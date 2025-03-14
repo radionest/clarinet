@@ -93,6 +93,12 @@ class SlicerConnectionError(SlicerError):
     pass
 
 
+class SlicerSegmentationError(SlicerError):
+    """Error related to incorect segmentation result in Slicer."""
+
+    pass
+
+
 class ScriptError(SlicerError):
     """Error related to Slicer script execution."""
 

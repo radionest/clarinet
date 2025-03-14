@@ -17,13 +17,13 @@ from sqlmodel import Session
 from src.exceptions import SlicerConnectionError
 from src.models import Task, TaskRead, TaskStatus, TaskType, User, UserRead
 from src.settings import settings
-from src.utils.common import trans_booleans_in_form
 from src.utils.database import get_session
-from src.utils.form_generator import Questionary
+from src.utils.forms import Questionary, trans_booleans_in_form
 from src.utils.logger import logger
 
+from ..dependencies import get_application_url
 from ..routers import auth, slicer, study, task, user
-from ..security import decode_token_cookie, Token
+from ..security import Token
 
 
 class RenderRouter(APIRoute):
@@ -85,7 +85,7 @@ templates: Jinja2Templates = Jinja2Templates(
 def render_index(
     request: Request,
     user: UserRead = Depends(user.get_current_user_cookie),
-    task_list: List[TaskRead] = Depends(task.get_my_tasks_pending),
+    task_list: List[TaskRead] = Depends(task.get_my_pending_tasks),
     available_task_types: Dict[TaskType, int] = Depends(
         task.get_my_available_task_types
     ),
@@ -112,7 +112,7 @@ async def get_task_questionary(
     session: Session = Depends(get_session),
 ) -> templates.TemplateResponse:
     """Get a questionary for a specific task type."""
-    new_task: List[Task] = await task.find_task(
+    new_task = await task.find_tasks(
         random_one=True,
         task_status=TaskStatus.pending,
         task_name=task_name,
@@ -129,11 +129,11 @@ async def get_task_questionary(
             status_code=status.HTTP_404_NOT_FOUND,
         )
 
-    updated_task: Task = task.append_user_to_task(
-        user=user, task=new_task_item, session=session
+    updated_task = task.assign_user_to_task(
+        user=user, task_id=new_task_item.id, session=session
     )
-    question: Questionary = Questionary(updated_task, request=request)
-    context: Dict[str, Any] = {
+    question = Questionary(updated_task, request=request)
+    context = {
         "request": request,
         "username": user.id,
         "new_task": question,
@@ -144,7 +144,7 @@ async def get_task_questionary(
 @router.get("/login")
 def render_login(request: Request) -> templates.TemplateResponse:
     """Render the login page."""
-    context: Dict[str, Any] = {"request": request}
+    context = {"request": request}
     return templates.TemplateResponse("login.jinja", context=context)
 
 
@@ -165,7 +165,7 @@ def render_logout(request: Request) -> RedirectResponse:
 
 @router.post("/authorize")
 def render_authorize(
-    request: Request, token: Token = Depends(auth.login_by_form)
+    request: Request, token: Token = Depends(auth.login_for_access_token)
 ) -> RedirectResponse:
     """Authorize a user and set the authentication cookie."""
     response: RedirectResponse = RedirectResponse(
@@ -186,7 +186,7 @@ def add_navigation_button(
 
 @router.get("/task/{task_id}")
 def show_task(
-    request: Request, task: Task = Depends(task.get_task_details)
+    request: Request, task: Task = Depends(task.get_task)
 ) -> templates.TemplateResponse:
     """Show a specific task."""
     context: Dict[str, Any] = {"request": request, "task": task}
@@ -196,10 +196,10 @@ def show_task(
 @router.post("/task/{task_id}/submit")
 async def submit_task(
     request: Request,
-    inwork_task: Task = Depends(task.get_task_details),
+    inwork_task: Task = Depends(task.get_task),
     session: Session = Depends(get_session),
     user_ip: str = Depends(slicer.get_client_ip),
-    klara_url: str = Depends(task.get_clarinet_instance_url),
+    klara_url: str = Depends(get_application_url),
 ) -> Response:
     """Submit a completed task."""
     form: Dict[str, Any] = dict(await request.form())
