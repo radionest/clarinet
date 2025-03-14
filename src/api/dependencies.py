@@ -7,13 +7,12 @@ including authentication, parameter validation, and other shared functionality.
 
 from typing import Annotated, Dict, Optional
 
-from fastapi import Cookie, Depends, HTTPException, Query, Request, status
+from fastapi import Depends, Query, Request
 from sqlmodel import Session
 
 from ..exceptions import UNAUTHORIZED, ClarinetError
 from ..models import User
 from ..utils.database import get_session
-from ..utils.logger import logger
 from ..settings import settings
 from ..api.security import decode_token, decode_token_cookie, TokenData
 
@@ -102,12 +101,12 @@ async def common_parameters(
     ),
 ) -> Dict[str, Optional[int]]:
     """
-    Common query parameters for pagination.
-    
+    Get common query parameters for pagination.
+
     Args:
         skip: Number of items to skip
         limit: Maximum number of items to return
-        
+
     Returns:
         Dictionary with skip and limit parameters
     """

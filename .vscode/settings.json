@@ -3,5 +3,6 @@
         "DICOM",
         "dotenv",
         "rabbitmq"
-    ]
+    ],
+    "python.analysis.typeCheckingMode": "standard"
 }

@@ -16,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 # Use relative imports for development
 from src.settings import settings
 from src.utils.database import create_db_and_tables
-from src.utils.common import (
+from src.utils.bootstrap import (
     create_demo_task_types_from_json,
     add_default_user_roles,
 )
@@ -35,16 +35,16 @@ from src.api.routers import (
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """
     Application lifespan context manager.
-    
+   
     Creates database tables, adds default roles, and loads task types.
     """
     # Initialize database
     create_db_and_tables()
-    
+   
     # Setup default configuration
     add_default_user_roles()
     create_demo_task_types_from_json("./tasks/", demo_suffix="")
-    
+   
     logger.info("Application startup complete")
     yield
     logger.info("Application shutdown")
