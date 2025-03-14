@@ -5,6 +5,7 @@ This module provides a set of standardized exceptions for use throughout the Cla
 Each exception is designed to be clear about what went wrong and provide useful context.
 """
 
+from typing import Self
 from fastapi import HTTPException, status
 
 
@@ -134,45 +135,44 @@ class ValidationError(ClarinetError):
 
 
 # Standard HTTP exceptions
-UNAUTHORIZED = HTTPException(
+class CustomHTTPException(HTTPException):
+    def with_context(self, detail: str) -> Self:
+        """
+        Add context to an HTTP exception.
+            
+            Args:
+                exception: The original exception
+                context: Context information to add
+                
+            Returns:
+                A new HTTPException with updated details
+        """
+        self.detail = detail
+        return self
+
+UNAUTHORIZED = CustomHTTPException(
     status_code=status.HTTP_401_UNAUTHORIZED,
     detail="Invalid authentication credentials",
     headers={"WWW-Authenticate": "Bearer"},
 )
 
-FORBIDDEN = HTTPException(
+FORBIDDEN = CustomHTTPException(
     status_code=status.HTTP_403_FORBIDDEN,
     detail="Not enough permissions to perform this action",
 )
 
-NOT_FOUND = HTTPException(
+NOT_FOUND = CustomHTTPException(
     status_code=status.HTTP_404_NOT_FOUND,
     detail="The requested resource was not found",
 )
 
-CONFLICT = HTTPException(
+CONFLICT = CustomHTTPException(
     status_code=status.HTTP_409_CONFLICT,
     detail="The request conflicts with the current state of the resource",
 )
 
-INTERNAL_SERVER_ERROR = HTTPException(
+INTERNAL_SERVER_ERROR = CustomHTTPException(
     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
     detail="An internal server error occurred",
 )
 
-
-def with_context(exception: HTTPException, context: str) -> HTTPException:
-    """Add context to an HTTP exception.
-    
-    Args:
-        exception: The original exception
-        context: Context information to add
-        
-    Returns:
-        A new HTTPException with updated details
-    """
-    return HTTPException(
-        status_code=exception.status_code,
-        detail=f"{exception.detail}: {context}",
-        headers=exception.headers,
-    )
