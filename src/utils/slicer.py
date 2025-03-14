@@ -10,7 +10,7 @@ import re
 from pathlib import Path
 from typing import Any, Dict, Literal, Optional, Union, cast
 
-import requests
+import httpx
 
 from src.exceptions import (
     NoScriptError,
@@ -126,12 +126,12 @@ class SlicerWeb:
             SlicerError: If Slicer returns an error
         """
         try:
-            response = requests.post(
+            response = httpx.post(
                 f"{self.url}/slicer/exec", data=script, timeout=5.0
             )
-        except requests.ConnectionError:
+        except httpx.ConnectError:
             raise SlicerConnectionError(f"Cannot connect to Slicer at {self.url}")
-        except requests.Timeout:
+        except httpx.TimeoutException:
             raise SlicerConnectionError(f"Connection to Slicer at {self.url} timed out")
 
         if response.status_code != 200:
