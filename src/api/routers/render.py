@@ -91,7 +91,9 @@ def render_index(
     ),
 ) -> templates.TemplateResponse:
     """Render the index page with task list and available task types."""
-    task_questionaries: List[Questionary] = list(map(lambda t: Questionary(t, request), task_list))
+    task_questionaries: List[Questionary] = list(
+        map(lambda t: Questionary(t, request), task_list)
+    )
 
     context: Dict[str, Any] = {
         "request": request,
@@ -127,9 +129,15 @@ async def get_task_questionary(
             status_code=status.HTTP_404_NOT_FOUND,
         )
 
-    updated_task: Task = task.append_user_to_task(user=user, task=new_task_item, session=session)
+    updated_task: Task = task.append_user_to_task(
+        user=user, task=new_task_item, session=session
+    )
     question: Questionary = Questionary(updated_task, request=request)
-    context: Dict[str, Any] = {"request": request, "username": user.id, "new_task": question}
+    context: Dict[str, Any] = {
+        "request": request,
+        "username": user.id,
+        "new_task": question,
+    }
     return templates.TemplateResponse("task.jinja", context=context)
 
 
@@ -156,7 +164,9 @@ def render_logout(request: Request) -> RedirectResponse:
 
 
 @router.post("/authorize")
-def render_authorize(request: Request, token: Token = Depends(auth.login_by_form)) -> RedirectResponse:
+def render_authorize(
+    request: Request, token: Token = Depends(auth.login_by_form)
+) -> RedirectResponse:
     """Authorize a user and set the authentication cookie."""
     response: RedirectResponse = RedirectResponse(
         request.url_for("render_index"), status_code=status.HTTP_302_FOUND
@@ -166,14 +176,18 @@ def render_authorize(request: Request, token: Token = Depends(auth.login_by_form
 
 
 @router.get("/navigation/{button_name}")
-def add_navigation_button(button_name: str, request: Request) -> templates.TemplateResponse:
+def add_navigation_button(
+    button_name: str, request: Request
+) -> templates.TemplateResponse:
     """Render a navigation button template."""
     context: Dict[str, Any] = {"request": request}
     return templates.TemplateResponse(f"navigation/{button_name}.html", context=context)
 
 
 @router.get("/task/{task_id}")
-def show_task(request: Request, task: Task = Depends(task.get_task_details)) -> templates.TemplateResponse:
+def show_task(
+    request: Request, task: Task = Depends(task.get_task_details)
+) -> templates.TemplateResponse:
     """Show a specific task."""
     context: Dict[str, Any] = {"request": request, "task": task}
     return templates.TemplateResponse("task.jinja", context=context)
@@ -266,7 +280,10 @@ def render_feedback(
     user: Optional[UserRead] = Depends(user.get_current_user_cookie),
 ) -> templates.TemplateResponse:
     """Render the feedback page."""
-    context: Dict[str, Any] = {"request": request, "username": user.id if user else None}
+    context: Dict[str, Any] = {
+        "request": request,
+        "username": user.id if user else None,
+    }
     return templates.TemplateResponse("feedback.jinja", context=context)
 
 
