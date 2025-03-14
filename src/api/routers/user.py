@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlmodel import Session, select
 
-from src.exceptions import UNAUTHORIZED, CONFLICT, NOT_FOUND, with_context
+from src.exceptions import UNAUTHORIZED, CONFLICT, NOT_FOUND
 from src.models import User, UserRead, UserRole
 from src.api.security import (
     decode_token,
@@ -31,7 +31,7 @@ async def get_current_user_cookie(
     session: Session = Depends(get_session),
 ) -> User:
     """Get current user from cookie authentication."""
-    return get_user(user_id=payload.username, session=session)
+    return await get_user(user_id=payload.username, session=session)
 
 
 @router.get("/me/token", response_model=UserRead)
@@ -40,7 +40,7 @@ async def get_current_user(
     session: Session = Depends(get_session),
 ) -> User:
     """Get current user from token authentication."""
-    return get_user(user_id=payload.username, session=session)
+    return await get_user(user_id=payload.username, session=session)
 
 
 @router.get("/{user_id}", response_model=UserRead)
