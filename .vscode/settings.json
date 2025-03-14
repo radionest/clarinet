@@ -5,5 +5,10 @@
         "rabbitmq"
     ],
     "python.analysis.typeCheckingMode": "standard",
-    "flake8.importStrategy": "fromEnvironment"
+    "flake8.importStrategy": "fromEnvironment",
+    "python.testing.pytestArgs": [
+        "tests"
+    ],
+    "python.testing.unittestEnabled": false,
+    "python.testing.pytestEnabled": true
 }

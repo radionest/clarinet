@@ -1,3 +1,6 @@
 .pdm-python
 pdm.lock
 .idea
+__pycache__
+.hypothesis
+clarinet.db

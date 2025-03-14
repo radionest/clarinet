@@ -5,24 +5,26 @@ This module provides models for tasks, task types, and task results.
 """
 
 from datetime import datetime, UTC
-from typing import Optional, List, Dict, Any, ForwardRef, Self, Union
+from typing import Optional, Dict, Any, Union
 from enum import Enum
 
 from sqlmodel import SQLModel, Field, Relationship, Column, JSON
 from sqlalchemy import Boolean, func, event, String, Integer, Float
 
-from pydantic import computed_field, field_validator
+from pydantic import computed_field
 
 from .base import BaseModel, DicomQueryLevel, TaskStatus
 from .user import User, UserRole
-from .patient import Patient
-from .study import Study, Series
+from .patient import Patient, PatientRead
+from .study import Study, Series, StudyRead, SeriesBase
 
 from ..settings import settings
+from src.utils import logger
+
 
 class TaskTypeBase(SQLModel):
     """Base model for task type data."""
-    
+
     name: str
     description: Optional[str] = None
     result_schema: Optional[Dict] = {}
@@ -58,6 +60,7 @@ class TaskType(TaskTypeBase, table=True):
     tasks: "Task" = Relationship(back_populates="task_type")
 
     def __hash__(self) -> int:
+        """TaskType hash is taken by its """
         return hash(self.id)
 
     def __eq__(self, other: Any) -> bool:
@@ -68,14 +71,15 @@ class TaskType(TaskTypeBase, table=True):
 
 class TaskTypeCreate(TaskTypeBase):
     """Pydantic model for creating a new task type."""
+
     pass
 
 
 class TaskTypeOptional(TaskTypeBase):
     """Pydantic model for updating a task type with optional fields."""
-    
-    id: Optional[int] = None 
-    name: Optional[str] = None # type: ignore
+
+    id: Optional[int] = None
+    name: Optional[str] = None  # type: ignore
     description: Optional[str] = None
     result_schema: Optional[Dict] = None
 
@@ -87,7 +91,7 @@ class TaskTypeOptional(TaskTypeBase):
 
 class TaskTypeFind(SQLModel):
     """Pydantic model for searching task types."""
-    
+
     name: Optional[str] = Field(default=None)
     constraint_role: Optional[str] = Field(default=None)
     constraint_user_num: Optional[int] = Field(default=None)
@@ -95,7 +99,7 @@ class TaskTypeFind(SQLModel):
 
 class TaskFindResultComparisonOperator(str, Enum):
     """Enumeration of comparison operators for task result searches."""
-    
+
     eq = "eq"
     lt = "lt"
     gt = "gt"
@@ -104,7 +108,7 @@ class TaskFindResultComparisonOperator(str, Enum):
 
 class TaskFindResult(SQLModel):
     """Model for specifying search criteria for task results."""
-    
+
     result_name: str
     result_value: Union[str, bool, int, float]
     comparison_operator: Optional[TaskFindResultComparisonOperator] = Field(
@@ -113,9 +117,9 @@ class TaskFindResult(SQLModel):
 
     @computed_field(return_type=type)
     @property
-    def sql_type(self) -> (type[String] | type[Boolean] | type[Integer] | type[Float]):
+    def sql_type(self) -> type[String] | type[Boolean] | type[Integer] | type[Float]:
         """Determine the appropriate SQL type based on the result value."""
-        
+
         match self.result_value:
             case str():
                 return String
@@ -131,7 +135,7 @@ class TaskFindResult(SQLModel):
 
 class TaskBase(BaseModel):
     """Base model for task data."""
-    
+
     info: Optional[str] = Field(default=None, max_length=3000)
     status: TaskStatus = TaskStatus.pending
 
@@ -148,7 +152,7 @@ class TaskBase(BaseModel):
             raise NotImplementedError
         return self.id == other.id
 
-    @computed_field(return_type=str) # type: ignore[prop-decorator]
+    @computed_field(return_type=str)  # type: ignore[prop-decorator]
     @property
     def radiant(self) -> Optional[str]:
         """Generate a radiant URL for this task."""
@@ -167,16 +171,19 @@ class TaskBase(BaseModel):
                 study_uid=self.study_uid,
                 study_anon_uid=self.study.anon_uid,
                 series_uid=self.series_uid,
-                series_anon_uid=self.series.anon_uid if hasattr(self, "series") and self.series else None,
+                series_anon_uid=self.series.anon_uid
+                if hasattr(self, "series") and self.series
+                else None,
                 user_id=self.user_id,
                 clarinet_storage_path=self.clarinet_storage_path,
             )
         except AttributeError as e:
-            from clarinet.utils.logger import logger
             logger.error(e)
             return None
 
-    def _format_slicer_kwargs(self, slicer_kwargs: dict[str,str]) -> dict[str,Optional[str]]:
+    def _format_slicer_kwargs(
+        self, slicer_kwargs: dict[str, str]
+    ) -> dict[str, Optional[str]]:
         """Format Slicer script arguments with values from this task."""
         if slicer_kwargs is None:
             return {}
@@ -186,16 +193,24 @@ class TaskBase(BaseModel):
     @property
     def slicer_args_formated(self) -> Optional[Dict]:
         """Get formatted Slicer script arguments."""
-        if not hasattr(self, 'task_type') or self.task_type is None or self.task_type.slicer_script_args is None:
+        if (
+            not hasattr(self, "task_type")
+            or self.task_type is None
+            or self.task_type.slicer_script_args is None
+        ):
             return None
-        
+
         return self._format_slicer_kwargs(self.task_type.slicer_script_args)
 
     @computed_field(return_type=dict)
     @property
     def slicer_validator_args_formated(self) -> Optional[Dict]:
         """Get formatted Slicer validator arguments."""
-        if not hasattr(self, 'task_type') or self.task_type is None or self.task_type.slicer_result_validator_args is None:
+        if (
+            not hasattr(self, "task_type")
+            or self.task_type is None
+            or self.task_type.slicer_result_validator_args is None
+        ):
             return None
         return self._format_slicer_kwargs(self.task_type.slicer_result_validator_args)
 
@@ -203,9 +218,9 @@ class TaskBase(BaseModel):
     @property
     def working_folder(self) -> Optional[str]:
         """Get the working folder path for this task."""
-        if not hasattr(self, 'task_type') or self.task_type is None:
+        if not hasattr(self, "task_type") or self.task_type is None:
             return None
-        
+
         match self.task_type.level:
             case DicomQueryLevel.series:
                 return self._format_path(
@@ -226,7 +241,7 @@ class TaskBase(BaseModel):
         """Get all formatted Slicer arguments."""
         if self.working_folder is None:
             return None
-        
+
         all_args = self._format_slicer_kwargs({"working_folder": self.working_folder})
         all_args.update(self.slicer_args_formated or {})
         all_args.update(self.slicer_validator_args_formated or {})
@@ -256,15 +271,19 @@ class Task(TaskBase, table=True):
     result: Optional[Dict] = Field(default_factory=dict, sa_column=Column(JSON))
 
     created_at: Optional[datetime] = Field(default_factory=lambda: datetime.now(UTC))
-    changed_at: Optional[datetime] = Field(sa_column_kwargs={"onupdate": func.now(), "server_default": func.now()})
+    changed_at: Optional[datetime] = Field(
+        sa_column_kwargs={"onupdate": func.now(), "server_default": func.now()}
+    )
 
     started_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
 
 
 # Add event listener to update timestamps based on status changes
-@event.listens_for(Task.status, 'set')
-def set_task_timestamps(target: Task, value: Any, oldvalue: Any, initiator: Any) -> None:
+@event.listens_for(Task.status, "set")
+def set_task_timestamps(
+    target: Task, value: Any, oldvalue: Any, initiator: Any
+) -> None:
     """Update task timestamps when status changes."""
     if value == oldvalue:
         return
@@ -279,12 +298,13 @@ def set_task_timestamps(target: Task, value: Any, oldvalue: Any, initiator: Any)
 
 class TaskCreate(TaskBase):
     """Pydantic model for creating a new task."""
+
     pass
 
 
 class TaskRead(TaskBase):
     """Pydantic model for reading task data with related entities."""
-    
+
     id: int
     result: Optional[Dict] = None
     patient: "PatientRead"
@@ -295,7 +315,7 @@ class TaskRead(TaskBase):
 
 class TaskFind(SQLModel):
     """Pydantic model for searching tasks."""
-    
+
     status: Optional[TaskStatus] = None
     name: str
     result: Optional[dict] = None
@@ -303,6 +323,4 @@ class TaskFind(SQLModel):
     is_absent: Optional[bool] = None
 
 
-# Import required forward references to resolve circular dependencies
-from .patient import PatientRead
-from .study import StudyRead, SeriesBase
+
