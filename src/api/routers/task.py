@@ -5,9 +5,15 @@ This module provides API endpoints for managing tasks, task types, and task subm
 """
 
 import random
-from typing import Annotated, Dict, List, Optional, Sequence, Union, cast
+from typing import Dict, List, Optional, Sequence, Union
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, Request, status
+from fastapi import (
+    APIRouter,
+    Body,
+    Depends,
+    HTTPException,
+    status,
+)
 from jsonschema import Draft202012Validator, SchemaError
 from sqlalchemy import func
 from sqlalchemy.exc import NoResultFound
@@ -32,7 +38,7 @@ from src.models import (
     User,
     UserRole,
 )
-from src.api.routers.user import get_current_user, get_current_user_cookie, get_user
+from src.api.routers.user import get_current_user, get_current_user_cookie
 from src.api.routers.study import get_random_series
 from src.utils.database import get_session
 from src.utils.logger import logger
@@ -50,14 +56,17 @@ router = APIRouter(
     responses={
         404: {"description": "Not found"},
         409: {"description": "Conflict"},
-    }
+    },
 )
 
 
 # Task Type Endpoints
 
+
 @router.get("/types", response_model=List[TaskType])
-async def get_all_task_types(session: Session = Depends(get_session)) -> Sequence[TaskType]:
+async def get_all_task_types(
+    session: Session = Depends(get_session),
+) -> Sequence[TaskType]:
     """Get all task types."""
     return session.exec(select(TaskType)).all()
 
@@ -70,7 +79,7 @@ async def find_task_type(
     """Find task types by criteria."""
     find_terms = find_query.model_dump(exclude_none=True)
     find_statement = select(TaskType)
-    
+
     for find_key, find_value in find_terms.items():
         if find_key == "name":
             find_statement = find_statement.where(TaskType.name.contains(find_value))
@@ -94,7 +103,7 @@ async def add_task_type(
 ) -> TaskType:
     """Create a new task type."""
     new_task_type = TaskType.model_validate(task_type)
-    
+
     # Validate result schema if present
     if new_task_type.result_schema is not None:
         try:
@@ -104,7 +113,7 @@ async def add_task_type(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="Result schema is invalid",
             )
-    
+
     # Ensure task type name is unique if required
     if constrain_unique_names:
         existing = session.exec(
@@ -114,7 +123,7 @@ async def add_task_type(
             raise CONFLICT.with_context(
                 f"There is already a task type with name '{task_type.name}'"
             )
-            
+
     return add_item(new_task_type, session)
 
 
@@ -128,7 +137,7 @@ async def update_task_type(
     task_type = session.get(TaskType, task_type_id)
     if task_type is None:
         raise NOT_FOUND.with_context(f"Task type with ID {task_type_id} not found")
-    
+
     # Validate result schema if present
     if task_type_update.result_schema is not None:
         try:
@@ -143,7 +152,7 @@ async def update_task_type(
     update_data = task_type_update.model_dump(exclude_unset=True, exclude_none=True)
     for field, value in update_data.items():
         setattr(task_type, field, value)
-        
+
     session.commit()
     session.refresh(task_type)
     return task_type
@@ -170,12 +179,13 @@ async def delete_task_type(
     task_type = session.get(TaskType, task_type_id)
     if task_type is None:
         raise NOT_FOUND.with_context(f"Task type with ID {task_type_id} not found")
-    
+
     session.delete(task_type)
     session.commit()
 
 
 # Task Endpoints
+
 
 @router.get("/", response_model=List[Task])
 async def get_all_tasks(session: Session = Depends(get_session)) -> Sequence[Task]:
@@ -201,7 +211,9 @@ async def get_my_pending_tasks(
     return session.exec(
         select(Task).where(
             Task.user_id == user.id,
-            Task.status.not_in([TaskStatus.failed, TaskStatus.finished, TaskStatus.pause]),
+            Task.status.not_in(
+                [TaskStatus.failed, TaskStatus.finished, TaskStatus.pause]
+            ),
         )
     ).all()
 
@@ -221,10 +233,11 @@ async def get_my_available_task_types(
         .group_by(TaskType.id)
     )
     results = session.exec(statement).all()
-    
+
     return {
-        session.get(TaskType, task_type_id): task_count
+        task_type: task_count
         for task_type_id, task_count in results
+        if (task_type := session.get(TaskType, task_type_id)) is not None
     }
 
 
@@ -238,7 +251,7 @@ async def get_task(
     task = session.get(Task, task_id)
     if task is None:
         raise NOT_FOUND.with_context(f"Task with ID {task_id} not found")
-    
+
     if detailed:
         return TaskRead.model_validate(task)
     return task
@@ -250,21 +263,29 @@ async def check_task_constraints(
 ) -> None:
     """Check if a task can be added based on constraints."""
     # Count existing tasks with same task type, series, and study
-    query = select(func.count(Task.id)).join(TaskType).where(
-        TaskType.id == new_task.task_type_id,
-        Task.series_uid == new_task.series_uid,
-        Task.study_uid == new_task.study_uid,
+    query = (
+        select(func.count(Task.id))
+        .join(TaskType)
+        .where(
+            TaskType.id == new_task.task_type_id,
+            Task.series_uid == new_task.series_uid,
+            Task.study_uid == new_task.study_uid,
+        )
     )
-    
+
     same_tasks_count = session.exec(query).one()
     task_type = session.get(TaskType, new_task.task_type_id)
-    
+
     if task_type is None:
-        raise NOT_FOUND.with_context(f"Task type with ID {new_task.task_type_id} not found")
-    
-    if same_tasks_count >= task_type.max_users:
+        raise NOT_FOUND.with_context(
+            f"Task type with ID {new_task.task_type_id} not found"
+        )
+
+    if task_type.max_users and same_tasks_count >= task_type.max_users:
         raise CONFLICT.with_context(
-            f"The maximum users per task limit ({same_tasks_count} of {task_type.max_users}) is reached"
+            f"The maximum users per task limit \
+            ({same_tasks_count} of {task_type.max_users})\
+            is reached"
         )
 
 
@@ -283,9 +304,9 @@ async def add_task(
     session.add(task)
     session.commit()
     session.refresh(task)
-    
+
     # Publish event or trigger background tasks here if needed
-    
+
     return task
 
 
@@ -299,7 +320,7 @@ async def update_task_status(
     task = session.get(Task, task_id)
     if task is None:
         raise NOT_FOUND.with_context(f"Task with ID {task_id} not found")
-    
+
     task.status = task_status
     session.commit()
     session.refresh(task)
@@ -316,11 +337,11 @@ async def assign_task_to_user(
     task = session.get(Task, task_id)
     if task is None:
         raise NOT_FOUND.with_context(f"Task with ID {task_id} not found")
-    
+
     user = session.get(User, user_id)
     if user is None:
         raise NOT_FOUND.with_context(f"User with ID {user_id} not found")
-    
+
     task.user_id = user_id
     session.commit()
     session.refresh(task)
@@ -336,7 +357,7 @@ async def validate_task_result(
     task = session.get(Task, task_id)
     if task is None:
         raise NOT_FOUND.with_context(f"Task with ID {task_id} not found")
-    
+
     # Validate against task type's result schema
     if task.task_type.result_schema:
         try:
@@ -346,9 +367,9 @@ async def validate_task_result(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=f"Result does not match schema: {str(e)}",
             )
-    
+
     # Add additional validation here (e.g., Slicer validation)
-    
+
     return result
 
 
@@ -363,23 +384,23 @@ async def submit_task_result(
     task = session.get(Task, task_id)
     if task is None:
         raise NOT_FOUND.with_context(f"Task with ID {task_id} not found")
-    
+
     if task.status == TaskStatus.finished:
         raise CONFLICT.with_context(
             "Task already finished. Use PATCH to update the task result."
         )
-    
+
     # Validate result
     validated_result = await validate_task_result(task_id, result, session)
-    
+
     # Update task
     task.result = validated_result
     task.status = TaskStatus.finished
     session.commit()
     session.refresh(task)
-    
+
     # Publish event or trigger background tasks here if needed
-    
+
     return task
 
 
@@ -394,22 +415,22 @@ async def update_task_result(
     task = session.get(Task, task_id)
     if task is None:
         raise NOT_FOUND.with_context(f"Task with ID {task_id} not found")
-    
+
     if task.status != TaskStatus.finished:
         raise CONFLICT.with_context(
             "Task is not finished yet. Use POST to submit a task result."
         )
-    
+
     # Validate result
     validated_result = await validate_task_result(task_id, result, session)
-    
+
     # Update task
     task.result = validated_result
     session.commit()
     session.refresh(task)
-    
+
     # Publish event or trigger background tasks here if needed
-    
+
     return task
 
 
@@ -445,44 +466,34 @@ async def find_tasks(
             .join(Patient)
             .where(Patient.anon_id == patient_anon_id)
         )
-        
+
     # Add filters for series
     if series_uid:
         find_statement = find_statement.where(Task.series_uid == series_uid)
-
 
     match anon_series_uid:
         case None:
             pass
         case "Null":
-            find_statement = find_statement.join(Series).where(
-                Series.anon_uid == None
-            )
+            find_statement = find_statement.join(Series).where(Series.anon_uid == None)
         case "*":
-            find_statement = find_statement.join(Series).where(
-                Series.anon_uid != None
-            )
+            find_statement = find_statement.join(Series).where(Series.anon_uid != None)
         case _:
             find_statement = find_statement.join(Series).where(
                 Series.anon_uid == anon_series_uid
             )
-    
+
     # Add filters for study
     if study_uid:
         find_statement = find_statement.where(Task.study_uid == study_uid)
 
-    
     match anon_study_uid:
         case None:
             pass
         case "Null":
-            find_statement = find_statement.join(Study).where(
-                Study.anon_uid == None
-            )
+            find_statement = find_statement.join(Study).where(Study.anon_uid == None)
         case "*":
-            find_statement = find_statement.join(Study).where(
-                Study.anon_uid != None
-            )
+            find_statement = find_statement.join(Study).where(Study.anon_uid != None)
         case _:
             find_statement = find_statement.join(Study).where(
                 Study.anon_uid == anon_study_uid
@@ -506,7 +517,7 @@ async def find_tasks(
 
     if task_name:
         find_statement = find_statement.where(TaskType.name == task_name)
-        
+
     # Add result filters
     for query in find_queries:
         match query.comparison_operator:
@@ -527,20 +538,22 @@ async def find_tasks(
                 )
             case TaskFindResultComparisonOperator.contains:
                 find_statement = find_statement.where(
-                    Task.result[query.result_name].as_string().cast(query.sql_type)
+                    Task.result[query.result_name]
+                    .as_string()
+                    .cast(query.sql_type)
                     .contains(query.result_value)
                 )
 
     # Apply pagination
     find_statement = find_statement.distinct(Task.id)
-    if commons.get('skip'):
-        find_statement = find_statement.offset(commons['skip'])
-    if commons.get('limit'):
-        find_statement = find_statement.limit(commons['limit'])
-        
+    if commons.get("skip"):
+        find_statement = find_statement.offset(commons["skip"])
+    if commons.get("limit"):
+        find_statement = find_statement.limit(commons["limit"])
+
     # Execute query
     results = session.exec(find_statement).all()
-    
+
     # Apply random selection if requested
     if random_one and results:
         results = [random.choice(results)]
@@ -560,7 +573,7 @@ async def bulk_update_task_status(
         task = session.get(Task, task_id)
         if task:
             task.status = new_status
-    
+
     session.commit()
 
 
@@ -573,7 +586,7 @@ def assign_user_to_task(
     task = session.get(Task, task_id)
     if task is None:
         raise NOT_FOUND.with_context(f"Task with ID {task_id} not found")
-    
+
     task.status = TaskStatus.inwork
     task.user_id = user.id
     session.commit()
@@ -591,13 +604,13 @@ def add_demo_tasks_for_user(
     task_types = session.exec(
         select(TaskType).where(TaskType.name.contains("demo"))
     ).all()
-    
+
     if not task_types:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="No demo task types found",
         )
-    
+
     # Create a task for each demo task type
     for task_type in task_types:
         if task_type.level == DicomQueryLevel.series:
@@ -617,8 +630,8 @@ def add_demo_tasks_for_user(
             )
         else:
             continue
-            
+
         task = Task(**new_task.model_dump())
         session.add(task)
-    
+
     session.commit()

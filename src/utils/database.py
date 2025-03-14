@@ -26,13 +26,17 @@ match settings.database_driver:
             poolclass=StaticPool if settings.debug else None
         )
     case "postgresql+psycopg2" | "postgresql+asyncpg":
-        logger.info(f'Database: {settings.database_host}:{settings.database_port}/{settings.database_name}')
+        logger.info(f'Database:'
+                    f'{settings.database_host}:{settings.database_port}'
+                    f'/{settings.database_name}')
         engine = create_engine(
             settings.database_url,
             echo=settings.debug
         )
     case _:
-        raise ValueError(f'Database driver {settings.database_driver} is not supported')
+        raise ValueError(
+            f'Database driver {settings.database_driver} is not supported'
+            )
 
 
 def create_db_and_tables() -> None:

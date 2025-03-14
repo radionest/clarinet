@@ -46,6 +46,8 @@ dev = [
     "flake8-docstrings>=1.7.0",
     "schemathesis>=3.19.0",
     "pytest-cov>=4.1.0",
+    "Flake8-pyproject>=1.2.3",
+    "types-jsonschema>=4.23.0.20241208",
 ]
 image = [
     "numpy>=1.24.3",
@@ -99,7 +101,7 @@ strict_optional = true
 
 [tool.flake8]
 max-line-length = 88
-extend-ignore = ["E203"]
+extend-ignore = ["E203", "D212"]
 exclude = [".git", "__pycache__", "build", "dist"]
 max-complexity = 10
 docstring-convention = "google"

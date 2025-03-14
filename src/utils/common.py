@@ -15,13 +15,14 @@ P = ParamSpec('P')
 T = TypeVar('T')
 R = TypeVar('R')
 
+
 def timing(func: Callable[P, R]) -> Callable[P, R]:
     """
-    Decorator to measure and log function execution time.
-    
+    Measure and log function execution time.
+
     Args:
         func: The function to measure
-        
+
     Returns:
         Wrapped function that logs execution time
     """
@@ -37,13 +38,14 @@ def timing(func: Callable[P, R]) -> Callable[P, R]:
 
 def copy_object(method: Callable[[Any], T]) -> Callable[[Any], T]:
     """
-    Decorator to create a copy of an object before modifying it.
-    
-    This is useful for creating method chains that don't modify the original object.
-    
+    Create a copy of an object before modifying it.
+
+    This is useful for creating method chains \
+    that don't modify the original object.
+
     Args:
         method: The method to wrap
-        
+
     Returns:
         Wrapped method that works on a copy of the object
     """
@@ -59,10 +61,10 @@ def copy_signature(
 ) -> Callable[[Callable[..., T]], Callable[P, T]]:
     """
     Create a decorator that copies the signature from one function to another.
-    
+
     Args:
         source_func: The function whose signature should be copied
-        
+
     Returns:
         A decorator that applies the signature
     """

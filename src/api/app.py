@@ -50,6 +50,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info("Application shutdown")
 
 
+# noinspection PyTypeChecker
 def create_app(root_path: str = "/") -> FastAPI:
     """
     Create and configure the FastAPI application.

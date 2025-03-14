@@ -4,5 +4,6 @@
         "dotenv",
         "rabbitmq"
     ],
-    "python.analysis.typeCheckingMode": "standard"
+    "python.analysis.typeCheckingMode": "standard",
+    "flake8.importStrategy": "fromEnvironment"
 }

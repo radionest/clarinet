@@ -7,6 +7,7 @@ used throughout the Clarinet models.
 
 import enum
 from datetime import datetime, date, timedelta, UTC
+from pydoc import classify_class_attrs
 from typing import Optional, List, Dict, Any, Self, Annotated
 
 from sqlmodel import SQLModel, Field, Relationship, Column, JSON
@@ -19,7 +20,8 @@ type T = Any
 
 class BaseModel(SQLModel):
     """Base model for all Clarinet models with common validation and utilities."""
-    
+
+    @classmethod
     @field_validator("*", mode="before")
     def empty_to_none(cls, value: T) -> Optional[T]:      
         """Convert empty strings to None."""
