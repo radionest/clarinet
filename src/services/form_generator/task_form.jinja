@@ -1,0 +1,43 @@
+<div class="question" tabindex="0">
+      <div class="patient_name">{task.patient.name} </div>
+      <div class="patient_id">{ task.patient.anon_id or task.patient.id} </div>
+      <div class="study_details">{ task.study.date } </div>
+      <div class="task_name" tabindex="0">{ task.schema.title } </div>
+      <div class="task_description">{ markdown.markdown(task.schema.description) }</div>
+      <div class="task_info">{ task.additional_info }</div>
+
+      <a class="img_link" href="{{ task.radiant }}">Открыть в радианте</a>
+      <a class="img_link_ico" href="{{ task.radiant }}">RA</a>
+
+
+      <form action="{{task_meta.url_for('submit_task', task_id=self.task.id)}}" method="post" hx-boost="true"
+            hx-target="closest div.question" hx-swap="outerHTML" tabindex="0">
+
+            {% for question_html in task_result_html %}
+
+            {{question_html}}
+
+            {% endfor %}
+
+
+            <input type="submit" 
+                   hx-indicator="this"
+                   value="Готово">
+
+            <input type="button" 
+                   hx-post="{{actions.pause}}"
+                   hx-indicator="this"
+                   value="Пауза">
+
+            <input type="button" 
+                   hx-post="{{actions.cancel}}"
+                   hx-indicator="this"
+                   value="Отменить">
+                   
+            <input type="button" 
+                   hx-post="{{actions.return}}"
+                   hx-indicator="this"
+                   value="Вернуть">            
+      </form>
+
+</div>

@@ -238,10 +238,10 @@ async def find_series(
 
     # Apply task-related filters if present
     if find_query.tasks:
-        from src.models import Task, TaskType
+        from src.models import Task, TaskScheme
 
         find_statement = find_statement.join(Task, isouter=True)
-        find_statement = find_statement.join(TaskType, isouter=True)
+        find_statement = find_statement.join(TaskScheme, isouter=True)
 
         # Apply task filters (simplified for now)
         # Full implementation would need to handle TaskFind conditions

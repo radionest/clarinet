@@ -13,7 +13,7 @@ from sqlmodel import SQLModel, Field, Relationship
 from .base import BaseModel
 
 if TYPE_CHECKING:
-    from .task import Task, TaskType
+    from .task import Task, TaskScheme
 
 
 class UserRolesLink(BaseModel, table=True):
@@ -50,7 +50,7 @@ class UserRole(BaseModel, table=True):
 
     name: str = Field(primary_key=True)
     users: List[User] = Relationship(back_populates="roles", link_model=UserRolesLink)
-    allowed_tasks: List["TaskType"] = Relationship(back_populates="constraint_role")
+    allowed_tasks: List["TaskScheme"] = Relationship(back_populates="constraint_role")
 
 
 class HTTPSession(SQLModel, table=True):

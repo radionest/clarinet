@@ -31,7 +31,7 @@ from src.models import (
     TaskFindResultComparisonOperator,
     TaskRead,
     TaskStatus,
-    TaskType,
+    TaskScheme,
     TaskTypeCreate,
     TaskTypeFind,
     TaskTypeOptional,
@@ -63,46 +63,46 @@ router = APIRouter(
 # Task Type Endpoints
 
 
-@router.get("/types", response_model=List[TaskType])
+@router.get("/types", response_model=List[TaskScheme])
 async def get_all_task_types(
     session: Session = Depends(get_session),
-) -> Sequence[TaskType]:
+) -> Sequence[TaskScheme]:
     """Get all task types."""
-    return session.exec(select(TaskType)).all()
+    return session.exec(select(TaskScheme)).all()
 
 
-@router.post("/types/find", response_model=List[TaskType])
+@router.post("/types/find", response_model=List[TaskScheme])
 async def find_task_type(
     find_query: TaskTypeFind,
     session: Session = Depends(get_session),
-) -> Sequence[TaskType]:
+) -> Sequence[TaskScheme]:
     """Find task types by criteria."""
     find_terms = find_query.model_dump(exclude_none=True)
-    find_statement = select(TaskType)
+    find_statement = select(TaskScheme)
 
     for find_key, find_value in find_terms.items():
         if find_key == "name":
-            find_statement = find_statement.where(TaskType.name.contains(find_value))
+            find_statement = find_statement.where(TaskScheme.name.contains(find_value))
         elif isinstance(find_value, list):
             find_statement = find_statement.where(
-                getattr(TaskType, find_key) == find_value
+                getattr(TaskScheme, find_key) == find_value
             )
         else:
             find_statement = find_statement.where(
-                getattr(TaskType, find_key) == find_value
+                getattr(TaskScheme, find_key) == find_value
             )
 
     return session.exec(find_statement).all()
 
 
-@router.post("/types", response_model=TaskType, status_code=status.HTTP_201_CREATED)
+@router.post("/types", response_model=TaskScheme, status_code=status.HTTP_201_CREATED)
 async def add_task_type(
     task_type: TaskTypeCreate,
     constrain_unique_names: bool = True,
     session: Session = Depends(get_session),
-) -> TaskType:
+) -> TaskScheme:
     """Create a new task type."""
-    new_task_type = TaskType.model_validate(task_type)
+    new_task_type = TaskScheme.model_validate(task_type)
 
     # Validate result schema if present
     if new_task_type.result_schema is not None:
@@ -117,7 +117,7 @@ async def add_task_type(
     # Ensure task type name is unique if required
     if constrain_unique_names:
         existing = session.exec(
-            select(TaskType).where(TaskType.name == task_type.name)
+            select(TaskScheme).where(TaskScheme.name == task_type.name)
         ).first()
         if existing is not None:
             raise CONFLICT.with_context(
@@ -127,14 +127,14 @@ async def add_task_type(
     return add_item(new_task_type, session)
 
 
-@router.patch("/types/{task_type_id}", response_model=TaskType)
+@router.patch("/types/{task_type_id}", response_model=TaskScheme)
 async def update_task_type(
     task_type_id: int,
     task_type_update: TaskTypeOptional,
     session: Session = Depends(get_session),
-) -> TaskType:
+) -> TaskScheme:
     """Update an existing task type."""
-    task_type = session.get(TaskType, task_type_id)
+    task_type = session.get(TaskScheme, task_type_id)
     if task_type is None:
         raise NOT_FOUND.with_context(f"Task type with ID {task_type_id} not found")
 
@@ -158,13 +158,13 @@ async def update_task_type(
     return task_type
 
 
-@router.get("/types/{task_type_id}", response_model=TaskType)
+@router.get("/types/{task_type_id}", response_model=TaskScheme)
 async def get_task_type(
     task_type_id: int,
     session: Session = Depends(get_session),
-) -> TaskType:
+) -> TaskScheme:
     """Get a task type by ID."""
-    task_type = session.get(TaskType, task_type_id)
+    task_type = session.get(TaskScheme, task_type_id)
     if task_type is None:
         raise NOT_FOUND.with_context(f"Task type with ID {task_type_id} not found")
     return task_type
@@ -176,7 +176,7 @@ async def delete_task_type(
     session: Session = Depends(get_session),
 ) -> None:
     """Delete a task type."""
-    task_type = session.get(TaskType, task_type_id)
+    task_type = session.get(TaskScheme, task_type_id)
     if task_type is None:
         raise NOT_FOUND.with_context(f"Task type with ID {task_type_id} not found")
 
@@ -218,26 +218,26 @@ async def get_my_pending_tasks(
     ).all()
 
 
-@router.get("/available_types", response_model=Dict[TaskType, int])
+@router.get("/available_types", response_model=Dict[TaskScheme, int])
 async def get_my_available_task_types(
     user: User = Depends(get_current_user_cookie),
     session: Session = Depends(get_session),
-) -> Dict[TaskType, int]:
+) -> Dict[TaskScheme, int]:
     """Get all task types available to the current user with task counts."""
     statement = (
-        select(TaskType.id, func.count(Task.id).label("task_count"))
+        select(TaskScheme.id, func.count(Task.id).label("task_count"))
         .join(Task)
         .join(UserRole)
         .where(UserRole.users.contains(user))
         .where(Task.status == TaskStatus.pending)
-        .group_by(TaskType.id)
+        .group_by(TaskScheme.id)
     )
     results = session.exec(statement).all()
 
     return {
         task_type: task_count
         for task_type_id, task_count in results
-        if (task_type := session.get(TaskType, task_type_id)) is not None
+        if (task_type := session.get(TaskScheme, task_type_id)) is not None
     }
 
 
@@ -265,16 +265,16 @@ async def check_task_constraints(
     # Count existing tasks with same task type, series, and study
     query = (
         select(func.count(Task.id))
-        .join(TaskType)
+        .join(TaskScheme)
         .where(
-            TaskType.id == new_task.task_type_id,
+            TaskScheme.id == new_task.task_type_id,
             Task.series_uid == new_task.series_uid,
             Task.study_uid == new_task.study_uid,
         )
     )
 
     same_tasks_count = session.exec(query).one()
-    task_type = session.get(TaskType, new_task.task_type_id)
+    task_type = session.get(TaskScheme, new_task.task_type_id)
 
     if task_type is None:
         raise NOT_FOUND.with_context(
@@ -452,7 +452,7 @@ async def find_tasks(
     commons: dict = Depends(common_parameters),
 ) -> Sequence[Task]:
     """Find tasks by various criteria."""
-    find_statement = select(Task).join(TaskType)
+    find_statement = select(Task).join(TaskScheme)
 
     # Add filters for patient
     if patient_id:
@@ -516,7 +516,7 @@ async def find_tasks(
         find_statement = find_statement.where(Task.status == task_status)
 
     if task_name:
-        find_statement = find_statement.where(TaskType.name == task_name)
+        find_statement = find_statement.where(TaskScheme.name == task_name)
 
     # Add result filters
     for query in find_queries:
@@ -602,7 +602,7 @@ def add_demo_tasks_for_user(
     """Add demo tasks for a new user."""
     # Find demo task types
     task_types = session.exec(
-        select(TaskType).where(TaskType.name.contains("demo"))
+        select(TaskScheme).where(TaskScheme.name.contains("demo"))
     ).all()
 
     if not task_types:

@@ -51,8 +51,8 @@ from .task import (
     TaskCreate,
     TaskFind,
     TaskRead,
-    TaskType,
-    TaskTypeBase,
+    TaskScheme,
+    TaskSchemeBase,
     TaskTypeCreate,
     TaskTypeFind,
     TaskTypeOptional,
@@ -76,6 +76,6 @@ __all__ = [
     
     # Task
     'Task', 'TaskBase', 'TaskCreate', 'TaskFind', 'TaskRead',
-    'TaskType', 'TaskTypeBase', 'TaskTypeCreate', 'TaskTypeFind', 'TaskTypeOptional',
+    'TaskScheme', 'TaskSchemeBase', 'TaskTypeCreate', 'TaskTypeFind', 'TaskTypeOptional',
     'TaskFindResult', 'TaskFindResultComparisonOperator'
 ]

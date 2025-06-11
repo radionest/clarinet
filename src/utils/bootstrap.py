@@ -13,7 +13,7 @@ from pathlib import Path
 from sqlmodel import Session, select
 from fastapi import HTTPException, status
 
-from src.models import TaskType, TaskTypeCreate, UserRole, User
+from src.models import TaskScheme, TaskTypeCreate, UserRole, User
 from src.utils.database import get_session_context
 from src.utils.logger import logger
 from src.settings import settings
@@ -174,7 +174,7 @@ def create_demo_task_types_from_json(
                 logger.error(f"Error processing task {task_name}: {e}")
 
 
-def add_task_type(task_type: TaskTypeCreate, session: Session) -> TaskType:
+def add_task_type(task_type: TaskTypeCreate, session: Session) -> TaskScheme:
     """
     Add a new task type to the database.
 
@@ -190,7 +190,7 @@ def add_task_type(task_type: TaskTypeCreate, session: Session) -> TaskType:
     """
     # Check if task type with this name already exists
     existing = session.exec(
-        select(TaskType).where(TaskType.name == task_type.name)
+        select(TaskScheme).where(TaskScheme.name == task_type.name)
     ).first()
 
     if existing:
@@ -212,7 +212,7 @@ def add_task_type(task_type: TaskTypeCreate, session: Session) -> TaskType:
             )
 
     # Create and save the task type
-    new_task_type = TaskType.model_validate(task_type)
+    new_task_type = TaskScheme.model_validate(task_type)
     session.add(new_task_type)
     session.commit()
     session.refresh(new_task_type)

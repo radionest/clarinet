@@ -39,5 +39,3 @@ make_seg_calcifications_from_ai)
     > compare_ai_with_doctor.if(result=False) 
     > give_task('check_calcification_differences')
 
-pipeline = gather_pipes() # Должен собирать пайпланы из locals
-

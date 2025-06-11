@@ -1,0 +1,7 @@
+class Anonimizer:
+    ...
+    
+
+class PACS:
+    ...
+

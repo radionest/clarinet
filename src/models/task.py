@@ -7,11 +7,13 @@ This module provides models for tasks, task types, and task results.
 from datetime import datetime, UTC
 from typing import Optional, Dict, Any, Union
 from enum import Enum
+from typing_extensions import Unpack
 
 from sqlmodel import SQLModel, Field, Relationship, Column, JSON
 from sqlalchemy import Boolean, func, event, String, Integer, Float
 
-from pydantic import computed_field
+from pydantic import ConfigDict, computed_field
+from pydantic import BaseModel as PydanticBaseModel
 
 from .base import BaseModel, DicomQueryLevel, TaskStatus
 from .user import User, UserRole
@@ -22,12 +24,15 @@ from ..settings import settings
 from src.utils import logger
 
 
-class TaskTypeBase(SQLModel):
+class TaskResultSchema(BaseModel):
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+
+class TaskSchemeBase(SQLModel):
     """Base model for task type data."""
 
     name: str
     description: Optional[str] = None
-    result_schema: Optional[Dict] = {}
     label: Optional[str] = None
     slicer_script: Optional[str] = None
     slicer_script_args: Optional[Dict] = None
@@ -39,18 +44,19 @@ class TaskTypeBase(SQLModel):
     min_users: Optional[int] = Field(default=1)
     level: Optional[DicomQueryLevel] = None
 
+    @property
+    def result_schema(self) -> TaskResultSchema:
+        return ...
 
-class TaskType(TaskTypeBase, table=True):
+
+class TaskScheme(TaskSchemeBase, table=True):
     """Model representing a type of task that can be performed."""
 
     id: Optional[int] = Field(default=None, primary_key=True)
     result_schema: Optional[Dict] = Field(default_factory=dict, sa_column=Column(JSON))
     level: DicomQueryLevel
-
+    
     slicer_script_args: Optional[Dict] = Field(
-        default_factory=dict, sa_column=Column(JSON)
-    )
-    slicer_result_validator_args: Optional[Dict] = Field(
         default_factory=dict, sa_column=Column(JSON)
     )
 
@@ -69,13 +75,13 @@ class TaskType(TaskTypeBase, table=True):
         return self.id == other.id
 
 
-class TaskTypeCreate(TaskTypeBase):
+class TaskTypeCreate(TaskSchemeBase):
     """Pydantic model for creating a new task type."""
 
     pass
 
 
-class TaskTypeOptional(TaskTypeBase):
+class TaskTypeOptional(TaskSchemeBase):
     """Pydantic model for updating a task type with optional fields."""
 
     id: Optional[int] = None
@@ -263,7 +269,7 @@ class Task(TaskBase, table=True):
     series: Optional[Series] = Relationship(back_populates="tasks")
 
     task_type_id: int = Field(foreign_key="tasktype.id")
-    task_type: TaskType = Relationship(back_populates="tasks")
+    task_type: TaskScheme = Relationship(back_populates="tasks")
 
     user_id: Optional[str] = Field(default=None, foreign_key="user.id")
     user: Optional[User] = Relationship(back_populates="tasks")
@@ -310,7 +316,7 @@ class TaskRead(TaskBase):
     patient: "PatientRead"
     study: "StudyRead"
     series: Optional[SeriesBase] = None
-    task_type: TaskTypeBase
+    task_type: TaskSchemeBase
 
 
 class TaskFind(SQLModel):

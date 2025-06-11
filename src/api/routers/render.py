@@ -15,7 +15,7 @@ from jinja_markdown import MarkdownExtension
 from sqlmodel import Session
 
 from src.exceptions import SlicerConnectionError
-from src.models import Task, TaskRead, TaskStatus, TaskType, User, UserRead
+from src.models import Task, TaskRead, TaskStatus, TaskScheme, User, UserRead
 from src.settings import settings
 from src.utils.database import get_session
 from src.utils.forms import Questionary, trans_booleans_in_form
@@ -86,7 +86,7 @@ def render_index(
     request: Request,
     user: UserRead = Depends(user.get_current_user_cookie),
     task_list: List[TaskRead] = Depends(task.get_my_pending_tasks),
-    available_task_types: Dict[TaskType, int] = Depends(
+    available_task_types: Dict[TaskScheme, int] = Depends(
         task.get_my_available_task_types
     ),
 ) -> templates.TemplateResponse:
