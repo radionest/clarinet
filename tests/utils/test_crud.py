@@ -131,7 +131,7 @@ class TestUpdateItem:
         # Act
         result = update_item(test_item, update_data, mock_session)
         
-        # Assert
+        # Assertd
         assert test_item.name == "Updated Name"
         assert test_item.description == "Updated Description"
         mock_session.add.assert_called_once_with(test_item)
