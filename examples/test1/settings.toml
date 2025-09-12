@@ -1,0 +1,16 @@
+# Clarinet Configuration File
+
+# Server settings
+port = 8000
+host = "127.0.0.1"
+debug = true
+
+# Database settings
+database_driver = "sqlite"
+database_name = "clarinet_test_project"
+
+# Storage settings
+storage_path = "./data"
+
+# Security (change in production!)
+jwt_secret_key = "change-this-secret-key-in-production"
