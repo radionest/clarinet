@@ -102,7 +102,22 @@ async def client(test_session, test_settings) -> AsyncGenerator[AsyncClient, Non
         pass
 
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+    # Use cookies=True to enable cookie jar
+    async with AsyncClient(transport=transport, base_url="http://test", cookies={}) as ac:
+        # Patch the client to properly handle cookies
+        original_request = ac.request
+        
+        async def request_with_cookies(method, url, **kwargs):
+            # Always include cookies in headers
+            if ac.cookies:
+                headers = kwargs.get("headers") or {}
+                cookie_header = "; ".join([f"{k}={v}" for k, v in ac.cookies.items()])
+                if cookie_header:
+                    headers["Cookie"] = cookie_header
+                    kwargs["headers"] = headers
+            return await original_request(method, url, **kwargs)
+        
+        ac.request = request_with_cookies
         yield ac
 
     app.dependency_overrides.clear()

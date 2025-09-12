@@ -39,20 +39,22 @@ async def test_login_invalid_credentials(client: AsyncClient):
     )
 
     # fastapi-users returns 400 for invalid credentials
-    assert response.status_code in [400, 401]
+    assert response.status_code == 400
+    assert response.json()["detail"] == "LOGIN_BAD_CREDENTIALS"
 
 
 @pytest.mark.asyncio
 async def test_get_current_user(client: AsyncClient, test_user):
     """Test getting current user."""
     # First authenticate
-    await client.post(
+    login_response = await client.post(
         "/auth/login",
         data={
             "username": "test@example.com",
             "password": "testpassword",
         },
     )
+    assert login_response.status_code == 204
 
     # Use new endpoint /auth/me
     response = await client.get("/auth/me")
@@ -168,7 +170,7 @@ async def test_update_task_status(client: AsyncClient, auth_headers, test_sessio
     from src.models.task import Task
     from src.models.user import User
 
-    statement = select(User).where(User.id == "test@example.com")
+    statement = select(User).where(User.id == "test_user")
     result = await test_session.execute(statement)
     user = result.scalar_one()
 

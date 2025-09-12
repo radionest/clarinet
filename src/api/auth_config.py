@@ -13,6 +13,7 @@ from fastapi_users.authentication import (
     CookieTransport,
     Strategy,
 )
+from fastapi_users.exceptions import UserNotExists
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -34,10 +35,10 @@ class UserManager(BaseUserManager[User, str]):
         """Get user by email for authentication."""
         user = await self.user_db.get_by_email(user_email)
         if user is None:
-            raise Exception("User not found")
+            raise UserNotExists()
         # Type narrowing for mypy
         if not isinstance(user, User):
-            raise Exception("Invalid user type")
+            raise UserNotExists()
         return user
 
     async def on_after_register(
