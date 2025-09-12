@@ -40,7 +40,11 @@ class UserManager(BaseUserManager[User, str]):
             raise Exception("Invalid user type")
         return user
 
-    async def on_after_register(self, user: User, request: Request | None = None) -> None:
+    async def on_after_register(
+        self,
+        user: User,
+        request: Request | None = None,
+    ) -> None:
         """Called after successful user registration."""
         del request  # Unused but required by interface
         logger.info(f"User {user.id} has registered.")

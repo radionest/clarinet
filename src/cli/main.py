@@ -138,6 +138,9 @@ def main() -> None:
     db_subparsers = db_parser.add_subparsers(dest="db_command")
     db_subparsers.add_parser("init", help="Initialize database with tables")
 
+    # init-migrations command
+    subparsers.add_parser("init-migrations", help="Initialize Alembic migrations for the project")
+
     args = parser.parse_args()
 
     if args.command == "init":
@@ -149,6 +152,10 @@ def main() -> None:
             asyncio.run(init_database())
         else:
             db_parser.print_help()
+    elif args.command == "init-migrations":
+        from src.utils.migrations import init_alembic_in_project
+
+        init_alembic_in_project()
     else:
         parser.print_help()
         sys.exit(1)
