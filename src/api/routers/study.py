@@ -1,53 +1,48 @@
 """
-Study router for the Clarinet framework.
+Async study router for the Clarinet framework.
 
-This module provides API endpoints for managing medical imaging studies, series, and related data.
+This module provides async API endpoints for managing medical imaging studies, series, and related data.
 """
 
-from datetime import date
-from typing import Annotated, List, Optional, Dict, Any
+import aiofiles
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import func, select
 
-from fastapi import APIRouter, Depends, HTTPException, status, Request, BackgroundTasks
-from sqlmodel import Session, select, and_, not_, func
-
-from src.exceptions import NOT_FOUND, CONFLICT
+from src.exceptions import CONFLICT, NOT_FOUND
 from src.models import (
-    Patient,
-    PatientBase,
-    PatientSave,
-    Study,
-    StudyBase,
-    StudyCreate,
-    StudyRead,
-    Series,
-    SeriesBase,
-    SeriesCreate,
-    SeriesFind,
-    SeriesRead,
     DicomUID,
+    Patient,
+    PatientSave,
+    Series,
+    SeriesCreate,
+    SeriesRead,
+    Study,
+    StudyCreate,
 )
-from src.utils.database import get_session
-from src.utils.logger import logger
-from src.utils.study import choose_unique_name
+from src.models.study import SeriesFind
 from src.settings import settings
+from src.utils.async_crud import add_item_async, exists_async
+from src.utils.database import get_async_session
 
 router = APIRouter()
 
 # Patient endpoints
 
 
-@router.get("/patients", response_model=List[Patient])
-async def get_all_patients(session: Session = Depends(get_session)) -> List[Patient]:
+@router.get("/patients", response_model=list[Patient])
+async def get_all_patients(session: AsyncSession = Depends(get_async_session)) -> list[Patient]:
     """Get all patients."""
-    return session.exec(select(Patient)).all()
+    result = await session.execute(select(Patient))
+    return list(result.scalars().all())
 
 
 @router.get("/patients/{patient_id}", response_model=Patient)
 async def get_patient_details(
-    patient_id: str, session: Session = Depends(get_session)
+    patient_id: str, session: AsyncSession = Depends(get_async_session)
 ) -> Patient:
     """Get patient details by ID."""
-    patient = session.get(Patient, patient_id)
+    patient = await session.get(Patient, patient_id)
     if not patient:
         raise NOT_FOUND.with_context(f"Patient with ID {patient_id} not found")
     return patient
@@ -55,28 +50,23 @@ async def get_patient_details(
 
 @router.post("/patients", response_model=Patient, status_code=status.HTTP_201_CREATED)
 async def add_patient(
-    patient: PatientSave, session: Session = Depends(get_session)
+    patient: PatientSave, session: AsyncSession = Depends(get_async_session)
 ) -> Patient:
     """Create a new patient."""
-    new_patient = Patient(**patient.model_dump(by_alias=True))
-
-    try:
-        session.add(new_patient)
-        session.commit()
-        session.refresh(new_patient)
-    except Exception:
-        session.rollback()
+    # Check if patient already exists
+    if await exists_async(Patient, session, id=patient.id):
         raise CONFLICT.with_context(f"Patient with ID {patient.id} already exists")
 
-    return new_patient
+    new_patient = Patient(**patient.model_dump(by_alias=True))
+    return await add_item_async(new_patient, session)
 
 
 @router.post("/patients/{patient_id}/anonymize", response_model=Patient)
 async def anonymize_patient(
-    patient_id: str, session: Session = Depends(get_session)
+    patient_id: str, session: AsyncSession = Depends(get_async_session)
 ) -> Patient:
     """Anonymize a patient by assigning an anonymous name."""
-    patient = session.get(Patient, patient_id)
+    patient = await session.get(Patient, patient_id)
     if not patient:
         raise NOT_FOUND.with_context(f"Patient with ID {patient_id} not found")
 
@@ -85,11 +75,21 @@ async def anonymize_patient(
 
     anon_names_list = []
     if settings.anon_names_list:
-        with open(settings.anon_names_list, "r") as f:
-            anon_names_list = f.readlines()
+        async with aiofiles.open(settings.anon_names_list) as f:
+            anon_names_list = await f.readlines()
 
     if anon_names_list:
-        new_anon_name = choose_unique_name(anon_names_list, session)
+        # Note: choose_unique_name needs to be made async-compatible
+        # For now, we'll use a simpler approach
+        import random
+
+        new_anon_name = random.choice(anon_names_list).strip()
+
+        # Check if name is already used
+        result = await session.execute(select(Patient).where(Patient.anon_name == new_anon_name))
+        if result.scalars().first():
+            # If name is taken, fall back to auto-generated name
+            new_anon_name = f"{settings.anon_id_prefix}_{patient.auto_id}"
     else:
         new_anon_name = f"{settings.anon_id_prefix}_{patient.auto_id}"
 
@@ -100,90 +100,92 @@ async def anonymize_patient(
         )
 
     patient.anon_name = new_anon_name
-    session.commit()
-    session.refresh(patient)
+    await session.commit()
+    await session.refresh(patient)
     return patient
 
 
 # Study endpoints
 
 
-@router.get("/studies", response_model=List[Study])
-async def get_studies(session: Session = Depends(get_session)) -> List[Study]:
+@router.get("/studies", response_model=list[Study])
+async def get_studies(session: AsyncSession = Depends(get_async_session)) -> list[Study]:
     """Get all studies."""
-    return session.exec(select(Study)).all()
+    result = await session.execute(select(Study))
+    return list(result.scalars().all())
 
 
 @router.get("/studies/{study_uid}", response_model=Study)
 async def get_study_details(
-    study_uid: DicomUID, session: Session = Depends(get_session)
+    study_uid: DicomUID, session: AsyncSession = Depends(get_async_session)
 ) -> Study:
     """Get study details by UID."""
-    study = session.get(Study, study_uid)
+    study = await session.get(Study, study_uid)
     if not study:
         raise NOT_FOUND.with_context(f"Study with UID {study_uid} not found")
     return study
 
 
-@router.get("/studies/{study_uid}/series", response_model=List[Series])
+@router.get("/studies/{study_uid}/series", response_model=list[Series])
 async def get_study_series(
-    study_uid: DicomUID, session: Session = Depends(get_session)
-) -> List[Series]:
+    study_uid: DicomUID, session: AsyncSession = Depends(get_async_session)
+) -> list[Series]:
     """Get all series for a study."""
-    study = session.get(Study, study_uid)
+    study = await session.get(Study, study_uid)
     if not study:
         raise NOT_FOUND.with_context(f"Study with UID {study_uid} not found")
+
+    # Load series relationship
+    await session.refresh(study, ["series"])
     return study.series
 
 
 @router.post("/studies", response_model=Study, status_code=status.HTTP_201_CREATED)
 async def add_study(
-    study: StudyCreate, session: Session = Depends(get_session)
+    study: StudyCreate, session: AsyncSession = Depends(get_async_session)
 ) -> Study:
     """Create a new study."""
     # Check if patient exists
-    patient = session.get(Patient, study.patient_id)
+    patient = await session.get(Patient, study.patient_id)
     if not patient:
         raise NOT_FOUND.with_context(f"Patient with ID {study.patient_id} not found")
+
+    # Check if study already exists
+    if await exists_async(Study, session, study_uid=study.study_uid):
+        raise CONFLICT.with_context(f"Study with UID {study.study_uid} already exists")
 
     new_study = Study.model_validate(study)
     new_study.patient = patient
 
-    try:
-        session.add(new_study)
-        session.commit()
-        session.refresh(new_study)
-    except Exception:
-        session.rollback()
-        raise CONFLICT.with_context(f"Study with UID {study.study_uid} already exists")
-
-    return new_study
+    return await add_item_async(new_study, session)
 
 
 # Series endpoints
 
 
-@router.get("/series", response_model=List[Series])
-async def get_all_series(session: Session = Depends(get_session)) -> List[Series]:
+@router.get("/series", response_model=list[Series])
+async def get_all_series(session: AsyncSession = Depends(get_async_session)) -> list[Series]:
     """Get all series."""
-    return session.exec(select(Series)).all()
+    result = await session.execute(select(Series))
+    return list(result.scalars().all())
 
 
 @router.get("/series/random", response_model=Series)
-async def get_random_series(session: Session = Depends(get_session)) -> Series:
+async def get_random_series(session: AsyncSession = Depends(get_async_session)) -> Series:
     """Get a random series."""
-    result = session.exec(select(Series).order_by(func.random()).limit(1)).first()
-    if not result:
+    result = await session.execute(select(Series).order_by(func.random()).limit(1))
+    series = result.scalars().first()
+    if not series:
         raise NOT_FOUND.with_context("No series found")
-    return result
+    return series
 
 
 @router.get("/series/{series_uid}", response_model=SeriesRead)
 async def get_series_details(
-    series_uid: DicomUID, session: Session = Depends(get_session)
+    series_uid: DicomUID, session: AsyncSession = Depends(get_async_session)
 ) -> Series:
     """Get series details by UID."""
-    series = session.get(Series, series_uid)
+    series = await session.get(Series, series_uid)
     if not series:
         raise NOT_FOUND.with_context(f"Series with UID {series_uid} not found")
     return series
@@ -191,90 +193,81 @@ async def get_series_details(
 
 @router.post("/series", response_model=Series, status_code=status.HTTP_201_CREATED)
 async def add_series(
-    series: SeriesCreate, session: Session = Depends(get_session)
+    series: SeriesCreate, session: AsyncSession = Depends(get_async_session)
 ) -> Series:
     """Create a new series."""
     # Check if study exists
-    study = session.get(Study, series.study_uid)
+    study = await session.get(Study, series.study_uid)
     if not study:
         raise NOT_FOUND.with_context(f"Study with UID {series.study_uid} not found")
+
+    # Check if series already exists
+    if await exists_async(Series, session, series_uid=series.series_uid):
+        raise CONFLICT.with_context(f"Series with UID {series.series_uid} already exists")
 
     new_series = Series.model_validate(series)
     new_series.study = study
 
-    try:
-        session.add(new_series)
-        session.commit()
-        session.refresh(new_series)
-    except Exception:
-        session.rollback()
-        raise CONFLICT.with_context(
-            f"Series with UID {series.series_uid} already exists"
-        )
-
-    return new_series
+    return await add_item_async(new_series, session)
 
 
-@router.post("/series/find", response_model=List[SeriesRead])
+@router.post("/series/find", response_model=list[SeriesRead])
 async def find_series(
-    find_query: SeriesFind, session: Session = Depends(get_session)
-) -> List[Series]:
+    find_query: SeriesFind, session: AsyncSession = Depends(get_async_session)
+) -> list[Series]:
     """Find series by criteria."""
     find_statement = select(Series)
 
     # Apply find criteria
     for query_key, query_value in find_query.model_dump(
-        exclude_none=True, exclude_defaults=True, exclude="tasks"
+        exclude_none=True, exclude_defaults=True, exclude={"tasks"}
     ).items():
         match query_value:
             case "*":
-                find_statement = find_statement.where(
-                    getattr(Series, query_key) != None
-                )
+                find_statement = find_statement.where(getattr(Series, query_key) is not None)
             case _:
-                find_statement = find_statement.where(
-                    getattr(Series, query_key) == query_value
-                )
+                find_statement = find_statement.where(getattr(Series, query_key) == query_value)
 
     # Apply task-related filters if present
     if find_query.tasks:
-        from src.models import Task, TaskScheme
+        from src.models import Task, TaskDesign
 
         find_statement = find_statement.join(Task, isouter=True)
-        find_statement = find_statement.join(TaskScheme, isouter=True)
+        find_statement = find_statement.join(TaskDesign, isouter=True)
 
         # Apply task filters (simplified for now)
         # Full implementation would need to handle TaskFind conditions
 
-    results = session.exec(find_statement.distinct()).all()
-    return results
+    result = await session.execute(find_statement.distinct())
+    results = result.scalars().all()
+    return list(results)
 
 
 @router.post("/studies/{study_uid}/add_anonymized", response_model=Study)
 async def add_anonymized_study(
-    study_uid: DicomUID, anon_uid: DicomUID, session: Session = Depends(get_session)
+    study_uid: DicomUID, anon_uid: DicomUID, session: AsyncSession = Depends(get_async_session)
 ) -> Study:
     """Add anonymized UID to a study."""
-    study = session.get(Study, study_uid)
+    study = await session.get(Study, study_uid)
     if not study:
         raise NOT_FOUND.with_context(f"Study with UID {study_uid} not found")
 
     study.anon_uid = anon_uid
-    session.commit()
-    session.refresh(study)
+    await session.commit()
+    await session.refresh(study)
     return study
 
 
 @router.post("/series/{series_uid}/add_anonymized", response_model=Series)
 async def add_anonymized_series(
-    series_uid: DicomUID, anon_uid: DicomUID, session: Session = Depends(get_session)
+    series_uid: DicomUID, anon_uid: DicomUID, session: AsyncSession = Depends(get_async_session)
 ) -> Series:
     """Add anonymized UID to a series."""
-    series = session.get(Series, series_uid)
+    series = await session.get(Series, series_uid)
     if not series:
         raise NOT_FOUND.with_context(f"Series with UID {series_uid} not found")
 
     series.anon_uid = anon_uid
-    session.commit()
-    session.refresh(series)
+    await session.commit()
+    await session.refresh(series)
     return series

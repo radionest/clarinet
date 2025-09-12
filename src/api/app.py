@@ -5,59 +5,62 @@ This module creates and configures the FastAPI application with all routers,
 middleware, and static files.
 """
 
-import os
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import Annotated, Any, AsyncGenerator
 
-from fastapi import Depends, FastAPI
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 # Use relative imports for development
+from src.api.routers import auth as auth
+from src.api.routers import slicer  # slicer doesn't use database, no async version needed,
+from src.api.routers import study as study
+from src.api.routers import task as task
+from src.api.routers import user as user
 from src.settings import settings
-from src.utils.database import create_db_and_tables
 from src.utils.bootstrap import (
-    create_demo_task_types_from_json,
     add_default_user_roles,
+    create_demo_task_designs_from_json,
 )
+from src.utils.db_manager import db_manager
 from src.utils.logger import logger
-from src.api.routers import (
-    auth,
-    render,
-    slicer,
-    study,
-    task,
-    user,
-)
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:  # noqa: ARG001
     """
     Application lifespan context manager.
-   
+
     Creates database tables, adds default roles, and loads task types.
     """
-    # Initialize database
-    create_db_and_tables()
-   
+    # Initialize database using DatabaseManager
+
+    await db_manager.create_db_and_tables_async()
+    logger.info("Database initialized with async support")
+
     # Setup default configuration
-    add_default_user_roles()
-    create_demo_task_types_from_json("./tasks/", demo_suffix="")
-   
+    await add_default_user_roles()
+    await create_demo_task_designs_from_json("./tasks/", demo_suffix="")
+
     logger.info("Application startup complete")
-    yield
-    logger.info("Application shutdown")
+
+    try:
+        yield
+    finally:
+        # Cleanup database connections on shutdown
+        await db_manager.close()
+        logger.info("Application shutdown")
 
 
 # noinspection PyTypeChecker
 def create_app(root_path: str = "/") -> FastAPI:
     """
     Create and configure the FastAPI application.
-    
+
     Args:
         root_path: The root path for the application
-        
+
     Returns:
         Configured FastAPI application
     """
@@ -69,7 +72,7 @@ def create_app(root_path: str = "/") -> FastAPI:
         lifespan=lifespan,
         root_path=root_path,
     )
-    
+
     # Configure CORS
     origins = ["http://localhost", "http://localhost:8080", "*"]
     app.add_middleware(
@@ -79,7 +82,7 @@ def create_app(root_path: str = "/") -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
-    
+
     # Mount static files
     static_dir = settings.get_static_dir()
     app.mount(
@@ -87,19 +90,14 @@ def create_app(root_path: str = "/") -> FastAPI:
         StaticFiles(directory=static_dir),
         name="static",
     )
-    
+
     # Include routers
     app.include_router(auth.router)
     app.include_router(user.router, prefix="/user", tags=["Users"])
     app.include_router(task.router, prefix="/task", tags=["Tasks"])
     app.include_router(study.router, prefix="/study", tags=["Studies"])
     app.include_router(slicer.router, prefix="/slicer", tags=["Slicer"])
-    
-    # Mount rendering routes
-    render_app = FastAPI(debug=settings.debug)
-    render_app.include_router(render.router)
-    app.mount("/render", render_app)
-    
+
     return app
 
 

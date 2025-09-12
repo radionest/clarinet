@@ -8,7 +8,7 @@ executing scripts remotely, and validating segmentations.
 import os
 import re
 from pathlib import Path
-from typing import Any, Dict, Literal, Optional, Union, cast
+from typing import Any, cast
 
 import httpx
 
@@ -36,7 +36,7 @@ def clean_value(value: str) -> str:
     return re.sub(r"[\'\"]", "", value)
 
 
-def input_values_to_template(template_line: str, values_dict: Dict[str, Any]) -> str:
+def input_values_to_template(template_line: str, values_dict: dict[str, Any]) -> str:
     """
     Replace template placeholders with actual values.
 
@@ -59,8 +59,8 @@ def input_values_to_template(template_line: str, values_dict: Dict[str, Any]) ->
 
     try:
         new_value = values_dict[value_key]
-    except KeyError:
-        raise ScriptArgumentError(f"Missing required parameter: {value_key}")
+    except KeyError as e:
+        raise ScriptArgumentError(f"Missing required parameter: {value_key}") from e
 
     # Format value based on type
     if isinstance(new_value, str):
@@ -70,7 +70,7 @@ def input_values_to_template(template_line: str, values_dict: Dict[str, Any]) ->
     return re.sub(r"=(.*)###", f"= {new_value} #", template_line)
 
 
-def script_from_template(script_path: Union[str, Path], **kwargs: Any) -> str:
+def script_from_template(script_path: str | Path, **kwargs: Any) -> str:
     """
     Create a script from a template by replacing placeholders with values.
 
@@ -85,7 +85,7 @@ def script_from_template(script_path: Union[str, Path], **kwargs: Any) -> str:
         FileNotFoundError: If the script file doesn't exist
         ScriptArgumentError: If a required value is missing
     """
-    with open(os.path.abspath(script_path), "r") as f:
+    with open(os.path.abspath(script_path)) as f:
         script_lines = f.readlines()
 
     processed_lines = [input_values_to_template(line, kwargs) for line in script_lines]
@@ -111,7 +111,7 @@ class SlicerWeb:
         # Verify connection with a simple test
         self.exec()
 
-    def exec(self, script: str = "print()") -> Dict[str, Any]:
+    def exec(self, script: str = "print()") -> dict[str, Any]:
         """
         Execute a script in Slicer.
 
@@ -126,22 +126,21 @@ class SlicerWeb:
             SlicerError: If Slicer returns an error
         """
         try:
-            response = httpx.post(
-                f"{self.url}/slicer/exec", data=script, timeout=5.0
-            )
-        except httpx.ConnectError:
-            raise SlicerConnectionError(f"Cannot connect to Slicer at {self.url}")
-        except httpx.TimeoutException:
-            raise SlicerConnectionError(f"Connection to Slicer at {self.url} timed out")
+            response = httpx.post(f"{self.url}/slicer/exec", content=script, timeout=5.0)
+        except httpx.ConnectError as e:
+            raise SlicerConnectionError(f"Cannot connect to Slicer at {self.url}") from e
+        except httpx.TimeoutException as e:
+            raise SlicerConnectionError(f"Connection to Slicer at {self.url} timed out") from e
 
         if response.status_code != 200:
             logger.error(f"Slicer error: {response.status_code} - {response.text}")
             logger.error(f"Script: {script}")
             raise SlicerError(f"Slicer execution failed: {response.text}")
 
-        return response.json()
+        result = response.json()
+        return cast("dict[str, Any]", result)
 
-    def run_script(self, script_name: str, **kwargs: Any) -> Dict[str, Any]:
+    def run_script(self, script_name: str, **kwargs: Any) -> dict[str, Any]:
         """
         Run a script by name with parameters.
 
@@ -160,9 +159,7 @@ class SlicerWeb:
         script_file = self.find_script_file(script_name)
         return self.run_from_file(script_file, **kwargs)
 
-    def run_from_file(
-        self, file_path: Union[str, Path], **kwargs: Any
-    ) -> Dict[str, Any]:
+    def run_from_file(self, file_path: str | Path, **kwargs: Any) -> dict[str, Any]:
         """
         Run a script from a file path with parameters.
 
@@ -199,9 +196,7 @@ class SlicerWeb:
 
         raise NoScriptError(f"Cannot find script '{script_name}' in script paths")
 
-    def validate_result(
-        self, validation_script: Optional[str] = None, **kwargs: Any
-    ) -> bool:
+    def validate_result(self, validation_script: str | None = None, **kwargs: Any) -> bool:
         """
         Validate a segmentation result either with a custom script or the default validator.
 
@@ -221,9 +216,7 @@ class SlicerWeb:
             if validation_script is None:
                 # Use the default validation approach
                 kwargs_formatted = ",".join(f"{k}={v!r}" for k, v in kwargs.items())
-                validation_result = self.exec(
-                    f"slicer_scene_manager.finish({kwargs_formatted})"
-                )
+                validation_result = self.exec(f"slicer_scene_manager.finish({kwargs_formatted})")
                 return True
             else:
                 # Use the provided validation script
@@ -237,7 +230,7 @@ class SlicerWeb:
 
         except (SlicerError, ScriptArgumentError) as e:
             logger.error(f"Validation error: {e}")
-            raise SlicerSegmentationError(f"Failed to validate segmentation: {e}")
+            raise SlicerSegmentationError(f"Failed to validate segmentation: {e}") from e
 
 
 def get_client_ip(request: Any) -> str:
@@ -250,7 +243,7 @@ def get_client_ip(request: Any) -> str:
     Returns:
         The client's IP address
     """
-    return cast(str, request.client.host)
+    return cast("str", request.client.host)
 
 
 def get_webslicer(client_ip: str) -> SlicerWeb:

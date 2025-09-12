@@ -6,42 +6,22 @@ and data structures used throughout the Clarinet framework.
 """
 
 # Base models
-from .base import (
-    BaseModel,
-    DicomUID,
-    TaskStatus,
-    DicomQueryLevel
-)
-
-# User models
-from .user import (
-    User, 
-    UserBase,
-    UserRead,
-    UserRole,
-    UserRolesLink,
-    HTTPSession
-)
+from .base import BaseModel, DicomQueryLevel, DicomUID, TaskStatus
 
 # Patient models
-from .patient import (
-    Patient,
-    PatientBase,
-    PatientRead,
-    PatientSave
-)
+from .patient import Patient, PatientBase, PatientRead, PatientSave
 
 # Study models
 from .study import (
-    Study,
-    StudyBase,
-    StudyCreate,
-    StudyRead,
     Series,
     SeriesBase,
     SeriesCreate,
     SeriesFind,
-    SeriesRead
+    SeriesRead,
+    Study,
+    StudyBase,
+    StudyCreate,
+    StudyRead,
 )
 
 # Task models
@@ -49,33 +29,59 @@ from .task import (
     Task,
     TaskBase,
     TaskCreate,
+    TaskDesign,
+    TaskDesignBase,
+    TaskDesignCreate,
+    TaskDesignFind,
+    TaskDesignOptional,
     TaskFind,
-    TaskRead,
-    TaskScheme,
-    TaskSchemeBase,
-    TaskTypeCreate,
-    TaskTypeFind,
-    TaskTypeOptional,
     TaskFindResult,
-    TaskFindResultComparisonOperator
+    TaskFindResultComparisonOperator,
+    TaskRead,
 )
+
+# User models
+from .user import HTTPSession, User, UserBase, UserRead, UserRole, UserRolesLink
 
 __all__ = [
     # Base
-    'BaseModel', 'DicomUID', 'TaskStatus', 'DicomQueryLevel',
-    
-    # User
-    'User', 'UserBase', 'UserRead', 'UserRole', 'UserRolesLink', 'HTTPSession',
-    
+    "BaseModel",
+    "DicomQueryLevel",
+    "DicomUID",
+    "HTTPSession",
     # Patient
-    'Patient', 'PatientBase', 'PatientRead', 'PatientSave',
-    
+    "Patient",
+    "PatientBase",
+    "PatientRead",
+    "PatientSave",
+    "Series",
+    "SeriesBase",
+    "SeriesCreate",
+    "SeriesFind",
+    "SeriesRead",
     # Study
-    'Study', 'StudyBase', 'StudyCreate', 'StudyRead',
-    'Series', 'SeriesBase', 'SeriesCreate', 'SeriesFind', 'SeriesRead',
-    
+    "Study",
+    "StudyBase",
+    "StudyCreate",
+    "StudyRead",
     # Task
-    'Task', 'TaskBase', 'TaskCreate', 'TaskFind', 'TaskRead',
-    'TaskScheme', 'TaskSchemeBase', 'TaskTypeCreate', 'TaskTypeFind', 'TaskTypeOptional',
-    'TaskFindResult', 'TaskFindResultComparisonOperator'
+    "Task",
+    "TaskBase",
+    "TaskCreate",
+    "TaskDesign",
+    "TaskDesignBase",
+    "TaskDesignCreate",
+    "TaskDesignFind",
+    "TaskDesignOptional",
+    "TaskFind",
+    "TaskFindResult",
+    "TaskFindResultComparisonOperator",
+    "TaskRead",
+    "TaskStatus",
+    # User
+    "User",
+    "UserBase",
+    "UserRead",
+    "UserRole",
+    "UserRolesLink",
 ]

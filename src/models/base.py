@@ -6,24 +6,23 @@ used throughout the Clarinet models.
 """
 
 import enum
-from datetime import datetime, date, timedelta, UTC
-from pydoc import classify_class_attrs
-from typing import Optional, List, Dict, Any, Self, Annotated
+from typing import Annotated, Any
 
-from sqlmodel import SQLModel, Field, Relationship, Column, JSON
-from pydantic import computed_field, field_validator, StringConstraints, constr
+from pydantic import StringConstraints, field_validator
+from sqlmodel import SQLModel
 
 # Define common type constraints
 DicomUID = Annotated[str, StringConstraints(pattern=r"^[0-9\.]*$", min_length=5, max_length=64)]
 
 type T = Any
 
+
 class BaseModel(SQLModel):
     """Base model for all Clarinet models with common validation and utilities."""
 
     @classmethod
     @field_validator("*", mode="before")
-    def empty_to_none(cls, value: T) -> Optional[T]:      
+    def empty_to_none(cls, value: T) -> T | None:
         """Convert empty strings to None."""
         if isinstance(value, str):
             value = value.replace("\x00", " ")
@@ -34,7 +33,7 @@ class BaseModel(SQLModel):
 
 class TaskStatus(str, enum.Enum):
     """Enumeration of possible task status values."""
-    
+
     pending = "pending"
     inwork = "inwork"
     finished = "finished"
@@ -44,7 +43,7 @@ class TaskStatus(str, enum.Enum):
 
 class DicomQueryLevel(str, enum.Enum):
     """Enumeration of DICOM query levels."""
-    
-    series = "series"
-    study = "study"
-    patient = "patient"
+
+    SERIES = "SERIES"
+    STUDY = "STUDY"
+    PATIENT = "PATIENT"

@@ -1,0 +1,3 @@
+"""
+Clarinet integration tests package.
+"""

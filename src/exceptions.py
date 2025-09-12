@@ -6,6 +6,7 @@ Each exception is designed to be clear about what went wrong and provide useful 
 """
 
 from typing import Self
+
 from fastapi import HTTPException, status
 
 
@@ -17,6 +18,12 @@ class ClarinetError(Exception):
 
 class ConfigError(ClarinetError):
     """Error related to configuration issues."""
+
+    pass
+
+
+class MigrationError(ClarinetError):
+    """Error related to migration issues"""
 
     pass
 
@@ -141,8 +148,8 @@ class TaskResultExistsError(TaskError):
     pass
 
 
-class TaskTypeError(TaskError):
-    """Error related to task types."""
+class TaskDesignError(TaskError):
+    """Error related to task designs."""
 
     pass
 

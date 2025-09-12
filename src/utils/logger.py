@@ -1,4 +1,3 @@
-
 """
 Logging utilities for Clarinet.
 
@@ -6,11 +5,11 @@ This module provides a unified logging interface for the Clarinet framework,
 using loguru for powerful, flexible logging capabilities.
 
 """
-import sys
+
 import inspect
 import logging
+import sys
 from pathlib import Path
-from typing import Dict, Any, Optional, Union, overload
 
 from loguru import logger as _logger
 
@@ -24,6 +23,7 @@ class InterceptHandler(logging.Handler):
 
     def emit(self, record: logging.LogRecord) -> None:
         # Get corresponding loguru level if it exists
+        level: str | int
         try:
             level = _logger.level(record.levelname).name
         except ValueError:
@@ -35,16 +35,14 @@ class InterceptHandler(logging.Handler):
             frame = frame.f_back
             depth += 1
 
-        _logger\
-            .opt(depth=depth, exception=record.exc_info)\
-            .log(level, record.getMessage())
+        _logger.opt(depth=depth, exception=record.exc_info).log(level, record.getMessage())
 
 
 def setup_logging(
     level: str = "INFO",
     format: str | None = None,
     log_to_file: bool = False,
-    log_file: Optional[Union[str, Path]] = None,
+    log_file: str | Path | None = None,
     rotation: str = "20 MB",
     retention: str = "1 week",
     serialize: bool = False,
@@ -60,7 +58,7 @@ def setup_logging(
         rotation: When to rotate log files (size or time)
         retention: How long to keep log files
         serialize: Whether to serialize logs as JSON (useful for log aggregation)
-    """  # noqa: E501
+    """
     # Remove default handlers
 
     if format is None:
@@ -68,7 +66,6 @@ def setup_logging(
                   <level>{level: <8}</level> | \
                   <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - \
                   <level>{message}</level>"
-
 
     _logger.remove()
 

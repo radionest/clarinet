@@ -4,30 +4,32 @@ Patient-related models for the Clarinet framework.
 This module provides models for patients, studies, and series.
 """
 
-from datetime import date
-from typing import Optional, List, Dict, Any, ForwardRef
+from typing import TYPE_CHECKING
 
-from sqlmodel import SQLModel, Field, Relationship, Column, Identity
-from pydantic import computed_field, Field as PydanticField
-
-from .base import BaseModel, DicomUID
+from pydantic import computed_field
+from sqlmodel import Column, Field, Integer, Relationship
 
 from ..settings import settings
+from .base import BaseModel
+
+if TYPE_CHECKING:
+    from .study import Study, StudyRead
+    from .task import Task
+
 
 class PatientBase(BaseModel):
     """Base model for patient data."""
-    
+
     id: str = Field(min_length=1, max_length=64)
     name: str = Field(default=None, min_length=1, max_length=64)
-    anon_name: Optional[str] = Field(
-        default=None, min_length=5, max_length=50, unique=True
-    )
-    auto_id: Optional[int] = Field(default=None)
+    anon_name: str | None = Field(default=None, min_length=5, max_length=50, unique=True)
+    auto_id: int | None = Field(default=None)
 
-    @computed_field(return_type=str)
-    @property
-    def anon_id(self) -> str:
+    @computed_field
+    def anon_id(self) -> str | None:
         """Generate an anonymous ID using the auto_id."""
+        if self.auto_id is None:
+            return None
         return f"{settings.anon_id_prefix}_{self.auto_id}"
 
 
@@ -36,27 +38,33 @@ class Patient(PatientBase, table=True):
 
     id: str = Field(
         primary_key=True,
-        min_length=1, max_length=64,
+        min_length=1,
+        max_length=64,
         schema_extra={"validation_alias": "patient_id"},
     )
-    studies: List["Study"] = Relationship(back_populates="patient")
-    auto_id: Optional[int] = Field(
-        default=None, sa_column=Column(Identity(always=True))
+    studies: list["Study"] = Relationship(back_populates="patient")
+    auto_id: int | None = Field(
+        default=None,
+        sa_column=Column(
+            Integer,
+            nullable=True,  # SQLite needs nullable for autoincrement non-primary key
+            autoincrement=True,
+            unique=True,
+        ),
     )
-    tasks: List["Task"] = Relationship(back_populates="patient")
+    tasks: list["Task"] = Relationship(back_populates="patient")
 
 
 class PatientSave(PatientBase):
     """Pydantic model for creating a new patient."""
-    
+
     id: str = Field(min_length=1, max_length=64, schema_extra={"validation_alias": "patient_id"})
+    name: str = Field(
+        min_length=1, max_length=64, schema_extra={"validation_alias": "patient_name"}
+    )
 
 
 class PatientRead(PatientBase):
     """Pydantic model for reading patient data with related studies."""
-    
-    studies: List["StudyRead"] = []
 
-
-# Forward references for relationships
-StudyRead = ForwardRef("StudyRead")
+    studies: list["StudyRead"] = Field()

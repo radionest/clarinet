@@ -1,4 +1,3 @@
-
 """
 Common utility functions for the Clarinet framework.
 
@@ -7,16 +6,17 @@ including timing, object copying, and other common operations.
 """
 
 import time
+from collections.abc import Callable
 from copy import deepcopy
 from functools import wraps
-from typing import Any, Callable, ParamSpec, TypeVar, cast
+from typing import Any, ParamSpec, TypeVar
 
-P = ParamSpec('P')
-T = TypeVar('T')
-R = TypeVar('R')
+P = ParamSpec("P")
+T = TypeVar("T")
+R = TypeVar("R")
 
 
-def timing(func: Callable[P, R]) -> Callable[P, R]:
+def timing[**P, R](func: Callable[P, R]) -> Callable[P, R]:
     """
     Measure and log function execution time.
 
@@ -26,17 +26,19 @@ def timing(func: Callable[P, R]) -> Callable[P, R]:
     Returns:
         Wrapped function that logs execution time
     """
+
     @wraps(func)
     def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
         start_time = time.perf_counter()
         result = func(*args, **kwargs)
         end_time = time.perf_counter()
-        print(f'func:{func.__name__!r} took: {end_time - start_time:.4f} sec')
+        print(f"func:{func.__name__!r} took: {end_time - start_time:.4f} sec")
         return result
+
     return wrapper
 
 
-def copy_object(method: Callable[[Any], T]) -> Callable[[Any], T]:
+def copy_object[T](method: Callable[[Any], T]) -> Callable[[Any], T]:
     """
     Create a copy of an object before modifying it.
 
@@ -49,26 +51,10 @@ def copy_object(method: Callable[[Any], T]) -> Callable[[Any], T]:
     Returns:
         Wrapped method that works on a copy of the object
     """
+
     @wraps(method)
     def wrapped(self: Any, *args: Any, **kwargs: Any) -> T:
         new_obj = deepcopy(self)
         return method(new_obj, *args, **kwargs)
+
     return wrapped
-
-
-def copy_signature(
-    source_func: Callable[..., Any]
-) -> Callable[[Callable[..., T]], Callable[P, T]]:
-    """
-    Create a decorator that copies the signature from one function to another.
-
-    Args:
-        source_func: The function whose signature should be copied
-
-    Returns:
-        A decorator that applies the signature
-    """
-    def decorator(target_func: Callable[..., T]) -> Callable[P, T]:
-        return cast(Callable[P, T], target_func)
-    return decorator
-

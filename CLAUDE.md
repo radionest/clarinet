@@ -1,246 +1,437 @@
-# CLAUDE.md - Руководство по стилю кода и best practices
+# CLAUDE.md - Code Style Guide and Best Practices for Clarinet
 
-## Общие принципы
+## About the Project
 
-### Архитектура
-- Следуй принципам SOLID и DRY
-- Используй модульную архитектуру с четким разделением ответственности
-- Предпочитай композицию наследованию
-- Каждый модуль должен иметь единственную цель
+Clarinet is a framework for conducting clinical-radiological studies, built on FastAPI, SQLModel, and asynchronous architecture.
 
-### Асинхронное программирование
-- Используй `async/await` для всех I/O операций
-- Избегай блокирующих вызовов в асинхронном коде
-- Используй `asyncio.gather()` для параллельного выполнения независимых задач
-- Всегда обрабатывай исключения в асинхронных функциях
+## General Principles
 
-## Стиль кода
+### Architecture
 
-### Именование
-- Классы: `PascalCase` (например, `GeminiClient`)
-- Функции и переменные: `snake_case` (например, `analyze_message`)
-- Константы: `UPPER_SNAKE_CASE` (например, `MIN_MESSAGE_LENGTH`)
-- Приватные методы: с префиксом `_` (например, `_process_data`)
+- Follow KISS, SOLID, DRY, YAGNI principles
+- Use modular architecture with clear separation of responsibilities
+- Prefer composition over inheritance
+- Each module should have a single purpose
+- Use dependency injection for managing dependencies
 
-### Импорты
-```python
-# Стандартная библиотека
-import asyncio
-import sys
-from typing import Optional, List, Dict
+### Asynchronous Programming
 
-# Сторонние библиотеки
-from aiogram import Router, F
-from loguru import logger
+- Use `async/await` for all I/O operations
+- Avoid blocking calls in asynchronous code
+- Use `asyncio.gather()` for parallel execution of independent tasks
+- Always handle exceptions in asynchronous functions
+- Prefer AsyncSession for database operations in API endpoints
+- Use `get_async_session` from `src.utils.database` to get a session
 
-# Локальные модули
-from config import settings
-from utils.logger import logger
-```
+## Code Style
 
-### Типизация
-- Используй type hints для всех функций
-- Применяй `Optional[]` для значений, которые могут быть None
-- Используй `Union[]` осторожно, предпочитай более специфичные типы
-- Для сложных структур создавай TypedDict или dataclass
+### Formatting and Linting
 
-```python
-from typing import Optional, List, Dict
-from dataclasses import dataclass
+- Use **black** with `line-length=100` (settings in pyproject.toml)
+- Use **isort** for sorting imports (`profile="black"`)
+- Use **ruff** for code checking: `ruff check src/ --fix`
+- Use **mypy** for type checking: `mypy src/`
+- Maximum line length: 100 characters
 
-@dataclass
-class AnalysisResult:
-    text: str
-    confidence: float
-    response_type: str
+### Type Annotations
 
-async def analyze_message(text: str, context: Optional[Dict[str, str]] = None) -> AnalysisResult:
-    ...
-```
+- Use type hints for all functions and methods
+- mypy settings in pyproject.toml (strict mode enabled)
+- Fix all mypy errors before committing
+- Use TypeVar and Generic for generic types
+- Use Optional[T] instead of Union[T, None]
+
+### Imports
+
+- Group imports: standard library, third-party packages, local modules
+- Use relative imports within package for development
+- Avoid circular imports
+- Sort imports using isort
 
 ## Best Practices
 
-### Обработка ошибок
+### Error Handling
+
+- Don't wrap large blocks of code in try-except
+- Try block should contain no more than two function calls
+- Use custom exceptions from `src.exceptions` (CONFLICT, NOT_FOUND)
+- Always log errors before handling them
+- Avoid bare except - always specify the exception type
+
 ```python
-# Плохо
+from src.exceptions import NOT_FOUND
+from src.utils.logger import logger
+
 try:
-    result = await some_operation()
-except:
-    pass
-
-# Хорошо
-try:
-    result = await some_operation()
-except SpecificException as e:
-    logger.error(f"Ошибка при выполнении операции: {e}")
-    # Обработка или повторный выброс
-    raise
+    item = await session.get(Model, item_id)
+    await session.commit()
+except IntegrityError as e:
+    await session.rollback()
+    logger.error(f"Database integrity error: {e}")
+    raise CONFLICT.with_context("Item already exists")
 ```
 
-- Не оборачивай большие блоки кода в try-except. В блоке try должно быть не более двух вызовов функций.
+### Logging
 
-### Логирование
-- Используй loguru для всего логирования
-- Логируй на соответствующих уровнях:
-  - `DEBUG`: детальная информация для отладки
-  - `INFO`: важные события в нормальном потоке
-  - `WARNING`: неожиданные события, которые не прерывают работу
-  - `ERROR`: ошибки, требующие внимания
-  - `CRITICAL`: критические ошибки, угрожающие работе системы
+- Import logger from `src.utils.logger`: `from src.utils.logger import logger`
+- DO NOT import loguru directly - use the configured logger
+- Log at appropriate levels:
+  - `DEBUG`: detailed information for debugging
+  - `INFO`: important events in normal flow
+  - `WARNING`: unexpected events that don't interrupt operation
+  - `ERROR`: errors requiring attention
+  - `CRITICAL`: critical errors threatening system operation
 
 ```python
-logger.debug(f"Обработка сообщения длиной {len(message)} символов")
-logger.info(f"Пользователь {user_id} отправил команду {command}")
-logger.warning(f"API лимит близок к исчерпанию: {remaining} запросов")
-logger.error(f"Не удалось подключиться к API: {error}")
+from src.utils.logger import logger
+
+logger.debug(f"Processing message with length {len(message)}")
+logger.info(f"User {user_id} created new task")
+logger.warning(f"API rate limit approaching: {remaining} requests")
+logger.error(f"Failed to connect to database: {error}")
 ```
 
-### Конфигурация
-- Все настройки выноси в отдельный модуль config
-- Используй переменные окружения для секретов
-- Валидируй конфигурацию при запуске
-- Предоставляй разумные значения по умолчанию
+### Configuration
+
+- Main configuration file: `src/settings.py`
+- Use `Settings` class based on `pydantic_settings.BaseSettings`
+- Import settings: `from src.settings import settings`
+- Environment variables with `CLARINET_` prefix
+- Supports TOML files: `settings.toml` and `settings.custom.toml`
+- Validate configuration on startup
 
 ```python
-# config/settings.py
-import os
-from typing import List
+from src.settings import settings
 
-# Обязательные переменные
-API_KEY = os.getenv("API_KEY")
-if not API_KEY:
-    raise ValueError("API_KEY must be set")
-
-# Опциональные с дефолтами
-TIMEOUT: int = int(os.getenv("TIMEOUT", "30"))
-MAX_RETRIES: int = int(os.getenv("MAX_RETRIES", "3"))
+# Using settings
+database_url = settings.database_url
+jwt_secret = settings.jwt_secret_key
+storage_path = settings.storage_path
 ```
 
-### Работа с внешними API
+### Database Operations
+
+- Use SQLModel for models
+- Asynchronous operations through AsyncSession
+- CRUD operations in `src/utils/async_crud.py` and `src/utils/crud.py`
+- Database manager in `src/utils/db_manager.py`
+
 ```python
-class APIClient:
-    def __init__(self, timeout: int = 30, max_retries: int = 3):
-        self.timeout = timeout
-        self.max_retries = max_retries
-        
-    async def make_request(self, endpoint: str, data: Dict) -> Dict:
-        for attempt in range(self.max_retries):
-            try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.post(
-                        endpoint, 
-                        json=data, 
-                        timeout=aiohttp.ClientTimeout(total=self.timeout)
-                    ) as response:
-                        response.raise_for_status()
-                        return await response.json()
-            except aiohttp.ClientError as e:
-                logger.warning(f"Попытка {attempt + 1}/{self.max_retries} не удалась: {e}")
-                if attempt == self.max_retries - 1:
-                    raise
-                await asyncio.sleep(2 ** attempt)  # Exponential backoff
+from sqlalchemy.ext.asyncio import AsyncSession
+from src.utils.database import get_async_session
+from src.utils.async_crud import add_item_async, get_item_async
+
+async def create_user(
+    user_data: UserCreate,
+    session: AsyncSession = Depends(get_async_session)
+):
+    user = User(**user_data.model_dump())
+    return await add_item_async(user, session)
 ```
 
-### Структура проекта
-```
+### Project Structure (Current)
+
+```tree
 src/
 ├── __init__.py
-├── main.py              # Точка входа
-├── config/
+├── __main__.py          # CLI entry point
+├── settings.py          # Application configuration
+├── exceptions.py        # Custom exceptions
+├── api/                 # FastAPI application
 │   ├── __init__.py
-│   └── settings.py      # Конфигурация
-├── models/              # Модели данных
+│   ├── app.py          # Main application file
+│   ├── dependencies.py  # Dependencies (auth, etc)
+│   ├── security.py     # JWT and security
+│   └── routers/        # API endpoints
+│       ├── auth_async.py
+│       ├── study_async.py
+│       ├── task_async.py
+│       ├── user_async.py
+│       └── slicer.py
+├── cli/                 # CLI interface
 │   ├── __init__.py
-│   └── ...
-├── services/            # Бизнес-логика
+│   └── main.py
+├── models/              # SQLModel models
 │   ├── __init__.py
-│   └── ...
-├── handlers/            # Обработчики событий
-│   ├── __init__.py
-│   └── ...
-└── utils/               # Вспомогательные утилиты
+│   ├── base.py         # Base models
+│   ├── user.py
+│   ├── study.py
+│   ├── task.py
+│   └── patient.py
+├── services/            # Business logic
+│   ├── dicom/          # DICOM processing
+│   ├── image/          # Image processing
+│   └── slicer/         # Slicer integration
+└── utils/               # Helper utilities
     ├── __init__.py
-    └── ...
+    ├── logger.py       # Loguru setup
+    ├── database.py     # Database connection
+    ├── db_manager.py   # Database management
+    ├── async_crud.py   # Async CRUD operations
+    ├── crud.py         # Sync CRUD operations
+    ├── bootstrap.py    # Data initialization
+    └── slicer.py       # Slicer utilities
 ```
 
-### Тестирование
-- Пиши тесты для критической бизнес-логики
-- Используй pytest и pytest-asyncio для асинхронных тестов
-- Мокай внешние зависимости
-- Стремись к покрытию >80% для основной логики
+### API Routers
+
+- All routers use async/await
+- Routers with `_async` suffix for async database operations
+- Use `Depends` for dependency injection
+- Handle errors with HTTPException or custom exceptions
 
 ```python
-# tests/test_analyzer.py
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
+from src.utils.database import get_async_session
+from src.api.dependencies import get_current_user_async
+
+router = APIRouter(prefix="/items", tags=["Items"])
+
+@router.get("/{item_id}")
+async def get_item(
+    item_id: int,
+    session: AsyncSession = Depends(get_async_session),
+    current_user: User = Depends(get_current_user_async)
+):
+    # Implementation
+    pass
+```
+
+### Testing
+
+- Tests in `tests/` directory
+- Use pytest and pytest-asyncio for async tests
+- Configuration in `tests/conftest.py`
+- Test structure:
+  - `tests/integration/` - integration tests
+  - `tests/utils/` - utility tests
+- Mock external dependencies
+- Use fixtures for code reuse
+
+```python
 import pytest
-from unittest.mock import AsyncMock
+from httpx import AsyncClient
+from src.api.app import app
 
 @pytest.mark.asyncio
-async def test_analyze_message():
-    client = AsyncMock()
-    client.analyze.return_value = "Test response"
-    
-    result = await analyze_message("test", client)
-    assert result == "Test response"
-    client.analyze.assert_called_once_with("test")
+async def test_create_user(async_client: AsyncClient):
+    response = await async_client.post(
+        "/users/",
+        json={"username": "test", "email": "test@test.com"}
+    )
+    assert response.status_code == 201
 ```
 
-### Документация
-- Используй docstrings для всех публичных функций и классов
-- Пиши комментарии на английском языке
-- Следуй Google Style для docstrings
-- Документируй сложную логику inline комментариями
-- Поддерживай README.md актуальным
+### Development Commands
+
+```bash
+# Run application
+uvicorn src.api.app:app --reload
+
+# Format code
+black src/ tests/
+isort src/ tests/
+
+# Check code
+ruff check src/ --fix
+mypy src/
+
+# Run tests
+pytest
+pytest --cov=src tests/
+
+# Database migrations (Alembic)
+alembic upgrade head  # Apply all migrations
+alembic revision --autogenerate -m "Description"  # Create migration from model changes
+alembic downgrade -1  # Rollback one migration
+alembic current  # Show current migration
+alembic history  # Show migration history
+```
+
+### Performance
+
+- Use caching for frequent operations (@lru_cache)
+- Apply connection pooling for DB (configured in SQLAlchemy)
+- Avoid N+1 queries - use selectinload/joinedload
+- Profile critical code sections
+
+### Security
+
+- Never log sensitive data (passwords, tokens)
+- Validate all input data with Pydantic
+- Use parameterized queries (SQLModel does this automatically)
+- JWT tokens for authentication (src/api/security.py)
+- Password hashing with bcrypt
+- Rate limiting for API endpoints
+- CORS settings in src/api/app.py
+
+### Git Workflow
+
+- Make atomic commits with clear messages
+- Use conventional commits (feat:, fix:, docs:, refactor:, test:, chore:)
+- Don't commit:
+  - Generated files (**pycache**, *.pyc)
+  - Secrets and configuration files with passwords
+  - .env files (use .env.example)
+  - Database (*.db)
+- Write meaningful PR descriptions
+
+### Documentation
+
+- Use docstrings for all public functions and classes
+- Follow Google Style for docstrings
+- Document complex logic with inline comments
+- Update README.md when functionality changes
+- Document API endpoints with FastAPI auto-documentation
 
 ```python
-async def process_message(message: str, user_id: int) -> Optional[str]:
-    """Обрабатывает входящее сообщение от пользователя.
+async def process_task(
+    task_id: int,
+    user_id: int,
+    session: AsyncSession
+) -> Optional[TaskResult]:
+    """Process a task and return the result.
     
     Args:
-        message: Текст сообщения для обработки
-        user_id: ID пользователя отправителя
+        task_id: The ID of the task to process
+        user_id: The ID of the user requesting processing
+        session: Database session
         
     Returns:
-        Обработанный ответ или None, если обработка не требуется
+        TaskResult object if processing succeeded, None otherwise
         
     Raises:
-        ValueError: Если сообщение пустое
-        APIError: При ошибке внешнего API
+        NOT_FOUND: If task doesn't exist
+        CONFLICT: If task is already being processed
     """
-    if not message:
-        raise ValueError("Message cannot be empty")
-    
-    # Фильтрация по бизнес-правилам
-    if not should_process(message):
-        return None
-        
-    return await api_client.process(message, user_id)
+    # Implementation
+    pass
 ```
 
-### Производительность
-- Используй кеширование для частых операций
-- Применяй connection pooling для БД и HTTP
-- Избегай N+1 запросов
-- Профилируй критические участки кода
+## Anti-patterns to Avoid
 
-### Безопасность
-- Никогда не логируй секретные данные
-- Валидируй все входные данные
-- Используй параметризованные запросы для БД
-- Применяй rate limiting для API endpoints
-- Обновляй зависимости регулярно
+- **God objects** - classes with too much responsibility
+- **Callback hell** - use async/await instead of callbacks
+- **Global variables** - use dependency injection through FastAPI
+- **Magic numbers** - extract to constants or settings
+- **Code duplication** - extract to functions/classes/utilities
+- **Ignoring errors** - always handle exceptions explicitly
+- **Hardcoded configuration** - use settings.py and environment variables
+- **Direct loguru import** - use configured logger from src.utils.logger
+- **Synchronous operations in async functions** - use async equivalents
+- **Bare except** - always specify exception type
 
-### Git workflow
-- Делай атомарные коммиты с понятными сообщениями
-- Используй conventional commits (feat:, fix:, docs:, etc.)
-- Не коммить сгенерированные файлы и секреты
-- Пиши содержательные PR описания
+## Database Migrations (Alembic)
 
-## Анти-паттерны которых следует избегать
+### Overview
 
-- God objects - классы с слишком большой ответственностью
-- Callback hell - используй async/await вместо callbacks
-- Глобальные переменные - используй dependency injection
-- Магические числа - выноси в константы
-- Дублирование кода - выноси в функции/классы
-- Игнорирование ошибок - всегда обрабатывай исключения
-- Hardcoded конфигурация - используй переменные окружения
+The project uses Alembic for database schema migrations with full async support for SQLModel.
+
+### Migration Workflow
+
+1. **Initial Setup** (Already configured):
+   - Alembic configuration in `alembic.ini`
+   - Migration environment in `alembic/env.py`
+   - Migrations directory in `alembic/versions/`
+
+2. **Creating Migrations**:
+   ```bash
+   # Auto-generate migration from model changes
+   alembic revision --autogenerate -m "Add new field to User model"
+   
+   # Create empty migration for custom SQL
+   alembic revision -m "Custom migration description"
+   ```
+
+3. **Applying Migrations**:
+   ```bash
+   # Apply all pending migrations
+   alembic upgrade head
+   
+   # Apply specific migration
+   alembic upgrade +1  # Next migration
+   alembic upgrade <revision_id>
+   
+   # Apply migrations up to specific revision
+   alembic upgrade <revision_id>
+   ```
+
+4. **Rolling Back**:
+   ```bash
+   # Rollback one migration
+   alembic downgrade -1
+   
+   # Rollback to specific revision
+   alembic downgrade <revision_id>
+   
+   # Rollback all migrations
+   alembic downgrade base
+   ```
+
+5. **Checking Status**:
+   ```bash
+   # Show current migration
+   alembic current
+   
+   # Show migration history
+   alembic history
+   
+   # Show pending migrations
+   alembic history --indicate-current
+   ```
+
+### Migration Utilities
+
+Use the helper functions from `src.utils.migrations`:
+
+```python
+from src.utils.migrations import (
+    run_migrations,
+    create_migration,
+    get_current_revision,
+    get_pending_migrations,
+    initialize_database
+)
+
+# Apply migrations programmatically
+await initialize_database()  # Check and apply pending migrations
+
+# Create new migration
+create_migration("Add user preferences table", autogenerate=True)
+
+# Check migration status
+current = get_current_revision()
+pending = get_pending_migrations()
+```
+
+### Best Practices
+
+1. **Always review auto-generated migrations** before applying them
+2. **Test migrations** in development before production
+3. **Back up database** before applying migrations in production
+4. **Use descriptive messages** for migrations
+5. **Don't edit applied migrations** - create new ones instead
+6. **Keep migrations small and focused** on single changes
+7. **Use transactions** where supported (PostgreSQL)
+
+### Troubleshooting
+
+- **Import errors**: Ensure all models are imported in `alembic/env.py`
+- **Missing tables**: Run `alembic upgrade head` to apply migrations
+- **Duplicate migrations**: Check `alembic_version` table and history
+- **Failed migration**: Use `alembic downgrade -1` to rollback
+
+## Pre-commit Checklist
+
+- [ ] Code formatted with black
+- [ ] Imports sorted with isort
+- [ ] No ruff errors (run `ruff check src/`)
+- [ ] No mypy errors (run `mypy src/`)
+- [ ] Tests written for new functionality
+- [ ] Tests pass successfully
+- [ ] Docstrings added for public functions
+- [ ] Documentation updated if necessary
+- [ ] No secrets in code
+- [ ] Commit follows conventional commits
+- [ ] Database migrations created for schema changes

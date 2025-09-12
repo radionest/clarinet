@@ -5,15 +5,14 @@ This module provides utilities for authentication, authorization, password hashi
 and token generation/validation.
 """
 
-from datetime import datetime, timedelta, UTC
-from typing import Annotated, Optional, Union
-
-from pydantic import BaseModel
-from fastapi import Depends, Cookie
-from fastapi.security import OAuth2PasswordBearer
+from datetime import UTC, datetime, timedelta
+from typing import Annotated
 
 import bcrypt
-from authlib.jose import jwt, JoseError
+from authlib.jose import JoseError, jwt
+from fastapi import Cookie, Depends
+from fastapi.security import OAuth2PasswordBearer
+from pydantic import BaseModel
 
 from src.exceptions import UNAUTHORIZED
 from src.settings import settings
@@ -33,34 +32,32 @@ class TokenData(BaseModel):
     """Schema for JWT token payload."""
 
     username: str
-    exp: Optional[datetime] = None
+    exp: datetime | None = None
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """Verify a password against its hash."""
-    return bcrypt.checkpw(
+    result: bool = bcrypt.checkpw(
         password=plain_password.encode("utf-8"),
         hashed_password=hashed_password.encode("utf-8"),
     )
+    return result
 
 
 def get_password_hash(password: str) -> str:
     """Generate a password hash."""
     salt = bcrypt.gensalt()
-    return bcrypt.hashpw(password.encode("utf-8"), salt).decode()
+    hashed: bytes = bcrypt.hashpw(password.encode("utf-8"), salt)
+    return hashed.decode()
 
 
-def create_access_token(
-    data: TokenData, expires_delta: Optional[timedelta] = None
-) -> Token:
+def create_access_token(data: TokenData, expires_delta: timedelta | None = None) -> Token:
     """Create a new JWT access token."""
     # Set expiration time
     if expires_delta:
         new_expire_time = datetime.now(UTC) + expires_delta
     else:
-        new_expire_time = datetime.now(UTC) + timedelta(
-            minutes=settings.jwt_expire_minutes
-        )
+        new_expire_time = datetime.now(UTC) + timedelta(minutes=settings.jwt_expire_minutes)
 
     data.exp = new_expire_time
 
@@ -84,12 +81,12 @@ def decode_token(token: Annotated[str, Depends(oauth2_scheme)]) -> TokenData:
             raise UNAUTHORIZED
 
         return token_data
-    except JoseError:
-        raise UNAUTHORIZED
+    except JoseError as e:
+        raise UNAUTHORIZED from e
 
 
 def decode_token_cookie(
-    clarinet_auth_token: Annotated[Union[str, None], Cookie()] = None,
+    clarinet_auth_token: Annotated[str | None, Cookie()] = None,
 ) -> TokenData:
     """Decode and validate a JWT token from cookie."""
     if not clarinet_auth_token:
@@ -106,5 +103,5 @@ def decode_token_cookie(
             raise UNAUTHORIZED
 
         return token_data
-    except JoseError:
-        raise UNAUTHORIZED
+    except JoseError as e:
+        raise UNAUTHORIZED from e

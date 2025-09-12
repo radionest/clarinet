@@ -1,0 +1,22 @@
+Generic single-database configuration with async support for Clarinet project.
+
+This Alembic setup is configured to work with:
+- SQLModel ORM
+- Async SQLAlchemy engines (aiosqlite, asyncpg)
+- Settings from src.settings module
+- Custom logger from src.utils.logger
+
+To create a new migration:
+    alembic revision --autogenerate -m "Description of changes"
+
+To apply migrations:
+    alembic upgrade head
+
+To rollback one migration:
+    alembic downgrade -1
+
+To view migration history:
+    alembic history
+
+To view current migration:
+    alembic current

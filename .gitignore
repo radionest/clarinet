@@ -1,5 +1,11 @@
+# UV
+uv.lock
+.venv/
+
+# PDM (removed - backup in .backup-pdm)
 .pdm-python
 pdm.lock
+.pdm-build/
 .idea
 __pycache__
 .hypothesis

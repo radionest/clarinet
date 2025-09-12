@@ -5,21 +5,20 @@ This module provides functions to initialize the application with default data,
 such as user roles and task types, during startup.
 """
 
-import os
 import json
-from typing import List, Optional, Dict, Any
-from pathlib import Path
+import os
 
-from sqlmodel import Session, select
+import aiofiles
 from fastapi import HTTPException, status
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import select
 
-from src.models import TaskScheme, TaskTypeCreate, UserRole, User
-from src.utils.database import get_session_context
+from src.models import TaskDesign, TaskDesignCreate, User, UserRole
+from src.utils.db_manager import db_manager
 from src.utils.logger import logger
-from src.settings import settings
 
 
-def add_default_user_roles() -> None:
+async def add_default_user_roles() -> None:
     """
     Add default user roles to the database if they don't exist.
 
@@ -27,10 +26,10 @@ def add_default_user_roles() -> None:
     """
     default_roles = ["doctor", "auto", "admin", "expert", "ordinator"]
 
-    with get_session_context() as session:
+    async with db_manager.get_async_session_context() as session:
         for role_name in default_roles:
             try:
-                create_user_role(role_name, session=session)
+                await create_user_role(role_name, session=session)
                 logger.info(f"Created role: {role_name}")
             except HTTPException as e:
                 if e.status_code == status.HTTP_409_CONFLICT:
@@ -40,17 +39,19 @@ def add_default_user_roles() -> None:
                     raise
 
 
-def give_role_to_all_users(role_name: str) -> None:
+async def give_role_to_all_users(role_name: str) -> None:
     """
     Assign a role to all users in the database.
 
     Args:
         role_name: The name of the role to assign
     """
-    with get_session_context() as session:
-        users = session.exec(select(User)).all()
+    async with db_manager.get_async_session_context() as session:
+        users_result = await session.execute(select(User))
+        users = users_result.scalars().all()
 
-        role = session.exec(select(UserRole).where(UserRole.name == role_name)).first()
+        role_result = await session.execute(select(UserRole).where(UserRole.name == role_name))
+        role = role_result.scalar_one_or_none()
         if role is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -65,15 +66,15 @@ def give_role_to_all_users(role_name: str) -> None:
             except HTTPException as e:
                 if e.status_code == status.HTTP_409_CONFLICT:
                     logger.info(f"User {user.id} already has role {role_name}")
-                    session.rollback()
+                    await session.rollback()
                     continue
                 else:
                     raise
 
-        session.commit()
+        await session.commit()
 
 
-def create_user_role(role_name: str, session: Session) -> UserRole:
+async def create_user_role(role_name: str, session: AsyncSession) -> UserRole:
     """
     Create a new user role if it doesn't exist.
 
@@ -87,7 +88,8 @@ def create_user_role(role_name: str, session: Session) -> UserRole:
     Raises:
         HTTPException: If the role already exists
     """
-    existing = session.exec(select(UserRole).where(UserRole.name == role_name)).first()
+    existing_result = await session.execute(select(UserRole).where(UserRole.name == role_name))
+    existing = existing_result.scalar_one_or_none()
     if existing:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -96,14 +98,12 @@ def create_user_role(role_name: str, session: Session) -> UserRole:
 
     new_role = UserRole(name=role_name)
     session.add(new_role)
-    session.commit()
-    session.refresh(new_role)
+    await session.commit()
+    await session.refresh(new_role)
     return new_role
 
 
-def filter_task_schemas(
-    task_files: List[str], filter_suffix: str = "demo"
-) -> List[str]:
+def filter_task_schemas(task_files: list[str], filter_suffix: str = "demo") -> list[str]:
     """
     Filter task schema files by suffix.
 
@@ -116,15 +116,11 @@ def filter_task_schemas(
     """
     logger.info(f"Task files found: {', '.join(task_files)}")
     filtered_by_suffix = filter(lambda x: filter_suffix in x, task_files)
-    task_names = [
-        t.removesuffix(".json") for t in filtered_by_suffix if "schema" not in t
-    ]
+    task_names = [t.removesuffix(".json") for t in filtered_by_suffix if "schema" not in t]
     return task_names
 
 
-def create_demo_task_types_from_json(
-    input_folder: str, demo_suffix: str = "demo"
-) -> None:
+async def create_demo_task_designs_from_json(input_folder: str, demo_suffix: str = "demo") -> None:
     """
     Create task types from JSON files in the specified folder.
 
@@ -142,28 +138,30 @@ def create_demo_task_types_from_json(
     logger.info(f"Found task schemas: {task_names}")
 
     for task_name in task_names:
-        with get_session_context() as session:
+        async with db_manager.get_async_session_context() as session:
             try:
                 # Load task properties
-                with open(os.path.join(input_folder, f"{task_name}.json")) as f:
-                    task_properties = json.load(f)
+                async with aiofiles.open(os.path.join(input_folder, f"{task_name}.json")) as f:
+                    content = await f.read()
+                    task_properties = json.loads(content)
 
                 # Load task schema if it exists
                 if task_properties.get("result_schema") is None:
                     try:
-                        with open(
+                        async with aiofiles.open(
                             os.path.join(input_folder, f"{task_name}.schema.json")
                         ) as f:
-                            task_scheme_json = json.load(f)
+                            content = await f.read()
+                            task_scheme_json = json.loads(content)
                         task_properties["result_schema"] = task_scheme_json
                     except FileNotFoundError:
                         logger.warning(f"Cannot find schema for task {task_name}!")
                         continue
 
                 # Create task type
-                new_task_type = TaskTypeCreate(**task_properties)
+                new_task_design = TaskDesignCreate(**task_properties)
                 try:
-                    add_task_type(new_task_type, session=session)
+                    await add_task_design(new_task_design, session=session)
                     logger.info(f"Created task type: {task_name}")
                 except HTTPException as e:
                     if e.status_code == status.HTTP_409_CONFLICT:
@@ -174,12 +172,12 @@ def create_demo_task_types_from_json(
                 logger.error(f"Error processing task {task_name}: {e}")
 
 
-def add_task_type(task_type: TaskTypeCreate, session: Session) -> TaskScheme:
+async def add_task_design(task_design: TaskDesignCreate, session: AsyncSession) -> TaskDesign:
     """
     Add a new task type to the database.
 
     Args:
-        task_type: The task type to add
+        task_design: The task type to add
         session: Database session
 
     Returns:
@@ -189,18 +187,19 @@ def add_task_type(task_type: TaskTypeCreate, session: Session) -> TaskScheme:
         HTTPException: If the task type already exists
     """
     # Check if task type with this name already exists
-    existing = session.exec(
-        select(TaskScheme).where(TaskScheme.name == task_type.name)
-    ).first()
+    existing_result = await session.execute(
+        select(TaskDesign).where(TaskDesign.name == task_design.name)
+    )
+    existing = existing_result.scalar_one_or_none()
 
     if existing:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"Task type with name {task_type.name} already exists",
+            detail=f"Task type with name {task_design.name} already exists",
         )
 
     # Validate result schema if provided
-    if task_type.result_schema is not None:
+    if task_design.result_schema is not None:
         try:
             # In a real implementation, you might want to validate the schema
             # using a library like jsonschema
@@ -209,12 +208,12 @@ def add_task_type(task_type: TaskTypeCreate, session: Session) -> TaskScheme:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=f"Result schema is invalid: {e}",
-            )
+            ) from e
 
     # Create and save the task type
-    new_task_type = TaskScheme.model_validate(task_type)
-    session.add(new_task_type)
-    session.commit()
-    session.refresh(new_task_type)
+    new_task_design = TaskDesign.model_validate(task_design)
+    session.add(new_task_design)
+    await session.commit()
+    await session.refresh(new_task_design)
 
-    return new_task_type
+    return new_task_design
