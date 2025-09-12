@@ -27,11 +27,15 @@ Clarinet is a framework for conducting clinical-radiological studies, built on F
 
 ### Formatting and Linting
 
-- Use **black** with `line-length=100` (settings in pyproject.toml)
-- Use **isort** for sorting imports (`profile="black"`)
-- Use **ruff** for code checking: `ruff check src/ --fix`
+- Use **ruff** for both formatting and linting (configured in `.ruff.toml`)
+  - Formatting: `ruff format src/ tests/`
+  - Linting: `ruff check src/ tests/ --fix`
+  - Line length: 100 characters
+  - Includes isort functionality for import sorting
 - Use **mypy** for type checking: `mypy src/`
-- Maximum line length: 100 characters
+- **Pre-commit hooks** configured in `.pre-commit-config.yaml`:
+  - Automatically runs ruff and mypy before commits
+  - Install with: `pre-commit install`
 
 ### Type Annotations
 
@@ -46,7 +50,7 @@ Clarinet is a framework for conducting clinical-radiological studies, built on F
 - Group imports: standard library, third-party packages, local modules
 - Use relative imports within package for development
 - Avoid circular imports
-- Sort imports using isort
+- Sort imports using ruff (includes isort functionality)
 
 ## Best Practices
 
@@ -109,11 +113,32 @@ jwt_secret = settings.jwt_secret_key
 storage_path = settings.storage_path
 ```
 
+### Type Definitions
+
+- Common type aliases in `src/types.py`
+- Use type aliases for better code readability and consistency
+- Import types: `from src.types import JSONDict, TaskResult`
+
+```python
+from src.types import JSONDict, TaskResult, SlicerArgs
+
+# Using type aliases
+async def process_task(args: SlicerArgs) -> TaskResult:
+    result: JSONDict = {"status": "success", "data": {}}
+    return result
+```
+
+Available type aliases:
+- `JSONDict`: JSON-compatible dictionary
+- `TaskResult`, `SlicerArgs`, `SlicerResult`: Task-related types
+- `AuthResponse`, `TokenResponse`: Authentication types
+- `FormData`, `ValidationSchema`: Form and validation types
+
 ### Database Operations
 
 - Use SQLModel for models
 - Asynchronous operations through AsyncSession
-- CRUD operations in `src/utils/async_crud.py` and `src/utils/crud.py`
+- Async CRUD operations in `src/utils/async_crud.py`
 - Database manager in `src/utils/db_manager.py`
 
 ```python
@@ -137,16 +162,17 @@ src/
 ├── __main__.py          # CLI entry point
 ├── settings.py          # Application configuration
 ├── exceptions.py        # Custom exceptions
+├── types.py             # Common type definitions
 ├── api/                 # FastAPI application
 │   ├── __init__.py
 │   ├── app.py          # Main application file
 │   ├── dependencies.py  # Dependencies (auth, etc)
 │   ├── security.py     # JWT and security
 │   └── routers/        # API endpoints
-│       ├── auth_async.py
-│       ├── study_async.py
-│       ├── task_async.py
-│       ├── user_async.py
+│       ├── auth.py
+│       ├── study.py
+│       ├── task.py
+│       ├── user.py
 │       └── slicer.py
 ├── cli/                 # CLI interface
 │   ├── __init__.py
@@ -168,15 +194,17 @@ src/
     ├── database.py     # Database connection
     ├── db_manager.py   # Database management
     ├── async_crud.py   # Async CRUD operations
-    ├── crud.py         # Sync CRUD operations
     ├── bootstrap.py    # Data initialization
-    └── slicer.py       # Slicer utilities
+    ├── common.py       # Common utility functions
+    ├── migrations.py   # Migration helper functions
+    ├── slicer.py       # Slicer utilities
+    ├── study.py        # Study-related utilities
+    └── validation.py   # Validation utilities
 ```
 
 ### API Routers
 
 - All routers use async/await
-- Routers with `_async` suffix for async database operations
 - Use `Depends` for dependency injection
 - Handle errors with HTTPException or custom exceptions
 
@@ -184,7 +212,7 @@ src/
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from src.utils.database import get_async_session
-from src.api.dependencies import get_current_user_async
+from src.api.dependencies import get_current_user
 
 router = APIRouter(prefix="/items", tags=["Items"])
 
@@ -192,7 +220,7 @@ router = APIRouter(prefix="/items", tags=["Items"])
 async def get_item(
     item_id: int,
     session: AsyncSession = Depends(get_async_session),
-    current_user: User = Depends(get_current_user_async)
+    current_user: User = Depends(get_current_user)
 ):
     # Implementation
     pass
@@ -230,12 +258,15 @@ async def test_create_user(async_client: AsyncClient):
 uvicorn src.api.app:app --reload
 
 # Format code
-black src/ tests/
-isort src/ tests/
+ruff format src/ tests/
 
-# Check code
-ruff check src/ --fix
+# Check code  
+ruff check src/ tests/ --fix
 mypy src/
+
+# Pre-commit hooks
+pre-commit install  # Install hooks (run once)
+pre-commit run --all-files  # Run all hooks manually
 
 # Run tests
 pytest
@@ -424,9 +455,9 @@ pending = get_pending_migrations()
 
 ## Pre-commit Checklist
 
-- [ ] Code formatted with black
-- [ ] Imports sorted with isort
-- [ ] No ruff errors (run `ruff check src/`)
+- [ ] Code formatted with ruff (`ruff format src/ tests/`)
+- [ ] No ruff errors (run `ruff check src/ tests/`)
+- [ ] Pre-commit hooks pass (`pre-commit run --all-files`)
 - [ ] No mypy errors (run `mypy src/`)
 - [ ] Tests written for new functionality
 - [ ] Tests pass successfully
