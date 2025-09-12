@@ -12,7 +12,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 
 from src.api.dependencies import get_current_user_async, get_current_user_cookie_async
-from src.api.security import get_password_hash, verify_password
 from src.exceptions import CONFLICT, NOT_FOUND, UNAUTHORIZED
 from src.models import User, UserRead, UserRole
 from src.utils.async_crud import (
@@ -20,6 +19,7 @@ from src.utils.async_crud import (
     exists_async,
     get_item_async,
 )
+from src.utils.auth import get_password_hash, verify_password
 from src.utils.database import get_async_session
 
 router = APIRouter(prefix="/users", tags=["users"])
@@ -58,7 +58,7 @@ async def add_user(user: User, session: AsyncSession = Depends(get_async_session
         raise CONFLICT.with_context(f"User {user.id} already exists")
 
     new_user = User.model_validate(user)
-    new_user.password = get_password_hash(user.password)
+    new_user.hashed_password = get_password_hash(user.hashed_password)
 
     return await add_item_async(new_user, session)
 
@@ -136,7 +136,7 @@ async def authenticate_user_async(username: str, password: str, session: AsyncSe
     except HTTPException as e:
         raise UNAUTHORIZED from e
 
-    if not verify_password(password, user.password):
+    if not verify_password(password, user.hashed_password):
         raise UNAUTHORIZED
     return user
 
@@ -172,7 +172,7 @@ async def update_user(
     update_data = user_update.model_dump(exclude_unset=True)
 
     # Hash password if it's being updated
-    if "password" in update_data:
-        update_data["password"] = get_password_hash(update_data["password"])
+    if "hashed_password" in update_data:
+        update_data["hashed_password"] = get_password_hash(update_data["hashed_password"])
 
     return await update_item_async(user, update_data, session)

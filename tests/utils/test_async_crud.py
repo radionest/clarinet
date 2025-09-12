@@ -29,6 +29,7 @@ from src.utils.async_crud import (
 # Define test models
 class TestModelAsync(SQLModel, table=True):
     """Test model for async CRUD operations."""
+
     __tablename__ = "testmodel_async"
 
     id: int = Field(primary_key=True)
@@ -47,6 +48,7 @@ class UniqueTestModelAsync(SQLModel, table=True):
 
 class ParentModel(SQLModel, table=True):
     """Parent model for foreign key constraint testing."""
+
     __tablename__ = "parentmodel_async"
 
     id: int = Field(primary_key=True)
@@ -55,6 +57,7 @@ class ParentModel(SQLModel, table=True):
 
 class ChildModel(SQLModel, table=True):
     """Child model with foreign key constraint."""
+
     __tablename__ = "childmodel_async"
 
     id: int = Field(primary_key=True)
@@ -167,10 +170,7 @@ class TestGetItemsAsync:
     async def test_get_items_with_pagination(self, async_session):
         """Test getting multiple items with pagination."""
         # Arrange
-        items = [
-            TestModelAsync(id=i, name=f"Item {i}", value=i * 10)
-            for i in range(1, 11)
-        ]
+        items = [TestModelAsync(id=i, name=f"Item {i}", value=i * 10) for i in range(1, 11)]
         for item in items:
             async_session.add(item)
         await async_session.commit()
@@ -369,7 +369,7 @@ class TestGetOrCreateAsync:
             async_session,
             defaults={"description": "Created item"},
             id=1,
-            name="New Item"
+            name="New Item",
         )
 
         # Assert
@@ -387,10 +387,7 @@ class TestGetOrCreateAsync:
 
         # Act
         item, created = await get_or_create_async(
-            TestModelAsync,
-            async_session,
-            defaults={"description": "Should not be used"},
-            id=1
+            TestModelAsync, async_session, defaults={"description": "Should not be used"}, id=1
         )
 
         # Assert
@@ -407,10 +404,7 @@ class TestComplexAsyncScenario:
     async def test_complex_crud_workflow(self, async_session):
         """Test a complex async CRUD workflow with multiple operations."""
         # Add multiple items
-        items = [
-            TestModelAsync(id=i, name=f"Item {i}", value=i * 10)
-            for i in range(1, 6)
-        ]
+        items = [TestModelAsync(id=i, name=f"Item {i}", value=i * 10) for i in range(1, 6)]
 
         for item in items:
             await add_item_async(item, async_session)
@@ -422,9 +416,7 @@ class TestComplexAsyncScenario:
         # Update an item
         item_to_update = await get_item_async(TestModelAsync, 3, async_session)
         await update_item_async(
-            item_to_update,
-            {"name": "Updated Item 3", "value": 999},
-            async_session
+            item_to_update, {"name": "Updated Item 3", "value": 999}, async_session
         )
 
         # Verify update worked

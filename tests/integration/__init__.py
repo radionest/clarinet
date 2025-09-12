@@ -1,1 +1,1 @@
-"""Интеграционные тесты для Clarinet."""
+"""Integration tests for Clarinet."""

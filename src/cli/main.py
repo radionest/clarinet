@@ -46,7 +46,7 @@ database_name = "clarinet"
 storage_path = "./data"
 
 # Security (change in production!)
-jwt_secret_key = "change-this-secret-key-in-production"
+secret_key = "change-this-secret-key-in-production"
 """
 
     settings_file = project_path / "settings.toml"

@@ -1,115 +1,118 @@
-"""Тесты CRUD операций для User."""
+"""CRUD operations tests for User."""
 
 import pytest
 from httpx import AsyncClient
 from sqlmodel import select
 
-from src.api.security import get_password_hash, verify_password
 from src.models.user import User, UserRole
+from src.utils.auth import get_password_hash, verify_password
 
 
 @pytest.mark.asyncio
 async def test_create_user(test_session):
-    """Тест создания пользователя."""
+    """Test creating user."""
     user = User(
-        id="newuser@example.com",
-        password=get_password_hash("password123"),
-        isactive=True,
+        id="newuser",
+        email="newuser@example.com",
+        hashed_password=get_password_hash("password123"),
+        is_active=True,
+        is_verified=False,
+        is_superuser=False,
     )
     test_session.add(user)
     await test_session.commit()
     await test_session.refresh(user)
 
-    assert user.id == "newuser@example.com"
-    assert user.isactive is True
-    assert verify_password("password123", user.password)
+    assert user.id == "newuser"
+    assert user.email == "newuser@example.com"
+    assert user.is_active is True
+    assert verify_password("password123", user.hashed_password)
 
 
 @pytest.mark.asyncio
 async def test_get_user_by_id(test_session, test_user):
-    """Тест получения пользователя по ID."""
-    result = await test_session.get(User, test_user.id)
-    assert result is not None
-    assert result.id == test_user.id
-    assert result.email == test_user.email
-
-
-@pytest.mark.asyncio
-async def test_get_user_by_id(test_session, test_user):
-    """Тест получения пользователя по ID."""
+    """Test getting user by ID."""
     statement = select(User).where(User.id == test_user.id)
     result = await test_session.execute(statement)
     user = result.scalar_one_or_none()
 
     assert user is not None
     assert user.id == test_user.id
-    assert user.isactive == test_user.isactive
+    assert user.email == test_user.email
+    assert user.is_active == test_user.is_active
 
 
 @pytest.mark.asyncio
 async def test_update_user(test_session, test_user):
-    """Тест обновления пользователя."""
-    # Обновляем пользователя
-    test_user.isactive = False
+    """Test updating user."""
+    # Update user
+    test_user.is_active = False
     test_session.add(test_user)
     await test_session.commit()
     await test_session.refresh(test_user)
 
-    # Проверяем изменения
+    # Check changes
     updated_user = await test_session.get(User, test_user.id)
-    assert updated_user.isactive is False
+    assert updated_user.is_active is False
 
 
 @pytest.mark.asyncio
 async def test_delete_user(test_session):
-    """Тест удаления пользователя."""
-    # Создаем пользователя для удаления
+    """Test deleting user."""
+    # Create user for deletion
     user = User(
-        id="delete@example.com",
-        password=get_password_hash("password"),
-        isactive=True,
+        id="delete_user",
+        email="delete@example.com",
+        hashed_password=get_password_hash("password"),
+        is_active=True,
+        is_verified=False,
+        is_superuser=False,
     )
     test_session.add(user)
     await test_session.commit()
     user_id = user.id
 
-    # Удаляем пользователя
+    # Delete user
     await test_session.delete(user)
     await test_session.commit()
 
-    # Проверяем что пользователь удален
+    # Check that user is deleted
     deleted_user = await test_session.get(User, user_id)
     assert deleted_user is None
 
 
 @pytest.mark.asyncio
 async def test_user_with_roles(test_session):
-    """Тест создания пользователя с ролями."""
-    # Создаем пользователя
+    """Test creating user with roles."""
+    # Create user
     user = User(
-        id="roleuser@example.com",
-        password=get_password_hash("password"),
-        isactive=True,
+        id="roleuser",
+        email="roleuser@example.com",
+        hashed_password=get_password_hash("password"),
+        is_active=True,
+        is_verified=False,
+        is_superuser=False,
     )
     test_session.add(user)
     await test_session.commit()
     await test_session.refresh(user)
 
-    # Сначала создаем роли, если они не существуют
+    # First create roles if they don't exist
     admin_role_def = await test_session.get(UserRole, "admin")
     if not admin_role_def:
         admin_role_def = UserRole(name="admin")
         test_session.add(admin_role_def)
         await test_session.commit()
-    
+
     moderator_role_def = await test_session.get(UserRole, "moderator")
     if not moderator_role_def:
         moderator_role_def = UserRole(name="moderator")
         test_session.add(moderator_role_def)
         await test_session.commit()
-    
-    # Добавляем связи через UserRolesLink
+
+    # Add links through UserRolesLink
     from src.models.user import UserRolesLink
+
     admin_link = UserRolesLink(user_id=user.id, role_name="admin")
     moderator_link = UserRolesLink(user_id=user.id, role_name="moderator")
 
@@ -117,8 +120,9 @@ async def test_user_with_roles(test_session):
     test_session.add(moderator_link)
     await test_session.commit()
 
-    # Получаем роли пользователя через UserRolesLink
+    # Get user roles through UserRolesLink
     from src.models.user import UserRolesLink
+
     statement = select(UserRolesLink).where(UserRolesLink.user_id == user.id)
     result = await test_session.execute(statement)
     roles = result.scalars().all()
@@ -131,65 +135,71 @@ async def test_user_with_roles(test_session):
 
 @pytest.mark.asyncio
 async def test_list_all_users(test_session, test_user, admin_user):
-    """Тест получения списка всех пользователей."""
+    """Test getting list of all users."""
     statement = select(User)
     result = await test_session.execute(statement)
     users = result.scalars().all()
 
-    assert len(users) >= 2  # Минимум test_user и admin_user
+    assert len(users) >= 2  # Minimum test_user and admin_user
     user_ids = [u.id for u in users]
-    assert "test@example.com" in user_ids
-    assert "admin@example.com" in user_ids
+    assert "test_user" in user_ids
+    assert "admin_user" in user_ids
 
 
 @pytest.mark.asyncio
 async def test_filter_active_users(test_session):
-    """Тест фильтрации активных пользователей."""
-    # Создаем активного и неактивного пользователей
+    """Test filtering active users."""
+    # Create active and inactive users
     active_user = User(
-        id="active@example.com",
-        password=get_password_hash("password"),
-        isactive=True,
+        id="active_user",
+        email="active@example.com",
+        hashed_password=get_password_hash("password"),
+        is_active=True,
+        is_verified=False,
+        is_superuser=False,
     )
     inactive_user = User(
-        id="inactive@example.com",
-        password=get_password_hash("password"),
-        isactive=False,
+        id="inactive_user",
+        email="inactive@example.com",
+        hashed_password=get_password_hash("password"),
+        is_active=False,
+        is_verified=False,
+        is_superuser=False,
     )
 
     test_session.add(active_user)
     test_session.add(inactive_user)
     await test_session.commit()
 
-    # Получаем только активных пользователей
-    statement = select(User).where(User.isactive)
+    # Get only active users
+    statement = select(User).where(User.is_active)
     result = await test_session.execute(statement)
     active_users = result.scalars().all()
 
     user_ids = [u.id for u in active_users]
-    assert "active@example.com" in user_ids
-    assert "inactive@example.com" not in user_ids
+    assert "active_user" in user_ids
+    assert "inactive_user" not in user_ids
 
 
 @pytest.mark.asyncio
 async def test_user_registration_via_api(client: AsyncClient):
-    """Тест регистрации пользователя через API."""
+    """Test user registration via API."""
     response = await client.post(
         "/auth/register",
         json={
             "email": "apiuser@example.com",
             "username": "apiuser",
             "password": "securepassword123",
-        }
+        },
     )
 
-    # Регистрация может быть отключена или требовать дополнительных полей
+    # Registration may be disabled or require additional fields
     if response.status_code == 200:
         data = response.json()
         assert "id" in data or "user" in data
     elif response.status_code == 422:
-        # Валидация не прошла - это тоже ок для теста
+        # Validation failed - this is also ok for test
         pass
     else:
-        # 404 если endpoint не существует
+        # 404 if endpoint doesn't exist
         assert response.status_code in [404, 405]

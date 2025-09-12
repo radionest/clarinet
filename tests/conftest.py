@@ -1,4 +1,4 @@
-"""Глобальная конфигурация для интеграционных тестов."""
+"""Global configuration for integration tests."""
 
 import asyncio
 from collections.abc import AsyncGenerator, Generator
@@ -21,7 +21,7 @@ from src.utils.database import get_async_session
 
 @pytest.fixture(scope="session")
 def event_loop() -> Generator:
-    """Создание event loop для всей тестовой сессии."""
+    """Create event loop for the entire test session."""
     loop = asyncio.get_event_loop_policy().new_event_loop()
     yield loop
     loop.close()
@@ -29,7 +29,7 @@ def event_loop() -> Generator:
 
 @pytest.fixture(scope="session")
 def test_settings() -> Settings:
-    """Тестовые настройки с SQLite в памяти."""
+    """Test settings with in-memory SQLite."""
     return Settings(
         database_url="sqlite+aiosqlite:///test.db",
         jwt_secret_key="test-secret-key-for-testing-only",
@@ -45,7 +45,7 @@ def test_settings() -> Settings:
 
 @pytest_asyncio.fixture
 async def test_engine(test_settings):
-    """Создание тестового движка БД."""
+    """Create test database engine."""
     # Use aiosqlite for async testing
     database_url = "sqlite+aiosqlite:///:memory:"
     engine = create_async_engine(
@@ -64,12 +64,8 @@ async def test_engine(test_settings):
 
 @pytest_asyncio.fixture
 async def test_session(test_engine) -> AsyncGenerator[AsyncSession, None]:
-    """Создание тестовой сессии БД."""
-    async_session = sessionmaker(
-        test_engine,
-        class_=AsyncSession,
-        expire_on_commit=False
-    )
+    """Create test database session."""
+    async_session = sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
 
     async with async_session() as session:
         yield session
@@ -78,7 +74,7 @@ async def test_session(test_engine) -> AsyncGenerator[AsyncSession, None]:
 
 @pytest_asyncio.fixture
 async def client(test_session, test_settings) -> AsyncGenerator[AsyncClient, None]:
-    """Создание тестового клиента API."""
+    """Create test API client."""
 
     async def override_get_session():
         yield test_session
@@ -88,16 +84,22 @@ async def client(test_session, test_settings) -> AsyncGenerator[AsyncClient, Non
 
     app.dependency_overrides[get_async_session] = override_get_session
 
-    # Переопределяем настройки если есть такая зависимость
+    # Override settings if such dependency exists
     try:
         from src.settings import get_settings
+
         app.dependency_overrides[get_settings] = override_get_settings
     except (ImportError, AttributeError):
         pass
-    
+
     # Also override settings object directly in security module
-    import src.api.security
-    src.api.security.settings = test_settings
+    # Update auth_config settings if needed
+    try:
+        import src.api.auth_config
+
+        src.api.auth_config.settings = test_settings
+    except (ImportError, AttributeError):
+        pass
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
@@ -108,7 +110,7 @@ async def client(test_session, test_settings) -> AsyncGenerator[AsyncClient, Non
 
 @pytest.fixture
 def test_client(test_session, test_settings) -> TestClient:
-    """Синхронный тестовый клиент для простых тестов."""
+    """Synchronous test client for simple tests."""
 
     def override_get_session():
         yield test_session
@@ -120,6 +122,7 @@ def test_client(test_session, test_settings) -> TestClient:
 
     try:
         from src.settings import get_settings
+
         app.dependency_overrides[get_settings] = override_get_settings
     except (ImportError, AttributeError):
         pass
@@ -132,14 +135,17 @@ def test_client(test_session, test_settings) -> TestClient:
 
 @pytest_asyncio.fixture
 async def test_user(test_session):
-    """Создание тестового пользователя."""
-    from src.api.security import get_password_hash
+    """Create test user."""
     from src.models.user import User
+    from src.utils.auth import get_password_hash
 
     user = User(
-        id="test@example.com",  # Using email as ID
-        password=get_password_hash("testpassword"),
-        isactive=True,
+        id="test_user",  # Username as ID
+        email="test@example.com",
+        hashed_password=get_password_hash("testpassword"),
+        is_active=True,
+        is_verified=True,
+        is_superuser=False,
     )
     test_session.add(user)
     await test_session.commit()
@@ -149,28 +155,32 @@ async def test_user(test_session):
 
 @pytest_asyncio.fixture
 async def admin_user(test_session):
-    """Создание тестового администратора."""
-    from src.api.security import get_password_hash
+    """Create test administrator."""
     from src.models.user import User, UserRole
+    from src.utils.auth import get_password_hash
 
     admin = User(
-        id="admin@example.com",  # Using email as ID
-        password=get_password_hash("adminpassword"),
-        isactive=True,
+        id="admin_user",  # Username as ID
+        email="admin@example.com",
+        hashed_password=get_password_hash("adminpassword"),
+        is_active=True,
+        is_verified=True,
+        is_superuser=True,
     )
     test_session.add(admin)
     await test_session.commit()
     await test_session.refresh(admin)
 
-    # Создаем роль администратора если она не существует
+    # Create admin role if it doesn't exist
     admin_role = await test_session.get(UserRole, "admin")
     if not admin_role:
         admin_role = UserRole(name="admin")
         test_session.add(admin_role)
         await test_session.commit()
-    
-    # Связываем пользователя с ролью через UserRolesLink
+
+    # Link user with role through UserRolesLink
     from src.models.user import UserRolesLink
+
     admin_link = UserRolesLink(user_id=admin.id, role_name="admin")
     test_session.add(admin_link)
     await test_session.commit()
@@ -180,44 +190,46 @@ async def admin_user(test_session):
 
 @pytest_asyncio.fixture
 async def auth_headers(client, test_user):
-    """Получение заголовков с токеном авторизации."""
+    """Get headers with authorization cookies."""
+    # Login with new fastapi-users API
     response = await client.post(
         "/auth/login",
         data={
-            "username": "test@example.com",
+            "username": "test@example.com",  # fastapi-users uses email as username
             "password": "testpassword",
-        }
+        },
     )
-    assert response.status_code == 200
-    token = response.json()["access_token"]
-    return {"Authorization": f"Bearer {token}"}
+    assert response.status_code in [200, 204]  # fastapi-users may return 204
+
+    # For cookie-based auth headers are not needed, cookies are stored in the client
+    # But return empty dict for compatibility
+    return {}
 
 
 @pytest_asyncio.fixture
 async def admin_headers(client, admin_user):
-    """Получение заголовков с токеном администратора."""
+    """Get headers with administrator cookies."""
+    # Login with new fastapi-users API
     response = await client.post(
         "/auth/login",
         data={
-            "username": "admin@example.com",
+            "username": "admin@example.com",  # fastapi-users uses email as username
             "password": "adminpassword",
-        }
+        },
     )
-    assert response.status_code == 200
-    token = response.json()["access_token"]
-    return {"Authorization": f"Bearer {token}"}
+    assert response.status_code in [200, 204]  # fastapi-users may return 204
+
+    # For cookie-based auth headers are not needed, cookies are stored in the client
+    # But return empty dict for compatibility
+    return {}
 
 
 @pytest_asyncio.fixture
 async def test_patient(test_session):
-    """Создание тестового пациента."""
+    """Create test patient."""
     from src.models.patient import Patient
-    
-    patient = Patient(
-        id="TEST_PAT001",
-        name="Test Patient",
-        anon_name="ANON_001"
-    )
+
+    patient = Patient(id="TEST_PAT001", name="Test Patient", anon_name="ANON_001")
     test_session.add(patient)
     await test_session.commit()
     await test_session.refresh(patient)
@@ -226,15 +238,16 @@ async def test_patient(test_session):
 
 @pytest_asyncio.fixture
 async def test_study(test_session, test_patient):
-    """Создание тестового исследования."""
+    """Create test study."""
     from datetime import UTC, datetime
+
     from src.models.study import Study
-    
+
     study = Study(
         patient_id=test_patient.id,
         study_uid="1.2.3.4.5.6.7.8.9",
         date=datetime.now(UTC).date(),
-        anon_uid="ANON_STUDY_001"
+        anon_uid="ANON_STUDY_001",
     )
     test_session.add(study)
     await test_session.commit()
@@ -244,6 +257,6 @@ async def test_study(test_session, test_patient):
 
 @pytest_asyncio.fixture(autouse=True)
 async def clear_database(test_session):
-    """Очистка БД после каждого теста."""
+    """Clear database after each test."""
     yield
-    # Очистка происходит автоматически через rollback в test_session
+    # Cleanup occurs automatically through rollback in test_session

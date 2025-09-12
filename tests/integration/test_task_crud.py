@@ -1,4 +1,4 @@
-"""Тесты CRUD операций для Task."""
+"""CRUD operations tests for Task."""
 
 from datetime import UTC, datetime
 
@@ -10,16 +10,11 @@ from src.models.task import Task, TaskDesign, TaskStatus
 
 @pytest.mark.asyncio
 async def test_create_task_scheme(test_session):
-    """Тест создания типа задачи (taskdesign)."""
+    """Test creating task type (taskdesign)."""
     task_scheme = TaskDesign(
         name="Test Task Type",
         description="Test task description",
-        result_schema={
-            "type": "object",
-            "properties": {
-                "field1": {"type": "string"}
-            }
-        }
+        result_schema={"type": "object", "properties": {"field1": {"type": "string"}}},
     )
     test_session.add(task_scheme)
     await test_session.commit()
@@ -32,23 +27,21 @@ async def test_create_task_scheme(test_session):
 
 @pytest.mark.asyncio
 async def test_create_task(test_session, test_user, test_patient, test_study):
-    """Тест создания задачи."""
-    # Создаем тип задачи
+    """Test creating task."""
+    # Create task type
     task_scheme = TaskDesign(
-        name="Simple Task",
-        description="Simple task",
-        result_schema={"type": "object"}
+        name="Simple Task", description="Simple task", result_schema={"type": "object"}
     )
     test_session.add(task_scheme)
     await test_session.commit()
 
-    # Создаем задачу
+    # Create task
     task = Task(
         patient_id=test_patient.id,
         study_uid=test_study.study_uid,
         user_id=test_user.id,
         task_design_id=task_scheme.name,
-        status=TaskStatus.pending
+        status=TaskStatus.pending,
     )
     test_session.add(task)
     await test_session.commit()
@@ -62,12 +55,10 @@ async def test_create_task(test_session, test_user, test_patient, test_study):
 
 @pytest.mark.asyncio
 async def test_get_task_by_id(test_session, test_user, test_patient, test_study):
-    """Тест получения задачи по ID."""
-    # Создаем задачу
+    """Test getting task by ID."""
+    # Create task
     task_scheme = TaskDesign(
-        name="Get Task",
-        description="Get task",
-        result_schema={"type": "object"}
+        name="Get Task", description="Get task", result_schema={"type": "object"}
     )
     test_session.add(task_scheme)
     await test_session.commit()
@@ -77,12 +68,12 @@ async def test_get_task_by_id(test_session, test_user, test_patient, test_study)
         study_uid=test_study.study_uid,
         user_id=test_user.id,
         task_design_id=task_scheme.name,
-        status=TaskStatus.inwork
+        status=TaskStatus.inwork,
     )
     test_session.add(task)
     await test_session.commit()
 
-    # Получаем задачу
+    # Get task
     result = await test_session.get(Task, task.id)
     assert result is not None
     assert result.id == task.id
@@ -91,12 +82,10 @@ async def test_get_task_by_id(test_session, test_user, test_patient, test_study)
 
 @pytest.mark.asyncio
 async def test_update_task_status(test_session, test_user, test_patient, test_study):
-    """Тест обновления статуса задачи."""
-    # Создаем задачу
+    """Test updating task status."""
+    # Create task
     task_scheme = TaskDesign(
-        name="Update Task",
-        description="Update task",
-        result_schema={"type": "object"}
+        name="Update Task", description="Update task", result_schema={"type": "object"}
     )
     test_session.add(task_scheme)
     await test_session.commit()
@@ -106,19 +95,19 @@ async def test_update_task_status(test_session, test_user, test_patient, test_st
         study_uid=test_study.study_uid,
         user_id=test_user.id,
         task_design_id=task_scheme.name,
-        status=TaskStatus.pending
+        status=TaskStatus.pending,
     )
     test_session.add(task)
     await test_session.commit()
 
-    # Обновляем статус
+    # Update status
     task.status = TaskStatus.finished
     task.finished_at = datetime.now(UTC)
     test_session.add(task)
     await test_session.commit()
     await test_session.refresh(task)
 
-    # Проверяем изменения
+    # Check changes
     updated_task = await test_session.get(Task, task.id)
     assert updated_task.status == TaskStatus.finished
     assert updated_task.finished_at is not None
@@ -126,12 +115,10 @@ async def test_update_task_status(test_session, test_user, test_patient, test_st
 
 @pytest.mark.asyncio
 async def test_delete_task(test_session, test_user, test_patient, test_study):
-    """Тест удаления задачи."""
-    # Создаем задачу
+    """Test deleting task."""
+    # Create task
     task_scheme = TaskDesign(
-        name="Delete Task",
-        description="Delete task",
-        result_schema={"type": "object"}
+        name="Delete Task", description="Delete task", result_schema={"type": "object"}
     )
     test_session.add(task_scheme)
     await test_session.commit()
@@ -141,29 +128,27 @@ async def test_delete_task(test_session, test_user, test_patient, test_study):
         study_uid=test_study.study_uid,
         user_id=test_user.id,
         task_design_id=task_scheme.name,
-        status=TaskStatus.pending
+        status=TaskStatus.pending,
     )
     test_session.add(task)
     await test_session.commit()
     task_id = task.id
 
-    # Удаляем задачу
+    # Delete task
     await test_session.delete(task)
     await test_session.commit()
 
-    # Проверяем удаление
+    # Check deletion
     deleted_task = await test_session.get(Task, task_id)
     assert deleted_task is None
 
 
 @pytest.mark.asyncio
 async def test_get_user_tasks(test_session, test_user, test_patient, test_study):
-    """Тест получения задач пользователя."""
-    # Создаем несколько задач для пользователя
+    """Test getting user tasks."""
+    # Create multiple tasks for user
     task_scheme = TaskDesign(
-        name="User Tasks",
-        description="User tasks",
-        result_schema={"type": "object"}
+        name="User Tasks", description="User tasks", result_schema={"type": "object"}
     )
     test_session.add(task_scheme)
     await test_session.commit()
@@ -174,13 +159,13 @@ async def test_get_user_tasks(test_session, test_user, test_patient, test_study)
             study_uid=test_study.study_uid,
             user_id=test_user.id,
             task_design_id=task_scheme.name,
-            status=TaskStatus.pending
+            status=TaskStatus.pending,
         )
         test_session.add(task)
 
     await test_session.commit()
 
-    # Получаем задачи пользователя
+    # Get user tasks
     statement = select(Task).where(Task.user_id == test_user.id)
     result = await test_session.execute(statement)
     tasks = result.scalars().all()
@@ -192,12 +177,10 @@ async def test_get_user_tasks(test_session, test_user, test_patient, test_study)
 
 @pytest.mark.asyncio
 async def test_filter_tasks_by_status(test_session, test_user, test_patient, test_study):
-    """Тест фильтрации задач по статусу."""
-    # Создаем задачи с разными статусами
+    """Test filtering tasks by status."""
+    # Create tasks with different statuses
     task_scheme = TaskDesign(
-        name="Filter Tasks",
-        description="Filter tasks",
-        result_schema={"type": "object"}
+        name="Filter Tasks", description="Filter tasks", result_schema={"type": "object"}
     )
     test_session.add(task_scheme)
     await test_session.commit()
@@ -209,16 +192,15 @@ async def test_filter_tasks_by_status(test_session, test_user, test_patient, tes
             study_uid=test_study.study_uid,
             user_id=test_user.id,
             task_design_id=task_scheme.name,
-            status=status
+            status=status,
         )
         test_session.add(task)
 
     await test_session.commit()
 
-    # Фильтруем по статусу PENDING
+    # Filter by PENDING status
     statement = select(Task).where(
-        (Task.user_id == test_user.id) &
-        (Task.status == TaskStatus.pending)
+        (Task.user_id == test_user.id) & (Task.status == TaskStatus.pending)
     )
     result = await test_session.execute(statement)
     pending_tasks = result.scalars().all()
@@ -230,50 +212,44 @@ async def test_filter_tasks_by_status(test_session, test_user, test_patient, tes
 
 @pytest.mark.asyncio
 async def test_task_scheme_with_multiple_tasks(test_session, test_user, admin_user):
-    """Тест создания нескольких задач для одного типа."""
-    # Создаем тип задачи
+    """Test creating multiple tasks for one type."""
+    # Create task type
     task_scheme = TaskDesign(
         name="Shared Task Type",
         description="Shared task",
         result_schema={
             "type": "object",
-            "properties": {
-                "difficulty": {"type": "string", "enum": ["easy", "medium", "hard"]}
-            }
-        }
+            "properties": {"difficulty": {"type": "string", "enum": ["easy", "medium", "hard"]}},
+        },
     )
     test_session.add(task_scheme)
     await test_session.commit()
 
-    # Создаем необходимые объекты
+    # Create necessary objects
     from src.models.patient import Patient
     from src.models.study import Study
-    
-    patient = Patient(
-        id="TASK_PAT007",
-        name="Multiple Tasks Patient",
-        anon_name="ANON_TASK_007"
-    )
+
+    patient = Patient(id="TASK_PAT007", name="Multiple Tasks Patient", anon_name="ANON_TASK_007")
     test_session.add(patient)
     await test_session.commit()
-    
+
     study = Study(
         patient_id=patient.id,
         study_uid="1.2.3.4.5.TASK.7",
         date=datetime.now(UTC).date(),
-        anon_uid="ANON_TASK_STUDY_007"
+        anon_uid="ANON_TASK_STUDY_007",
     )
     test_session.add(study)
     await test_session.commit()
-    
-    # Создаем задачи для разных пользователей
+
+    # Create tasks for different users
     task1 = Task(
         patient_id=patient.id,
         study_uid=study.study_uid,
         user_id=test_user.id,
         task_design_id=task_scheme.name,
         status=TaskStatus.pending,
-        result={"difficulty": "easy"}
+        result={"difficulty": "easy"},
     )
     task2 = Task(
         patient_id=patient.id,
@@ -281,14 +257,14 @@ async def test_task_scheme_with_multiple_tasks(test_session, test_user, admin_us
         user_id=admin_user.id,
         task_design_id=task_scheme.name,
         status=TaskStatus.inwork,
-        result={"difficulty": "hard"}
+        result={"difficulty": "hard"},
     )
 
     test_session.add(task1)
     test_session.add(task2)
     await test_session.commit()
 
-    # Получаем все задачи этого типа
+    # Get all tasks of this type
     statement = select(Task).where(Task.task_design_id == task_scheme.name)
     result = await test_session.execute(statement)
     tasks = result.scalars().all()
@@ -301,30 +277,24 @@ async def test_task_scheme_with_multiple_tasks(test_session, test_user, admin_us
 
 @pytest.mark.asyncio
 async def test_task_data_json_field(test_session, test_user, test_patient, test_study):
-    """Тест работы с JSON полем result в задаче."""
-    # Создаем тип задачи с JSON схемой
+    """Test working with JSON field result in task."""
+    # Create task type with JSON schema
     task_scheme = TaskDesign(
         name="JSON Task",
         description="JSON task",
         result_schema={
             "type": "object",
             "properties": {
-                "labels": {
-                    "type": "array",
-                    "items": {"type": "string"}
-                },
-                "confidence": {"type": "number"}
-            }
-        }
+                "labels": {"type": "array", "items": {"type": "string"}},
+                "confidence": {"type": "number"},
+            },
+        },
     )
     test_session.add(task_scheme)
     await test_session.commit()
 
-    # Создаем задачу с JSON данными
-    task_data = {
-        "labels": ["cat", "dog", "bird"],
-        "confidence": 0.95
-    }
+    # Create task with JSON data
+    task_data = {"labels": ["cat", "dog", "bird"], "confidence": 0.95}
 
     task = Task(
         patient_id=test_patient.id,
@@ -332,13 +302,13 @@ async def test_task_data_json_field(test_session, test_user, test_patient, test_
         user_id=test_user.id,
         task_design_id=task_scheme.name,
         status=TaskStatus.pending,
-        result=task_data
+        result=task_data,
     )
     test_session.add(task)
     await test_session.commit()
     await test_session.refresh(task)
 
-    # Проверяем JSON данные
+    # Check JSON data
     stored_data = task.result or {}
     assert stored_data["labels"] == ["cat", "dog", "bird"]
     assert stored_data["confidence"] == 0.95

@@ -62,7 +62,7 @@ class TaskDesign(TaskDesignBase, table=True):
     tasks: list["Task"] = Relationship(back_populates="task_design")
 
     def __hash__(self) -> int:
-        """TaskType hash is taken by its"""
+        """Hash the TaskDesign by its name."""
         return hash(self.name)
 
     def __eq__(self, other: Any) -> bool:

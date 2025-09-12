@@ -1,4 +1,4 @@
-"""Тесты запуска приложения и базовой функциональности."""
+"""Application startup and basic functionality tests."""
 
 import pytest
 from httpx import AsyncClient
@@ -10,92 +10,92 @@ from src.models.user import User
 
 @pytest.mark.asyncio
 async def test_app_startup(client: AsyncClient):
-    """Проверка успешного запуска приложения."""
+    """Check successful application startup."""
     response = await client.get("/")
-    # Корневой путь может вернуть 404 или редирект на /docs
+    # Root path may return 404 or redirect to /docs
     assert response.status_code in [307, 404]
 
 
 @pytest.mark.asyncio
 async def test_health_check(client: AsyncClient):
-    """Проверка health check endpoint если есть."""
+    """Check health check endpoint if available."""
     response = await client.get("/health")
-    # Health endpoint не настроен в текущем приложении
+    # Health endpoint is not configured in current application
     assert response.status_code == 404
 
 
 @pytest.mark.asyncio
 async def test_database_tables_created(test_session):
-    """Проверка создания таблиц в БД."""
-    # Проверяем что можем выполнить запросы к основным таблицам
+    """Check database tables creation."""
+    # Check that we can execute queries to main tables
     result = await test_session.execute(select(User))
     users = result.scalars().all()
-    assert users is not None  # Проверяем что запрос выполнился
-    assert isinstance(users, list)  # Проверяем что получили список
+    assert users is not None  # Check that query executed
+    assert isinstance(users, list)  # Check that we got a list
 
     result = await test_session.execute(select(TaskDesign))
     task_designs = result.scalars().all()
-    assert task_designs is not None  # Проверяем что запрос выполнился
-    assert isinstance(task_designs, list)  # Проверяем что получили список
+    assert task_designs is not None  # Check that query executed
+    assert isinstance(task_designs, list)  # Check that we got a list
 
 
 @pytest.mark.asyncio
 async def test_api_docs_available(client: AsyncClient):
-    """Проверка доступности документации API."""
-    # Проверяем Swagger UI
+    """Check API documentation availability."""
+    # Check Swagger UI
     response = await client.get("/docs")
     assert response.status_code == 200
 
-    # Примечание: OpenAPI schema не может быть сгенерирован в тестах из-за ошибок Pydantic
-    # с моделью SeriesFind. Пропускаем этот тест пока не исправлена проблема.
+    # Note: OpenAPI schema cannot be generated in tests due to Pydantic errors
+    # with SeriesFind model. Skipping this test until the issue is fixed.
     # response = await client.get("/openapi.json")
     # assert response.status_code == 200
 
 
 @pytest.mark.asyncio
 async def test_cors_headers(client: AsyncClient):
-    """Проверка настройки CORS."""
+    """Check CORS configuration."""
     response = await client.options(
         "/auth/login",
         headers={
             "Origin": "http://localhost:3000",
             "Access-Control-Request-Method": "POST",
-        }
+        },
     )
-    # CORS может быть настроен или нет
+    # CORS may be configured or not
     assert response.status_code in [200, 405]
     if response.status_code == 200:
-        # Проверяем заголовки без учета регистра
+        # Check headers case-insensitive
         headers_lower = {k.lower(): v for k, v in response.headers.items()}
         assert "access-control-allow-origin" in headers_lower
 
 
 @pytest.mark.asyncio
 async def test_static_files_mount(client: AsyncClient):
-    """Проверка монтирования статических файлов."""
+    """Check static files mounting."""
     response = await client.get("/static/test.txt")
-    # Статические файлы не настроены в текущем приложении
+    # Static files are not configured in current application
     assert response.status_code == 404
 
 
 @pytest.mark.asyncio
 async def test_api_prefix(client: AsyncClient):
-    """Проверка что API роуты доступны."""
-    # Примечание: В текущей конфигурации роуты не используют префикс /api
-    # Проверим доступность основных роутов вместо схемы OpenAPI
-    # Пропускаем этот тест из-за ошибки SeriesFind
+    """Check that API routes are accessible."""
+    # Note: In current configuration routes don't use /api prefix
+    # Check availability of main routes instead of OpenAPI schema
+    # Skipping this test due to SeriesFind error
     pass
 
 
 @pytest.mark.asyncio
 async def test_error_handling(client: AsyncClient):
-    """Проверка обработки ошибок."""
-    # Запрос к несуществующему endpoint
+    """Check error handling."""
+    # Request to non-existent endpoint
     response = await client.get("/api/nonexistent")
     assert response.status_code == 404
 
-    # Запрос без авторизации к защищенному endpoint
-    # Примечание: /user/me требует авторизации
+    # Request without authorization to protected endpoint
+    # Note: /user/me requires authorization
     response = await client.get("/user/me")
-    # Должен вернуть 401 Unauthorized, но в тестах может вернуть 404 если роут не настроен
+    # Should return 401 Unauthorized, but in tests may return 404 if route is not configured
     assert response.status_code in [401, 404]

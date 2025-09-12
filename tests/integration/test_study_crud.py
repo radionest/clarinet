@@ -1,6 +1,6 @@
-"""Тесты CRUD операций для Study, Patient и Series."""
+"""CRUD operations tests for Study, Patient and Series."""
 
-from datetime import date
+from datetime import UTC, datetime
 
 import pytest
 from sqlmodel import select
@@ -11,12 +11,8 @@ from src.models.study import Series, Study
 
 @pytest.mark.asyncio
 async def test_create_patient(test_session):
-    """Тест создания пациента."""
-    patient = Patient(
-        id="PAT001",
-        name="John Doe",
-        anon_name="ANON_001"
-    )
+    """Test patient creation."""
+    patient = Patient(id="PAT001", name="John Doe", anon_name="ANON_001")
     test_session.add(patient)
     await test_session.commit()
     await test_session.refresh(patient)
@@ -28,12 +24,8 @@ async def test_create_patient(test_session):
 
 @pytest.mark.asyncio
 async def test_get_patient_by_id(test_session):
-    """Тест получения пациента по ID."""
-    patient = Patient(
-        id="PAT002",
-        name="Jane Smith",
-        anon_name="ANON_002"
-    )
+    """Test getting patient by ID."""
+    patient = Patient(id="PAT002", name="Jane Smith", anon_name="ANON_002")
     test_session.add(patient)
     await test_session.commit()
 
@@ -45,22 +37,15 @@ async def test_get_patient_by_id(test_session):
 
 @pytest.mark.asyncio
 async def test_create_study(test_session):
-    """Тест создания исследования."""
-    # Создаем пациента
-    patient = Patient(
-        id="PAT003",
-        name="Bob Johnson",
-        anon_name="ANON_003"
-    )
+    """Test study creation."""
+    # Create patient
+    patient = Patient(id="PAT003", name="Bob Johnson", anon_name="ANON_003")
     test_session.add(patient)
     await test_session.commit()
 
-    # Создаем исследование
+    # Create study
     study = Study(
-        patient_id=patient.id,
-        study_uid="1.2.3.4.5.6",
-        date=date.today(),
-        anon_uid="ANON_STUDY_001"
+        patient_id=patient.id, study_uid="1.2.3.4.5.6", date=datetime.now(UTC).date(), anon_uid="ANON_STUDY_001"
     )
     test_session.add(study)
     await test_session.commit()
@@ -68,38 +53,31 @@ async def test_create_study(test_session):
 
     assert study.study_uid == "1.2.3.4.5.6"
     assert study.patient_id == patient.id
-    assert study.date == date.today()
+    assert study.date == datetime.now(UTC).date()
     assert study.anon_uid == "ANON_STUDY_001"
 
 
 @pytest.mark.asyncio
 async def test_create_series(test_session):
-    """Тест создания серии."""
-    # Создаем пациента и исследование
-    patient = Patient(
-        id="PAT004",
-        name="Alice Brown",
-        anon_name="ANON_004"
-    )
+    """Test series creation."""
+    # Create patient and study
+    patient = Patient(id="PAT004", name="Alice Brown", anon_name="ANON_004")
     test_session.add(patient)
     await test_session.commit()
 
     study = Study(
-        patient_id=patient.id,
-        study_uid="1.2.3.4.5.7",
-        date=date.today(),
-        anon_uid="ANON_STUDY_002"
+        patient_id=patient.id, study_uid="1.2.3.4.5.7", date=datetime.now(UTC).date(), anon_uid="ANON_STUDY_002"
     )
     test_session.add(study)
     await test_session.commit()
 
-    # Создаем серию
+    # Create series
     series = Series(
         study_uid=study.study_uid,
         series_uid="1.2.3.4.5.7.1",
         series_number=1,
         series_description="T1 Axial",
-        anon_uid="ANON_SERIES_001"
+        anon_uid="ANON_SERIES_001",
     )
     test_session.add(series)
     await test_session.commit()
@@ -113,23 +91,19 @@ async def test_create_series(test_session):
 
 @pytest.mark.asyncio
 async def test_update_patient(test_session):
-    """Тест обновления пациента."""
-    patient = Patient(
-        id="PAT005",
-        name="Original Name",
-        anon_name="ANON_005"
-    )
+    """Test patient update."""
+    patient = Patient(id="PAT005", name="Original Name", anon_name="ANON_005")
     test_session.add(patient)
     await test_session.commit()
 
-    # Обновляем данные
+    # Update data
     patient.name = "Updated Name"
     patient.anon_name = "ANON_005_UPDATED"
     test_session.add(patient)
     await test_session.commit()
     await test_session.refresh(patient)
 
-    # Проверяем изменения
+    # Check changes
     updated_patient = await test_session.get(Patient, patient.id)
     assert updated_patient.name == "Updated Name"
     assert updated_patient.anon_name == "ANON_005_UPDATED"
@@ -137,21 +111,14 @@ async def test_update_patient(test_session):
 
 @pytest.mark.asyncio
 async def test_delete_patient_cascade(test_session):
-    """Тест каскадного удаления пациента с исследованиями."""
-    # Создаем пациента с исследованием
-    patient = Patient(
-        id="PAT006",
-        name="Delete Test",
-        anon_name="ANON_006"
-    )
+    """Test cascade deletion of patient with studies."""
+    # Create patient with study
+    patient = Patient(id="PAT006", name="Delete Test", anon_name="ANON_006")
     test_session.add(patient)
     await test_session.commit()
 
     study = Study(
-        patient_id=patient.id,
-        study_uid="1.2.3.4.5.8",
-        date=date.today(),
-        anon_uid="ANON_STUDY_003"
+        patient_id=patient.id, study_uid="1.2.3.4.5.8", date=datetime.now(UTC).date(), anon_uid="ANON_STUDY_003"
     )
     test_session.add(study)
     await test_session.commit()
@@ -159,48 +126,44 @@ async def test_delete_patient_cascade(test_session):
     patient_id = patient.id
     study_uid = study.study_uid
 
-    # Сначала удаляем связанные исследования
+    # First delete related studies
     await test_session.delete(study)
     await test_session.commit()
-    
-    # Затем удаляем пациента
+
+    # Then delete patient
     await test_session.delete(patient)
     await test_session.commit()
 
-    # Проверяем что пациент удален
+    # Check that patient is deleted
     deleted_patient = await test_session.get(Patient, patient_id)
     assert deleted_patient is None
-    
-    # Проверяем что исследование удалено
+
+    # Check that study is deleted
     deleted_study = await test_session.get(Study, study_uid)
     assert deleted_study is None
 
 
 @pytest.mark.asyncio
 async def test_get_patient_studies(test_session):
-    """Тест получения всех исследований пациента."""
-    # Создаем пациента
-    patient = Patient(
-        id="PAT007",
-        name="Multi Study",
-        anon_name="ANON_007"
-    )
+    """Test getting all patient studies."""
+    # Create patient
+    patient = Patient(id="PAT007", name="Multi Study", anon_name="ANON_007")
     test_session.add(patient)
     await test_session.commit()
 
-    # Создаем несколько исследований
+    # Create multiple studies
     for i in range(3):
         study = Study(
             patient_id=patient.id,
             study_uid=f"1.2.3.4.5.9.{i}",
-            date=date.today(),
-            anon_uid=f"ANON_STUDY_{i+4}"
+            date=datetime.now(UTC).date(),
+            anon_uid=f"ANON_STUDY_{i + 4}",
         )
         test_session.add(study)
 
     await test_session.commit()
 
-    # Получаем все исследования пациента
+    # Get all patient studies
     statement = select(Study).where(Study.patient_id == patient.id)
     result = await test_session.execute(statement)
     studies = result.scalars().all()
@@ -212,39 +175,35 @@ async def test_get_patient_studies(test_session):
 
 @pytest.mark.asyncio
 async def test_get_study_series(test_session):
-    """Тест получения всех серий исследования."""
-    # Создаем структуру данных
-    patient = Patient(
-        id="PAT008",
-        name="Series Test",
-        anon_name="ANON_008"
-    )
+    """Test getting all study series."""
+    # Create data structure
+    patient = Patient(id="PAT008", name="Series Test", anon_name="ANON_008")
     test_session.add(patient)
     await test_session.commit()
 
     study = Study(
         patient_id=patient.id,
         study_uid="1.2.3.4.5.10",
-        date=date.today(),
-        anon_uid="ANON_STUDY_007"
+        date=datetime.now(UTC).date(),
+        anon_uid="ANON_STUDY_007",
     )
     test_session.add(study)
     await test_session.commit()
 
-    # Создаем несколько серий
+    # Create multiple series
     for i in range(4):
         series = Series(
             study_uid=study.study_uid,
             series_uid=f"1.2.3.4.5.10.{i}",
-            series_number=i+1,
-            series_description=f"Series {i+1}",
-            anon_uid=f"ANON_SERIES_{i+2}"
+            series_number=i + 1,
+            series_description=f"Series {i + 1}",
+            anon_uid=f"ANON_SERIES_{i + 2}",
         )
         test_session.add(series)
 
     await test_session.commit()
 
-    # Получаем все серии исследования
+    # Get all study series
     statement = select(Series).where(Series.study_uid == study.study_uid)
     result = await test_session.execute(statement)
     series_list = result.scalars().all()
@@ -256,28 +215,24 @@ async def test_get_study_series(test_session):
 
 @pytest.mark.asyncio
 async def test_filter_studies_by_modality(test_session):
-    """Тест фильтрации исследований по модальности."""
-    patient = Patient(
-        id="PAT009",
-        name="Modality Test",
-        anon_name="ANON_009"
-    )
+    """Test filtering studies by modality."""
+    patient = Patient(id="PAT009", name="Modality Test", anon_name="ANON_009")
     test_session.add(patient)
     await test_session.commit()
 
-    # Создаем исследования
+    # Create studies
     for i in range(4):
         study = Study(
             patient_id=patient.id,
             study_uid=f"1.2.3.4.5.11.{i}",
-            date=date.today(),
-            anon_uid=f"ANON_STUDY_{i+8}"
+            date=datetime.now(UTC).date(),
+            anon_uid=f"ANON_STUDY_{i + 8}",
         )
         test_session.add(study)
 
     await test_session.commit()
 
-    # Получаем все исследования пациента
+    # Get all patient studies
     statement = select(Study).where(Study.patient_id == patient.id)
     result = await test_session.execute(statement)
     studies = result.scalars().all()
@@ -287,58 +242,50 @@ async def test_filter_studies_by_modality(test_session):
 
 @pytest.mark.asyncio
 async def test_patient_with_full_hierarchy(test_session):
-    """Тест создания полной иерархии: пациент -> исследование -> серии."""
-    # Создаем пациента
-    patient = Patient(
-        id="PAT010",
-        name="Full Hierarchy",
-        anon_name="ANON_010"
-    )
+    """Test creating full hierarchy: patient -> study -> series."""
+    # Create patient
+    patient = Patient(id="PAT010", name="Full Hierarchy", anon_name="ANON_010")
     test_session.add(patient)
     await test_session.commit()
 
-    # Создаем исследование
+    # Create study
     study = Study(
         patient_id=patient.id,
         study_uid="1.2.3.4.5.12",
-        date=date.today(),
-        anon_uid="ANON_STUDY_012"
+        date=datetime.now(UTC).date(),
+        anon_uid="ANON_STUDY_012",
     )
     test_session.add(study)
     await test_session.commit()
 
-    # Создаем серии
-    series_data = [
-        ("T1", "1.2.3.4.5.12.1"),
-        ("T2", "1.2.3.4.5.12.2"),
-        ("FLAIR", "1.2.3.4.5.12.3")
-    ]
+    # Create series
+    series_data = [("T1", "1.2.3.4.5.12.1"), ("T2", "1.2.3.4.5.12.2"), ("FLAIR", "1.2.3.4.5.12.3")]
 
     for i, (desc, uid) in enumerate(series_data):
         series = Series(
             study_uid=study.study_uid,
             series_uid=uid,
-            series_number=i+1,
+            series_number=i + 1,
             series_description=desc,
-            anon_uid=f"ANON_SERIES_{i+10}"
+            anon_uid=f"ANON_SERIES_{i + 10}",
         )
         test_session.add(series)
 
     await test_session.commit()
 
-    # Проверяем структуру
-    # Проверяем пациента
+    # Check structure
+    # Check patient
     stored_patient = await test_session.get(Patient, patient.id)
     assert stored_patient.id == "PAT010"
 
-    # Проверяем исследование
+    # Check study
     statement = select(Study).where(Study.patient_id == patient.id)
     result = await test_session.execute(statement)
     studies = result.scalars().all()
     assert len(studies) == 1
-    assert studies[0].date == date.today()
+    assert studies[0].date == datetime.now(UTC).date()
 
-    # Проверяем серии
+    # Check series
     statement = select(Series).where(Series.study_uid == study.study_uid)
     result = await test_session.execute(statement)
     series_list = result.scalars().all()

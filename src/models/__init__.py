@@ -41,14 +41,13 @@ from .task import (
 )
 
 # User models
-from .user import HTTPSession, User, UserBase, UserRead, UserRole, UserRolesLink
+from .user import User, UserRead, UserRole, UserRolesLink
 
 __all__ = [
     # Base
     "BaseModel",
     "DicomQueryLevel",
     "DicomUID",
-    "HTTPSession",
     # Patient
     "Patient",
     "PatientBase",
@@ -80,7 +79,6 @@ __all__ = [
     "TaskStatus",
     # User
     "User",
-    "UserBase",
     "UserRead",
     "UserRole",
     "UserRolesLink",

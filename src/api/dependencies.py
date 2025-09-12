@@ -1,20 +1,25 @@
 """
-Common dependencies for Clarinet API endpoints.
-
-This module provides reusable dependency functions for FastAPI endpoints
-including authentication, parameter validation, and other shared functionality.
+Simplified dependencies using fastapi-users.
 """
 
-from typing import Annotated
+from fastapi import Query, Request
 
-from fastapi import Depends, Query, Request
-from sqlalchemy.ext.asyncio import AsyncSession
+from src.api.auth_config import (
+    current_active_user,
+    current_superuser,
+    optional_current_user,
+)
+from src.exceptions import ClarinetError
+from src.settings import settings
 
-from ..api.security import TokenData, decode_token, decode_token_cookie
-from ..exceptions import UNAUTHORIZED, ClarinetError
-from ..models import User
-from ..settings import settings
-from ..utils.database import get_async_session
+# Export for use in other modules
+get_current_user_async = current_active_user
+get_current_user_cookie_async = current_active_user  # Alias for compatibility
+get_current_superuser_async = current_superuser
+get_optional_user_async = optional_current_user
+
+# Compatibility aliases
+get_current_user = current_active_user
 
 
 async def get_client_ip(request: Request) -> str:
@@ -63,49 +68,3 @@ async def common_parameters(
         Dictionary with skip and limit parameters
     """
     return {"skip": skip, "limit": limit}
-
-
-async def get_current_user_async(
-    payload: Annotated[TokenData, Depends(decode_token)],
-    session: AsyncSession = Depends(get_async_session),
-) -> User:
-    """
-    Get the current authenticated user from token using async session.
-
-    Args:
-        payload: Token data from JWT
-        session: Async database session
-
-    Returns:
-        Authenticated user
-
-    Raises:
-        HTTPException: If user is not found or inactive
-    """
-    user = await session.get(User, payload.username)
-    if not user or not user.isactive:
-        raise UNAUTHORIZED
-    return user
-
-
-async def get_current_user_cookie_async(
-    payload: Annotated[TokenData, Depends(decode_token_cookie)],
-    session: AsyncSession = Depends(get_async_session),
-) -> User:
-    """
-    Get the current authenticated user from cookie using async session.
-
-    Args:
-        payload: Token data from JWT cookie
-        session: Async database session
-
-    Returns:
-        Authenticated user
-
-    Raises:
-        HTTPException: If user is not found or inactive
-    """
-    user = await session.get(User, payload.username)
-    if not user or not user.isactive:
-        raise UNAUTHORIZED
-    return user

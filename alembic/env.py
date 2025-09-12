@@ -13,7 +13,7 @@ from src.models.base import BaseModel, DicomQueryLevel, TaskStatus  # noqa: F401
 from src.models.patient import Patient  # noqa: F401
 from src.models.study import Series, Study  # noqa: F401
 from src.models.task import Task, TaskDesign  # noqa: F401
-from src.models.user import HTTPSession, User, UserRole, UserRolesLink  # noqa: F401
+from src.models.user import User, UserRole, UserRolesLink  # noqa: F401
 
 # Import settings and models
 from src.settings import settings

@@ -38,13 +38,6 @@ class DatabaseDriver(str, Enum):
     POSTGRESQL_ASYNC = "postgresql+asyncpg"
 
 
-class JWTAlgorithm(str, Enum):
-    """Supported JWT encoding algorithms."""
-
-    RS256 = "RS256"
-    HS256 = "HS256"
-
-
 class QueueConfig(BaseSettings):
     """Configuration for message queue requirements."""
 
@@ -121,13 +114,20 @@ class Settings(BaseSettings):
     dicom_ip: str | None = None
 
     # Security settings
-    jwt_algorithm: JWTAlgorithm = JWTAlgorithm.HS256
-    jwt_expire_minutes: int = 60
-    jwt_secret_key: str = "insecure-change-this-key-in-production"
+    secret_key: str = "insecure-change-this-key-in-production"  # For session signing
+
+    # Session settings (KISS - only essentials)
+    cookie_name: str = "clarinet_session"
+    session_expire_hours: int = 24
 
     # Template settings
     template_dir: str | None = None
     static_dir: str | None = None
+
+    @property
+    def session_expire_seconds(self) -> int:
+        """Get session expiration time in seconds."""
+        return self.session_expire_hours * 3600
 
     @classmethod
     def settings_customize_sources(
