@@ -1,0 +1,52 @@
+# Example configuration file for Clarinet
+# Copy this file to settings.toml and customize as needed
+
+# Server settings
+port = 8000
+host = "127.0.0.1"
+root_url = "/"
+debug = false
+
+# Storage settings
+storage_path = "~/clarinet/data"
+anon_id_prefix = "CLARINET"
+
+# Database settings
+database_driver = "sqlite"
+database_name = "clarinet"
+
+# Security settings
+secret_key = "change-this-secret-key-in-production"
+
+# Session settings
+cookie_name = "clarinet_session"
+session_expire_hours = 24
+
+# Logging settings
+log_level = "INFO"           # Options: DEBUG, INFO, WARNING, ERROR, CRITICAL
+log_to_file = true           # Enable file logging
+# log_dir = "/custom/path/to/logs"  # Optional: custom log directory (default: {storage_path}/logs)
+log_rotation = "20 MB"       # Rotate logs when they reach this size
+log_retention = "1 week"     # Keep logs for this duration
+# log_format = "custom format"  # Optional: custom log format
+
+# RabbitMQ settings (for task queue)
+rabbitmq_login = "guest"
+rabbitmq_password = "guest"
+rabbitmq_host = "localhost"
+rabbitmq_port = 5672
+rabbitmq_exchange = "clarinet"
+rabbitmq_max_consumers = 0
+
+# DICOM settings
+dicom_aet = "CLARINET"
+dicom_port = 11112
+
+# Slicer settings
+slicer_script_paths = []
+
+# Queue requirements
+have_gpu = false
+have_dicom = false
+have_keras = false
+have_torch = false

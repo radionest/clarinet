@@ -124,6 +124,14 @@ class Settings(BaseSettings):
     template_dir: str | None = None
     static_dir: str | None = None
 
+    # Logging settings
+    log_level: str = "INFO"
+    log_to_file: bool = True
+    log_dir: str | None = None  # If None, will use {storage_path}/logs
+    log_rotation: str = "20 MB"
+    log_retention: str = "1 week"
+    log_format: str | None = None  # Use default if None
+
     @property
     def session_expire_seconds(self) -> int:
         """Get session expiration time in seconds."""
@@ -173,6 +181,17 @@ class Settings(BaseSettings):
         if self.static_dir:
             return self.static_dir
         return os.path.join(os.path.dirname(__file__), "..", "static")
+
+    def get_log_dir(self) -> Path:
+        """Get the log directory path.
+
+        Returns:
+            Path to the log directory. Uses log_dir if specified,
+            otherwise creates logs directory in storage_path.
+        """
+        if self.log_dir:
+            return Path(self.log_dir)
+        return Path(self.storage_path) / "logs"
 
 
 @lru_cache

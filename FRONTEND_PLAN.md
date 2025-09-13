@@ -8,7 +8,7 @@
 
 ### 1.1 Структура директорий
 
-```
+```scheme
 clarinet/
 ├── src/
 │   ├── api/                     # Существующий backend
@@ -26,11 +26,18 @@ clarinet/
 │   │   │   │   ├── study.gleam
 │   │   │   │   ├── task.gleam
 │   │   │   │   ├── user.gleam
-│   │   │   │   └── types.gleam
+│   │   │   │   ├── types.gleam
+│   │   │   │   └── models.gleam        # Статические типы моделей
 │   │   │   ├── components/     # Переиспользуемые компоненты
 │   │   │   │   ├── layout.gleam
 │   │   │   │   ├── navbar.gleam
-│   │   │   │   ├── forms.gleam
+│   │   │   │   ├── forms/          # Статические типизированные формы
+│   │   │   │   │   ├── base.gleam  # Базовые элементы форм
+│   │   │   │   │   ├── patient_form.gleam
+│   │   │   │   │   ├── study_form.gleam
+│   │   │   │   │   ├── task_design_form.gleam
+│   │   │   │   │   └── user_form.gleam
+│   │   │   │   ├── formosh_wrapper.gleam  # Обертка для Task.result
 │   │   │   │   ├── tables.gleam
 │   │   │   │   └── modals.gleam
 │   │   │   ├── pages/          # Страницы приложения
@@ -42,7 +49,8 @@ clarinet/
 │   │   │   │   ├── tasks/
 │   │   │   │   │   ├── list.gleam
 │   │   │   │   │   ├── detail.gleam
-│   │   │   │   │   └── form.gleam
+│   │   │   │   │   ├── design.gleam    # Статическая форма для TaskDesign
+│   │   │   │   │   └── execute.gleam   # Динамическая форма для Task.result
 │   │   │   │   └── users/
 │   │   │   │       ├── list.gleam
 │   │   │   │       └── profile.gleam
@@ -87,6 +95,7 @@ user_project/
 ### 2.1 Настройка Gleam проекта
 
 **gleam.toml:**
+
 ```toml
 name = "clarinet_frontend"
 version = "1.0.0"
@@ -100,8 +109,9 @@ lustre_ui = "~> 0.6"
 gleam_json = "~> 2.0"
 gleam_javascript = "~> 0.8"
 gleam_stdlib = "~> 0.38"
-decipher = "~> 1.0"  # Для работы с JSON
-rada = "~> 1.0"      # Роутинг
+modem = "~> 1.3"
+formosh = "~> 0.1"  # Для динамических форм Task.result
+gleam_fetch = "~> 0.4"  # Для загрузки схем
 
 [dev-dependencies]
 gleeunit = "~> 1.0"
@@ -114,6 +124,7 @@ output = "build/dev/javascript/clarinet.mjs"
 ### 2.2 API клиент
 
 **src/frontend/src/api/client.gleam:**
+
 ```gleam
 import gleam/http/request
 import gleam/http/response
@@ -169,13 +180,15 @@ fn add_auth_header(request, token: Option(String)) {
 ### 2.3 Основное приложение
 
 **src/frontend/src/main.gleam:**
+
 ```gleam
 import lustre
 import lustre/element.{Element}
 import lustre/element/html
 import lustre/event
-import lustre/cmd.{Cmd}
-import router
+import lustre/effect.{Effect}
+import modem
+import router.{Route}
 import store.{Model, Msg}
 import pages/login
 import pages/home
@@ -187,22 +200,27 @@ pub fn main() {
   Nil
 }
 
-fn init(_) -> #(Model, Cmd(Msg)) {
+fn init(_) -> #(Model, Effect(Msg)) {
   let model = store.init()
-  #(model, cmd.none())
+  let router = modem.init(router.on_route_change)
+  #(model, router)
 }
 
-fn update(model: Model, msg: Msg) -> #(Model, Cmd(Msg)) {
+fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
   case msg {
+    store.OnRouteChange(route) -> {
+      let new_model = store.set_route(model, route)
+      #(new_model, effect.none())
+    }
     store.Navigate(route) -> {
       let new_model = store.set_route(model, route)
-      #(new_model, router.push(route))
+      #(new_model, modem.push(router.route_to_path(route)))
     }
     store.LoginSuccess(token, user) -> {
       let new_model = model
         |> store.set_auth(token, user)
         |> store.set_route(router.Home)
-      #(new_model, router.push(router.Home))
+      #(new_model, modem.push("/"))
     }
     // ... другие сообщения
   }
@@ -223,9 +241,458 @@ fn page_content(model: Model) -> Element(Msg) {
 }
 ```
 
-### 2.4 Интеграция с FastAPI
+### 2.4 Модуль роутинга с Modem
+
+**src/frontend/src/router.gleam:**
+
+```gleam
+import gleam/uri
+import gleam/option.{Option, Some, None}
+import gleam/string
+import gleam/list
+import gleam/result
+import modem
+import store.{Msg}
+
+// Определение маршрутов
+pub type Route {
+  Home
+  Login
+  Studies
+  StudyDetail(id: String)
+  Tasks
+  TaskDetail(id: String)
+  TaskNew
+  Users
+  UserProfile(id: String)
+  NotFound
+}
+
+// Преобразование Route в путь URL
+pub fn route_to_path(route: Route) -> String {
+  case route {
+    Home -> "/"
+    Login -> "/login"
+    Studies -> "/studies"
+    StudyDetail(id) -> "/studies/" <> id
+    Tasks -> "/tasks"
+    TaskDetail(id) -> "/tasks/" <> id
+    TaskNew -> "/tasks/new"
+    Users -> "/users"
+    UserProfile(id) -> "/users/" <> id
+    NotFound -> "/404"
+  }
+}
+
+// Парсинг URL в Route
+pub fn parse_route(uri: uri.Uri) -> Route {
+  let path = uri.path
+    |> string.split("/")
+    |> list.filter(fn(s) { string.length(s) > 0 })
+  
+  case path {
+    [] -> Home
+    ["login"] -> Login
+    ["studies"] -> Studies
+    ["studies", id] -> StudyDetail(id)
+    ["tasks"] -> Tasks
+    ["tasks", "new"] -> TaskNew
+    ["tasks", id] -> TaskDetail(id)
+    ["users"] -> Users
+    ["users", id] -> UserProfile(id)
+    _ -> NotFound
+  }
+}
+
+// Обработчик изменения маршрута для Modem
+pub fn on_route_change(uri: uri.Uri) -> Msg {
+  let route = parse_route(uri)
+  store.OnRouteChange(route)
+}
+
+// Навигация к маршруту
+pub fn navigate_to(route: Route) -> modem.Effect(Msg) {
+  modem.push(route_to_path(route))
+}
+
+// Замена текущего маршрута
+pub fn replace_with(route: Route) -> modem.Effect(Msg) {
+  modem.replace(route_to_path(route))
+}
+
+// Проверка доступа к маршруту
+pub fn requires_auth(route: Route) -> Bool {
+  case route {
+    Login -> False
+    _ -> True
+  }
+}
+
+// Получение параметров из маршрута
+pub fn get_route_params(route: Route) -> Option(String) {
+  case route {
+    StudyDetail(id) -> Some(id)
+    TaskDetail(id) -> Some(id)
+    UserProfile(id) -> Some(id)
+    _ -> None
+  }
+}
+```
+
+### 2.5 Гибридный подход к формам
+
+Проект использует два подхода для работы с формами в зависимости от типа данных:
+
+#### 2.5.1 Статические типизированные формы (Patient, Study, TaskDesign, User)
+
+Для основных моделей данных используются полностью типизированные формы на чистом Gleam/Lustre:
+
+**src/frontend/src/api/models.gleam:**
+
+```gleam
+// Статические типы для основных моделей
+pub type Patient {
+  Patient(
+    id: Option(Int),
+    name: String,
+    birth_date: String,
+    medical_record: String,
+    gender: Gender,
+    notes: Option(String)
+  )
+}
+
+pub type Study {
+  Study(
+    id: Option(Int),
+    patient_id: Int,
+    modality: String,
+    description: String,
+    study_date: String,
+    institution: String,
+    series_count: Int
+  )
+}
+
+pub type TaskDesign {
+  TaskDesign(
+    id: Option(Int),
+    name: String,
+    description: String,
+    category: String,
+    result_schema: Json,  // JSON Schema для динамической формы
+    is_active: Bool
+  )
+}
+
+pub type User {
+  User(
+    id: Int,
+    username: String,
+    email: String,
+    role: UserRole,
+    is_active: Bool
+  )
+}
+```
+
+**Пример статической формы - src/frontend/src/components/forms/study_form.gleam:**
+
+```gleam
+import lustre/element.{Element}
+import lustre/element/html
+import lustre/event
+import lustre/attribute
+import lustre_ui/input
+import lustre_ui/button
+import api/models.{Study}
+import store.{Msg}
+
+pub type StudyFormData {
+  StudyFormData(
+    patient_id: String,
+    modality: String,
+    description: String,
+    study_date: String,
+    institution: String
+  )
+}
+
+pub fn view(form_data: StudyFormData, errors: Dict(String, String)) -> Element(Msg) {
+  html.form([
+    attribute.class("study-form"),
+    event.on_submit(fn(e) { 
+      event.prevent_default(e)
+      store.SubmitStudyForm(form_data)
+    })
+  ], [
+    // Patient ID field
+    html.div([attribute.class("form-group")], [
+      html.label([attribute.for("patient_id")], [html.text("Patient ID")]),
+      input.text([
+        attribute.id("patient_id"),
+        attribute.value(form_data.patient_id),
+        attribute.required(True),
+        event.on_input(fn(value) { 
+          store.UpdateStudyForm(StudyFormData(..form_data, patient_id: value))
+        })
+      ]),
+      error_message(errors, "patient_id")
+    ]),
+    
+    // Modality dropdown
+    html.div([attribute.class("form-group")], [
+      html.label([attribute.for("modality")], [html.text("Modality")]),
+      html.select([
+        attribute.id("modality"),
+        event.on_change(fn(value) {
+          store.UpdateStudyForm(StudyFormData(..form_data, modality: value))
+        })
+      ], [
+        html.option([attribute.value("CT")], [html.text("CT")]),
+        html.option([attribute.value("MR")], [html.text("MRI")]),
+        html.option([attribute.value("US")], [html.text("Ultrasound")]),
+        html.option([attribute.value("XR")], [html.text("X-Ray")])
+      ])
+    ]),
+    
+    // Other fields...
+    
+    // Submit button
+    button.primary([
+      attribute.type_("submit")
+    ], [html.text("Create Study")])
+  ])
+}
+
+fn error_message(errors: Dict(String, String), field: String) -> Element(Msg) {
+  case dict.get(errors, field) {
+    Ok(error) -> html.span([attribute.class("error")], [html.text(error)])
+    Error(_) -> html.text("")
+  }
+}
+```
+
+**Преимущества статических форм:**
+
+- Полная типобезопасность на этапе компиляции
+- Автокомплит и подсказки в IDE
+- Прямое соответствие моделям backend
+- Оптимальная производительность
+- Простота отладки
+
+#### 2.5.2 Динамические формы через Formosh (Task.result)
+
+Для результатов задач используется Formosh - генератор форм на основе JSON Schema:
+
+**src/frontend/src/components/formosh_wrapper.gleam:**
+
+```gleam
+import lustre/element.{Element}
+import lustre/element/html
+import lustre/attribute
+import lustre/effect.{Effect}
+import gleam/json.{Json}
+import formosh
+import store.{Msg}
+
+pub fn render_task_form(
+  schema: Json,
+  initial_data: Option(Json),
+  on_submit: fn(Json) -> Msg
+) -> Element(Msg) {
+  html.div([
+    attribute.class("formosh-container"),
+    attribute.id("task-result-form")
+  ], [
+    // Formosh web component
+    html.node("formosh-form", [
+      attribute.property("schema", schema),
+      attribute.property("value", initial_data |> option.unwrap(json.object([]))),
+      attribute.property("locale", "en"),
+      attribute.on("submit", fn(event) {
+        let data = event.detail
+        on_submit(data)
+      })
+    ], [])
+  ])
+}
+```
+
+**src/frontend/src/pages/tasks/execute.gleam:**
+
+```gleam
+import lustre/element.{Element}
+import lustre/element/html
+import lustre/effect.{Effect}
+import gleam/json
+import gleam/result
+import api/client
+import api/types.{Task, TaskDesign}
+import components/formosh_wrapper
+import store.{Model, Msg}
+
+pub fn view(model: Model, task_id: String) -> Element(Msg) {
+  case dict.get(model.tasks, task_id) {
+    Ok(task) -> render_task_execution(model, task)
+    Error(_) -> loading_view()
+  }
+}
+
+fn render_task_execution(model: Model, task: Task) -> Element(Msg) {
+  html.div([attribute.class("task-execution")], [
+    html.h2([], [html.text(task.design.name)]),
+    html.p([], [html.text(task.design.description)]),
+    
+    // Динамическая форма на основе result_schema
+    formosh_wrapper.render_task_form(
+      schema: task.design.result_schema,
+      initial_data: task.result,
+      on_submit: fn(data) { store.SubmitTaskResult(task.id, data) }
+    )
+  ])
+}
+
+// Обработка отправки в update функции
+pub fn handle_submit_task_result(
+  model: Model,
+  task_id: String,
+  result: Json
+) -> #(Model, Effect(Msg)) {
+  let submit_effect = 
+    client.post(
+      model.api_config,
+      "/tasks/" <> task_id <> "/result",
+      result,
+      task_result_decoder
+    )
+    |> effect.map(fn(response) {
+      case response {
+        Ok(updated_task) -> store.TaskResultSaved(updated_task)
+        Error(error) -> store.ShowError("Failed to save task result")
+      }
+    })
+  
+  #(Model(..model, loading: True), submit_effect)
+}
+```
+
+**Преимущества динамических форм Formosh:**
+
+- Автоматическая генерация UI из JSON Schema
+- Встроенная валидация на основе constraints
+- Поддержка сложных структур (nested objects, arrays)
+- Условная логика (if/then/else в схеме)
+- Не требует изменения кода при добавлении новых типов задач
+
+#### 2.5.3 Пример статической формы для TaskDesign
+
+**src/frontend/src/pages/tasks/design.gleam:**
+
+```gleam
+import lustre/element.{Element}
+import lustre/element/html
+import lustre/event
+import lustre/attribute
+import gleam/json
+import api/models.{TaskDesign}
+import components/forms/task_design_form
+import store.{Model, Msg}
+
+pub fn view(model: Model, task_design_id: Option(String)) -> Element(Msg) {
+  let form_data = case task_design_id {
+    Some(id) -> load_existing_design(model, id)
+    None -> empty_design_form()
+  }
+  
+  html.div([attribute.class("task-design-page")], [
+    html.h2([], [
+      html.text(case task_design_id {
+        Some(_) -> "Edit Task Design"
+        None -> "Create New Task Design"
+      })
+    ]),
+    
+    // Статическая форма для основных полей TaskDesign
+    task_design_form.view(form_data, model.form_errors),
+    
+    // JSON Schema редактор для result_schema
+    html.div([attribute.class("schema-editor-section")], [
+      html.h3([], [html.text("Result Schema (JSON Schema)")]),
+      html.textarea([
+        attribute.class("json-editor"),
+        attribute.rows(20),
+        attribute.value(json.to_string(form_data.result_schema)),
+        event.on_input(fn(value) {
+          case json.parse(value) {
+            Ok(schema) -> store.UpdateTaskDesignSchema(schema)
+            Error(_) -> store.ShowSchemaError("Invalid JSON")
+          }
+        })
+      ], []),
+      
+      // Предпросмотр формы
+      html.div([attribute.class("form-preview")], [
+        html.h4([], [html.text("Form Preview")]),
+        formosh_wrapper.render_task_form(
+          schema: form_data.result_schema,
+          initial_data: None,
+          on_submit: fn(_) { store.NoOp }  // Только предпросмотр
+        )
+      ])
+    ])
+  ])
+}
+```
+
+#### 2.5.4 Примеры JSON Schema для Formosh
+
+**Пример схемы для радиологического отчета:**
+
+```json
+{
+  "type": "object",
+  "title": "Radiology Report",
+  "required": ["findings", "conclusion"],
+  "properties": {
+    "findings": {
+      "type": "string",
+      "title": "Findings",
+      "description": "Describe the observed findings",
+      "minLength": 10,
+      "ui:widget": "textarea"
+    },
+    "measurements": {
+      "type": "array",
+      "title": "Measurements",
+      "items": {
+        "type": "object",
+        "properties": {
+          "location": {
+            "type": "string",
+            "title": "Location"
+          },
+          "value": {
+            "type": "number",
+            "title": "Value (mm)"
+          }
+        }
+      }
+    },
+    "conclusion": {
+      "type": "string",
+      "title": "Conclusion",
+      "enum": ["normal", "abnormal", "follow-up required"],
+      "ui:widget": "radio"
+    }
+  }
+}
+```
+
+### 2.6 Интеграция с FastAPI
 
 **Изменения в src/api/app.py:**
+
 ```python
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
@@ -284,9 +751,10 @@ if settings.frontend_enabled:
         return {"error": "Frontend not built"}, 404
 ```
 
-### 2.5 CLI команды
+### 2.6 CLI команды
 
 **Расширение src/cli/main.py:**
+
 ```python
 def add_frontend_commands(subparsers):
     """Добавление команд для управления фронтендом."""
@@ -376,9 +844,10 @@ def build_frontend(watch=False):
         logger.info("Frontend built successfully")
 ```
 
-### 2.6 Конфигурация
+### 2.7 Конфигурация
 
 **Дополнения в src/settings.py:**
+
 ```python
 from pydantic_settings import BaseSettings
 from pathlib import Path
@@ -425,17 +894,18 @@ class Settings(BaseSettings):
    - Добавление frontend параметров
    - Обновление .env.example
 
-### Фаза 2: API клиент и аутентификация (3-4 дня)
+### Фаза 2: API клиент и типизированные модели (3-4 дня)
 
 1. **API клиент**
    - Базовый HTTP клиент в Gleam
    - Обработка JWT токенов
    - Типы для API ответов
 
-2. **Модели данных**
-   - User, Study, Task, Patient типы
+2. **Статические модели данных**
+   - Patient, Study, TaskDesign, User типы в api/models.gleam
+   - Полная типизация всех основных сущностей
    - Decoders/Encoders для JSON
-   - Валидация данных
+   - Валидация на уровне типов
 
 3. **Аутентификация**
    - Login страница и форма
@@ -443,7 +913,7 @@ class Settings(BaseSettings):
    - Auto-refresh токенов
    - Logout функциональность
 
-### Фаза 3: Основные компоненты UI (3-4 дня)
+### Фаза 3: Основные компоненты UI и формы (4-5 дней)
 
 1. **Layout компоненты**
    - Navbar с навигацией
@@ -451,16 +921,92 @@ class Settings(BaseSettings):
    - Footer
    - Container/Grid система
 
-2. **Базовые компоненты**
-   - Формы (Input, Select, Textarea)
+2. **Статические формы для моделей**
+   - components/forms/patient_form.gleam
+   - components/forms/study_form.gleam
+   - components/forms/task_design_form.gleam
+   - components/forms/user_form.gleam
+   - Базовые элементы форм (base.gleam)
+
+3. **Интеграция Formosh для Task.result**
+   - components/formosh_wrapper.gleam
+   - Загрузка Formosh web component
+   - Обработка событий формы
+
+4. **Другие компоненты**
    - Таблицы с сортировкой
    - Модальные окна
    - Уведомления/Toasts
 
-3. **Стили**
+5. **Стили**
    - base.css с переменными
    - Responsive дизайн
    - Темная/светлая тема
+
+#### Пример навигации в компонентах с Modem
+
+**src/frontend/src/components/navbar.gleam:**
+
+```gleam
+import lustre/element.{Element}
+import lustre/element/html
+import lustre/event
+import lustre/attribute
+import store.{Model, Msg}
+import router
+
+pub fn view(model: Model) -> Element(Msg) {
+  html.nav([attribute.class("navbar")], [
+    html.div([attribute.class("navbar-brand")], [
+      link_to(router.Home, "Clarinet", is_active(model, router.Home))
+    ]),
+    html.div([attribute.class("navbar-menu")], [
+      case model.user {
+        Some(user) -> authenticated_menu(model, user)
+        None -> guest_menu(model)
+      }
+    ])
+  ])
+}
+
+fn link_to(route: router.Route, text: String, active: Bool) -> Element(Msg) {
+  let classes = case active {
+    True -> "navbar-item active"
+    False -> "navbar-item"
+  }
+  
+  html.a([
+    attribute.href(router.route_to_path(route)),
+    attribute.class(classes),
+    event.on_click(fn(_) { store.Navigate(route) })
+  ], [html.text(text)])
+}
+
+fn is_active(model: Model, route: router.Route) -> Bool {
+  model.route == route
+}
+
+fn authenticated_menu(model: Model, user: User) -> Element(Msg) {
+  html.div([attribute.class("navbar-items")], [
+    link_to(router.Studies, "Studies", is_active(model, router.Studies)),
+    link_to(router.Tasks, "Tasks", is_active(model, router.Tasks)),
+    link_to(router.Users, "Users", is_active(model, router.Users)),
+    html.div([attribute.class("navbar-user")], [
+      html.span([], [html.text(user.username)]),
+      html.button([
+        attribute.class("btn-logout"),
+        event.on_click(fn(_) { store.Logout })
+      ], [html.text("Logout")])
+    ])
+  ])
+}
+
+fn guest_menu(model: Model) -> Element(Msg) {
+  html.div([attribute.class("navbar-items")], [
+    link_to(router.Login, "Login", is_active(model, router.Login))
+  ])
+}
+```
 
 ### Фаза 4: Страницы приложения (4-5 дней)
 
@@ -471,9 +1017,10 @@ class Settings(BaseSettings):
    - Анонимизация
 
 2. **Tasks модуль**
-   - Список задач
-   - Создание/редактирование задач
-   - Форма выполнения задачи
+   - Список задач (list.gleam)
+   - Детали задачи (detail.gleam)
+   - Создание/редактирование TaskDesign (design.gleam - статическая форма)
+   - Выполнение задачи с динамической формой (execute.gleam - использует Formosh)
    - История выполнения
 
 3. **Users модуль**
@@ -526,24 +1073,100 @@ class Settings(BaseSettings):
 
 ### 4.1 Роутинг
 
-Клиентский роутинг через rada или lustre_router:
+Клиентский роутинг через Modem:
+
 - `/` - Home/Dashboard
 - `/login` - Авторизация
 - `/studies` - Список исследований
 - `/studies/:id` - Детали исследования
 - `/tasks` - Список задач
+- `/tasks/new` - Создание новой задачи
 - `/tasks/:id` - Детали задачи
 - `/users` - Управление пользователями
-- `/profile` - Профиль текущего пользователя
+- `/users/:id` - Профиль пользователя
+
+Modem обеспечивает:
+
+- Декларативную навигацию через эффекты
+- Автоматическую синхронизацию с browser history API
+- Поддержку параметров маршрутов
+- Обработку browser back/forward кнопок
 
 ### 4.2 State Management
 
 Глобальное состояние в store.gleam:
+
 - Текущий пользователь
 - JWT токен
 - Текущий роут
 - Кэш загруженных данных
 - UI состояние (модалы, уведомления)
+
+**src/frontend/src/store.gleam:**
+
+```gleam
+import gleam/option.{Option, Some, None}
+import gleam/dict.{Dict}
+import lustre/effect.{Effect}
+import modem
+import router.{Route}
+import api/types.{User}
+
+pub type Model {
+  Model(
+    route: Route,
+    user: Option(User),
+    token: Option(String),
+    loading: Bool,
+    error: Option(String),
+    cache: Dict(String, Dynamic)
+  )
+}
+
+pub type Msg {
+  OnRouteChange(Route)
+  Navigate(Route)
+  LoginSuccess(String, User)
+  Logout
+  SetLoading(Bool)
+  SetError(Option(String))
+  ClearError
+}
+
+pub fn init() -> Model {
+  Model(
+    route: router.Home,
+    user: None,
+    token: None,
+    loading: False,
+    error: None,
+    cache: dict.new()
+  )
+}
+
+pub fn set_route(model: Model, route: Route) -> Model {
+  Model(..model, route: route)
+}
+
+pub fn set_auth(model: Model, token: String, user: User) -> Model {
+  Model(..model, token: Some(token), user: Some(user))
+}
+
+// Middleware для проверки авторизации при навигации
+pub fn check_auth_middleware(model: Model, route: Route) -> Effect(Msg) {
+  case router.requires_auth(route), model.token {
+    True, None -> {
+      // Редирект на логин если нужна авторизация
+      modem.replace("/login")
+    }
+    False, Some(_) if route == router.Login -> {
+      // Редирект с логина если уже авторизован
+      modem.replace("/")
+    }
+    _, _ -> effect.none()
+  }
+}
+```
 
 ### 4.3 Обработка ошибок
 
@@ -562,28 +1185,32 @@ class Settings(BaseSettings):
 
 ## 5. Зависимости
 
-### Системные требования:
+### Системные требования
+
 - Gleam >= 1.4.0
 - Erlang/OTP >= 26
 - Node.js >= 18 (для сборки)
 
-### Gleam пакеты:
+### Gleam пакеты
+
 - lustre: UI фреймворк
 - lustre_http: HTTP клиент
 - lustre_ui: UI компоненты
 - gleam_json: JSON работа
-- rada: Роутинг
+- modem: Клиентский роутинг с history API
 - decipher: JSON декодеры
 
 ## 6. Конфигурация производительности
 
-### Оптимизации сборки:
+### Оптимизации сборки
+
 - Tree shaking для уменьшения размера
 - Минификация JavaScript
 - Gzip компрессия статики
 - Cache headers для статических файлов
 
-### Runtime оптимизации:
+### Runtime оптимизации
+
 - Lazy loading страниц
 - Виртуализация длинных списков
 - Дебаунс для поисковых запросов
@@ -591,13 +1218,15 @@ class Settings(BaseSettings):
 
 ## 7. Мониторинг и отладка
 
-### Development:
+### Development
+
 - Hot reload через gleam build --watch
 - Source maps для отладки
 - Логирование API запросов
 - Redux DevTools интеграция
 
-### Production:
+### Production
+
 - Error boundary для перехвата ошибок
 - Sentry интеграция
 - Performance метрики
@@ -605,12 +1234,14 @@ class Settings(BaseSettings):
 
 ## 8. Расширяемость
 
-### Плагины:
+### Плагины
+
 - Система плагинов для кастомных компонентов
 - API для регистрации новых страниц
 - Hooks для расширения функциональности
 
-### Темы:
+### Темы
+
 - CSS переменные для цветов
 - Настраиваемые шрифты
 - Кастомные иконки
@@ -646,12 +1277,30 @@ class Settings(BaseSettings):
 
 ## Заключение
 
-План обеспечивает поэтапную интеграцию современного SPA фронтенда с минимальными изменениями в существующем коде. Основные преимущества:
+План обеспечивает поэтапную интеграцию современного SPA фронтенда с минимальными изменениями в существующем коде.
 
-- Полная типобезопасность
-- Функциональное программирование
+### Ключевая особенность - Гибридный подход к формам
+
+**Статические типизированные формы** для основных моделей (Patient, Study, TaskDesign, User):
+
+- Полная типобезопасность на этапе компиляции
+- Оптимальная производительность
+- Прямое соответствие backend моделям
+- IDE поддержка с автокомплитом
+
+**Динамические формы через Formosh** только для Task.result:
+
+- Автоматическая генерация из JSON Schema
+- Поддержка произвольных структур данных
+- Не требует изменения кода при добавлении новых типов задач
+- Встроенная валидация
+
+### Основные преимущества решения
+
+- Баланс между типобезопасностью и гибкостью
+- Функциональное программирование с Gleam/Lustre
 - Минимальный runtime overhead
 - Простота развертывания
-- Гибкая кастомизация
+- Гибкая кастомизация через CSS переменные
 
 Ориентировочное время реализации: 3-4 недели для базовой функциональности, 5-6 недель для полной реализации с тестами и документацией.

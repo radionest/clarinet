@@ -13,6 +13,8 @@ from pathlib import Path
 
 from loguru import logger as _logger
 
+from ..settings import settings
+
 
 class InterceptHandler(logging.Handler):
     """
@@ -54,7 +56,7 @@ def setup_logging(
         level: Minimum log level to capture
         format: Log message format string
         log_to_file: Whether to log to a file in addition to console
-        log_file: Path to log file (defaults to logs/clarinet.log)
+        log_file: Path to log file (will be created if doesn't exist)
         rotation: When to rotate log files (size or time)
         retention: How long to keep log files
         serialize: Whether to serialize logs as JSON (useful for log aggregation)
@@ -80,14 +82,13 @@ def setup_logging(
     )
 
     # Add file handler if requested
-    if log_to_file:
-        if log_file is None:
-            log_dir = Path("logs")
-            log_dir.mkdir(exist_ok=True)
-            log_file = log_dir / "clarinet.log"
+    if log_to_file and log_file:
+        # Ensure the parent directory exists
+        log_path = Path(log_file)
+        log_path.parent.mkdir(parents=True, exist_ok=True)
 
         _logger.add(
-            str(log_file),
+            str(log_path),
             level=level,
             format=format,
             rotation=rotation,
@@ -106,8 +107,15 @@ def setup_logging(
         logging.getLogger(log_name).handlers = [InterceptHandler()]
 
 
-# Configure a basic console logger by default
-setup_logging()
+# Configure logging with settings from config
+setup_logging(
+    level=settings.log_level,
+    format=settings.log_format,
+    log_to_file=settings.log_to_file,
+    log_file=settings.get_log_dir() / "clarinet.log" if settings.log_to_file else None,
+    rotation=settings.log_rotation,
+    retention=settings.log_retention,
+)
 
 # Export loguru's logger as the module's logger
 logger = _logger

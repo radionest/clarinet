@@ -45,7 +45,10 @@ async def test_create_study(test_session):
 
     # Create study
     study = Study(
-        patient_id=patient.id, study_uid="1.2.3.4.5.6", date=datetime.now(UTC).date(), anon_uid="ANON_STUDY_001"
+        patient_id=patient.id,
+        study_uid="1.2.3.4.5.6",
+        date=datetime.now(UTC).date(),
+        anon_uid="ANON_STUDY_001",
     )
     test_session.add(study)
     await test_session.commit()
@@ -66,7 +69,10 @@ async def test_create_series(test_session):
     await test_session.commit()
 
     study = Study(
-        patient_id=patient.id, study_uid="1.2.3.4.5.7", date=datetime.now(UTC).date(), anon_uid="ANON_STUDY_002"
+        patient_id=patient.id,
+        study_uid="1.2.3.4.5.7",
+        date=datetime.now(UTC).date(),
+        anon_uid="ANON_STUDY_002",
     )
     test_session.add(study)
     await test_session.commit()
@@ -118,7 +124,10 @@ async def test_delete_patient_cascade(test_session):
     await test_session.commit()
 
     study = Study(
-        patient_id=patient.id, study_uid="1.2.3.4.5.8", date=datetime.now(UTC).date(), anon_uid="ANON_STUDY_003"
+        patient_id=patient.id,
+        study_uid="1.2.3.4.5.8",
+        date=datetime.now(UTC).date(),
+        anon_uid="ANON_STUDY_003",
     )
     test_session.add(study)
     await test_session.commit()

@@ -20,11 +20,8 @@ from sqlalchemy import cast, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import and_, col, select
 
-from src.api.dependencies import (
-    common_parameters,
-    get_current_user_async,
-    get_current_user_cookie_async,
-)
+from src.api.auth_config import current_active_user
+from src.api.dependencies import PaginationDep
 from src.exceptions import CONFLICT, NOT_FOUND
 from src.models import (
     Patient,
@@ -43,11 +40,7 @@ from src.models import (
     User,
     UserRole,
 )
-from src.types import PaginationParams, TaskResult
-from src.utils.async_crud import (
-    add_item_async,
-    exists_async,
-)
+from src.types import TaskResult
 from src.utils.database import get_async_session
 from src.utils.logger import logger
 from src.utils.validation import validate_json_by_schema
@@ -117,10 +110,19 @@ async def add_task_design(
             ) from e
 
     # Ensure task type name is unique if required
-    if constrain_unique_names and await exists_async(TaskDesign, session, name=task_design.name):
-        raise CONFLICT.with_context(f"There is already a task type with name '{task_design.name}'")
+    if constrain_unique_names:
+        existing = await session.execute(
+            select(TaskDesign).where(TaskDesign.name == task_design.name).limit(1)
+        )
+        if existing.scalars().first():
+            raise CONFLICT.with_context(
+                f"There is already a task type with name '{task_design.name}'"
+            )
 
-    return await add_item_async(new_task_design, session)
+    session.add(new_task_design)
+    await session.commit()
+    await session.refresh(new_task_design)
+    return new_task_design
 
 
 @router.patch("/types/{task_design_id}", response_model=TaskDesign)
@@ -192,7 +194,7 @@ async def get_all_tasks(session: AsyncSession = Depends(get_async_session)) -> S
 
 @router.get("/my", response_model=list[Task])
 async def get_my_tasks(
-    user: User = Depends(get_current_user_cookie_async),
+    user: User = Depends(current_active_user),
     session: AsyncSession = Depends(get_async_session),
 ) -> Sequence[Task]:
     """Get all tasks assigned to the current user."""
@@ -202,7 +204,7 @@ async def get_my_tasks(
 
 @router.get("/my/pending", response_model=Sequence[TaskRead])
 async def get_my_pending_tasks(
-    user: User = Depends(get_current_user_cookie_async),
+    user: User = Depends(current_active_user),
     session: AsyncSession = Depends(get_async_session),
 ) -> Sequence[Task]:
     """Get all pending tasks assigned to the current user."""
@@ -221,7 +223,7 @@ async def get_my_pending_tasks(
 
 @router.get("/available_types", response_model=dict[TaskDesign, int])
 async def get_my_available_task_designs(
-    user: User = Depends(get_current_user_cookie_async),
+    user: User = Depends(current_active_user),
     session: AsyncSession = Depends(get_async_session),
 ) -> dict[TaskDesign, int]:
     """Get all task types available to the current user with task counts."""
@@ -436,6 +438,7 @@ async def update_task_result(
 
 @router.post("/find", response_model=list[TaskRead])
 async def find_tasks(
+    pagination: PaginationDep,
     find_queries: list[TaskFindResult] = Body(default=[]),
     patient_id: str | None = None,
     patient_anon_id: str | None = None,
@@ -449,7 +452,6 @@ async def find_tasks(
     wo_user: bool | None = None,
     random_one: bool = False,
     session: AsyncSession = Depends(get_async_session),
-    commons: PaginationParams = Depends(common_parameters),
 ) -> Sequence[Task]:
     """Find tasks by various criteria."""
     find_statement = select(Task).join(TaskDesign)
@@ -535,10 +537,8 @@ async def find_tasks(
 
     # Apply pagination
     find_statement = find_statement.distinct()
-    if commons.get("skip"):
-        find_statement = find_statement.offset(commons["skip"])
-    if commons.get("limit"):
-        find_statement = find_statement.limit(commons["limit"])
+    find_statement = find_statement.offset(pagination.skip)
+    find_statement = find_statement.limit(pagination.limit)
 
     # Execute query
     result = await session.execute(find_statement)
@@ -569,7 +569,7 @@ async def bulk_update_task_status(
 
 async def assign_user_to_task(
     task_id: int,
-    user: User = Depends(get_current_user_async),
+    user: User = Depends(current_active_user),
     session: AsyncSession = Depends(get_async_session),
 ) -> Task:
     """Assign the current user to a task."""

@@ -106,7 +106,7 @@ async def client(test_session, test_settings) -> AsyncGenerator[AsyncClient, Non
     async with AsyncClient(transport=transport, base_url="http://test", cookies={}) as ac:
         # Patch the client to properly handle cookies
         original_request = ac.request
-        
+
         async def request_with_cookies(method, url, **kwargs):
             # Always include cookies in headers
             if ac.cookies:
@@ -116,7 +116,7 @@ async def client(test_session, test_settings) -> AsyncGenerator[AsyncClient, Non
                     headers["Cookie"] = cookie_header
                     kwargs["headers"] = headers
             return await original_request(method, url, **kwargs)
-        
+
         ac.request = request_with_cookies
         yield ac
 

@@ -1,8 +1,11 @@
 """
-Simplified dependencies using fastapi-users.
+Dependencies for FastAPI application with enhanced dependency injection.
 """
 
-from fastapi import Query, Request
+from typing import Annotated
+
+from fastapi import Depends, Query, Request
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.auth_config import (
     current_active_user,
@@ -10,16 +13,21 @@ from src.api.auth_config import (
     optional_current_user,
 )
 from src.exceptions import ClarinetError
+from src.models import User
+from src.repositories.patient_repository import PatientRepository
+from src.repositories.series_repository import SeriesRepository
+from src.repositories.study_repository import StudyRepository
+from src.repositories.user_repository import UserRepository, UserRoleRepository
+from src.services.study_service import StudyService
+from src.services.user_service import UserService
 from src.settings import settings
+from src.utils.database import get_async_session
 
-# Export for use in other modules
-get_current_user_async = current_active_user
-get_current_user_cookie_async = current_active_user  # Alias for compatibility
-get_current_superuser_async = current_superuser
-get_optional_user_async = optional_current_user
-
-# Compatibility aliases
-get_current_user = current_active_user
+# Type aliases for common dependencies
+CurrentUserDep = Annotated[User, Depends(current_active_user)]
+OptionalUserDep = Annotated[User | None, Depends(optional_current_user)]
+SuperUserDep = Annotated[User, Depends(current_superuser)]
+SessionDep = Annotated[AsyncSession, Depends(get_async_session)]
 
 
 async def get_client_ip(request: Request) -> str:
@@ -53,18 +61,74 @@ async def get_application_url(request: Request) -> str:
     return f"{host}{root_path}"
 
 
-async def common_parameters(
-    skip: int = Query(0, ge=0, description="Number of items to skip"),
-    limit: int | None = Query(None, ge=1, description="Maximum number of items to return"),
-) -> dict[str, int | None]:
-    """
-    Get common query parameters for pagination.
+class PaginationParams:
+    """Common pagination parameters."""
 
-    Args:
-        skip: Number of items to skip
-        limit: Maximum number of items to return
+    def __init__(
+        self,
+        skip: int = Query(0, ge=0, description="Number of items to skip"),
+        limit: int = Query(100, ge=1, le=1000, description="Maximum number of items to return"),
+    ):
+        self.skip = skip
+        self.limit = limit
 
-    Returns:
-        Dictionary with skip and limit parameters
-    """
-    return {"skip": skip, "limit": limit}
+
+PaginationDep = Annotated[PaginationParams, Depends()]
+
+# Repository factory functions
+
+
+async def get_user_repository(session: SessionDep) -> UserRepository:
+    """Get user repository instance."""
+    return UserRepository(session)
+
+
+async def get_user_role_repository(session: SessionDep) -> UserRoleRepository:
+    """Get user role repository instance."""
+    return UserRoleRepository(session)
+
+
+async def get_study_repository(session: SessionDep) -> StudyRepository:
+    """Get study repository instance."""
+    return StudyRepository(session)
+
+
+async def get_patient_repository(session: SessionDep) -> PatientRepository:
+    """Get patient repository instance."""
+    return PatientRepository(session)
+
+
+async def get_series_repository(session: SessionDep) -> SeriesRepository:
+    """Get series repository instance."""
+    return SeriesRepository(session)
+
+
+# Repository type aliases
+UserRepositoryDep = Annotated[UserRepository, Depends(get_user_repository)]
+UserRoleRepositoryDep = Annotated[UserRoleRepository, Depends(get_user_role_repository)]
+StudyRepositoryDep = Annotated[StudyRepository, Depends(get_study_repository)]
+PatientRepositoryDep = Annotated[PatientRepository, Depends(get_patient_repository)]
+SeriesRepositoryDep = Annotated[SeriesRepository, Depends(get_series_repository)]
+
+# Service factory functions
+
+
+async def get_user_service(
+    user_repo: UserRepositoryDep, role_repo: UserRoleRepositoryDep
+) -> UserService:
+    """Get user service instance with injected repositories."""
+    return UserService(user_repo, role_repo)
+
+
+async def get_study_service(
+    study_repo: StudyRepositoryDep,
+    patient_repo: PatientRepositoryDep,
+    series_repo: SeriesRepositoryDep,
+) -> StudyService:
+    """Get study service instance with injected repositories."""
+    return StudyService(study_repo, patient_repo, series_repo)
+
+
+# Service type aliases
+UserServiceDep = Annotated[UserService, Depends(get_user_service)]
+StudyServiceDep = Annotated[StudyService, Depends(get_study_service)]

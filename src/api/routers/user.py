@@ -1,178 +1,151 @@
 """
-Async user router for the Clarinet framework.
+Async user router for the Clarinet framework with enhanced dependency injection.
 
 This module provides async API endpoints for user management, authentication, and role assignment.
 """
 
-from collections.abc import Sequence
-from typing import Annotated
+from fastapi import APIRouter, status
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlmodel import select
-
-from src.api.dependencies import get_current_user_async, get_current_user_cookie_async
-from src.exceptions import CONFLICT, NOT_FOUND, UNAUTHORIZED
-from src.models import User, UserRead, UserRole
-from src.utils.async_crud import (
-    add_item_async,
-    exists_async,
-    get_item_async,
+from src.api.dependencies import (
+    CurrentUserDep,
+    PaginationDep,
+    UserServiceDep,
 )
-from src.utils.auth import get_password_hash, verify_password
-from src.utils.database import get_async_session
+from src.models import User, UserRead, UserRole
 
 router = APIRouter(prefix="/users", tags=["users"])
 
 
+# Authentication endpoints
 @router.get("/me", response_model=UserRead)
-async def get_current_user_cookie(
-    user: Annotated[User, Depends(get_current_user_cookie_async)],
+async def get_current_user_me(
+    current_user: CurrentUserDep,
 ) -> User:
-    """Get current user from cookie authentication."""
-    return user
+    """Get current user from authentication."""
+    return current_user
 
 
-@router.get("/me/token", response_model=UserRead)
-async def get_current_user(
-    user: Annotated[User, Depends(get_current_user_async)],
-) -> User:
-    """Get current user from token authentication."""
-    return user
+@router.get("/me/roles", response_model=list[UserRole])
+async def get_my_roles(
+    current_user: CurrentUserDep,
+    service: UserServiceDep,
+) -> list[UserRole]:
+    """Get roles for the current user."""
+    return await service.get_user_roles(current_user.id)
+
+
+# User CRUD endpoints
+@router.get("/", response_model=list[UserRead])
+async def list_users(
+    service: UserServiceDep,
+    pagination: PaginationDep,
+) -> list[User]:
+    """List all users with pagination."""
+    return await service.list_users(pagination.skip, pagination.limit)
 
 
 @router.get("/{user_id}", response_model=UserRead)
-async def get_user(user_id: str, session: AsyncSession = Depends(get_async_session)) -> User:
+async def get_user(
+    user_id: str,
+    service: UserServiceDep,
+) -> User:
     """Get user by ID."""
-    user = await session.get(User, user_id)
-    if not user:
-        raise UNAUTHORIZED
-    return user
+    return await service.get_user(user_id)
 
 
 @router.post("/", response_model=UserRead, status_code=status.HTTP_201_CREATED)
-async def add_user(user: User, session: AsyncSession = Depends(get_async_session)) -> User:
+async def create_user(
+    user: User,
+    service: UserServiceDep,
+) -> User:
     """Create a new user."""
-    # Check if user already exists
-    if await exists_async(User, session, id=user.id):
-        raise CONFLICT.with_context(f"User {user.id} already exists")
-
-    new_user = User.model_validate(user)
-    new_user.hashed_password = get_password_hash(user.hashed_password)
-
-    return await add_item_async(new_user, session)
+    user_data = user.model_dump()
+    return await service.create_user(user_data)
 
 
+@router.put("/{user_id}", response_model=UserRead)
+async def update_user(
+    user_id: str,
+    user_update: User,
+    service: UserServiceDep,
+) -> User:
+    """Update a user's information."""
+    update_data = user_update.model_dump(exclude_unset=True)
+    return await service.update_user(user_id, update_data)
+
+
+@router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_user(
+    user_id: str,
+    service: UserServiceDep,
+) -> None:
+    """Delete a user by ID."""
+    await service.delete_user(user_id)
+
+
+# Role management endpoints
 @router.get("/roles/{role_name}", response_model=UserRole)
 async def get_role_details(
-    role_name: str, session: AsyncSession = Depends(get_async_session)
+    role_name: str,
+    service: UserServiceDep,
 ) -> UserRole:
     """Get role details by name."""
-    role = await session.get(UserRole, role_name)
-    if not role:
-        raise NOT_FOUND.with_context(f"Role '{role_name}' not found")
-    return role
+    return await service.get_role(role_name)
 
 
 @router.post("/roles", response_model=UserRole, status_code=status.HTTP_201_CREATED)
 async def create_role(
-    new_role: UserRole, session: AsyncSession = Depends(get_async_session)
+    new_role: UserRole,
+    service: UserServiceDep,
 ) -> UserRole:
     """Create a new role."""
-    # Check if role already exists
-    if await exists_async(UserRole, session, name=new_role.name):
-        raise CONFLICT.with_context(f"Role '{new_role.name}' already exists")
+    role_data = new_role.model_dump()
+    return await service.create_role(role_data)
 
-    return await add_item_async(new_role, session)
+
+@router.get("/{user_id}/roles", response_model=list[UserRole])
+async def get_user_roles(
+    user_id: str,
+    service: UserServiceDep,
+) -> list[UserRole]:
+    """Get roles for a specific user."""
+    return await service.get_user_roles(user_id)
 
 
 @router.post("/{user_id}/roles/{role_name}", response_model=UserRead)
 async def add_user_role(
     user_id: str,
     role_name: str,
-    session: AsyncSession = Depends(get_async_session),
+    service: UserServiceDep,
 ) -> User:
     """Assign a role to a user."""
-    user = await get_item_async(User, user_id, session)
-    role = await get_item_async(UserRole, role_name, session)
-
-    # Load roles relationship
-    await session.refresh(user, ["roles"])
-
-    if role in user.roles:
-        raise CONFLICT.with_context(f"User '{user_id}' already has role '{role_name}'")
-
-    user.roles.append(role)
-    await session.commit()
-    await session.refresh(user)
-    return user
+    return await service.assign_role(user_id, role_name)
 
 
-@router.get("/me/roles", response_model=list[UserRole])
-async def get_my_roles(
-    user: User = Depends(get_current_user_async), session: AsyncSession = Depends(get_async_session)
-) -> list[UserRole]:
-    """Get roles for the current user."""
-    # Refresh user with roles loaded
-    await session.refresh(user, ["roles"])
-    return user.roles
-
-
-@router.get("/{user_id}/roles", response_model=list[UserRole])
-async def get_user_roles(
-    user_id: str, session: AsyncSession = Depends(get_async_session)
-) -> list[UserRole]:
-    """Get roles for a specific user."""
-    user = await get_item_async(User, user_id, session)
-    # Refresh user with roles loaded
-    await session.refresh(user, ["roles"])
-    return user.roles
-
-
-async def authenticate_user_async(username: str, password: str, session: AsyncSession) -> User:
-    """Authenticate a user with username and password asynchronously."""
-    try:
-        user = await get_item_async(User, username, session)
-    except HTTPException as e:
-        raise UNAUTHORIZED from e
-
-    if not verify_password(password, user.hashed_password):
-        raise UNAUTHORIZED
-    return user
-
-
-@router.get("/", response_model=list[UserRead])
-async def list_users(
-    session: AsyncSession = Depends(get_async_session), skip: int = 0, limit: int = 100
-) -> Sequence[User]:
-    """List all users with pagination."""
-    statement = select(User).offset(skip).limit(limit)
-    result = await session.execute(statement)
-    return result.scalars().all()
-
-
-@router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_user(user_id: str, session: AsyncSession = Depends(get_async_session)) -> None:
-    """Delete a user by ID."""
-    from src.utils.async_crud import delete_item_async
-
-    user = await get_item_async(User, user_id, session)
-    await delete_item_async(user, session)
-
-
-@router.put("/{user_id}", response_model=UserRead)
-async def update_user(
-    user_id: str, user_update: User, session: AsyncSession = Depends(get_async_session)
+@router.delete("/{user_id}/roles/{role_name}", response_model=UserRead)
+async def remove_user_role(
+    user_id: str,
+    role_name: str,
+    service: UserServiceDep,
 ) -> User:
-    """Update a user's information."""
-    from src.utils.async_crud import update_item_async
+    """Remove a role from a user."""
+    return await service.remove_role(user_id, role_name)
 
-    user = await get_item_async(User, user_id, session)
 
-    update_data = user_update.model_dump(exclude_unset=True)
+# User activation endpoints
+@router.post("/{user_id}/activate", response_model=UserRead)
+async def activate_user(
+    user_id: str,
+    service: UserServiceDep,
+) -> User:
+    """Activate a user account."""
+    return await service.activate_user(user_id)
 
-    # Hash password if it's being updated
-    if "hashed_password" in update_data:
-        update_data["hashed_password"] = get_password_hash(update_data["hashed_password"])
 
-    return await update_item_async(user, update_data, session)
+@router.post("/{user_id}/deactivate", response_model=UserRead)
+async def deactivate_user(
+    user_id: str,
+    service: UserServiceDep,
+) -> User:
+    """Deactivate a user account."""
+    return await service.deactivate_user(user_id)
