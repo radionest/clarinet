@@ -99,8 +99,7 @@ async def create_role(
     service: UserServiceDep,
 ) -> UserRole:
     """Create a new role."""
-    role_data = new_role.model_dump()
-    return await service.create_role(role_data)
+    return await service.create_role(new_role.name)
 
 
 @router.get("/{user_id}/roles", response_model=list[UserRole])

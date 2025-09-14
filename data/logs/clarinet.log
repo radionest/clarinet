@@ -51,3 +51,54 @@
 2025-09-14 02:22:46.711 |                   INFO     |                   src.utils.logger:emit:40 -                   HTTP Request: GET http://test/api/nonexistent "HTTP/1.1 404 Not Found"
 2025-09-14 02:22:46.711 |                   INFO     |                   src.utils.logger:emit:40 -                   HTTP Request: GET http://test/user/me "HTTP/1.1 404 Not Found"
 2025-09-14 02:22:52.229 |                   INFO     |                   src.utils.logger:emit:40 -                   HTTP Request: POST http://test/auth/register "HTTP/1.1 404 Not Found"
+2025-09-14 19:12:41.171 |                   INFO     |                   src.api.auth_config:on_after_login:61 -                   User test_user logged in.
+2025-09-14 19:12:41.180 |                   INFO     |                   src.utils.logger:emit:40 -                   HTTP Request: POST http://test/auth/login "HTTP/1.1 204 No Content"
+2025-09-14 19:12:41.291 |                   INFO     |                   src.utils.logger:emit:40 -                   HTTP Request: POST http://test/auth/login "HTTP/1.1 400 Bad Request"
+2025-09-14 19:12:41.825 |                   INFO     |                   src.api.auth_config:on_after_login:61 -                   User test_user logged in.
+2025-09-14 19:12:41.825 |                   INFO     |                   src.utils.logger:emit:40 -                   HTTP Request: POST http://test/auth/login "HTTP/1.1 204 No Content"
+2025-09-14 19:12:41.830 |                   INFO     |                   src.utils.logger:emit:40 -                   HTTP Request: GET http://test/auth/me "HTTP/1.1 200 OK"
+2025-09-14 19:12:42.366 |                   INFO     |                   src.api.auth_config:on_after_login:61 -                   User admin_user logged in.
+2025-09-14 19:12:42.366 |                   INFO     |                   src.utils.logger:emit:40 -                   HTTP Request: POST http://test/auth/login "HTTP/1.1 204 No Content"
+2025-09-14 19:12:42.371 |                   INFO     |                   src.utils.logger:emit:40 -                   HTTP Request: GET http://test/user/users/ "HTTP/1.1 200 OK"
+2025-09-14 19:12:42.904 |                   INFO     |                   src.api.auth_config:on_after_login:61 -                   User admin_user logged in.
+2025-09-14 19:12:42.905 |                   INFO     |                   src.utils.logger:emit:40 -                   HTTP Request: POST http://test/auth/login "HTTP/1.1 204 No Content"
+2025-09-14 19:12:42.906 |                   INFO     |                   src.utils.logger:emit:40 -                   HTTP Request: POST http://test/task/types "HTTP/1.1 404 Not Found"
+2025-09-14 19:12:43.437 |                   INFO     |                   src.api.auth_config:on_after_login:61 -                   User test_user logged in.
+2025-09-14 19:12:43.438 |                   INFO     |                   src.utils.logger:emit:40 -                   HTTP Request: POST http://test/auth/login "HTTP/1.1 204 No Content"
+2025-09-14 19:12:43.439 |                   INFO     |                   src.utils.logger:emit:40 -                   HTTP Request: GET http://test/task/types "HTTP/1.1 404 Not Found"
+2025-09-14 19:12:43.966 |                   INFO     |                   src.api.auth_config:on_after_login:61 -                   User test_user logged in.
+2025-09-14 19:12:43.966 |                   INFO     |                   src.utils.logger:emit:40 -                   HTTP Request: POST http://test/auth/login "HTTP/1.1 204 No Content"
+2025-09-14 19:12:43.971 |                   INFO     |                   src.utils.logger:emit:40 -                   HTTP Request: POST http://test/task/ "HTTP/1.1 404 Not Found"
+2025-09-14 19:12:44.498 |                   INFO     |                   src.api.auth_config:on_after_login:61 -                   User test_user logged in.
+2025-09-14 19:12:44.498 |                   INFO     |                   src.utils.logger:emit:40 -                   HTTP Request: POST http://test/auth/login "HTTP/1.1 204 No Content"
+2025-09-14 19:12:44.500 |                   INFO     |                   src.utils.logger:emit:40 -                   HTTP Request: GET http://test/task/my "HTTP/1.1 404 Not Found"
+2025-09-14 19:12:45.026 |                   INFO     |                   src.api.auth_config:on_after_login:61 -                   User test_user logged in.
+2025-09-14 19:12:45.026 |                   INFO     |                   src.utils.logger:emit:40 -                   HTTP Request: POST http://test/auth/login "HTTP/1.1 204 No Content"
+2025-09-14 19:12:45.037 |                   INFO     |                   src.utils.logger:emit:40 -                   HTTP Request: PATCH http://test/task/1 "HTTP/1.1 404 Not Found"
+2025-09-14 19:12:45.562 |                   INFO     |                   src.api.auth_config:on_after_login:61 -                   User test_user logged in.
+2025-09-14 19:12:45.562 |                   INFO     |                   src.utils.logger:emit:40 -                   HTTP Request: POST http://test/auth/login "HTTP/1.1 204 No Content"
+2025-09-14 19:12:45.564 |                   INFO     |                   src.utils.logger:emit:40 -                   HTTP Request: GET http://test/study/ "HTTP/1.1 404 Not Found"
+2025-09-14 19:12:46.092 |                   INFO     |                   src.api.auth_config:on_after_login:61 -                   User test_user logged in.
+2025-09-14 19:12:46.093 |                   INFO     |                   src.utils.logger:emit:40 -                   HTTP Request: POST http://test/auth/login "HTTP/1.1 204 No Content"
+2025-09-14 19:12:46.103 |                   INFO     |                   src.utils.logger:emit:40 -                   HTTP Request: POST http://test/study/patients "HTTP/1.1 201 Created"
+2025-09-14 19:12:46.627 |                   INFO     |                   src.api.auth_config:on_after_login:61 -                   User test_user logged in.
+2025-09-14 19:12:46.628 |                   INFO     |                   src.utils.logger:emit:40 -                   HTTP Request: POST http://test/auth/login "HTTP/1.1 204 No Content"
+2025-09-14 19:12:46.631 |                   INFO     |                   src.utils.logger:emit:40 -                   HTTP Request: POST http://test/study/ "HTTP/1.1 404 Not Found"
+2025-09-14 19:12:46.655 |                   INFO     |                   src.utils.logger:emit:40 -                   HTTP Request: GET http://test/user/users/me/token "HTTP/1.1 404 Not Found"
+2025-09-14 19:12:46.655 |                   INFO     |                   src.utils.logger:emit:40 -                   HTTP Request: GET http://test/task/ "HTTP/1.1 404 Not Found"
+2025-09-14 19:12:46.656 |                   INFO     |                   src.utils.logger:emit:40 -                   HTTP Request: GET http://test/study/ "HTTP/1.1 404 Not Found"
+2025-09-14 19:12:47.183 |                   INFO     |                   src.api.auth_config:on_after_login:61 -                   User test_user logged in.
+2025-09-14 19:12:47.183 |                   INFO     |                   src.utils.logger:emit:40 -                   HTTP Request: POST http://test/auth/login "HTTP/1.1 204 No Content"
+2025-09-14 19:12:47.184 |                   INFO     |                   src.utils.logger:emit:40 -                   HTTP Request: GET http://test/task/?limit=10&offset=0 "HTTP/1.1 404 Not Found"
+2025-09-14 19:12:47.716 |                   INFO     |                   src.api.auth_config:on_after_login:61 -                   User test_user logged in.
+2025-09-14 19:12:47.716 |                   INFO     |                   src.utils.logger:emit:40 -                   HTTP Request: POST http://test/auth/login "HTTP/1.1 204 No Content"
+2025-09-14 19:12:47.718 |                   INFO     |                   src.utils.logger:emit:40 -                   HTTP Request: GET http://test/study/?modality=CT "HTTP/1.1 404 Not Found"
+2025-09-14 19:12:47.741 |                   INFO     |                   src.utils.logger:emit:40 -                   HTTP Request: OPTIONS http://test/auth/login "HTTP/1.1 200 OK"
+2025-09-14 19:12:47.767 |                   INFO     |                   src.utils.logger:emit:40 -                   HTTP Request: GET http://test/ "HTTP/1.1 404 Not Found"
+2025-09-14 19:12:47.792 |                   INFO     |                   src.utils.logger:emit:40 -                   HTTP Request: GET http://test/health "HTTP/1.1 404 Not Found"
+2025-09-14 19:12:47.843 |                   INFO     |                   src.utils.logger:emit:40 -                   HTTP Request: GET http://test/docs "HTTP/1.1 200 OK"
+2025-09-14 19:12:47.865 |                   INFO     |                   src.utils.logger:emit:40 -                   HTTP Request: OPTIONS http://test/auth/login "HTTP/1.1 200 OK"
+2025-09-14 19:12:47.891 |                   INFO     |                   src.utils.logger:emit:40 -                   HTTP Request: GET http://test/static/test.txt "HTTP/1.1 404 Not Found"
+2025-09-14 19:12:47.938 |                   INFO     |                   src.utils.logger:emit:40 -                   HTTP Request: GET http://test/api/nonexistent "HTTP/1.1 404 Not Found"
+2025-09-14 19:12:47.939 |                   INFO     |                   src.utils.logger:emit:40 -                   HTTP Request: GET http://test/user/me "HTTP/1.1 404 Not Found"
+2025-09-14 19:12:52.833 |                   INFO     |                   src.utils.logger:emit:40 -                   HTTP Request: POST http://test/auth/register "HTTP/1.1 404 Not Found"

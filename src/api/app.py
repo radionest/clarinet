@@ -12,6 +12,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from src.api.exception_handlers import setup_exception_handlers
+
 # Use relative imports for development
 from src.api.routers import auth as auth
 from src.api.routers import slicer  # slicer doesn't use database, no async version needed,
@@ -90,6 +92,9 @@ def create_app(root_path: str = "/") -> FastAPI:
         StaticFiles(directory=static_dir),
         name="static",
     )
+
+    # Setup exception handlers using decorators
+    setup_exception_handlers(app)
 
     # Include routers
     app.include_router(auth.router)

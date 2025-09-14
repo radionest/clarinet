@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import Select
 from sqlmodel import SQLModel, select
 
-from src.exceptions import NOT_FOUND
+from src.exceptions.domain import EntityNotFoundError
 
 ModelT = TypeVar("ModelT", bound=SQLModel)
 type FilterValueT = str | int | float
@@ -28,7 +28,7 @@ class BaseRepository[ModelT: SQLModel]:
         self.model_class = model_class
 
     async def get(self, id: Any) -> ModelT:
-        """Get entity by ID or raise NOT_FOUND.
+        """Get entity by ID or raise EntityNotFoundError.
 
         Args:
             id: Entity ID
@@ -37,11 +37,11 @@ class BaseRepository[ModelT: SQLModel]:
             Found entity
 
         Raises:
-            NOT_FOUND: If entity doesn't exist
+            EntityNotFoundError: If entity doesn't exist
         """
         entity = await self.session.get(self.model_class, id)
         if not entity:
-            raise NOT_FOUND.with_context(f"{self.model_class.__name__} with ID {id} not found")
+            raise EntityNotFoundError(f"{self.model_class.__name__} with ID {id} not found")
         return entity
 
     async def get_optional(self, id: Any) -> ModelT | None:
