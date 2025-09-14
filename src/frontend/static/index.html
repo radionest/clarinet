@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Clarinet - Medical Imaging Framework</title>
+    <link rel="stylesheet" href="/static/base.css">
+    <link rel="stylesheet" href="/static/custom/custom.css">
+    <style>
+        /* Initial loading styles */
+        #app {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+        }
+        .loading {
+            text-align: center;
+            color: #666;
+        }
+        .loading-spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #3498db;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <div class="loading">
+            <div class="loading-spinner"></div>
+            <p>Loading Clarinet...</p>
+        </div>
+    </div>
+
+    <!-- Preload module for Lustre -->
+    <script type="module">
+        import { main } from "/js/clarinet.mjs";
+
+        // Initialize the Lustre application
+        main();
+    </script>
+</body>
+</html>

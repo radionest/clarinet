@@ -7,6 +7,8 @@ Following KISS and YAGNI principles - minimal, practical implementation.
 import argparse
 import asyncio
 import json
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -107,6 +109,91 @@ async def init_database() -> None:
     logger.info("Database initialized successfully")
 
 
+def install_frontend() -> None:
+    """Install Gleam and frontend dependencies."""
+    # Check if Gleam is installed
+    try:
+        result = subprocess.run(["gleam", "--version"], check=True, capture_output=True, text=True)
+        logger.info(f"Gleam already installed: {result.stdout.strip()}")
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        logger.info("Installing Gleam...")
+        try:
+            # Install Gleam using official installation script
+            subprocess.run(["sh", "-c", "curl -fsSL https://gleam.run/install.sh | sh"], check=True)
+            logger.info("Gleam installed successfully")
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Failed to install Gleam: {e}")
+            sys.exit(1)
+
+    # Install frontend dependencies
+    frontend_path = Path("src/frontend")
+    if frontend_path.exists():
+        logger.info("Installing frontend dependencies...")
+        try:
+            subprocess.run(["gleam", "deps", "download"], cwd=frontend_path, check=True)
+            logger.info("Frontend dependencies installed successfully")
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Failed to install frontend dependencies: {e}")
+            sys.exit(1)
+    else:
+        logger.error(f"Frontend directory not found: {frontend_path}")
+        sys.exit(1)
+
+
+def build_frontend(watch: bool = False) -> None:
+    """Build the frontend application."""
+    frontend_path = Path("src/frontend")
+    if not frontend_path.exists():
+        logger.error(f"Frontend directory not found: {frontend_path}")
+        sys.exit(1)
+
+    try:
+        if watch:
+            logger.info("Starting frontend build in watch mode...")
+            subprocess.run(
+                ["gleam", "build", "--target", "javascript"], cwd=frontend_path, check=True
+            )
+            # Note: Gleam doesn't have a built-in watch mode, would need external tool
+            logger.info(
+                "Note: Gleam doesn't have built-in watch mode. Consider using entr or similar."
+            )
+        else:
+            logger.info("Building frontend...")
+            subprocess.run(
+                ["gleam", "build", "--target", "javascript"], cwd=frontend_path, check=True
+            )
+            logger.info("Frontend built successfully")
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Failed to build frontend: {e}")
+        sys.exit(1)
+
+
+def clean_frontend() -> None:
+    """Clean frontend build artifacts."""
+    frontend_path = Path("src/frontend")
+    build_dir = frontend_path / "build"
+
+    if build_dir.exists():
+        logger.info(f"Cleaning build directory: {build_dir}")
+        shutil.rmtree(build_dir)
+        logger.info("Frontend build artifacts cleaned")
+    else:
+        logger.info("No build artifacts to clean")
+
+
+def handle_frontend_command(args: argparse.Namespace) -> None:
+    """Handle frontend-related commands."""
+    if args.frontend_command == "install":
+        install_frontend()
+    elif args.frontend_command == "build":
+        build_frontend(watch=args.watch)
+    elif args.frontend_command == "clean":
+        clean_frontend()
+    else:
+        logger.error(f"Unknown frontend command: {args.frontend_command}")
+        sys.exit(1)
+
+
 def main() -> None:
     """Main CLI entry point."""
     parser = argparse.ArgumentParser(
@@ -141,6 +228,20 @@ def main() -> None:
     # init-migrations command
     subparsers.add_parser("init-migrations", help="Initialize Alembic migrations for the project")
 
+    # frontend command
+    frontend_parser = subparsers.add_parser("frontend", help="Frontend management commands")
+    frontend_subparsers = frontend_parser.add_subparsers(dest="frontend_command")
+
+    # frontend install
+    frontend_subparsers.add_parser("install", help="Install Gleam and frontend dependencies")
+
+    # frontend build
+    build_parser = frontend_subparsers.add_parser("build", help="Build frontend for production")
+    build_parser.add_argument("--watch", action="store_true", help="Watch for changes and rebuild")
+
+    # frontend clean
+    frontend_subparsers.add_parser("clean", help="Clean build artifacts")
+
     args = parser.parse_args()
 
     if args.command == "init":
@@ -156,6 +257,8 @@ def main() -> None:
         from src.utils.migrations import init_alembic_in_project
 
         init_alembic_in_project()
+    elif args.command == "frontend":
+        handle_frontend_command(args)
     else:
         parser.print_help()
         sys.exit(1)

@@ -1,0 +1,25 @@
+# Frontend-enabled configuration for Clarinet
+# Copy this to settings.toml to enable the frontend
+
+# Server settings
+port = 8000
+host = "127.0.0.1"
+debug = true
+
+# Database settings
+database_driver = "sqlite"
+database_name = "clarinet"
+
+# Storage settings
+storage_path = "./data"
+
+# Frontend settings - ENABLE FRONTEND
+frontend_enabled = true
+frontend_build_on_start = false
+frontend_dev_mode = true
+
+# Security (change in production!)
+secret_key = "change-this-secret-key-in-production"
+
+# Log settings
+log_level = "INFO"

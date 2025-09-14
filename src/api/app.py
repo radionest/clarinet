@@ -7,9 +7,11 @@ middleware, and static files.
 
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 # Use relative imports for development
@@ -91,12 +93,62 @@ def create_app(root_path: str = "/") -> FastAPI:
         name="static",
     )
 
-    # Include routers
-    app.include_router(auth.router)
-    app.include_router(user.router, prefix="/user", tags=["Users"])
-    app.include_router(task.router, prefix="/task", tags=["Tasks"])
-    app.include_router(study.router, prefix="/study", tags=["Studies"])
-    app.include_router(slicer.router, prefix="/slicer", tags=["Slicer"])
+    # Include routers with /api prefix for backend endpoints
+    app.include_router(auth.router, prefix="/api/auth")
+    app.include_router(user.router, prefix="/api/user", tags=["Users"])
+    app.include_router(task.router, prefix="/api/task", tags=["Tasks"])
+    app.include_router(study.router, prefix="/api/study", tags=["Studies"])
+    app.include_router(slicer.router, prefix="/api/slicer", tags=["Slicer"])
+
+    # Serve frontend if enabled
+    if settings.frontend_enabled:
+        frontend_path = Path(__file__).parent.parent / "frontend"
+        frontend_build = frontend_path / "build" / "dev" / "javascript"
+        frontend_static = frontend_path / "static"
+
+        # Mount JavaScript build files
+        if frontend_build.exists():
+            app.mount("/js", StaticFiles(directory=str(frontend_build)), name="frontend_js")
+            logger.info(f"Mounted frontend JavaScript from {frontend_build}")
+
+        # Mount frontend static files
+        if frontend_static.exists():
+            # Override /static mount for frontend
+            app.mount(
+                "/static", StaticFiles(directory=str(frontend_static)), name="frontend_static"
+            )
+            logger.info(f"Mounted frontend static files from {frontend_static}")
+
+        # Mount user custom static files with higher priority
+        if (
+            settings.project_path
+            and settings.project_static_path
+            and settings.project_static_path.exists()
+        ):
+            app.mount(
+                "/static/custom",
+                StaticFiles(directory=str(settings.project_static_path)),
+                name="custom_static",
+            )
+            logger.info(f"Mounted custom static files from {settings.project_static_path}")
+
+        # SPA fallback - all non-API routes serve index.html
+        @app.get("/{full_path:path}")
+        async def serve_spa(full_path: str) -> FileResponse:
+            """Serve the SPA for all non-API routes."""
+            # Skip API and static routes
+            if (
+                full_path.startswith("api/")
+                or full_path.startswith("static/")
+                or full_path.startswith("js/")
+            ):
+                return FileResponse(status_code=404, path=str(frontend_static / "404.html"))
+
+            index_file = frontend_static / "index.html"
+            if index_file.exists():
+                return FileResponse(str(index_file))
+
+            return FileResponse(status_code=404, path=str(frontend_static / "404.html"))
 
     return app
 

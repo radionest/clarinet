@@ -132,6 +132,15 @@ class Settings(BaseSettings):
     log_retention: str = "1 week"
     log_format: str | None = None  # Use default if None
 
+    # Frontend settings
+    frontend_enabled: bool = False
+    frontend_build_on_start: bool = False
+    frontend_dev_mode: bool = False
+
+    # Project customization
+    project_path: Path | None = None
+    project_static_path: Path | None = None
+
     @property
     def session_expire_seconds(self) -> int:
         """Get session expiration time in seconds."""
