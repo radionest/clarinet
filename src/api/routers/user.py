@@ -13,7 +13,7 @@ from src.api.dependencies import (
 )
 from src.models import User, UserRead, UserRole
 
-router = APIRouter(prefix="/users", tags=["users"])
+router = APIRouter(tags=["users"])
 
 
 # Authentication endpoints
@@ -32,6 +32,25 @@ async def get_my_roles(
 ) -> list[UserRole]:
     """Get roles for the current user."""
     return await service.get_user_roles(current_user.id)
+
+
+# Role management endpoints (must come before /{user_id} routes)
+@router.get("/roles/{role_name}", response_model=UserRole)
+async def get_role_details(
+    role_name: str,
+    service: UserServiceDep,
+) -> UserRole:
+    """Get role details by name."""
+    return await service.get_role(role_name)
+
+
+@router.post("/roles", response_model=UserRole, status_code=status.HTTP_201_CREATED)
+async def create_role(
+    new_role: UserRole,
+    service: UserServiceDep,
+) -> UserRole:
+    """Create a new role."""
+    return await service.create_role(name=new_role.name)
 
 
 # User CRUD endpoints
@@ -81,25 +100,6 @@ async def delete_user(
 ) -> None:
     """Delete a user by ID."""
     await service.delete_user(user_id)
-
-
-# Role management endpoints
-@router.get("/roles/{role_name}", response_model=UserRole)
-async def get_role_details(
-    role_name: str,
-    service: UserServiceDep,
-) -> UserRole:
-    """Get role details by name."""
-    return await service.get_role(role_name)
-
-
-@router.post("/roles", response_model=UserRole, status_code=status.HTTP_201_CREATED)
-async def create_role(
-    new_role: UserRole,
-    service: UserServiceDep,
-) -> UserRole:
-    """Create a new role."""
-    return await service.create_role(name=new_role.name)
 
 
 @router.get("/{user_id}/roles", response_model=list[UserRole])

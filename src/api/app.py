@@ -66,6 +66,12 @@ def create_app(root_path: str = "/") -> FastAPI:
     Returns:
         Configured FastAPI application
     """
+    # Import and rebuild models to resolve forward references
+    from src.models import SeriesRead, StudyRead, TaskRead
+
+    TaskRead.model_rebuild()
+    StudyRead.model_rebuild()
+    SeriesRead.model_rebuild()
     app = FastAPI(
         title="Clarinet",
         description="A Framework for Medical Image Analysis and Annotation",
@@ -98,10 +104,10 @@ def create_app(root_path: str = "/") -> FastAPI:
 
     # Include routers
     app.include_router(auth.router)
-    app.include_router(user.router, prefix="/user", tags=["Users"])
-    app.include_router(task.router, prefix="/task", tags=["Tasks"])
-    app.include_router(study.router, prefix="/study", tags=["Studies"])
-    app.include_router(slicer.router, prefix="/slicer", tags=["Slicer"])
+    app.include_router(user.router, prefix="/api/user", tags=["Users"])
+    app.include_router(task.router, prefix="/api/task", tags=["Tasks"])
+    app.include_router(study.router, prefix="/api/study", tags=["Studies"])
+    app.include_router(slicer.router, prefix="/api/slicer", tags=["Slicer"])
 
     return app
 

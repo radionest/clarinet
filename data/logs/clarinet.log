@@ -102,3 +102,179 @@
 2025-09-14 19:12:47.938 |                   INFO     |                   src.utils.logger:emit:40 -                   HTTP Request: GET http://test/api/nonexistent "HTTP/1.1 404 Not Found"
 2025-09-14 19:12:47.939 |                   INFO     |                   src.utils.logger:emit:40 -                   HTTP Request: GET http://test/user/me "HTTP/1.1 404 Not Found"
 2025-09-14 19:12:52.833 |                   INFO     |                   src.utils.logger:emit:40 -                   HTTP Request: POST http://test/auth/register "HTTP/1.1 404 Not Found"
+2025-09-14 19:40:43.871 |                   INFO     |                   src.cli.main:init_project:31 -                   Created directory: /home/nest/clarinet-feature/examples/test_front/tasks
+2025-09-14 19:40:43.871 |                   INFO     |                   src.cli.main:init_project:31 -                   Created directory: /home/nest/clarinet-feature/examples/test_front/static
+2025-09-14 19:40:43.871 |                   INFO     |                   src.cli.main:init_project:31 -                   Created directory: /home/nest/clarinet-feature/examples/test_front/data
+2025-09-14 19:40:43.872 |                   INFO     |                   src.cli.main:init_project:55 -                   Created settings file: /home/nest/clarinet-feature/examples/test_front/settings.toml
+2025-09-14 19:40:43.872 |                   INFO     |                   src.cli.main:init_project:67 -                   Created example task: /home/nest/clarinet-feature/examples/test_front/tasks/example.json
+2025-09-14 19:40:43.872 |                   INFO     |                   src.cli.main:init_project:77 -                   Created .env.example: /home/nest/clarinet-feature/examples/test_front/.env.example
+2025-09-14 19:40:43.872 |                   INFO     |                   src.cli.main:init_project:79 -                   Project initialized at /home/nest/clarinet-feature/examples/test_front
+2025-09-14 19:43:01.284 |                   INFO     |                   src.cli.main:run_server:89 -                   Starting Clarinet server at http://127.0.0.1:8000
+2025-09-14 19:43:01.683 |                   INFO     |                   src.utils.db_manager:create_db_and_tables_async:92 -                   Creating database tables (async)...
+2025-09-14 19:43:01.730 |                   INFO     |                   src.utils.db_manager:_create_async_engine:69 -                   Async database engine created: sqlite+aiosqlite:///clarinet.db
+2025-09-14 19:43:01.905 |                   INFO     |                   src.utils.db_manager:create_db_and_tables_async:95 -                   Database tables created (async)
+2025-09-14 19:43:01.905 |                   INFO     |                   src.api.app:lifespan:42 -                   Database initialized with async support
+2025-09-14 19:43:01.946 |                   INFO     |                   src.utils.bootstrap:add_default_user_roles:33 -                   Created role: doctor
+2025-09-14 19:43:01.961 |                   INFO     |                   src.utils.bootstrap:add_default_user_roles:33 -                   Created role: auto
+2025-09-14 19:43:01.977 |                   INFO     |                   src.utils.bootstrap:add_default_user_roles:33 -                   Created role: admin
+2025-09-14 19:43:01.994 |                   INFO     |                   src.utils.bootstrap:add_default_user_roles:33 -                   Created role: expert
+2025-09-14 19:43:02.010 |                   INFO     |                   src.utils.bootstrap:add_default_user_roles:33 -                   Created role: ordinator
+2025-09-14 19:43:02.011 |                   INFO     |                   src.utils.bootstrap:filter_task_schemas:117 -                   Task files found: example.json
+2025-09-14 19:43:02.011 |                   INFO     |                   src.utils.bootstrap:create_demo_task_designs_from_json:138 -                   Found task schemas: ['example']
+2025-09-14 19:43:02.012 |                   WARNING  |                   src.utils.bootstrap:create_demo_task_designs_from_json:158 -                   Cannot find schema for task example!
+2025-09-14 19:43:02.013 |                   INFO     |                   src.api.app:lifespan:48 -                   Application startup complete
+2025-09-14 19:47:51.762 |                   INFO     |                   src.utils.db_manager:close:150 -                   Async database engine disposed
+2025-09-14 19:47:51.762 |                   INFO     |                   src.api.app:lifespan:55 -                   Application shutdown
+2025-09-14 19:49:43.005 |                   INFO     |                   src.cli.main:init_project:31 -                   Created directory: /home/nest/clarinet/examples/tasks
+2025-09-14 19:49:43.005 |                   INFO     |                   src.cli.main:init_project:31 -                   Created directory: /home/nest/clarinet/examples/static
+2025-09-14 19:49:43.005 |                   INFO     |                   src.cli.main:init_project:31 -                   Created directory: /home/nest/clarinet/examples/data
+2025-09-14 19:49:43.005 |                   INFO     |                   src.cli.main:init_project:55 -                   Created settings file: /home/nest/clarinet/examples/settings.toml
+2025-09-14 19:49:43.005 |                   INFO     |                   src.cli.main:init_project:67 -                   Created example task: /home/nest/clarinet/examples/tasks/example.json
+2025-09-14 19:49:43.005 |                   INFO     |                   src.cli.main:init_project:77 -                   Created .env.example: /home/nest/clarinet/examples/.env.example
+2025-09-14 19:49:43.006 |                   INFO     |                   src.cli.main:init_project:79 -                   Project initialized at /home/nest/clarinet/examples
+2025-09-14 19:49:58.767 |                   INFO     |                   src.cli.main:run_server:89 -                   Starting Clarinet server at http://127.0.0.1:8000
+2025-09-14 19:49:59.169 |                   INFO     |                   src.utils.db_manager:create_db_and_tables_async:92 -                   Creating database tables (async)...
+2025-09-14 19:49:59.177 |                   INFO     |                   src.utils.db_manager:_create_async_engine:69 -                   Async database engine created: sqlite+aiosqlite:///clarinet.db
+2025-09-14 19:49:59.242 |                   INFO     |                   src.utils.db_manager:create_db_and_tables_async:95 -                   Database tables created (async)
+2025-09-14 19:49:59.242 |                   INFO     |                   src.api.app:lifespan:42 -                   Database initialized with async support
+2025-09-14 19:49:59.266 |                   INFO     |                   src.utils.bootstrap:add_default_user_roles:36 -                   Role already exists: doctor
+2025-09-14 19:49:59.267 |                   INFO     |                   src.utils.bootstrap:add_default_user_roles:36 -                   Role already exists: auto
+2025-09-14 19:49:59.268 |                   INFO     |                   src.utils.bootstrap:add_default_user_roles:36 -                   Role already exists: admin
+2025-09-14 19:49:59.269 |                   INFO     |                   src.utils.bootstrap:add_default_user_roles:36 -                   Role already exists: expert
+2025-09-14 19:49:59.270 |                   INFO     |                   src.utils.bootstrap:add_default_user_roles:36 -                   Role already exists: ordinator
+2025-09-14 19:49:59.271 |                   INFO     |                   src.utils.bootstrap:filter_task_schemas:117 -                   Task files found: example.json
+2025-09-14 19:49:59.271 |                   INFO     |                   src.utils.bootstrap:create_demo_task_designs_from_json:138 -                   Found task schemas: ['example']
+2025-09-14 19:49:59.273 |                   WARNING  |                   src.utils.bootstrap:create_demo_task_designs_from_json:158 -                   Cannot find schema for task example!
+2025-09-14 19:49:59.273 |                   INFO     |                   src.api.app:lifespan:48 -                   Application startup complete
+2025-09-14 19:58:31.876 |                   INFO     |                   src.utils.db_manager:close:150 -                   Async database engine disposed
+2025-09-14 19:58:31.876 |                   INFO     |                   src.api.app:lifespan:55 -                   Application shutdown
+2025-09-16 07:42:37.229 |                   INFO     |                   src.cli.main:run_server:89 -                   Starting Clarinet server at http://127.0.0.1:8000
+2025-09-16 07:42:37.710 |                   INFO     |                   src.utils.db_manager:create_db_and_tables_async:92 -                   Creating database tables (async)...
+2025-09-16 07:42:37.759 |                   INFO     |                   src.utils.db_manager:_create_async_engine:69 -                   Async database engine created: sqlite+aiosqlite:///clarinet.db
+2025-09-16 07:42:37.764 |                   INFO     |                   src.utils.db_manager:create_db_and_tables_async:95 -                   Database tables created (async)
+2025-09-16 07:42:37.765 |                   INFO     |                   src.api.app:lifespan:42 -                   Database initialized with async support
+2025-09-16 07:42:37.785 |                   INFO     |                   src.utils.bootstrap:add_default_user_roles:36 -                   Role already exists: doctor
+2025-09-16 07:42:37.786 |                   INFO     |                   src.utils.bootstrap:add_default_user_roles:36 -                   Role already exists: auto
+2025-09-16 07:42:37.786 |                   INFO     |                   src.utils.bootstrap:add_default_user_roles:36 -                   Role already exists: admin
+2025-09-16 07:42:37.787 |                   INFO     |                   src.utils.bootstrap:add_default_user_roles:36 -                   Role already exists: expert
+2025-09-16 07:42:37.788 |                   INFO     |                   src.utils.bootstrap:add_default_user_roles:36 -                   Role already exists: ordinator
+2025-09-16 07:42:37.789 |                   INFO     |                   src.utils.bootstrap:filter_task_schemas:117 -                   Task files found: example.json
+2025-09-16 07:42:37.789 |                   INFO     |                   src.utils.bootstrap:create_demo_task_designs_from_json:138 -                   Found task schemas: ['example']
+2025-09-16 07:42:37.791 |                   WARNING  |                   src.utils.bootstrap:create_demo_task_designs_from_json:158 -                   Cannot find schema for task example!
+2025-09-16 07:42:37.791 |                   INFO     |                   src.api.app:lifespan:48 -                   Application startup complete
+2025-09-16 07:48:06.874 |                   INFO     |                   src.utils.db_manager:close:150 -                   Async database engine disposed
+2025-09-16 07:48:06.874 |                   INFO     |                   src.api.app:lifespan:55 -                   Application shutdown
+2025-09-16 07:48:08.873 |                   INFO     |                   src.cli.main:run_server:89 -                   Starting Clarinet server at http://127.0.0.1:8000
+2025-09-16 07:48:09.279 |                   INFO     |                   src.utils.db_manager:create_db_and_tables_async:92 -                   Creating database tables (async)...
+2025-09-16 07:48:09.334 |                   INFO     |                   src.utils.db_manager:_create_async_engine:69 -                   Async database engine created: sqlite+aiosqlite:///clarinet.db
+2025-09-16 07:48:09.340 |                   INFO     |                   src.utils.db_manager:create_db_and_tables_async:95 -                   Database tables created (async)
+2025-09-16 07:48:09.340 |                   INFO     |                   src.api.app:lifespan:42 -                   Database initialized with async support
+2025-09-16 07:48:09.361 |                   INFO     |                   src.utils.bootstrap:add_default_user_roles:36 -                   Role already exists: doctor
+2025-09-16 07:48:09.362 |                   INFO     |                   src.utils.bootstrap:add_default_user_roles:36 -                   Role already exists: auto
+2025-09-16 07:48:09.363 |                   INFO     |                   src.utils.bootstrap:add_default_user_roles:36 -                   Role already exists: admin
+2025-09-16 07:48:09.364 |                   INFO     |                   src.utils.bootstrap:add_default_user_roles:36 -                   Role already exists: expert
+2025-09-16 07:48:09.365 |                   INFO     |                   src.utils.bootstrap:add_default_user_roles:36 -                   Role already exists: ordinator
+2025-09-16 07:48:09.366 |                   INFO     |                   src.utils.bootstrap:filter_task_schemas:117 -                   Task files found: example.json
+2025-09-16 07:48:09.366 |                   INFO     |                   src.utils.bootstrap:create_demo_task_designs_from_json:138 -                   Found task schemas: ['example']
+2025-09-16 07:48:09.368 |                   WARNING  |                   src.utils.bootstrap:create_demo_task_designs_from_json:158 -                   Cannot find schema for task example!
+2025-09-16 07:48:09.368 |                   INFO     |                   src.api.app:lifespan:48 -                   Application startup complete
+2025-09-16 08:07:24.308 |                   INFO     |                   src.utils.db_manager:close:150 -                   Async database engine disposed
+2025-09-16 08:07:24.309 |                   INFO     |                   src.api.app:lifespan:55 -                   Application shutdown
+2025-09-16 08:07:27.447 |                   INFO     |                   src.cli.main:run_server:89 -                   Starting Clarinet server at http://127.0.0.1:8000
+2025-09-16 08:07:28.445 |                   INFO     |                   src.utils.db_manager:create_db_and_tables_async:92 -                   Creating database tables (async)...
+2025-09-16 08:07:28.563 |                   INFO     |                   src.utils.db_manager:_create_async_engine:69 -                   Async database engine created: sqlite+aiosqlite:///clarinet.db
+2025-09-16 08:07:28.585 |                   INFO     |                   src.utils.db_manager:create_db_and_tables_async:95 -                   Database tables created (async)
+2025-09-16 08:07:28.585 |                   INFO     |                   src.api.app:lifespan:42 -                   Database initialized with async support
+2025-09-16 08:07:28.635 |                   INFO     |                   src.utils.bootstrap:add_default_user_roles:36 -                   Role already exists: doctor
+2025-09-16 08:07:28.638 |                   INFO     |                   src.utils.bootstrap:add_default_user_roles:36 -                   Role already exists: auto
+2025-09-16 08:07:28.640 |                   INFO     |                   src.utils.bootstrap:add_default_user_roles:36 -                   Role already exists: admin
+2025-09-16 08:07:28.643 |                   INFO     |                   src.utils.bootstrap:add_default_user_roles:36 -                   Role already exists: expert
+2025-09-16 08:07:28.645 |                   INFO     |                   src.utils.bootstrap:add_default_user_roles:36 -                   Role already exists: ordinator
+2025-09-16 08:07:28.647 |                   INFO     |                   src.utils.bootstrap:filter_task_schemas:117 -                   Task files found: example.json
+2025-09-16 08:07:28.647 |                   INFO     |                   src.utils.bootstrap:create_demo_task_designs_from_json:138 -                   Found task schemas: ['example']
+2025-09-16 08:07:28.649 |                   WARNING  |                   src.utils.bootstrap:create_demo_task_designs_from_json:158 -                   Cannot find schema for task example!
+2025-09-16 08:07:28.650 |                   INFO     |                   src.api.app:lifespan:48 -                   Application startup complete
+2025-09-16 08:07:34.771 |                   INFO     |                   src.utils.db_manager:close:150 -                   Async database engine disposed
+2025-09-16 08:07:34.771 |                   INFO     |                   src.api.app:lifespan:55 -                   Application shutdown
+2025-09-16 08:15:15.034 |                   INFO     |                   src.cli.main:run_server:89 -                   Starting Clarinet server at http://127.0.0.1:8000
+2025-09-16 08:15:15.918 |                   INFO     |                   src.utils.db_manager:create_db_and_tables_async:92 -                   Creating database tables (async)...
+2025-09-16 08:15:16.000 |                   INFO     |                   src.utils.db_manager:_create_async_engine:69 -                   Async database engine created: sqlite+aiosqlite:///clarinet.db
+2025-09-16 08:15:16.021 |                   INFO     |                   src.utils.db_manager:create_db_and_tables_async:95 -                   Database tables created (async)
+2025-09-16 08:15:16.021 |                   INFO     |                   src.api.app:lifespan:42 -                   Database initialized with async support
+2025-09-16 08:15:16.069 |                   INFO     |                   src.utils.bootstrap:add_default_user_roles:36 -                   Role already exists: doctor
+2025-09-16 08:15:16.072 |                   INFO     |                   src.utils.bootstrap:add_default_user_roles:36 -                   Role already exists: auto
+2025-09-16 08:15:16.074 |                   INFO     |                   src.utils.bootstrap:add_default_user_roles:36 -                   Role already exists: admin
+2025-09-16 08:15:16.076 |                   INFO     |                   src.utils.bootstrap:add_default_user_roles:36 -                   Role already exists: expert
+2025-09-16 08:15:16.078 |                   INFO     |                   src.utils.bootstrap:add_default_user_roles:36 -                   Role already exists: ordinator
+2025-09-16 08:15:16.080 |                   INFO     |                   src.utils.bootstrap:filter_task_schemas:117 -                   Task files found: example.json
+2025-09-16 08:15:16.080 |                   INFO     |                   src.utils.bootstrap:create_demo_task_designs_from_json:138 -                   Found task schemas: ['example']
+2025-09-16 08:15:16.082 |                   WARNING  |                   src.utils.bootstrap:create_demo_task_designs_from_json:158 -                   Cannot find schema for task example!
+2025-09-16 08:15:16.083 |                   INFO     |                   src.api.app:lifespan:48 -                   Application startup complete
+2025-09-16 08:41:11.770 |                   INFO     |                   src.utils.db_manager:close:150 -                   Async database engine disposed
+2025-09-16 08:41:11.771 |                   INFO     |                   src.api.app:lifespan:55 -                   Application shutdown
+2025-09-16 08:41:13.353 |                   INFO     |                   src.cli.main:run_server:89 -                   Starting Clarinet server at http://127.0.0.1:8000
+2025-09-16 08:41:14.243 |                   INFO     |                   src.utils.db_manager:create_db_and_tables_async:92 -                   Creating database tables (async)...
+2025-09-16 08:41:14.350 |                   INFO     |                   src.utils.db_manager:_create_async_engine:69 -                   Async database engine created: sqlite+aiosqlite:///clarinet.db
+2025-09-16 08:41:14.368 |                   INFO     |                   src.utils.db_manager:create_db_and_tables_async:95 -                   Database tables created (async)
+2025-09-16 08:41:14.368 |                   INFO     |                   src.api.app:lifespan:42 -                   Database initialized with async support
+2025-09-16 08:41:14.413 |                   INFO     |                   src.utils.bootstrap:add_default_user_roles:36 -                   Role already exists: doctor
+2025-09-16 08:41:14.416 |                   INFO     |                   src.utils.bootstrap:add_default_user_roles:36 -                   Role already exists: auto
+2025-09-16 08:41:14.418 |                   INFO     |                   src.utils.bootstrap:add_default_user_roles:36 -                   Role already exists: admin
+2025-09-16 08:41:14.420 |                   INFO     |                   src.utils.bootstrap:add_default_user_roles:36 -                   Role already exists: expert
+2025-09-16 08:41:14.422 |                   INFO     |                   src.utils.bootstrap:add_default_user_roles:36 -                   Role already exists: ordinator
+2025-09-16 08:41:14.423 |                   INFO     |                   src.utils.bootstrap:filter_task_schemas:117 -                   Task files found: example.json
+2025-09-16 08:41:14.423 |                   INFO     |                   src.utils.bootstrap:create_demo_task_designs_from_json:138 -                   Found task schemas: ['example']
+2025-09-16 08:41:14.426 |                   WARNING  |                   src.utils.bootstrap:create_demo_task_designs_from_json:158 -                   Cannot find schema for task example!
+2025-09-16 08:41:14.427 |                   INFO     |                   src.api.app:lifespan:48 -                   Application startup complete
+2025-09-16 12:01:19.122 |                   INFO     |                   src.utils.db_manager:close:150 -                   Async database engine disposed
+2025-09-16 12:01:19.123 |                   INFO     |                   src.api.app:lifespan:55 -                   Application shutdown
+2025-09-16 12:12:27.572 |                   INFO     |                   src.cli.main:run_server:89 -                   Starting Clarinet server at http://127.0.0.1:8000
+2025-09-16 12:12:28.002 |                   INFO     |                   src.utils.db_manager:create_db_and_tables_async:92 -                   Creating database tables (async)...
+2025-09-16 12:12:28.071 |                   INFO     |                   src.utils.db_manager:_create_async_engine:69 -                   Async database engine created: sqlite+aiosqlite:///clarinet.db
+2025-09-16 12:12:28.076 |                   INFO     |                   src.utils.db_manager:create_db_and_tables_async:95 -                   Database tables created (async)
+2025-09-16 12:12:28.077 |                   INFO     |                   src.api.app:lifespan:42 -                   Database initialized with async support
+2025-09-16 12:12:28.099 |                   INFO     |                   src.utils.bootstrap:add_default_user_roles:36 -                   Role already exists: doctor
+2025-09-16 12:12:28.101 |                   INFO     |                   src.utils.bootstrap:add_default_user_roles:36 -                   Role already exists: auto
+2025-09-16 12:12:28.102 |                   INFO     |                   src.utils.bootstrap:add_default_user_roles:36 -                   Role already exists: admin
+2025-09-16 12:12:28.103 |                   INFO     |                   src.utils.bootstrap:add_default_user_roles:36 -                   Role already exists: expert
+2025-09-16 12:12:28.104 |                   INFO     |                   src.utils.bootstrap:add_default_user_roles:36 -                   Role already exists: ordinator
+2025-09-16 12:12:28.105 |                   INFO     |                   src.utils.bootstrap:filter_task_schemas:117 -                   Task files found: example.json
+2025-09-16 12:12:28.105 |                   INFO     |                   src.utils.bootstrap:create_demo_task_designs_from_json:138 -                   Found task schemas: ['example']
+2025-09-16 12:12:28.106 |                   WARNING  |                   src.utils.bootstrap:create_demo_task_designs_from_json:158 -                   Cannot find schema for task example!
+2025-09-16 12:12:28.107 |                   INFO     |                   src.api.app:lifespan:48 -                   Application startup complete
+2025-09-16 12:18:13.430 |                   INFO     |                   src.utils.db_manager:close:150 -                   Async database engine disposed
+2025-09-16 12:18:13.430 |                   INFO     |                   src.api.app:lifespan:55 -                   Application shutdown
+2025-09-16 12:18:15.920 |                   INFO     |                   src.cli.main:run_server:89 -                   Starting Clarinet server at http://127.0.0.1:8000
+2025-09-16 12:18:40.011 |                   INFO     |                   src.cli.main:run_server:89 -                   Starting Clarinet server at http://127.0.0.1:8000
+2025-09-16 12:19:10.382 |                   INFO     |                   src.cli.main:run_server:89 -                   Starting Clarinet server at http://127.0.0.1:8000
+2025-09-16 12:19:10.935 |                   INFO     |                   src.utils.db_manager:create_db_and_tables_async:92 -                   Creating database tables (async)...
+2025-09-16 12:19:11.045 |                   INFO     |                   src.utils.db_manager:_create_async_engine:69 -                   Async database engine created: sqlite+aiosqlite:///clarinet.db
+2025-09-16 12:19:11.054 |                   INFO     |                   src.utils.db_manager:create_db_and_tables_async:95 -                   Database tables created (async)
+2025-09-16 12:19:11.054 |                   INFO     |                   src.api.app:lifespan:42 -                   Database initialized with async support
+2025-09-16 12:19:11.080 |                   INFO     |                   src.utils.bootstrap:add_default_user_roles:36 -                   Role already exists: doctor
+2025-09-16 12:19:11.082 |                   INFO     |                   src.utils.bootstrap:add_default_user_roles:36 -                   Role already exists: auto
+2025-09-16 12:19:11.082 |                   INFO     |                   src.utils.bootstrap:add_default_user_roles:36 -                   Role already exists: admin
+2025-09-16 12:19:11.083 |                   INFO     |                   src.utils.bootstrap:add_default_user_roles:36 -                   Role already exists: expert
+2025-09-16 12:19:11.084 |                   INFO     |                   src.utils.bootstrap:add_default_user_roles:36 -                   Role already exists: ordinator
+2025-09-16 12:19:11.085 |                   INFO     |                   src.utils.bootstrap:filter_task_schemas:117 -                   Task files found: example.json
+2025-09-16 12:19:11.085 |                   INFO     |                   src.utils.bootstrap:create_demo_task_designs_from_json:138 -                   Found task schemas: ['example']
+2025-09-16 12:19:11.087 |                   WARNING  |                   src.utils.bootstrap:create_demo_task_designs_from_json:158 -                   Cannot find schema for task example!
+2025-09-16 12:19:11.088 |                   INFO     |                   src.api.app:lifespan:48 -                   Application startup complete
+2025-09-16 12:20:08.163 |                   INFO     |                   src.utils.db_manager:close:150 -                   Async database engine disposed
+2025-09-16 12:20:08.163 |                   INFO     |                   src.api.app:lifespan:55 -                   Application shutdown
+2025-09-16 12:20:09.566 |                   INFO     |                   src.cli.main:run_server:89 -                   Starting Clarinet server at http://127.0.0.1:8000
+2025-09-16 12:20:10.022 |                   INFO     |                   src.utils.db_manager:create_db_and_tables_async:92 -                   Creating database tables (async)...
+2025-09-16 12:20:10.088 |                   INFO     |                   src.utils.db_manager:_create_async_engine:69 -                   Async database engine created: sqlite+aiosqlite:///clarinet.db
+2025-09-16 12:20:10.094 |                   INFO     |                   src.utils.db_manager:create_db_and_tables_async:95 -                   Database tables created (async)
+2025-09-16 12:20:10.095 |                   INFO     |                   src.api.app:lifespan:42 -                   Database initialized with async support
+2025-09-16 12:20:10.118 |                   INFO     |                   src.utils.bootstrap:add_default_user_roles:36 -                   Role already exists: doctor
+2025-09-16 12:20:10.120 |                   INFO     |                   src.utils.bootstrap:add_default_user_roles:36 -                   Role already exists: auto
+2025-09-16 12:20:10.121 |                   INFO     |                   src.utils.bootstrap:add_default_user_roles:36 -                   Role already exists: admin
+2025-09-16 12:20:10.121 |                   INFO     |                   src.utils.bootstrap:add_default_user_roles:36 -                   Role already exists: expert
+2025-09-16 12:20:10.122 |                   INFO     |                   src.utils.bootstrap:add_default_user_roles:36 -                   Role already exists: ordinator
+2025-09-16 12:20:10.123 |                   INFO     |                   src.utils.bootstrap:filter_task_schemas:117 -                   Task files found: example.json
+2025-09-16 12:20:10.123 |                   INFO     |                   src.utils.bootstrap:create_demo_task_designs_from_json:138 -                   Found task schemas: ['example']
+2025-09-16 12:20:10.124 |                   WARNING  |                   src.utils.bootstrap:create_demo_task_designs_from_json:158 -                   Cannot find schema for task example!
+2025-09-16 12:20:10.125 |                   INFO     |                   src.api.app:lifespan:48 -                   Application startup complete
+2025-09-16 12:51:54.239 |                   INFO     |                   src.utils.db_manager:close:150 -                   Async database engine disposed
+2025-09-16 12:51:54.239 |                   INFO     |                   src.api.app:lifespan:55 -                   Application shutdown

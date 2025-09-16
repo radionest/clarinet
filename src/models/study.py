@@ -5,7 +5,7 @@ This module provides models for medical imaging studies and series.
 """
 
 from datetime import date
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from pydantic import computed_field
 from sqlmodel import Field, Relationship
@@ -16,7 +16,7 @@ from .base import BaseModel, DicomUID
 from .patient import Patient, PatientBase
 
 if TYPE_CHECKING:
-    from .task import Task, TaskFind, TaskRead
+    from .task import Task, TaskFind
 
 
 class StudyBase(BaseModel):
@@ -82,7 +82,7 @@ class SeriesRead(SeriesBase):
     """Pydantic model for reading series data with related entities."""
 
     study: StudyRead
-    tasks: list["TaskRead"] = Field()
+    tasks: list[Any] = Field(default_factory=list)  # Will contain TaskRead objects
 
     def _format_path(self, unformated_path: str) -> str | None:
         """Format a path with values from this series."""
@@ -126,4 +126,4 @@ class SeriesFind(SeriesBase):
     series_number: int | None = None  # type: ignore
     anon_uid: str | None = None
     study_uid: str | None = None
-    tasks: list["TaskFind"] = Field()
+    tasks: list["TaskFind"] = Field(default_factory=list)  # Will contain TaskRead objects
