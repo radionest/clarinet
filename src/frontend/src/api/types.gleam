@@ -1,6 +1,5 @@
 // Core types for the API layer
 import gleam/option.{type Option}
-import gleam/json.{type Json}
 
 // API Configuration
 pub type ApiConfig {
@@ -34,13 +33,20 @@ pub type UserRole {
   Viewer
 }
 
-// Task status
+// Task status (matching backend TaskStatus enum)
 pub type TaskStatus {
-  Pending
-  Running
-  Completed
-  Failed
-  Cancelled
+  Pending      // pending in backend
+  InWork       // inwork in backend
+  Finished     // finished in backend
+  Failed       // failed in backend
+  Cancelled    // cancelled in backend
+}
+
+// DicomQueryLevel for TaskDesign
+pub type DicomQueryLevel {
+  Patient
+  Study
+  Series
 }
 
 // Generic response wrapper

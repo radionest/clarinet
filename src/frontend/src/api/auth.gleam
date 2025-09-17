@@ -1,10 +1,13 @@
 // Authentication API endpoints
 import gleam/json
+import gleam/dynamic
+import gleam/dynamic/decode
 import gleam/result
+import gleam/option.{type Option, None, Some}
 import gleam/javascript/promise.{type Promise}
 import api/client
 import api/types.{type ApiConfig, type ApiError}
-import api/models.{type LoginRequest, type LoginResponse, type RegisterRequest, type User}
+import api/models.{type LoginResponse, type RegisterRequest, type User}
 
 // Login endpoint
 pub fn login(
@@ -16,6 +19,7 @@ pub fn login(
     #("username", json.string(username)),
     #("password", json.string(password)),
   ])
+  |> json.to_string
 
   client.post(config, "/auth/login", body)
   |> promise.map(fn(result) {
@@ -25,7 +29,10 @@ pub fn login(
 
 // Logout endpoint
 pub fn logout(config: ApiConfig) -> Promise(Result(Nil, ApiError)) {
-  client.post(config, "/auth/logout", json.object([]))
+  let body = json.object([])
+  |> json.to_string
+
+  client.post(config, "/auth/logout", body)
   |> promise.map(fn(result) {
     result.map(result, fn(_) { Nil })
   })
@@ -53,6 +60,7 @@ pub fn register(
       None -> json.null()
     }),
   ])
+  |> json.to_string
 
   client.post(config, "/auth/register", body)
   |> promise.map(fn(result) {
@@ -62,82 +70,84 @@ pub fn register(
 
 // Refresh token
 pub fn refresh_token(config: ApiConfig) -> Promise(Result(LoginResponse, ApiError)) {
-  client.post(config, "/auth/refresh", json.object([]))
+  let body = json.object([])
+  |> json.to_string
+
+  client.post(config, "/auth/refresh", body)
   |> promise.map(fn(result) {
     result.try(result, decode_login_response)
   })
 }
 
-// Decode login response from JSON
-fn decode_login_response(data: json.Json) -> Result(LoginResponse, ApiError) {
-  // This is a simplified decoder - in production, use proper JSON decoding
-  case data {
-    json.Object(obj) -> {
-      case dict.get(obj, "access_token"), dict.get(obj, "user") {
-        Ok(json.String(token)), Ok(user_json) -> {
-          case decode_user(user_json) {
-            Ok(user) -> Ok(LoginResponse(
-              access_token: token,
-              token_type: "Bearer",
-              user: user,
-            ))
-            Error(e) -> Error(e)
-          }
-        }
-        _, _ -> Error(types.ParseError("Invalid login response"))
-      }
+// Decode login response from dynamic data
+fn decode_login_response(data: dynamic.Dynamic) -> Result(LoginResponse, ApiError) {
+  let decoder = {
+    use access_token <- decode.field("access_token", decode.string)
+    use token_type <- decode.optional_field("token_type", "Bearer", decode.string)
+    use user_data <- decode.field("user", decode.dynamic)
+
+    // Decode the nested user
+    case decode_user(user_data) {
+      Ok(user) ->
+        decode.success(models.LoginResponse(
+          access_token: access_token,
+          token_type: token_type,
+          user: user,
+        ))
+      Error(_e) -> decode.failure(
+        models.LoginResponse(access_token: "", token_type: "", user: models.User(
+          id: "",
+          username: "",
+          email: "",
+          hashed_password: None,
+          is_active: False,
+          is_superuser: False,
+          is_verified: False,
+          roles: None,
+          tasks: None,
+        )),
+        "Failed to decode user"
+      )
     }
-    _ -> Error(types.ParseError("Invalid login response"))
+  }
+
+  case decode.run(data, decoder) {
+    Ok(response) -> Ok(response)
+    Error(_) -> Error(types.ParseError("Invalid login response"))
   }
 }
 
-// Decode user from JSON
-fn decode_user(data: json.Json) -> Result(User, ApiError) {
-  // Simplified decoder - replace with proper JSON decoding
-  case data {
-    json.Object(obj) -> {
-      case dict.get(obj, "id"), dict.get(obj, "username"), dict.get(obj, "email") {
-        Ok(json.Number(id)), Ok(json.String(username)), Ok(json.String(email)) -> {
-          Ok(User(
-            id: float.round(id),
-            username: username,
-            email: email,
-            full_name: get_optional_string(obj, "full_name"),
-            role: decode_role(dict.get(obj, "role")),
-            is_active: get_bool(obj, "is_active", True),
-            created_at: get_optional_string(obj, "created_at"),
-            last_login: get_optional_string(obj, "last_login"),
-          ))
-        }
-        _, _, _ -> Error(types.ParseError("Invalid user data"))
-      }
-    }
-    _ -> Error(types.ParseError("Invalid user data"))
-  }
-}
+// Decode user from dynamic data
+fn decode_user(data: dynamic.Dynamic) -> Result(User, ApiError) {
+  let decoder = {
+    use id <- decode.field("id", decode.string)
+    use username <- decode.field("username", decode.string)
+    use email <- decode.field("email", decode.string)
+    use hashed_password <- decode.optional_field("hashed_password", None, decode.optional(decode.string))
+    use is_active <- decode.optional_field("is_active", True, decode.bool)
+    use is_superuser <- decode.optional_field("is_superuser", False, decode.bool)
+    use is_verified <- decode.optional_field("is_verified", False, decode.bool)
 
-// Helper to decode role
-fn decode_role(role_json: Result(json.Json, _)) -> models.UserRole {
-  case role_json {
-    Ok(json.String("admin")) -> models.Admin
-    Ok(json.String("viewer")) -> models.Viewer
-    _ -> models.User
-  }
-}
+    // For now, skip decoding complex nested types
+    let roles = None
+    let tasks = None
 
-// Helper to get optional string from JSON object
-fn get_optional_string(obj: dict.Dict(String, json.Json), key: String) -> option.Option(String) {
-  case dict.get(obj, key) {
-    Ok(json.String(s)) -> option.Some(s)
-    _ -> option.None
+    decode.success(models.User(
+      id: id,
+      username: username,
+      email: email,
+      hashed_password: hashed_password,
+      is_active: is_active,
+      is_superuser: is_superuser,
+      is_verified: is_verified,
+      roles: roles,
+      tasks: tasks,
+    ))
   }
-}
 
-// Helper to get boolean from JSON object with default
-fn get_bool(obj: dict.Dict(String, json.Json), key: String, default: Bool) -> Bool {
-  case dict.get(obj, key) {
-    Ok(json.Boolean(b)) -> b
-    _ -> default
+  case decode.run(data, decoder) {
+    Ok(user) -> Ok(user)
+    Error(_) -> Error(types.ParseError("Invalid user data"))
   }
 }
 
@@ -147,7 +157,7 @@ pub fn store_token(token: String) -> Nil
 
 // Get stored token from localStorage
 @external(javascript, "../ffi/http.js", "getStoredToken")
-pub fn get_stored_token() -> option.Option(String)
+pub fn get_stored_token() -> Option(String)
 
 // Clear token from localStorage
 @external(javascript, "../ffi/http.js", "clearToken")

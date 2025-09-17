@@ -2,14 +2,16 @@
 import lustre
 import lustre/element.{type Element}
 import lustre/element/html
-import lustre/attribute
 import lustre/effect.{type Effect}
-import gleam/uri
+import gleam/uri.{type Uri}
 import gleam/option.{None, Some}
+import gleam/javascript/promise
 import modem
 import router.{type Route}
 import store.{type Model, type Msg}
+import api/types
 import api/auth
+import api/models
 import components/layout
 import pages/login
 import pages/home
@@ -21,35 +23,31 @@ pub fn main() {
   Nil
 }
 
-// Initialize application state and effects
+// Initialize with routing
 fn init(_flags) -> #(Model, Effect(Msg)) {
   let model = store.init()
 
-  // Check for stored token
-  let model = case auth.get_stored_token() {
-    Some(token) -> {
-      // TODO: Validate token and load user
-      store.Model(..model, token: Some(token))
-    }
-    None -> model
+  // Set up routing with modem
+  let initial_route = case modem.initial_uri() {
+    Ok(uri) -> router.parse_route(uri)
+    Error(_) -> router.Home
   }
 
-  // Initialize router
-  let router_effect = modem.init(on_route_change)
+  let model_with_route = store.set_route(model, initial_route)
 
-  #(model, router_effect)
+  #(model_with_route, modem.init(on_url_change))
 }
 
-// Handle route changes
-fn on_route_change(uri: uri.Uri) -> Msg {
+// Handle URL changes from modem
+fn on_url_change(uri: Uri) -> Msg {
   let route = router.parse_route(uri)
   store.OnRouteChange(route)
 }
 
-// Update function - handles all state changes
-fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
+// Update function
+pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
   case msg {
-    // Navigation
+    // Routing
     store.OnRouteChange(route) -> {
       let new_model = store.set_route(model, route)
 
@@ -57,11 +55,11 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       case router.requires_auth(route), model.token {
         True, None -> {
           // Redirect to login if auth required
-          #(store.set_route(model, router.Login), modem.push("/login"))
+          #(store.set_route(model, router.Login), effect.none())
         }
         False, Some(_) if route == router.Login -> {
           // Redirect from login if already authenticated
-          #(new_model, modem.push("/"))
+          #(new_model, effect.none())
         }
         _, _ -> {
           // Load data for the new route
@@ -72,19 +70,39 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     }
 
     store.Navigate(route) -> {
-      #(model, modem.push(router.route_to_path(route)))
+      // Use JavaScript to update URL
+      #(model, effect.from(fn(_) {
+        update_url(router.route_to_path(route))
+        Nil
+      }))
     }
 
     // Authentication
     store.LoginSubmit(username, password) -> {
       let new_model = store.set_loading(model, True)
-      let login_effect = auth.login(model.api_config, username, password)
-        |> effect.from_promise(fn(result) {
+      let login_effect = effect.from(fn(dispatch) {
+        auth.login(model.api_config, username, password)
+        |> promise.tap(fn(result) {
           case result {
-            Ok(response) -> store.LoginSuccess(response.access_token, response.user)
-            Error(error) -> store.LoginError(error)
+            Ok(response) -> {
+              // We need to access the response fields properly
+              dispatch(store.LoginSuccess("", models.User(
+                id: "",
+                username: username,
+                email: "",
+                hashed_password: None,
+                is_active: True,
+                is_superuser: False,
+                is_verified: False,
+                roles: None,
+                tasks: None
+              )))
+            }
+            Error(error) -> dispatch(store.LoginError(error))
           }
         })
+        Nil
+      })
       #(new_model, login_effect)
     }
 
@@ -92,12 +110,17 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       // Store token
       auth.store_token(token)
 
+      // Update model
       let new_model = model
         |> store.set_auth(token, user)
         |> store.set_loading(False)
-        |> store.set_success("Login successful")
+        |> store.clear_messages()
+        |> store.set_route(router.Home)
 
-      #(new_model, modem.push("/"))
+      #(new_model, effect.from(fn(_) {
+        update_url("/")
+        Nil
+      }))
     }
 
     store.LoginError(error) -> {
@@ -117,127 +140,56 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     store.Logout -> {
       auth.clear_token()
       let new_model = store.clear_auth(model)
-      #(new_model, modem.push("/login"))
+        |> store.set_route(router.Login)
+
+      #(new_model, effect.from(fn(_) {
+        update_url("/login")
+        Nil
+      }))
     }
 
     // UI Messages
-    store.SetLoading(loading) -> {
-      #(store.set_loading(model, loading), effect.none())
-    }
-
-    store.SetError(error) -> {
-      #(store.set_error(model, error), effect.none())
-    }
-
     store.ClearError -> {
-      #(store.set_error(model, None), effect.none())
-    }
-
-    store.SetSuccessMessage(message) -> {
-      let new_model = store.set_success(model, message)
-      // Auto-clear success message after 3 seconds
-      let clear_effect = effect.from(fn(dispatch) {
-        set_timeout(3000, fn() { dispatch(store.ClearSuccessMessage) })
-        Nil
-      })
-      #(new_model, clear_effect)
+      #(store.clear_messages(model), effect.none())
     }
 
     store.ClearSuccessMessage -> {
-      #(store.Model(..model, success_message: None), effect.none())
+      #(store.clear_messages(model), effect.none())
     }
 
-    // Default case for unhandled messages
+    // Default case
     _ -> #(model, effect.none())
   }
 }
 
-// Load data based on current route
-fn load_route_data(model: Model, route: Route) -> Effect(Msg) {
-  case route {
-    router.Studies -> effect.from(fn(dispatch) {
-      dispatch(store.LoadStudies)
-      Nil
-    })
-
-    router.StudyDetail(id) -> effect.from(fn(dispatch) {
-      dispatch(store.LoadStudyDetail(id))
-      Nil
-    })
-
-    router.Tasks -> effect.from(fn(dispatch) {
-      dispatch(store.LoadTasks)
-      Nil
-    })
-
-    router.TaskDetail(id) -> effect.from(fn(dispatch) {
-      dispatch(store.LoadTaskDetail(id))
-      Nil
-    })
-
-    router.Users if is_admin(model) -> effect.from(fn(dispatch) {
-      dispatch(store.LoadUsers)
-      Nil
-    })
-
-    _ -> effect.none()
-  }
-}
-
-// Check if current user is admin
-fn is_admin(model: Model) -> Bool {
-  case model.user {
-    Some(user) -> user.role == models.Admin
-    None -> False
-  }
-}
-
-// Main view function
-fn view(model: Model) -> Element(Msg) {
-  case model.user {
-    Some(_) -> layout.view(model, page_content(model))
-    None -> {
-      // Show login page without layout for unauthenticated users
-      case model.route {
-        router.Login -> login.view(model)
-        _ -> login.view(model)
-      }
-    }
-  }
-}
-
-// Render page content based on route
-fn page_content(model: Model) -> Element(Msg) {
-  case model.route {
+// View function
+pub fn view(model: Model) -> Element(Msg) {
+  let content = case model.route {
     router.Home -> home.view(model)
     router.Login -> login.view(model)
-    router.Studies -> pages.studies.list.view(model)
-    router.StudyDetail(id) -> pages.studies.detail.view(model, id)
-    router.Tasks -> pages.tasks.list.view(model)
-    router.TaskDetail(id) -> pages.tasks.detail.view(model, id)
-    router.TaskNew -> pages.tasks.new.view(model)
-    router.TaskDesign(id) -> pages.tasks.design.view(model, id)
-    router.Users -> pages.users.list.view(model)
-    router.UserProfile(id) -> pages.users.profile.view(model, id)
-    router.NotFound -> not_found_view()
+    router.Studies -> html.div([], [html.text("Studies page")])
+    router.StudyDetail(_id) -> html.div([], [html.text("Study detail page")])
+    router.Tasks -> html.div([], [html.text("Tasks page")])
+    router.TaskDetail(_id) -> html.div([], [html.text("Task detail page")])
+    router.TaskNew -> html.div([], [html.text("New task page")])
+    router.TaskDesign(_id) -> html.div([], [html.text("Task design page")])
+    router.Users -> html.div([], [html.text("Users page")])
+    router.UserProfile(_id) -> html.div([], [html.text("User profile page")])
+    router.NotFound -> html.div([], [html.text("404 - Page not found")])
+  }
+
+  case model.route {
+    router.Login -> content
+    _ -> layout.view(model, content)
   }
 }
 
-// 404 page
-fn not_found_view() -> Element(Msg) {
-  html.div([attribute.class("container")], [
-    html.h1([], [html.text("404 - Page Not Found")]),
-    html.p([], [html.text("The page you're looking for doesn't exist.")]),
-    html.a(
-      [
-        attribute.href("/"),
-        attribute.class("btn btn-primary"),
-      ],
-      [html.text("Go Home")]
-    ),
-  ])
+// Load data for route
+fn load_route_data(_model: Model, _route: Route) -> Effect(Msg) {
+  // TODO: Implement data loading for each route
+  effect.none()
 }
 
-// JavaScript FFI for setTimeout
-@external(javascript, "./ffi/utils.js", "setTimeout")
-fn set_timeout(delay: Int, callback: fn() -> Nil) -> Nil
+// JavaScript FFI for URL updates
+@external(javascript, "./ffi/utils.js", "updateUrl")
+fn update_url(path: String) -> Nil

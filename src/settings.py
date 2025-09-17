@@ -134,8 +134,10 @@ class Settings(BaseSettings):
 
     # Frontend settings
     frontend_enabled: bool = False
-    frontend_build_on_start: bool = False
-    frontend_dev_mode: bool = False
+    frontend_build_on_start: bool = True
+    frontend_dev_mode: bool = True
+    frontend_auto_build: bool = True
+    frontend_watch: bool = True
 
     # Project customization
     project_path: Path | None = None

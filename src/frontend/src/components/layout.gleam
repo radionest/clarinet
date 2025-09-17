@@ -4,8 +4,10 @@ import lustre/element/html
 import lustre/attribute
 import lustre/event
 import gleam/option.{None, Some}
+import gleam/list
 import router
 import store.{type Model, type Msg}
+import api/models
 
 // Main layout view
 pub fn view(model: Model, content: Element(Msg)) -> Element(Msg) {
@@ -49,10 +51,7 @@ fn nav_link(route: router.Route, text: String, current_route: router.Route) -> E
     [
       attribute.href(router.route_to_path(route)),
       attribute.class(classes),
-      event.on_click(fn(_) {
-        event.prevent_default()
-        store.Navigate(route)
-      }),
+      event.on_click(store.Navigate(route)),
     ],
     [html.text(text)]
   )
@@ -67,7 +66,7 @@ fn user_menu(model: Model) -> Element(Msg) {
         html.button(
           [
             attribute.class("btn-logout"),
-            event.on_click(fn(_) { store.Logout }),
+            event.on_click(store.Logout),
           ],
           [html.text("Logout")]
         ),
@@ -98,7 +97,7 @@ fn error_notification(message: String) -> Element(Msg) {
     html.button(
       [
         attribute.class("notification-close"),
-        event.on_click(fn(_) { store.ClearError }),
+        event.on_click(store.ClearError),
       ],
       [html.text("×")]
     ),
@@ -112,7 +111,7 @@ fn success_notification(message: String) -> Element(Msg) {
     html.button(
       [
         attribute.class("notification-close"),
-        event.on_click(fn(_) { store.ClearSuccessMessage }),
+        event.on_click(store.ClearSuccessMessage),
       ],
       [html.text("×")]
     ),
@@ -133,7 +132,10 @@ fn footer() -> Element(Msg) {
 // Check if user is admin
 fn is_admin(model: Model) -> Bool {
   case model.user {
-    Some(user) -> user.role == models.Admin
+    Some(user) -> {
+      // Check if user is superuser or has admin role
+      user.is_superuser
+    }
     None -> False
   }
 }

@@ -3,12 +3,14 @@ import gleam/option.{type Option, None, Some}
 import gleam/dict.{type Dict}
 import gleam/json.{type Json}
 import gleam/result
+import gleam/int
+import gleam/dynamic
 import router.{type Route}
 import api/types.{type ApiConfig, type ApiError}
 import api/models.{
-  type User, type Study, type Task, type TaskDesign, type Patient,
-  type StudyForm, type TaskDesignForm, type PatientForm
+  type User, type Study, type Task, type TaskDesign, type Patient
 }
+import api/client
 
 // Application state model
 pub type Model {
@@ -34,9 +36,9 @@ pub type Model {
     users: Dict(String, User),
 
     // Form states
-    study_form: Option(StudyForm),
-    task_design_form: Option(TaskDesignForm),
-    patient_form: Option(PatientForm),
+    study_form: Option(dynamic.Dynamic),  // Will hold form data dynamically
+    task_design_form: Option(dynamic.Dynamic),
+    patient_form: Option(dynamic.Dynamic),
     form_errors: Dict(String, String),
 
     // List views
@@ -95,16 +97,16 @@ pub type Msg {
   UsersLoaded(Result(List(User), ApiError))
 
   // Form handling
-  UpdateStudyForm(StudyForm)
+  UpdateStudyForm(dynamic.Dynamic)
   SubmitStudyForm
   StudyFormSubmitted(Result(Study, ApiError))
 
-  UpdateTaskDesignForm(TaskDesignForm)
+  UpdateTaskDesignForm(dynamic.Dynamic)
   UpdateTaskDesignSchema(Json)
   SubmitTaskDesignForm
   TaskDesignFormSubmitted(Result(TaskDesign, ApiError))
 
-  UpdatePatientForm(PatientForm)
+  UpdatePatientForm(dynamic.Dynamic)
   SubmitPatientForm
   PatientFormSubmitted(Result(Patient, ApiError))
 
@@ -145,7 +147,7 @@ pub fn init() -> Model {
     route: router.Home,
     user: None,
     token: None,
-    api_config: api.client.create_client(get_base_url()),
+    api_config: client.create_client(get_base_url()),
     loading: False,
     error: None,
     success_message: None,
@@ -194,7 +196,7 @@ pub fn set_auth(model: Model, token: String, user: User) -> Model {
     ..model,
     token: Some(token),
     user: Some(user),
-    api_config: api.client.with_token(model.api_config, token),
+    api_config: client.with_token(model.api_config, token),
   )
 }
 
@@ -203,7 +205,7 @@ pub fn clear_auth(model: Model) -> Model {
     ..model,
     token: None,
     user: None,
-    api_config: api.client.create_client(get_base_url()),
+    api_config: client.create_client(get_base_url()),
   )
 }
 
@@ -225,13 +227,9 @@ pub fn clear_messages(model: Model) -> Model {
 
 // Cache helpers
 pub fn cache_study(model: Model, study: Study) -> Model {
-  case study.id {
-    Some(id) -> {
-      let studies = dict.insert(model.studies, int.to_string(id), study)
-      Model(..model, studies: studies)
-    }
-    None -> model
-  }
+  // Use study_uid as the key
+  let studies = dict.insert(model.studies, study.study_uid, study)
+  Model(..model, studies: studies)
 }
 
 pub fn cache_task(model: Model, task: Task) -> Model {
@@ -245,13 +243,9 @@ pub fn cache_task(model: Model, task: Task) -> Model {
 }
 
 pub fn cache_task_design(model: Model, design: TaskDesign) -> Model {
-  case design.id {
-    Some(id) -> {
-      let designs = dict.insert(model.task_designs, int.to_string(id), design)
-      Model(..model, task_designs: designs)
-    }
-    None -> model
-  }
+  // Use name as the key for TaskDesign
+  let designs = dict.insert(model.task_designs, design.name, design)
+  Model(..model, task_designs: designs)
 }
 
 // Form helpers

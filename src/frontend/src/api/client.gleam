@@ -2,21 +2,23 @@
 import gleam/http
 import gleam/http/request.{type Request}
 import gleam/http/response.{type Response}
-import gleam/json.{type Json}
+import gleam/json
+import gleam/dynamic
+import gleam/dynamic/decode
 import gleam/option.{type Option, None, Some}
-import gleam/result
+import gleam/list
 import gleam/string
 import gleam/javascript/promise.{type Promise}
-import api/types.{type ApiConfig, type ApiError, type ApiResponse}
+import api/types.{type ApiConfig, type ApiError}
 
 // Create a new API client configuration
 pub fn create_client(base_url: String) -> ApiConfig {
-  ApiConfig(base_url: base_url, token: None)
+  types.ApiConfig(base_url: base_url, token: None)
 }
 
 // Set authentication token
 pub fn with_token(config: ApiConfig, token: String) -> ApiConfig {
-  ApiConfig(..config, token: Some(token))
+  types.ApiConfig(..config, token: Some(token))
 }
 
 // Build request with authentication headers
@@ -24,7 +26,7 @@ fn build_request(
   config: ApiConfig,
   method: http.Method,
   path: String,
-  body: Option(Json),
+  body: Option(String),
 ) -> Request(String) {
   let url = config.base_url <> "/api" <> path
 
@@ -43,7 +45,7 @@ fn build_request(
 
   // Add body if present
   case body {
-    Some(json_body) -> request.set_body(req, json.to_string(json_body))
+    Some(json_body) -> request.set_body(req, json_body)
     None -> req
   }
 }
@@ -63,10 +65,11 @@ fn get_host(url: String) -> String {
 }
 
 // Handle API response
-fn handle_response(response: Response(String)) -> Result(Json, ApiError) {
+fn handle_response(response: Response(String)) -> Result(dynamic.Dynamic, ApiError) {
   case response.status {
     200 | 201 | 204 -> {
-      case json.decode(response.body) {
+      // Parse JSON string to dynamic
+      case json.parse(response.body, decode.dynamic) {
         Ok(data) -> Ok(data)
         Error(_) -> Error(types.ParseError("Failed to parse response"))
       }
@@ -74,7 +77,7 @@ fn handle_response(response: Response(String)) -> Result(Json, ApiError) {
     401 -> Error(types.AuthError("Unauthorized"))
     400 -> {
       // Try to parse validation errors
-      case json.decode(response.body) {
+      case json.parse(response.body, decode.dynamic) {
         Ok(_) -> Error(types.ValidationError([]))
         Error(_) -> Error(types.ServerError(400, "Bad Request"))
       }
@@ -87,7 +90,7 @@ fn handle_response(response: Response(String)) -> Result(Json, ApiError) {
 pub fn get(
   config: ApiConfig,
   path: String,
-) -> Promise(Result(Json, ApiError)) {
+) -> Promise(Result(dynamic.Dynamic, ApiError)) {
   let req = build_request(config, http.Get, path, None)
   fetch_request(req)
 }
@@ -96,8 +99,8 @@ pub fn get(
 pub fn post(
   config: ApiConfig,
   path: String,
-  body: Json,
-) -> Promise(Result(Json, ApiError)) {
+  body: String,
+) -> Promise(Result(dynamic.Dynamic, ApiError)) {
   let req = build_request(config, http.Post, path, Some(body))
   fetch_request(req)
 }
@@ -106,8 +109,8 @@ pub fn post(
 pub fn put(
   config: ApiConfig,
   path: String,
-  body: Json,
-) -> Promise(Result(Json, ApiError)) {
+  body: String,
+) -> Promise(Result(dynamic.Dynamic, ApiError)) {
   let req = build_request(config, http.Put, path, Some(body))
   fetch_request(req)
 }
@@ -116,14 +119,14 @@ pub fn put(
 pub fn delete(
   config: ApiConfig,
   path: String,
-) -> Promise(Result(Json, ApiError)) {
+) -> Promise(Result(dynamic.Dynamic, ApiError)) {
   let req = build_request(config, http.Delete, path, None)
   fetch_request(req)
 }
 
 // External JavaScript function for making HTTP requests
 @external(javascript, "../ffi/http.js", "fetchRequest")
-fn fetch_request(request: Request(String)) -> Promise(Result(Json, ApiError))
+fn fetch_request(request: Request(String)) -> Promise(Result(dynamic.Dynamic, ApiError))
 
 // Helper to build query parameters
 pub fn with_query_params(path: String, params: List(#(String, String))) -> String {

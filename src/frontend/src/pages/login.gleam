@@ -24,10 +24,7 @@ fn login_form(model: Model) -> Element(Msg) {
   html.form(
     [
       attribute.class("login-form"),
-      event.on_submit(fn(e) {
-        event.prevent_default(e)
-        handle_submit()
-      }),
+      event.on_submit(fn(_) { handle_submit() }),
     ],
     [
       // Username field

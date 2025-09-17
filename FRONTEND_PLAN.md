@@ -94,33 +94,6 @@ user_project/
 
 ### 2.1 Настройка Gleam проекта
 
-**gleam.toml:**
-
-```toml
-name = "clarinet_frontend"
-version = "1.0.0"
-target = "javascript"
-description = "Clarinet medical imaging framework frontend"
-
-[dependencies]
-lustre = "~> 4.2"
-lustre_http = "~> 1.2"
-lustre_ui = "~> 0.6"
-gleam_json = "~> 2.0"
-gleam_javascript = "~> 0.8"
-gleam_stdlib = "~> 0.38"
-modem = "~> 1.3"
-formosh = "~> 0.1"  # Для динамических форм Task.result
-gleam_fetch = "~> 0.4"  # Для загрузки схем
-
-[dev-dependencies]
-gleeunit = "~> 1.0"
-
-[javascript]
-entry_point = "clarinet.gleam"
-output = "build/dev/javascript/clarinet.mjs"
-```
-
 ### 2.2 API клиент
 
 **src/frontend/src/api/client.gleam:**
@@ -1177,11 +1150,8 @@ pub fn check_auth_middleware(model: Model, route: Route) -> Effect(Msg) {
 
 ### 4.4 Безопасность
 
-- JWT токены в localStorage
 - HTTPS only в production
 - CSP headers
-- XSS защита через Lustre
-- CSRF токены для форм
 
 ## 5. Зависимости
 

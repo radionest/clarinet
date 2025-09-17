@@ -10,3 +10,5 @@ pdm.lock
 __pycache__
 .hypothesis
 clarinet.db
+
+**/build/**
