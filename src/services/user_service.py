@@ -2,7 +2,12 @@
 
 from typing import Any
 
-from src.exceptions import CONFLICT, UNAUTHORIZED
+from src.exceptions.domain import (
+    InvalidCredentialsError,
+    RoleAlreadyExistsError,
+    UserAlreadyExistsError,
+    UserAlreadyHasRoleError,
+)
 from src.models import User, UserRole
 from src.repositories.user_repository import UserRepository, UserRoleRepository
 from src.utils.auth import get_password_hash, verify_password
@@ -31,7 +36,7 @@ class UserService:
             User object
 
         Raises:
-            NOT_FOUND: If user doesn't exist
+            EntityNotFoundError: If user doesn't exist
         """
         return await self.user_repo.get(user_id)
 
@@ -45,7 +50,7 @@ class UserService:
             User with roles
 
         Raises:
-            NOT_FOUND: If user doesn't exist
+            EntityNotFoundError: If user doesn't exist
         """
         return await self.user_repo.get_with_roles(user_id)
 
@@ -59,11 +64,11 @@ class UserService:
             Created user
 
         Raises:
-            CONFLICT: If user already exists
+            UserAlreadyExistsError: If user already exists
         """
         # Check if user exists
         if await self.user_repo.exists(id=user_data["id"]):
-            raise CONFLICT.with_context(f"User {user_data['id']} already exists")
+            raise UserAlreadyExistsError(user_data["id"])
 
         # Hash password if provided
         if "password" in user_data:
@@ -86,7 +91,7 @@ class UserService:
             Updated user
 
         Raises:
-            NOT_FOUND: If user doesn't exist
+            EntityNotFoundError: If user doesn't exist
         """
         user = await self.user_repo.get(user_id)
 
@@ -105,7 +110,7 @@ class UserService:
             user_id: User ID to delete
 
         Raises:
-            NOT_FOUND: If user doesn't exist
+            EntityNotFoundError: If user doesn't exist
         """
         user = await self.user_repo.get(user_id)
         await self.user_repo.delete(user)
@@ -121,7 +126,7 @@ class UserService:
             Authenticated user
 
         Raises:
-            UNAUTHORIZED: If authentication fails
+            InvalidCredentialsError: If authentication fails
         """
         # Try to get user by username (which is the ID in this case)
         user: User | None = None
@@ -132,7 +137,7 @@ class UserService:
             user = await self.user_repo.find_by_username(username)
 
         if user is None or not verify_password(password, user.hashed_password):
-            raise UNAUTHORIZED
+            raise InvalidCredentialsError()
 
         return user
 
@@ -159,7 +164,7 @@ class UserService:
             List of user roles
 
         Raises:
-            NOT_FOUND: If user doesn't exist
+            EntityNotFoundError: If user doesn't exist
         """
         user = await self.user_repo.get_with_roles(user_id)
         return user.roles
@@ -175,15 +180,15 @@ class UserService:
             Updated user with new role
 
         Raises:
-            NOT_FOUND: If user or role doesn't exist
-            CONFLICT: If user already has the role
+            EntityNotFoundError: If user or role doesn't exist
+            UserAlreadyHasRoleError: If user already has the role
         """
         user = await self.user_repo.get(user_id)
         role = await self.role_repo.get(role_name)
 
         # Check if already has role
         if await self.user_repo.has_role(user, role_name):
-            raise CONFLICT.with_context(f"User '{user_id}' already has role '{role_name}'")
+            raise UserAlreadyHasRoleError(user_id, role_name)
 
         return await self.user_repo.add_role(user, role)
 
@@ -198,45 +203,45 @@ class UserService:
             Updated user without the role
 
         Raises:
-            NOT_FOUND: If user or role doesn't exist
+            EntityNotFoundError: If user or role doesn't exist
         """
         user = await self.user_repo.get(user_id)
         role = await self.role_repo.get(role_name)
 
         return await self.user_repo.remove_role(user, role)
 
-    async def create_role(self, role_data: dict[str, Any]) -> UserRole:
+    async def create_role(self, name: str) -> UserRole:
         """Create new role.
 
         Args:
-            role_data: Role data dictionary
+            name: Role name string
 
         Returns:
             Created role
 
         Raises:
-            CONFLICT: If role already exists
+            RoleAlreadyExistsError: If role already exists
         """
         # Check if role exists
-        if await self.role_repo.exists(name=role_data["name"]):
-            raise CONFLICT.with_context(f"Role '{role_data['name']}' already exists")
+        if await self.role_repo.exists(name=name):
+            raise RoleAlreadyExistsError(name)
 
-        role = UserRole(**role_data)
+        role = UserRole(name=name)
         return await self.role_repo.create(role)
 
-    async def get_role(self, role_name: str) -> UserRole:
+    async def get_role(self, name: str) -> UserRole:
         """Get role by name.
 
         Args:
-            role_name: Role name
+            name: Role name
 
         Returns:
             Role object
 
         Raises:
-            NOT_FOUND: If role doesn't exist
+            EntityNotFoundError: If role doesn't exist
         """
-        return await self.role_repo.get(role_name)
+        return await self.role_repo.get(name)
 
     async def activate_user(self, user_id: str) -> User:
         """Activate user account.
@@ -248,7 +253,7 @@ class UserService:
             Activated user
 
         Raises:
-            NOT_FOUND: If user doesn't exist
+            EntityNotFoundError: If user doesn't exist
         """
         user = await self.user_repo.get(user_id)
         return await self.user_repo.activate(user)
@@ -263,7 +268,7 @@ class UserService:
             Deactivated user
 
         Raises:
-            NOT_FOUND: If user doesn't exist
+            EntityNotFoundError: If user doesn't exist
         """
         user = await self.user_repo.get(user_id)
         return await self.user_repo.deactivate(user)

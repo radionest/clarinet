@@ -3,7 +3,13 @@
 import random
 from typing import Any
 
-from src.exceptions import CONFLICT
+from src.exceptions.domain import (
+    AlreadyAnonymizedError,
+    AnonymizationFailedError,
+    PatientAlreadyExistsError,
+    SeriesAlreadyExistsError,
+    StudyAlreadyExistsError,
+)
 from src.models import Patient, Series, Study
 from src.models.study import SeriesFind
 from src.repositories.patient_repository import PatientRepository
@@ -79,7 +85,7 @@ class StudyService:
         """
         # Check if patient exists
         if await self.patient_repo.exists(id=patient_data["id"]):
-            raise CONFLICT.with_context(f"Patient with ID {patient_data['id']} already exists")
+            raise PatientAlreadyExistsError(patient_data["id"])
 
         patient = Patient(**patient_data)
         return await self.patient_repo.create(patient)
@@ -101,13 +107,13 @@ class StudyService:
 
         # Check if already anonymized
         if patient.anon_name is not None:
-            raise CONFLICT.with_context("Patient already has an anonymous name")
+            raise AlreadyAnonymizedError("Patient")
 
         # Generate anonymous name
         anon_name = await self._generate_anonymous_name(patient)
 
         if anon_name is None:
-            raise CONFLICT.with_context("Cannot find available name for anonymization")
+            raise AnonymizationFailedError("Cannot find available name")
 
         # Update patient with anonymous name
         return await self.patient_repo.update_anon_name(patient, anon_name)
@@ -197,7 +203,7 @@ class StudyService:
 
         # Check if study already exists
         if await self.study_repo.exists(study_uid=study_data["study_uid"]):
-            raise CONFLICT.with_context(f"Study with UID {study_data['study_uid']} already exists")
+            raise StudyAlreadyExistsError(study_data["study_uid"])
 
         study = Study(**study_data)
         study.patient = patient
@@ -277,9 +283,7 @@ class StudyService:
 
         # Check if series already exists
         if await self.series_repo.exists(series_uid=series_data["series_uid"]):
-            raise CONFLICT.with_context(
-                f"Series with UID {series_data['series_uid']} already exists"
-            )
+            raise SeriesAlreadyExistsError(series_data["series_uid"])
 
         series = Series(**series_data)
         series.study = study

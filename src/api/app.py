@@ -14,6 +14,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from src.api.exception_handlers import setup_exception_handlers
+
 # Use relative imports for development
 from src.api.routers import auth as auth
 from src.api.routers import slicer  # slicer doesn't use database, no async version needed,
@@ -66,6 +68,12 @@ def create_app(root_path: str = "/") -> FastAPI:
     Returns:
         Configured FastAPI application
     """
+    # Import and rebuild models to resolve forward references
+    from src.models import SeriesRead, StudyRead, TaskRead
+
+    TaskRead.model_rebuild()
+    StudyRead.model_rebuild()
+    SeriesRead.model_rebuild()
     app = FastAPI(
         title="Clarinet",
         description="A Framework for Medical Image Analysis and Annotation",
@@ -92,6 +100,9 @@ def create_app(root_path: str = "/") -> FastAPI:
         StaticFiles(directory=static_dir),
         name="static",
     )
+
+    # Setup exception handlers using decorators
+    setup_exception_handlers(app)
 
     # Include routers with /api prefix for backend endpoints
     app.include_router(auth.router, prefix="/api/auth")

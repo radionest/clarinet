@@ -19,7 +19,7 @@ from ..settings import settings
 from ..utils.logger import logger
 from .base import BaseModel, DicomQueryLevel, TaskStatus
 from .patient import Patient, PatientRead
-from .study import Series, SeriesBase, Study, StudyRead
+from .study import Series, SeriesBase, SeriesFind, Study, StudyRead
 from .user import User, UserRole
 
 
@@ -401,3 +401,6 @@ class TaskFind(SQLModel):
     result: TaskResult | None = None
     user_id: str | None = None
     is_absent: bool | None = None
+
+
+SeriesFind.model_rebuild()

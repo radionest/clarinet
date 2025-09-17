@@ -202,7 +202,7 @@ async def get_my_tasks(
     return result.scalars().all()
 
 
-@router.get("/my/pending", response_model=Sequence[TaskRead])
+@router.get("/my/pending", response_model=list[TaskRead])
 async def get_my_pending_tasks(
     user: User = Depends(current_active_user),
     session: AsyncSession = Depends(get_async_session),
