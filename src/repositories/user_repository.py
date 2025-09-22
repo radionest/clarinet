@@ -1,5 +1,7 @@
 """Repository for User-specific database operations."""
 
+from uuid import UUID
+
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 
@@ -14,7 +16,7 @@ class UserRepository(BaseRepository[User]):
         """Initialize user repository with session."""
         super().__init__(session, User)
 
-    async def get_with_roles(self, user_id: str) -> User:
+    async def get_with_roles(self, user_id: UUID) -> User:
         """Get user with roles loaded.
 
         Args:

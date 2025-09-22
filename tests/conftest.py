@@ -2,6 +2,7 @@
 
 import asyncio
 from collections.abc import AsyncGenerator, Generator
+from uuid import uuid4
 
 import pytest
 import pytest_asyncio
@@ -155,7 +156,7 @@ async def test_user(test_session):
     from src.utils.auth import get_password_hash
 
     user = User(
-        id="test_user",  # Username as ID
+        id=uuid4(),  # UUID as ID
         email="test@example.com",
         hashed_password=get_password_hash("testpassword"),
         is_active=True,
@@ -175,7 +176,7 @@ async def admin_user(test_session):
     from src.utils.auth import get_password_hash
 
     admin = User(
-        id="admin_user",  # Username as ID
+        id=uuid4(),  # UUID as ID
         email="admin@example.com",
         hashed_password=get_password_hash("adminpassword"),
         is_active=True,

@@ -3,8 +3,8 @@ Fastapi-users configuration for session-based authentication.
 Following KISS principle - minimal configuration.
 """
 
-import uuid
 from collections.abc import AsyncGenerator
+from uuid import UUID, uuid4
 
 from fastapi import Depends, Request, Response
 from fastapi_users import BaseUserManager, FastAPIUsers
@@ -13,7 +13,7 @@ from fastapi_users.authentication import (
     CookieTransport,
     Strategy,
 )
-from fastapi_users.exceptions import UserNotExists
+from fastapi_users_db_sqlmodel import SQLModelUserDatabaseAsync
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,21 +25,11 @@ from src.utils.logger import logger
 
 
 # Minimal UserManager
-class UserManager(BaseUserManager[User, str]):
+class UserManager(BaseUserManager[User, UUID]):
     """Minimal user manager - only necessary methods."""
 
     reset_password_token_secret = settings.secret_key
     verification_token_secret = settings.secret_key
-
-    async def get_by_email(self, user_email: str) -> User:
-        """Get user by email for authentication."""
-        user = await self.user_db.get_by_email(user_email)
-        if user is None:
-            raise UserNotExists()
-        # Type narrowing for mypy
-        if not isinstance(user, User):
-            raise UserNotExists()
-        return user
 
     async def on_after_register(
         self,
@@ -61,60 +51,21 @@ class UserManager(BaseUserManager[User, str]):
         logger.info(f"User {user.id} logged in.")
 
 
-class SQLModelUserDatabase:
-    """Custom user database adapter for SQLModel with string ID."""
-
-    def __init__(self, session: AsyncSession, user_model: type[User]) -> None:
-        self.session = session
-        self.user_model = user_model
-
-    async def get(self, id: str) -> User | None:
-        """Get user by ID."""
-        statement = select(self.user_model).where(self.user_model.id == id)  # type: ignore[arg-type]
-        results = await self.session.execute(statement)
-        return results.scalar_one_or_none()  # type: ignore[return-value]
-
-    async def get_by_email(self, email: str) -> User | None:
-        """Get user by email."""
-        statement = select(self.user_model).where(self.user_model.email == email)  # type: ignore[arg-type]
-        results = await self.session.execute(statement)
-        return results.scalar_one_or_none()  # type: ignore[return-value]
-
-    async def create(self, user_dict: dict) -> User:
-        """Create user."""
-        user = self.user_model(**user_dict)
-        self.session.add(user)
-        await self.session.commit()
-        await self.session.refresh(user)
-        return user
-
-    async def update(self, user: User, update_dict: dict) -> User:
-        """Update user."""
-        for key, value in update_dict.items():
-            setattr(user, key, value)
-        self.session.add(user)
-        await self.session.commit()
-        await self.session.refresh(user)
-        return user
-
-    async def delete(self, user: User) -> None:
-        """Delete user."""
-        await self.session.delete(user)
-        await self.session.commit()
+# No longer need custom SQLModelUserDatabase - use fastapi_users_db_sqlmodel instead
 
 
 async def get_user_db(
     session: AsyncSession = Depends(get_async_session),
-) -> AsyncGenerator[SQLModelUserDatabase, None]:
+) -> AsyncGenerator[SQLModelUserDatabaseAsync, None]:
     """Get user database."""
-    yield SQLModelUserDatabase(session, User)
+    yield SQLModelUserDatabaseAsync(session, User)
 
 
 async def get_user_manager(
-    user_db: SQLModelUserDatabase = Depends(get_user_db),
+    user_db: SQLModelUserDatabaseAsync = Depends(get_user_db),
 ) -> AsyncGenerator[UserManager, None]:
     """Get user manager."""
-    yield UserManager(user_db)  # type: ignore[arg-type]
+    yield UserManager(user_db)
 
 
 # Cookie transport configuration (KISS - only cookies, no tokens)
@@ -128,7 +79,7 @@ cookie_transport = CookieTransport(
 
 
 # Database session storage strategy
-class DatabaseStrategy(Strategy[User, str]):
+class DatabaseStrategy(Strategy[User, UUID]):
     """Simple database strategy for session storage."""
 
     def __init__(self, session: AsyncSession) -> None:
@@ -137,7 +88,7 @@ class DatabaseStrategy(Strategy[User, str]):
 
     async def write_token(self, user: User) -> str:
         """Create and store session token."""
-        token = str(uuid.uuid4())
+        token = str(uuid4())
 
         # Save to DB through AccessToken
         access_token = AccessToken(
@@ -150,7 +101,7 @@ class DatabaseStrategy(Strategy[User, str]):
         return token
 
     async def read_token(
-        self, token: str | None, user_manager: BaseUserManager[User, str]
+        self, token: str | None, user_manager: BaseUserManager[User, UUID]
     ) -> User | None:  # type: ignore[override]
         """Validate and read session token."""
         del user_manager  # Unused but required by interface
@@ -193,7 +144,7 @@ auth_backend = AuthenticationBackend(
 )
 
 # Create FastAPIUsers instance
-fastapi_users = FastAPIUsers[User, str](
+fastapi_users = FastAPIUsers[User, UUID](
     get_user_manager,
     [auth_backend],
 )

@@ -7,9 +7,11 @@ This module provides models for tasks, task types, and task results.
 from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
+from uuid import UUID
 
 from pydantic import computed_field, model_validator
-from sqlalchemy import Boolean, Float, Integer, String, event, func
+from sqlalchemy import Boolean, Float, ForeignKey, Integer, String, event, func
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlmodel import JSON, Column, Field, Relationship, SQLModel
 
 from src.types import ResultSchema, SlicerArgs, TaskResult
@@ -153,7 +155,7 @@ class TaskBase(BaseModel):
     study_uid: str | None
     series_uid: str | None = None
     task_design_id: str
-    user_id: str | None = None
+    user_id: UUID | None = None
     patient_id: str
 
     # Anon UIDs (used in working_folder)
@@ -333,7 +335,14 @@ class Task(TaskBase, table=True):
     task_design_id: str = Field(foreign_key="taskdesign.name")
     task_design: TaskDesign = Relationship(back_populates="tasks")
 
-    user_id: str | None = Field(default=None, foreign_key="user.id")
+    user_id: UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            PG_UUID(as_uuid=True),
+            ForeignKey("user.id"),
+            nullable=True,
+        ),
+    )
     user: User | None = Relationship(back_populates="tasks")
 
     result: TaskResult | None = Field(default_factory=dict, sa_column=Column(JSON))
@@ -399,7 +408,7 @@ class TaskFind(SQLModel):
     status: TaskStatus | None = None
     name: str
     result: TaskResult | None = None
-    user_id: str | None = None
+    user_id: UUID | None = None
     is_absent: bool | None = None
 
 

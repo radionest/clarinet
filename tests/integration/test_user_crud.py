@@ -1,5 +1,7 @@
 """CRUD operations tests for User."""
 
+from uuid import uuid4
+
 import pytest
 from httpx import AsyncClient
 from sqlmodel import select
@@ -11,8 +13,9 @@ from src.utils.auth import get_password_hash, verify_password
 @pytest.mark.asyncio
 async def test_create_user(test_session):
     """Test creating user."""
+    user_id = uuid4()
     user = User(
-        id="newuser",
+        id=user_id,
         email="newuser@example.com",
         hashed_password=get_password_hash("password123"),
         is_active=True,
@@ -23,7 +26,7 @@ async def test_create_user(test_session):
     await test_session.commit()
     await test_session.refresh(user)
 
-    assert user.id == "newuser"
+    assert user.id == user_id
     assert user.email == "newuser@example.com"
     assert user.is_active is True
     assert verify_password("password123", user.hashed_password)
@@ -60,8 +63,9 @@ async def test_update_user(test_session, test_user):
 async def test_delete_user(test_session):
     """Test deleting user."""
     # Create user for deletion
+    user_id = uuid4()
     user = User(
-        id="delete_user",
+        id=user_id,
         email="delete@example.com",
         hashed_password=get_password_hash("password"),
         is_active=True,
@@ -70,7 +74,6 @@ async def test_delete_user(test_session):
     )
     test_session.add(user)
     await test_session.commit()
-    user_id = user.id
 
     # Delete user
     await test_session.delete(user)
@@ -85,8 +88,9 @@ async def test_delete_user(test_session):
 async def test_user_with_roles(test_session):
     """Test creating user with roles."""
     # Create user
+    user_id = uuid4()
     user = User(
-        id="roleuser",
+        id=user_id,
         email="roleuser@example.com",
         hashed_password=get_password_hash("password"),
         is_active=True,
@@ -142,16 +146,18 @@ async def test_list_all_users(test_session, test_user, admin_user):
 
     assert len(users) >= 2  # Minimum test_user and admin_user
     user_ids = [u.id for u in users]
-    assert "test_user" in user_ids
-    assert "admin_user" in user_ids
+    assert test_user.id in user_ids
+    assert admin_user.id in user_ids
 
 
 @pytest.mark.asyncio
 async def test_filter_active_users(test_session):
     """Test filtering active users."""
     # Create active and inactive users
+    active_user_id = uuid4()
+    inactive_user_id = uuid4()
     active_user = User(
-        id="active_user",
+        id=active_user_id,
         email="active@example.com",
         hashed_password=get_password_hash("password"),
         is_active=True,
@@ -159,7 +165,7 @@ async def test_filter_active_users(test_session):
         is_superuser=False,
     )
     inactive_user = User(
-        id="inactive_user",
+        id=inactive_user_id,
         email="inactive@example.com",
         hashed_password=get_password_hash("password"),
         is_active=False,
@@ -177,8 +183,8 @@ async def test_filter_active_users(test_session):
     active_users = result.scalars().all()
 
     user_ids = [u.id for u in active_users]
-    assert "active_user" in user_ids
-    assert "inactive_user" not in user_ids
+    assert active_user_id in user_ids
+    assert inactive_user_id not in user_ids
 
 
 @pytest.mark.asyncio

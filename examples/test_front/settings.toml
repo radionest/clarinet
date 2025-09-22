@@ -5,9 +5,6 @@ port = 8000
 host = "127.0.0.1"
 debug = true
 
-# Frontend settings
-frontend_enabled = true
-
 # Database settings
 database_driver = "sqlite"
 database_name = "clarinet"

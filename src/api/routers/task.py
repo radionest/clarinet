@@ -6,6 +6,7 @@ This module provides async API endpoints for managing tasks, task types, and tas
 
 import random
 from collections.abc import Sequence
+from uuid import UUID
 
 from fastapi import (
     APIRouter,
@@ -333,7 +334,7 @@ async def update_task_status(
 @router.patch("/{task_id}/user", response_model=Task)
 async def assign_task_to_user(
     task_id: int,
-    user_id: str,
+    user_id: UUID,
     session: AsyncSession = Depends(get_async_session),
 ) -> Task:
     """Assign a task to a user."""
@@ -446,7 +447,7 @@ async def find_tasks(
     anon_series_uid: str | None = None,
     study_uid: str | None = None,
     anon_study_uid: str | None = None,
-    user_id: str | None = None,
+    user_id: UUID | None = None,
     task_name: str | None = None,
     task_status: TaskStatus | None = None,
     wo_user: bool | None = None,

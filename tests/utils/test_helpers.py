@@ -32,7 +32,7 @@ class UserFactory:
         unique_id = str(uuid.uuid4())[:8]
 
         user = User(
-            id=username or f"testuser_{unique_id}",
+            id=uuid.uuid4(),  # Use UUID instead of string
             email=email or f"test_{unique_id}@example.com",
             hashed_password=get_password_hash(password),
             is_active=is_active,
@@ -202,11 +202,11 @@ class TestDataGenerator:
         """Creates a complete test environment with users, tasks and studies."""
         # Create users
         regular_user = await UserFactory.create_user(
-            session, email="regular@test.com", username="regular_user"
+            session, email="regular@test.com"  # Remove username parameter
         )
 
         admin_user = await UserFactory.create_user(
-            session, email="admin@test.com", username="admin_user", roles=["admin"]
+            session, email="admin@test.com", roles=["admin"]  # Remove username parameter
         )
 
         # Create task types
@@ -294,7 +294,7 @@ async def assert_task_status(session: Session, task_id: int, expected_status: Ta
     assert task.status == expected_status, f"Expected status {expected_status}, got {task.status}"
 
 
-async def count_user_tasks(session: Session, user_id: int) -> int:
+async def count_user_tasks(session: Session, user_id) -> int:
     """Counts user tasks."""
     from sqlmodel import func, select
 

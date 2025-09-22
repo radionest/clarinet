@@ -1,6 +1,7 @@
 """Service layer for user business logic."""
 
 from typing import Any
+from uuid import UUID
 
 from src.exceptions.domain import (
     InvalidCredentialsError,
@@ -26,7 +27,7 @@ class UserService:
         self.user_repo = user_repo
         self.role_repo = role_repo
 
-    async def get_user(self, user_id: str) -> User:
+    async def get_user(self, user_id: UUID) -> User:
         """Get user by ID.
 
         Args:
@@ -40,7 +41,7 @@ class UserService:
         """
         return await self.user_repo.get(user_id)
 
-    async def get_user_with_roles(self, user_id: str) -> User:
+    async def get_user_with_roles(self, user_id: UUID) -> User:
         """Get user with roles loaded.
 
         Args:
@@ -80,7 +81,7 @@ class UserService:
         user = User(**user_data)
         return await self.user_repo.create(user)
 
-    async def update_user(self, user_id: str, update_data: dict[str, Any]) -> User:
+    async def update_user(self, user_id: UUID, update_data: dict[str, Any]) -> User:
         """Update user information.
 
         Args:
@@ -103,7 +104,7 @@ class UserService:
 
         return await self.user_repo.update(user, update_data)
 
-    async def delete_user(self, user_id: str) -> None:
+    async def delete_user(self, user_id: UUID) -> None:
         """Delete user.
 
         Args:
@@ -154,7 +155,7 @@ class UserService:
         users = await self.user_repo.get_all(skip=skip, limit=limit)
         return list(users)
 
-    async def get_user_roles(self, user_id: str) -> list[UserRole]:
+    async def get_user_roles(self, user_id: UUID) -> list[UserRole]:
         """Get roles for a user.
 
         Args:
@@ -169,7 +170,7 @@ class UserService:
         user = await self.user_repo.get_with_roles(user_id)
         return user.roles
 
-    async def assign_role(self, user_id: str, role_name: str) -> User:
+    async def assign_role(self, user_id: UUID, role_name: str) -> User:
         """Assign role to user.
 
         Args:
@@ -192,7 +193,7 @@ class UserService:
 
         return await self.user_repo.add_role(user, role)
 
-    async def remove_role(self, user_id: str, role_name: str) -> User:
+    async def remove_role(self, user_id: UUID, role_name: str) -> User:
         """Remove role from user.
 
         Args:
@@ -243,7 +244,7 @@ class UserService:
         """
         return await self.role_repo.get(name)
 
-    async def activate_user(self, user_id: str) -> User:
+    async def activate_user(self, user_id: UUID) -> User:
         """Activate user account.
 
         Args:
@@ -258,7 +259,7 @@ class UserService:
         user = await self.user_repo.get(user_id)
         return await self.user_repo.activate(user)
 
-    async def deactivate_user(self, user_id: str) -> User:
+    async def deactivate_user(self, user_id: UUID) -> User:
         """Deactivate user account.
 
         Args:

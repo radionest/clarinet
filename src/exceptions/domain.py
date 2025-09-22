@@ -6,6 +6,7 @@ business logic errors without coupling to HTTP status codes.
 """
 
 from typing import Self
+from uuid import UUID
 
 
 class ClarinetError(Exception):
@@ -65,7 +66,7 @@ class BusinessRuleViolationError(ClarinetError):
 class UserNotFoundError(EntityNotFoundError):
     """Raised when a user is not found."""
 
-    def __init__(self, user_id: str | None = None):
+    def __init__(self, user_id: UUID | None = None):
         if user_id:
             super().__init__(f"User with ID '{user_id}' not found")
         else:
@@ -75,7 +76,7 @@ class UserNotFoundError(EntityNotFoundError):
 class UserAlreadyExistsError(EntityAlreadyExistsError):
     """Raised when trying to create a user that already exists."""
 
-    def __init__(self, user_id: str):
+    def __init__(self, user_id: UUID):
         super().__init__(f"User with ID '{user_id}' already exists")
 
 
@@ -114,7 +115,7 @@ class RoleAlreadyExistsError(EntityAlreadyExistsError):
 class UserAlreadyHasRoleError(BusinessRuleViolationError):
     """Raised when trying to assign a role that user already has."""
 
-    def __init__(self, user_id: str, role_name: str):
+    def __init__(self, user_id: UUID, role_name: str):
         super().__init__(f"User '{user_id}' already has role '{role_name}'")
 
 
