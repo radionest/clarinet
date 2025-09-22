@@ -1,18 +1,19 @@
 // Task execution page with dynamic Formosh forms
-import lustre/element.{type Element}
-import lustre/element/html
-import lustre/attribute
-import lustre/event
-import gleam/option.{type Option, None, Some}
-import gleam/dict
-import gleam/json
-import gleam/int
 import api/models.{type Task, type TaskDesign, type User}
 import api/types.{type TaskStatus}
-import components/formosh_wrapper as formosh
+import gleam/dict
+import gleam/int
+import gleam/json
+import gleam/option.{type Option, None, Some}
+import lustre/attribute
+import lustre/element.{type Element}
+import lustre/element/html
+import lustre/event
+
+// import components/formosh_wrapper as formosh  // Temporarily disabled - needs fixing
+import router
 import schema/parser
 import store.{type Model, type Msg}
-import router
 
 // View function for task execution page
 pub fn view(model: Model, task_id: String) -> Element(Msg) {
@@ -40,14 +41,14 @@ fn render_task_execution(model: Model, task: Task) -> Element(Msg) {
         html.text(
           option.map(task.task_design, fn(d) { d.label })
           |> option.flatten
-          |> option.unwrap("Task")
+          |> option.unwrap("Task"),
         ),
       ]),
       html.p([attribute.class("task-description")], [
         html.text(
           option.map(task.task_design, fn(d) { d.description })
           |> option.flatten
-          |> option.unwrap("Complete the task form below")
+          |> option.unwrap("Complete the task form below"),
         ),
       ]),
       render_task_metadata(task),
@@ -92,51 +93,29 @@ fn render_dynamic_form(
           let can_edit = can_edit_task(task, model.user)
 
           // Get existing result data if any
-          let initial_data = option.map(task.result, fn(r) {
-            formosh.from_json_dict(r)
-          })
+          let initial_data =
+            option.map(task.result, fn(r) {
+              dict.new()
+              // formosh.from_json_dict(r) - TODO: Fix formosh wrapper
+            })
 
+          // TODO: Re-enable formosh form rendering when wrapper is fixed
           case can_edit {
             True -> {
-              // Editable form
-              formosh.with_header(
-                "Task Result Form",
-                Some("Fill out the form below to complete this task"),
-                formosh.render_task_form(
-                  schema,
-                  initial_data,
-                  fn(data) {
-                    // Convert FormoshData to Json for submission
-                    let json_data = formosh.to_json(data)
-                    case task.id {
-                      Some(id) -> store.SubmitTaskResult(int.to_string(id), json_data)
-                      None -> store.NoOp
-                    }
-                  },
-                  Some(fn(data) {
-                    let _json_data = formosh.to_json(data)
-                    // Just trigger a NoOp since UpdateTaskResult doesn't exist
-                    store.NoOp
-                  }),
-                  False,
+              // Editable form - temporarily disabled
+              html.div([attribute.class("alert alert-warning")], [
+                html.text(
+                  "Form rendering temporarily disabled - formosh wrapper needs fixing",
                 ),
-              )
+              ])
             }
             False -> {
               // Read-only view
               case initial_data {
-                Some(data) -> {
-                  formosh.with_header(
-                    "Task Result (Read Only)",
-                    Some("This task has been completed"),
-                    formosh.render_task_form(
-                      schema,
-                      Some(data),
-                      fn(_) { store.NoOp },
-                      None,
-                      True,  // read-only
-                    ),
-                  )
+                Some(_data) -> {
+                  html.div([attribute.class("alert alert-info")], [
+                    html.text("Task result viewing temporarily disabled"),
+                  ])
                 }
                 None -> {
                   html.div([attribute.class("no-result")], [
@@ -152,7 +131,7 @@ fn render_dynamic_form(
           html.div([attribute.class("schema-error")], [
             html.p([], [html.text("Error loading form schema")]),
             html.p([attribute.class("error-details")], [
-              html.text(parse_error_to_string(parse_error))
+              html.text(parse_error_to_string(parse_error)),
             ]),
           ])
         }
@@ -191,7 +170,8 @@ fn can_edit_task(task: Task, user: Option(User)) -> Bool {
         None -> False
       }
     }
-    _ -> False  // Cannot edit completed/failed tasks
+    _ -> False
+    // Cannot edit completed/failed tasks
   }
 }
 
@@ -203,6 +183,7 @@ fn render_task_status(status: TaskStatus) -> Element(Msg) {
     types.Finished -> #("badge-success", "Completed")
     types.Failed -> #("badge-danger", "Failed")
     types.Cancelled -> #("badge-secondary", "Cancelled")
+    types.Paused -> #("badge-paused", "Paused")
   }
 
   html.span([attribute.class("badge " <> class)], [html.text(text)])
@@ -218,37 +199,41 @@ fn render_task_metadata(task: Task) -> Element(Msg) {
 
       // Study UID
       case task.study_uid {
-        Some(uid) -> element.fragment([
-          html.dt([], [html.text("Study:")]),
-          html.dd([], [html.text(uid)]),
-        ])
+        Some(uid) ->
+          element.fragment([
+            html.dt([], [html.text("Study:")]),
+            html.dd([], [html.text(uid)]),
+          ])
         None -> element.none()
       },
 
       // Series UID
       case task.series_uid {
-        Some(uid) -> element.fragment([
-          html.dt([], [html.text("Series:")]),
-          html.dd([], [html.text(uid)]),
-        ])
+        Some(uid) ->
+          element.fragment([
+            html.dt([], [html.text("Series:")]),
+            html.dd([], [html.text(uid)]),
+          ])
         None -> element.none()
       },
 
       // Created date
       case task.created_at {
-        Some(date) -> element.fragment([
-          html.dt([], [html.text("Created:")]),
-          html.dd([], [html.text(date)]),
-        ])
+        Some(date) ->
+          element.fragment([
+            html.dt([], [html.text("Created:")]),
+            html.dd([], [html.text(date)]),
+          ])
         None -> element.none()
       },
 
       // Assigned user
       case task.user {
-        Some(user) -> element.fragment([
-          html.dt([], [html.text("Assigned to:")]),
-          html.dd([], [html.text(user.username)]),
-        ])
+        Some(user) ->
+          element.fragment([
+            html.dt([], [html.text("Assigned to:")]),
+            html.dd([], [html.text(user.username)]),
+          ])
         None -> element.none()
       },
     ]),

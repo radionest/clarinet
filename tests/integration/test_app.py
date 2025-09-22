@@ -56,7 +56,7 @@ async def test_api_docs_available(client: AsyncClient):
 async def test_cors_headers(client: AsyncClient):
     """Check CORS configuration."""
     response = await client.options(
-        "/auth/login",
+        "/api/auth/login",
         headers={
             "Origin": "http://localhost:3000",
             "Access-Control-Request-Method": "POST",
@@ -96,6 +96,6 @@ async def test_error_handling(client: AsyncClient):
 
     # Request without authorization to protected endpoint
     # Note: /user/me requires authorization
-    response = await client.get("/user/me")
+    response = await client.get("/api/user/me")
     # Should return 401 Unauthorized, but in tests may return 404 if route is not configured
     assert response.status_code in [401, 404]

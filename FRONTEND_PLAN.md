@@ -330,7 +330,6 @@ pub type Patient {
     name: String,
     birth_date: String,
     medical_record: String,
-    gender: Gender,
     notes: Option(String)
   )
 }

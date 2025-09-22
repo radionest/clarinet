@@ -20,7 +20,7 @@ The frontend provides a web-based user interface for:
 ## Project Structure
 
 ```
-src/frontend/
+frontend/
 ├── src/
 │   ├── api/              # API client and models
 │   │   ├── client.gleam  # HTTP client
@@ -41,14 +41,20 @@ src/frontend/
 │   ├── store.gleam      # Global state management
 │   ├── main.gleam       # Application entry
 │   └── clarinet.gleam   # Build entry point
-├── static/              # Static assets
+├── public/              # Static assets
 │   ├── index.html       # SPA entry
-│   ├── base.css        # Base styles
-│   └── 404.html        # Error page
-├── scripts/            # Build scripts
-│   ├── build.sh        # Production build
-│   └── watch.sh        # Development watch
-└── gleam.toml          # Gleam configuration
+│   └── css/            # Stylesheets
+├── build/              # Build artifacts (generated)
+├── gleam.toml          # Gleam configuration
+└── manifest.toml       # Dependencies
+
+../scripts/             # Build scripts (in project root)
+└── build_frontend.sh   # Production build script
+
+../dist/                # Production output (in project root)
+├── index.html
+├── js/                 # Compiled JavaScript
+└── css/                # Stylesheets
 ```
 
 ## Getting Started
@@ -63,22 +69,20 @@ src/frontend/
 
 1. Install Gleam and dependencies:
 ```bash
-# Using the CLI
-python -m clarinet frontend install
+# Navigate to frontend directory
+cd frontend
 
-# Or manually
-cd src/frontend
+# Install dependencies
 gleam deps download
 ```
 
 2. Build the frontend:
 ```bash
-# Using the CLI
-python -m clarinet frontend build
+# From project root
+make frontend-build
 
-# Or manually
-cd src/frontend
-./scripts/build.sh
+# Or using the script
+./scripts/build_frontend.sh
 ```
 
 ### Development
@@ -91,12 +95,15 @@ frontend_dev_mode = true
 
 2. Start the development server:
 ```bash
-# Start backend with frontend enabled
-python -m clarinet run
+# Start full stack development server
+make run-dev
 
-# In another terminal, watch for frontend changes
-cd src/frontend
-./scripts/watch.sh
+# Or start with CLI
+clarinet run --with-frontend
+
+# For frontend development only
+cd frontend
+gleam build --target javascript
 ```
 
 3. Access the application at http://localhost:8000

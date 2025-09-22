@@ -1,20 +1,16 @@
 // Static typed form for Patient model
-import lustre/element.{type Element}
-import lustre/element/html
-import lustre/attribute
-import gleam/option.{type Option, None, Some}
-import gleam/dict.{type Dict}
 import api/models.{type PatientCreate}
 import components/forms/base as form
+import gleam/dict.{type Dict}
+import gleam/option.{type Option, None, Some}
+import lustre/attribute
+import lustre/element.{type Element}
+import lustre/element/html
 import store.{type Msg}
 
 // Patient form data type for managing form state
 pub type PatientFormData {
-  PatientFormData(
-    id: String,
-    anon_id: String,
-    anon_name: String,
-  )
+  PatientFormData(id: String, anon_id: String, anon_name: String)
 }
 
 // Message types for form updates
@@ -42,11 +38,7 @@ pub fn to_patient_create(data: PatientFormData) -> PatientCreate {
 
 // Initialize empty form data
 pub fn init() -> PatientFormData {
-  PatientFormData(
-    id: "",
-    anon_id: "",
-    anon_name: "",
-  )
+  PatientFormData(id: "", anon_id: "", anon_name: "")
 }
 
 // Initialize form data from existing patient
@@ -120,7 +112,9 @@ pub fn view(
 }
 
 // Validate form data
-pub fn validate(data: PatientFormData) -> Result(PatientFormData, Dict(String, String)) {
+pub fn validate(
+  data: PatientFormData,
+) -> Result(PatientFormData, Dict(String, String)) {
   let errors = dict.new()
 
   // Validate Patient ID (required)
@@ -141,7 +135,8 @@ pub fn update(data: PatientFormData, msg: PatientFormMsg) -> PatientFormData {
     UpdatePatientId(value) -> PatientFormData(..data, id: value)
     UpdateAnonId(value) -> PatientFormData(..data, anon_id: value)
     UpdateAnonName(value) -> PatientFormData(..data, anon_name: value)
-    SubmitPatient -> data  // Submit is handled by parent component
+    SubmitPatient -> data
+    // Submit is handled by parent component
   }
 }
 

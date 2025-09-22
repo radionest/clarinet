@@ -52,18 +52,91 @@ Clarinet is a framework for conducting clinical-radiological studies, built on F
 - Avoid circular imports
 - Sort imports using ruff (includes isort functionality)
 
+## Frontend Development
+
+### Technology Stack
+
+- **Gleam**: Functional programming language with excellent type safety
+- **Lustre**: Elm-inspired web framework for Gleam
+- **Modem**: Client-side routing
+- **MVU Architecture**: Model-View-Update pattern for predictable state management
+
+### Frontend Structure
+
+The frontend can be located in two places:
+- `src/frontend/` - Embedded within the package (current default)
+- `frontend/` - Standalone at root level (for separation of concerns)
+
+```
+src/frontend/src/  OR  frontend/src/
+├── api/              # API client and models
+├── components/       # Reusable UI components
+├── pages/           # Application pages
+├── router.gleam     # Client-side routing
+├── store.gleam      # Global state management
+└── main.gleam       # Application entry
+```
+
+### Building Frontend
+
+1. **Development Build**:
+   ```bash
+   # For embedded frontend
+   cd src/frontend
+   gleam build --target javascript
+
+   # For standalone frontend
+   cd frontend
+   gleam build --target javascript
+   ```
+
+2. **Production Build**:
+   ```bash
+   make frontend-build
+   # Or directly:
+   ./scripts/build_frontend.sh
+   ```
+
+   The build script automatically detects the frontend location.
+
+3. **Output Structure**:
+   - Built files are placed in `dist/` directory
+   - FastAPI automatically serves these files when `frontend_enabled=True`
+   - Files are served from `/` with SPA routing support
+
+### Frontend Configuration
+
+- Frontend is enabled by default in `settings.py`
+- Set `frontend_enabled=False` to run API-only mode
+- Static files are served from `dist/` when available
+- Custom static files can be placed in `clarinet_custom/` directory
+
+### Authentication Architecture
+
+**Backend (FastAPI-users with session cookies):**
+- Sessions stored in database via `AccessToken` model
+- Cookies configured as httpOnly, secure (in production), and SameSite=lax
+- No JWT tokens - more secure than localStorage
+- Session expiry managed by `session_expire_seconds` setting
+
+**Frontend (Cookie-based auth):**
+- Authentication state tracked by user presence in store (not tokens)
+- HTTP requests automatically include cookies via gleam_fetch
+- No manual token management needed
+- Login/logout handled through cookie setting/clearing by server
+
 ## Best Practices
 
 ### Error Handling
 
 - Don't wrap large blocks of code in try-except
 - Try block should contain no more than two function calls
-- Use custom exceptions from `src.exceptions` (CONFLICT, NOT_FOUND)
+- Use custom exceptions from `src.exceptions.http` (CONFLICT, NOT_FOUND, etc.)
 - Always log errors before handling them
 - Avoid bare except - always specify the exception type
 
 ```python
-from src.exceptions import NOT_FOUND
+from src.exceptions.http import NOT_FOUND, CONFLICT
 from src.utils.logger import logger
 
 try:
@@ -101,7 +174,7 @@ logger.error(f"Failed to connect to database: {error}")
 - Use `Settings` class based on `pydantic_settings.BaseSettings`
 - Import settings: `from src.settings import settings`
 - Environment variables with `CLARINET_` prefix
-- Supports TOML files: `settings.toml` and `settings.custom.toml`
+- Supports TOML files: copy `settings.toml.example` to create your configuration
 - Validate configuration on startup
 
 ```python
@@ -138,68 +211,65 @@ Available type aliases:
 
 - Use SQLModel for models
 - Asynchronous operations through AsyncSession
-- Async CRUD operations in `src/utils/async_crud.py`
+- Repository pattern in `src/repositories/` for data access
 - Database manager in `src/utils/db_manager.py`
 
 ```python
 from sqlalchemy.ext.asyncio import AsyncSession
 from src.utils.database import get_async_session
-from src.utils.async_crud import add_item_async, get_item_async
+from src.repositories.user_repository import UserRepository
 
 async def create_user(
     user_data: UserCreate,
     session: AsyncSession = Depends(get_async_session)
 ):
+    user_repo = UserRepository(session)
     user = User(**user_data.model_dump())
-    return await add_item_async(user, session)
+    return await user_repo.add(user)
 ```
 
 ### Project Structure (Current)
 
 ```tree
-src/
-├── __init__.py
-├── __main__.py          # CLI entry point
-├── settings.py          # Application configuration
-├── exceptions.py        # Custom exceptions
-├── types.py             # Common type definitions
-├── api/                 # FastAPI application
+clarinet/
+├── src/                 # Backend source code
 │   ├── __init__.py
-│   ├── app.py          # Main application file
-│   ├── dependencies.py  # Dependencies (auth, etc)
-│   ├── security.py     # JWT and security
-│   └── routers/        # API endpoints
-│       ├── auth.py
-│       ├── study.py
-│       ├── task.py
-│       ├── user.py
-│       └── slicer.py
-├── cli/                 # CLI interface
-│   ├── __init__.py
-│   └── main.py
-├── models/              # SQLModel models
-│   ├── __init__.py
-│   ├── base.py         # Base models
-│   ├── user.py
-│   ├── study.py
-│   ├── task.py
-│   └── patient.py
-├── services/            # Business logic
-│   ├── dicom/          # DICOM processing
-│   ├── image/          # Image processing
-│   └── slicer/         # Slicer integration
-└── utils/               # Helper utilities
-    ├── __init__.py
-    ├── logger.py       # Loguru setup
-    ├── database.py     # Database connection
-    ├── db_manager.py   # Database management
-    ├── async_crud.py   # Async CRUD operations
-    ├── bootstrap.py    # Data initialization
-    ├── common.py       # Common utility functions
-    ├── migrations.py   # Migration helper functions
-    ├── slicer.py       # Slicer utilities
-    ├── study.py        # Study-related utilities
-    └── validation.py   # Validation utilities
+│   ├── __main__.py      # CLI entry point
+│   ├── settings.py      # Application configuration
+│   ├── exceptions/      # Custom exceptions module
+│   │   ├── domain.py   # Domain exceptions
+│   │   └── http.py     # HTTP exceptions
+│   ├── types.py         # Common type definitions
+│   ├── api/             # FastAPI application
+│   │   ├── app.py      # Main application file
+│   │   ├── routers/    # API endpoints
+│   │   └── ...
+│   ├── cli/             # CLI interface
+│   ├── models/          # SQLModel models
+│   ├── repositories/    # Repository pattern
+│   ├── services/        # Business logic
+│   ├── utils/           # Helper utilities
+│   └── frontend/        # Embedded Gleam/Lustre frontend
+│       ├── src/         # Gleam source code
+│       │   ├── api/     # API client
+│       │   ├── components/ # UI components
+│       │   ├── pages/   # Application pages
+│       │   └── main.gleam # Entry point
+│       ├── public/      # Public assets
+│       ├── static/      # Static HTML/CSS
+│       ├── build/       # Build artifacts (generated)
+│       └── gleam.toml   # Gleam configuration
+├── frontend/            # Standalone frontend (optional)
+│   └── [same structure as src/frontend]
+├── dist/                # Built frontend (generated)
+├── scripts/             # Build scripts
+│   └── build_frontend.sh
+├── tests/               # Test suite
+├── examples/            # Examples and templates
+├── data/                # Data storage
+├── .github/             # CI/CD workflows
+├── Makefile            # Build automation
+└── pyproject.toml      # Package configuration
 ```
 
 ### API Routers
@@ -251,16 +321,39 @@ async def test_create_user(async_client: AsyncClient):
     assert response.status_code == 201
 ```
 
+### Minimal FFI Usage
+
+The frontend is primarily written in pure Gleam with minimal JavaScript FFI:
+- Only `utils/router_ffi.js` for pushState (SPA routing)
+- All other functionality uses native Gleam libraries
+- HTTP requests via gleam_fetch (automatic cookie handling)
+- DOM manipulation via plinth
+- No custom JavaScript for authentication or data handling
+
 ### Development Commands
 
 ```bash
-# Run application
-uvicorn src.api.app:app --reload
+# Backend Development
+uvicorn src.api.app:app --reload  # Run API server
+clarinet run --with-frontend      # Run with frontend
+
+# Frontend Development
+cd frontend
+gleam deps download               # Install dependencies (includes gleam_fetch, plinth, formosh)
+gleam build --target javascript   # Build for browser with native Gleam libraries
+cd ..
+
+# Build Commands
+make frontend-build               # Build production frontend
+make frontend-clean               # Clean frontend artifacts
+make frontend-test                # Run frontend tests
+make run-dev                      # Run full stack development
+make build                        # Build entire package
 
 # Format code
 ruff format src/ tests/
 
-# Check code  
+# Check code
 ruff check src/ tests/ --fix
 mypy src/
 
@@ -272,7 +365,10 @@ pre-commit run --all-files  # Run all hooks manually
 pytest
 pytest --cov=src tests/
 
-# Database migrations (Alembic)
+# Database migrations (Alembic in user projects)
+# Initialize Alembic in your project first:
+# alembic init alembic
+# Then use these commands:
 alembic upgrade head  # Apply all migrations
 alembic revision --autogenerate -m "Description"  # Create migration from model changes
 alembic downgrade -1  # Rollback one migration
@@ -292,7 +388,7 @@ alembic history  # Show migration history
 - Never log sensitive data (passwords, tokens)
 - Validate all input data with Pydantic
 - Use parameterized queries (SQLModel does this automatically)
-- JWT tokens for authentication (src/api/security.py)
+- FastAPI-users for authentication (src/api/auth_config.py)
 - Password hashing with bcrypt
 - Rate limiting for API endpoints
 - CORS settings in src/api/app.py
@@ -333,8 +429,8 @@ async def process_task(
         TaskResult object if processing succeeded, None otherwise
         
     Raises:
-        NOT_FOUND: If task doesn't exist
-        CONFLICT: If task is already being processed
+        NOT_FOUND: If task doesn't exist (from src.exceptions.http)
+        CONFLICT: If task is already being processed (from src.exceptions.http)
     """
     # Implementation
     pass
@@ -353,71 +449,32 @@ async def process_task(
 - **Synchronous operations in async functions** - use async equivalents
 - **Bare except** - always specify exception type
 
-## Database Migrations (Alembic)
+## Database Migrations (Alembic Integration)
 
 ### Overview
 
-The project uses Alembic for database schema migrations with full async support for SQLModel.
+Clarinet provides utilities to simplify Alembic integration in your projects. As a framework, Clarinet doesn't include Alembic configuration directly, but offers helper functions to manage migrations in user projects.
 
-### Migration Workflow
+### Setting up Alembic in Your Project
 
-1. **Initial Setup** (Already configured):
-   - Alembic configuration in `alembic.ini`
-   - Migration environment in `alembic/env.py`
-   - Migrations directory in `alembic/versions/`
-
-2. **Creating Migrations**:
+1. **Initialize Alembic in your project**:
    ```bash
-   # Auto-generate migration from model changes
-   alembic revision --autogenerate -m "Add new field to User model"
-   
-   # Create empty migration for custom SQL
-   alembic revision -m "Custom migration description"
+   # In your project directory
+   alembic init alembic
    ```
 
-3. **Applying Migrations**:
-   ```bash
-   # Apply all pending migrations
-   alembic upgrade head
-   
-   # Apply specific migration
-   alembic upgrade +1  # Next migration
-   alembic upgrade <revision_id>
-   
-   # Apply migrations up to specific revision
-   alembic upgrade <revision_id>
-   ```
+2. **Configure Alembic for async SQLModel**:
+   Update your `alembic/env.py` to use Clarinet's models and async support.
 
-4. **Rolling Back**:
-   ```bash
-   # Rollback one migration
-   alembic downgrade -1
-   
-   # Rollback to specific revision
-   alembic downgrade <revision_id>
-   
-   # Rollback all migrations
-   alembic downgrade base
-   ```
-
-5. **Checking Status**:
-   ```bash
-   # Show current migration
-   alembic current
-   
-   # Show migration history
-   alembic history
-   
-   # Show pending migrations
-   alembic history --indicate-current
-   ```
+3. **Use Clarinet's migration utilities**:
+   The framework provides helper functions in `src/utils/migrations.py` to simplify common migration tasks.
 
 ### Migration Utilities
 
-Use the helper functions from `src.utils.migrations`:
+Clarinet provides helper functions in `src.utils.migrations` to manage Alembic in your projects:
 
 ```python
-from src.utils.migrations import (
+from clarinet.utils.migrations import (
     run_migrations,
     create_migration,
     get_current_revision,
@@ -425,7 +482,7 @@ from src.utils.migrations import (
     initialize_database
 )
 
-# Apply migrations programmatically
+# Apply migrations programmatically in your project
 await initialize_database()  # Check and apply pending migrations
 
 # Create new migration
@@ -435,6 +492,28 @@ create_migration("Add user preferences table", autogenerate=True)
 current = get_current_revision()
 pending = get_pending_migrations()
 ```
+
+### Using Alembic in Your Project
+
+When creating a project with Clarinet:
+
+1. **Initialize Alembic**:
+   ```bash
+   alembic init alembic
+   ```
+
+2. **Configure `alembic/env.py`** to import Clarinet models:
+   ```python
+   from clarinet.models import *  # Import all Clarinet models
+   # Your project models
+   from myproject.models import *
+   ```
+
+3. **Create migrations**:
+   ```bash
+   alembic revision --autogenerate -m "Initial migration"
+   alembic upgrade head
+   ```
 
 ### Best Practices
 
@@ -448,7 +527,7 @@ pending = get_pending_migrations()
 
 ### Troubleshooting
 
-- **Import errors**: Ensure all models are imported in `alembic/env.py`
+- **Import errors**: Ensure all Clarinet and project models are imported in `alembic/env.py`
 - **Missing tables**: Run `alembic upgrade head` to apply migrations
 - **Duplicate migrations**: Check `alembic_version` table and history
 - **Failed migration**: Use `alembic downgrade -1` to rollback

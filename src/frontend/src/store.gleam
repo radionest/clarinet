@@ -1,60 +1,51 @@
 // Global state management
-import gleam/option.{type Option, None, Some}
-import gleam/dict.{type Dict}
-import gleam/json.{type Json}
-import gleam/result
-import gleam/int
-import gleam/dynamic
-import router.{type Route}
-import api/types.{type ApiConfig, type ApiError}
 import api/models.{
-  type User, type Study, type Task, type TaskDesign, type Patient
+  type Patient, type Study, type Task, type TaskDesign, type User,
 }
-import api/client
+import api/types.{type ApiError}
+import gleam/dict.{type Dict}
+import gleam/dynamic
+import gleam/int
+import gleam/json.{type Json}
+import gleam/option.{type Option, None, Some}
+import gleam/result
+import router.{type Route}
+import utils/dom
 
 // Application state model
 pub type Model {
   Model(
     // Navigation
     route: Route,
-
-    // Authentication
+    // Authentication (using cookie-based auth)
     user: Option(User),
-    token: Option(String),
-    api_config: ApiConfig,
-
     // UI State
     loading: Bool,
     error: Option(String),
     success_message: Option(String),
-
     // Data caches
     studies: Dict(String, Study),
     tasks: Dict(String, Task),
     task_designs: Dict(String, TaskDesign),
     patients: Dict(String, Patient),
     users: Dict(String, User),
-
     // Form states
-    study_form: Option(dynamic.Dynamic),  // Will hold form data dynamically
+    study_form: Option(dynamic.Dynamic),
+    // Will hold form data dynamically
     task_design_form: Option(dynamic.Dynamic),
     patient_form: Option(dynamic.Dynamic),
     form_errors: Dict(String, String),
-
     // List views
     studies_list: List(Study),
     tasks_list: List(Task),
     users_list: List(User),
-
     // Pagination
     current_page: Int,
     items_per_page: Int,
     total_items: Int,
-
     // Filters
     search_query: String,
     active_filters: Dict(String, String),
-
     // Modal state
     modal_open: Bool,
     modal_content: ModalContent,
@@ -77,8 +68,11 @@ pub type Msg {
 
   // Authentication
   LoginSubmit(username: String, password: String)
-  LoginSuccess(token: String, user: User)
+  LoginSuccess(user: User)
   LoginError(ApiError)
+  RegisterSubmit(username: String, email: String, password: String)
+  RegisterSuccess(user: User)
+  RegisterError(ApiError)
   Logout
   LogoutComplete
 
@@ -146,8 +140,6 @@ pub fn init() -> Model {
   Model(
     route: router.Home,
     user: None,
-    token: None,
-    api_config: client.create_client(get_base_url()),
     loading: False,
     error: None,
     success_message: None,
@@ -173,40 +165,17 @@ pub fn init() -> Model {
   )
 }
 
-// Get base URL from environment
-fn get_base_url() -> String {
-  // In production, this would come from environment config
-  case is_development() {
-    True -> "http://localhost:8000"
-    False -> ""  // Use same origin in production
-  }
-}
-
-// Check if in development mode
-@external(javascript, "./ffi/utils.js", "isDevelopment")
-fn is_development() -> Bool
-
 // State update helpers
 pub fn set_route(model: Model, route: Route) -> Model {
   Model(..model, route: route)
 }
 
-pub fn set_auth(model: Model, token: String, user: User) -> Model {
-  Model(
-    ..model,
-    token: Some(token),
-    user: Some(user),
-    api_config: client.with_token(model.api_config, token),
-  )
+pub fn set_user(model: Model, user: User) -> Model {
+  Model(..model, user: Some(user))
 }
 
-pub fn clear_auth(model: Model) -> Model {
-  Model(
-    ..model,
-    token: None,
-    user: None,
-    api_config: client.create_client(get_base_url()),
-  )
+pub fn clear_user(model: Model) -> Model {
+  Model(..model, user: None)
 }
 
 pub fn set_loading(model: Model, loading: Bool) -> Model {

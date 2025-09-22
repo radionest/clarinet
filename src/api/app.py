@@ -7,12 +7,10 @@ middleware, and static files.
 
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
-from fastapi.staticfiles import StaticFiles
 
 from src.api.exception_handlers import setup_exception_handlers
 
@@ -93,13 +91,8 @@ def create_app(root_path: str = "/") -> FastAPI:
         allow_headers=["*"],
     )
 
-    # Mount static files
-    static_dir = settings.get_static_dir()
-    app.mount(
-        "/static",
-        StaticFiles(directory=static_dir),
-        name="static",
-    )
+    # Mount static files only if frontend is enabled
+    # No static files when frontend is disabled
 
     # Setup exception handlers using decorators
     setup_exception_handlers(app)
@@ -113,53 +106,54 @@ def create_app(root_path: str = "/") -> FastAPI:
 
     # Serve frontend if enabled
     if settings.frontend_enabled:
-        frontend_path = Path(__file__).parent.parent / "frontend"
-        frontend_build = frontend_path / "build" / "dev" / "javascript"
-        frontend_static = frontend_path / "static"
+        # Find first existing static directory
+        static_dir = None
+        for dir_path in settings.static_directories:
+            if dir_path.exists():
+                static_dir = dir_path
+                logger.info(f"Using static files from {static_dir}")
+                break
+            else:
+                logger.debug(f"Static directory {dir_path} does not exist")
 
-        # Mount JavaScript build files
-        if frontend_build.exists():
-            app.mount("/js", StaticFiles(directory=str(frontend_build)), name="frontend_js")
-            logger.info(f"Mounted frontend JavaScript from {frontend_build}")
-
-        # Mount frontend static files
-        if frontend_static.exists():
-            # Override /static mount for frontend
-            app.mount(
-                "/static", StaticFiles(directory=str(frontend_static)), name="frontend_static"
+        if not static_dir:
+            logger.warning(
+                "No static directories found. Run 'make frontend-build' to build the frontend."
             )
-            logger.info(f"Mounted frontend static files from {frontend_static}")
 
-        # Mount user custom static files with higher priority
-        if (
-            settings.project_path
-            and settings.project_static_path
-            and settings.project_static_path.exists()
-        ):
-            app.mount(
-                "/static/custom",
-                StaticFiles(directory=str(settings.project_static_path)),
-                name="custom_static",
-            )
-            logger.info(f"Mounted custom static files from {settings.project_static_path}")
-
-        # SPA fallback - all non-API routes serve index.html
+        # Serve index.html for all non-API routes (SPA support)
         @app.get("/{full_path:path}")
         async def serve_spa(full_path: str) -> FileResponse:
-            """Serve the SPA for all non-API routes."""
-            # Skip API and static routes
-            if (
-                full_path.startswith("api/")
-                or full_path.startswith("static/")
-                or full_path.startswith("js/")
-            ):
-                return FileResponse(status_code=404, path=str(frontend_static / "404.html"))
+            """Serve SPA for all non-API routes."""
+            # Skip API routes
+            if full_path.startswith("api/"):
+                from fastapi import HTTPException
 
-            index_file = frontend_static / "index.html"
-            if index_file.exists():
-                return FileResponse(str(index_file))
+                raise HTTPException(status_code=404, detail="API endpoint not found")
 
-            return FileResponse(status_code=404, path=str(frontend_static / "404.html"))
+            # Check if static directory exists
+            if not static_dir:
+                from fastapi import HTTPException
+
+                raise HTTPException(
+                    status_code=404,
+                    detail="Frontend not built. Run 'make frontend-build' to build the frontend.",
+                )
+
+            # Try to serve the requested file first
+            requested_file = static_dir / full_path
+            if requested_file.exists() and requested_file.is_file():
+                return FileResponse(requested_file)
+
+            # Serve index.html for all other routes (SPA routing)
+            index_path = static_dir / "index.html"
+            if index_path.exists():
+                return FileResponse(index_path)
+
+            # Fallback error if index.html not found
+            from fastapi import HTTPException
+
+            raise HTTPException(status_code=404, detail="index.html not found in static directory")
 
     return app
 

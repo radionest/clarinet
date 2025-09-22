@@ -1,0 +1,64 @@
+name: Build Frontend
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/frontend-build.yml'
+      - 'scripts/build_frontend.sh'
+  pull_request:
+    paths:
+      - 'frontend/**'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Gleam
+        uses: erlef/setup-beam@v1
+        with:
+          gleam-version: "1.5.0"
+          otp-version: "26.0"
+
+      - name: Cache Gleam dependencies
+        uses: actions/cache@v3
+        with:
+          path: |
+            frontend/build/packages
+            frontend/build/dev
+          key: gleam-deps-${{ runner.os }}-${{ hashFiles('frontend/gleam.toml', 'frontend/manifest.toml') }}
+          restore-keys: |
+            gleam-deps-${{ runner.os }}-
+
+      - name: Build frontend
+        run: |
+          cd frontend
+          gleam deps download
+          gleam build --target javascript
+
+      - name: Generate dist directory
+        run: |
+          rm -rf dist
+          mkdir -p dist/{js,css,assets}
+          cp frontend/build/dev/javascript/clarinet_frontend.mjs dist/js/app.mjs
+          if [ -d "frontend/public" ]; then
+            cp -r frontend/public/* dist/
+          fi
+
+      - name: Commit and push changes
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: |
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+          git add dist
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "chore: update frontend build [skip ci]"
+            git push
+          fi

@@ -12,3 +12,6 @@ __pycache__
 clarinet.db
 
 **/build/**
+
+# Frontend build output (local development only)
+dist/

@@ -6,11 +6,20 @@ set -e
 
 echo "Building Clarinet frontend..."
 
-# Change to frontend directory
-cd "$(dirname "$0")/.."
-
 # Download dependencies if needed
-if [ ! -d "build/packages" ]; then
+if [ ! -d "build/(.venv) nest@nest-home:~/clarinet-feature$ cd src/frontend/
+(.venv) nest@nest-home:~/clarinet-feature/src/frontend$ gleam build
+error: File IO failure
+
+An error occurred while trying to read this file:
+
+    /home/nest/clarinet-feature/frontend/src/api/client.gleam
+
+The error message from the file IO library was:
+
+    No such file or directory (os error 2)
+
+packages" ]; then
     echo "Downloading dependencies..."
     gleam deps download
 fi

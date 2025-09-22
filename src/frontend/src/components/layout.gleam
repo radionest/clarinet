@@ -1,22 +1,20 @@
 // Main layout component with navbar and content area
+import api/models
+import gleam/list
+import gleam/option.{None, Some}
+import lustre/attribute
 import lustre/element.{type Element}
 import lustre/element/html
-import lustre/attribute
 import lustre/event
-import gleam/option.{None, Some}
-import gleam/list
 import router
 import store.{type Model, type Msg}
-import api/models
 
 // Main layout view
 pub fn view(model: Model, content: Element(Msg)) -> Element(Msg) {
   html.div([attribute.class("app-layout")], [
     navbar(model),
     notifications(model),
-    html.main([attribute.class("main-content")], [
-      content
-    ]),
+    html.main([attribute.class("main-content")], [content]),
     footer(),
   ])
 }
@@ -25,7 +23,7 @@ pub fn view(model: Model, content: Element(Msg)) -> Element(Msg) {
 fn navbar(model: Model) -> Element(Msg) {
   html.nav([attribute.class("navbar")], [
     html.div([attribute.class("navbar-brand")], [
-      nav_link(router.Home, "Clarinet", model.route)
+      nav_link(router.Home, "Clarinet", model.route),
     ]),
     html.div([attribute.class("navbar-menu")], [
       nav_link(router.Studies, "Studies", model.route),
@@ -40,7 +38,11 @@ fn navbar(model: Model) -> Element(Msg) {
 }
 
 // Navigation link
-fn nav_link(route: router.Route, text: String, current_route: router.Route) -> Element(Msg) {
+fn nav_link(
+  route: router.Route,
+  text: String,
+  current_route: router.Route,
+) -> Element(Msg) {
   let is_active = router.is_same_section(route, current_route)
   let classes = case is_active {
     True -> "navbar-item active"
@@ -49,11 +51,11 @@ fn nav_link(route: router.Route, text: String, current_route: router.Route) -> E
 
   html.a(
     [
-      attribute.href(router.route_to_path(route)),
+      attribute.href("#"),
       attribute.class(classes),
       event.on_click(store.Navigate(route)),
     ],
-    [html.text(text)]
+    [html.text(text)],
   )
 }
 
@@ -68,7 +70,7 @@ fn user_menu(model: Model) -> Element(Msg) {
             attribute.class("btn-logout"),
             event.on_click(store.Logout),
           ],
-          [html.text("Logout")]
+          [html.text("Logout")],
         ),
       ])
     }
@@ -99,7 +101,7 @@ fn error_notification(message: String) -> Element(Msg) {
         attribute.class("notification-close"),
         event.on_click(store.ClearError),
       ],
-      [html.text("×")]
+      [html.text("×")],
     ),
   ])
 }
@@ -113,7 +115,7 @@ fn success_notification(message: String) -> Element(Msg) {
         attribute.class("notification-close"),
         event.on_click(store.ClearSuccessMessage),
       ],
-      [html.text("×")]
+      [html.text("×")],
     ),
   ])
 }

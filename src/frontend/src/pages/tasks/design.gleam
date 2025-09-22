@@ -1,8 +1,8 @@
 // Task design page stub
+import gleam/option.{type Option, None, Some}
+import lustre/attribute
 import lustre/element.{type Element}
 import lustre/element/html
-import lustre/attribute
-import gleam/option.{type Option, None, Some}
 import store.{type Model, type Msg}
 
 pub fn view(model: Model, id: Option(String)) -> Element(Msg) {

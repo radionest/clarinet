@@ -208,7 +208,7 @@ async def auth_headers(client, test_user):
     """Get headers with authorization cookies."""
     # Login with new fastapi-users API
     response = await client.post(
-        "/auth/login",
+        "/api/auth/login",
         data={
             "username": "test@example.com",  # fastapi-users uses email as username
             "password": "testpassword",
@@ -226,7 +226,7 @@ async def admin_headers(client, admin_user):
     """Get headers with administrator cookies."""
     # Login with new fastapi-users API
     response = await client.post(
-        "/auth/login",
+        "/api/auth/login",
         data={
             "username": "admin@example.com",  # fastapi-users uses email as username
             "password": "adminpassword",

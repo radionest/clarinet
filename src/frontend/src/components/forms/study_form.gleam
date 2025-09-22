@@ -1,11 +1,11 @@
 // Static typed form for Study model
-import lustre/element.{type Element}
-import lustre/element/html
-import lustre/attribute
-import gleam/option.{type Option, None, Some}
-import gleam/dict.{type Dict}
 import api/models.{type StudyCreate}
 import components/forms/base as form
+import gleam/dict.{type Dict}
+import gleam/option.{type Option, None, Some}
+import lustre/attribute
+import lustre/element.{type Element}
+import lustre/element/html
 import store.{type Msg}
 
 // Study form data type for managing form state
@@ -42,12 +42,7 @@ pub fn to_study_create(data: StudyFormData) -> StudyCreate {
 
 // Initialize empty form data
 pub fn init() -> StudyFormData {
-  StudyFormData(
-    study_uid: "",
-    date: "",
-    patient_id: "",
-    anon_uid: "",
-  )
+  StudyFormData(study_uid: "", date: "", patient_id: "", anon_uid: "")
 }
 
 // Initialize form data from existing study
@@ -88,11 +83,9 @@ pub fn view(
     form.required_field(
       "Study Date",
       "date",
-      form.date_input(
-        "date",
-        data.date,
-        fn(value) { on_update(UpdateDate(value)) },
-      ),
+      form.date_input("date", data.date, fn(value) {
+        on_update(UpdateDate(value))
+      }),
       errors,
     ),
 
@@ -134,7 +127,9 @@ pub fn view(
 }
 
 // Validate form data
-pub fn validate(data: StudyFormData) -> Result(StudyFormData, Dict(String, String)) {
+pub fn validate(
+  data: StudyFormData,
+) -> Result(StudyFormData, Dict(String, String)) {
   let errors = dict.new()
 
   // Validate Study UID
@@ -168,7 +163,8 @@ pub fn update(data: StudyFormData, msg: StudyFormMsg) -> StudyFormData {
     UpdateDate(value) -> StudyFormData(..data, date: value)
     UpdatePatientId(value) -> StudyFormData(..data, patient_id: value)
     UpdateAnonUid(value) -> StudyFormData(..data, anon_uid: value)
-    SubmitStudy -> data  // Submit is handled by parent component
+    SubmitStudy -> data
+    // Submit is handled by parent component
   }
 }
 

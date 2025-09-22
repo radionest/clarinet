@@ -1,13 +1,14 @@
 // Client-side routing with Modem
-import gleam/uri.{type Uri}
+import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/string
-import gleam/list
+import gleam/uri.{type Uri}
 
 // Route definitions
 pub type Route {
   Home
   Login
+  Register
   Studies
   StudyDetail(id: String)
   Tasks
@@ -24,6 +25,7 @@ pub fn route_to_path(route: Route) -> String {
   case route {
     Home -> "/"
     Login -> "/login"
+    Register -> "/register"
     Studies -> "/studies"
     StudyDetail(id) -> "/studies/" <> id
     Tasks -> "/tasks"
@@ -39,13 +41,15 @@ pub fn route_to_path(route: Route) -> String {
 
 // Parse URL path to Route
 pub fn parse_route(uri: Uri) -> Route {
-  let path = uri.path
+  let path =
+    uri.path
     |> string.split("/")
     |> list.filter(fn(s) { string.length(s) > 0 })
 
   case path {
     [] -> Home
     ["login"] -> Login
+    ["register"] -> Register
     ["studies"] -> Studies
     ["studies", id] -> StudyDetail(id)
     ["tasks"] -> Tasks
@@ -63,6 +67,7 @@ pub fn parse_route(uri: Uri) -> Route {
 pub fn requires_auth(route: Route) -> Bool {
   case route {
     Login -> False
+    Register -> False
     _ -> True
   }
 }
@@ -72,6 +77,7 @@ pub fn get_route_title(route: Route) -> String {
   case route {
     Home -> "Dashboard"
     Login -> "Login"
+    Register -> "Register"
     Studies -> "Studies"
     StudyDetail(_) -> "Study Details"
     Tasks -> "Tasks"

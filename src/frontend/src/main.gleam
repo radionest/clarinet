@@ -1,20 +1,22 @@
 // Main Lustre application
-import lustre
-import lustre/element.{type Element}
-import lustre/element/html
-import lustre/effect.{type Effect}
-import gleam/uri.{type Uri}
-import gleam/option.{None, Some}
-import gleam/javascript/promise
-import modem
-import router.{type Route}
-import store.{type Model, type Msg}
-import api/types
 import api/auth
 import api/models
+import api/types
 import components/layout
-import pages/login
+import gleam/javascript/promise
+import gleam/option.{None, Some}
+import gleam/uri.{type Uri}
+import lustre
+import lustre/effect.{type Effect}
+import lustre/element.{type Element}
+import lustre/element/html
+import modem
 import pages/home
+import pages/login
+import pages/register
+import router.{type Route}
+import store.{type Model, type Msg}
+import utils/dom
 
 // Initialize the application
 pub fn main() {
@@ -52,14 +54,17 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       let new_model = store.set_route(model, route)
 
       // Check authentication requirement
-      case router.requires_auth(route), model.token {
+      case router.requires_auth(route), model.user {
         True, None -> {
           // Redirect to login if auth required
           #(store.set_route(model, router.Login), effect.none())
         }
-        False, Some(_) if route == router.Login -> {
-          // Redirect from login if already authenticated
-          #(new_model, effect.none())
+        False, Some(_) if route == router.Login || route == router.Register -> {
+          // Redirect from login/register if already authenticated
+          #(
+            store.set_route(model, router.Home),
+            modem.push("/", option.None, option.None),
+          )
         }
         _, _ -> {
           // Load data for the new route
@@ -70,57 +75,42 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     }
 
     store.Navigate(route) -> {
-      // Use JavaScript to update URL
-      #(model, effect.from(fn(_) {
-        update_url(router.route_to_path(route))
-        Nil
-      }))
+      // Use Modem to update URL without page reload
+      let path = router.route_to_path(route)
+      #(model, modem.push(path, option.None, option.None))
     }
 
     // Authentication
     store.LoginSubmit(username, password) -> {
       let new_model = store.set_loading(model, True)
-      let login_effect = effect.from(fn(dispatch) {
-        auth.login(model.api_config, username, password)
-        |> promise.tap(fn(result) {
-          case result {
-            Ok(response) -> {
-              // We need to access the response fields properly
-              dispatch(store.LoginSuccess("", models.User(
-                id: "",
-                username: username,
-                email: "",
-                hashed_password: None,
-                is_active: True,
-                is_superuser: False,
-                is_verified: False,
-                roles: None,
-                tasks: None
-              )))
+      let login_effect =
+        effect.from(fn(dispatch) {
+          auth.login(username, password)
+          |> promise.tap(fn(result) {
+            case result {
+              Ok(response) -> {
+                // Login response now only contains user data
+                dispatch(store.LoginSuccess(response.user))
+              }
+              Error(error) -> dispatch(store.LoginError(error))
             }
-            Error(error) -> dispatch(store.LoginError(error))
-          }
+          })
+          Nil
         })
-        Nil
-      })
       #(new_model, login_effect)
     }
 
-    store.LoginSuccess(token, user) -> {
-      // Store token
-      auth.store_token(token)
-
-      // Update model
-      let new_model = model
-        |> store.set_auth(token, user)
+    store.LoginSuccess(user) -> {
+      // Cookie authentication is handled automatically
+      // Just update the model with the user
+      let new_model =
+        model
+        |> store.set_user(user)
         |> store.set_loading(False)
         |> store.clear_messages()
         |> store.set_route(router.Home)
 
-      #(new_model, effect.from(fn(_) {
-        update_url("/")
-        Nil
-      }))
+      #(new_model, modem.push("/", option.None, option.None))
     }
 
     store.LoginError(error) -> {
@@ -130,7 +120,66 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         _ -> "Login failed. Please try again."
       }
 
-      let new_model = model
+      let new_model =
+        model
+        |> store.set_loading(False)
+        |> store.set_error(Some(error_msg))
+
+      #(new_model, effect.none())
+    }
+
+    store.RegisterSubmit(username, email, password) -> {
+      let new_model =
+        store.set_loading(model, True)
+        |> store.clear_messages()
+
+      let register_request =
+        models.RegisterRequest(
+          username: username,
+          email: email,
+          password: password,
+          full_name: None,
+        )
+
+      let register_effect =
+        effect.from(fn(dispatch) {
+          auth.register(register_request)
+          |> promise.tap(fn(result) {
+            case result {
+              Ok(user) -> dispatch(store.RegisterSuccess(user))
+              Error(error) -> dispatch(store.RegisterError(error))
+            }
+          })
+          Nil
+        })
+      #(new_model, register_effect)
+    }
+
+    store.RegisterSuccess(user) -> {
+      // Registration successful - user is logged in via cookie
+      let new_model =
+        model
+        |> store.set_user(user)
+        |> store.set_loading(False)
+        |> store.clear_messages()
+        |> store.set_success("Registration successful! Welcome to Clarinet.")
+        |> store.set_route(router.Home)
+
+      #(new_model, modem.push("/", option.None, option.None))
+    }
+
+    store.RegisterError(error) -> {
+      let error_msg = case error {
+        types.ValidationError(_) ->
+          "Invalid registration data. Please check your inputs."
+        types.AuthError(msg) -> msg
+        types.ServerError(409, _) -> "Username or email already exists."
+        types.NetworkError(msg) -> "Network error: " <> msg
+        _ -> "Registration failed. Please try again."
+      }
+
+      let new_model =
+        model
         |> store.set_loading(False)
         |> store.set_error(Some(error_msg))
 
@@ -138,14 +187,12 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     }
 
     store.Logout -> {
-      auth.clear_token()
-      let new_model = store.clear_auth(model)
+      // Cookie will be cleared by server on logout
+      let new_model =
+        store.clear_user(model)
         |> store.set_route(router.Login)
 
-      #(new_model, effect.from(fn(_) {
-        update_url("/login")
-        Nil
-      }))
+      #(new_model, modem.push("/login", option.None, option.None))
     }
 
     // UI Messages
@@ -167,6 +214,7 @@ pub fn view(model: Model) -> Element(Msg) {
   let content = case model.route {
     router.Home -> home.view(model)
     router.Login -> login.view(model)
+    router.Register -> register.view(model)
     router.Studies -> html.div([], [html.text("Studies page")])
     router.StudyDetail(_id) -> html.div([], [html.text("Study detail page")])
     router.Tasks -> html.div([], [html.text("Tasks page")])
@@ -179,7 +227,7 @@ pub fn view(model: Model) -> Element(Msg) {
   }
 
   case model.route {
-    router.Login -> content
+    router.Login | router.Register -> content
     _ -> layout.view(model, content)
   }
 }
@@ -189,7 +237,3 @@ fn load_route_data(_model: Model, _route: Route) -> Effect(Msg) {
   // TODO: Implement data loading for each route
   effect.none()
 }
-
-// JavaScript FFI for URL updates
-@external(javascript, "./ffi/utils.js", "updateUrl")
-fn update_url(path: String) -> Nil

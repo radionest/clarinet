@@ -1,11 +1,11 @@
 // Base form elements and utilities
-import lustre/element.{type Element}
-import lustre/element/html
-import lustre/attribute
-import lustre/event
-import gleam/option.{type Option, None, Some}
 import gleam/dict.{type Dict}
 import gleam/list
+import gleam/option.{type Option, None, Some}
+import lustre/attribute
+import lustre/element.{type Element}
+import lustre/element/html
+import lustre/event
 import store.{type Msg}
 
 // Form field wrapper with label and error display
@@ -270,8 +270,7 @@ pub fn submit_button(
   ]
 
   let attrs = case on_click {
-    Some(msg) ->
-      list.append(attrs, [event.on_click(msg)])
+    Some(msg) -> list.append(attrs, [event.on_click(msg)])
     None -> attrs
   }
 
@@ -291,7 +290,10 @@ pub fn cancel_button(text: String, on_click: Msg) -> Element(Msg) {
 }
 
 // Error message display
-pub fn error_message(errors: Dict(String, String), field: String) -> Element(Msg) {
+pub fn error_message(
+  errors: Dict(String, String),
+  field: String,
+) -> Element(Msg) {
   case dict.get(errors, field) {
     Ok(error) -> html.span([attribute.class("form-error")], [html.text(error)])
     Error(_) -> html.text("")
@@ -321,16 +323,17 @@ pub fn form_row(children: List(Element(Msg))) -> Element(Msg) {
 pub fn form_group(title: String, children: List(Element(Msg))) -> Element(Msg) {
   html.fieldset([attribute.class("form-group")], [
     html.legend([attribute.class("form-group-title")], [html.text(title)]),
-    ..children,
+    ..children
   ])
 }
 
 // Loading indicator for forms
 pub fn loading_overlay(loading: Bool) -> Element(Msg) {
   case loading {
-    True -> html.div([attribute.class("form-loading-overlay")], [
-      html.div([attribute.class("spinner")], []),
-    ])
+    True ->
+      html.div([attribute.class("form-loading-overlay")], [
+        html.div([attribute.class("spinner")], []),
+      ])
     False -> html.text("")
   }
 }
@@ -344,7 +347,10 @@ pub fn success_message(message: Option(String)) -> Element(Msg) {
 }
 
 // Helper to validate required fields
-pub fn validate_required(value: String, field_name: String) -> Result(String, String) {
+pub fn validate_required(
+  value: String,
+  field_name: String,
+) -> Result(String, String) {
   case string.is_empty(value) {
     True -> Error(field_name <> " is required")
     False -> Ok(value)

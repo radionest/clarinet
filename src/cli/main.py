@@ -93,6 +93,7 @@ def run_server(
 
     if with_frontend:
         # Run both backend and frontend
+        logger.info(f"Starting Clarinet server with frontend at http://{host}:{port}")
         asyncio.run(run_with_frontend(host, port))
     else:
         # Run only backend
@@ -119,7 +120,7 @@ async def _run_gleam_command(
     """
     process = await asyncio.create_subprocess_exec(
         *args,
-        cwd=cwd,
+        cwd=str(cwd) if cwd else None,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
@@ -154,7 +155,11 @@ async def run_with_frontend(host: str, port: int) -> None:
     os.environ["CLARINET_FRONTEND_ENABLED"] = "true"
 
     # Check if frontend is built
-    frontend_path = Path("src/frontend")
+    # Frontend is part of the installed clarinet library
+    import src
+
+    library_path = Path(src.__file__).parent
+    frontend_path = library_path / "frontend"
     build_file = frontend_path / "build" / "dev" / "javascript" / "clarinet.mjs"
 
     if not build_file.exists():
@@ -170,7 +175,7 @@ async def run_with_frontend(host: str, port: int) -> None:
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                 )
-                stdout_bytes, stderr_bytes = await install_process.communicate()
+                _, stderr_bytes = await install_process.communicate()
                 stderr = stderr_bytes.decode() if stderr_bytes else ""
                 if install_process.returncode != 0:
                     logger.error(f"Failed to install Gleam: {stderr}")
@@ -332,7 +337,7 @@ async def _install_frontend_async() -> None:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            stdout_bytes, stderr_bytes = await install_process.communicate()
+            _, stderr_bytes = await install_process.communicate()
             stderr = stderr_bytes.decode() if stderr_bytes else ""
             if install_process.returncode != 0:
                 logger.error(f"Failed to install Gleam: {stderr}")
@@ -343,7 +348,10 @@ async def _install_frontend_async() -> None:
             sys.exit(1)
 
     # Install frontend dependencies
-    frontend_path = Path("src/frontend")
+    import src
+
+    library_path = Path(src.__file__).parent
+    frontend_path = library_path / "frontend"
     if frontend_path.exists():
         logger.info("Installing frontend dependencies...")
         try:
@@ -364,7 +372,10 @@ def build_frontend(watch: bool = False) -> None:
 
 async def _build_frontend_async(watch: bool = False) -> None:
     """Async implementation of frontend build."""
-    frontend_path = Path("src/frontend")
+    import src
+
+    library_path = Path(src.__file__).parent
+    frontend_path = library_path / "frontend"
     if not frontend_path.exists():
         logger.error(f"Frontend directory not found: {frontend_path}")
         sys.exit(1)
@@ -392,7 +403,10 @@ async def _build_frontend_async(watch: bool = False) -> None:
 
 def clean_frontend() -> None:
     """Clean frontend build artifacts."""
-    frontend_path = Path("src/frontend")
+    import src
+
+    library_path = Path(src.__file__).parent
+    frontend_path = library_path / "frontend"
     build_dir = frontend_path / "build"
 
     if build_dir.exists():

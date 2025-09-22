@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "clarinet"
-version = "0.0a.0"
+version = "0.0a.1"
 description = "Clarinet - A Framework for Clinical Trials with heavy 8sdf"
 readme = "README.md"
 authors = [
@@ -80,6 +80,15 @@ Issues = "https://github.com/radionest/clarinet/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src"]
+include = [
+    "dist/**/*"
+]
+
+[tool.hatch.build]
+include = [
+    "src/**/*",
+    "dist/**/*"
+]
 
 [tool.uv]
 dev-dependencies = [

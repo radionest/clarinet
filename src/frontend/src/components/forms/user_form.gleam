@@ -1,12 +1,12 @@
 // Static typed form for User model
-import lustre/element.{type Element}
-import lustre/element/html
-import lustre/attribute
-import gleam/option.{type Option, None, Some}
-import gleam/dict.{type Dict}
-import gleam/list
 import api/models.{type UserCreate}
 import components/forms/base as form
+import gleam/dict.{type Dict}
+import gleam/list
+import gleam/option.{type Option, None, Some}
+import lustre/attribute
+import lustre/element.{type Element}
+import lustre/element/html
 import store.{type Msg}
 
 // User form data type for managing form state
@@ -64,7 +64,8 @@ pub fn from_user(user: models.User) -> UserFormData {
   UserFormData(
     username: user.username,
     email: user.email,
-    password: "",  // Don't populate password for editing
+    password: "",
+    // Don't populate password for editing
     password_confirm: "",
     is_active: user.is_active,
     is_superuser: user.is_superuser,
@@ -86,7 +87,7 @@ pub fn view(
       html.text(case is_edit {
         True -> "Edit User"
         False -> "Create User"
-      })
+      }),
     ]),
 
     // Username field (required)
@@ -161,17 +162,18 @@ pub fn view(
           ),
           case data.password {
             "" -> html.text("")
-            _ -> form.field(
-              "Confirm New Password",
-              "password_confirm",
-              form.password_input(
+            _ ->
+              form.field(
+                "Confirm New Password",
                 "password_confirm",
-                data.password_confirm,
-                Some("Confirm new password"),
-                fn(value) { on_update(UpdatePasswordConfirm(value)) },
-              ),
-              errors,
-            )
+                form.password_input(
+                  "password_confirm",
+                  data.password_confirm,
+                  Some("Confirm new password"),
+                  fn(value) { on_update(UpdatePasswordConfirm(value)) },
+                ),
+                errors,
+              )
           },
         ])
       }
@@ -222,7 +224,10 @@ pub fn view(
 }
 
 // Validate form data
-pub fn validate(data: UserFormData, is_edit: Bool) -> Result(UserFormData, Dict(String, String)) {
+pub fn validate(
+  data: UserFormData,
+  is_edit: Bool,
+) -> Result(UserFormData, Dict(String, String)) {
   let errors = dict.new()
 
   // Validate Username (required)
@@ -234,10 +239,11 @@ pub fn validate(data: UserFormData, is_edit: Bool) -> Result(UserFormData, Dict(
   // Validate Email (required and format)
   let errors = case form.validate_required(data.email, "Email") {
     Error(msg) -> dict.insert(errors, "email", msg)
-    Ok(email) -> case form.validate_email(email) {
-      Error(msg) -> dict.insert(errors, "email", msg)
-      Ok(_) -> errors
-    }
+    Ok(email) ->
+      case form.validate_email(email) {
+        Error(msg) -> dict.insert(errors, "email", msg)
+        Ok(_) -> errors
+      }
   }
 
   // Validate Password (required for new users)
@@ -248,7 +254,12 @@ pub fn validate(data: UserFormData, is_edit: Bool) -> Result(UserFormData, Dict(
         Ok(password) -> {
           // Check minimum length
           case string.length(password) < 8 {
-            True -> dict.insert(errors, "password", "Password must be at least 8 characters")
+            True ->
+              dict.insert(
+                errors,
+                "password",
+                "Password must be at least 8 characters",
+              )
             False -> errors
           }
         }
@@ -260,7 +271,12 @@ pub fn validate(data: UserFormData, is_edit: Bool) -> Result(UserFormData, Dict(
         "" -> errors
         password -> {
           case string.length(password) < 8 {
-            True -> dict.insert(errors, "password", "Password must be at least 8 characters")
+            True ->
+              dict.insert(
+                errors,
+                "password",
+                "Password must be at least 8 characters",
+              )
             False -> errors
           }
         }
@@ -270,10 +286,12 @@ pub fn validate(data: UserFormData, is_edit: Bool) -> Result(UserFormData, Dict(
 
   // Validate Password Confirmation
   let errors = case data.password {
-    "" if is_edit -> errors  // Skip if no password change
+    "" if is_edit -> errors
+    // Skip if no password change
     _ -> {
       case data.password == data.password_confirm {
-        False -> dict.insert(errors, "password_confirm", "Passwords do not match")
+        False ->
+          dict.insert(errors, "password_confirm", "Passwords do not match")
         True -> errors
       }
     }
@@ -291,14 +309,16 @@ pub fn update(data: UserFormData, msg: UserFormMsg) -> UserFormData {
     UpdateUsername(value) -> UserFormData(..data, username: value)
     UpdateEmail(value) -> UserFormData(..data, email: value)
     UpdatePassword(value) -> UserFormData(..data, password: value)
-    UpdatePasswordConfirm(value) -> UserFormData(..data, password_confirm: value)
+    UpdatePasswordConfirm(value) ->
+      UserFormData(..data, password_confirm: value)
     UpdateIsActive(value) -> UserFormData(..data, is_active: value)
     UpdateIsSuperuser(value) -> UserFormData(..data, is_superuser: value)
     UpdateIsVerified(value) -> UserFormData(..data, is_verified: value)
-    SubmitUser -> data  // Submit is handled by parent component
+    SubmitUser -> data
+    // Submit is handled by parent component
   }
 }
 
 // Import router for navigation
-import router
 import gleam/string
+import router

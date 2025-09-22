@@ -8,16 +8,16 @@ from src.api.auth_config import auth_backend, current_active_user, fastapi_users
 from src.models.user import User, UserRead
 
 # Use ready-made routers from fastapi-users
-router = APIRouter(prefix="/auth", tags=["auth"])
+router = APIRouter(tags=["auth"])
 
 # Add standard endpoints (login, logout)
 router.include_router(
     fastapi_users.get_auth_router(auth_backend),
 )
 
-# User registration (if needed)
+# User registration
 # router.include_router(
-#     fastapi_users.get_register_router(UserRead, UserCreate),
+#     fastapi_users.get_register_router(User, UserCreate),
 # )
 
 

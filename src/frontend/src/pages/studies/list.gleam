@@ -1,7 +1,7 @@
 // Studies list page stub
+import lustre/attribute
 import lustre/element.{type Element}
 import lustre/element/html
-import lustre/attribute
 import store.{type Model, type Msg}
 
 pub fn view(model: Model) -> Element(Msg) {

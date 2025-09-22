@@ -1,13 +1,16 @@
 // Static type definitions for core models matching backend SQLModel
-import gleam/option.{type Option}
-import gleam/json.{type Json}
+import api/types.{
+  type DicomQueryLevel, type TaskStatus, type UserRole as UserRoleEnum,
+}
 import gleam/dict.{type Dict}
-import api/types.{type Gender, type UserRole as UserRoleEnum, type TaskStatus, type DicomQueryLevel}
+import gleam/json.{type Json}
+import gleam/option.{type Option}
 
 // Patient model (matching backend)
 pub type Patient {
   Patient(
-    id: String,  // Primary key in backend
+    id: String,
+    // Primary key in backend
     anon_id: Option(String),
     anon_name: Option(String),
     created_at: Option(String),
@@ -20,8 +23,10 @@ pub type Patient {
 // Study model (matching backend)
 pub type Study {
   Study(
-    study_uid: String,  // Primary key (DicomUID)
-    date: String,  // date type in backend
+    study_uid: String,
+    // Primary key (DicomUID)
+    date: String,
+    // date type in backend
     anon_uid: Option(String),
     patient_id: String,
     patient: Option(Patient),
@@ -33,14 +38,17 @@ pub type Study {
 // Task Design model (matching backend)
 pub type TaskDesign {
   TaskDesign(
-    name: String,  // Primary key
+    name: String,
+    // Primary key
     description: Option(String),
     label: Option(String),
     slicer_script: Option(String),
-    slicer_script_args: Option(Dict(String, String)),  // SlicerArgs
+    slicer_script_args: Option(Dict(String, String)),
+    // SlicerArgs
     slicer_result_validator: Option(String),
     slicer_result_validator_args: Option(Dict(String, String)),
-    result_schema: Option(Dict(String, Json)),  // ResultSchema for dynamic form
+    result_schema: Option(Dict(String, Json)),
+    // ResultSchema for dynamic form
     role_name: Option(String),
     max_users: Option(Int),
     min_users: Option(Int),
@@ -53,7 +61,8 @@ pub type TaskDesign {
 // Task model (matching backend)
 pub type Task {
   Task(
-    id: Option(Int),  // Primary key
+    id: Option(Int),
+    // Primary key
     info: Option(String),
     status: TaskStatus,
     study_uid: Option(String),
@@ -69,7 +78,8 @@ pub type Task {
     series: Option(Series),
     task_design: Option(TaskDesign),
     user: Option(User),
-    result: Option(Dict(String, Json)),  // TaskResult
+    result: Option(Dict(String, Json)),
+    // TaskResult
     created_at: Option(String),
     changed_at: Option(String),
     started_at: Option(String),
@@ -86,10 +96,12 @@ pub type Task {
 // User model (matching backend)
 pub type User {
   User(
-    id: String,  // Primary key
+    id: String,
+    // Primary key
     username: String,
     email: String,
-    hashed_password: Option(String),  // Won't be sent from API usually
+    hashed_password: Option(String),
+    // Won't be sent from API usually
     is_active: Bool,
     is_superuser: Bool,
     is_verified: Bool,
@@ -101,7 +113,8 @@ pub type User {
 // Series model (matching backend)
 pub type Series {
   Series(
-    series_uid: String,  // Primary key (DicomUID)
+    series_uid: String,
+    // Primary key (DicomUID)
     series_description: Option(String),
     series_number: Int,
     anon_uid: Option(String),
@@ -115,18 +128,12 @@ pub type Series {
 
 // Authentication models
 pub type LoginRequest {
-  LoginRequest(
-    username: String,
-    password: String,
-  )
+  LoginRequest(username: String, password: String)
 }
 
+// Login response - returns user data only (cookie auth handled automatically)
 pub type LoginResponse {
-  LoginResponse(
-    access_token: String,
-    token_type: String,
-    user: User,
-  )
+  LoginResponse(user: User)
 }
 
 pub type RegisterRequest {
@@ -140,11 +147,7 @@ pub type RegisterRequest {
 
 // Form data types for creating/updating models
 pub type PatientCreate {
-  PatientCreate(
-    id: String,
-    anon_id: Option(String),
-    anon_name: Option(String),
-  )
+  PatientCreate(id: String, anon_id: Option(String), anon_name: Option(String))
 }
 
 pub type PatientRead {

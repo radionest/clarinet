@@ -1,15 +1,15 @@
 // Home/Dashboard page
+import api/models
+import gleam/dict
+import gleam/int
+import gleam/list
+import gleam/option.{None, Some}
+import lustre/attribute
 import lustre/element.{type Element}
 import lustre/element/html
-import lustre/attribute
 import lustre/event
-import gleam/option.{Some, None}
-import gleam/list
-import gleam/int
-import gleam/dict
 import router
 import store.{type Model, type Msg}
-import api/models
 
 pub fn view(model: Model) -> Element(Msg) {
   html.div([attribute.class("container")], [
@@ -19,7 +19,7 @@ pub fn view(model: Model) -> Element(Msg) {
       Some(user) -> {
         html.div([attribute.class("dashboard-content")], [
           html.p([attribute.class("welcome")], [
-            html.text("Welcome back, " <> user.username <> "!")
+            html.text("Welcome back, " <> user.username <> "!"),
           ]),
           stats_section(model),
           recent_activity(model),
@@ -34,15 +34,20 @@ pub fn view(model: Model) -> Element(Msg) {
               attribute.href(router.route_to_path(router.Login)),
               attribute.class("btn btn-primary"),
             ],
-            [html.text("Login")]
+            [html.text("Login")],
           ),
         ])
       }
-    }
+    },
   ])
 }
 
-fn stat_card(label: String, count: Int, color: String, route: router.Route) -> Element(Msg) {
+fn stat_card(
+  label: String,
+  count: Int,
+  color: String,
+  route: router.Route,
+) -> Element(Msg) {
   html.div([attribute.class("stat-card card stat-" <> color)], [
     html.div([attribute.class("stat-value")], [html.text(int.to_string(count))]),
     html.div([attribute.class("stat-label")], [html.text(label)]),
@@ -52,7 +57,7 @@ fn stat_card(label: String, count: Int, color: String, route: router.Route) -> E
         attribute.class("stat-link"),
         event.on_click(store.Navigate(route)),
       ],
-      [html.text("View all →")]
+      [html.text("View all →")],
     ),
   ])
 }
@@ -64,7 +69,7 @@ fn stats_section(model: Model) -> Element(Msg) {
       stat_card("Studies", dict.size(model.studies), "blue", router.Studies),
       stat_card("Tasks", dict.size(model.tasks), "green", router.Tasks),
       stat_card("Users", dict.size(model.users), "purple", router.Users),
-    ])
+    ]),
   ])
 }
 
@@ -73,9 +78,10 @@ fn recent_activity(model: Model) -> Element(Msg) {
     html.h3([], [html.text("Recent Studies")]),
     html.div([attribute.class("recent-list")], [
       case dict.to_list(model.studies) {
-        [] -> html.p([attribute.class("empty-state")], [
-          html.text("No recent studies found.")
-        ])
+        [] ->
+          html.p([attribute.class("empty-state")], [
+            html.text("No recent studies found."),
+          ])
         studies -> {
           studies
           |> list.take(5)
@@ -85,8 +91,8 @@ fn recent_activity(model: Model) -> Element(Msg) {
           })
           |> element.fragment
         }
-      }
-    ])
+      },
+    ]),
   ])
 }
 
@@ -94,18 +100,18 @@ fn study_item(study: models.Study) -> Element(Msg) {
   html.div([attribute.class("recent-item")], [
     html.a(
       [
-        attribute.href(router.route_to_path(router.StudyDetail(study.study_uid))),
+        attribute.href(
+          router.route_to_path(router.StudyDetail(study.study_uid)),
+        ),
         attribute.class("recent-link"),
         event.on_click(store.Navigate(router.StudyDetail(study.study_uid))),
       ],
       [
-        html.span([attribute.class("recent-title")],
-          [html.text(study.study_uid)]
-        ),
-      ]
+        html.span([attribute.class("recent-title")], [
+          html.text(study.study_uid),
+        ]),
+      ],
     ),
-    html.span([attribute.class("recent-date")], [
-      html.text(study.date)
-    ]),
+    html.span([attribute.class("recent-date")], [html.text(study.date)]),
   ])
 }

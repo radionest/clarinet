@@ -43,8 +43,6 @@ class QueueConfig(BaseSettings):
 
     have_gpu: bool = False
     have_dicom: bool = False
-    have_keras: bool = False
-    have_torch: bool = False
 
     def has_not(self, conditions: Self) -> bool:
         """Check if the current configuration doesn't meet the specified conditions.
@@ -82,6 +80,9 @@ class Settings(BaseSettings):
     storage_path: str = str(Path.home() / "clarinet/data")
     anon_id_prefix: str = "CLARINET"
     anon_names_list: str | None = None
+
+    # Frontend settings
+    frontend_enabled: bool = True
 
     # Slicer settings
     slicer_script_paths: list[str] = []
@@ -132,13 +133,6 @@ class Settings(BaseSettings):
     log_retention: str = "1 week"
     log_format: str | None = None  # Use default if None
 
-    # Frontend settings
-    frontend_enabled: bool = False
-    frontend_build_on_start: bool = True
-    frontend_dev_mode: bool = True
-    frontend_auto_build: bool = True
-    frontend_watch: bool = True
-
     # Project customization
     project_path: Path | None = None
     project_static_path: Path | None = None
@@ -169,8 +163,6 @@ class Settings(BaseSettings):
         return QueueConfig(
             have_gpu=self.have_gpu,
             have_dicom=self.have_dicom,
-            have_keras=self.have_keras,
-            have_torch=self.have_torch,
         )
 
     @property
@@ -203,6 +195,27 @@ class Settings(BaseSettings):
         if self.log_dir:
             return Path(self.log_dir)
         return Path(self.storage_path) / "logs"
+
+    @property
+    def static_path(self) -> Path:
+        """Path to built frontend static files."""
+        return Path(__file__).parent.parent / "dist"
+
+    @property
+    def custom_static_path(self) -> Path | None:
+        """Path to user custom static files."""
+        custom_path = Path.cwd() / "clarinet_custom"
+        return custom_path if custom_path.exists() else None
+
+    @property
+    def static_directories(self) -> list[Path]:
+        """List of static directories in priority order."""
+        dirs = []
+        if self.custom_static_path:
+            dirs.append(self.custom_static_path)
+        if self.static_path.exists():
+            dirs.append(self.static_path)
+        return dirs
 
 
 @lru_cache

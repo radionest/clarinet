@@ -1,10 +1,12 @@
 // Login page
+import gleam/option.{None, Some}
+import lustre/attribute
 import lustre/element.{type Element}
 import lustre/element/html
-import lustre/attribute
 import lustre/event
-import gleam/option.{None, Some}
+import router
 import store.{type Model, type Msg}
+import utils/dom
 
 pub fn view(model: Model) -> Element(Msg) {
   html.div([attribute.class("login-page")], [
@@ -12,9 +14,21 @@ pub fn view(model: Model) -> Element(Msg) {
       html.div([attribute.class("login-card card")], [
         html.h1([attribute.class("login-title")], [html.text("Clarinet")]),
         html.p([attribute.class("login-subtitle text-muted")], [
-          html.text("Medical Imaging Framework")
+          html.text("Medical Imaging Framework"),
         ]),
         login_form(model),
+        html.div([attribute.class("login-footer")], [
+          html.p([attribute.class("text-muted")], [
+            html.text("Don't have an account? "),
+            html.a(
+              [
+                attribute.href("#"),
+                event.on_click(store.Navigate(router.Register)),
+              ],
+              [html.text("Register here")],
+            ),
+          ]),
+        ]),
       ]),
     ]),
   ])
@@ -70,21 +84,23 @@ fn login_form(model: Model) -> Element(Msg) {
           case model.loading {
             True -> html.text("Logging in...")
             False -> html.text("Login")
-          }
-        ]
+          },
+        ],
       ),
-    ]
+    ],
   )
 }
 
 // Handle form submission
 fn handle_submit() -> Msg {
-  // Get form values using JavaScript FFI
-  let username = get_input_value("username")
-  let password = get_input_value("password")
+  // Get form values using native Gleam DOM utilities
+  let username = case dom.get_input_value("username") {
+    Some(value) -> value
+    None -> ""
+  }
+  let password = case dom.get_input_value("password") {
+    Some(value) -> value
+    None -> ""
+  }
   store.LoginSubmit(username, password)
 }
-
-// JavaScript FFI to get input value
-@external(javascript, "../ffi/forms.js", "getInputValue")
-fn get_input_value(id: String) -> String
