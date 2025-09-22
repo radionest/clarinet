@@ -116,6 +116,13 @@ class Settings(BaseSettings):
     # Security settings
     secret_key: str = "insecure-change-this-key-in-production"  # For session signing
 
+    # Admin user settings
+    admin_username: str = "admin"
+    admin_email: str = "admin@clarinet.local"
+    admin_password: str | None = None  # Required in production
+    admin_auto_create: bool = True  # Auto-create admin on initialization
+    admin_require_strong_password: bool = False  # Enforce in production
+
     # Session settings (KISS - only essentials)
     cookie_name: str = "clarinet_session"
     session_expire_hours: int = 24
