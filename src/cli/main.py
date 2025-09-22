@@ -306,11 +306,11 @@ async def run_with_frontend(host: str, port: int) -> None:
 
 async def init_database() -> None:
     """Initialize the database with tables and default data."""
-    from src.utils.bootstrap import add_default_user_roles
+    from src.utils.bootstrap import initialize_application_data
 
     logger.info("Initializing database...")
     await db_manager.create_db_and_tables_async()
-    await add_default_user_roles()
+    await initialize_application_data()  # Changed from add_default_user_roles
     logger.info("Database initialized successfully")
 
 
@@ -464,6 +464,24 @@ def main() -> None:
     db_subparsers = db_parser.add_subparsers(dest="db_command")
     db_subparsers.add_parser("init", help="Initialize database with tables")
 
+    # admin command
+    admin_parser = subparsers.add_parser("admin", help="Admin user management")
+    admin_subparsers = admin_parser.add_subparsers(dest="admin_command")
+
+    # admin create subcommand
+    admin_create = admin_subparsers.add_parser("create", help="Create admin user")
+    admin_create.add_argument("--username", type=str, default=None, help="Admin username")
+    admin_create.add_argument("--email", type=str, default=None, help="Admin email")
+    admin_create.add_argument(
+        "--password", type=str, default=None, help="Admin password (will prompt if not provided)"
+    )
+
+    # admin reset-password subcommand
+    admin_reset = admin_subparsers.add_parser("reset-password", help="Reset admin password")
+    admin_reset.add_argument(
+        "--username", type=str, default="admin", help="Admin username to reset"
+    )
+
     # init-migrations command
     subparsers.add_parser("init-migrations", help="Initialize Alembic migrations for the project")
 
@@ -492,6 +510,37 @@ def main() -> None:
             asyncio.run(init_database())
         else:
             db_parser.print_help()
+    elif args.command == "admin":
+        if args.admin_command == "create":
+            import getpass
+
+            from src.utils.bootstrap import create_admin_user
+
+            password = args.password
+            if not password:
+                password = getpass.getpass("Enter admin password: ")
+                confirm = getpass.getpass("Confirm password: ")
+                if password != confirm:
+                    logger.error("Passwords do not match")
+                    sys.exit(1)
+
+            asyncio.run(
+                create_admin_user(username=args.username, email=args.email, password=password)
+            )
+        elif args.admin_command == "reset-password":
+            import getpass
+
+            from src.utils.admin import reset_admin_password
+
+            password = getpass.getpass("Enter new password: ")
+            confirm = getpass.getpass("Confirm password: ")
+            if password != confirm:
+                logger.error("Passwords do not match")
+                sys.exit(1)
+
+            asyncio.run(reset_admin_password(args.username, password))
+        else:
+            admin_parser.print_help()
     elif args.command == "init-migrations":
         from src.utils.migrations import init_alembic_in_project
 

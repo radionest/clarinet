@@ -21,6 +21,7 @@ from src.api.routers import study as study
 from src.api.routers import task as task
 from src.api.routers import user as user
 from src.settings import settings
+from src.utils.admin import ensure_admin_exists
 from src.utils.bootstrap import (
     add_default_user_roles,
     create_demo_task_designs_from_json,
@@ -44,6 +45,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:  # noqa: ARG001
     # Setup default configuration
     await add_default_user_roles()
     await create_demo_task_designs_from_json("./tasks/", demo_suffix="")
+
+    # Ensure admin exists
+    try:
+        await ensure_admin_exists()
+    except RuntimeError as e:
+        logger.critical(f"Startup failed: {e}")
+        # In production, you might want to exit
+        if not settings.debug:
+            raise
 
     logger.info("Application startup complete")
 

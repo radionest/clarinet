@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 
 from src.models import TaskDesign, TaskDesignCreate, User, UserRole
+from src.utils.auth import get_password_hash
 from src.utils.db_manager import db_manager
 from src.utils.logger import logger
 
@@ -101,6 +102,137 @@ async def create_user_role(role_name: str, session: AsyncSession) -> UserRole:
     await session.commit()
     await session.refresh(new_role)
     return new_role
+
+
+async def create_admin_user(
+    username: str | None = None,
+    email: str | None = None,
+    password: str | None = None,
+) -> User | None:
+    """
+    Create a default administrator user if it doesn't exist.
+
+    Args:
+        username: Admin username (defaults to settings.admin_username)
+        email: Admin email (defaults to settings.admin_email)
+        password: Admin password (defaults to settings.admin_password)
+
+    Returns:
+        The created or existing admin user, None if creation disabled
+
+    Raises:
+        ValueError: If password is not configured and required
+    """
+    from src.settings import settings
+
+    # Check if admin creation is enabled
+    if not settings.admin_auto_create:
+        logger.info("Admin auto-creation is disabled")
+        return None
+
+    # Use settings defaults if not provided
+    username = username or settings.admin_username
+    email = email or settings.admin_email
+    password = password or settings.admin_password
+
+    # Validate password is configured
+    if not password:
+        if settings.debug:
+            # In debug mode, use a default password with warning
+            password = "admin123"
+            logger.warning(
+                "SECURITY WARNING: Using default admin password 'admin123'. "
+                "Configure CLARINET_ADMIN_PASSWORD for production!"
+            )
+        else:
+            raise ValueError(
+                "Admin password not configured. Set CLARINET_ADMIN_PASSWORD "
+                "environment variable or admin_password in settings."
+            )
+
+    # Validate password strength if required
+    if settings.admin_require_strong_password:
+        if len(password) < 12:
+            raise ValueError("Admin password must be at least 12 characters in production")
+        if not any(c.isupper() for c in password):
+            raise ValueError("Admin password must contain uppercase letters")
+        if not any(c.islower() for c in password):
+            raise ValueError("Admin password must contain lowercase letters")
+        if not any(c.isdigit() for c in password):
+            raise ValueError("Admin password must contain numbers")
+
+    async with db_manager.get_async_session_context() as session:
+        # Check if admin user already exists
+        existing_result = await session.execute(select(User).where(User.id == username))
+        existing_user = existing_result.scalar_one_or_none()
+
+        if existing_user:
+            logger.info(f"Admin user '{username}' already exists")
+
+            # Ensure user has superuser privileges
+            if not existing_user.is_superuser:
+                existing_user.is_superuser = True
+                existing_user.is_active = True
+                existing_user.is_verified = True
+                await session.commit()
+                logger.info(f"Updated user '{username}' to superuser")
+
+            return existing_user
+
+        # Create new admin user
+        hashed_password = get_password_hash(password)
+        admin_user = User(
+            id=username,
+            email=email,
+            hashed_password=hashed_password,
+            is_active=True,
+            is_superuser=True,
+            is_verified=True,
+        )
+
+        session.add(admin_user)
+        await session.commit()
+        await session.refresh(admin_user)
+
+        # Assign admin role if it exists
+        role_result = await session.execute(select(UserRole).where(UserRole.name == "admin"))
+        admin_role = role_result.scalar_one_or_none()
+        if admin_role:
+            admin_user.roles.append(admin_role)
+            await session.commit()
+            logger.info(f"Assigned 'admin' role to user '{username}'")
+
+        logger.info(f"Created admin user '{username}' with email '{email}'")
+
+        if settings.debug and password == "admin123":
+            logger.warning(
+                "⚠️  DEFAULT ADMIN CREDENTIALS IN USE!\n"
+                "   Username: admin\n"
+                "   Password: admin123\n"
+                "   CHANGE THESE IMMEDIATELY!"
+            )
+
+        return admin_user
+
+
+async def initialize_application_data() -> None:
+    """
+    Initialize application with default data including roles and admin user.
+
+    This replaces the direct call to add_default_user_roles in CLI.
+    """
+    from src.settings import settings
+
+    # Create default roles
+    await add_default_user_roles()
+
+    # Create admin user
+    try:
+        await create_admin_user()
+    except ValueError as e:
+        logger.error(f"Failed to create admin user: {e}")
+        if not settings.debug:
+            raise
 
 
 def filter_task_schemas(task_files: list[str], filter_suffix: str = "demo") -> list[str]:

@@ -184,7 +184,85 @@ from src.settings import settings
 database_url = settings.database_url
 jwt_secret = settings.jwt_secret_key
 storage_path = settings.storage_path
+
+# Admin settings
+admin_username = settings.admin_username
+admin_email = settings.admin_email
+admin_auto_create = settings.admin_auto_create
 ```
+
+### Admin User Management
+
+The framework includes built-in admin user management with automatic creation and CLI tools.
+
+#### Configuration Settings
+
+| Setting | Type | Default | Environment Variable | Description |
+|---------|------|---------|---------------------|-------------|
+| `admin_username` | str | "admin" | `CLARINET_ADMIN_USERNAME` | Default admin username |
+| `admin_email` | str | "admin@clarinet.local" | `CLARINET_ADMIN_EMAIL` | Default admin email |
+| `admin_password` | str | None | `CLARINET_ADMIN_PASSWORD` | Admin password (required in production) |
+| `admin_auto_create` | bool | True | `CLARINET_ADMIN_AUTO_CREATE` | Auto-create admin on initialization |
+| `admin_require_strong_password` | bool | False | `CLARINET_ADMIN_REQUIRE_STRONG_PASSWORD` | Enforce password strength policy |
+
+#### Admin Creation Function
+
+Use the `create_admin_user` function from `src.utils.bootstrap`:
+
+```python
+from src.utils.bootstrap import create_admin_user
+
+# Create admin user programmatically
+admin = await create_admin_user(
+    username="superadmin",
+    email="admin@hospital.org",
+    password="SecurePassword123!"
+)
+```
+
+#### Admin Utility Functions
+
+Utility functions available in `src.utils.admin`:
+
+```python
+from src.utils.admin import (
+    reset_admin_password,
+    list_admin_users,
+    ensure_admin_exists
+)
+
+# Reset admin password
+success = await reset_admin_password("admin", "NewPassword123!")
+
+# List all admin users
+async with get_async_session() as session:
+    admins = await list_admin_users(session)
+
+# Ensure at least one admin exists
+await ensure_admin_exists()
+```
+
+#### Security Best Practices for Admin Users
+
+1. **Production Configuration**:
+   - Always set `CLARINET_ADMIN_PASSWORD` explicitly
+   - Enable `CLARINET_ADMIN_REQUIRE_STRONG_PASSWORD=true`
+   - Use minimum 12 characters with mixed case, numbers, and symbols
+
+2. **Password Management**:
+   - Passwords are hashed using bcrypt
+   - Never log or display passwords
+   - Use secure password input (getpass) in CLI
+
+3. **Access Control**:
+   - Admin users have `is_superuser=True` flag
+   - Full system privileges - protect credentials carefully
+   - Consider implementing admin action audit logging
+
+4. **Initialization**:
+   - Admin created automatically on `clarinet db init`
+   - Idempotent creation - safe to run multiple times
+   - System validates admin existence on API startup
 
 ### Type Definitions
 
@@ -270,6 +348,42 @@ clarinet/
 ├── .github/             # CI/CD workflows
 ├── Makefile            # Build automation
 └── pyproject.toml      # Package configuration
+│   ├── app.py          # Main application file
+│   ├── dependencies.py  # Dependencies (auth, etc)
+│   ├── security.py     # JWT and security
+│   └── routers/        # API endpoints
+│       ├── auth.py
+│       ├── study.py
+│       ├── task.py
+│       ├── user.py
+│       └── slicer.py
+├── cli/                 # CLI interface
+│   ├── __init__.py
+│   └── main.py
+├── models/              # SQLModel models
+│   ├── __init__.py
+│   ├── base.py         # Base models
+│   ├── user.py
+│   ├── study.py
+│   ├── task.py
+│   └── patient.py
+├── services/            # Business logic
+│   ├── dicom/          # DICOM processing
+│   ├── image/          # Image processing
+│   └── slicer/         # Slicer integration
+└── utils/               # Helper utilities
+    ├── __init__.py
+    ├── logger.py       # Loguru setup
+    ├── database.py     # Database connection
+    ├── db_manager.py   # Database management
+    ├── async_crud.py   # Async CRUD operations
+    ├── admin.py        # Admin user management utilities
+    ├── bootstrap.py    # Data initialization and admin creation
+    ├── common.py       # Common utility functions
+    ├── migrations.py   # Migration helper functions
+    ├── slicer.py       # Slicer utilities
+    ├── study.py        # Study-related utilities
+    └── validation.py   # Validation utilities
 ```
 
 ### API Routers
@@ -319,6 +433,19 @@ async def test_create_user(async_client: AsyncClient):
         json={"username": "test", "email": "test@test.com"}
     )
     assert response.status_code == 201
+
+@pytest.mark.asyncio
+async def test_admin_creation():
+    """Test admin user creation."""
+    from src.utils.bootstrap import create_admin_user
+
+    admin = await create_admin_user(
+        username="testadmin",
+        email="test@example.com",
+        password="TestPassword123!"
+    )
+    assert admin.is_superuser
+    assert admin.is_active
 ```
 
 ### Minimal FFI Usage
@@ -365,10 +492,18 @@ pre-commit run --all-files  # Run all hooks manually
 pytest
 pytest --cov=src tests/
 
-# Database migrations (Alembic in user projects)
-# Initialize Alembic in your project first:
-# alembic init alembic
-# Then use these commands:
+# Database management
+clarinet db init  # Initialize database with admin user
+clarinet db upgrade  # Apply migrations
+clarinet db downgrade  # Rollback migrations
+
+# Admin management
+clarinet admin create  # Create new admin user (interactive)
+clarinet admin create --username superadmin --email admin@example.com
+clarinet admin reset-password  # Reset admin password
+clarinet admin reset-password --username admin
+
+# Database migrations (Alembic)
 alembic upgrade head  # Apply all migrations
 alembic revision --autogenerate -m "Description"  # Create migration from model changes
 alembic downgrade -1  # Rollback one migration
@@ -392,6 +527,8 @@ alembic history  # Show migration history
 - Password hashing with bcrypt
 - Rate limiting for API endpoints
 - CORS settings in src/api/app.py
+- Admin user management with secure defaults
+- Strong password validation for production environments
 
 ### Git Workflow
 
