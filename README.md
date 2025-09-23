@@ -72,7 +72,7 @@ clarinet/
 
 ### Prerequisites
 
-- Python 3.11+
+- Python 3.12+
 - PostgreSQL or SQLite (for development)
 - 3D Slicer (optional, for advanced image processing)
 - Gleam 1.5+ (for frontend development)
@@ -159,7 +159,7 @@ The frontend uses native Gleam libraries for better type safety:
 - **gleam_fetch** (~1.3): HTTP client with automatic cookie support
 - **plinth** (~0.7): Browser API bindings for DOM manipulation
 - **modem** (~2.1): Client-side routing
-- **formosh**: Dynamic form generation from JSON Schema
+- **formosh**: Dynamic form generation from JSON Schema (Note: Currently references private repository)
 - **gleam_json** (~3.0): JSON encoding/decoding
 - **gleam_http** (~4.2): HTTP types and utilities
 
@@ -326,17 +326,16 @@ pytest tests/integration/test_api.py
 
 ## Contributing
 
-Please read [CONTRIBUTING.md](CONTRIBUTING.md) for details on our code of conduct and the process for submitting pull requests.
+Contributions are welcome! Please follow the code style guide in CLAUDE.md when submitting pull requests.
 
 ## Documentation
 
 - [Code Style Guide](CLAUDE.md) - Detailed development guidelines
-- [API Reference](docs/api.md) - Complete API documentation
 - [Examples](examples/) - Sample implementations
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License.
 
 ## Support
 

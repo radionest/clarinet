@@ -127,6 +127,20 @@ class Settings(BaseSettings):
     # Session settings (KISS - only essentials)
     cookie_name: str = "clarinet_session"
     session_expire_hours: int = 24
+    session_sliding_refresh: bool = True  # Auto-extend on activity
+    session_absolute_timeout_days: int = 30  # Maximum session age
+    session_idle_timeout_minutes: int = 60  # Inactivity timeout
+
+    # Cleanup service settings
+    session_cleanup_enabled: bool = True
+    session_cleanup_interval: int = 3600  # Run every hour (in seconds)
+    session_cleanup_batch_size: int = 1000
+    session_cleanup_retention_days: int = 30
+
+    # Session security settings
+    session_concurrent_limit: int = 5  # Max sessions per user (0 = unlimited)
+    session_ip_check: bool = False  # Validate IP consistency
+    session_secure_cookie: bool = True  # HTTPS only in production
 
     # Template settings
     template_dir: str | None = None

@@ -499,6 +499,38 @@ def main() -> None:
     # frontend clean
     frontend_subparsers.add_parser("clean", help="Clean build artifacts")
 
+    # session command
+    session_parser = subparsers.add_parser("session", help="Session management commands")
+    session_subparsers = session_parser.add_subparsers(dest="session_command")
+
+    # session cleanup
+    cleanup_parser = session_subparsers.add_parser("cleanup", help="Clean up expired sessions")
+    cleanup_parser.add_argument(
+        "--days", type=int, default=30, help="Remove sessions older than N days"
+    )
+
+    # session cleanup-once
+    session_subparsers.add_parser("cleanup-once", help="Run session cleanup once")
+
+    # session stats
+    session_subparsers.add_parser("stats", help="Show session statistics")
+
+    # session revoke-user
+    revoke_parser = session_subparsers.add_parser(
+        "revoke-user", help="Revoke all sessions for a user"
+    )
+    revoke_parser.add_argument("user_id", help="User UUID")
+    revoke_parser.add_argument(
+        "--keep-current", action="store_true", help="Keep current session active"
+    )
+
+    # session list-user
+    list_parser = session_subparsers.add_parser("list-user", help="List sessions for a user")
+    list_parser.add_argument("user_id", help="User UUID")
+
+    # session cleanup-all
+    session_subparsers.add_parser("cleanup-all", help="Remove ALL sessions (dangerous!)")
+
     args = parser.parse_args()
 
     if args.command == "init":
@@ -547,6 +579,30 @@ def main() -> None:
         init_alembic_in_project()
     elif args.command == "frontend":
         handle_frontend_command(args)
+    elif args.command == "session":
+        from src.cli.session_management import (
+            cleanup,
+            cleanup_all,
+            cleanup_once,
+            list_user_sessions,
+            revoke_user_sessions_cmd,
+            stats,
+        )
+
+        if args.session_command == "cleanup":
+            cleanup(args.days)
+        elif args.session_command == "cleanup-once":
+            cleanup_once()
+        elif args.session_command == "stats":
+            stats()
+        elif args.session_command == "revoke-user":
+            revoke_user_sessions_cmd(args.user_id, args.keep_current)
+        elif args.session_command == "list-user":
+            list_user_sessions(args.user_id)
+        elif args.session_command == "cleanup-all":
+            cleanup_all()
+        else:
+            session_parser.print_help()
     else:
         parser.print_help()
         sys.exit(1)

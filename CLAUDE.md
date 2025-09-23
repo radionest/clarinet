@@ -79,14 +79,16 @@ src/frontend/src/  OR  frontend/src/
 
 ### Building Frontend
 
+**Note about dependencies**: The `formosh` library currently references a private Git repository (`git@github.com:radionest/gleam_formosh.git`). You may need to either:
+- Have access to the private repository
+- Replace it with a public alternative
+- Build your own form handling solution
+
 1. **Development Build**:
    ```bash
    # For embedded frontend
    cd src/frontend
-   gleam build --target javascript
-
-   # For standalone frontend
-   cd frontend
+   gleam deps download  # Install dependencies
    gleam build --target javascript
    ```
 
@@ -113,17 +115,20 @@ src/frontend/src/  OR  frontend/src/
 
 ### Authentication Architecture
 
-**Backend (FastAPI-users with session cookies):**
-- Sessions stored in database via `AccessToken` model
+**Backend (FastAPI-users with database sessions):**
+- Session-based authentication using fastapi-users library
+- Sessions stored in database via `AccessToken` model (UUID4 tokens)
 - Cookies configured as httpOnly, secure (in production), and SameSite=lax
-- No JWT tokens - more secure than localStorage
-- Session expiry managed by `session_expire_seconds` setting
+- Cookie name: `clarinet_session` (configurable)
+- Session expiry: 24 hours by default (`session_expire_hours` setting)
+- Password hashing via bcrypt
 
 **Frontend (Cookie-based auth):**
-- Authentication state tracked by user presence in store (not tokens)
-- HTTP requests automatically include cookies via gleam_fetch
-- No manual token management needed
-- Login/logout handled through cookie setting/clearing by server
+- Authentication state tracked by user presence in store
+- HTTP requests automatically include session cookies via gleam_fetch
+- No manual token/session management in frontend code
+- Login endpoint accepts multipart/form-data with username/password
+- Logout clears session from database and cookie
 
 ## Best Practices
 
@@ -320,70 +325,77 @@ clarinet/
 │   ├── types.py         # Common type definitions
 │   ├── api/             # FastAPI application
 │   │   ├── app.py      # Main application file
-│   │   ├── routers/    # API endpoints
-│   │   └── ...
+│   │   ├── auth_config.py # Authentication configuration
+│   │   ├── dependencies.py  # Dependencies (auth, etc)
+│   │   ├── exception_handlers.py # Exception handlers
+│   │   └── routers/    # API endpoints
+│   │       ├── auth.py
+│   │       ├── study.py
+│   │       ├── task.py
+│   │       ├── user.py
+│   │       └── slicer.py
 │   ├── cli/             # CLI interface
+│   │   ├── __init__.py
+│   │   └── main.py
 │   ├── models/          # SQLModel models
+│   │   ├── __init__.py
+│   │   ├── auth.py     # Authentication models
+│   │   ├── base.py     # Base models
+│   │   ├── user.py
+│   │   ├── study.py
+│   │   ├── task.py
+│   │   ├── series.py
+│   │   └── patient.py
 │   ├── repositories/    # Repository pattern
+│   │   ├── patient_repository.py
+│   │   ├── series_repository.py
+│   │   ├── study_repository.py
+│   │   └── user_repository.py
 │   ├── services/        # Business logic
+│   │   ├── providers/  # Service providers
+│   │   ├── dicom/      # DICOM processing
+│   │   ├── image/      # Image processing
+│   │   └── slicer/     # Slicer integration
 │   ├── utils/           # Helper utilities
+│   │   ├── __init__.py
+│   │   ├── logger.py   # Loguru setup
+│   │   ├── database.py # Database connection
+│   │   ├── db_manager.py # Database management
+│   │   ├── admin.py    # Admin user management utilities
+│   │   ├── bootstrap.py # Data initialization and admin creation
+│   │   ├── common.py   # Common utility functions
+│   │   ├── migrations.py # Migration helper functions
+│   │   ├── slicer.py   # Slicer utilities
+│   │   ├── study.py    # Study-related utilities
+│   │   └── validation.py # Validation utilities
 │   └── frontend/        # Embedded Gleam/Lustre frontend
 │       ├── src/         # Gleam source code
-│       │   ├── api/     # API client
+│       │   ├── api/     # API client and HTTP
 │       │   ├── components/ # UI components
 │       │   ├── pages/   # Application pages
+│       │   ├── utils/   # Utility modules
+│       │   ├── store.gleam # State management
 │       │   └── main.gleam # Entry point
 │       ├── public/      # Public assets
 │       ├── static/      # Static HTML/CSS
 │       ├── build/       # Build artifacts (generated)
 │       └── gleam.toml   # Gleam configuration
-├── frontend/            # Standalone frontend (optional)
-│   └── [same structure as src/frontend]
 ├── dist/                # Built frontend (generated)
 ├── scripts/             # Build scripts
 │   └── build_frontend.sh
 ├── tests/               # Test suite
+│   ├── conftest.py
+│   ├── integration/
+│   └── utils/
 ├── examples/            # Examples and templates
-├── data/                # Data storage
+│   ├── test/
+│   └── test_front/
+├── data/                # Data storage (gitignored)
 ├── .github/             # CI/CD workflows
 ├── Makefile            # Build automation
-└── pyproject.toml      # Package configuration
-│   ├── app.py          # Main application file
-│   ├── dependencies.py  # Dependencies (auth, etc)
-│   ├── security.py     # JWT and security
-│   └── routers/        # API endpoints
-│       ├── auth.py
-│       ├── study.py
-│       ├── task.py
-│       ├── user.py
-│       └── slicer.py
-├── cli/                 # CLI interface
-│   ├── __init__.py
-│   └── main.py
-├── models/              # SQLModel models
-│   ├── __init__.py
-│   ├── base.py         # Base models
-│   ├── user.py
-│   ├── study.py
-│   ├── task.py
-│   └── patient.py
-├── services/            # Business logic
-│   ├── dicom/          # DICOM processing
-│   ├── image/          # Image processing
-│   └── slicer/         # Slicer integration
-└── utils/               # Helper utilities
-    ├── __init__.py
-    ├── logger.py       # Loguru setup
-    ├── database.py     # Database connection
-    ├── db_manager.py   # Database management
-    ├── async_crud.py   # Async CRUD operations
-    ├── admin.py        # Admin user management utilities
-    ├── bootstrap.py    # Data initialization and admin creation
-    ├── common.py       # Common utility functions
-    ├── migrations.py   # Migration helper functions
-    ├── slicer.py       # Slicer utilities
-    ├── study.py        # Study-related utilities
-    └── validation.py   # Validation utilities
+├── pyproject.toml      # Package configuration
+├── settings.toml.example # Configuration template
+└── .pre-commit-config.yaml # Pre-commit hooks
 ```
 
 ### API Routers
@@ -396,7 +408,7 @@ clarinet/
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from src.utils.database import get_async_session
-from src.api.dependencies import get_current_user
+from src.api.dependencies import get_current_active_user
 
 router = APIRouter(prefix="/items", tags=["Items"])
 
@@ -404,7 +416,7 @@ router = APIRouter(prefix="/items", tags=["Items"])
 async def get_item(
     item_id: int,
     session: AsyncSession = Depends(get_async_session),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_active_user)
 ):
     # Implementation
     pass
@@ -448,14 +460,14 @@ async def test_admin_creation():
     assert admin.is_active
 ```
 
-### Minimal FFI Usage
+### Pure Gleam Frontend
 
-The frontend is primarily written in pure Gleam with minimal JavaScript FFI:
-- Only `utils/router_ffi.js` for pushState (SPA routing)
-- All other functionality uses native Gleam libraries
+The frontend is written entirely in pure Gleam without JavaScript FFI:
+- All functionality uses native Gleam libraries
 - HTTP requests via gleam_fetch (automatic cookie handling)
 - DOM manipulation via plinth
-- No custom JavaScript for authentication or data handling
+- Client-side routing via modem
+- No custom JavaScript required
 
 ### Development Commands
 
@@ -465,10 +477,10 @@ uvicorn src.api.app:app --reload  # Run API server
 clarinet run --with-frontend      # Run with frontend
 
 # Frontend Development
-cd frontend
-gleam deps download               # Install dependencies (includes gleam_fetch, plinth, formosh)
-gleam build --target javascript   # Build for browser with native Gleam libraries
-cd ..
+cd src/frontend  # Frontend is embedded in src/
+gleam deps download               # Install dependencies
+gleam build --target javascript   # Build for browser
+cd ../..
 
 # Build Commands
 make frontend-build               # Build production frontend

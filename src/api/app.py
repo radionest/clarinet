@@ -20,6 +20,7 @@ from src.api.routers import slicer  # slicer doesn't use database, no async vers
 from src.api.routers import study as study
 from src.api.routers import task as task
 from src.api.routers import user as user
+from src.services.session_cleanup import session_cleanup_service
 from src.settings import settings
 from src.utils.admin import ensure_admin_exists
 from src.utils.bootstrap import (
@@ -55,11 +56,21 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:  # noqa: ARG001
         if not settings.debug:
             raise
 
+    # Start session cleanup service if enabled
+    if settings.session_cleanup_enabled:
+        await session_cleanup_service.start()
+        logger.info("Session cleanup service started")
+
     logger.info("Application startup complete")
 
     try:
         yield
     finally:
+        # Stop session cleanup service
+        if settings.session_cleanup_enabled:
+            await session_cleanup_service.stop()
+            logger.info("Session cleanup service stopped")
+
         # Cleanup database connections on shutdown
         await db_manager.close()
         logger.info("Application shutdown")
