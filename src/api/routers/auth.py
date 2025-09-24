@@ -19,7 +19,7 @@ from src.api.auth_config import (
     get_user_db,
 )
 from src.models.auth import AccessToken
-from src.models.user import User, UserRead
+from src.models.user import User, UserCreate, UserRead
 from src.settings import settings
 from src.utils.database import get_async_session
 from src.utils.logger import logger
@@ -53,9 +53,9 @@ router.include_router(
 )
 
 # User registration
-# router.include_router(
-#     fastapi_users.get_register_router(User, UserCreate),
-# )
+router.include_router(
+    fastapi_users.get_register_router(UserRead, UserCreate),
+)
 
 
 # Additional endpoints
@@ -124,7 +124,11 @@ async def refresh_session(
     # Check absolute timeout
     if settings.session_absolute_timeout_days > 0:
         max_age = timedelta(days=settings.session_absolute_timeout_days)
-        absolute_limit = access_token.created_at + max_age
+        # Ensure created_at is timezone-aware
+        created_at = access_token.created_at
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=UTC)
+        absolute_limit = created_at + max_age
         new_expiry = min(new_expiry, absolute_limit)
 
     access_token.expires_at = new_expiry

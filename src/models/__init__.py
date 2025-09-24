@@ -5,6 +5,9 @@ This package contains the SQLModel-based models that define the database schema
 and data structures used throughout the Clarinet framework.
 """
 
+# Authentication models
+from .auth import AccessToken
+
 # Base models
 from .base import BaseModel, DicomQueryLevel, DicomUID, TaskStatus
 
@@ -44,6 +47,8 @@ from .task import (
 from .user import User, UserRead, UserRole, UserRolesLink
 
 __all__ = [
+    # Authentication
+    "AccessToken",
     # Base
     "BaseModel",
     "DicomQueryLevel",

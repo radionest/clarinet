@@ -232,7 +232,7 @@ fn render_task_metadata(task: Task) -> Element(Msg) {
         Some(user) ->
           element.fragment([
             html.dt([], [html.text("Assigned to:")]),
-            html.dd([], [html.text(user.username)]),
+            html.dd([], [html.text(user.email)]),
           ])
         None -> element.none()
       },

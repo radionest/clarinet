@@ -11,18 +11,23 @@ import gleam/result
 import multipart_form/field
 
 // Login endpoint using multipart/form-data
+// Returns 204 No Content on success - must call get_current_user to get user data
 pub fn login(
-  username: String,
+  email: String,
   password: String,
 ) -> Promise(Result(LoginResponse, ApiError)) {
-  // Create a multipart form with username and password fields
+  // Create a multipart form with username field (but email value - fastapi-users convention)
+  // The backend expects field named "username" but containing email value
   let form = [
-    #("username", field.String(username)),
+    #("username", field.String(email)),
     #("password", field.String(password)),
   ]
-  // Send the multipart form data
-  http_client.post_multipart("/auth/login", form)
-  |> promise.map(fn(result) { result.try(result, decode_login_response) })
+
+  // Send the login request - it returns 204 No Content on success
+  // Using try_await to handle the Result inside the promise
+  use _login <- promise.try_await(http_client.post_multipart("/auth/login", form))
+  use current_user <- promise.map_try(get_current_user())
+  Ok(models.LoginResponse(user: current_user))
 }
 
 // Logout endpoint
@@ -45,7 +50,6 @@ pub fn get_current_user() -> Promise(Result(User, ApiError)) {
 pub fn register(request: RegisterRequest) -> Promise(Result(User, ApiError)) {
   let body =
     json.object([
-      #("username", json.string(request.username)),
       #("email", json.string(request.email)),
       #("password", json.string(request.password)),
       #("full_name", case request.full_name {
@@ -55,7 +59,7 @@ pub fn register(request: RegisterRequest) -> Promise(Result(User, ApiError)) {
     ])
     |> json.to_string
 
-  http_client.post("/auth/register", body)
+  http_client.post("/api/auth/register", body)
   |> promise.map(fn(result) { result.try(result, decode_user) })
 }
 
@@ -65,26 +69,24 @@ pub fn refresh_token() -> Promise(Result(LoginResponse, ApiError)) {
     json.object([])
     |> json.to_string
 
+  // Refresh also returns 204, so chain get_current_user
+  // Using try_await to handle the Result and reduce nesting
   http_client.post("/auth/refresh", body)
-  |> promise.map(fn(result) { result.try(result, decode_login_response) })
+  |> promise.try_await(fn(_) {
+    // Refresh successful - fetch current user
+    get_current_user()
+  })
+  |> promise.map(fn(result) {
+    // Transform the user result into a LoginResponse
+    result.map(result, fn(user) { models.LoginResponse(user: user) })
+  })
 }
 
-// Decode login response from dynamic data (cookie auth - no token in response)
-fn decode_login_response(
-  data: dynamic.Dynamic,
-) -> Result(LoginResponse, ApiError) {
-  // Login now returns just the user data
-  case decode_user(data) {
-    Ok(user) -> Ok(models.LoginResponse(user: user))
-    Error(e) -> Error(e)
-  }
-}
 
 // Decode user from dynamic data
 fn decode_user(data: dynamic.Dynamic) -> Result(User, ApiError) {
   let decoder = {
     use id <- decode.field("id", decode.string)
-    use username <- decode.field("username", decode.string)
     use email <- decode.field("email", decode.string)
     use hashed_password <- decode.optional_field(
       "hashed_password",
@@ -105,7 +107,6 @@ fn decode_user(data: dynamic.Dynamic) -> Result(User, ApiError) {
 
     decode.success(models.User(
       id: id,
-      username: username,
       email: email,
       hashed_password: hashed_password,
       is_active: is_active,

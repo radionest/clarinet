@@ -16,14 +16,14 @@ async def reset_admin_password(username: str, new_password: str) -> bool:
     Reset the password for an admin user.
 
     Args:
-        username: The admin username
+        username: The admin username (email)
         new_password: The new password to set
 
     Returns:
         True if password was reset, False otherwise
     """
     async with db_manager.get_async_session_context() as session:
-        result = await session.execute(select(User).where(User.id == username))
+        result = await session.execute(select(User).where(User.email == username))
         user = result.scalar_one_or_none()
 
         if not user:

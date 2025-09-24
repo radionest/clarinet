@@ -11,6 +11,7 @@ import os
 import aiofiles
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 from sqlmodel import select
 
 from src.models import TaskDesign, TaskDesignCreate, User, UserRole
@@ -48,7 +49,8 @@ async def give_role_to_all_users(role_name: str) -> None:
         role_name: The name of the role to assign
     """
     async with db_manager.get_async_session_context() as session:
-        users_result = await session.execute(select(User))
+        # Eagerly load roles relationship to avoid lazy loading in async context
+        users_result = await session.execute(select(User).options(selectinload(User.roles)))  # type:ignore[arg-type]
         users = users_result.scalars().all()
 
         role_result = await session.execute(select(UserRole).where(UserRole.name == role_name))
@@ -163,11 +165,11 @@ async def create_admin_user(
 
     async with db_manager.get_async_session_context() as session:
         # Check if admin user already exists
-        existing_result = await session.execute(select(User).where(User.id == username))
+        existing_result = await session.execute(select(User).where(User.email == email))
         existing_user = existing_result.scalar_one_or_none()
 
         if existing_user:
-            logger.info(f"Admin user '{username}' already exists")
+            logger.info(f"Admin user with email '{email}' already exists")
 
             # Ensure user has superuser privileges
             if not existing_user.is_superuser:
@@ -175,14 +177,13 @@ async def create_admin_user(
                 existing_user.is_active = True
                 existing_user.is_verified = True
                 await session.commit()
-                logger.info(f"Updated user '{username}' to superuser")
+                logger.info(f"Updated user with email '{email}' to superuser")
 
             return existing_user
 
         # Create new admin user
         hashed_password = get_password_hash(password)
         admin_user = User(
-            id=username,
             email=email,
             hashed_password=hashed_password,
             is_active=True,
@@ -192,7 +193,12 @@ async def create_admin_user(
 
         session.add(admin_user)
         await session.commit()
-        await session.refresh(admin_user)
+
+        # Refresh with eager loading of roles to avoid lazy loading in async context
+        admin_user_result = await session.execute(
+            select(User).options(selectinload(User.roles)).where(User.id == admin_user.id)  # type:ignore[arg-type]
+        )
+        admin_user = admin_user_result.scalar_one()
 
         # Assign admin role if it exists
         role_result = await session.execute(select(UserRole).where(UserRole.name == "admin"))
@@ -200,9 +206,9 @@ async def create_admin_user(
         if admin_role:
             admin_user.roles.append(admin_role)
             await session.commit()
-            logger.info(f"Assigned 'admin' role to user '{username}'")
+            logger.info(f"Assigned 'admin' role to user with email '{email}'")
 
-        logger.info(f"Created admin user '{username}' with email '{email}'")
+        logger.info(f"Created admin user with email '{email}'")
 
         if settings.debug and password == "admin123":
             logger.warning(

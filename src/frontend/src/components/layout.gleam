@@ -51,7 +51,7 @@ fn nav_link(
 
   html.a(
     [
-      attribute.href("#"),
+      attribute.href(router.route_to_path(route)),
       attribute.class(classes),
       event.on_click(store.Navigate(route)),
     ],
@@ -64,7 +64,7 @@ fn user_menu(model: Model) -> Element(Msg) {
   case model.user {
     Some(user) -> {
       html.div([attribute.class("navbar-user")], [
-        html.span([attribute.class("username")], [html.text(user.username)]),
+        html.span([attribute.class("username")], [html.text(user.email)]),
         html.button(
           [
             attribute.class("btn-logout"),

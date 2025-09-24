@@ -30,7 +30,7 @@ class AccessToken(SQLModel, table=True):
         ),
     )
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
-    expires_at: datetime = Field(index=True)  # When session expires
+    expires_at: datetime = Field()  # When session expires
     last_accessed: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     # Optional metadata fields

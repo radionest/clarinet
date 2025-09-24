@@ -93,13 +93,13 @@ pub type Task {
   )
 }
 
-// User model (matching backend)
+// User model (matching backend fastapi-users SQLModelBaseUserDB)
 pub type User {
   User(
     id: String,
-    // Primary key
-    username: String,
+    // UUID Primary key
     email: String,
+    // Unique email used for identification
     hashed_password: Option(String),
     // Won't be sent from API usually
     is_active: Bool,
@@ -128,7 +128,7 @@ pub type Series {
 
 // Authentication models
 pub type LoginRequest {
-  LoginRequest(username: String, password: String)
+  LoginRequest(email: String, password: String)
 }
 
 // Login response - returns user data only (cookie auth handled automatically)
@@ -138,7 +138,6 @@ pub type LoginResponse {
 
 pub type RegisterRequest {
   RegisterRequest(
-    username: String,
     email: String,
     password: String,
     full_name: Option(String),
@@ -252,7 +251,6 @@ pub type SeriesRead {
 
 pub type UserCreate {
   UserCreate(
-    username: String,
     email: String,
     password: String,
     is_active: Option(Bool),
@@ -264,7 +262,6 @@ pub type UserCreate {
 pub type UserRead {
   UserRead(
     id: String,
-    username: String,
     email: String,
     is_active: Bool,
     is_superuser: Bool,

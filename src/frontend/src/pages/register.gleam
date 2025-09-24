@@ -44,22 +44,6 @@ fn register_form(model: Model) -> Element(Msg) {
       event.on_submit(fn(_) { handle_submit() }),
     ],
     [
-      // Username field
-      html.div([attribute.class("form-group")], [
-        html.label([attribute.for("reg-username")], [html.text("Username")]),
-        html.input([
-          attribute.type_("text"),
-          attribute.id("reg-username"),
-          attribute.name("username"),
-          attribute.placeholder("Choose a username"),
-          attribute.required(True),
-          attribute.disabled(model.loading),
-        ]),
-        html.small([attribute.class("form-text text-muted")], [
-          html.text("Your unique identifier in the system"),
-        ]),
-      ]),
-
       // Email field
       html.div([attribute.class("form-group")], [
         html.label([attribute.for("reg-email")], [html.text("Email")]),
@@ -72,7 +56,7 @@ fn register_form(model: Model) -> Element(Msg) {
           attribute.disabled(model.loading),
         ]),
         html.small([attribute.class("form-text text-muted")], [
-          html.text("We'll use this for important notifications"),
+          html.text("This will be your unique identifier for login"),
         ]),
       ]),
 
@@ -145,10 +129,6 @@ fn register_form(model: Model) -> Element(Msg) {
 // Handle form submission
 fn handle_submit() -> Msg {
   // Get form values using native Gleam DOM utilities
-  let username = case dom.get_input_value("reg-username") {
-    Some(value) -> value
-    None -> ""
-  }
   let email = case dom.get_input_value("reg-email") {
     Some(value) -> value
     None -> ""
@@ -168,7 +148,7 @@ fn handle_submit() -> Msg {
     True -> {
       case string.length(password) < 8 {
         True -> store.SetError(Some("Password must be at least 8 characters"))
-        False -> store.RegisterSubmit(username, email, password)
+        False -> store.RegisterSubmit(email, password)
       }
     }
   }

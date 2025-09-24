@@ -19,7 +19,7 @@ pub fn view(model: Model) -> Element(Msg) {
       Some(user) -> {
         html.div([attribute.class("dashboard-content")], [
           html.p([attribute.class("welcome")], [
-            html.text("Welcome back, " <> user.username <> "!"),
+            html.text("Welcome back, " <> user.email <> "!"),
           ]),
           stats_section(model),
           recent_activity(model),

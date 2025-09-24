@@ -41,14 +41,14 @@ fn login_form(model: Model) -> Element(Msg) {
       event.on_submit(fn(_) { handle_submit() }),
     ],
     [
-      // Username field
+      // Email field
       html.div([attribute.class("form-group")], [
-        html.label([attribute.for("username")], [html.text("Username")]),
+        html.label([attribute.for("email")], [html.text("Email")]),
         html.input([
-          attribute.type_("text"),
-          attribute.id("username"),
-          attribute.name("username"),
-          attribute.placeholder("Enter username"),
+          attribute.type_("email"),
+          attribute.id("email"),
+          attribute.name("email"),
+          attribute.placeholder("Enter your email"),
           attribute.required(True),
           attribute.disabled(model.loading),
         ]),
@@ -94,7 +94,7 @@ fn login_form(model: Model) -> Element(Msg) {
 // Handle form submission
 fn handle_submit() -> Msg {
   // Get form values using native Gleam DOM utilities
-  let username = case dom.get_input_value("username") {
+  let email = case dom.get_input_value("email") {
     Some(value) -> value
     None -> ""
   }
@@ -102,5 +102,5 @@ fn handle_submit() -> Msg {
     Some(value) -> value
     None -> ""
   }
-  store.LoginSubmit(username, password)
+  store.LoginSubmit(email, password)
 }

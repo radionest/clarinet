@@ -12,7 +12,6 @@ import store.{type Msg}
 // User form data type for managing form state
 pub type UserFormData {
   UserFormData(
-    username: String,
     email: String,
     password: String,
     password_confirm: String,
@@ -24,7 +23,6 @@ pub type UserFormData {
 
 // Message types for form updates
 pub type UserFormMsg {
-  UpdateUsername(String)
   UpdateEmail(String)
   UpdatePassword(String)
   UpdatePasswordConfirm(String)
@@ -37,7 +35,6 @@ pub type UserFormMsg {
 // Convert form data to UserCreate model
 pub fn to_user_create(data: UserFormData) -> UserCreate {
   models.UserCreate(
-    username: data.username,
     email: data.email,
     password: data.password,
     is_active: Some(data.is_active),
@@ -49,7 +46,6 @@ pub fn to_user_create(data: UserFormData) -> UserCreate {
 // Initialize empty form data
 pub fn init() -> UserFormData {
   UserFormData(
-    username: "",
     email: "",
     password: "",
     password_confirm: "",
@@ -62,7 +58,6 @@ pub fn init() -> UserFormData {
 // Initialize form data for editing (without password)
 pub fn from_user(user: models.User) -> UserFormData {
   UserFormData(
-    username: user.username,
     email: user.email,
     password: "",
     // Don't populate password for editing
@@ -89,19 +84,6 @@ pub fn view(
         False -> "Create User"
       }),
     ]),
-
-    // Username field (required)
-    form.required_field(
-      "Username",
-      "username",
-      form.text_input(
-        "username",
-        data.username,
-        Some("Enter username"),
-        fn(value) { on_update(UpdateUsername(value)) },
-      ),
-      errors,
-    ),
 
     // Email field (required)
     form.required_field(
@@ -230,12 +212,6 @@ pub fn validate(
 ) -> Result(UserFormData, Dict(String, String)) {
   let errors = dict.new()
 
-  // Validate Username (required)
-  let errors = case form.validate_required(data.username, "Username") {
-    Error(msg) -> dict.insert(errors, "username", msg)
-    Ok(_) -> errors
-  }
-
   // Validate Email (required and format)
   let errors = case form.validate_required(data.email, "Email") {
     Error(msg) -> dict.insert(errors, "email", msg)
@@ -306,7 +282,6 @@ pub fn validate(
 // Update form data based on message
 pub fn update(data: UserFormData, msg: UserFormMsg) -> UserFormData {
   case msg {
-    UpdateUsername(value) -> UserFormData(..data, username: value)
     UpdateEmail(value) -> UserFormData(..data, email: value)
     UpdatePassword(value) -> UserFormData(..data, password: value)
     UpdatePasswordConfirm(value) ->

@@ -579,30 +579,6 @@ def main() -> None:
         init_alembic_in_project()
     elif args.command == "frontend":
         handle_frontend_command(args)
-    elif args.command == "session":
-        from src.cli.session_management import (
-            cleanup,
-            cleanup_all,
-            cleanup_once,
-            list_user_sessions,
-            revoke_user_sessions_cmd,
-            stats,
-        )
-
-        if args.session_command == "cleanup":
-            cleanup(args.days)
-        elif args.session_command == "cleanup-once":
-            cleanup_once()
-        elif args.session_command == "stats":
-            stats()
-        elif args.session_command == "revoke-user":
-            revoke_user_sessions_cmd(args.user_id, args.keep_current)
-        elif args.session_command == "list-user":
-            list_user_sessions(args.user_id)
-        elif args.session_command == "cleanup-all":
-            cleanup_all()
-        else:
-            session_parser.print_help()
     else:
         parser.print_help()
         sys.exit(1)

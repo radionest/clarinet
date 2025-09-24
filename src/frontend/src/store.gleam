@@ -67,10 +67,10 @@ pub type Msg {
   Navigate(Route)
 
   // Authentication
-  LoginSubmit(username: String, password: String)
+  LoginSubmit(email: String, password: String)
   LoginSuccess(user: User)
   LoginError(ApiError)
-  RegisterSubmit(username: String, email: String, password: String)
+  RegisterSubmit(email: String, password: String)
   RegisterSuccess(user: User)
   RegisterError(ApiError)
   Logout

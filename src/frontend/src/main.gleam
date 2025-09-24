@@ -57,7 +57,10 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       case router.requires_auth(route), model.user {
         True, None -> {
           // Redirect to login if auth required
-          #(store.set_route(model, router.Login), effect.none())
+          #(
+            store.set_route(model, router.Login),
+            modem.push("/login", option.None, option.None),
+          )
         }
         False, Some(_) if route == router.Login || route == router.Register -> {
           // Redirect from login/register if already authenticated
@@ -81,11 +84,11 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     }
 
     // Authentication
-    store.LoginSubmit(username, password) -> {
+    store.LoginSubmit(email, password) -> {
       let new_model = store.set_loading(model, True)
       let login_effect =
         effect.from(fn(dispatch) {
-          auth.login(username, password)
+          auth.login(email, password)
           |> promise.tap(fn(result) {
             case result {
               Ok(response) -> {
@@ -128,14 +131,13 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       #(new_model, effect.none())
     }
 
-    store.RegisterSubmit(username, email, password) -> {
+    store.RegisterSubmit(email, password) -> {
       let new_model =
         store.set_loading(model, True)
         |> store.clear_messages()
 
       let register_request =
         models.RegisterRequest(
-          username: username,
           email: email,
           password: password,
           full_name: None,

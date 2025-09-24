@@ -160,7 +160,11 @@ class DatabaseStrategy(Strategy[User, UUID]):
 
         # Check idle timeout
         if settings.session_idle_timeout_minutes > 0:
-            idle_duration = datetime.now(UTC) - access_token.last_accessed
+            # Ensure last_accessed is timezone-aware
+            last_accessed = access_token.last_accessed
+            if last_accessed.tzinfo is None:
+                last_accessed = last_accessed.replace(tzinfo=UTC)
+            idle_duration = datetime.now(UTC) - last_accessed
             max_idle = timedelta(minutes=settings.session_idle_timeout_minutes)
             if idle_duration > max_idle:
                 logger.info(f"Session {token[:8]}... expired due to inactivity")
@@ -170,7 +174,11 @@ class DatabaseStrategy(Strategy[User, UUID]):
         access_token.last_accessed = datetime.now(UTC)
 
         if settings.session_sliding_refresh:
-            time_left = access_token.expires_at - datetime.now(UTC)
+            # Ensure expires_at is timezone-aware
+            expires_at = access_token.expires_at
+            if expires_at.tzinfo is None:
+                expires_at = expires_at.replace(tzinfo=UTC)
+            time_left = expires_at - datetime.now(UTC)
             total_duration = timedelta(hours=settings.session_expire_hours)
 
             # Refresh if less than 50% time remaining
@@ -180,7 +188,11 @@ class DatabaseStrategy(Strategy[User, UUID]):
                 # Check absolute timeout
                 if settings.session_absolute_timeout_days > 0:
                     max_age = timedelta(days=settings.session_absolute_timeout_days)
-                    absolute_limit = access_token.created_at + max_age
+                    # Ensure created_at is timezone-aware
+                    created_at = access_token.created_at
+                    if created_at.tzinfo is None:
+                        created_at = created_at.replace(tzinfo=UTC)
+                    absolute_limit = created_at + max_age
                     new_expiry = min(new_expiry, absolute_limit)
 
                 access_token.expires_at = new_expiry
