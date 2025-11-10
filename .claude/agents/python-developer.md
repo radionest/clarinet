@@ -12,7 +12,7 @@ examples:
     context: "User requests async function in Russian"
   - query: "Отрефактори парсер используя паттерн стратегия"
     context: "User wants refactoring with mixed Russian/English"
-model: opus
+model: sonnet
 color: red
 ---
 
