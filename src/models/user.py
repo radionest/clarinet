@@ -7,8 +7,9 @@ This module provides models for users, roles, and authentication.
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
+from fastapi_users import schemas
 from fastapi_users_db_sqlmodel import SQLModelBaseUserDB
-from pydantic import EmailStr
+from pydantic import field_validator
 from sqlalchemy import Column, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlmodel import Field, Relationship, SQLModel
@@ -58,34 +59,29 @@ class User(SQLModelBaseUserDB, SQLModel, table=True):
     tasks: list["Task"] = Relationship(back_populates="user")
 
 
-class UserRead(SQLModel):
+class UserRead(schemas.BaseUser[UUID]):
     """Pydantic model for reading user data without sensitive fields."""
 
-    id: UUID
-    email: str
-    is_active: bool = True
-    is_superuser: bool = False
-    is_verified: bool = False
+    pass
 
 
-class UserCreate(SQLModel):
-    """Pydantic model for creating a new user."""
+class UserCreate(schemas.BaseUserCreate):
+    """Pydantic model for creating a new user with password validation."""
 
-    email: EmailStr
-    password: str
-    is_active: bool = True
-    is_superuser: bool = False
-    is_verified: bool = False
+    @field_validator("password")
+    @classmethod
+    def validate_password(cls, v: str) -> str:
+        """Validate password strength."""
+        if len(v) < 8:
+            raise ValueError("Password must be at least 8 characters long")
+        # Additional validation could be added here (e.g., complexity requirements)
+        return v
 
 
-class UserUpdate(SQLModel):
+class UserUpdate(schemas.BaseUserUpdate):
     """Pydantic model for updating user data."""
 
-    password: str | None = None
-    email: EmailStr | None = None
-    is_active: bool | None = None
-    is_superuser: bool | None = None
-    is_verified: bool | None = None
+    pass
 
 
 class UserRole(BaseModel, table=True):
