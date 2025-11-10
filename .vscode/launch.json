@@ -5,7 +5,7 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Clarinet: Run with Frontend (test_front)",
+            "name": "Clarinet: Run with Frontend (test)",
             "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/.venv/bin/clarinet",
@@ -13,11 +13,12 @@
                 "run",
                 "--with-frontend"
             ],
-            "cwd": "${workspaceFolder}/examples/test_front",
+            "cwd": "${workspaceFolder}/examples/test",
             "console": "integratedTerminal",
             "justMyCode": false,
             "env": {
-                "PYTHONPATH": "${workspaceFolder}"
+                "PYTHONPATH": "${workspaceFolder}",
+                "CLARINET_ADMIN_PASSWORD":"123123"
             }
         },
         {
