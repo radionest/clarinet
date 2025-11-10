@@ -119,7 +119,7 @@ class Settings(BaseSettings):
 
     # Admin user settings
     admin_username: str = "admin"
-    admin_email: str = "admin@clarinet.local"
+    admin_email: str = "admin@clarinet.ru"
     admin_password: str | None = None  # Required in production
     admin_auto_create: bool = True  # Auto-create admin on initialization
     admin_require_strong_password: bool = False  # Enforce in production
