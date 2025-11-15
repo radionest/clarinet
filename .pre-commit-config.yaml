@@ -25,6 +25,7 @@ repos:
           - loguru
           - alembic
           - sqlalchemy
+          - httpx
           - types-requests
           - types-jsonschema
           - types-aiofiles
