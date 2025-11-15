@@ -276,3 +276,72 @@ async def clear_database(test_session):
     """Clear database after each test."""
     yield
     # Cleanup occurs automatically through rollback in test_session
+
+
+@pytest_asyncio.fixture
+async def clarinet_client(test_session, test_settings):
+    """Create ClarinetClient for testing with real API."""
+    from unittest.mock import patch
+
+    from src.client import ClarinetClient
+
+    # Override database session dependency
+    async def override_get_session():
+        yield test_session
+
+    async def override_get_settings():
+        return test_settings
+
+    app.dependency_overrides[get_async_session] = override_get_session
+
+    try:
+        from src.settings import get_settings
+
+        app.dependency_overrides[get_settings] = override_get_settings
+    except (ImportError, AttributeError):
+        pass
+
+    # Override settings in auth_config
+    try:
+        import src.api.auth_config
+
+        src.api.auth_config.settings = test_settings
+    except (ImportError, AttributeError):
+        pass
+
+    # Create transport for AsyncClient
+    transport = ASGITransport(app=app)
+
+    # Create real AsyncClient with /api base path and enable cookie jar
+    real_client = AsyncClient(transport=transport, base_url="http://test/api", cookies={})
+
+    # Patch the client to properly handle cookies (same as in conftest.py for tests)
+    original_request = real_client.request
+
+    async def request_with_cookies(method, url, **kwargs):
+        # Always include cookies in headers
+        if real_client.cookies:
+            headers = kwargs.get("headers") or {}
+            cookie_header = "; ".join([f"{k}={v}" for k, v in real_client.cookies.items()])
+            if cookie_header:
+                headers["Cookie"] = cookie_header
+                kwargs["headers"] = headers
+        return await original_request(method, url, **kwargs)
+
+    real_client.request = request_with_cookies
+
+    # Patch httpx.AsyncClient to return our test client
+    with patch("src.client.httpx.AsyncClient", return_value=real_client):
+        # Create ClarinetClient with auto_login=False to avoid login on init
+        client = ClarinetClient(
+            base_url="http://test/api", username="test@example.com", auto_login=False
+        )
+        # Replace the client's httpx client with our test client
+        client.client = real_client
+
+        yield client
+
+        # Cleanup
+        await client.close()
+
+    app.dependency_overrides.clear()
