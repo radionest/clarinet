@@ -40,7 +40,6 @@ class Patient(PatientBase, table=True):
         primary_key=True,
         min_length=1,
         max_length=64,
-        schema_extra={"validation_alias": "patient_id"},
     )
     studies: list["Study"] = Relationship(back_populates="patient")
     auto_id: int | None = Field(
@@ -58,10 +57,8 @@ class Patient(PatientBase, table=True):
 class PatientSave(PatientBase):
     """Pydantic model for creating a new patient."""
 
-    id: str = Field(min_length=1, max_length=64, schema_extra={"validation_alias": "patient_id"})
-    name: str = Field(
-        min_length=1, max_length=64, schema_extra={"validation_alias": "patient_name"}
-    )
+    id: str = Field(min_length=1, max_length=64, alias="patient_id")
+    name: str = Field(min_length=1, max_length=64, alias="patient_name")
 
 
 class PatientRead(PatientBase):

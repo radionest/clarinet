@@ -17,6 +17,8 @@ from src.models import (
     Study,
     StudyCreate,
 )
+from src.models.patient import PatientRead
+from src.models.study import StudyRead
 from src.models.study import SeriesFind
 
 router = APIRouter()
@@ -25,20 +27,20 @@ router = APIRouter()
 # Patient endpoints
 
 
-@router.get("/patients", response_model=list[Patient])
+@router.get("/patients", response_model=list[PatientRead])
 async def get_all_patients(
     service: StudyServiceDep,
 ) -> list[Patient]:
-    """Get all patients."""
+    """Get all patients with their studies."""
     return await service.get_all_patients()
 
 
-@router.get("/patients/{patient_id}", response_model=Patient)
+@router.get("/patients/{patient_id}", response_model=PatientRead)
 async def get_patient_details(
     patient_id: str,
     service: StudyServiceDep,
 ) -> Patient:
-    """Get patient details by ID."""
+    """Get patient details by ID with their studies."""
     return await service.get_patient(patient_id)
 
 
@@ -64,20 +66,20 @@ async def anonymize_patient(
 # Study endpoints
 
 
-@router.get("/studies", response_model=list[Study])
+@router.get("/studies", response_model=list[StudyRead])
 async def get_studies(
     service: StudyServiceDep,
 ) -> list[Study]:
-    """Get all studies."""
+    """Get all studies with their relations."""
     return await service.get_all_studies()
 
 
-@router.get("/studies/{study_uid}", response_model=Study)
+@router.get("/studies/{study_uid}", response_model=StudyRead)
 async def get_study_details(
     study_uid: DicomUID,
     service: StudyServiceDep,
 ) -> Study:
-    """Get study details by UID."""
+    """Get study details by UID with relations."""
     return await service.get_study(study_uid)
 
 

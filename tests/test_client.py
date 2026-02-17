@@ -133,15 +133,19 @@ class TestPatientManagement:
         self,
         clarinet_client: ClarinetClient,
         test_user: User,
-        test_patient: Patient,
         test_session: AsyncSession,
     ) -> None:
         """Test anonymizing a patient."""
         # Login
         await clarinet_client.login(username=test_user.email, password="testpassword")
 
+        # Create patient without anon_name
+        new_patient = Patient(id="TEST_PAT_ANON", name="Patient To Anonymize")
+        test_session.add(new_patient)
+        await test_session.commit()
+
         # Anonymize patient
-        patient = await clarinet_client.anonymize_patient(test_patient.id)
+        patient = await clarinet_client.anonymize_patient(new_patient.id)
 
         # Should have anonymous name assigned
         assert patient.anon_name is not None
@@ -201,17 +205,17 @@ class TestStudyManagement:
 
         # Create study
         study_data = {
-            "study_uid": "1.2.3.4.5.TEST",
+            "study_uid": "1.2.3.4.5.999",
             "date": datetime.now(UTC).date().isoformat(),
             "patient_id": test_patient.id,
         }
         study = await clarinet_client.create_study(study_data)
 
-        assert study.study_uid == "1.2.3.4.5.TEST"
+        assert study.study_uid == "1.2.3.4.5.999"
         assert study.patient_id == test_patient.id
 
         # Verify in database
-        db_study = await test_session.get(Study, "1.2.3.4.5.TEST")
+        db_study = await test_session.get(Study, "1.2.3.4.5.999")
         assert db_study is not None
         assert db_study.patient_id == test_patient.id
 
@@ -391,12 +395,12 @@ class TestHighLevelMethods:
         # Create studies batch
         studies_data = [
             {
-                "study_uid": "1.2.3.BATCH.1",
+                "study_uid": "1.2.3.888.1",
                 "date": datetime.now(UTC).date().isoformat(),
                 "patient_id": test_patient.id,
             },
             {
-                "study_uid": "1.2.3.BATCH.2",
+                "study_uid": "1.2.3.888.2",
                 "date": datetime.now(UTC).date().isoformat(),
                 "patient_id": test_patient.id,
             },
@@ -405,12 +409,12 @@ class TestHighLevelMethods:
         studies = await clarinet_client.create_studies_batch(studies_data)
 
         assert len(studies) == 2
-        assert studies[0].study_uid == "1.2.3.BATCH.1"
-        assert studies[1].study_uid == "1.2.3.BATCH.2"
+        assert studies[0].study_uid == "1.2.3.888.1"
+        assert studies[1].study_uid == "1.2.3.888.2"
 
         # Verify in database
-        db_study1 = await test_session.get(Study, "1.2.3.BATCH.1")
-        db_study2 = await test_session.get(Study, "1.2.3.BATCH.2")
+        db_study1 = await test_session.get(Study, "1.2.3.888.1")
+        db_study2 = await test_session.get(Study, "1.2.3.888.2")
         assert db_study1 is not None
         assert db_study2 is not None
 
@@ -428,8 +432,8 @@ class TestHighLevelMethods:
         # Create patient with studies
         patient_data = {"id": "P_BATCH", "name": "Patient with Studies"}
         studies_data = [
-            {"study_uid": "1.2.3.PWS.1", "date": datetime.now(UTC).date().isoformat()},
-            {"study_uid": "1.2.3.PWS.2", "date": datetime.now(UTC).date().isoformat()},
+            {"study_uid": "1.2.3.777.1", "date": datetime.now(UTC).date().isoformat()},
+            {"study_uid": "1.2.3.777.2", "date": datetime.now(UTC).date().isoformat()},
         ]
 
         patient, studies = await clarinet_client.create_patient_with_studies(
@@ -444,8 +448,8 @@ class TestHighLevelMethods:
         db_patient = await test_session.get(Patient, "P_BATCH")
         assert db_patient is not None
 
-        db_study1 = await test_session.get(Study, "1.2.3.PWS.1")
-        db_study2 = await test_session.get(Study, "1.2.3.PWS.2")
+        db_study1 = await test_session.get(Study, "1.2.3.777.1")
+        db_study2 = await test_session.get(Study, "1.2.3.777.2")
         assert db_study1 is not None
         assert db_study2 is not None
         assert db_study1.patient_id == "P_BATCH"
@@ -467,7 +471,7 @@ class TestHighLevelMethods:
         # Create a series for the study
         series = Series(
             study_uid=test_study.study_uid,
-            series_uid=f"{test_study.study_uid}.HIER",
+            series_uid=f"{test_study.study_uid}.555",
             series_number=100,
             series_description="Hierarchy Test",
         )
@@ -501,12 +505,12 @@ class TestHighLevelMethods:
         # Create series batch
         series_data = [
             {
-                "series_uid": f"{test_study.study_uid}.BATCH.1",
+                "series_uid": f"{test_study.study_uid}.666.1",
                 "series_number": 201,
                 "study_uid": test_study.study_uid,
             },
             {
-                "series_uid": f"{test_study.study_uid}.BATCH.2",
+                "series_uid": f"{test_study.study_uid}.666.2",
                 "series_number": 202,
                 "study_uid": test_study.study_uid,
             },
@@ -519,8 +523,8 @@ class TestHighLevelMethods:
         assert series_list[1].series_number == 202
 
         # Verify in database
-        db_series1 = await test_session.get(Series, f"{test_study.study_uid}.BATCH.1")
-        db_series2 = await test_session.get(Series, f"{test_study.study_uid}.BATCH.2")
+        db_series1 = await test_session.get(Series, f"{test_study.study_uid}.666.1")
+        db_series2 = await test_session.get(Series, f"{test_study.study_uid}.666.2")
         assert db_series1 is not None
         assert db_series2 is not None
 

@@ -49,6 +49,30 @@ class StudyRepository(BaseRepository[Study]):
 
         return study
 
+    async def get_all_with_relations(
+        self, skip: int = 0, limit: int = 100
+    ) -> Sequence[Study]:
+        """Get all studies with relations loaded.
+
+        Args:
+            skip: Number of records to skip
+            limit: Maximum number of records
+
+        Returns:
+            List of studies with relations loaded
+        """
+        statement = (
+            select(Study)
+            .options(
+                selectinload(Study.patient),  # type: ignore
+                selectinload(Study.series),  # type: ignore
+            )
+            .offset(skip)
+            .limit(limit)
+        )
+        result = await self.session.execute(statement)
+        return result.scalars().all()
+
     async def find_by_patient(
         self, patient_id: str, skip: int = 0, limit: int = 100
     ) -> Sequence[Study]:

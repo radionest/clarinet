@@ -22,8 +22,8 @@ from ..settings import settings
 from ..utils.logger import logger
 from .base import BaseModel, DicomQueryLevel, RecordStatus
 from .file_schema import FileDefinition
-from .patient import Patient, PatientRead
-from .study import Series, SeriesBase, SeriesFind, Study, StudyRead
+from .patient import Patient, PatientBase
+from .study import Series, SeriesBase, SeriesFind, Study, StudyBase
 from .user import User, UserRole
 
 
@@ -434,8 +434,8 @@ class RecordRead(RecordBase):
 
     id: int
     data: RecordData | None = None
-    patient: "PatientRead"
-    study: "StudyRead"
+    patient: "PatientBase"
+    study: "StudyBase"
     series: SeriesBase | None = None
     record_type: RecordTypeBase
 

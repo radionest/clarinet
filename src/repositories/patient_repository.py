@@ -18,6 +18,25 @@ class PatientRepository(BaseRepository[Patient]):
         """Initialize patient repository with session."""
         super().__init__(session, Patient)
 
+    async def get_all_with_studies(self, skip: int = 0, limit: int = 100) -> Sequence[Patient]:
+        """Get all patients with studies loaded.
+
+        Args:
+            skip: Number of records to skip
+            limit: Maximum number of records
+
+        Returns:
+            List of patients with studies loaded
+        """
+        statement = (
+            select(Patient)
+            .options(selectinload(Patient.studies))
+            .offset(skip)
+            .limit(limit)
+        )
+        result = await self.session.execute(statement)
+        return result.scalars().all()
+
     async def get_with_studies(self, patient_id: str) -> Patient:
         """Get patient with studies loaded.
 
@@ -31,7 +50,7 @@ class PatientRepository(BaseRepository[Patient]):
             NOT_FOUND: If patient doesn't exist
         """
         statement = (
-            select(Patient).where(Patient.id == patient_id).options(selectinload("studies"))  # type: ignore
+            select(Patient).where(Patient.id == patient_id).options(selectinload(Patient.studies))
         )
         result = await self.session.execute(statement)
         patient = result.scalars().first()

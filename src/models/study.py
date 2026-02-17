@@ -24,7 +24,7 @@ class StudyBase(BaseModel):
 
     study_uid: DicomUID = Field()
     date: date
-    anon_uid: DicomUID | None = None
+    anon_uid: str | None = None
     patient_id: str
 
 
@@ -60,7 +60,7 @@ class SeriesBase(BaseModel):
     series_uid: DicomUID | None = None
     series_description: str | None = Field(min_length=0, max_length=64, default=None)
     series_number: int = Field(gt=0, lt=100000)
-    anon_uid: DicomUID | None = Field(default=None, min_length=5, max_length=64)
+    anon_uid: str | None = Field(default=None)
     study_uid: DicomUID | None = Field(default=None)
 
 

@@ -23,6 +23,7 @@ from jsonschema import Draft202012Validator, SchemaError
 from sqlalchemy import String as SQLString
 from sqlalchemy import cast, func
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 from sqlmodel import and_, col, select
 
 from src.api.auth_config import current_active_user
@@ -220,20 +221,36 @@ async def delete_record_type(
 # Record Endpoints
 
 
-@router.get("/", response_model=list[Record])
+@router.get("/", response_model=list[RecordRead])
 async def get_all_records(session: AsyncSession = Depends(get_async_session)) -> Sequence[Record]:
-    """Get all records."""
-    result = await session.execute(select(Record))
+    """Get all records with relations loaded."""
+    statement = select(Record).options(
+        selectinload(Record.patient),  # type: ignore
+        selectinload(Record.study),  # type: ignore
+        selectinload(Record.series),  # type: ignore
+        selectinload(Record.record_type),  # type: ignore
+    )
+    result = await session.execute(statement)
     return result.scalars().all()
 
 
-@router.get("/my", response_model=list[Record])
+@router.get("/my", response_model=list[RecordRead])
 async def get_my_records(
     user: User = Depends(current_active_user),
     session: AsyncSession = Depends(get_async_session),
 ) -> Sequence[Record]:
-    """Get all records assigned to the current user."""
-    result = await session.execute(select(Record).where(Record.user_id == user.id))
+    """Get all records assigned to the current user with relations loaded."""
+    statement = (
+        select(Record)
+        .where(Record.user_id == user.id)
+        .options(
+            selectinload(Record.patient),  # type: ignore
+            selectinload(Record.study),  # type: ignore
+            selectinload(Record.series),  # type: ignore
+            selectinload(Record.record_type),  # type: ignore
+        )
+    )
+    result = await session.execute(statement)
     return result.scalars().all()
 
 
@@ -242,9 +259,10 @@ async def get_my_pending_records(
     user: User = Depends(current_active_user),
     session: AsyncSession = Depends(get_async_session),
 ) -> Sequence[Record]:
-    """Get all pending records assigned to the current user."""
-    result = await session.execute(
-        select(Record).where(
+    """Get all pending records assigned to the current user with relations loaded."""
+    statement = (
+        select(Record)
+        .where(
             Record.user_id == user.id,
             and_(
                 Record.status != RecordStatus.failed,
@@ -252,7 +270,14 @@ async def get_my_pending_records(
                 Record.status != RecordStatus.pause,
             ),
         )
+        .options(
+            selectinload(Record.patient),  # type: ignore
+            selectinload(Record.study),  # type: ignore
+            selectinload(Record.series),  # type: ignore
+            selectinload(Record.record_type),  # type: ignore
+        )
     )
+    result = await session.execute(statement)
     return result.scalars().all()
 
 

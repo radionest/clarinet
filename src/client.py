@@ -13,6 +13,7 @@ from uuid import UUID
 import httpx
 
 from src.models import (
+    Patient,
     PatientRead,
     PatientSave,
     RecordCreate,
@@ -21,9 +22,11 @@ from src.models import (
     RecordType,
     RecordTypeCreate,
     RecordTypeFind,
+    Series,
     SeriesCreate,
     SeriesFind,
     SeriesRead,
+    Study,
     StudyCreate,
     StudyRead,
     UserRead,
@@ -183,6 +186,26 @@ class ClarinetClient:
                         status_code=403,
                         detail=response.text,
                     )
+                elif response.status_code == 400:
+                    detail = None
+                    try:
+                        detail = response.json()
+                    except Exception:
+                        detail = response.text
+
+                    # For auth endpoints 400 means invalid credentials
+                    if "/auth/" in endpoint:
+                        raise ClarinetAuthError(
+                            "Invalid credentials",
+                            status_code=400,
+                            detail=detail,
+                        )
+                    else:
+                        raise ClarinetAPIError(
+                            f"Bad request: {response.status_code}",
+                            status_code=response.status_code,
+                            detail=detail,
+                        )
                 elif response.status_code >= 400:
                     detail = None
                     try:
@@ -309,14 +332,14 @@ class ClarinetClient:
         response = await self._request("GET", f"/patients/{patient_id}")
         return PatientRead.model_validate(response.json())
 
-    async def create_patient(self, patient: PatientSave | dict[str, Any]) -> PatientRead:
+    async def create_patient(self, patient: PatientSave | dict[str, Any]) -> Patient:
         """Create a new patient.
 
         Args:
             patient: Patient data (model or dict)
 
         Returns:
-            Created patient
+            Created patient (without studies)
         """
         if isinstance(patient, dict):
             patient = PatientSave.model_validate(patient)
@@ -326,19 +349,19 @@ class ClarinetClient:
             "/patients",
             json=patient.model_dump(by_alias=True, mode="json"),
         )
-        return PatientRead.model_validate(response.json())
+        return Patient.model_validate(response.json())
 
-    async def anonymize_patient(self, patient_id: str) -> PatientRead:
+    async def anonymize_patient(self, patient_id: str) -> Patient:
         """Anonymize a patient.
 
         Args:
             patient_id: Patient ID to anonymize
 
         Returns:
-            Updated patient with anonymous name
+            Updated patient with anonymous name (without studies)
         """
         response = await self._request("POST", f"/patients/{patient_id}/anonymize")
-        return PatientRead.model_validate(response.json())
+        return Patient.model_validate(response.json())
 
     # ==================== Study Management ====================
 
@@ -363,26 +386,26 @@ class ClarinetClient:
         response = await self._request("GET", f"/studies/{study_uid}")
         return StudyRead.model_validate(response.json())
 
-    async def get_study_series(self, study_uid: str) -> list[SeriesRead]:
+    async def get_study_series(self, study_uid: str) -> list[Series]:
         """Get all series for a study.
 
         Args:
             study_uid: Study UID
 
         Returns:
-            List of series in the study
+            List of series in the study (without nested relations)
         """
         response = await self._request("GET", f"/studies/{study_uid}/series")
-        return [SeriesRead.model_validate(s) for s in response.json()]
+        return [Series.model_validate(s) for s in response.json()]
 
-    async def create_study(self, study: StudyCreate | dict[str, Any]) -> StudyRead:
+    async def create_study(self, study: StudyCreate | dict[str, Any]) -> Study:
         """Create a new study.
 
         Args:
             study: Study data (model or dict)
 
         Returns:
-            Created study
+            Created study (without relations)
         """
         if isinstance(study, dict):
             # Handle date conversion if needed
@@ -395,9 +418,9 @@ class ClarinetClient:
             "/studies",
             json=study.model_dump(mode="json"),
         )
-        return StudyRead.model_validate(response.json())
+        return Study.model_validate(response.json())
 
-    async def add_anonymized_study_uid(self, study_uid: str, anon_uid: str) -> StudyRead:
+    async def add_anonymized_study_uid(self, study_uid: str, anon_uid: str) -> Study:
         """Add anonymized UID to a study.
 
         Args:
@@ -405,14 +428,14 @@ class ClarinetClient:
             anon_uid: Anonymized study UID
 
         Returns:
-            Updated study
+            Updated study (without relations)
         """
         response = await self._request(
             "POST",
             f"/studies/{study_uid}/add_anonymized",
             params={"anon_uid": anon_uid},
         )
-        return StudyRead.model_validate(response.json())
+        return Study.model_validate(response.json())
 
     # ==================== Series Management ====================
 
@@ -446,14 +469,14 @@ class ClarinetClient:
         response = await self._request("GET", "/series/random")
         return SeriesRead.model_validate(response.json())
 
-    async def create_series(self, series: SeriesCreate | dict[str, Any]) -> SeriesRead:
+    async def create_series(self, series: SeriesCreate | dict[str, Any]) -> Series:
         """Create a new series.
 
         Args:
             series: Series data (model or dict)
 
         Returns:
-            Created series
+            Created series (without relations)
         """
         if isinstance(series, dict):
             series = SeriesCreate.model_validate(series)
@@ -463,7 +486,7 @@ class ClarinetClient:
             "/series",
             json=series.model_dump(mode="json"),
         )
-        return SeriesRead.model_validate(response.json())
+        return Series.model_validate(response.json())
 
     async def find_series(self, find_query: SeriesFind | dict[str, Any]) -> list[SeriesRead]:
         """Find series by criteria.
@@ -484,7 +507,7 @@ class ClarinetClient:
         )
         return [SeriesRead.model_validate(s) for s in response.json()]
 
-    async def add_anonymized_series_uid(self, series_uid: str, anon_uid: str) -> SeriesRead:
+    async def add_anonymized_series_uid(self, series_uid: str, anon_uid: str) -> Series:
         """Add anonymized UID to a series.
 
         Args:
@@ -492,14 +515,14 @@ class ClarinetClient:
             anon_uid: Anonymized series UID
 
         Returns:
-            Updated series
+            Updated series (without relations)
         """
         response = await self._request(
             "POST",
             f"/series/{series_uid}/add_anonymized",
             params={"anon_uid": anon_uid},
         )
-        return SeriesRead.model_validate(response.json())
+        return Series.model_validate(response.json())
 
     # ==================== Record Type Management ====================
 

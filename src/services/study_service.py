@@ -52,9 +52,9 @@ class StudyService:
             limit: Maximum number of records
 
         Returns:
-            List of patients
+            List of patients with studies loaded
         """
-        patients = await self.patient_repo.get_all(skip=skip, limit=limit)
+        patients = await self.patient_repo.get_all_with_studies(skip=skip, limit=limit)
         return list(patients)
 
     async def get_patient(self, patient_id: str) -> Patient:
@@ -64,12 +64,12 @@ class StudyService:
             patient_id: Patient ID
 
         Returns:
-            Patient object
+            Patient object with studies loaded
 
         Raises:
             NOT_FOUND: If patient doesn't exist
         """
-        return await self.patient_repo.get(patient_id)
+        return await self.patient_repo.get_with_studies(patient_id)
 
     async def create_patient(self, patient_data: dict[str, Any]) -> Patient:
         """Create new patient.
@@ -151,9 +151,9 @@ class StudyService:
             limit: Maximum number of records
 
         Returns:
-            List of studies
+            List of studies with relations loaded
         """
-        studies = await self.study_repo.get_all(skip=skip, limit=limit)
+        studies = await self.study_repo.get_all_with_relations(skip=skip, limit=limit)
         return list(studies)
 
     async def get_study(self, study_uid: str) -> Study:
@@ -163,12 +163,12 @@ class StudyService:
             study_uid: Study UID
 
         Returns:
-            Study object
+            Study object with relations loaded
 
         Raises:
             NOT_FOUND: If study doesn't exist
         """
-        return await self.study_repo.get(study_uid)
+        return await self.study_repo.get_with_relations(study_uid)
 
     async def get_study_series(self, study_uid: str) -> list[Series]:
         """Get all series for a study.
@@ -247,12 +247,12 @@ class StudyService:
             series_uid: Series UID
 
         Returns:
-            Series object
+            Series object with relations loaded
 
         Raises:
             NOT_FOUND: If series doesn't exist
         """
-        return await self.series_repo.get(series_uid)
+        return await self.series_repo.get_with_relations(series_uid)
 
     async def get_random_series(self) -> Series:
         """Get a random series.
