@@ -15,27 +15,27 @@ import httpx
 from src.models import (
     PatientRead,
     PatientSave,
+    RecordCreate,
+    RecordRead,
+    RecordStatus,
+    RecordType,
+    RecordTypeCreate,
+    RecordTypeFind,
     SeriesCreate,
     SeriesFind,
     SeriesRead,
     StudyCreate,
     StudyRead,
-    TaskCreate,
-    TaskDesign,
-    TaskDesignCreate,
-    TaskDesignFind,
-    TaskRead,
-    TaskStatus,
     UserRead,
 )
-from src.types import TaskResult
+from src.types import RecordData
 from src.utils.logger import logger
 
 # Rebuild models to resolve forward references
 PatientRead.model_rebuild()
 StudyRead.model_rebuild()
 SeriesRead.model_rebuild()
-TaskRead.model_rebuild()
+RecordRead.model_rebuild()
 
 
 class ClarinetAPIError(Exception):
@@ -272,7 +272,7 @@ class ClarinetClient:
             ClarinetAuthError: If not authenticated
         """
         response = await self._request("GET", "/auth/me")
-        return cast(UserRead, UserRead.model_validate(response.json()))
+        return cast("UserRead", UserRead.model_validate(response.json()))
 
     async def validate_session(self) -> UserRead:
         """Validate current session.
@@ -284,7 +284,7 @@ class ClarinetClient:
             ClarinetAuthError: If session is invalid
         """
         response = await self._request("GET", "/auth/session/validate")
-        return cast(UserRead, UserRead.model_validate(response.json()))
+        return cast("UserRead", UserRead.model_validate(response.json()))
 
     # ==================== Patient Management ====================
 
@@ -501,198 +501,198 @@ class ClarinetClient:
         )
         return SeriesRead.model_validate(response.json())
 
-    # ==================== Task Design Management ====================
+    # ==================== Record Type Management ====================
 
-    async def get_task_designs(self) -> list[TaskDesign]:
-        """Get all task types.
+    async def get_record_types(self) -> list[RecordType]:
+        """Get all record types.
 
         Returns:
-            List of all task designs
+            List of all record types
         """
-        response = await self._request("GET", "/tasks/types")
-        return [TaskDesign.model_validate(t) for t in response.json()]
+        response = await self._request("GET", "/records/types")
+        return [RecordType.model_validate(t) for t in response.json()]
 
-    async def get_task_design(self, task_design_id: int) -> TaskDesign:
-        """Get task design by ID.
+    async def get_record_type(self, record_type_id: int) -> RecordType:
+        """Get record type by ID.
 
         Args:
-            task_design_id: Task design ID
+            record_type_id: Record type ID
 
         Returns:
-            Task design data
+            Record type data
         """
-        response = await self._request("GET", f"/tasks/types/{task_design_id}")
-        return TaskDesign.model_validate(response.json())
+        response = await self._request("GET", f"/records/types/{record_type_id}")
+        return RecordType.model_validate(response.json())
 
-    async def create_task_design(
+    async def create_record_type(
         self,
-        task_design: TaskDesignCreate | dict[str, Any],
+        record_type: RecordTypeCreate | dict[str, Any],
         constrain_unique_names: bool = True,
-    ) -> TaskDesign:
-        """Create a new task design.
+    ) -> RecordType:
+        """Create a new record type.
 
         Args:
-            task_design: Task design data
-            constrain_unique_names: Enforce unique task design names
+            record_type: Record type data
+            constrain_unique_names: Enforce unique record type names
 
         Returns:
-            Created task design
+            Created record type
         """
-        if isinstance(task_design, dict):
-            task_design = TaskDesignCreate.model_validate(task_design)
+        if isinstance(record_type, dict):
+            record_type = RecordTypeCreate.model_validate(record_type)
 
         response = await self._request(
             "POST",
-            "/tasks/types",
+            "/records/types",
             params={"constrain_unique_names": constrain_unique_names},
-            json=task_design.model_dump(mode="json"),
+            json=record_type.model_dump(mode="json"),
         )
-        return TaskDesign.model_validate(response.json())
+        return RecordType.model_validate(response.json())
 
-    async def find_task_designs(
-        self, find_query: TaskDesignFind | dict[str, Any]
-    ) -> list[TaskDesign]:
-        """Find task designs by criteria.
+    async def find_record_types(
+        self, find_query: RecordTypeFind | dict[str, Any]
+    ) -> list[RecordType]:
+        """Find record types by criteria.
 
         Args:
             find_query: Search criteria
 
         Returns:
-            List of matching task designs
+            List of matching record types
         """
         if isinstance(find_query, dict):
-            find_query = TaskDesignFind.model_validate(find_query)
+            find_query = RecordTypeFind.model_validate(find_query)
 
         response = await self._request(
             "POST",
-            "/tasks/types/find",
+            "/records/types/find",
             json=find_query.model_dump(exclude_none=True, mode="json"),
         )
-        return [TaskDesign.model_validate(t) for t in response.json()]
+        return [RecordType.model_validate(t) for t in response.json()]
 
-    # ==================== Task Management ====================
+    # ==================== Record Management ====================
 
-    async def get_tasks(self) -> list[TaskRead]:
-        """Get all tasks.
-
-        Returns:
-            List of all tasks
-        """
-        response = await self._request("GET", "/tasks/")
-        return [TaskRead.model_validate(t) for t in response.json()]
-
-    async def get_my_tasks(self) -> list[TaskRead]:
-        """Get tasks assigned to current user.
+    async def get_records(self) -> list[RecordRead]:
+        """Get all records.
 
         Returns:
-            List of user's tasks
+            List of all records
         """
-        response = await self._request("GET", "/tasks/my")
-        return [TaskRead.model_validate(t) for t in response.json()]
+        response = await self._request("GET", "/records/")
+        return [RecordRead.model_validate(t) for t in response.json()]
 
-    async def get_my_pending_tasks(self) -> list[TaskRead]:
-        """Get pending tasks assigned to current user.
+    async def get_my_records(self) -> list[RecordRead]:
+        """Get records assigned to current user.
 
         Returns:
-            List of user's pending tasks
+            List of user's records
         """
-        response = await self._request("GET", "/tasks/my/pending")
-        return [TaskRead.model_validate(t) for t in response.json()]
+        response = await self._request("GET", "/records/my")
+        return [RecordRead.model_validate(t) for t in response.json()]
 
-    async def get_task(self, task_id: int, detailed: bool = False) -> TaskRead:
-        """Get task by ID.
+    async def get_my_pending_records(self) -> list[RecordRead]:
+        """Get pending records assigned to current user.
+
+        Returns:
+            List of user's pending records
+        """
+        response = await self._request("GET", "/records/my/pending")
+        return [RecordRead.model_validate(t) for t in response.json()]
+
+    async def get_record(self, record_id: int, detailed: bool = False) -> RecordRead:
+        """Get record by ID.
 
         Args:
-            task_id: Task ID
-            detailed: Return detailed task info
+            record_id: Record ID
+            detailed: Return detailed record info
 
         Returns:
-            Task data
+            Record data
         """
         response = await self._request(
             "GET",
-            f"/tasks/{task_id}",
+            f"/records/{record_id}",
             params={"detailed": detailed},
         )
-        return TaskRead.model_validate(response.json())
+        return RecordRead.model_validate(response.json())
 
-    async def create_task(self, task: TaskCreate | dict[str, Any]) -> TaskRead:
-        """Create a new task.
+    async def create_record(self, record: RecordCreate | dict[str, Any]) -> RecordRead:
+        """Create a new record.
 
         Args:
-            task: Task data
+            record: Record data
 
         Returns:
-            Created task
+            Created record
         """
-        if isinstance(task, dict):
-            task = TaskCreate.model_validate(task)
+        if isinstance(record, dict):
+            record = RecordCreate.model_validate(record)
 
         response = await self._request(
             "POST",
-            "/tasks/",
-            json=task.model_dump(mode="json"),
+            "/records/",
+            json=record.model_dump(mode="json"),
         )
-        return TaskRead.model_validate(response.json())
+        return RecordRead.model_validate(response.json())
 
-    async def update_task_status(self, task_id: int, status: TaskStatus) -> TaskRead:
-        """Update task status.
+    async def update_record_status(self, record_id: int, status: RecordStatus) -> RecordRead:
+        """Update record status.
 
         Args:
-            task_id: Task ID
-            status: New task status
+            record_id: Record ID
+            status: New record status
 
         Returns:
-            Updated task
+            Updated record
         """
         response = await self._request(
             "PATCH",
-            f"/tasks/{task_id}/status",
-            params={"task_status": status.value},
+            f"/records/{record_id}/status",
+            params={"record_status": status.value},
         )
-        return TaskRead.model_validate(response.json())
+        return RecordRead.model_validate(response.json())
 
-    async def assign_task_to_user(self, task_id: int, user_id: UUID) -> TaskRead:
-        """Assign task to a user.
+    async def assign_record_to_user(self, record_id: int, user_id: UUID) -> RecordRead:
+        """Assign record to a user.
 
         Args:
-            task_id: Task ID
+            record_id: Record ID
             user_id: User ID to assign to
 
         Returns:
-            Updated task
+            Updated record
         """
         response = await self._request(
             "PATCH",
-            f"/tasks/{task_id}/user",
+            f"/records/{record_id}/user",
             params={"user_id": str(user_id)},
         )
-        return TaskRead.model_validate(response.json())
+        return RecordRead.model_validate(response.json())
 
-    async def submit_task_result(self, task_id: int, result: TaskResult) -> TaskRead:
-        """Submit result for a task.
+    async def submit_record_data(self, record_id: int, data: RecordData) -> RecordRead:
+        """Submit data for a record.
 
         Args:
-            task_id: Task ID
-            result: Task result data
+            record_id: Record ID
+            data: Record data
 
         Returns:
-            Updated task
+            Updated record
         """
         response = await self._request(
             "POST",
-            f"/tasks/{task_id}/result",
-            json=result,
+            f"/records/{record_id}/data",
+            json=data,
         )
-        return TaskRead.model_validate(response.json())
+        return RecordRead.model_validate(response.json())
 
-    async def find_tasks(
+    async def find_records(
         self,
         skip: int = 0,
         limit: int = 100,
         **filters: Any,
-    ) -> list[TaskRead]:
-        """Find tasks by various criteria.
+    ) -> list[RecordRead]:
+        """Find records by various criteria.
 
         Args:
             skip: Number of records to skip (pagination)
@@ -700,13 +700,13 @@ class ClarinetClient:
             **filters: Additional filter parameters (patient_id, study_uid, etc.)
 
         Returns:
-            List of matching tasks
+            List of matching records
         """
         params = {"skip": skip, "limit": limit}
         params.update(filters)
 
-        response = await self._request("POST", "/tasks/find", params=params)
-        return [TaskRead.model_validate(t) for t in response.json()]
+        response = await self._request("POST", "/records/find", params=params)
+        return [RecordRead.model_validate(t) for t in response.json()]
 
     # ==================== High-Level Convenience Methods ====================
 
@@ -792,41 +792,41 @@ class ClarinetClient:
 
         return patient, studies
 
-    async def assign_tasks_bulk(self, task_ids: list[int], user_id: UUID) -> list[TaskRead]:
-        """Assign multiple tasks to a user at once.
+    async def assign_records_bulk(self, record_ids: list[int], user_id: UUID) -> list[RecordRead]:
+        """Assign multiple records to a user at once.
 
         Args:
-            task_ids: List of task IDs
-            user_id: User ID to assign tasks to
+            record_ids: List of record IDs
+            user_id: User ID to assign records to
 
         Returns:
-            List of updated tasks
+            List of updated records
 
         Example:
             ```python
-            tasks = await client.assign_tasks_bulk([1, 2, 3], user_id)
+            records = await client.assign_records_bulk([1, 2, 3], user_id)
             ```
         """
-        updated_tasks: list[TaskRead] = []
-        for task_id in task_ids:
+        updated_records: list[RecordRead] = []
+        for record_id in record_ids:
             try:
-                task = await self.assign_task_to_user(task_id, user_id)
-                updated_tasks.append(task)
-                logger.info(f"Assigned task {task_id} to user {user_id}")
+                record = await self.assign_record_to_user(record_id, user_id)
+                updated_records.append(record)
+                logger.info(f"Assigned record {record_id} to user {user_id}")
             except ClarinetAPIError as e:
-                logger.error(f"Failed to assign task {task_id}: {e}")
+                logger.error(f"Failed to assign record {record_id}: {e}")
                 continue
 
-        return updated_tasks
+        return updated_records
 
     async def get_study_hierarchy(self, study_uid: str) -> dict[str, Any]:
-        """Get complete study hierarchy including patient, series, and tasks.
+        """Get complete study hierarchy including patient, series, and records.
 
         Args:
             study_uid: Study UID
 
         Returns:
-            Dictionary with study, patient, series, and tasks data
+            Dictionary with study, patient, series, and records data
 
         Example:
             ```python
@@ -844,30 +844,30 @@ class ClarinetClient:
         # Get series
         series_list = await self.get_study_series(study_uid)
 
-        # Get tasks for this study
-        tasks = await self.find_tasks(study_uid=study_uid, limit=1000)
+        # Get records for this study
+        records = await self.find_records(study_uid=study_uid, limit=1000)
 
         return {
             "study": study.model_dump(),
             "patient": patient.model_dump(),
             "series": [s.model_dump() for s in series_list],
-            "tasks": [t.model_dump() for t in tasks],
+            "records": [t.model_dump() for t in records],
         }
 
-    async def find_tasks_advanced(
+    async def find_records_advanced(
         self,
         patient_id: str | None = None,
         patient_anon_id: str | None = None,
         series_uid: str | None = None,
         study_uid: str | None = None,
         user_id: UUID | None = None,
-        task_name: str | None = None,
-        task_status: TaskStatus | None = None,
+        record_type_name: str | None = None,
+        record_status: RecordStatus | None = None,
         wo_user: bool | None = None,
         skip: int = 0,
         limit: int = 100,
-    ) -> list[TaskRead]:
-        """Advanced task search with multiple filter options.
+    ) -> list[RecordRead]:
+        """Advanced record search with multiple filter options.
 
         Args:
             patient_id: Filter by patient ID
@@ -875,14 +875,14 @@ class ClarinetClient:
             series_uid: Filter by series UID
             study_uid: Filter by study UID
             user_id: Filter by assigned user
-            task_name: Filter by task design name
-            task_status: Filter by task status
-            wo_user: Filter by tasks without user (True) or with user (False)
+            record_type_name: Filter by record type name
+            record_status: Filter by record status
+            wo_user: Filter by records without user (True) or with user (False)
             skip: Pagination offset
             limit: Maximum results
 
         Returns:
-            List of matching tasks
+            List of matching records
         """
         filters = {
             "patient_id": patient_id,
@@ -890,15 +890,15 @@ class ClarinetClient:
             "series_uid": series_uid,
             "study_uid": study_uid,
             "user_id": str(user_id) if user_id else None,
-            "task_name": task_name,
-            "task_status": task_status.value if task_status else None,
+            "record_type_name": record_type_name,
+            "record_status": record_status.value if record_status else None,
             "wo_user": wo_user,
         }
 
         # Remove None values
         filters = {k: v for k, v in filters.items() if v is not None}
 
-        return await self.find_tasks(skip=skip, limit=limit, **filters)
+        return await self.find_records(skip=skip, limit=limit, **filters)
 
     async def create_series_batch(
         self, series_data: list[dict[str, Any] | SeriesCreate]

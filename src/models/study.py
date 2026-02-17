@@ -16,7 +16,7 @@ from .base import BaseModel, DicomUID
 from .patient import Patient, PatientBase
 
 if TYPE_CHECKING:
-    from .task import Task, TaskFind
+    from .record import Record, RecordFind
 
 
 class StudyBase(BaseModel):
@@ -37,7 +37,7 @@ class Study(StudyBase, table=True):
 
     patient: Patient = Relationship(back_populates="studies")
     series: list["Series"] = Relationship(back_populates="study")
-    tasks: list["Task"] = Relationship(back_populates="study")
+    records: list["Record"] = Relationship(back_populates="study")
 
 
 class StudyCreate(StudyBase):
@@ -75,14 +75,14 @@ class Series(SeriesBase, table=True):
     study_uid: str = Field(foreign_key="study.study_uid")
     study: Study = Relationship(back_populates="series")
 
-    tasks: list["Task"] = Relationship(back_populates="series")
+    records: list["Record"] = Relationship(back_populates="series")
 
 
 class SeriesRead(SeriesBase):
     """Pydantic model for reading series data with related entities."""
 
     study: StudyRead
-    tasks: list[Any] = Field(default_factory=list)  # Will contain TaskRead objects
+    records: list[Any] = Field(default_factory=list)  # Will contain RecordRead objects
 
     def _format_path(self, unformated_path: str) -> str | None:
         """Format a path with values from this series."""
@@ -126,4 +126,4 @@ class SeriesFind(SeriesBase):
     series_number: int | None = None  # type: ignore
     anon_uid: str | None = None
     study_uid: str | None = None
-    tasks: list["TaskFind"] = Field(default_factory=list)  # Will contain TaskRead objects
+    records: list["RecordFind"] = Field(default_factory=list)  # Will contain RecordFind objects

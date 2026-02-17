@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlmodel import select
 
-from src.models import Series, Task, TaskDesign
+from src.models import Record, RecordType, Series
 from src.models.study import SeriesFind
 from src.repositories.base import BaseRepository
 
@@ -34,7 +34,7 @@ class SeriesRepository(BaseRepository[Series]):
         statement = (
             select(Series)
             .where(Series.series_uid == series_id)
-            .options(selectinload(Series.study), selectinload(Series.tasks))  # type: ignore
+            .options(selectinload(Series.study), selectinload(Series.records))  # type: ignore
         )
         result = await self.session.execute(statement)
         series = result.scalars().first()
@@ -119,18 +119,18 @@ class SeriesRepository(BaseRepository[Series]):
         result = await self.session.execute(statement)
         return result.scalars().all()
 
-    async def get_tasks(self, series_id: str) -> list[Task]:
-        """Get all tasks for a series.
+    async def get_records(self, series_id: str) -> list[Record]:
+        """Get all records for a series.
 
         Args:
             series_id: Series ID
 
         Returns:
-            List of tasks
+            List of records
         """
         series = await self.get(series_id)
-        await self.session.refresh(series, ["tasks"])
-        return list(series.tasks)
+        await self.session.refresh(series, ["records"])
+        return list(series.records)
 
     async def count_by_study_uid(self, study_uid: str) -> int:
         """Count series for a study.
@@ -145,16 +145,16 @@ class SeriesRepository(BaseRepository[Series]):
         result = await self.session.execute(statement)
         return result.scalar() or 0
 
-    async def count_tasks(self, series_uid: str) -> int:
-        """Count tasks for a series.
+    async def count_records(self, series_uid: str) -> int:
+        """Count records for a series.
 
         Args:
             series_uid: Series UID
 
         Returns:
-            Number of tasks
+            Number of records
         """
-        statement = select(func.count()).select_from(Task).where(Task.series_uid == series_uid)
+        statement = select(func.count()).select_from(Record).where(Record.series_uid == series_uid)
         result = await self.session.execute(statement)
         return result.scalar() or 0
 
@@ -258,7 +258,7 @@ class SeriesRepository(BaseRepository[Series]):
         statement = select(Series)
 
         for query_key, query_value in find_query.model_dump(
-            exclude_none=True, exclude_defaults=True, exclude={"tasks"}
+            exclude_none=True, exclude_defaults=True, exclude={"records"}
         ).items():
             if hasattr(Series, query_key):
                 if query_value == "*":
@@ -266,9 +266,9 @@ class SeriesRepository(BaseRepository[Series]):
                 else:
                     statement = statement.where(getattr(Series, query_key) == query_value)
 
-        if find_query.tasks:
-            statement = statement.join(Task, isouter=True)
-            statement = statement.join(TaskDesign, isouter=True)
+        if find_query.records:
+            statement = statement.join(Record, isouter=True)
+            statement = statement.join(RecordType, isouter=True)
 
         result = await self.session.execute(statement.distinct())
         return list(result.scalars().all())

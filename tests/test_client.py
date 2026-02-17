@@ -5,18 +5,16 @@ This module provides integration tests for the ClarinetClient,
 using real FastAPI server and database.
 """
 
-from datetime import date, datetime
-from uuid import uuid4
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlmodel import select
 
 from src.client import ClarinetAPIError, ClarinetAuthError, ClarinetClient
-from src.models import TaskDesign, TaskDesignCreate
+from src.models import RecordType
 from src.models.patient import Patient
+from src.models.record import Record
 from src.models.study import Series, Study
-from src.models.task import Task
 from src.models.user import User
 
 
@@ -204,7 +202,7 @@ class TestStudyManagement:
         # Create study
         study_data = {
             "study_uid": "1.2.3.4.5.TEST",
-            "date": date.today().isoformat(),
+            "date": datetime.now(UTC).date().isoformat(),
             "patient_id": test_patient.id,
         }
         study = await clarinet_client.create_study(study_data)
@@ -280,61 +278,63 @@ class TestSeriesManagement:
         assert db_series.series_description == "Created Test Series"
 
 
-class TestTaskManagement:
-    """Test task management methods with real server."""
+class TestRecordManagement:
+    """Test record management methods with real server."""
 
     @pytest.mark.asyncio
-    async def test_get_task_designs(
+    async def test_get_record_types(
         self,
         clarinet_client: ClarinetClient,
         test_user: User,
         test_session: AsyncSession,
     ) -> None:
-        """Test getting all task designs."""
+        """Test getting all record types."""
         # Login
         await clarinet_client.login(username=test_user.email, password="testpassword")
 
-        # Create a test task design
-        task_design = TaskDesign(name="test_design", level="SERIES")
-        test_session.add(task_design)
+        # Create a test record type
+        record_type = RecordType(name="test_type", level="SERIES")
+        test_session.add(record_type)
         await test_session.commit()
 
-        # Get task designs
-        designs = await clarinet_client.get_task_designs()
+        # Get record types
+        types = await clarinet_client.get_record_types()
 
-        assert len(designs) >= 1
-        design_names = [d.name for d in designs]
-        assert "test_design" in design_names
+        assert len(types) >= 1
+        type_names = [t.name for t in types]
+        assert "test_type" in type_names
 
     @pytest.mark.asyncio
-    async def test_create_task_design(
+    async def test_create_record_type(
         self,
         clarinet_client: ClarinetClient,
         test_user: User,
         test_session: AsyncSession,
     ) -> None:
-        """Test creating a task design."""
+        """Test creating a record type."""
         # Login
         await clarinet_client.login(username=test_user.email, password="testpassword")
 
-        # Create task design
-        design_data = {
-            "name": "new_test_design",
+        # Create record type
+        type_data = {
+            "name": "new_test_type",
             "level": "STUDY",
-            "description": "Test design created via client",
+            "description": "Test type created via client",
         }
-        design = await clarinet_client.create_task_design(design_data, constrain_unique_names=True)
+        record_type = await clarinet_client.create_record_type(
+            type_data, constrain_unique_names=True
+        )
 
-        assert design.name == "new_test_design"
-        assert design.level == "STUDY"
+        assert record_type.name == "new_test_type"
+        assert record_type.level == "STUDY"
 
         # Verify in database
-        db_design = await test_session.get(TaskDesign, "new_test_design")
-        assert db_design is not None
-        assert db_design.description == "Test design created via client"
+        db_type = await test_session.get(RecordType, "new_test_type")
+        assert db_type is not None
+        assert db_type.description == "Test type created via client"
 
     @pytest.mark.asyncio
-    async def test_get_my_tasks(
+    async def test_get_my_records(
         self,
         clarinet_client: ClarinetClient,
         test_user: User,
@@ -342,35 +342,35 @@ class TestTaskManagement:
         test_study: Study,
         test_session: AsyncSession,
     ) -> None:
-        """Test getting tasks assigned to current user."""
+        """Test getting records assigned to current user."""
         # Login
         await clarinet_client.login(username=test_user.email, password="testpassword")
 
-        # Create task design if not exists
-        task_design = await test_session.get(TaskDesign, "test_task")
-        if not task_design:
-            task_design = TaskDesign(name="test_task", level="STUDY")
-            test_session.add(task_design)
+        # Create record type if not exists
+        record_type = await test_session.get(RecordType, "test_record")
+        if not record_type:
+            record_type = RecordType(name="test_record", level="STUDY")
+            test_session.add(record_type)
             await test_session.commit()
 
-        # Create a task assigned to test_user
-        task = Task(
+        # Create a record assigned to test_user
+        record = Record(
             status="pending",
             patient_id=test_patient.id,
             study_uid=test_study.study_uid,
-            task_design_id=task_design.name,
+            record_type_name=record_type.name,
             user_id=test_user.id,
         )
-        test_session.add(task)
+        test_session.add(record)
         await test_session.commit()
 
-        # Get user's tasks
-        tasks = await clarinet_client.get_my_tasks()
+        # Get user's records
+        records = await clarinet_client.get_my_records()
 
-        assert len(tasks) >= 1
-        # Check that at least one task belongs to test_user
-        user_task_ids = [t.user_id for t in tasks if t.user_id]
-        assert str(test_user.id) in [str(uid) for uid in user_task_ids]
+        assert len(records) >= 1
+        # Check that at least one record belongs to test_user
+        user_record_ids = [r.user_id for r in records if r.user_id]
+        assert str(test_user.id) in [str(uid) for uid in user_record_ids]
 
 
 class TestHighLevelMethods:
@@ -392,12 +392,12 @@ class TestHighLevelMethods:
         studies_data = [
             {
                 "study_uid": "1.2.3.BATCH.1",
-                "date": date.today().isoformat(),
+                "date": datetime.now(UTC).date().isoformat(),
                 "patient_id": test_patient.id,
             },
             {
                 "study_uid": "1.2.3.BATCH.2",
-                "date": date.today().isoformat(),
+                "date": datetime.now(UTC).date().isoformat(),
                 "patient_id": test_patient.id,
             },
         ]
@@ -428,8 +428,8 @@ class TestHighLevelMethods:
         # Create patient with studies
         patient_data = {"id": "P_BATCH", "name": "Patient with Studies"}
         studies_data = [
-            {"study_uid": "1.2.3.PWS.1", "date": date.today().isoformat()},
-            {"study_uid": "1.2.3.PWS.2", "date": date.today().isoformat()},
+            {"study_uid": "1.2.3.PWS.1", "date": datetime.now(UTC).date().isoformat()},
+            {"study_uid": "1.2.3.PWS.2", "date": datetime.now(UTC).date().isoformat()},
         ]
 
         patient, studies = await clarinet_client.create_patient_with_studies(
@@ -480,7 +480,7 @@ class TestHighLevelMethods:
         assert "study" in hierarchy
         assert "patient" in hierarchy
         assert "series" in hierarchy
-        assert "tasks" in hierarchy
+        assert "records" in hierarchy
 
         assert hierarchy["study"]["study_uid"] == test_study.study_uid
         assert hierarchy["patient"]["id"] == test_patient.id

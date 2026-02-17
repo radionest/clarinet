@@ -2,7 +2,7 @@
 Bootstrap utilities for Clarinet application initialization.
 
 This module provides functions to initialize the application with default data,
-such as user roles and task types, during startup.
+such as user roles and record types, during startup.
 """
 
 import json
@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlmodel import select
 
-from src.models import TaskDesign, TaskDesignCreate, User, UserRole
+from src.models import RecordType, RecordTypeCreate, User, UserRole
 from src.utils.auth import get_password_hash
 from src.utils.db_manager import db_manager
 from src.utils.logger import logger
@@ -241,103 +241,107 @@ async def initialize_application_data() -> None:
             raise
 
 
-def filter_task_schemas(task_files: list[str], filter_suffix: str = "demo") -> list[str]:
+def filter_record_schemas(record_files: list[str], filter_suffix: str = "demo") -> list[str]:
     """
-    Filter task schema files by suffix.
+    Filter record schema files by suffix.
 
     Args:
-        task_files: List of task file names
+        record_files: List of record file names
         filter_suffix: Suffix to filter by
 
     Returns:
-        List of task names (without .json extension)
+        List of record names (without .json extension)
     """
-    logger.info(f"Task files found: {', '.join(task_files)}")
-    filtered_by_suffix = filter(lambda x: filter_suffix in x, task_files)
-    task_names = [t.removesuffix(".json") for t in filtered_by_suffix if "schema" not in t]
-    return task_names
+    logger.info(f"Record type files found: {', '.join(record_files)}")
+    filtered_by_suffix = filter(lambda x: filter_suffix in x, record_files)
+    record_names = [t.removesuffix(".json") for t in filtered_by_suffix if "schema" not in t]
+    return record_names
 
 
-async def create_demo_task_designs_from_json(input_folder: str, demo_suffix: str = "demo") -> None:
+async def create_demo_record_types_from_json(input_folder: str, demo_suffix: str = "demo") -> None:
     """
-    Create task types from JSON files in the specified folder.
+    Create record types from JSON files in the specified folder.
 
     Args:
-        input_folder: Path to the folder containing task JSON files
-        demo_suffix: Suffix to filter task files by
+        input_folder: Path to the folder containing record type JSON files
+        demo_suffix: Suffix to filter record type files by
     """
     try:
-        task_files = os.listdir(input_folder)
+        record_files = os.listdir(input_folder)
     except FileNotFoundError:
-        logger.warning(f"Task folder {input_folder} not found")
+        logger.warning(f"Record types folder {input_folder} not found")
         return
 
-    task_names = filter_task_schemas(task_files, demo_suffix)
-    logger.info(f"Found task schemas: {task_names}")
+    record_names = filter_record_schemas(record_files, demo_suffix)
+    logger.info(f"Found record type schemas: {record_names}")
 
-    for task_name in task_names:
+    for record_name in record_names:
         async with db_manager.get_async_session_context() as session:
             try:
-                # Load task properties
-                async with aiofiles.open(os.path.join(input_folder, f"{task_name}.json")) as f:
+                # Load record type properties
+                async with aiofiles.open(os.path.join(input_folder, f"{record_name}.json")) as f:
                     content = await f.read()
-                    task_properties = json.loads(content)
+                    record_properties = json.loads(content)
 
-                # Load task schema if it exists
-                if task_properties.get("result_schema") is None:
-                    try:
-                        async with aiofiles.open(
-                            os.path.join(input_folder, f"{task_name}.schema.json")
-                        ) as f:
-                            content = await f.read()
-                            task_scheme_json = json.loads(content)
-                        task_properties["result_schema"] = task_scheme_json
-                    except FileNotFoundError:
-                        logger.warning(f"Cannot find schema for task {task_name}!")
-                        continue
+                # Load data schema if it exists (check both old and new field names)
+                if record_properties.get("data_schema") is None:
+                    # Try to migrate from old result_schema field
+                    if record_properties.get("result_schema") is not None:
+                        record_properties["data_schema"] = record_properties.pop("result_schema")
+                    else:
+                        try:
+                            async with aiofiles.open(
+                                os.path.join(input_folder, f"{record_name}.schema.json")
+                            ) as f:
+                                content = await f.read()
+                                schema_json = json.loads(content)
+                            record_properties["data_schema"] = schema_json
+                        except FileNotFoundError:
+                            logger.warning(f"Cannot find schema for record type {record_name}!")
+                            continue
 
-                # Create task type
-                new_task_design = TaskDesignCreate(**task_properties)
+                # Create record type
+                new_record_type = RecordTypeCreate(**record_properties)
                 try:
-                    await add_task_design(new_task_design, session=session)
-                    logger.info(f"Created task type: {task_name}")
+                    await add_record_type(new_record_type, session=session)
+                    logger.info(f"Created record type: {record_name}")
                 except HTTPException as e:
                     if e.status_code == status.HTTP_409_CONFLICT:
-                        logger.info(f"Task type already exists: {task_name}")
+                        logger.info(f"Record type already exists: {record_name}")
                     else:
-                        logger.error(f"Error creating task type {task_name}: {e}")
+                        logger.error(f"Error creating record type {record_name}: {e}")
             except Exception as e:
-                logger.error(f"Error processing task {task_name}: {e}")
+                logger.error(f"Error processing record type {record_name}: {e}")
 
 
-async def add_task_design(task_design: TaskDesignCreate, session: AsyncSession) -> TaskDesign:
+async def add_record_type(record_type: RecordTypeCreate, session: AsyncSession) -> RecordType:
     """
-    Add a new task type to the database.
+    Add a new record type to the database.
 
     Args:
-        task_design: The task type to add
+        record_type: The record type to add
         session: Database session
 
     Returns:
-        The created task type
+        The created record type
 
     Raises:
-        HTTPException: If the task type already exists
+        HTTPException: If the record type already exists
     """
-    # Check if task type with this name already exists
+    # Check if record type with this name already exists
     existing_result = await session.execute(
-        select(TaskDesign).where(TaskDesign.name == task_design.name)
+        select(RecordType).where(RecordType.name == record_type.name)
     )
     existing = existing_result.scalar_one_or_none()
 
     if existing:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"Task type with name {task_design.name} already exists",
+            detail=f"Record type with name {record_type.name} already exists",
         )
 
-    # Validate result schema if provided
-    if task_design.result_schema is not None:
+    # Validate data schema if provided
+    if record_type.data_schema is not None:
         try:
             # In a real implementation, you might want to validate the schema
             # using a library like jsonschema
@@ -345,13 +349,13 @@ async def add_task_design(task_design: TaskDesignCreate, session: AsyncSession) 
         except Exception as e:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=f"Result schema is invalid: {e}",
+                detail=f"Data schema is invalid: {e}",
             ) from e
 
-    # Create and save the task type
-    new_task_design = TaskDesign.model_validate(task_design)
-    session.add(new_task_design)
+    # Create and save the record type
+    new_record_type = RecordType.model_validate(record_type)
+    session.add(new_record_type)
     await session.commit()
-    await session.refresh(new_task_design)
+    await session.refresh(new_record_type)
 
-    return new_task_design
+    return new_record_type

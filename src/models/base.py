@@ -31,8 +31,8 @@ class BaseModel(SQLModel):
         return value
 
 
-class TaskStatus(str, enum.Enum):
-    """Enumeration of possible task status values."""
+class RecordStatus(str, enum.Enum):
+    """Enumeration of possible record status values."""
 
     pending = "pending"
     inwork = "inwork"

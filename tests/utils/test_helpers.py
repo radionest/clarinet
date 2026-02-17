@@ -7,8 +7,8 @@ from typing import Any
 from sqlmodel import Session
 
 from src.models.patient import Patient
+from src.models.record import Record, RecordStatus, RecordType
 from src.models.study import Series, Study
-from src.models.task import Task, TaskDesign, TaskStatus
 from src.models.user import User, UserRole
 from src.utils.auth import get_password_hash
 
@@ -63,58 +63,58 @@ class UserFactory:
         return user
 
 
-class TaskFactory:
-    """Factory for creating test tasks."""
+class RecordFactory:
+    """Factory for creating test records."""
 
     @staticmethod
-    async def create_task_scheme(
+    async def create_record_type(
         session: Session,
         name: str | None = None,
         title: str | None = None,
-        task_design: str = "CLASSIFICATION",  # Changed from TaskType enum
+        record_type: str = "CLASSIFICATION",  # Changed from TaskType enum
         schema: dict[str, Any] | None = None,
-    ) -> TaskDesign:
-        """Creates a task type."""
+    ) -> RecordType:
+        """Creates a record type."""
         import uuid
 
         unique_id = str(uuid.uuid4())[:8]
 
         default_schema = {"type": "object", "properties": {"label": {"type": "string"}}}
 
-        task_scheme = TaskDesign(
-            name=name or f"test_scheme_{unique_id}",
-            title=title or f"Test Scheme {unique_id}",
-            type=task_design,
+        record_type_obj = RecordType(
+            name=name or f"test_type_{unique_id}",
+            title=title or f"Test Type {unique_id}",
+            type=record_type,
             schema=json.dumps(schema or default_schema),
         )
-        session.add(task_scheme)
+        session.add(record_type_obj)
         await session.commit()
-        await session.refresh(task_scheme)
-        return task_scheme
+        await session.refresh(record_type_obj)
+        return record_type_obj
 
     @staticmethod
-    async def create_task(
+    async def create_record(
         session: Session,
         user: User,
-        task_scheme: TaskDesign,
-        status: TaskStatus = TaskStatus.pending,
+        record_type: RecordType,
+        status: RecordStatus = RecordStatus.pending,
         data: dict[str, Any] | None = None,
-    ) -> Task:
-        """Creates a task."""
-        task = Task(
+    ) -> Record:
+        """Creates a record."""
+        record = Record(
             user_id=user.id,
-            task_scheme_id=task_scheme.id,
+            record_type_name=record_type.name,
             status=status,
             data=json.dumps(data) if data else None,
         )
 
-        if status == TaskStatus.finished:
-            task.completed_at = datetime.now(UTC)
+        if status == RecordStatus.finished:
+            record.finished_at = datetime.now(UTC)
 
-        session.add(task)
+        session.add(record)
         await session.commit()
-        await session.refresh(task)
-        return task
+        await session.refresh(record)
+        return record
 
 
 class PatientFactory:
@@ -199,43 +199,46 @@ class TestDataGenerator:
 
     @staticmethod
     async def create_full_test_environment(session: Session) -> dict[str, Any]:
-        """Creates a complete test environment with users, tasks and studies."""
+        """Creates a complete test environment with users, records and studies."""
         # Create users
         regular_user = await UserFactory.create_user(
-            session, email="regular@test.com"  # Remove username parameter
+            session,
+            email="regular@test.com",  # Remove username parameter
         )
 
         admin_user = await UserFactory.create_user(
-            session, email="admin@test.com", roles=["admin"]  # Remove username parameter
+            session,
+            email="admin@test.com",
+            roles=["admin"],  # Remove username parameter
         )
 
-        # Create task types
-        classification_scheme = await TaskFactory.create_task_scheme(
+        # Create record types
+        classification_type = await RecordFactory.create_record_type(
             session,
             name="classification",
-            title="Classification Task",
-            task_design="CLASSIFICATION",
+            title="Classification Record",
+            record_type="CLASSIFICATION",
         )
 
-        segmentation_scheme = await TaskFactory.create_task_scheme(
+        segmentation_type = await RecordFactory.create_record_type(
             session,
             name="segmentation",
-            title="Segmentation Task",
-            task_design="SEGMENTATION",
+            title="Segmentation Record",
+            record_type="SEGMENTATION",
         )
 
-        # Create tasks
-        tasks = []
+        # Create records
+        records = []
         for user in [regular_user, admin_user]:
-            for scheme in [classification_scheme, segmentation_scheme]:
-                task = await TaskFactory.create_task(
+            for record_type in [classification_type, segmentation_type]:
+                record = await RecordFactory.create_record(
                     session,
                     user=user,
-                    task_scheme=scheme,
-                    status=TaskStatus.PENDING,
+                    record_type=record_type,
+                    status=RecordStatus.pending,
                     data={"test": "data"},
                 )
-                tasks.append(task)
+                records.append(record)
 
         # Create patients and studies
         patients = []
@@ -264,11 +267,11 @@ class TestDataGenerator:
 
         return {
             "users": {"regular": regular_user, "admin": admin_user},
-            "task_schemes": {
-                "classification": classification_scheme,
-                "segmentation": segmentation_scheme,
+            "record_types": {
+                "classification": classification_type,
+                "segmentation": segmentation_type,
             },
-            "tasks": tasks,
+            "records": records,
             "patients": patients,
             "studies": studies,
             "series": series_list,
@@ -287,18 +290,20 @@ async def assert_user_exists(session: Session, email: str) -> User:
     return user
 
 
-async def assert_task_status(session: Session, task_id: int, expected_status: TaskStatus):
-    """Checks task status."""
-    task = await session.get(Task, task_id)
-    assert task is not None, f"Task with id {task_id} not found"
-    assert task.status == expected_status, f"Expected status {expected_status}, got {task.status}"
+async def assert_record_status(session: Session, record_id: int, expected_status: RecordStatus):
+    """Checks record status."""
+    record = await session.get(Record, record_id)
+    assert record is not None, f"Record with id {record_id} not found"
+    assert record.status == expected_status, (
+        f"Expected status {expected_status}, got {record.status}"
+    )
 
 
-async def count_user_tasks(session: Session, user_id) -> int:
-    """Counts user tasks."""
+async def count_user_records(session: Session, user_id) -> int:
+    """Counts user records."""
     from sqlmodel import func, select
 
-    statement = select(func.count(Task.id)).where(Task.user_id == user_id)
+    statement = select(func.count(Record.id)).where(Record.user_id == user_id)
     result = await session.exec(statement)
     return result.one()
 

@@ -177,36 +177,36 @@ class AnonymizationFailedError(BusinessRuleViolationError):
         super().__init__(f"Anonymization failed: {reason}")
 
 
-# Task-specific exceptions
-class TaskNotFoundError(EntityNotFoundError):
-    """Raised when a task is not found."""
+# Record-specific exceptions (formerly Task)
+class RecordNotFoundError(EntityNotFoundError):
+    """Raised when a record is not found."""
 
-    def __init__(self, task_id: int):
-        super().__init__(f"Task with ID {task_id} not found")
+    def __init__(self, record_id: int):
+        super().__init__(f"Record with ID {record_id} not found")
 
 
-class TaskAlreadyExistsError(EntityAlreadyExistsError):
-    """Raised when trying to create a task that already exists."""
+class RecordAlreadyExistsError(EntityAlreadyExistsError):
+    """Raised when trying to create a record that already exists."""
 
     pass
 
 
-class TaskDesignNotFoundError(EntityNotFoundError):
-    """Raised when a task design is not found."""
+class RecordTypeNotFoundError(EntityNotFoundError):
+    """Raised when a record type is not found."""
 
-    def __init__(self, design_id: int | str):
-        super().__init__(f"Task design with ID '{design_id}' not found")
+    def __init__(self, type_id: int | str):
+        super().__init__(f"Record type with ID '{type_id}' not found")
 
 
-class TaskDesignAlreadyExistsError(EntityAlreadyExistsError):
-    """Raised when trying to create a task design that already exists."""
+class RecordTypeAlreadyExistsError(EntityAlreadyExistsError):
+    """Raised when trying to create a record type that already exists."""
 
     def __init__(self, name: str):
-        super().__init__(f"Task design with name '{name}' already exists")
+        super().__init__(f"Record type with name '{name}' already exists")
 
 
-class TaskConstraintViolationError(BusinessRuleViolationError):
-    """Raised when a task constraint is violated."""
+class RecordConstraintViolationError(BusinessRuleViolationError):
+    """Raised when a record constraint is violated."""
 
     pass
 
@@ -261,6 +261,26 @@ class FileAlreadyExistsError(StorageError):
     """Raised when trying to create a file that already exists."""
 
     pass
+
+
+# File schema errors
+class FileSchemaError(ClarinetError):
+    """Base exception for file schema errors."""
+
+    pass
+
+
+class FilePatternError(FileSchemaError):
+    """Raised when a file pattern is invalid."""
+
+    pass
+
+
+class RequiredFileMissingError(FileSchemaError):
+    """Raised when a required file is not found."""
+
+    def __init__(self, file_name: str, pattern: str):
+        super().__init__(f"Required file '{file_name}' not found (pattern: {pattern})")
 
 
 # DICOM errors
@@ -336,3 +356,51 @@ class ScriptArgumentError(ScriptError):
     """Raised when script arguments are invalid."""
 
     pass
+
+
+# RecordFlow errors
+class RecordFlowError(ClarinetError):
+    """Base exception for RecordFlow workflow errors."""
+
+    pass
+
+
+class FlowDefinitionError(RecordFlowError):
+    """Raised when flow definition is invalid.
+
+    Examples: or_()/and_() called without if_(), invalid trigger status.
+    """
+
+    pass
+
+
+class FlowConditionError(RecordFlowError):
+    """Raised when a flow condition is invalid or evaluation fails.
+
+    Examples: unknown operator, invalid comparison.
+    """
+
+    pass
+
+
+class FlowContextError(RecordFlowError):
+    """Raised when record context is missing or invalid.
+
+    Examples: record not found in context, cannot access field in non-dict.
+    """
+
+    def __init__(self, record_name: str, detail: str | None = None):
+        if detail:
+            super().__init__(f"Context error for record '{record_name}': {detail}")
+        else:
+            super().__init__(f"Record '{record_name}' not found in context")
+
+
+class FlowExecutionError(RecordFlowError):
+    """Raised when flow action execution fails.
+
+    Examples: failed to create record, failed to update status.
+    """
+
+    def __init__(self, action: str, reason: str):
+        super().__init__(f"Failed to execute action '{action}': {reason}")

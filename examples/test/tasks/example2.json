@@ -1,0 +1,25 @@
+{
+  "name": "Example Record 2",
+  "description": "An example record type with JSON schema",
+  "max_doctors": 2,
+  "data_schema": {
+    "type": "object",
+    "properties": {
+      "field1": {
+        "type": "string",
+        "title": "Example Field"
+      },
+      "field2": {
+        "type": "string",
+        "format": "path",
+        "title": "Another Field"
+      },
+      "epoch": {
+        "type": "numeric",
+        "format": "path",
+        "title": "Another Field"
+      }
+    },
+    "required": ["field1"]
+  }
+}

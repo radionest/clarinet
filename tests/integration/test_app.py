@@ -4,7 +4,7 @@ import pytest
 from httpx import AsyncClient
 from sqlmodel import select
 
-from src.models.task import TaskDesign
+from src.models.record import RecordType
 from src.models.user import User
 
 
@@ -33,10 +33,10 @@ async def test_database_tables_created(test_session):
     assert users is not None  # Check that query executed
     assert isinstance(users, list)  # Check that we got a list
 
-    result = await test_session.execute(select(TaskDesign))
-    task_designs = result.scalars().all()
-    assert task_designs is not None  # Check that query executed
-    assert isinstance(task_designs, list)  # Check that we got a list
+    result = await test_session.execute(select(RecordType))
+    record_types = result.scalars().all()
+    assert record_types is not None  # Check that query executed
+    assert isinstance(record_types, list)  # Check that we got a list
 
 
 @pytest.mark.asyncio

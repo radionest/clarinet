@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 import pytest
 from httpx import AsyncClient
 
-from src.models.task import TaskDesign, TaskStatus
+from src.models.record import RecordStatus, RecordType
 
 
 @pytest.mark.asyncio
@@ -88,8 +88,8 @@ async def test_get_users_list(client: AsyncClient, admin_user):
 
 
 @pytest.mark.asyncio
-async def test_create_task_scheme(client: AsyncClient, admin_user):
-    """Test creating task type via API."""
+async def test_create_record_type(client: AsyncClient, admin_user):
+    """Test creating record type via API."""
     # Authenticate as admin
     await client.post(
         "/api/auth/login",
@@ -99,15 +99,15 @@ async def test_create_task_scheme(client: AsyncClient, admin_user):
         },
     )
 
-    task_scheme_data = {
-        "name": "api_test_task",
-        "title": "API Test Task",
-        "description": "Task created via API",
+    record_type_data = {
+        "name": "api_test_record",
+        "title": "API Test Record",
+        "description": "Record created via API",
         "type": "classification",
         "schema": json.dumps({"type": "object", "properties": {"label": {"type": "string"}}}),
     }
 
-    response = await client.post("/api/task/types", json=task_scheme_data)
+    response = await client.post("/api/record/types", json=record_type_data)
 
     # May require special permissions or not exist
     assert response.status_code in [200, 201, 403, 404, 405]  # 405 added for Method Not Allowed
@@ -117,9 +117,9 @@ async def test_create_task_scheme(client: AsyncClient, admin_user):
 
 
 @pytest.mark.asyncio
-async def test_get_task_types(client: AsyncClient, auth_headers):
-    """Test getting task types list."""
-    response = await client.get("/api/task/types", headers=auth_headers)
+async def test_get_record_types(client: AsyncClient, auth_headers):
+    """Test getting record types list."""
+    response = await client.get("/api/record/types", headers=auth_headers)
 
     assert response.status_code in [200, 404]
     if response.status_code == 200:
@@ -128,30 +128,30 @@ async def test_get_task_types(client: AsyncClient, auth_headers):
 
 
 @pytest.mark.asyncio
-async def test_create_task(client: AsyncClient, auth_headers, test_session):
-    """Test creating task via API."""
-    # First create task type in DB
+async def test_create_record(client: AsyncClient, auth_headers, test_session):
+    """Test creating record via API."""
+    # First create record type in DB
 
-    task_design = TaskDesign(name="test_api_scheme", title="Test Scheme")
-    test_session.add(task_design)
+    record_type = RecordType(name="test_api_type", title="Test Type")
+    test_session.add(record_type)
     await test_session.commit()
 
-    # Create task via API
-    task_data = {"task_design_id": task_design.name, "data": json.dumps({"test": "value"})}
+    # Create record via API
+    record_data = {"record_type_name": record_type.name, "data": json.dumps({"test": "value"})}
 
-    response = await client.post("/api/task/", json=task_data, headers=auth_headers)
+    response = await client.post("/api/record/", json=record_data, headers=auth_headers)
 
     assert response.status_code in [200, 201, 404, 405, 422]  # 405 added for Method Not Allowed
     if response.status_code in [200, 201]:
         data = response.json()
         assert "id" in data
-        assert data["status"] == TaskStatus.pending.value
+        assert data["status"] == RecordStatus.pending.value
 
 
 @pytest.mark.asyncio
-async def test_get_user_tasks(client: AsyncClient, auth_headers):
-    """Test getting user tasks."""
-    response = await client.get("/api/task/my", headers=auth_headers)
+async def test_get_user_records(client: AsyncClient, auth_headers):
+    """Test getting user records."""
+    response = await client.get("/api/record/my", headers=auth_headers)
 
     assert response.status_code in [200, 404]
     if response.status_code == 200:
@@ -160,14 +160,14 @@ async def test_get_user_tasks(client: AsyncClient, auth_headers):
 
 
 @pytest.mark.asyncio
-async def test_update_task_status(client: AsyncClient, auth_headers, test_session):
-    """Test updating task status."""
-    # Create task in DB
+async def test_update_record_status(client: AsyncClient, auth_headers, test_session):
+    """Test updating record status."""
+    # Create record in DB
     # Get user
     from sqlmodel import select
 
     from src.models.patient import Patient
-    from src.models.task import Task
+    from src.models.record import Record
     from src.models.user import User
 
     statement = select(User).where(User.email == "test@example.com")  # Query by email instead of ID
@@ -179,29 +179,31 @@ async def test_update_task_status(client: AsyncClient, auth_headers, test_sessio
     test_session.add(patient)
     await test_session.commit()
 
-    # Create task type and task
-    task_design = TaskDesign(name="update_test", title="Update Test")
-    test_session.add(task_design)
+    # Create record type and record
+    record_type = RecordType(name="update_test", title="Update Test")
+    test_session.add(record_type)
     await test_session.commit()
 
-    task = Task(
+    record = Record(
         patient_id=patient.id,
         user_id=user.id,
-        task_design_id=task_design.name,
-        status=TaskStatus.pending,
+        record_type_name=record_type.name,
+        status=RecordStatus.pending,
     )
-    test_session.add(task)
+    test_session.add(record)
     await test_session.commit()
 
     # Update status via API
-    update_data = {"status": TaskStatus.inwork.value}
+    update_data = {"status": RecordStatus.inwork.value}
 
-    response = await client.patch(f"/api/task/{task.id}", json=update_data, headers=auth_headers)
+    response = await client.patch(
+        f"/api/record/{record.id}", json=update_data, headers=auth_headers
+    )
 
     assert response.status_code in [200, 404, 403, 405]
     if response.status_code == 200:
         data = response.json()
-        assert data["status"] == TaskStatus.inwork.value
+        assert data["status"] == RecordStatus.inwork.value
 
 
 @pytest.mark.asyncio
@@ -265,7 +267,7 @@ async def test_unauthorized_access(client: AsyncClient):
     """Test access without authorization."""
     endpoints = [
         "/api/user/users/me/token",
-        "/api/task/",
+        "/api/record/",
         "/api/study/",
     ]
 
@@ -278,7 +280,7 @@ async def test_unauthorized_access(client: AsyncClient):
 @pytest.mark.asyncio
 async def test_pagination(client: AsyncClient, auth_headers):
     """Test pagination if supported."""
-    response = await client.get("/api/task/?limit=10&offset=0", headers=auth_headers)
+    response = await client.get("/api/record/?limit=10&offset=0", headers=auth_headers)
 
     assert response.status_code in [200, 404]
     if response.status_code == 200:

@@ -13,8 +13,8 @@ from ..settings import settings
 from .base import BaseModel
 
 if TYPE_CHECKING:
+    from .record import Record
     from .study import Study, StudyRead
-    from .task import Task
 
 
 class PatientBase(BaseModel):
@@ -52,7 +52,7 @@ class Patient(PatientBase, table=True):
             unique=True,
         ),
     )
-    tasks: list["Task"] = Relationship(back_populates="patient")
+    records: list["Record"] = Relationship(back_populates="patient")
 
 
 class PatientSave(PatientBase):

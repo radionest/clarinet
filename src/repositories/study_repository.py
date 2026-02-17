@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlmodel import select
 
-from src.models import Patient, Study, Task
+from src.models import Patient, Record, Study
 from src.repositories.base import BaseRepository
 
 
@@ -36,7 +36,7 @@ class StudyRepository(BaseRepository[Study]):
             .options(
                 selectinload(Study.patient),  # type: ignore
                 selectinload(Study.series),  # type: ignore
-                selectinload(Study.tasks),  # type: ignore
+                selectinload(Study.records),  # type: ignore
             )
         )
         result = await self.session.execute(statement)
@@ -92,18 +92,18 @@ class StudyRepository(BaseRepository[Study]):
         await self.session.refresh(study, ["series"])
         return list(study.series)
 
-    async def has_task(self, study: Study, task_id: int) -> bool:
-        """Check if task is in study.
+    async def has_record(self, study: Study, record_id: int) -> bool:
+        """Check if record is in study.
 
         Args:
             study: Study to check
-            task_id: Task ID to check
+            record_id: Record ID to check
 
         Returns:
-            True if task is in study
+            True if record is in study
         """
-        await self.session.refresh(study, ["tasks"])
-        return any(task.id == task_id for task in study.tasks)
+        await self.session.refresh(study, ["records"])
+        return any(record.id == record_id for record in study.records)
 
     async def get_by_uid(self, study_uid: str) -> Study:
         """Get study by UID.
@@ -123,18 +123,18 @@ class StudyRepository(BaseRepository[Study]):
             raise NOT_FOUND.with_context(f"Study {study_uid} not found")
         return study
 
-    async def get_tasks(self, study_id: str) -> list[Task]:
-        """Get all tasks for a study.
+    async def get_records(self, study_id: str) -> list[Record]:
+        """Get all records for a study.
 
         Args:
             study_id: Study ID
 
         Returns:
-            List of tasks
+            List of records
         """
         study = await self.get(study_id)
-        await self.session.refresh(study, ["tasks"])
-        return list(study.tasks)
+        await self.session.refresh(study, ["records"])
+        return list(study.records)
 
     async def search(
         self,
@@ -181,16 +181,16 @@ class StudyRepository(BaseRepository[Study]):
         result = await self.session.execute(statement)
         return result.scalar() or 0
 
-    async def count_tasks(self, study_id: str) -> int:
-        """Count tasks in a study.
+    async def count_records(self, study_id: str) -> int:
+        """Count records in a study.
 
         Args:
             study_id: Study ID
 
         Returns:
-            Number of tasks
+            Number of records
         """
-        statement = select(func.count()).select_from(Task).where(Task.study_uid == study_id)
+        statement = select(func.count()).select_from(Record).where(Record.study_uid == study_id)
         result = await self.session.execute(statement)
         return result.scalar() or 0
 

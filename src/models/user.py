@@ -17,7 +17,7 @@ from sqlmodel import Field, Relationship, SQLModel
 from .base import BaseModel
 
 if TYPE_CHECKING:
-    from .task import Task, TaskDesign
+    from .record import Record, RecordType
 
 
 class UserRolesLink(BaseModel, table=True):
@@ -56,7 +56,7 @@ class User(SQLModelBaseUserDB, SQLModel, table=True):
 
     # Relationships with existing models
     roles: list["UserRole"] = Relationship(back_populates="users", link_model=UserRolesLink)
-    tasks: list["Task"] = Relationship(back_populates="user")
+    records: list["Record"] = Relationship(back_populates="user")
 
 
 class UserRead(schemas.BaseUser[UUID]):
@@ -89,4 +89,4 @@ class UserRole(BaseModel, table=True):
 
     name: str = Field(primary_key=True)
     users: list[User] = Relationship(back_populates="roles", link_model=UserRolesLink)
-    allowed_task_designs: list["TaskDesign"] = Relationship(back_populates="constraint_role")
+    allowed_record_types: list["RecordType"] = Relationship(back_populates="constraint_role")

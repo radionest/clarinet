@@ -1,6 +1,6 @@
 {
-  "name": "Example Task",
-  "description": "An example task design",
+  "name": "Example Record",
+  "description": "An example record type",
   "fields": [
     {
       "name": "field1",

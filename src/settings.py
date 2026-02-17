@@ -142,6 +142,10 @@ class Settings(BaseSettings):
     session_ip_check: bool = False  # Validate IP consistency
     session_secure_cookie: bool = True  # HTTPS only in production
 
+    # RecordFlow settings
+    recordflow_enabled: bool = False  # Enable RecordFlow workflow engine
+    recordflow_paths: list[str] = []  # Directories containing *_flow.py files
+
     # Template settings
     template_dir: str | None = None
     static_dir: str | None = None
