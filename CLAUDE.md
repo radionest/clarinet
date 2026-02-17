@@ -168,7 +168,7 @@ except IntegrityError as e:
 from src.utils.logger import logger
 
 logger.debug(f"Processing message with length {len(message)}")
-logger.info(f"User {user_id} created new task")
+logger.info(f"User {user_id} created new record")
 logger.warning(f"API rate limit approaching: {remaining} requests")
 logger.error(f"Failed to connect to database: {error}")
 ```
@@ -273,21 +273,23 @@ await ensure_admin_exists()
 
 - Common type aliases in `src/types.py`
 - Use type aliases for better code readability and consistency
-- Import types: `from src.types import JSONDict, TaskResult`
+- Import types: `from src.types import JSONDict, RecordData`
 
 ```python
-from src.types import JSONDict, TaskResult, SlicerArgs
+from src.types import JSONDict, RecordData, SlicerArgs
 
 # Using type aliases
-async def process_task(args: SlicerArgs) -> TaskResult:
+async def process_record(args: SlicerArgs) -> RecordData:
     result: JSONDict = {"status": "success", "data": {}}
     return result
 ```
 
 Available type aliases:
 - `JSONDict`: JSON-compatible dictionary
-- `TaskResult`, `SlicerArgs`, `SlicerResult`: Task-related types
+- `RecordData`, `SlicerArgs`, `SlicerResult`: Record-related types
+- `RecordSchema`, `RecordContextInfo`: Record schema types
 - `AuthResponse`, `TokenResponse`: Authentication types
+- `PaginationParams`, `MessageResponse`: API response types
 - `FormData`, `ValidationSchema`: Form and validation types
 
 ### Database Operations
@@ -311,6 +313,80 @@ async def create_user(
     return await user_repo.add(user)
 ```
 
+### RecordFlow - Workflow Automation
+
+RecordFlow is an event-driven workflow orchestration system that automatically creates or updates records based on status changes and conditional logic.
+
+#### Core Concepts
+
+- **FlowRecord**: Defines a trigger-activated workflow
+- **FlowCondition**: Conditional blocks with associated actions
+- **RecordFlowEngine**: Runtime execution engine
+- **FlowResult**: Lazy evaluation of data field comparisons
+
+#### Defining Workflows
+
+Workflows are defined in Python files (naming convention: `*_flow.py`):
+
+```python
+from src.services.recordflow import record
+
+# Create follow-up when doctor and AI disagree
+record('doctor_report')
+    .on_status('finished')
+    .if_(record('doctor_report').data.BIRADS_R != record('ai_report').data.BIRADS_R)
+    .add_record('confirm_birads', info='BIRADS disagreement')
+```
+
+#### Key Methods
+
+- `record('type_name')` - Create a flow for a record type
+- `.on_status('status')` - Set trigger status
+- `.if_(condition)` - Start conditional block
+- `.or_(condition)` / `.and_(condition)` - Combine conditions
+- `.add_record('type', **kwargs)` - Create new record
+- `.update_record('name', status='new_status')` - Update record
+- `.call(func)` - Execute custom function
+- `.else_()` - Add else branch
+
+#### Data Access
+
+Access record data fields using dot notation:
+
+```python
+record('report').data.findings.tumor_size  # Nested field access
+record('report').d.field_name              # Shorthand
+```
+
+#### Comparison Operators
+
+Supports: `==`, `!=`, `<`, `<=`, `>`, `>=`
+
+#### Engine Setup
+
+```python
+from src.services.recordflow import RecordFlowEngine, discover_and_load_flows
+from pathlib import Path
+
+engine = RecordFlowEngine(client)
+discover_and_load_flows(engine, [Path('flows/')])
+
+# Trigger on status change
+await engine.handle_record_status_change(record, old_status)
+```
+
+#### File Structure
+
+```
+src/services/recordflow/
+├── engine.py          # Runtime execution
+├── flow_builder.py    # Builder exports
+├── flow_condition.py  # Conditional logic
+├── flow_loader.py     # Dynamic file loading
+├── flow_record.py     # DSL builder
+└── flow_result.py     # Comparison classes
+```
+
 ### Project Structure (Current)
 
 ```tree
@@ -319,6 +395,7 @@ clarinet/
 │   ├── __init__.py
 │   ├── __main__.py      # CLI entry point
 │   ├── settings.py      # Application configuration
+│   ├── client.py        # API client library
 │   ├── exceptions/      # Custom exceptions module
 │   │   ├── domain.py   # Domain exceptions
 │   │   └── http.py     # HTTP exceptions
@@ -331,7 +408,7 @@ clarinet/
 │   │   └── routers/    # API endpoints
 │   │       ├── auth.py
 │   │       ├── study.py
-│   │       ├── task.py
+│   │       ├── record.py  # Record/workflow endpoints
 │   │       ├── user.py
 │   │       └── slicer.py
 │   ├── cli/             # CLI interface
@@ -339,19 +416,31 @@ clarinet/
 │   │   └── main.py
 │   ├── models/          # SQLModel models
 │   │   ├── __init__.py
-│   │   ├── auth.py     # Authentication models
-│   │   ├── base.py     # Base models
+│   │   ├── auth.py     # Authentication models (AccessToken)
+│   │   ├── base.py     # Base models, RecordStatus enum
 │   │   ├── user.py
 │   │   ├── study.py
-│   │   ├── task.py
+│   │   ├── record.py   # Record and RecordType models
 │   │   ├── series.py
 │   │   └── patient.py
 │   ├── repositories/    # Repository pattern
+│   │   ├── base.py     # Base repository class
 │   │   ├── patient_repository.py
 │   │   ├── series_repository.py
 │   │   ├── study_repository.py
-│   │   └── user_repository.py
+│   │   ├── user_repository.py
+│   │   └── record.py   # Record repository
 │   ├── services/        # Business logic
+│   │   ├── user_service.py    # User business logic
+│   │   ├── study_service.py   # Study business logic
+│   │   ├── session_cleanup.py # Session management
+│   │   ├── recordflow/        # Record workflow engine
+│   │   │   ├── engine.py      # Runtime execution
+│   │   │   ├── flow_builder.py
+│   │   │   ├── flow_condition.py
+│   │   │   ├── flow_loader.py
+│   │   │   ├── flow_record.py # DSL builder
+│   │   │   └── flow_result.py # Comparison classes
 │   │   ├── providers/  # Service providers
 │   │   ├── dicom/      # DICOM processing
 │   │   ├── image/      # Image processing
@@ -372,9 +461,18 @@ clarinet/
 │       ├── src/         # Gleam source code
 │       │   ├── api/     # API client and HTTP
 │       │   ├── components/ # UI components
+│       │   │   ├── layout.gleam
+│       │   │   └── forms/  # Form components
 │       │   ├── pages/   # Application pages
+│       │   │   ├── home.gleam
+│       │   │   ├── login.gleam
+│       │   │   ├── register.gleam
+│       │   │   ├── records/  # Record management pages
+│       │   │   ├── studies/
+│       │   │   └── users/
 │       │   ├── utils/   # Utility modules
 │       │   ├── store.gleam # State management
+│       │   ├── router.gleam # Client-side routing
 │       │   └── main.gleam # Entry point
 │       ├── public/      # Public assets
 │       ├── static/      # Static HTML/CSS
@@ -385,7 +483,15 @@ clarinet/
 │   └── build_frontend.sh
 ├── tests/               # Test suite
 │   ├── conftest.py
-│   ├── integration/
+│   ├── test_client.py   # Client library tests
+│   ├── integration/     # Integration tests
+│   │   ├── test_app.py
+│   │   ├── test_api_endpoints.py
+│   │   ├── test_record_crud.py
+│   │   ├── test_study_crud.py
+│   │   └── test_user_crud.py
+│   ├── e2e/             # End-to-end tests
+│   │   └── test_auth_workflows.py
 │   └── utils/
 ├── examples/            # Examples and templates
 │   ├── test/
@@ -523,35 +629,6 @@ alembic current  # Show current migration
 alembic history  # Show migration history
 ```
 
-### Performance
-
-- Use caching for frequent operations (@lru_cache)
-- Apply connection pooling for DB (configured in SQLAlchemy)
-- Avoid N+1 queries - use selectinload/joinedload
-- Profile critical code sections
-
-### Security
-
-- Never log sensitive data (passwords, tokens)
-- Validate all input data with Pydantic
-- Use parameterized queries (SQLModel does this automatically)
-- FastAPI-users for authentication (src/api/auth_config.py)
-- Password hashing with bcrypt
-- Rate limiting for API endpoints
-- CORS settings in src/api/app.py
-- Admin user management with secure defaults
-- Strong password validation for production environments
-
-### Git Workflow
-
-- Make atomic commits with clear messages
-- Use conventional commits (feat:, fix:, docs:, refactor:, test:, chore:)
-- Don't commit:
-  - Generated files (**pycache**, *.pyc)
-  - Secrets and configuration files with passwords
-  - .env files (use .env.example)
-  - Database (*.db)
-- Write meaningful PR descriptions
 
 ### Documentation
 
@@ -562,24 +639,24 @@ alembic history  # Show migration history
 - Document API endpoints with FastAPI auto-documentation
 
 ```python
-async def process_task(
-    task_id: int,
+async def process_record(
+    record_id: int,
     user_id: int,
     session: AsyncSession
-) -> Optional[TaskResult]:
-    """Process a task and return the result.
-    
+) -> Optional[RecordData]:
+    """Process a record and return the result.
+
     Args:
-        task_id: The ID of the task to process
+        record_id: The ID of the record to process
         user_id: The ID of the user requesting processing
         session: Database session
-        
+
     Returns:
-        TaskResult object if processing succeeded, None otherwise
-        
+        RecordData dict if processing succeeded, None otherwise
+
     Raises:
-        NOT_FOUND: If task doesn't exist (from src.exceptions.http)
-        CONFLICT: If task is already being processed (from src.exceptions.http)
+        NOT_FOUND: If record doesn't exist (from src.exceptions.http)
+        CONFLICT: If record is already being processed (from src.exceptions.http)
     """
     # Implementation
     pass
@@ -603,83 +680,6 @@ async def process_task(
 ### Overview
 
 Clarinet provides utilities to simplify Alembic integration in your projects. As a framework, Clarinet doesn't include Alembic configuration directly, but offers helper functions to manage migrations in user projects.
-
-### Setting up Alembic in Your Project
-
-1. **Initialize Alembic in your project**:
-   ```bash
-   # In your project directory
-   alembic init alembic
-   ```
-
-2. **Configure Alembic for async SQLModel**:
-   Update your `alembic/env.py` to use Clarinet's models and async support.
-
-3. **Use Clarinet's migration utilities**:
-   The framework provides helper functions in `src/utils/migrations.py` to simplify common migration tasks.
-
-### Migration Utilities
-
-Clarinet provides helper functions in `src.utils.migrations` to manage Alembic in your projects:
-
-```python
-from clarinet.utils.migrations import (
-    run_migrations,
-    create_migration,
-    get_current_revision,
-    get_pending_migrations,
-    initialize_database
-)
-
-# Apply migrations programmatically in your project
-await initialize_database()  # Check and apply pending migrations
-
-# Create new migration
-create_migration("Add user preferences table", autogenerate=True)
-
-# Check migration status
-current = get_current_revision()
-pending = get_pending_migrations()
-```
-
-### Using Alembic in Your Project
-
-When creating a project with Clarinet:
-
-1. **Initialize Alembic**:
-   ```bash
-   alembic init alembic
-   ```
-
-2. **Configure `alembic/env.py`** to import Clarinet models:
-   ```python
-   from clarinet.models import *  # Import all Clarinet models
-   # Your project models
-   from myproject.models import *
-   ```
-
-3. **Create migrations**:
-   ```bash
-   alembic revision --autogenerate -m "Initial migration"
-   alembic upgrade head
-   ```
-
-### Best Practices
-
-1. **Always review auto-generated migrations** before applying them
-2. **Test migrations** in development before production
-3. **Back up database** before applying migrations in production
-4. **Use descriptive messages** for migrations
-5. **Don't edit applied migrations** - create new ones instead
-6. **Keep migrations small and focused** on single changes
-7. **Use transactions** where supported (PostgreSQL)
-
-### Troubleshooting
-
-- **Import errors**: Ensure all Clarinet and project models are imported in `alembic/env.py`
-- **Missing tables**: Run `alembic upgrade head` to apply migrations
-- **Duplicate migrations**: Check `alembic_version` table and history
-- **Failed migration**: Use `alembic downgrade -1` to rollback
 
 ## Pre-commit Checklist
 
