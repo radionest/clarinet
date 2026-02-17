@@ -27,7 +27,7 @@ fn navbar(model: Model) -> Element(Msg) {
     ]),
     html.div([attribute.class("navbar-menu")], [
       nav_link(router.Studies, "Studies", model.route),
-      nav_link(router.Tasks, "Tasks", model.route),
+      nav_link(router.Records, "Records", model.route),
       case is_admin(model) {
         True -> nav_link(router.Users, "Users", model.route)
         False -> html.text("")

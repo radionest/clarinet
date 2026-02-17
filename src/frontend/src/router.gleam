@@ -11,10 +11,10 @@ pub type Route {
   Register
   Studies
   StudyDetail(id: String)
-  Tasks
-  TaskDetail(id: String)
-  TaskNew
-  TaskDesign(id: Option(String))
+  Records
+  RecordDetail(id: String)
+  RecordNew
+  RecordTypeDesign(id: Option(String))
   Users
   UserProfile(id: String)
   NotFound
@@ -28,11 +28,11 @@ pub fn route_to_path(route: Route) -> String {
     Register -> "/register"
     Studies -> "/studies"
     StudyDetail(id) -> "/studies/" <> id
-    Tasks -> "/tasks"
-    TaskDetail(id) -> "/tasks/" <> id
-    TaskNew -> "/tasks/new"
-    TaskDesign(None) -> "/tasks/design/new"
-    TaskDesign(Some(id)) -> "/tasks/design/" <> id
+    Records -> "/records"
+    RecordDetail(id) -> "/records/" <> id
+    RecordNew -> "/records/new"
+    RecordTypeDesign(None) -> "/records/type/new"
+    RecordTypeDesign(Some(id)) -> "/records/type/" <> id
     Users -> "/users"
     UserProfile(id) -> "/users/" <> id
     NotFound -> "/404"
@@ -52,11 +52,11 @@ pub fn parse_route(uri: Uri) -> Route {
     ["register"] -> Register
     ["studies"] -> Studies
     ["studies", id] -> StudyDetail(id)
-    ["tasks"] -> Tasks
-    ["tasks", "new"] -> TaskNew
-    ["tasks", "design", "new"] -> TaskDesign(None)
-    ["tasks", "design", id] -> TaskDesign(Some(id))
-    ["tasks", id] -> TaskDetail(id)
+    ["records"] -> Records
+    ["records", "new"] -> RecordNew
+    ["records", "type", "new"] -> RecordTypeDesign(None)
+    ["records", "type", id] -> RecordTypeDesign(Some(id))
+    ["records", id] -> RecordDetail(id)
     ["users"] -> Users
     ["users", id] -> UserProfile(id)
     _ -> NotFound
@@ -80,11 +80,11 @@ pub fn get_route_title(route: Route) -> String {
     Register -> "Register"
     Studies -> "Studies"
     StudyDetail(_) -> "Study Details"
-    Tasks -> "Tasks"
-    TaskDetail(_) -> "Task Details"
-    TaskNew -> "New Task"
-    TaskDesign(None) -> "New Task Design"
-    TaskDesign(Some(_)) -> "Edit Task Design"
+    Records -> "Records"
+    RecordDetail(_) -> "Record Details"
+    RecordNew -> "New Record"
+    RecordTypeDesign(None) -> "New Record Type"
+    RecordTypeDesign(Some(_)) -> "Edit Record Type"
     Users -> "Users"
     UserProfile(_) -> "User Profile"
     NotFound -> "Page Not Found"
@@ -98,12 +98,12 @@ pub fn is_same_section(route1: Route, route2: Route) -> Bool {
     StudyDetail(_), Studies -> True
     StudyDetail(_), StudyDetail(_) -> True
 
-    Tasks, TaskDetail(_) -> True
-    Tasks, TaskNew -> True
-    Tasks, TaskDesign(_) -> True
-    TaskDetail(_), Tasks -> True
-    TaskNew, Tasks -> True
-    TaskDesign(_), Tasks -> True
+    Records, RecordDetail(_) -> True
+    Records, RecordNew -> True
+    Records, RecordTypeDesign(_) -> True
+    RecordDetail(_), Records -> True
+    RecordNew, Records -> True
+    RecordTypeDesign(_), Records -> True
 
     Users, UserProfile(_) -> True
     UserProfile(_), Users -> True

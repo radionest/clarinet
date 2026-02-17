@@ -1,6 +1,6 @@
 // Global state management
 import api/models.{
-  type Patient, type Study, type Task, type TaskDesign, type User,
+  type Patient, type Study, type Record, type RecordType, type User,
 }
 import api/types.{type ApiError}
 import gleam/dict.{type Dict}
@@ -25,19 +25,19 @@ pub type Model {
     success_message: Option(String),
     // Data caches
     studies: Dict(String, Study),
-    tasks: Dict(String, Task),
-    task_designs: Dict(String, TaskDesign),
+    records: Dict(String, Record),
+    record_types: Dict(String, RecordType),
     patients: Dict(String, Patient),
     users: Dict(String, User),
     // Form states
     study_form: Option(dynamic.Dynamic),
     // Will hold form data dynamically
-    task_design_form: Option(dynamic.Dynamic),
+    record_type_form: Option(dynamic.Dynamic),
     patient_form: Option(dynamic.Dynamic),
     form_errors: Dict(String, String),
     // List views
     studies_list: List(Study),
-    tasks_list: List(Task),
+    records_list: List(Record),
     users_list: List(User),
     // Pagination
     current_page: Int,
@@ -82,10 +82,10 @@ pub type Msg {
   LoadStudyDetail(id: String)
   StudyDetailLoaded(Result(Study, ApiError))
 
-  LoadTasks
-  TasksLoaded(Result(List(Task), ApiError))
-  LoadTaskDetail(id: String)
-  TaskDetailLoaded(Result(Task, ApiError))
+  LoadRecords
+  RecordsLoaded(Result(List(Record), ApiError))
+  LoadRecordDetail(id: String)
+  RecordDetailLoaded(Result(Record, ApiError))
 
   LoadUsers
   UsersLoaded(Result(List(User), ApiError))
@@ -95,18 +95,18 @@ pub type Msg {
   SubmitStudyForm
   StudyFormSubmitted(Result(Study, ApiError))
 
-  UpdateTaskDesignForm(dynamic.Dynamic)
-  UpdateTaskDesignSchema(Json)
-  SubmitTaskDesignForm
-  TaskDesignFormSubmitted(Result(TaskDesign, ApiError))
+  UpdateRecordTypeForm(dynamic.Dynamic)
+  UpdateRecordTypeSchema(Json)
+  SubmitRecordTypeForm
+  RecordTypeFormSubmitted(Result(RecordType, ApiError))
 
   UpdatePatientForm(dynamic.Dynamic)
   SubmitPatientForm
   PatientFormSubmitted(Result(Patient, ApiError))
 
-  // Task execution
-  SubmitTaskResult(task_id: String, result: Json)
-  TaskResultSaved(Result(Task, ApiError))
+  // Record data submission
+  SubmitRecordData(record_id: String, data: Json)
+  RecordDataSaved(Result(Record, ApiError))
 
   // UI Actions
   SetLoading(Bool)
@@ -144,16 +144,16 @@ pub fn init() -> Model {
     error: None,
     success_message: None,
     studies: dict.new(),
-    tasks: dict.new(),
-    task_designs: dict.new(),
+    records: dict.new(),
+    record_types: dict.new(),
     patients: dict.new(),
     users: dict.new(),
     study_form: None,
-    task_design_form: None,
+    record_type_form: None,
     patient_form: None,
     form_errors: dict.new(),
     studies_list: [],
-    tasks_list: [],
+    records_list: [],
     users_list: [],
     current_page: 1,
     items_per_page: 20,
@@ -201,20 +201,20 @@ pub fn cache_study(model: Model, study: Study) -> Model {
   Model(..model, studies: studies)
 }
 
-pub fn cache_task(model: Model, task: Task) -> Model {
-  case task.id {
+pub fn cache_record(model: Model, record: Record) -> Model {
+  case record.id {
     Some(id) -> {
-      let tasks = dict.insert(model.tasks, int.to_string(id), task)
-      Model(..model, tasks: tasks)
+      let records = dict.insert(model.records, int.to_string(id), record)
+      Model(..model, records: records)
     }
     None -> model
   }
 }
 
-pub fn cache_task_design(model: Model, design: TaskDesign) -> Model {
-  // Use name as the key for TaskDesign
-  let designs = dict.insert(model.task_designs, design.name, design)
-  Model(..model, task_designs: designs)
+pub fn cache_record_type(model: Model, record_type: RecordType) -> Model {
+  // Use name as the key for RecordType
+  let record_types = dict.insert(model.record_types, record_type.name, record_type)
+  Model(..model, record_types: record_types)
 }
 
 // Form helpers

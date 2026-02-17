@@ -17,8 +17,8 @@ pub type UserRole {
   Viewer
 }
 
-// Task status (matching backend TaskStatus enum)
-pub type TaskStatus {
+// Record status (matching backend RecordStatus enum)
+pub type RecordStatus {
   Pending
   // pending in backend
   InWork
@@ -33,7 +33,7 @@ pub type TaskStatus {
   // pause in backend
 }
 
-// DicomQueryLevel for TaskDesign
+// DicomQueryLevel for RecordType
 pub type DicomQueryLevel {
   Patient
   Study

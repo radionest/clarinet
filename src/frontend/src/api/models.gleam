@@ -1,6 +1,6 @@
 // Static type definitions for core models matching backend SQLModel
 import api/types.{
-  type DicomQueryLevel, type TaskStatus, type UserRole as UserRoleEnum,
+  type DicomQueryLevel, type RecordStatus, type UserRole as UserRoleEnum,
 }
 import gleam/dict.{type Dict}
 import gleam/json.{type Json}
@@ -16,7 +16,7 @@ pub type Patient {
     created_at: Option(String),
     updated_at: Option(String),
     studies: Option(List(Study)),
-    tasks: Option(List(Task)),
+    records: Option(List(Record)),
   )
 }
 
@@ -31,13 +31,13 @@ pub type Study {
     patient_id: String,
     patient: Option(Patient),
     series: Option(List(Series)),
-    tasks: Option(List(Task)),
+    records: Option(List(Record)),
   )
 }
 
-// Task Design model (matching backend)
-pub type TaskDesign {
-  TaskDesign(
+// Record Type model (matching backend)
+pub type RecordType {
+  RecordType(
     name: String,
     // Primary key
     description: Option(String),
@@ -47,27 +47,27 @@ pub type TaskDesign {
     // SlicerArgs
     slicer_result_validator: Option(String),
     slicer_result_validator_args: Option(Dict(String, String)),
-    result_schema: Option(Dict(String, Json)),
-    // ResultSchema for dynamic form
+    data_schema: Option(Dict(String, Json)),
+    // DataSchema for dynamic form
     role_name: Option(String),
     max_users: Option(Int),
     min_users: Option(Int),
     level: DicomQueryLevel,
     constraint_role: Option(Role),
-    tasks: Option(List(Task)),
+    records: Option(List(Record)),
   )
 }
 
-// Task model (matching backend)
-pub type Task {
-  Task(
+// Record model (matching backend)
+pub type Record {
+  Record(
     id: Option(Int),
     // Primary key
-    info: Option(String),
-    status: TaskStatus,
+    context_info: Option(String),
+    status: RecordStatus,
     study_uid: Option(String),
     series_uid: Option(String),
-    task_design_id: String,
+    record_type_name: String,
     user_id: Option(String),
     patient_id: String,
     study_anon_uid: Option(String),
@@ -76,10 +76,10 @@ pub type Task {
     patient: Option(Patient),
     study: Option(Study),
     series: Option(Series),
-    task_design: Option(TaskDesign),
+    record_type: Option(RecordType),
     user: Option(User),
-    result: Option(Dict(String, Json)),
-    // TaskResult
+    data: Option(Dict(String, Json)),
+    // RecordData
     created_at: Option(String),
     changed_at: Option(String),
     started_at: Option(String),
@@ -106,7 +106,7 @@ pub type User {
     is_superuser: Bool,
     is_verified: Bool,
     roles: Option(List(Role)),
-    tasks: Option(List(Task)),
+    records: Option(List(Record)),
   )
 }
 
@@ -120,7 +120,7 @@ pub type Series {
     anon_uid: Option(String),
     study_uid: String,
     study: Option(Study),
-    tasks: Option(List(Task)),
+    records: Option(List(Record)),
     // Computed field
     working_folder: Option(String),
   )
@@ -155,7 +155,7 @@ pub type PatientRead {
     anon_id: Option(String),
     anon_name: Option(String),
     studies: List(Study),
-    tasks: List(Task),
+    records: List(Record),
   )
 }
 
@@ -179,8 +179,8 @@ pub type StudyRead {
   )
 }
 
-pub type TaskDesignCreate {
-  TaskDesignCreate(
+pub type RecordTypeCreate {
+  RecordTypeCreate(
     name: String,
     description: Option(String),
     label: Option(String),
@@ -188,7 +188,7 @@ pub type TaskDesignCreate {
     slicer_script_args: Option(Dict(String, String)),
     slicer_result_validator: Option(String),
     slicer_result_validator_args: Option(Dict(String, String)),
-    result_schema: Option(Dict(String, Json)),
+    data_schema: Option(Dict(String, Json)),
     role_name: Option(String),
     max_users: Option(Int),
     min_users: Option(Int),
@@ -196,33 +196,33 @@ pub type TaskDesignCreate {
   )
 }
 
-pub type TaskCreate {
-  TaskCreate(
-    info: Option(String),
-    status: TaskStatus,
+pub type RecordCreate {
+  RecordCreate(
+    context_info: Option(String),
+    status: RecordStatus,
     study_uid: Option(String),
     series_uid: Option(String),
-    task_design_id: String,
+    record_type_name: String,
     user_id: Option(String),
     patient_id: String,
   )
 }
 
-pub type TaskRead {
-  TaskRead(
+pub type RecordRead {
+  RecordRead(
     id: Int,
-    info: Option(String),
-    status: TaskStatus,
+    context_info: Option(String),
+    status: RecordStatus,
     study_uid: Option(String),
     series_uid: Option(String),
-    task_design_id: String,
+    record_type_name: String,
     user_id: Option(String),
     patient_id: String,
-    result: Option(Dict(String, Json)),
+    data: Option(Dict(String, Json)),
     patient: Patient,
     study: Study,
     series: Option(Series),
-    task_design: TaskDesign,
+    record_type: RecordType,
   )
 }
 
@@ -244,7 +244,7 @@ pub type SeriesRead {
     anon_uid: Option(String),
     study_uid: String,
     study: Study,
-    tasks: List(TaskRead),
+    records: List(RecordRead),
     working_folder: Option(String),
   )
 }
@@ -274,7 +274,7 @@ pub type Role {
   Role(
     name: String,
     description: Option(String),
-    allowed_task_designs: Option(List(TaskDesign)),
+    allowed_record_types: Option(List(RecordType)),
     users: Option(List(User)),
   )
 }

@@ -67,7 +67,7 @@ fn stats_section(model: Model) -> Element(Msg) {
     html.h3([], [html.text("Overview")]),
     html.div([attribute.class("stats-grid")], [
       stat_card("Studies", dict.size(model.studies), "blue", router.Studies),
-      stat_card("Tasks", dict.size(model.tasks), "green", router.Tasks),
+      stat_card("Records", dict.size(model.records), "green", router.Records),
       stat_card("Users", dict.size(model.users), "purple", router.Users),
     ]),
   ])

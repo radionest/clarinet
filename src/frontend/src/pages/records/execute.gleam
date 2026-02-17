@@ -1,6 +1,6 @@
-// Task execution page with dynamic Formosh forms
-import api/models.{type Task, type TaskDesign, type User}
-import api/types.{type TaskStatus}
+// Record execution page with dynamic Formosh forms
+import api/models.{type Record, type RecordType, type User}
+import api/types.{type RecordStatus}
 import gleam/dict
 import gleam/int
 import gleam/json
@@ -15,50 +15,50 @@ import router
 import schema/parser
 import store.{type Model, type Msg}
 
-// View function for task execution page
-pub fn view(model: Model, task_id: String) -> Element(Msg) {
-  case dict.get(model.tasks, task_id) {
-    Ok(task) -> render_task_execution(model, task)
+// View function for record execution page
+pub fn view(model: Model, record_id: String) -> Element(Msg) {
+  case dict.get(model.records, record_id) {
+    Ok(record) -> render_record_execution(model, record)
     Error(_) -> {
-      // Task not loaded yet
-      loading_view(task_id)
+      // Record not loaded yet
+      loading_view(record_id)
     }
   }
 }
 
-// Render the task execution interface
-fn render_task_execution(model: Model, task: Task) -> Element(Msg) {
-  html.div([attribute.class("task-execution-page")], [
+// Render the record execution interface
+fn render_record_execution(model: Model, record: Record) -> Element(Msg) {
+  html.div([attribute.class("record-execution-page")], [
     // Header
     html.div([attribute.class("page-header")], [
-      html.h2([], [html.text("Task Execution")]),
-      render_task_status(task.status),
+      html.h2([], [html.text("Record Execution")]),
+      render_record_status(record.status),
     ]),
 
-    // Task information
-    html.div([attribute.class("task-info card")], [
+    // Record information
+    html.div([attribute.class("record-info card")], [
       html.h3([], [
         html.text(
-          option.map(task.task_design, fn(d) { d.label })
+          option.map(record.record_type, fn(d) { d.label })
           |> option.flatten
-          |> option.unwrap("Task"),
+          |> option.unwrap("Record"),
         ),
       ]),
-      html.p([attribute.class("task-description")], [
+      html.p([attribute.class("record-description")], [
         html.text(
-          option.map(task.task_design, fn(d) { d.description })
+          option.map(record.record_type, fn(d) { d.description })
           |> option.flatten
-          |> option.unwrap("Complete the task form below"),
+          |> option.unwrap("Complete the record form below"),
         ),
       ]),
-      render_task_metadata(task),
+      render_record_metadata(record),
     ]),
 
-    // Dynamic form based on task design's result_schema
-    html.div([attribute.class("task-form-container card")], [
-      case task.task_design {
-        Some(design) -> render_dynamic_form(model, task, design)
-        None -> error_view("Task design not found")
+    // Dynamic form based on record type's data_schema
+    html.div([attribute.class("record-form-container card")], [
+      case record.record_type {
+        Some(record_type) -> render_dynamic_form(model, record, record_type)
+        None -> error_view("Record type not found")
       },
     ]),
 
@@ -67,9 +67,9 @@ fn render_task_execution(model: Model, task: Task) -> Element(Msg) {
       html.button(
         [
           attribute.class("btn btn-secondary"),
-          event.on_click(store.Navigate(router.Tasks)),
+          event.on_click(store.Navigate(router.Records)),
         ],
-        [html.text("Back to Tasks")],
+        [html.text("Back to Records")],
       ),
     ]),
   ])
@@ -78,10 +78,10 @@ fn render_task_execution(model: Model, task: Task) -> Element(Msg) {
 // Render the dynamic form using Formosh
 fn render_dynamic_form(
   model: Model,
-  task: Task,
-  design: TaskDesign,
+  record: Record,
+  record_type: RecordType,
 ) -> Element(Msg) {
-  case design.result_schema {
+  case record_type.data_schema {
     Some(schema_dict) -> {
       // Convert Dict to Json then parse to JsonSchema
       let schema_json = dict_to_json(schema_dict)
@@ -89,12 +89,12 @@ fn render_dynamic_form(
 
       case schema_result {
         Ok(schema) -> {
-          // Check if task can be edited
-          let can_edit = can_edit_task(task, model.user)
+          // Check if record can be edited
+          let can_edit = can_edit_record(record, model.user)
 
-          // Get existing result data if any
+          // Get existing data if any
           let initial_data =
-            option.map(task.result, fn(r) {
+            option.map(record.data, fn(r) {
               dict.new()
               // formosh.from_json_dict(r) - TODO: Fix formosh wrapper
             })
@@ -114,12 +114,12 @@ fn render_dynamic_form(
               case initial_data {
                 Some(_data) -> {
                   html.div([attribute.class("alert alert-info")], [
-                    html.text("Task result viewing temporarily disabled"),
+                    html.text("Record data viewing temporarily disabled"),
                   ])
                 }
                 None -> {
-                  html.div([attribute.class("no-result")], [
-                    html.p([], [html.text("No result submitted yet")]),
+                  html.div([attribute.class("no-data")], [
+                    html.p([], [html.text("No data submitted yet")]),
                   ])
                 }
               }
@@ -140,10 +140,10 @@ fn render_dynamic_form(
     None -> {
       // No schema defined - show simple message
       html.div([attribute.class("no-schema")], [
-        html.p([], [html.text("This task does not have a result form defined.")]),
-        case task.result {
-          Some(result) -> render_raw_result(result)
-          None -> html.text("No result submitted.")
+        html.p([], [html.text("This record does not have a data form defined.")]),
+        case record.data {
+          Some(data) -> render_raw_data(data)
+          None -> html.text("No data submitted.")
         },
       ])
     }
@@ -155,14 +155,14 @@ fn dict_to_json(dict: dict.Dict(String, json.Json)) -> json.Json {
   json.object(dict.to_list(dict))
 }
 
-// Check if user can edit task
-fn can_edit_task(task: Task, user: Option(User)) -> Bool {
-  case task.status {
+// Check if user can edit record
+fn can_edit_record(record: Record, user: Option(User)) -> Bool {
+  case record.status {
     types.Pending | types.InWork -> {
       case user {
         Some(u) -> {
-          // Check if user is assigned to task or is admin
-          case task.user_id {
+          // Check if user is assigned to record or is admin
+          case record.user_id {
             Some(assigned_id) -> assigned_id == u.id || u.is_superuser
             None -> u.is_superuser
           }
@@ -171,12 +171,12 @@ fn can_edit_task(task: Task, user: Option(User)) -> Bool {
       }
     }
     _ -> False
-    // Cannot edit completed/failed tasks
+    // Cannot edit completed/failed records
   }
 }
 
-// Render task status badge
-fn render_task_status(status: TaskStatus) -> Element(Msg) {
+// Render record status badge
+fn render_record_status(status: RecordStatus) -> Element(Msg) {
   let #(class, text) = case status {
     types.Pending -> #("badge-pending", "Pending")
     types.InWork -> #("badge-progress", "In Progress")
@@ -189,16 +189,16 @@ fn render_task_status(status: TaskStatus) -> Element(Msg) {
   html.span([attribute.class("badge " <> class)], [html.text(text)])
 }
 
-// Render task metadata
-fn render_task_metadata(task: Task) -> Element(Msg) {
-  html.div([attribute.class("task-metadata")], [
+// Render record metadata
+fn render_record_metadata(record: Record) -> Element(Msg) {
+  html.div([attribute.class("record-metadata")], [
     html.dl([], [
       // Patient ID
       html.dt([], [html.text("Patient:")]),
-      html.dd([], [html.text(task.patient_id)]),
+      html.dd([], [html.text(record.patient_id)]),
 
       // Study UID
-      case task.study_uid {
+      case record.study_uid {
         Some(uid) ->
           element.fragment([
             html.dt([], [html.text("Study:")]),
@@ -208,7 +208,7 @@ fn render_task_metadata(task: Task) -> Element(Msg) {
       },
 
       // Series UID
-      case task.series_uid {
+      case record.series_uid {
         Some(uid) ->
           element.fragment([
             html.dt([], [html.text("Series:")]),
@@ -218,7 +218,7 @@ fn render_task_metadata(task: Task) -> Element(Msg) {
       },
 
       // Created date
-      case task.created_at {
+      case record.created_at {
         Some(date) ->
           element.fragment([
             html.dt([], [html.text("Created:")]),
@@ -228,7 +228,7 @@ fn render_task_metadata(task: Task) -> Element(Msg) {
       },
 
       // Assigned user
-      case task.user {
+      case record.user {
         Some(user) ->
           element.fragment([
             html.dt([], [html.text("Assigned to:")]),
@@ -240,23 +240,23 @@ fn render_task_metadata(task: Task) -> Element(Msg) {
   ])
 }
 
-// Render raw result as JSON (fallback)
-fn render_raw_result(result: dict.Dict(String, json.Json)) -> Element(Msg) {
-  html.div([attribute.class("raw-result")], [
-    html.h4([], [html.text("Result Data:")]),
+// Render raw data as JSON (fallback)
+fn render_raw_data(data: dict.Dict(String, json.Json)) -> Element(Msg) {
+  html.div([attribute.class("raw-data")], [
+    html.h4([], [html.text("Record Data:")]),
     html.pre([attribute.class("json-display")], [
       html.code([], [
-        html.text(json.to_string(dict_to_json(result))),
+        html.text(json.to_string(dict_to_json(data))),
       ]),
     ]),
   ])
 }
 
 // Loading view
-fn loading_view(task_id: String) -> Element(Msg) {
+fn loading_view(record_id: String) -> Element(Msg) {
   html.div([attribute.class("loading-container")], [
     html.div([attribute.class("spinner")], []),
-    html.p([], [html.text("Loading task " <> task_id <> "...")]),
+    html.p([], [html.text("Loading record " <> record_id <> "...")]),
   ])
 }
 
