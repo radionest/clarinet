@@ -20,6 +20,7 @@ from src.api.routers import record as record
 from src.api.routers import slicer  # slicer doesn't use database, no async version needed,
 from src.api.routers import study as study
 from src.api.routers import user as user
+from src.exceptions.domain import RecordFlowError
 from src.services.session_cleanup import session_cleanup_service
 from src.settings import settings
 from src.utils.admin import ensure_admin_exists
@@ -29,10 +30,10 @@ from src.utils.bootstrap import (
 )
 from src.utils.db_manager import db_manager
 from src.utils.logger import logger
-from src.exceptions.domain import RecordFlowError
+
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     """
     Application lifespan context manager.
 

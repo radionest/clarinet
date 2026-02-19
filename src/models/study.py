@@ -36,8 +36,8 @@ class Study(StudyBase, table=True):
     anon_uid: str | None = None
 
     patient: Patient = Relationship(back_populates="studies")
-    series: list["Series"] = Relationship(back_populates="study")
-    records: list["Record"] = Relationship(back_populates="study")
+    series: list[Series] = Relationship(back_populates="study")
+    records: list[Record] = Relationship(back_populates="study")
 
 
 class StudyCreate(StudyBase):
@@ -51,7 +51,7 @@ class StudyRead(StudyBase):
     """Pydantic model for reading study data with related entities."""
 
     patient: PatientBase
-    series: list["SeriesBase"] = Field()
+    series: list[SeriesBase] = Field()
 
 
 class SeriesBase(BaseModel):
@@ -75,7 +75,7 @@ class Series(SeriesBase, table=True):
     study_uid: str = Field(foreign_key="study.study_uid")
     study: Study = Relationship(back_populates="series")
 
-    records: list["Record"] = Relationship(back_populates="series")
+    records: list[Record] = Relationship(back_populates="series")
 
 
 class SeriesRead(SeriesBase):
@@ -126,4 +126,4 @@ class SeriesFind(SeriesBase):
     series_number: int | None = None  # type: ignore
     anon_uid: str | None = None
     study_uid: str | None = None
-    records: list["RecordFind"] = Field(default_factory=list)  # Will contain RecordFind objects
+    records: list[RecordFind] = Field(default_factory=list)  # Will contain RecordFind objects

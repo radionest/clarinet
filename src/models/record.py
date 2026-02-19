@@ -82,7 +82,7 @@ class RecordType(RecordTypeBase, table=True):
     role_name: str | None = Field(foreign_key="userrole.name", default=None)
     constraint_role: UserRole | None = Relationship(back_populates="allowed_record_types")
 
-    records: list["Record"] = Relationship(back_populates="record_type")
+    records: list[Record] = Relationship(back_populates="record_type")
 
     def __hash__(self) -> int:
         """Hash the RecordType by its name."""
@@ -394,7 +394,7 @@ class Record(RecordBase, table=True):
     finished_at: datetime | None = None
 
     @model_validator(mode="after")
-    def validate_record_level(self) -> "Record":
+    def validate_record_level(self) -> Record:
         match (self.record_type.level, self.patient_id, self.study_uid, self.series_uid):
             case ("PATIENT", _, None, None) | ("STUDY", _, _, None) | ("SERIES", _, _, _):
                 return self
@@ -434,8 +434,8 @@ class RecordRead(RecordBase):
 
     id: int
     data: RecordData | None = None
-    patient: "PatientBase"
-    study: "StudyBase"
+    patient: PatientBase
+    study: StudyBase
     series: SeriesBase | None = None
     record_type: RecordTypeBase
 

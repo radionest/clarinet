@@ -63,13 +63,13 @@ class FileValidator:
         ...         print(f"Error: {error.message}")
     """
 
-    def __init__(self, record_type: "RecordType"):
+    def __init__(self, record_type: RecordType):
         self.record_type = record_type
 
     def validate_files(
         self,
-        record: "Record",
-        file_definitions: list["FileDefinition"] | None,
+        record: Record,
+        file_definitions: list[FileDefinition] | None,
         directory: Path,
     ) -> FileValidationResult:
         """Validate files against a list of file definitions.
@@ -122,7 +122,7 @@ class FileValidator:
 
     def validate_input_files(
         self,
-        record: "Record",
+        record: Record,
         directory: Path,
     ) -> FileValidationResult:
         """Validate input files for a record.
@@ -138,7 +138,7 @@ class FileValidator:
 
     def validate_output_files(
         self,
-        record: "Record",
+        record: Record,
         directory: Path,
     ) -> FileValidationResult:
         """Validate output files for a record.

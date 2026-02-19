@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from fastapi import FastAPI
 
 
-def setup_exception_handlers(app: "FastAPI") -> None:
+def setup_exception_handlers(app: FastAPI) -> None:
     """Setup exception handlers using decorators.
 
     This function registers exception handlers for domain exceptions,

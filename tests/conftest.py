@@ -64,7 +64,7 @@ async def test_engine(test_settings):
 
 
 @pytest_asyncio.fixture
-async def test_session(test_engine) -> AsyncGenerator[AsyncSession, None]:
+async def test_session(test_engine) -> AsyncGenerator[AsyncSession]:
     """Create test database session."""
     async_session = sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
 
@@ -74,7 +74,7 @@ async def test_session(test_engine) -> AsyncGenerator[AsyncSession, None]:
 
 
 @pytest_asyncio.fixture
-async def client(test_session, test_settings) -> AsyncGenerator[AsyncClient, None]:
+async def client(test_session, test_settings) -> AsyncGenerator[AsyncClient]:
     """Create test API client."""
 
     async def override_get_session():

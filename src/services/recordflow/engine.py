@@ -32,7 +32,7 @@ class RecordFlowEngine:
         await engine.handle_record_status_change(record, old_status)
     """
 
-    def __init__(self, clarinet_client: "ClarinetClient"):
+    def __init__(self, clarinet_client: ClarinetClient):
         """Initialize the engine with a ClarinetClient.
 
         Args:
@@ -69,8 +69,8 @@ class RecordFlowEngine:
 
     async def handle_record_status_change(
         self,
-        record: "RecordRead",
-        old_status: "RecordStatus | None" = None,  # noqa: ARG002 - kept for future use
+        record: RecordRead,
+        old_status: RecordStatus | None = None,  # noqa: ARG002 - kept for future use
     ) -> None:
         """Handle a record status change and execute relevant flows.
 
@@ -105,7 +105,7 @@ class RecordFlowEngine:
                 )
                 await self._execute_flow(flow, record, record_context)
 
-    async def _get_record_context(self, record: "RecordRead") -> dict[str, "RecordRead"]:
+    async def _get_record_context(self, record: RecordRead) -> dict[str, RecordRead]:
         """Get all related records for evaluation context.
 
         This method fetches all records in the same study (and series if applicable)
@@ -149,7 +149,7 @@ class RecordFlowEngine:
         return context
 
     async def _execute_flow(
-        self, flow: FlowRecord, record: "RecordRead", context: dict[str, "RecordRead"]
+        self, flow: FlowRecord, record: RecordRead, context: dict[str, RecordRead]
     ) -> None:
         """Execute a flow for a specific record.
 
@@ -189,7 +189,7 @@ class RecordFlowEngine:
                     previous_condition_met = False
 
     async def _execute_action(
-        self, action: dict[str, Any], record: "RecordRead", context: dict[str, "RecordRead"]
+        self, action: dict[str, Any], record: RecordRead, context: dict[str, RecordRead]
     ) -> None:
         """Execute a single action.
 
@@ -215,8 +215,8 @@ class RecordFlowEngine:
     async def _create_record(
         self,
         action: dict[str, Any],
-        record: "RecordRead",
-        context: dict[str, "RecordRead"],  # noqa: ARG002 - kept for API consistency
+        record: RecordRead,
+        context: dict[str, RecordRead],  # noqa: ARG002 - kept for API consistency
     ) -> None:
         """Create a new record.
 
@@ -266,8 +266,8 @@ class RecordFlowEngine:
     async def _update_record(
         self,
         action: dict[str, Any],
-        record: "RecordRead",  # noqa: ARG002 - kept for API consistency
-        context: dict[str, "RecordRead"],
+        record: RecordRead,  # noqa: ARG002 - kept for API consistency
+        context: dict[str, RecordRead],
     ) -> None:
         """Update an existing record.
 
@@ -302,7 +302,7 @@ class RecordFlowEngine:
                 logger.error(f"Failed to update record status: {e}")
 
     async def _call_function(
-        self, action: dict[str, Any], record: "RecordRead", context: dict[str, "RecordRead"]
+        self, action: dict[str, Any], record: RecordRead, context: dict[str, RecordRead]
     ) -> None:
         """Call a custom function.
 

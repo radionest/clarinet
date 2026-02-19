@@ -102,7 +102,7 @@ class DatabaseManager:
         logger.info("Database tables dropped (async)")
 
     @asynccontextmanager
-    async def get_async_session_context(self) -> AsyncGenerator[AsyncSession, None]:
+    async def get_async_session_context(self) -> AsyncGenerator[AsyncSession]:
         """
         Get an async database session as a context manager.
 
@@ -125,7 +125,7 @@ class DatabaseManager:
             finally:
                 await session.close()
 
-    async def get_async_session(self) -> AsyncGenerator[AsyncSession, None]:
+    async def get_async_session(self) -> AsyncGenerator[AsyncSession]:
         """
         Get an async database session for FastAPI dependency.
 

@@ -16,7 +16,7 @@ class ComparisonResult(ABC):
     """Abstract base for comparison results."""
 
     @abstractmethod
-    def evaluate(self, record_context: dict[str, "RecordRead"]) -> bool:
+    def evaluate(self, record_context: dict[str, RecordRead]) -> bool:
         """Evaluate the comparison against actual record data."""
         pass
 
@@ -24,12 +24,12 @@ class ComparisonResult(ABC):
 class FieldComparison(ComparisonResult):
     """Represents a comparison between record data fields."""
 
-    def __init__(self, left: "FlowResult", right: "FlowResult", operator: str):
+    def __init__(self, left: FlowResult, right: FlowResult, operator: str):
         self.left = left
         self.right = right
         self.operator = operator
 
-    def evaluate(self, record_context: dict[str, "RecordRead"]) -> bool:
+    def evaluate(self, record_context: dict[str, RecordRead]) -> bool:
         """Evaluate the field comparison."""
         left_value = self.left._get_value(record_context)
         right_value = self.right._get_value(record_context)
@@ -61,7 +61,7 @@ class LogicalComparison(ComparisonResult):
         self.right = right
         self.operator = operator
 
-    def evaluate(self, record_context: dict[str, "RecordRead"]) -> bool:
+    def evaluate(self, record_context: dict[str, RecordRead]) -> bool:
         """Evaluate the logical comparison."""
         if self.operator == "and":
             return self.left.evaluate(record_context) and self.right.evaluate(record_context)
@@ -94,13 +94,13 @@ class FlowResult:
             else:
                 self.field_path = field_path
 
-    def __getattr__(self, name: str) -> "FlowResult":
+    def __getattr__(self, name: str) -> FlowResult:
         """Allow chaining attribute access for nested fields."""
         if name.startswith("_"):
             raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{name}'")
         return FlowResult(self.record_name, [*self.field_path, name])
 
-    def _get_value(self, record_context: dict[str, "RecordRead"]) -> Any:
+    def _get_value(self, record_context: dict[str, RecordRead]) -> Any:
         """Get the actual value from record data."""
         if self.record_name not in record_context:
             raise ValueError(f"Record '{self.record_name}' not found in context")
@@ -168,7 +168,7 @@ class ConstantFlowResult(FlowResult):
 
     def _get_value(
         self,
-        record_context: dict[str, "RecordRead"],  # noqa: ARG002 - required by interface
+        record_context: dict[str, RecordRead],  # noqa: ARG002 - required by interface
     ) -> Any:
         """Return the constant value."""
         return self.value

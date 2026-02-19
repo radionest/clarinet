@@ -28,7 +28,7 @@ async def create_db_and_tables_async() -> None:
     await db_manager.create_db_and_tables_async()
 
 
-async def get_async_session() -> AsyncGenerator[AsyncSession, None]:
+async def get_async_session() -> AsyncGenerator[AsyncSession]:
     """Get an async database session as a FastAPI dependency.
 
     Usage:

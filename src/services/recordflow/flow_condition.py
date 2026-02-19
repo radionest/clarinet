@@ -38,7 +38,7 @@ class FlowCondition:
         """Add an action to execute when this condition is true."""
         self.actions.append(action)
 
-    def evaluate(self, record_context: dict[str, "RecordRead"]) -> bool:
+    def evaluate(self, record_context: dict[str, RecordRead]) -> bool:
         """Evaluate whether this condition is true given the record context."""
         if self.is_else:
             # Else conditions are handled specially by the engine

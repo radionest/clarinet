@@ -41,7 +41,7 @@ class Patient(PatientBase, table=True):
         min_length=1,
         max_length=64,
     )
-    studies: list["Study"] = Relationship(back_populates="patient")
+    studies: list[Study] = Relationship(back_populates="patient")
     auto_id: int | None = Field(
         default=None,
         sa_column=Column(
@@ -51,7 +51,7 @@ class Patient(PatientBase, table=True):
             unique=True,
         ),
     )
-    records: list["Record"] = Relationship(back_populates="patient")
+    records: list[Record] = Relationship(back_populates="patient")
 
 
 class PatientSave(PatientBase):
@@ -64,4 +64,4 @@ class PatientSave(PatientBase):
 class PatientRead(PatientBase):
     """Pydantic model for reading patient data with related studies."""
 
-    studies: list["StudyRead"] = Field()
+    studies: list[StudyRead] = Field()

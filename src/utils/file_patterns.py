@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 PLACEHOLDER_REGEX = re.compile(r"\{([^}]+)\}")
 
 
-def resolve_record_field(record: "Record", field_path: str) -> str:
+def resolve_record_field(record: Record, field_path: str) -> str:
     """Get value of a field from record by path.
 
     Supports paths:
@@ -56,7 +56,7 @@ def resolve_record_field(record: "Record", field_path: str) -> str:
     return str(obj) if obj is not None else ""
 
 
-def resolve_pattern(pattern: str, record: "Record") -> str:
+def resolve_pattern(pattern: str, record: Record) -> str:
     """Replace placeholders {field} with values from record.
 
     Args:
@@ -82,7 +82,7 @@ def resolve_pattern(pattern: str, record: "Record") -> str:
     return PLACEHOLDER_REGEX.sub(replacer, pattern)
 
 
-def match_filename(filename: str, pattern: str, record: "Record") -> bool:
+def match_filename(filename: str, pattern: str, record: Record) -> bool:
     """Check if filename matches the pattern (exact match).
 
     Args:
@@ -106,7 +106,7 @@ def match_filename(filename: str, pattern: str, record: "Record") -> bool:
 def find_matching_file(
     directory: Path,
     pattern: str,
-    record: "Record",
+    record: Record,
 ) -> str | None:
     """Find file in directory that matches the pattern.
 
@@ -134,7 +134,7 @@ def find_matching_file(
     return None
 
 
-def generate_filename(pattern: str, record: "Record") -> str:
+def generate_filename(pattern: str, record: Record) -> str:
     """Generate filename from pattern using record values.
 
     This is an alias for resolve_pattern for semantic clarity.
