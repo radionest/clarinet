@@ -8,11 +8,12 @@ from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 from fastapi_users import schemas
-from fastapi_users_db_sqlmodel import SQLModelBaseUserDB
 from pydantic import field_validator
 from sqlalchemy import Column, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlmodel import Field, Relationship, SQLModel
+
+from src.utils.fastapi_users_db import SQLModelBaseUserDB
 
 from .base import BaseModel
 
@@ -55,8 +56,8 @@ class User(SQLModelBaseUserDB, SQLModel, table=True):
     )
 
     # Relationships with existing models
-    roles: list["UserRole"] = Relationship(back_populates="users", link_model=UserRolesLink)
-    records: list["Record"] = Relationship(back_populates="user")
+    roles: list[UserRole] = Relationship(back_populates="users", link_model=UserRolesLink)
+    records: list[Record] = Relationship(back_populates="user")
 
 
 class UserRead(schemas.BaseUser[UUID]):
@@ -89,4 +90,4 @@ class UserRole(BaseModel, table=True):
 
     name: str = Field(primary_key=True)
     users: list[User] = Relationship(back_populates="roles", link_model=UserRolesLink)
-    allowed_record_types: list["RecordType"] = Relationship(back_populates="constraint_role")
+    allowed_record_types: list[RecordType] = Relationship(back_populates="constraint_role")

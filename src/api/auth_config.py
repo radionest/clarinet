@@ -14,7 +14,6 @@ from fastapi_users.authentication import (
     CookieTransport,
     Strategy,
 )
-from fastapi_users_db_sqlmodel import SQLModelUserDatabaseAsync
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
@@ -23,6 +22,7 @@ from src.models.auth import AccessToken
 from src.models.user import User
 from src.settings import settings
 from src.utils.database import get_async_session
+from src.utils.fastapi_users_db import SQLModelUserDatabaseAsync
 from src.utils.logger import logger
 
 
@@ -58,14 +58,14 @@ class UserManager(BaseUserManager[User, UUID]):
 
 async def get_user_db(
     session: AsyncSession = Depends(get_async_session),
-) -> AsyncGenerator[SQLModelUserDatabaseAsync, None]:
+) -> AsyncGenerator[SQLModelUserDatabaseAsync]:
     """Get user database."""
     yield SQLModelUserDatabaseAsync(session, User)
 
 
 async def get_user_manager(
     user_db: SQLModelUserDatabaseAsync = Depends(get_user_db),
-) -> AsyncGenerator[UserManager, None]:
+) -> AsyncGenerator[UserManager]:
     """Get user manager."""
     yield UserManager(user_db)
 
