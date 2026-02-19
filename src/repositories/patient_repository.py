@@ -30,7 +30,9 @@ class PatientRepository(BaseRepository[Patient]):
         """
         statement = (
             select(Patient)
-            .options(selectinload(Patient.studies))
+            .options(
+                selectinload(Patient.studies).selectinload(Study.series),  # type: ignore[arg-type]
+            )
             .offset(skip)
             .limit(limit)
         )
@@ -50,7 +52,11 @@ class PatientRepository(BaseRepository[Patient]):
             NOT_FOUND: If patient doesn't exist
         """
         statement = (
-            select(Patient).where(Patient.id == patient_id).options(selectinload(Patient.studies))
+            select(Patient)
+            .where(Patient.id == patient_id)
+            .options(
+                selectinload(Patient.studies).selectinload(Study.series),  # type: ignore[arg-type]
+            )
         )
         result = await self.session.execute(statement)
         patient = result.scalars().first()

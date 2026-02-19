@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlmodel import select
 
-from src.models import Record, RecordType, Series
+from src.models import Record, RecordType, Series, Study
 from src.models.study import SeriesFind
 from src.repositories.base import BaseRepository
 
@@ -34,7 +34,10 @@ class SeriesRepository(BaseRepository[Series]):
         statement = (
             select(Series)
             .where(Series.series_uid == series_id)
-            .options(selectinload(Series.study), selectinload(Series.records))  # type: ignore
+            .options(
+                selectinload(Series.study).selectinload(Study.patient),  # type: ignore
+                selectinload(Series.records),  # type: ignore
+            )
         )
         result = await self.session.execute(statement)
         series = result.scalars().first()
@@ -255,7 +258,10 @@ class SeriesRepository(BaseRepository[Series]):
         Returns:
             List of matching series
         """
-        statement = select(Series)
+        statement = select(Series).options(
+            selectinload(Series.study).selectinload(Study.patient),  # type: ignore
+            selectinload(Series.records),  # type: ignore
+        )
 
         for query_key, query_value in find_query.model_dump(
             exclude_none=True, exclude_defaults=True, exclude={"records"}
