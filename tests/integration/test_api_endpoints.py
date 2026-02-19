@@ -227,7 +227,7 @@ async def test_create_patient(client: AsyncClient, auth_headers):
         "patient_sex": "M",
     }
 
-    response = await client.post("/api/study/patients", json=patient_data, headers=auth_headers)
+    response = await client.post("/api/patients", json=patient_data, headers=auth_headers)
 
     assert response.status_code in [200, 201, 404, 422]
     if response.status_code in [200, 201]:

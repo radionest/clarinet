@@ -117,7 +117,7 @@ class TestPatientManagement:
         await clarinet_client.login(username=test_user.email, password="testpassword")
 
         # Create patient
-        patient_data = {"id": "P_TEST_999", "name": "Test Patient Created"}
+        patient_data = {"patient_id": "P_TEST_999", "patient_name": "Test Patient Created"}
         patient = await clarinet_client.create_patient(patient_data)
 
         assert patient.id == "P_TEST_999"
@@ -430,7 +430,7 @@ class TestHighLevelMethods:
         await clarinet_client.login(username=test_user.email, password="testpassword")
 
         # Create patient with studies
-        patient_data = {"id": "P_BATCH", "name": "Patient with Studies"}
+        patient_data = {"patient_id": "P_BATCH", "patient_name": "Patient with Studies"}
         studies_data = [
             {"study_uid": "1.2.3.777.1", "date": datetime.now(UTC).date().isoformat()},
             {"study_uid": "1.2.3.777.2", "date": datetime.now(UTC).date().isoformat()},
@@ -545,7 +545,7 @@ class TestErrorHandling:
         await clarinet_client.login(username=test_user.email, password="testpassword")
 
         # Try to create duplicate patient
-        patient_data = {"id": test_patient.id, "name": "Duplicate"}
+        patient_data = {"patient_id": test_patient.id, "patient_name": "Duplicate"}
 
         with pytest.raises(ClarinetAPIError) as exc_info:
             await clarinet_client.create_patient(patient_data)

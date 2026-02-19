@@ -117,7 +117,7 @@ class ClarinetClient:
             # User can also call login() manually
             pass
 
-    async def __aenter__(self) -> "ClarinetClient":
+    async def __aenter__(self) -> ClarinetClient:
         """Async context manager entry."""
         if self.username and not self._authenticated:
             await self.login()
@@ -735,7 +735,7 @@ class ClarinetClient:
 
     async def create_studies_batch(
         self, studies_data: list[dict[str, Any] | StudyCreate]
-    ) -> list[StudyRead]:
+    ) -> list[Study]:
         """Create multiple studies at once.
 
         Args:
@@ -754,7 +754,7 @@ class ClarinetClient:
             )
             ```
         """
-        created_studies: list[StudyRead] = []
+        created_studies: list[Study] = []
         for study_data in studies_data:
             try:
                 study = await self.create_study(study_data)
@@ -771,7 +771,7 @@ class ClarinetClient:
         self,
         patient_data: dict[str, Any] | PatientSave,
         studies_data: list[dict[str, Any] | StudyCreate],
-    ) -> tuple[PatientRead, list[StudyRead]]:
+    ) -> tuple[Patient, list[Study]]:
         """Create a patient and associated studies in one operation.
 
         Args:
@@ -925,7 +925,7 @@ class ClarinetClient:
 
     async def create_series_batch(
         self, series_data: list[dict[str, Any] | SeriesCreate]
-    ) -> list[SeriesRead]:
+    ) -> list[Series]:
         """Create multiple series at once.
 
         Args:
@@ -944,7 +944,7 @@ class ClarinetClient:
             )
             ```
         """
-        created_series: list[SeriesRead] = []
+        created_series: list[Series] = []
         for series_item in series_data:
             try:
                 series = await self.create_series(series_item)

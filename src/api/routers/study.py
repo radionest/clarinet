@@ -18,8 +18,7 @@ from src.models import (
     StudyCreate,
 )
 from src.models.patient import PatientRead
-from src.models.study import StudyRead
-from src.models.study import SeriesFind
+from src.models.study import SeriesFind, StudyRead
 
 router = APIRouter()
 
@@ -50,7 +49,7 @@ async def add_patient(
     service: StudyServiceDep,
 ) -> Patient:
     """Create a new patient."""
-    patient_data = patient.model_dump(by_alias=True)
+    patient_data = patient.model_dump()
     return await service.create_patient(patient_data)
 
 
