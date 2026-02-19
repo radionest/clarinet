@@ -21,20 +21,18 @@ from fastapi import (
 )
 from jsonschema import Draft202012Validator, SchemaError
 from sqlalchemy import String as SQLString
-from sqlalchemy import cast, func
+from sqlalchemy import cast
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
-from sqlmodel import and_, col, select
+from sqlmodel import select
 
 from src.api.auth_config import current_active_user
-from src.api.dependencies import PaginationDep
+from src.api.dependencies import PaginationDep, RecordRepositoryDep
 from src.exceptions import CONFLICT, NOT_FOUND
 from src.models import (
-    Patient,
     Record,
     RecordCreate,
     RecordFindResult,
-    RecordFindResultComparisonOperator,
     RecordRead,
     RecordStatus,
     RecordType,
@@ -42,14 +40,12 @@ from src.models import (
     RecordTypeFind,
     RecordTypeOptional,
     Series,
-    Study,
     User,
-    UserRole,
 )
+from src.repositories.record_repository import RecordSearchCriteria
 from src.services.file_validation import FileValidationResult, FileValidator
 from src.types import RecordData
 from src.utils.database import get_async_session
-from src.utils.logger import logger
 from src.utils.validation import validate_json_by_schema
 
 router = APIRouter(
@@ -61,24 +57,20 @@ router = APIRouter(
 )
 
 
-# File Validation Helper
+# Helpers
 
 
-async def validate_record_files(
-    record: Record,
-    session: AsyncSession,
-) -> FileValidationResult | None:
+def validate_record_files(record: Record) -> FileValidationResult | None:
     """Validate input files for a record.
 
+    Record must have record_type relation loaded.
+
     Args:
-        record: Record to validate files for
-        session: Database session for loading relationships
+        record: Record to validate files for (with record_type loaded)
 
     Returns:
         FileValidationResult if validation was performed, None if no input_files defined
     """
-    await session.refresh(record, ["record_type"])
-
     if not record.record_type.input_files:
         return None
 
@@ -89,6 +81,33 @@ async def validate_record_files(
     directory = Path(working_folder)
     validator = FileValidator(record.record_type)
     return validator.validate_input_files(record, directory)
+
+
+def validate_record_data(record: Record, data: RecordData) -> RecordData:
+    """Validate record data against its record type schema.
+
+    Record must have record_type relation loaded.
+
+    Args:
+        record: Record with record_type loaded
+        data: Data to validate
+
+    Returns:
+        Validated data
+
+    Raises:
+        HTTPException: If data does not match schema
+    """
+    if record.record_type.data_schema:
+        try:
+            validate_json_by_schema(data, record.record_type.data_schema)
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Data does not match schema: {e!s}",
+            ) from e
+
+    return data
 
 
 # Record Type Endpoints
@@ -222,99 +241,46 @@ async def delete_record_type(
 
 
 @router.get("/", response_model=list[RecordRead])
-async def get_all_records(session: AsyncSession = Depends(get_async_session)) -> Sequence[Record]:
+async def get_all_records(repo: RecordRepositoryDep) -> Sequence[Record]:
     """Get all records with relations loaded."""
-    statement = select(Record).options(
-        selectinload(Record.patient),  # type: ignore
-        selectinload(Record.study),  # type: ignore
-        selectinload(Record.series),  # type: ignore
-        selectinload(Record.record_type),  # type: ignore
-    )
-    result = await session.execute(statement)
-    return result.scalars().all()
+    return await repo.get_all_with_relations()
 
 
 @router.get("/my", response_model=list[RecordRead])
 async def get_my_records(
+    repo: RecordRepositoryDep,
     user: User = Depends(current_active_user),
-    session: AsyncSession = Depends(get_async_session),
 ) -> Sequence[Record]:
     """Get all records assigned to the current user with relations loaded."""
-    statement = (
-        select(Record)
-        .where(Record.user_id == user.id)
-        .options(
-            selectinload(Record.patient),  # type: ignore
-            selectinload(Record.study),  # type: ignore
-            selectinload(Record.series),  # type: ignore
-            selectinload(Record.record_type),  # type: ignore
-        )
-    )
-    result = await session.execute(statement)
-    return result.scalars().all()
+    return await repo.find_by_user(user.id)
 
 
 @router.get("/my/pending", response_model=list[RecordRead])
 async def get_my_pending_records(
+    repo: RecordRepositoryDep,
     user: User = Depends(current_active_user),
-    session: AsyncSession = Depends(get_async_session),
 ) -> Sequence[Record]:
     """Get all pending records assigned to the current user with relations loaded."""
-    statement = (
-        select(Record)
-        .where(
-            Record.user_id == user.id,
-            and_(
-                Record.status != RecordStatus.failed,
-                Record.status != RecordStatus.finished,
-                Record.status != RecordStatus.pause,
-            ),
-        )
-        .options(
-            selectinload(Record.patient),  # type: ignore
-            selectinload(Record.study),  # type: ignore
-            selectinload(Record.series),  # type: ignore
-            selectinload(Record.record_type),  # type: ignore
-        )
-    )
-    result = await session.execute(statement)
-    return result.scalars().all()
+    return await repo.find_pending_by_user(user.id)
 
 
 @router.get("/available_types", response_model=dict[RecordType, int])
 async def get_my_available_record_types(
+    repo: RecordRepositoryDep,
     user: User = Depends(current_active_user),
-    session: AsyncSession = Depends(get_async_session),
 ) -> dict[RecordType, int]:
     """Get all record types available to the current user with record counts."""
-    statement = (
-        select(RecordType.name, func.count(col(Record.id)).label("record_count"))
-        .join(Record)
-        .join(UserRole)
-        .where(UserRole.users.any(User.id == user.id))  # type: ignore[attr-defined]
-        .where(Record.status == RecordStatus.pending)
-        .group_by(col(RecordType.name))
-    )
-    result = await session.execute(statement)
-    results = result.all()  # This returns tuples (id, count), not scalars
-
-    return {
-        record_type: record_count
-        for record_type_id, record_count in results
-        if (record_type := await session.get(RecordType, record_type_id)) is not None
-    }
+    return await repo.get_available_type_counts(user.id)
 
 
 @router.get("/{record_id}", response_model=Record | RecordRead)
 async def get_record(
     record_id: int,
+    repo: RecordRepositoryDep,
     detailed: bool = False,
-    session: AsyncSession = Depends(get_async_session),
 ) -> Record | RecordRead:
     """Get a record by ID."""
-    record = await session.get(Record, record_id)
-    if record is None:
-        raise NOT_FOUND.with_context(f"Record with ID {record_id} not found")
+    record = await repo.get_with_relations(record_id)
 
     if detailed:
         return RecordRead.model_validate(record)
@@ -323,33 +289,12 @@ async def get_record(
 
 async def check_record_constraints(
     new_record: RecordCreate,
-    session: AsyncSession = Depends(get_async_session),
+    repo: RecordRepositoryDep,
 ) -> None:
     """Check if a record can be added based on constraints."""
-    # Count existing records with same record type, series, and study
-    query = (
-        select(func.count(col(Record.id)))
-        .join(RecordType)
-        .where(
-            RecordType.name == new_record.record_type_name,
-            Record.series_uid == new_record.series_uid,
-            Record.study_uid == new_record.study_uid,
-        )
+    await repo.check_constraints(
+        new_record.record_type_name, new_record.series_uid, new_record.study_uid
     )
-
-    result = await session.execute(query)
-    same_records_count = result.scalar_one()
-    record_type = await session.get(RecordType, new_record.record_type_name)
-
-    if record_type is None:
-        raise NOT_FOUND.with_context(f"Record type with ID {new_record.record_type_name} not found")
-
-    if record_type.max_users and same_records_count >= record_type.max_users:
-        raise CONFLICT.with_context(
-            f"The maximum users per record limit \
-            ({same_records_count} of {record_type.max_users})\
-            is reached"
-        )
 
 
 @router.post(
@@ -360,25 +305,22 @@ async def check_record_constraints(
 )
 async def add_record(
     new_record: RecordCreate,
-    session: AsyncSession = Depends(get_async_session),
+    repo: RecordRepositoryDep,
 ) -> Record:
     """Create a new record."""
     record = Record(**new_record.model_dump())
-    session.add(record)
-    await session.commit()
-    await session.refresh(record)
+    record = await repo.create_with_relations(record)
 
     # Validate input files if defined
-    file_result = await validate_record_files(record, session)
+    file_result = validate_record_files(record)
     if file_result and not file_result.valid:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=[{"file_name": e.file_name, "error": e.message} for e in file_result.errors],
         )
     if file_result and file_result.matched_files:
-        record.files = file_result.matched_files
-        await session.commit()
-        await session.refresh(record)
+        await repo.set_files(record, file_result.matched_files)
+        return await repo.get_with_relations(record.id)  # type: ignore[arg-type]
 
     return record
 
@@ -389,17 +331,10 @@ async def update_record_status(
     record_status: RecordStatus,
     request: Request,
     background_tasks: BackgroundTasks,
-    session: AsyncSession = Depends(get_async_session),
+    repo: RecordRepositoryDep,
 ) -> Record:
     """Update a record's status."""
-    record = await session.get(Record, record_id)
-    if record is None:
-        raise NOT_FOUND.with_context(f"Record with ID {record_id} not found")
-
-    old_status = record.status
-    record.status = record_status
-    await session.commit()
-    await session.refresh(record)
+    record, old_status = await repo.update_status(record_id, record_status)
 
     # Trigger RecordFlow if enabled and status changed
     if old_status != record_status:
@@ -417,49 +352,10 @@ async def update_record_status(
 async def assign_record_to_user(
     record_id: int,
     user_id: UUID,
-    session: AsyncSession = Depends(get_async_session),
+    repo: RecordRepositoryDep,
 ) -> Record:
     """Assign a record to a user."""
-    record = await session.get(Record, record_id)
-    if record is None:
-        raise NOT_FOUND.with_context(f"Record with ID {record_id} not found")
-
-    user = await session.get(User, user_id)
-    if user is None:
-        raise NOT_FOUND.with_context(f"User with ID {user_id} not found")
-
-    record.user_id = user_id
-    await session.commit()
-    await session.refresh(record)
-    return record
-
-
-async def validate_record_data(
-    record_id: int,
-    data: RecordData,
-    session: AsyncSession = Depends(get_async_session),
-) -> RecordData:
-    """Validate record data against its schema."""
-    record = await session.get(Record, record_id)
-    if record is None:
-        raise NOT_FOUND.with_context(f"Record with ID {record_id} not found")
-
-    # Load record_type relationship
-    await session.refresh(record, ["record_type"])
-
-    # Validate against record type's data schema
-    if record.record_type.data_schema:
-        try:
-            validate_json_by_schema(data, record.record_type.data_schema)
-        except Exception as e:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=f"Data does not match schema: {e!s}",
-            ) from e
-
-    # Add additional validation here (e.g., Slicer validation)
-
-    return data
+    return await repo.assign_user(record_id, user_id)
 
 
 @router.post("/{record_id}/data", response_model=RecordRead)
@@ -468,36 +364,32 @@ async def submit_record_data(
     data: RecordData,
     request: Request,
     background_tasks: BackgroundTasks,
-    session: AsyncSession = Depends(get_async_session),
+    repo: RecordRepositoryDep,
 ) -> Record:
     """Submit data for a record."""
-    # Get and validate record
-    record = await session.get(Record, record_id)
-    if record is None:
-        raise NOT_FOUND.with_context(f"Record with ID {record_id} not found")
+    record = await repo.get_with_record_type(record_id)
 
     if record.status == RecordStatus.finished:
         raise CONFLICT.with_context("Record already finished. Use PATCH to update the record data.")
 
-    # Validate data
-    validated_data = await validate_record_data(record_id, data, session)
+    # Validate data against schema
+    validated_data = validate_record_data(record, data)
 
     # Validate input files if defined
-    file_result = await validate_record_files(record, session)
+    file_result = validate_record_files(record)
+    files: dict[str, str] | None = None
     if file_result and not file_result.valid:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=[{"file_name": e.file_name, "error": e.message} for e in file_result.errors],
         )
     if file_result and file_result.matched_files:
-        record.files = file_result.matched_files
+        files = file_result.matched_files
 
-    # Update record
-    old_status = record.status
-    record.data = validated_data
-    record.status = RecordStatus.finished
-    await session.commit()
-    await session.refresh(record)
+    # Update record data, set finished status
+    record, old_status = await repo.update_data(
+        record_id, validated_data, new_status=RecordStatus.finished, files=files
+    )
 
     # Trigger RecordFlow if enabled
     recordflow_engine = getattr(request.app.state, "recordflow_engine", None)
@@ -514,34 +406,23 @@ async def submit_record_data(
 async def update_record_data(
     record_id: int,
     data: RecordData,
-    session: AsyncSession = Depends(get_async_session),
+    repo: RecordRepositoryDep,
 ) -> Record:
     """Update a record's data."""
-    # Get and validate record
-    record = await session.get(Record, record_id)
-    if record is None:
-        raise NOT_FOUND.with_context(f"Record with ID {record_id} not found")
+    record = await repo.get_with_record_type(record_id)
 
     if record.status != RecordStatus.finished:
         raise CONFLICT.with_context("Record is not finished yet. Use POST to submit record data.")
 
-    # Validate data
-    validated_data = await validate_record_data(record_id, data, session)
-
-    # Update record
-    record.data = validated_data
-    await session.commit()
-    await session.refresh(record)
-
-    # Publish event or trigger background tasks here if needed
-
-    return record
+    validated_data = validate_record_data(record, data)
+    updated, _ = await repo.update_data(record_id, validated_data)
+    return updated
 
 
 @router.post("/{record_id}/validate-files")
 async def validate_files_endpoint(
     record_id: int,
-    session: AsyncSession = Depends(get_async_session),
+    repo: RecordRepositoryDep,
 ) -> FileValidationResult:
     """Validate input files for a record without saving the result.
 
@@ -554,11 +435,9 @@ async def validate_files_endpoint(
     Returns:
         FileValidationResult with validation status and matched files
     """
-    record = await session.get(Record, record_id)
-    if record is None:
-        raise NOT_FOUND.with_context(f"Record with ID {record_id} not found")
+    record = await repo.get_with_record_type(record_id)
 
-    result = await validate_record_files(record, session)
+    result = validate_record_files(record)
     if result is None:
         return FileValidationResult(valid=True)
 
@@ -568,6 +447,7 @@ async def validate_files_endpoint(
 @router.post("/find", response_model=list[RecordRead])
 async def find_records(
     pagination: PaginationDep,
+    repo: RecordRepositoryDep,
     find_queries: list[RecordFindResult] = Body(default=[]),
     patient_id: str | None = None,
     patient_anon_id: str | None = None,
@@ -580,142 +460,50 @@ async def find_records(
     record_status: RecordStatus | None = None,
     wo_user: bool | None = None,
     random_one: bool = False,
-    session: AsyncSession = Depends(get_async_session),
 ) -> Sequence[Record]:
     """Find records by various criteria."""
-    find_statement = select(Record).join(RecordType)
-
-    # Add filters for patient
-    if patient_id:
-        find_statement = find_statement.join(Study).join(Patient).where(Patient.id == patient_id)
-
-    if (
-        patient_anon_id and "_" in patient_anon_id
-    ):  # Extract auto_id from anon_id format (e.g., "CLARINET_123" -> 123)
-        auto_id = int(patient_anon_id.split("_")[1])
-        find_statement = find_statement.join(Study).join(Patient).where(Patient.auto_id == auto_id)
-
-    # Add filters for series
-    if series_uid:
-        find_statement = find_statement.where(Record.series_uid == series_uid)
-
-    match anon_series_uid:
-        case None:
-            pass
-        case "Null":
-            find_statement = find_statement.join(Series).where(Series.anon_uid is None)
-        case "*":
-            find_statement = find_statement.join(Series).where(Series.anon_uid is not None)
-        case _:
-            find_statement = find_statement.join(Series).where(Series.anon_uid == anon_series_uid)
-
-    # Add filters for study
-    if study_uid:
-        find_statement = find_statement.where(Record.study_uid == study_uid)
-
-    match anon_study_uid:
-        case None:
-            pass
-        case "Null":
-            find_statement = find_statement.join(Study).where(Study.anon_uid is None)
-        case "*":
-            find_statement = find_statement.join(Study).where(Study.anon_uid is not None)
-        case _:
-            find_statement = find_statement.join(Study).where(Study.anon_uid == anon_study_uid)
-
-    # Add user filters
-    match wo_user:
-        case None:
-            pass
-        case True:
-            find_statement = find_statement.where(Record.user_id is None)
-        case False:
-            find_statement = find_statement.where(Record.user_id is not None)
-
-    if user_id:
-        find_statement = find_statement.where(Record.user_id == user_id)
-
-    # Add record filters
-    if record_status:
-        find_statement = find_statement.where(Record.status == record_status)
-
-    if record_type_name:
-        find_statement = find_statement.where(RecordType.name == record_type_name)
-
-    # Add data filters
-    for query in find_queries:
-        # Record.data is a JSON column, we need to handle it properly
-        data_field = Record.data.op("->")(query.result_name).as_string()  # type: ignore[union-attr]
-        match query.comparison_operator:
-            case RecordFindResultComparisonOperator.eq:
-                find_statement = find_statement.where(
-                    data_field.cast(query.sql_type) == query.result_value
-                )
-            case RecordFindResultComparisonOperator.gt:
-                find_statement = find_statement.where(
-                    data_field.cast(query.sql_type) > query.result_value
-                )
-            case RecordFindResultComparisonOperator.lt:
-                find_statement = find_statement.where(
-                    data_field.cast(query.sql_type) < query.result_value
-                )
-            case RecordFindResultComparisonOperator.contains:
-                find_statement = find_statement.where(
-                    data_field.cast(query.sql_type).like(f"%{query.result_value}%")
-                )
-
-    # Apply pagination
-    find_statement = find_statement.distinct()
-    find_statement = find_statement.offset(pagination.skip)
-    find_statement = find_statement.limit(pagination.limit)
-
-    # Execute query
-    result = await session.execute(find_statement)
-    results = result.scalars().all()
-
-    # Apply random selection if requested
-    if random_one and results:
-        results = [random.choice(results)]
-
-    logger.info(f"Found {len(results)} records matching criteria")
-    return results
+    criteria = RecordSearchCriteria(
+        patient_id=patient_id,
+        patient_anon_id=patient_anon_id,
+        series_uid=series_uid,
+        anon_series_uid=anon_series_uid,
+        study_uid=study_uid,
+        anon_study_uid=anon_study_uid,
+        user_id=user_id,
+        record_type_name=record_type_name,
+        record_status=record_status,
+        wo_user=wo_user,
+        random_one=random_one,
+        data_queries=find_queries,
+    )
+    return await repo.find_by_criteria(criteria, skip=pagination.skip, limit=pagination.limit)
 
 
 @router.patch("/bulk/status", status_code=status.HTTP_204_NO_CONTENT)
 async def bulk_update_record_status(
     record_ids: list[int],
     new_status: RecordStatus,
-    session: AsyncSession = Depends(get_async_session),
+    repo: RecordRepositoryDep,
 ) -> None:
     """Update status for multiple records at once."""
-    for record_id in record_ids:
-        record = await session.get(Record, record_id)
-        if record:
-            record.status = new_status
+    await repo.bulk_update_status(record_ids, new_status)
 
-    await session.commit()
+
+# Dependency functions (used by other parts of the application)
 
 
 async def assign_user_to_record(
     record_id: int,
+    repo: RecordRepositoryDep,
     user: User = Depends(current_active_user),
-    session: AsyncSession = Depends(get_async_session),
 ) -> Record:
     """Assign the current user to a record."""
-    record = await session.get(Record, record_id)
-    if record is None:
-        raise NOT_FOUND.with_context(f"Record with ID {record_id} not found")
-
-    record.status = RecordStatus.inwork
-    record.user_id = user.id
-    await session.commit()
-    await session.refresh(record)
-    return record
+    return await repo.claim_record(record_id, user.id)
 
 
 async def get_random_series_async(session: AsyncSession = Depends(get_async_session)) -> Series:
     """Get a random series from the database."""
-    result = await session.execute(select(Series))
+    result = await session.execute(select(Series).options(selectinload(Series.study)))  # type: ignore
     all_series = result.scalars().all()
     if not all_series:
         raise NOT_FOUND.with_context("No series found in database")
@@ -724,11 +512,12 @@ async def get_random_series_async(session: AsyncSession = Depends(get_async_sess
 
 async def add_demo_records_for_user(
     user: User,
+    repo: RecordRepositoryDep,
     series: Series = Depends(get_random_series_async),
     session: AsyncSession = Depends(get_async_session),
 ) -> None:
     """Add demo records for a new user."""
-    # Find demo record types
+    # Find demo record types (RecordType query — no RecordTypeRepository yet)
     result = await session.execute(
         select(RecordType).where(cast(RecordType.name, SQLString).like("%demo%"))
     )
@@ -741,6 +530,7 @@ async def add_demo_records_for_user(
         )
 
     # Create a record for each demo record type
+    records: list[Record] = []
     for record_type in record_types:
         if record_type.level == "SERIES":
             new_record = RecordCreate(
@@ -762,7 +552,7 @@ async def add_demo_records_for_user(
         else:
             continue
 
-        record = Record(**new_record.model_dump())
-        session.add(record)
+        records.append(Record(**new_record.model_dump()))
 
-    await session.commit()
+    if records:
+        await repo.create_many(records)
