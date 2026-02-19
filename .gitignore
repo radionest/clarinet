@@ -16,3 +16,5 @@ clarinet.db
 # Frontend build output (local development only)
 dist/
 data/logs/clarinet.log
+data/logs/clarinet.log
+*/clarinet_demo.db

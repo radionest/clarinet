@@ -1,0 +1,20 @@
+{
+    "type": "object",
+    "properties": {
+        "ai_diagnosis": {
+            "type": "string",
+            "description": "AI-generated diagnosis"
+        },
+        "ai_confidence": {
+            "type": "number",
+            "minimum": 0.0,
+            "maximum": 1.0,
+            "description": "AI confidence score (0.0-1.0)"
+        },
+        "findings": {
+            "type": "string",
+            "description": "Detailed AI findings"
+        }
+    },
+    "required": ["ai_diagnosis", "ai_confidence"]
+}

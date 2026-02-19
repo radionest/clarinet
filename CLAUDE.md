@@ -27,15 +27,17 @@ Clarinet is a framework for conducting clinical-radiological studies, built on F
 
 ### Formatting and Linting
 
+- All Python tools run through **uv**: `uv run <command>`
 - Use **ruff** for both formatting and linting (configured in `.ruff.toml`)
-  - Formatting: `ruff format src/ tests/`
-  - Linting: `ruff check src/ tests/ --fix`
+  - Formatting: `uv run ruff format src/ tests/`
+  - Linting: `uv run ruff check src/ tests/ --fix`
   - Line length: 100 characters
+  - Target: Python 3.14
   - Includes isort functionality for import sorting
-- Use **mypy** for type checking: `mypy src/`
+- Use **mypy** for type checking: `uv run mypy src/`
 - **Pre-commit hooks** configured in `.pre-commit-config.yaml`:
   - Automatically runs ruff and mypy before commits
-  - Install with: `pre-commit install`
+  - Install with: `uv run pre-commit install`
 
 ### Type Annotations
 
@@ -57,24 +59,53 @@ Clarinet is a framework for conducting clinical-radiological studies, built on F
 ### Technology Stack
 
 - **Gleam**: Functional programming language with excellent type safety
-- **Lustre**: Elm-inspired web framework for Gleam
-- **Modem**: Client-side routing
+- **Lustre**: Elm-inspired web framework for Gleam (~> 5.4)
+- **Modem**: Client-side routing (~> 2.1)
+- **Formosh**: Form handling (private: `git@github.com:radionest/gleam_formosh.git`)
+- **Plinth**: DOM manipulation (~> 0.7.2)
+- **gleam_fetch**: HTTP requests with automatic cookie handling (~> 1.3)
 - **MVU Architecture**: Model-View-Update pattern for predictable state management
 
 ### Frontend Structure
 
-The frontend can be located in two places:
-- `src/frontend/` - Embedded within the package (current default)
-- `frontend/` - Standalone at root level (for separation of concerns)
+The frontend is embedded within the package at `src/frontend/`. The entry point is `clarinet.gleam`.
 
 ```
-src/frontend/src/  OR  frontend/src/
-├── api/              # API client and models
-├── components/       # Reusable UI components
-├── pages/           # Application pages
-├── router.gleam     # Client-side routing
-├── store.gleam      # Global state management
-└── main.gleam       # Application entry
+src/frontend/src/
+├── clarinet.gleam       # Entry point (configured in gleam.toml)
+├── main.gleam           # Application initialization
+├── router.gleam         # Client-side routing
+├── store.gleam          # Global state management
+├── api/                 # API client and HTTP
+│   ├── auth.gleam       # Authentication API
+│   ├── http_client.gleam # HTTP client wrapper
+│   ├── models.gleam     # Data models
+│   └── types.gleam      # Type definitions
+├── components/          # Reusable UI components
+│   ├── layout.gleam     # Layout component
+│   └── forms/           # Form components
+│       ├── base.gleam
+│       ├── study_form.gleam
+│       ├── user_form.gleam
+│       └── patient_form.gleam
+├── pages/               # Application pages
+│   ├── home.gleam
+│   ├── login.gleam
+│   ├── register.gleam
+│   ├── records/         # Record management pages
+│   │   ├── list.gleam
+│   │   ├── detail.gleam
+│   │   ├── new.gleam
+│   │   ├── design.gleam
+│   │   └── execute.gleam
+│   ├── studies/
+│   │   ├── list.gleam
+│   │   └── detail.gleam
+│   └── users/
+│       ├── list.gleam
+│       └── profile.gleam
+└── utils/
+    └── dom.gleam        # DOM utilities
 ```
 
 ### Building Frontend
@@ -86,7 +117,6 @@ src/frontend/src/  OR  frontend/src/
 
 1. **Development Build**:
    ```bash
-   # For embedded frontend
    cd src/frontend
    gleam deps download  # Install dependencies
    gleam build --target javascript
@@ -98,8 +128,6 @@ src/frontend/src/  OR  frontend/src/
    # Or directly:
    ./scripts/build_frontend.sh
    ```
-
-   The build script automatically detects the frontend location.
 
 3. **Output Structure**:
    - Built files are placed in `dist/` directory
@@ -121,6 +149,7 @@ src/frontend/src/  OR  frontend/src/
 - Cookies configured as httpOnly, secure (in production), and SameSite=lax
 - Cookie name: `clarinet_session` (configurable)
 - Session expiry: 24 hours by default (`session_expire_hours` setting)
+- Sliding session refresh, absolute timeout, and idle timeout supported
 - Password hashing via bcrypt
 
 **Frontend (Cookie-based auth):**
@@ -179,7 +208,8 @@ logger.error(f"Failed to connect to database: {error}")
 - Use `Settings` class based on `pydantic_settings.BaseSettings`
 - Import settings: `from src.settings import settings`
 - Environment variables with `CLARINET_` prefix
-- Supports TOML files: copy `settings.toml.example` to create your configuration
+- Supports TOML files: `settings.toml` and `settings.custom.toml`
+- Copy `settings.toml.example` to create your configuration
 - Validate configuration on startup
 
 ```python
@@ -187,7 +217,7 @@ from src.settings import settings
 
 # Using settings
 database_url = settings.database_url
-jwt_secret = settings.jwt_secret_key
+secret_key = settings.secret_key
 storage_path = settings.storage_path
 
 # Admin settings
@@ -205,7 +235,7 @@ The framework includes built-in admin user management with automatic creation an
 | Setting | Type | Default | Environment Variable | Description |
 |---------|------|---------|---------------------|-------------|
 | `admin_username` | str | "admin" | `CLARINET_ADMIN_USERNAME` | Default admin username |
-| `admin_email` | str | "admin@clarinet.local" | `CLARINET_ADMIN_EMAIL` | Default admin email |
+| `admin_email` | str | "admin@clarinet.ru" | `CLARINET_ADMIN_EMAIL` | Default admin email |
 | `admin_password` | str | None | `CLARINET_ADMIN_PASSWORD` | Admin password (required in production) |
 | `admin_auto_create` | bool | True | `CLARINET_ADMIN_AUTO_CREATE` | Auto-create admin on initialization |
 | `admin_require_strong_password` | bool | False | `CLARINET_ADMIN_REQUIRE_STRONG_PASSWORD` | Enforce password strength policy |
@@ -262,7 +292,6 @@ await ensure_admin_exists()
 3. **Access Control**:
    - Admin users have `is_superuser=True` flag
    - Full system privileges - protect credentials carefully
-   - Consider implementing admin action audit logging
 
 4. **Initialization**:
    - Admin created automatically on `clarinet db init`
@@ -315,7 +344,7 @@ async def create_user(
 
 ### RecordFlow - Workflow Automation
 
-RecordFlow is an event-driven workflow orchestration system that automatically creates or updates records based on status changes and conditional logic.
+RecordFlow is an event-driven workflow orchestration system that automatically creates or updates records based on status changes and conditional logic. Disabled by default (`recordflow_enabled = False`).
 
 #### Core Concepts
 
@@ -375,10 +404,18 @@ discover_and_load_flows(engine, [Path('flows/')])
 await engine.handle_record_status_change(record, old_status)
 ```
 
+#### RecordFlow Configuration
+
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `recordflow_enabled` | bool | False | Enable RecordFlow workflow engine |
+| `recordflow_paths` | list[str] | [] | Directories containing `*_flow.py` files |
+
 #### File Structure
 
 ```
 src/services/recordflow/
+├── __init__.py        # Package exports
 ├── engine.py          # Runtime execution
 ├── flow_builder.py    # Builder exports
 ├── flow_condition.py  # Conditional logic
@@ -387,27 +424,56 @@ src/services/recordflow/
 └── flow_result.py     # Comparison classes
 ```
 
+### Session Management
+
+Clarinet includes comprehensive session management with automatic cleanup.
+
+#### Session Settings
+
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `cookie_name` | str | "clarinet_session" | Session cookie name |
+| `session_expire_hours` | int | 24 | Session expiration time |
+| `session_sliding_refresh` | bool | True | Auto-extend on activity |
+| `session_absolute_timeout_days` | int | 30 | Maximum session age |
+| `session_idle_timeout_minutes` | int | 60 | Inactivity timeout |
+| `session_concurrent_limit` | int | 5 | Max sessions per user (0 = unlimited) |
+| `session_ip_check` | bool | False | Validate IP consistency |
+| `session_secure_cookie` | bool | True | HTTPS only in production |
+
+#### Session Cleanup Settings
+
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `session_cleanup_enabled` | bool | True | Enable automatic cleanup |
+| `session_cleanup_interval` | int | 3600 | Cleanup interval in seconds |
+| `session_cleanup_batch_size` | int | 1000 | Batch size for cleanup |
+| `session_cleanup_retention_days` | int | 30 | Days to retain sessions |
+
 ### Project Structure (Current)
 
 ```tree
 clarinet/
 ├── src/                 # Backend source code
 │   ├── __init__.py
-│   ├── __main__.py      # CLI entry point
+│   ├── __main__.py      # CLI entry point (python -m clarinet)
 │   ├── settings.py      # Application configuration
 │   ├── client.py        # API client library
+│   ├── types.py         # Common type definitions
 │   ├── exceptions/      # Custom exceptions module
+│   │   ├── __init__.py
 │   │   ├── domain.py   # Domain exceptions
 │   │   └── http.py     # HTTP exceptions
-│   ├── types.py         # Common type definitions
 │   ├── api/             # FastAPI application
+│   │   ├── __init__.py
 │   │   ├── app.py      # Main application file
 │   │   ├── auth_config.py # Authentication configuration
 │   │   ├── dependencies.py  # Dependencies (auth, etc)
 │   │   ├── exception_handlers.py # Exception handlers
 │   │   └── routers/    # API endpoints
+│   │       ├── __init__.py
 │   │       ├── auth.py
-│   │       ├── study.py
+│   │       ├── study.py   # Study, patient, series endpoints
 │   │       ├── record.py  # Record/workflow endpoints
 │   │       ├── user.py
 │   │       └── slicer.py
@@ -416,83 +482,88 @@ clarinet/
 │   │   └── main.py
 │   ├── models/          # SQLModel models
 │   │   ├── __init__.py
-│   │   ├── auth.py     # Authentication models (AccessToken)
-│   │   ├── base.py     # Base models, RecordStatus enum
-│   │   ├── user.py
-│   │   ├── study.py
-│   │   ├── record.py   # Record and RecordType models
-│   │   ├── series.py
-│   │   └── patient.py
+│   │   ├── auth.py      # Authentication models (AccessToken)
+│   │   ├── base.py      # Base models, RecordStatus, DicomQueryLevel enums
+│   │   ├── user.py      # User, UserRole, UserRolesLink
+│   │   ├── study.py     # Study, Series and related schemas
+│   │   ├── record.py    # Record, RecordType and related schemas
+│   │   ├── file_schema.py # FileDefinition model
+│   │   └── patient.py   # Patient and related schemas
 │   ├── repositories/    # Repository pattern
-│   │   ├── base.py     # Base repository class
+│   │   ├── __init__.py
+│   │   ├── base.py      # Base repository class
 │   │   ├── patient_repository.py
 │   │   ├── series_repository.py
 │   │   ├── study_repository.py
-│   │   ├── user_repository.py
-│   │   └── record.py   # Record repository
+│   │   └── user_repository.py
 │   ├── services/        # Business logic
-│   │   ├── user_service.py    # User business logic
-│   │   ├── study_service.py   # Study business logic
-│   │   ├── session_cleanup.py # Session management
-│   │   ├── recordflow/        # Record workflow engine
-│   │   │   ├── engine.py      # Runtime execution
+│   │   ├── __init__.py
+│   │   ├── user_service.py       # User business logic
+│   │   ├── study_service.py      # Study business logic
+│   │   ├── session_cleanup.py    # Session cleanup service
+│   │   ├── file_validation.py    # File validation service
+│   │   ├── recordflow/           # Record workflow engine
+│   │   │   ├── __init__.py
+│   │   │   ├── engine.py         # Runtime execution
 │   │   │   ├── flow_builder.py
 │   │   │   ├── flow_condition.py
 │   │   │   ├── flow_loader.py
-│   │   │   ├── flow_record.py # DSL builder
-│   │   │   └── flow_result.py # Comparison classes
-│   │   ├── providers/  # Service providers
-│   │   ├── dicom/      # DICOM processing
-│   │   ├── image/      # Image processing
-│   │   └── slicer/     # Slicer integration
+│   │   │   ├── flow_record.py    # DSL builder
+│   │   │   └── flow_result.py    # Comparison classes
+│   │   ├── providers/            # Service providers
+│   │   │   ├── __init__.py
+│   │   │   └── anonymous_name_provider.py
+│   │   ├── dicom/                # DICOM processing
+│   │   │   ├── dicom.py
+│   │   │   └── anonimizer.py
+│   │   ├── image/                # Image processing
+│   │   │   ├── image.py
+│   │   │   └── coco2nii.py
+│   │   └── slicer/               # Slicer integration
+│   │       ├── __init__.py
+│   │       └── slicer.py
 │   ├── utils/           # Helper utilities
 │   │   ├── __init__.py
-│   │   ├── logger.py   # Loguru setup
-│   │   ├── database.py # Database connection
-│   │   ├── db_manager.py # Database management
-│   │   ├── admin.py    # Admin user management utilities
-│   │   ├── bootstrap.py # Data initialization and admin creation
-│   │   ├── common.py   # Common utility functions
-│   │   ├── migrations.py # Migration helper functions
-│   │   ├── slicer.py   # Slicer utilities
-│   │   ├── study.py    # Study-related utilities
-│   │   └── validation.py # Validation utilities
+│   │   ├── logger.py        # Loguru setup
+│   │   ├── database.py      # Database connection
+│   │   ├── db_manager.py    # Database management
+│   │   ├── admin.py         # Admin user management utilities
+│   │   ├── auth.py          # Authentication utilities
+│   │   ├── bootstrap.py     # Data initialization and admin creation
+│   │   ├── common.py        # Common utility functions
+│   │   ├── file_patterns.py # File pattern matching utilities
+│   │   ├── migrations.py    # Migration helper functions
+│   │   ├── session.py       # Session management utilities
+│   │   ├── slicer.py        # Slicer utilities
+│   │   ├── study.py         # Study-related utilities
+│   │   └── validation.py    # Validation utilities
 │   └── frontend/        # Embedded Gleam/Lustre frontend
+│       ├── gleam.toml   # Gleam configuration
 │       ├── src/         # Gleam source code
-│       │   ├── api/     # API client and HTTP
-│       │   ├── components/ # UI components
-│       │   │   ├── layout.gleam
-│       │   │   └── forms/  # Form components
-│       │   ├── pages/   # Application pages
-│       │   │   ├── home.gleam
-│       │   │   ├── login.gleam
-│       │   │   ├── register.gleam
-│       │   │   ├── records/  # Record management pages
-│       │   │   ├── studies/
-│       │   │   └── users/
-│       │   ├── utils/   # Utility modules
-│       │   ├── store.gleam # State management
-│       │   ├── router.gleam # Client-side routing
-│       │   └── main.gleam # Entry point
 │       ├── public/      # Public assets
 │       ├── static/      # Static HTML/CSS
-│       ├── build/       # Build artifacts (generated)
-│       └── gleam.toml   # Gleam configuration
+│       └── build/       # Build artifacts (generated)
 ├── dist/                # Built frontend (generated)
 ├── scripts/             # Build scripts
 │   └── build_frontend.sh
 ├── tests/               # Test suite
+│   ├── __init__.py
 │   ├── conftest.py
-│   ├── test_client.py   # Client library tests
-│   ├── integration/     # Integration tests
+│   ├── test_client.py          # Client library tests
+│   ├── test_file_patterns.py   # File pattern tests
+│   ├── test_file_validation.py # File validation tests
+│   ├── integration/            # Integration tests
+│   │   ├── __init__.py
 │   │   ├── test_app.py
 │   │   ├── test_api_endpoints.py
 │   │   ├── test_record_crud.py
 │   │   ├── test_study_crud.py
 │   │   └── test_user_crud.py
-│   ├── e2e/             # End-to-end tests
+│   ├── e2e/                    # End-to-end tests
 │   │   └── test_auth_workflows.py
 │   └── utils/
+│       ├── __init__.py
+│       └── test_helpers.py
 ├── examples/            # Examples and templates
 │   ├── test/
 │   └── test_front/
@@ -500,6 +571,7 @@ clarinet/
 ├── .github/             # CI/CD workflows
 ├── Makefile            # Build automation
 ├── pyproject.toml      # Package configuration
+├── .ruff.toml          # Ruff configuration
 ├── settings.toml.example # Configuration template
 └── .pre-commit-config.yaml # Pre-commit hooks
 ```
@@ -535,7 +607,8 @@ async def get_item(
 - Configuration in `tests/conftest.py`
 - Test structure:
   - `tests/integration/` - integration tests
-  - `tests/utils/` - utility tests
+  - `tests/e2e/` - end-to-end tests
+  - `tests/utils/` - test helpers
 - Mock external dependencies
 - Use fixtures for code reuse
 
@@ -573,14 +646,17 @@ The frontend is written entirely in pure Gleam without JavaScript FFI:
 - HTTP requests via gleam_fetch (automatic cookie handling)
 - DOM manipulation via plinth
 - Client-side routing via modem
+- Form handling via formosh
 - No custom JavaScript required
 
 ### Development Commands
 
+All Python commands run through **uv** to ensure correct virtual environment and dependencies.
+
 ```bash
 # Backend Development
-uvicorn src.api.app:app --reload  # Run API server
-clarinet run --with-frontend      # Run with frontend
+uv run uvicorn src.api.app:app --reload  # Run API server
+uv run clarinet run --with-frontend      # Run with frontend
 
 # Frontend Development
 cd src/frontend  # Frontend is embedded in src/
@@ -588,47 +664,56 @@ gleam deps download               # Install dependencies
 gleam build --target javascript   # Build for browser
 cd ../..
 
-# Build Commands
+# Build Commands (Makefile)
 make frontend-build               # Build production frontend
+make frontend-deps                # Install frontend dependencies
 make frontend-clean               # Clean frontend artifacts
 make frontend-test                # Run frontend tests
 make run-dev                      # Run full stack development
+make run-api                      # Run API server only
 make build                        # Build entire package
+make dev-setup                    # Set up development environment
 
-# Format code
-ruff format src/ tests/
-
-# Check code
-ruff check src/ tests/ --fix
-mypy src/
+# Code Quality (direct)
+uv run ruff format src/ tests/             # Format code
+uv run ruff check src/ tests/ --fix        # Lint code (with fixes)
+uv run mypy src/                           # Type check
 
 # Pre-commit hooks
-pre-commit install  # Install hooks (run once)
-pre-commit run --all-files  # Run all hooks manually
+uv run pre-commit install                  # Install hooks (run once)
+uv run pre-commit run --all-files          # Run all hooks manually
 
 # Run tests
-pytest
-pytest --cov=src tests/
+uv run pytest                              # Run all tests
+uv run pytest --cov=src tests/             # Run with coverage
+uv run pytest tests/integration/           # Run integration tests only
 
 # Database management
-clarinet db init  # Initialize database with admin user
-clarinet db upgrade  # Apply migrations
-clarinet db downgrade  # Rollback migrations
-
-# Admin management
-clarinet admin create  # Create new admin user (interactive)
-clarinet admin create --username superadmin --email admin@example.com
-clarinet admin reset-password  # Reset admin password
-clarinet admin reset-password --username admin
+uv run clarinet db init                    # Initialize database with admin user
 
 # Database migrations (Alembic)
-alembic upgrade head  # Apply all migrations
-alembic revision --autogenerate -m "Description"  # Create migration from model changes
-alembic downgrade -1  # Rollback one migration
-alembic current  # Show current migration
-alembic history  # Show migration history
-```
+uv run clarinet init-migrations            # Initialize Alembic in project
+uv run alembic upgrade head                # Apply all migrations
+uv run alembic revision --autogenerate -m "Description"  # Create migration
+uv run alembic downgrade -1                # Rollback one migration
+uv run alembic current                     # Show current migration
+uv run alembic history                     # Show migration history
 
+# Admin management
+uv run clarinet admin create               # Create new admin user (interactive)
+uv run clarinet admin create --username superadmin --email admin@example.com
+uv run clarinet admin reset-password       # Reset admin password
+uv run clarinet admin reset-password --username admin
+
+# Frontend management (CLI)
+uv run clarinet frontend install           # Install Gleam and dependencies
+uv run clarinet frontend build             # Build frontend
+uv run clarinet frontend build --watch     # Build with watch mode
+uv run clarinet frontend clean             # Clean build artifacts
+
+# Project initialization
+uv run clarinet init [path]                # Initialize new Clarinet project
+```
 
 ### Documentation
 
@@ -679,14 +764,14 @@ async def process_record(
 
 ### Overview
 
-Clarinet provides utilities to simplify Alembic integration in your projects. As a framework, Clarinet doesn't include Alembic configuration directly, but offers helper functions to manage migrations in user projects.
+Clarinet provides utilities to simplify Alembic integration in your projects. As a framework, Clarinet doesn't include Alembic configuration directly, but offers helper functions to manage migrations in user projects. Use `clarinet init-migrations` to initialize Alembic, then use `alembic` commands or Makefile targets directly.
 
 ## Pre-commit Checklist
 
-- [ ] Code formatted with ruff (`ruff format src/ tests/`)
-- [ ] No ruff errors (run `ruff check src/ tests/`)
-- [ ] Pre-commit hooks pass (`pre-commit run --all-files`)
-- [ ] No mypy errors (run `mypy src/`)
+- [ ] Code formatted with ruff (`uv run ruff format src/ tests/`)
+- [ ] No ruff errors (run `uv run ruff check src/ tests/`)
+- [ ] Pre-commit hooks pass (`uv run pre-commit run --all-files`)
+- [ ] No mypy errors (run `uv run mypy src/`)
 - [ ] Tests written for new functionality
 - [ ] Tests pass successfully
 - [ ] Docstrings added for public functions

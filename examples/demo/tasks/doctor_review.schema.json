@@ -1,0 +1,24 @@
+{
+    "type": "object",
+    "properties": {
+        "diagnosis": {
+            "type": "string",
+            "description": "Primary diagnosis"
+        },
+        "confidence": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100,
+            "description": "Confidence level (0-100)"
+        },
+        "requires_expert": {
+            "type": "boolean",
+            "description": "Whether expert review is needed"
+        },
+        "notes": {
+            "type": "string",
+            "description": "Additional notes"
+        }
+    },
+    "required": ["diagnosis", "confidence"]
+}

@@ -1,0 +1,12 @@
+port = 8000
+host = "127.0.0.1"
+debug = true
+database_driver = "sqlite"
+database_name = "clarinet_demo"
+storage_path = "./data"
+anon_id_prefix = "DEMO"
+secret_key = "demo-secret-key-not-for-production"
+admin_password = "admin123"
+recordflow_enabled = true
+recordflow_paths = ["."]
+frontend_enabled = true

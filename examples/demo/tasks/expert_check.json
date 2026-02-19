@@ -1,0 +1,9 @@
+{
+    "name": "expert_check",
+    "description": "Expert verification of conflicting diagnoses",
+    "label": "Expert Check",
+    "level": "SERIES",
+    "role_name": "expert",
+    "min_users": 1,
+    "max_users": 1
+}

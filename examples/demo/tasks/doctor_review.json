@@ -1,0 +1,9 @@
+{
+    "name": "doctor_review",
+    "description": "Doctor review of a series with diagnosis and confidence assessment",
+    "label": "Doctor Review",
+    "level": "SERIES",
+    "role_name": "doctor",
+    "min_users": 1,
+    "max_users": 3
+}

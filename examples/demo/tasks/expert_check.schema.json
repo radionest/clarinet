@@ -1,0 +1,22 @@
+{
+    "type": "object",
+    "properties": {
+        "final_diagnosis": {
+            "type": "string",
+            "description": "Final expert diagnosis"
+        },
+        "agrees_with_doctor": {
+            "type": "boolean",
+            "description": "Whether expert agrees with doctor review"
+        },
+        "agrees_with_ai": {
+            "type": "boolean",
+            "description": "Whether expert agrees with AI analysis"
+        },
+        "expert_notes": {
+            "type": "string",
+            "description": "Expert notes and reasoning"
+        }
+    },
+    "required": ["final_diagnosis", "agrees_with_doctor", "agrees_with_ai"]
+}
