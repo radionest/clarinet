@@ -65,12 +65,12 @@ frontend-clean: ## Clean frontend build artifacts
 .PHONY: run-dev
 run-dev: ## Run development server with frontend
 	@echo "Starting development server with frontend..."
-	@clarinet run --with-frontend
+	@uv run clarinet run --with-frontend
 
 .PHONY: run-api
 run-api: ## Run API server only (no frontend)
 	@echo "Starting API server..."
-	@uvicorn src.api.app:app --reload --host 127.0.0.1 --port 8000
+	@uv run uvicorn src.api.app:app --reload --host 127.0.0.1 --port 8000
 
 # =============================================================================
 # Code Quality Commands
@@ -79,27 +79,27 @@ run-api: ## Run API server only (no frontend)
 .PHONY: format
 format: ## Format code with ruff
 	@echo "Formatting code with ruff..."
-	@ruff format src/ tests/
+	@uv run ruff format src/ tests/
 
 .PHONY: lint
 lint: ## Check code with ruff (with fixes)
 	@echo "Checking code with ruff..."
-	@ruff check src/ tests/ --fix
+	@uv run ruff check src/ tests/ --fix
 
 .PHONY: typecheck
 typecheck: ## Type check with mypy
 	@echo "Type checking with mypy..."
-	@mypy src/
+	@uv run mypy src/
 
 .PHONY: pre-commit
 pre-commit: ## Run pre-commit hooks
 	@echo "Running pre-commit hooks..."
-	@pre-commit run --all-files
+	@uv run pre-commit run --all-files
 
 .PHONY: pre-commit-install
 pre-commit-install: ## Install pre-commit hooks
 	@echo "Installing pre-commit hooks..."
-	@pre-commit install
+	@uv run pre-commit install
 
 # =============================================================================
 # Testing Commands
@@ -108,12 +108,12 @@ pre-commit-install: ## Install pre-commit hooks
 .PHONY: test
 test: ## Run backend tests
 	@echo "Running backend tests..."
-	@pytest
+	@uv run pytest
 
 .PHONY: test-cov
 test-cov: ## Run tests with coverage
 	@echo "Running tests with coverage..."
-	@pytest --cov=src tests/
+	@uv run pytest --cov=src tests/
 
 .PHONY: test-all
 test-all: test frontend-test ## Run all tests (backend + frontend)
@@ -121,7 +121,7 @@ test-all: test frontend-test ## Run all tests (backend + frontend)
 .PHONY: test-integration
 test-integration: ## Run integration tests only
 	@echo "Running integration tests..."
-	@pytest tests/integration/
+	@uv run pytest tests/integration/
 
 # =============================================================================
 # Build and Install Commands
@@ -130,21 +130,16 @@ test-integration: ## Run integration tests only
 .PHONY: build
 build: frontend-build ## Build complete package (backend + frontend)
 	@echo "Building Clarinet package..."
-	@python -m build
-
-.PHONY: install
-install: ## Install package in development mode
-	@echo "Installing package in development mode..."
-	@pip install -e .
+	@uv build
 
 .PHONY: dev-setup
 dev-setup: ## Set up development environment
 	@echo "Setting up development environment..."
-	@pip install -e ".[dev]"
+	@uv sync --dev
 	@echo "Installing frontend dependencies..."
 	@cd src/frontend && gleam deps download
 	@echo "Installing pre-commit hooks..."
-	@pre-commit install
+	@uv run pre-commit install
 	@echo "Development environment ready!"
 
 # =============================================================================
@@ -154,18 +149,18 @@ dev-setup: ## Set up development environment
 .PHONY: db-upgrade
 db-upgrade: ## Apply database migrations
 	@echo "Applying database migrations..."
-	@alembic upgrade head
+	@uv run alembic upgrade head
 
 .PHONY: db-downgrade
 db-downgrade: ## Rollback last migration
 	@echo "Rolling back last migration..."
-	@alembic downgrade -1
+	@uv run alembic downgrade -1
 
 .PHONY: db-migration
 db-migration: ## Create new migration from model changes
 	@echo "Creating new migration..."
 	@read -p "Enter migration message: " msg; \
-	alembic revision --autogenerate -m "$$msg"
+	uv run alembic revision --autogenerate -m "$$msg"
 
 # =============================================================================
 # Utility Commands

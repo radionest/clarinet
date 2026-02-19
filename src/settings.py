@@ -168,7 +168,7 @@ class Settings(BaseSettings):
         return self.session_expire_hours * 3600
 
     @classmethod
-    def settings_customize_sources(
+    def settings_customise_sources(
         cls,
         settings_cls: type[BaseSettings],
         init_settings: PydanticBaseSettingsSource,  # noqa: ARG003
