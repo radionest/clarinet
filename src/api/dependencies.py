@@ -16,6 +16,7 @@ from src.exceptions import ClarinetError
 from src.models import User
 from src.repositories.patient_repository import PatientRepository
 from src.repositories.record_repository import RecordRepository
+from src.repositories.record_type_repository import RecordTypeRepository
 from src.repositories.series_repository import SeriesRepository
 from src.repositories.study_repository import StudyRepository
 from src.repositories.user_repository import UserRepository, UserRoleRepository
@@ -109,6 +110,11 @@ async def get_record_repository(session: SessionDep) -> RecordRepository:
     return RecordRepository(session)
 
 
+async def get_record_type_repository(session: SessionDep) -> RecordTypeRepository:
+    """Get record type repository instance."""
+    return RecordTypeRepository(session)
+
+
 # Repository type aliases
 UserRepositoryDep = Annotated[UserRepository, Depends(get_user_repository)]
 UserRoleRepositoryDep = Annotated[UserRoleRepository, Depends(get_user_role_repository)]
@@ -116,6 +122,7 @@ StudyRepositoryDep = Annotated[StudyRepository, Depends(get_study_repository)]
 PatientRepositoryDep = Annotated[PatientRepository, Depends(get_patient_repository)]
 SeriesRepositoryDep = Annotated[SeriesRepository, Depends(get_series_repository)]
 RecordRepositoryDep = Annotated[RecordRepository, Depends(get_record_repository)]
+RecordTypeRepositoryDep = Annotated[RecordTypeRepository, Depends(get_record_type_repository)]
 
 # Service factory functions
 

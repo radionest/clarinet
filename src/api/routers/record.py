@@ -27,7 +27,7 @@ from sqlalchemy.orm import selectinload
 from sqlmodel import select
 
 from src.api.auth_config import current_active_user
-from src.api.dependencies import PaginationDep, RecordRepositoryDep
+from src.api.dependencies import PaginationDep, RecordRepositoryDep, RecordTypeRepositoryDep
 from src.exceptions import CONFLICT, NOT_FOUND
 from src.models import (
     Record,
@@ -115,41 +115,26 @@ def validate_record_data(record: Record, data: RecordData) -> RecordData:
 
 @router.get("/types", response_model=list[RecordType])
 async def get_all_record_types(
-    session: AsyncSession = Depends(get_async_session),
+    repo: RecordTypeRepositoryDep,
 ) -> Sequence[RecordType]:
     """Get all record types."""
-    result = await session.execute(select(RecordType))
-    return result.scalars().all()
+    return await repo.list_all()
 
 
 @router.post("/types/find", response_model=list[RecordType])
 async def find_record_type(
     find_query: RecordTypeFind,
-    session: AsyncSession = Depends(get_async_session),
+    repo: RecordTypeRepositoryDep,
 ) -> Sequence[RecordType]:
     """Find record types by criteria."""
-    find_terms = find_query.model_dump(exclude_none=True)
-    find_statement = select(RecordType)
-
-    for find_key, find_value in find_terms.items():
-        if find_key == "name":
-            find_statement = find_statement.where(
-                cast(RecordType.name, SQLString).like(f"%{find_value}%")
-            )
-        elif isinstance(find_value, list):
-            find_statement = find_statement.where(getattr(RecordType, find_key) == find_value)
-        else:
-            find_statement = find_statement.where(getattr(RecordType, find_key) == find_value)
-
-    result = await session.execute(find_statement)
-    return result.scalars().all()
+    return await repo.find(find_query)
 
 
 @router.post("/types", response_model=RecordType, status_code=status.HTTP_201_CREATED)
 async def add_record_type(
     record_type: RecordTypeCreate,
+    repo: RecordTypeRepositoryDep,
     constrain_unique_names: bool = True,
-    session: AsyncSession = Depends(get_async_session),
 ) -> RecordType:
     """Create a new record type."""
     new_record_type = RecordType.model_validate(record_type)
@@ -164,32 +149,20 @@ async def add_record_type(
                 detail="Data schema is invalid",
             ) from e
 
-    # Ensure record type name is unique if required
     if constrain_unique_names:
-        existing = await session.execute(
-            select(RecordType).where(RecordType.name == record_type.name).limit(1)
-        )
-        if existing.scalars().first():
-            raise CONFLICT.with_context(
-                f"There is already a record type with name '{record_type.name}'"
-            )
+        await repo.ensure_unique_name(record_type.name)
 
-    session.add(new_record_type)
-    await session.commit()
-    await session.refresh(new_record_type)
-    return new_record_type
+    return await repo.create(new_record_type)
 
 
 @router.patch("/types/{record_type_id}", response_model=RecordType)
 async def update_record_type(
     record_type_id: int,
     record_type_update: RecordTypeOptional,
-    session: AsyncSession = Depends(get_async_session),
+    repo: RecordTypeRepositoryDep,
 ) -> RecordType:
     """Update an existing record type."""
-    record_type = await session.get(RecordType, record_type_id)
-    if record_type is None:
-        raise NOT_FOUND.with_context(f"Record type with ID {record_type_id} not found")
+    record_type = await repo.get(record_type_id)
 
     # Validate data schema if present
     if record_type_update.data_schema is not None:
@@ -201,40 +174,27 @@ async def update_record_type(
                 detail="Data schema is invalid",
             ) from e
 
-    # Update fields
     update_data = record_type_update.model_dump(exclude_unset=True, exclude_none=True)
-    for field, value in update_data.items():
-        setattr(record_type, field, value)
-
-    await session.commit()
-    await session.refresh(record_type)
-    return record_type
+    return await repo.update(record_type, update_data)
 
 
 @router.get("/types/{record_type_id}", response_model=RecordType)
 async def get_record_type(
     record_type_id: int,
-    session: AsyncSession = Depends(get_async_session),
+    repo: RecordTypeRepositoryDep,
 ) -> RecordType:
     """Get a record type by ID."""
-    record_type = await session.get(RecordType, record_type_id)
-    if record_type is None:
-        raise NOT_FOUND.with_context(f"Record type with ID {record_type_id} not found")
-    return record_type
+    return await repo.get(record_type_id)
 
 
 @router.delete("/types/{record_type_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_record_type(
     record_type_id: int,
-    session: AsyncSession = Depends(get_async_session),
+    repo: RecordTypeRepositoryDep,
 ) -> None:
     """Delete a record type."""
-    record_type = await session.get(RecordType, record_type_id)
-    if record_type is None:
-        raise NOT_FOUND.with_context(f"Record type with ID {record_type_id} not found")
-
-    await session.delete(record_type)
-    await session.commit()
+    record_type = await repo.get(record_type_id)
+    await repo.delete(record_type)
 
 
 # Record Endpoints
