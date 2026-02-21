@@ -84,10 +84,10 @@ class SeriesRead(SeriesBase):
     study: StudyRead
     records: list[Any] = Field(default_factory=list)  # Will contain RecordRead objects
 
-    def _format_path(self, unformated_path: str) -> str | None:
+    def _format_path(self, unformatted_path: str) -> str | None:
         """Format a path with values from this series."""
         try:
-            return unformated_path.format(
+            return unformatted_path.format(
                 patient_id=self.study.patient.anon_id,
                 patient_anon_name=self.study.patient.anon_name,
                 study_uid=self.study_uid,

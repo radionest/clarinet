@@ -73,9 +73,9 @@ pub fn record_decoder() -> decode.Decoder(Record) {
     finished_at: None,
     radiant: None,
     working_folder: None,
-    slicer_args_formated: None,
-    slicer_validator_args_formated: None,
-    slicer_all_args_formated: None,
+    slicer_args_formatted: None,
+    slicer_validator_args_formatted: None,
+    slicer_all_args_formatted: None,
   ))
 }
 

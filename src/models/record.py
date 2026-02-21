@@ -202,7 +202,7 @@ class RecordBase(BaseModel):
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, type(self)):
-            raise NotImplementedError
+            return NotImplemented
         return self.id == other.id
 
     @computed_field
@@ -218,7 +218,7 @@ class RecordBase(BaseModel):
             return f"radiant://?n=paet&v=PACS_PETROVA&n=pstv&v=0020000D&v={study.anon_uid}"
         return f"radiant://?n=paet&v=PACS_PETROVA&n=pstv&v=0020000D&v={study.study_uid}"
 
-    def _format_path(self, unformated_path: str) -> str | None:
+    def _format_path(self, unformatted_path: str) -> str | None:
         """Format a path template with values from this record."""
         try:
             # Get study and patient if they exist (only available in Record, not RecordBase)
@@ -226,7 +226,7 @@ class RecordBase(BaseModel):
             patient = study.patient if study and hasattr(study, "patient") else None
             series = getattr(self, "series", None)
 
-            return unformated_path.format(
+            return unformatted_path.format(
                 patient_id=patient.anon_id if patient else self.patient_id,
                 patient_anon_name=patient.anon_name if patient else None,
                 study_uid=self.study_uid,
@@ -252,7 +252,7 @@ class RecordBase(BaseModel):
         return result
 
     @computed_field
-    def slicer_args_formated(self) -> SlicerArgs | None:
+    def slicer_args_formatted(self) -> SlicerArgs | None:
         """Get formatted Slicer script arguments."""
         if (
             not hasattr(self, "record_type")
@@ -265,7 +265,7 @@ class RecordBase(BaseModel):
         return result
 
     @computed_field
-    def slicer_validator_args_formated(self) -> SlicerArgs | None:
+    def slicer_validator_args_formatted(self) -> SlicerArgs | None:
         """Get formatted Slicer validator arguments."""
         if (
             not hasattr(self, "record_type")
@@ -304,7 +304,7 @@ class RecordBase(BaseModel):
         return self._get_working_folder()
 
     @computed_field
-    def slicer_all_args_formated(self) -> SlicerArgs | None:
+    def slicer_all_args_formatted(self) -> SlicerArgs | None:
         """Get all formatted Slicer arguments."""
         # Get working folder
         working_folder_path = self._get_working_folder()

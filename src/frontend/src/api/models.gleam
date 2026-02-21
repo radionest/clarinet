@@ -87,9 +87,9 @@ pub type Record {
     // Computed fields
     radiant: Option(String),
     working_folder: Option(String),
-    slicer_args_formated: Option(Dict(String, String)),
-    slicer_validator_args_formated: Option(Dict(String, String)),
-    slicer_all_args_formated: Option(Dict(String, String)),
+    slicer_args_formatted: Option(Dict(String, String)),
+    slicer_validator_args_formatted: Option(Dict(String, String)),
+    slicer_all_args_formatted: Option(Dict(String, String)),
   )
 }
 
