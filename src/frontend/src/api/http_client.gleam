@@ -145,6 +145,11 @@ pub fn post_multipart(
   }
 }
 
+/// Performs a PATCH request with a JSON body to the specified API path.
+pub fn patch(path: String, body: String) -> Promise(Result(Dynamic, ApiError)) {
+  request_with_body(http.Patch, path, Some(body))
+}
+
 /// Performs a PUT request with a JSON body to the specified API path.
 pub fn put(path: String, body: String) -> Promise(Result(Dynamic, ApiError)) {
   request_with_body(http.Put, path, Some(body))

@@ -7,7 +7,7 @@ drop-in replacements for SQLModelBaseUserDB and SQLModelUserDatabaseAsync.
 """
 
 import uuid
-from typing import TYPE_CHECKING, Any, Generic, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from fastapi_users.db.base import BaseUserDatabase
 from fastapi_users.models import ID, OAP, UP
@@ -26,9 +26,7 @@ class SQLModelBaseUserDB(SQLModel):
     if TYPE_CHECKING:  # pragma: no cover
         email: str
     else:
-        email: EmailStr = Field(
-            sa_column_kwargs={"unique": True, "index": True}, nullable=False
-        )
+        email: EmailStr = Field(sa_column_kwargs={"unique": True, "index": True}, nullable=False)
     hashed_password: str
 
     is_active: bool = Field(True, nullable=False)
@@ -38,7 +36,7 @@ class SQLModelBaseUserDB(SQLModel):
     model_config = {"from_attributes": True}
 
 
-class SQLModelUserDatabaseAsync(Generic[UP, ID], BaseUserDatabase[UP, ID]):
+class SQLModelUserDatabaseAsync(BaseUserDatabase[UP, ID]):
     """
     Async database adapter for SQLModel (Pydantic v2 compatible).
 
@@ -72,7 +70,7 @@ class SQLModelUserDatabaseAsync(Generic[UP, ID], BaseUserDatabase[UP, ID]):
         obj = results.first()
         if obj is None:
             return None
-        return cast(UP, obj[0])
+        return cast("UP", obj[0])
 
     async def get_by_oauth_account(self, oauth: str, account_id: str) -> UP | None:
         if self.oauth_account_model is None:
@@ -87,7 +85,7 @@ class SQLModelUserDatabaseAsync(Generic[UP, ID], BaseUserDatabase[UP, ID]):
         oauth_account = results.first()
         if oauth_account:
             user = oauth_account[0].user  # type: ignore[attr-defined]
-            return cast(UP, user)
+            return cast("UP", user)
         return None
 
     async def create(self, create_dict: dict[str, Any]) -> UP:

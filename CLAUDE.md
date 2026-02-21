@@ -493,6 +493,7 @@ clarinet/
 │   │   ├── __init__.py
 │   │   ├── base.py      # Base repository class
 │   │   ├── patient_repository.py
+│   │   ├── record_repository.py
 │   │   ├── series_repository.py
 │   │   ├── study_repository.py
 │   │   └── user_repository.py
@@ -531,6 +532,7 @@ clarinet/
 │   │   ├── auth.py          # Authentication utilities
 │   │   ├── bootstrap.py     # Data initialization and admin creation
 │   │   ├── common.py        # Common utility functions
+│   │   ├── fastapi_users_db.py # FastAPI Users database adapter
 │   │   ├── file_patterns.py # File pattern matching utilities
 │   │   ├── migrations.py    # Migration helper functions
 │   │   ├── session.py       # Session management utilities
@@ -671,8 +673,30 @@ make frontend-clean               # Clean frontend artifacts
 make frontend-test                # Run frontend tests
 make run-dev                      # Run full stack development
 make run-api                      # Run API server only
-make build                        # Build entire package
+make build                        # Build entire package (backend + frontend)
 make dev-setup                    # Set up development environment
+
+# Code Quality (Makefile)
+make format                       # Format code with ruff
+make lint                         # Lint code with ruff (with fixes)
+make typecheck                    # Type check with mypy
+make pre-commit                   # Run all pre-commit hooks
+make pre-commit-install           # Install pre-commit hooks
+
+# Testing (Makefile)
+make test                         # Run backend tests
+make test-cov                     # Run tests with coverage
+make test-integration             # Run integration tests only
+make test-all                     # Run all tests (backend + frontend)
+
+# Database (Makefile)
+make db-upgrade                   # Apply database migrations
+make db-downgrade                 # Rollback last migration
+make db-migration                 # Create new migration (interactive)
+
+# Cleanup (Makefile)
+make clean                        # Clean all build artifacts
+make clean-all                    # Deep clean including virtual environment
 
 # Code Quality (direct)
 uv run ruff format src/ tests/             # Format code
@@ -710,6 +734,14 @@ uv run clarinet frontend install           # Install Gleam and dependencies
 uv run clarinet frontend build             # Build frontend
 uv run clarinet frontend build --watch     # Build with watch mode
 uv run clarinet frontend clean             # Clean build artifacts
+
+# Session management (CLI)
+uv run clarinet session cleanup --days 30  # Clean up sessions older than N days
+uv run clarinet session cleanup-once       # Run session cleanup once
+uv run clarinet session stats              # Show session statistics
+uv run clarinet session revoke-user <id>   # Revoke all sessions for a user
+uv run clarinet session list-user <id>     # List sessions for a user
+uv run clarinet session cleanup-all        # Remove ALL sessions (dangerous!)
 
 # Project initialization
 uv run clarinet init [path]                # Initialize new Clarinet project

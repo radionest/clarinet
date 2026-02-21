@@ -278,3 +278,14 @@ pub type Role {
     users: Option(List(User)),
   )
 }
+
+// Admin dashboard statistics
+pub type AdminStats {
+  AdminStats(
+    total_studies: Int,
+    total_records: Int,
+    total_users: Int,
+    total_patients: Int,
+    records_by_status: Dict(String, Int),
+  )
+}

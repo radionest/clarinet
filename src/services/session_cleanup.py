@@ -5,8 +5,9 @@ Background service for cleaning expired sessions.
 import asyncio
 import contextlib
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import CursorResult, delete, func, select
 from sqlmodel import col
 
 from src.models.auth import AccessToken
@@ -97,10 +98,10 @@ class SessionCleanupService:
                         col(AccessToken.token).in_(select(subquery))
                     )
 
-                    result = await session.execute(delete_stmt)
+                    dr: CursorResult[Any] = await session.execute(delete_stmt)  # type: ignore[assignment]
                     await session.commit()
 
-                    deleted_count = result.rowcount
+                    deleted_count = dr.rowcount
                     deleted_total += deleted_count
 
                     if deleted_count == 0:
@@ -122,11 +123,11 @@ class SessionCleanupService:
                     old_stmt = delete(AccessToken).where(
                         AccessToken.created_at < cutoff_date  # type:ignore[arg-type]
                     )
-                    result = await session.execute(old_stmt)
+                    old_result: CursorResult[Any] = await session.execute(old_stmt)  # type: ignore[assignment]
                     await session.commit()
 
-                    if result.rowcount > 0:
-                        logger.info(f"Removed {result.rowcount} ancient sessions")
+                    if old_result.rowcount > 0:
+                        logger.info(f"Removed {old_result.rowcount} ancient sessions")
 
             except Exception as e:
                 logger.error(f"Failed to perform cleanup: {e}")
@@ -148,9 +149,9 @@ class SessionCleanupService:
                 delete_stmt = delete(AccessToken).where(
                     AccessToken.expires_at <= datetime.now(UTC)  # type:ignore[arg-type]
                 )
-                result = await session.execute(delete_stmt)
+                dr2: CursorResult[Any] = await session.execute(delete_stmt)  # type: ignore[assignment]
                 await session.commit()
-                deleted_total = result.rowcount
+                deleted_total = dr2.rowcount
 
                 logger.info(f"Manual cleanup: removed {deleted_total} expired sessions")
 
@@ -162,12 +163,12 @@ class SessionCleanupService:
                     old_stmt = delete(AccessToken).where(
                         AccessToken.created_at < cutoff_date  # type:ignore[arg-type]
                     )
-                    result = await session.execute(old_stmt)
+                    old_r: CursorResult[Any] = await session.execute(old_stmt)  # type: ignore[assignment]
                     await session.commit()
 
-                    if result.rowcount > 0:
-                        deleted_total += result.rowcount
-                        logger.info(f"Removed {result.rowcount} ancient sessions")
+                    if old_r.rowcount > 0:
+                        deleted_total += old_r.rowcount
+                        logger.info(f"Removed {old_r.rowcount} ancient sessions")
 
             except Exception as e:
                 logger.error(f"Failed to perform manual cleanup: {e}")

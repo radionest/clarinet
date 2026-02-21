@@ -1,12 +1,14 @@
 // Global state management
 import api/models.{
-  type Patient, type Study, type Record, type RecordType, type User,
+  type AdminStats, type Patient, type Study, type Record, type RecordType,
+  type User,
 }
 import api/types.{type ApiError}
 import gleam/dict.{type Dict}
 import gleam/dynamic
 import gleam/int
 import gleam/json.{type Json}
+import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
 import router.{type Route}
@@ -46,6 +48,9 @@ pub type Model {
     // Filters
     search_query: String,
     active_filters: Dict(String, String),
+    // Admin
+    admin_stats: Option(AdminStats),
+    admin_editing_record_id: Option(Int),
     // Modal state
     modal_open: Bool,
     modal_content: ModalContent,
@@ -89,6 +94,14 @@ pub type Msg {
 
   LoadUsers
   UsersLoaded(Result(List(User), ApiError))
+
+  LoadAdminStats
+  AdminStatsLoaded(Result(AdminStats, ApiError))
+
+  // Admin record assignment
+  AdminToggleAssignDropdown(record_id: Option(Int))
+  AdminAssignUser(record_id: Int, user_id: String)
+  AdminAssignUserResult(Result(Record, ApiError))
 
   // Form handling
   UpdateStudyForm(dynamic.Dynamic)
@@ -160,6 +173,8 @@ pub fn init() -> Model {
     total_items: 0,
     search_query: "",
     active_filters: dict.new(),
+    admin_stats: None,
+    admin_editing_record_id: None,
     modal_open: False,
     modal_content: NoModal,
   )
@@ -240,4 +255,21 @@ pub fn remove_filter(model: Model, key: String) -> Model {
 
 pub fn clear_filters(model: Model) -> Model {
   Model(..model, active_filters: dict.new(), search_query: "")
+}
+
+// Update a record in the records list by replacing the matching entry
+pub fn update_record_in_list(model: Model, updated: Record) -> Model {
+  let new_list =
+    list.map(model.records_list, fn(r) {
+      case r.id == updated.id {
+        True -> updated
+        False -> r
+      }
+    })
+  // Also update the dict cache
+  let new_dict = case updated.id {
+    Some(id) -> dict.insert(model.records, int.to_string(id), updated)
+    None -> model.records
+  }
+  Model(..model, records_list: new_list, records: new_dict)
 }

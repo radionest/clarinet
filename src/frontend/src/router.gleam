@@ -17,6 +17,7 @@ pub type Route {
   RecordTypeDesign(id: Option(String))
   Users
   UserProfile(id: String)
+  AdminDashboard
   NotFound
 }
 
@@ -35,6 +36,7 @@ pub fn route_to_path(route: Route) -> String {
     RecordTypeDesign(Some(id)) -> "/records/type/" <> id
     Users -> "/users"
     UserProfile(id) -> "/users/" <> id
+    AdminDashboard -> "/admin"
     NotFound -> "/404"
   }
 }
@@ -59,6 +61,7 @@ pub fn parse_route(uri: Uri) -> Route {
     ["records", id] -> RecordDetail(id)
     ["users"] -> Users
     ["users", id] -> UserProfile(id)
+    ["admin"] -> AdminDashboard
     _ -> NotFound
   }
 }
@@ -87,6 +90,7 @@ pub fn get_route_title(route: Route) -> String {
     RecordTypeDesign(Some(_)) -> "Edit Record Type"
     Users -> "Users"
     UserProfile(_) -> "User Profile"
+    AdminDashboard -> "Admin Dashboard"
     NotFound -> "Page Not Found"
   }
 }
@@ -108,6 +112,8 @@ pub fn is_same_section(route1: Route, route2: Route) -> Bool {
     Users, UserProfile(_) -> True
     UserProfile(_), Users -> True
     UserProfile(_), UserProfile(_) -> True
+
+    AdminDashboard, AdminDashboard -> True
 
     _, _ -> route1 == route2
   }

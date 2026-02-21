@@ -17,7 +17,7 @@ from pathlib import Path
 project_root = Path(__file__).resolve().parent.parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.client import ClarinetClient, ClarinetAPIError
+from src.client import ClarinetAPIError, ClarinetClient
 from src.models.base import RecordStatus
 
 BASE_URL = "http://localhost:8000/api"
@@ -78,10 +78,12 @@ async def test_patients(client: ClarinetClient) -> None:
 
     # create
     try:
-        patient = await client.create_patient({
-            "patient_id": "TEST_P001",
-            "patient_name": "Тестов Тест Тестович",
-        })
+        patient = await client.create_patient(
+            {
+                "patient_id": "TEST_P001",
+                "patient_name": "Тестов Тест Тестович",
+            }
+        )
         assert patient.id == "TEST_P001"
         ok("create_patient")
     except ClarinetAPIError:
@@ -120,11 +122,13 @@ async def test_studies(client: ClarinetClient) -> None:
 
     # create
     try:
-        study = await client.create_study({
-            "study_uid": "1.2.840.99999.1",
-            "date": "2024-06-15",
-            "patient_id": "TEST_P001",
-        })
+        study = await client.create_study(
+            {
+                "study_uid": "1.2.840.99999.1",
+                "date": "2024-06-15",
+                "patient_id": "TEST_P001",
+            }
+        )
         assert study.study_uid == "1.2.840.99999.1"
         ok("create_study")
     except ClarinetAPIError:
@@ -170,12 +174,14 @@ async def test_series(client: ClarinetClient) -> None:
 
     # create
     try:
-        series = await client.create_series({
-            "series_uid": "1.2.840.99999.1.1",
-            "series_number": 1,
-            "study_uid": "1.2.840.99999.1",
-            "series_description": "T1 test",
-        })
+        series = await client.create_series(
+            {
+                "series_uid": "1.2.840.99999.1.1",
+                "series_number": 1,
+                "study_uid": "1.2.840.99999.1",
+                "series_description": "T1 test",
+            }
+        )
         assert series.series_uid == "1.2.840.99999.1.1"
         ok("create_series")
     except ClarinetAPIError:
@@ -249,15 +255,17 @@ async def test_record_types(client: ClarinetClient) -> None:
 
     # create a new one
     try:
-        new_type = await client.create_record_type({
-            "name": "test_record_type",
-            "description": "Test record type for testing",
-            "level": "SERIES",
-            "data_schema": {
-                "type": "object",
-                "properties": {"value": {"type": "string"}},
-            },
-        })
+        new_type = await client.create_record_type(
+            {
+                "name": "test_record_type",
+                "description": "Test record type for testing",
+                "level": "SERIES",
+                "data_schema": {
+                    "type": "object",
+                    "properties": {"value": {"type": "string"}},
+                },
+            }
+        )
         assert new_type.name == "test_record_type"
         ok("create_record_type")
     except ClarinetAPIError:
@@ -272,12 +280,14 @@ async def test_records(client: ClarinetClient) -> None:
 
     # create
     try:
-        rec = await client.create_record({
-            "record_type_name": "doctor_review",
-            "patient_id": "TEST_P001",
-            "study_uid": "1.2.840.99999.1",
-            "series_uid": "1.2.840.99999.1.1",
-        })
+        rec = await client.create_record(
+            {
+                "record_type_name": "doctor_review",
+                "patient_id": "TEST_P001",
+                "study_uid": "1.2.840.99999.1",
+                "series_uid": "1.2.840.99999.1.1",
+            }
+        )
         record_id = rec.id
         ok(f"create_record (id={record_id})")
     except Exception as e:
@@ -325,12 +335,15 @@ async def test_records(client: ClarinetClient) -> None:
 
     # submit data (this also sets status to finished)
     try:
-        result = await client.submit_record_data(record_id, {
-            "diagnosis": "Normal",
-            "confidence": 85,
-            "requires_expert": False,
-            "notes": "No abnormalities detected",
-        })
+        result = await client.submit_record_data(
+            record_id,
+            {
+                "diagnosis": "Normal",
+                "confidence": 85,
+                "requires_expert": False,
+                "notes": "No abnormalities detected",
+            },
+        )
         assert result.data is not None
         assert result.data["diagnosis"] == "Normal"
         ok("submit_record_data")
@@ -396,20 +409,32 @@ async def test_batch_operations(client: ClarinetClient) -> None:
 
     # create_studies_batch
     try:
-        studies = await client.create_studies_batch([
-            {"study_uid": "1.2.840.88888.1", "date": "2024-07-01", "patient_id": "TEST_P001"},
-            {"study_uid": "1.2.840.88888.2", "date": "2024-07-02", "patient_id": "TEST_P001"},
-        ])
+        studies = await client.create_studies_batch(
+            [
+                {"study_uid": "1.2.840.88888.1", "date": "2024-07-01", "patient_id": "TEST_P001"},
+                {"study_uid": "1.2.840.88888.2", "date": "2024-07-02", "patient_id": "TEST_P001"},
+            ]
+        )
         ok(f"create_studies_batch ({len(studies)} created)")
     except Exception as e:
         fail("create_studies_batch", str(e))
 
     # create_series_batch
     try:
-        series = await client.create_series_batch([
-            {"series_uid": "1.2.840.88888.1.1", "series_number": 1, "study_uid": "1.2.840.88888.1"},
-            {"series_uid": "1.2.840.88888.1.2", "series_number": 2, "study_uid": "1.2.840.88888.1"},
-        ])
+        series = await client.create_series_batch(
+            [
+                {
+                    "series_uid": "1.2.840.88888.1.1",
+                    "series_number": 1,
+                    "study_uid": "1.2.840.88888.1",
+                },
+                {
+                    "series_uid": "1.2.840.88888.1.2",
+                    "series_number": 2,
+                    "study_uid": "1.2.840.88888.1",
+                },
+            ]
+        )
         ok(f"create_series_batch ({len(series)} created)")
     except Exception as e:
         fail("create_series_batch", str(e))
@@ -436,31 +461,37 @@ async def test_recordflow(client: ClarinetClient) -> None:
 
     # Create a fresh series for RecordFlow testing
     try:
-        await client.create_study({
-            "study_uid": "1.2.840.55555.1",
-            "date": "2024-09-01",
-            "patient_id": "TEST_P001",
-        })
+        await client.create_study(
+            {
+                "study_uid": "1.2.840.55555.1",
+                "date": "2024-09-01",
+                "patient_id": "TEST_P001",
+            }
+        )
     except ClarinetAPIError:
         pass  # already exists
 
     try:
-        await client.create_series({
-            "series_uid": "1.2.840.55555.1.1",
-            "series_number": 1,
-            "study_uid": "1.2.840.55555.1",
-        })
+        await client.create_series(
+            {
+                "series_uid": "1.2.840.55555.1.1",
+                "series_number": 1,
+                "study_uid": "1.2.840.55555.1",
+            }
+        )
     except ClarinetAPIError:
         pass  # already exists
 
     # Create a doctor_review record
     try:
-        rec = await client.create_record({
-            "record_type_name": "doctor_review",
-            "patient_id": "TEST_P001",
-            "study_uid": "1.2.840.55555.1",
-            "series_uid": "1.2.840.55555.1.1",
-        })
+        rec = await client.create_record(
+            {
+                "record_type_name": "doctor_review",
+                "patient_id": "TEST_P001",
+                "study_uid": "1.2.840.55555.1",
+                "series_uid": "1.2.840.55555.1.1",
+            }
+        )
         flow_record_id = rec.id
         ok(f"create doctor_review for flow (id={flow_record_id})")
     except Exception as e:
@@ -469,12 +500,15 @@ async def test_recordflow(client: ClarinetClient) -> None:
 
     # Submit data with LOW confidence to trigger both flows
     try:
-        result = await client.submit_record_data(flow_record_id, {
-            "diagnosis": "Suspected lesion",
-            "confidence": 50,
-            "requires_expert": True,
-            "notes": "Low confidence, need expert",
-        })
+        result = await client.submit_record_data(
+            flow_record_id,
+            {
+                "diagnosis": "Suspected lesion",
+                "confidence": 50,
+                "requires_expert": True,
+                "notes": "Low confidence, need expert",
+            },
+        )
         ok("submit_record_data (low confidence to trigger flows)")
     except Exception as e:
         fail("submit_record_data for flow", str(e))
@@ -517,37 +551,46 @@ async def test_record_data_submit(client: ClarinetClient) -> None:
 
     # Create a fresh record for data submit test
     try:
-        await client.create_study({
-            "study_uid": "1.2.840.44444.1",
-            "date": "2024-10-01",
-            "patient_id": "TEST_P001",
-        })
+        await client.create_study(
+            {
+                "study_uid": "1.2.840.44444.1",
+                "date": "2024-10-01",
+                "patient_id": "TEST_P001",
+            }
+        )
     except ClarinetAPIError:
         pass
 
     try:
-        await client.create_series({
-            "series_uid": "1.2.840.44444.1.1",
-            "series_number": 1,
-            "study_uid": "1.2.840.44444.1",
-        })
+        await client.create_series(
+            {
+                "series_uid": "1.2.840.44444.1.1",
+                "series_number": 1,
+                "study_uid": "1.2.840.44444.1",
+            }
+        )
     except ClarinetAPIError:
         pass
 
     # doctor_review with full schema
     try:
-        rec = await client.create_record({
-            "record_type_name": "doctor_review",
-            "patient_id": "TEST_P001",
-            "study_uid": "1.2.840.44444.1",
-            "series_uid": "1.2.840.44444.1.1",
-        })
-        result = await client.submit_record_data(rec.id, {
-            "diagnosis": "Benign finding",
-            "confidence": 92,
-            "requires_expert": False,
-            "notes": "Clear benign pattern observed",
-        })
+        rec = await client.create_record(
+            {
+                "record_type_name": "doctor_review",
+                "patient_id": "TEST_P001",
+                "study_uid": "1.2.840.44444.1",
+                "series_uid": "1.2.840.44444.1.1",
+            }
+        )
+        result = await client.submit_record_data(
+            rec.id,
+            {
+                "diagnosis": "Benign finding",
+                "confidence": 92,
+                "requires_expert": False,
+                "notes": "Clear benign pattern observed",
+            },
+        )
         assert result.data["confidence"] == 92
         ok("submit doctor_review data")
     except Exception as e:
@@ -564,11 +607,14 @@ async def test_record_data_submit(client: ClarinetClient) -> None:
         )
         if ai_records:
             ai_rec = ai_records[0]
-            result = await client.submit_record_data(ai_rec.id, {
-                "ai_diagnosis": "Benign finding",
-                "ai_confidence": 0.95,
-                "findings": "No suspicious features detected by AI",
-            })
+            result = await client.submit_record_data(
+                ai_rec.id,
+                {
+                    "ai_diagnosis": "Benign finding",
+                    "ai_confidence": 0.95,
+                    "findings": "No suspicious features detected by AI",
+                },
+            )
             assert result.data["ai_confidence"] == 0.95
             ok("submit ai_analysis data")
         else:
@@ -580,9 +626,7 @@ async def test_record_data_submit(client: ClarinetClient) -> None:
 async def main() -> None:
     print("=== Clarinet Demo: Functionality Tests ===")
 
-    async with ClarinetClient(
-        BASE_URL, username="admin", password="admin123"
-    ) as client:
+    async with ClarinetClient(BASE_URL, username="admin", password="admin123") as client:
         await test_auth(client)
         await test_patients(client)
         await test_studies(client)

@@ -6,6 +6,7 @@ Following KISS and YAGNI principles - minimal, practical implementation.
 
 import argparse
 import asyncio
+import contextlib
 import json
 import os
 import shutil
@@ -13,7 +14,6 @@ import signal
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
 
 from src.settings import settings
 from src.utils.db_manager import db_manager
@@ -196,23 +196,22 @@ async def run_with_frontend(host: str, port: int) -> None:
             sys.exit(1)
 
     # Create tasks for both servers
-    backend_task = None
     frontend_task = None
+
+    import uvicorn
+
+    config = uvicorn.Config(
+        "src.api.app:app",
+        host=host,
+        port=port,
+        reload=getattr(settings, "debug", True),
+        log_level="info" if getattr(settings, "debug", True) else "warning",
+    )
+    server = uvicorn.Server(config)
 
     async def run_backend() -> None:
         """Run the backend server using uvicorn programmatically."""
-        import uvicorn
-
         logger.info(f"Starting backend server at http://{host}:{port}")
-
-        config = uvicorn.Config(
-            "src.api.app:app",
-            host=host,
-            port=port,
-            reload=getattr(settings, "debug", True),
-            log_level="info" if getattr(settings, "debug", True) else "warning",
-        )
-        server = uvicorn.Server(config)
         await server.serve()
 
     async def run_frontend_watch() -> None:
@@ -276,32 +275,38 @@ async def run_with_frontend(host: str, port: int) -> None:
 
                 await asyncio.sleep(2)
 
-    # Signal handler for graceful shutdown
-    def signal_handler(_signum: int, _frame: Any) -> None:
-        logger.info("\nShutting down servers...")
-        if backend_task:
-            backend_task.cancel()
+    # Signal handler for graceful shutdown (must use loop.add_signal_handler for asyncio)
+    loop = asyncio.get_running_loop()
+
+    def signal_handler() -> None:
+        logger.info("Shutting down servers...")
+        server.should_exit = True
         if frontend_task:
             frontend_task.cancel()
-        sys.exit(0)
 
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        loop.add_signal_handler(sig, signal_handler)
 
     logger.info(f"Starting Clarinet with frontend at http://{host}:{port}")
     logger.info("Press Ctrl+C to stop both servers")
 
     try:
-        # Run both servers concurrently
+        # Run servers as independent tasks (not gathered, so frontend cancel
+        # doesn't propagate to backend and break uvicorn's graceful shutdown)
         backend_task = asyncio.create_task(run_backend())
         frontend_task = asyncio.create_task(run_frontend_watch())
 
-        await asyncio.gather(backend_task, frontend_task)
-    except asyncio.CancelledError:
-        logger.info("Servers stopped")
+        # Wait for backend to finish gracefully via should_exit
+        await backend_task
     except Exception as e:
         logger.error(f"Error running servers: {e}")
         sys.exit(1)
+    finally:
+        if frontend_task is not None:
+            frontend_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await frontend_task
+        logger.info("Servers stopped")
 
 
 async def init_database() -> None:

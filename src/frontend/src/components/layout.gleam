@@ -29,7 +29,11 @@ fn navbar(model: Model) -> Element(Msg) {
       nav_link(router.Studies, "Studies", model.route),
       nav_link(router.Records, "Records", model.route),
       case is_admin(model) {
-        True -> nav_link(router.Users, "Users", model.route)
+        True ->
+          element.fragment([
+            nav_link(router.Users, "Users", model.route),
+            nav_link(router.AdminDashboard, "Admin", model.route),
+          ])
         False -> html.text("")
       },
       user_menu(model),

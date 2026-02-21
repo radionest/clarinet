@@ -1,9 +1,16 @@
 // Main Lustre application
+import api/admin
 import api/auth
 import api/models
+import api/records
+import api/studies
 import api/types
+import api/users
 import components/layout
+import gleam/dict
+import gleam/int
 import gleam/javascript/promise
+import gleam/list
 import gleam/option.{None, Some}
 import gleam/uri.{type Uri}
 import lustre
@@ -11,6 +18,7 @@ import lustre/effect.{type Effect}
 import lustre/element.{type Element}
 import lustre/element/html
 import modem
+import pages/admin as admin_page
 import pages/home
 import pages/login
 import pages/register
@@ -206,6 +214,157 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       #(store.clear_messages(model), effect.none())
     }
 
+    // Data loading - Studies
+    store.LoadStudies -> {
+      let load_effect =
+        effect.from(fn(dispatch) {
+          studies.get_studies()
+          |> promise.tap(fn(result) { dispatch(store.StudiesLoaded(result)) })
+          Nil
+        })
+      #(store.set_loading(model, True), load_effect)
+    }
+
+    store.StudiesLoaded(Ok(studies_list)) -> {
+      let studies_dict =
+        list.fold(studies_list, model.studies, fn(acc, study) {
+          dict.insert(acc, study.study_uid, study)
+        })
+      let new_model =
+        store.Model(..model, studies: studies_dict, studies_list: studies_list, loading: False)
+      #(new_model, effect.none())
+    }
+
+    store.StudiesLoaded(Error(_err)) -> {
+      let new_model =
+        model
+        |> store.set_loading(False)
+        |> store.set_error(Some("Failed to load studies"))
+      #(new_model, effect.none())
+    }
+
+    // Data loading - Records
+    store.LoadRecords -> {
+      let load_effect =
+        effect.from(fn(dispatch) {
+          records.get_records()
+          |> promise.tap(fn(result) { dispatch(store.RecordsLoaded(result)) })
+          Nil
+        })
+      #(store.set_loading(model, True), load_effect)
+    }
+
+    store.RecordsLoaded(Ok(records_list)) -> {
+      let records_dict =
+        list.fold(records_list, model.records, fn(acc, record) {
+          case record.id {
+            Some(id) -> dict.insert(acc, int.to_string(id), record)
+            None -> acc
+          }
+        })
+      let new_model =
+        store.Model(..model, records: records_dict, records_list: records_list, loading: False)
+      #(new_model, effect.none())
+    }
+
+    store.RecordsLoaded(Error(_err)) -> {
+      let new_model =
+        model
+        |> store.set_loading(False)
+        |> store.set_error(Some("Failed to load records"))
+      #(new_model, effect.none())
+    }
+
+    // Data loading - Users
+    store.LoadUsers -> {
+      let load_effect =
+        effect.from(fn(dispatch) {
+          users.get_users()
+          |> promise.tap(fn(result) { dispatch(store.UsersLoaded(result)) })
+          Nil
+        })
+      #(store.set_loading(model, True), load_effect)
+    }
+
+    store.UsersLoaded(Ok(users_list)) -> {
+      let users_dict =
+        list.fold(users_list, model.users, fn(acc, user) {
+          dict.insert(acc, user.id, user)
+        })
+      let new_model =
+        store.Model(..model, users: users_dict, users_list: users_list, loading: False)
+      #(new_model, effect.none())
+    }
+
+    store.UsersLoaded(Error(_err)) -> {
+      let new_model =
+        model
+        |> store.set_loading(False)
+        |> store.set_error(Some("Failed to load users"))
+      #(new_model, effect.none())
+    }
+
+    // Data loading - Admin Stats
+    store.LoadAdminStats -> {
+      let load_effect =
+        effect.from(fn(dispatch) {
+          admin.get_admin_stats()
+          |> promise.tap(fn(result) { dispatch(store.AdminStatsLoaded(result)) })
+          Nil
+        })
+      #(store.set_loading(model, True), load_effect)
+    }
+
+    store.AdminStatsLoaded(Ok(stats)) -> {
+      let new_model =
+        store.Model(..model, admin_stats: Some(stats), loading: False)
+      #(new_model, effect.none())
+    }
+
+    store.AdminStatsLoaded(Error(_err)) -> {
+      let new_model =
+        model
+        |> store.set_loading(False)
+        |> store.set_error(Some("Failed to load admin statistics"))
+      #(new_model, effect.none())
+    }
+
+    // Admin record assignment
+    store.AdminToggleAssignDropdown(record_id) -> {
+      #(store.Model(..model, admin_editing_record_id: record_id), effect.none())
+    }
+
+    store.AdminAssignUser(record_id, user_id) -> {
+      let new_model =
+        store.Model(..model, admin_editing_record_id: None, loading: True)
+      let assign_effect =
+        effect.from(fn(dispatch) {
+          admin.assign_record_user(record_id, user_id)
+          |> promise.tap(fn(result) {
+            dispatch(store.AdminAssignUserResult(result))
+          })
+          Nil
+        })
+      #(new_model, assign_effect)
+    }
+
+    store.AdminAssignUserResult(Ok(record)) -> {
+      let new_model =
+        model
+        |> store.update_record_in_list(record)
+        |> store.set_loading(False)
+        |> store.set_success("User assigned successfully")
+      #(new_model, effect.none())
+    }
+
+    store.AdminAssignUserResult(Error(_err)) -> {
+      let new_model =
+        model
+        |> store.set_loading(False)
+        |> store.set_error(Some("Failed to assign user to record"))
+      #(new_model, effect.none())
+    }
+
     // Default case
     _ -> #(model, effect.none())
   }
@@ -225,6 +384,7 @@ pub fn view(model: Model) -> Element(Msg) {
     router.RecordTypeDesign(_id) -> html.div([], [html.text("Record type design page")])
     router.Users -> html.div([], [html.text("Users page")])
     router.UserProfile(_id) -> html.div([], [html.text("User profile page")])
+    router.AdminDashboard -> admin_page.view(model)
     router.NotFound -> html.div([], [html.text("404 - Page not found")])
   }
 
@@ -235,7 +395,24 @@ pub fn view(model: Model) -> Element(Msg) {
 }
 
 // Load data for route
-fn load_route_data(_model: Model, _route: Route) -> Effect(Msg) {
-  // TODO: Implement data loading for each route
-  effect.none()
+fn load_route_data(model: Model, route: Route) -> Effect(Msg) {
+  case route, model.user {
+    router.Home, Some(_) ->
+      effect.batch([
+        effect.from(fn(dispatch) { dispatch(store.LoadStudies) }),
+        effect.from(fn(dispatch) { dispatch(store.LoadRecords) }),
+        effect.from(fn(dispatch) { dispatch(store.LoadUsers) }),
+      ])
+    router.Home, None -> effect.none()
+    router.Studies, _ -> effect.from(fn(dispatch) { dispatch(store.LoadStudies) })
+    router.Records, _ -> effect.from(fn(dispatch) { dispatch(store.LoadRecords) })
+    router.Users, _ -> effect.from(fn(dispatch) { dispatch(store.LoadUsers) })
+    router.AdminDashboard, Some(_) ->
+      effect.batch([
+        effect.from(fn(dispatch) { dispatch(store.LoadAdminStats) }),
+        effect.from(fn(dispatch) { dispatch(store.LoadRecords) }),
+        effect.from(fn(dispatch) { dispatch(store.LoadUsers) }),
+      ])
+    _, _ -> effect.none()
+  }
 }

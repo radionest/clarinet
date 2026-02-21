@@ -293,9 +293,7 @@ class RecordBase(BaseModel):
                     f"{settings.storage_path}/{self.patient_id}/{self.study_anon_uid}"
                 )
             case "PATIENT":
-                return self._format_path(
-                    f"{settings.storage_path}/{self.patient_id}"
-                )
+                return self._format_path(f"{settings.storage_path}/{self.patient_id}")
             case _:
                 raise NotImplementedError(
                     "Working folder attribute only available for Study and Series level record types."

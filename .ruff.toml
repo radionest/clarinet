@@ -73,7 +73,9 @@ dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
 
 [lint.per-file-ignores]
 "__init__.py" = ["F401", "F403"]
-"tests/*" = ["ARG", "S101"]
+"tests/*" = ["ARG", "S101", "TCH"]
+"src/**" = ["TCH"]
+"examples/*" = ["E402", "SIM105", "F841", "TCH"]
 
 [format]
 # Like Black, use double quotes for strings.

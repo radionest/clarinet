@@ -49,9 +49,7 @@ class StudyRepository(BaseRepository[Study]):
 
         return study
 
-    async def get_all_with_relations(
-        self, skip: int = 0, limit: int = 100
-    ) -> Sequence[Study]:
+    async def get_all_with_relations(self, skip: int = 0, limit: int = 100) -> Sequence[Study]:
         """Get all studies with relations loaded.
 
         Args:

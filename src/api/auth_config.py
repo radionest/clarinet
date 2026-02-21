@@ -5,6 +5,7 @@ Following KISS principle - minimal configuration.
 
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime, timedelta
+from typing import Any
 from uuid import UUID, uuid4
 
 from fastapi import Depends, Request, Response
@@ -14,7 +15,7 @@ from fastapi_users.authentication import (
     CookieTransport,
     Strategy,
 )
-from sqlalchemy import delete, func, select
+from sqlalchemy import CursorResult, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
@@ -214,7 +215,7 @@ class DatabaseStrategy(Strategy[User, UUID]):
     async def destroy_token(self, token: str, user: User) -> None:
         """Remove session token on logout."""
         stmt = delete(AccessToken).where(AccessToken.token == token)  # type: ignore[arg-type]
-        result = await self.session.execute(stmt)
+        result: CursorResult[Any] = await self.session.execute(stmt)  # type: ignore[assignment]
         await self.session.commit()
 
         if result.rowcount > 0:

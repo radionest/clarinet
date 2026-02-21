@@ -3,11 +3,7 @@
 from src.services.recordflow import record
 
 # Flow 1: When doctor_review finishes -> always create ai_analysis
-(
-    record("doctor_review")
-    .on_status("finished")
-    .add_record("ai_analysis")
-)
+(record("doctor_review").on_status("finished").add_record("ai_analysis"))
 
 # Flow 2: When doctor_review finishes with low confidence -> create expert_check
 (

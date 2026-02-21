@@ -103,7 +103,7 @@ fn decode_user(data: dynamic.Dynamic) -> Result(User, ApiError) {
 
     // For now, skip decoding complex nested types
     let roles = None
-    let tasks = None
+    let records = None
 
     decode.success(models.User(
       id: id,
@@ -113,7 +113,7 @@ fn decode_user(data: dynamic.Dynamic) -> Result(User, ApiError) {
       is_superuser: is_superuser,
       is_verified: is_verified,
       roles: roles,
-      tasks: tasks,
+      records: records,
     ))
   }
 

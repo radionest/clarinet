@@ -3,9 +3,10 @@ Session management utilities.
 """
 
 from datetime import UTC, datetime, timedelta
+from typing import Any
 from uuid import UUID
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import CursorResult, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
@@ -56,7 +57,7 @@ async def revoke_user_sessions(
     if except_token:
         stmt = stmt.where(AccessToken.token != except_token)  # type:ignore[arg-type]
 
-    result = await session.execute(stmt)
+    result: CursorResult[Any] = await session.execute(stmt)  # type: ignore[assignment]
     await session.commit()
 
     if result.rowcount > 0:
@@ -104,10 +105,10 @@ async def cleanup_expired_sessions(session: AsyncSession, batch_size: int = 1000
 
         delete_stmt = delete(AccessToken).where(col(AccessToken.token).in_(select(subquery)))
 
-        result = await session.execute(delete_stmt)
+        delete_result: CursorResult[Any] = await session.execute(delete_stmt)  # type: ignore[assignment]
         await session.commit()
 
-        deleted_count = result.rowcount
+        deleted_count = delete_result.rowcount
         deleted_total += deleted_count
 
         if deleted_count == 0:
