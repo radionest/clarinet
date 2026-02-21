@@ -21,6 +21,7 @@ pub type Model {
     route: Route,
     // Authentication (using cookie-based auth)
     user: Option(User),
+    checking_session: Bool,
     // UI State
     loading: Bool,
     error: Option(String),
@@ -72,6 +73,7 @@ pub type Msg {
   Navigate(Route)
 
   // Authentication
+  CheckSessionResult(Result(User, ApiError))
   LoginSubmit(email: String, password: String)
   LoginSuccess(user: User)
   LoginError(ApiError)
@@ -153,6 +155,7 @@ pub fn init() -> Model {
   Model(
     route: router.Home,
     user: None,
+    checking_session: True,
     loading: False,
     error: None,
     success_message: None,

@@ -45,7 +45,18 @@ fn init(_flags) -> #(Model, Effect(Msg)) {
 
   let model_with_route = store.set_route(model, initial_route)
 
-  #(model_with_route, modem.init(on_url_change))
+  // Check existing session via cookie
+  let check_session_effect =
+    effect.from(fn(dispatch) {
+      auth.get_current_user()
+      |> promise.tap(fn(result) { dispatch(store.CheckSessionResult(result)) })
+      Nil
+    })
+
+  #(
+    model_with_route,
+    effect.batch([modem.init(on_url_change), check_session_effect]),
+  )
 }
 
 // Handle URL changes from modem
@@ -61,27 +72,34 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     store.OnRouteChange(route) -> {
       let new_model = store.set_route(model, route)
 
-      // Check authentication requirement
-      case router.requires_auth(route), model.user {
-        True, None -> {
-          // Redirect to login if auth required
-          #(
-            store.set_route(model, router.Login),
-            modem.push("/login", option.None, option.None),
-          )
-        }
-        False, Some(_) if route == router.Login || route == router.Register -> {
-          // Redirect from login/register if already authenticated
-          #(
-            store.set_route(model, router.Home),
-            modem.push("/", option.None, option.None),
-          )
-        }
-        _, _ -> {
-          // Load data for the new route
-          let effect = load_route_data(new_model, route)
-          #(new_model, effect)
-        }
+      // Don't redirect while session check is in progress
+      case model.checking_session {
+        True -> #(new_model, effect.none())
+        False ->
+          // Check authentication requirement
+          case router.requires_auth(route), model.user {
+            True, None -> {
+              // Redirect to login if auth required
+              #(
+                store.set_route(model, router.Login),
+                modem.push("/login", option.None, option.None),
+              )
+            }
+            False, Some(_)
+              if route == router.Login || route == router.Register
+            -> {
+              // Redirect from login/register if already authenticated
+              #(
+                store.set_route(model, router.Home),
+                modem.push("/", option.None, option.None),
+              )
+            }
+            _, _ -> {
+              // Load data for the new route
+              let effect = load_route_data(new_model, route)
+              #(new_model, effect)
+            }
+          }
       }
     }
 
@@ -89,6 +107,40 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       // Use Modem to update URL without page reload
       let path = router.route_to_path(route)
       #(model, modem.push(path, option.None, option.None))
+    }
+
+    // Session restoration
+    store.CheckSessionResult(result) -> {
+      case result {
+        Ok(user) -> {
+          // Session is valid - restore user and load route data
+          let new_model =
+            model
+            |> store.set_user(user)
+            |> fn(m) { store.Model(..m, checking_session: False) }
+          let route = model.route
+          case router.requires_auth(route), new_model.user {
+            False, Some(_) if route == router.Login || route == router.Register ->
+              #(
+                store.set_route(new_model, router.Home),
+                modem.push("/", option.None, option.None),
+              )
+            _, _ -> #(new_model, load_route_data(new_model, route))
+          }
+        }
+        Error(_) -> {
+          // No valid session - redirect to login if on protected route
+          let new_model = store.Model(..model, checking_session: False)
+          case router.requires_auth(model.route) {
+            True ->
+              #(
+                store.set_route(new_model, router.Login),
+                modem.push("/login", option.None, option.None),
+              )
+            False -> #(new_model, effect.none())
+          }
+        }
+      }
     }
 
     // Authentication
@@ -372,6 +424,14 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
 
 // View function
 pub fn view(model: Model) -> Element(Msg) {
+  // Show loading while checking session
+  case model.checking_session {
+    True -> html.div([], [])
+    False -> view_content(model)
+  }
+}
+
+fn view_content(model: Model) -> Element(Msg) {
   let content = case model.route {
     router.Home -> home.view(model)
     router.Login -> login.view(model)
