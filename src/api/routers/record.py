@@ -5,7 +5,6 @@ This module provides async API endpoints for managing records, record types, and
 Formerly known as task router.
 """
 
-import random
 from collections.abc import Sequence
 from pathlib import Path
 from uuid import UUID
@@ -20,14 +19,14 @@ from fastapi import (
     status,
 )
 from jsonschema import Draft202012Validator, SchemaError
-from sqlalchemy import String as SQLString
-from sqlalchemy import cast
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
-from sqlmodel import select
 
 from src.api.auth_config import current_active_user
-from src.api.dependencies import PaginationDep, RecordRepositoryDep, RecordTypeRepositoryDep
+from src.api.dependencies import (
+    PaginationDep,
+    RecordRepositoryDep,
+    RecordTypeRepositoryDep,
+    SeriesRepositoryDep,
+)
 from src.exceptions import CONFLICT, NOT_FOUND
 from src.models import (
     Record,
@@ -39,13 +38,11 @@ from src.models import (
     RecordTypeCreate,
     RecordTypeFind,
     RecordTypeOptional,
-    Series,
     User,
 )
 from src.repositories.record_repository import RecordSearchCriteria
 from src.services.file_validation import FileValidationResult, FileValidator
 from src.types import RecordData
-from src.utils.database import get_async_session
 from src.utils.validation import validate_json_by_schema
 
 router = APIRouter(
@@ -461,33 +458,19 @@ async def assign_user_to_record(
     return await repo.claim_record(record_id, user.id)
 
 
-async def get_random_series_async(session: AsyncSession = Depends(get_async_session)) -> Series:
-    """Get a random series from the database."""
-    result = await session.execute(select(Series).options(selectinload(Series.study)))  # type: ignore
-    all_series = result.scalars().all()
-    if not all_series:
-        raise NOT_FOUND.with_context("No series found in database")
-    return random.choice(all_series)
-
-
 async def add_demo_records_for_user(
     user: User,
     repo: RecordRepositoryDep,
-    series: Series = Depends(get_random_series_async),
-    session: AsyncSession = Depends(get_async_session),
+    series_repo: SeriesRepositoryDep,
+    record_type_repo: RecordTypeRepositoryDep,
 ) -> None:
     """Add demo records for a new user."""
-    # Find demo record types (RecordType query — no RecordTypeRepository yet)
-    result = await session.execute(
-        select(RecordType).where(cast(RecordType.name, SQLString).like("%demo%"))
-    )
-    record_types = result.scalars().all()
+    series = await series_repo.get_random()
+
+    record_types = await record_type_repo.find(RecordTypeFind(name="demo"))
 
     if not record_types:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="No demo record types found",
-        )
+        raise NOT_FOUND.with_context("No demo record types found")
 
     # Create a record for each demo record type
     records: list[Record] = []

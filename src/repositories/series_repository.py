@@ -238,7 +238,12 @@ class SeriesRepository(BaseRepository[Series]):
         Raises:
             NOT_FOUND: If no series exist
         """
-        statement = select(Series).order_by(func.random()).limit(1)
+        statement = (
+            select(Series)
+            .options(selectinload(Series.study))  # type: ignore[arg-type]
+            .order_by(func.random())
+            .limit(1)
+        )
         result = await self.session.execute(statement)
         series = result.scalars().first()
 
