@@ -276,9 +276,7 @@ class RecordBase(BaseModel):
         result = self._format_slicer_kwargs(self.record_type.slicer_result_validator_args)
         return result
 
-    @property
-    @computed_field
-    def working_folder(self) -> str | None:
+    def _get_working_folder(self) -> str | None:
         """Get the working folder path for this record."""
         if not hasattr(self, "record_type") or self.record_type is None:
             return None
@@ -298,6 +296,12 @@ class RecordBase(BaseModel):
                 raise NotImplementedError(
                     "Working folder attribute only available for Study and Series level record types."
                 )
+
+    @property
+    @computed_field
+    def working_folder(self) -> str | None:
+        """Get the working folder path for this record."""
+        return self._get_working_folder()
 
     @computed_field
     def slicer_all_args_formated(self) -> SlicerArgs | None:
@@ -330,25 +334,6 @@ class RecordBase(BaseModel):
             all_args.update(formatted_validator)
 
         return all_args
-
-    def _get_working_folder(self) -> str | None:
-        """Get the working folder path for this record."""
-        if not hasattr(self, "record_type") or self.record_type is None:
-            return None
-
-        match self.record_type.level:
-            case "SERIES":
-                return self._format_path(
-                    f"{settings.storage_path}/{self.patient_id}/{self.study_anon_uid}/{self.series_anon_uid}"
-                )
-            case "STUDY":
-                return self._format_path(
-                    f"{settings.storage_path}/{self.patient_id}/{self.study_anon_uid}"
-                )
-            case _:
-                raise NotImplementedError(
-                    "Working folder attribute only available for Study and Series level record types."
-                )
 
 
 class Record(RecordBase, table=True):
