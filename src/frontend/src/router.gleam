@@ -95,26 +95,19 @@ pub fn get_route_title(route: Route) -> String {
   }
 }
 
-// Check if routes are in the same section
-pub fn is_same_section(route1: Route, route2: Route) -> Bool {
-  case route1, route2 {
-    Studies, StudyDetail(_) -> True
-    StudyDetail(_), Studies -> True
-    StudyDetail(_), StudyDetail(_) -> True
-
-    Records, RecordDetail(_) -> True
-    Records, RecordNew -> True
-    Records, RecordTypeDesign(_) -> True
-    RecordDetail(_), Records -> True
-    RecordNew, Records -> True
-    RecordTypeDesign(_), Records -> True
-
-    Users, UserProfile(_) -> True
-    UserProfile(_), Users -> True
-    UserProfile(_), UserProfile(_) -> True
-
-    AdminDashboard, AdminDashboard -> True
-
-    _, _ -> route1 == route2
+fn section(route: Route) -> String {
+  case route {
+    Home -> "home"
+    Login -> "login"
+    Register -> "register"
+    Studies | StudyDetail(_) -> "studies"
+    Records | RecordDetail(_) | RecordNew | RecordTypeDesign(_) -> "records"
+    Users | UserProfile(_) -> "users"
+    AdminDashboard -> "admin"
+    NotFound -> "notfound"
   }
+}
+
+pub fn is_same_section(route1: Route, route2: Route) -> Bool {
+  section(route1) == section(route2)
 }
