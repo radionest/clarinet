@@ -103,7 +103,6 @@ fn record_row(model: Model, record: models.Record) -> Element(Msg) {
     types.Finished -> "finished"
     types.Failed -> "failed"
     types.Paused -> "pause"
-    types.Cancelled -> "cancelled"
   }
 
   let is_editing = model.admin_editing_record_id == Some(record_id)

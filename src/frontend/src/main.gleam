@@ -230,11 +230,7 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         |> store.clear_messages()
 
       let register_request =
-        models.RegisterRequest(
-          email: email,
-          password: password,
-          full_name: None,
-        )
+        models.RegisterRequest(email: email, password: password)
 
       let register_effect =
         effect.from(fn(dispatch) {

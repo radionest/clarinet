@@ -25,6 +25,7 @@ pub type PatientFormMsg {
 pub fn to_patient_create(data: PatientFormData) -> PatientCreate {
   models.PatientCreate(
     id: data.id,
+    name: None,
     anon_id: case data.anon_id {
       "" -> None
       id -> Some(id)

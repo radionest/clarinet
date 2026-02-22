@@ -1,7 +1,5 @@
 // Static type definitions for core models matching backend SQLModel
-import api/types.{
-  type DicomQueryLevel, type RecordStatus, type UserRole as UserRoleEnum,
-}
+import api/types.{type DicomQueryLevel, type RecordStatus}
 import gleam/dict.{type Dict}
 import gleam/json.{type Json}
 import gleam/option.{type Option}
@@ -11,10 +9,10 @@ pub type Patient {
   Patient(
     id: String,
     // Primary key in backend
+    name: Option(String),
     anon_id: Option(String),
     anon_name: Option(String),
-    created_at: Option(String),
-    updated_at: Option(String),
+    auto_id: Option(Int),
     studies: Option(List(Study)),
     records: Option(List(Record)),
   )
@@ -32,6 +30,16 @@ pub type Study {
     patient: Option(Patient),
     series: Option(List(Series)),
     records: Option(List(Record)),
+  )
+}
+
+// File definition for RecordType input/output files (matching backend)
+pub type FileDefinition {
+  FileDefinition(
+    name: String,
+    pattern: String,
+    description: Option(String),
+    required: Bool,
   )
 }
 
@@ -53,7 +61,9 @@ pub type RecordType {
     max_users: Option(Int),
     min_users: Option(Int),
     level: DicomQueryLevel,
-    constraint_role: Option(Role),
+    input_files: Option(List(FileDefinition)),
+    output_files: Option(List(FileDefinition)),
+    constraint_role: Option(String),
     records: Option(List(Record)),
   )
 }
@@ -73,6 +83,7 @@ pub type Record {
     study_anon_uid: Option(String),
     series_anon_uid: Option(String),
     clarinet_storage_path: Option(String),
+    files: Option(Dict(String, String)),
     patient: Option(Patient),
     study: Option(Study),
     series: Option(Series),
@@ -93,20 +104,16 @@ pub type Record {
   )
 }
 
-// User model (matching backend fastapi-users SQLModelBaseUserDB)
+// User model (matching backend fastapi-users UserRead schema)
 pub type User {
   User(
     id: String,
     // UUID Primary key
     email: String,
     // Unique email used for identification
-    hashed_password: Option(String),
-    // Won't be sent from API usually
     is_active: Bool,
     is_superuser: Bool,
     is_verified: Bool,
-    roles: Option(List(Role)),
-    records: Option(List(Record)),
   )
 }
 
@@ -137,25 +144,27 @@ pub type LoginResponse {
 }
 
 pub type RegisterRequest {
-  RegisterRequest(
-    email: String,
-    password: String,
-    full_name: Option(String),
-  )
+  RegisterRequest(email: String, password: String)
 }
 
 // Form data types for creating/updating models
 pub type PatientCreate {
-  PatientCreate(id: String, anon_id: Option(String), anon_name: Option(String))
+  PatientCreate(
+    id: String,
+    name: Option(String),
+    anon_id: Option(String),
+    anon_name: Option(String),
+  )
 }
 
 pub type PatientRead {
   PatientRead(
     id: String,
+    name: Option(String),
     anon_id: Option(String),
     anon_name: Option(String),
+    auto_id: Option(Int),
     studies: List(Study),
-    records: List(Record),
   )
 }
 
@@ -193,6 +202,8 @@ pub type RecordTypeCreate {
     max_users: Option(Int),
     min_users: Option(Int),
     level: DicomQueryLevel,
+    input_files: Option(List(FileDefinition)),
+    output_files: Option(List(FileDefinition)),
   )
 }
 
@@ -266,18 +277,9 @@ pub type UserRead {
     is_active: Bool,
     is_superuser: Bool,
     is_verified: Bool,
-    roles: List(Role),
   )
 }
 
-pub type Role {
-  Role(
-    name: String,
-    description: Option(String),
-    allowed_record_types: Option(List(RecordType)),
-    users: Option(List(User)),
-  )
-}
 
 // Admin dashboard statistics
 pub type AdminStats {

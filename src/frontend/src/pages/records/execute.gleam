@@ -182,7 +182,6 @@ fn render_record_status(status: RecordStatus) -> Element(Msg) {
     types.InWork -> #("badge-progress", "In Progress")
     types.Finished -> #("badge-success", "Completed")
     types.Failed -> #("badge-danger", "Failed")
-    types.Cancelled -> #("badge-secondary", "Cancelled")
     types.Paused -> #("badge-paused", "Paused")
   }
 

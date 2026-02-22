@@ -6,7 +6,6 @@ import gleam/dynamic
 import gleam/dynamic/decode
 import gleam/javascript/promise.{type Promise}
 import gleam/json
-import gleam/option.{type Option, None, Some}
 import gleam/result
 import multipart_form/field
 
@@ -52,10 +51,6 @@ pub fn register(request: RegisterRequest) -> Promise(Result(User, ApiError)) {
     json.object([
       #("email", json.string(request.email)),
       #("password", json.string(request.password)),
-      #("full_name", case request.full_name {
-        Some(name) -> json.string(name)
-        None -> json.null()
-      }),
     ])
     |> json.to_string
 
@@ -88,11 +83,6 @@ fn decode_user(data: dynamic.Dynamic) -> Result(User, ApiError) {
   let decoder = {
     use id <- decode.field("id", decode.string)
     use email <- decode.field("email", decode.string)
-    use hashed_password <- decode.optional_field(
-      "hashed_password",
-      None,
-      decode.optional(decode.string),
-    )
     use is_active <- decode.optional_field("is_active", True, decode.bool)
     use is_superuser <- decode.optional_field(
       "is_superuser",
@@ -101,19 +91,12 @@ fn decode_user(data: dynamic.Dynamic) -> Result(User, ApiError) {
     )
     use is_verified <- decode.optional_field("is_verified", False, decode.bool)
 
-    // For now, skip decoding complex nested types
-    let roles = None
-    let records = None
-
     decode.success(models.User(
       id: id,
       email: email,
-      hashed_password: hashed_password,
       is_active: is_active,
       is_superuser: is_superuser,
       is_verified: is_verified,
-      roles: roles,
-      records: records,
     ))
   }
 

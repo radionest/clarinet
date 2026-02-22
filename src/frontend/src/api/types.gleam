@@ -1,5 +1,4 @@
 // Core types for the API layer
-import gleam/option.{type Option}
 
 // API Error types
 pub type ApiError {
@@ -8,13 +7,6 @@ pub type ApiError {
   AuthError(String)
   ServerError(code: Int, message: String)
   ValidationError(errors: List(#(String, String)))
-}
-
-// User role types
-pub type UserRole {
-  Admin
-  User
-  Viewer
 }
 
 // Record status (matching backend RecordStatus enum)
@@ -27,8 +19,6 @@ pub type RecordStatus {
   // finished in backend
   Failed
   // failed in backend
-  Cancelled
-  // cancelled in backend
   Paused
   // pause in backend
 }

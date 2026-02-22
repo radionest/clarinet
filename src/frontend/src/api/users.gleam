@@ -5,7 +5,6 @@ import api/types.{type ApiError}
 import gleam/dynamic
 import gleam/dynamic/decode
 import gleam/javascript/promise.{type Promise}
-import gleam/option.{None}
 import gleam/result
 
 // Get all users
@@ -25,12 +24,9 @@ pub fn user_decoder() -> decode.Decoder(User) {
   decode.success(models.User(
     id: id,
     email: email,
-    hashed_password: None,
     is_active: is_active,
     is_superuser: is_superuser,
     is_verified: is_verified,
-    roles: None,
-    records: None,
   ))
 }
 

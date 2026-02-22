@@ -61,6 +61,7 @@ pub fn record_decoder() -> decode.Decoder(Record) {
     study_anon_uid: None,
     series_anon_uid: None,
     clarinet_storage_path: None,
+    files: None,
     patient: None,
     study: None,
     series: None,
@@ -86,7 +87,6 @@ fn parse_status(status: String) -> types.RecordStatus {
     "finished" -> types.Finished
     "failed" -> types.Failed
     "pause" -> types.Paused
-    "cancelled" -> types.Cancelled
     _ -> types.Pending
   }
 }
