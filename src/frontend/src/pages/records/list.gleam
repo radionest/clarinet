@@ -203,11 +203,7 @@ fn record_row(model: Model, record: Record) -> Element(Msg) {
   let record_id_str = int.to_string(record_id)
 
   let type_label = case record.record_type {
-    Some(rt) ->
-      case rt.label {
-        Some(l) -> l
-        None -> rt.name
-      }
+    Some(rt) -> option.unwrap(rt.label, rt.name)
     None -> record.record_type_name
   }
 

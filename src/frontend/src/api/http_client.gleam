@@ -19,24 +19,27 @@ import multipart_form
 import multipart_form/field.{type FormBody}
 import plinth/browser/window
 
-/// Builds an HTTP request with standard headers and API prefix.
-/// Attempts to use the browser's origin as base URL, falling back to relative paths.
+/// Creates a base request with origin resolution, method, path prefix, and accept header.
+fn base_request(method: http.Method, path: String) -> request.Request(String) {
+  {
+    use origin <- result.try(window.origin() |> uri.parse)
+    request.from_uri(origin)
+  }
+  |> result.unwrap(request.new())
+  |> request.set_method(method)
+  |> request.set_path("/api" <> path)
+  |> request.set_header("accept", "application/json")
+}
+
+/// Builds an HTTP request with JSON content-type and optional body.
 fn build_request(
   method method: http.Method,
   path path: String,
   body body: Option(String),
 ) -> request.Request(String) {
   let req =
-    {
-      // Try to get browser origin for absolute URLs, fallback to relative
-      use origin <- result.try(window.origin() |> uri.parse)
-      request.from_uri(origin)
-    }
-    |> result.unwrap(request.new())
-    |> request.set_method(method)
-    |> request.set_path("/api" <> path)
+    base_request(method, path)
     |> request.set_header("content-type", "application/json")
-    |> request.set_header("accept", "application/json")
 
   case body {
     Some(json_body) -> request.set_body(req, json_body)
@@ -45,26 +48,14 @@ fn build_request(
 }
 
 /// Builds an HTTP request with multipart/form-data body.
-/// Used for form submissions that need to send data as form fields rather than JSON.
 fn build_multipart_request(
   method method: http.Method,
   path path: String,
   form form: List(#(String, FormBody)),
 ) -> request.Request(BitArray) {
-  let req =
-    {
-      // Try to get browser origin for absolute URLs, fallback to relative
-      use origin <- result.try(window.origin() |> uri.parse)
-      request.from_uri(origin)
-    }
-    |> result.unwrap(request.new())
-    |> request.set_method(method)
-    |> request.set_path("/api" <> path)
-    |> request.set_header("content-type", "multipart/form-data")
-    |> request.set_header("accept", "application/json")
-    |> multipart_form.to_request(form)
-
-  req
+  base_request(method, path)
+  |> request.set_header("content-type", "multipart/form-data")
+  |> multipart_form.to_request(form)
 }
 
 /// Processes HTTP responses, converting status codes to appropriate errors.

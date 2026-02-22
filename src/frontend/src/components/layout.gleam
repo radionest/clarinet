@@ -84,14 +84,10 @@ fn user_menu(model: Model) -> Element(Msg) {
 // Notification area for errors and success messages
 fn notifications(model: Model) -> Element(Msg) {
   html.div([attribute.class("notifications")], [
-    case model.error {
-      Some(error) -> error_notification(error)
-      None -> html.text("")
-    },
-    case model.success_message {
-      Some(message) -> success_notification(message)
-      None -> html.text("")
-    },
+    option.map(model.error, error_notification)
+      |> option.unwrap(html.text("")),
+    option.map(model.success_message, success_notification)
+      |> option.unwrap(html.text("")),
   ])
 }
 
