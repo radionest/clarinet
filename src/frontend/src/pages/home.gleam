@@ -21,7 +21,10 @@ pub fn view(model: Model) -> Element(Msg) {
             html.text("Welcome back, " <> user.email <> "!"),
           ]),
           stats_section(model),
-          recent_activity(model),
+          case user.is_superuser {
+            True -> recent_activity(model)
+            False -> html.text("")
+          },
         ])
       }
       None -> {
@@ -63,11 +66,19 @@ fn stat_card(
 fn stats_section(model: Model) -> Element(Msg) {
   html.div([attribute.class("dashboard-section")], [
     html.h3([], [html.text("Overview")]),
-    html.div([attribute.class("stats-grid")], [
-      stat_card(label: "Studies", count: dict.size(model.studies), color: "blue", route: router.Studies),
-      stat_card(label: "Records", count: dict.size(model.records), color: "green", route: router.Records),
-      stat_card(label: "Users", count: dict.size(model.users), color: "purple", route: router.Users),
-    ]),
+    html.div(
+      [attribute.class("stats-grid")],
+      case model.user {
+        Some(models.User(is_superuser: True, ..)) -> [
+          stat_card(label: "Studies", count: dict.size(model.studies), color: "blue", route: router.Studies),
+          stat_card(label: "Records", count: dict.size(model.records), color: "green", route: router.Records),
+          stat_card(label: "Users", count: dict.size(model.users), color: "purple", route: router.Users),
+        ]
+        _ -> [
+          stat_card(label: "My Records", count: dict.size(model.records), color: "green", route: router.Records),
+        ]
+      },
+    ),
   ])
 }
 

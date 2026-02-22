@@ -115,11 +115,14 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
                 modem.push("/", option.None, option.None),
               )
             }
-            _, _, _ -> {
-              // Load data for the new route
-              let effect = load_route_data(new_model, route)
-              #(new_model, effect)
-            }
+            _, _, _ ->
+              case router.requires_admin_role(route), model.user {
+                True, Some(models.User(is_superuser: False, ..)) -> #(
+                  store.set_route(model, router.Home),
+                  modem.push("/", option.None, option.None),
+                )
+                _, _ -> #(new_model, load_route_data(new_model, route))
+              }
           }
         }
       }
@@ -150,7 +153,14 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
                 store.set_route(new_model, router.Home),
                 modem.push("/", option.None, option.None),
               )
-            _, _, _ -> #(new_model, load_route_data(new_model, route))
+            _, _, _ ->
+              case router.requires_admin_role(route), new_model.user {
+                True, Some(models.User(is_superuser: False, ..)) -> #(
+                  store.set_route(new_model, router.Home),
+                  modem.push("/", option.None, option.None),
+                )
+                _, _ -> #(new_model, load_route_data(new_model, route))
+              }
           }
         }
         Error(_) -> {
@@ -349,13 +359,9 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
 
     // Data loading - Records (role-aware)
     store.LoadRecords -> {
-      let is_admin = case model.user {
-        Some(u) -> u.is_superuser
-        None -> False
-      }
-      let fetch_fn = case is_admin {
-        True -> records.get_records
-        False -> records.get_my_records
+      let fetch_fn = case model.user {
+        Some(models.User(is_superuser: True, ..)) -> records.get_records
+        _ -> records.get_my_records
       }
       let load_effect =
         effect.from(fn(dispatch) {
@@ -558,18 +564,22 @@ fn view_content(model: Model) -> Element(Msg) {
 // Load data for route
 fn load_route_data(model: Model, route: Route) -> Effect(Msg) {
   case route, model.user {
-    router.Home, Some(_) ->
+    router.Home, Some(models.User(is_superuser: True, ..)) ->
       effect.batch([
         effect.from(fn(dispatch) { dispatch(store.LoadStudies) }),
         effect.from(fn(dispatch) { dispatch(store.LoadRecords) }),
         effect.from(fn(dispatch) { dispatch(store.LoadUsers) }),
       ])
+    router.Home, Some(_) ->
+      effect.from(fn(dispatch) { dispatch(store.LoadRecords) })
     router.Home, None -> effect.none()
-    router.Studies, _ -> effect.from(fn(dispatch) { dispatch(store.LoadStudies) })
+    router.Studies, Some(models.User(is_superuser: True, ..)) ->
+      effect.from(fn(dispatch) { dispatch(store.LoadStudies) })
     router.Records, _ -> effect.from(fn(dispatch) { dispatch(store.LoadRecords) })
     router.RecordDetail(id), Some(_) ->
       effect.from(fn(dispatch) { dispatch(store.LoadRecordDetail(id)) })
-    router.Users, _ -> effect.from(fn(dispatch) { dispatch(store.LoadUsers) })
+    router.Users, Some(models.User(is_superuser: True, ..)) ->
+      effect.from(fn(dispatch) { dispatch(store.LoadUsers) })
     router.AdminDashboard, Some(_) ->
       effect.batch([
         effect.from(fn(dispatch) { dispatch(store.LoadAdminStats) }),

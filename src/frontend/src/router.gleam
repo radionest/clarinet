@@ -75,6 +75,14 @@ pub fn requires_auth(route: Route) -> Bool {
   }
 }
 
+// Check if route requires admin role
+pub fn requires_admin_role(route: Route) -> Bool {
+  case route {
+    Studies | StudyDetail(_) | Users | UserProfile(_) | AdminDashboard -> True
+    _ -> False
+  }
+}
+
 // Get route title for display
 pub fn get_route_title(route: Route) -> String {
   case route {

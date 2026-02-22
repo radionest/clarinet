@@ -26,11 +26,11 @@ fn navbar(model: Model) -> Element(Msg) {
       nav_link(route: router.Home, text: "Clarinet", current_route: model.route),
     ]),
     html.div([attribute.class("navbar-menu")], [
-      nav_link(route: router.Studies, text: "Studies", current_route: model.route),
       nav_link(route: router.Records, text: "Records", current_route: model.route),
       case is_admin(model) {
         True ->
           element.fragment([
+            nav_link(route: router.Studies, text: "Studies", current_route: model.route),
             nav_link(route: router.Users, text: "Users", current_route: model.route),
             nav_link(route: router.AdminDashboard, text: "Admin", current_route: model.route),
           ])
