@@ -524,6 +524,17 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       #(store.set_error(model, Some(error)), effect.none())
     }
 
+    // Filters
+    store.AddFilter(key, value) -> {
+      #(store.apply_filter(model, key, value), effect.none())
+    }
+    store.RemoveFilter(key) -> {
+      #(store.remove_filter(model, key), effect.none())
+    }
+    store.ClearFilters -> {
+      #(store.clear_filters(model), effect.none())
+    }
+
     // Default case
     _ -> #(model, effect.none())
   }

@@ -1,6 +1,7 @@
 // Records list page
 import api/models.{type Record}
 import api/types
+import components/forms/base
 import gleam/dict
 import gleam/int
 import gleam/list
@@ -8,6 +9,7 @@ import gleam/option.{None, Some}
 import lustre/attribute
 import lustre/element.{type Element}
 import lustre/element/html
+import lustre/event
 import store.{type Model, type Msg}
 
 pub fn view(model: Model) -> Element(Msg) {
@@ -28,14 +30,146 @@ pub fn view(model: Model) -> Element(Msg) {
         html.div([attribute.class("loading")], [
           html.p([], [html.text("Loading records...")]),
         ])
-      False -> records_table(model)
+      False -> {
+        let all_records = dict.values(model.records)
+        html.div([], [
+          filter_bar(model, all_records),
+          records_table(model, all_records),
+        ])
+      }
     },
   ])
 }
 
-fn records_table(model: Model) -> Element(Msg) {
+fn filter_bar(model: Model, all_records: List(Record)) -> Element(Msg) {
+  let status_value =
+    dict.get(model.active_filters, "status")
+    |> option.from_result()
+    |> option.unwrap("")
+
+  let type_value =
+    dict.get(model.active_filters, "record_type")
+    |> option.from_result()
+    |> option.unwrap("")
+
+  let patient_value =
+    dict.get(model.active_filters, "patient")
+    |> option.from_result()
+    |> option.unwrap("")
+
+  let status_options = [
+    #("", "All Statuses"),
+    #("pending", "Pending"),
+    #("inwork", "In Progress"),
+    #("finished", "Completed"),
+    #("failed", "Failed"),
+    #("paused", "Paused"),
+  ]
+
+  let type_options = {
+    let types =
+      list.map(all_records, fn(r) { r.record_type_name })
+      |> list.unique()
+      |> list.sort(fn(a, b) { string.compare(a, b) })
+    [#("", "All Types"), ..list.map(types, fn(t) { #(t, t) })]
+  }
+
+  let patient_options = {
+    let patients =
+      list.map(all_records, fn(r) { r.patient_id })
+      |> list.unique()
+      |> list.sort(fn(a, b) { string.compare(a, b) })
+    [#("", "All Patients"), ..list.map(patients, fn(p) { #(p, p) })]
+  }
+
+  let has_filters = !dict.is_empty(model.active_filters)
+
+  html.div([attribute.class("filter-bar")], [
+    base.select(
+      name: "filter-status",
+      value: status_value,
+      options: status_options,
+      on_change: fn(val) {
+        case val {
+          "" -> store.RemoveFilter("status")
+          _ -> store.AddFilter("status", val)
+        }
+      },
+    ),
+    base.select(
+      name: "filter-record-type",
+      value: type_value,
+      options: type_options,
+      on_change: fn(val) {
+        case val {
+          "" -> store.RemoveFilter("record_type")
+          _ -> store.AddFilter("record_type", val)
+        }
+      },
+    ),
+    base.select(
+      name: "filter-patient",
+      value: patient_value,
+      options: patient_options,
+      on_change: fn(val) {
+        case val {
+          "" -> store.RemoveFilter("patient")
+          _ -> store.AddFilter("patient", val)
+        }
+      },
+    ),
+    case has_filters {
+      True ->
+        html.button(
+          [
+            attribute.type_("button"),
+            attribute.class("btn btn-sm btn-outline"),
+            event.on_click(store.ClearFilters),
+          ],
+          [html.text("Clear Filters")],
+        )
+      False -> html.text("")
+    },
+  ])
+}
+
+fn status_to_string(status: types.RecordStatus) -> String {
+  case status {
+    types.Pending -> "pending"
+    types.InWork -> "inwork"
+    types.Finished -> "finished"
+    types.Failed -> "failed"
+    types.Paused -> "paused"
+  }
+}
+
+fn apply_filters(
+  records: List(Record),
+  filters: dict.Dict(String, String),
+) -> List(Record) {
+  list.filter(records, fn(record) {
+    let status_ok = case dict.get(filters, "status") {
+      Ok(status_filter) -> status_to_string(record.status) == status_filter
+      Error(_) -> True
+    }
+
+    let type_ok = case dict.get(filters, "record_type") {
+      Ok(type_filter) -> record.record_type_name == type_filter
+      Error(_) -> True
+    }
+
+    let patient_ok = case dict.get(filters, "patient") {
+      Ok(patient_filter) -> record.patient_id == patient_filter
+      Error(_) -> True
+    }
+
+    status_ok && type_ok && patient_ok
+  })
+}
+
+fn records_table(model: Model, all_records: List(Record)) -> Element(Msg) {
   let records =
-    dict.values(model.records)
+    apply_filters(all_records, model.active_filters)
     |> list.sort(fn(a, b) {
       int.compare(option.unwrap(a.id, 0), option.unwrap(b.id, 0))
     })
@@ -130,3 +264,5 @@ fn record_row(model: Model, record: Record) -> Element(Msg) {
     ]),
   ])
 }
+
+import gleam/string
