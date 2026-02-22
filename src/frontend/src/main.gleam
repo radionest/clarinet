@@ -325,7 +325,7 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           dict.insert(acc, study.study_uid, study)
         })
       let new_model =
-        store.Model(..model, studies: studies_dict, studies_list: studies_list, loading: False)
+        store.Model(..model, studies: studies_dict, loading: False)
       #(new_model, effect.none())
     }
 
@@ -357,7 +357,7 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           }
         })
       let new_model =
-        store.Model(..model, records: records_dict, records_list: records_list, loading: False)
+        store.Model(..model, records: records_dict, loading: False)
       #(new_model, effect.none())
     }
 
@@ -386,7 +386,7 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           dict.insert(acc, user.id, user)
         })
       let new_model =
-        store.Model(..model, users: users_dict, users_list: users_list, loading: False)
+        store.Model(..model, users: users_dict, loading: False)
       #(new_model, effect.none())
     }
 
@@ -445,7 +445,7 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     store.AdminAssignUserResult(Ok(record)) -> {
       let new_model =
         model
-        |> store.update_record_in_list(record)
+        |> store.update_record(record)
         |> store.set_loading(False)
         |> store.set_success("User assigned successfully")
       #(new_model, effect.none())

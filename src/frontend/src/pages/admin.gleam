@@ -61,7 +61,12 @@ fn status_section(stats: models.AdminStats) -> Element(Msg) {
 fn records_section(model: Model) -> Element(Msg) {
   html.div([attribute.class("dashboard-section")], [
     html.h3([], [html.text("Records")]),
-    case model.records_list {
+    case
+      dict.values(model.records)
+      |> list.sort(fn(a, b) {
+        int.compare(option.unwrap(a.id, 0), option.unwrap(b.id, 0))
+      })
+    {
       [] ->
         html.p([attribute.class("text-muted")], [html.text("No records found.")])
       records ->
@@ -169,7 +174,9 @@ fn user_dropdown(model: Model, record_id: Int) -> Element(Msg) {
       ],
       [
         html.option([attribute.value("")], "Select user..."),
-        ..list.map(model.users_list, fn(user) {
+        ..dict.values(model.users)
+        |> list.sort(fn(a, b) { string.compare(a.email, b.email) })
+        |> list.map(fn(user) {
           html.option([attribute.value(user.id)], user.email)
         })
       ],

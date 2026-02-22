@@ -8,9 +8,7 @@ import gleam/dict.{type Dict}
 import gleam/dynamic
 import gleam/int
 import gleam/json.{type Json}
-import gleam/list
 import gleam/option.{type Option, None, Some}
-import gleam/result
 import router.{type Route}
 
 // Application state model
@@ -43,10 +41,6 @@ pub type Model {
     record_type_form: Option(dynamic.Dynamic),
     patient_form: Option(dynamic.Dynamic),
     form_errors: Dict(String, String),
-    // List views
-    studies_list: List(Study),
-    records_list: List(Record),
-    users_list: List(User),
     // Pagination
     current_page: Int,
     items_per_page: Int,
@@ -183,9 +177,6 @@ pub fn init() -> Model {
     record_type_form: None,
     patient_form: None,
     form_errors: dict.new(),
-    studies_list: [],
-    records_list: [],
-    users_list: [],
     current_page: 1,
     items_per_page: 20,
     total_items: 0,
@@ -286,19 +277,13 @@ pub fn clear_filters(model: Model) -> Model {
   Model(..model, active_filters: dict.new(), search_query: "")
 }
 
-// Update a record in the records list by replacing the matching entry
-pub fn update_record_in_list(model: Model, updated: Record) -> Model {
-  let new_list =
-    list.map(model.records_list, fn(r) {
-      case r.id == updated.id {
-        True -> updated
-        False -> r
-      }
-    })
-  // Also update the dict cache
-  let new_dict = case updated.id {
-    Some(id) -> dict.insert(model.records, int.to_string(id), updated)
-    None -> model.records
+// Update a record in the records dict cache
+pub fn update_record(model: Model, updated: Record) -> Model {
+  case updated.id {
+    Some(id) -> {
+      let records = dict.insert(model.records, int.to_string(id), updated)
+      Model(..model, records: records)
+    }
+    None -> model
   }
-  Model(..model, records_list: new_list, records: new_dict)
 }
