@@ -314,10 +314,10 @@ async def assign_record_to_user(
 @router.post("/{record_id}/data", response_model=RecordRead)
 async def submit_record_data(
     record_id: int,
-    data: RecordData,
     request: Request,
     background_tasks: BackgroundTasks,
     repo: RecordRepositoryDep,
+    data: RecordData = Body(),
 ) -> Record:
     """Submit data for a record."""
     record = await repo.get_with_record_type(record_id)
@@ -358,8 +358,8 @@ async def submit_record_data(
 @router.patch("/{record_id}/data", response_model=RecordRead)
 async def update_record_data(
     record_id: int,
-    data: RecordData,
     repo: RecordRepositoryDep,
+    data: RecordData = Body(),
 ) -> Record:
     """Update a record's data."""
     record = await repo.get_with_record_type(record_id)
