@@ -271,12 +271,20 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     }
 
     store.Logout -> {
-      // Cookie will be cleared by server on logout
-      let new_model =
-        store.clear_user(model)
-        |> store.set_route(router.Login)
+      let logout_effect =
+        effect.from(fn(dispatch) {
+          auth.logout()
+          |> promise.tap(fn(_) { dispatch(store.LogoutComplete) })
+          Nil
+        })
+      #(store.clear_user(model), logout_effect)
+    }
 
-      #(new_model, modem.push("/login", option.None, option.None))
+    store.LogoutComplete -> {
+      #(
+        store.set_route(model, router.Login),
+        modem.push("/login", option.None, option.None),
+      )
     }
 
     // UI Messages
