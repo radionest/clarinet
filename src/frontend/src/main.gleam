@@ -24,7 +24,6 @@ import pages/login
 import pages/register
 import router.{type Route}
 import store.{type Model, type Msg}
-import utils/dom
 
 // Initialize the application
 pub fn main() {
@@ -143,6 +142,27 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       }
     }
 
+    // Auth form updates
+    store.LoginUpdateEmail(value) -> {
+      #(store.Model(..model, login_email: value), effect.none())
+    }
+
+    store.LoginUpdatePassword(value) -> {
+      #(store.Model(..model, login_password: value), effect.none())
+    }
+
+    store.RegisterUpdateEmail(value) -> {
+      #(store.Model(..model, register_email: value), effect.none())
+    }
+
+    store.RegisterUpdatePassword(value) -> {
+      #(store.Model(..model, register_password: value), effect.none())
+    }
+
+    store.RegisterUpdatePasswordConfirm(value) -> {
+      #(store.Model(..model, register_password_confirm: value), effect.none())
+    }
+
     // Authentication
     store.LoginSubmit(email, password) -> {
       let new_model = store.set_loading(model, True)
@@ -171,6 +191,7 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         |> store.set_user(user)
         |> store.set_loading(False)
         |> store.clear_messages()
+        |> store.clear_auth_forms()
         |> store.set_route(router.Home)
 
       #(new_model, modem.push("/", option.None, option.None))
@@ -224,6 +245,7 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         |> store.set_user(user)
         |> store.set_loading(False)
         |> store.clear_messages()
+        |> store.clear_auth_forms()
         |> store.set_success("Registration successful! Welcome to Clarinet.")
         |> store.set_route(router.Home)
 

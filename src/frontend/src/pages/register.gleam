@@ -7,7 +7,6 @@ import lustre/element/html
 import lustre/event
 import router
 import store.{type Model, type Msg}
-import utils/dom
 
 pub fn view(model: Model) -> Element(Msg) {
   html.div([attribute.class("register-page")], [
@@ -41,7 +40,7 @@ fn register_form(model: Model) -> Element(Msg) {
   html.form(
     [
       attribute.class("register-form"),
-      event.on_submit(fn(_) { handle_submit() }),
+      event.on_submit(fn(_) { handle_submit(model) }),
     ],
     [
       // Email field
@@ -52,8 +51,10 @@ fn register_form(model: Model) -> Element(Msg) {
           attribute.id("reg-email"),
           attribute.name("email"),
           attribute.placeholder("your.email@example.com"),
+          attribute.value(model.register_email),
           attribute.required(True),
           attribute.disabled(model.loading),
+          event.on_input(store.RegisterUpdateEmail),
         ]),
         html.small([attribute.class("form-text text-muted")], [
           html.text("This will be your unique identifier for login"),
@@ -68,9 +69,11 @@ fn register_form(model: Model) -> Element(Msg) {
           attribute.id("reg-password"),
           attribute.name("password"),
           attribute.placeholder("Enter a strong password"),
+          attribute.value(model.register_password),
           attribute.required(True),
           attribute.disabled(model.loading),
           attribute.attribute("minlength", "8"),
+          event.on_input(store.RegisterUpdatePassword),
         ]),
         html.small([attribute.class("form-text text-muted")], [
           html.text("Minimum 8 characters"),
@@ -87,8 +90,10 @@ fn register_form(model: Model) -> Element(Msg) {
           attribute.id("reg-password-confirm"),
           attribute.name("password-confirm"),
           attribute.placeholder("Re-enter your password"),
+          attribute.value(model.register_password_confirm),
           attribute.required(True),
           attribute.disabled(model.loading),
+          event.on_input(store.RegisterUpdatePasswordConfirm),
         ]),
       ]),
 
@@ -126,29 +131,14 @@ fn register_form(model: Model) -> Element(Msg) {
   )
 }
 
-// Handle form submission
-fn handle_submit() -> Msg {
-  // Get form values using native Gleam DOM utilities
-  let email = case dom.get_input_value("reg-email") {
-    Some(value) -> value
-    None -> ""
-  }
-  let password = case dom.get_input_value("reg-password") {
-    Some(value) -> value
-    None -> ""
-  }
-  let password_confirm = case dom.get_input_value("reg-password-confirm") {
-    Some(value) -> value
-    None -> ""
-  }
-
-  // Basic client-side validation
-  case password == password_confirm {
+// Handle form submission — reads from Model state
+fn handle_submit(model: Model) -> Msg {
+  case model.register_password == model.register_password_confirm {
     False -> store.SetError(Some("Passwords do not match"))
     True -> {
-      case string.length(password) < 8 {
+      case string.length(model.register_password) < 8 {
         True -> store.SetError(Some("Password must be at least 8 characters"))
-        False -> store.RegisterSubmit(email, password)
+        False -> store.RegisterSubmit(model.register_email, model.register_password)
       }
     }
   }

@@ -59,7 +59,7 @@ pub fn register(request: RegisterRequest) -> Promise(Result(User, ApiError)) {
     ])
     |> json.to_string
 
-  http_client.post("/api/auth/register", body)
+  http_client.post("/auth/register", body)
   |> promise.map(fn(result) { result.try(result, decode_user) })
 }
 

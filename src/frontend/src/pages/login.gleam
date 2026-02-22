@@ -6,7 +6,6 @@ import lustre/element/html
 import lustre/event
 import router
 import store.{type Model, type Msg}
-import utils/dom
 
 pub fn view(model: Model) -> Element(Msg) {
   html.div([attribute.class("login-page")], [
@@ -38,7 +37,9 @@ fn login_form(model: Model) -> Element(Msg) {
   html.form(
     [
       attribute.class("login-form"),
-      event.on_submit(fn(_) { handle_submit() }),
+      event.on_submit(fn(_) {
+        store.LoginSubmit(model.login_email, model.login_password)
+      }),
     ],
     [
       // Email field
@@ -49,8 +50,10 @@ fn login_form(model: Model) -> Element(Msg) {
           attribute.id("email"),
           attribute.name("email"),
           attribute.placeholder("Enter your email"),
+          attribute.value(model.login_email),
           attribute.required(True),
           attribute.disabled(model.loading),
+          event.on_input(store.LoginUpdateEmail),
         ]),
       ]),
 
@@ -62,8 +65,10 @@ fn login_form(model: Model) -> Element(Msg) {
           attribute.id("password"),
           attribute.name("password"),
           attribute.placeholder("Enter password"),
+          attribute.value(model.login_password),
           attribute.required(True),
           attribute.disabled(model.loading),
+          event.on_input(store.LoginUpdatePassword),
         ]),
       ]),
 
@@ -89,18 +94,4 @@ fn login_form(model: Model) -> Element(Msg) {
       ),
     ],
   )
-}
-
-// Handle form submission
-fn handle_submit() -> Msg {
-  // Get form values using native Gleam DOM utilities
-  let email = case dom.get_input_value("email") {
-    Some(value) -> value
-    None -> ""
-  }
-  let password = case dom.get_input_value("password") {
-    Some(value) -> value
-    None -> ""
-  }
-  store.LoginSubmit(email, password)
 }
