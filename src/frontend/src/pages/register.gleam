@@ -23,10 +23,7 @@ pub fn view(model: Model) -> Element(Msg) {
           html.p([attribute.class("text-muted")], [
             html.text("Already have an account? "),
             html.a(
-              [
-                attribute.href("#"),
-                event.on_click(store.Navigate(router.Login)),
-              ],
+              [attribute.href(router.route_to_path(router.Login))],
               [html.text("Login here")],
             ),
           ]),

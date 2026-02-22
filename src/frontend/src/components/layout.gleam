@@ -57,7 +57,6 @@ fn nav_link(
     [
       attribute.href(router.route_to_path(route)),
       attribute.class(classes),
-      event.on_click(store.Navigate(route)),
     ],
     [html.text(text)],
   )

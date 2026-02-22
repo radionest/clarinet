@@ -7,7 +7,6 @@ import gleam/option.{None, Some}
 import lustre/attribute
 import lustre/element.{type Element}
 import lustre/element/html
-import lustre/event
 import router
 import store.{type Model, type Msg}
 
@@ -55,7 +54,6 @@ fn stat_card(
       [
         attribute.href(router.route_to_path(route)),
         attribute.class("stat-link"),
-        event.on_click(store.Navigate(route)),
       ],
       [html.text("View all →")],
     ),
@@ -104,7 +102,6 @@ fn study_item(study: models.Study) -> Element(Msg) {
           router.route_to_path(router.StudyDetail(study.study_uid)),
         ),
         attribute.class("recent-link"),
-        event.on_click(store.Navigate(router.StudyDetail(study.study_uid))),
       ],
       [
         html.span([attribute.class("recent-title")], [

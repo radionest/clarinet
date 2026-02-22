@@ -19,13 +19,9 @@ pub fn view(model: Model) -> Element(Msg) {
         html.div([attribute.class("login-footer")], [
           html.p([attribute.class("text-muted")], [
             html.text("Don't have an account? "),
-            html.a(
-              [
-                attribute.href("#"),
-                event.on_click(store.Navigate(router.Register)),
-              ],
-              [html.text("Register here")],
-            ),
+            html.a([attribute.href(router.route_to_path(router.Register))], [
+              html.text("Register here"),
+            ]),
           ]),
         ]),
       ]),

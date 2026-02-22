@@ -9,7 +9,9 @@ import api/users
 import components/layout
 import gleam/dict
 import gleam/int
+import gleam/io
 import gleam/javascript/promise
+import gleam/string
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/uri.{type Uri}
@@ -60,7 +62,9 @@ fn init(_flags) -> #(Model, Effect(Msg)) {
 
 // Handle URL changes from modem
 fn on_url_change(uri: Uri) -> Msg {
+  io.println(">>> on_url_change fired, uri: " <> string.inspect(uri))
   let route = router.parse_route(uri)
+  io.println(">>> parsed route: " <> string.inspect(route))
   store.OnRouteChange(route)
 }
 
@@ -69,42 +73,49 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
   case msg {
     // Routing
     store.OnRouteChange(route) -> {
+      io.println(
+        ">>> OnRouteChange handler, route: " <> string.inspect(route)
+        <> ", checking_session: " <> string.inspect(model.checking_session)
+        <> ", user: " <> string.inspect(model.user),
+      )
       let new_model = store.set_route(model, route)
 
       // Don't redirect while session check is in progress
       case model.checking_session {
         True -> #(new_model, effect.none())
-        False ->
+        False -> {
           // Check authentication requirement
-          case router.requires_auth(route), model.user {
-            True, None -> {
+          let is_auth_page = route == router.Login || route == router.Register
+          case router.requires_auth(route), model.user, is_auth_page {
+            True, None, _ -> {
               // Redirect to login if auth required
               #(
                 store.set_route(model, router.Login),
                 modem.push("/login", option.None, option.None),
               )
             }
-            False, Some(_)
-              if route == router.Login || route == router.Register
-            -> {
+            False, Some(_), True -> {
               // Redirect from login/register if already authenticated
               #(
                 store.set_route(model, router.Home),
                 modem.push("/", option.None, option.None),
               )
             }
-            _, _ -> {
+            _, _, _ -> {
               // Load data for the new route
               let effect = load_route_data(new_model, route)
               #(new_model, effect)
             }
           }
+        }
       }
     }
 
     store.Navigate(route) -> {
+      io.println(">>> Navigate handler, route: " <> string.inspect(route))
       // Use Modem to update URL without page reload
       let path = router.route_to_path(route)
+      io.println(">>> Navigate pushing path: " <> path)
       #(model, modem.push(path, option.None, option.None))
     }
 
@@ -118,13 +129,14 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
             |> store.set_user(user)
             |> fn(m) { store.Model(..m, checking_session: False) }
           let route = model.route
-          case router.requires_auth(route), new_model.user {
-            False, Some(_) if route == router.Login || route == router.Register ->
+          let is_auth_page = route == router.Login || route == router.Register
+          case router.requires_auth(route), new_model.user, is_auth_page {
+            False, Some(_), True ->
               #(
                 store.set_route(new_model, router.Home),
                 modem.push("/", option.None, option.None),
               )
-            _, _ -> #(new_model, load_route_data(new_model, route))
+            _, _, _ -> #(new_model, load_route_data(new_model, route))
           }
         }
         Error(_) -> {
