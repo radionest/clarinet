@@ -67,7 +67,7 @@ pub fn view(
     html.h3([attribute.class("form-title")], [html.text("Study Information")]),
 
     // Study UID field (required)
-    form.required_field(
+    form.field(
       "Study UID",
       "study_uid",
       form.text_input(
@@ -77,20 +77,22 @@ pub fn view(
         fn(value) { on_update(UpdateStudyUid(value)) },
       ),
       errors,
+      True,
     ),
 
     // Date field (required)
-    form.required_field(
+    form.field(
       "Study Date",
       "date",
       form.date_input("date", data.date, fn(value) {
         on_update(UpdateDate(value))
       }),
       errors,
+      True,
     ),
 
     // Patient ID field (required)
-    form.required_field(
+    form.field(
       "Patient ID",
       "patient_id",
       form.text_input(
@@ -100,6 +102,7 @@ pub fn view(
         fn(value) { on_update(UpdatePatientId(value)) },
       ),
       errors,
+      True,
     ),
 
     // Anonymous UID field (optional)
@@ -113,6 +116,7 @@ pub fn view(
         fn(value) { on_update(UpdateAnonUid(value)) },
       ),
       errors,
+      False,
     ),
 
     // Form actions

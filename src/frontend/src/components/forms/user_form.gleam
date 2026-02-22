@@ -86,7 +86,7 @@ pub fn view(
     ]),
 
     // Email field (required)
-    form.required_field(
+    form.field(
       "Email",
       "email",
       form.email_input(
@@ -96,13 +96,14 @@ pub fn view(
         fn(value) { on_update(UpdateEmail(value)) },
       ),
       errors,
+      True,
     ),
 
     // Password fields (required for new users, optional for edit)
     case is_edit {
       False -> {
         html.div([], [
-          form.required_field(
+          form.field(
             "Password",
             "password",
             form.password_input(
@@ -112,8 +113,9 @@ pub fn view(
               fn(value) { on_update(UpdatePassword(value)) },
             ),
             errors,
+            True,
           ),
-          form.required_field(
+          form.field(
             "Confirm Password",
             "password_confirm",
             form.password_input(
@@ -123,6 +125,7 @@ pub fn view(
               fn(value) { on_update(UpdatePasswordConfirm(value)) },
             ),
             errors,
+            True,
           ),
         ])
       }
@@ -141,6 +144,7 @@ pub fn view(
               fn(value) { on_update(UpdatePassword(value)) },
             ),
             errors,
+            False,
           ),
           case data.password {
             "" -> html.text("")
@@ -155,6 +159,7 @@ pub fn view(
                   fn(value) { on_update(UpdatePasswordConfirm(value)) },
                 ),
                 errors,
+                False,
               )
           },
         ])

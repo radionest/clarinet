@@ -62,7 +62,7 @@ pub fn view(
     html.h3([attribute.class("form-title")], [html.text("Patient Information")]),
 
     // Patient ID field (required)
-    form.required_field(
+    form.field(
       "Patient ID",
       "patient_id",
       form.text_input(
@@ -72,6 +72,7 @@ pub fn view(
         fn(value) { on_update(UpdatePatientId(value)) },
       ),
       errors,
+      True,
     ),
 
     // Anonymous ID field (optional)
@@ -85,6 +86,7 @@ pub fn view(
         fn(value) { on_update(UpdateAnonId(value)) },
       ),
       errors,
+      False,
     ),
 
     // Anonymous Name field (optional)
@@ -98,6 +100,7 @@ pub fn view(
         fn(value) { on_update(UpdateAnonName(value)) },
       ),
       errors,
+      False,
     ),
 
     // Form actions

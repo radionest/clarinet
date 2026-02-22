@@ -14,27 +14,19 @@ pub fn field(
   name: String,
   input: Element(Msg),
   errors: Dict(String, String),
+  required: Bool,
 ) -> Element(Msg) {
-  html.div([attribute.class("form-field")], [
+  let class = case required {
+    True -> "form-field required"
+    False -> "form-field"
+  }
+  html.div([attribute.class(class)], [
     html.label([attribute.for(name), attribute.class("form-label")], [
       html.text(label),
-    ]),
-    input,
-    error_message(errors, name),
-  ])
-}
-
-// Required field wrapper (adds asterisk to label)
-pub fn required_field(
-  label: String,
-  name: String,
-  input: Element(Msg),
-  errors: Dict(String, String),
-) -> Element(Msg) {
-  html.div([attribute.class("form-field required")], [
-    html.label([attribute.for(name), attribute.class("form-label")], [
-      html.text(label),
-      html.span([attribute.class("required-marker")], [html.text(" *")]),
+      case required {
+        True -> html.span([attribute.class("required-marker")], [html.text(" *")])
+        False -> html.text("")
+      },
     ]),
     input,
     error_message(errors, name),
