@@ -2,6 +2,7 @@
 import api/http_client
 import api/models.{type LoginResponse, type RegisterRequest, type User}
 import api/types.{type ApiError}
+import api/users
 import gleam/dynamic
 import gleam/dynamic/decode
 import gleam/javascript/promise.{type Promise}
@@ -80,27 +81,7 @@ pub fn refresh_token() -> Promise(Result(LoginResponse, ApiError)) {
 
 // Decode user from dynamic data
 fn decode_user(data: dynamic.Dynamic) -> Result(User, ApiError) {
-  let decoder = {
-    use id <- decode.field("id", decode.string)
-    use email <- decode.field("email", decode.string)
-    use is_active <- decode.optional_field("is_active", True, decode.bool)
-    use is_superuser <- decode.optional_field(
-      "is_superuser",
-      False,
-      decode.bool,
-    )
-    use is_verified <- decode.optional_field("is_verified", False, decode.bool)
-
-    decode.success(models.User(
-      id: id,
-      email: email,
-      is_active: is_active,
-      is_superuser: is_superuser,
-      is_verified: is_verified,
-    ))
-  }
-
-  case decode.run(data, decoder) {
+  case decode.run(data, users.user_decoder()) {
     Ok(user) -> Ok(user)
     Error(_) -> Error(types.ParseError("Invalid user data"))
   }
