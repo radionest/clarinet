@@ -43,10 +43,10 @@ pub fn view(model: Model) -> Element(Msg) {
 }
 
 fn stat_card(
-  label: String,
-  count: Int,
-  color: String,
-  route: router.Route,
+  label label: String,
+  count count: Int,
+  color color: String,
+  route route: router.Route,
 ) -> Element(Msg) {
   html.div([attribute.class("stat-card card stat-" <> color)], [
     html.div([attribute.class("stat-value")], [html.text(int.to_string(count))]),
@@ -66,9 +66,9 @@ fn stats_section(model: Model) -> Element(Msg) {
   html.div([attribute.class("dashboard-section")], [
     html.h3([], [html.text("Overview")]),
     html.div([attribute.class("stats-grid")], [
-      stat_card("Studies", dict.size(model.studies), "blue", router.Studies),
-      stat_card("Records", dict.size(model.records), "green", router.Records),
-      stat_card("Users", dict.size(model.users), "purple", router.Users),
+      stat_card(label: "Studies", count: dict.size(model.studies), color: "blue", route: router.Studies),
+      stat_card(label: "Records", count: dict.size(model.records), color: "green", route: router.Records),
+      stat_card(label: "Users", count: dict.size(model.users), color: "purple", route: router.Users),
     ]),
   ])
 }

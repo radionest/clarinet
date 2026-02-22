@@ -57,72 +57,72 @@ pub fn from_study(study: models.Study) -> StudyFormData {
 
 // Main form view
 pub fn view(
-  data: StudyFormData,
-  errors: Dict(String, String),
-  loading: Bool,
-  on_update: fn(StudyFormMsg) -> Msg,
-  on_submit: fn() -> Msg,
+  data data: StudyFormData,
+  errors errors: Dict(String, String),
+  loading loading: Bool,
+  on_update on_update: fn(StudyFormMsg) -> Msg,
+  on_submit on_submit: fn() -> Msg,
 ) -> Element(Msg) {
   form.form(on_submit, [
     html.h3([attribute.class("form-title")], [html.text("Study Information")]),
 
     // Study UID field (required)
     form.field(
-      "Study UID",
-      "study_uid",
-      form.text_input(
-        "study_uid",
-        data.study_uid,
-        Some("Enter DICOM Study Instance UID"),
-        fn(value) { on_update(UpdateStudyUid(value)) },
+      label: "Study UID",
+      name: "study_uid",
+      input: form.text_input(
+        name: "study_uid",
+        value: data.study_uid,
+        placeholder: Some("Enter DICOM Study Instance UID"),
+        on_input: fn(value) { on_update(UpdateStudyUid(value)) },
       ),
-      errors,
-      True,
+      errors: errors,
+      required: True,
     ),
 
     // Date field (required)
     form.field(
-      "Study Date",
-      "date",
-      form.date_input("date", data.date, fn(value) {
+      label: "Study Date",
+      name: "date",
+      input: form.date_input(name: "date", value: data.date, on_input: fn(value) {
         on_update(UpdateDate(value))
       }),
-      errors,
-      True,
+      errors: errors,
+      required: True,
     ),
 
     // Patient ID field (required)
     form.field(
-      "Patient ID",
-      "patient_id",
-      form.text_input(
-        "patient_id",
-        data.patient_id,
-        Some("Enter Patient ID"),
-        fn(value) { on_update(UpdatePatientId(value)) },
+      label: "Patient ID",
+      name: "patient_id",
+      input: form.text_input(
+        name: "patient_id",
+        value: data.patient_id,
+        placeholder: Some("Enter Patient ID"),
+        on_input: fn(value) { on_update(UpdatePatientId(value)) },
       ),
-      errors,
-      True,
+      errors: errors,
+      required: True,
     ),
 
     // Anonymous UID field (optional)
     form.field(
-      "Anonymous UID",
-      "anon_uid",
-      form.text_input(
-        "anon_uid",
-        data.anon_uid,
-        Some("Enter Anonymous UID (optional)"),
-        fn(value) { on_update(UpdateAnonUid(value)) },
+      label: "Anonymous UID",
+      name: "anon_uid",
+      input: form.text_input(
+        name: "anon_uid",
+        value: data.anon_uid,
+        placeholder: Some("Enter Anonymous UID (optional)"),
+        on_input: fn(value) { on_update(UpdateAnonUid(value)) },
       ),
-      errors,
-      False,
+      errors: errors,
+      required: False,
     ),
 
     // Form actions
     html.div([attribute.class("form-actions")], [
-      form.submit_button("Save Study", loading, Some(on_submit())),
-      form.cancel_button("Cancel", store.Navigate(router.Studies)),
+      form.submit_button(text: "Save Study", disabled: loading, on_click: Some(on_submit())),
+      form.cancel_button(text: "Cancel", on_click: store.Navigate(router.Studies)),
     ]),
 
     // Loading overlay
@@ -137,19 +137,19 @@ pub fn validate(
   let errors = dict.new()
 
   // Validate Study UID
-  let errors = case form.validate_required(data.study_uid, "Study UID") {
+  let errors = case form.validate_required(value: data.study_uid, field_name: "Study UID") {
     Error(msg) -> dict.insert(errors, "study_uid", msg)
     Ok(_) -> errors
   }
 
   // Validate Date
-  let errors = case form.validate_required(data.date, "Study Date") {
+  let errors = case form.validate_required(value: data.date, field_name: "Study Date") {
     Error(msg) -> dict.insert(errors, "date", msg)
     Ok(_) -> errors
   }
 
   // Validate Patient ID
-  let errors = case form.validate_required(data.patient_id, "Patient ID") {
+  let errors = case form.validate_required(value: data.patient_id, field_name: "Patient ID") {
     Error(msg) -> dict.insert(errors, "patient_id", msg)
     Ok(_) -> errors
   }

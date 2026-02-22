@@ -34,10 +34,10 @@ fn overview_section(stats: models.AdminStats) -> Element(Msg) {
   html.div([attribute.class("dashboard-section")], [
     html.h3([], [html.text("System Overview")]),
     html.div([attribute.class("stats-grid")], [
-      admin_stat_card("Studies", stats.total_studies, "blue"),
-      admin_stat_card("Records", stats.total_records, "green"),
-      admin_stat_card("Users", stats.total_users, "purple"),
-      admin_stat_card("Patients", stats.total_patients, "orange"),
+      admin_stat_card(label: "Studies", count: stats.total_studies, color: "blue"),
+      admin_stat_card(label: "Records", count: stats.total_records, color: "green"),
+      admin_stat_card(label: "Users", count: stats.total_users, color: "purple"),
+      admin_stat_card(label: "Patients", count: stats.total_patients, color: "orange"),
     ]),
   ])
 }
@@ -52,7 +52,7 @@ fn status_section(stats: models.AdminStats) -> Element(Msg) {
         |> list.sort(fn(a, b) { string.compare(a.0, b.0) })
         |> list.map(fn(pair) {
           let #(status, count) = pair
-          admin_stat_card(status, count, status_color(status))
+          admin_stat_card(label: status, count: count, color: status_color(status))
         }),
     ),
   ])
@@ -112,15 +112,15 @@ fn record_row(model: Model, record: models.Record) -> Element(Msg) {
       ]),
     ]),
     html.td([], [html.text(record.patient_id)]),
-    html.td([], [assign_cell(model, record_id, record.user_id, is_editing)]),
+    html.td([], [assign_cell(model: model, record_id: record_id, user_id: record.user_id, is_editing: is_editing)]),
   ])
 }
 
 fn assign_cell(
-  model: Model,
-  record_id: Int,
-  user_id: option.Option(String),
-  is_editing: Bool,
+  model model: Model,
+  record_id record_id: Int,
+  user_id user_id: option.Option(String),
+  is_editing is_editing: Bool,
 ) -> Element(Msg) {
   case is_editing {
     True -> user_dropdown(model, record_id)
@@ -184,7 +184,7 @@ fn user_dropdown(model: Model, record_id: Int) -> Element(Msg) {
   ])
 }
 
-fn admin_stat_card(label: String, count: Int, color: String) -> Element(Msg) {
+fn admin_stat_card(label label: String, count count: Int, color color: String) -> Element(Msg) {
   html.div([attribute.class("stat-card card stat-" <> color)], [
     html.div([attribute.class("stat-value")], [
       html.text(int.to_string(count)),

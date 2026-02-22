@@ -52,61 +52,61 @@ pub fn from_patient(patient: models.Patient) -> PatientFormData {
 
 // Main form view
 pub fn view(
-  data: PatientFormData,
-  errors: Dict(String, String),
-  loading: Bool,
-  on_update: fn(PatientFormMsg) -> Msg,
-  on_submit: fn() -> Msg,
+  data data: PatientFormData,
+  errors errors: Dict(String, String),
+  loading loading: Bool,
+  on_update on_update: fn(PatientFormMsg) -> Msg,
+  on_submit on_submit: fn() -> Msg,
 ) -> Element(Msg) {
   form.form(on_submit, [
     html.h3([attribute.class("form-title")], [html.text("Patient Information")]),
 
     // Patient ID field (required)
     form.field(
-      "Patient ID",
-      "patient_id",
-      form.text_input(
-        "patient_id",
-        data.id,
-        Some("Enter Patient ID"),
-        fn(value) { on_update(UpdatePatientId(value)) },
+      label: "Patient ID",
+      name: "patient_id",
+      input: form.text_input(
+        name: "patient_id",
+        value: data.id,
+        placeholder: Some("Enter Patient ID"),
+        on_input: fn(value) { on_update(UpdatePatientId(value)) },
       ),
-      errors,
-      True,
+      errors: errors,
+      required: True,
     ),
 
     // Anonymous ID field (optional)
     form.field(
-      "Anonymous ID",
-      "anon_id",
-      form.text_input(
-        "anon_id",
-        data.anon_id,
-        Some("Enter Anonymous ID (optional)"),
-        fn(value) { on_update(UpdateAnonId(value)) },
+      label: "Anonymous ID",
+      name: "anon_id",
+      input: form.text_input(
+        name: "anon_id",
+        value: data.anon_id,
+        placeholder: Some("Enter Anonymous ID (optional)"),
+        on_input: fn(value) { on_update(UpdateAnonId(value)) },
       ),
-      errors,
-      False,
+      errors: errors,
+      required: False,
     ),
 
     // Anonymous Name field (optional)
     form.field(
-      "Anonymous Name",
-      "anon_name",
-      form.text_input(
-        "anon_name",
-        data.anon_name,
-        Some("Enter Anonymous Name (optional)"),
-        fn(value) { on_update(UpdateAnonName(value)) },
+      label: "Anonymous Name",
+      name: "anon_name",
+      input: form.text_input(
+        name: "anon_name",
+        value: data.anon_name,
+        placeholder: Some("Enter Anonymous Name (optional)"),
+        on_input: fn(value) { on_update(UpdateAnonName(value)) },
       ),
-      errors,
-      False,
+      errors: errors,
+      required: False,
     ),
 
     // Form actions
     html.div([attribute.class("form-actions")], [
-      form.submit_button("Save Patient", loading, Some(on_submit())),
-      form.cancel_button("Cancel", store.Navigate(router.Home)),
+      form.submit_button(text: "Save Patient", disabled: loading, on_click: Some(on_submit())),
+      form.cancel_button(text: "Cancel", on_click: store.Navigate(router.Home)),
     ]),
 
     // Loading overlay
@@ -121,7 +121,7 @@ pub fn validate(
   let errors = dict.new()
 
   // Validate Patient ID (required)
-  let errors = case form.validate_required(data.id, "Patient ID") {
+  let errors = case form.validate_required(value: data.id, field_name: "Patient ID") {
     Error(msg) -> dict.insert(errors, "patient_id", msg)
     Ok(_) -> errors
   }

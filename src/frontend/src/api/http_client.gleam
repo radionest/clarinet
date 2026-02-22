@@ -22,9 +22,9 @@ import plinth/browser/window
 /// Builds an HTTP request with standard headers and API prefix.
 /// Attempts to use the browser's origin as base URL, falling back to relative paths.
 fn build_request(
-  method: http.Method,
-  path: String,
-  body: Option(String),
+  method method: http.Method,
+  path path: String,
+  body body: Option(String),
 ) -> request.Request(String) {
   let req =
     {
@@ -47,9 +47,9 @@ fn build_request(
 /// Builds an HTTP request with multipart/form-data body.
 /// Used for form submissions that need to send data as form fields rather than JSON.
 fn build_multipart_request(
-  method: http.Method,
-  path: String,
-  form: List(#(String, FormBody)),
+  method method: http.Method,
+  path path: String,
+  form form: List(#(String, FormBody)),
 ) -> request.Request(BitArray) {
   let req =
     {
@@ -107,7 +107,7 @@ pub fn request_with_body(
   path path: String,
   body body: Option(String),
 ) -> Promise(Result(Dynamic, ApiError)) {
-  let req = build_request(method, path, body)
+  let req = build_request(method: method, path: path, body: body)
 
   use resp_result <- promise.await(fetch.send(req))
   case resp_result {
@@ -120,12 +120,12 @@ pub fn request_with_body(
 
 /// Performs a GET request to the specified API path.
 pub fn get(path: String) -> Promise(Result(Dynamic, ApiError)) {
-  request_with_body(http.Get, path, None)
+  request_with_body(method: http.Get, path: path, body: None)
 }
 
 /// Performs a POST request with a JSON body to the specified API path.
 pub fn post(path: String, body: String) -> Promise(Result(Dynamic, ApiError)) {
-  request_with_body(http.Post, path, Some(body))
+  request_with_body(method: http.Post, path: path, body: Some(body))
 }
 
 /// Performs a POST request with multipart/form-data to the specified API path.
@@ -134,7 +134,7 @@ pub fn post_multipart(
   path: String,
   form: List(#(String, FormBody)),
 ) -> Promise(Result(Dynamic, ApiError)) {
-  let req = build_multipart_request(http.Post, path, form)
+  let req = build_multipart_request(method: http.Post, path: path, form: form)
 
   use resp_result <- promise.await(fetch.send_bits(req))
   case resp_result {
@@ -147,15 +147,15 @@ pub fn post_multipart(
 
 /// Performs a PATCH request with a JSON body to the specified API path.
 pub fn patch(path: String, body: String) -> Promise(Result(Dynamic, ApiError)) {
-  request_with_body(http.Patch, path, Some(body))
+  request_with_body(method: http.Patch, path: path, body: Some(body))
 }
 
 /// Performs a PUT request with a JSON body to the specified API path.
 pub fn put(path: String, body: String) -> Promise(Result(Dynamic, ApiError)) {
-  request_with_body(http.Put, path, Some(body))
+  request_with_body(method: http.Put, path: path, body: Some(body))
 }
 
 /// Performs a DELETE request to the specified API path.
 pub fn delete(path: String) -> Promise(Result(Dynamic, ApiError)) {
-  request_with_body(http.Delete, path, None)
+  request_with_body(method: http.Delete, path: path, body: None)
 }

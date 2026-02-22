@@ -10,11 +10,11 @@ import store.{type Msg}
 
 // Form field wrapper with label and error display
 pub fn field(
-  label: String,
-  name: String,
-  input: Element(Msg),
-  errors: Dict(String, String),
-  required: Bool,
+  label label: String,
+  name name: String,
+  input input: Element(Msg),
+  errors errors: Dict(String, String),
+  required required: Bool,
 ) -> Element(Msg) {
   let class = case required {
     True -> "form-field required"
@@ -35,10 +35,10 @@ pub fn field(
 
 // Text input
 pub fn text_input(
-  name: String,
-  value: String,
-  placeholder: Option(String),
-  on_input: fn(String) -> Msg,
+  name name: String,
+  value value: String,
+  placeholder placeholder: Option(String),
+  on_input on_input: fn(String) -> Msg,
 ) -> Element(Msg) {
   let attrs = [
     attribute.type_("text"),
@@ -59,10 +59,10 @@ pub fn text_input(
 
 // Email input
 pub fn email_input(
-  name: String,
-  value: String,
-  placeholder: Option(String),
-  on_input: fn(String) -> Msg,
+  name name: String,
+  value value: String,
+  placeholder placeholder: Option(String),
+  on_input on_input: fn(String) -> Msg,
 ) -> Element(Msg) {
   let attrs = [
     attribute.type_("email"),
@@ -83,10 +83,10 @@ pub fn email_input(
 
 // Password input
 pub fn password_input(
-  name: String,
-  value: String,
-  placeholder: Option(String),
-  on_input: fn(String) -> Msg,
+  name name: String,
+  value value: String,
+  placeholder placeholder: Option(String),
+  on_input on_input: fn(String) -> Msg,
 ) -> Element(Msg) {
   let attrs = [
     attribute.type_("password"),
@@ -107,11 +107,11 @@ pub fn password_input(
 
 // Number input
 pub fn number_input(
-  name: String,
-  value: Int,
-  min: Option(Int),
-  max: Option(Int),
-  on_input: fn(String) -> Msg,
+  name name: String,
+  value value: Int,
+  min min: Option(Int),
+  max max: Option(Int),
+  on_input on_input: fn(String) -> Msg,
 ) -> Element(Msg) {
   let attrs = [
     attribute.type_("number"),
@@ -137,9 +137,9 @@ pub fn number_input(
 
 // Date input
 pub fn date_input(
-  name: String,
-  value: String,
-  on_input: fn(String) -> Msg,
+  name name: String,
+  value value: String,
+  on_input on_input: fn(String) -> Msg,
 ) -> Element(Msg) {
   html.input([
     attribute.type_("date"),
@@ -153,11 +153,11 @@ pub fn date_input(
 
 // Textarea
 pub fn textarea(
-  name: String,
-  value: String,
-  rows: Int,
-  placeholder: Option(String),
-  on_input: fn(String) -> Msg,
+  name name: String,
+  value value: String,
+  rows rows: Int,
+  placeholder placeholder: Option(String),
+  on_input on_input: fn(String) -> Msg,
 ) -> Element(Msg) {
   let attrs = [
     attribute.id(name),
@@ -177,10 +177,10 @@ pub fn textarea(
 
 // Select dropdown
 pub fn select(
-  name: String,
-  value: String,
-  options: List(#(String, String)),
-  on_change: fn(String) -> Msg,
+  name name: String,
+  value value: String,
+  options options: List(#(String, String)),
+  on_change on_change: fn(String) -> Msg,
 ) -> Element(Msg) {
   html.select(
     [
@@ -203,10 +203,10 @@ pub fn select(
 
 // Radio button group
 pub fn radio_group(
-  name: String,
-  value: String,
-  options: List(#(String, String)),
-  on_change: fn(String) -> Msg,
+  name name: String,
+  value value: String,
+  options options: List(#(String, String)),
+  on_change on_change: fn(String) -> Msg,
 ) -> Element(Msg) {
   html.div(
     [attribute.class("form-radio-group")],
@@ -231,10 +231,10 @@ pub fn radio_group(
 
 // Checkbox
 pub fn checkbox(
-  name: String,
-  checked: Bool,
-  label: String,
-  on_change: fn(Bool) -> Msg,
+  name name: String,
+  checked checked: Bool,
+  label label: String,
+  on_change on_change: fn(Bool) -> Msg,
 ) -> Element(Msg) {
   html.label([attribute.for(name), attribute.class("checkbox-label")], [
     html.input([
@@ -251,9 +251,9 @@ pub fn checkbox(
 
 // Submit button
 pub fn submit_button(
-  text: String,
-  disabled: Bool,
-  on_click: Option(Msg),
+  text text: String,
+  disabled disabled: Bool,
+  on_click on_click: Option(Msg),
 ) -> Element(Msg) {
   let attrs = [
     attribute.type_("submit"),
@@ -270,7 +270,7 @@ pub fn submit_button(
 }
 
 // Cancel button
-pub fn cancel_button(text: String, on_click: Msg) -> Element(Msg) {
+pub fn cancel_button(text text: String, on_click on_click: Msg) -> Element(Msg) {
   html.button(
     [
       attribute.type_("button"),
@@ -340,8 +340,8 @@ pub fn success_message(message: Option(String)) -> Element(Msg) {
 
 // Helper to validate required fields
 pub fn validate_required(
-  value: String,
-  field_name: String,
+  value value: String,
+  field_name field_name: String,
 ) -> Result(String, String) {
   case string.is_empty(value) {
     True -> Error(field_name <> " is required")

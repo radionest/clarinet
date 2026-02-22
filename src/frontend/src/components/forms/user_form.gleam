@@ -70,12 +70,12 @@ pub fn from_user(user: models.User) -> UserFormData {
 
 // Main form view
 pub fn view(
-  data: UserFormData,
-  errors: Dict(String, String),
-  loading: Bool,
-  is_edit: Bool,
-  on_update: fn(UserFormMsg) -> Msg,
-  on_submit: fn() -> Msg,
+  data data: UserFormData,
+  errors errors: Dict(String, String),
+  loading loading: Bool,
+  is_edit is_edit: Bool,
+  on_update on_update: fn(UserFormMsg) -> Msg,
+  on_submit on_submit: fn() -> Msg,
 ) -> Element(Msg) {
   form.form(on_submit, [
     html.h3([attribute.class("form-title")], [
@@ -87,16 +87,16 @@ pub fn view(
 
     // Email field (required)
     form.field(
-      "Email",
-      "email",
-      form.email_input(
-        "email",
-        data.email,
-        Some("Enter email address"),
-        fn(value) { on_update(UpdateEmail(value)) },
+      label: "Email",
+      name: "email",
+      input: form.email_input(
+        name: "email",
+        value: data.email,
+        placeholder: Some("Enter email address"),
+        on_input: fn(value) { on_update(UpdateEmail(value)) },
       ),
-      errors,
-      True,
+      errors: errors,
+      required: True,
     ),
 
     // Password fields (required for new users, optional for edit)
@@ -104,28 +104,28 @@ pub fn view(
       False -> {
         html.div([], [
           form.field(
-            "Password",
-            "password",
-            form.password_input(
-              "password",
-              data.password,
-              Some("Enter password"),
-              fn(value) { on_update(UpdatePassword(value)) },
+            label: "Password",
+            name: "password",
+            input: form.password_input(
+              name: "password",
+              value: data.password,
+              placeholder: Some("Enter password"),
+              on_input: fn(value) { on_update(UpdatePassword(value)) },
             ),
-            errors,
-            True,
+            errors: errors,
+            required: True,
           ),
           form.field(
-            "Confirm Password",
-            "password_confirm",
-            form.password_input(
-              "password_confirm",
-              data.password_confirm,
-              Some("Confirm password"),
-              fn(value) { on_update(UpdatePasswordConfirm(value)) },
+            label: "Confirm Password",
+            name: "password_confirm",
+            input: form.password_input(
+              name: "password_confirm",
+              value: data.password_confirm,
+              placeholder: Some("Confirm password"),
+              on_input: fn(value) { on_update(UpdatePasswordConfirm(value)) },
             ),
-            errors,
-            True,
+            errors: errors,
+            required: True,
           ),
         ])
       }
@@ -135,31 +135,31 @@ pub fn view(
             html.text("Leave password fields empty to keep existing password"),
           ]),
           form.field(
-            "New Password",
-            "password",
-            form.password_input(
-              "password",
-              data.password,
-              Some("Enter new password (optional)"),
-              fn(value) { on_update(UpdatePassword(value)) },
+            label: "New Password",
+            name: "password",
+            input: form.password_input(
+              name: "password",
+              value: data.password,
+              placeholder: Some("Enter new password (optional)"),
+              on_input: fn(value) { on_update(UpdatePassword(value)) },
             ),
-            errors,
-            False,
+            errors: errors,
+            required: False,
           ),
           case data.password {
             "" -> html.text("")
             _ ->
               form.field(
-                "Confirm New Password",
-                "password_confirm",
-                form.password_input(
-                  "password_confirm",
-                  data.password_confirm,
-                  Some("Confirm new password"),
-                  fn(value) { on_update(UpdatePasswordConfirm(value)) },
+                label: "Confirm New Password",
+                name: "password_confirm",
+                input: form.password_input(
+                  name: "password_confirm",
+                  value: data.password_confirm,
+                  placeholder: Some("Confirm new password"),
+                  on_input: fn(value) { on_update(UpdatePasswordConfirm(value)) },
                 ),
-                errors,
-                False,
+                errors: errors,
+                required: False,
               )
           },
         ])
@@ -171,38 +171,38 @@ pub fn view(
       html.legend([], [html.text("User Status")]),
 
       form.checkbox(
-        "is_active",
-        data.is_active,
-        "Active (can login)",
-        fn(checked) { on_update(UpdateIsActive(checked)) },
+        name: "is_active",
+        checked: data.is_active,
+        label: "Active (can login)",
+        on_change: fn(checked) { on_update(UpdateIsActive(checked)) },
       ),
 
       form.checkbox(
-        "is_superuser",
-        data.is_superuser,
-        "Superuser (admin privileges)",
-        fn(checked) { on_update(UpdateIsSuperuser(checked)) },
+        name: "is_superuser",
+        checked: data.is_superuser,
+        label: "Superuser (admin privileges)",
+        on_change: fn(checked) { on_update(UpdateIsSuperuser(checked)) },
       ),
 
       form.checkbox(
-        "is_verified",
-        data.is_verified,
-        "Email Verified",
-        fn(checked) { on_update(UpdateIsVerified(checked)) },
+        name: "is_verified",
+        checked: data.is_verified,
+        label: "Email Verified",
+        on_change: fn(checked) { on_update(UpdateIsVerified(checked)) },
       ),
     ]),
 
     // Form actions
     html.div([attribute.class("form-actions")], [
       form.submit_button(
-        case is_edit {
+        text: case is_edit {
           True -> "Update User"
           False -> "Create User"
         },
-        loading,
-        Some(on_submit()),
+        disabled: loading,
+        on_click: Some(on_submit()),
       ),
-      form.cancel_button("Cancel", store.Navigate(router.Users)),
+      form.cancel_button(text: "Cancel", on_click: store.Navigate(router.Users)),
     ]),
 
     // Loading overlay
@@ -218,7 +218,7 @@ pub fn validate(
   let errors = dict.new()
 
   // Validate Email (required and format)
-  let errors = case form.validate_required(data.email, "Email") {
+  let errors = case form.validate_required(value: data.email, field_name: "Email") {
     Error(msg) -> dict.insert(errors, "email", msg)
     Ok(email) ->
       case form.validate_email(email) {
@@ -230,7 +230,7 @@ pub fn validate(
   // Validate Password (required for new users)
   let errors = case is_edit {
     False -> {
-      case form.validate_required(data.password, "Password") {
+      case form.validate_required(value: data.password, field_name: "Password") {
         Error(msg) -> dict.insert(errors, "password", msg)
         Ok(password) -> {
           // Check minimum length

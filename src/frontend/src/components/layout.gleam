@@ -23,16 +23,16 @@ pub fn view(model: Model, content: Element(Msg)) -> Element(Msg) {
 fn navbar(model: Model) -> Element(Msg) {
   html.nav([attribute.class("navbar")], [
     html.div([attribute.class("navbar-brand")], [
-      nav_link(router.Home, "Clarinet", model.route),
+      nav_link(route: router.Home, text: "Clarinet", current_route: model.route),
     ]),
     html.div([attribute.class("navbar-menu")], [
-      nav_link(router.Studies, "Studies", model.route),
-      nav_link(router.Records, "Records", model.route),
+      nav_link(route: router.Studies, text: "Studies", current_route: model.route),
+      nav_link(route: router.Records, text: "Records", current_route: model.route),
       case is_admin(model) {
         True ->
           element.fragment([
-            nav_link(router.Users, "Users", model.route),
-            nav_link(router.AdminDashboard, "Admin", model.route),
+            nav_link(route: router.Users, text: "Users", current_route: model.route),
+            nav_link(route: router.AdminDashboard, text: "Admin", current_route: model.route),
           ])
         False -> html.text("")
       },
@@ -43,9 +43,9 @@ fn navbar(model: Model) -> Element(Msg) {
 
 // Navigation link
 fn nav_link(
-  route: router.Route,
-  text: String,
-  current_route: router.Route,
+  route route: router.Route,
+  text text: String,
+  current_route current_route: router.Route,
 ) -> Element(Msg) {
   let is_active = router.is_same_section(route, current_route)
   let classes = case is_active {
