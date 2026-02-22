@@ -24,13 +24,39 @@ pub fn field(
     html.label([attribute.for(name), attribute.class("form-label")], [
       html.text(label),
       case required {
-        True -> html.span([attribute.class("required-marker")], [html.text(" *")])
+        True ->
+          html.span([attribute.class("required-marker")], [html.text(" *")])
         False -> html.text("")
       },
     ]),
     input,
     error_message(errors, name),
   ])
+}
+
+// Generic text-like input (shared implementation for text, email, password)
+pub fn input(
+  input_type input_type: String,
+  name name: String,
+  value value: String,
+  placeholder placeholder: Option(String),
+  on_input on_input: fn(String) -> Msg,
+) -> Element(Msg) {
+  list.flatten([
+    [
+      attribute.type_(input_type),
+      attribute.id(name),
+      attribute.name(name),
+      attribute.value(value),
+      attribute.class("form-input"),
+      event.on_input(on_input),
+    ],
+    case placeholder {
+      Some(p) -> [attribute.placeholder(p)]
+      None -> []
+    },
+  ])
+  |> html.input
 }
 
 // Text input
@@ -40,21 +66,7 @@ pub fn text_input(
   placeholder placeholder: Option(String),
   on_input on_input: fn(String) -> Msg,
 ) -> Element(Msg) {
-  let attrs = [
-    attribute.type_("text"),
-    attribute.id(name),
-    attribute.name(name),
-    attribute.value(value),
-    attribute.class("form-input"),
-    event.on_input(on_input),
-  ]
-
-  let attrs = case placeholder {
-    Some(p) -> list.append(attrs, [attribute.placeholder(p)])
-    None -> attrs
-  }
-
-  html.input(attrs)
+  input(input_type: "text", name:, value:, placeholder:, on_input:)
 }
 
 // Email input
@@ -64,21 +76,7 @@ pub fn email_input(
   placeholder placeholder: Option(String),
   on_input on_input: fn(String) -> Msg,
 ) -> Element(Msg) {
-  let attrs = [
-    attribute.type_("email"),
-    attribute.id(name),
-    attribute.name(name),
-    attribute.value(value),
-    attribute.class("form-input"),
-    event.on_input(on_input),
-  ]
-
-  let attrs = case placeholder {
-    Some(p) -> list.append(attrs, [attribute.placeholder(p)])
-    None -> attrs
-  }
-
-  html.input(attrs)
+  input(input_type: "email", name:, value:, placeholder:, on_input:)
 }
 
 // Password input
@@ -88,21 +86,7 @@ pub fn password_input(
   placeholder placeholder: Option(String),
   on_input on_input: fn(String) -> Msg,
 ) -> Element(Msg) {
-  let attrs = [
-    attribute.type_("password"),
-    attribute.id(name),
-    attribute.name(name),
-    attribute.value(value),
-    attribute.class("form-input"),
-    event.on_input(on_input),
-  ]
-
-  let attrs = case placeholder {
-    Some(p) -> list.append(attrs, [attribute.placeholder(p)])
-    None -> attrs
-  }
-
-  html.input(attrs)
+  input(input_type: "password", name:, value:, placeholder:, on_input:)
 }
 
 // Number input
@@ -113,26 +97,25 @@ pub fn number_input(
   max max: Option(Int),
   on_input on_input: fn(String) -> Msg,
 ) -> Element(Msg) {
-  let attrs = [
-    attribute.type_("number"),
-    attribute.id(name),
-    attribute.name(name),
-    attribute.value(int.to_string(value)),
-    attribute.class("form-input"),
-    event.on_input(on_input),
-  ]
-
-  let attrs = case min {
-    Some(m) -> list.append(attrs, [attribute.min(int.to_string(m))])
-    None -> attrs
-  }
-
-  let attrs = case max {
-    Some(m) -> list.append(attrs, [attribute.max(int.to_string(m))])
-    None -> attrs
-  }
-
-  html.input(attrs)
+  list.flatten([
+    [
+      attribute.type_("number"),
+      attribute.id(name),
+      attribute.name(name),
+      attribute.value(int.to_string(value)),
+      attribute.class("form-input"),
+      event.on_input(on_input),
+    ],
+    case min {
+      Some(m) -> [attribute.min(int.to_string(m))]
+      None -> []
+    },
+    case max {
+      Some(m) -> [attribute.max(int.to_string(m))]
+      None -> []
+    },
+  ])
+  |> html.input
 }
 
 // Date input
@@ -159,20 +142,20 @@ pub fn textarea(
   placeholder placeholder: Option(String),
   on_input on_input: fn(String) -> Msg,
 ) -> Element(Msg) {
-  let attrs = [
-    attribute.id(name),
-    attribute.name(name),
-    attribute.attribute("rows", int.to_string(rows)),
-    attribute.class("form-textarea"),
-    event.on_input(on_input),
-  ]
-
-  let attrs = case placeholder {
-    Some(p) -> list.append(attrs, [attribute.placeholder(p)])
-    None -> attrs
-  }
-
-  html.textarea(attrs, value)
+  list.flatten([
+    [
+      attribute.id(name),
+      attribute.name(name),
+      attribute.attribute("rows", int.to_string(rows)),
+      attribute.class("form-textarea"),
+      event.on_input(on_input),
+    ],
+    case placeholder {
+      Some(p) -> [attribute.placeholder(p)]
+      None -> []
+    },
+  ])
+  |> html.textarea(value)
 }
 
 // Select dropdown
@@ -191,12 +174,7 @@ pub fn select(
     ],
     list.map(options, fn(opt) {
       let #(val, label) = opt
-      let attrs = [attribute.value(val)]
-      let attrs = case val == value {
-        True -> list.append(attrs, [attribute.selected(True)])
-        False -> attrs
-      }
-      html.option(attrs, label)
+      html.option([attribute.value(val), attribute.selected(val == value)], label)
     }),
   )
 }
@@ -255,18 +233,18 @@ pub fn submit_button(
   disabled disabled: Bool,
   on_click on_click: Option(Msg),
 ) -> Element(Msg) {
-  let attrs = [
-    attribute.type_("submit"),
-    attribute.class("btn btn-primary"),
-    attribute.disabled(disabled),
-  ]
-
-  let attrs = case on_click {
-    Some(msg) -> list.append(attrs, [event.on_click(msg)])
-    None -> attrs
-  }
-
-  html.button(attrs, [html.text(text)])
+  list.flatten([
+    [
+      attribute.type_("submit"),
+      attribute.class("btn btn-primary"),
+      attribute.disabled(disabled),
+    ],
+    case on_click {
+      Some(msg) -> [event.on_click(msg)]
+      None -> []
+    },
+  ])
+  |> html.button([html.text(text)])
 }
 
 // Cancel button
