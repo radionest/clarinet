@@ -3,8 +3,6 @@ import api/http_client
 import api/models.{type LoginResponse, type RegisterRequest, type User}
 import api/types.{type ApiError}
 import api/users
-import gleam/dynamic
-import gleam/dynamic/decode
 import gleam/javascript/promise.{type Promise}
 import gleam/json
 import gleam/result
@@ -43,7 +41,13 @@ pub fn logout() -> Promise(Result(Nil, ApiError)) {
 // Get current user
 pub fn get_current_user() -> Promise(Result(User, ApiError)) {
   http_client.get("/auth/me")
-  |> promise.map(fn(result) { result.try(result, decode_user) })
+  |> promise.map(fn(result) {
+    result.try(result, http_client.decode_response(
+      _,
+      users.user_decoder(),
+      "Invalid user data",
+    ))
+  })
 }
 
 // Register new user
@@ -56,7 +60,13 @@ pub fn register(request: RegisterRequest) -> Promise(Result(User, ApiError)) {
     |> json.to_string
 
   http_client.post("/auth/register", body)
-  |> promise.map(fn(result) { result.try(result, decode_user) })
+  |> promise.map(fn(result) {
+    result.try(result, http_client.decode_response(
+      _,
+      users.user_decoder(),
+      "Invalid user data",
+    ))
+  })
 }
 
 // Refresh token
@@ -76,13 +86,4 @@ pub fn refresh_token() -> Promise(Result(LoginResponse, ApiError)) {
     // Transform the user result into a LoginResponse
     result.map(result, fn(user) { models.LoginResponse(user: user) })
   })
-}
-
-
-// Decode user from dynamic data
-fn decode_user(data: dynamic.Dynamic) -> Result(User, ApiError) {
-  case decode.run(data, users.user_decoder()) {
-    Ok(user) -> Ok(user)
-    Error(_) -> Error(types.ParseError("Invalid user data"))
-  }
 }

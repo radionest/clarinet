@@ -2,7 +2,6 @@
 import api/http_client
 import api/models.{type Record, type RecordType, type User}
 import api/types.{type ApiError}
-import gleam/dynamic
 import gleam/dynamic/decode
 import gleam/javascript/promise.{type Promise}
 import gleam/option.{None, Some}
@@ -12,19 +11,37 @@ import utils/json_utils
 // Get all records
 pub fn get_records() -> Promise(Result(List(Record), ApiError)) {
   http_client.get("/records/")
-  |> promise.map(fn(res) { result.try(res, decode_records) })
+  |> promise.map(fn(res) {
+    result.try(res, http_client.decode_response(
+      _,
+      decode.list(record_decoder()),
+      "Invalid records data",
+    ))
+  })
 }
 
 // Get current user's records
 pub fn get_my_records() -> Promise(Result(List(Record), ApiError)) {
   http_client.get("/records/my")
-  |> promise.map(fn(res) { result.try(res, decode_records) })
+  |> promise.map(fn(res) {
+    result.try(res, http_client.decode_response(
+      _,
+      decode.list(record_decoder()),
+      "Invalid records data",
+    ))
+  })
 }
 
 // Get a single record by ID
 pub fn get_record(id: String) -> Promise(Result(Record, ApiError)) {
   http_client.get("/records/" <> id)
-  |> promise.map(fn(res) { result.try(res, decode_single_record) })
+  |> promise.map(fn(res) {
+    result.try(res, http_client.decode_response(
+      _,
+      record_decoder(),
+      "Invalid record data",
+    ))
+  })
 }
 
 // Decoder for nested RecordType (RecordTypeBase from backend)
@@ -194,19 +211,5 @@ fn parse_status(status: String) -> types.RecordStatus {
     "failed" -> types.Failed
     "pause" -> types.Paused
     _ -> types.Pending
-  }
-}
-
-fn decode_records(data: dynamic.Dynamic) -> Result(List(Record), ApiError) {
-  case decode.run(data, decode.list(record_decoder())) {
-    Ok(records) -> Ok(records)
-    Error(_) -> Error(types.ParseError("Invalid records data"))
-  }
-}
-
-fn decode_single_record(data: dynamic.Dynamic) -> Result(Record, ApiError) {
-  case decode.run(data, record_decoder()) {
-    Ok(record) -> Ok(record)
-    Error(_) -> Error(types.ParseError("Invalid record data"))
   }
 }

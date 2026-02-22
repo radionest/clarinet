@@ -150,3 +150,15 @@ pub fn put(path: String, body: String) -> Promise(Result(Dynamic, ApiError)) {
 pub fn delete(path: String) -> Promise(Result(Dynamic, ApiError)) {
   request_with_body(method: http.Delete, path: path, body: None)
 }
+
+/// Decodes a Dynamic value using the given decoder, mapping errors to ParseError.
+pub fn decode_response(
+  data: Dynamic,
+  decoder: decode.Decoder(a),
+  error_msg: String,
+) -> Result(a, ApiError) {
+  case decode.run(data, decoder) {
+    Ok(value) -> Ok(value)
+    Error(_) -> Error(types.ParseError(error_msg))
+  }
+}

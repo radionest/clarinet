@@ -3,7 +3,6 @@ import api/http_client
 import api/models.{type AdminStats, type Record}
 import api/records
 import api/types.{type ApiError}
-import gleam/dynamic
 import gleam/dynamic/decode
 import gleam/int
 import gleam/javascript/promise.{type Promise}
@@ -13,7 +12,13 @@ import gleam/result
 // Get admin dashboard statistics
 pub fn get_admin_stats() -> Promise(Result(AdminStats, ApiError)) {
   http_client.get("/admin/stats")
-  |> promise.map(fn(res) { result.try(res, decode_admin_stats) })
+  |> promise.map(fn(res) {
+    result.try(res, http_client.decode_response(
+      _,
+      admin_stats_decoder(),
+      "Invalid admin stats data",
+    ))
+  })
 }
 
 // Decoder for AdminStats
@@ -36,13 +41,6 @@ pub fn admin_stats_decoder() -> decode.Decoder(AdminStats) {
   ))
 }
 
-fn decode_admin_stats(data: dynamic.Dynamic) -> Result(AdminStats, ApiError) {
-  case decode.run(data, admin_stats_decoder()) {
-    Ok(stats) -> Ok(stats)
-    Error(_) -> Error(types.ParseError("Invalid admin stats data"))
-  }
-}
-
 // Assign a user to a record (superuser only)
 pub fn assign_record_user(
   record_id: Int,
@@ -54,12 +52,11 @@ pub fn assign_record_user(
     <> "/assign?user_id="
     <> user_id
   http_client.patch(path, json.to_string(json.object([])))
-  |> promise.map(fn(res) { result.try(res, decode_record) })
-}
-
-fn decode_record(data: dynamic.Dynamic) -> Result(Record, ApiError) {
-  case decode.run(data, records.record_decoder()) {
-    Ok(record) -> Ok(record)
-    Error(_) -> Error(types.ParseError("Invalid record data"))
-  }
+  |> promise.map(fn(res) {
+    result.try(res, http_client.decode_response(
+      _,
+      records.record_decoder(),
+      "Invalid record data",
+    ))
+  })
 }

@@ -2,7 +2,6 @@
 import api/http_client
 import api/models.{type Study}
 import api/types.{type ApiError}
-import gleam/dynamic
 import gleam/dynamic/decode
 import gleam/javascript/promise.{type Promise}
 import gleam/option.{None}
@@ -11,13 +10,25 @@ import gleam/result
 // Get all studies
 pub fn get_studies() -> Promise(Result(List(Study), ApiError)) {
   http_client.get("/studies")
-  |> promise.map(fn(res) { result.try(res, decode_studies) })
+  |> promise.map(fn(res) {
+    result.try(res, http_client.decode_response(
+      _,
+      decode.list(study_decoder()),
+      "Invalid studies data",
+    ))
+  })
 }
 
 // Get a single study by UID
 pub fn get_study(study_uid: String) -> Promise(Result(Study, ApiError)) {
   http_client.get("/studies/" <> study_uid)
-  |> promise.map(fn(res) { result.try(res, decode_study) })
+  |> promise.map(fn(res) {
+    result.try(res, http_client.decode_response(
+      _,
+      study_decoder(),
+      "Invalid study data",
+    ))
+  })
 }
 
 // Public decoder for reuse
@@ -36,18 +47,4 @@ pub fn study_decoder() -> decode.Decoder(Study) {
     series: None,
     records: None,
   ))
-}
-
-fn decode_study(data: dynamic.Dynamic) -> Result(Study, ApiError) {
-  case decode.run(data, study_decoder()) {
-    Ok(study) -> Ok(study)
-    Error(_) -> Error(types.ParseError("Invalid study data"))
-  }
-}
-
-fn decode_studies(data: dynamic.Dynamic) -> Result(List(Study), ApiError) {
-  case decode.run(data, decode.list(study_decoder())) {
-    Ok(studies) -> Ok(studies)
-    Error(_) -> Error(types.ParseError("Invalid studies data"))
-  }
 }

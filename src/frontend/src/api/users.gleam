@@ -2,7 +2,6 @@
 import api/http_client
 import api/models.{type User}
 import api/types.{type ApiError}
-import gleam/dynamic
 import gleam/dynamic/decode
 import gleam/javascript/promise.{type Promise}
 import gleam/result
@@ -10,7 +9,13 @@ import gleam/result
 // Get all users
 pub fn get_users() -> Promise(Result(List(User), ApiError)) {
   http_client.get("/user/")
-  |> promise.map(fn(res) { result.try(res, decode_users) })
+  |> promise.map(fn(res) {
+    result.try(res, http_client.decode_response(
+      _,
+      decode.list(user_decoder()),
+      "Invalid users data",
+    ))
+  })
 }
 
 // Public decoder for reuse
@@ -28,11 +33,4 @@ pub fn user_decoder() -> decode.Decoder(User) {
     is_superuser: is_superuser,
     is_verified: is_verified,
   ))
-}
-
-fn decode_users(data: dynamic.Dynamic) -> Result(List(User), ApiError) {
-  case decode.run(data, decode.list(user_decoder())) {
-    Ok(users) -> Ok(users)
-    Error(_) -> Error(types.ParseError("Invalid users data"))
-  }
 }
