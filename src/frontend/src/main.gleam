@@ -7,6 +7,7 @@ import api/studies
 import api/types
 import api/users
 import components/layout
+import formosh/component as formosh_component
 import gleam/dict
 import gleam/int
 import gleam/io
@@ -23,6 +24,8 @@ import modem
 import pages/admin as admin_page
 import pages/home
 import pages/login
+import pages/records/execute as record_execute
+import pages/records/list as records_list
 import pages/register
 import router.{type Route}
 import store.{type Model, type Msg}
@@ -46,6 +49,13 @@ fn init(_flags) -> #(Model, Effect(Msg)) {
 
   let model_with_route = store.set_route(model, initial_route)
 
+  // Register formosh web component
+  let register_formosh_effect =
+    effect.from(fn(_dispatch) {
+      let _ = formosh_component.register()
+      Nil
+    })
+
   // Check existing session via cookie
   let check_session_effect =
     effect.from(fn(dispatch) {
@@ -56,7 +66,11 @@ fn init(_flags) -> #(Model, Effect(Msg)) {
 
   #(
     model_with_route,
-    effect.batch([modem.init(on_url_change), check_session_effect]),
+    effect.batch([
+      modem.init(on_url_change),
+      register_formosh_effect,
+      check_session_effect,
+    ]),
   )
 }
 
@@ -333,11 +347,19 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       #(new_model, effect.none())
     }
 
-    // Data loading - Records
+    // Data loading - Records (role-aware)
     store.LoadRecords -> {
+      let is_admin = case model.user {
+        Some(u) -> u.is_superuser
+        None -> False
+      }
+      let fetch_fn = case is_admin {
+        True -> records.get_records
+        False -> records.get_my_records
+      }
       let load_effect =
         effect.from(fn(dispatch) {
-          records.get_records()
+          fetch_fn()
           |> promise.tap(fn(result) { dispatch(store.RecordsLoaded(result)) })
           Nil
         })
@@ -455,6 +477,47 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       #(new_model, effect.none())
     }
 
+    // Data loading - Record Detail
+    store.LoadRecordDetail(id) -> {
+      let load_effect =
+        effect.from(fn(dispatch) {
+          records.get_record(id)
+          |> promise.tap(fn(result) {
+            dispatch(store.RecordDetailLoaded(result))
+          })
+          Nil
+        })
+      #(store.set_loading(model, True), load_effect)
+    }
+
+    store.RecordDetailLoaded(Ok(record)) -> {
+      let new_model =
+        model
+        |> store.cache_record(record)
+        |> store.set_loading(False)
+      #(new_model, effect.none())
+    }
+
+    store.RecordDetailLoaded(Error(_err)) -> {
+      let new_model =
+        model
+        |> store.set_loading(False)
+        |> store.set_error(Some("Failed to load record"))
+      #(new_model, effect.none())
+    }
+
+    // Formosh form events
+    store.FormSubmitSuccess(record_id) -> {
+      let new_model = store.set_success(model, "Record data submitted successfully")
+      let reload_effect =
+        effect.from(fn(dispatch) { dispatch(store.LoadRecordDetail(record_id)) })
+      #(new_model, reload_effect)
+    }
+
+    store.FormSubmitError(error) -> {
+      #(store.set_error(model, Some(error)), effect.none())
+    }
+
     // Default case
     _ -> #(model, effect.none())
   }
@@ -476,8 +539,8 @@ fn view_content(model: Model) -> Element(Msg) {
     router.Register -> register.view(model)
     router.Studies -> html.div([], [html.text("Studies page")])
     router.StudyDetail(_id) -> html.div([], [html.text("Study detail page")])
-    router.Records -> html.div([], [html.text("Records page")])
-    router.RecordDetail(_id) -> html.div([], [html.text("Record detail page")])
+    router.Records -> records_list.view(model)
+    router.RecordDetail(id) -> record_execute.view(model, id)
     router.RecordNew -> html.div([], [html.text("New record page")])
     router.RecordTypeDesign(_id) -> html.div([], [html.text("Record type design page")])
     router.Users -> html.div([], [html.text("Users page")])
@@ -504,6 +567,8 @@ fn load_route_data(model: Model, route: Route) -> Effect(Msg) {
     router.Home, None -> effect.none()
     router.Studies, _ -> effect.from(fn(dispatch) { dispatch(store.LoadStudies) })
     router.Records, _ -> effect.from(fn(dispatch) { dispatch(store.LoadRecords) })
+    router.RecordDetail(id), Some(_) ->
+      effect.from(fn(dispatch) { dispatch(store.LoadRecordDetail(id)) })
     router.Users, _ -> effect.from(fn(dispatch) { dispatch(store.LoadUsers) })
     router.AdminDashboard, Some(_) ->
       effect.batch([

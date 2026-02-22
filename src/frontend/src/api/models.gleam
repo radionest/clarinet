@@ -1,7 +1,6 @@
 // Static type definitions for core models matching backend SQLModel
 import api/types.{type DicomQueryLevel, type RecordStatus}
 import gleam/dict.{type Dict}
-import gleam/json.{type Json}
 import gleam/option.{type Option}
 
 // Patient model (matching backend)
@@ -55,8 +54,8 @@ pub type RecordType {
     // SlicerArgs
     slicer_result_validator: Option(String),
     slicer_result_validator_args: Option(Dict(String, String)),
-    data_schema: Option(Dict(String, Json)),
-    // DataSchema for dynamic form
+    data_schema: Option(String),
+    // JSON Schema string for dynamic form (formosh)
     role_name: Option(String),
     max_users: Option(Int),
     min_users: Option(Int),
@@ -89,8 +88,8 @@ pub type Record {
     series: Option(Series),
     record_type: Option(RecordType),
     user: Option(User),
-    data: Option(Dict(String, Json)),
-    // RecordData
+    data: Option(String),
+    // RecordData as JSON string
     created_at: Option(String),
     changed_at: Option(String),
     started_at: Option(String),
@@ -197,7 +196,7 @@ pub type RecordTypeCreate {
     slicer_script_args: Option(Dict(String, String)),
     slicer_result_validator: Option(String),
     slicer_result_validator_args: Option(Dict(String, String)),
-    data_schema: Option(Dict(String, Json)),
+    data_schema: Option(String),
     role_name: Option(String),
     max_users: Option(Int),
     min_users: Option(Int),
@@ -229,7 +228,7 @@ pub type RecordRead {
     record_type_name: String,
     user_id: Option(String),
     patient_id: String,
-    data: Option(Dict(String, Json)),
+    data: Option(String),
     patient: Patient,
     study: Study,
     series: Option(Series),

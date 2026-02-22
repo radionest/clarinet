@@ -62,6 +62,7 @@ class RecordTypeBase(SQLModel):
     # File schema definitions
     input_files: list[FileDefinition] | None = None
     output_files: list[FileDefinition] | None = None
+    data_schema: RecordSchema | None = None
 
 
 class RecordType(RecordTypeBase, table=True):
@@ -417,6 +418,8 @@ class RecordRead(RecordBase):
 
     id: int
     data: RecordData | None = None
+    created_at: datetime | None = None
+    changed_at: datetime | None = None
     patient: PatientBase
     study: StudyBase
     series: SeriesBase | None = None

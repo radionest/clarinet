@@ -127,6 +127,10 @@ pub type Msg {
   SubmitRecordData(record_id: String, data: Json)
   RecordDataSaved(Result(Record, ApiError))
 
+  // Formosh form events
+  FormSubmitSuccess(record_id: String)
+  FormSubmitError(error: String)
+
   // UI Actions
   SetLoading(Bool)
   SetError(Option(String))

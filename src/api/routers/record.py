@@ -230,18 +230,14 @@ async def get_my_available_record_types(
     return await repo.get_available_type_counts(user.id)
 
 
-@router.get("/{record_id}", response_model=Record | RecordRead)
+@router.get("/{record_id}", response_model=RecordRead)
 async def get_record(
     record_id: int,
     repo: RecordRepositoryDep,
-    detailed: bool = False,
-) -> Record | RecordRead:
+) -> RecordRead:
     """Get a record by ID."""
     record = await repo.get_with_relations(record_id)
-
-    if detailed:
-        return RecordRead.model_validate(record)
-    return record
+    return RecordRead.model_validate(record)
 
 
 async def check_record_constraints(

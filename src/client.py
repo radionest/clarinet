@@ -622,21 +622,16 @@ class ClarinetClient:
         response = await self._request("GET", "/records/my/pending")
         return [RecordRead.model_validate(t) for t in response.json()]
 
-    async def get_record(self, record_id: int, detailed: bool = False) -> RecordRead:
+    async def get_record(self, record_id: int) -> RecordRead:
         """Get record by ID.
 
         Args:
             record_id: Record ID
-            detailed: Return detailed record info
 
         Returns:
             Record data
         """
-        response = await self._request(
-            "GET",
-            f"/records/{record_id}",
-            params={"detailed": detailed},
-        )
+        response = await self._request("GET", f"/records/{record_id}")
         return RecordRead.model_validate(response.json())
 
     async def create_record(self, record: RecordCreate | dict[str, Any]) -> RecordRead:
