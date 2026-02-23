@@ -20,6 +20,7 @@ from src.repositories.record_type_repository import RecordTypeRepository
 from src.repositories.series_repository import SeriesRepository
 from src.repositories.study_repository import StudyRepository
 from src.repositories.user_repository import UserRepository, UserRoleRepository
+from src.services.admin_service import AdminService
 from src.services.study_service import StudyService
 from src.services.user_service import UserService
 from src.settings import settings
@@ -143,6 +144,18 @@ async def get_study_service(
     return StudyService(study_repo, patient_repo, series_repo)
 
 
+async def get_admin_service(
+    record_repo: RecordRepositoryDep,
+    record_type_repo: RecordTypeRepositoryDep,
+    study_repo: StudyRepositoryDep,
+    patient_repo: PatientRepositoryDep,
+    user_repo: UserRepositoryDep,
+) -> AdminService:
+    """Get admin service instance with injected repositories."""
+    return AdminService(record_repo, record_type_repo, study_repo, patient_repo, user_repo)
+
+
 # Service type aliases
 UserServiceDep = Annotated[UserService, Depends(get_user_service)]
 StudyServiceDep = Annotated[StudyService, Depends(get_study_service)]
+AdminServiceDep = Annotated[AdminService, Depends(get_admin_service)]

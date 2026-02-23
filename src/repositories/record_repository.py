@@ -5,7 +5,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from uuid import UUID
 
-from sqlalchemy import func
+from sqlalchemy import distinct, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlmodel import col, select
@@ -520,6 +520,52 @@ class RecordRepository(BaseRepository[Record]):
 
         logger.info(f"Found {len(results)} records matching criteria")
         return results
+
+    async def get_status_counts(self) -> dict[str, int]:
+        """Get record counts grouped by status.
+
+        Returns:
+            Dict mapping status value to count, e.g. {"pending": 5, "inwork": 3}
+        """
+        query = select(col(Record.status), func.count()).group_by(col(Record.status))
+        result = await self.session.execute(query)
+        return {status.value: count for status, count in result.all()}
+
+    async def get_per_type_status_counts(self) -> dict[str, dict[str, int]]:
+        """Get per-record-type, per-status counts.
+
+        Returns:
+            Nested dict: {type_name: {status_value: count}}
+        """
+        query = select(
+            col(Record.record_type_name),
+            col(Record.status),
+            func.count(col(Record.id)),
+        ).group_by(col(Record.record_type_name), col(Record.status))
+        result = await self.session.execute(query)
+
+        status_map: dict[str, dict[str, int]] = {}
+        for type_name, status, count in result.all():
+            status_map.setdefault(type_name, {})[status.value] = count
+        return status_map
+
+    async def get_per_type_unique_users(self) -> dict[str, int]:
+        """Get unique assigned user count per record type.
+
+        Returns:
+            Dict mapping type_name to unique user count
+        """
+        query = (
+            select(
+                col(Record.record_type_name),
+                func.count(distinct(col(Record.user_id))),
+            )
+            .where(col(Record.user_id).is_not(None))
+            .group_by(col(Record.record_type_name))
+        )
+        result = await self.session.execute(query)
+        rows = result.all()
+        return {type_name: count for type_name, count in rows}  # noqa: C416
 
     async def get_available_type_counts(self, user_id: UUID) -> dict[RecordType, int]:
         """Get record types with pending record counts available to a user.
