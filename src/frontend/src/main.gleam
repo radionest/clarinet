@@ -4,6 +4,7 @@ import api/auth
 import api/models
 import api/patients
 import api/records
+import api/series
 import api/studies
 import api/types
 import api/users
@@ -32,6 +33,9 @@ import pages/patients/new as patient_new
 import pages/records/execute as record_execute
 import pages/records/list as records_list
 import pages/register
+import pages/series/detail as series_detail
+import pages/studies/detail as study_detail
+import pages/studies/list as studies_list
 import router.{type Route}
 import store.{type Model, type Msg}
 
@@ -690,6 +694,64 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       #(new_model, effect.none())
     }
 
+    // Data loading - Study Detail
+    store.LoadStudyDetail(id) -> {
+      let load_effect =
+        effect.from(fn(dispatch) {
+          studies.get_study(id)
+          |> promise.tap(fn(result) {
+            dispatch(store.StudyDetailLoaded(result))
+          })
+          Nil
+        })
+      #(store.set_loading(model, True), load_effect)
+    }
+
+    store.StudyDetailLoaded(Ok(study)) -> {
+      let new_model =
+        model
+        |> store.cache_study(study)
+        |> store.set_loading(False)
+      #(new_model, effect.none())
+    }
+
+    store.StudyDetailLoaded(Error(_err)) -> {
+      let new_model =
+        model
+        |> store.set_loading(False)
+        |> store.set_error(Some("Failed to load study"))
+      #(new_model, effect.none())
+    }
+
+    // Data loading - Series Detail
+    store.LoadSeriesDetail(id) -> {
+      let load_effect =
+        effect.from(fn(dispatch) {
+          series.get_series(id)
+          |> promise.tap(fn(result) {
+            dispatch(store.SeriesDetailLoaded(result))
+          })
+          Nil
+        })
+      #(store.set_loading(model, True), load_effect)
+    }
+
+    store.SeriesDetailLoaded(Ok(s)) -> {
+      let new_model =
+        model
+        |> store.cache_series(s)
+        |> store.set_loading(False)
+      #(new_model, effect.none())
+    }
+
+    store.SeriesDetailLoaded(Error(_err)) -> {
+      let new_model =
+        model
+        |> store.set_loading(False)
+        |> store.set_error(Some("Failed to load series"))
+      #(new_model, effect.none())
+    }
+
     // Default case
     _ -> #(model, effect.none())
   }
@@ -709,8 +771,9 @@ fn view_content(model: Model) -> Element(Msg) {
     router.Home -> home.view(model)
     router.Login -> login.view(model)
     router.Register -> register.view(model)
-    router.Studies -> html.div([], [html.text("Studies page")])
-    router.StudyDetail(_id) -> html.div([], [html.text("Study detail page")])
+    router.Studies -> studies_list.view(model)
+    router.StudyDetail(id) -> study_detail.view(model, id)
+    router.SeriesDetail(id) -> series_detail.view(model, id)
     router.Records -> records_list.view(model)
     router.RecordDetail(id) -> record_execute.view(model, id)
     router.RecordNew -> html.div([], [html.text("New record page")])
@@ -744,6 +807,13 @@ fn load_route_data(model: Model, route: Route) -> Effect(Msg) {
     router.Home, None -> effect.none()
     router.Studies, Some(models.User(is_superuser: True, ..)) ->
       effect.from(fn(dispatch) { dispatch(store.LoadStudies) })
+    router.StudyDetail(id), Some(models.User(is_superuser: True, ..)) ->
+      effect.batch([
+        effect.from(fn(dispatch) { dispatch(store.LoadStudyDetail(id)) }),
+        effect.from(fn(dispatch) { dispatch(store.LoadRecords) }),
+      ])
+    router.SeriesDetail(id), Some(models.User(is_superuser: True, ..)) ->
+      effect.from(fn(dispatch) { dispatch(store.LoadSeriesDetail(id)) })
     router.Records, _ -> effect.from(fn(dispatch) { dispatch(store.LoadRecords) })
     router.RecordDetail(id), Some(_) ->
       effect.from(fn(dispatch) { dispatch(store.LoadRecordDetail(id)) })

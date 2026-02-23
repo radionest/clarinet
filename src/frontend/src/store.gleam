@@ -1,7 +1,7 @@
 // Global state management
 import api/models.{
-  type AdminStats, type Patient, type Study, type Record, type RecordType,
-  type User,
+  type AdminStats, type Patient, type Series, type Study, type Record,
+  type RecordType, type User,
 }
 import api/types.{type ApiError}
 import gleam/dict.{type Dict}
@@ -25,6 +25,7 @@ pub type Model {
     success_message: Option(String),
     // Data caches
     studies: Dict(String, Study),
+    series: Dict(String, Series),
     records: Dict(String, Record),
     record_types: Dict(String, RecordType),
     patients: Dict(String, Patient),
@@ -93,6 +94,9 @@ pub type Msg {
   StudiesLoaded(Result(List(Study), ApiError))
   LoadStudyDetail(id: String)
   StudyDetailLoaded(Result(Study, ApiError))
+
+  LoadSeriesDetail(id: String)
+  SeriesDetailLoaded(Result(Series, ApiError))
 
   LoadRecords
   RecordsLoaded(Result(List(Record), ApiError))
@@ -182,6 +186,7 @@ pub fn init() -> Model {
     register_password: "",
     register_password_confirm: "",
     studies: dict.new(),
+    series: dict.new(),
     records: dict.new(),
     record_types: dict.new(),
     patients: dict.new(),
@@ -248,6 +253,11 @@ pub fn cache_study(model: Model, study: Study) -> Model {
   // Use study_uid as the key
   let studies = dict.insert(model.studies, study.study_uid, study)
   Model(..model, studies: studies)
+}
+
+pub fn cache_series(model: Model, s: Series) -> Model {
+  let series = dict.insert(model.series, s.series_uid, s)
+  Model(..model, series: series)
 }
 
 pub fn cache_record(model: Model, record: Record) -> Model {

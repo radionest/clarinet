@@ -137,25 +137,6 @@
 
 ## 2. DRY — дублирование
 
-### 2.1 Двойной decoder для User
-
-**Проблема:**
-- `auth.gleam:87-124` — приватный `decode_user`
-- `users.gleam:18-35` — публичный `user_decoder`
-
-**Исправление:** удалить `decode_user` из `auth.gleam`, использовать `users.user_decoder()`.
-
-```gleam
-// auth.gleam — заменить decode_user на:
-import api/users
-
-fn decode_user(data: dynamic.Dynamic) -> Result(User, ApiError) {
-  case decode.run(data, users.user_decoder()) {
-    Ok(user) -> Ok(user)
-    Error(_) -> Error(types.ParseError("Invalid user data"))
-  }
-}
-```
 
 ### 2.2 Повторяющийся паттерн decode-обертки
 
@@ -195,80 +176,6 @@ pub fn get_studies() -> Promise(Result(List(Study), ApiError)) {
       _, decode.list(study_decoder()), "Invalid studies data",
     ))
   })
-}
-```
-
-### 2.3 text_input / email_input / password_input
-
-**Проблема:** три почти идентичные функции в `forms/base.gleam` (строки 45-114),
-отличающиеся только `attribute.type_()`.
-
-**Исправление:** одна функция с параметром типа:
-
-```gleam
-pub fn input(
-  input_type: String,
-  name: String,
-  value: String,
-  placeholder: Option(String),
-  on_input: fn(String) -> Msg,
-) -> Element(Msg) {
-  let attrs = [
-    attribute.type_(input_type),
-    attribute.id(name),
-    attribute.name(name),
-    attribute.value(value),
-    attribute.class("form-input"),
-    event.on_input(on_input),
-  ]
-  let attrs = case placeholder {
-    Some(p) -> list.append(attrs, [attribute.placeholder(p)])
-    None -> attrs
-  }
-  html.input(attrs)
-}
-
-// Удобные алиасы (опционально):
-pub fn text_input(name, value, placeholder, on_input) {
-  input("text", name, value, placeholder, on_input)
-}
-pub fn email_input(name, value, placeholder, on_input) {
-  input("email", name, value, placeholder, on_input)
-}
-pub fn password_input(name, value, placeholder, on_input) {
-  input("password", name, value, placeholder, on_input)
-}
-```
-
-### 2.4 field / required_field
-
-**Проблема:** отличаются только CSS-классом и звездочкой в label.
-
-**Исправление:** одна функция с параметром `required: Bool`:
-
-```gleam
-pub fn field(
-  label: String,
-  name: String,
-  input: Element(Msg),
-  errors: Dict(String, String),
-  required: Bool,
-) -> Element(Msg) {
-  let class = case required {
-    True -> "form-field required"
-    False -> "form-field"
-  }
-  html.div([attribute.class(class)], [
-    html.label([attribute.for(name), attribute.class("form-label")], [
-      html.text(label),
-      case required {
-        True -> html.span([attribute.class("required-marker")], [html.text(" *")])
-        False -> html.text("")
-      },
-    ]),
-    input,
-    error_message(errors, name),
-  ])
 }
 ```
 
@@ -314,47 +221,6 @@ fn base_request(method: http.Method, path: String) -> request.Request(String) {
 
 ## 3. KISS — излишняя сложность
 
-### 3.1 Двойные структуры данных Dict + List
-
-**Проблема:** store поддерживает `studies: Dict` + `studies_list: List`,
-то же для records и users. Риск рассинхронизации, лишняя работа при обновлении.
-
-**Исправление:** оставить только `Dict`. Для отображения списков использовать
-`dict.values()`. Если нужна сортировка — сортировать при рендере.
-
-```gleam
-// Вместо:
-studies: Dict(String, Study),
-studies_list: List(Study),
-
-// Оставить:
-studies: Dict(String, Study),
-```
-
-### 3.2 is_same_section в router.gleam — ручное перечисление пар
-
-**Проблема:** 14 case-ветвей вручную перечисляют все комбинации маршрутов.
-
-**Исправление:** ввести функцию `section`:
-
-```gleam
-fn section(route: Route) -> String {
-  case route {
-    Home -> "home"
-    Login -> "login"
-    Register -> "register"
-    Studies | StudyDetail(_) -> "studies"
-    Records | RecordDetail(_) | RecordNew | RecordTypeDesign(_) -> "records"
-    Users | UserProfile(_) -> "users"
-    AdminDashboard -> "admin"
-    NotFound -> "notfound"
-  }
-}
-
-pub fn is_same_section(route1: Route, route2: Route) -> Bool {
-  section(route1) == section(route2)
-}
-```
 
 ### 3.3 Record тип слишком большой
 
@@ -398,23 +264,6 @@ pub type RecordSummary {
 
 ---
 
-## 4. Баг
-
-### 4.1 Двойной `/api` prefix в auth.gleam
-
-**Файл:** `auth.gleam:62`
-
-```gleam
-// Текущий (ОШИБКА):
-http_client.post("/api/auth/register", body)
-
-// Правильно:
-http_client.post("/auth/register", body)
-```
-
-`http_client.post` уже добавляет `/api`, итоговый URL будет `/api/api/auth/register`.
-
----
 
 ## 5. Стилистические замечания
 

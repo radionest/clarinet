@@ -18,6 +18,7 @@ pub type Route {
   Patients
   PatientDetail(id: String)
   PatientNew
+  SeriesDetail(id: String)
   Users
   UserProfile(id: String)
   AdminDashboard
@@ -40,6 +41,7 @@ pub fn route_to_path(route: Route) -> String {
     Patients -> "/patients"
     PatientNew -> "/patients/new"
     PatientDetail(id) -> "/patients/" <> id
+    SeriesDetail(id) -> "/series/" <> id
     Users -> "/users"
     UserProfile(id) -> "/users/" <> id
     AdminDashboard -> "/admin"
@@ -68,6 +70,7 @@ pub fn parse_route(uri: Uri) -> Route {
     ["patients"] -> Patients
     ["patients", "new"] -> PatientNew
     ["patients", id] -> PatientDetail(id)
+    ["series", id] -> SeriesDetail(id)
     ["users"] -> Users
     ["users", id] -> UserProfile(id)
     ["admin"] -> AdminDashboard
@@ -87,7 +90,7 @@ pub fn requires_auth(route: Route) -> Bool {
 // Check if route requires admin role
 pub fn requires_admin_role(route: Route) -> Bool {
   case route {
-    Studies | StudyDetail(_) | Patients | PatientDetail(_) | PatientNew | Users | UserProfile(_) | AdminDashboard -> True
+    Studies | StudyDetail(_) | SeriesDetail(_) | Patients | PatientDetail(_) | PatientNew | Users | UserProfile(_) | AdminDashboard -> True
     _ -> False
   }
 }
@@ -108,6 +111,7 @@ pub fn get_route_title(route: Route) -> String {
     Patients -> "Patients"
     PatientDetail(_) -> "Patient Details"
     PatientNew -> "New Patient"
+    SeriesDetail(_) -> "Series Details"
     Users -> "Users"
     UserProfile(_) -> "User Profile"
     AdminDashboard -> "Admin Dashboard"
@@ -120,7 +124,7 @@ fn section(route: Route) -> String {
     Home -> "home"
     Login -> "login"
     Register -> "register"
-    Studies | StudyDetail(_) -> "studies"
+    Studies | StudyDetail(_) | SeriesDetail(_) -> "studies"
     Records | RecordDetail(_) | RecordNew | RecordTypeDesign(_) -> "records"
     Patients | PatientDetail(_) | PatientNew -> "patients"
     Users | UserProfile(_) -> "users"

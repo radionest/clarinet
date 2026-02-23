@@ -36,7 +36,8 @@ class SeriesRepository(BaseRepository[Series]):
             .where(Series.series_uid == series_id)
             .options(
                 selectinload(Series.study).selectinload(Study.patient),  # type: ignore
-                selectinload(Series.records),  # type: ignore
+                selectinload(Series.study).selectinload(Study.series),  # type: ignore
+                selectinload(Series.records).selectinload(Record.record_type),  # type: ignore
             )
         )
         result = await self.session.execute(statement)
@@ -265,7 +266,8 @@ class SeriesRepository(BaseRepository[Series]):
         """
         statement = select(Series).options(
             selectinload(Series.study).selectinload(Study.patient),  # type: ignore
-            selectinload(Series.records),  # type: ignore
+            selectinload(Series.study).selectinload(Study.series),  # type: ignore
+            selectinload(Series.records).selectinload(Record.record_type),  # type: ignore
         )
 
         for query_key, query_value in find_query.model_dump(
