@@ -27,13 +27,6 @@ from .study import Series, SeriesBase, SeriesFind, Study, StudyBase
 from .user import User, UserRole
 
 
-class RecordDataSchema(BaseModel):
-    """Base class for record data schemas."""
-
-    def __init_subclass__(cls, **kwargs: Any) -> None:
-        super().__init_subclass__(**kwargs)
-
-
 class SlicerSettings(SQLModel):
     """Settings for Slicer workspace and validation scripts."""
 
@@ -106,7 +99,6 @@ class RecordTypeCreate(RecordTypeBase):
 class RecordTypeOptional(SQLModel):
     """Pydantic model for updating a record type with optional fields."""
 
-    id: int | None = None
     name: str | None = None
     description: str | None = None
     label: str | None = None
