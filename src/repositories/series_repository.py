@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlmodel import select
 
-from src.models import Record, RecordType, Series, Study
+from src.models import Record, Series, Study
 from src.models.study import SeriesFind
 from src.repositories.base import BaseRepository
 
@@ -279,9 +279,20 @@ class SeriesRepository(BaseRepository[Series]):
                 else:
                     statement = statement.where(getattr(Series, query_key) == query_value)
 
-        if find_query.records:
-            statement = statement.join(Record, isouter=True)
-            statement = statement.join(RecordType, isouter=True)
+        for rec_criteria in find_query.records:
+            subq = select(Record.id).where(
+                Record.series_uid == Series.series_uid,
+                Record.record_type_name == rec_criteria.record_type_name,
+            )
+            if rec_criteria.status is not None:
+                subq = subq.where(Record.status == rec_criteria.status)
+            if rec_criteria.user_id is not None:
+                subq = subq.where(Record.user_id == rec_criteria.user_id)
 
-        result = await self.session.execute(statement.distinct())
+            if rec_criteria.is_absent:
+                statement = statement.where(~subq.exists())
+            else:
+                statement = statement.where(subq.exists())
+
+        result = await self.session.execute(statement)
         return list(result.scalars().all())

@@ -421,13 +421,12 @@ class RecordRead(RecordBase):
 
 
 class RecordFind(SQLModel):
-    """Pydantic model for searching records."""
+    """Criteria for filtering series by their records."""
 
+    record_type_name: str
     status: RecordStatus | None = None
-    name: str
-    data: RecordData | None = None
     user_id: UUID | None = None
-    is_absent: bool | None = None
+    is_absent: bool = False
 
 
 SeriesFind.model_rebuild()
