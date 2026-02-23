@@ -274,15 +274,15 @@ class RecordRepository(BaseRepository[Record]):
         record.files = files
         await self.session.commit()
 
-    async def assign_user(self, record_id: int, user_id: UUID) -> Record:
-        """Assign a user to a record.
+    async def assign_user(self, record_id: int, user_id: UUID) -> tuple[Record, RecordStatus]:
+        """Assign a user to a record and set status to inwork.
 
         Args:
             record_id: Record ID
             user_id: User UUID
 
         Returns:
-            Updated record
+            Tuple of (record with relations loaded, old status)
 
         Raises:
             RecordNotFoundError: If record doesn't exist
@@ -292,10 +292,11 @@ class RecordRepository(BaseRepository[Record]):
         user = await self.session.get(User, user_id)
         if not user:
             raise UserNotFoundError(user_id)
+        old_status = record.status
         record.user_id = user_id
+        record.status = RecordStatus.inwork
         await self.session.commit()
-        await self.session.refresh(record)
-        return record
+        return await self.get_with_relations(record_id), old_status
 
     async def claim_record(self, record_id: int, user_id: UUID) -> Record:
         """Assign user and set status to inwork.

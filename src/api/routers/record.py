@@ -301,14 +301,27 @@ async def update_record_status(
     return record
 
 
-@router.patch("/{record_id}/user", response_model=Record)
+@router.patch("/{record_id}/user", response_model=RecordRead)
 async def assign_record_to_user(
     record_id: int,
     user_id: UUID,
+    request: Request,
+    background_tasks: BackgroundTasks,
     repo: RecordRepositoryDep,
 ) -> Record:
     """Assign a record to a user."""
-    return await repo.assign_user(record_id, user_id)
+    record, old_status = await repo.assign_user(record_id, user_id)
+
+    # Trigger RecordFlow if enabled and status changed
+    if old_status != record.status:
+        recordflow_engine = getattr(request.app.state, "recordflow_engine", None)
+        if recordflow_engine:
+            record_read = RecordRead.model_validate(record)
+            background_tasks.add_task(
+                recordflow_engine.handle_record_status_change, record_read, old_status
+            )
+
+    return record
 
 
 @router.post("/{record_id}/data", response_model=RecordRead)
