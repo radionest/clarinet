@@ -290,3 +290,30 @@ pub type AdminStats {
     records_by_status: Dict(String, Int),
   )
 }
+
+// Per-status record counts for a record type
+pub type RecordTypeStatusCounts {
+  RecordTypeStatusCounts(
+    pending: Int,
+    inwork: Int,
+    finished: Int,
+    failed: Int,
+    pause: Int,
+  )
+}
+
+// Record type with aggregate statistics
+pub type RecordTypeStats {
+  RecordTypeStats(
+    name: String,
+    description: Option(String),
+    label: Option(String),
+    level: String,
+    role_name: Option(String),
+    min_users: Option(Int),
+    max_users: Option(Int),
+    total_records: Int,
+    records_by_status: RecordTypeStatusCounts,
+    unique_users: Int,
+  )
+}

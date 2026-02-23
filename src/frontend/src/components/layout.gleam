@@ -33,6 +33,7 @@ fn navbar(model: Model) -> Element(Msg) {
             nav_link(route: router.Studies, text: "Studies", current_route: model.route),
             nav_link(route: router.Patients, text: "Patients", current_route: model.route),
             nav_link(route: router.Users, text: "Users", current_route: model.route),
+            nav_link(route: router.AdminRecordTypes, text: "Record Types", current_route: model.route),
             nav_link(route: router.AdminDashboard, text: "Admin", current_route: model.route),
           ])
         False -> html.text("")

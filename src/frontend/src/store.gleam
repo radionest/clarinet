@@ -1,7 +1,7 @@
 // Global state management
 import api/models.{
-  type AdminStats, type Patient, type Series, type Study, type Record,
-  type RecordType, type User,
+  type AdminStats, type Patient, type RecordTypeStats, type Series, type Study,
+  type Record, type RecordType, type User,
 }
 import api/types.{type ApiError}
 import gleam/dict.{type Dict}
@@ -52,6 +52,7 @@ pub type Model {
     active_filters: Dict(String, String),
     // Admin
     admin_stats: Option(AdminStats),
+    record_type_stats: Option(List(RecordTypeStats)),
     admin_editing_record_id: Option(Int),
     // Modal state
     modal_open: Bool,
@@ -115,6 +116,9 @@ pub type Msg {
 
   LoadAdminStats
   AdminStatsLoaded(Result(AdminStats, ApiError))
+
+  LoadRecordTypeStats
+  RecordTypeStatsLoaded(Result(List(RecordTypeStats), ApiError))
 
   // Admin record assignment
   AdminToggleAssignDropdown(record_id: Option(Int))
@@ -202,6 +206,7 @@ pub fn init() -> Model {
     search_query: "",
     active_filters: dict.new(),
     admin_stats: None,
+    record_type_stats: None,
     admin_editing_record_id: None,
     modal_open: False,
     modal_content: NoModal,

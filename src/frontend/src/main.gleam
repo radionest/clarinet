@@ -25,6 +25,8 @@ import lustre/element.{type Element}
 import lustre/element/html
 import modem
 import pages/admin as admin_page
+import pages/record_types/detail as record_type_detail
+import pages/record_types/list as record_types_list
 import pages/home
 import pages/login
 import pages/patients/detail as patient_detail
@@ -423,6 +425,28 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       #(new_model, effect.none())
     }
 
+    // Data loading - Record Type Stats
+    store.LoadRecordTypeStats ->
+      load_with_effect(
+        model,
+        admin.get_record_type_stats,
+        store.RecordTypeStatsLoaded,
+      )
+
+    store.RecordTypeStatsLoaded(Ok(stats)) -> {
+      let new_model =
+        store.Model(..model, record_type_stats: Some(stats), loading: False)
+      #(new_model, effect.none())
+    }
+
+    store.RecordTypeStatsLoaded(Error(_err)) -> {
+      let new_model =
+        model
+        |> store.set_loading(False)
+        |> store.set_error(Some("Failed to load record type statistics"))
+      #(new_model, effect.none())
+    }
+
     // Admin record assignment
     store.AdminToggleAssignDropdown(record_id) -> {
       #(store.Model(..model, admin_editing_record_id: record_id), effect.none())
@@ -739,6 +763,8 @@ fn view_content(model: Model) -> Element(Msg) {
     router.Users -> html.div([], [html.text("Users page")])
     router.UserProfile(_id) -> html.div([], [html.text("User profile page")])
     router.AdminDashboard -> admin_page.view(model)
+    router.AdminRecordTypes -> record_types_list.view(model)
+    router.AdminRecordTypeDetail(name) -> record_type_detail.view(model, name)
     router.NotFound -> html.div([], [html.text("404 - Page not found")])
   }
 
@@ -786,6 +812,13 @@ fn load_route_data(model: Model, route: Route) -> Effect(Msg) {
         dispatch_msg(store.LoadAdminStats),
         dispatch_msg(store.LoadRecords),
         dispatch_msg(store.LoadUsers),
+      ])
+    router.AdminRecordTypes, Some(_) ->
+      dispatch_msg(store.LoadRecordTypeStats)
+    router.AdminRecordTypeDetail(_), Some(_) ->
+      effect.batch([
+        dispatch_msg(store.LoadRecordTypeStats),
+        dispatch_msg(store.LoadRecords),
       ])
     _, _ -> effect.none()
   }
