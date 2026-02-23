@@ -1,6 +1,7 @@
 // Records list page
 import api/models.{type Record}
 import api/types
+import utils/permissions
 import components/forms/base
 import gleam/dict
 import gleam/int
@@ -215,19 +216,8 @@ fn record_row(model: Model, record: Record) -> Element(Msg) {
     types.Paused -> #("badge-paused", "Paused")
   }
 
-  let can_fill = case record.status {
-    types.Pending | types.InWork -> {
-      case model.user {
-        Some(u) ->
-          case record.user_id {
-            Some(assigned_id) -> assigned_id == u.id || u.is_superuser
-            None -> u.is_superuser
-          }
-        None -> False
-      }
-    }
-    _ -> False
-  }
+  let can_fill = permissions.can_fill_record(record, model.user)
+  let can_edit = permissions.can_edit_record(record, model.user)
 
   html.tr([], [
     html.td([], [html.text(record_id_str)]),
@@ -239,8 +229,8 @@ fn record_row(model: Model, record: Record) -> Element(Msg) {
     ]),
     html.td([], [html.text(record.patient_id)]),
     html.td([], [
-      case can_fill {
-        True ->
+      case can_fill, can_edit {
+        True, _ ->
           html.a(
             [
               attribute.href("/records/" <> record_id_str),
@@ -248,7 +238,15 @@ fn record_row(model: Model, record: Record) -> Element(Msg) {
             ],
             [html.text("Fill")],
           )
-        False ->
+        _, True ->
+          html.a(
+            [
+              attribute.href("/records/" <> record_id_str),
+              attribute.class("btn btn-sm btn-secondary"),
+            ],
+            [html.text("Edit")],
+          )
+        _, _ ->
           html.a(
             [
               attribute.href("/records/" <> record_id_str),

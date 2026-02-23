@@ -1,10 +1,12 @@
 // Record execution page with dynamic Formosh forms
-import api/models.{type Record, type RecordType, type User}
+import api/models.{type Record, type RecordType}
 import api/types.{type RecordStatus}
+import utils/permissions
 import formosh/component as formosh_component
 import gleam/dict
 import gleam/dynamic/decode
-import gleam/option.{type Option, None, Some}
+import gleam/list
+import gleam/option.{None, Some}
 import lustre/attribute
 import lustre/element.{type Element}
 import lustre/element/html
@@ -80,9 +82,11 @@ fn render_dynamic_form(
 ) -> Element(Msg) {
   case record_type.data_schema {
     Some(schema_json) -> {
-      let can_edit = can_edit_record(record, model.user)
+      let can_edit =
+        permissions.can_fill_record(record, model.user)
+        || permissions.can_edit_record(record, model.user)
       case can_edit {
-        True -> render_editable_form(schema_json, record_id)
+        True -> render_editable_form(schema_json, record_id, record)
         False -> render_readonly_data(record)
       }
     }
@@ -102,15 +106,29 @@ fn render_dynamic_form(
 fn render_editable_form(
   schema_json: String,
   record_id: String,
+  record: Record,
 ) -> Element(Msg) {
   let submit_url = "/api/records/" <> record_id <> "/data"
+  let is_finished = record.status == types.Finished
+  let method = case is_finished {
+    True -> "PATCH"
+    False -> "POST"
+  }
 
-  formosh_component.element([
+  let base_attrs = [
     formosh_component.schema_string(schema_json),
     formosh_component.submit_url(submit_url),
-    formosh_component.submit_method("POST"),
+    formosh_component.submit_method(method),
     event.on("formosh-submit", decode_form_submit(record_id)),
-  ])
+  ]
+
+  let attrs = case is_finished, record.data {
+    True, Some(data) ->
+      list.append(base_attrs, [formosh_component.initial_values_string(data)])
+    _, _ -> base_attrs
+  }
+
+  formosh_component.element(attrs)
 }
 
 /// Decode the formosh-submit custom event
@@ -134,23 +152,6 @@ fn render_readonly_data(record: Record) -> Element(Msg) {
   }
 }
 
-/// Check if user can edit record
-fn can_edit_record(record: Record, user: Option(User)) -> Bool {
-  case record.status {
-    types.Pending | types.InWork -> {
-      case user {
-        Some(u) -> {
-          case record.user_id {
-            Some(assigned_id) -> assigned_id == u.id || u.is_superuser
-            None -> u.is_superuser
-          }
-        }
-        None -> False
-      }
-    }
-    _ -> False
-  }
-}
 
 /// Render record status badge
 fn render_record_status(status: RecordStatus) -> Element(Msg) {

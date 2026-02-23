@@ -93,6 +93,7 @@ fn studies_section(studies: Option(List(Study))) -> Element(Msg) {
                 html.th([], [html.text("Study UID")]),
                 html.th([], [html.text("Date")]),
                 html.th([], [html.text("Anon UID")]),
+                html.th([], [html.text("Actions")]),
               ]),
             ]),
             html.tbody([], list.map(study_list, study_row)),
@@ -107,6 +108,15 @@ fn study_row(study: Study) -> Element(Msg) {
     html.td([], [html.text(study.study_uid)]),
     html.td([], [html.text(study.date)]),
     html.td([], [html.text(option.unwrap(study.anon_uid, "-"))]),
+    html.td([], [
+      html.a(
+        [
+          attribute.href(router.route_to_path(router.StudyDetail(study.study_uid))),
+          attribute.class("btn btn-sm btn-outline"),
+        ],
+        [html.text("View")],
+      ),
+    ]),
   ])
 }
 
