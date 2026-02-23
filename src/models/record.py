@@ -412,6 +412,8 @@ class RecordRead(RecordBase):
     data: RecordData | None = None
     created_at: datetime | None = None
     changed_at: datetime | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
     patient: PatientBase
     study: StudyBase
     series: SeriesBase | None = None
