@@ -160,6 +160,16 @@ pub fn record_decoder() -> decode.Decoder(Record) {
     None,
     decode.optional(decode.string),
   )
+  use started_at <- decode.optional_field(
+    "started_at",
+    None,
+    decode.optional(decode.string),
+  )
+  use finished_at <- decode.optional_field(
+    "finished_at",
+    None,
+    decode.optional(decode.string),
+  )
   use data_dyn <- decode.optional_field(
     "data",
     None,
@@ -193,8 +203,8 @@ pub fn record_decoder() -> decode.Decoder(Record) {
     data: data,
     created_at: created_at,
     changed_at: changed_at,
-    started_at: None,
-    finished_at: None,
+    started_at: started_at,
+    finished_at: finished_at,
     radiant: None,
     working_folder: None,
     slicer_args_formatted: None,

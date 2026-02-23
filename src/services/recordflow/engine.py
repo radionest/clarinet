@@ -246,10 +246,10 @@ class RecordFlowEngine:
             create_params["series_uid"] = params["series_uid"]
         if "user_id" in params:
             create_params["user_id"] = params["user_id"]
-        if "info" in params:
-            create_params["info"] = params["info"]
+        if "context_info" in params:
+            create_params["context_info"] = params["context_info"]
         else:
-            create_params["info"] = (
+            create_params["context_info"] = (
                 f"Created by flow from record {record.record_type.name} (id={record.id})"
             )
 

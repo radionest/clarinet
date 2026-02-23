@@ -68,7 +68,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         try:
             # Create client with admin credentials
             client = ClarinetClient(
-                base_url=f"http://{settings.host}:{settings.port}",
+                base_url=f"http://{settings.host}:{settings.port}/api",
                 username=settings.admin_username,
                 password=settings.admin_password,
                 auto_login=False,  # We'll login manually in the engine when needed

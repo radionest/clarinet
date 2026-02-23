@@ -20,14 +20,7 @@ data/logs/clarinet.log
 */clarinet_demo.db
 .Rhistory
 examples/test/data/logs/clarinet.log
-CLAUDE.md
 REFACTOR.md
 examples/demo/clarinet_demo.db
 examples/demo/data/logs/clarinet.log
-src/CLAUDE.md
-src/api/CLAUDE.md
-src/frontend/CLAUDE.md
-src/models/CLAUDE.md
-src/repositories/CLAUDE.md
-src/services/recordflow/CLAUDE.md
-tests/CLAUDE.md
+

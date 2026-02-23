@@ -1,0 +1,524 @@
+"""Integration tests for RecordFlow engine with real DB and API.
+
+Uses clarinet_client fixture (real HTTP client → FastAPI app → in-memory SQLite).
+"""
+
+from collections.abc import AsyncGenerator
+
+import pytest
+import pytest_asyncio
+from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.api.app import app
+from src.client import ClarinetClient
+from src.models.base import DicomQueryLevel, RecordStatus
+from src.models.patient import Patient
+from src.models.record import RecordCreate, RecordRead, RecordType
+from src.models.study import Study
+from src.services.recordflow import FlowRecord, FlowResult, RecordFlowEngine
+from src.services.recordflow.flow_record import RECORD_REGISTRY
+
+
+@pytest.fixture(autouse=True)
+def _clear_registry():
+    """Clear the global FlowRecord registry between tests."""
+    RECORD_REGISTRY.clear()
+    yield
+    RECORD_REGISTRY.clear()
+
+
+@pytest_asyncio.fixture
+async def record_types(test_session: AsyncSession) -> dict[str, RecordType]:
+    """Create record types used by flow tests."""
+    types = {}
+    for name in ["doctor_report", "ai_analysis", "expert_check", "confirm_birads"]:
+        rt = RecordType(name=name, level=DicomQueryLevel.STUDY)
+        test_session.add(rt)
+        types[name] = rt
+    await test_session.commit()
+    for rt in types.values():
+        await test_session.refresh(rt)
+    return types
+
+
+@pytest_asyncio.fixture
+async def flow_engine(clarinet_client: ClarinetClient) -> RecordFlowEngine:
+    """Create a RecordFlowEngine backed by the test client."""
+    return RecordFlowEngine(clarinet_client)
+
+
+async def _create_record_via_client(
+    clarinet_client: ClarinetClient,
+    record_type_name: str,
+    patient_id: str,
+    study_uid: str,
+    status: RecordStatus = RecordStatus.pending,
+    data: dict | None = None,
+) -> RecordRead:
+    """Create a record through the API and optionally set data/status."""
+    record_create = RecordCreate(
+        record_type_name=record_type_name,
+        patient_id=patient_id,
+        study_uid=study_uid,
+    )
+    created = await clarinet_client.create_record(record_create)
+
+    # Submit data if provided
+    if data is not None:
+        created = await clarinet_client.submit_record_data(created.id, data)
+
+    # Update status if not pending
+    if status != RecordStatus.pending:
+        created = await clarinet_client.update_record_status(created.id, status)
+
+    return created
+
+
+class TestRecordFlowIntegration:
+    """Integration tests for RecordFlowEngine with real API."""
+
+    @pytest.mark.asyncio
+    async def test_unconditional_flow_creates_record(
+        self,
+        clarinet_client: ClarinetClient,
+        flow_engine: RecordFlowEngine,
+        record_types: dict[str, RecordType],
+        test_patient: Patient,
+        test_study: Study,
+    ):
+        """Unconditional flow on status=finished creates a new record."""
+        # Define flow: doctor_report finished → create ai_analysis
+        flow = FlowRecord("doctor_report")
+        flow.on_status("finished").add_record("ai_analysis")
+        flow_engine.register_flow(flow)
+
+        # Create trigger record
+        trigger = await _create_record_via_client(
+            clarinet_client,
+            "doctor_report",
+            test_patient.id,
+            test_study.study_uid,
+            status=RecordStatus.finished,
+        )
+
+        # Execute flow
+        await flow_engine.handle_record_status_change(trigger)
+
+        # Verify: ai_analysis record was created
+        records = await clarinet_client.find_records(
+            study_uid=test_study.study_uid,
+            record_type_name="ai_analysis",
+        )
+        assert len(records) == 1
+        assert records[0].record_type.name == "ai_analysis"
+
+    @pytest.mark.asyncio
+    async def test_conditional_flow_true(
+        self,
+        clarinet_client: ClarinetClient,
+        flow_engine: RecordFlowEngine,
+        record_types: dict[str, RecordType],
+        test_patient: Patient,
+        test_study: Study,
+    ):
+        """Conditional flow executes when condition is True (confidence < 70)."""
+        # Define flow
+        flow = FlowRecord("doctor_report")
+        flow.on_status("finished")
+        flow.if_(FlowResult("doctor_report", ["confidence"]) < 70).add_record("expert_check")
+        flow_engine.register_flow(flow)
+
+        # Create trigger record with confidence=50 (< 70 → True)
+        trigger = await _create_record_via_client(
+            clarinet_client,
+            "doctor_report",
+            test_patient.id,
+            test_study.study_uid,
+            status=RecordStatus.finished,
+            data={"confidence": 50},
+        )
+
+        await flow_engine.handle_record_status_change(trigger)
+
+        records = await clarinet_client.find_records(
+            study_uid=test_study.study_uid,
+            record_type_name="expert_check",
+        )
+        assert len(records) == 1
+
+    @pytest.mark.asyncio
+    async def test_conditional_flow_false(
+        self,
+        clarinet_client: ClarinetClient,
+        flow_engine: RecordFlowEngine,
+        record_types: dict[str, RecordType],
+        test_patient: Patient,
+        test_study: Study,
+    ):
+        """Conditional flow does NOT execute when condition is False (confidence >= 70)."""
+        flow = FlowRecord("doctor_report")
+        flow.on_status("finished")
+        flow.if_(FlowResult("doctor_report", ["confidence"]) < 70).add_record("expert_check")
+        flow_engine.register_flow(flow)
+
+        # confidence=90 → condition False
+        trigger = await _create_record_via_client(
+            clarinet_client,
+            "doctor_report",
+            test_patient.id,
+            test_study.study_uid,
+            status=RecordStatus.finished,
+            data={"confidence": 90},
+        )
+
+        await flow_engine.handle_record_status_change(trigger)
+
+        records = await clarinet_client.find_records(
+            study_uid=test_study.study_uid,
+            record_type_name="expert_check",
+        )
+        assert len(records) == 0
+
+    @pytest.mark.asyncio
+    async def test_else_branch(
+        self,
+        clarinet_client: ClarinetClient,
+        flow_engine: RecordFlowEngine,
+        record_types: dict[str, RecordType],
+        test_patient: Patient,
+        test_study: Study,
+    ):
+        """Else branch executes when if_ condition is False."""
+        flow = FlowRecord("doctor_report")
+        flow.on_status("finished")
+        flow.if_(FlowResult("doctor_report", ["confidence"]) < 70).add_record("expert_check")
+        flow.else_().add_record("ai_analysis")
+        flow_engine.register_flow(flow)
+
+        # confidence=90 → if_ False → else_ executes
+        trigger = await _create_record_via_client(
+            clarinet_client,
+            "doctor_report",
+            test_patient.id,
+            test_study.study_uid,
+            status=RecordStatus.finished,
+            data={"confidence": 90},
+        )
+
+        await flow_engine.handle_record_status_change(trigger)
+
+        # expert_check should NOT exist
+        expert = await clarinet_client.find_records(
+            study_uid=test_study.study_uid,
+            record_type_name="expert_check",
+        )
+        assert len(expert) == 0
+
+        # ai_analysis SHOULD exist (else branch)
+        ai = await clarinet_client.find_records(
+            study_uid=test_study.study_uid,
+            record_type_name="ai_analysis",
+        )
+        assert len(ai) == 1
+
+    @pytest.mark.asyncio
+    async def test_cross_record_comparison(
+        self,
+        clarinet_client: ClarinetClient,
+        flow_engine: RecordFlowEngine,
+        record_types: dict[str, RecordType],
+        test_patient: Patient,
+        test_study: Study,
+    ):
+        """Flow compares data from two different record types."""
+        flow = FlowRecord("doctor_report")
+        flow.on_status("finished")
+        flow.if_(
+            FlowResult("doctor_report", ["diagnosis"]) != FlowResult("ai_analysis", ["diagnosis"])
+        ).add_record("confirm_birads")
+        flow_engine.register_flow(flow)
+
+        # Create ai_analysis first (context record)
+        await _create_record_via_client(
+            clarinet_client,
+            "ai_analysis",
+            test_patient.id,
+            test_study.study_uid,
+            status=RecordStatus.finished,
+            data={"diagnosis": "benign"},
+        )
+
+        # Create doctor_report with different diagnosis
+        trigger = await _create_record_via_client(
+            clarinet_client,
+            "doctor_report",
+            test_patient.id,
+            test_study.study_uid,
+            status=RecordStatus.finished,
+            data={"diagnosis": "malignant"},
+        )
+
+        await flow_engine.handle_record_status_change(trigger)
+
+        records = await clarinet_client.find_records(
+            study_uid=test_study.study_uid,
+            record_type_name="confirm_birads",
+        )
+        assert len(records) == 1
+
+    @pytest.mark.asyncio
+    async def test_update_record_action(
+        self,
+        clarinet_client: ClarinetClient,
+        flow_engine: RecordFlowEngine,
+        record_types: dict[str, RecordType],
+        test_patient: Patient,
+        test_study: Study,
+    ):
+        """update_record() changes status of an existing record in context."""
+        flow = FlowRecord("doctor_report")
+        flow.on_status("finished").update_record("ai_analysis", status="finished")
+        flow_engine.register_flow(flow)
+
+        # Create ai_analysis (pending)
+        await _create_record_via_client(
+            clarinet_client,
+            "ai_analysis",
+            test_patient.id,
+            test_study.study_uid,
+            status=RecordStatus.pending,
+        )
+
+        # Create trigger
+        trigger = await _create_record_via_client(
+            clarinet_client,
+            "doctor_report",
+            test_patient.id,
+            test_study.study_uid,
+            status=RecordStatus.finished,
+        )
+
+        await flow_engine.handle_record_status_change(trigger)
+
+        # Verify ai_analysis status changed
+        records = await clarinet_client.find_records(
+            study_uid=test_study.study_uid,
+            record_type_name="ai_analysis",
+        )
+        assert len(records) == 1
+        assert records[0].status == RecordStatus.finished
+
+    @pytest.mark.asyncio
+    async def test_no_trigger_on_wrong_status(
+        self,
+        clarinet_client: ClarinetClient,
+        flow_engine: RecordFlowEngine,
+        record_types: dict[str, RecordType],
+        test_patient: Patient,
+        test_study: Study,
+    ):
+        """Flow does not trigger when record status doesn't match trigger."""
+        flow = FlowRecord("doctor_report")
+        flow.on_status("finished").add_record("ai_analysis")
+        flow_engine.register_flow(flow)
+
+        # Create record with status=pending (not "finished")
+        trigger = await _create_record_via_client(
+            clarinet_client,
+            "doctor_report",
+            test_patient.id,
+            test_study.study_uid,
+            status=RecordStatus.pending,
+        )
+
+        await flow_engine.handle_record_status_change(trigger)
+
+        records = await clarinet_client.find_records(
+            study_uid=test_study.study_uid,
+            record_type_name="ai_analysis",
+        )
+        assert len(records) == 0
+
+    @pytest.mark.asyncio
+    async def test_custom_function_call(
+        self,
+        clarinet_client: ClarinetClient,
+        flow_engine: RecordFlowEngine,
+        record_types: dict[str, RecordType],
+        test_patient: Patient,
+        test_study: Study,
+    ):
+        """call() executes a custom async function with record context."""
+        call_log: list[dict] = []
+
+        async def custom_handler(record, context, client, **kwargs):
+            call_log.append(
+                {
+                    "record_id": record.id,
+                    "record_type": record.record_type.name,
+                    "context_keys": list(context.keys()),
+                }
+            )
+
+        flow = FlowRecord("doctor_report")
+        flow.on_status("finished").call(custom_handler)
+        flow_engine.register_flow(flow)
+
+        trigger = await _create_record_via_client(
+            clarinet_client,
+            "doctor_report",
+            test_patient.id,
+            test_study.study_uid,
+            status=RecordStatus.finished,
+        )
+
+        await flow_engine.handle_record_status_change(trigger)
+
+        assert len(call_log) == 1
+        assert call_log[0]["record_type"] == "doctor_report"
+        assert isinstance(call_log[0]["record_id"], int)
+
+
+class TestRecordFlowRuntime:
+    """Tests for the full runtime chain: PATCH /status → background task → engine → new record.
+
+    Verifies that app.state.recordflow_engine is triggered by the API endpoint,
+    the same way it works in production.
+    """
+
+    @pytest_asyncio.fixture
+    async def app_with_engine(
+        self,
+        clarinet_client: ClarinetClient,
+    ) -> AsyncGenerator[RecordFlowEngine]:
+        """Install RecordFlowEngine into app.state, clean up after test."""
+        engine = RecordFlowEngine(clarinet_client)
+        app.state.recordflow_engine = engine
+        yield engine
+        app.state.recordflow_engine = None
+
+    @pytest.mark.asyncio
+    async def test_status_change_triggers_flow_via_api(
+        self,
+        client: AsyncClient,
+        clarinet_client: ClarinetClient,
+        app_with_engine: RecordFlowEngine,
+        record_types: dict[str, RecordType],
+        test_patient: Patient,
+        test_study: Study,
+    ):
+        """PATCH /records/{id}/status triggers engine and creates a new record."""
+        # Register flow: doctor_report finished → create ai_analysis
+        flow = FlowRecord("doctor_report")
+        flow.on_status("finished").add_record("ai_analysis")
+        app_with_engine.register_flow(flow)
+
+        # Create a record via API (status=pending by default)
+        create_resp = await client.post(
+            "/api/records/",
+            json={
+                "record_type_name": "doctor_report",
+                "patient_id": test_patient.id,
+                "study_uid": test_study.study_uid,
+            },
+        )
+        assert create_resp.status_code == 201
+        record_id = create_resp.json()["id"]
+
+        # Change status via PATCH — this triggers background task with engine
+        patch_resp = await client.patch(
+            f"/api/records/{record_id}/status",
+            params={"record_status": "finished"},
+        )
+        assert patch_resp.status_code == 200
+
+        # Verify: ai_analysis was created by the engine via background task
+        records = await clarinet_client.find_records(
+            study_uid=test_study.study_uid,
+            record_type_name="ai_analysis",
+        )
+        assert len(records) == 1
+        assert records[0].record_type.name == "ai_analysis"
+
+    @pytest.mark.asyncio
+    async def test_conditional_flow_via_api(
+        self,
+        client: AsyncClient,
+        clarinet_client: ClarinetClient,
+        app_with_engine: RecordFlowEngine,
+        record_types: dict[str, RecordType],
+        test_patient: Patient,
+        test_study: Study,
+    ):
+        """PATCH /status triggers conditional flow — condition True creates record."""
+        flow = FlowRecord("doctor_report")
+        flow.on_status("finished")
+        flow.if_(FlowResult("doctor_report", ["confidence"]) < 70).add_record("expert_check")
+        app_with_engine.register_flow(flow)
+
+        # Create record
+        create_resp = await client.post(
+            "/api/records/",
+            json={
+                "record_type_name": "doctor_report",
+                "patient_id": test_patient.id,
+                "study_uid": test_study.study_uid,
+            },
+        )
+        record_id = create_resp.json()["id"]
+
+        # Submit data with low confidence
+        await client.post(
+            f"/api/records/{record_id}/data",
+            json={"confidence": 50},
+        )
+
+        # Change status → triggers flow
+        patch_resp = await client.patch(
+            f"/api/records/{record_id}/status",
+            params={"record_status": "finished"},
+        )
+        assert patch_resp.status_code == 200
+
+        records = await clarinet_client.find_records(
+            study_uid=test_study.study_uid,
+            record_type_name="expert_check",
+        )
+        assert len(records) == 1
+
+    @pytest.mark.asyncio
+    async def test_no_engine_means_no_flow(
+        self,
+        client: AsyncClient,
+        clarinet_client: ClarinetClient,
+        record_types: dict[str, RecordType],
+        test_patient: Patient,
+        test_study: Study,
+    ):
+        """Without engine in app.state, status change does NOT trigger any flow."""
+        # Ensure no engine is set (default state)
+        app.state.recordflow_engine = None
+
+        create_resp = await client.post(
+            "/api/records/",
+            json={
+                "record_type_name": "doctor_report",
+                "patient_id": test_patient.id,
+                "study_uid": test_study.study_uid,
+            },
+        )
+        record_id = create_resp.json()["id"]
+
+        patch_resp = await client.patch(
+            f"/api/records/{record_id}/status",
+            params={"record_status": "finished"},
+        )
+        assert patch_resp.status_code == 200
+
+        # No flow engine → no ai_analysis created
+        records = await clarinet_client.find_records(
+            study_uid=test_study.study_uid,
+            record_type_name="ai_analysis",
+        )
+        assert len(records) == 0

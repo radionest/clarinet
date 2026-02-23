@@ -141,6 +141,16 @@ fn record_base_decoder() -> decode.Decoder(models.Record) {
     None,
     decode.optional(decode.string),
   )
+  use started_at <- decode.optional_field(
+    "started_at",
+    None,
+    decode.optional(decode.string),
+  )
+  use finished_at <- decode.optional_field(
+    "finished_at",
+    None,
+    decode.optional(decode.string),
+  )
 
   let status = case status_str {
     "pending" -> types.Pending
@@ -172,8 +182,8 @@ fn record_base_decoder() -> decode.Decoder(models.Record) {
     data: None,
     created_at: created_at,
     changed_at: changed_at,
-    started_at: None,
-    finished_at: None,
+    started_at: started_at,
+    finished_at: finished_at,
     radiant: None,
     working_folder: None,
     slicer_args_formatted: None,
