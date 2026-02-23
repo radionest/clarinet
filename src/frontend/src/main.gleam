@@ -66,12 +66,12 @@ fn init(_flags) -> #(Model, Effect(Msg)) {
     })
 
   // Check existing session via cookie
-  let check_session_effect =
-    effect.from(fn(dispatch) {
-      auth.get_current_user()
-      |> promise.tap(fn(result) { dispatch(store.CheckSessionResult(result)) })
-      Nil
-    })
+  let check_session_effect = {
+    use dispatch <- effect.from
+    auth.get_current_user()
+    |> promise.tap(fn(result) { dispatch(store.CheckSessionResult(result)) })
+    Nil
+  }
 
   #(
     model_with_route,
@@ -210,22 +210,18 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
 
     // Authentication
     store.LoginSubmit(email, password) -> {
-      let new_model = store.set_loading(model, True)
-      let login_effect =
-        effect.from(fn(dispatch) {
-          auth.login(email, password)
-          |> promise.tap(fn(result) {
-            case result {
-              Ok(response) -> {
-                // Login response now only contains user data
-                dispatch(store.LoginSuccess(response.user))
-              }
-              Error(error) -> dispatch(store.LoginError(error))
-            }
-          })
-          Nil
+      let login_effect = {
+        use dispatch <- effect.from
+        auth.login(email, password)
+        |> promise.tap(fn(result) {
+          case result {
+            Ok(response) -> dispatch(store.LoginSuccess(response.user))
+            Error(error) -> dispatch(store.LoginError(error))
+          }
         })
-      #(new_model, login_effect)
+        Nil
+      }
+      #(store.set_loading(model, True), login_effect)
     }
 
     store.LoginSuccess(user) -> {
@@ -258,25 +254,23 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     }
 
     store.RegisterSubmit(email, password) -> {
-      let new_model =
-        store.set_loading(model, True)
-        |> store.clear_messages()
-
       let register_request =
         models.RegisterRequest(email: email, password: password)
-
-      let register_effect =
-        effect.from(fn(dispatch) {
-          auth.register(register_request)
-          |> promise.tap(fn(result) {
-            case result {
-              Ok(user) -> dispatch(store.RegisterSuccess(user))
-              Error(error) -> dispatch(store.RegisterError(error))
-            }
-          })
-          Nil
+      let register_effect = {
+        use dispatch <- effect.from
+        auth.register(register_request)
+        |> promise.tap(fn(result) {
+          case result {
+            Ok(user) -> dispatch(store.RegisterSuccess(user))
+            Error(error) -> dispatch(store.RegisterError(error))
+          }
         })
-      #(new_model, register_effect)
+        Nil
+      }
+      #(
+        store.set_loading(model, True) |> store.clear_messages(),
+        register_effect,
+      )
     }
 
     store.RegisterSuccess(user) -> {
@@ -312,12 +306,12 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     }
 
     store.Logout -> {
-      let logout_effect =
-        effect.from(fn(dispatch) {
-          auth.logout()
-          |> promise.tap(fn(_) { dispatch(store.LogoutComplete) })
-          Nil
-        })
+      let logout_effect = {
+        use dispatch <- effect.from
+        auth.logout()
+        |> promise.tap(fn(_) { dispatch(store.LogoutComplete) })
+        Nil
+      }
       #(store.clear_user(model), logout_effect)
     }
 
@@ -338,15 +332,8 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     }
 
     // Data loading - Studies
-    store.LoadStudies -> {
-      let load_effect =
-        effect.from(fn(dispatch) {
-          studies.get_studies()
-          |> promise.tap(fn(result) { dispatch(store.StudiesLoaded(result)) })
-          Nil
-        })
-      #(store.set_loading(model, True), load_effect)
-    }
+    store.LoadStudies ->
+      load_with_effect(model, studies.get_studies, store.StudiesLoaded)
 
     store.StudiesLoaded(Ok(studies_list)) -> {
       let studies_dict =
@@ -372,13 +359,7 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         Some(models.User(is_superuser: True, ..)) -> records.get_records
         _ -> records.get_my_records
       }
-      let load_effect =
-        effect.from(fn(dispatch) {
-          fetch_fn()
-          |> promise.tap(fn(result) { dispatch(store.RecordsLoaded(result)) })
-          Nil
-        })
-      #(store.set_loading(model, True), load_effect)
+      load_with_effect(model, fetch_fn, store.RecordsLoaded)
     }
 
     store.RecordsLoaded(Ok(records_list)) -> {
@@ -403,15 +384,8 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     }
 
     // Data loading - Users
-    store.LoadUsers -> {
-      let load_effect =
-        effect.from(fn(dispatch) {
-          users.get_users()
-          |> promise.tap(fn(result) { dispatch(store.UsersLoaded(result)) })
-          Nil
-        })
-      #(store.set_loading(model, True), load_effect)
-    }
+    store.LoadUsers ->
+      load_with_effect(model, users.get_users, store.UsersLoaded)
 
     store.UsersLoaded(Ok(users_list)) -> {
       let users_dict =
@@ -432,15 +406,8 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     }
 
     // Data loading - Admin Stats
-    store.LoadAdminStats -> {
-      let load_effect =
-        effect.from(fn(dispatch) {
-          admin.get_admin_stats()
-          |> promise.tap(fn(result) { dispatch(store.AdminStatsLoaded(result)) })
-          Nil
-        })
-      #(store.set_loading(model, True), load_effect)
-    }
+    store.LoadAdminStats ->
+      load_with_effect(model, admin.get_admin_stats, store.AdminStatsLoaded)
 
     store.AdminStatsLoaded(Ok(stats)) -> {
       let new_model =
@@ -462,17 +429,18 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     }
 
     store.AdminAssignUser(record_id, user_id) -> {
-      let new_model =
-        store.Model(..model, admin_editing_record_id: None, loading: True)
-      let assign_effect =
-        effect.from(fn(dispatch) {
-          admin.assign_record_user(record_id, user_id)
-          |> promise.tap(fn(result) {
-            dispatch(store.AdminAssignUserResult(result))
-          })
-          Nil
+      let assign_effect = {
+        use dispatch <- effect.from
+        admin.assign_record_user(record_id, user_id)
+        |> promise.tap(fn(result) {
+          dispatch(store.AdminAssignUserResult(result))
         })
-      #(new_model, assign_effect)
+        Nil
+      }
+      #(
+        store.Model(..model, admin_editing_record_id: None, loading: True),
+        assign_effect,
+      )
     }
 
     store.AdminAssignUserResult(Ok(record)) -> {
@@ -493,17 +461,12 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     }
 
     // Data loading - Record Detail
-    store.LoadRecordDetail(id) -> {
-      let load_effect =
-        effect.from(fn(dispatch) {
-          records.get_record(id)
-          |> promise.tap(fn(result) {
-            dispatch(store.RecordDetailLoaded(result))
-          })
-          Nil
-        })
-      #(store.set_loading(model, True), load_effect)
-    }
+    store.LoadRecordDetail(id) ->
+      load_with_effect(
+        model,
+        fn() { records.get_record(id) },
+        store.RecordDetailLoaded,
+      )
 
     store.RecordDetailLoaded(Ok(record)) -> {
       let new_model =
@@ -523,10 +486,10 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
 
     // Formosh form events
     store.FormSubmitSuccess(record_id) -> {
-      let new_model = store.set_success(model, "Record data submitted successfully")
-      let reload_effect =
-        effect.from(fn(dispatch) { dispatch(store.LoadRecordDetail(record_id)) })
-      #(new_model, reload_effect)
+      #(
+        store.set_success(model, "Record data submitted successfully"),
+        dispatch_msg(store.LoadRecordDetail(record_id)),
+      )
     }
 
     store.FormSubmitError(error) -> {
@@ -545,15 +508,8 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     }
 
     // Patient data loading
-    store.LoadPatients -> {
-      let load_effect =
-        effect.from(fn(dispatch) {
-          patients.get_patients()
-          |> promise.tap(fn(result) { dispatch(store.PatientsLoaded(result)) })
-          Nil
-        })
-      #(store.set_loading(model, True), load_effect)
-    }
+    store.LoadPatients ->
+      load_with_effect(model, patients.get_patients, store.PatientsLoaded)
 
     store.PatientsLoaded(Ok(patients_list)) -> {
       let patients_dict =
@@ -573,17 +529,12 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       #(new_model, effect.none())
     }
 
-    store.LoadPatientDetail(id) -> {
-      let load_effect =
-        effect.from(fn(dispatch) {
-          patients.get_patient(id)
-          |> promise.tap(fn(result) {
-            dispatch(store.PatientDetailLoaded(result))
-          })
-          Nil
-        })
-      #(store.set_loading(model, True), load_effect)
-    }
+    store.LoadPatientDetail(id) ->
+      load_with_effect(
+        model,
+        fn() { patients.get_patient(id) },
+        store.PatientDetailLoaded,
+      )
 
     store.PatientDetailLoaded(Ok(patient)) -> {
       let new_model =
@@ -618,19 +569,18 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         )
       case patient_form.validate(form_data) {
         Ok(data) -> {
-          let new_model =
-            model
-            |> store.set_loading(True)
-            |> store.clear_form_errors()
-          let submit_effect =
-            effect.from(fn(dispatch) {
-              patients.create_patient(data.id, data.name)
-              |> promise.tap(fn(result) {
-                dispatch(store.PatientFormSubmitted(result))
-              })
-              Nil
+          let submit_effect = {
+            use dispatch <- effect.from
+            patients.create_patient(data.id, data.name)
+            |> promise.tap(fn(result) {
+              dispatch(store.PatientFormSubmitted(result))
             })
-          #(new_model, submit_effect)
+            Nil
+          }
+          #(
+            model |> store.set_loading(True) |> store.clear_form_errors(),
+            submit_effect,
+          )
         }
         Error(errors) -> {
           #(store.Model(..model, form_errors: errors), effect.none())
@@ -665,17 +615,12 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     }
 
     // Patient anonymize
-    store.AnonymizePatient(id) -> {
-      let anon_effect =
-        effect.from(fn(dispatch) {
-          patients.anonymize_patient(id)
-          |> promise.tap(fn(result) {
-            dispatch(store.PatientAnonymized(result))
-          })
-          Nil
-        })
-      #(store.set_loading(model, True), anon_effect)
-    }
+    store.AnonymizePatient(id) ->
+      load_with_effect(
+        model,
+        fn() { patients.anonymize_patient(id) },
+        store.PatientAnonymized,
+      )
 
     store.PatientAnonymized(Ok(patient)) -> {
       let new_model =
@@ -695,17 +640,12 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     }
 
     // Data loading - Study Detail
-    store.LoadStudyDetail(id) -> {
-      let load_effect =
-        effect.from(fn(dispatch) {
-          studies.get_study(id)
-          |> promise.tap(fn(result) {
-            dispatch(store.StudyDetailLoaded(result))
-          })
-          Nil
-        })
-      #(store.set_loading(model, True), load_effect)
-    }
+    store.LoadStudyDetail(id) ->
+      load_with_effect(
+        model,
+        fn() { studies.get_study(id) },
+        store.StudyDetailLoaded,
+      )
 
     store.StudyDetailLoaded(Ok(study)) -> {
       let new_model =
@@ -724,17 +664,12 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     }
 
     // Data loading - Series Detail
-    store.LoadSeriesDetail(id) -> {
-      let load_effect =
-        effect.from(fn(dispatch) {
-          series.get_series(id)
-          |> promise.tap(fn(result) {
-            dispatch(store.SeriesDetailLoaded(result))
-          })
-          Nil
-        })
-      #(store.set_loading(model, True), load_effect)
-    }
+    store.LoadSeriesDetail(id) ->
+      load_with_effect(
+        model,
+        fn() { series.get_series(id) },
+        store.SeriesDetailLoaded,
+      )
 
     store.SeriesDetailLoaded(Ok(s)) -> {
       let new_model =
@@ -755,6 +690,26 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     // Default case
     _ -> #(model, effect.none())
   }
+}
+
+// Helper: standard load-and-dispatch pattern for API calls
+fn load_with_effect(
+  model: Model,
+  api_call: fn() -> promise.Promise(Result(a, types.ApiError)),
+  on_result: fn(Result(a, types.ApiError)) -> Msg,
+) -> #(Model, Effect(Msg)) {
+  let eff = {
+    use dispatch <- effect.from
+    api_call() |> promise.tap(fn(r) { dispatch(on_result(r)) })
+    Nil
+  }
+  #(store.set_loading(model, True), eff)
+}
+
+// Helper: dispatch a message as an effect
+fn dispatch_msg(msg: Msg) -> Effect(Msg) {
+  use dispatch <- effect.from
+  dispatch(msg)
 }
 
 // View function
@@ -798,40 +753,39 @@ fn load_route_data(model: Model, route: Route) -> Effect(Msg) {
   case route, model.user {
     router.Home, Some(models.User(is_superuser: True, ..)) ->
       effect.batch([
-        effect.from(fn(dispatch) { dispatch(store.LoadStudies) }),
-        effect.from(fn(dispatch) { dispatch(store.LoadRecords) }),
-        effect.from(fn(dispatch) { dispatch(store.LoadUsers) }),
+        dispatch_msg(store.LoadStudies),
+        dispatch_msg(store.LoadRecords),
+        dispatch_msg(store.LoadUsers),
       ])
-    router.Home, Some(_) ->
-      effect.from(fn(dispatch) { dispatch(store.LoadRecords) })
+    router.Home, Some(_) -> dispatch_msg(store.LoadRecords)
     router.Home, None -> effect.none()
     router.Studies, Some(models.User(is_superuser: True, ..)) ->
-      effect.from(fn(dispatch) { dispatch(store.LoadStudies) })
+      dispatch_msg(store.LoadStudies)
     router.StudyDetail(id), Some(models.User(is_superuser: True, ..)) ->
       effect.batch([
-        effect.from(fn(dispatch) { dispatch(store.LoadStudyDetail(id)) }),
-        effect.from(fn(dispatch) { dispatch(store.LoadRecords) }),
+        dispatch_msg(store.LoadStudyDetail(id)),
+        dispatch_msg(store.LoadRecords),
       ])
     router.SeriesDetail(id), Some(models.User(is_superuser: True, ..)) ->
-      effect.from(fn(dispatch) { dispatch(store.LoadSeriesDetail(id)) })
-    router.Records, _ -> effect.from(fn(dispatch) { dispatch(store.LoadRecords) })
+      dispatch_msg(store.LoadSeriesDetail(id))
+    router.Records, _ -> dispatch_msg(store.LoadRecords)
     router.RecordDetail(id), Some(_) ->
-      effect.from(fn(dispatch) { dispatch(store.LoadRecordDetail(id)) })
+      dispatch_msg(store.LoadRecordDetail(id))
     router.Patients, Some(models.User(is_superuser: True, ..)) ->
-      effect.from(fn(dispatch) { dispatch(store.LoadPatients) })
+      dispatch_msg(store.LoadPatients)
     router.PatientDetail(id), Some(models.User(is_superuser: True, ..)) ->
       effect.batch([
-        effect.from(fn(dispatch) { dispatch(store.LoadPatientDetail(id)) }),
-        effect.from(fn(dispatch) { dispatch(store.LoadRecords) }),
+        dispatch_msg(store.LoadPatientDetail(id)),
+        dispatch_msg(store.LoadRecords),
       ])
     router.PatientNew, _ -> effect.none()
     router.Users, Some(models.User(is_superuser: True, ..)) ->
-      effect.from(fn(dispatch) { dispatch(store.LoadUsers) })
+      dispatch_msg(store.LoadUsers)
     router.AdminDashboard, Some(_) ->
       effect.batch([
-        effect.from(fn(dispatch) { dispatch(store.LoadAdminStats) }),
-        effect.from(fn(dispatch) { dispatch(store.LoadRecords) }),
-        effect.from(fn(dispatch) { dispatch(store.LoadUsers) }),
+        dispatch_msg(store.LoadAdminStats),
+        dispatch_msg(store.LoadRecords),
+        dispatch_msg(store.LoadUsers),
       ])
     _, _ -> effect.none()
   }
