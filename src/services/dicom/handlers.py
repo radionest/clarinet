@@ -44,11 +44,12 @@ class StorageHandler:
         # Validate configuration
         if mode == StorageMode.DISK and not output_dir:
             raise ValueError("output_dir required for DISK mode")
-        if mode == StorageMode.FORWARD:
-            if not all([destination_aet, destination_host, destination_port]):
-                raise ValueError(
-                    "destination_aet, destination_host, destination_port required for FORWARD mode"
-                )
+        if mode == StorageMode.FORWARD and not all(
+            [destination_aet, destination_host, destination_port]
+        ):
+            raise ValueError(
+                "destination_aet, destination_host, destination_port required for FORWARD mode"
+            )
 
         # Create output directory if needed
         if output_dir:
@@ -137,7 +138,12 @@ class StorageHandler:
             Status code
         """
         try:
-            if not all([self.destination_ae, self.destination_aet, self.destination_host]):
+            if (
+                self.destination_ae is None
+                or self.destination_aet is None
+                or self.destination_host is None
+                or self.destination_port is None
+            ):
                 logger.error("Destination AE not configured")
                 return 0xC000
 

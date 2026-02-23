@@ -75,7 +75,7 @@ class DicomClient:
         self,
         query: StudyQuery,
         peer: DicomNode,
-        timeout: float = 30.0,
+        timeout: float = 30.0,  # noqa: ASYNC109 — DICOM association timeout, not asyncio
     ) -> list[StudyResult]:
         """Find studies matching query criteria.
 
@@ -112,7 +112,7 @@ class DicomClient:
         self,
         query: SeriesQuery,
         peer: DicomNode,
-        timeout: float = 30.0,
+        timeout: float = 30.0,  # noqa: ASYNC109 — DICOM association timeout, not asyncio
     ) -> list[SeriesResult]:
         """Find series matching query criteria.
 
@@ -149,7 +149,7 @@ class DicomClient:
         self,
         query: ImageQuery,
         peer: DicomNode,
-        timeout: float = 30.0,
+        timeout: float = 30.0,  # noqa: ASYNC109 — DICOM association timeout, not asyncio
     ) -> list[ImageResult]:
         """Find images matching query criteria.
 
@@ -188,7 +188,7 @@ class DicomClient:
         peer: DicomNode,
         output_dir: Path,
         patient_id: str | None = None,
-        timeout: float = 300.0,
+        timeout: float = 300.0,  # noqa: ASYNC109 — DICOM association timeout, not asyncio
     ) -> RetrieveResult:
         """Retrieve study and save to disk.
 
@@ -244,7 +244,7 @@ class DicomClient:
         peer: DicomNode,
         output_dir: Path,
         patient_id: str | None = None,
-        timeout: float = 300.0,
+        timeout: float = 300.0,  # noqa: ASYNC109 — DICOM association timeout, not asyncio
     ) -> RetrieveResult:
         """Retrieve series and save to disk.
 
@@ -300,7 +300,7 @@ class DicomClient:
         study_uid: str,
         peer: DicomNode,
         patient_id: str | None = None,
-        timeout: float = 300.0,
+        timeout: float = 300.0,  # noqa: ASYNC109 — DICOM association timeout, not asyncio
     ) -> RetrieveResult:
         """Retrieve study to memory.
 
@@ -352,7 +352,7 @@ class DicomClient:
         peer: DicomNode,
         destination_aet: str,
         patient_id: str | None = None,
-        timeout: float = 300.0,
+        timeout: float = 300.0,  # noqa: ASYNC109 — DICOM association timeout, not asyncio
     ) -> RetrieveResult:
         """Move study to another DICOM node.
 
@@ -403,7 +403,7 @@ class DicomClient:
         peer: DicomNode,
         destination_aet: str,
         patient_id: str | None = None,
-        timeout: float = 300.0,
+        timeout: float = 300.0,  # noqa: ASYNC109 — DICOM association timeout, not asyncio
     ) -> RetrieveResult:
         """Move series to another DICOM node.
 
