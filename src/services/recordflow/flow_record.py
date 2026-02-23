@@ -140,7 +140,7 @@ class FlowRecord:
         Args:
             record_type_name: The name of the record type to create.
             **kwargs: Additional parameters for record creation
-                     (e.g., user_id, info, series_uid).
+                     (e.g., user_id, context_info, series_uid).
 
         Returns:
             Self for method chaining.
