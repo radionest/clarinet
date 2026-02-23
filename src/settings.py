@@ -109,10 +109,16 @@ class Settings(BaseSettings):
     database_username: str = "postgres"
     database_password: str = "postgres"
 
-    # DICOM settings
+    # DICOM settings (local node)
     dicom_aet: str = "CLARINET"
     dicom_port: int = 11112
     dicom_ip: str | None = None
+    dicom_max_pdu: int = 16384
+
+    # DICOM settings (remote PACS)
+    dicom_pacs_aet: str = "ORTHANC"
+    dicom_pacs_host: str = "localhost"
+    dicom_pacs_port: int = 4242
 
     # Security settings
     secret_key: str = "insecure-change-this-key-in-production"  # For session signing

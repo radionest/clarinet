@@ -38,6 +38,7 @@ dependencies = [
     "aiofiles>=24.1.0",
     "fastapi-users>=13.0.0",
     "greenlet>=3.0.0",
+    "pynetdicom>=3.0.4",
 ]
 
 [project.optional-dependencies]
@@ -148,3 +149,6 @@ ignore_missing_imports = false
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = "test_*.py"
+markers = [
+    "dicom: tests requiring a live DICOM PACS server",
+]
