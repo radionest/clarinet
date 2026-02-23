@@ -39,7 +39,8 @@ pub type Model {
     study_form: Option(dynamic.Dynamic),
     // Will hold form data dynamically
     record_type_form: Option(dynamic.Dynamic),
-    patient_form: Option(dynamic.Dynamic),
+    patient_form_id: String,
+    patient_form_name: String,
     form_errors: Dict(String, String),
     // Pagination
     current_page: Int,
@@ -101,6 +102,13 @@ pub type Msg {
   LoadUsers
   UsersLoaded(Result(List(User), ApiError))
 
+  LoadPatients
+  PatientsLoaded(Result(List(Patient), ApiError))
+  LoadPatientDetail(id: String)
+  PatientDetailLoaded(Result(Patient, ApiError))
+  AnonymizePatient(id: String)
+  PatientAnonymized(Result(Patient, ApiError))
+
   LoadAdminStats
   AdminStatsLoaded(Result(AdminStats, ApiError))
 
@@ -119,7 +127,8 @@ pub type Msg {
   SubmitRecordTypeForm
   RecordTypeFormSubmitted(Result(RecordType, ApiError))
 
-  UpdatePatientForm(dynamic.Dynamic)
+  UpdatePatientFormId(String)
+  UpdatePatientFormName(String)
   SubmitPatientForm
   PatientFormSubmitted(Result(Patient, ApiError))
 
@@ -179,7 +188,8 @@ pub fn init() -> Model {
     users: dict.new(),
     study_form: None,
     record_type_form: None,
-    patient_form: None,
+    patient_form_id: "",
+    patient_form_name: "",
     form_errors: dict.new(),
     current_page: 1,
     items_per_page: 20,
@@ -254,6 +264,15 @@ pub fn cache_record_type(model: Model, record_type: RecordType) -> Model {
   // Use name as the key for RecordType
   let record_types = dict.insert(model.record_types, record_type.name, record_type)
   Model(..model, record_types: record_types)
+}
+
+pub fn cache_patient(model: Model, patient: Patient) -> Model {
+  let patients = dict.insert(model.patients, patient.id, patient)
+  Model(..model, patients: patients)
+}
+
+pub fn clear_patient_form(model: Model) -> Model {
+  Model(..model, patient_form_id: "", patient_form_name: "")
 }
 
 // Form helpers

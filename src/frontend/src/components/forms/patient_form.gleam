@@ -1,54 +1,27 @@
-// Static typed form for Patient model
-import api/models.{type PatientCreate}
+// Static typed form for Patient creation
 import components/forms/base as form
 import gleam/dict.{type Dict}
-import gleam/option.{type Option, None, Some}
+import gleam/option.{Some}
 import lustre/attribute
 import lustre/element.{type Element}
 import lustre/element/html
+import router
 import store.{type Msg}
 
 // Patient form data type for managing form state
 pub type PatientFormData {
-  PatientFormData(id: String, anon_id: String, anon_name: String)
+  PatientFormData(id: String, name: String)
 }
 
 // Message types for form updates
 pub type PatientFormMsg {
   UpdatePatientId(String)
-  UpdateAnonId(String)
-  UpdateAnonName(String)
-  SubmitPatient
-}
-
-// Convert form data to PatientCreate model
-pub fn to_patient_create(data: PatientFormData) -> PatientCreate {
-  models.PatientCreate(
-    id: data.id,
-    name: None,
-    anon_id: case data.anon_id {
-      "" -> None
-      id -> Some(id)
-    },
-    anon_name: case data.anon_name {
-      "" -> None
-      name -> Some(name)
-    },
-  )
+  UpdatePatientName(String)
 }
 
 // Initialize empty form data
 pub fn init() -> PatientFormData {
-  PatientFormData(id: "", anon_id: "", anon_name: "")
-}
-
-// Initialize form data from existing patient
-pub fn from_patient(patient: models.Patient) -> PatientFormData {
-  PatientFormData(
-    id: patient.id,
-    anon_id: option.unwrap(patient.anon_id, ""),
-    anon_name: option.unwrap(patient.anon_name, ""),
-  )
+  PatientFormData(id: "", name: "")
 }
 
 // Main form view
@@ -76,38 +49,24 @@ pub fn view(
       required: True,
     ),
 
-    // Anonymous ID field (optional)
+    // Patient Name field (required)
     form.field(
-      label: "Anonymous ID",
-      name: "anon_id",
+      label: "Patient Name",
+      name: "patient_name",
       input: form.text_input(
-        name: "anon_id",
-        value: data.anon_id,
-        placeholder: Some("Enter Anonymous ID (optional)"),
-        on_input: fn(value) { on_update(UpdateAnonId(value)) },
+        name: "patient_name",
+        value: data.name,
+        placeholder: Some("Enter Patient Name"),
+        on_input: fn(value) { on_update(UpdatePatientName(value)) },
       ),
       errors: errors,
-      required: False,
-    ),
-
-    // Anonymous Name field (optional)
-    form.field(
-      label: "Anonymous Name",
-      name: "anon_name",
-      input: form.text_input(
-        name: "anon_name",
-        value: data.anon_name,
-        placeholder: Some("Enter Anonymous Name (optional)"),
-        on_input: fn(value) { on_update(UpdateAnonName(value)) },
-      ),
-      errors: errors,
-      required: False,
+      required: True,
     ),
 
     // Form actions
     html.div([attribute.class("form-actions")], [
-      form.submit_button(text: "Save Patient", disabled: loading, on_click: Some(on_submit())),
-      form.cancel_button(text: "Cancel", on_click: store.Navigate(router.Home)),
+      form.submit_button(text: "Create Patient", disabled: loading, on_click: Some(on_submit())),
+      form.cancel_button(text: "Cancel", on_click: store.Navigate(router.Patients)),
     ]),
 
     // Loading overlay
@@ -121,9 +80,13 @@ pub fn validate(
 ) -> Result(PatientFormData, Dict(String, String)) {
   let errors = dict.new()
 
-  // Validate Patient ID (required)
   let errors = case form.validate_required(value: data.id, field_name: "Patient ID") {
     Error(msg) -> dict.insert(errors, "patient_id", msg)
+    Ok(_) -> errors
+  }
+
+  let errors = case form.validate_required(value: data.name, field_name: "Patient Name") {
+    Error(msg) -> dict.insert(errors, "patient_name", msg)
     Ok(_) -> errors
   }
 
@@ -137,12 +100,6 @@ pub fn validate(
 pub fn update(data: PatientFormData, msg: PatientFormMsg) -> PatientFormData {
   case msg {
     UpdatePatientId(value) -> PatientFormData(..data, id: value)
-    UpdateAnonId(value) -> PatientFormData(..data, anon_id: value)
-    UpdateAnonName(value) -> PatientFormData(..data, anon_name: value)
-    SubmitPatient -> data
-    // Submit is handled by parent component
+    UpdatePatientName(value) -> PatientFormData(..data, name: value)
   }
 }
-
-// Import router for navigation
-import router

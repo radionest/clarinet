@@ -15,6 +15,9 @@ pub type Route {
   RecordDetail(id: String)
   RecordNew
   RecordTypeDesign(id: Option(String))
+  Patients
+  PatientDetail(id: String)
+  PatientNew
   Users
   UserProfile(id: String)
   AdminDashboard
@@ -34,6 +37,9 @@ pub fn route_to_path(route: Route) -> String {
     RecordNew -> "/records/new"
     RecordTypeDesign(None) -> "/records/type/new"
     RecordTypeDesign(Some(id)) -> "/records/type/" <> id
+    Patients -> "/patients"
+    PatientNew -> "/patients/new"
+    PatientDetail(id) -> "/patients/" <> id
     Users -> "/users"
     UserProfile(id) -> "/users/" <> id
     AdminDashboard -> "/admin"
@@ -59,6 +65,9 @@ pub fn parse_route(uri: Uri) -> Route {
     ["records", "type", "new"] -> RecordTypeDesign(None)
     ["records", "type", id] -> RecordTypeDesign(Some(id))
     ["records", id] -> RecordDetail(id)
+    ["patients"] -> Patients
+    ["patients", "new"] -> PatientNew
+    ["patients", id] -> PatientDetail(id)
     ["users"] -> Users
     ["users", id] -> UserProfile(id)
     ["admin"] -> AdminDashboard
@@ -78,7 +87,7 @@ pub fn requires_auth(route: Route) -> Bool {
 // Check if route requires admin role
 pub fn requires_admin_role(route: Route) -> Bool {
   case route {
-    Studies | StudyDetail(_) | Users | UserProfile(_) | AdminDashboard -> True
+    Studies | StudyDetail(_) | Patients | PatientDetail(_) | PatientNew | Users | UserProfile(_) | AdminDashboard -> True
     _ -> False
   }
 }
@@ -96,6 +105,9 @@ pub fn get_route_title(route: Route) -> String {
     RecordNew -> "New Record"
     RecordTypeDesign(None) -> "New Record Type"
     RecordTypeDesign(Some(_)) -> "Edit Record Type"
+    Patients -> "Patients"
+    PatientDetail(_) -> "Patient Details"
+    PatientNew -> "New Patient"
     Users -> "Users"
     UserProfile(_) -> "User Profile"
     AdminDashboard -> "Admin Dashboard"
@@ -110,6 +122,7 @@ fn section(route: Route) -> String {
     Register -> "register"
     Studies | StudyDetail(_) -> "studies"
     Records | RecordDetail(_) | RecordNew | RecordTypeDesign(_) -> "records"
+    Patients | PatientDetail(_) | PatientNew -> "patients"
     Users | UserProfile(_) -> "users"
     AdminDashboard -> "admin"
     NotFound -> "notfound"

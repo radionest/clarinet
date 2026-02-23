@@ -2,10 +2,12 @@
 import api/admin
 import api/auth
 import api/models
+import api/patients
 import api/records
 import api/studies
 import api/types
 import api/users
+import components/forms/patient_form
 import components/layout
 import formosh/component as formosh_component
 import gleam/dict
@@ -24,6 +26,9 @@ import modem
 import pages/admin as admin_page
 import pages/home
 import pages/login
+import pages/patients/detail as patient_detail
+import pages/patients/list as patients_list
+import pages/patients/new as patient_new
 import pages/records/execute as record_execute
 import pages/records/list as records_list
 import pages/register
@@ -535,6 +540,156 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       #(store.clear_filters(model), effect.none())
     }
 
+    // Patient data loading
+    store.LoadPatients -> {
+      let load_effect =
+        effect.from(fn(dispatch) {
+          patients.get_patients()
+          |> promise.tap(fn(result) { dispatch(store.PatientsLoaded(result)) })
+          Nil
+        })
+      #(store.set_loading(model, True), load_effect)
+    }
+
+    store.PatientsLoaded(Ok(patients_list)) -> {
+      let patients_dict =
+        list.fold(patients_list, model.patients, fn(acc, patient) {
+          dict.insert(acc, patient.id, patient)
+        })
+      let new_model =
+        store.Model(..model, patients: patients_dict, loading: False)
+      #(new_model, effect.none())
+    }
+
+    store.PatientsLoaded(Error(_err)) -> {
+      let new_model =
+        model
+        |> store.set_loading(False)
+        |> store.set_error(Some("Failed to load patients"))
+      #(new_model, effect.none())
+    }
+
+    store.LoadPatientDetail(id) -> {
+      let load_effect =
+        effect.from(fn(dispatch) {
+          patients.get_patient(id)
+          |> promise.tap(fn(result) {
+            dispatch(store.PatientDetailLoaded(result))
+          })
+          Nil
+        })
+      #(store.set_loading(model, True), load_effect)
+    }
+
+    store.PatientDetailLoaded(Ok(patient)) -> {
+      let new_model =
+        model
+        |> store.cache_patient(patient)
+        |> store.set_loading(False)
+      #(new_model, effect.none())
+    }
+
+    store.PatientDetailLoaded(Error(_err)) -> {
+      let new_model =
+        model
+        |> store.set_loading(False)
+        |> store.set_error(Some("Failed to load patient"))
+      #(new_model, effect.none())
+    }
+
+    // Patient form handling
+    store.UpdatePatientFormId(value) -> {
+      #(store.Model(..model, patient_form_id: value), effect.none())
+    }
+
+    store.UpdatePatientFormName(value) -> {
+      #(store.Model(..model, patient_form_name: value), effect.none())
+    }
+
+    store.SubmitPatientForm -> {
+      let form_data =
+        patient_form.PatientFormData(
+          id: model.patient_form_id,
+          name: model.patient_form_name,
+        )
+      case patient_form.validate(form_data) {
+        Ok(data) -> {
+          let new_model =
+            model
+            |> store.set_loading(True)
+            |> store.clear_form_errors()
+          let submit_effect =
+            effect.from(fn(dispatch) {
+              patients.create_patient(data.id, data.name)
+              |> promise.tap(fn(result) {
+                dispatch(store.PatientFormSubmitted(result))
+              })
+              Nil
+            })
+          #(new_model, submit_effect)
+        }
+        Error(errors) -> {
+          #(store.Model(..model, form_errors: errors), effect.none())
+        }
+      }
+    }
+
+    store.PatientFormSubmitted(Ok(patient)) -> {
+      let new_model =
+        model
+        |> store.cache_patient(patient)
+        |> store.set_loading(False)
+        |> store.clear_patient_form()
+        |> store.clear_form_errors()
+        |> store.set_success("Patient created successfully")
+        |> store.set_route(router.PatientDetail(patient.id))
+      let nav_effect =
+        modem.push(
+          router.route_to_path(router.PatientDetail(patient.id)),
+          option.None,
+          option.None,
+        )
+      #(new_model, nav_effect)
+    }
+
+    store.PatientFormSubmitted(Error(_err)) -> {
+      let new_model =
+        model
+        |> store.set_loading(False)
+        |> store.set_error(Some("Failed to create patient"))
+      #(new_model, effect.none())
+    }
+
+    // Patient anonymize
+    store.AnonymizePatient(id) -> {
+      let anon_effect =
+        effect.from(fn(dispatch) {
+          patients.anonymize_patient(id)
+          |> promise.tap(fn(result) {
+            dispatch(store.PatientAnonymized(result))
+          })
+          Nil
+        })
+      #(store.set_loading(model, True), anon_effect)
+    }
+
+    store.PatientAnonymized(Ok(patient)) -> {
+      let new_model =
+        model
+        |> store.cache_patient(patient)
+        |> store.set_loading(False)
+        |> store.set_success("Patient anonymized successfully")
+      #(new_model, effect.none())
+    }
+
+    store.PatientAnonymized(Error(_err)) -> {
+      let new_model =
+        model
+        |> store.set_loading(False)
+        |> store.set_error(Some("Failed to anonymize patient"))
+      #(new_model, effect.none())
+    }
+
     // Default case
     _ -> #(model, effect.none())
   }
@@ -560,6 +715,9 @@ fn view_content(model: Model) -> Element(Msg) {
     router.RecordDetail(id) -> record_execute.view(model, id)
     router.RecordNew -> html.div([], [html.text("New record page")])
     router.RecordTypeDesign(_id) -> html.div([], [html.text("Record type design page")])
+    router.Patients -> patients_list.view(model)
+    router.PatientNew -> patient_new.view(model)
+    router.PatientDetail(id) -> patient_detail.view(model, id)
     router.Users -> html.div([], [html.text("Users page")])
     router.UserProfile(_id) -> html.div([], [html.text("User profile page")])
     router.AdminDashboard -> admin_page.view(model)
@@ -589,6 +747,14 @@ fn load_route_data(model: Model, route: Route) -> Effect(Msg) {
     router.Records, _ -> effect.from(fn(dispatch) { dispatch(store.LoadRecords) })
     router.RecordDetail(id), Some(_) ->
       effect.from(fn(dispatch) { dispatch(store.LoadRecordDetail(id)) })
+    router.Patients, Some(models.User(is_superuser: True, ..)) ->
+      effect.from(fn(dispatch) { dispatch(store.LoadPatients) })
+    router.PatientDetail(id), Some(models.User(is_superuser: True, ..)) ->
+      effect.batch([
+        effect.from(fn(dispatch) { dispatch(store.LoadPatientDetail(id)) }),
+        effect.from(fn(dispatch) { dispatch(store.LoadRecords) }),
+      ])
+    router.PatientNew, _ -> effect.none()
     router.Users, Some(models.User(is_superuser: True, ..)) ->
       effect.from(fn(dispatch) { dispatch(store.LoadUsers) })
     router.AdminDashboard, Some(_) ->
