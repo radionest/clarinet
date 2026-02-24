@@ -391,9 +391,7 @@ class DicomClient:
             destination_aet,
         )
 
-        logger.info(
-            f"Moved study: {result.num_completed} completed, {result.num_failed} failed"
-        )
+        logger.info(f"Moved study: {result.num_completed} completed, {result.num_failed} failed")
         return result
 
     async def move_series(
@@ -444,7 +442,5 @@ class DicomClient:
             destination_aet,
         )
 
-        logger.info(
-            f"Moved series: {result.num_completed} completed, {result.num_failed} failed"
-        )
+        logger.info(f"Moved series: {result.num_completed} completed, {result.num_failed} failed")
         return result

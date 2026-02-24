@@ -280,6 +280,43 @@ pub type UserRead {
 }
 
 
+// PACS series result (mirrors backend SeriesResult)
+pub type PacsSeriesResult {
+  PacsSeriesResult(
+    study_instance_uid: String,
+    series_instance_uid: String,
+    series_number: Option(Int),
+    modality: Option(String),
+    series_description: Option(String),
+    number_of_series_related_instances: Option(Int),
+  )
+}
+
+// PACS study result (mirrors backend StudyResult)
+pub type PacsStudyResult {
+  PacsStudyResult(
+    patient_id: Option(String),
+    patient_name: Option(String),
+    study_instance_uid: String,
+    study_date: Option(String),
+    study_time: Option(String),
+    study_description: Option(String),
+    accession_number: Option(String),
+    modalities_in_study: Option(String),
+    number_of_study_related_series: Option(Int),
+    number_of_study_related_instances: Option(Int),
+  )
+}
+
+// Wrapper: study + series + DB existence flag (mirrors backend PacsStudyWithSeries)
+pub type PacsStudyWithSeries {
+  PacsStudyWithSeries(
+    study: PacsStudyResult,
+    series: List(PacsSeriesResult),
+    already_exists: Bool,
+  )
+}
+
 // Admin dashboard statistics
 pub type AdminStats {
   AdminStats(

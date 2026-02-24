@@ -1,10 +1,14 @@
 // Patient detail page (admin only)
-import api/models.{type Patient, type Record, type Study}
+import api/models.{
+  type PacsSeriesResult, type PacsStudyWithSeries, type Patient, type Record,
+  type Study,
+}
 import api/types
 import gleam/dict
 import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
+import gleam/string
 import lustre/attribute
 import lustre/element.{type Element}
 import lustre/element/html
@@ -40,6 +44,7 @@ fn render_detail(model: Model, patient: Patient) -> Element(Msg) {
     ]),
     patient_info_card(patient),
     studies_section(patient.studies),
+    pacs_section(model, patient),
     records_section(patient_records),
   ])
 }
@@ -178,6 +183,160 @@ fn status_text(status: types.RecordStatus) -> String {
     types.Finished -> "Completed"
     types.Failed -> "Failed"
     types.Paused -> "Paused"
+  }
+}
+
+fn pacs_section(model: Model, patient: Patient) -> Element(Msg) {
+  html.div([attribute.class("card")], [
+    html.h3([], [html.text("Add Study from PACS")]),
+    html.div([attribute.class("card-actions")], [
+      html.button(
+        [
+          attribute.class("btn btn-primary"),
+          attribute.disabled(model.pacs_loading),
+          event.on_click(store.SearchPacsStudies(patient.id)),
+        ],
+        [
+          case model.pacs_loading {
+            True -> html.text("Searching...")
+            False -> html.text("Search PACS")
+          },
+        ],
+      ),
+      case model.pacs_studies {
+        [] -> element.none()
+        _ ->
+          html.button(
+            [
+              attribute.class("btn btn-secondary"),
+              event.on_click(store.ClearPacsResults),
+            ],
+            [html.text("Clear Results")],
+          )
+      },
+    ]),
+    case model.pacs_loading {
+      True ->
+        html.div([attribute.class("loading-container")], [
+          html.div([attribute.class("spinner")], []),
+          html.p([], [html.text("Searching PACS...")]),
+        ])
+      False ->
+        case model.pacs_studies {
+          [] -> element.none()
+          pacs_studies -> pacs_results_table(model, pacs_studies, patient.id)
+        }
+    },
+  ])
+}
+
+fn pacs_results_table(
+  model: Model,
+  pacs_studies: List(PacsStudyWithSeries),
+  patient_id: String,
+) -> Element(Msg) {
+  html.div([attribute.class("table-responsive")], [
+    html.table([attribute.class("table")], [
+      html.thead([], [
+        html.tr([], [
+          html.th([], [html.text("Study Date")]),
+          html.th([], [html.text("Modalities")]),
+          html.th([], [html.text("Description")]),
+          html.th([], [html.text("Series")]),
+          html.th([], [html.text("Actions")]),
+        ]),
+      ]),
+      html.tbody(
+        [],
+        list.flat_map(pacs_studies, fn(ps) {
+          pacs_study_rows(model, ps, patient_id)
+        }),
+      ),
+    ]),
+  ])
+}
+
+fn pacs_study_rows(
+  model: Model,
+  ps: PacsStudyWithSeries,
+  patient_id: String,
+) -> List(Element(Msg)) {
+  let study_date = format_dicom_date(ps.study.study_date)
+  let modalities = option.unwrap(ps.study.modalities_in_study, "-")
+  let description = option.unwrap(ps.study.study_description, "-")
+  let series_count = list.length(ps.series)
+  let is_importing = model.pacs_importing == Some(ps.study.study_instance_uid)
+
+  let study_row =
+    html.tr([], [
+      html.td([], [html.text(study_date)]),
+      html.td([], [html.text(modalities)]),
+      html.td([], [html.text(description)]),
+      html.td([], [html.text(int.to_string(series_count) <> " series")]),
+      html.td([], [
+        case ps.already_exists {
+          True ->
+            html.span([attribute.class("badge badge-muted")], [
+              html.text("Already added"),
+            ])
+          False ->
+            case is_importing {
+              True ->
+                html.span([attribute.class("badge badge-info")], [
+                  html.text("Importing..."),
+                ])
+              False ->
+                html.button(
+                  [
+                    attribute.class("btn btn-sm btn-primary"),
+                    event.on_click(store.ImportPacsStudy(
+                      ps.study.study_instance_uid,
+                      patient_id,
+                    )),
+                  ],
+                  [html.text("Add")],
+                )
+            }
+        },
+      ]),
+    ])
+
+  // Series detail rows
+  let series_rows =
+    list.map(ps.series, fn(s) { pacs_series_row(s) })
+
+  [study_row, ..series_rows]
+}
+
+fn pacs_series_row(s: PacsSeriesResult) -> Element(Msg) {
+  let description = option.unwrap(s.series_description, "No description")
+  let modality = option.unwrap(s.modality, "-")
+  let image_count = case s.number_of_series_related_instances {
+    Some(n) -> int.to_string(n) <> " images"
+    None -> "-"
+  }
+
+  html.tr([attribute.class("series-detail-row")], [
+    html.td([], []),
+    html.td([], [html.text(modality)]),
+    html.td([attribute.attribute("colspan", "2")], [html.text(description)]),
+    html.td([], [html.text(image_count)]),
+  ])
+}
+
+fn format_dicom_date(date: Option(String)) -> String {
+  case date {
+    None -> "-"
+    Some(d) ->
+      case string.length(d) {
+        8 -> {
+          let year = string.slice(d, 0, 4)
+          let month = string.slice(d, 4, 2)
+          let day = string.slice(d, 6, 2)
+          year <> "-" <> month <> "-" <> day
+        }
+        _ -> d
+      }
   }
 }
 

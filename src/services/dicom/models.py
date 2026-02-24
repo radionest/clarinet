@@ -146,6 +146,21 @@ class DicomNode(BaseModel):
     port: int
 
 
+class PacsStudyWithSeries(BaseModel):
+    """StudyResult enriched with series list and local DB existence flag."""
+
+    study: StudyResult
+    series: list[SeriesResult] = Field(default_factory=list)
+    already_exists: bool = False
+
+
+class PacsImportRequest(BaseModel):
+    """Request body for importing a study from PACS."""
+
+    study_instance_uid: str
+    patient_id: str
+
+
 class AssociationConfig(BaseModel):
     """Configuration for DICOM association."""
 

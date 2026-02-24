@@ -1,6 +1,7 @@
 // Main Lustre application
 import api/admin
 import api/auth
+import api/dicom
 import api/models
 import api/patients
 import api/records
@@ -709,6 +710,82 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         |> store.set_loading(False)
         |> store.set_error(Some("Failed to load series"))
       #(new_model, effect.none())
+    }
+
+    // PACS operations
+    store.SearchPacsStudies(patient_id) -> {
+      let search_effect = {
+        use dispatch <- effect.from
+        dicom.search_patient_studies(patient_id)
+        |> promise.tap(fn(result) { dispatch(store.PacsStudiesLoaded(result)) })
+        Nil
+      }
+      #(store.set_pacs_loading(model, True), search_effect)
+    }
+
+    store.PacsStudiesLoaded(Ok(pacs_studies)) -> {
+      #(store.set_pacs_studies(model, pacs_studies), effect.none())
+    }
+
+    store.PacsStudiesLoaded(Error(_err)) -> {
+      let new_model =
+        model
+        |> store.set_pacs_loading(False)
+        |> store.set_error(Some("Failed to search PACS"))
+      #(new_model, effect.none())
+    }
+
+    store.ImportPacsStudy(study_uid, patient_id) -> {
+      let import_effect = {
+        use dispatch <- effect.from
+        dicom.import_study(study_uid, patient_id)
+        |> promise.tap(fn(result) {
+          dispatch(store.PacsStudyImported(result))
+        })
+        Nil
+      }
+      #(
+        store.Model(..model, pacs_importing: Some(study_uid)),
+        import_effect,
+      )
+    }
+
+    store.PacsStudyImported(Ok(study)) -> {
+      // Mark study as existing in PACS results
+      let updated_pacs =
+        list.map(model.pacs_studies, fn(ps) {
+          case ps.study.study_instance_uid == study.study_uid {
+            True ->
+              models.PacsStudyWithSeries(..ps, already_exists: True)
+            False -> ps
+          }
+        })
+      let new_model =
+        model
+        |> store.cache_study(study)
+        |> fn(m) {
+          store.Model(
+            ..m,
+            pacs_importing: None,
+            pacs_studies: updated_pacs,
+          )
+        }
+        |> store.set_success("Study imported from PACS successfully")
+      // Reload patient detail to show new study
+      let reload_effect = dispatch_msg(store.LoadPatientDetail(study.patient_id))
+      #(new_model, reload_effect)
+    }
+
+    store.PacsStudyImported(Error(_err)) -> {
+      let new_model =
+        model
+        |> fn(m) { store.Model(..m, pacs_importing: None) }
+        |> store.set_error(Some("Failed to import study from PACS"))
+      #(new_model, effect.none())
+    }
+
+    store.ClearPacsResults -> {
+      #(store.clear_pacs(model), effect.none())
     }
 
     // Default case

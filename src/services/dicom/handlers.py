@@ -164,9 +164,7 @@ class StorageHandler:
                 status = assoc.send_c_store(ds)
 
                 if status and status.Status == 0x0000:
-                    logger.info(
-                        f"Forwarded instance {ds.SOPInstanceUID} to {self.destination_aet}"
-                    )
+                    logger.info(f"Forwarded instance {ds.SOPInstanceUID} to {self.destination_aet}")
                     return 0x0000  # Success
                 else:
                     logger.error(

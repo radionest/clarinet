@@ -17,6 +17,7 @@ from src.api.exception_handlers import setup_exception_handlers
 # Use relative imports for development
 from src.api.routers import admin as admin
 from src.api.routers import auth as auth
+from src.api.routers import dicom as dicom
 from src.api.routers import record as record
 from src.api.routers import slicer  # slicer doesn't use database, no async version needed,
 from src.api.routers import study as study
@@ -168,6 +169,7 @@ def create_app(root_path: str = "/") -> FastAPI:
     app.include_router(study.router, prefix="/api")
     app.include_router(slicer.router, prefix="/api/slicer", tags=["Slicer"])
     app.include_router(admin.router, prefix="/api/admin", tags=["Admin"])
+    app.include_router(dicom.router, prefix="/api/dicom", tags=["DICOM"])
 
     # Serve frontend if enabled
     if settings.frontend_enabled:

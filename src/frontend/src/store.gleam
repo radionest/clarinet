@@ -1,7 +1,7 @@
 // Global state management
 import api/models.{
-  type AdminStats, type Patient, type RecordTypeStats, type Series, type Study,
-  type Record, type RecordType, type User,
+  type AdminStats, type PacsStudyWithSeries, type Patient, type RecordTypeStats,
+  type Series, type Study, type Record, type RecordType, type User,
 }
 import api/types.{type ApiError}
 import gleam/dict.{type Dict}
@@ -57,6 +57,10 @@ pub type Model {
     // Modal state
     modal_open: Bool,
     modal_content: ModalContent,
+    // PACS state
+    pacs_studies: List(PacsStudyWithSeries),
+    pacs_loading: Bool,
+    pacs_importing: Option(String),
   )
 }
 
@@ -169,6 +173,13 @@ pub type Msg {
   SetPage(Int)
   SetItemsPerPage(Int)
 
+  // PACS operations
+  SearchPacsStudies(patient_id: String)
+  PacsStudiesLoaded(Result(List(PacsStudyWithSeries), ApiError))
+  ImportPacsStudy(study_uid: String, patient_id: String)
+  PacsStudyImported(Result(Study, ApiError))
+  ClearPacsResults
+
   // Misc
   NoOp
   RefreshData
@@ -210,6 +221,9 @@ pub fn init() -> Model {
     admin_editing_record_id: None,
     modal_open: False,
     modal_content: NoModal,
+    pacs_studies: [],
+    pacs_loading: False,
+    pacs_importing: None,
   )
 }
 
@@ -313,6 +327,19 @@ pub fn remove_filter(model: Model, key: String) -> Model {
 
 pub fn clear_filters(model: Model) -> Model {
   Model(..model, active_filters: dict.new(), search_query: "")
+}
+
+// PACS helpers
+pub fn set_pacs_loading(model: Model, loading: Bool) -> Model {
+  Model(..model, pacs_loading: loading)
+}
+
+pub fn set_pacs_studies(model: Model, studies: List(PacsStudyWithSeries)) -> Model {
+  Model(..model, pacs_studies: studies, pacs_loading: False)
+}
+
+pub fn clear_pacs(model: Model) -> Model {
+  Model(..model, pacs_studies: [], pacs_loading: False, pacs_importing: None)
 }
 
 // Update a record in the records dict cache
