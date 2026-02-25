@@ -20,6 +20,6 @@ dicom_aet = "CLARINET"
 dicom_port = 11112
 
 # Test PACS server (Orthanc on klara)
-dicom_pacs_aet = "ORTHANC"
-dicom_pacs_host = "192.168.122.151"
-dicom_pacs_port = 4242
+pacs_aet = "ORTHANC"
+pacs_host = "192.168.122.151"
+pacs_port = 4242

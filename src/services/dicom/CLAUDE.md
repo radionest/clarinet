@@ -25,11 +25,11 @@ dicom/
 | `dicom_port` | `11112` | Local DICOM port |
 | `dicom_ip` | `None` | Local DICOM IP |
 | `dicom_max_pdu` | `16384` | Maximum PDU size |
-| `dicom_pacs_aet` | `ORTHANC` | Remote PACS AE title |
-| `dicom_pacs_host` | `localhost` | Remote PACS host |
-| `dicom_pacs_port` | `4242` | Remote PACS port |
+| `pacs_aet` | `ORTHANC` | Remote PACS AE title |
+| `pacs_host` | `localhost` | Remote PACS host |
+| `pacs_port` | `4242` | Remote PACS port |
 
-Env vars use `CLARINET_` prefix (e.g. `CLARINET_DICOM_PACS_HOST`).
+Env vars use `CLARINET_` prefix (e.g. `CLARINET_PACS_HOST`).
 
 ## Test PACS (Orthanc on klara)
 
@@ -45,7 +45,7 @@ from src.services.dicom import DicomClient, DicomNode, StudyQuery
 from src.settings import settings
 
 client = DicomClient(calling_aet=settings.dicom_aet, max_pdu=settings.dicom_max_pdu)
-pacs = DicomNode(aet=settings.dicom_pacs_aet, host=settings.dicom_pacs_host, port=settings.dicom_pacs_port)
+pacs = DicomNode(aet=settings.pacs_aet, host=settings.pacs_host, port=settings.pacs_port)
 
 studies = await client.find_studies(query=StudyQuery(patient_id="12345"), peer=pacs)
 result = await client.get_study(study_uid=studies[0].study_instance_uid, peer=pacs, output_dir=Path("./out"))

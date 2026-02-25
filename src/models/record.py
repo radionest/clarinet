@@ -237,9 +237,10 @@ class RecordBase(BaseModel):
                 patient_id=patient.anon_id if patient else self.patient_id,
                 patient_anon_name=patient.anon_name if patient else None,
                 study_uid=self.study_uid,
-                study_anon_uid=study.anon_uid if study else self.study_anon_uid,
+                study_anon_uid=(study.anon_uid if study else self.study_anon_uid) or self.study_uid,
                 series_uid=self.series_uid,
-                series_anon_uid=series.anon_uid if series else self.series_anon_uid,
+                series_anon_uid=(series.anon_uid if series else self.series_anon_uid)
+                or self.series_uid,
                 user_id=self.user_id,
                 clarinet_storage_path=self.clarinet_storage_path,
             )
@@ -291,14 +292,14 @@ class RecordBase(BaseModel):
         match self.record_type.level:
             case "SERIES":
                 return self._format_path(
-                    f"{settings.storage_path}/{self.patient_id}/{self.study_anon_uid}/{self.series_anon_uid}"
+                    f"{settings.storage_path}/{{patient_id}}/{{study_anon_uid}}/{{series_anon_uid}}"
                 )
             case "STUDY":
                 return self._format_path(
-                    f"{settings.storage_path}/{self.patient_id}/{self.study_anon_uid}"
+                    f"{settings.storage_path}/{{patient_id}}/{{study_anon_uid}}"
                 )
             case "PATIENT":
-                return self._format_path(f"{settings.storage_path}/{self.patient_id}")
+                return self._format_path(f"{settings.storage_path}/{{patient_id}}")
             case _:
                 raise NotImplementedError(
                     "Working folder attribute only available for Study and Series level record types."

@@ -4,8 +4,8 @@ from pathlib import Path
 from typing import Any
 
 from pydicom import Dataset
-from pynetdicom import evt
-from pynetdicom.ae import ApplicationEntity
+from pynetdicom import evt  # type: ignore[import-not-found]
+from pynetdicom.ae import ApplicationEntity  # type: ignore[import-not-found]
 
 from src.services.dicom.models import StorageMode
 from src.utils.logger import logger

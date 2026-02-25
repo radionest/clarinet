@@ -61,6 +61,9 @@ pub type Model {
     pacs_studies: List(PacsStudyWithSeries),
     pacs_loading: Bool,
     pacs_importing: Option(String),
+    // Slicer state
+    slicer_loading: Bool,
+    slicer_available: Option(Bool),
   )
 }
 
@@ -186,6 +189,14 @@ pub type Msg {
   PacsStudyImported(Result(Study, ApiError))
   ClearPacsResults
 
+  // Slicer operations
+  OpenInSlicer(record_id: String)
+  SlicerOpenResult(Result(dynamic.Dynamic, ApiError))
+  SlicerValidate(record_id: String)
+  SlicerValidateResult(Result(dynamic.Dynamic, ApiError))
+  SlicerPing
+  SlicerPingResult(Result(dynamic.Dynamic, ApiError))
+
   // Misc
   NoOp
   RefreshData
@@ -230,6 +241,8 @@ pub fn init() -> Model {
     pacs_studies: [],
     pacs_loading: False,
     pacs_importing: None,
+    slicer_loading: False,
+    slicer_available: None,
   )
 }
 

@@ -23,6 +23,7 @@ from src.repositories.user_repository import UserRepository, UserRoleRepository
 from src.services.admin_service import AdminService
 from src.services.dicom import DicomClient
 from src.services.dicom.models import DicomNode
+from src.services.slicer.service import SlicerService
 from src.services.study_service import StudyService
 from src.services.user_service import UserService
 from src.settings import settings
@@ -157,10 +158,19 @@ async def get_admin_service(
     return AdminService(record_repo, record_type_repo, study_repo, patient_repo, user_repo)
 
 
+# Slicer service factory
+
+
+async def get_slicer_service() -> SlicerService:
+    """Get slicer service instance."""
+    return SlicerService()
+
+
 # Service type aliases
 UserServiceDep = Annotated[UserService, Depends(get_user_service)]
 StudyServiceDep = Annotated[StudyService, Depends(get_study_service)]
 AdminServiceDep = Annotated[AdminService, Depends(get_admin_service)]
+SlicerServiceDep = Annotated[SlicerService, Depends(get_slicer_service)]
 
 
 # DICOM dependencies
@@ -174,9 +184,9 @@ def get_dicom_client() -> DicomClient:
 def get_pacs_node() -> DicomNode:
     """Get default PACS node configuration."""
     return DicomNode(
-        aet=settings.dicom_pacs_aet,
-        host=settings.dicom_pacs_host,
-        port=settings.dicom_pacs_port,
+        aet=settings.pacs_aet,
+        host=settings.pacs_host,
+        port=settings.pacs_port,
     )
 
 

@@ -1,90 +1,200 @@
-"""
-Slicer router for the Clarinet framework.
+"""Slicer router for the Clarinet framework.
 
-This module provides API endpoints for interacting with 3D Slicer instances,
-including running scripts and validating segmentations.
+Provides API endpoints for executing scripts on 3D Slicer instances
+via the SlicerService DSL layer.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from typing import Any
+
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
-from src.exceptions import NoScriptError, ScriptArgumentError, SlicerConnectionError
-from src.types import SlicerResult
+from src.api.dependencies import (
+    CurrentUserDep,
+    RecordRepositoryDep,
+    SlicerServiceDep,
+    get_client_ip,
+)
+from src.exceptions.domain import NoScriptError
+from src.settings import settings
 from src.utils.logger import logger
-from src.utils.slicer import SlicerWeb
 
 router = APIRouter(tags=["Slicer"])
 
 
-class SlicerScript(BaseModel):
-    """Model for Slicer script execution request."""
+class SlicerExecRequest(BaseModel):
+    """Request model for script execution."""
 
-    script_name: str
-    working_folder: str
-    slicer_script_args: dict[str, str]
+    script: str
+    context: dict[str, Any] | None = None
 
 
-def get_client_ip(request: Request) -> str:
-    """Get the client's IP address from the request.
+class SlicerExecResponse(BaseModel):
+    """Response model for script execution."""
+
+    result: dict[str, Any]
+
+
+@router.post("/exec")
+async def execute_script(
+    request: SlicerExecRequest,
+    service: SlicerServiceDep,
+    _current_user: CurrentUserDep,
+    client_ip: str = Depends(get_client_ip),
+) -> dict[str, Any]:
+    """Execute a script on the user's local Slicer instance.
+
+    The helper DSL is automatically prepended to the script.
 
     Args:
-        request: The FastAPI request
+        request: Script and optional context variables.
+        service: Injected SlicerService.
+        current_user: Authenticated user.
+        client_ip: Client IP for Slicer URL construction.
 
     Returns:
-        The client's IP address as a string
+        JSON response from Slicer.
+    """
+    slicer_url = f"http://{client_ip}:{settings.slicer_port}"
+    return await service.execute(slicer_url, request.script, request.context)
+
+
+@router.post("/exec/raw")
+async def execute_raw_script(
+    request: SlicerExecRequest,
+    service: SlicerServiceDep,
+    _current_user: CurrentUserDep,
+    client_ip: str = Depends(get_client_ip),
+) -> dict[str, Any]:
+    """Execute a raw script without the helper DSL prepended.
+
+    Args:
+        request: Script to execute (context is ignored).
+        service: Injected SlicerService.
+        current_user: Authenticated user.
+        client_ip: Client IP for Slicer URL construction.
+
+    Returns:
+        JSON response from Slicer.
+    """
+    slicer_url = f"http://{client_ip}:{settings.slicer_port}"
+    return await service.execute_raw(slicer_url, request.script)
+
+
+@router.get("/ping")
+async def ping_slicer(
+    service: SlicerServiceDep,
+    _current_user: CurrentUserDep,
+    client_ip: str = Depends(get_client_ip),
+) -> dict[str, bool]:
+    """Check if the user's local Slicer instance is reachable.
+
+    Args:
+        service: Injected SlicerService.
+        current_user: Authenticated user.
+        client_ip: Client IP for Slicer URL construction.
+
+    Returns:
+        {"ok": true/false}
+    """
+    slicer_url = f"http://{client_ip}:{settings.slicer_port}"
+    ok = await service.ping(slicer_url)
+    return {"ok": ok}
+
+
+def _build_pacs_context() -> dict[str, Any]:
+    """Build PACS settings context dict for Slicer scripts."""
+    return {
+        "pacs_host": settings.pacs_host,
+        "pacs_port": settings.pacs_port,
+        "pacs_aet": settings.pacs_aet,
+        "pacs_calling_aet": settings.pacs_calling_aet,
+        "pacs_prefer_cget": settings.pacs_prefer_cget,
+        "pacs_move_aet": settings.pacs_move_aet,
+    }
+
+
+@router.post("/records/{record_id}/open")
+async def open_record_in_slicer(
+    record_id: int,
+    record_repo: RecordRepositoryDep,
+    service: SlicerServiceDep,
+    _current_user: CurrentUserDep,
+    client_ip: str = Depends(get_client_ip),
+) -> dict[str, Any]:
+    """Open a record's workspace in the user's local 3D Slicer.
+
+    Loads the record with relations, takes its record_type's slicer_script
+    and the record's formatted args, then sends the script to Slicer.
+
+    Args:
+        record_id: Record ID to open.
+        record_repo: Injected RecordRepository.
+        service: Injected SlicerService.
+        _current_user: Authenticated user.
+        client_ip: Client IP for Slicer URL construction.
+
+    Returns:
+        JSON response from Slicer.
 
     Raises:
-        HTTPException: If client information is not available
+        NoScriptError: If the record type has no slicer_script configured.
     """
-    if request.client is None:
-        raise HTTPException(status_code=400, detail="Client information not available")
-    return request.client.host
+    record = await record_repo.get_with_relations(record_id)
+
+    if not record.record_type or not record.record_type.slicer_script:
+        raise NoScriptError(f"Record type has no slicer_script configured for record {record_id}")
+
+    args: dict[str, str] | None = record.slicer_all_args_formatted  # type: ignore[assignment]
+    context: dict[str, Any] = dict(args or {})
+    context.update(_build_pacs_context())
+
+    slicer_url = f"http://{client_ip}:{settings.slicer_port}"
+    logger.info(f"Opening record {record_id} in Slicer at {slicer_url}")
+    return await service.execute(
+        slicer_url, record.record_type.slicer_script, context, request_timeout=60.0
+    )
 
 
-def get_webslicer(client_ip: str = Depends(get_client_ip)) -> SlicerWeb:
-    """Get a SlicerWeb instance connected to the client's Slicer.
+@router.post("/records/{record_id}/validate")
+async def validate_record_in_slicer(
+    record_id: int,
+    record_repo: RecordRepositoryDep,
+    service: SlicerServiceDep,
+    _current_user: CurrentUserDep,
+    client_ip: str = Depends(get_client_ip),
+) -> dict[str, Any]:
+    """Run the result validation script for a record in 3D Slicer.
+
+    Loads the record with relations, takes its record_type's slicer_result_validator
+    and the record's formatted args, then sends the script to Slicer.
 
     Args:
-        client_ip: The client's IP address
+        record_id: Record ID to validate.
+        record_repo: Injected RecordRepository.
+        service: Injected SlicerService.
+        _current_user: Authenticated user.
+        client_ip: Client IP for Slicer URL construction.
 
     Returns:
-        A SlicerWeb instance connected to the client's Slicer
-    """
-    slicer = SlicerWeb(f"http://{client_ip}:2016")
-    return slicer
-
-
-@router.post("/run")
-async def run_script(
-    slicer_script: SlicerScript, slicer: SlicerWeb = Depends(get_webslicer)
-) -> SlicerResult:
-    """Run a script on the client's Slicer instance.
-
-    Args:
-        slicer_script: The script to run and its arguments
-        slicer: A SlicerWeb instance connected to the client's Slicer
-
-    Returns:
-        The response from Slicer
+        JSON response from Slicer.
 
     Raises:
-        NoScriptError: If the script cannot be found
-        ScriptArgumentError: If the script arguments are invalid
-        SlicerConnectionError: If connection to Slicer fails
+        NoScriptError: If the record type has no slicer_result_validator configured.
     """
-    try:
-        slicer_response = slicer.run_script(
-            slicer_script.script_name,
-            working_folder=slicer_script.working_folder,
-            **slicer_script.slicer_script_args,
+    record = await record_repo.get_with_relations(record_id)
+
+    if not record.record_type or not record.record_type.slicer_result_validator:
+        raise NoScriptError(
+            f"Record type has no slicer_result_validator configured for record {record_id}"
         )
-        return slicer_response
-    except NoScriptError as e:
-        logger.error(f"Script not found: {e}")
-        raise
-    except ScriptArgumentError as e:
-        logger.error(f"Invalid script arguments: {e}")
-        raise
-    except SlicerConnectionError:
-        logger.error(f"Could not connect to Slicer at {slicer.url}")
-        raise
+
+    args: dict[str, str] | None = record.slicer_all_args_formatted  # type: ignore[assignment]
+    context: dict[str, Any] = dict(args or {})
+    context.update(_build_pacs_context())
+
+    slicer_url = f"http://{client_ip}:{settings.slicer_port}"
+    logger.info(f"Validating record {record_id} in Slicer at {slicer_url}")
+    return await service.execute(
+        slicer_url, record.record_type.slicer_result_validator, context, request_timeout=60.0
+    )

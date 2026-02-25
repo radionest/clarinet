@@ -151,4 +151,5 @@ testpaths = ["tests"]
 python_files = "test_*.py"
 markers = [
     "dicom: tests requiring a live DICOM PACS server",
+    "slicer: tests requiring a running 3D Slicer instance (deselect with '-m \"not slicer\"')",
 ]

@@ -91,9 +91,9 @@ class SeriesRead(SeriesBase):
                 patient_id=self.study.patient.anon_id,
                 patient_anon_name=self.study.patient.anon_name,
                 study_uid=self.study_uid,
-                study_anon_uid=self.study.anon_uid,
+                study_anon_uid=self.study.anon_uid or self.study_uid,
                 series_uid=self.series_uid,
-                series_anon_uid=self.anon_uid,
+                series_anon_uid=self.anon_uid or self.series_uid,
                 clarinet_storage_path=settings.storage_path,
             )
         except AttributeError as e:

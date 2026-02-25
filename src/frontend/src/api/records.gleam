@@ -64,6 +64,16 @@ fn record_type_base_decoder() -> decode.Decoder(RecordType) {
     None,
     decode.optional(decode.dynamic),
   )
+  use slicer_script <- decode.optional_field(
+    "slicer_script",
+    None,
+    decode.optional(decode.string),
+  )
+  use slicer_result_validator <- decode.optional_field(
+    "slicer_result_validator",
+    None,
+    decode.optional(decode.string),
+  )
 
   let level = case level_str {
     None -> types.Series
@@ -82,9 +92,9 @@ fn record_type_base_decoder() -> decode.Decoder(RecordType) {
     name: name,
     description: description,
     label: label,
-    slicer_script: None,
+    slicer_script: slicer_script,
     slicer_script_args: None,
-    slicer_result_validator: None,
+    slicer_result_validator: slicer_result_validator,
     slicer_result_validator_args: None,
     data_schema: data_schema,
     role_name: None,

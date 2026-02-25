@@ -34,6 +34,8 @@ def setup_exception_handlers(app: FastAPI) -> None:
         EntityAlreadyExistsError,
         EntityNotFoundError,
         InvalidCredentialsError,
+        SlicerConnectionError,
+        SlicerError,
         ValidationError,
     )
 
@@ -106,6 +108,22 @@ def setup_exception_handlers(app: FastAPI) -> None:
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content={"detail": "Database operation failed"},
+        )
+
+    @app.exception_handler(SlicerConnectionError)
+    async def handle_slicer_connection(_: Request, exc: SlicerConnectionError) -> JSONResponse:
+        """Convert SlicerConnectionError to 502 response."""
+        return JSONResponse(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            content={"detail": str(exc) if str(exc) else "3D Slicer is not reachable"},
+        )
+
+    @app.exception_handler(SlicerError)
+    async def handle_slicer_error(_: Request, exc: SlicerError) -> JSONResponse:
+        """Convert SlicerError to 422 response."""
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            content={"detail": str(exc) if str(exc) else "Slicer operation failed"},
         )
 
     @app.exception_handler(AlreadyAnonymizedError)

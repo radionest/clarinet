@@ -86,6 +86,16 @@ class Settings(BaseSettings):
 
     # Slicer settings
     slicer_script_paths: list[str] = []
+    slicer_port: int = 2016
+    slicer_timeout: float = 10.0
+
+    # PACS server settings (remote PACS)
+    pacs_host: str = "localhost"
+    pacs_port: int = 4242
+    pacs_aet: str = "ORTHANC"
+    pacs_calling_aet: str = "SLICER"
+    pacs_prefer_cget: bool = True
+    pacs_move_aet: str = "SLICER"
 
     # RabbitMQ settings
     rabbitmq_login: str = "guest"
@@ -114,11 +124,6 @@ class Settings(BaseSettings):
     dicom_port: int = 11112
     dicom_ip: str | None = None
     dicom_max_pdu: int = 16384
-
-    # DICOM settings (remote PACS)
-    dicom_pacs_aet: str = "ORTHANC"
-    dicom_pacs_host: str = "localhost"
-    dicom_pacs_port: int = 4242
 
     # Security settings
     secret_key: str = "insecure-change-this-key-in-production"  # For session signing

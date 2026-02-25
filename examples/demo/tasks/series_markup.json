@@ -1,0 +1,15 @@
+{
+    "name": "series_markup",
+    "description": "Series-level segmentation and annotation in 3D Slicer",
+    "label": "Series Markup",
+    "level": "SERIES",
+    "role_name": "doctor",
+    "min_users": 1,
+    "max_users": 1,
+    "slicer_script": "s = SlicerHelper(working_folder)\ns.load_study_from_pacs(study_uid)\nseg = s.create_segmentation('markup')\ns.setup_editor(seg, effect='Paint', brush_size=20)\ns.set_layout('axial')",
+    "slicer_script_args": {
+        "working_folder": "{clarinet_storage_path}/{patient_id}/{study_anon_uid}/{series_anon_uid}",
+        "study_uid": "{study_uid}",
+        "series_uid": "{series_uid}"
+    }
+}

@@ -52,6 +52,8 @@ fn render_record_execution(
       ]),
       render_record_metadata(record),
     ]),
+    // Slicer toolbar (only if record type has slicer_script)
+    render_slicer_toolbar(model, record, record_id),
     // Dynamic form based on record type's data_schema
     html.div([attribute.class("record-form-container card")], [
       case record.record_type {
@@ -71,6 +73,62 @@ fn render_record_execution(
       ),
     ]),
   ])
+}
+
+/// Render the Slicer toolbar (only when record type has slicer_script)
+fn render_slicer_toolbar(
+  model: Model,
+  record: Record,
+  record_id: String,
+) -> Element(Msg) {
+  let has_slicer_script = case record.record_type {
+    Some(models.RecordType(slicer_script: Some(_), ..)) -> True
+    _ -> False
+  }
+
+  case has_slicer_script {
+    False -> element.none()
+    True -> {
+      let status_badge = case model.slicer_available {
+        Some(True) ->
+          html.span([attribute.class("badge badge-success")], [
+            html.text("Connected"),
+          ])
+        Some(False) ->
+          html.span([attribute.class("badge badge-danger")], [
+            html.text("Unreachable"),
+          ])
+        None ->
+          html.span([attribute.class("badge badge-pending")], [
+            html.text("Checking..."),
+          ])
+      }
+
+      let btn_disabled = model.slicer_loading
+
+      html.div([attribute.class("slicer-toolbar card")], [
+        html.div([attribute.class("slicer-toolbar-header")], [
+          html.h4([], [html.text("3D Slicer")]),
+          status_badge,
+        ]),
+        html.div([attribute.class("slicer-toolbar-actions")], [
+          html.button(
+            [
+              attribute.class("btn btn-primary"),
+              attribute.disabled(btn_disabled),
+              event.on_click(store.OpenInSlicer(record_id)),
+            ],
+            [
+              case model.slicer_loading {
+                True -> html.text("Opening...")
+                False -> html.text("Open in Slicer")
+              },
+            ],
+          ),
+        ]),
+      ])
+    }
+  }
 }
 
 /// Render the dynamic form using Formosh web component

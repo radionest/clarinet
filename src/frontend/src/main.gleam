@@ -6,6 +6,7 @@ import api/models
 import api/patients
 import api/records
 import api/series
+import api/slicer
 import api/studies
 import api/types
 import api/users
@@ -512,9 +513,18 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
 
     // Formosh form events
     store.FormSubmitSuccess(record_id) -> {
+      // Check if this record type has a validator script
+      let validate_effect = case dict.get(model.records, record_id) {
+        Ok(models.Record(record_type: Some(models.RecordType(slicer_result_validator: Some(_), ..)), ..)) ->
+          dispatch_msg(store.SlicerValidate(record_id))
+        _ -> effect.none()
+      }
       #(
         store.set_success(model, "Record data submitted successfully"),
-        dispatch_msg(store.LoadRecordDetail(record_id)),
+        effect.batch([
+          dispatch_msg(store.LoadRecordDetail(record_id)),
+          validate_effect,
+        ]),
       )
     }
 
@@ -566,6 +576,92 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
 
     store.RecordTypeEditError(error) -> {
       #(store.set_error(model, Some(error)), effect.none())
+    }
+
+    // Slicer operations
+    store.OpenInSlicer(record_id) -> {
+      let open_effect = {
+        use dispatch <- effect.from
+        slicer.open_record(record_id)
+        |> promise.tap(fn(result) { dispatch(store.SlicerOpenResult(result)) })
+        Nil
+      }
+      #(store.Model(..model, slicer_loading: True), open_effect)
+    }
+
+    store.SlicerOpenResult(Ok(_)) -> {
+      #(
+        store.Model(..model, slicer_loading: False)
+          |> store.set_success("Workspace opened in 3D Slicer"),
+        effect.none(),
+      )
+    }
+
+    store.SlicerOpenResult(Error(err)) -> {
+      let error_msg = case err {
+        types.ServerError(502, _) -> "3D Slicer is not reachable. Is it running?"
+        types.ServerError(_, msg) -> "Slicer error: " <> msg
+        types.NetworkError(msg) -> "Network error: " <> msg
+        _ -> "Failed to open record in Slicer"
+      }
+      #(
+        store.Model(..model, slicer_loading: False)
+          |> store.set_error(Some(error_msg)),
+        effect.none(),
+      )
+    }
+
+    store.SlicerValidate(record_id) -> {
+      let validate_effect = {
+        use dispatch <- effect.from
+        slicer.validate_record(record_id)
+        |> promise.tap(fn(result) {
+          dispatch(store.SlicerValidateResult(result))
+        })
+        Nil
+      }
+      #(store.Model(..model, slicer_loading: True), validate_effect)
+    }
+
+    store.SlicerValidateResult(Ok(_)) -> {
+      #(
+        store.Model(..model, slicer_loading: False)
+          |> store.set_success("Slicer validation completed"),
+        effect.none(),
+      )
+    }
+
+    store.SlicerValidateResult(Error(err)) -> {
+      let error_msg = case err {
+        types.ServerError(502, _) ->
+          "3D Slicer is not reachable for validation. Is it running?"
+        types.ServerError(_, msg) -> "Validation error: " <> msg
+        types.NetworkError(msg) -> "Network error: " <> msg
+        _ -> "Slicer validation failed"
+      }
+      #(
+        store.Model(..model, slicer_loading: False)
+          |> store.set_error(Some(error_msg)),
+        effect.none(),
+      )
+    }
+
+    store.SlicerPing -> {
+      let ping_effect = {
+        use dispatch <- effect.from
+        slicer.ping()
+        |> promise.tap(fn(result) { dispatch(store.SlicerPingResult(result)) })
+        Nil
+      }
+      #(model, ping_effect)
+    }
+
+    store.SlicerPingResult(Ok(_)) -> {
+      #(store.Model(..model, slicer_available: Some(True)), effect.none())
+    }
+
+    store.SlicerPingResult(Error(_)) -> {
+      #(store.Model(..model, slicer_available: Some(False)), effect.none())
     }
 
     // Filters
@@ -921,7 +1017,10 @@ fn load_route_data(model: Model, route: Route) -> Effect(Msg) {
       dispatch_msg(store.LoadSeriesDetail(id))
     router.Records, _ -> dispatch_msg(store.LoadRecords)
     router.RecordDetail(id), Some(_) ->
-      dispatch_msg(store.LoadRecordDetail(id))
+      effect.batch([
+        dispatch_msg(store.LoadRecordDetail(id)),
+        dispatch_msg(store.SlicerPing),
+      ])
     router.Patients, Some(models.User(is_superuser: True, ..)) ->
       dispatch_msg(store.LoadPatients)
     router.PatientDetail(id), Some(models.User(is_superuser: True, ..)) ->

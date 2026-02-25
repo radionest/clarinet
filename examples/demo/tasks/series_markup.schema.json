@@ -1,0 +1,22 @@
+{
+    "type": "object",
+    "properties": {
+        "markup_type": {
+            "type": "string",
+            "enum": ["segmentation", "annotation", "measurement"]
+        },
+        "segments": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "name": { "type": "string" },
+                    "label": { "type": "string" }
+                },
+                "required": ["name"]
+            }
+        },
+        "notes": { "type": "string" }
+    },
+    "required": ["markup_type"]
+}
