@@ -35,6 +35,8 @@ slicer_script_paths: list[str]   # Additional script directories (unused current
 - `SlicerConnectionError(SlicerError)` — connect/timeout failure
 - `SlicerSegmentationError(SlicerError)` — segmentation-specific
 - `ScriptError(SlicerError)` — script execution error
+- `NoScriptError(ScriptError)` — record type has no `slicer_script` or `slicer_result_validator`
+- `ScriptArgumentError(ScriptError)` — invalid script arguments
 
 ## Helper DSL (`helper.py`)
 
@@ -50,11 +52,13 @@ Runs inside Slicer Python environment. Has `_Dummy` fallback for testing outside
 
 - `SlicerHelper(working_folder)` — clears scene, sets root dir
 - `load_volume(path, window=)` → image node
-- `create_segmentation(name)` → `SegmentationBuilder` (fluent `.add_segment()`)
+- `create_segmentation(name)` → `SegmentationBuilder` (fluent `.add_segment()`, `.select_segment(name)`)
+- `load_segmentation(path, name=None)` → loads existing segmentation from file, sets reference geometry
 - `setup_editor(seg, effect=, brush_size=, threshold=)` — configures SegmentEditor
 - `set_layout("axial"|"sagittal"|"coronal"|"four_up")`
 - `annotate(text)`, `configure_slab(thickness=)`, `setup_edit_mask(path)`
 - `add_view_shortcuts()` — a/s/c keys for view switching
+- `add_shortcuts(shortcuts: list[tuple[str, str]])` — custom keyboard shortcuts (key→layout or key→exec code)
 - `load_study_from_pacs(study_instance_uid)` → list of loaded MRML node IDs
 
 ## PacsHelper (`helper.py`)
@@ -95,6 +99,8 @@ Context variables are injected by `SlicerService._build_context_block()` — no 
 - `POST /exec/raw` — execute raw script (no helper)
 - `POST /clear` — clear the Slicer scene (sends `slicer.mrmlScene.Clear(0)` via `execute_raw`)
 - `GET /ping` — check Slicer reachability
+- `POST /records/{record_id}/open` — load record workspace in Slicer (uses `record_type.slicer_script` + `slicer_all_args_formatted`, injects PACS context, 60s timeout). Raises `NoScriptError` if no script configured.
+- `POST /records/{record_id}/validate` — run `record_type.slicer_result_validator` (same context/timeout pattern). Raises `NoScriptError` if no validator configured.
 
 ## Testing
 
