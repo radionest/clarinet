@@ -61,8 +61,9 @@ def load_flows_from_file(file_path: Path) -> list[FlowRecord]:
         # Execute the code in the namespace
         exec(compiled, namespace)
 
-        # Return a copy of the registry (exec populated it via record() calls)
-        flows = list(RECORD_REGISTRY)
+        # Return only active flows (filter out reference-only FlowRecords
+        # created for data access like record('type').data.field)
+        flows = [f for f in RECORD_REGISTRY if f.is_active_flow()]
         for flow in flows:
             logger.info(f"Loaded flow: {flow.record_name}")
 

@@ -10,6 +10,11 @@ Example usage:
         .if_(record('doctor_report').data.BIRADS_R != record('ai_report').data.BIRADS_R)
         .or_(record('doctor_report').data.BIRADS_L != record('ai_report').data.BIRADS_L)
         .add_record('confirm_birads')
+
+    # Invalidate dependent records when data is updated
+    record('master_model')
+        .on_data_update()
+        .invalidate_records('child_analysis', mode='hard')
 """
 
 from __future__ import annotations
@@ -46,6 +51,7 @@ class FlowRecord:
     def __init__(self, record_name: str):
         self.record_name = record_name
         self.status_trigger: str | None = None
+        self.data_update_trigger: bool = False
         self.conditions: list[FlowCondition] = []
         self.actions: list[dict] = []
         self._current_condition: FlowCondition | None = None
@@ -74,6 +80,18 @@ class FlowRecord:
             self.status_trigger = status.value
         else:
             self.status_trigger = str(status)
+        return self
+
+    def on_data_update(self) -> FlowRecord:
+        """Trigger this flow when a finished record's data is updated.
+
+        This trigger is separate from on_status() and is only fired when
+        record data is modified via PATCH /records/{id}/data.
+
+        Returns:
+            Self for method chaining.
+        """
+        self.data_update_trigger = True
         return self
 
     def if_(self, condition: ComparisonResult) -> FlowRecord:
@@ -201,6 +219,42 @@ class FlowRecord:
 
         return self
 
+    def invalidate_records(
+        self,
+        *record_type_names: str,
+        mode: str = "hard",
+        callback: Callable | None = None,
+    ) -> FlowRecord:
+        """Add an invalidation action for records of specified types.
+
+        Searches by patient_id (broadest scope), covering all hierarchy levels.
+        A series-level change can invalidate patient-level records and vice versa.
+
+        Args:
+            record_type_names: Names of record types to invalidate.
+            mode: "hard" resets status to pending and clears user_id.
+                  "soft" only appends reason to context_info without status change.
+            callback: Optional project-level callback(record, source_record, client)
+                      for custom behavior (e.g. updating context_info).
+
+        Returns:
+            Self for method chaining.
+        """
+        action: dict = {
+            "type": "invalidate_records",
+            "record_type_names": list(record_type_names),
+            "mode": mode,
+        }
+        if callback is not None:
+            action["callback"] = callback
+
+        if self._current_condition:
+            self._current_condition.add_action(action)
+        else:
+            self.actions.append(action)
+
+        return self
+
     def else_(self) -> FlowRecord:
         """Start an else block for the current condition.
 
@@ -217,6 +271,17 @@ class FlowRecord:
         self._current_condition = FlowCondition(None, is_else=True)
         self.conditions.append(self._current_condition)
         return self
+
+    def is_active_flow(self) -> bool:
+        """Check if this FlowRecord defines an actual flow (not just a data reference).
+
+        Returns True if the flow has triggers, actions, or conditions.
+        Returns False for FlowRecord instances created only for data field
+        references (e.g. record('type').data.field in comparisons).
+        """
+        return bool(
+            self.status_trigger or self.data_update_trigger or self.actions or self.conditions
+        )
 
     def validate(self) -> bool:
         """Validate the flow definition.
@@ -240,15 +305,22 @@ class FlowRecord:
         parts = [f"FlowRecord('{self.record_name}')"]
         if self.status_trigger:
             parts.append(f".on_status('{self.status_trigger}')")
+        if self.data_update_trigger:
+            parts.append(".on_data_update()")
         return "".join(parts)
 
 
 def record(record_name: str) -> FlowRecord:
     """
-    Get or create a FlowRecord instance by name.
+    Create a new FlowRecord instance for the given record type name.
 
-    If a record with this name already exists in the registry, it's returned.
-    Otherwise, a new one is created, added to the registry, and returned.
+    Each call creates a new FlowRecord and adds it to the global registry.
+    This allows defining multiple independent flows for the same record type
+    (e.g. one triggered on status change, another on data update).
+
+    FlowRecord instances created only for data references (e.g.
+    ``record('type').data.field`` in comparisons) will be filtered out
+    by the loader via ``is_active_flow()``.
 
     This function is the main entry point for creating flow definitions.
 
@@ -256,18 +328,18 @@ def record(record_name: str) -> FlowRecord:
         record_name: The name of the record type this flow applies to.
 
     Returns:
-        A FlowRecord instance for chaining DSL methods.
+        A new FlowRecord instance for chaining DSL methods.
 
     Example:
         record('doctor_report')
             .on_status('finished')
             .if_(record('doctor_report').data.BIRADS_R != record('ai_report').data.BIRADS_R)
             .add_record('confirm_birads')
-    """
-    for existing_record in RECORD_REGISTRY:
-        if existing_record.record_name == record_name:
-            return existing_record
 
+        record('master_model')
+            .on_data_update()
+            .invalidate_records('child_analysis', mode='hard')
+    """
     new_record = FlowRecord(record_name)
     RECORD_REGISTRY.append(new_record)
     return new_record

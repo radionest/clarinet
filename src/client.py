@@ -670,6 +670,37 @@ class ClarinetClient:
         )
         return RecordRead.model_validate(response.json())
 
+    async def invalidate_record(
+        self,
+        record_id: int,
+        mode: str = "hard",
+        source_record_id: int | None = None,
+        reason: str | None = None,
+    ) -> RecordRead:
+        """Invalidate a record.
+
+        Args:
+            record_id: Record ID to invalidate.
+            mode: "hard" resets to pending, "soft" only appends reason.
+            source_record_id: ID of the record that triggered invalidation.
+            reason: Human-readable reason for invalidation.
+
+        Returns:
+            Updated record.
+        """
+        body: dict = {"mode": mode}
+        if source_record_id is not None:
+            body["source_record_id"] = source_record_id
+        if reason is not None:
+            body["reason"] = reason
+
+        response = await self._request(
+            "POST",
+            f"/records/{record_id}/invalidate",
+            json=body,
+        )
+        return RecordRead.model_validate(response.json())
+
     async def assign_record_to_user(self, record_id: int, user_id: UUID) -> RecordRead:
         """Assign record to a user.
 

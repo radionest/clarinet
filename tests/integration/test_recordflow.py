@@ -32,7 +32,14 @@ def _clear_registry():
 async def record_types(test_session: AsyncSession) -> dict[str, RecordType]:
     """Create record types used by flow tests."""
     types = {}
-    for name in ["doctor_report", "ai_analysis", "expert_check", "confirm_birads"]:
+    for name in [
+        "doctor_report",
+        "ai_analysis",
+        "expert_check",
+        "confirm_birads",
+        "parent_model",
+        "child_analysis",
+    ]:
         rt = RecordType(name=name, level=DicomQueryLevel.STUDY)
         test_session.add(rt)
         types[name] = rt
@@ -522,3 +529,427 @@ class TestRecordFlowRuntime:
             record_type_name="ai_analysis",
         )
         assert len(records) == 0
+
+
+class TestRecordFlowInvalidation:
+    """Integration tests for record invalidation flow with real DB."""
+
+    @pytest.mark.asyncio
+    async def test_hard_invalidate_resets_to_pending(
+        self,
+        clarinet_client: ClarinetClient,
+        flow_engine: RecordFlowEngine,
+        record_types: dict[str, RecordType],
+        test_patient: Patient,
+        test_study: Study,
+    ):
+        """Hard invalidation resets child record to pending status."""
+        # Define flow: parent_model on_data_update → invalidate child_analysis (hard)
+        flow = FlowRecord("parent_model")
+        flow.on_data_update().invalidate_records("child_analysis", mode="hard")
+        flow_engine.register_flow(flow)
+
+        # Create parent record (finished with data)
+        parent_record = await _create_record_via_client(
+            clarinet_client,
+            "parent_model",
+            test_patient.id,
+            test_study.study_uid,
+            status=RecordStatus.finished,
+            data={"model_version": "v1"},
+        )
+
+        # Create child record (finished)
+        await _create_record_via_client(
+            clarinet_client,
+            "child_analysis",
+            test_patient.id,
+            test_study.study_uid,
+            status=RecordStatus.finished,
+        )
+
+        # Trigger data update flow
+        await flow_engine.handle_record_data_update(parent_record)
+
+        # Verify child is now pending and has invalidation info
+        records = await clarinet_client.find_records(
+            study_uid=test_study.study_uid,
+            record_type_name="child_analysis",
+        )
+        assert len(records) == 1
+        assert records[0].status == RecordStatus.pending
+        assert records[0].context_info is not None
+        assert "Invalidated by record" in records[0].context_info
+
+    @pytest.mark.asyncio
+    async def test_soft_invalidate_keeps_status(
+        self,
+        clarinet_client: ClarinetClient,
+        flow_engine: RecordFlowEngine,
+        record_types: dict[str, RecordType],
+        test_patient: Patient,
+        test_study: Study,
+    ):
+        """Soft invalidation keeps status but updates context_info."""
+        # Define flow: parent_model on_data_update → invalidate child_analysis (soft)
+        flow = FlowRecord("parent_model")
+        flow.on_data_update().invalidate_records("child_analysis", mode="soft")
+        flow_engine.register_flow(flow)
+
+        # Create parent record (finished with data)
+        parent_record = await _create_record_via_client(
+            clarinet_client,
+            "parent_model",
+            test_patient.id,
+            test_study.study_uid,
+            status=RecordStatus.finished,
+            data={"model_version": "v1"},
+        )
+
+        # Create child record (finished)
+        await _create_record_via_client(
+            clarinet_client,
+            "child_analysis",
+            test_patient.id,
+            test_study.study_uid,
+            status=RecordStatus.finished,
+        )
+
+        # Trigger data update flow
+        await flow_engine.handle_record_data_update(parent_record)
+
+        # Verify child status unchanged but context_info updated
+        records = await clarinet_client.find_records(
+            study_uid=test_study.study_uid,
+            record_type_name="child_analysis",
+        )
+        assert len(records) == 1
+        assert records[0].status == RecordStatus.finished
+        assert records[0].context_info is not None
+        assert "Invalidated by record" in records[0].context_info
+
+    @pytest.mark.asyncio
+    async def test_invalidate_skips_source_record(
+        self,
+        clarinet_client: ClarinetClient,
+        flow_engine: RecordFlowEngine,
+        record_types: dict[str, RecordType],
+        test_patient: Patient,
+        test_study: Study,
+    ):
+        """Invalidation skips the source record when invalidating same type."""
+        # Define flow: parent_model on_data_update → invalidate parent_model (self-invalidation)
+        flow = FlowRecord("parent_model")
+        flow.on_data_update().invalidate_records("parent_model", mode="hard")
+        flow_engine.register_flow(flow)
+
+        # Create two parent_model records
+        first_record = await _create_record_via_client(
+            clarinet_client,
+            "parent_model",
+            test_patient.id,
+            test_study.study_uid,
+            status=RecordStatus.finished,
+            data={"version": "1"},
+        )
+
+        second_record = await _create_record_via_client(
+            clarinet_client,
+            "parent_model",
+            test_patient.id,
+            test_study.study_uid,
+            status=RecordStatus.finished,
+            data={"version": "2"},
+        )
+
+        # Trigger data update on first record
+        await flow_engine.handle_record_data_update(first_record)
+
+        # Verify: first record NOT invalidated, second record IS invalidated
+        records = await clarinet_client.find_records(
+            study_uid=test_study.study_uid,
+            record_type_name="parent_model",
+        )
+        assert len(records) == 2
+
+        first_updated = next(r for r in records if r.id == first_record.id)
+        second_updated = next(r for r in records if r.id == second_record.id)
+
+        # First (source) should remain finished
+        assert first_updated.status == RecordStatus.finished
+        # Second should be invalidated (reset to pending)
+        assert second_updated.status == RecordStatus.pending
+        assert "Invalidated by record" in (second_updated.context_info or "")
+
+    @pytest.mark.asyncio
+    async def test_invalidate_with_callback(
+        self,
+        clarinet_client: ClarinetClient,
+        flow_engine: RecordFlowEngine,
+        record_types: dict[str, RecordType],
+        test_patient: Patient,
+        test_study: Study,
+    ):
+        """Invalidation with callback executes the callback function."""
+        call_log: list[dict] = []
+
+        async def invalidation_callback(record, source_record, client, **kwargs):
+            call_log.append(
+                {
+                    "record_id": record.id,
+                    "record_type": record.record_type.name,
+                    "source_record_id": source_record.id,
+                }
+            )
+
+        # Define flow with callback
+        flow = FlowRecord("parent_model")
+        flow.on_data_update().invalidate_records(
+            "child_analysis", mode="hard", callback=invalidation_callback
+        )
+        flow_engine.register_flow(flow)
+
+        # Create parent and child
+        parent_record = await _create_record_via_client(
+            clarinet_client,
+            "parent_model",
+            test_patient.id,
+            test_study.study_uid,
+            status=RecordStatus.finished,
+            data={"data": "test"},
+        )
+
+        await _create_record_via_client(
+            clarinet_client,
+            "child_analysis",
+            test_patient.id,
+            test_study.study_uid,
+            status=RecordStatus.finished,
+        )
+
+        # Trigger data update
+        await flow_engine.handle_record_data_update(parent_record)
+
+        # Verify callback was called with the target (child) record
+        assert len(call_log) == 1
+        assert call_log[0]["record_type"] == "child_analysis"
+        assert call_log[0]["source_record_id"] == parent_record.id
+
+    @pytest.mark.asyncio
+    async def test_invalidate_multiple_types(
+        self,
+        clarinet_client: ClarinetClient,
+        flow_engine: RecordFlowEngine,
+        record_types: dict[str, RecordType],
+        test_patient: Patient,
+        test_study: Study,
+    ):
+        """Invalidation can target multiple record types simultaneously."""
+        # Define flow: parent_model on_data_update → invalidate child_analysis AND ai_analysis
+        flow = FlowRecord("parent_model")
+        flow.on_data_update().invalidate_records("child_analysis", "ai_analysis", mode="hard")
+        flow_engine.register_flow(flow)
+
+        # Create parent
+        parent_record = await _create_record_via_client(
+            clarinet_client,
+            "parent_model",
+            test_patient.id,
+            test_study.study_uid,
+            status=RecordStatus.finished,
+            data={"data": "test"},
+        )
+
+        # Create child_analysis (finished)
+        await _create_record_via_client(
+            clarinet_client,
+            "child_analysis",
+            test_patient.id,
+            test_study.study_uid,
+            status=RecordStatus.finished,
+        )
+
+        # Create ai_analysis (finished)
+        await _create_record_via_client(
+            clarinet_client,
+            "ai_analysis",
+            test_patient.id,
+            test_study.study_uid,
+            status=RecordStatus.finished,
+        )
+
+        # Trigger data update
+        await flow_engine.handle_record_data_update(parent_record)
+
+        # Verify both child_analysis and ai_analysis are invalidated
+        child_records = await clarinet_client.find_records(
+            study_uid=test_study.study_uid,
+            record_type_name="child_analysis",
+        )
+        assert len(child_records) == 1
+        assert child_records[0].status == RecordStatus.pending
+
+        ai_records = await clarinet_client.find_records(
+            study_uid=test_study.study_uid,
+            record_type_name="ai_analysis",
+        )
+        assert len(ai_records) == 1
+        assert ai_records[0].status == RecordStatus.pending
+
+
+class TestRecordFlowInvalidationRuntime:
+    """Tests for invalidation triggered through API (PATCH /data → engine)."""
+
+    @pytest_asyncio.fixture
+    async def app_with_engine(
+        self,
+        clarinet_client: ClarinetClient,
+    ) -> AsyncGenerator[RecordFlowEngine]:
+        """Install RecordFlowEngine into app.state, clean up after test."""
+        engine = RecordFlowEngine(clarinet_client)
+        app.state.recordflow_engine = engine
+        yield engine
+        app.state.recordflow_engine = None
+
+    @pytest.mark.asyncio
+    async def test_data_update_triggers_invalidation_via_api(
+        self,
+        client: AsyncClient,
+        clarinet_client: ClarinetClient,
+        app_with_engine: RecordFlowEngine,
+        record_types: dict[str, RecordType],
+        test_patient: Patient,
+        test_study: Study,
+    ):
+        """PATCH /records/{id}/data triggers invalidation through engine."""
+        # Register flow: parent_model on_data_update → invalidate child_analysis
+        flow = FlowRecord("parent_model")
+        flow.on_data_update().invalidate_records("child_analysis", mode="hard")
+        app_with_engine.register_flow(flow)
+
+        # Create parent_model via API
+        create_resp = await client.post(
+            "/api/records/",
+            json={
+                "record_type_name": "parent_model",
+                "patient_id": test_patient.id,
+                "study_uid": test_study.study_uid,
+            },
+        )
+        assert create_resp.status_code == 201
+        parent_id = create_resp.json()["id"]
+
+        # Submit initial data for parent
+        await client.post(
+            f"/api/records/{parent_id}/data",
+            json={"initial": "data"},
+        )
+
+        # Create child_analysis and set to finished
+        child_create = await client.post(
+            "/api/records/",
+            json={
+                "record_type_name": "child_analysis",
+                "patient_id": test_patient.id,
+                "study_uid": test_study.study_uid,
+            },
+        )
+        child_id = child_create.json()["id"]
+
+        # Set child to finished status
+        await client.patch(
+            f"/api/records/{child_id}/status",
+            params={"record_status": "finished"},
+        )
+
+        # Update parent data via PATCH — this triggers invalidation
+        patch_resp = await client.patch(
+            f"/api/records/{parent_id}/data",
+            json={"updated": "data"},
+        )
+        assert patch_resp.status_code == 200
+
+        # Verify child_analysis is now pending (invalidated)
+        child_records = await clarinet_client.find_records(
+            study_uid=test_study.study_uid,
+            record_type_name="child_analysis",
+        )
+        assert len(child_records) == 1
+        assert child_records[0].status == RecordStatus.pending
+        assert "Invalidated by record" in (child_records[0].context_info or "")
+
+
+class TestInvalidateEndpoint:
+    """Tests for the direct POST /records/{id}/invalidate endpoint."""
+
+    @pytest.mark.asyncio
+    async def test_invalidate_hard_mode(
+        self,
+        client: AsyncClient,
+        clarinet_client: ClarinetClient,
+        record_types: dict[str, RecordType],
+        test_patient: Patient,
+        test_study: Study,
+    ):
+        """POST /invalidate with hard mode resets status to pending."""
+        # Create a finished record
+        record = await _create_record_via_client(
+            clarinet_client,
+            "parent_model",
+            test_patient.id,
+            test_study.study_uid,
+            status=RecordStatus.finished,
+            data={"some": "data"},
+        )
+
+        # Call invalidate endpoint
+        resp = await client.post(
+            f"/api/records/{record.id}/invalidate",
+            json={"mode": "hard", "reason": "test reason"},
+        )
+        assert resp.status_code == 200
+
+        # Verify record is now pending with reason in context_info
+        updated_record = await clarinet_client.get_record(record.id)
+        assert updated_record.status == RecordStatus.pending
+        assert updated_record.context_info is not None
+        assert "test reason" in updated_record.context_info
+
+    @pytest.mark.asyncio
+    async def test_invalidate_soft_mode(
+        self,
+        client: AsyncClient,
+        clarinet_client: ClarinetClient,
+        record_types: dict[str, RecordType],
+        test_patient: Patient,
+        test_study: Study,
+    ):
+        """POST /invalidate with soft mode keeps status but appends context_info."""
+        # Create a finished record with existing context_info
+        record = await _create_record_via_client(
+            clarinet_client,
+            "parent_model",
+            test_patient.id,
+            test_study.study_uid,
+            status=RecordStatus.finished,
+            data={"some": "data"},
+        )
+
+        # Add existing context by updating it manually
+        await client.patch(
+            f"/api/records/{record.id}/data",
+            json={"existing": "context"},
+        )
+
+        # Call invalidate endpoint with soft mode
+        resp = await client.post(
+            f"/api/records/{record.id}/invalidate",
+            json={"mode": "soft", "reason": "soft reason"},
+        )
+        assert resp.status_code == 200
+
+        # Verify status unchanged, context_info appended
+        updated_record = await clarinet_client.get_record(record.id)
+        assert updated_record.status == RecordStatus.finished
+        assert updated_record.context_info is not None
+        assert "soft reason" in updated_record.context_info

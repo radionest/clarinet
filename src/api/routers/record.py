@@ -371,6 +371,8 @@ async def submit_record_data(
 @router.patch("/{record_id}/data", response_model=RecordRead)
 async def update_record_data(
     record_id: int,
+    request: Request,
+    background_tasks: BackgroundTasks,
     repo: RecordRepositoryDep,
     data: RecordData = Body(),
 ) -> Record:
@@ -382,6 +384,13 @@ async def update_record_data(
 
     validated_data = validate_record_data(record, data)
     updated, _ = await repo.update_data(record_id, validated_data)
+
+    # Trigger RecordFlow data update flows if enabled
+    recordflow_engine = getattr(request.app.state, "recordflow_engine", None)
+    if recordflow_engine:
+        record_read = RecordRead.model_validate(updated)
+        background_tasks.add_task(recordflow_engine.handle_record_data_update, record_read)
+
     return updated
 
 
@@ -408,6 +417,36 @@ async def validate_files_endpoint(
         return FileValidationResult(valid=True)
 
     return result
+
+
+@router.post("/{record_id}/invalidate", response_model=RecordRead)
+async def invalidate_record(
+    record_id: int,
+    repo: RecordRepositoryDep,
+    mode: str = Body(default="hard"),
+    source_record_id: int | None = Body(default=None),
+    reason: str | None = Body(default=None),
+) -> Record:
+    """Invalidate a record.
+
+    Hard mode resets status to pending and clears user assignment.
+    Soft mode only appends the reason to context_info.
+
+    Args:
+        record_id: ID of the record to invalidate.
+        mode: "hard" or "soft".
+        source_record_id: ID of the record that triggered invalidation.
+        reason: Human-readable reason for invalidation.
+
+    Returns:
+        Updated record.
+    """
+    return await repo.invalidate_record(
+        record_id=record_id,
+        mode=mode,
+        source_record_id=source_record_id,
+        reason=reason,
+    )
 
 
 @router.post("/find", response_model=list[RecordRead])

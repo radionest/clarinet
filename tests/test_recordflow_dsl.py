@@ -213,11 +213,74 @@ class TestFlowRecordDSL:
         assert fr.record_name == "test_record_type"
         assert fr in RECORD_REGISTRY
 
-    def test_record_factory_returns_existing(self):
-        """record() returns existing FlowRecord if name already registered."""
+    def test_record_factory_creates_separate_instances(self):
+        """record() always creates a new FlowRecord for independent flow definitions."""
         fr1 = record("same_record_type")
         fr2 = record("same_record_type")
-        assert fr1 is fr2
+        assert fr1 is not fr2
+        assert fr1.record_name == fr2.record_name
+        assert len(RECORD_REGISTRY) == 2
+
+    def test_on_data_update_sets_trigger(self):
+        """on_data_update() sets data_update_trigger flag."""
+        fr = FlowRecord("test_type")
+        result = fr.on_data_update()
+        assert result is fr
+        assert fr.data_update_trigger is True
+
+    def test_invalidate_records_unconditional(self):
+        """invalidate_records() without if_() adds to self.actions."""
+        fr = FlowRecord("test_type")
+        fr.invalidate_records("child_a", "child_b", mode="hard")
+        assert len(fr.actions) == 1
+        assert fr.actions[0]["type"] == "invalidate_records"
+        assert fr.actions[0]["record_type_names"] == ["child_a", "child_b"]
+        assert fr.actions[0]["mode"] == "hard"
+
+    def test_invalidate_records_conditional(self):
+        """invalidate_records() after if_() adds to condition.actions."""
+        fr = FlowRecord("test_type")
+        fr.if_(FlowResult("r", ["x"]) == 1).invalidate_records("child", mode="soft")
+        assert len(fr.actions) == 0
+        assert len(fr.conditions) == 1
+        assert fr.conditions[0].actions[0]["type"] == "invalidate_records"
+        assert fr.conditions[0].actions[0]["mode"] == "soft"
+
+    def test_invalidate_records_with_callback(self):
+        """invalidate_records() stores callback when provided."""
+
+        def my_handler(**kwargs: object) -> None:
+            pass
+
+        fr = FlowRecord("test_type")
+        fr.invalidate_records("child", callback=my_handler)
+        assert fr.actions[0]["callback"] is my_handler
+
+    def test_is_active_flow_with_trigger(self):
+        """is_active_flow() returns True when flow has a trigger."""
+        fr = FlowRecord("test_type")
+        assert fr.is_active_flow() is False
+
+        fr.on_status("finished")
+        assert fr.is_active_flow() is True
+
+    def test_is_active_flow_with_data_update(self):
+        """is_active_flow() returns True for data_update_trigger."""
+        fr = FlowRecord("test_type")
+        fr.on_data_update()
+        assert fr.is_active_flow() is True
+
+    def test_is_active_flow_with_actions(self):
+        """is_active_flow() returns True when flow has actions."""
+        fr = FlowRecord("test_type")
+        fr.add_record("other")
+        assert fr.is_active_flow() is True
+
+    def test_reference_only_flow_is_not_active(self):
+        """FlowRecord used only for .data references is not active."""
+        fr = record("ref_type")
+        _ = fr.data.some_field  # Only used for data reference
+        assert fr.is_active_flow() is False
 
     def test_on_status_sets_trigger(self):
         """on_status() sets status_trigger string."""
@@ -356,3 +419,276 @@ class TestFlowCondition:
         condition.add_action(action)
         assert len(condition.actions) == 1
         assert condition.actions[0] is action
+
+
+# ─── RecordFlowEngine — unit tests with mocked client ────────────────────────
+
+
+class TestRecordFlowEngineUnit:
+    """Unit tests for RecordFlowEngine with mocked ClarinetClient."""
+
+    @pytest.mark.asyncio
+    async def test_handle_data_update_only_runs_data_update_flows(self):
+        """handle_record_data_update only executes flows with on_data_update."""
+        from unittest.mock import AsyncMock
+
+        from src.services.recordflow.engine import RecordFlowEngine
+
+        # Create mocked client
+        mock_client = AsyncMock()
+        mock_client.find_records = AsyncMock(return_value=[])
+
+        engine = RecordFlowEngine(mock_client)
+
+        # Register two flows: one on_status, one on_data_update
+        flow_status = FlowRecord("test_type")
+        flow_status.on_status("finished")
+        flow_status.add_record("output_from_status")
+
+        flow_data_update = FlowRecord("test_type")
+        flow_data_update.on_data_update()
+        flow_data_update.add_record("output_from_data_update")
+
+        engine.register_flow(flow_status)
+        engine.register_flow(flow_data_update)
+
+        # Create test record
+        test_record = make_record_read("test_type", record_id=100, status=RecordStatus.finished)
+
+        # Call handle_record_data_update
+        await engine.handle_record_data_update(test_record)
+
+        # Verify only data_update flow executed (create_record should be called once)
+        assert mock_client.create_record.call_count == 1
+        call_args = mock_client.create_record.call_args[0][0]
+        assert call_args.record_type_name == "output_from_data_update"
+
+    @pytest.mark.asyncio
+    async def test_handle_status_change_skips_data_update_flows(self):
+        """handle_record_status_change skips flows with on_data_update."""
+        from unittest.mock import AsyncMock
+
+        from src.services.recordflow.engine import RecordFlowEngine
+
+        # Create mocked client
+        mock_client = AsyncMock()
+        mock_client.find_records = AsyncMock(return_value=[])
+
+        engine = RecordFlowEngine(mock_client)
+
+        # Register two flows: one on_status, one on_data_update
+        flow_status = FlowRecord("test_type")
+        flow_status.on_status("finished")
+        flow_status.add_record("output_from_status")
+
+        flow_data_update = FlowRecord("test_type")
+        flow_data_update.on_data_update()
+        flow_data_update.add_record("output_from_data_update")
+
+        engine.register_flow(flow_status)
+        engine.register_flow(flow_data_update)
+
+        # Create test record
+        test_record = make_record_read("test_type", record_id=100, status=RecordStatus.finished)
+
+        # Call handle_record_status_change
+        await engine.handle_record_status_change(test_record)
+
+        # Verify only status flow executed
+        assert mock_client.create_record.call_count == 1
+        call_args = mock_client.create_record.call_args[0][0]
+        assert call_args.record_type_name == "output_from_status"
+
+    @pytest.mark.asyncio
+    async def test_invalidate_records_hard_mode(self):
+        """_invalidate_records calls invalidate_record with mode='hard'."""
+        from unittest.mock import AsyncMock
+
+        from src.services.recordflow.engine import RecordFlowEngine
+
+        # Create mocked client
+        mock_client = AsyncMock()
+
+        # Source record
+        source_record = make_record_read("source_type", record_id=1, status=RecordStatus.finished)
+
+        # Target record to invalidate
+        target_record = make_record_read("child_type", record_id=2, status=RecordStatus.finished)
+
+        # Mock find_records to return the target
+        mock_client.find_records = AsyncMock(return_value=[target_record])
+        mock_client.invalidate_record = AsyncMock(return_value=target_record)
+
+        engine = RecordFlowEngine(mock_client)
+
+        # Register flow with invalidate_records
+        flow = FlowRecord("source_type")
+        flow.on_status("finished")
+        flow.invalidate_records("child_type", mode="hard")
+
+        engine.register_flow(flow)
+
+        # Execute flow
+        await engine.handle_record_status_change(source_record)
+
+        # Verify invalidate_record was called correctly
+        assert mock_client.invalidate_record.call_count == 1
+        call_kwargs = mock_client.invalidate_record.call_args[1]
+        assert call_kwargs["record_id"] == 2
+        assert call_kwargs["mode"] == "hard"
+        assert call_kwargs["source_record_id"] == 1
+
+    @pytest.mark.asyncio
+    async def test_invalidate_records_skips_self(self):
+        """_invalidate_records skips source record when it appears in results."""
+        from unittest.mock import AsyncMock
+
+        from src.services.recordflow.engine import RecordFlowEngine
+
+        # Create mocked client
+        mock_client = AsyncMock()
+
+        # Source record
+        source_record = make_record_read("test_type", record_id=1, status=RecordStatus.finished)
+
+        # Mock find_records to return source record itself
+        mock_client.find_records = AsyncMock(return_value=[source_record])
+        mock_client.invalidate_record = AsyncMock()
+
+        engine = RecordFlowEngine(mock_client)
+
+        # Register flow that tries to invalidate same type
+        flow = FlowRecord("test_type")
+        flow.on_status("finished")
+        flow.invalidate_records("test_type", mode="hard")
+
+        engine.register_flow(flow)
+
+        # Execute flow
+        await engine.handle_record_status_change(source_record)
+
+        # Verify invalidate_record was NOT called
+        assert mock_client.invalidate_record.call_count == 0
+
+    @pytest.mark.asyncio
+    async def test_invalidate_records_with_callback(self):
+        """_invalidate_records calls callback with correct kwargs."""
+        from unittest.mock import AsyncMock, Mock
+
+        from src.services.recordflow.engine import RecordFlowEngine
+
+        # Create mocked client
+        mock_client = AsyncMock()
+
+        # Source and target records
+        source_record = make_record_read("source_type", record_id=1, status=RecordStatus.finished)
+        target_record = make_record_read("child_type", record_id=2, status=RecordStatus.finished)
+
+        # Mock find_records to return target
+        mock_client.find_records = AsyncMock(return_value=[target_record])
+        mock_client.invalidate_record = AsyncMock(return_value=target_record)
+
+        # Mock callback
+        callback_mock = Mock()
+
+        engine = RecordFlowEngine(mock_client)
+
+        # Register flow with callback
+        flow = FlowRecord("source_type")
+        flow.on_status("finished")
+        flow.invalidate_records("child_type", mode="hard", callback=callback_mock)
+
+        engine.register_flow(flow)
+
+        # Execute flow
+        await engine.handle_record_status_change(source_record)
+
+        # Verify callback was called with correct kwargs
+        assert callback_mock.call_count == 1
+        call_kwargs = callback_mock.call_args[1]
+        assert call_kwargs["record"] == target_record
+        assert call_kwargs["source_record"] == source_record
+        assert call_kwargs["client"] == mock_client
+
+    @pytest.mark.asyncio
+    async def test_invalidate_records_soft_mode(self):
+        """_invalidate_records calls invalidate_record with mode='soft'."""
+        from unittest.mock import AsyncMock
+
+        from src.services.recordflow.engine import RecordFlowEngine
+
+        # Create mocked client
+        mock_client = AsyncMock()
+
+        # Source and target records
+        source_record = make_record_read("source_type", record_id=1, status=RecordStatus.finished)
+        target_record = make_record_read("child_type", record_id=2, status=RecordStatus.finished)
+
+        # Mock find_records to return target
+        mock_client.find_records = AsyncMock(return_value=[target_record])
+        mock_client.invalidate_record = AsyncMock(return_value=target_record)
+
+        engine = RecordFlowEngine(mock_client)
+
+        # Register flow with soft mode
+        flow = FlowRecord("source_type")
+        flow.on_status("finished")
+        flow.invalidate_records("child_type", mode="soft")
+
+        engine.register_flow(flow)
+
+        # Execute flow
+        await engine.handle_record_status_change(source_record)
+
+        # Verify invalidate_record was called with mode='soft'
+        assert mock_client.invalidate_record.call_count == 1
+        call_kwargs = mock_client.invalidate_record.call_args[1]
+        assert call_kwargs["mode"] == "soft"
+
+    @pytest.mark.asyncio
+    async def test_invalidate_records_with_multiple_targets(self):
+        """_invalidate_records processes multiple target record types."""
+        from unittest.mock import AsyncMock
+
+        from src.services.recordflow.engine import RecordFlowEngine
+
+        # Create mocked client
+        mock_client = AsyncMock()
+
+        # Source record
+        source_record = make_record_read("source_type", record_id=1, status=RecordStatus.finished)
+
+        # Multiple target records
+        target_a = make_record_read("child_a", record_id=2, status=RecordStatus.finished)
+        target_b = make_record_read("child_b", record_id=3, status=RecordStatus.finished)
+
+        # Mock find_records to return different targets based on record_type_name
+        async def mock_find_records(**kwargs):
+            if kwargs.get("record_type_name") == "child_a":
+                return [target_a]
+            elif kwargs.get("record_type_name") == "child_b":
+                return [target_b]
+            return []
+
+        mock_client.find_records = AsyncMock(side_effect=mock_find_records)
+        mock_client.invalidate_record = AsyncMock()
+
+        engine = RecordFlowEngine(mock_client)
+
+        # Register flow with multiple invalidation targets
+        flow = FlowRecord("source_type")
+        flow.on_status("finished")
+        flow.invalidate_records("child_a", "child_b", mode="hard")
+
+        engine.register_flow(flow)
+
+        # Execute flow
+        await engine.handle_record_status_change(source_record)
+
+        # Verify invalidate_record was called for both targets
+        assert mock_client.invalidate_record.call_count == 2
+
+        # Check both calls
+        calls = mock_client.invalidate_record.call_args_list
+        invalidated_ids = {call[1]["record_id"] for call in calls}
+        assert invalidated_ids == {2, 3}

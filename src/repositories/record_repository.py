@@ -333,6 +333,46 @@ class RecordRepository(BaseRepository[Record]):
                 record.status = new_status
         await self.session.commit()
 
+    async def invalidate_record(
+        self,
+        record_id: int,
+        mode: str,
+        source_record_id: int | None = None,
+        reason: str | None = None,
+    ) -> Record:
+        """Invalidate a record by resetting its status and/or appending reason.
+
+        Args:
+            record_id: ID of the record to invalidate.
+            mode: "hard" resets status to pending and clears user_id.
+                  "soft" only appends reason to context_info.
+            source_record_id: ID of the record that triggered invalidation.
+            reason: Human-readable reason. Defaults to a generated message.
+
+        Returns:
+            Updated record with relations loaded.
+
+        Raises:
+            RecordNotFoundError: If record doesn't exist.
+        """
+        record = await self.get(record_id)
+
+        if reason is None and source_record_id is not None:
+            reason = f"Invalidated by record #{source_record_id}"
+
+        if reason:
+            if record.context_info:
+                record.context_info = f"{record.context_info}\n{reason}"
+            else:
+                record.context_info = reason
+
+        if mode == "hard":
+            record.status = RecordStatus.pending
+            record.user_id = None
+
+        await self.session.commit()
+        return await self.get_with_relations(record_id)
+
     async def count_by_type_and_context(
         self,
         record_type_name: str,
