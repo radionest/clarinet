@@ -16,6 +16,7 @@ from .flow_action import (
     InvalidateRecordsAction,
     UpdateRecordAction,
 )
+from .flow_condition import FlowCondition
 from .flow_record import FlowRecord
 
 if TYPE_CHECKING:
@@ -273,6 +274,17 @@ class RecordFlowEngine:
         except Exception as e:
             logger.error(f"Error calling entity function {action.function.__name__}: {e}")
 
+    def _update_context_from_records(
+        self, context: dict[str, RecordRead], records: list[RecordRead]
+    ) -> None:
+        """Merge records into context, keeping the latest by id for each record type."""
+        for r in records:
+            if not (r.record_type and r.record_type.name):
+                continue
+            name = r.record_type.name
+            if name not in context or (r.id and r.id > context[name].id):
+                context[name] = r
+
     async def _get_record_context(self, record: RecordRead) -> dict[str, RecordRead]:
         """Get all related records for evaluation context.
 
@@ -289,42 +301,49 @@ class RecordFlowEngine:
         context: dict[str, RecordRead] = {}
 
         try:
-            # Get patient-level records (broadest scope)
             if record.patient:
-                patient_records = await self.clarinet_client.find_records(
+                records = await self.clarinet_client.find_records(
                     patient_id=record.patient.id, limit=1000
                 )
-                for r in patient_records:
-                    if r.record_type and r.record_type.name:
-                        record_name = r.record_type.name
-                        if record_name not in context or (r.id and r.id > context[record_name].id):
-                            context[record_name] = r
+                self._update_context_from_records(context, records)
 
-            # Study-level records override patient-level for same type
             if record.study:
-                study_records = await self.clarinet_client.find_records(
+                records = await self.clarinet_client.find_records(
                     study_uid=record.study.study_uid, limit=1000
                 )
-                for r in study_records:
-                    if r.record_type and r.record_type.name:
-                        record_name = r.record_type.name
-                        if record_name not in context or (r.id and r.id > context[record_name].id):
-                            context[record_name] = r
+                self._update_context_from_records(context, records)
 
-            # Series-level records override study-level for same type
             if record.series:
-                series_records = await self.clarinet_client.find_records(
+                records = await self.clarinet_client.find_records(
                     series_uid=record.series.series_uid, limit=1000
                 )
-                for r in series_records:
-                    if r.record_type and r.record_type.name:
-                        record_name = r.record_type.name
-                        context[record_name] = r
+                self._update_context_from_records(context, records)
 
         except Exception as e:
             logger.error(f"Error getting record context: {e}")
 
         return context
+
+    async def _evaluate_and_run_condition(
+        self,
+        condition: FlowCondition,
+        context: dict[str, RecordRead],
+        record: RecordRead,
+    ) -> bool | None:
+        """Evaluate a condition and run its actions.
+
+        Returns:
+            True/False for the condition result, or None on error.
+        """
+        try:
+            met = condition.evaluate(context)
+        except Exception as e:
+            logger.error(f"Error evaluating condition: {e}")
+            return None
+        if met:
+            for action in condition.actions:
+                await self._execute_action(action, record, context)
+        return met
 
     async def _execute_flow(
         self, flow: FlowRecord, record: RecordRead, context: dict[str, RecordRead]
@@ -347,24 +366,13 @@ class RecordFlowEngine:
         previous_condition_met = False
         for condition in flow.conditions:
             if condition.is_else:
-                # Execute else block only if previous condition was false
                 if not previous_condition_met:
                     for action in condition.actions:
                         await self._execute_action(action, record, context)
                 break
-            else:
-                # Evaluate condition
-                try:
-                    condition_met = condition.evaluate(context)
-                    if condition_met:
-                        for action in condition.actions:
-                            await self._execute_action(action, record, context)
-                        previous_condition_met = True
-                    else:
-                        previous_condition_met = False
-                except Exception as e:
-                    logger.error(f"Error evaluating condition: {e}")
-                    previous_condition_met = False
+
+            result = await self._evaluate_and_run_condition(condition, context, record)
+            previous_condition_met = result is True
 
     async def _execute_action(
         self, action: FlowAction, record: RecordRead, context: dict[str, RecordRead]
@@ -462,6 +470,44 @@ class RecordFlowEngine:
             except Exception as e:
                 logger.error(f"Failed to update record status: {e}")
 
+    async def _invalidate_single_record(
+        self,
+        target: RecordRead,
+        source_record: RecordRead,
+        action: InvalidateRecordsAction,
+    ) -> None:
+        """Invalidate a single target record and run optional callback."""
+        try:
+            await self.clarinet_client.invalidate_record(
+                record_id=target.id,
+                mode=action.mode,
+                source_record_id=source_record.id,
+            )
+            logger.info(
+                f"Invalidated record '{target.record_type.name}' (id={target.id}) "
+                f"mode='{action.mode}', triggered by record {source_record.id}"
+            )
+        except Exception as e:
+            logger.error(
+                f"Failed to invalidate record '{target.record_type.name}' (id={target.id}): {e}"
+            )
+            return
+
+        if action.callback is None:
+            return
+        try:
+            import asyncio
+
+            result = action.callback(
+                record=target,
+                source_record=source_record,
+                client=self.clarinet_client,
+            )
+            if asyncio.iscoroutine(result):
+                await result
+        except Exception as e:
+            logger.error(f"Error in invalidation callback for record {target.id}: {e}")
+
     async def _invalidate_records(
         self,
         action: InvalidateRecordsAction,
@@ -481,56 +527,22 @@ class RecordFlowEngine:
         """
         for target_type_name in action.record_type_names:
             try:
-                # Find ALL records of target type for the same patient
                 target_records = await self.clarinet_client.find_records(
                     patient_id=record.patient.id,
                     record_type_name=target_type_name,
                     limit=1000,
                 )
-
-                for target in target_records:
-                    # Skip the source record itself
-                    if target.id == record.id:
-                        continue
-
-                    try:
-                        await self.clarinet_client.invalidate_record(
-                            record_id=target.id,
-                            mode=action.mode,
-                            source_record_id=record.id,
-                        )
-                        logger.info(
-                            f"Invalidated record '{target_type_name}' (id={target.id}) "
-                            f"mode='{action.mode}', triggered by record {record.id}"
-                        )
-                    except Exception as e:
-                        logger.error(
-                            f"Failed to invalidate record '{target_type_name}' "
-                            f"(id={target.id}): {e}"
-                        )
-
-                    # Call project-level callback if provided
-                    if action.callback is not None:
-                        try:
-                            import asyncio
-
-                            result = action.callback(
-                                record=target,
-                                source_record=record,
-                                client=self.clarinet_client,
-                            )
-                            if asyncio.iscoroutine(result):
-                                await result
-                        except Exception as e:
-                            logger.error(
-                                f"Error in invalidation callback for record {target.id}: {e}"
-                            )
-
             except Exception as e:
                 logger.error(
                     f"Failed to find records of type '{target_type_name}' "
                     f"for patient {record.patient.id}: {e}"
                 )
+                continue
+
+            for target in target_records:
+                if target.id == record.id:
+                    continue
+                await self._invalidate_single_record(target, record, action)
 
     async def _call_function(
         self, action: CallFunctionAction, record: RecordRead, context: dict[str, RecordRead]

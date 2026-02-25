@@ -34,6 +34,39 @@ from src.utils.db_manager import db_manager
 from src.utils.logger import logger
 
 
+async def _init_recordflow(app: FastAPI) -> None:
+    """Initialize RecordFlow engine and attach to app state."""
+    from pathlib import Path
+
+    from src.client import ClarinetClient
+    from src.services.recordflow import RecordFlowEngine, discover_and_load_flows
+
+    client = ClarinetClient(
+        base_url=f"http://{settings.host}:{settings.port}/api",
+        username=settings.admin_username,
+        password=settings.admin_password,
+        auto_login=False,
+    )
+
+    engine = RecordFlowEngine(client)
+
+    flow_paths = [Path(p) for p in settings.recordflow_paths]
+    if flow_paths:
+        discover_and_load_flows(engine, flow_paths)
+
+    app.state.recordflow_engine = engine
+    logger.info("RecordFlow engine initialized")
+
+
+async def _shutdown_recordflow(app: FastAPI) -> None:
+    """Close RecordFlow client connection."""
+    try:
+        await app.state.recordflow_engine.clarinet_client.close()
+        logger.info("RecordFlow client closed")
+    except AttributeError as e:
+        raise RecordFlowError("Cant find clarinet web client in recordflow engine.") from e
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     """
@@ -41,58 +74,26 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     Creates database tables, adds default roles, and loads record types.
     """
-    # Initialize database using DatabaseManager
-
     await db_manager.create_db_and_tables_async()
     logger.info("Database initialized with async support")
 
-    # Setup default configuration
     await add_default_user_roles()
     await create_demo_record_types_from_json("./tasks/", demo_suffix="")
 
-    # Ensure admin exists
     try:
         await ensure_admin_exists()
     except RuntimeError as e:
         logger.critical(f"Startup failed: {e}")
-        # In production, you might want to exit
         if not settings.debug:
             raise
 
-    # Initialize RecordFlow engine if enabled
     if settings.recordflow_enabled:
-        from pathlib import Path
-
-        from src.client import ClarinetClient
-        from src.services.recordflow import RecordFlowEngine, discover_and_load_flows
-
         try:
-            # Create client with admin credentials
-            client = ClarinetClient(
-                base_url=f"http://{settings.host}:{settings.port}/api",
-                username=settings.admin_username,
-                password=settings.admin_password,
-                auto_login=False,  # We'll login manually in the engine when needed
-            )
-            # Note: We don't login here to avoid blocking startup
-            # The engine will use the client for API calls
-
-            # Create engine
-            engine = RecordFlowEngine(client)
-
-            # Load flows from configured paths
-            flow_paths = [Path(p) for p in settings.recordflow_paths]
-            if flow_paths:
-                discover_and_load_flows(engine, flow_paths)
-
-            # Store engine in app state for access from routers
-            app.state.recordflow_engine = engine
-            logger.info("RecordFlow engine initialized")
+            await _init_recordflow(app)
         except Exception as e:
             logger.error(f"Failed to initialize RecordFlow engine: {e}")
             app.state.recordflow_engine = None
 
-    # Start session cleanup service if enabled
     if settings.session_cleanup_enabled:
         await session_cleanup_service.start()
         logger.info("Session cleanup service started")
@@ -102,20 +103,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     try:
         yield
     finally:
-        # Stop session cleanup service
         if settings.session_cleanup_enabled:
             await session_cleanup_service.stop()
             logger.info("Session cleanup service stopped")
 
-        # Cleanup RecordFlow engine client
         if settings.recordflow_enabled:
-            try:
-                await app.state.recordflow_engine.clarinet_client.close()
-                logger.info("RecordFlow client closed")
-            except AttributeError as e:
-                raise RecordFlowError("Cant find clarinet web client in recordflow engine.") from e
+            await _shutdown_recordflow(app)
 
-        # Cleanup database connections on shutdown
         await db_manager.close()
         logger.info("Application shutdown")
 

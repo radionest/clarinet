@@ -7,6 +7,7 @@ such as user roles and record types, during startup.
 
 import json
 import os
+from typing import Any
 
 import aiofiles
 from fastapi import HTTPException, status
@@ -258,6 +259,57 @@ def filter_record_schemas(record_files: list[str], filter_suffix: str = "demo") 
     return record_names
 
 
+async def _load_record_properties(input_folder: str, record_name: str) -> dict[str, Any] | None:
+    """Load record type properties from JSON, resolving schema if needed.
+
+    Args:
+        input_folder: Path to the folder containing record type JSON files.
+        record_name: Name of the record type (without .json extension).
+
+    Returns:
+        Properties dict, or None if schema could not be found.
+    """
+    async with aiofiles.open(os.path.join(input_folder, f"{record_name}.json")) as f:
+        content = await f.read()
+        props: dict[str, Any] = json.loads(content)
+
+    if props.get("data_schema") is not None:
+        return props
+
+    # Legacy: rename result_schema → data_schema
+    if props.get("result_schema") is not None:
+        props["data_schema"] = props.pop("result_schema")
+        return props
+
+    # Try loading from separate schema file
+    try:
+        async with aiofiles.open(os.path.join(input_folder, f"{record_name}.schema.json")) as f:
+            content = await f.read()
+            props["data_schema"] = json.loads(content)
+        return props
+    except FileNotFoundError:
+        logger.warning(f"Cannot find schema for record type {record_name}!")
+        return None
+
+
+async def _upsert_record_type(props: dict[str, Any], session: AsyncSession) -> None:
+    """Create a record type, logging conflicts as info.
+
+    Args:
+        props: Record type properties dict.
+        session: Database session.
+    """
+    new_record_type = RecordTypeCreate(**props)
+    try:
+        await add_record_type(new_record_type, session=session)
+        logger.info(f"Created record type: {props.get('name')}")
+    except HTTPException as e:
+        if e.status_code == status.HTTP_409_CONFLICT:
+            logger.info(f"Record type already exists: {props.get('name')}")
+        else:
+            logger.error(f"Error creating record type {props.get('name')}: {e}")
+
+
 async def create_demo_record_types_from_json(input_folder: str, demo_suffix: str = "demo") -> None:
     """
     Create record types from JSON files in the specified folder.
@@ -278,38 +330,10 @@ async def create_demo_record_types_from_json(input_folder: str, demo_suffix: str
     for record_name in record_names:
         async with db_manager.get_async_session_context() as session:
             try:
-                # Load record type properties
-                async with aiofiles.open(os.path.join(input_folder, f"{record_name}.json")) as f:
-                    content = await f.read()
-                    record_properties = json.loads(content)
-
-                # Load data schema if it exists (check both old and new field names)
-                if record_properties.get("data_schema") is None:
-                    # Try to migrate from old result_schema field
-                    if record_properties.get("result_schema") is not None:
-                        record_properties["data_schema"] = record_properties.pop("result_schema")
-                    else:
-                        try:
-                            async with aiofiles.open(
-                                os.path.join(input_folder, f"{record_name}.schema.json")
-                            ) as f:
-                                content = await f.read()
-                                schema_json = json.loads(content)
-                            record_properties["data_schema"] = schema_json
-                        except FileNotFoundError:
-                            logger.warning(f"Cannot find schema for record type {record_name}!")
-                            continue
-
-                # Create record type
-                new_record_type = RecordTypeCreate(**record_properties)
-                try:
-                    await add_record_type(new_record_type, session=session)
-                    logger.info(f"Created record type: {record_name}")
-                except HTTPException as e:
-                    if e.status_code == status.HTTP_409_CONFLICT:
-                        logger.info(f"Record type already exists: {record_name}")
-                    else:
-                        logger.error(f"Error creating record type {record_name}: {e}")
+                props = await _load_record_properties(input_folder, record_name)
+                if props is None:
+                    continue
+                await _upsert_record_type(props, session)
             except Exception as e:
                 logger.error(f"Error processing record type {record_name}: {e}")
 

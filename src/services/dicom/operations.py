@@ -49,6 +49,12 @@ def _ds_int(ds: Dataset, attr: str) -> int | None:
     return int(val)
 
 
+def _set_ds_fields(ds: Dataset, fields: dict[str, Any]) -> None:
+    """Set DICOM dataset fields, using empty string for None values."""
+    for attr, value in fields.items():
+        setattr(ds, attr, value if value is not None else "")
+
+
 class DicomOperations:
     """Synchronous DICOM operations wrapper for pynetdicom."""
 
@@ -118,46 +124,21 @@ class DicomOperations:
         ds = Dataset()
         ds.QueryRetrieveLevel = QueryRetrieveLevel.STUDY.value
 
-        # Set query fields
-        if query.patient_id is not None:
-            ds.PatientID = query.patient_id
-        else:
-            ds.PatientID = ""
-
-        if query.patient_name is not None:
-            ds.PatientName = query.patient_name
-        else:
-            ds.PatientName = ""
-
-        if query.study_instance_uid is not None:
-            ds.StudyInstanceUID = query.study_instance_uid
-        else:
-            ds.StudyInstanceUID = ""
-
-        if query.study_date is not None:
-            ds.StudyDate = query.study_date
-        else:
-            ds.StudyDate = ""
-
-        if query.study_description is not None:
-            ds.StudyDescription = query.study_description
-        else:
-            ds.StudyDescription = ""
-
-        if query.accession_number is not None:
-            ds.AccessionNumber = query.accession_number
-        else:
-            ds.AccessionNumber = ""
-
-        if query.modality is not None:
-            ds.ModalitiesInStudy = query.modality
-        else:
-            ds.ModalitiesInStudy = ""
-
-        # Add return fields
-        ds.StudyTime = ""
-        ds.NumberOfStudyRelatedSeries = ""
-        ds.NumberOfStudyRelatedInstances = ""
+        _set_ds_fields(
+            ds,
+            {
+                "PatientID": query.patient_id,
+                "PatientName": query.patient_name,
+                "StudyInstanceUID": query.study_instance_uid,
+                "StudyDate": query.study_date,
+                "StudyDescription": query.study_description,
+                "AccessionNumber": query.accession_number,
+                "ModalitiesInStudy": query.modality,
+                "StudyTime": None,
+                "NumberOfStudyRelatedSeries": None,
+                "NumberOfStudyRelatedInstances": None,
+            },
+        )
 
         return ds
 
@@ -172,30 +153,18 @@ class DicomOperations:
         """
         ds = Dataset()
         ds.QueryRetrieveLevel = QueryRetrieveLevel.SERIES.value
-
         ds.StudyInstanceUID = query.study_instance_uid
 
-        if query.series_instance_uid is not None:
-            ds.SeriesInstanceUID = query.series_instance_uid
-        else:
-            ds.SeriesInstanceUID = ""
-
-        if query.series_number is not None:
-            ds.SeriesNumber = query.series_number
-        else:
-            ds.SeriesNumber = ""
-
-        if query.modality is not None:
-            ds.Modality = query.modality
-        else:
-            ds.Modality = ""
-
-        if query.series_description is not None:
-            ds.SeriesDescription = query.series_description
-        else:
-            ds.SeriesDescription = ""
-
-        ds.NumberOfSeriesRelatedInstances = ""
+        _set_ds_fields(
+            ds,
+            {
+                "SeriesInstanceUID": query.series_instance_uid,
+                "SeriesNumber": query.series_number,
+                "Modality": query.modality,
+                "SeriesDescription": query.series_description,
+                "NumberOfSeriesRelatedInstances": None,
+            },
+        )
 
         return ds
 
@@ -210,21 +179,17 @@ class DicomOperations:
         """
         ds = Dataset()
         ds.QueryRetrieveLevel = QueryRetrieveLevel.IMAGE.value
-
         ds.StudyInstanceUID = query.study_instance_uid
         ds.SeriesInstanceUID = query.series_instance_uid
 
-        if query.sop_instance_uid is not None:
-            ds.SOPInstanceUID = query.sop_instance_uid
-        else:
-            ds.SOPInstanceUID = ""
-
-        if query.instance_number is not None:
-            ds.InstanceNumber = query.instance_number
-        else:
-            ds.InstanceNumber = ""
-
-        ds.SOPClassUID = ""
+        _set_ds_fields(
+            ds,
+            {
+                "SOPInstanceUID": query.sop_instance_uid,
+                "InstanceNumber": query.instance_number,
+                "SOPClassUID": None,
+            },
+        )
         ds.Rows = None
         ds.Columns = None
 

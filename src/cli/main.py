@@ -149,54 +149,113 @@ async def _check_command_exists(command: str) -> bool:
         return False
 
 
+async def _install_gleam() -> None:
+    """Install Gleam via the official installation script."""
+    logger.info("Installing Gleam...")
+    try:
+        install_process = await asyncio.create_subprocess_exec(
+            "sh",
+            "-c",
+            "curl -fsSL https://gleam.run/install.sh | sh",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr_bytes = await install_process.communicate()
+        stderr = stderr_bytes.decode() if stderr_bytes else ""
+        if install_process.returncode != 0:
+            logger.error(f"Failed to install Gleam: {stderr}")
+            sys.exit(1)
+    except Exception as e:
+        logger.error(f"Failed to install Gleam: {e}")
+        sys.exit(1)
+
+
+async def _ensure_frontend_built(frontend_path: Path) -> None:
+    """Build frontend if not already built, installing Gleam if needed."""
+    build_file = frontend_path / "build" / "dev" / "javascript" / "clarinet.mjs"
+    if build_file.exists():
+        return
+
+    logger.info("Frontend not built. Building now...")
+    if not await _check_command_exists("gleam"):
+        await _install_gleam()
+
+    try:
+        logger.info("Building frontend...")
+        await _run_gleam_command(["gleam", "build", "--target", "javascript"], cwd=frontend_path)
+        logger.info("Frontend built successfully")
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Failed to build frontend: {e}")
+        sys.exit(1)
+
+
+async def _log_subprocess_output(stream: asyncio.StreamReader, prefix: str) -> None:
+    """Log lines from a subprocess stream."""
+    async for line in stream:
+        decoded = line.decode().strip()
+        if decoded:
+            logger.info(f"{prefix}: {decoded}")
+
+
+async def _run_frontend_with_entr(frontend_path: Path) -> None:
+    """Watch frontend with entr for auto-rebuild."""
+    watch_cmd = [
+        "sh",
+        "-c",
+        "find src -name '*.gleam' | entr -c gleam build --target javascript",
+    ]
+    process = await asyncio.create_subprocess_exec(
+        *watch_cmd,
+        cwd=frontend_path,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    if process.stdout and process.stderr:
+        await asyncio.gather(
+            _log_subprocess_output(process.stdout, "Frontend"),
+            _log_subprocess_output(process.stderr, "Frontend"),
+            process.wait(),
+        )
+
+
+async def _run_frontend_periodic(frontend_path: Path) -> None:
+    """Fallback: periodically rebuild frontend."""
+    logger.info("'entr' not found. Using periodic rebuild (every 2 seconds)...")
+    while True:
+        try:
+            result = await asyncio.create_subprocess_exec(
+                "gleam",
+                "build",
+                "--target",
+                "javascript",
+                cwd=frontend_path,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await result.communicate()
+
+            if result.returncode != 0:
+                logger.error(f"Frontend build failed: {stderr.decode()}")
+            else:
+                output = stdout.decode().strip() if stdout else ""
+                if output and "Compiling" in output:
+                    logger.info("Frontend rebuilt")
+        except Exception as e:
+            logger.error(f"Frontend watch error: {e}")
+
+        await asyncio.sleep(2)
+
+
 async def run_with_frontend(host: str, port: int) -> None:
     """Run both backend and frontend servers concurrently."""
-    # Enable frontend in settings
     os.environ["CLARINET_FRONTEND_ENABLED"] = "true"
 
-    # Check if frontend is built
-    # Frontend is part of the installed clarinet library
     import src
 
     library_path = Path(src.__file__).parent
     frontend_path = library_path / "frontend"
-    build_file = frontend_path / "build" / "dev" / "javascript" / "clarinet.mjs"
 
-    if not build_file.exists():
-        logger.info("Frontend not built. Building now...")
-        # Ensure Gleam is installed
-        if not await _check_command_exists("gleam"):
-            logger.info("Installing Gleam...")
-            try:
-                install_process = await asyncio.create_subprocess_exec(
-                    "sh",
-                    "-c",
-                    "curl -fsSL https://gleam.run/install.sh | sh",
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                )
-                _, stderr_bytes = await install_process.communicate()
-                stderr = stderr_bytes.decode() if stderr_bytes else ""
-                if install_process.returncode != 0:
-                    logger.error(f"Failed to install Gleam: {stderr}")
-                    sys.exit(1)
-            except Exception as e:
-                logger.error(f"Failed to install Gleam: {e}")
-                sys.exit(1)
-
-        # Build frontend
-        try:
-            logger.info("Building frontend...")
-            await _run_gleam_command(
-                ["gleam", "build", "--target", "javascript"], cwd=frontend_path
-            )
-            logger.info("Frontend built successfully")
-        except subprocess.CalledProcessError as e:
-            logger.error(f"Failed to build frontend: {e}")
-            sys.exit(1)
-
-    # Create tasks for both servers
-    frontend_task = None
+    await _ensure_frontend_built(frontend_path)
 
     import uvicorn
 
@@ -208,74 +267,13 @@ async def run_with_frontend(host: str, port: int) -> None:
         log_level="info" if getattr(settings, "debug", True) else "warning",
     )
     server = uvicorn.Server(config)
+    frontend_task = None
 
     async def run_backend() -> None:
-        """Run the backend server using uvicorn programmatically."""
         logger.info(f"Starting backend server at http://{host}:{port}")
         await server.serve()
 
-    async def run_frontend_watch() -> None:
-        """Run the frontend build in watch mode."""
-        logger.info("Starting frontend watch mode...")
-
-        # Check if entr is available for watching
-        if await _check_command_exists("entr"):
-            # Use entr for watching
-            watch_cmd = [
-                "sh",
-                "-c",
-                "find src -name '*.gleam' | entr -c gleam build --target javascript",
-            ]
-            # Run watch command with entr
-            process = await asyncio.create_subprocess_exec(
-                *watch_cmd,
-                cwd=frontend_path,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-
-            async def log_output(stream: asyncio.StreamReader, prefix: str) -> None:
-                async for line in stream:
-                    decoded = line.decode().strip()
-                    if decoded:
-                        logger.info(f"{prefix}: {decoded}")
-
-            if process.stdout and process.stderr:
-                await asyncio.gather(
-                    log_output(process.stdout, "Frontend"),
-                    log_output(process.stderr, "Frontend"),
-                    process.wait(),
-                )
-        else:
-            # Fallback to periodic rebuild
-            logger.info("'entr' not found. Using periodic rebuild (every 2 seconds)...")
-            while True:
-                try:
-                    # Check for changes and rebuild
-                    result = await asyncio.create_subprocess_exec(
-                        "gleam",
-                        "build",
-                        "--target",
-                        "javascript",
-                        cwd=frontend_path,
-                        stdout=asyncio.subprocess.PIPE,
-                        stderr=asyncio.subprocess.PIPE,
-                    )
-                    stdout, stderr = await result.communicate()
-
-                    if result.returncode != 0:
-                        logger.error(f"Frontend build failed: {stderr.decode()}")
-                    else:
-                        output = stdout.decode().strip() if stdout else ""
-                        if output and "Compiling" in output:
-                            logger.info("Frontend rebuilt")
-
-                except Exception as e:
-                    logger.error(f"Frontend watch error: {e}")
-
-                await asyncio.sleep(2)
-
-    # Signal handler for graceful shutdown (must use loop.add_signal_handler for asyncio)
+    # Signal handler for graceful shutdown
     loop = asyncio.get_running_loop()
 
     def signal_handler() -> None:
@@ -290,13 +288,13 @@ async def run_with_frontend(host: str, port: int) -> None:
     logger.info(f"Starting Clarinet with frontend at http://{host}:{port}")
     logger.info("Press Ctrl+C to stop both servers")
 
-    try:
-        # Run servers as independent tasks (not gathered, so frontend cancel
-        # doesn't propagate to backend and break uvicorn's graceful shutdown)
-        backend_task = asyncio.create_task(run_backend())
-        frontend_task = asyncio.create_task(run_frontend_watch())
+    watch_fn = (
+        _run_frontend_with_entr if await _check_command_exists("entr") else _run_frontend_periodic
+    )
 
-        # Wait for backend to finish gracefully via should_exit
+    try:
+        backend_task = asyncio.create_task(run_backend())
+        frontend_task = asyncio.create_task(watch_fn(frontend_path))
         await backend_task
     except Exception as e:
         logger.error(f"Error running servers: {e}")

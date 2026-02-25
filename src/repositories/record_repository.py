@@ -1,8 +1,9 @@
 """Repository for Record-specific database operations."""
 
 import random
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import distinct, func
@@ -43,6 +44,14 @@ class RecordSearchCriteria:
     wo_user: bool | None = None
     random_one: bool = False
     data_queries: list[RecordFindResult] = field(default_factory=list)
+
+
+_COMPARISON_OPS: dict[RecordFindResultComparisonOperator, Callable[..., Any]] = {
+    RecordFindResultComparisonOperator.eq: lambda f, v: f == v,
+    RecordFindResultComparisonOperator.gt: lambda f, v: f > v,
+    RecordFindResultComparisonOperator.lt: lambda f, v: f < v,
+    RecordFindResultComparisonOperator.contains: lambda f, v: f.like(f"%{v}%"),
+}
 
 
 class RecordRepository(BaseRepository[Record]):
@@ -443,6 +452,41 @@ class RecordRepository(BaseRepository[Record]):
                 f"({count} of {record_type.max_users}) is reached"
             )
 
+    @staticmethod
+    def _apply_anon_uid_filter(
+        statement: Any,
+        value: str | None,
+        model: type,
+        column: Any,
+    ) -> Any:
+        """Apply Null / * / exact match filter for anonymous UID columns."""
+        match value:
+            case None:
+                return statement
+            case "Null":
+                return statement.join(model).where(column.is_(None))
+            case "*":
+                return statement.join(model).where(column.is_not(None))
+            case _:
+                return statement.join(model).where(column == value)
+
+    @staticmethod
+    def _apply_data_query_filters(
+        statement: Any,
+        queries: list[RecordFindResult],
+    ) -> Any:
+        """Apply JSON data field comparison filters."""
+        for query in queries:
+            if query.comparison_operator is None:
+                continue
+            data_field = Record.data.op("->")(query.result_name).as_string()  # type: ignore[union-attr]
+            op_fn = _COMPARISON_OPS.get(query.comparison_operator)
+            if op_fn:
+                statement = statement.where(
+                    op_fn(data_field.cast(query.sql_type), query.result_value)
+                )
+        return statement
+
     async def find_by_criteria(
         self,
         criteria: RecordSearchCriteria,
@@ -482,40 +526,23 @@ class RecordRepository(BaseRepository[Record]):
         if criteria.series_uid:
             statement = statement.where(Record.series_uid == criteria.series_uid)
 
-        match criteria.anon_series_uid:
-            case None:
-                pass
-            case "Null":
-                statement = statement.join(Series).where(col(Series.anon_uid).is_(None))
-            case "*":
-                statement = statement.join(Series).where(col(Series.anon_uid).is_not(None))
-            case _:
-                statement = statement.join(Series).where(
-                    Series.anon_uid == criteria.anon_series_uid
-                )
+        statement = self._apply_anon_uid_filter(
+            statement, criteria.anon_series_uid, Series, col(Series.anon_uid)
+        )
 
         # Study filters
         if criteria.study_uid:
             statement = statement.where(Record.study_uid == criteria.study_uid)
 
-        match criteria.anon_study_uid:
-            case None:
-                pass
-            case "Null":
-                statement = statement.join(Study).where(col(Study.anon_uid).is_(None))
-            case "*":
-                statement = statement.join(Study).where(col(Study.anon_uid).is_not(None))
-            case _:
-                statement = statement.join(Study).where(Study.anon_uid == criteria.anon_study_uid)
+        statement = self._apply_anon_uid_filter(
+            statement, criteria.anon_study_uid, Study, col(Study.anon_uid)
+        )
 
         # User filters
-        match criteria.wo_user:
-            case None:
-                pass
-            case True:
-                statement = statement.where(col(Record.user_id).is_(None))
-            case False:
-                statement = statement.where(col(Record.user_id).is_not(None))
+        if criteria.wo_user is True:
+            statement = statement.where(col(Record.user_id).is_(None))
+        elif criteria.wo_user is False:
+            statement = statement.where(col(Record.user_id).is_not(None))
 
         if criteria.user_id:
             statement = statement.where(Record.user_id == criteria.user_id)
@@ -528,25 +555,7 @@ class RecordRepository(BaseRepository[Record]):
             statement = statement.where(RecordType.name == criteria.record_type_name)
 
         # Data filters
-        for query in criteria.data_queries:
-            data_field = Record.data.op("->")(query.result_name).as_string()  # type: ignore[union-attr]
-            match query.comparison_operator:
-                case RecordFindResultComparisonOperator.eq:
-                    statement = statement.where(
-                        data_field.cast(query.sql_type) == query.result_value
-                    )
-                case RecordFindResultComparisonOperator.gt:
-                    statement = statement.where(
-                        data_field.cast(query.sql_type) > query.result_value
-                    )
-                case RecordFindResultComparisonOperator.lt:
-                    statement = statement.where(
-                        data_field.cast(query.sql_type) < query.result_value
-                    )
-                case RecordFindResultComparisonOperator.contains:
-                    statement = statement.where(
-                        data_field.cast(query.sql_type).like(f"%{query.result_value}%")
-                    )
+        statement = self._apply_data_query_filters(statement, criteria.data_queries)
 
         # Pagination
         statement = statement.distinct().offset(skip).limit(limit)

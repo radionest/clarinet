@@ -138,48 +138,50 @@ class StorageHandler:
         Returns:
             Status code
         """
-        try:
-            if (
-                self.destination_ae is None
-                or self.destination_aet is None
-                or self.destination_host is None
-                or self.destination_port is None
-            ):
-                logger.error("Destination AE not configured")
-                return 0xC000
+        if not all(
+            [
+                self.destination_ae,
+                self.destination_aet,
+                self.destination_host,
+                self.destination_port,
+            ]
+        ):
+            logger.error("Destination AE not configured")
+            return 0xC000
 
-            # Create association with destination
+        # Narrowed by the guard above
+        assert self.destination_ae is not None
+        assert self.destination_host is not None
+        assert self.destination_port is not None
+        assert self.destination_aet is not None
+
+        try:
             assoc = self.destination_ae.associate(
                 self.destination_host, self.destination_port, ae_title=self.destination_aet
             )
-
-            if not assoc.is_established:
-                logger.error(
-                    f"Failed to establish association with "
-                    f"{self.destination_aet}@{self.destination_host}:{self.destination_port}"
-                )
-                return 0xC000
-
-            try:
-                # Send C-STORE request
-                status = assoc.send_c_store(ds)
-
-                if status and status.Status == 0x0000:
-                    logger.info(f"Forwarded instance {ds.SOPInstanceUID} to {self.destination_aet}")
-                    return 0x0000  # Success
-                else:
-                    logger.error(
-                        f"Failed to forward instance {ds.SOPInstanceUID}: "
-                        f"status={status.Status if status else 'None'}"
-                    )
-                    return 0xC000  # Failure
-
-            finally:
-                assoc.release()
-
         except Exception as e:
             logger.error(f"Error forwarding instance: {e}")
-            return 0xC000  # Failure
+            return 0xC000
+
+        if not assoc.is_established:
+            logger.error(
+                f"Failed to establish association with "
+                f"{self.destination_aet}@{self.destination_host}:{self.destination_port}"
+            )
+            return 0xC000
+
+        try:
+            status = assoc.send_c_store(ds)
+            if status and status.Status == 0x0000:
+                logger.info(f"Forwarded instance {ds.SOPInstanceUID} to {self.destination_aet}")
+                return 0x0000
+            logger.error(
+                f"Failed to forward instance {ds.SOPInstanceUID}: "
+                f"status={status.Status if status else 'None'}"
+            )
+            return 0xC000
+        finally:
+            assoc.release()
 
     def get_stored_instances(self) -> list[Dataset]:
         """Get all instances stored in memory.
