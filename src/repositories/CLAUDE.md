@@ -44,6 +44,14 @@ Special sentinel values for `anon_series_uid` / `anon_study_uid`:
 Other fields: `status`, `name` (record_type), `user_id`, `wo_user` (unassigned),
 `random_one`, `data_queries: list[RecordFindResult]` (JSON field queries with operators).
 
+## Record Invalidation (record_repository.py)
+
+`invalidate_record(record_id, mode, source_record_id=None, reason=None)`:
+- **hard**: `status` → `pending`, `user_id` → `None`, append reason to `context_info`
+- **soft**: only append reason to `context_info` (status unchanged)
+- Default reason: `"Invalidated by record #{source_record_id}"`
+- `context_info` is appended (newline-separated), never overwritten
+
 ## Eager Loading
 
 Use `selectinload()` to avoid N+1. Nested loading for deep relations:

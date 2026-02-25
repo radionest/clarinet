@@ -55,6 +55,18 @@ Shutdown: stop cleanup service → close RecordFlow client → close DB.
 
 Routers don't need try/except for these — just let domain exceptions propagate.
 
+## RecordFlow Integration (record.py)
+
+Endpoints that trigger RecordFlow engine via `BackgroundTasks`:
+- `PATCH /records/{id}/status` → `engine.handle_record_status_change()`
+- `PATCH /records/{id}/data` → `engine.handle_record_data_update()`
+- `POST /records/{id}/assign` → `engine.handle_record_status_change()`
+
+Engine is accessed via `request.app.state.recordflow_engine` (may be `None` if disabled).
+
+Direct invalidation endpoint:
+- `POST /records/{id}/invalidate` — body: `{mode, source_record_id, reason}`
+
 ## SPA Frontend Routing
 
 When `frontend_enabled=True`, catch-all `/{full_path:path}` serves:
