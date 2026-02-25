@@ -34,9 +34,7 @@ class TestGetRecordType:
         self, client: AsyncClient, auth_headers, sample_record_type
     ):
         """Should return full record type data for an existing type."""
-        response = await client.get(
-            f"{BASE}/types/{sample_record_type.name}", headers=auth_headers
-        )
+        response = await client.get(f"{BASE}/types/{sample_record_type.name}", headers=auth_headers)
         assert response.status_code == 200
         data = response.json()
         assert data["name"] == sample_record_type.name
@@ -55,9 +53,7 @@ class TestUpdateRecordType:
     """Tests for PATCH /types/{record_type_id}."""
 
     @pytest.mark.asyncio
-    async def test_update_description(
-        self, client: AsyncClient, auth_headers, sample_record_type
-    ):
+    async def test_update_description(self, client: AsyncClient, auth_headers, sample_record_type):
         """Should update a simple string field."""
         response = await client.patch(
             f"{BASE}/types/{sample_record_type.name}",
@@ -176,9 +172,7 @@ class TestDeleteRecordType:
     """Tests for DELETE /types/{record_type_id}."""
 
     @pytest.mark.asyncio
-    async def test_delete_record_type(
-        self, client: AsyncClient, auth_headers, sample_record_type
-    ):
+    async def test_delete_record_type(self, client: AsyncClient, auth_headers, sample_record_type):
         """Should delete an existing record type and return 204."""
         response = await client.delete(
             f"{BASE}/types/{sample_record_type.name}", headers=auth_headers
@@ -194,7 +188,5 @@ class TestDeleteRecordType:
     @pytest.mark.asyncio
     async def test_delete_nonexistent_record_type(self, client: AsyncClient, auth_headers):
         """Should return 404 when deleting a non-existent record type."""
-        response = await client.delete(
-            f"{BASE}/types/nonexistent_type_xyz", headers=auth_headers
-        )
+        response = await client.delete(f"{BASE}/types/nonexistent_type_xyz", headers=auth_headers)
         assert response.status_code == 404
