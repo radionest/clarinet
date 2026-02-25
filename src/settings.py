@@ -12,6 +12,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Self
 
+from pydantic import field_validator
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
@@ -79,6 +80,13 @@ class Settings(BaseSettings):
     # Storage settings
     storage_path: str = str(Path.home() / "clarinet/data")
     anon_id_prefix: str = "CLARINET"
+
+    @field_validator("storage_path")
+    @classmethod
+    def resolve_storage_path(cls, v: str) -> str:
+        """Resolve relative storage_path to absolute so external tools get correct paths."""
+        return str(Path(v).resolve())
+
     anon_names_list: str | None = None
 
     # Frontend settings
