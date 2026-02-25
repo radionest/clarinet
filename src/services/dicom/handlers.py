@@ -138,22 +138,13 @@ class StorageHandler:
         Returns:
             Status code
         """
-        if not all(
-            [
-                self.destination_ae,
-                self.destination_aet,
-                self.destination_host,
-                self.destination_port,
-            ]
+        if (self.destination_ae is None
+            or self.destination_aet is None
+            or self.destination_host is None
+            or self.destination_port is None
         ):
             logger.error("Destination AE not configured")
             return 0xC000
-
-        # Narrowed by the guard above
-        assert self.destination_ae is not None
-        assert self.destination_host is not None
-        assert self.destination_port is not None
-        assert self.destination_aet is not None
 
         try:
             assoc = self.destination_ae.associate(

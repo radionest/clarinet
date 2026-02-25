@@ -16,6 +16,7 @@ from src.exceptions.domain import (
     RecordNotFoundError,
     RecordTypeNotFoundError,
     UserNotFoundError,
+    ValidationError,
 )
 from src.models import Record
 from src.models.base import RecordStatus
@@ -481,10 +482,13 @@ class RecordRepository(BaseRepository[Record]):
                 continue
             data_field = Record.data.op("->")(query.result_name).as_string()  # type: ignore[union-attr]
             op_fn = _COMPARISON_OPS.get(query.comparison_operator)
-            if op_fn:
-                statement = statement.where(
-                    op_fn(data_field.cast(query.sql_type), query.result_value)
+            if op_fn is None:
+                raise ValidationError(
+                    f"Unsupported comparison operator: {query.comparison_operator}"
                 )
+            statement = statement.where(
+                op_fn(data_field.cast(query.sql_type), query.result_value)
+            )
         return statement
 
     async def find_by_criteria(
