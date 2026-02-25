@@ -56,6 +56,42 @@ else:
 
 EditorEffectName = Literal["Paint", "Erase", "Threshold", "Draw", "Islands"]
 
+
+class SlicerHelperError(Exception):
+    """Error raised by helper functions when Slicer operations fail."""
+
+
+def export_segmentation(name: str, output_path: str) -> str:
+    """Find segmentation node by name, export to file, and verify.
+
+    Args:
+        name: Display name of the segmentation node in the scene.
+        output_path: Absolute path where the segmentation file will be saved.
+
+    Returns:
+        The output_path on success.
+
+    Raises:
+        SlicerHelperError: If the node is not found or the file was not created.
+    """
+    seg_node = slicer.util.getNode(name)
+    if seg_node is None:
+        raise SlicerHelperError(f"Segmentation node '{name}' not found in scene")
+
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    slicer.util.exportNode(seg_node, output_path)
+
+    if not os.path.isfile(output_path):
+        raise SlicerHelperError(f"Export failed: file not created at {output_path}")
+
+    return output_path
+
+
+def clear_scene() -> None:
+    """Clear the current Slicer MRML scene."""
+    slicer.mrmlScene.Clear(0)
+
+
 LAYOUT_MAP: dict[str, str] = {
     "axial": "SlicerLayoutOneUpRedSliceView",
     "sagittal": "SlicerLayoutOneUpYellowSliceView",

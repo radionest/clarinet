@@ -194,6 +194,8 @@ pub type Msg {
   SlicerOpenResult(Result(dynamic.Dynamic, ApiError))
   SlicerValidate(record_id: String)
   SlicerValidateResult(Result(dynamic.Dynamic, ApiError))
+  SlicerClearScene
+  SlicerClearSceneResult(Result(dynamic.Dynamic, ApiError))
   SlicerPing
   SlicerPingResult(Result(dynamic.Dynamic, ApiError))
 

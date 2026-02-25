@@ -14,6 +14,11 @@ pub fn validate_record(record_id: String) -> Promise(Result(Dynamic, ApiError)) 
   http_client.post("/slicer/records/" <> record_id <> "/validate", "{}")
 }
 
+/// Clear the current scene in the user's local 3D Slicer
+pub fn clear_scene() -> Promise(Result(Dynamic, ApiError)) {
+  http_client.post("/slicer/clear", "{}")
+}
+
 /// Check if the user's local 3D Slicer instance is reachable
 pub fn ping() -> Promise(Result(Dynamic, ApiError)) {
   http_client.get("/slicer/ping")

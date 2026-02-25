@@ -114,6 +114,27 @@ def _build_pacs_context() -> dict[str, Any]:
     }
 
 
+@router.post("/clear")
+async def clear_slicer_scene(
+    service: SlicerServiceDep,
+    _current_user: CurrentUserDep,
+    client_ip: str = Depends(get_client_ip),
+) -> dict[str, bool]:
+    """Clear the current scene in the user's local 3D Slicer.
+
+    Args:
+        service: Injected SlicerService.
+        _current_user: Authenticated user.
+        client_ip: Client IP for Slicer URL construction.
+
+    Returns:
+        {"ok": true} on success.
+    """
+    slicer_url = f"http://{client_ip}:{settings.slicer_port}"
+    await service.execute_raw(slicer_url, "slicer.mrmlScene.Clear(0)")
+    return {"ok": True}
+
+
 @router.post("/records/{record_id}/open")
 async def open_record_in_slicer(
     record_id: int,

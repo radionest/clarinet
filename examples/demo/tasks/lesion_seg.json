@@ -12,7 +12,7 @@
         "study_uid": "{study_uid}",
         "series_uid": "{series_uid}"
     },
-    "slicer_result_validator": "import slicer\nseg_node = slicer.util.getNode('lesions')\nslicer.util.exportNode(seg_node, output_path)",
+    "slicer_result_validator": "export_segmentation('lesions', output_path)",
     "slicer_result_validator_args": {
         "output_path": "{clarinet_storage_path}/{patient_id}/{study_anon_uid}/{series_anon_uid}/lesions_{user_id}.seg.nrrd"
     },

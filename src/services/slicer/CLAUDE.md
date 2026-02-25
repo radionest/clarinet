@@ -40,6 +40,14 @@ slicer_script_paths: list[str]   # Additional script directories (unused current
 
 Runs inside Slicer Python environment. Has `_Dummy` fallback for testing outside Slicer.
 
+### Module-level functions (no `SlicerHelper` init needed)
+
+- `SlicerHelperError(Exception)` — lightweight exception for helper errors
+- `export_segmentation(name, output_path)` → exports segmentation node to file; raises `SlicerHelperError` if node not found or file not created
+- `clear_scene()` → calls `slicer.mrmlScene.Clear(0)`
+
+### SlicerHelper class
+
 - `SlicerHelper(working_folder)` — clears scene, sets root dir
 - `load_volume(path, window=)` → image node
 - `create_segmentation(name)` → `SegmentationBuilder` (fluent `.add_segment()`)
@@ -85,6 +93,7 @@ Context variables are injected by `SlicerService._build_context_block()` — no 
 
 - `POST /exec` — execute script with helper DSL prepended
 - `POST /exec/raw` — execute raw script (no helper)
+- `POST /clear` — clear the Slicer scene (sends `slicer.mrmlScene.Clear(0)` via `execute_raw`)
 - `GET /ping` — check Slicer reachability
 
 ## Testing

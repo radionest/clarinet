@@ -513,17 +513,21 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
 
     // Formosh form events
     store.FormSubmitSuccess(record_id) -> {
-      // Check if this record type has a validator script
-      let validate_effect = case dict.get(model.records, record_id) {
+      // Check if this record type has a validator or slicer_script
+      let slicer_effect = case dict.get(model.records, record_id) {
         Ok(models.Record(record_type: Some(models.RecordType(slicer_result_validator: Some(_), ..)), ..)) ->
+          // Has validator: validate first, scene will clear after validation succeeds
           dispatch_msg(store.SlicerValidate(record_id))
+        Ok(models.Record(record_type: Some(models.RecordType(slicer_script: Some(_), ..)), ..)) ->
+          // Has slicer_script but no validator: clear scene directly
+          dispatch_msg(store.SlicerClearScene)
         _ -> effect.none()
       }
       #(
         store.set_success(model, "Record data submitted successfully"),
         effect.batch([
           dispatch_msg(store.LoadRecordDetail(record_id)),
-          validate_effect,
+          slicer_effect,
         ]),
       )
     }
@@ -627,7 +631,7 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       #(
         store.Model(..model, slicer_loading: False)
           |> store.set_success("Slicer validation completed"),
-        effect.none(),
+        dispatch_msg(store.SlicerClearScene),
       )
     }
 
@@ -644,6 +648,23 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           |> store.set_error(Some(error_msg)),
         effect.none(),
       )
+    }
+
+    store.SlicerClearScene -> {
+      let clear_effect = {
+        use dispatch <- effect.from
+        slicer.clear_scene()
+        |> promise.tap(fn(result) {
+          dispatch(store.SlicerClearSceneResult(result))
+        })
+        Nil
+      }
+      #(model, clear_effect)
+    }
+
+    store.SlicerClearSceneResult(_) -> {
+      // Silently ignore both success and error — data is already saved
+      #(model, effect.none())
     }
 
     store.SlicerPing -> {
