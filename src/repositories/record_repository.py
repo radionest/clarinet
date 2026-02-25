@@ -486,9 +486,7 @@ class RecordRepository(BaseRepository[Record]):
                 raise ValidationError(
                     f"Unsupported comparison operator: {query.comparison_operator}"
                 )
-            statement = statement.where(
-                op_fn(data_field.cast(query.sql_type), query.result_value)
-            )
+            statement = statement.where(op_fn(data_field.cast(query.sql_type), query.result_value))
         return statement
 
     async def find_by_criteria(

@@ -138,7 +138,8 @@ class StorageHandler:
         Returns:
             Status code
         """
-        if (self.destination_ae is None
+        if (
+            self.destination_ae is None
             or self.destination_aet is None
             or self.destination_host is None
             or self.destination_port is None
