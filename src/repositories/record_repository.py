@@ -344,7 +344,7 @@ class RecordRepository(BaseRepository[Record]):
 
         Args:
             record_id: ID of the record to invalidate.
-            mode: "hard" resets status to pending and clears user_id.
+            mode: "hard" resets status to pending (keeps user_id).
                   "soft" only appends reason to context_info.
             source_record_id: ID of the record that triggered invalidation.
             reason: Human-readable reason. Defaults to a generated message.
@@ -368,7 +368,6 @@ class RecordRepository(BaseRepository[Record]):
 
         if mode == "hard":
             record.status = RecordStatus.pending
-            record.user_id = None
 
         await self.session.commit()
         return await self.get_with_relations(record_id)

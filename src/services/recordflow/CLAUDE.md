@@ -54,7 +54,7 @@ These are mutually exclusive per FlowRecord instance. Use separate `record()` ca
 - Patient-level change can invalidate series-level records
 
 Modes:
-- **hard**: reset status to `pending`, clear `user_id`, append reason to `context_info`
+- **hard**: reset status to `pending`, append reason to `context_info` (keeps `user_id`)
 - **soft**: only append reason to `context_info`
 
 Optional `callback(record, source_record, client)` for per-project custom behavior.

@@ -47,7 +47,7 @@ Other fields: `status`, `name` (record_type), `user_id`, `wo_user` (unassigned),
 ## Record Invalidation (record_repository.py)
 
 `invalidate_record(record_id, mode, source_record_id=None, reason=None)`:
-- **hard**: `status` → `pending`, `user_id` → `None`, append reason to `context_info`
+- **hard**: `status` → `pending`, append reason to `context_info` (keeps `user_id`)
 - **soft**: only append reason to `context_info` (status unchanged)
 - Default reason: `"Invalidated by record #{source_record_id}"`
 - `context_info` is appended (newline-separated), never overwritten

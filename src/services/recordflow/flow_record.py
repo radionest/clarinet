@@ -232,7 +232,7 @@ class FlowRecord:
 
         Args:
             record_type_names: Names of record types to invalidate.
-            mode: "hard" resets status to pending and clears user_id.
+            mode: "hard" resets status to pending (keeps user_id).
                   "soft" only appends reason to context_info without status change.
             callback: Optional project-level callback(record, source_record, client)
                       for custom behavior (e.g. updating context_info).

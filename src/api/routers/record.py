@@ -429,7 +429,7 @@ async def invalidate_record(
 ) -> Record:
     """Invalidate a record.
 
-    Hard mode resets status to pending and clears user assignment.
+    Hard mode resets status to pending (keeps user assignment).
     Soft mode only appends the reason to context_info.
 
     Args:
