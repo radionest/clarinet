@@ -1,7 +1,8 @@
 // Record API endpoints
 import api/http_client
-import api/models.{type Record, type RecordType, type User}
+import api/models.{type FileDefinition, type Record, type RecordType, type User}
 import api/types.{type ApiError}
+import gleam/dict
 import gleam/dynamic/decode
 import gleam/javascript/promise.{type Promise}
 import gleam/option.{None, Some}
@@ -66,9 +67,9 @@ fn record_type_base_decoder() -> decode.Decoder(RecordType) {
 
   let level = case level_str {
     None -> types.Series
-    Some("patient") -> types.Patient
-    Some("study") -> types.Study
-    Some("series") -> types.Series
+    Some("patient") | Some("PATIENT") -> types.Patient
+    Some("study") | Some("STUDY") -> types.Study
+    Some("series") | Some("SERIES") -> types.Series
     Some(_) -> types.Series
   }
 
@@ -222,4 +223,142 @@ fn parse_status(status: String) -> types.RecordStatus {
     "pause" -> types.Paused
     _ -> types.Pending
   }
+}
+
+// Decoder for FileDefinition
+fn file_definition_decoder() -> decode.Decoder(FileDefinition) {
+  use name <- decode.field("name", decode.string)
+  use pattern <- decode.field("pattern", decode.string)
+  use description <- decode.optional_field(
+    "description",
+    None,
+    decode.optional(decode.string),
+  )
+  use required <- decode.optional_field("required", True, decode.bool)
+  decode.success(models.FileDefinition(
+    name: name,
+    pattern: pattern,
+    description: description,
+    required: required,
+  ))
+}
+
+// Decoder for dict(String, String) from dynamic
+fn string_dict_decoder() -> decode.Decoder(dict.Dict(String, String)) {
+  decode.dict(decode.string, decode.string)
+}
+
+/// Full RecordType decoder with all fields (for edit page)
+pub fn record_type_full_decoder() -> decode.Decoder(RecordType) {
+  use name <- decode.field("name", decode.string)
+  use description <- decode.optional_field(
+    "description",
+    None,
+    decode.optional(decode.string),
+  )
+  use label <- decode.optional_field("label", None, decode.optional(decode.string))
+  use level_str <- decode.optional_field(
+    "level",
+    None,
+    decode.optional(decode.string),
+  )
+  use slicer_script <- decode.optional_field(
+    "slicer_script",
+    None,
+    decode.optional(decode.string),
+  )
+  use slicer_result_validator <- decode.optional_field(
+    "slicer_result_validator",
+    None,
+    decode.optional(decode.string),
+  )
+  use slicer_script_args <- decode.optional_field(
+    "slicer_script_args",
+    None,
+    decode.optional(string_dict_decoder()),
+  )
+  use slicer_result_validator_args <- decode.optional_field(
+    "slicer_result_validator_args",
+    None,
+    decode.optional(string_dict_decoder()),
+  )
+  use data_schema_dyn <- decode.optional_field(
+    "data_schema",
+    None,
+    decode.optional(decode.dynamic),
+  )
+  use role_name <- decode.optional_field(
+    "role_name",
+    None,
+    decode.optional(decode.string),
+  )
+  use max_users <- decode.optional_field(
+    "max_users",
+    None,
+    decode.optional(decode.int),
+  )
+  use min_users <- decode.optional_field(
+    "min_users",
+    None,
+    decode.optional(decode.int),
+  )
+  use input_files <- decode.optional_field(
+    "input_files",
+    None,
+    decode.optional(decode.list(file_definition_decoder())),
+  )
+  use output_files <- decode.optional_field(
+    "output_files",
+    None,
+    decode.optional(decode.list(file_definition_decoder())),
+  )
+  use constraint_role_name <- decode.optional_field(
+    "constraint_role",
+    None,
+    decode.optional(decode.string),
+  )
+
+  let level = case level_str {
+    None -> types.Series
+    Some("patient") | Some("PATIENT") -> types.Patient
+    Some("study") | Some("STUDY") -> types.Study
+    Some("series") | Some("SERIES") -> types.Series
+    Some(_) -> types.Series
+  }
+
+  let data_schema = case data_schema_dyn {
+    Some(dyn) -> Some(json_utils.dynamic_to_string(dyn))
+    None -> None
+  }
+
+  decode.success(models.RecordType(
+    name: name,
+    description: description,
+    label: label,
+    slicer_script: slicer_script,
+    slicer_script_args: slicer_script_args,
+    slicer_result_validator: slicer_result_validator,
+    slicer_result_validator_args: slicer_result_validator_args,
+    data_schema: data_schema,
+    role_name: role_name,
+    max_users: max_users,
+    min_users: min_users,
+    level: level,
+    input_files: input_files,
+    output_files: output_files,
+    constraint_role: constraint_role_name,
+    records: None,
+  ))
+}
+
+/// Get a single record type by name
+pub fn get_record_type(name: String) -> Promise(Result(RecordType, ApiError)) {
+  http_client.get("/records/types/" <> name)
+  |> promise.map(fn(res) {
+    result.try(res, http_client.decode_response(
+      _,
+      record_type_full_decoder(),
+      "Invalid record type data",
+    ))
+  })
 }

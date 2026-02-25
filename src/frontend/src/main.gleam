@@ -27,6 +27,7 @@ import lustre/element/html
 import modem
 import pages/admin as admin_page
 import pages/record_types/detail as record_type_detail
+import pages/record_types/edit as record_type_edit
 import pages/record_types/list as record_types_list
 import pages/home
 import pages/login
@@ -521,6 +522,52 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       #(store.set_error(model, Some(error)), effect.none())
     }
 
+    // RecordType edit
+    store.LoadRecordTypeForEdit(name) ->
+      load_with_effect(
+        model,
+        fn() { records.get_record_type(name) },
+        store.RecordTypeForEditLoaded,
+      )
+
+    store.RecordTypeForEditLoaded(Ok(rt)) -> {
+      let new_model =
+        model
+        |> store.cache_record_type(rt)
+        |> store.set_loading(False)
+      #(new_model, effect.none())
+    }
+
+    store.RecordTypeForEditLoaded(Error(_err)) -> {
+      let new_model =
+        model
+        |> store.set_loading(False)
+        |> store.set_error(Some("Failed to load record type"))
+      #(new_model, effect.none())
+    }
+
+    store.RecordTypeEditSuccess(name) -> {
+      let new_model =
+        model
+        |> store.set_success("Record type updated successfully")
+        |> store.set_route(router.AdminRecordTypeDetail(name))
+      #(
+        new_model,
+        effect.batch([
+          modem.push(
+            router.route_to_path(router.AdminRecordTypeDetail(name)),
+            option.None,
+            option.None,
+          ),
+          dispatch_msg(store.LoadRecordTypeStats),
+        ]),
+      )
+    }
+
+    store.RecordTypeEditError(error) -> {
+      #(store.set_error(model, Some(error)), effect.none())
+    }
+
     // Filters
     store.AddFilter(key, value) -> {
       #(store.apply_filter(model, key, value), effect.none())
@@ -842,6 +889,7 @@ fn view_content(model: Model) -> Element(Msg) {
     router.AdminDashboard -> admin_page.view(model)
     router.AdminRecordTypes -> record_types_list.view(model)
     router.AdminRecordTypeDetail(name) -> record_type_detail.view(model, name)
+    router.AdminRecordTypeEdit(name) -> record_type_edit.view(model, name)
     router.NotFound -> html.div([], [html.text("404 - Page not found")])
   }
 
@@ -897,6 +945,8 @@ fn load_route_data(model: Model, route: Route) -> Effect(Msg) {
         dispatch_msg(store.LoadRecordTypeStats),
         dispatch_msg(store.LoadRecords),
       ])
+    router.AdminRecordTypeEdit(name), Some(_) ->
+      dispatch_msg(store.LoadRecordTypeForEdit(name))
     _, _ -> effect.none()
   }
 }

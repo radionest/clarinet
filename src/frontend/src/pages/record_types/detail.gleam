@@ -49,6 +49,13 @@ fn render_detail(model: Model, stat: RecordTypeStats) -> Element(Msg) {
         ],
         [html.text("Back to Record Types")],
       ),
+      html.button(
+        [
+          attribute.class("btn btn-primary"),
+          event.on_click(store.Navigate(router.AdminRecordTypeEdit(stat.name))),
+        ],
+        [html.text("Edit")],
+      ),
     ]),
     info_card(stat),
     stats_cards(stat),

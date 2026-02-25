@@ -24,6 +24,7 @@ pub type Route {
   AdminDashboard
   AdminRecordTypes
   AdminRecordTypeDetail(name: String)
+  AdminRecordTypeEdit(name: String)
   NotFound
 }
 
@@ -49,6 +50,7 @@ pub fn route_to_path(route: Route) -> String {
     AdminDashboard -> "/admin"
     AdminRecordTypes -> "/admin/record-types"
     AdminRecordTypeDetail(name) -> "/admin/record-types/" <> name
+    AdminRecordTypeEdit(name) -> "/admin/record-types/" <> name <> "/edit"
     NotFound -> "/404"
   }
 }
@@ -79,6 +81,7 @@ pub fn parse_route(uri: Uri) -> Route {
     ["users", id] -> UserProfile(id)
     ["admin"] -> AdminDashboard
     ["admin", "record-types"] -> AdminRecordTypes
+    ["admin", "record-types", name, "edit"] -> AdminRecordTypeEdit(name)
     ["admin", "record-types", name] -> AdminRecordTypeDetail(name)
     _ -> NotFound
   }
@@ -96,7 +99,7 @@ pub fn requires_auth(route: Route) -> Bool {
 // Check if route requires admin role
 pub fn requires_admin_role(route: Route) -> Bool {
   case route {
-    Studies | StudyDetail(_) | SeriesDetail(_) | Patients | PatientDetail(_) | PatientNew | Users | UserProfile(_) | AdminDashboard | AdminRecordTypes | AdminRecordTypeDetail(_) -> True
+    Studies | StudyDetail(_) | SeriesDetail(_) | Patients | PatientDetail(_) | PatientNew | Users | UserProfile(_) | AdminDashboard | AdminRecordTypes | AdminRecordTypeDetail(_) | AdminRecordTypeEdit(_) -> True
     _ -> False
   }
 }
@@ -123,6 +126,7 @@ pub fn get_route_title(route: Route) -> String {
     AdminDashboard -> "Admin Dashboard"
     AdminRecordTypes -> "Record Types"
     AdminRecordTypeDetail(_) -> "Record Type Details"
+    AdminRecordTypeEdit(_) -> "Edit Record Type"
     NotFound -> "Page Not Found"
   }
 }
@@ -136,7 +140,7 @@ fn section(route: Route) -> String {
     Records | RecordDetail(_) | RecordNew | RecordTypeDesign(_) -> "records"
     Patients | PatientDetail(_) | PatientNew -> "patients"
     Users | UserProfile(_) -> "users"
-    AdminDashboard | AdminRecordTypes | AdminRecordTypeDetail(_) -> "admin"
+    AdminDashboard | AdminRecordTypes | AdminRecordTypeDetail(_) | AdminRecordTypeEdit(_) -> "admin"
     NotFound -> "notfound"
   }
 }

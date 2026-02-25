@@ -154,7 +154,7 @@ async def add_record_type(
 
 @router.patch("/types/{record_type_id}", response_model=RecordType)
 async def update_record_type(
-    record_type_id: int,
+    record_type_id: str,
     record_type_update: RecordTypeOptional,
     repo: RecordTypeRepositoryDep,
 ) -> RecordType:
@@ -177,7 +177,7 @@ async def update_record_type(
 
 @router.get("/types/{record_type_id}", response_model=RecordType)
 async def get_record_type(
-    record_type_id: int,
+    record_type_id: str,
     repo: RecordTypeRepositoryDep,
 ) -> RecordType:
     """Get a record type by ID."""
@@ -186,7 +186,7 @@ async def get_record_type(
 
 @router.delete("/types/{record_type_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_record_type(
-    record_type_id: int,
+    record_type_id: str,
     repo: RecordTypeRepositoryDep,
 ) -> None:
     """Delete a record type."""

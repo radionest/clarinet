@@ -5,12 +5,13 @@ This module provides models for records, record types, and record data.
 Formerly known as Task/TaskDesign models.
 """
 
+import json as json_lib
 from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 from uuid import UUID
 
-from pydantic import computed_field, model_validator
+from pydantic import computed_field, field_validator, model_validator
 from sqlalchemy import Boolean, Float, ForeignKey, Integer, String, event, func
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlmodel import JSON, Column, Field, Relationship, SQLModel
@@ -116,6 +117,19 @@ class RecordTypeOptional(SQLModel):
     # File schema fields
     input_files: list[FileDefinition] | None = None
     output_files: list[FileDefinition] | None = None
+
+    @field_validator(
+        "data_schema", "slicer_script_args", "slicer_result_validator_args", mode="before"
+    )
+    @classmethod
+    def parse_json_strings(cls, v: Any) -> Any:
+        """Accept JSON strings for dict fields (from formosh textarea submission)."""
+        if isinstance(v, str) and v:
+            try:
+                return json_lib.loads(v)
+            except json_lib.JSONDecodeError as e:
+                raise ValueError(f"Invalid JSON: {e}") from e
+        return v
 
 
 class RecordTypeFind(SQLModel):

@@ -152,6 +152,12 @@ pub type Msg {
   FormSubmitSuccess(record_id: String)
   FormSubmitError(error: String)
 
+  // RecordType edit
+  LoadRecordTypeForEdit(name: String)
+  RecordTypeForEditLoaded(Result(RecordType, ApiError))
+  RecordTypeEditSuccess(name: String)
+  RecordTypeEditError(error: String)
+
   // UI Actions
   SetLoading(Bool)
   SetError(Option(String))
