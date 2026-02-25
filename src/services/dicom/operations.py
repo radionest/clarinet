@@ -280,15 +280,15 @@ class DicomOperations:
                     continue
 
                 # Pending status means we have data
-                if status.Status in (0xFF00, 0xFF01):
-                    if identifier:
-                        result = self._parse_study_result(identifier)
-                        results.append(result)
-                elif status.Status == 0x0000:
-                    # Success - no more matches
-                    logger.info(f"C-FIND completed successfully, found {len(results)} studies")
-                else:
-                    logger.warning(f"C-FIND warning status: 0x{status.Status:04x}")
+                match status.Status:
+                    case 0xFF00 | 0xFF01:
+                        if identifier:
+                            result = self._parse_study_result(identifier)
+                            results.append(result)
+                    case 0x0000:
+                        logger.info(f"C-FIND completed successfully, found {len(results)} studies")
+                    case _:
+                        logger.warning(f"C-FIND warning status: 0x{status.Status:04x}")
 
             return results
 
@@ -329,12 +329,13 @@ class DicomOperations:
                 if not status:
                     continue
 
-                if status.Status in (0xFF00, 0xFF01):
-                    if identifier:
-                        result = self._parse_series_result(identifier)
-                        results.append(result)
-                elif status.Status == 0x0000:
-                    logger.info(f"C-FIND completed successfully, found {len(results)} series")
+                match status.Status:
+                    case 0xFF00 | 0xFF01:
+                        if identifier:
+                            result = self._parse_series_result(identifier)
+                            results.append(result)
+                    case 0x0000:
+                        logger.info(f"C-FIND completed successfully, found {len(results)} series")
 
             return results
 
@@ -375,12 +376,13 @@ class DicomOperations:
                 if not status:
                     continue
 
-                if status.Status in (0xFF00, 0xFF01):
-                    if identifier:
-                        result = self._parse_image_result(identifier)
-                        results.append(result)
-                elif status.Status == 0x0000:
-                    logger.info(f"C-FIND completed successfully, found {len(results)} images")
+                match status.Status:
+                    case 0xFF00 | 0xFF01:
+                        if identifier:
+                            result = self._parse_image_result(identifier)
+                            results.append(result)
+                    case 0x0000:
+                        logger.info(f"C-FIND completed successfully, found {len(results)} images")
 
             return results
 
@@ -445,17 +447,18 @@ class DicomOperations:
                 if hasattr(status, "NumberOfWarningSuboperations"):
                     result.num_warning = status.NumberOfWarningSuboperations or 0
 
-                if status.Status == 0x0000:
-                    result.status = "success"
-                    logger.info(
-                        f"C-GET completed: {result.num_completed} completed, "
-                        f"{result.num_failed} failed"
-                    )
-                elif status.Status in (0xFF00,):  # Pending
-                    result.status = "pending"
-                else:
-                    result.status = f"warning_0x{status.Status:04x}"
-                    logger.warning(f"C-GET status: 0x{status.Status:04x}")
+                match status.Status:
+                    case 0x0000:
+                        result.status = "success"
+                        logger.info(
+                            f"C-GET completed: {result.num_completed} completed, "
+                            f"{result.num_failed} failed"
+                        )
+                    case 0xFF00:
+                        result.status = "pending"
+                    case _:
+                        result.status = f"warning_0x{status.Status:04x}"
+                        logger.warning(f"C-GET status: 0x{status.Status:04x}")
 
             # Get stored instances if in memory mode
             if storage.mode == StorageMode.MEMORY:
@@ -515,17 +518,18 @@ class DicomOperations:
                 if hasattr(status, "NumberOfWarningSuboperations"):
                     result.num_warning = status.NumberOfWarningSuboperations or 0
 
-                if status.Status == 0x0000:
-                    result.status = "success"
-                    logger.info(
-                        f"C-MOVE completed: {result.num_completed} completed, "
-                        f"{result.num_failed} failed, destination: {destination_aet}"
-                    )
-                elif status.Status in (0xFF00,):  # Pending
-                    result.status = "pending"
-                else:
-                    result.status = f"warning_0x{status.Status:04x}"
-                    logger.warning(f"C-MOVE status: 0x{status.Status:04x}")
+                match status.Status:
+                    case 0x0000:
+                        result.status = "success"
+                        logger.info(
+                            f"C-MOVE completed: {result.num_completed} completed, "
+                            f"{result.num_failed} failed, destination: {destination_aet}"
+                        )
+                    case 0xFF00:
+                        result.status = "pending"
+                    case _:
+                        result.status = f"warning_0x{status.Status:04x}"
+                        logger.warning(f"C-MOVE status: 0x{status.Status:04x}")
 
             return result
 

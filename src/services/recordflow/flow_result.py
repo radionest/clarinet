@@ -34,20 +34,21 @@ class FieldComparison(ComparisonResult):
         left_value = self.left._get_value(record_context)
         right_value = self.right._get_value(record_context)
 
-        if self.operator == "==":
-            return bool(left_value == right_value)
-        elif self.operator == "!=":
-            return bool(left_value != right_value)
-        elif self.operator == "<":
-            return bool(left_value < right_value)
-        elif self.operator == "<=":
-            return bool(left_value <= right_value)
-        elif self.operator == ">":
-            return bool(left_value > right_value)
-        elif self.operator == ">=":
-            return bool(left_value >= right_value)
-        else:
-            raise ValueError(f"Unknown operator: {self.operator}")
+        match self.operator:
+            case "==":
+                return bool(left_value == right_value)
+            case "!=":
+                return bool(left_value != right_value)
+            case "<":
+                return bool(left_value < right_value)
+            case "<=":
+                return bool(left_value <= right_value)
+            case ">":
+                return bool(left_value > right_value)
+            case ">=":
+                return bool(left_value >= right_value)
+            case _:
+                raise ValueError(f"Unknown operator: {self.operator}")
 
     def __repr__(self) -> str:
         return f"FieldComparison({self.left} {self.operator} {self.right})"
@@ -63,12 +64,13 @@ class LogicalComparison(ComparisonResult):
 
     def evaluate(self, record_context: dict[str, RecordRead]) -> bool:
         """Evaluate the logical comparison."""
-        if self.operator == "and":
-            return self.left.evaluate(record_context) and self.right.evaluate(record_context)
-        elif self.operator == "or":
-            return self.left.evaluate(record_context) or self.right.evaluate(record_context)
-        else:
-            raise ValueError(f"Unknown logical operator: {self.operator}")
+        match self.operator:
+            case "and":
+                return self.left.evaluate(record_context) and self.right.evaluate(record_context)
+            case "or":
+                return self.left.evaluate(record_context) or self.right.evaluate(record_context)
+            case _:
+                raise ValueError(f"Unknown logical operator: {self.operator}")
 
     def __repr__(self) -> str:
         return f"LogicalComparison({self.left} {self.operator} {self.right})"

@@ -523,25 +523,26 @@ async def add_demo_records_for_user(
     # Create a record for each demo record type
     records: list[Record] = []
     for record_type in record_types:
-        if record_type.level == "SERIES":
-            new_record = RecordCreate(
-                status=RecordStatus.pending,
-                user_id=user.id,
-                series_uid=series.series_uid,
-                study_uid=series.study_uid,
-                patient_id=series.study.patient_id,
-                record_type_name=record_type.name,
-            )
-        elif record_type.level == "STUDY":
-            new_record = RecordCreate(
-                status=RecordStatus.pending,
-                user_id=user.id,
-                study_uid=series.study_uid,
-                patient_id=series.study.patient_id,
-                record_type_name=record_type.name,
-            )
-        else:
-            continue
+        match record_type.level:
+            case "SERIES":
+                new_record = RecordCreate(
+                    status=RecordStatus.pending,
+                    user_id=user.id,
+                    series_uid=series.series_uid,
+                    study_uid=series.study_uid,
+                    patient_id=series.study.patient_id,
+                    record_type_name=record_type.name,
+                )
+            case "STUDY":
+                new_record = RecordCreate(
+                    status=RecordStatus.pending,
+                    user_id=user.id,
+                    study_uid=series.study_uid,
+                    patient_id=series.study.patient_id,
+                    record_type_name=record_type.name,
+                )
+            case _:
+                continue
 
         records.append(Record(**new_record.model_dump()))
 

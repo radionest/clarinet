@@ -68,15 +68,16 @@ class StorageHandler:
             ds = event.dataset
             ds.file_meta = event.file_meta
 
-            if self.mode == StorageMode.DISK:
-                return self._store_to_disk(ds)
-            elif self.mode == StorageMode.MEMORY:
-                return self._store_to_memory(ds)
-            elif self.mode == StorageMode.FORWARD:
-                return self._forward_instance(ds)
-            else:
-                logger.error(f"Unknown storage mode: {self.mode}")
-                return 0xC000  # Failure
+            match self.mode:
+                case StorageMode.DISK:
+                    return self._store_to_disk(ds)
+                case StorageMode.MEMORY:
+                    return self._store_to_memory(ds)
+                case StorageMode.FORWARD:
+                    return self._forward_instance(ds)
+                case _:
+                    logger.error(f"Unknown storage mode: {self.mode}")
+                    return 0xC000  # Failure
 
         except Exception as e:
             logger.error(f"Error handling C-STORE: {e}")
