@@ -1,0 +1,9 @@
+{
+    "type": "object",
+    "properties": {
+        "notes": {
+            "type": "string",
+            "description": "Additional notes"
+        }
+    }
+}

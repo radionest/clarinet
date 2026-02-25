@@ -1,0 +1,27 @@
+{
+    "name": "lesion_seg",
+    "description": "Series-level lesion segmentation in 3D Slicer",
+    "label": "Lesion Segmentation",
+    "level": "SERIES",
+    "role_name": "doctor",
+    "min_users": 1,
+    "max_users": 1,
+    "slicer_script": "s = SlicerHelper(working_folder)\ns.load_study_from_pacs(study_uid)\nseg = s.create_segmentation('lesions')\nseg.add_segment('lesions', color=(1.0, 0.0, 0.0))\ns.setup_editor(seg, effect='Paint', brush_size=20)\ns.set_layout('axial')",
+    "slicer_script_args": {
+        "working_folder": "{clarinet_storage_path}/{patient_id}/{study_anon_uid}/{series_anon_uid}",
+        "study_uid": "{study_uid}",
+        "series_uid": "{series_uid}"
+    },
+    "slicer_result_validator": "import slicer\nseg_node = slicer.util.getNode('lesions')\nslicer.util.exportNode(seg_node, output_path)",
+    "slicer_result_validator_args": {
+        "output_path": "{clarinet_storage_path}/{patient_id}/{study_anon_uid}/{series_anon_uid}/lesions_{user_id}.seg.nrrd"
+    },
+    "output_files": [
+        {
+            "name": "lesion_mask",
+            "pattern": "lesions_{user_id}.seg.nrrd",
+            "description": "Lesion segmentation mask",
+            "required": true
+        }
+    ]
+}

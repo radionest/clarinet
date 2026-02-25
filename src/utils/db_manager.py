@@ -5,8 +5,10 @@ This module provides a centralized database connection manager
 that avoids global state and supports both sync and async operations.
 """
 
+import json
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from typing import Any
 
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import (
@@ -20,6 +22,17 @@ from sqlmodel import SQLModel
 
 from ..settings import settings
 from ..utils.logger import logger
+
+
+def _pydantic_json_serializer(obj: Any) -> str:
+    """JSON serializer that handles Pydantic/SQLModel objects in JSON columns."""
+
+    def default(o: Any) -> Any:
+        if hasattr(o, "model_dump"):
+            return o.model_dump()
+        raise TypeError(f"Object of type {type(o).__name__} is not JSON serializable")
+
+    return json.dumps(obj, default=default)
 
 
 class DatabaseManager:
@@ -57,6 +70,7 @@ class DatabaseManager:
                 connect_args={"check_same_thread": False},
                 poolclass=StaticPool if settings.debug else None,
                 echo=settings.debug,
+                json_serializer=_pydantic_json_serializer,
             )
         else:
             engine = create_async_engine(
@@ -64,6 +78,7 @@ class DatabaseManager:
                 echo=settings.debug,
                 pool_size=20,
                 max_overflow=0,
+                json_serializer=_pydantic_json_serializer,
             )
 
         logger.info(f"Async database engine created: {async_url}")

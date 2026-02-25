@@ -23,3 +23,5 @@ from src.services.recordflow import record, series
 
 # Flow 4: When a new series is created -> auto-create series_markup record
 (series().on_created().add_record("series_markup"))
+
+(record("series_markup").on_status("finished").add_record("lesion_seg"))

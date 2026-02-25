@@ -234,7 +234,7 @@ class RecordBase(BaseModel):
             series = getattr(self, "series", None)
 
             return unformatted_path.format(
-                patient_id=patient.anon_id if patient else self.patient_id,
+                patient_id=(patient.anon_id if patient else None) or self.patient_id,
                 patient_anon_name=patient.anon_name if patient else None,
                 study_uid=self.study_uid,
                 study_anon_uid=(study.anon_uid if study else self.study_anon_uid) or self.study_uid,
@@ -242,7 +242,7 @@ class RecordBase(BaseModel):
                 series_anon_uid=(series.anon_uid if series else self.series_anon_uid)
                 or self.series_uid,
                 user_id=self.user_id,
-                clarinet_storage_path=self.clarinet_storage_path,
+                clarinet_storage_path=self.clarinet_storage_path or settings.storage_path,
             )
         except (AttributeError, KeyError) as e:
             logger.error(f"Error formatting path: {e}")
