@@ -158,6 +158,51 @@ async def test_find_studies_nonexistent_patient(
     assert results == []
 
 
+@pytest.mark.dicom
+@pytest.mark.asyncio
+async def test_find_studies_by_patient_id(
+    dicom_client: DicomClient, orthanc_node: DicomNode, mr_study: StudyResult
+) -> None:
+    """Query by patient_id returns the expected study."""
+    assert mr_study.patient_id, "MR study has no patient_id"
+    results = await dicom_client.find_studies(
+        StudyQuery(patient_id=mr_study.patient_id), orthanc_node
+    )
+    assert len(results) >= 1
+    uids = {s.study_instance_uid for s in results}
+    assert mr_study.study_instance_uid in uids
+
+
+@pytest.mark.dicom
+@pytest.mark.asyncio
+async def test_find_studies_by_study_uid(
+    dicom_client: DicomClient, orthanc_node: DicomNode, mr_study: StudyResult
+) -> None:
+    """Query by study_instance_uid returns exactly that study."""
+    results = await dicom_client.find_studies(
+        StudyQuery(study_instance_uid=mr_study.study_instance_uid), orthanc_node
+    )
+    assert len(results) == 1
+    assert results[0].study_instance_uid == mr_study.study_instance_uid
+
+
+@pytest.mark.dicom
+@pytest.mark.asyncio
+async def test_find_studies_fields_populated(
+    dicom_client: DicomClient, orthanc_node: DicomNode, mr_study: StudyResult
+) -> None:
+    """Verify study metadata fields are populated for the MR study."""
+    results = await dicom_client.find_studies(
+        StudyQuery(study_instance_uid=mr_study.study_instance_uid), orthanc_node
+    )
+    assert len(results) == 1
+    study = results[0]
+    assert study.study_date is not None
+    assert study.study_time is not None
+    assert study.number_of_study_related_series is not None
+    assert study.number_of_study_related_instances is not None
+
+
 # ===========================================================================
 # B. C-FIND Series
 # ===========================================================================
@@ -211,6 +256,40 @@ async def test_find_series_nonexistent_study(
         orthanc_node,
     )
     assert results == []
+
+
+@pytest.mark.dicom
+@pytest.mark.asyncio
+async def test_find_series_by_series_uid(
+    dicom_client: DicomClient,
+    orthanc_node: DicomNode,
+    mr_study: StudyResult,
+    mr_series_list: list[SeriesResult],
+) -> None:
+    """Query by specific series_instance_uid returns exactly one series."""
+    target = mr_series_list[0]
+    results = await dicom_client.find_series(
+        SeriesQuery(
+            study_instance_uid=mr_study.study_instance_uid,
+            series_instance_uid=target.series_instance_uid,
+        ),
+        orthanc_node,
+    )
+    assert len(results) == 1
+    assert results[0].series_instance_uid == target.series_instance_uid
+
+
+@pytest.mark.dicom
+@pytest.mark.asyncio
+async def test_find_series_count_matches_study(
+    dicom_client: DicomClient,
+    orthanc_node: DicomNode,
+    mr_study: StudyResult,
+    mr_series_list: list[SeriesResult],
+) -> None:
+    """Series count from C-FIND matches study.number_of_study_related_series."""
+    assert mr_study.number_of_study_related_series is not None
+    assert len(mr_series_list) == mr_study.number_of_study_related_series
 
 
 # ===========================================================================
@@ -294,6 +373,47 @@ async def test_find_images_specific_instance(
     assert filtered[0].sop_instance_uid == target_uid
 
 
+@pytest.mark.dicom
+@pytest.mark.asyncio
+async def test_find_images_nonexistent_series(
+    dicom_client: DicomClient,
+    orthanc_node: DicomNode,
+    mr_study: StudyResult,
+) -> None:
+    """Querying images for a fake series UID returns an empty list."""
+    results = await dicom_client.find_images(
+        ImageQuery(
+            study_instance_uid=mr_study.study_instance_uid,
+            series_instance_uid="1.2.3.4.5.6.7.8.9.FAKE_SERIES",
+        ),
+        orthanc_node,
+    )
+    assert results == []
+
+
+@pytest.mark.dicom
+@pytest.mark.asyncio
+async def test_find_images_rows_columns(
+    dicom_client: DicomClient,
+    orthanc_node: DicomNode,
+    mr_study: StudyResult,
+    mr_series_list: list[SeriesResult],
+) -> None:
+    """MR image results have rows and columns populated (pixel data present)."""
+    series = mr_series_list[0]
+    images = await dicom_client.find_images(
+        ImageQuery(
+            study_instance_uid=mr_study.study_instance_uid,
+            series_instance_uid=series.series_instance_uid,
+        ),
+        orthanc_node,
+    )
+    assert images
+    for img in images:
+        assert img.rows is not None and img.rows > 0
+        assert img.columns is not None and img.columns > 0
+
+
 # ===========================================================================
 # D. C-GET to Disk
 # ===========================================================================
@@ -365,6 +485,93 @@ async def test_get_study_to_disk_valid_dicom(
     ds = pydicom.dcmread(dcm_files[0])
     assert hasattr(ds, "PatientName")
     assert ds.Modality == "MR"
+
+
+@pytest.mark.dicom
+@pytest.mark.asyncio
+async def test_get_study_with_patient_id(
+    dicom_client: DicomClient,
+    orthanc_node: DicomNode,
+    mr_study: StudyResult,
+    tmp_path: Path,
+) -> None:
+    """C-GET study with patient_id param succeeds and returns 30 files."""
+    assert mr_study.patient_id, "MR study has no patient_id"
+    result = await dicom_client.get_study(
+        study_uid=mr_study.study_instance_uid,
+        peer=orthanc_node,
+        output_dir=tmp_path,
+        patient_id=mr_study.patient_id,
+    )
+    assert result.status == "success"
+    assert result.num_completed == 30
+    assert result.num_failed == 0
+
+
+@pytest.mark.dicom
+@pytest.mark.asyncio
+async def test_get_series_to_disk_valid_dicom(
+    dicom_client: DicomClient,
+    orthanc_node: DicomNode,
+    mr_study: StudyResult,
+    mr_series_list: list[SeriesResult],
+    tmp_path: Path,
+) -> None:
+    """Series-level C-GET produces valid DICOM files with correct Modality."""
+    series = mr_series_list[0]
+    await dicom_client.get_series(
+        study_uid=mr_study.study_instance_uid,
+        series_uid=series.series_instance_uid,
+        peer=orthanc_node,
+        output_dir=tmp_path,
+    )
+    dcm_files = list(tmp_path.glob("*.dcm"))
+    assert dcm_files
+
+    ds = pydicom.dcmread(dcm_files[0])
+    assert hasattr(ds, "PatientName")
+    assert ds.Modality == "MR"
+
+
+@pytest.mark.dicom
+@pytest.mark.asyncio
+async def test_get_series_instance_count_matches_find(
+    dicom_client: DicomClient,
+    orthanc_node: DicomNode,
+    mr_study: StudyResult,
+    mr_series_list: list[SeriesResult],
+    tmp_path: Path,
+) -> None:
+    """C-GET series num_completed matches C-FIND number_of_series_related_instances."""
+    series = mr_series_list[0]
+    result = await dicom_client.get_series(
+        study_uid=mr_study.study_instance_uid,
+        series_uid=series.series_instance_uid,
+        peer=orthanc_node,
+        output_dir=tmp_path,
+    )
+    assert result.num_completed == (series.number_of_series_related_instances or 0)
+
+
+@pytest.mark.dicom
+@pytest.mark.asyncio
+async def test_get_study_to_disk_file_uids_unique(
+    dicom_client: DicomClient,
+    orthanc_node: DicomNode,
+    mr_study: StudyResult,
+    tmp_path: Path,
+) -> None:
+    """All 30 .dcm files have unique SOPInstanceUID — no overwrites."""
+    await dicom_client.get_study(
+        study_uid=mr_study.study_instance_uid,
+        peer=orthanc_node,
+        output_dir=tmp_path,
+    )
+    dcm_files = list(tmp_path.glob("*.dcm"))
+    assert len(dcm_files) == 30
+
+    uids = {str(pydicom.dcmread(f).SOPInstanceUID) for f in dcm_files}
+    assert len(uids) == 30
 
 
 # ===========================================================================
@@ -517,6 +724,45 @@ async def test_get_study_unreachable_peer(tmp_path: Path) -> None:
 
 @pytest.mark.dicom
 @pytest.mark.asyncio
+async def test_move_study_unreachable_peer(tmp_path: Path) -> None:
+    """C-MOVE study to an unreachable host raises HTTPException(409)."""
+    from fastapi import HTTPException
+
+    client = DicomClient(calling_aet=CALLING_AET)
+    fake_node = DicomNode(aet="FAKE", host="192.168.122.254", port=9999)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await client.move_study(
+            study_uid="1.2.3.FAKE",
+            peer=fake_node,
+            destination_aet="ANYWHERE",
+            timeout=3,
+        )
+    assert exc_info.value.status_code == 409
+
+
+@pytest.mark.dicom
+@pytest.mark.asyncio
+async def test_move_series_unreachable_peer(tmp_path: Path) -> None:
+    """C-MOVE series to an unreachable host raises HTTPException(409)."""
+    from fastapi import HTTPException
+
+    client = DicomClient(calling_aet=CALLING_AET)
+    fake_node = DicomNode(aet="FAKE", host="192.168.122.254", port=9999)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await client.move_series(
+            study_uid="1.2.3.FAKE",
+            series_uid="1.2.3.4.FAKE",
+            peer=fake_node,
+            destination_aet="ANYWHERE",
+            timeout=3,
+        )
+    assert exc_info.value.status_code == 409
+
+
+@pytest.mark.dicom
+@pytest.mark.asyncio
 async def test_find_studies_wrong_aet() -> None:
     """C-FIND with the wrong called AET against a real host.
 
@@ -531,3 +777,22 @@ async def test_find_studies_wrong_aet() -> None:
     results = await client.find_studies(StudyQuery(), node, timeout=5)
     # We only assert it didn't raise — Orthanc returns data regardless of AET.
     assert isinstance(results, list)
+
+
+# ===========================================================================
+# H. Cross-validation
+# ===========================================================================
+
+
+@pytest.mark.dicom
+@pytest.mark.asyncio
+async def test_study_instance_count_matches_series_sum(
+    dicom_client: DicomClient,
+    orthanc_node: DicomNode,
+    mr_study: StudyResult,
+    mr_series_list: list[SeriesResult],
+) -> None:
+    """study.number_of_study_related_instances == sum of each series instance count."""
+    assert mr_study.number_of_study_related_instances is not None
+    series_sum = sum(s.number_of_series_related_instances or 0 for s in mr_series_list)
+    assert mr_study.number_of_study_related_instances == series_sum

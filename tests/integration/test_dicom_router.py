@@ -22,7 +22,7 @@ from src.api.app import app
 from src.api.dependencies import get_dicom_client, get_pacs_node
 from src.models.patient import Patient
 from src.models.study import Study
-from src.services.dicom import DicomClient, DicomNode, StudyQuery
+from src.services.dicom import DicomClient, DicomNode, SeriesQuery, StudyQuery
 from src.services.dicom.models import StudyResult
 
 # ---------------------------------------------------------------------------
@@ -332,3 +332,130 @@ async def test_import_duplicate_study(
         },
     )
     assert response.status_code == 409
+
+
+# ===========================================================================
+# C. Additional Auth & Field Tests
+# ===========================================================================
+
+
+@pytest.mark.dicom
+@pytest.mark.asyncio
+async def test_import_non_admin(
+    client: AsyncClient, test_user: object, pacs_available: None, pacs_study: StudyResult
+) -> None:
+    """Non-superuser import request returns 403."""
+    await client.post(
+        "/api/auth/login",
+        data={"username": "test@example.com", "password": "testpassword"},
+    )
+    response = await client.post(
+        f"{DICOM_BASE}/import-study",
+        json={
+            "study_instance_uid": pacs_study.study_instance_uid,
+            "patient_id": pacs_study.patient_id,
+        },
+    )
+    assert response.status_code == 403
+
+
+@pytest.mark.dicom
+@pytest.mark.asyncio
+async def test_search_study_fields(
+    admin_logged_in: AsyncClient,
+    pacs_available: None,
+    pacs_patient_id: str,
+    db_patient: Patient,
+) -> None:
+    """Search response includes modalities_in_study, study_description, patient_name."""
+    response = await admin_logged_in.get(f"{DICOM_BASE}/patient/{pacs_patient_id}/studies")
+    assert response.status_code == 200
+    data = response.json()
+    assert data
+
+    study = data[0]["study"]
+    assert "modalities_in_study" in study
+    assert "study_description" in study
+    assert "patient_name" in study
+
+
+@pytest.mark.dicom
+@pytest.mark.asyncio
+async def test_search_series_fields(
+    admin_logged_in: AsyncClient,
+    pacs_available: None,
+    pacs_patient_id: str,
+    db_patient: Patient,
+) -> None:
+    """Each series in search response has modality, series_instance_uid, instance count."""
+    response = await admin_logged_in.get(f"{DICOM_BASE}/patient/{pacs_patient_id}/studies")
+    assert response.status_code == 200
+    data = response.json()
+    assert data
+
+    series_list = data[0]["series"]
+    assert series_list
+    for s in series_list:
+        assert s["modality"] is not None
+        assert s["series_instance_uid"]
+        assert "number_of_series_related_instances" in s
+
+
+@pytest.mark.dicom
+@pytest.mark.asyncio
+async def test_import_creates_correct_series_count(
+    admin_logged_in: AsyncClient,
+    pacs_available: None,
+    pacs_study: StudyResult,
+    db_patient: Patient,
+) -> None:
+    """Imported study's series count matches PACS series count."""
+    # Get expected series count from PACS directly
+    client = DicomClient(calling_aet=CALLING_AET)
+    node = DicomNode(aet=PACS_AET, host=PACS_HOST, port=PACS_PORT)
+    pacs_series = await client.find_series(
+        SeriesQuery(study_instance_uid=pacs_study.study_instance_uid), node
+    )
+
+    response = await admin_logged_in.post(
+        f"{DICOM_BASE}/import-study",
+        json={
+            "study_instance_uid": pacs_study.study_instance_uid,
+            "patient_id": db_patient.id,
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data["series"]) == len(pacs_series)
+
+
+@pytest.mark.dicom
+@pytest.mark.asyncio
+async def test_import_series_descriptions_stored(
+    admin_logged_in: AsyncClient,
+    pacs_available: None,
+    pacs_study: StudyResult,
+    db_patient: Patient,
+) -> None:
+    """Imported series preserve series_description from PACS."""
+    # Get expected descriptions from PACS
+    client = DicomClient(calling_aet=CALLING_AET)
+    node = DicomNode(aet=PACS_AET, host=PACS_HOST, port=PACS_PORT)
+    pacs_series = await client.find_series(
+        SeriesQuery(study_instance_uid=pacs_study.study_instance_uid), node
+    )
+    pacs_descriptions = {s.series_instance_uid: s.series_description for s in pacs_series}
+
+    response = await admin_logged_in.post(
+        f"{DICOM_BASE}/import-study",
+        json={
+            "study_instance_uid": pacs_study.study_instance_uid,
+            "patient_id": db_patient.id,
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()
+
+    for series in data["series"]:
+        pacs_desc = pacs_descriptions.get(series["series_uid"])
+        assert series["series_description"] == pacs_desc
