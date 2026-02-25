@@ -271,6 +271,40 @@ async def test_study(test_session, test_patient):
     return study
 
 
+@pytest_asyncio.fixture
+async def test_series(test_session, test_study):
+    """Create test series."""
+    from src.models.study import Series
+
+    series = Series(
+        study_uid=test_study.study_uid,
+        series_uid="1.2.3.4.5.6.7.8.9.1",
+        series_number=1,
+        series_description="Test Series",
+    )
+    test_session.add(series)
+    await test_session.commit()
+    await test_session.refresh(series)
+    return series
+
+
+@pytest_asyncio.fixture
+async def test_record_type(test_session):
+    """Create test record type."""
+    from src.models.record import RecordType
+
+    record_type = RecordType(
+        name="test_record_type",
+        description="Test record type",
+        label="Test Type",
+        level="SERIES",
+    )
+    test_session.add(record_type)
+    await test_session.commit()
+    await test_session.refresh(record_type)
+    return record_type
+
+
 @pytest_asyncio.fixture(autouse=True)
 async def clear_database(test_session):
     """Clear database after each test."""

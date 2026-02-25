@@ -1,7 +1,7 @@
 """Helper utilities for tests."""
 
 import json
-from datetime import UTC, date, datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlmodel import Session
@@ -125,8 +125,6 @@ class PatientFactory:
         session: Session,
         patient_id: str | None = None,
         patient_name: str | None = None,
-        patient_sex: str = "M",
-        patient_birthdate: date | None = None,
     ) -> Patient:
         """Creates a patient."""
         import uuid
@@ -134,10 +132,8 @@ class PatientFactory:
         unique_id = str(uuid.uuid4())[:8]
 
         patient = Patient(
-            patient_id=patient_id or f"PAT_{unique_id}",
-            patient_name=patient_name or f"Test Patient {unique_id}",
-            patient_sex=patient_sex,
-            patient_birthdate=patient_birthdate or date(1980, 1, 1),
+            id=patient_id or f"PAT_{unique_id}",
+            name=patient_name or f"Test Patient {unique_id}",
         )
         session.add(patient)
         await session.commit()
@@ -149,8 +145,6 @@ class PatientFactory:
         session: Session,
         patient: Patient,
         study_uid: str | None = None,
-        modality: str = "CT",
-        study_description: str | None = None,
     ) -> Study:
         """Creates a study."""
         import uuid
@@ -159,11 +153,8 @@ class PatientFactory:
 
         study = Study(
             patient_id=patient.id,
-            study_instance_uid=study_uid or f"1.2.3.{unique_id}",
-            study_date=datetime.now(UTC).date(),
-            study_description=study_description or f"Test Study {unique_id}",
-            modality=modality,
-            accession_number=f"ACC_{unique_id}",
+            study_uid=study_uid or f"1.2.3.{unique_id}",
+            date=datetime.now(UTC).date(),
         )
         session.add(study)
         await session.commit()
@@ -181,12 +172,10 @@ class PatientFactory:
         """Creates a series."""
 
         series = Series(
-            study_id=study.id,
-            series_instance_uid=series_uid or f"{study.study_instance_uid}.{series_number}",
+            study_uid=study.study_uid,
+            series_uid=series_uid or f"{study.study_uid}.{series_number}",
             series_number=series_number,
             series_description=series_description or f"Series {series_number}",
-            modality=study.modality,
-            body_part_examined="CHEST",
         )
         session.add(series)
         await session.commit()
@@ -252,10 +241,8 @@ class TestDataGenerator:
             patients.append(patient)
 
             # Create 2 studies for each patient
-            for j in range(2):
-                study = await PatientFactory.create_study(
-                    session, patient=patient, modality="CT" if j == 0 else "MR"
-                )
+            for _j in range(2):
+                study = await PatientFactory.create_study(session, patient=patient)
                 studies.append(study)
 
                 # Create 3 series for each study
