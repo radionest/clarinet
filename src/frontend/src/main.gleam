@@ -350,13 +350,8 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       #(new_model, effect.none())
     }
 
-    store.StudiesLoaded(Error(_err)) -> {
-      let new_model =
-        model
-        |> store.set_loading(False)
-        |> store.set_error(Some("Failed to load studies"))
-      #(new_model, effect.none())
-    }
+    store.StudiesLoaded(Error(err)) ->
+      handle_api_error(model, err, "Failed to load studies")
 
     // Data loading - Records (role-aware)
     store.LoadRecords -> {
@@ -380,13 +375,8 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       #(new_model, effect.none())
     }
 
-    store.RecordsLoaded(Error(_err)) -> {
-      let new_model =
-        model
-        |> store.set_loading(False)
-        |> store.set_error(Some("Failed to load records"))
-      #(new_model, effect.none())
-    }
+    store.RecordsLoaded(Error(err)) ->
+      handle_api_error(model, err, "Failed to load records")
 
     // Data loading - Users
     store.LoadUsers ->
@@ -402,13 +392,8 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       #(new_model, effect.none())
     }
 
-    store.UsersLoaded(Error(_err)) -> {
-      let new_model =
-        model
-        |> store.set_loading(False)
-        |> store.set_error(Some("Failed to load users"))
-      #(new_model, effect.none())
-    }
+    store.UsersLoaded(Error(err)) ->
+      handle_api_error(model, err, "Failed to load users")
 
     // Data loading - Admin Stats
     store.LoadAdminStats ->
@@ -420,13 +405,8 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       #(new_model, effect.none())
     }
 
-    store.AdminStatsLoaded(Error(_err)) -> {
-      let new_model =
-        model
-        |> store.set_loading(False)
-        |> store.set_error(Some("Failed to load admin statistics"))
-      #(new_model, effect.none())
-    }
+    store.AdminStatsLoaded(Error(err)) ->
+      handle_api_error(model, err, "Failed to load admin statistics")
 
     // Data loading - Record Type Stats
     store.LoadRecordTypeStats ->
@@ -442,13 +422,8 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       #(new_model, effect.none())
     }
 
-    store.RecordTypeStatsLoaded(Error(_err)) -> {
-      let new_model =
-        model
-        |> store.set_loading(False)
-        |> store.set_error(Some("Failed to load record type statistics"))
-      #(new_model, effect.none())
-    }
+    store.RecordTypeStatsLoaded(Error(err)) ->
+      handle_api_error(model, err, "Failed to load record type statistics")
 
     // Admin record assignment
     store.AdminToggleAssignDropdown(record_id) -> {
@@ -479,13 +454,8 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       #(new_model, effect.none())
     }
 
-    store.AdminAssignUserResult(Error(_err)) -> {
-      let new_model =
-        model
-        |> store.set_loading(False)
-        |> store.set_error(Some("Failed to assign user to record"))
-      #(new_model, effect.none())
-    }
+    store.AdminAssignUserResult(Error(err)) ->
+      handle_api_error(model, err, "Failed to assign user to record")
 
     // Data loading - Record Detail
     store.LoadRecordDetail(id) ->
@@ -503,13 +473,8 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       #(new_model, effect.none())
     }
 
-    store.RecordDetailLoaded(Error(_err)) -> {
-      let new_model =
-        model
-        |> store.set_loading(False)
-        |> store.set_error(Some("Failed to load record"))
-      #(new_model, effect.none())
-    }
+    store.RecordDetailLoaded(Error(err)) ->
+      handle_api_error(model, err, "Failed to load record")
 
     // Formosh form events
     store.FormSubmitSuccess(record_id) -> {
@@ -710,13 +675,8 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       #(new_model, effect.none())
     }
 
-    store.PatientsLoaded(Error(_err)) -> {
-      let new_model =
-        model
-        |> store.set_loading(False)
-        |> store.set_error(Some("Failed to load patients"))
-      #(new_model, effect.none())
-    }
+    store.PatientsLoaded(Error(err)) ->
+      handle_api_error(model, err, "Failed to load patients")
 
     store.LoadPatientDetail(id) ->
       load_with_effect(
@@ -733,13 +693,8 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       #(new_model, effect.none())
     }
 
-    store.PatientDetailLoaded(Error(_err)) -> {
-      let new_model =
-        model
-        |> store.set_loading(False)
-        |> store.set_error(Some("Failed to load patient"))
-      #(new_model, effect.none())
-    }
+    store.PatientDetailLoaded(Error(err)) ->
+      handle_api_error(model, err, "Failed to load patient")
 
     // Patient form handling
     store.UpdatePatientFormId(value) -> {
@@ -795,13 +750,8 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       #(new_model, nav_effect)
     }
 
-    store.PatientFormSubmitted(Error(_err)) -> {
-      let new_model =
-        model
-        |> store.set_loading(False)
-        |> store.set_error(Some("Failed to create patient"))
-      #(new_model, effect.none())
-    }
+    store.PatientFormSubmitted(Error(err)) ->
+      handle_api_error(model, err, "Failed to create patient")
 
     // Patient anonymize
     store.AnonymizePatient(id) ->
@@ -820,13 +770,8 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       #(new_model, effect.none())
     }
 
-    store.PatientAnonymized(Error(_err)) -> {
-      let new_model =
-        model
-        |> store.set_loading(False)
-        |> store.set_error(Some("Failed to anonymize patient"))
-      #(new_model, effect.none())
-    }
+    store.PatientAnonymized(Error(err)) ->
+      handle_api_error(model, err, "Failed to anonymize patient")
 
     // Data loading - Study Detail
     store.LoadStudyDetail(id) ->
@@ -844,13 +789,8 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       #(new_model, effect.none())
     }
 
-    store.StudyDetailLoaded(Error(_err)) -> {
-      let new_model =
-        model
-        |> store.set_loading(False)
-        |> store.set_error(Some("Failed to load study"))
-      #(new_model, effect.none())
-    }
+    store.StudyDetailLoaded(Error(err)) ->
+      handle_api_error(model, err, "Failed to load study")
 
     // Data loading - Series Detail
     store.LoadSeriesDetail(id) ->
@@ -868,13 +808,8 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       #(new_model, effect.none())
     }
 
-    store.SeriesDetailLoaded(Error(_err)) -> {
-      let new_model =
-        model
-        |> store.set_loading(False)
-        |> store.set_error(Some("Failed to load series"))
-      #(new_model, effect.none())
-    }
+    store.SeriesDetailLoaded(Error(err)) ->
+      handle_api_error(model, err, "Failed to load series")
 
     // PACS operations
     store.SearchPacsStudies(patient_id) -> {
@@ -891,13 +826,12 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       #(store.set_pacs_studies(model, pacs_studies), effect.none())
     }
 
-    store.PacsStudiesLoaded(Error(_err)) -> {
-      let new_model =
-        model
-        |> store.set_pacs_loading(False)
-        |> store.set_error(Some("Failed to search PACS"))
-      #(new_model, effect.none())
-    }
+    store.PacsStudiesLoaded(Error(err)) ->
+      handle_api_error(
+        store.set_pacs_loading(model, False),
+        err,
+        "Failed to search PACS",
+      )
 
     store.ImportPacsStudy(study_uid, patient_id) -> {
       let import_effect = {
@@ -940,13 +874,12 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       #(new_model, reload_effect)
     }
 
-    store.PacsStudyImported(Error(_err)) -> {
-      let new_model =
-        model
-        |> fn(m) { store.Model(..m, pacs_importing: None) }
-        |> store.set_error(Some("Failed to import study from PACS"))
-      #(new_model, effect.none())
-    }
+    store.PacsStudyImported(Error(err)) ->
+      handle_api_error(
+        store.Model(..model, pacs_importing: None),
+        err,
+        "Failed to import study from PACS",
+      )
 
     store.ClearPacsResults -> {
       #(store.clear_pacs(model), effect.none())
@@ -975,6 +908,34 @@ fn load_with_effect(
 fn dispatch_msg(msg: Msg) -> Effect(Msg) {
   use dispatch <- effect.from
   dispatch(msg)
+}
+
+/// Handles API errors with automatic session expiry detection.
+/// On AuthError: clears user, shows expiry message, redirects to login.
+/// On other errors: shows the provided fallback message.
+fn handle_api_error(
+  model: Model,
+  err: types.ApiError,
+  fallback_msg: String,
+) -> #(Model, Effect(Msg)) {
+  case err {
+    types.AuthError(_) -> {
+      let new_model =
+        model
+        |> store.clear_user()
+        |> store.set_loading(False)
+        |> store.set_error(Some("Session expired. Please log in again."))
+        |> store.set_route(router.Login)
+      #(new_model, modem.push("/login", option.None, option.None))
+    }
+    _ -> {
+      let new_model =
+        model
+        |> store.set_loading(False)
+        |> store.set_error(Some(fallback_msg))
+      #(new_model, effect.none())
+    }
+  }
 }
 
 // View function
