@@ -5,15 +5,20 @@ This module provides the RecordFlowEngine class that monitors record status
 changes and executes registered flows when their conditions are met.
 """
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from src.utils.logger import logger
 
+from .flow_action import (
+    CallFunctionAction,
+    CreateRecordAction,
+    FlowAction,
+    InvalidateRecordsAction,
+    UpdateRecordAction,
+)
 from .flow_record import FlowRecord
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
     from src.client import ClarinetClient
     from src.models import RecordRead, RecordStatus
 
@@ -40,6 +45,7 @@ class RecordFlowEngine:
         """
         self.clarinet_client = clarinet_client
         self.flows: dict[str, list[FlowRecord]] = {}
+        self.entity_flows: dict[str, list[FlowRecord]] = {}
 
     def register_flow(self, flow: FlowRecord) -> None:
         """Register a flow definition.
@@ -51,6 +57,14 @@ class RecordFlowEngine:
             ValueError: If the flow definition is invalid.
         """
         flow.validate()
+
+        # Route entity flows to separate registry
+        if flow.entity_trigger:
+            if flow.entity_trigger not in self.entity_flows:
+                self.entity_flows[flow.entity_trigger] = []
+            self.entity_flows[flow.entity_trigger].append(flow)
+            logger.info(f"Registered entity flow for '{flow.entity_trigger}' on creation")
+            return
 
         # Group flows by record type name
         if flow.record_name not in self.flows:
@@ -134,6 +148,130 @@ class RecordFlowEngine:
                     f"Executing data update flow for record '{record_type_name}' (id={record.id})"
                 )
                 await self._execute_flow(flow, record, record_context)
+
+    async def handle_entity_created(
+        self,
+        entity_type: str,
+        patient_id: str,
+        study_uid: str | None = None,
+        series_uid: str | None = None,
+    ) -> None:
+        """Handle an entity creation event and execute relevant flows.
+
+        Called when a new patient, study, or series is created. Executes all
+        entity flows registered for the given entity type.
+
+        Args:
+            entity_type: The entity type ("series", "study", or "patient").
+            patient_id: The patient ID.
+            study_uid: The study UID (for study and series entities).
+            series_uid: The series UID (for series entities).
+        """
+        if entity_type not in self.entity_flows:
+            logger.debug(f"No entity flows registered for '{entity_type}'")
+            return
+
+        logger.debug(
+            f"Processing entity flows for '{entity_type}' "
+            f"(patient={patient_id}, study={study_uid}, series={series_uid})"
+        )
+
+        for flow in self.entity_flows[entity_type]:
+            for action in flow.actions:
+                await self._execute_entity_action(action, patient_id, study_uid, series_uid)
+
+    async def _execute_entity_action(
+        self,
+        action: FlowAction,
+        patient_id: str,
+        study_uid: str | None,
+        series_uid: str | None,
+    ) -> None:
+        """Execute a single action for an entity creation flow.
+
+        Args:
+            action: The action model instance.
+            patient_id: The patient ID.
+            study_uid: The study UID (if available).
+            series_uid: The series UID (if available).
+        """
+        try:
+            match action:
+                case CreateRecordAction():
+                    await self._create_entity_record(action, patient_id, study_uid, series_uid)
+                case CallFunctionAction():
+                    await self._call_entity_function(action, patient_id, study_uid, series_uid)
+                case _:
+                    logger.warning(f"Unsupported entity action type: {action.type}")
+        except Exception as e:
+            logger.error(f"Error executing entity action: {e}")
+
+    async def _create_entity_record(
+        self,
+        action: CreateRecordAction,
+        patient_id: str,
+        study_uid: str | None,
+        series_uid: str | None,
+    ) -> None:
+        """Create a record from an entity creation flow.
+
+        Args:
+            action: The CreateRecordAction with record details.
+            patient_id: The patient ID.
+            study_uid: The study UID (if available).
+            series_uid: The series UID (if available).
+        """
+        from src.models import RecordCreate
+
+        try:
+            record_create = RecordCreate(
+                record_type_name=action.record_type_name,
+                patient_id=patient_id,
+                study_uid=study_uid,
+                series_uid=action.series_uid or series_uid,
+                user_id=action.user_id,
+                context_info=action.context_info
+                or f"Created by entity flow on {series_uid or study_uid or patient_id} creation",
+            )
+            result = await self.clarinet_client.create_record(record_create)
+            logger.info(
+                f"Created record '{action.record_type_name}' (id={result.id}) from entity flow"
+            )
+        except Exception as e:
+            logger.error(
+                f"Failed to create record '{action.record_type_name}' from entity flow: {e}"
+            )
+
+    async def _call_entity_function(
+        self,
+        action: CallFunctionAction,
+        patient_id: str,
+        study_uid: str | None,
+        series_uid: str | None,
+    ) -> None:
+        """Call a custom function from an entity creation flow.
+
+        Args:
+            action: The CallFunctionAction with function, args, and kwargs.
+            patient_id: The patient ID.
+            study_uid: The study UID (if available).
+            series_uid: The series UID (if available).
+        """
+        kwargs = {
+            "patient_id": patient_id,
+            "study_uid": study_uid,
+            "series_uid": series_uid,
+            "client": self.clarinet_client,
+        } | action.extra_kwargs
+
+        try:
+            import asyncio
+
+            result = action.function(*action.args, **kwargs)
+            if asyncio.iscoroutine(result):
+                await result
+        except Exception as e:
+            logger.error(f"Error calling entity function {action.function.__name__}: {e}")
 
     async def _get_record_context(self, record: RecordRead) -> dict[str, RecordRead]:
         """Get all related records for evaluation context.
@@ -229,123 +367,104 @@ class RecordFlowEngine:
                     previous_condition_met = False
 
     async def _execute_action(
-        self, action: dict[str, Any], record: RecordRead, context: dict[str, RecordRead]
+        self, action: FlowAction, record: RecordRead, context: dict[str, RecordRead]
     ) -> None:
         """Execute a single action.
 
         Args:
-            action: The action dictionary with type and parameters.
+            action: The action model instance.
             record: The triggering record.
             context: Dictionary of related records.
         """
-        action_type = action.get("type")
-
         try:
-            if action_type == "create_record":
-                await self._create_record(action, record, context)
-            elif action_type == "update_record":
-                await self._update_record(action, record, context)
-            elif action_type == "invalidate_records":
-                await self._invalidate_records(action, record, context)
-            elif action_type == "call_function":
-                await self._call_function(action, record, context)
-            else:
-                logger.warning(f"Unknown action type: {action_type}")
+            match action:
+                case CreateRecordAction():
+                    await self._create_record(action, record, context)
+                case UpdateRecordAction():
+                    await self._update_record(action, record, context)
+                case InvalidateRecordsAction():
+                    await self._invalidate_records(action, record, context)
+                case CallFunctionAction():
+                    await self._call_function(action, record, context)
+                case _:
+                    logger.warning(f"Unknown action type: {action.type}")
         except Exception as e:
-            logger.error(f"Error executing action {action_type}: {e}")
+            logger.error(f"Error executing action {action.type}: {e}")
 
     async def _create_record(
         self,
-        action: dict[str, Any],
+        action: CreateRecordAction,
         record: RecordRead,
         context: dict[str, RecordRead],  # noqa: ARG002 - kept for API consistency
     ) -> None:
         """Create a new record.
 
         Args:
-            action: The action dictionary containing record_type_name and params.
+            action: The CreateRecordAction with record details.
             record: The triggering record.
             context: Dictionary of related records.
         """
         from src.models import RecordCreate
 
-        record_type_name = action["record_type_name"]
-        params = action.get("params", {})
-
-        # Build create params from the triggering record
-        create_params = {
-            "record_type_name": record_type_name,
-            "patient_id": record.patient.id,
-            "study_uid": record.study.study_uid,
-        }
-
-        # Add series_uid if available and not overridden
-        if record.series and "series_uid" not in params:
-            create_params["series_uid"] = record.series.series_uid
-
-        # Add any custom params
-        if "series_uid" in params:
-            create_params["series_uid"] = params["series_uid"]
-        if "user_id" in params:
-            create_params["user_id"] = params["user_id"]
-        if "context_info" in params:
-            create_params["context_info"] = params["context_info"]
-        else:
-            create_params["context_info"] = (
-                f"Created by flow from record {record.record_type.name} (id={record.id})"
-            )
+        series_uid = action.series_uid or (record.series.series_uid if record.series else None)
 
         try:
-            record_create = RecordCreate(**create_params)
+            record_create = RecordCreate(
+                record_type_name=action.record_type_name,
+                patient_id=record.patient.id,
+                study_uid=record.study.study_uid,
+                series_uid=series_uid,
+                user_id=action.user_id,
+                context_info=action.context_info
+                or f"Created by flow from record {record.record_type.name} (id={record.id})",
+            )
             result = await self.clarinet_client.create_record(record_create)
             logger.info(
-                f"Created record '{record_type_name}' (id={result.id}) "
-                f"for study {create_params['study_uid']}"
+                f"Created record '{action.record_type_name}' (id={result.id}) "
+                f"for study {record.study.study_uid}"
             )
         except Exception as e:
-            logger.error(f"Failed to create record '{record_type_name}': {e}")
+            logger.error(f"Failed to create record '{action.record_type_name}': {e}")
 
     async def _update_record(
         self,
-        action: dict[str, Any],
+        action: UpdateRecordAction,
         record: RecordRead,  # noqa: ARG002 - kept for API consistency
         context: dict[str, RecordRead],
     ) -> None:
         """Update an existing record.
 
         Args:
-            action: The action dictionary containing record_name and params.
+            action: The UpdateRecordAction with target record name and status.
             record: The triggering record.
             context: Dictionary of related records.
         """
         from src.models import RecordStatus
 
-        record_name = action["record_name"]
-        params = action.get("params", {})
-
-        if record_name not in context:
-            logger.warning(f"Record '{record_name}' not found in context for update")
+        if action.record_name not in context:
+            logger.warning(f"Record '{action.record_name}' not found in context for update")
             return
 
-        target_record = context[record_name]
+        target_record = context[action.record_name]
 
         # Update record status if specified
-        if "status" in params:
+        if action.status is not None:
             try:
-                status = params["status"]
+                status: str | RecordStatus = action.status
                 if isinstance(status, str):
                     status = RecordStatus(status)
 
                 await self.clarinet_client.update_record_status(target_record.id, status)
                 logger.info(
-                    f"Updated record '{record_name}' (id={target_record.id}) status to {status}"
+                    f"Updated record '{action.record_name}' "
+                    f"(id={target_record.id}) status to {status}"
                 )
             except Exception as e:
                 logger.error(f"Failed to update record status: {e}")
 
     async def _invalidate_records(
         self,
-        action: dict[str, Any],
+        action: InvalidateRecordsAction,
         record: RecordRead,
         context: dict[str, RecordRead],  # noqa: ARG002 - kept for API consistency
     ) -> None:
@@ -356,15 +475,11 @@ class RecordFlowEngine:
         can invalidate patient-level records and vice versa.
 
         Args:
-            action: The action dictionary containing record_type_names, mode, and callback.
+            action: The InvalidateRecordsAction with target types, mode, and callback.
             record: The triggering record.
             context: Dictionary of related records (not used; we query directly).
         """
-        record_type_names: list[str] = action["record_type_names"]
-        mode: str = action.get("mode", "hard")
-        callback: Callable | None = action.get("callback")
-
-        for target_type_name in record_type_names:
+        for target_type_name in action.record_type_names:
             try:
                 # Find ALL records of target type for the same patient
                 target_records = await self.clarinet_client.find_records(
@@ -381,12 +496,12 @@ class RecordFlowEngine:
                     try:
                         await self.clarinet_client.invalidate_record(
                             record_id=target.id,
-                            mode=mode,
+                            mode=action.mode,
                             source_record_id=record.id,
                         )
                         logger.info(
                             f"Invalidated record '{target_type_name}' (id={target.id}) "
-                            f"mode='{mode}', triggered by record {record.id}"
+                            f"mode='{action.mode}', triggered by record {record.id}"
                         )
                     except Exception as e:
                         logger.error(
@@ -395,11 +510,11 @@ class RecordFlowEngine:
                         )
 
                     # Call project-level callback if provided
-                    if callback is not None:
+                    if action.callback is not None:
                         try:
                             import asyncio
 
-                            result = callback(
+                            result = action.callback(
                                 record=target,
                                 source_record=record,
                                 client=self.clarinet_client,
@@ -418,33 +533,27 @@ class RecordFlowEngine:
                 )
 
     async def _call_function(
-        self, action: dict[str, Any], record: RecordRead, context: dict[str, RecordRead]
+        self, action: CallFunctionAction, record: RecordRead, context: dict[str, RecordRead]
     ) -> None:
         """Call a custom function.
 
         Args:
-            action: The action dictionary containing function, args, and kwargs.
+            action: The CallFunctionAction with function, args, and kwargs.
             record: The triggering record.
             context: Dictionary of related records.
         """
-        func: Callable = action["function"]
-        args: tuple = action.get("args", ())
-        kwargs: dict = action.get("kwargs", {}).copy()
-
-        # Add record, context, and client to kwargs if not present
-        if "record" not in kwargs:
-            kwargs["record"] = record
-        if "context" not in kwargs:
-            kwargs["context"] = context
-        if "client" not in kwargs:
-            kwargs["client"] = self.clarinet_client
+        kwargs = {
+            "record": record,
+            "context": context,
+            "client": self.clarinet_client,
+        } | action.extra_kwargs
 
         try:
             # Handle both sync and async functions
             import asyncio
 
-            result = func(*args, **kwargs)
+            result = action.function(*action.args, **kwargs)
             if asyncio.iscoroutine(result):
                 await result
         except Exception as e:
-            logger.error(f"Error calling function {func.__name__}: {e}")
+            logger.error(f"Error calling function {action.function.__name__}: {e}")

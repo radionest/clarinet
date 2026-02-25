@@ -4,7 +4,7 @@ Async study router for the Clarinet framework.
 This module provides async API endpoints for managing medical imaging studies, series, and related data.
 """
 
-from fastapi import APIRouter, status
+from fastapi import APIRouter, BackgroundTasks, Request, status
 
 from src.api.dependencies import StudyServiceDep
 from src.models import (
@@ -47,10 +47,18 @@ async def get_patient_details(
 async def add_patient(
     patient: PatientSave,
     service: StudyServiceDep,
+    request: Request,
+    background_tasks: BackgroundTasks,
 ) -> Patient:
     """Create a new patient."""
     patient_data = patient.model_dump()
-    return await service.create_patient(patient_data)
+    result = await service.create_patient(patient_data)
+
+    engine = getattr(request.app.state, "recordflow_engine", None)
+    if engine:
+        background_tasks.add_task(engine.handle_entity_created, "patient", result.id)
+
+    return result
 
 
 @router.post("/patients/{patient_id}/anonymize", response_model=Patient)
@@ -95,10 +103,20 @@ async def get_study_series(
 async def add_study(
     study: StudyCreate,
     service: StudyServiceDep,
+    request: Request,
+    background_tasks: BackgroundTasks,
 ) -> Study:
     """Create a new study."""
     study_data = study.model_dump()
-    return await service.create_study(study_data)
+    result = await service.create_study(study_data)
+
+    engine = getattr(request.app.state, "recordflow_engine", None)
+    if engine:
+        background_tasks.add_task(
+            engine.handle_entity_created, "study", result.patient_id, result.study_uid
+        )
+
+    return result
 
 
 # Series endpoints
@@ -133,10 +151,24 @@ async def get_series_details(
 async def add_series(
     series: SeriesCreate,
     service: StudyServiceDep,
+    request: Request,
+    background_tasks: BackgroundTasks,
 ) -> Series:
     """Create a new series."""
     series_data = series.model_dump()
-    return await service.create_series(series_data)
+    result = await service.create_series(series_data)
+
+    engine = getattr(request.app.state, "recordflow_engine", None)
+    if engine:
+        background_tasks.add_task(
+            engine.handle_entity_created,
+            "series",
+            result.study.patient_id,
+            result.study_uid,
+            result.series_uid,
+        )
+
+    return result
 
 
 @router.post("/series/find", response_model=list[SeriesRead])

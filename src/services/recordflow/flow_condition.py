@@ -7,6 +7,7 @@ with associated actions in a flow definition.
 
 from typing import TYPE_CHECKING
 
+from .flow_action import FlowAction
 from .flow_result import ComparisonResult
 
 if TYPE_CHECKING:
@@ -24,7 +25,7 @@ class FlowCondition:
     def __init__(self, condition: ComparisonResult | None, is_else: bool = False):
         self.condition = condition
         self.is_else = is_else
-        self.actions: list[dict] = []
+        self.actions: list[FlowAction] = []
 
     def add_condition(self, condition: ComparisonResult) -> None:
         """Add or combine a condition."""
@@ -34,7 +35,7 @@ class FlowCondition:
             # This would be handled by the FlowRecord's or_/and_ methods
             raise ValueError("Use or_() or and_() methods to combine conditions")
 
-    def add_action(self, action: dict) -> None:
+    def add_action(self, action: FlowAction) -> None:
         """Add an action to execute when this condition is true."""
         self.actions.append(action)
 

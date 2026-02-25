@@ -15,12 +15,22 @@ Example usage:
     record('master_model')
         .on_data_update()
         .invalidate_records('child_analysis', mode='hard')
+
+    # Trigger on entity creation
+    series().on_created().add_record('series_markup')
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from .flow_action import (
+    CallFunctionAction,
+    CreateRecordAction,
+    FlowAction,
+    InvalidateRecordsAction,
+    UpdateRecordAction,
+)
 from .flow_condition import FlowCondition
 from .flow_result import ComparisonResult, FlowResult, LogicalComparison
 
@@ -32,6 +42,9 @@ if TYPE_CHECKING:
 
 # Global registry for loaded flow records
 RECORD_REGISTRY: list[FlowRecord] = []
+
+# Global registry for entity creation flows
+ENTITY_REGISTRY: list[FlowRecord] = []
 
 
 class FlowRecord:
@@ -48,12 +61,13 @@ class FlowRecord:
             .add_record('confirm_birads')
     """
 
-    def __init__(self, record_name: str):
+    def __init__(self, record_name: str, *, entity_trigger: str | None = None):
         self.record_name = record_name
         self.status_trigger: str | None = None
         self.data_update_trigger: bool = False
+        self.entity_trigger: str | None = entity_trigger
         self.conditions: list[FlowCondition] = []
-        self.actions: list[dict] = []
+        self.actions: list[FlowAction] = []
         self._current_condition: FlowCondition | None = None
 
     @property
@@ -92,6 +106,17 @@ class FlowRecord:
             Self for method chaining.
         """
         self.data_update_trigger = True
+        return self
+
+    def on_created(self) -> FlowRecord:
+        """Trigger this flow when the entity is created.
+
+        Only valid for entity flows created via series(), study(), or patient()
+        factory functions. Marks the flow as triggered on entity creation.
+
+        Returns:
+            Self for method chaining.
+        """
         return self
 
     def if_(self, condition: ComparisonResult) -> FlowRecord:
@@ -163,13 +188,16 @@ class FlowRecord:
         Returns:
             Self for method chaining.
         """
-        action = {"type": "create_record", "record_type_name": record_type_name, "params": kwargs}
+        action = CreateRecordAction(
+            record_type_name=record_type_name,
+            series_uid=kwargs.get("series_uid"),  # type: ignore[arg-type]
+            user_id=kwargs.get("user_id"),  # type: ignore[arg-type]
+            context_info=kwargs.get("context_info"),  # type: ignore[arg-type]
+        )
 
         if self._current_condition:
-            # Add to current condition
             self._current_condition.add_action(action)
         else:
-            # Add as unconditional action
             self.actions.append(action)
 
         return self
@@ -184,7 +212,10 @@ class FlowRecord:
         Returns:
             Self for method chaining.
         """
-        action = {"type": "update_record", "record_name": record_name, "params": kwargs}
+        action = UpdateRecordAction(
+            record_name=record_name,
+            status=kwargs.get("status"),  # type: ignore[arg-type]
+        )
 
         if self._current_condition:
             self._current_condition.add_action(action)
@@ -210,7 +241,11 @@ class FlowRecord:
         Returns:
             Self for method chaining.
         """
-        action = {"type": "call_function", "function": func, "args": args, "kwargs": kwargs}
+        action = CallFunctionAction(
+            function=func,
+            args=args,
+            extra_kwargs=dict(kwargs),
+        )
 
         if self._current_condition:
             self._current_condition.add_action(action)
@@ -240,13 +275,11 @@ class FlowRecord:
         Returns:
             Self for method chaining.
         """
-        action: dict = {
-            "type": "invalidate_records",
-            "record_type_names": list(record_type_names),
-            "mode": mode,
-        }
-        if callback is not None:
-            action["callback"] = callback
+        action = InvalidateRecordsAction(
+            record_type_names=list(record_type_names),
+            mode=mode,
+            callback=callback,
+        )
 
         if self._current_condition:
             self._current_condition.add_action(action)
@@ -280,7 +313,11 @@ class FlowRecord:
         references (e.g. record('type').data.field in comparisons).
         """
         return bool(
-            self.status_trigger or self.data_update_trigger or self.actions or self.conditions
+            self.status_trigger
+            or self.data_update_trigger
+            or self.entity_trigger
+            or self.actions
+            or self.conditions
         )
 
     def validate(self) -> bool:
@@ -302,11 +339,14 @@ class FlowRecord:
         return True
 
     def __repr__(self) -> str:
-        parts = [f"FlowRecord('{self.record_name}')"]
-        if self.status_trigger:
-            parts.append(f".on_status('{self.status_trigger}')")
-        if self.data_update_trigger:
-            parts.append(".on_data_update()")
+        if self.entity_trigger:
+            parts = [f"{self.entity_trigger}().on_created()"]
+        else:
+            parts = [f"FlowRecord('{self.record_name}')"]
+            if self.status_trigger:
+                parts.append(f".on_status('{self.status_trigger}')")
+            if self.data_update_trigger:
+                parts.append(".on_data_update()")
         return "".join(parts)
 
 
@@ -343,3 +383,53 @@ def record(record_name: str) -> FlowRecord:
     new_record = FlowRecord(record_name)
     RECORD_REGISTRY.append(new_record)
     return new_record
+
+
+def _entity_factory(entity_type: str) -> FlowRecord:
+    """Create a FlowRecord for an entity creation trigger.
+
+    Args:
+        entity_type: The entity type ("series", "study", or "patient").
+
+    Returns:
+        A new FlowRecord with entity_trigger set.
+    """
+    flow = FlowRecord(entity_type, entity_trigger=entity_type)
+    ENTITY_REGISTRY.append(flow)
+    return flow
+
+
+def series() -> FlowRecord:
+    """Create a flow triggered when a new series is created.
+
+    Returns:
+        A new FlowRecord for chaining DSL methods.
+
+    Example:
+        series().on_created().add_record('series_markup')
+    """
+    return _entity_factory("series")
+
+
+def study() -> FlowRecord:
+    """Create a flow triggered when a new study is created.
+
+    Returns:
+        A new FlowRecord for chaining DSL methods.
+
+    Example:
+        study().on_created().add_record('study_review')
+    """
+    return _entity_factory("study")
+
+
+def patient() -> FlowRecord:
+    """Create a flow triggered when a new patient is created.
+
+    Returns:
+        A new FlowRecord for chaining DSL methods.
+
+    Example:
+        patient().on_created().add_record('patient_intake')
+    """
+    return _entity_factory("patient")

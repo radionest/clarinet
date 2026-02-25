@@ -10,7 +10,15 @@ from pathlib import Path
 from src.utils.logger import logger
 
 from .engine import RecordFlowEngine
-from .flow_record import RECORD_REGISTRY, FlowRecord, record
+from .flow_record import (
+    ENTITY_REGISTRY,
+    RECORD_REGISTRY,
+    FlowRecord,
+    patient,
+    record,
+    series,
+    study,
+)
 
 
 def load_flows_from_file(file_path: Path) -> list[FlowRecord]:
@@ -39,8 +47,9 @@ def load_flows_from_file(file_path: Path) -> list[FlowRecord]:
         logger.warning(f"Flow file not found: {file_path}")
         return []
 
-    # Clear the registry before loading a new file to avoid duplicates
+    # Clear the registries before loading a new file to avoid duplicates
     RECORD_REGISTRY.clear()
+    ENTITY_REGISTRY.clear()
 
     try:
         # Read and compile the file
@@ -53,6 +62,9 @@ def load_flows_from_file(file_path: Path) -> list[FlowRecord]:
         # Create a namespace with the necessary imports
         namespace = {
             "record": record,
+            "series": series,
+            "study": study,
+            "patient": patient,
             "FlowRecord": FlowRecord,
             "__file__": str(file_path),
             "__name__": "__main__",
@@ -63,9 +75,12 @@ def load_flows_from_file(file_path: Path) -> list[FlowRecord]:
 
         # Return only active flows (filter out reference-only FlowRecords
         # created for data access like record('type').data.field)
-        flows = [f for f in RECORD_REGISTRY if f.is_active_flow()]
+        # Entity flows always have entity_trigger set, so they pass is_active_flow()
+        record_flows = [f for f in RECORD_REGISTRY if f.is_active_flow()]
+        entity_flows = list(ENTITY_REGISTRY)
+        flows = record_flows + entity_flows
         for flow in flows:
-            logger.info(f"Loaded flow: {flow.record_name}")
+            logger.info(f"Loaded flow: {flow!r}")
 
         return flows
 

@@ -22,7 +22,14 @@ Example usage:
 """
 
 from .engine import RecordFlowEngine
-from .flow_builder import flow, record
+from .flow_action import (
+    CallFunctionAction,
+    CreateRecordAction,
+    FlowAction,
+    InvalidateRecordsAction,
+    UpdateRecordAction,
+)
+from .flow_builder import flow, patient, record, series, study
 from .flow_condition import FlowCondition
 from .flow_loader import (
     discover_and_load_flows,
@@ -30,7 +37,7 @@ from .flow_loader import (
     load_and_register_flows,
     load_flows_from_file,
 )
-from .flow_record import RECORD_REGISTRY, FlowRecord
+from .flow_record import ENTITY_REGISTRY, RECORD_REGISTRY, FlowRecord
 from .flow_result import (
     ComparisonResult,
     ConstantFlowResult,
@@ -40,19 +47,28 @@ from .flow_result import (
 )
 
 __all__ = [
+    "ENTITY_REGISTRY",
     "RECORD_REGISTRY",
+    "CallFunctionAction",
     "ComparisonResult",
     "ConstantFlowResult",
+    "CreateRecordAction",
     "FieldComparison",
+    "FlowAction",
     "FlowCondition",
     "FlowRecord",
     "FlowResult",
+    "InvalidateRecordsAction",
     "LogicalComparison",
     "RecordFlowEngine",
+    "UpdateRecordAction",
     "discover_and_load_flows",
     "find_flow_files",
     "flow",
     "load_and_register_flows",
     "load_flows_from_file",
+    "patient",
     "record",
+    "series",
+    "study",
 ]

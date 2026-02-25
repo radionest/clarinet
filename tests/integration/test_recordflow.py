@@ -17,30 +17,38 @@ from src.models.patient import Patient
 from src.models.record import RecordCreate, RecordRead, RecordType
 from src.models.study import Study
 from src.services.recordflow import FlowRecord, FlowResult, RecordFlowEngine
-from src.services.recordflow.flow_record import RECORD_REGISTRY
+from src.services.recordflow.flow_record import ENTITY_REGISTRY, RECORD_REGISTRY
 
 
 @pytest.fixture(autouse=True)
 def _clear_registry():
-    """Clear the global FlowRecord registry between tests."""
+    """Clear the global FlowRecord registries between tests."""
     RECORD_REGISTRY.clear()
+    ENTITY_REGISTRY.clear()
     yield
     RECORD_REGISTRY.clear()
+    ENTITY_REGISTRY.clear()
 
 
 @pytest_asyncio.fixture
 async def record_types(test_session: AsyncSession) -> dict[str, RecordType]:
     """Create record types used by flow tests."""
     types = {}
-    for name in [
+    study_level_types = [
         "doctor_report",
         "ai_analysis",
         "expert_check",
         "confirm_birads",
         "parent_model",
         "child_analysis",
-    ]:
+    ]
+    series_level_types = ["series_markup"]
+    for name in study_level_types:
         rt = RecordType(name=name, level=DicomQueryLevel.STUDY)
+        test_session.add(rt)
+        types[name] = rt
+    for name in series_level_types:
+        rt = RecordType(name=name, level=DicomQueryLevel.SERIES)
         test_session.add(rt)
         types[name] = rt
     await test_session.commit()
@@ -953,3 +961,86 @@ class TestInvalidateEndpoint:
         assert updated_record.status == RecordStatus.finished
         assert updated_record.context_info is not None
         assert "soft reason" in updated_record.context_info
+
+
+class TestEntityFlowIntegration:
+    """Integration tests for entity creation flows."""
+
+    @pytest.mark.asyncio
+    async def test_entity_flow_creates_record_on_series(
+        self,
+        clarinet_client: ClarinetClient,
+        record_types: dict[str, RecordType],
+        test_patient: Patient,
+        test_study: Study,
+    ):
+        """Engine entity flow creates a record when triggered for a series."""
+        engine = RecordFlowEngine(clarinet_client)
+
+        fr = FlowRecord("series", entity_trigger="series")
+        fr.add_record("series_markup")
+        engine.register_flow(fr)
+
+        await engine.handle_entity_created(
+            "series",
+            patient_id=test_patient.id,
+            study_uid=test_study.study_uid,
+            series_uid="1.2.3.4.5.6.7.8.9.10",
+        )
+
+        records = await clarinet_client.find_records(
+            study_uid=test_study.study_uid,
+            record_type_name="series_markup",
+        )
+        assert len(records) == 1
+        assert records[0].record_type.name == "series_markup"
+        assert records[0].series_uid == "1.2.3.4.5.6.7.8.9.10"
+
+
+class TestEntityFlowRuntime:
+    """Tests for entity flows triggered through API endpoints."""
+
+    @pytest_asyncio.fixture
+    async def app_with_engine(
+        self,
+        clarinet_client: ClarinetClient,
+    ) -> AsyncGenerator[RecordFlowEngine]:
+        """Install RecordFlowEngine into app.state, clean up after test."""
+        engine = RecordFlowEngine(clarinet_client)
+        app.state.recordflow_engine = engine
+        yield engine
+        app.state.recordflow_engine = None
+
+    @pytest.mark.asyncio
+    async def test_post_series_triggers_entity_flow(
+        self,
+        client: AsyncClient,
+        clarinet_client: ClarinetClient,
+        app_with_engine: RecordFlowEngine,
+        record_types: dict[str, RecordType],
+        test_patient: Patient,
+        test_study: Study,
+    ):
+        """POST /series triggers entity flow and creates a record."""
+        fr = FlowRecord("series", entity_trigger="series")
+        fr.add_record("series_markup")
+        app_with_engine.register_flow(fr)
+
+        # Create series via API
+        resp = await client.post(
+            "/api/series",
+            json={
+                "series_uid": "9.8.7.6.5.4.3.2.1",
+                "series_number": 1,
+                "study_uid": test_study.study_uid,
+            },
+        )
+        assert resp.status_code == 201
+
+        # Verify: series_markup was created by the entity flow
+        records = await clarinet_client.find_records(
+            study_uid=test_study.study_uid,
+            record_type_name="series_markup",
+        )
+        assert len(records) == 1
+        assert records[0].series_uid == "9.8.7.6.5.4.3.2.1"

@@ -3,7 +3,7 @@
 import asyncio
 from datetime import UTC, datetime
 
-from fastapi import APIRouter
+from fastapi import APIRouter, BackgroundTasks, Request
 
 from src.api.dependencies import (
     DicomClientDep,
@@ -80,6 +80,8 @@ async def search_patient_studies(
 
 @router.post("/import-study", response_model=StudyRead)
 async def import_study_from_pacs(
+    http_request: Request,
+    background_tasks: BackgroundTasks,
     request: PacsImportRequest,
     _user: SuperUserDep,
     client: DicomClientDep,
@@ -140,6 +142,7 @@ async def import_study_from_pacs(
     )
 
     # Create each series in local DB
+    engine = getattr(http_request.app.state, "recordflow_engine", None)
     for idx, s in enumerate(pacs_series):
         await service.create_series(
             {
@@ -149,6 +152,14 @@ async def import_study_from_pacs(
                 "study_uid": request.study_instance_uid,
             }
         )
+        if engine:
+            background_tasks.add_task(
+                engine.handle_entity_created,
+                "series",
+                request.patient_id,
+                request.study_instance_uid,
+                s.series_instance_uid,
+            )
 
     # Return full study with relations
     logger.info(f"Imported study {request.study_instance_uid} with {len(pacs_series)} series")

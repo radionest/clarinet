@@ -12,15 +12,20 @@ from src.models.patient import PatientBase
 from src.models.record import RecordRead, RecordTypeBase
 from src.models.study import StudyBase
 from src.services.recordflow import (
+    ENTITY_REGISTRY,
     RECORD_REGISTRY,
+    CallFunctionAction,
     ConstantFlowResult,
+    CreateRecordAction,
     FieldComparison,
     FlowCondition,
     FlowRecord,
     FlowResult,
+    InvalidateRecordsAction,
     LogicalComparison,
+    UpdateRecordAction,
 )
-from src.services.recordflow.flow_record import record
+from src.services.recordflow.flow_record import patient, record, series, study
 
 
 def make_record_read(
@@ -52,10 +57,12 @@ def make_record_read(
 
 @pytest.fixture(autouse=True)
 def _clear_registry():
-    """Clear the global record registry before each test."""
+    """Clear the global registries before each test."""
     RECORD_REGISTRY.clear()
+    ENTITY_REGISTRY.clear()
     yield
     RECORD_REGISTRY.clear()
+    ENTITY_REGISTRY.clear()
 
 
 # ─── FlowResult — expression tree ────────────────────────────────────────────
@@ -233,9 +240,9 @@ class TestFlowRecordDSL:
         fr = FlowRecord("test_type")
         fr.invalidate_records("child_a", "child_b", mode="hard")
         assert len(fr.actions) == 1
-        assert fr.actions[0]["type"] == "invalidate_records"
-        assert fr.actions[0]["record_type_names"] == ["child_a", "child_b"]
-        assert fr.actions[0]["mode"] == "hard"
+        assert isinstance(fr.actions[0], InvalidateRecordsAction)
+        assert fr.actions[0].record_type_names == ["child_a", "child_b"]
+        assert fr.actions[0].mode == "hard"
 
     def test_invalidate_records_conditional(self):
         """invalidate_records() after if_() adds to condition.actions."""
@@ -243,8 +250,8 @@ class TestFlowRecordDSL:
         fr.if_(FlowResult("r", ["x"]) == 1).invalidate_records("child", mode="soft")
         assert len(fr.actions) == 0
         assert len(fr.conditions) == 1
-        assert fr.conditions[0].actions[0]["type"] == "invalidate_records"
-        assert fr.conditions[0].actions[0]["mode"] == "soft"
+        assert isinstance(fr.conditions[0].actions[0], InvalidateRecordsAction)
+        assert fr.conditions[0].actions[0].mode == "soft"
 
     def test_invalidate_records_with_callback(self):
         """invalidate_records() stores callback when provided."""
@@ -254,7 +261,8 @@ class TestFlowRecordDSL:
 
         fr = FlowRecord("test_type")
         fr.invalidate_records("child", callback=my_handler)
-        assert fr.actions[0]["callback"] is my_handler
+        assert isinstance(fr.actions[0], InvalidateRecordsAction)
+        assert fr.actions[0].callback is my_handler
 
     def test_is_active_flow_with_trigger(self):
         """is_active_flow() returns True when flow has a trigger."""
@@ -333,8 +341,8 @@ class TestFlowRecordDSL:
         fr = FlowRecord("test_type")
         fr.add_record("new_type")
         assert len(fr.actions) == 1
-        assert fr.actions[0]["type"] == "create_record"
-        assert fr.actions[0]["record_type_name"] == "new_type"
+        assert isinstance(fr.actions[0], CreateRecordAction)
+        assert fr.actions[0].record_type_name == "new_type"
 
     def test_add_record_conditional(self):
         """add_record() after if_() adds to condition.actions."""
@@ -343,7 +351,8 @@ class TestFlowRecordDSL:
         assert len(fr.actions) == 0  # not in unconditional actions
         assert len(fr.conditions) == 1
         assert len(fr.conditions[0].actions) == 1
-        assert fr.conditions[0].actions[0]["record_type_name"] == "new_type"
+        assert isinstance(fr.conditions[0].actions[0], CreateRecordAction)
+        assert fr.conditions[0].actions[0].record_type_name == "new_type"
 
     def test_validate_condition_without_actions_raises(self):
         """validate() raises when a non-else condition has no actions."""
@@ -369,17 +378,17 @@ class TestFlowRecordDSL:
         fr = FlowRecord("test_type")
         fr.call(my_handler)
         assert len(fr.actions) == 1
-        assert fr.actions[0]["type"] == "call_function"
-        assert fr.actions[0]["function"] is my_handler
+        assert isinstance(fr.actions[0], CallFunctionAction)
+        assert fr.actions[0].function is my_handler
 
     def test_update_record_action(self):
         """update_record() adds an update_record action."""
         fr = FlowRecord("test_type")
         fr.update_record("target", status="finished")
         assert len(fr.actions) == 1
-        assert fr.actions[0]["type"] == "update_record"
-        assert fr.actions[0]["record_name"] == "target"
-        assert fr.actions[0]["params"]["status"] == "finished"
+        assert isinstance(fr.actions[0], UpdateRecordAction)
+        assert fr.actions[0].record_name == "target"
+        assert fr.actions[0].status == "finished"
 
 
 # ─── FlowCondition — condition evaluation ─────────────────────────────────────
@@ -415,7 +424,7 @@ class TestFlowCondition:
     def test_add_action(self):
         """add_action() appends to the actions list."""
         condition = FlowCondition(None)
-        action = {"type": "create_record", "record_type_name": "test"}
+        action = CreateRecordAction(record_type_name="test")
         condition.add_action(action)
         assert len(condition.actions) == 1
         assert condition.actions[0] is action
@@ -692,3 +701,170 @@ class TestRecordFlowEngineUnit:
         calls = mock_client.invalidate_record.call_args_list
         invalidated_ids = {call[1]["record_id"] for call in calls}
         assert invalidated_ids == {2, 3}
+
+
+# ─── Entity creation flows — DSL + engine ──────────────────────────────────
+
+
+class TestEntityFlowDSL:
+    """Tests for entity creation flow DSL (series, study, patient factories)."""
+
+    def test_series_factory_creates_flow_with_entity_trigger(self):
+        """series() creates a FlowRecord with entity_trigger='series'."""
+        fr = series()
+        assert isinstance(fr, FlowRecord)
+        assert fr.entity_trigger == "series"
+        assert fr.record_name == "series"
+
+    def test_study_factory_creates_flow_with_entity_trigger(self):
+        """study() creates a FlowRecord with entity_trigger='study'."""
+        fr = study()
+        assert fr.entity_trigger == "study"
+        assert fr.record_name == "study"
+
+    def test_patient_factory_creates_flow_with_entity_trigger(self):
+        """patient() creates a FlowRecord with entity_trigger='patient'."""
+        fr = patient()
+        assert fr.entity_trigger == "patient"
+        assert fr.record_name == "patient"
+
+    def test_entity_factory_populates_entity_registry(self):
+        """Entity factories add flows to ENTITY_REGISTRY, not RECORD_REGISTRY."""
+        series()
+        study()
+        patient()
+        assert len(ENTITY_REGISTRY) == 3
+        assert len(RECORD_REGISTRY) == 0
+
+    def test_on_created_returns_self(self):
+        """on_created() returns self for method chaining."""
+        fr = series()
+        result = fr.on_created()
+        assert result is fr
+
+    def test_entity_flow_chaining(self):
+        """series().on_created().add_record('X') creates correct flow."""
+        fr = series().on_created().add_record("series_markup")
+        assert fr.entity_trigger == "series"
+        assert len(fr.actions) == 1
+        assert isinstance(fr.actions[0], CreateRecordAction)
+        assert fr.actions[0].record_type_name == "series_markup"
+
+    def test_entity_flow_is_active(self):
+        """Entity flow with entity_trigger is considered active."""
+        fr = series()
+        assert fr.is_active_flow() is True
+
+    def test_entity_flow_repr(self):
+        """Entity flow __repr__ shows entity type."""
+        fr = series().on_created().add_record("series_markup")
+        assert repr(fr) == "series().on_created()"
+
+    def test_entity_flow_call_action(self):
+        """Entity flows support .call() for custom functions."""
+
+        def my_handler(**kwargs: object) -> None:
+            pass
+
+        fr = series().on_created().call(my_handler)
+        assert len(fr.actions) == 1
+        assert isinstance(fr.actions[0], CallFunctionAction)
+        assert fr.actions[0].function is my_handler
+
+
+class TestEntityFlowEngine:
+    """Unit tests for entity flow registration and execution in RecordFlowEngine."""
+
+    def test_register_entity_flow_routes_to_entity_flows(self):
+        """register_flow() routes entity flows to engine.entity_flows."""
+        from unittest.mock import AsyncMock
+
+        from src.services.recordflow.engine import RecordFlowEngine
+
+        mock_client = AsyncMock()
+        engine = RecordFlowEngine(mock_client)
+
+        fr = FlowRecord("series", entity_trigger="series")
+        fr.add_record("series_markup")
+        engine.register_flow(fr)
+
+        assert "series" in engine.entity_flows
+        assert len(engine.entity_flows["series"]) == 1
+        assert len(engine.flows) == 0  # not in record flows
+
+    @pytest.mark.asyncio
+    async def test_handle_entity_created_creates_record(self):
+        """handle_entity_created() executes create_record action."""
+        from unittest.mock import AsyncMock
+
+        from src.services.recordflow.engine import RecordFlowEngine
+
+        mock_client = AsyncMock()
+        mock_client.create_record = AsyncMock(
+            return_value=make_record_read("series_markup", record_id=99)
+        )
+
+        engine = RecordFlowEngine(mock_client)
+
+        fr = FlowRecord("series", entity_trigger="series")
+        fr.add_record("series_markup")
+        engine.register_flow(fr)
+
+        await engine.handle_entity_created(
+            "series", patient_id="PAT001", study_uid="1.2.3", series_uid="1.2.3.4"
+        )
+
+        assert mock_client.create_record.call_count == 1
+        call_args = mock_client.create_record.call_args[0][0]
+        assert call_args.record_type_name == "series_markup"
+        assert call_args.patient_id == "PAT001"
+        assert call_args.study_uid == "1.2.3"
+        assert call_args.series_uid == "1.2.3.4"
+
+    @pytest.mark.asyncio
+    async def test_handle_entity_created_no_matching_flows(self):
+        """handle_entity_created() does nothing when no flows match."""
+        from unittest.mock import AsyncMock
+
+        from src.services.recordflow.engine import RecordFlowEngine
+
+        mock_client = AsyncMock()
+        engine = RecordFlowEngine(mock_client)
+
+        # Register a series flow, but trigger for study
+        fr = FlowRecord("series", entity_trigger="series")
+        fr.add_record("series_markup")
+        engine.register_flow(fr)
+
+        await engine.handle_entity_created("study", patient_id="PAT001", study_uid="1.2.3")
+
+        assert mock_client.create_record.call_count == 0
+
+    @pytest.mark.asyncio
+    async def test_handle_entity_created_calls_function(self):
+        """handle_entity_created() executes call_function action with entity kwargs."""
+        from unittest.mock import AsyncMock
+
+        from src.services.recordflow.engine import RecordFlowEngine
+
+        mock_client = AsyncMock()
+        engine = RecordFlowEngine(mock_client)
+
+        call_log: list[dict] = []
+
+        def entity_handler(**kwargs: object) -> None:
+            call_log.append(dict(kwargs))
+
+        fr = FlowRecord("series", entity_trigger="series")
+        fr.call(entity_handler)
+        engine.register_flow(fr)
+
+        await engine.handle_entity_created(
+            "series", patient_id="PAT001", study_uid="1.2.3", series_uid="1.2.3.4"
+        )
+
+        assert len(call_log) == 1
+        assert call_log[0]["patient_id"] == "PAT001"
+        assert call_log[0]["study_uid"] == "1.2.3"
+        assert call_log[0]["series_uid"] == "1.2.3.4"
+        assert call_log[0]["client"] is mock_client
