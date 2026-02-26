@@ -39,7 +39,7 @@ class StorageHandler:
         self.destination_aet = destination_aet
         self.destination_host = destination_host
         self.destination_port = destination_port
-        self.stored_instances: list[Dataset] = []
+        self.stored_instances: dict[str, Dataset] = {}
 
         # Validate configuration
         if mode == StorageMode.DISK and not output_dir:
@@ -100,7 +100,7 @@ class StorageHandler:
             filename = f"{ds.SOPInstanceUID}.dcm"
             filepath = self.output_dir / filename
 
-            ds.save_as(filepath, write_like_original=False)
+            ds.save_as(filepath, enforce_file_format=True)
             logger.info(f"Stored instance to {filepath}")
             return 0x0000  # Success
 
@@ -118,7 +118,7 @@ class StorageHandler:
             Status code
         """
         try:
-            self.stored_instances.append(ds)
+            self.stored_instances[str(ds.SOPInstanceUID)] = ds
             logger.debug(
                 f"Stored instance in memory: {ds.SOPInstanceUID} "
                 f"(total: {len(self.stored_instances)})"
@@ -175,11 +175,11 @@ class StorageHandler:
         finally:
             assoc.release()
 
-    def get_stored_instances(self) -> list[Dataset]:
+    def get_stored_instances(self) -> dict[str, Dataset]:
         """Get all instances stored in memory.
 
         Returns:
-            List of stored datasets
+            Dict of stored datasets keyed by SOPInstanceUID
         """
         return self.stored_instances
 

@@ -608,7 +608,7 @@ async def test_get_study_to_memory_are_datasets(
         study_uid=mr_study.study_instance_uid,
         peer=orthanc_node,
     )
-    for instance in result.instances:
+    for instance in result.instances.values():
         assert isinstance(instance, pydicom.Dataset)
         assert hasattr(instance, "SOPInstanceUID")
 
@@ -639,7 +639,7 @@ async def test_get_study_to_memory_matches_find(
         study_uid=mr_study.study_instance_uid,
         peer=orthanc_node,
     )
-    get_uids = {str(inst.SOPInstanceUID) for inst in result.instances}
+    get_uids = set(result.instances.keys())
 
     assert find_uids == get_uids
 

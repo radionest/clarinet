@@ -17,6 +17,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import src.api.auth_config as auth_config_module
 from src.models.auth import AccessToken
 from src.models.user import User, UserRole, UserRolesLink
 from src.settings import settings
@@ -193,6 +194,10 @@ class TestSessionLifecycle:
         with (
             patch.object(settings, "session_sliding_refresh", True),
             patch.object(settings, "session_idle_timeout_minutes", 0),  # Disable idle timeout
+            patch.object(settings, "session_cache_ttl_seconds", 0),  # Disable session cache
+            patch.object(
+                auth_config_module.settings, "session_cache_ttl_seconds", 0
+            ),  # Disable in auth module too
         ):
             # Login
             response = await client.post(

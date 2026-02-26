@@ -58,6 +58,18 @@ fn study_info_card(study: Study) -> Element(Msg) {
       html.dt([], [html.text("Patient ID:")]),
       html.dd([], [html.text(study.patient_id)]),
     ]),
+    html.div([attribute.class("card-actions")], [
+      html.a(
+        [
+          attribute.href(
+            "/ohif/viewer?StudyInstanceUIDs=" <> study.study_uid,
+          ),
+          attribute.target("_blank"),
+          attribute.class("btn btn-primary"),
+        ],
+        [html.text("Open in Viewer")],
+      ),
+    ]),
   ])
 }
 

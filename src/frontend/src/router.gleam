@@ -11,6 +11,7 @@ pub type Route {
   Register
   Studies
   StudyDetail(id: String)
+  StudyViewer(id: String)
   Records
   RecordDetail(id: String)
   RecordNew
@@ -36,6 +37,7 @@ pub fn route_to_path(route: Route) -> String {
     Register -> "/register"
     Studies -> "/studies"
     StudyDetail(id) -> "/studies/" <> id
+    StudyViewer(id) -> "/studies/" <> id <> "/viewer"
     Records -> "/records"
     RecordDetail(id) -> "/records/" <> id
     RecordNew -> "/records/new"
@@ -67,6 +69,7 @@ pub fn parse_route(uri: Uri) -> Route {
     ["login"] -> Login
     ["register"] -> Register
     ["studies"] -> Studies
+    ["studies", id, "viewer"] -> StudyViewer(id)
     ["studies", id] -> StudyDetail(id)
     ["records"] -> Records
     ["records", "new"] -> RecordNew
@@ -99,7 +102,18 @@ pub fn requires_auth(route: Route) -> Bool {
 // Check if route requires admin role
 pub fn requires_admin_role(route: Route) -> Bool {
   case route {
-    Studies | StudyDetail(_) | SeriesDetail(_) | Patients | PatientDetail(_) | PatientNew | Users | UserProfile(_) | AdminDashboard | AdminRecordTypes | AdminRecordTypeDetail(_) | AdminRecordTypeEdit(_) -> True
+    Studies
+    | StudyDetail(_)
+    | SeriesDetail(_)
+    | Patients
+    | PatientDetail(_)
+    | PatientNew
+    | Users
+    | UserProfile(_)
+    | AdminDashboard
+    | AdminRecordTypes
+    | AdminRecordTypeDetail(_)
+    | AdminRecordTypeEdit(_) -> True
     _ -> False
   }
 }
@@ -112,6 +126,7 @@ pub fn get_route_title(route: Route) -> String {
     Register -> "Register"
     Studies -> "Studies"
     StudyDetail(_) -> "Study Details"
+    StudyViewer(_) -> "Study Viewer"
     Records -> "Records"
     RecordDetail(_) -> "Record Details"
     RecordNew -> "New Record"
@@ -136,11 +151,14 @@ fn section(route: Route) -> String {
     Home -> "home"
     Login -> "login"
     Register -> "register"
-    Studies | StudyDetail(_) | SeriesDetail(_) -> "studies"
+    Studies | StudyDetail(_) | StudyViewer(_) | SeriesDetail(_) -> "studies"
     Records | RecordDetail(_) | RecordNew | RecordTypeDesign(_) -> "records"
     Patients | PatientDetail(_) | PatientNew -> "patients"
     Users | UserProfile(_) -> "users"
-    AdminDashboard | AdminRecordTypes | AdminRecordTypeDetail(_) | AdminRecordTypeEdit(_) -> "admin"
+    AdminDashboard
+    | AdminRecordTypes
+    | AdminRecordTypeDetail(_)
+    | AdminRecordTypeEdit(_) -> "admin"
     NotFound -> "notfound"
   }
 }

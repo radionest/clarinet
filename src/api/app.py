@@ -18,6 +18,7 @@ from src.api.exception_handlers import setup_exception_handlers
 from src.api.routers import admin as admin
 from src.api.routers import auth as auth
 from src.api.routers import dicom as dicom
+from src.api.routers import dicomweb as dicomweb
 from src.api.routers import record as record
 from src.api.routers import slicer  # slicer doesn't use database, no async version needed,
 from src.api.routers import study as study
@@ -98,11 +99,30 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         await session_cleanup_service.start()
         logger.info("Session cleanup service started")
 
+    # Initialize DICOMweb cache singleton
+    if settings.dicomweb_enabled:
+        from pathlib import Path as _CachePath
+
+        from src.services.dicomweb.cache import DicomWebCache
+
+        cache_dir = _CachePath(settings.storage_path) / "dicomweb_cache"
+        app.state.dicomweb_cache = DicomWebCache(
+            base_dir=cache_dir,
+            ttl_hours=settings.dicomweb_cache_ttl_hours,
+            max_size_gb=settings.dicomweb_cache_max_size_gb,
+            memory_ttl_minutes=settings.dicomweb_memory_cache_ttl_minutes,
+        )
+        logger.info("DICOMweb cache initialized (two-tier: memory + disk)")
+
     logger.info("Application startup complete")
 
     try:
         yield
     finally:
+        # Shutdown DICOMweb cache (flush pending disk writes)
+        if settings.dicomweb_enabled and hasattr(app.state, "dicomweb_cache"):
+            await app.state.dicomweb_cache.shutdown()
+
         if settings.session_cleanup_enabled:
             await session_cleanup_service.stop()
             logger.info("Session cleanup service stopped")
@@ -165,6 +185,25 @@ def create_app(root_path: str = "/") -> FastAPI:
     app.include_router(admin.router, prefix="/api/admin", tags=["Admin"])
     app.include_router(dicom.router, prefix="/api/dicom", tags=["DICOM"])
 
+    # Mount DICOMweb proxy router (conditional on settings)
+    if settings.dicomweb_enabled:
+        app.include_router(dicomweb.router, prefix="/dicom-web", tags=["DICOMweb"])
+        logger.info("DICOMweb proxy enabled at /dicom-web")
+
+    # OHIF Viewer directory (checked at request time for SPA routing)
+    from pathlib import Path as _Path
+
+    ohif_dir = _Path(__file__).parent.parent / "ohif"
+    if settings.ohif_enabled:
+        ohif_index = ohif_dir / "index.html"
+        if ohif_index.exists():
+            logger.info(f"OHIF Viewer enabled at /ohif (serving from {ohif_dir})")
+        else:
+            logger.warning(
+                "OHIF enabled but index.html not found. "
+                "Run 'make ohif-build' to download OHIF Viewer."
+            )
+
     # Serve frontend if enabled
     if settings.frontend_enabled:
         # Find first existing static directory
@@ -186,11 +225,29 @@ def create_app(root_path: str = "/") -> FastAPI:
         @app.get("/{full_path:path}")
         async def serve_spa(full_path: str) -> FileResponse:
             """Serve SPA for all non-API routes."""
-            # Skip API routes
-            if full_path.startswith("api/"):
+            # Skip API and DICOMweb routes
+            if full_path.startswith(("api/", "dicom-web/")):
                 from fastapi import HTTPException
 
-                raise HTTPException(status_code=404, detail="API endpoint not found")
+                raise HTTPException(status_code=404, detail="Not found")
+
+            # OHIF Viewer SPA routing: serve static files or fall back to index.html
+            if full_path.startswith("ohif/"):
+                if settings.ohif_enabled and ohif_dir.exists():
+                    # Try to serve the exact static file
+                    ohif_file = ohif_dir / full_path.removeprefix("ohif/")
+                    if ohif_file.exists() and ohif_file.is_file():
+                        return FileResponse(ohif_file)
+                    # SPA fallback — serve index.html for client-side routing
+                    ohif_idx = ohif_dir / "index.html"
+                    if ohif_idx.exists():
+                        return FileResponse(ohif_idx)
+                from fastapi import HTTPException
+
+                raise HTTPException(
+                    status_code=404,
+                    detail="OHIF Viewer not installed. Run 'make ohif-build'.",
+                )
 
             # Check if static directory exists
             if not static_dir:

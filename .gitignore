@@ -24,3 +24,4 @@ REFACTOR.md
 examples/demo/clarinet_demo.db
 examples/demo/data/logs/clarinet.log
 
+**/dicomweb_cache

@@ -62,6 +62,11 @@ frontend-clean: ## Clean frontend build artifacts
 	@rm -rf src/frontend/build
 	@rm -rf dist
 
+.PHONY: ohif-build
+ohif-build: ## Download and install OHIF Viewer
+	@echo "Building OHIF Viewer..."
+	@bash scripts/build_ohif.sh
+
 .PHONY: run-dev
 run-dev: ## Run development server with frontend
 	@echo "Starting development server with frontend..."

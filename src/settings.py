@@ -133,6 +133,20 @@ class Settings(BaseSettings):
     dicom_ip: str | None = None
     dicom_max_pdu: int = 16384
 
+    # DICOM settings (remote PACS)
+    dicom_pacs_aet: str = "ORTHANC"
+    dicom_pacs_host: str = "localhost"
+    dicom_pacs_port: int = 4242
+
+    # DICOMweb proxy settings
+    dicomweb_enabled: bool = True
+    dicomweb_cache_ttl_hours: int = 24
+    dicomweb_cache_max_size_gb: float = 10.0
+    dicomweb_memory_cache_ttl_minutes: int = 30
+
+    # OHIF viewer settings
+    ohif_enabled: bool = True
+
     # Security settings
     secret_key: str = "insecure-change-this-key-in-production"  # For session signing
 
@@ -160,6 +174,7 @@ class Settings(BaseSettings):
     session_concurrent_limit: int = 5  # Max sessions per user (0 = unlimited)
     session_ip_check: bool = False  # Validate IP consistency
     session_secure_cookie: bool = True  # HTTPS only in production
+    session_cache_ttl_seconds: int = 30  # In-memory session validation cache TTL
 
     # RecordFlow settings
     recordflow_enabled: bool = False  # Enable RecordFlow workflow engine

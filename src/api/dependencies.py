@@ -23,6 +23,7 @@ from src.repositories.user_repository import UserRepository, UserRoleRepository
 from src.services.admin_service import AdminService
 from src.services.dicom import DicomClient
 from src.services.dicom.models import DicomNode
+from src.services.dicomweb import DicomWebCache, DicomWebProxyService
 from src.services.slicer.service import SlicerService
 from src.services.study_service import StudyService
 from src.services.user_service import UserService
@@ -192,3 +193,26 @@ def get_pacs_node() -> DicomNode:
 
 DicomClientDep = Annotated[DicomClient, Depends(get_dicom_client)]
 PacsNodeDep = Annotated[DicomNode, Depends(get_pacs_node)]
+
+
+# DICOMweb proxy dependencies
+
+
+def get_dicomweb_cache(request: Request) -> DicomWebCache:
+    """Get singleton DICOMweb cache from app state."""
+    cache: DicomWebCache = request.app.state.dicomweb_cache
+    return cache
+
+
+def get_dicomweb_proxy_service(
+    request: Request,
+    client: DicomClientDep,
+    pacs: PacsNodeDep,
+) -> DicomWebProxyService:
+    """Get DICOMweb proxy service instance with singleton cache."""
+    cache = get_dicomweb_cache(request)
+    return DicomWebProxyService(client=client, pacs=pacs, cache=cache)
+
+
+DicomWebCacheDep = Annotated[DicomWebCache, Depends(get_dicomweb_cache)]
+DicomWebProxyServiceDep = Annotated[DicomWebProxyService, Depends(get_dicomweb_proxy_service)]

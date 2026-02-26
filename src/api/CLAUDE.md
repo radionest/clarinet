@@ -21,6 +21,9 @@ RecordTypeRepositoryDep
 
 # Services
 UserServiceDep, StudyServiceDep
+
+# DICOMweb proxy
+DicomWebCacheDep, DicomWebProxyServiceDep
 ```
 
 ### Factory pattern for new repos/services
@@ -67,9 +70,25 @@ Engine is accessed via `request.app.state.recordflow_engine` (may be `None` if d
 Direct invalidation endpoint:
 - `POST /records/{id}/invalidate` — body: `{mode, source_record_id, reason}`
 
+## DICOMweb Proxy Router (dicomweb.py)
+
+Mounted at `/dicom-web` (outside `/api` prefix for OHIF compatibility).
+Conditional on `settings.dicomweb_enabled`. All endpoints require `CurrentUserDep`.
+
+| Endpoint | DICOMweb | Backend |
+|---|---|---|
+| `GET /studies` | QIDO-RS | C-FIND Study |
+| `GET /studies/{uid}/metadata` | WADO-RS | C-FIND series → C-GET all → metadata |
+| `GET /studies/{uid}/series` | QIDO-RS | C-FIND Series |
+| `GET /studies/{uid}/series/{uid}/instances` | QIDO-RS | C-FIND Image |
+| `GET /studies/{uid}/series/{uid}/metadata` | WADO-RS | C-GET → cache → metadata |
+| `GET /.../instances/{uid}/frames/{frames}` | WADO-RS | cached .dcm → pixel data |
+
+OHIF static files served at `/ohif` (conditional on `settings.ohif_enabled`).
+
 ## SPA Frontend Routing
 
 When `frontend_enabled=True`, catch-all `/{full_path:path}` serves:
 - Static file if exists in `settings.static_directories`
 - `index.html` otherwise (SPA client-side routing)
-- Skips paths starting with `api/`
+- Skips paths starting with `api/`, `dicom-web/`, or `ohif/`

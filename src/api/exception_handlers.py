@@ -143,3 +143,11 @@ def setup_exception_handlers(app: FastAPI) -> None:
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content={"detail": str(exc)},
         )
+
+    @app.exception_handler(FileNotFoundError)
+    async def handle_file_not_found(_: Request, exc: FileNotFoundError) -> JSONResponse:
+        """Convert FileNotFoundError to 404 response."""
+        return JSONResponse(
+            status_code=status.HTTP_404_NOT_FOUND,
+            content={"detail": str(exc) if str(exc) else "Resource not found"},
+        )

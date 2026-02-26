@@ -954,6 +954,7 @@ fn view_content(model: Model) -> Element(Msg) {
     router.Register -> register.view(model)
     router.Studies -> studies_list.view(model)
     router.StudyDetail(id) -> study_detail.view(model, id)
+    router.StudyViewer(id) -> study_detail.view(model, id)
     router.SeriesDetail(id) -> series_detail.view(model, id)
     router.Records -> records_list.view(model)
     router.RecordDetail(id) -> record_execute.view(model, id)
@@ -995,6 +996,8 @@ fn load_route_data(model: Model, route: Route) -> Effect(Msg) {
         dispatch_msg(store.LoadStudyDetail(id)),
         dispatch_msg(store.LoadRecords),
       ])
+    router.StudyViewer(id), Some(models.User(is_superuser: True, ..)) ->
+      dispatch_msg(store.LoadStudyDetail(id))
     router.SeriesDetail(id), Some(models.User(is_superuser: True, ..)) ->
       dispatch_msg(store.LoadSeriesDetail(id))
     router.Records, _ -> dispatch_msg(store.LoadRecords)

@@ -3,9 +3,10 @@ Fastapi-users configuration for session-based authentication.
 Following KISS principle - minimal configuration.
 """
 
+import time
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, ClassVar
 from uuid import UUID, uuid4
 
 from fastapi import Depends, Request, Response
@@ -85,6 +86,9 @@ cookie_transport = CookieTransport(
 class DatabaseStrategy(Strategy[User, UUID]):
     """Enhanced database strategy with session lifecycle management."""
 
+    _user_cache: ClassVar[dict[str, tuple[User, float]]] = {}
+    _cache_max_size: ClassVar[int] = 1000
+
     def __init__(self, session: AsyncSession, request: Request | None = None) -> None:
         """Initialize strategy with database session and optional request."""
         self.session = session
@@ -132,10 +136,17 @@ class DatabaseStrategy(Strategy[User, UUID]):
     async def read_token(
         self, token: str | None, user_manager: BaseUserManager[User, UUID]
     ) -> User | None:  # type: ignore[override]
-        """Validate token with comprehensive checks."""
+        """Validate token with comprehensive checks and in-memory caching."""
         del user_manager  # Unused but required by interface
         if not token:
             return None
+
+        # Check in-memory cache for recent validations
+        ttl = settings.session_cache_ttl_seconds
+        if ttl > 0 and token in self._user_cache:
+            cached_user, cached_at = self._user_cache[token]
+            if time.monotonic() - cached_at < ttl:
+                return cached_user
 
         # Query token with expiration check
         stmt = select(AccessToken).where(
@@ -147,6 +158,7 @@ class DatabaseStrategy(Strategy[User, UUID]):
 
         if not access_token:
             logger.debug(f"Token {token[:8]}... not found or expired")
+            self._user_cache.pop(token, None)
             return None
 
         # Optional IP validation
@@ -169,6 +181,7 @@ class DatabaseStrategy(Strategy[User, UUID]):
             max_idle = timedelta(minutes=settings.session_idle_timeout_minutes)
             if idle_duration > max_idle:
                 logger.info(f"Session {token[:8]}... expired due to inactivity")
+                self._user_cache.pop(token, None)
                 return None
 
         # Update last accessed and optionally refresh
@@ -208,12 +221,23 @@ class DatabaseStrategy(Strategy[User, UUID]):
 
         if not user or not user.is_active:
             logger.warning(f"User {access_token.user_id} not found or inactive")
+            self._user_cache.pop(token, None)
             return None
+
+        # Cache the validated user (detach from SQLAlchemy session first)
+        if ttl > 0:
+            self.session.expunge(user)
+            # Evict oldest entries if cache is full
+            if len(self._user_cache) >= self._cache_max_size:
+                oldest_key = min(self._user_cache, key=lambda k: self._user_cache[k][1])
+                del self._user_cache[oldest_key]
+            self._user_cache[token] = (user, time.monotonic())
 
         return user  # type: ignore[return-value]
 
     async def destroy_token(self, token: str, user: User) -> None:
         """Remove session token on logout."""
+        self._user_cache.pop(token, None)
         stmt = delete(AccessToken).where(AccessToken.token == token)  # type: ignore[arg-type]
         result: CursorResult[Any] = await self.session.execute(stmt)  # type: ignore[assignment]
         await self.session.commit()

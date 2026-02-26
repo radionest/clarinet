@@ -1,0 +1,5 @@
+# OHIF Viewer static files — downloaded via `make ohif-build`
+# Only app-config.js (our custom config) and this .gitignore are tracked
+*
+!.gitignore
+!app-config.js

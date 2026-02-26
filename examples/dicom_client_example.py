@@ -110,7 +110,7 @@ async def example_retrieve_to_memory() -> None:
     print(f"Retrieved {len(result.instances)} instances to memory")
 
     # Process instances
-    for ds in result.instances:
+    for ds in result.instances.values():
         print(f"  - {ds.SOPInstanceUID}: {ds.Modality}")
 
 

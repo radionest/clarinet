@@ -346,6 +346,60 @@ class DicomClient:
         )
         return result
 
+    async def get_series_to_memory(
+        self,
+        study_uid: str,
+        series_uid: str,
+        peer: DicomNode,
+        patient_id: str | None = None,
+        timeout: float = 300.0,  # noqa: ASYNC109 — DICOM association timeout, not asyncio
+    ) -> RetrieveResult:
+        """Retrieve series to memory.
+
+        Args:
+            study_uid: Study instance UID
+            series_uid: Series instance UID
+            peer: DICOM peer node
+            patient_id: Optional patient ID for query
+            timeout: Operation timeout
+
+        Returns:
+            Retrieve result with instances in memory (dict keyed by SOPInstanceUID)
+
+        Raises:
+            CONFLICT: If association fails
+        """
+        logger.info(f"Retrieving series {series_uid} to memory")
+
+        config = self._create_association_config(
+            called_aet=peer.aet,
+            peer_host=peer.host,
+            peer_port=peer.port,
+            timeout=timeout,
+        )
+
+        request = RetrieveRequest(
+            level=QueryRetrieveLevel.SERIES,
+            study_instance_uid=study_uid,
+            series_instance_uid=series_uid,
+            patient_id=patient_id,
+        )
+
+        storage = StorageConfig(mode=StorageMode.MEMORY)
+
+        result = await asyncio.to_thread(
+            self._operations.get_study,
+            config,
+            request,
+            storage,
+        )
+
+        logger.info(
+            f"Retrieved series to memory: {result.num_completed} instances, "
+            f"{result.num_failed} failed"
+        )
+        return result
+
     async def move_study(
         self,
         study_uid: str,

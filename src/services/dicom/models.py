@@ -135,7 +135,7 @@ class RetrieveResult(BaseModel):
     num_failed: int = 0
     num_warning: int = 0
     failed_sop_instances: list[str] = Field(default_factory=list)
-    instances: list[Any] = Field(default_factory=list)  # For C-GET with memory mode
+    instances: dict[str, Any] = Field(default_factory=dict)  # For C-GET with memory mode
 
 
 class DicomNode(BaseModel):
