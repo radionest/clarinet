@@ -7,6 +7,7 @@ middleware, and static files.
 
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -37,8 +38,6 @@ from src.utils.logger import logger
 
 async def _init_recordflow(app: FastAPI) -> None:
     """Initialize RecordFlow engine and attach to app state."""
-    from pathlib import Path
-
     from src.client import ClarinetClient
     from src.services.recordflow import RecordFlowEngine, discover_and_load_flows
 
@@ -101,11 +100,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     # Initialize DICOMweb cache singleton
     if settings.dicomweb_enabled:
-        from pathlib import Path as _CachePath
-
         from src.services.dicomweb.cache import DicomWebCache
 
-        cache_dir = _CachePath(settings.storage_path) / "dicomweb_cache"
+        cache_dir = Path(settings.storage_path) / "dicomweb_cache"
         app.state.dicomweb_cache = DicomWebCache(
             base_dir=cache_dir,
             ttl_hours=settings.dicomweb_cache_ttl_hours,
@@ -202,9 +199,7 @@ def create_app(root_path: str = "/") -> FastAPI:
         logger.info("DICOMweb proxy enabled at /dicom-web")
 
     # OHIF Viewer directory (checked at request time for SPA routing)
-    from pathlib import Path as _Path
-
-    ohif_dir = _Path(__file__).parent.parent / "ohif"
+    ohif_dir = Path(__file__).parent.parent / "ohif"
     if settings.ohif_enabled:
         ohif_index = ohif_dir / "index.html"
         if ohif_index.exists():

@@ -8,12 +8,11 @@ from src.services.dicomweb.converter import (
     series_result_to_dicom_json,
     study_result_to_dicom_json,
 )
-from src.services.dicomweb.models import CachedSeries, MemoryCachedSeries
+from src.services.dicomweb.models import MemoryCachedSeries
 from src.services.dicomweb.multipart import build_multipart_response, extract_frames_from_dataset
 from src.services.dicomweb.service import DicomWebProxyService
 
 __all__ = [
-    "CachedSeries",
     "DicomWebCache",
     "DicomWebCacheCleanupService",
     "DicomWebProxyService",

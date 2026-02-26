@@ -15,6 +15,11 @@ router = APIRouter()
 DICOM_JSON_CONTENT_TYPE = "application/dicom+json"
 
 
+def _dicomweb_base_url(request: Request) -> str:
+    """Build the DICOMweb base URL from the incoming request."""
+    return str(request.base_url).rstrip("/") + "/dicom-web"
+
+
 @router.get("/studies")
 async def search_studies(
     request: Request,
@@ -54,7 +59,7 @@ async def retrieve_study_metadata(
     Returns:
         DICOM JSON array of instance metadata with BulkDataURIs
     """
-    base_url = str(request.base_url).rstrip("/") + "/dicom-web"
+    base_url = _dicomweb_base_url(request)
     metadata = await service.retrieve_study_metadata(study_uid, base_url)
     return JSONResponse(content=metadata, media_type=DICOM_JSON_CONTENT_TYPE)
 
@@ -130,7 +135,7 @@ async def retrieve_series_metadata(
     Returns:
         DICOM JSON array of instance metadata with BulkDataURIs
     """
-    base_url = str(request.base_url).rstrip("/") + "/dicom-web"
+    base_url = _dicomweb_base_url(request)
     metadata = await service.retrieve_series_metadata(study_uid, series_uid, base_url)
     return JSONResponse(content=metadata, media_type=DICOM_JSON_CONTENT_TYPE)
 

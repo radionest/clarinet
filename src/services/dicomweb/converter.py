@@ -28,6 +28,18 @@ def _tag_value(vr: str, value: Any) -> dict[str, Any]:
     return entry
 
 
+def _fields_to_dicom_json(fields: list[tuple[str, str, Any]]) -> dict[str, Any]:
+    """Convert a list of (tag, VR, value) tuples to DICOM JSON format.
+
+    Args:
+        fields: List of (DICOM tag, VR, value) tuples; None values are skipped
+
+    Returns:
+        DICOM JSON dict keyed by tag
+    """
+    return {tag: _tag_value(vr, val) for tag, vr, val in fields if val is not None}
+
+
 def study_result_to_dicom_json(result: StudyResult) -> dict[str, Any]:
     """Convert a StudyResult to DICOM JSON format.
 
@@ -37,19 +49,24 @@ def study_result_to_dicom_json(result: StudyResult) -> dict[str, Any]:
     Returns:
         DICOM JSON dict keyed by tag
     """
-    fields: list[tuple[str, str, Any]] = [
-        ("0020000D", "UI", result.study_instance_uid),
-        ("00100020", "LO", result.patient_id),
-        ("00100010", "PN", {"Alphabetic": result.patient_name} if result.patient_name else None),
-        ("00080020", "DA", result.study_date),
-        ("00080030", "TM", result.study_time),
-        ("00081030", "LO", result.study_description),
-        ("00080050", "SH", result.accession_number),
-        ("00080061", "CS", result.modalities_in_study),
-        ("00201206", "IS", result.number_of_study_related_series),
-        ("00201208", "IS", result.number_of_study_related_instances),
-    ]
-    return {tag: _tag_value(vr, val) for tag, vr, val in fields if val is not None}
+    return _fields_to_dicom_json(
+        [
+            ("0020000D", "UI", result.study_instance_uid),
+            ("00100020", "LO", result.patient_id),
+            (
+                "00100010",
+                "PN",
+                {"Alphabetic": result.patient_name} if result.patient_name else None,
+            ),
+            ("00080020", "DA", result.study_date),
+            ("00080030", "TM", result.study_time),
+            ("00081030", "LO", result.study_description),
+            ("00080050", "SH", result.accession_number),
+            ("00080061", "CS", result.modalities_in_study),
+            ("00201206", "IS", result.number_of_study_related_series),
+            ("00201208", "IS", result.number_of_study_related_instances),
+        ]
+    )
 
 
 def series_result_to_dicom_json(result: SeriesResult) -> dict[str, Any]:
@@ -61,15 +78,16 @@ def series_result_to_dicom_json(result: SeriesResult) -> dict[str, Any]:
     Returns:
         DICOM JSON dict keyed by tag
     """
-    fields: list[tuple[str, str, Any]] = [
-        ("0020000D", "UI", result.study_instance_uid),
-        ("0020000E", "UI", result.series_instance_uid),
-        ("00080060", "CS", result.modality),
-        ("00200011", "IS", result.series_number),
-        ("0008103E", "LO", result.series_description),
-        ("00201209", "IS", result.number_of_series_related_instances),
-    ]
-    return {tag: _tag_value(vr, val) for tag, vr, val in fields if val is not None}
+    return _fields_to_dicom_json(
+        [
+            ("0020000D", "UI", result.study_instance_uid),
+            ("0020000E", "UI", result.series_instance_uid),
+            ("00080060", "CS", result.modality),
+            ("00200011", "IS", result.series_number),
+            ("0008103E", "LO", result.series_description),
+            ("00201209", "IS", result.number_of_series_related_instances),
+        ]
+    )
 
 
 def image_result_to_dicom_json(result: ImageResult) -> dict[str, Any]:
@@ -81,16 +99,17 @@ def image_result_to_dicom_json(result: ImageResult) -> dict[str, Any]:
     Returns:
         DICOM JSON dict keyed by tag
     """
-    fields: list[tuple[str, str, Any]] = [
-        ("0020000D", "UI", result.study_instance_uid),
-        ("0020000E", "UI", result.series_instance_uid),
-        ("00080018", "UI", result.sop_instance_uid),
-        ("00080016", "UI", result.sop_class_uid),
-        ("00200013", "IS", result.instance_number),
-        ("00280010", "US", result.rows),
-        ("00280011", "US", result.columns),
-    ]
-    return {tag: _tag_value(vr, val) for tag, vr, val in fields if val is not None}
+    return _fields_to_dicom_json(
+        [
+            ("0020000D", "UI", result.study_instance_uid),
+            ("0020000E", "UI", result.series_instance_uid),
+            ("00080018", "UI", result.sop_instance_uid),
+            ("00080016", "UI", result.sop_class_uid),
+            ("00200013", "IS", result.instance_number),
+            ("00280010", "US", result.rows),
+            ("00280011", "US", result.columns),
+        ]
+    )
 
 
 def _skip_bulk_data(_data_element: DataElement) -> str:

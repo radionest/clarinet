@@ -3,7 +3,7 @@
 import asyncio
 from typing import Any
 
-import pydicom
+from pydicom import Dataset
 
 from src.services.dicom.client import DicomClient
 from src.services.dicom.models import (
@@ -168,23 +168,20 @@ class DicomWebProxyService:
         Returns:
             List of DICOM JSON metadata objects for all instances in the study
         """
-        series_results = await self.search_series(study_uid, {})
-
-        series_uids: list[str] = []
-        for series_json in series_results:
-            series_uid = series_json.get("0020000E", {}).get("Value", [None])[0]
-            if series_uid:
-                series_uids.append(series_uid)
+        results = await self._client.find_series(
+            query=SeriesQuery(study_instance_uid=study_uid), peer=self._pacs
+        )
+        series_uids = [r.series_instance_uid for r in results if r.series_instance_uid]
 
         if not series_uids:
             return []
 
         # Retrieve metadata for all series in parallel
         tasks = [self.retrieve_series_metadata(study_uid, uid, base_url) for uid in series_uids]
-        results = await asyncio.gather(*tasks)
+        all_results = await asyncio.gather(*tasks)
 
         all_metadata: list[dict[str, Any]] = []
-        for series_meta in results:
+        for series_meta in all_results:
             all_metadata.extend(series_meta)
 
         return all_metadata
@@ -257,7 +254,7 @@ class DicomWebProxyService:
 
     async def _read_instance_from_disk(
         self, study_uid: str, series_uid: str, instance_uid: str
-    ) -> Any | None:
+    ) -> Dataset | None:
         """Fallback: read a single instance from disk cache.
 
         Args:
@@ -268,12 +265,6 @@ class DicomWebProxyService:
         Returns:
             pydicom Dataset or None if not found on disk
         """
-
-        def _read() -> Any | None:
-            cache_dir = self._cache._series_dir(study_uid, series_uid)
-            dcm_path = cache_dir / f"{instance_uid}.dcm"
-            if dcm_path.exists():
-                return pydicom.dcmread(dcm_path)
-            return None
-
-        return await asyncio.to_thread(_read)
+        return await asyncio.to_thread(
+            self._cache.read_instance_from_disk, study_uid, series_uid, instance_uid
+        )

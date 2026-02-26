@@ -8,7 +8,7 @@ from a traditional PACS (Orthanc) that only supports DICOM Q/R.
 
 ```
 dicomweb/
-  models.py      # CachedSeries (disk), MemoryCachedSeries (in-memory with __slots__)
+  models.py      # MemoryCachedSeries (in-memory with __slots__)
   converter.py   # DICOM JSON conversion (StudyResult/SeriesResult/ImageResult → tags)
   multipart.py   # WADO-RS multipart/related response builder + frame extraction
   cache.py       # DicomWebCache — two-tier cache (memory + disk) with background persistence

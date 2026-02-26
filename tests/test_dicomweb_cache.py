@@ -19,6 +19,7 @@ import pytest
 from cachetools import TTLCache
 
 from src.services.dicomweb.cache import DicomWebCache
+from tests.conftest import create_disk_series
 
 
 def _make_instances(count: int = 3) -> dict[str, Any]:
@@ -261,22 +262,6 @@ class TestBackgroundDiskWriteSafety:
             await cache._write_to_disk_background("study1", "series1", instances)
 
 
-def _create_disk_series(
-    cache_dir: Path, study_uid: str, series_uid: str, cached_at: float, file_size: int = 1024
-) -> Path:
-    """Create a fake cached series on disk with a .cached_at marker and a dummy file."""
-    series_dir = cache_dir / study_uid / series_uid
-    series_dir.mkdir(parents=True, exist_ok=True)
-
-    marker = series_dir / ".cached_at"
-    marker.write_text(str(cached_at))
-
-    dummy = series_dir / "1.2.3.dcm"
-    dummy.write_bytes(b"\x00" * file_size)
-
-    return series_dir
-
-
 class TestEvictExpired:
     """Test evict_expired() removes expired entries and preserves fresh ones."""
 
@@ -285,7 +270,7 @@ class TestEvictExpired:
         cache = DicomWebCache(base_dir=tmp_cache_dir, ttl_hours=1)
 
         # Create an expired entry (2 hours old)
-        _create_disk_series(tmp_cache_dir, "study1", "series_old", cached_at=time.time() - 7200)
+        create_disk_series(tmp_cache_dir, "study1", "series_old", cached_at=time.time() - 7200)
 
         removed = cache.evict_expired()
         assert removed == 1
@@ -295,7 +280,7 @@ class TestEvictExpired:
         """Fresh series dirs should not be removed."""
         cache = DicomWebCache(base_dir=tmp_cache_dir, ttl_hours=24)
 
-        _create_disk_series(tmp_cache_dir, "study1", "series_fresh", cached_at=time.time())
+        create_disk_series(tmp_cache_dir, "study1", "series_fresh", cached_at=time.time())
 
         removed = cache.evict_expired()
         assert removed == 0
@@ -305,7 +290,7 @@ class TestEvictExpired:
         """After removing all series in a study, the empty study dir should be removed."""
         cache = DicomWebCache(base_dir=tmp_cache_dir, ttl_hours=1)
 
-        _create_disk_series(tmp_cache_dir, "study1", "series_old", cached_at=time.time() - 7200)
+        create_disk_series(tmp_cache_dir, "study1", "series_old", cached_at=time.time() - 7200)
 
         cache.evict_expired()
         assert not (tmp_cache_dir / "study1").exists()
@@ -325,13 +310,13 @@ class TestEvictBySize:
         cache = DicomWebCache(base_dir=tmp_cache_dir, ttl_hours=24, max_size_gb=0)
         cache._max_size_bytes = 2048  # Override for testing
 
-        _create_disk_series(
+        create_disk_series(
             tmp_cache_dir, "study1", "series_oldest", cached_at=100.0, file_size=1024
         )
-        _create_disk_series(
+        create_disk_series(
             tmp_cache_dir, "study1", "series_middle", cached_at=200.0, file_size=1024
         )
-        _create_disk_series(
+        create_disk_series(
             tmp_cache_dir, "study1", "series_newest", cached_at=300.0, file_size=1024
         )
 
@@ -347,7 +332,7 @@ class TestEvictBySize:
         """When total size is under the limit, nothing should be removed."""
         cache = DicomWebCache(base_dir=tmp_cache_dir, ttl_hours=24, max_size_gb=10.0)
 
-        _create_disk_series(
+        create_disk_series(
             tmp_cache_dir, "study1", "series1", cached_at=time.time(), file_size=1024
         )
 
@@ -370,7 +355,7 @@ class TestEvictBySize:
         cache = DicomWebCache(base_dir=tmp_cache_dir, ttl_hours=24, max_size_gb=0)
         cache._max_size_bytes = 512
 
-        _create_disk_series(
+        create_disk_series(
             tmp_cache_dir, "study_lonely", "series_only", cached_at=100.0, file_size=1024
         )
 

@@ -3,6 +3,7 @@
 import asyncio
 import shutil
 import time
+from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -12,7 +13,7 @@ from pydicom import Dataset
 
 from src.services.dicom.client import DicomClient
 from src.services.dicom.models import DicomNode
-from src.services.dicomweb.models import CachedSeries, MemoryCachedSeries
+from src.services.dicomweb.models import MemoryCachedSeries
 from src.utils.logger import logger
 
 
@@ -268,77 +269,32 @@ class DicomWebCache:
 
             return entry
 
-    def get_series(self, study_uid: str, series_uid: str) -> CachedSeries | None:
-        """Get cached series from disk if it exists and is not expired.
-
-        Kept for backward compatibility.
-
-        Args:
-            study_uid: Study Instance UID
-            series_uid: Series Instance UID
-
-        Returns:
-            CachedSeries if valid cache exists, None otherwise
-        """
-        series_dir = self._series_dir(study_uid, series_uid)
-        marker = series_dir / ".cached_at"
-
-        if not marker.exists():
-            return None
-
-        cached_at = float(marker.read_text().strip())
-        if time.time() - cached_at > self._ttl_seconds:
-            logger.debug(f"Cache expired for series {series_uid}")
-            shutil.rmtree(series_dir, ignore_errors=True)
-            return None
-
-        instance_paths = sorted(series_dir.glob("*.dcm"))
-        if not instance_paths:
-            return None
-
-        return CachedSeries(
-            study_uid=study_uid,
-            series_uid=series_uid,
-            cache_dir=series_dir,
-            instance_paths=instance_paths,
-            cached_at=cached_at,
-        )
-
-    def put_series(self, study_uid: str, series_uid: str) -> CachedSeries:
-        """Mark a series directory as cached (after C-GET has written files).
+    def read_instance_from_disk(
+        self, study_uid: str, series_uid: str, instance_uid: str
+    ) -> Dataset | None:
+        """Read a single DICOM instance from disk cache.
 
         Args:
             study_uid: Study Instance UID
             series_uid: Series Instance UID
+            instance_uid: SOP Instance UID
 
         Returns:
-            CachedSeries with discovered .dcm files
+            pydicom Dataset if found and readable, None otherwise
         """
-        series_dir = self._series_dir(study_uid, series_uid)
-        cached_at = time.time()
+        dcm_path = self._series_dir(study_uid, series_uid) / f"{instance_uid}.dcm"
+        if not dcm_path.exists():
+            return None
+        try:
+            return pydicom.dcmread(dcm_path)
+        except Exception as e:
+            logger.warning(f"Failed to read cached instance {dcm_path}: {e}")
+            return None
 
-        marker = series_dir / ".cached_at"
-        marker.write_text(str(cached_at))
-
-        instance_paths = sorted(series_dir.glob("*.dcm"))
-        return CachedSeries(
-            study_uid=study_uid,
-            series_uid=series_uid,
-            cache_dir=series_dir,
-            instance_paths=instance_paths,
-            cached_at=cached_at,
-        )
-
-    def evict_expired(self) -> int:
-        """Remove all expired cache entries.
-
-        Returns:
-            Number of series directories removed
-        """
-        removed = 0
+    def _iter_cached_entries(self) -> Iterator[tuple[Path, float, Path]]:
+        """Yield (series_dir, cached_at, study_dir) for all valid cached entries on disk."""
         if not self._base_dir.exists():
-            return removed
-
+            return
         for study_dir in self._base_dir.iterdir():
             if not study_dir.is_dir():
                 continue
@@ -349,14 +305,30 @@ class DicomWebCache:
                 if not marker.exists():
                     continue
                 cached_at = float(marker.read_text().strip())
-                if time.time() - cached_at > self._ttl_seconds:
-                    shutil.rmtree(series_dir, ignore_errors=True)
-                    removed += 1
+                yield series_dir, cached_at, study_dir
 
-            # Remove empty study directories
+    @staticmethod
+    def _cleanup_empty_study_dirs(study_dirs: Iterable[Path]) -> None:
+        """Remove study directories that have no remaining series."""
+        for study_dir in study_dirs:
             if study_dir.exists() and not any(study_dir.iterdir()):
                 study_dir.rmdir()
 
+    def evict_expired(self) -> int:
+        """Remove all expired cache entries.
+
+        Returns:
+            Number of series directories removed
+        """
+        removed = 0
+        study_dirs: set[Path] = set()
+        for series_dir, cached_at, study_dir in self._iter_cached_entries():
+            if time.time() - cached_at > self._ttl_seconds:
+                shutil.rmtree(series_dir, ignore_errors=True)
+                removed += 1
+                study_dirs.add(study_dir)
+
+        self._cleanup_empty_study_dirs(study_dirs)
         if removed > 0:
             logger.info(f"Evicted {removed} expired cache entries")
         return removed
@@ -383,25 +355,12 @@ class DicomWebCache:
         Returns:
             Number of series directories removed
         """
-        if not self._base_dir.exists():
+        entries = [
+            (series_dir, cached_at, self._get_directory_size(series_dir), study_dir)
+            for series_dir, cached_at, study_dir in self._iter_cached_entries()
+        ]
+        if not entries:
             return 0
-
-        # Collect all series dirs with their cached_at timestamps and sizes
-        entries: list[
-            tuple[Path, float, int, Path]
-        ] = []  # (series_dir, cached_at, size, study_dir)
-        for study_dir in self._base_dir.iterdir():
-            if not study_dir.is_dir():
-                continue
-            for series_dir in study_dir.iterdir():
-                if not series_dir.is_dir():
-                    continue
-                marker = series_dir / ".cached_at"
-                if not marker.exists():
-                    continue
-                cached_at = float(marker.read_text().strip())
-                size = self._get_directory_size(series_dir)
-                entries.append((series_dir, cached_at, size, study_dir))
 
         total_size = sum(e[2] for e in entries)
         if total_size <= self._max_size_bytes:
@@ -420,11 +379,7 @@ class DicomWebCache:
             removed += 1
             study_dirs_to_check.add(study_dir)
 
-        # Clean empty study directories
-        for study_dir in study_dirs_to_check:
-            if study_dir.exists() and not any(study_dir.iterdir()):
-                study_dir.rmdir()
-
+        self._cleanup_empty_study_dirs(study_dirs_to_check)
         if removed > 0:
             logger.info(
                 f"Evicted {removed} cache entries by size (target: {self._max_size_bytes} bytes)"

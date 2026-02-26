@@ -15,6 +15,7 @@ import pytest
 
 from src.services.dicomweb.cache import DicomWebCache
 from src.services.dicomweb.cleanup import DicomWebCacheCleanupService
+from tests.conftest import create_disk_series
 
 
 @pytest.fixture
@@ -163,22 +164,6 @@ class TestCleanupExecution:
         assert call_count >= 1
 
 
-def _create_disk_series(
-    cache_dir: Path, study_uid: str, series_uid: str, cached_at: float, file_size: int = 1024
-) -> Path:
-    """Create a fake cached series on disk."""
-    series_dir = cache_dir / study_uid / series_uid
-    series_dir.mkdir(parents=True, exist_ok=True)
-
-    marker = series_dir / ".cached_at"
-    marker.write_text(str(cached_at))
-
-    dummy = series_dir / "1.2.3.dcm"
-    dummy.write_bytes(b"\x00" * file_size)
-
-    return series_dir
-
-
 class TestIntegration:
     """Integration tests with real disk cache directories."""
 
@@ -186,8 +171,8 @@ class TestIntegration:
     async def test_expired_entries_removed(self, tmp_cache_dir: Path, cache: DicomWebCache) -> None:
         """cleanup_once should remove expired entries from disk."""
         # TTL = 1 hour, entry is 2 hours old
-        _create_disk_series(tmp_cache_dir, "study1", "series_old", cached_at=time.time() - 7200)
-        _create_disk_series(tmp_cache_dir, "study1", "series_fresh", cached_at=time.time())
+        create_disk_series(tmp_cache_dir, "study1", "series_old", cached_at=time.time() - 7200)
+        create_disk_series(tmp_cache_dir, "study1", "series_fresh", cached_at=time.time())
 
         service = DicomWebCacheCleanupService(cache=cache)
         expired, _ = await service.cleanup_once()
@@ -204,10 +189,10 @@ class TestIntegration:
         cache._max_size_bytes = 1500  # ~1.5KB limit
 
         # Use fresh timestamps so evict_expired doesn't remove them
-        _create_disk_series(
+        create_disk_series(
             tmp_cache_dir, "study1", "series_old", cached_at=now - 100, file_size=1024
         )
-        _create_disk_series(tmp_cache_dir, "study1", "series_new", cached_at=now, file_size=1024)
+        create_disk_series(tmp_cache_dir, "study1", "series_new", cached_at=now, file_size=1024)
 
         service = DicomWebCacheCleanupService(cache=cache)
         _, by_size = await service.cleanup_once()
