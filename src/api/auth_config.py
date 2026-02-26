@@ -3,12 +3,12 @@ Fastapi-users configuration for session-based authentication.
 Following KISS principle - minimal configuration.
 """
 
-import time
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime, timedelta
 from typing import Any, ClassVar
 from uuid import UUID, uuid4
 
+from cachetools import TTLCache
 from fastapi import Depends, Request, Response
 from fastapi_users import BaseUserManager, FastAPIUsers
 from fastapi_users.authentication import (
@@ -86,8 +86,10 @@ cookie_transport = CookieTransport(
 class DatabaseStrategy(Strategy[User, UUID]):
     """Enhanced database strategy with session lifecycle management."""
 
-    _user_cache: ClassVar[dict[str, tuple[User, float]]] = {}
-    _cache_max_size: ClassVar[int] = 1000
+    _user_cache: ClassVar[TTLCache] = TTLCache(
+        maxsize=1000,
+        ttl=max(settings.session_cache_ttl_seconds, 1),
+    )
 
     def __init__(self, session: AsyncSession, request: Request | None = None) -> None:
         """Initialize strategy with database session and optional request."""
@@ -144,9 +146,7 @@ class DatabaseStrategy(Strategy[User, UUID]):
         # Check in-memory cache for recent validations
         ttl = settings.session_cache_ttl_seconds
         if ttl > 0 and token in self._user_cache:
-            cached_user, cached_at = self._user_cache[token]
-            if time.monotonic() - cached_at < ttl:
-                return cached_user
+            return self._user_cache[token]  # type: ignore[no-any-return]
 
         # Query token with expiration check
         stmt = select(AccessToken).where(
@@ -227,11 +227,7 @@ class DatabaseStrategy(Strategy[User, UUID]):
         # Cache the validated user (detach from SQLAlchemy session first)
         if ttl > 0:
             self.session.expunge(user)
-            # Evict oldest entries if cache is full
-            if len(self._user_cache) >= self._cache_max_size:
-                oldest_key = min(self._user_cache, key=lambda k: self._user_cache[k][1])
-                del self._user_cache[oldest_key]
-            self._user_cache[token] = (user, time.monotonic())
+            self._user_cache[token] = user
 
         return user  # type: ignore[return-value]
 

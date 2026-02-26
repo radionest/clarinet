@@ -111,14 +111,25 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
             ttl_hours=settings.dicomweb_cache_ttl_hours,
             max_size_gb=settings.dicomweb_cache_max_size_gb,
             memory_ttl_minutes=settings.dicomweb_memory_cache_ttl_minutes,
+            memory_max_entries=settings.dicomweb_memory_cache_max_entries,
         )
         logger.info("DICOMweb cache initialized (two-tier: memory + disk)")
+
+        if settings.dicomweb_cache_cleanup_enabled:
+            from src.services.dicomweb.cleanup import DicomWebCacheCleanupService
+
+            app.state.dicomweb_cleanup = DicomWebCacheCleanupService(cache=app.state.dicomweb_cache)
+            await app.state.dicomweb_cleanup.start()
 
     logger.info("Application startup complete")
 
     try:
         yield
     finally:
+        # Stop DICOMweb cache cleanup service
+        if hasattr(app.state, "dicomweb_cleanup"):
+            await app.state.dicomweb_cleanup.stop()
+
         # Shutdown DICOMweb cache (flush pending disk writes)
         if settings.dicomweb_enabled and hasattr(app.state, "dicomweb_cache"):
             await app.state.dicomweb_cache.shutdown()

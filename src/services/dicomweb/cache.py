@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import pydicom
+from cachetools import TTLCache
 from pydicom import Dataset
 
 from src.services.dicom.client import DicomClient
@@ -29,6 +30,7 @@ class DicomWebCache:
         ttl_hours: int = 24,
         max_size_gb: float = 10.0,
         memory_ttl_minutes: int = 30,
+        memory_max_entries: int = 50,
     ):
         """Initialize the cache.
 
@@ -37,13 +39,15 @@ class DicomWebCache:
             ttl_hours: Time-to-live for disk cache entries in hours
             max_size_gb: Maximum disk cache size in gigabytes
             memory_ttl_minutes: Time-to-live for in-memory cache entries in minutes
+            memory_max_entries: Maximum number of series in the in-memory TTLCache
         """
         self._base_dir = base_dir
         self._ttl_seconds = ttl_hours * 3600
         self._max_size_bytes = int(max_size_gb * 1024**3)
-        self._memory_ttl_seconds = memory_ttl_minutes * 60
         self._locks: dict[str, asyncio.Lock] = {}
-        self._memory_cache: dict[str, MemoryCachedSeries] = {}
+        self._memory_cache: TTLCache[str, MemoryCachedSeries] = TTLCache(
+            maxsize=memory_max_entries, ttl=memory_ttl_minutes * 60
+        )
         self._disk_write_tasks: set[asyncio.Task[None]] = set()
 
     def _series_dir(self, study_uid: str, series_uid: str) -> Path:
@@ -61,6 +65,8 @@ class DicomWebCache:
     def _get_from_memory(self, study_uid: str, series_uid: str) -> MemoryCachedSeries | None:
         """Get series from memory cache if present and not expired.
 
+        TTL expiration is handled automatically by ``TTLCache.get()``.
+
         Args:
             study_uid: Study Instance UID
             series_uid: Series Instance UID
@@ -69,16 +75,8 @@ class DicomWebCache:
             MemoryCachedSeries if valid, None otherwise
         """
         key = self._cache_key(study_uid, series_uid)
-        cached = self._memory_cache.get(key)
-        if cached is None:
-            return None
-
-        if time.time() - cached.cached_at > self._memory_ttl_seconds:
-            logger.debug(f"Memory cache expired for series {series_uid}")
-            del self._memory_cache[key]
-            return None
-
-        return cached
+        result: MemoryCachedSeries | None = self._memory_cache.get(key)
+        return result
 
     def _put_to_memory(
         self,
@@ -87,7 +85,7 @@ class DicomWebCache:
         instances: dict[str, Any],
         disk_persisted: bool = False,
     ) -> MemoryCachedSeries:
-        """Store series in memory cache.
+        """Store series in memory cache (TTLCache with LRU eviction).
 
         Args:
             study_uid: Study Instance UID
@@ -361,6 +359,76 @@ class DicomWebCache:
 
         if removed > 0:
             logger.info(f"Evicted {removed} expired cache entries")
+        return removed
+
+    @staticmethod
+    def _get_directory_size(directory: Path) -> int:
+        """Calculate total size of all files in a directory tree.
+
+        Args:
+            directory: Root directory to measure
+
+        Returns:
+            Total size in bytes
+        """
+        total = 0
+        for f in directory.rglob("*"):
+            if f.is_file():
+                total += f.stat().st_size
+        return total
+
+    def evict_by_size(self) -> int:
+        """Remove oldest cache entries until total size is under the configured maximum.
+
+        Returns:
+            Number of series directories removed
+        """
+        if not self._base_dir.exists():
+            return 0
+
+        # Collect all series dirs with their cached_at timestamps and sizes
+        entries: list[
+            tuple[Path, float, int, Path]
+        ] = []  # (series_dir, cached_at, size, study_dir)
+        for study_dir in self._base_dir.iterdir():
+            if not study_dir.is_dir():
+                continue
+            for series_dir in study_dir.iterdir():
+                if not series_dir.is_dir():
+                    continue
+                marker = series_dir / ".cached_at"
+                if not marker.exists():
+                    continue
+                cached_at = float(marker.read_text().strip())
+                size = self._get_directory_size(series_dir)
+                entries.append((series_dir, cached_at, size, study_dir))
+
+        total_size = sum(e[2] for e in entries)
+        if total_size <= self._max_size_bytes:
+            return 0
+
+        # Sort by cached_at ascending (oldest first)
+        entries.sort(key=lambda e: e[1])
+
+        removed = 0
+        study_dirs_to_check: set[Path] = set()
+        for series_dir, _, size, study_dir in entries:
+            if total_size <= self._max_size_bytes:
+                break
+            shutil.rmtree(series_dir, ignore_errors=True)
+            total_size -= size
+            removed += 1
+            study_dirs_to_check.add(study_dir)
+
+        # Clean empty study directories
+        for study_dir in study_dirs_to_check:
+            if study_dir.exists() and not any(study_dir.iterdir()):
+                study_dir.rmdir()
+
+        if removed > 0:
+            logger.info(
+                f"Evicted {removed} cache entries by size (target: {self._max_size_bytes} bytes)"
+            )
         return removed
 
     async def shutdown(self) -> None:

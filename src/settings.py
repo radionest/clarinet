@@ -143,6 +143,9 @@ class Settings(BaseSettings):
     dicomweb_cache_ttl_hours: int = 24
     dicomweb_cache_max_size_gb: float = 10.0
     dicomweb_memory_cache_ttl_minutes: int = 30
+    dicomweb_memory_cache_max_entries: int = 50
+    dicomweb_cache_cleanup_enabled: bool = True
+    dicomweb_cache_cleanup_interval: int = 86400  # 24 hours in seconds
 
     # OHIF viewer settings
     ohif_enabled: bool = True

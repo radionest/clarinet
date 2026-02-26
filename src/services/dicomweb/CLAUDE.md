@@ -12,6 +12,7 @@ dicomweb/
   converter.py   # DICOM JSON conversion (StudyResult/SeriesResult/ImageResult → tags)
   multipart.py   # WADO-RS multipart/related response builder + frame extraction
   cache.py       # DicomWebCache — two-tier cache (memory + disk) with background persistence
+  cleanup.py     # DicomWebCacheCleanupService — periodic disk cache TTL + size eviction
   service.py     # DicomWebProxyService — main entry point
   __init__.py    # Public API re-exports
 ```
@@ -19,7 +20,7 @@ dicomweb/
 ## Two-tier cache
 
 ```
-Request → Memory cache (dict[str, MemoryCachedSeries], O(1) lookup)
+Request → Memory cache (cachetools.TTLCache[str, MemoryCachedSeries], O(1) lookup + LRU eviction)
         ↓ miss
         → Disk cache ({storage_path}/dicomweb_cache/{study}/{series}/*.dcm)
         ↓ miss
@@ -27,7 +28,7 @@ Request → Memory cache (dict[str, MemoryCachedSeries], O(1) lookup)
           → background asyncio.Task writes .dcm to disk
 ```
 
-- **Memory tier**: `MemoryCachedSeries` holds `dict[str, Dataset]` keyed by SOPInstanceUID. TTL controlled by `dicomweb_memory_cache_ttl_minutes`.
+- **Memory tier**: `TTLCache` holds `MemoryCachedSeries` with `dict[str, Dataset]` keyed by SOPInstanceUID. TTL controlled by `dicomweb_memory_cache_ttl_minutes`, max entries by `dicomweb_memory_cache_max_entries` (LRU eviction).
 - **Disk tier**: `.dcm` files + `.cached_at` marker. TTL controlled by `dicomweb_cache_ttl_hours`. Loaded into memory on first access after restart.
 - **Background persistence**: After C-GET to memory, `asyncio.create_task` writes datasets to disk via `asyncio.to_thread`. On shutdown, pending tasks are cancelled.
 
@@ -52,11 +53,24 @@ OHIF (iframe/tab) → DICOMweb HTTP → FastAPI /dicom-web/ router
 | `dicomweb_cache_ttl_hours` | `24` | Disk cache TTL in hours |
 | `dicomweb_cache_max_size_gb` | `10.0` | Max disk cache size in GB |
 | `dicomweb_memory_cache_ttl_minutes` | `30` | In-memory cache TTL in minutes |
+| `dicomweb_memory_cache_max_entries` | `50` | Max series in memory TTLCache (LRU eviction) |
+| `dicomweb_cache_cleanup_enabled` | `True` | Enable periodic disk cache cleanup |
+| `dicomweb_cache_cleanup_interval` | `86400` | Cleanup interval in seconds (default: 24h) |
 | `ohif_enabled` | `True` | Mount OHIF static files at `/ohif` |
+
+## Disk cache cleanup service
+
+`DicomWebCacheCleanupService` (in `cleanup.py`) runs as a background `asyncio.Task` during app lifespan. It periodically calls:
+
+1. `cache.evict_expired()` — removes series dirs with `.cached_at` older than TTL
+2. `cache.evict_by_size()` — if total disk size exceeds `dicomweb_cache_max_size_gb`, removes oldest entries first
+
+Both methods run off the event loop via `asyncio.to_thread()`. The service follows the same pattern as `SessionCleanupService`. Stored in `app.state.dicomweb_cleanup` (conditional on `dicomweb_cache_cleanup_enabled`).
 
 ## Dependencies
 
 - `DicomWebCache` is a singleton stored in `app.state.dicomweb_cache` (created in lifespan, shutdown on exit)
+- `DicomWebCacheCleanupService` stored in `app.state.dicomweb_cleanup` (started after cache init, stopped before cache shutdown)
 - Injected via `get_dicomweb_cache(request: Request)` in `src/api/dependencies.py`
 - `DicomWebProxyServiceDep` gets the singleton cache + per-request client/pacs
 

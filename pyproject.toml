@@ -39,6 +39,7 @@ dependencies = [
     "fastapi-users>=13.0.0",
     "greenlet>=3.0.0",
     "pynetdicom>=3.0.4",
+    "cachetools>=7.0.0",
 ]
 
 [project.optional-dependencies]
@@ -144,6 +145,10 @@ module = [
     "alembic.*",
 ]
 ignore_missing_imports = false
+
+[[tool.mypy.overrides]]
+module = ["cachetools.*"]
+ignore_missing_imports = true
 
 
 [tool.pytest.ini_options]
