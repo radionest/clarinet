@@ -673,7 +673,7 @@ class TestDeadLetterQueue:
             receiver = asyncio.create_task(run_receiver_task(broker))
 
             # Patch DLQ_QUEUE to use the test-isolated queue name
-            with patch("src.services.pipeline.middleware.DLQ_QUEUE", dlq_queue_name):
+            with patch("src.services.pipeline.broker.DLQ_QUEUE", dlq_queue_name):
                 await always_failing_task.kiq({"patient_id": "P", "study_uid": "S"})
 
                 # Wait for retries (3 retries with 1s delay) + DLQ publish
