@@ -7,6 +7,28 @@ window.config = {
   maxNumberOfWebWorkers: 3,
   showLoadingIndicator: true,
   strictZSpacingForVolumeViewport: true,
+  customizationService: {
+    'viewportOverlay.topRight': [
+      {
+        id: 'PatientNameOverlay',
+        customizationType: 'ohif.overlayItem',
+        attribute: 'PatientName',
+        label: '',
+        title: 'Patient Name',
+        condition: ({ instance }) => instance?.PatientName,
+        contentF: ({ instance, formatters: { formatPN } }) =>
+          formatPN(instance.PatientName),
+      },
+      {
+        id: 'PatientIDOverlay',
+        customizationType: 'ohif.overlayItem',
+        attribute: 'PatientID',
+        label: 'ID:',
+        title: 'Patient ID',
+        condition: ({ instance }) => instance?.PatientID,
+      },
+    ],
+  },
   dataSources: [
     {
       namespace: '@ohif/extension-default.dataSourcesModule.dicomweb',
