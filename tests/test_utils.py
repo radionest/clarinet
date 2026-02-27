@@ -64,24 +64,20 @@ class TestValidation:
         assert validate_json_by_schema({"name": "Alice"}, schema) is True
 
     def test_validate_invalid_json(self):
-        from fastapi import HTTPException
-
+        from src.exceptions.domain import ValidationError
         from src.utils.validation import validate_json_by_schema
 
         schema = {"type": "object", "properties": {"age": {"type": "integer"}}, "required": ["age"]}
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(ValidationError, match="JSON validation failed"):
             validate_json_by_schema({}, schema)
-        assert exc_info.value.status_code == 422
 
     def test_validate_invalid_schema(self):
-        from fastapi import HTTPException
-
+        from src.exceptions.domain import ValidationError
         from src.utils.validation import validate_json_by_schema
 
         bad_schema = {"type": "invalid_type_that_does_not_exist"}
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(ValidationError, match="Invalid JSON schema"):
             validate_json_by_schema({"key": "value"}, bad_schema)
-        assert exc_info.value.status_code == 400
 
 
 # ===================================================================

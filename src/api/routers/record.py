@@ -94,16 +94,10 @@ def validate_record_data(record: Record, data: RecordData) -> RecordData:
         Validated data
 
     Raises:
-        HTTPException: If data does not match schema
+        ValidationError: If data does not match schema
     """
     if record.record_type.data_schema:
-        try:
-            validate_json_by_schema(data, record.record_type.data_schema)
-        except Exception as e:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=f"Data does not match schema: {e!s}",
-            ) from e
+        validate_json_by_schema(data, record.record_type.data_schema)
 
     return data
 
