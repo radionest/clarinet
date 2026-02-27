@@ -30,6 +30,35 @@ def _clear_registry():
     ENTITY_REGISTRY.clear()
 
 
+@pytest_asyncio.fixture(autouse=True)
+async def _auth_override(test_session: AsyncSession):
+    """Bypass auth for recordflow integration tests."""
+    from uuid import uuid4
+
+    from src.api.app import app
+    from src.api.auth_config import current_active_user, current_superuser
+    from src.models.user import User
+    from src.utils.auth import get_password_hash
+
+    mock_user = User(
+        id=uuid4(),
+        email="flow_test@test.com",
+        hashed_password=get_password_hash("mock"),
+        is_active=True,
+        is_verified=True,
+        is_superuser=True,
+    )
+    test_session.add(mock_user)
+    await test_session.commit()
+    await test_session.refresh(mock_user)
+
+    app.dependency_overrides[current_active_user] = lambda: mock_user
+    app.dependency_overrides[current_superuser] = lambda: mock_user
+    yield
+    app.dependency_overrides.pop(current_active_user, None)
+    app.dependency_overrides.pop(current_superuser, None)
+
+
 @pytest_asyncio.fixture
 async def record_types(test_session: AsyncSession) -> dict[str, RecordType]:
     """Create record types used by flow tests."""

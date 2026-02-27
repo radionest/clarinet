@@ -6,16 +6,18 @@ This module provides async API endpoints for user management, authentication, an
 
 from uuid import UUID
 
-from fastapi import APIRouter, status
+from fastapi import APIRouter, Depends, status
 
+from src.api.auth_config import current_active_user
 from src.api.dependencies import (
     CurrentUserDep,
     PaginationDep,
+    SuperUserDep,
     UserServiceDep,
 )
 from src.models import User, UserRead, UserRole
 
-router = APIRouter(tags=["users"])
+router = APIRouter(tags=["users"], dependencies=[Depends(current_active_user)])
 
 
 # Authentication endpoints
@@ -41,6 +43,7 @@ async def get_my_roles(
 async def get_role_details(
     role_name: str,
     service: UserServiceDep,
+    _current_user: SuperUserDep,
 ) -> UserRole:
     """Get role details by name."""
     return await service.get_role(role_name)
@@ -50,6 +53,7 @@ async def get_role_details(
 async def create_role(
     new_role: UserRole,
     service: UserServiceDep,
+    _current_user: SuperUserDep,
 ) -> UserRole:
     """Create a new role."""
     return await service.create_role(name=new_role.name)
@@ -60,6 +64,7 @@ async def create_role(
 async def list_users(
     service: UserServiceDep,
     pagination: PaginationDep,
+    _current_user: SuperUserDep,
 ) -> list[User]:
     """List all users with pagination."""
     return await service.list_users(pagination.skip, pagination.limit)
@@ -69,6 +74,7 @@ async def list_users(
 async def get_user(
     user_id: UUID,
     service: UserServiceDep,
+    _current_user: SuperUserDep,
 ) -> User:
     """Get user by ID."""
     return await service.get_user(user_id)
@@ -78,6 +84,7 @@ async def get_user(
 async def create_user(
     user: User,
     service: UserServiceDep,
+    _current_user: SuperUserDep,
 ) -> User:
     """Create a new user."""
     user_data = user.model_dump()
@@ -89,6 +96,7 @@ async def update_user(
     user_id: UUID,
     user_update: User,
     service: UserServiceDep,
+    _current_user: SuperUserDep,
 ) -> User:
     """Update a user's information."""
     update_data = user_update.model_dump(exclude_unset=True)
@@ -99,6 +107,7 @@ async def update_user(
 async def delete_user(
     user_id: UUID,
     service: UserServiceDep,
+    _current_user: SuperUserDep,
 ) -> None:
     """Delete a user by ID."""
     await service.delete_user(user_id)
@@ -108,6 +117,7 @@ async def delete_user(
 async def get_user_roles(
     user_id: UUID,
     service: UserServiceDep,
+    _current_user: SuperUserDep,
 ) -> list[UserRole]:
     """Get roles for a specific user."""
     return await service.get_user_roles(user_id)
@@ -118,6 +128,7 @@ async def add_user_role(
     user_id: UUID,
     role_name: str,
     service: UserServiceDep,
+    _current_user: SuperUserDep,
 ) -> User:
     """Assign a role to a user."""
     return await service.assign_role(user_id, role_name)
@@ -128,6 +139,7 @@ async def remove_user_role(
     user_id: UUID,
     role_name: str,
     service: UserServiceDep,
+    _current_user: SuperUserDep,
 ) -> User:
     """Remove a role from a user."""
     return await service.remove_role(user_id, role_name)
@@ -138,6 +150,7 @@ async def remove_user_role(
 async def activate_user(
     user_id: UUID,
     service: UserServiceDep,
+    _current_user: SuperUserDep,
 ) -> User:
     """Activate a user account."""
     return await service.activate_user(user_id)
@@ -147,6 +160,7 @@ async def activate_user(
 async def deactivate_user(
     user_id: UUID,
     service: UserServiceDep,
+    _current_user: SuperUserDep,
 ) -> User:
     """Deactivate a user account."""
     return await service.deactivate_user(user_id)

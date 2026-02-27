@@ -125,24 +125,27 @@ async def db_patient(test_session: AsyncSession, pacs_patient_id: str) -> Patien
 @pytest.mark.dicom
 @pytest.mark.asyncio
 async def test_search_unauthenticated(
-    client: AsyncClient, pacs_available: None, pacs_patient_id: str
+    unauthenticated_client: AsyncClient, pacs_available: None, pacs_patient_id: str
 ) -> None:
     """Unauthenticated request to search endpoint returns 401."""
-    response = await client.get(f"{DICOM_BASE}/patient/{pacs_patient_id}/studies")
+    response = await unauthenticated_client.get(f"{DICOM_BASE}/patient/{pacs_patient_id}/studies")
     assert response.status_code == 401
 
 
 @pytest.mark.dicom
 @pytest.mark.asyncio
 async def test_search_non_admin(
-    client: AsyncClient, test_user: object, pacs_available: None, pacs_patient_id: str
+    unauthenticated_client: AsyncClient,
+    test_user: object,
+    pacs_available: None,
+    pacs_patient_id: str,
 ) -> None:
     """Non-superuser request to search endpoint returns 403."""
-    await client.post(
+    await unauthenticated_client.post(
         "/api/auth/login",
         data={"username": "test@example.com", "password": "testpassword"},
     )
-    response = await client.get(f"{DICOM_BASE}/patient/{pacs_patient_id}/studies")
+    response = await unauthenticated_client.get(f"{DICOM_BASE}/patient/{pacs_patient_id}/studies")
     assert response.status_code == 403
 
 
@@ -222,10 +225,10 @@ async def test_search_already_exists_flag(
 @pytest.mark.dicom
 @pytest.mark.asyncio
 async def test_import_unauthenticated(
-    client: AsyncClient, pacs_available: None, pacs_study: StudyResult
+    unauthenticated_client: AsyncClient, pacs_available: None, pacs_study: StudyResult
 ) -> None:
     """Unauthenticated import request returns 401."""
-    response = await client.post(
+    response = await unauthenticated_client.post(
         f"{DICOM_BASE}/import-study",
         json={
             "study_instance_uid": pacs_study.study_instance_uid,
@@ -342,14 +345,17 @@ async def test_import_duplicate_study(
 @pytest.mark.dicom
 @pytest.mark.asyncio
 async def test_import_non_admin(
-    client: AsyncClient, test_user: object, pacs_available: None, pacs_study: StudyResult
+    unauthenticated_client: AsyncClient,
+    test_user: object,
+    pacs_available: None,
+    pacs_study: StudyResult,
 ) -> None:
     """Non-superuser import request returns 403."""
-    await client.post(
+    await unauthenticated_client.post(
         "/api/auth/login",
         data={"username": "test@example.com", "password": "testpassword"},
     )
-    response = await client.post(
+    response = await unauthenticated_client.post(
         f"{DICOM_BASE}/import-study",
         json={
             "study_instance_uid": pacs_study.study_instance_uid,

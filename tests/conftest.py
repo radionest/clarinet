@@ -76,7 +76,23 @@ async def test_session(test_engine) -> AsyncGenerator[AsyncSession]:
 
 @pytest_asyncio.fixture
 async def client(test_session, test_settings) -> AsyncGenerator[AsyncClient]:
-    """Create test API client."""
+    """Create test API client with auth bypassed (superuser)."""
+    from src.api.auth_config import current_active_user, current_superuser
+    from src.models.user import User
+    from src.utils.auth import get_password_hash
+
+    # Create a test superuser for auth override
+    mock_user = User(
+        id=uuid4(),
+        email="mock@test.com",
+        hashed_password=get_password_hash("mock"),
+        is_active=True,
+        is_verified=True,
+        is_superuser=True,
+    )
+    test_session.add(mock_user)
+    await test_session.commit()
+    await test_session.refresh(mock_user)
 
     async def override_get_session():
         yield test_session
@@ -85,6 +101,8 @@ async def client(test_session, test_settings) -> AsyncGenerator[AsyncClient]:
         return test_settings
 
     app.dependency_overrides[get_async_session] = override_get_session
+    app.dependency_overrides[current_active_user] = lambda: mock_user
+    app.dependency_overrides[current_superuser] = lambda: mock_user
 
     # Override settings if such dependency exists
     try:
@@ -111,6 +129,51 @@ async def client(test_session, test_settings) -> AsyncGenerator[AsyncClient]:
 
         async def request_with_cookies(method, url, **kwargs):
             # Always include cookies in headers
+            if ac.cookies:
+                headers = kwargs.get("headers") or {}
+                cookie_header = "; ".join([f"{k}={v}" for k, v in ac.cookies.items()])
+                if cookie_header:
+                    headers["Cookie"] = cookie_header
+                    kwargs["headers"] = headers
+            return await original_request(method, url, **kwargs)
+
+        ac.request = request_with_cookies
+        yield ac
+
+    app.dependency_overrides.clear()
+
+
+@pytest_asyncio.fixture
+async def unauthenticated_client(test_session, test_settings) -> AsyncGenerator[AsyncClient]:
+    """Create test API client WITHOUT auth overrides (real cookie-based auth)."""
+
+    async def override_get_session():
+        yield test_session
+
+    async def override_get_settings():
+        return test_settings
+
+    app.dependency_overrides[get_async_session] = override_get_session
+
+    try:
+        from src.settings import get_settings
+
+        app.dependency_overrides[get_settings] = override_get_settings
+    except (ImportError, AttributeError):
+        pass
+
+    try:
+        import src.api.auth_config
+
+        src.api.auth_config.settings = test_settings
+    except (ImportError, AttributeError):
+        pass
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test", cookies={}) as ac:
+        original_request = ac.request
+
+        async def request_with_cookies(method, url, **kwargs):
             if ac.cookies:
                 headers = kwargs.get("headers") or {}
                 cookie_header = "; ".join([f"{k}={v}" for k, v in ac.cookies.items()])

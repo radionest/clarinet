@@ -44,10 +44,10 @@ async def test_login_invalid_credentials(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_get_current_user(client: AsyncClient, test_user):
+async def test_get_current_user(unauthenticated_client: AsyncClient, test_user):
     """Test getting current user."""
     # First authenticate
-    login_response = await client.post(
+    login_response = await unauthenticated_client.post(
         "/api/auth/login",
         data={
             "username": "test@example.com",
@@ -57,7 +57,7 @@ async def test_get_current_user(client: AsyncClient, test_user):
     assert login_response.status_code == 204
 
     # Use new endpoint /auth/me
-    response = await client.get("/api/auth/me")
+    response = await unauthenticated_client.get("/api/auth/me")
 
     assert response.status_code == 200
     data = response.json()
@@ -263,7 +263,7 @@ async def test_create_study(client: AsyncClient, auth_headers, test_session):
 
 
 @pytest.mark.asyncio
-async def test_unauthorized_access(client: AsyncClient):
+async def test_unauthorized_access(unauthenticated_client: AsyncClient):
     """Test access without authorization."""
     endpoints = [
         "/api/user/users/me/token",
@@ -272,7 +272,7 @@ async def test_unauthorized_access(client: AsyncClient):
     ]
 
     for endpoint in endpoints:
-        response = await client.get(endpoint)
+        response = await unauthenticated_client.get(endpoint)
         # Some endpoints return 404 instead of 401 when not authenticated
         assert response.status_code in [401, 404]
 

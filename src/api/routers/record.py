@@ -51,6 +51,7 @@ router = APIRouter(
         404: {"description": "Not found"},
         409: {"description": "Conflict"},
     },
+    dependencies=[Depends(current_active_user)],
 )
 
 

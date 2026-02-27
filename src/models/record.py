@@ -355,7 +355,9 @@ class Record(RecordBase, table=True):
     study_uid: str | None = Field(default=None, foreign_key="study.study_uid", ondelete="CASCADE")
     study: Study = Relationship(back_populates="records")
 
-    series_uid: str | None = Field(default=None, foreign_key="series.series_uid", ondelete="CASCADE")
+    series_uid: str | None = Field(
+        default=None, foreign_key="series.series_uid", ondelete="CASCADE"
+    )
     series: Series | None = Relationship(back_populates="records")
 
     record_type_name: str = Field(foreign_key="recordtype.name")

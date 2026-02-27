@@ -89,14 +89,14 @@ async def test_api_prefix(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_error_handling(client: AsyncClient):
+async def test_error_handling(unauthenticated_client: AsyncClient):
     """Check error handling."""
     # Request to non-existent endpoint
-    response = await client.get("/api/nonexistent")
+    response = await unauthenticated_client.get("/api/nonexistent")
     assert response.status_code == 404
 
     # Request without authorization to protected endpoint
     # Note: /user/me requires authorization
-    response = await client.get("/api/user/me")
+    response = await unauthenticated_client.get("/api/user/me")
     # Should return 401 Unauthorized, but in tests may return 404 if route is not configured
     assert response.status_code in [401, 404]

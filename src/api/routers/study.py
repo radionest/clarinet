@@ -4,8 +4,9 @@ Async study router for the Clarinet framework.
 This module provides async API endpoints for managing medical imaging studies, series, and related data.
 """
 
-from fastapi import APIRouter, BackgroundTasks, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Request, status
 
+from src.api.auth_config import current_active_user
 from src.api.dependencies import StudyServiceDep
 from src.models import (
     DicomUID,
@@ -20,7 +21,7 @@ from src.models import (
 from src.models.patient import PatientRead
 from src.models.study import SeriesFind, StudyRead
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(current_active_user)])
 
 
 # Patient endpoints
