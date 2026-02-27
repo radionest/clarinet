@@ -98,7 +98,7 @@ class RecordTypeStats(PydanticBaseModel):
 async def get_record_type_stats(
     _current_user: SuperUserDep,
     service: AdminServiceDep,
-) -> list[RecordTypeStats]:
+) -> list[dict]:
     """Get per-record-type statistics.
 
     Args:
@@ -108,32 +108,4 @@ async def get_record_type_stats(
     Returns:
         List of RecordTypeStats with per-type counts and unique users.
     """
-    record_types, status_map, user_map = await service.get_record_type_stats()
-
-    result: list[RecordTypeStats] = []
-    for rt in record_types:
-        counts = status_map.get(rt.name, {})
-        status_counts = RecordTypeStatusCounts(
-            pending=counts.get("pending", 0),
-            inwork=counts.get("inwork", 0),
-            finished=counts.get("finished", 0),
-            failed=counts.get("failed", 0),
-            pause=counts.get("pause", 0),
-        )
-        total = sum(counts.values())
-        result.append(
-            RecordTypeStats(
-                name=rt.name,
-                description=rt.description,
-                label=rt.label,
-                level=rt.level.value,
-                role_name=rt.role_name,
-                min_users=rt.min_users,
-                max_users=rt.max_users,
-                total_records=total,
-                records_by_status=status_counts,
-                unique_users=user_map.get(rt.name, 0),
-            )
-        )
-
-    return result
+    return await service.get_record_type_stats()

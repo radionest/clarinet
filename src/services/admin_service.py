@@ -61,17 +61,32 @@ class AdminService:
         records_by_status.update(counts)
         return records_by_status
 
-    async def get_record_type_stats(
-        self,
-    ) -> tuple[list, dict[str, dict[str, int]], dict[str, int]]:
-        """Get record type list, per-type status counts, and per-type unique users in parallel.
+    async def get_record_type_stats(self) -> list[dict]:
+        """Get per-record-type statistics with status counts and unique users.
 
         Returns:
-            Tuple of (record_types, status_map, user_map)
+            List of dicts with record type metadata, per-status counts, total, and unique users.
         """
         record_types, status_map, user_map = await asyncio.gather(
             self.record_type_repo.list_all(),
             self.record_repo.get_per_type_status_counts(),
             self.record_repo.get_per_type_unique_users(),
         )
-        return list(record_types), status_map, user_map
+
+        result = []
+        for rt in record_types:
+            counts = status_map.get(rt.name, {})
+            status_counts = {status.value: counts.get(status.value, 0) for status in RecordStatus}
+            result.append({
+                "name": rt.name,
+                "description": rt.description,
+                "label": rt.label,
+                "level": rt.level.value,
+                "role_name": rt.role_name,
+                "min_users": rt.min_users,
+                "max_users": rt.max_users,
+                "total_records": sum(counts.values()),
+                "records_by_status": status_counts,
+                "unique_users": user_map.get(rt.name, 0),
+            })
+        return result
