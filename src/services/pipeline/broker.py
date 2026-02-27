@@ -14,6 +14,7 @@ from src.utils.logger import logger
 
 if TYPE_CHECKING:
     from taskiq import AsyncBroker
+    from taskiq.abc.result_backend import AsyncResultBackend
 
 # Module-level broker reference, initialized lazily
 _broker: AsyncBroker | None = None
@@ -39,6 +40,20 @@ def _build_amqp_url() -> str:
     )
 
 
+def extract_routing_key(queue_name: str) -> str:
+    """Extract routing key from a queue name.
+
+    Convention: ``clarinet.gpu`` → ``gpu``.
+
+    Args:
+        queue_name: Full queue name (e.g. ``clarinet.gpu``).
+
+    Returns:
+        The routing key suffix.
+    """
+    return queue_name.rsplit(".", maxsplit=1)[-1]
+
+
 def create_broker(queue_name: str = DEFAULT_QUEUE) -> AsyncBroker:
     """Create a TaskIQ broker for a specific queue.
 
@@ -54,8 +69,7 @@ def create_broker(queue_name: str = DEFAULT_QUEUE) -> AsyncBroker:
     """
     from taskiq_aio_pika import AioPikaBroker
 
-    # Extract routing key from queue name: "clarinet.gpu" -> "gpu"
-    routing_key = queue_name.rsplit(".", maxsplit=1)[-1]
+    routing_key = extract_routing_key(queue_name)
 
     broker_kwargs: dict[str, object] = {
         "url": _build_amqp_url(),
@@ -93,7 +107,9 @@ def create_broker(queue_name: str = DEFAULT_QUEUE) -> AsyncBroker:
         try:
             from taskiq_redis import RedisAsyncResultBackend
 
-            backend = RedisAsyncResultBackend(settings.pipeline_result_backend_url)
+            backend: AsyncResultBackend = RedisAsyncResultBackend(
+                settings.pipeline_result_backend_url
+            )
             broker = broker.with_result_backend(backend)
             logger.debug("Pipeline result backend configured: Redis")
         except ImportError:

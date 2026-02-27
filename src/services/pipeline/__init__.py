@@ -29,6 +29,7 @@ from .broker import (
     DLQ_QUEUE,
     GPU_QUEUE,
     create_broker,
+    extract_routing_key,
     get_broker,
     get_test_broker,
 )
@@ -51,6 +52,7 @@ __all__ = [
     "PipelineResult",
     "PipelineStepError",
     "create_broker",
+    "extract_routing_key",
     "get_all_pipelines",
     "get_broker",
     "get_pipeline",

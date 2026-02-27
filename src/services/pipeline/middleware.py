@@ -18,6 +18,8 @@ from taskiq import TaskiqMiddleware
 
 from src.utils.logger import logger
 
+from .broker import extract_routing_key
+
 if TYPE_CHECKING:
     from taskiq import TaskiqMessage, TaskiqResult
 
@@ -232,7 +234,7 @@ class PipelineChainMiddleware(TaskiqMiddleware):
 
         # Route to the correct queue via routing_key
         queue = next_step.get("queue", "clarinet.default")
-        routing_key = queue.rsplit(".", maxsplit=1)[-1]
+        routing_key = extract_routing_key(queue)
         next_labels["routing_key"] = routing_key
 
         # Prepare the message argument — pass the previous result through

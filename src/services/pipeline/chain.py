@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING, Any
 
 from src.utils.logger import logger
 
-from .broker import DEFAULT_QUEUE
+from .broker import DEFAULT_QUEUE, extract_routing_key
 from .message import PipelineMessage
 
 if TYPE_CHECKING:
@@ -140,7 +140,7 @@ class Pipeline:
             raise ValueError(f"Pipeline '{self.name}' has no steps")
 
         first_step = self.steps[0]
-        routing_key = first_step.queue.rsplit(".", maxsplit=1)[-1]
+        routing_key = extract_routing_key(first_step.queue)
 
         labels = {
             "pipeline_id": self.name,
