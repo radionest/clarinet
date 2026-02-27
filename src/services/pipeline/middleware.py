@@ -27,6 +27,12 @@ if TYPE_CHECKING:
 class PipelineLoggingMiddleware(TaskiqMiddleware):
     """Logs task send/receive/complete events."""
 
+    @staticmethod
+    def _log_prefix(message: TaskiqMessage) -> str:
+        pipeline_id = message.labels.get("pipeline_id", "")
+        step_index = message.labels.get("step_index", "")
+        return f"[pipeline={pipeline_id} step={step_index}] " if pipeline_id else ""
+
     async def pre_send(self, message: TaskiqMessage) -> TaskiqMessage:
         """Log before a task message is sent to the broker.
 
@@ -36,9 +42,7 @@ class PipelineLoggingMiddleware(TaskiqMiddleware):
         Returns:
             The message unchanged.
         """
-        pipeline_id = message.labels.get("pipeline_id", "")
-        step_index = message.labels.get("step_index", "")
-        prefix = f"[pipeline={pipeline_id} step={step_index}] " if pipeline_id else ""
+        prefix = self._log_prefix(message)
         logger.debug(f"{prefix}Sending task '{message.task_name}' (id={message.task_id})")
         return message
 
@@ -49,9 +53,7 @@ class PipelineLoggingMiddleware(TaskiqMiddleware):
             message: The executed task message.
             result: The task execution result.
         """
-        pipeline_id = message.labels.get("pipeline_id", "")
-        step_index = message.labels.get("step_index", "")
-        prefix = f"[pipeline={pipeline_id} step={step_index}] " if pipeline_id else ""
+        prefix = self._log_prefix(message)
 
         if result.is_err:
             error = result.error
@@ -74,7 +76,15 @@ class DeadLetterMiddleware(TaskiqMiddleware):
     SmartRetryMiddleware sets result.error = NoResultError() when scheduling
     a retry. If post_execute sees a real error (not NoResultError), it means
     retries are exhausted or disabled — route to DLQ.
+
+    Args:
+        amqp_url: Optional AMQP URL override. Falls back to ``_build_amqp_url()``
+            when not provided (production default).
     """
+
+    def __init__(self, amqp_url: str | None = None) -> None:
+        super().__init__()
+        self._amqp_url = amqp_url
 
     async def post_execute(self, message: TaskiqMessage, result: TaskiqResult[Any]) -> None:
         """Check if a failed task should be routed to the DLQ.
@@ -118,7 +128,8 @@ class DeadLetterMiddleware(TaskiqMiddleware):
                 "error_detail": getattr(error, "detail", None),
                 "error_status_code": getattr(error, "status_code", None),
             }
-            connection = await aio_pika.connect_robust(_build_amqp_url())
+            url = self._amqp_url or _build_amqp_url()
+            connection = await aio_pika.connect_robust(url)
             async with connection:
                 channel = await connection.channel()
                 await channel.declare_queue(DLQ_QUEUE, durable=True)

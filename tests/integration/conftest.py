@@ -110,7 +110,7 @@ def pipeline_broker_factory(
                     use_delay_exponent=False,
                 ),
                 PipelineLoggingMiddleware(),
-                DeadLetterMiddleware(),
+                DeadLetterMiddleware(amqp_url=rabbitmq_url),
                 PipelineChainMiddleware(),
             )
 
