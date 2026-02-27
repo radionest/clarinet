@@ -1,7 +1,6 @@
 """DICOM API router for PACS query and import operations."""
 
 import asyncio
-from datetime import UTC, datetime
 
 from fastapi import APIRouter, BackgroundTasks, Request
 
@@ -19,6 +18,7 @@ from src.services.dicom.models import (
     SeriesQuery,
     StudyQuery,
 )
+from src.utils.dicom import parse_dicom_date
 from src.utils.logger import logger
 
 router = APIRouter()
@@ -116,15 +116,7 @@ async def import_study_from_pacs(
 
     pacs_study = studies[0]
 
-    # Parse DICOM date (YYYYMMDD) to Python date
-    study_date = datetime.now(tz=UTC).date()
-    if pacs_study.study_date:
-        try:
-            study_date = (
-                datetime.strptime(pacs_study.study_date, "%Y%m%d").replace(tzinfo=UTC).date()
-            )
-        except ValueError:
-            logger.warning(f"Invalid DICOM date '{pacs_study.study_date}', using today's date")
+    study_date = parse_dicom_date(pacs_study.study_date)
 
     # Create study in local DB
     await service.create_study(

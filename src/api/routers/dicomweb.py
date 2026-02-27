@@ -9,6 +9,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, Response
 
 from src.api.dependencies import CurrentUserDep, DicomWebProxyServiceDep
+from src.utils.dicom import parse_frame_numbers
 
 router = APIRouter()
 
@@ -162,18 +163,7 @@ async def retrieve_frames(
     Returns:
         Multipart response with raw pixel data
     """
-    try:
-        frame_numbers = [int(f.strip()) for f in frames.split(",") if f.strip()]
-    except ValueError:
-        return JSONResponse(
-            status_code=400,
-            content={"detail": f"Invalid frame numbers: {frames}"},
-        )
-    if not frame_numbers:
-        return JSONResponse(
-            status_code=400,
-            content={"detail": "No frame numbers specified"},
-        )
+    frame_numbers = parse_frame_numbers(frames)
 
     body, content_type = await service.retrieve_frames(
         study_uid=study_uid,
