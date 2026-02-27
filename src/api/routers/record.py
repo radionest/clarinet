@@ -58,6 +58,31 @@ router = APIRouter(
 # Helpers
 
 
+def trigger_recordflow(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    record: Record,
+    old_status: RecordStatus | None = None,
+) -> None:
+    """Trigger RecordFlow engine in background if enabled.
+
+    Args:
+        request: FastAPI request to access app state.
+        background_tasks: FastAPI background tasks.
+        record: Record that changed.
+        old_status: Previous status. If provided, triggers status change handler;
+            otherwise triggers data update handler.
+    """
+    engine = getattr(request.app.state, "recordflow_engine", None)
+    if not engine:
+        return
+    record_read = RecordRead.model_validate(record)
+    if old_status is not None:
+        background_tasks.add_task(engine.handle_record_status_change, record_read, old_status)
+    else:
+        background_tasks.add_task(engine.handle_record_data_update, record_read)
+
+
 def validate_record_files(record: Record) -> FileValidationResult | None:
     """Validate input files for a record.
 
@@ -279,12 +304,7 @@ async def update_record_status(
 
     # Trigger RecordFlow if enabled and status changed
     if old_status != record_status:
-        recordflow_engine = getattr(request.app.state, "recordflow_engine", None)
-        if recordflow_engine:
-            record_read = RecordRead.model_validate(record)
-            background_tasks.add_task(
-                recordflow_engine.handle_record_status_change, record_read, old_status
-            )
+        trigger_recordflow(request, background_tasks, record, old_status)
 
     return record
 
@@ -302,12 +322,7 @@ async def assign_record_to_user(
 
     # Trigger RecordFlow if enabled and status changed
     if old_status != record.status:
-        recordflow_engine = getattr(request.app.state, "recordflow_engine", None)
-        if recordflow_engine:
-            record_read = RecordRead.model_validate(record)
-            background_tasks.add_task(
-                recordflow_engine.handle_record_status_change, record_read, old_status
-            )
+        trigger_recordflow(request, background_tasks, record, old_status)
 
     return record
 
@@ -341,12 +356,7 @@ async def submit_record_data(
     )
 
     # Trigger RecordFlow if enabled
-    recordflow_engine = getattr(request.app.state, "recordflow_engine", None)
-    if recordflow_engine:
-        record_read = RecordRead.model_validate(record)
-        background_tasks.add_task(
-            recordflow_engine.handle_record_status_change, record_read, old_status
-        )
+    trigger_recordflow(request, background_tasks, record, old_status)
 
     return record
 
@@ -369,10 +379,7 @@ async def update_record_data(
     updated, _ = await repo.update_data(record_id, validated_data)
 
     # Trigger RecordFlow data update flows if enabled
-    recordflow_engine = getattr(request.app.state, "recordflow_engine", None)
-    if recordflow_engine:
-        record_read = RecordRead.model_validate(updated)
-        background_tasks.add_task(recordflow_engine.handle_record_data_update, record_read)
+    trigger_recordflow(request, background_tasks, updated)
 
     return updated
 
