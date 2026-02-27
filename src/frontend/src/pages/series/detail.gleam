@@ -11,6 +11,7 @@ import lustre/element/html
 import lustre/event
 import router
 import store.{type Model, type Msg}
+import utils/viewer
 
 pub fn view(model: Model, series_uid: String) -> Element(Msg) {
   case dict.get(model.series, series_uid) {
@@ -55,12 +56,21 @@ fn series_info_card(s: Series) -> Element(Msg) {
       html.dd([], [
         html.a(
           [
-            attribute.href(router.route_to_path(router.StudyDetail(s.study_uid))),
+            attribute.href(
+              router.route_to_path(router.StudyDetail(s.study_uid)),
+            ),
             attribute.class("link"),
           ],
           [html.text(s.study_uid)],
         ),
       ]),
+    ]),
+    html.div([attribute.class("card-actions")], [
+      viewer.viewer_button(
+        Some(s.study_uid),
+        Some(s.series_uid),
+        "btn btn-primary",
+      ),
     ]),
   ])
 }
@@ -76,7 +86,9 @@ fn parent_study_section(s: Series) -> Element(Msg) {
           html.dd([], [
             html.a(
               [
-                attribute.href(router.route_to_path(router.StudyDetail(study.study_uid))),
+                attribute.href(
+                  router.route_to_path(router.StudyDetail(study.study_uid)),
+                ),
                 attribute.class("link"),
               ],
               [html.text(study.study_uid)],
@@ -88,7 +100,9 @@ fn parent_study_section(s: Series) -> Element(Msg) {
           html.dd([], [
             html.a(
               [
-                attribute.href(router.route_to_path(router.PatientDetail(study.patient_id))),
+                attribute.href(
+                  router.route_to_path(router.PatientDetail(study.patient_id)),
+                ),
                 attribute.class("link"),
               ],
               [html.text(study.patient_id)],

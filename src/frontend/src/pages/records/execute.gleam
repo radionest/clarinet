@@ -1,7 +1,6 @@
 // Record execution page with dynamic Formosh forms
 import api/models.{type Record, type RecordType}
 import api/types.{type RecordStatus}
-import utils/permissions
 import formosh/component as formosh_component
 import gleam/dict
 import gleam/dynamic/decode
@@ -13,6 +12,8 @@ import lustre/element/html
 import lustre/event
 import router
 import store.{type Model, type Msg}
+import utils/permissions
+import utils/viewer
 
 /// View function for record execution page
 pub fn view(model: Model, record_id: String) -> Element(Msg) {
@@ -51,6 +52,12 @@ fn render_record_execution(
         ),
       ]),
       render_record_metadata(record),
+      viewer.record_viewer_button(
+        record.study_uid,
+        record.series_uid,
+        option.map(record.record_type, fn(rt) { rt.level }),
+        "btn btn-primary",
+      ),
     ]),
     // Slicer toolbar (only if record type has slicer_script)
     render_slicer_toolbar(model, record, record_id),
@@ -209,7 +216,6 @@ fn render_readonly_data(record: Record) -> Element(Msg) {
       ])
   }
 }
-
 
 /// Render record status badge
 fn render_record_status(status: RecordStatus) -> Element(Msg) {

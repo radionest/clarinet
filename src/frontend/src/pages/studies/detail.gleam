@@ -11,6 +11,7 @@ import lustre/element/html
 import lustre/event
 import router
 import store.{type Model, type Msg}
+import utils/viewer
 
 pub fn view(model: Model, study_uid: String) -> Element(Msg) {
   case dict.get(model.studies, study_uid) {
@@ -59,16 +60,7 @@ fn study_info_card(study: Study) -> Element(Msg) {
       html.dd([], [html.text(study.patient_id)]),
     ]),
     html.div([attribute.class("card-actions")], [
-      html.a(
-        [
-          attribute.href(
-            "/ohif/viewer?StudyInstanceUIDs=" <> study.study_uid,
-          ),
-          attribute.target("_blank"),
-          attribute.class("btn btn-primary"),
-        ],
-        [html.text("Open in Viewer")],
-      ),
+      viewer.viewer_button(Some(study.study_uid), None, "btn btn-primary"),
     ]),
   ])
 }
@@ -81,7 +73,9 @@ fn patient_section(patient: Option(Patient), patient_id: String) -> Element(Msg)
         html.p([], [
           html.a(
             [
-              attribute.href(router.route_to_path(router.PatientDetail(patient_id))),
+              attribute.href(
+                router.route_to_path(router.PatientDetail(patient_id)),
+              ),
               attribute.class("link"),
             ],
             [html.text(patient_id)],
@@ -94,7 +88,9 @@ fn patient_section(patient: Option(Patient), patient_id: String) -> Element(Msg)
             html.dd([], [
               html.a(
                 [
-                  attribute.href(router.route_to_path(router.PatientDetail(p.id))),
+                  attribute.href(
+                    router.route_to_path(router.PatientDetail(p.id)),
+                  ),
                   attribute.class("link"),
                 ],
                 [html.text(p.id)],
@@ -144,13 +140,22 @@ fn series_row(s: Series) -> Element(Msg) {
     html.td([], [html.text(int.to_string(s.series_number))]),
     html.td([], [html.text(option.unwrap(s.anon_uid, "-"))]),
     html.td([], [
-      html.a(
-        [
-          attribute.href(router.route_to_path(router.SeriesDetail(s.series_uid))),
-          attribute.class("btn btn-sm btn-outline"),
-        ],
-        [html.text("View")],
-      ),
+      element.fragment([
+        html.a(
+          [
+            attribute.href(
+              router.route_to_path(router.SeriesDetail(s.series_uid)),
+            ),
+            attribute.class("btn btn-sm btn-outline"),
+          ],
+          [html.text("View")],
+        ),
+        viewer.viewer_button(
+          Some(s.study_uid),
+          Some(s.series_uid),
+          "btn btn-sm btn-outline",
+        ),
+      ]),
     ]),
   ])
 }
