@@ -349,13 +349,13 @@ class Record(RecordBase, table=True):
 
     id: int | None = Field(default=None, primary_key=True)
 
-    patient_id: str = Field(foreign_key="patient.id")
+    patient_id: str = Field(foreign_key="patient.id", ondelete="CASCADE")
     patient: Patient = Relationship(back_populates="records")
 
-    study_uid: str | None = Field(default=None, foreign_key="study.study_uid")
+    study_uid: str | None = Field(default=None, foreign_key="study.study_uid", ondelete="CASCADE")
     study: Study = Relationship(back_populates="records")
 
-    series_uid: str | None = Field(default=None, foreign_key="series.series_uid")
+    series_uid: str | None = Field(default=None, foreign_key="series.series_uid", ondelete="CASCADE")
     series: Series | None = Relationship(back_populates="records")
 
     record_type_name: str = Field(foreign_key="recordtype.name")

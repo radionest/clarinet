@@ -3,9 +3,12 @@
 from datetime import UTC, datetime
 
 import pytest
+from httpx import AsyncClient
 from sqlmodel import select
 
+from src.models.base import RecordStatus
 from src.models.patient import Patient
+from src.models.record import Record, RecordType
 from src.models.study import Series, Study
 
 
@@ -135,11 +138,7 @@ async def test_delete_patient_cascade(test_session):
     patient_id = patient.id
     study_uid = study.study_uid
 
-    # First delete related studies
-    await test_session.delete(study)
-    await test_session.commit()
-
-    # Then delete patient
+    # Delete patient — cascade_delete handles studies automatically
     await test_session.delete(patient)
     await test_session.commit()
 
@@ -147,7 +146,7 @@ async def test_delete_patient_cascade(test_session):
     deleted_patient = await test_session.get(Patient, patient_id)
     assert deleted_patient is None
 
-    # Check that study is deleted
+    # Check that study is cascade-deleted
     deleted_study = await test_session.get(Study, study_uid)
     assert deleted_study is None
 
@@ -303,3 +302,134 @@ async def test_patient_with_full_hierarchy(test_session):
     assert "T1" in series_descriptions
     assert "T2" in series_descriptions
     assert "FLAIR" in series_descriptions
+
+
+@pytest.mark.asyncio
+async def test_delete_patient_cascade_api(client: AsyncClient, test_session):
+    """Test DELETE /patients/{patient_id} cascades to studies, series, and records."""
+    # Create patient → study → series → record
+    patient = Patient(id="DEL_PAT001", name="Delete Cascade")
+    test_session.add(patient)
+    await test_session.commit()
+
+    study = Study(
+        patient_id=patient.id,
+        study_uid="1.2.3.4.5.100",
+        date=datetime.now(UTC).date(),
+    )
+    test_session.add(study)
+    await test_session.commit()
+
+    series = Series(
+        study_uid=study.study_uid,
+        series_uid="1.2.3.4.5.100.1",
+        series_number=1,
+        series_description="T1 Axial",
+    )
+    test_session.add(series)
+    await test_session.commit()
+
+    record_type = RecordType(
+        name="del_test_type",
+        description="Delete test type",
+        label="Delete Test",
+        level="SERIES",
+    )
+    test_session.add(record_type)
+    await test_session.commit()
+
+    record = Record(
+        patient_id=patient.id,
+        study_uid=study.study_uid,
+        series_uid=series.series_uid,
+        record_type_name=record_type.name,
+        status=RecordStatus.pending,
+    )
+    test_session.add(record)
+    await test_session.commit()
+
+    record_id = record.id
+
+    # Delete patient via API
+    response = await client.delete(f"/api/patients/{patient.id}")
+    assert response.status_code == 204
+
+    # Verify all entities are deleted
+    assert await test_session.get(Patient, "DEL_PAT001") is None
+    assert await test_session.get(Study, "1.2.3.4.5.100") is None
+    assert await test_session.get(Series, "1.2.3.4.5.100.1") is None
+    assert await test_session.get(Record, record_id) is None
+
+
+@pytest.mark.asyncio
+async def test_delete_patient_not_found(client: AsyncClient):
+    """Test DELETE /patients/{patient_id} returns 404 for non-existent patient."""
+    response = await client.delete("/api/patients/NON_EXISTENT")
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_delete_study_cascade_api(client: AsyncClient, test_session):
+    """Test DELETE /studies/{study_uid} cascades to series and records, patient remains."""
+    # Create patient → study → series → record
+    patient = Patient(id="DEL_PAT002", name="Study Delete Test")
+    test_session.add(patient)
+    await test_session.commit()
+
+    study = Study(
+        patient_id=patient.id,
+        study_uid="1.2.3.4.5.200",
+        date=datetime.now(UTC).date(),
+    )
+    test_session.add(study)
+    await test_session.commit()
+
+    series = Series(
+        study_uid=study.study_uid,
+        series_uid="1.2.3.4.5.200.1",
+        series_number=1,
+        series_description="T2 Axial",
+    )
+    test_session.add(series)
+    await test_session.commit()
+
+    record_type = RecordType(
+        name="del_study_type",
+        description="Study delete test type",
+        label="Study Delete",
+        level="SERIES",
+    )
+    test_session.add(record_type)
+    await test_session.commit()
+
+    record = Record(
+        patient_id=patient.id,
+        study_uid=study.study_uid,
+        series_uid=series.series_uid,
+        record_type_name=record_type.name,
+        status=RecordStatus.pending,
+    )
+    test_session.add(record)
+    await test_session.commit()
+
+    record_id = record.id
+
+    # Delete study via API
+    response = await client.delete(f"/api/studies/{study.study_uid}")
+    assert response.status_code == 204
+
+    # Verify study, series, and record are deleted
+    assert await test_session.get(Study, "1.2.3.4.5.200") is None
+    assert await test_session.get(Series, "1.2.3.4.5.200.1") is None
+    assert await test_session.get(Record, record_id) is None
+
+    # Patient should still exist
+    remaining_patient = await test_session.get(Patient, "DEL_PAT002")
+    assert remaining_patient is not None
+
+
+@pytest.mark.asyncio
+async def test_delete_study_not_found(client: AsyncClient):
+    """Test DELETE /studies/{study_uid} returns 404 for non-existent study."""
+    response = await client.delete("/api/studies/9.9.9.9.9.9")
+    assert response.status_code == 404

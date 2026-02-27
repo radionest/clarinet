@@ -67,6 +67,12 @@ pub fn anonymize_patient(id: String) -> Promise(Result(Patient, ApiError)) {
   })
 }
 
+// Delete a patient
+pub fn delete_patient(id: String) -> Promise(Result(Nil, ApiError)) {
+  http_client.delete("/patients/" <> id)
+  |> promise.map(fn(res) { result.map(res, fn(_) { Nil }) })
+}
+
 // Patient decoder
 pub fn patient_decoder() -> decode.Decoder(Patient) {
   use id <- decode.field("id", decode.string)

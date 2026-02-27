@@ -120,6 +120,10 @@ pub type Msg {
   PatientDetailLoaded(Result(Patient, ApiError))
   AnonymizePatient(id: String)
   PatientAnonymized(Result(Patient, ApiError))
+  DeletePatient(id: String)
+  PatientDeleted(Result(Nil, ApiError))
+  DeleteStudy(study_uid: String)
+  StudyDeleted(Result(Nil, ApiError))
 
   LoadAdminStats
   AdminStatsLoaded(Result(AdminStats, ApiError))

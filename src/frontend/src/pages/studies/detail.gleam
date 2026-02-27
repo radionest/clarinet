@@ -31,13 +31,25 @@ fn render_detail(model: Model, study: Study) -> Element(Msg) {
   html.div([attribute.class("container")], [
     html.div([attribute.class("page-header")], [
       html.h1([], [html.text("Study: " <> study.study_uid)]),
-      html.button(
-        [
-          attribute.class("btn btn-secondary"),
-          event.on_click(store.Navigate(router.Studies)),
-        ],
-        [html.text("Back to Studies")],
-      ),
+      html.div([], [
+        html.button(
+          [
+            attribute.class("btn btn-secondary"),
+            event.on_click(store.Navigate(router.Studies)),
+          ],
+          [html.text("Back to Studies")],
+        ),
+        html.button(
+          [
+            attribute.class("btn btn-danger"),
+            event.on_click(store.OpenModal(store.ConfirmDelete(
+              "study",
+              study.study_uid,
+            ))),
+          ],
+          [html.text("Delete Study")],
+        ),
+      ]),
     ]),
     study_info_card(study),
     patient_section(study.patient, study.patient_id),

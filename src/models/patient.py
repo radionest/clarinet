@@ -41,7 +41,7 @@ class Patient(PatientBase, table=True):
         min_length=1,
         max_length=64,
     )
-    studies: list[Study] = Relationship(back_populates="patient")
+    studies: list[Study] = Relationship(back_populates="patient", cascade_delete=True)
     auto_id: int | None = Field(
         default=None,
         sa_column=Column(
@@ -51,7 +51,7 @@ class Patient(PatientBase, table=True):
             unique=True,
         ),
     )
-    records: list[Record] = Relationship(back_populates="patient")
+    records: list[Record] = Relationship(back_populates="patient", cascade_delete=True)
 
 
 class PatientSave(PatientBase):

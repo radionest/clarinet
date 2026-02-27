@@ -32,6 +32,12 @@ pub fn get_study(study_uid: String) -> Promise(Result(Study, ApiError)) {
   })
 }
 
+// Delete a study
+pub fn delete_study(study_uid: String) -> Promise(Result(Nil, ApiError)) {
+  http_client.delete("/studies/" <> study_uid)
+  |> promise.map(fn(res) { result.map(res, fn(_) { Nil }) })
+}
+
 // Lightweight decoder (no nested relations) - used for lists
 pub fn study_decoder() -> decode.Decoder(Study) {
   use study_uid <- decode.field("study_uid", decode.string)

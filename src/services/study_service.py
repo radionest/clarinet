@@ -315,3 +315,33 @@ class StudyService:
         """
         series = await self.series_repo.get(series_uid)
         return await self.series_repo.update(series, {"anon_uid": anon_uid})
+
+    # Delete operations
+
+    async def delete_patient(self, patient_id: str) -> None:
+        """Delete a patient and all related studies, series, and records.
+
+        Uses SQLModel cascade_delete — the ORM handles child deletion automatically.
+
+        Args:
+            patient_id: Patient ID
+
+        Raises:
+            EntityNotFoundError: If patient doesn't exist
+        """
+        patient = await self.patient_repo.get(patient_id)
+        await self.patient_repo.delete(patient)
+
+    async def delete_study(self, study_uid: str) -> None:
+        """Delete a study and all related series and records.
+
+        Uses SQLModel cascade_delete — the ORM handles child deletion automatically.
+
+        Args:
+            study_uid: Study UID
+
+        Raises:
+            EntityNotFoundError: If study doesn't exist
+        """
+        study = await self.study_repo.get(study_uid)
+        await self.study_repo.delete(study)

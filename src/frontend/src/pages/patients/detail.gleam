@@ -34,13 +34,25 @@ fn render_detail(model: Model, patient: Patient) -> Element(Msg) {
   html.div([attribute.class("container")], [
     html.div([attribute.class("page-header")], [
       html.h1([], [html.text("Patient: " <> patient.id)]),
-      html.button(
-        [
-          attribute.class("btn btn-secondary"),
-          event.on_click(store.Navigate(router.Patients)),
-        ],
-        [html.text("Back to Patients")],
-      ),
+      html.div([], [
+        html.button(
+          [
+            attribute.class("btn btn-secondary"),
+            event.on_click(store.Navigate(router.Patients)),
+          ],
+          [html.text("Back to Patients")],
+        ),
+        html.button(
+          [
+            attribute.class("btn btn-danger"),
+            event.on_click(store.OpenModal(store.ConfirmDelete(
+              "patient",
+              patient.id,
+            ))),
+          ],
+          [html.text("Delete Patient")],
+        ),
+      ]),
     ]),
     patient_info_card(patient),
     studies_section(patient.studies),

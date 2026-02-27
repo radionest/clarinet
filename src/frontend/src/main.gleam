@@ -22,9 +22,11 @@ import gleam/list
 import gleam/option.{None, Some}
 import gleam/uri.{type Uri}
 import lustre
+import lustre/attribute
 import lustre/effect.{type Effect}
 import lustre/element.{type Element}
 import lustre/element/html
+import lustre/event
 import modem
 import pages/admin as admin_page
 import pages/record_types/detail as record_type_detail
@@ -773,6 +775,85 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     store.PatientAnonymized(Error(err)) ->
       handle_api_error(model, err, "Failed to anonymize patient")
 
+    // Delete patient
+    store.DeletePatient(id) -> {
+      let delete_effect = {
+        use dispatch <- effect.from
+        patients.delete_patient(id)
+        |> promise.tap(fn(result) { dispatch(store.PatientDeleted(result)) })
+        Nil
+      }
+      #(store.set_loading(model, True), delete_effect)
+    }
+
+    store.PatientDeleted(Ok(_)) -> {
+      let new_model =
+        model
+        |> store.set_loading(False)
+        |> store.set_success("Patient deleted successfully")
+        |> store.set_route(router.Patients)
+      #(new_model, effect.batch([
+        modem.push("/patients", option.None, option.None),
+        dispatch_msg(store.LoadPatients),
+      ]))
+    }
+
+    store.PatientDeleted(Error(err)) ->
+      handle_api_error(model, err, "Failed to delete patient")
+
+    // Delete study
+    store.DeleteStudy(study_uid) -> {
+      let delete_effect = {
+        use dispatch <- effect.from
+        studies.delete_study(study_uid)
+        |> promise.tap(fn(result) { dispatch(store.StudyDeleted(result)) })
+        Nil
+      }
+      #(store.set_loading(model, True), delete_effect)
+    }
+
+    store.StudyDeleted(Ok(_)) -> {
+      let new_model =
+        model
+        |> store.set_loading(False)
+        |> store.set_success("Study deleted successfully")
+        |> store.set_route(router.Studies)
+      #(new_model, effect.batch([
+        modem.push("/studies", option.None, option.None),
+        dispatch_msg(store.LoadStudies),
+      ]))
+    }
+
+    store.StudyDeleted(Error(err)) ->
+      handle_api_error(model, err, "Failed to delete study")
+
+    // Modal actions
+    store.OpenModal(content) -> {
+      #(
+        store.Model(..model, modal_open: True, modal_content: content),
+        effect.none(),
+      )
+    }
+
+    store.CloseModal -> {
+      #(
+        store.Model(..model, modal_open: False, modal_content: store.NoModal),
+        effect.none(),
+      )
+    }
+
+    store.ConfirmModalAction -> {
+      let close_model =
+        store.Model(..model, modal_open: False, modal_content: store.NoModal)
+      case model.modal_content {
+        store.ConfirmDelete("patient", id) ->
+          #(close_model, dispatch_msg(store.DeletePatient(id)))
+        store.ConfirmDelete("study", uid) ->
+          #(close_model, dispatch_msg(store.DeleteStudy(uid)))
+        _ -> #(close_model, effect.none())
+      }
+    }
+
     // Data loading - Study Detail
     store.LoadStudyDetail(id) ->
       load_with_effect(
@@ -972,10 +1053,58 @@ fn view_content(model: Model) -> Element(Msg) {
     router.NotFound -> html.div([], [html.text("404 - Page not found")])
   }
 
-  case model.route {
+  let page = case model.route {
     router.Login | router.Register -> content
     _ -> layout.view(model, content)
   }
+
+  case model.modal_open {
+    True -> html.div([], [page, render_modal(model)])
+    False -> page
+  }
+}
+
+fn render_modal(model: Model) -> Element(Msg) {
+  let #(title, warning) = case model.modal_content {
+    store.ConfirmDelete("patient", id) -> #(
+      "Delete Patient",
+      "Are you sure you want to delete patient \""
+        <> id
+        <> "\"? This will permanently delete all associated studies, series, and records. This action cannot be undone.",
+    )
+    store.ConfirmDelete("study", uid) -> #(
+      "Delete Study",
+      "Are you sure you want to delete study \""
+        <> uid
+        <> "\"? This will permanently delete all associated series and records. This action cannot be undone.",
+    )
+    _ -> #("Confirm", "Are you sure?")
+  }
+
+  html.div([attribute.class("modal-backdrop")], [
+    html.div([attribute.class("modal")], [
+      html.div([attribute.class("modal-header")], [
+        html.h3([attribute.class("modal-title")], [html.text(title)]),
+      ]),
+      html.p([], [html.text(warning)]),
+      html.div([attribute.class("modal-footer")], [
+        html.button(
+          [
+            attribute.class("btn btn-secondary"),
+            event.on_click(store.CloseModal),
+          ],
+          [html.text("Cancel")],
+        ),
+        html.button(
+          [
+            attribute.class("btn btn-danger"),
+            event.on_click(store.ConfirmModalAction),
+          ],
+          [html.text("Delete")],
+        ),
+      ]),
+    ]),
+  ])
 }
 
 // Load data for route

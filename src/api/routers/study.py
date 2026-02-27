@@ -70,6 +70,15 @@ async def anonymize_patient(
     return await service.anonymize_patient(patient_id)
 
 
+@router.delete("/patients/{patient_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_patient(
+    patient_id: str,
+    service: StudyServiceDep,
+) -> None:
+    """Delete a patient and all related studies, series, and records."""
+    await service.delete_patient(patient_id)
+
+
 # Study endpoints
 
 
@@ -117,6 +126,15 @@ async def add_study(
         )
 
     return result
+
+
+@router.delete("/studies/{study_uid}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_study(
+    study_uid: DicomUID,
+    service: StudyServiceDep,
+) -> None:
+    """Delete a study and all related series and records."""
+    await service.delete_study(study_uid)
 
 
 # Series endpoints
