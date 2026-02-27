@@ -5,7 +5,7 @@ import lustre/element.{type Element}
 import lustre/element/html
 import store.{type Model, type Msg}
 
-pub fn view(model: Model, id: Option(String)) -> Element(Msg) {
+pub fn view(_model: Model, id: Option(String)) -> Element(Msg) {
   let title = case id {
     Some(record_type_id) -> "Edit Record Type #" <> record_type_id
     None -> "New Record Type"

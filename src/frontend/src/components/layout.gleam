@@ -1,6 +1,4 @@
 // Main layout component with navbar and content area
-import api/models
-import gleam/list
 import gleam/option.{None, Some}
 import lustre/attribute
 import lustre/element.{type Element}

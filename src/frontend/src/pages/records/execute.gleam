@@ -111,7 +111,8 @@ fn render_slicer_toolbar(
           ])
       }
 
-      let btn_disabled = model.slicer_loading
+      let btn_disabled =
+        model.slicer_loading || model.slicer_available != Some(True)
 
       html.div([attribute.class("slicer-toolbar card")], [
         html.div([attribute.class("slicer-toolbar-header")], [

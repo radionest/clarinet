@@ -9,6 +9,7 @@ import gleam/dynamic
 import gleam/int
 import gleam/json.{type Json}
 import gleam/option.{type Option, None, Some}
+import plinth/javascript/global
 import router.{type Route}
 
 // Application state model
@@ -64,6 +65,7 @@ pub type Model {
     // Slicer state
     slicer_loading: Bool,
     slicer_available: Option(Bool),
+    slicer_ping_timer: Option(global.TimerID),
   )
 }
 
@@ -202,6 +204,8 @@ pub type Msg {
   SlicerClearSceneResult(Result(dynamic.Dynamic, ApiError))
   SlicerPing
   SlicerPingResult(Result(dynamic.Dynamic, ApiError))
+  SlicerPingTimerStarted(global.TimerID)
+  StopSlicerPingTimer
 
   // Misc
   NoOp
@@ -249,6 +253,7 @@ pub fn init() -> Model {
     pacs_importing: None,
     slicer_loading: False,
     slicer_available: None,
+    slicer_ping_timer: None,
   )
 }
 

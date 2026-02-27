@@ -1,7 +1,6 @@
 // Comprehensive unit tests for http_client.process_response function
 import api/http_client
 import api/types
-import gleam/dynamic.{type Dynamic}
 import gleam/dynamic/decode
 import gleam/json
 import gleam/list
@@ -29,50 +28,34 @@ pub fn process_response_status_code_coverage_test() {
 pub fn api_error_types_comprehensive_test() {
   // Test NetworkError
   let network_err = types.NetworkError("Connection timeout")
-  case network_err {
-    types.NetworkError(msg) -> should.equal(msg, "Connection timeout")
-    _ -> should.fail()
-  }
+  let types.NetworkError(msg) = network_err
+  should.equal(msg, "Connection timeout")
 
   // Test ParseError
   let parse_err = types.ParseError("Invalid JSON at position 42")
-  case parse_err {
-    types.ParseError(msg) -> should.equal(msg, "Invalid JSON at position 42")
-    _ -> should.fail()
-  }
+  let types.ParseError(msg) = parse_err
+  should.equal(msg, "Invalid JSON at position 42")
 
   // Test AuthError
   let auth_err = types.AuthError("Session expired")
-  case auth_err {
-    types.AuthError(msg) -> should.equal(msg, "Session expired")
-    _ -> should.fail()
-  }
+  let types.AuthError(msg) = auth_err
+  should.equal(msg, "Session expired")
 
   // Test ServerError with various codes
   let server_err_500 = types.ServerError(500, "Internal server error")
-  case server_err_500 {
-    types.ServerError(code, msg) -> {
-      should.equal(code, 500)
-      should.equal(msg, "Internal server error")
-    }
-    _ -> should.fail()
-  }
+  let types.ServerError(code, msg) = server_err_500
+  should.equal(code, 500)
+  should.equal(msg, "Internal server error")
 
   let server_err_502 = types.ServerError(502, "Bad gateway")
-  case server_err_502 {
-    types.ServerError(code, msg) -> {
-      should.equal(code, 502)
-      should.equal(msg, "Bad gateway")
-    }
-    _ -> should.fail()
-  }
+  let types.ServerError(code, msg) = server_err_502
+  should.equal(code, 502)
+  should.equal(msg, "Bad gateway")
 
   // Test ValidationError with empty list
   let validation_err_empty = types.ValidationError([])
-  case validation_err_empty {
-    types.ValidationError(errors) -> should.equal(errors, [])
-    _ -> should.fail()
-  }
+  let types.ValidationError(errors) = validation_err_empty
+  should.equal(errors, [])
 
   // Test ValidationError with errors
   let validation_err_full =
@@ -80,46 +63,29 @@ pub fn api_error_types_comprehensive_test() {
       #("username", "Username is required"),
       #("email", "Invalid email format"),
     ])
-  case validation_err_full {
-    types.ValidationError(errors) -> {
-      should.equal(errors, [
-        #("username", "Username is required"),
-        #("email", "Invalid email format"),
-      ])
-    }
-    _ -> should.fail()
-  }
+  let types.ValidationError(errors) = validation_err_full
+  should.equal(errors, [
+    #("username", "Username is required"),
+    #("email", "Invalid email format"),
+  ])
 }
 
 // Test JSON parsing utilities used in process_response
 pub fn json_parsing_test() {
   // Test valid JSON parsing (same as in process_response)
   let valid_json = "{\"status\":\"ok\",\"count\":42}"
-  case json.parse(valid_json, decode.dynamic) {
-    Ok(_data) -> {
-      // Successfully parsed
-      should.equal(True, True)
-    }
-    Error(_) -> should.fail()
-  }
+  json.parse(valid_json, decode.dynamic)
+  |> should.be_ok
 
   // Test invalid JSON parsing
   let invalid_json = "{invalid json}"
-  case json.parse(invalid_json, decode.dynamic) {
-    Ok(_) -> should.fail()
-    Error(_) -> should.equal(True, True)
-    // Expected error
-  }
+  json.parse(invalid_json, decode.dynamic)
+  |> should.be_error
 
   // Test empty object parsing (used for 204 responses)
   let empty_json = "{}"
-  case json.parse(empty_json, decode.dynamic) {
-    Ok(_) -> {
-      // Should parse successfully
-      should.equal(True, True)
-    }
-    Error(_) -> should.fail()
-  }
+  json.parse(empty_json, decode.dynamic)
+  |> should.be_ok
 }
 
 // Test complex JSON structures that might be returned by the API
@@ -127,23 +93,13 @@ pub fn complex_json_structures_test() {
   // Test nested object
   let nested_json =
     "{\"user\":{\"id\":1,\"name\":\"Alice\"},\"meta\":{\"version\":\"1.0\"}}"
-  case json.parse(nested_json, decode.dynamic) {
-    Ok(_) -> {
-      // Successfully parsed nested structure
-      should.equal(True, True)
-    }
-    Error(_) -> should.fail()
-  }
+  json.parse(nested_json, decode.dynamic)
+  |> should.be_ok
 
   // Test array of objects
   let array_json = "[{\"id\":1,\"active\":true},{\"id\":2,\"active\":false}]"
-  case json.parse(array_json, decode.dynamic) {
-    Ok(_) -> {
-      // Successfully parsed array
-      should.equal(True, True)
-    }
-    Error(_) -> should.fail()
-  }
+  json.parse(array_json, decode.dynamic)
+  |> should.be_ok
 }
 
 // Test that our error types work correctly with Result type
@@ -156,55 +112,33 @@ pub fn result_type_integration_test() {
     Error(types.AuthError("unauthorized"))
 
   // Test pattern matching on results
-  case success_result {
-    Ok(value) -> should.equal(value, "success")
-    Error(_) -> should.fail()
-  }
+  success_result
+  |> should.be_ok
+  |> should.equal("success")
 
-  case network_error_result {
-    Ok(_) -> should.fail()
-    Error(types.NetworkError(msg)) -> should.equal(msg, "timeout")
-    Error(_) -> should.fail()
-  }
+  let assert Error(types.NetworkError(msg)) = network_error_result
+  should.equal(msg, "timeout")
 
-  case auth_error_result {
-    Ok(_) -> should.fail()
-    Error(types.AuthError(msg)) -> should.equal(msg, "unauthorized")
-    Error(_) -> should.fail()
-  }
+  let assert Error(types.AuthError(msg)) = auth_error_result
+  should.equal(msg, "unauthorized")
 }
 
 // Test edge cases in JSON parsing
 pub fn json_edge_cases_test() {
   // Test null values
   let null_json = "{\"value\":null}"
-  case json.parse(null_json, decode.dynamic) {
-    Ok(_) -> {
-      // Null is valid JSON
-      should.equal(True, True)
-    }
-    Error(_) -> should.fail()
-  }
+  json.parse(null_json, decode.dynamic)
+  |> should.be_ok
 
   // Test boolean values
   let bool_json = "{\"success\":true,\"error\":false}"
-  case json.parse(bool_json, decode.dynamic) {
-    Ok(_) -> {
-      // Booleans parsed successfully
-      should.equal(True, True)
-    }
-    Error(_) -> should.fail()
-  }
+  json.parse(bool_json, decode.dynamic)
+  |> should.be_ok
 
   // Test number values (both int and float)
   let number_json = "{\"integer\":42,\"decimal\":3.14}"
-  case json.parse(number_json, decode.dynamic) {
-    Ok(_) -> {
-      // Numbers parsed successfully
-      should.equal(True, True)
-    }
-    Error(_) -> should.fail()
-  }
+  json.parse(number_json, decode.dynamic)
+  |> should.be_ok
 }
 
 // Test the contract of public HTTP methods
@@ -238,33 +172,17 @@ pub fn validation_error_structure_test() {
   let empty_errors = types.ValidationError([])
 
   // Verify structure
-  case single_error {
-    types.ValidationError(errors) -> {
-      should.equal(list.length(errors), 1)
-      case errors {
-        [#(field, message)] -> {
-          should.equal(field, "email")
-          should.equal(message, "Invalid email format")
-        }
-        _ -> should.fail()
-      }
-    }
-    _ -> should.fail()
-  }
+  let types.ValidationError(errors) = single_error
+  should.equal(list.length(errors), 1)
+  let assert [#(field, message)] = errors
+  should.equal(field, "email")
+  should.equal(message, "Invalid email format")
 
-  case multiple_errors {
-    types.ValidationError(errors) -> {
-      should.equal(list.length(errors), 3)
-    }
-    _ -> should.fail()
-  }
+  let types.ValidationError(errors) = multiple_errors
+  should.equal(list.length(errors), 3)
 
-  case empty_errors {
-    types.ValidationError(errors) -> {
-      should.equal(list.length(errors), 0)
-    }
-    _ -> should.fail()
-  }
+  let types.ValidationError(errors) = empty_errors
+  should.equal(list.length(errors), 0)
 }
 
 // Test that all status codes map to correct error types

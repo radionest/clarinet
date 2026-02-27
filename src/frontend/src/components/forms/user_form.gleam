@@ -2,8 +2,7 @@
 import api/models.{type UserCreate}
 import components/forms/base as form
 import gleam/dict.{type Dict}
-import gleam/list
-import gleam/option.{type Option, None, Some}
+import gleam/option.{Some}
 import lustre/attribute
 import lustre/element.{type Element}
 import lustre/element/html

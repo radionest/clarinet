@@ -1,5 +1,4 @@
 // Native DOM utilities using plinth
-import gleam/dynamic
 import gleam/option.{type Option, None, Some}
 import plinth/browser/document
 import plinth/browser/element

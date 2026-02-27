@@ -2,7 +2,7 @@
 import api/models.{type StudyCreate}
 import components/forms/base as form
 import gleam/dict.{type Dict}
-import gleam/option.{type Option, None, Some}
+import gleam/option.{None, Some}
 import lustre/attribute
 import lustre/element.{type Element}
 import lustre/element/html

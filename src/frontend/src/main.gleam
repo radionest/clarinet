@@ -14,10 +14,12 @@ import components/forms/patient_form
 import components/layout
 import formosh/component as formosh_component
 import gleam/dict
+import gleam/dynamic/decode
 import gleam/int
 import gleam/io
 import gleam/javascript/promise
 import gleam/string
+import plinth/javascript/global
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/uri.{type Uri}
@@ -108,11 +110,23 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         <> ", checking_session: " <> string.inspect(model.checking_session)
         <> ", user: " <> string.inspect(model.user),
       )
-      let new_model = store.set_route(model, route)
+      // Stop any existing slicer ping timer when changing routes
+      let stop_timer_effect = case model.slicer_ping_timer {
+        Some(timer_id) -> {
+          effect.from(fn(_dispatch) { global.clear_interval(timer_id) })
+        }
+        None -> effect.none()
+      }
+      let new_model =
+        store.Model(
+          ..store.set_route(model, route),
+          slicer_ping_timer: None,
+          slicer_available: None,
+        )
 
       // Don't redirect while session check is in progress
       case model.checking_session {
-        True -> #(new_model, effect.none())
+        True -> #(new_model, stop_timer_effect)
         False -> {
           // Check authentication requirement
           let is_auth_page = route == router.Login || route == router.Register
@@ -120,24 +134,51 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
             True, None, _ -> {
               // Redirect to login if auth required
               #(
-                store.set_route(model, router.Login),
-                modem.push("/login", option.None, option.None),
+                store.Model(
+                  ..store.set_route(model, router.Login),
+                  slicer_ping_timer: None,
+                  slicer_available: None,
+                ),
+                effect.batch([
+                  stop_timer_effect,
+                  modem.push("/login", option.None, option.None),
+                ]),
               )
             }
             False, Some(_), True -> {
               // Redirect from login/register if already authenticated
               #(
-                store.set_route(model, router.Home),
-                modem.push("/", option.None, option.None),
+                store.Model(
+                  ..store.set_route(model, router.Home),
+                  slicer_ping_timer: None,
+                  slicer_available: None,
+                ),
+                effect.batch([
+                  stop_timer_effect,
+                  modem.push("/", option.None, option.None),
+                ]),
               )
             }
             _, _, _ ->
               case router.requires_admin_role(route), model.user {
                 True, Some(models.User(is_superuser: False, ..)) -> #(
-                  store.set_route(model, router.Home),
-                  modem.push("/", option.None, option.None),
+                  store.Model(
+                    ..store.set_route(model, router.Home),
+                    slicer_ping_timer: None,
+                    slicer_available: None,
+                  ),
+                  effect.batch([
+                    stop_timer_effect,
+                    modem.push("/", option.None, option.None),
+                  ]),
                 )
-                _, _ -> #(new_model, load_route_data(new_model, route))
+                _, _ -> #(
+                  new_model,
+                  effect.batch([
+                    stop_timer_effect,
+                    load_route_data(new_model, route),
+                  ]),
+                )
               }
           }
         }
@@ -644,12 +685,43 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       #(model, ping_effect)
     }
 
-    store.SlicerPingResult(Ok(_)) -> {
-      #(store.Model(..model, slicer_available: Some(True)), effect.none())
+    store.SlicerPingResult(Ok(data)) -> {
+      // Backend returns {"ok": true/false} — decode the "ok" field
+      let ok_decoder = decode.at(["ok"], decode.bool)
+      let available = case decode.run(data, ok_decoder) {
+        Ok(True) -> True
+        _ -> False
+      }
+      #(store.Model(..model, slicer_available: Some(available)), effect.none())
     }
 
     store.SlicerPingResult(Error(_)) -> {
       #(store.Model(..model, slicer_available: Some(False)), effect.none())
+    }
+
+    store.SlicerPingTimerStarted(timer_id) -> {
+      #(
+        store.Model(..model, slicer_ping_timer: Some(timer_id)),
+        effect.none(),
+      )
+    }
+
+    store.StopSlicerPingTimer -> {
+      case model.slicer_ping_timer {
+        Some(timer_id) -> {
+          let clear_effect =
+            effect.from(fn(_dispatch) { global.clear_interval(timer_id) })
+          #(
+            store.Model(
+              ..model,
+              slicer_ping_timer: None,
+              slicer_available: None,
+            ),
+            clear_effect,
+          )
+        }
+        None -> #(model, effect.none())
+      }
     }
 
     // Filters
@@ -817,11 +889,7 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         model
         |> store.set_loading(False)
         |> store.set_success("Study deleted successfully")
-        |> store.set_route(router.Studies)
-      #(new_model, effect.batch([
-        modem.push("/studies", option.None, option.None),
-        dispatch_msg(store.LoadStudies),
-      ]))
+      #(new_model, modem.back(1))
     }
 
     store.StudyDeleted(Error(err)) ->
@@ -991,6 +1059,17 @@ fn dispatch_msg(msg: Msg) -> Effect(Msg) {
   dispatch(msg)
 }
 
+// Helper: start periodic slicer ping timer (immediate ping + 10s interval)
+fn start_slicer_ping_timer() -> Effect(Msg) {
+  use dispatch <- effect.from
+  // Immediate first ping
+  dispatch(store.SlicerPing)
+  // Set up periodic pings every 10 seconds
+  let timer_id =
+    global.set_interval(10_000, fn() { dispatch(store.SlicerPing) })
+  dispatch(store.SlicerPingTimerStarted(timer_id))
+}
+
 /// Handles API errors with automatic session expiry detection.
 /// On AuthError: clears user, shows expiry message, redirects to login.
 /// On other errors: shows the provided fallback message.
@@ -1133,7 +1212,7 @@ fn load_route_data(model: Model, route: Route) -> Effect(Msg) {
     router.RecordDetail(id), Some(_) ->
       effect.batch([
         dispatch_msg(store.LoadRecordDetail(id)),
-        dispatch_msg(store.SlicerPing),
+        start_slicer_ping_timer(),
       ])
     router.Patients, Some(models.User(is_superuser: True, ..)) ->
       dispatch_msg(store.LoadPatients)

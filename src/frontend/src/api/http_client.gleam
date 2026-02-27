@@ -9,7 +9,7 @@ import gleam/dynamic/decode
 import gleam/fetch
 import gleam/http
 import gleam/http/request
-import gleam/http/response.{type Response}
+import gleam/http/response
 import gleam/javascript/promise.{type Promise}
 import gleam/json
 import gleam/option.{type Option, None, Some}
