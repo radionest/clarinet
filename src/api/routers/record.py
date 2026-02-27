@@ -14,7 +14,6 @@ from fastapi import (
     BackgroundTasks,
     Body,
     Depends,
-    HTTPException,
     Request,
     status,
 )
@@ -28,6 +27,7 @@ from src.api.dependencies import (
     SeriesRepositoryDep,
 )
 from src.exceptions import CONFLICT, NOT_FOUND
+from src.exceptions.domain import ValidationError
 from src.models import (
     Record,
     RecordCreate,
@@ -78,7 +78,11 @@ def validate_record_files(record: Record) -> FileValidationResult | None:
 
     directory = Path(working_folder)
     validator = FileValidator(record.record_type)
-    return validator.validate_input_files(record, directory)
+    result = validator.validate_input_files(record, directory)
+    if not result.valid:
+        errors = "; ".join(f"{e.file_name}: {e.message}" for e in result.errors)
+        raise ValidationError(f"File validation failed: {errors}")
+    return result
 
 
 def validate_record_data(record: Record, data: RecordData) -> RecordData:
@@ -136,10 +140,7 @@ async def add_record_type(
         try:
             Draft202012Validator.check_schema(new_record_type.data_schema)
         except SchemaError as e:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="Data schema is invalid",
-            ) from e
+            raise ValidationError(f"Data schema is invalid: {e}") from e
 
     if constrain_unique_names:
         await repo.ensure_unique_name(record_type.name)
@@ -161,10 +162,7 @@ async def update_record_type(
         try:
             Draft202012Validator.check_schema(record_type_update.data_schema)
         except SchemaError as e:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="Data schema is invalid",
-            ) from e
+            raise ValidationError(f"Data schema is invalid: {e}") from e
 
     update_data = record_type_update.model_dump(exclude_unset=True, exclude_none=True)
     return await repo.update(record_type, update_data)
@@ -261,11 +259,6 @@ async def add_record(
 
     # Validate input files if defined
     file_result = validate_record_files(record)
-    if file_result and not file_result.valid:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=[{"file_name": e.file_name, "error": e.message} for e in file_result.errors],
-        )
     if file_result and file_result.matched_files:
         await repo.set_files(record, file_result.matched_files)
         return await repo.get_with_relations(record.id)  # type: ignore[arg-type]
@@ -339,11 +332,6 @@ async def submit_record_data(
     # Validate input files if defined
     file_result = validate_record_files(record)
     files: dict[str, str] | None = None
-    if file_result and not file_result.valid:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=[{"file_name": e.file_name, "error": e.message} for e in file_result.errors],
-        )
     if file_result and file_result.matched_files:
         files = file_result.matched_files
 
