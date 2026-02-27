@@ -6,7 +6,7 @@ Event-driven workflow engine that creates/updates/invalidates records on status 
 
 - **FlowRecord**: Trigger-activated workflow definition
 - **FlowCondition**: Conditional blocks with actions
-- **FlowAction**: Typed Pydantic models for actions (`CreateRecordAction`, `UpdateRecordAction`, `CallFunctionAction`, `InvalidateRecordsAction`)
+- **FlowAction**: Typed Pydantic models for actions (`CreateRecordAction`, `UpdateRecordAction`, `CallFunctionAction`, `InvalidateRecordsAction`, `PipelineAction`)
 - **RecordFlowEngine**: Runtime execution engine — dispatches via `isinstance()` on action models
 - **FlowResult**: Lazy evaluation of data field comparisons
 
@@ -38,7 +38,8 @@ Actions are Pydantic models (not dicts). Each has a `type` Literal field:
 - `UpdateRecordAction(record_name, status?)`
 - `CallFunctionAction(function, args, kwargs)` — needs `arbitrary_types_allowed`
 - `InvalidateRecordsAction(record_type_names, mode, callback?)` — needs `arbitrary_types_allowed`
-- `FlowAction` — union type of all four
+- `PipelineAction(pipeline_name, extra_payload?)` — dispatches to pipeline task queue
+- `FlowAction` — union type of all five
 
 ## Key Methods
 
@@ -51,6 +52,7 @@ Actions are Pydantic models (not dicts). Each has a `type` Literal field:
 - `.add_record('type', **kwargs)` → `CreateRecordAction`
 - `.update_record('name', status='new_status')` → `UpdateRecordAction`
 - `.invalidate_records('type1', 'type2', mode='hard'|'soft', callback=fn)` → `InvalidateRecordsAction`
+- `.pipeline('name', **extra_payload)` → `PipelineAction` (dispatches to pipeline service)
 - `.call(func)` → `CallFunctionAction`
 - `.else_()` — else branch
 - `.is_active_flow()` — check if flow has triggers/actions (vs data-reference only)

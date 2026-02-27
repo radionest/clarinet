@@ -78,4 +78,25 @@ class InvalidateRecordsAction(_ActionBase):
     callback: Callable[..., Any] | None = None
 
 
-FlowAction = CreateRecordAction | UpdateRecordAction | CallFunctionAction | InvalidateRecordsAction
+class PipelineAction(_ActionBase):
+    """Action to dispatch a pipeline task.
+
+    Sends a message to a registered pipeline for distributed execution.
+
+    Args:
+        pipeline_name: Name of the registered pipeline to run.
+        extra_payload: Additional key-value data merged into the pipeline message.
+    """
+
+    type: Literal["pipeline"] = "pipeline"
+    pipeline_name: str
+    extra_payload: dict[str, Any] = {}
+
+
+FlowAction = (
+    CreateRecordAction
+    | UpdateRecordAction
+    | CallFunctionAction
+    | InvalidateRecordsAction
+    | PipelineAction
+)

@@ -133,11 +133,6 @@ class Settings(BaseSettings):
     dicom_ip: str | None = None
     dicom_max_pdu: int = 16384
 
-    # DICOM settings (remote PACS)
-    dicom_pacs_aet: str = "ORTHANC"
-    dicom_pacs_host: str = "localhost"
-    dicom_pacs_port: int = 4242
-
     # DICOMweb proxy settings
     dicomweb_enabled: bool = True
     dicomweb_cache_ttl_hours: int = 24
@@ -182,6 +177,16 @@ class Settings(BaseSettings):
     # RecordFlow settings
     recordflow_enabled: bool = False  # Enable RecordFlow workflow engine
     recordflow_paths: list[str] = []  # Directories containing *_flow.py files
+
+    # Pipeline settings
+    pipeline_enabled: bool = False  # Enable pipeline task queue
+    pipeline_result_backend_url: str | None = None  # Redis URL for result backend (optional)
+    pipeline_worker_prefetch: int = 10  # Max tasks prefetched per worker
+    pipeline_default_timeout: int = 3600  # Default task timeout in seconds
+    pipeline_retry_count: int = 3  # Max retries for failed tasks
+    pipeline_retry_delay: int = 5  # Initial retry delay (seconds)
+    pipeline_retry_max_delay: int = 120  # Max retry delay with backoff
+    pipeline_ack_type: str = "when_executed"  # when_received | when_executed | when_saved
 
     # Template settings
     template_dir: str | None = None

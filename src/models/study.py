@@ -87,7 +87,9 @@ class SeriesRead(SeriesBase):
         """Format a path with values from this series."""
         try:
             return unformatted_path.format(
-                patient_id=self.study.patient.anon_id,
+                patient_id=self.study.patient.anon_id
+                if self.study.patient.anon_id is not None
+                else self.study.patient.id,
                 patient_anon_name=self.study.patient.anon_name,
                 study_uid=self.study_uid,
                 study_anon_uid=self.study.anon_uid or self.study_uid,

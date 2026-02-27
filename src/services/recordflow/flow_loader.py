@@ -5,7 +5,9 @@ This module provides functions to load FlowRecord definitions from external
 Python files, enabling dynamic flow configuration.
 """
 
+import sys
 from pathlib import Path
+from types import ModuleType
 
 from src.utils.logger import logger
 
@@ -67,8 +69,15 @@ def load_flows_from_file(file_path: Path) -> list[FlowRecord]:
             "patient": patient,
             "FlowRecord": FlowRecord,
             "__file__": str(file_path),
-            "__name__": "__main__",
+            "__name__": file_path.stem,
         }
+
+        # Register a placeholder module in sys.modules so that decorators
+        # (e.g. taskiq @broker.task()) can resolve func.__module__ at decoration time.
+        # This mirrors the same approach used in worker.py.
+        module_name = file_path.stem
+        if module_name not in sys.modules:
+            sys.modules[module_name] = ModuleType(module_name)
 
         # Execute the code in the namespace
         exec(compiled, namespace)

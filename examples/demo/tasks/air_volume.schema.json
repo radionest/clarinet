@@ -1,0 +1,10 @@
+{
+    "type": "object",
+    "properties": {
+        "volume_mm3": {"type": "number", "description": "Volume in mm\u00b3"},
+        "volume_ml": {"type": "number", "description": "Volume in mL"},
+        "voxel_count": {"type": "integer", "description": "Number of voxels in ROI"},
+        "threshold_hu": {"type": "number", "description": "Threshold used (HU)"}
+    },
+    "required": ["volume_mm3"]
+}

@@ -29,6 +29,7 @@ from .flow_action import (
     CreateRecordAction,
     FlowAction,
     InvalidateRecordsAction,
+    PipelineAction,
     UpdateRecordAction,
 )
 from .flow_condition import FlowCondition
@@ -279,6 +280,31 @@ class FlowRecord:
             record_type_names=list(record_type_names),
             mode=mode,
             callback=callback,
+        )
+
+        if self._current_condition:
+            self._current_condition.add_action(action)
+        else:
+            self.actions.append(action)
+
+        return self
+
+    def pipeline(self, pipeline_name: str, **extra_payload: object) -> FlowRecord:
+        """Add a pipeline dispatch action.
+
+        Sends a message to the named pipeline for distributed execution.
+        The pipeline message is populated from the triggering record's context.
+
+        Args:
+            pipeline_name: Name of the registered pipeline to run.
+            **extra_payload: Additional key-value data for the pipeline message.
+
+        Returns:
+            Self for method chaining.
+        """
+        action = PipelineAction(
+            pipeline_name=pipeline_name,
+            extra_payload=dict(extra_payload),
         )
 
         if self._current_condition:

@@ -27,6 +27,7 @@ from .flow_action import (
     CreateRecordAction,
     FlowAction,
     InvalidateRecordsAction,
+    PipelineAction,
     UpdateRecordAction,
 )
 from .flow_builder import flow, patient, record, series, study
@@ -60,6 +61,7 @@ __all__ = [
     "FlowResult",
     "InvalidateRecordsAction",
     "LogicalComparison",
+    "PipelineAction",
     "RecordFlowEngine",
     "UpdateRecordAction",
     "discover_and_load_flows",

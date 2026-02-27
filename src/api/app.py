@@ -43,7 +43,7 @@ async def _init_recordflow(app: FastAPI) -> None:
 
     client = ClarinetClient(
         base_url=f"http://{settings.host}:{settings.port}/api",
-        username=settings.admin_username,
+        username=settings.admin_email,
         password=settings.admin_password,
         auto_login=False,
     )
@@ -94,6 +94,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
             logger.error(f"Failed to initialize RecordFlow engine: {e}")
             app.state.recordflow_engine = None
 
+    if settings.pipeline_enabled:
+        try:
+            from src.services.pipeline import get_broker
+
+            broker = get_broker()
+            await broker.startup()
+            app.state.pipeline_broker = broker
+            logger.info("Pipeline broker started")
+        except Exception as e:
+            logger.error(f"Failed to start pipeline broker: {e}")
+            app.state.pipeline_broker = None
+
     if settings.session_cleanup_enabled:
         await session_cleanup_service.start()
         logger.info("Session cleanup service started")
@@ -134,6 +146,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         if settings.session_cleanup_enabled:
             await session_cleanup_service.stop()
             logger.info("Session cleanup service stopped")
+
+        if settings.pipeline_enabled and getattr(app.state, "pipeline_broker", None):
+            await app.state.pipeline_broker.shutdown()
+            logger.info("Pipeline broker stopped")
 
         if settings.recordflow_enabled:
             await _shutdown_recordflow(app)

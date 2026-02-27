@@ -404,3 +404,29 @@ class FlowExecutionError(RecordFlowError):
 
     def __init__(self, action: str, reason: str):
         super().__init__(f"Failed to execute action '{action}': {reason}")
+
+
+# Pipeline errors
+class PipelineError(ClarinetError):
+    """Base exception for pipeline task queue errors."""
+
+    pass
+
+
+class PipelineStepError(PipelineError):
+    """Raised when a pipeline step fails during execution.
+
+    Examples: task function raised an exception, timeout exceeded.
+    """
+
+    def __init__(self, step_name: str, reason: str):
+        super().__init__(f"Pipeline step '{step_name}' failed: {reason}")
+
+
+class PipelineConfigError(PipelineError):
+    """Raised when pipeline configuration is invalid.
+
+    Examples: unknown pipeline name, invalid queue, missing broker.
+    """
+
+    pass

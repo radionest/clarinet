@@ -307,6 +307,24 @@ async def run_with_frontend(host: str, port: int) -> None:
         logger.info("Servers stopped")
 
 
+async def _run_pipeline_worker(queues: list[str] | None, workers: int) -> None:
+    """Run the pipeline task worker.
+
+    Args:
+        queues: Queue names to listen on (auto-detected if None).
+        workers: Number of concurrent worker tasks.
+    """
+    from src.services.pipeline import run_worker
+
+    if not settings.pipeline_enabled:
+        logger.warning(
+            "Pipeline is disabled (pipeline_enabled=False). "
+            "Set CLARINET_PIPELINE_ENABLED=true to enable."
+        )
+
+    await run_worker(queues=queues, workers=workers)
+
+
 async def init_database() -> None:
     """Initialize the database with tables and default data."""
     from src.utils.bootstrap import initialize_application_data
@@ -502,6 +520,18 @@ def main() -> None:
     # frontend clean
     frontend_subparsers.add_parser("clean", help="Clean build artifacts")
 
+    # worker command
+    worker_parser = subparsers.add_parser("worker", help="Run pipeline task worker")
+    worker_parser.add_argument(
+        "--queues",
+        nargs="*",
+        default=None,
+        help="Queue names to listen on (default: auto-detect from capabilities)",
+    )
+    worker_parser.add_argument(
+        "--workers", type=int, default=2, help="Number of concurrent worker tasks (default: 2)"
+    )
+
     # session command
     session_parser = subparsers.add_parser("session", help="Session management commands")
     session_subparsers = session_parser.add_subparsers(dest="session_command")
@@ -576,6 +606,13 @@ def main() -> None:
             asyncio.run(reset_admin_password(args.username, password))
         else:
             admin_parser.print_help()
+    elif args.command == "worker":
+        queues = args.queues
+        if queues:
+            # Normalize queue names: "gpu" -> "clarinet.gpu"
+            queues = [q if "." in q else f"clarinet.{q}" for q in queues]
+        with contextlib.suppress(KeyboardInterrupt):
+            asyncio.run(_run_pipeline_worker(queues, args.workers))
     elif args.command == "init-migrations":
         from src.utils.migrations import init_alembic_in_project
 

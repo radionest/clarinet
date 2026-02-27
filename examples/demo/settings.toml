@@ -8,6 +8,13 @@ anon_id_prefix = "DEMO"
 secret_key = "demo-secret-key-not-for-production"
 admin_password = "admin123"
 recordflow_enabled = true
+pipeline_enabled = true
+
+# RabbitMQ (on klara)
+rabbitmq_host = "192.168.122.151"
+rabbitmq_login = "clarinet_test"
+rabbitmq_password = "clarinet_test"
+
 recordflow_paths = ["."]
 frontend_enabled = true
 

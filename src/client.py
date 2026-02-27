@@ -66,10 +66,12 @@ class ClarinetClient:
     Example:
         ```python
         # With password prompt
-        client = ClarinetClient("http://localhost:8000", username="admin")
+        client = ClarinetClient("http://localhost:8000", username="admin@example.com")
 
         # With password provided
-        client = ClarinetClient("http://localhost:8000", username="admin", password="secret")
+        client = ClarinetClient(
+            "http://localhost:8000", username="admin@example.com", password="secret"
+        )
 
         # Get current user
         user = await client.get_me()
@@ -667,6 +669,23 @@ class ClarinetClient:
             "PATCH",
             f"/records/{record_id}/status",
             params={"record_status": status.value},
+        )
+        return RecordRead.model_validate(response.json())
+
+    async def update_record_data(self, record_id: int, data: RecordData) -> RecordRead:
+        """Update data on a finished record.
+
+        Args:
+            record_id: Record ID
+            data: Record data to merge
+
+        Returns:
+            Updated record
+        """
+        response = await self._request(
+            "PATCH",
+            f"/records/{record_id}/data",
+            json=data,
         )
         return RecordRead.model_validate(response.json())
 

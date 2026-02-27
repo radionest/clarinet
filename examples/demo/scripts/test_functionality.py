@@ -626,7 +626,9 @@ async def test_record_data_submit(client: ClarinetClient) -> None:
 async def main() -> None:
     print("=== Clarinet Demo: Functionality Tests ===")
 
-    async with ClarinetClient(BASE_URL, username="admin", password="admin123") as client:
+    async with ClarinetClient(
+        BASE_URL, username="admin@clarinet.ru", password="admin123"
+    ) as client:
         await test_auth(client)
         await test_patients(client)
         await test_studies(client)

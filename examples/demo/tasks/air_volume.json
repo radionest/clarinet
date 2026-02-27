@@ -1,0 +1,16 @@
+{
+    "name": "air_volume",
+    "description": "Automated air ROI segmentation and volume calculation",
+    "label": "Air Volume",
+    "level": "SERIES",
+    "role_name": null,
+    "min_users": 0,
+    "max_users": 0,
+    "input_files": [
+        {
+            "name": "segmentation",
+            "pattern": "low_dens.seg.nrrd",
+            "required": true
+        }
+    ]
+}

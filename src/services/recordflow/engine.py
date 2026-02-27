@@ -14,6 +14,7 @@ from .flow_action import (
     CreateRecordAction,
     FlowAction,
     InvalidateRecordsAction,
+    PipelineAction,
     UpdateRecordAction,
 )
 from .flow_condition import FlowCondition
@@ -202,6 +203,8 @@ class RecordFlowEngine:
                     await self._create_entity_record(action, patient_id, study_uid, series_uid)
                 case CallFunctionAction():
                     await self._call_entity_function(action, patient_id, study_uid, series_uid)
+                case PipelineAction():
+                    await self._dispatch_entity_pipeline(action, patient_id, study_uid, series_uid)
                 case _:
                     logger.warning(f"Unsupported entity action type: {action.type}")
         except Exception as e:
@@ -273,6 +276,46 @@ class RecordFlowEngine:
                 await result
         except Exception as e:
             logger.error(f"Error calling entity function {action.function.__name__}: {e}")
+
+    async def _dispatch_entity_pipeline(
+        self,
+        action: PipelineAction,
+        patient_id: str,
+        study_uid: str | None,
+        series_uid: str | None,
+    ) -> None:
+        """Dispatch a pipeline from an entity creation flow.
+
+        Args:
+            action: The PipelineAction with pipeline name and extra payload.
+            patient_id: The patient ID.
+            study_uid: The study UID (if available).
+            series_uid: The series UID (if available).
+        """
+        from src.services.pipeline import PipelineMessage, get_pipeline
+
+        pipeline = get_pipeline(action.pipeline_name)
+        if pipeline is None:
+            logger.error(
+                f"Pipeline '{action.pipeline_name}' not found. "
+                f"Ensure it is registered before RecordFlow triggers it."
+            )
+            return
+
+        try:
+            message = PipelineMessage(
+                patient_id=patient_id,
+                study_uid=study_uid or "",
+                series_uid=series_uid,
+                payload=action.extra_payload,
+            )
+            await pipeline.run(message)
+            logger.info(
+                f"Dispatched pipeline '{action.pipeline_name}' "
+                f"for entity (patient={patient_id}, series={series_uid})"
+            )
+        except Exception as e:
+            logger.error(f"Failed to dispatch entity pipeline '{action.pipeline_name}': {e}")
 
     def _update_context_from_records(
         self, context: dict[str, RecordRead], records: list[RecordRead]
@@ -394,6 +437,8 @@ class RecordFlowEngine:
                     await self._invalidate_records(action, record, context)
                 case CallFunctionAction():
                     await self._call_function(action, record, context)
+                case PipelineAction():
+                    await self._dispatch_pipeline(action, record)
                 case _:
                     logger.warning(f"Unknown action type: {action.type}")
         except Exception as e:
@@ -569,3 +614,40 @@ class RecordFlowEngine:
                 await result
         except Exception as e:
             logger.error(f"Error calling function {action.function.__name__}: {e}")
+
+    async def _dispatch_pipeline(self, action: PipelineAction, record: RecordRead) -> None:
+        """Dispatch a task to a registered pipeline.
+
+        Builds a PipelineMessage from the record context and sends it
+        to the named pipeline for distributed execution.
+
+        Args:
+            action: The PipelineAction with pipeline name and extra payload.
+            record: The triggering record.
+        """
+        from src.services.pipeline import PipelineMessage, get_pipeline
+
+        pipeline = get_pipeline(action.pipeline_name)
+        if pipeline is None:
+            logger.error(
+                f"Pipeline '{action.pipeline_name}' not found. "
+                f"Ensure it is registered before RecordFlow triggers it."
+            )
+            return
+
+        try:
+            message = PipelineMessage(
+                patient_id=record.patient.id if record.patient else "",
+                study_uid=record.study.study_uid if record.study else "",
+                series_uid=record.series.series_uid if record.series else None,
+                record_id=record.id,
+                record_type_name=record.record_type.name if record.record_type else None,
+                payload=action.extra_payload,
+            )
+            await pipeline.run(message)
+            logger.info(
+                f"Dispatched pipeline '{action.pipeline_name}' "
+                f"for record {record.id} ({record.record_type.name})"
+            )
+        except Exception as e:
+            logger.error(f"Failed to dispatch pipeline '{action.pipeline_name}': {e}")
