@@ -36,15 +36,15 @@ def get_worker_queues() -> list[str]:
 
 
 def _load_task_modules() -> None:
-    """Exec flow files to register pipeline tasks on the singleton broker.
+    """Import flow files to register pipeline tasks on the singleton broker.
 
     Discovers ``*_flow.py`` files from ``settings.recordflow_paths`` and
-    executes them so that ``@broker.task()`` decorators populate the
-    singleton broker's task registry.
+    loads them via ``importlib.util`` so that ``@broker.task()`` decorators
+    populate the singleton broker's task registry.
     """
+    import importlib.util
     import sys
     from pathlib import Path
-    from types import ModuleType
 
     from src.services.recordflow.flow_loader import find_flow_files
 
@@ -54,14 +54,14 @@ def _load_task_modules() -> None:
         for flow_file in flow_files:
             module_name = flow_file.stem
             try:
-                # Register placeholder module so @broker.task() can do
-                # sys.modules[func.__module__] without KeyError
-                if module_name not in sys.modules:
-                    sys.modules[module_name] = ModuleType(module_name)
+                spec = importlib.util.spec_from_file_location(module_name, flow_file)
+                if spec is None or spec.loader is None:
+                    logger.error(f"Cannot create module spec for {flow_file}")
+                    continue
 
-                with open(flow_file) as f:
-                    code = compile(f.read(), str(flow_file), "exec")
-                exec(code, {"__file__": str(flow_file), "__name__": module_name})
+                module = importlib.util.module_from_spec(spec)
+                sys.modules[module_name] = module
+                spec.loader.exec_module(module)
                 logger.info(f"Loaded pipeline tasks from {flow_file}")
             except Exception as e:
                 logger.error(f"Failed to load tasks from {flow_file}: {e}")
