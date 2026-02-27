@@ -87,10 +87,12 @@ def trigger_recordflow(
 def validate_record_files(record: Record) -> FileValidationResult | None:
     """Validate input files for a record.
 
-    Record must have record_type relation loaded.
+    Record must have record_type, study, and series relations loaded
+    (via ``get_with_relations``), because ``record.working_folder`` accesses
+    the study and series relationships to build the path.
 
     Args:
-        record: Record to validate files for (with record_type loaded)
+        record: Record with record_type, study, and series loaded
 
     Returns:
         FileValidationResult if validation was performed, None if no input_files defined
@@ -340,7 +342,7 @@ async def submit_record_data(
     data: RecordData = Body(),
 ) -> Record:
     """Submit data for a record."""
-    record = await repo.get_with_record_type(record_id)
+    record = await repo.get_with_relations(record_id)
 
     if record.status == RecordStatus.finished:
         raise CONFLICT.with_context("Record already finished. Use PATCH to update the record data.")
@@ -404,7 +406,7 @@ async def validate_files_endpoint(
     Returns:
         FileValidationResult with validation status and matched files
     """
-    record = await repo.get_with_record_type(record_id)
+    record = await repo.get_with_relations(record_id)
 
     result = validate_record_files(record)
     if result is None:

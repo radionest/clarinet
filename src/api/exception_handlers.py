@@ -10,6 +10,8 @@ from typing import TYPE_CHECKING
 from fastapi import Request, status
 from fastapi.responses import JSONResponse
 
+from src.utils.logger import logger
+
 if TYPE_CHECKING:
     from fastapi import FastAPI
 
@@ -102,8 +104,9 @@ def setup_exception_handlers(app: FastAPI) -> None:
         )
 
     @app.exception_handler(DatabaseError)
-    async def handle_database_error(_: Request, _exc: DatabaseError) -> JSONResponse:
+    async def handle_database_error(_: Request, exc: DatabaseError) -> JSONResponse:
         """Convert DatabaseError to 500 response."""
+        logger.opt(exception=exc).error("Database error")
         # Don't expose internal database errors to clients
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -139,6 +142,7 @@ def setup_exception_handlers(app: FastAPI) -> None:
         _: Request, exc: AnonymizationFailedError
     ) -> JSONResponse:
         """Convert AnonymizationFailedError to 500 response."""
+        logger.opt(exception=exc).error("Anonymization failed")
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content={"detail": str(exc)},
@@ -150,4 +154,13 @@ def setup_exception_handlers(app: FastAPI) -> None:
         return JSONResponse(
             status_code=status.HTTP_404_NOT_FOUND,
             content={"detail": str(exc) if str(exc) else "Resource not found"},
+        )
+
+    @app.exception_handler(Exception)
+    async def handle_unhandled_exception(_: Request, exc: Exception) -> JSONResponse:
+        """Catch-all for unhandled exceptions — log full traceback, return generic 500."""
+        logger.opt(exception=exc).error("Unhandled exception")
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"detail": "Internal server error"},
         )

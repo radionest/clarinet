@@ -82,5 +82,5 @@ After completing any task, review and update CLAUDE.md files if your changes:
 - Changed technology stack or dependencies
 - Fixed bugs caused by outdated documentation
 
-Scoped CLAUDE.md files exist in: `src/`, `src/models/`, `src/repositories/`, `src/api/`, `src/frontend/`, `src/services/recordflow/`, `tests/`.
+Scoped CLAUDE.md files exist in: `src/`, `src/models/`, `src/repositories/`, `src/api/`, `src/frontend/`, `src/frontend/build/packages/formosh/`, `src/services/recordflow/`, `src/services/pipeline/`, `src/services/dicom/`, `src/services/slicer/`, `src/services/dicomweb/`, `tests/`.
 Update the most specific file. Keep root CLAUDE.md minimal — move details to subdirectory files.

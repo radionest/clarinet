@@ -75,6 +75,19 @@ async def test_session(test_engine) -> AsyncGenerator[AsyncSession]:
 
 
 @pytest_asyncio.fixture
+async def fresh_session(test_engine) -> AsyncGenerator[AsyncSession]:
+    """Create a separate database session (empty identity map).
+
+    Use this instead of test_session when you need to simulate production
+    behavior where each request gets a fresh session. This catches lazy-load
+    errors (MissingGreenlet) that the shared test_session masks.
+    """
+    async_session = sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
+    async with async_session() as session:
+        yield session
+
+
+@pytest_asyncio.fixture
 async def client(test_session, test_settings) -> AsyncGenerator[AsyncClient]:
     """Create test API client with auth bypassed (superuser)."""
     from src.api.auth_config import current_active_user, current_superuser
@@ -149,6 +162,37 @@ async def unauthenticated_client(test_session, test_settings) -> AsyncGenerator[
 
     async def override_get_session():
         yield test_session
+
+    async def override_get_settings():
+        return test_settings
+
+    app.dependency_overrides[get_async_session] = override_get_session
+
+    try:
+        from src.settings import get_settings
+
+        app.dependency_overrides[get_settings] = override_get_settings
+    except (ImportError, AttributeError):
+        pass
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        yield ac
+
+    app.dependency_overrides.clear()
+
+
+@pytest_asyncio.fixture
+async def fresh_client(fresh_session, test_settings) -> AsyncGenerator[AsyncClient]:
+    """Test client using a fresh session (catches lazy-load errors).
+
+    Unlike the regular ``client`` fixture which shares test_session with fixtures,
+    this client uses a separate session with an empty identity map, simulating
+    production where each request gets its own session.
+    """
+
+    async def override_get_session():
+        yield fresh_session
 
     async def override_get_settings():
         return test_settings

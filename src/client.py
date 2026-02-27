@@ -50,6 +50,15 @@ class ClarinetAPIError(Exception):
         self.detail = detail
         super().__init__(message)
 
+    def __str__(self) -> str:
+        parts: list[str] = []
+        if self.status_code is not None:
+            parts.append(f"[{self.status_code}]")
+        parts.append(self.message)
+        if self.detail is not None:
+            parts.append(f"(detail: {self.detail})")
+        return " ".join(parts)
+
 
 class ClarinetAuthError(ClarinetAPIError):
     """Authentication-related errors."""

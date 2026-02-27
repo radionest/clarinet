@@ -151,8 +151,6 @@ async def calculate_air_volume(msg: dict) -> dict:
     import nrrd
     import numpy as np
 
-    from src.models import RecordStatus
-
     message = PipelineMessage(**msg)
 
     working_dir = message.payload.get("working_dir")
@@ -172,7 +170,7 @@ async def calculate_air_volume(msg: dict) -> dict:
 
     client = await _get_client()
     try:
-        await client.update_record_data(
+        await client.submit_record_data(
             record_id,
             {
                 "volume_mm3": round(volume_mm3, 2),
@@ -181,7 +179,6 @@ async def calculate_air_volume(msg: dict) -> dict:
                 "threshold_hu": -900,
             },
         )
-        await client.update_record_status(record_id, RecordStatus.finished)
     finally:
         await client.close()
 

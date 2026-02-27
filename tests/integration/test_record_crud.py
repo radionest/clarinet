@@ -312,3 +312,77 @@ async def test_record_data_json_field(test_session, test_user, test_patient, tes
     stored_data = record.data or {}
     assert stored_data["labels"] == ["cat", "dog", "bird"]
     assert stored_data["confidence"] == 0.95
+
+
+@pytest.mark.asyncio
+async def test_submit_record_data_no_lazy_load(
+    fresh_client, test_session, test_user, test_patient, test_study, test_record_type
+):
+    """Verify submit_record_data eagerly loads all needed relationships.
+
+    Regression test: uses fresh_client (separate session) to detect
+    MissingGreenlet errors from lazy-loading in async context.
+    """
+    # Create record in test_session (populates DB)
+    record = Record(
+        patient_id=test_patient.id,
+        study_uid=test_study.study_uid,
+        user_id=test_user.id,
+        record_type_name=test_record_type.name,
+        status=RecordStatus.pending,
+    )
+    test_session.add(record)
+    await test_session.commit()
+    await test_session.refresh(record)
+
+    # Login via fresh_client (separate cookie jar)
+    login_resp = await fresh_client.post(
+        "/api/auth/login",
+        data={"username": "test@example.com", "password": "testpassword"},
+    )
+    assert login_resp.status_code in [200, 204]
+
+    # fresh_client uses a DIFFERENT session (empty identity map)
+    # If endpoint doesn't eagerly load study/series, this will fail with MissingGreenlet
+    response = await fresh_client.post(
+        f"/api/records/{record.id}/data",
+        json={},
+    )
+    # Should not be a 500 server error (MissingGreenlet)
+    assert response.status_code != 500
+
+
+@pytest.mark.asyncio
+async def test_validate_files_no_lazy_load(
+    fresh_client, test_session, test_user, test_patient, test_study, test_record_type
+):
+    """Verify validate_files_endpoint eagerly loads all needed relationships.
+
+    Regression test: uses fresh_client (separate session) to detect
+    MissingGreenlet errors from lazy-loading in async context.
+    """
+    # Create record in test_session (populates DB)
+    record = Record(
+        patient_id=test_patient.id,
+        study_uid=test_study.study_uid,
+        user_id=test_user.id,
+        record_type_name=test_record_type.name,
+        status=RecordStatus.pending,
+    )
+    test_session.add(record)
+    await test_session.commit()
+    await test_session.refresh(record)
+
+    # Login via fresh_client (separate cookie jar)
+    login_resp = await fresh_client.post(
+        "/api/auth/login",
+        data={"username": "test@example.com", "password": "testpassword"},
+    )
+    assert login_resp.status_code in [200, 204]
+
+    # fresh_client uses a DIFFERENT session (empty identity map)
+    response = await fresh_client.post(
+        f"/api/records/{record.id}/validate-files",
+    )
+    # Should not be a 500 server error (MissingGreenlet)
+    assert response.status_code != 500

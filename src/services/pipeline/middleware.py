@@ -52,8 +52,12 @@ class PipelineLoggingMiddleware(TaskiqMiddleware):
         prefix = f"[pipeline={pipeline_id} step={step_index}] " if pipeline_id else ""
 
         if result.is_err:
+            error = result.error
+            detail = getattr(error, "detail", None)
+            detail_suffix = f" (detail: {detail})" if detail is not None else ""
             logger.error(
-                f"{prefix}Task '{message.task_name}' (id={message.task_id}) failed: {result.error}"
+                f"{prefix}Task '{message.task_name}' (id={message.task_id}) "
+                f"failed: {error}{detail_suffix}"
             )
         else:
             logger.info(
@@ -100,14 +104,17 @@ class DeadLetterMiddleware(TaskiqMiddleware):
         from .broker import DLQ_QUEUE, _build_amqp_url
 
         try:
-            dlq_payload = {
+            error = result.error
+            dlq_payload: dict[str, Any] = {
                 "task_name": message.task_name,
                 "task_id": message.task_id,
                 "args": message.args,
                 "kwargs": message.kwargs,
                 "labels": message.labels,
-                "error": str(result.error),
-                "error_type": type(result.error).__name__ if result.error else None,
+                "error": str(error),
+                "error_type": type(error).__name__ if error else None,
+                "error_detail": getattr(error, "detail", None),
+                "error_status_code": getattr(error, "status_code", None),
             }
             connection = await aio_pika.connect_robust(_build_amqp_url())
             async with connection:
@@ -158,6 +165,11 @@ class PipelineChainMiddleware(TaskiqMiddleware):
             return
 
         if result.is_err:
+            from taskiq.exceptions import NoResultError
+
+            if isinstance(result.error, NoResultError):
+                return  # retry scheduled, don't stop chain
+
             pipeline_id = message.labels.get("pipeline_id", "unknown")
             logger.warning(
                 f"Pipeline '{pipeline_id}' chain stopped at step "

@@ -1,27 +1,40 @@
-# UV
-uv.lock
+# Python / UV
 .venv/
+uv.lock
+__pycache__
 
 # PDM (removed - backup in .backup-pdm)
 .pdm-python
 pdm.lock
 .pdm-build/
+
+# IDE
 .idea
-__pycache__
+
+# Testing
 .hypothesis
-clarinet.db
+.coverage
 
+# Build artifacts
 **/build/**
-
-# Frontend build output (local development only)
 dist/
-data/logs/clarinet.log
-data/logs/clarinet.log
-*/clarinet_demo.db
-.Rhistory
-examples/test/data/logs/clarinet.log
-REFACTOR.md
-examples/demo/clarinet_demo.db
-examples/demo/data/logs/clarinet.log
 
+# Database
+clarinet.db
+*/clarinet_demo.db
+examples/demo/clarinet_demo.db
+
+# Logs
+data/logs/clarinet.log
+examples/demo/data/logs/clarinet.log
+examples/test/data/logs/clarinet.log
+
+# Generated data
+examples/demo/data/[0-9]*/
+
+# DICOM
 **/dicomweb_cache
+
+# Misc
+.Rhistory
+REFACTOR.md
