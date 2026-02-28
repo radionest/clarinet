@@ -307,13 +307,13 @@ class RecordFlowEngine:
                 )
                 self._update_context_from_records(context, records)
 
-            if record.study:
+            elif record.study:
                 records = await self.clarinet_client.find_records(
                     study_uid=record.study.study_uid, limit=1000
                 )
                 self._update_context_from_records(context, records)
 
-            if record.series:
+            elif record.series:
                 records = await self.clarinet_client.find_records(
                     series_uid=record.series.series_uid, limit=1000
                 )

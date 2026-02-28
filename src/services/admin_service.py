@@ -77,16 +77,18 @@ class AdminService:
         for rt in record_types:
             counts = status_map.get(rt.name, {})
             status_counts = {status.value: counts.get(status.value, 0) for status in RecordStatus}
-            result.append({
-                "name": rt.name,
-                "description": rt.description,
-                "label": rt.label,
-                "level": rt.level.value,
-                "role_name": rt.role_name,
-                "min_users": rt.min_users,
-                "max_users": rt.max_users,
-                "total_records": sum(counts.values()),
-                "records_by_status": status_counts,
-                "unique_users": user_map.get(rt.name, 0),
-            })
+            result.append(
+                {
+                    "name": rt.name,
+                    "description": rt.description,
+                    "label": rt.label,
+                    "level": rt.level.value,
+                    "role_name": rt.role_name,
+                    "min_users": rt.min_users,
+                    "max_users": rt.max_users,
+                    "total_records": sum(counts.values()),
+                    "records_by_status": status_counts,
+                    "unique_users": user_map.get(rt.name, 0),
+                }
+            )
         return result
