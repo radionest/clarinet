@@ -20,6 +20,7 @@
 - `tests/test_client.py` — ClarinetClient unit tests with mocked HTTP
 - `tests/test_pipeline.py` — unit tests for Pipeline service (message models, chain DSL, worker queues, exceptions)
 - `tests/integration/test_pipeline_integration.py` — integration tests for Pipeline service (real RabbitMQ: broker connectivity, task dispatch/routing/execution, multi-step chains, middleware)
+- `tests/integration/test_app_startup.py` — regression tests for app startup with different pipeline settings (lifespan + lazy client login)
 - `tests/test_dicomweb_cache.py` — unit tests for DICOMweb two-tier cache (memory + disk)
 - `tests/test_dicomweb_cleanup.py` — unit tests for DICOMweb cache cleanup service
 - `tests/test_dicomweb_converter.py` — unit tests for DICOMweb data converters

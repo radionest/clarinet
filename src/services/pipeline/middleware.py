@@ -199,24 +199,45 @@ class PipelineChainMiddleware(TaskiqMiddleware):
         self._dlq_channel: AbstractChannel | None = None
 
     async def startup(self) -> None:
-        """Create the ClarinetClient and open a persistent DLQ connection."""
+        """Open a persistent DLQ connection.
+
+        The ClarinetClient is created lazily on first use (in ``_ensure_client``)
+        because ``startup()`` runs during lifespan before uvicorn accepts connections,
+        so HTTP login would fail.
+        """
         import aio_pika
 
         from .broker import DLQ_QUEUE, _build_amqp_url
-
-        if self._client is None:
-            self._client = ClarinetClient(
-                base_url=f"http://{settings.host}:{settings.port}/api",
-                username=settings.admin_email,
-                password=settings.admin_password,
-                auto_login=False,
-            )
-            await self._client.login()
 
         url = self._amqp_url or _build_amqp_url()
         self._dlq_connection = await aio_pika.connect_robust(url)
         self._dlq_channel = await self._dlq_connection.channel()
         await self._dlq_channel.declare_queue(DLQ_QUEUE, durable=True)
+
+    async def _ensure_client(self) -> ClarinetClient | None:
+        """Lazily create and authenticate the ClarinetClient.
+
+        Returns:
+            The authenticated client, or None if login fails.
+        """
+        if self._client is not None:
+            return self._client
+
+        client = ClarinetClient(
+            base_url=f"http://{settings.host}:{settings.port}/api",
+            username=settings.admin_email,
+            password=settings.admin_password,
+            auto_login=False,
+        )
+        try:
+            await client.login()
+        except Exception as e:
+            logger.error(f"Pipeline chain: failed to login ClarinetClient: {e}")
+            await client.close()
+            return None
+
+        self._client = client
+        return self._client
 
     async def shutdown(self) -> None:
         """Close the ClarinetClient and DLQ connection."""
@@ -325,13 +346,14 @@ class PipelineChainMiddleware(TaskiqMiddleware):
         Returns:
             List of step dicts, or None on failure.
         """
-        if self._client is None:
+        client = await self._ensure_client()
+        if client is None:
             reason = f"Pipeline chain: client not initialized for '{pipeline_id}'"
             logger.error(reason)
             await self._publish_chain_failure_to_dlq(message, reason)
             return None
         try:
-            return await self._client.get_pipeline_definition(pipeline_id)
+            return await client.get_pipeline_definition(pipeline_id)
         except ClarinetAPIError as e:
             if e.status_code == 404:
                 reason = f"Pipeline chain: definition '{pipeline_id}' not found (404)"
