@@ -175,8 +175,27 @@ async def unauthenticated_client(test_session, test_settings) -> AsyncGenerator[
     except (ImportError, AttributeError):
         pass
 
+    try:
+        import src.api.auth_config
+
+        src.api.auth_config.settings = test_settings
+    except (ImportError, AttributeError):
+        pass
+
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+    async with AsyncClient(transport=transport, base_url="http://test", cookies={}) as ac:
+        original_request = ac.request
+
+        async def request_with_cookies(method, url, **kwargs):
+            if ac.cookies:
+                headers = kwargs.get("headers") or {}
+                cookie_header = "; ".join([f"{k}={v}" for k, v in ac.cookies.items()])
+                if cookie_header:
+                    headers["Cookie"] = cookie_header
+                    kwargs["headers"] = headers
+            return await original_request(method, url, **kwargs)
+
+        ac.request = request_with_cookies
         yield ac
 
     app.dependency_overrides.clear()
