@@ -53,6 +53,43 @@ def pacs_available() -> None:
 
 
 @pytest.fixture(scope="session")
+def orthanc_expected_counts(pacs_available: None) -> dict[str, int]:
+    """Ground-truth study counts from Orthanc REST API."""
+    total = len(requests.get(f"{PACS_REST_URL}/studies", timeout=5).json())
+
+    shipilov = len(
+        requests.post(
+            f"{PACS_REST_URL}/tools/find",
+            json={"Level": "Study", "Query": {"PatientName": "SHIPILOV*"}},
+            timeout=5,
+        ).json()
+    )
+
+    ct = len(
+        requests.post(
+            f"{PACS_REST_URL}/tools/find",
+            json={"Level": "Study", "Query": {"ModalitiesInStudy": "CT"}},
+            timeout=5,
+        ).json()
+    )
+
+    mr = len(
+        requests.post(
+            f"{PACS_REST_URL}/tools/find",
+            json={"Level": "Study", "Query": {"ModalitiesInStudy": "MR"}},
+            timeout=5,
+        ).json()
+    )
+
+    return {
+        "total_studies": total,
+        "shipilov_studies": shipilov,
+        "ct_studies": ct,
+        "mr_studies": mr,
+    }
+
+
+@pytest.fixture(scope="session")
 def orthanc_node(pacs_available: None) -> DicomNode:
     """Pre-configured DicomNode pointing at the test Orthanc."""
     return DicomNode(aet=PACS_AET, host=PACS_HOST, port=PACS_PORT)
@@ -78,10 +115,22 @@ def all_studies(dicom_client: DicomClient, orthanc_node: DicomNode) -> list[Stud
 
 @pytest.fixture(scope="session")
 def mr_study(all_studies: list[StudyResult]) -> StudyResult:
-    """The SHIPILOV MR study (30 instances) — used for C-GET tests."""
+    """First MR study found on the PACS — used for C-GET tests."""
     matches = [s for s in all_studies if s.modalities_in_study and "MR" in s.modalities_in_study]
     assert matches, "No MR study found on test PACS"
     return matches[0]
+
+
+@pytest.fixture(scope="session")
+def mr_study_instance_count(pacs_available: None, mr_study: StudyResult) -> int:
+    """Instance count for selected MR study from Orthanc REST API."""
+    orthanc_ids = requests.post(
+        f"{PACS_REST_URL}/tools/find",
+        json={"Level": "Study", "Query": {"StudyInstanceUID": mr_study.study_instance_uid}},
+        timeout=5,
+    ).json()
+    stats = requests.get(f"{PACS_REST_URL}/studies/{orthanc_ids[0]}/statistics", timeout=5).json()
+    return int(stats["CountInstances"])
 
 
 @pytest.fixture(scope="session")
@@ -107,10 +156,13 @@ def mr_series_list(
 @pytest.mark.dicom
 @pytest.mark.asyncio
 async def test_find_all_studies(
-    dicom_client: DicomClient, orthanc_node: DicomNode, all_studies: list[StudyResult]
+    dicom_client: DicomClient,
+    orthanc_node: DicomNode,
+    all_studies: list[StudyResult],
+    orthanc_expected_counts: dict[str, int],
 ) -> None:
     """All studies are returned and each has a study_instance_uid."""
-    assert len(all_studies) == 4
+    assert len(all_studies) == orthanc_expected_counts["total_studies"]
     for study in all_studies:
         assert study.study_instance_uid
 
@@ -118,32 +170,38 @@ async def test_find_all_studies(
 @pytest.mark.dicom
 @pytest.mark.asyncio
 async def test_find_studies_by_patient_name(
-    dicom_client: DicomClient, orthanc_node: DicomNode
+    dicom_client: DicomClient,
+    orthanc_node: DicomNode,
+    orthanc_expected_counts: dict[str, int],
 ) -> None:
-    """Wildcard search on patient name returns 1 MR result."""
+    """Wildcard search on patient name returns matching results."""
     results = await dicom_client.find_studies(StudyQuery(patient_name="SHIPILOV*"), orthanc_node)
-    assert len(results) == 1
+    assert len(results) == orthanc_expected_counts["shipilov_studies"]
     assert results[0].modalities_in_study and "MR" in results[0].modalities_in_study
 
 
 @pytest.mark.dicom
 @pytest.mark.asyncio
 async def test_find_studies_by_modality_ct(
-    dicom_client: DicomClient, orthanc_node: DicomNode
+    dicom_client: DicomClient,
+    orthanc_node: DicomNode,
+    orthanc_expected_counts: dict[str, int],
 ) -> None:
-    """Filtering by CT returns 3 studies."""
+    """Filtering by CT returns expected number of studies."""
     results = await dicom_client.find_studies(StudyQuery(modality="CT"), orthanc_node)
-    assert len(results) == 3
+    assert len(results) == orthanc_expected_counts["ct_studies"]
 
 
 @pytest.mark.dicom
 @pytest.mark.asyncio
 async def test_find_studies_by_modality_mr(
-    dicom_client: DicomClient, orthanc_node: DicomNode
+    dicom_client: DicomClient,
+    orthanc_node: DicomNode,
+    orthanc_expected_counts: dict[str, int],
 ) -> None:
-    """Filtering by MR returns 1 study."""
+    """Filtering by MR returns expected number of studies."""
     results = await dicom_client.find_studies(StudyQuery(modality="MR"), orthanc_node)
-    assert len(results) == 1
+    assert len(results) == orthanc_expected_counts["mr_studies"]
 
 
 @pytest.mark.dicom
@@ -215,13 +273,14 @@ async def test_find_series_for_mr_study(
     orthanc_node: DicomNode,
     mr_study: StudyResult,
     mr_series_list: list[SeriesResult],
+    mr_study_instance_count: int,
 ) -> None:
-    """MR study has >= 1 series, all MR, totalling 30 instances."""
+    """MR study has >= 1 series, all MR, totalling expected instances."""
     assert len(mr_series_list) >= 1
     for series in mr_series_list:
         assert series.modality == "MR"
     total_instances = sum(s.number_of_series_related_instances or 0 for s in mr_series_list)
-    assert total_instances == 30
+    assert total_instances == mr_study_instance_count
 
 
 @pytest.mark.dicom
@@ -426,19 +485,20 @@ async def test_get_study_to_disk(
     orthanc_node: DicomNode,
     mr_study: StudyResult,
     tmp_path: Path,
+    mr_study_instance_count: int,
 ) -> None:
-    """C-GET study to disk: success, 30 completed, 0 failed, 30 .dcm files."""
+    """C-GET study to disk: success, expected completed, 0 failed, matching .dcm files."""
     result = await dicom_client.get_study(
         study_uid=mr_study.study_instance_uid,
         peer=orthanc_node,
         output_dir=tmp_path,
     )
     assert result.status == "success"
-    assert result.num_completed == 30
+    assert result.num_completed == mr_study_instance_count
     assert result.num_failed == 0
 
     dcm_files = list(tmp_path.glob("*.dcm"))
-    assert len(dcm_files) == 30
+    assert len(dcm_files) == mr_study_instance_count
 
 
 @pytest.mark.dicom
@@ -494,8 +554,9 @@ async def test_get_study_with_patient_id(
     orthanc_node: DicomNode,
     mr_study: StudyResult,
     tmp_path: Path,
+    mr_study_instance_count: int,
 ) -> None:
-    """C-GET study with patient_id param succeeds and returns 30 files."""
+    """C-GET study with patient_id param succeeds and returns expected files."""
     assert mr_study.patient_id, "MR study has no patient_id"
     result = await dicom_client.get_study(
         study_uid=mr_study.study_instance_uid,
@@ -504,7 +565,7 @@ async def test_get_study_with_patient_id(
         patient_id=mr_study.patient_id,
     )
     assert result.status == "success"
-    assert result.num_completed == 30
+    assert result.num_completed == mr_study_instance_count
     assert result.num_failed == 0
 
 
@@ -560,18 +621,19 @@ async def test_get_study_to_disk_file_uids_unique(
     orthanc_node: DicomNode,
     mr_study: StudyResult,
     tmp_path: Path,
+    mr_study_instance_count: int,
 ) -> None:
-    """All 30 .dcm files have unique SOPInstanceUID — no overwrites."""
+    """All .dcm files have unique SOPInstanceUID — no overwrites."""
     await dicom_client.get_study(
         study_uid=mr_study.study_instance_uid,
         peer=orthanc_node,
         output_dir=tmp_path,
     )
     dcm_files = list(tmp_path.glob("*.dcm"))
-    assert len(dcm_files) == 30
+    assert len(dcm_files) == mr_study_instance_count
 
     uids = {str(pydicom.dcmread(f).SOPInstanceUID) for f in dcm_files}
-    assert len(uids) == 30
+    assert len(uids) == mr_study_instance_count
 
 
 # ===========================================================================
@@ -585,15 +647,16 @@ async def test_get_study_to_memory(
     dicom_client: DicomClient,
     orthanc_node: DicomNode,
     mr_study: StudyResult,
+    mr_study_instance_count: int,
 ) -> None:
-    """C-GET study to memory: success, 30 completed, 30 instances."""
+    """C-GET study to memory: success, expected completed and instance count."""
     result = await dicom_client.get_study_to_memory(
         study_uid=mr_study.study_instance_uid,
         peer=orthanc_node,
     )
     assert result.status == "success"
-    assert result.num_completed == 30
-    assert len(result.instances) == 30
+    assert result.num_completed == mr_study_instance_count
+    assert len(result.instances) == mr_study_instance_count
 
 
 @pytest.mark.dicom
