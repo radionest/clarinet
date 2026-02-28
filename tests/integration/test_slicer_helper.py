@@ -23,6 +23,7 @@ async def test_load_volume(
     context = {"working_folder": str(test_images_path)}
     script = """
 import os
+os.makedirs(working_folder, exist_ok=True)
 s = SlicerHelper(working_folder)
 # List files to find a volume
 files = os.listdir(working_folder)
@@ -99,6 +100,7 @@ async def test_full_workspace_setup(
     }
     script = """
 import os
+os.makedirs(working_folder, exist_ok=True)
 s = SlicerHelper(working_folder)
 
 # Create segmentation even without volume
