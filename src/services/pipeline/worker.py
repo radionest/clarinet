@@ -113,15 +113,7 @@ async def run_worker(
             brokers.append(qbroker)
 
     # Start all brokers and begin consuming via TaskIQ receiver
-    from taskiq.acks import AcknowledgeType
     from taskiq.api.receiver import run_receiver_task
-
-    _ACK_TYPE_MAP = {
-        "when_received": AcknowledgeType.WHEN_RECEIVED,
-        "when_executed": AcknowledgeType.WHEN_EXECUTED,
-        "when_saved": AcknowledgeType.WHEN_SAVED,
-    }
-    ack_type = _ACK_TYPE_MAP.get(settings.pipeline_ack_type, AcknowledgeType.WHEN_EXECUTED)
 
     receiver_tasks: list[asyncio.Task[None]] = []
     for broker in brokers:
@@ -133,7 +125,7 @@ async def run_worker(
                     broker,
                     max_async_tasks=workers,
                     run_startup=False,
-                    ack_time=ack_type,
+                    ack_time=settings.pipeline_ack_type,
                 )
             )
         )

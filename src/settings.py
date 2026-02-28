@@ -19,6 +19,7 @@ from pydantic_settings import (
     SettingsConfigDict,
     TomlConfigSettingsSource,
 )
+from taskiq.acks import AcknowledgeType
 
 # Set locale for date/time formatting
 try:
@@ -186,7 +187,7 @@ class Settings(BaseSettings):
     pipeline_retry_count: int = 3  # Max retries for failed tasks
     pipeline_retry_delay: int = 5  # Initial retry delay (seconds)
     pipeline_retry_max_delay: int = 120  # Max retry delay with backoff
-    pipeline_ack_type: str = "when_executed"  # when_received | when_executed | when_saved
+    pipeline_ack_type: AcknowledgeType = AcknowledgeType.WHEN_EXECUTED
 
     # Template settings
     template_dir: str | None = None

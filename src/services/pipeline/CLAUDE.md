@@ -107,7 +107,7 @@ After each step, `PipelineChainMiddleware.post_execute()` fetches the definition
 - `pipeline_retry_count` (int, default 3) — max retries for failed tasks
 - `pipeline_retry_delay` (int, default 5) — initial retry delay in seconds
 - `pipeline_retry_max_delay` (int, default 120) — max retry delay with exponential backoff
-- `pipeline_ack_type` (str, default `when_executed`) — `when_received` | `when_executed` | `when_saved`
+- `pipeline_ack_type` (AcknowledgeType, default `when_executed`) — `when_received` | `when_executed` | `when_saved`
 
 
 ## RecordFlow Integration
