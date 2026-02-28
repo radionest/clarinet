@@ -371,10 +371,7 @@ async def test_working_folder_series_level(
     repo = RecordRepository(test_session)
     loaded = await repo.get_with_relations(record.id)
 
-    expected = (
-        f"{settings.storage_path}/{settings.anon_id_prefix}_42"
-        f"/ANON_STUDY_WF/ANON_SERIES_WF"
-    )
+    expected = f"{settings.storage_path}/{settings.anon_id_prefix}_42/ANON_STUDY_WF/ANON_SERIES_WF"
     assert loaded.working_folder == expected
 
 
@@ -454,10 +451,7 @@ async def test_working_folder_with_only_record_type_resolves_from_identity_map(
 
     # Even though only record_type was eagerly loaded, relations resolve
     # from the session's identity map → uses anon UIDs from relation objects
-    expected = (
-        f"{settings.storage_path}/{settings.anon_id_prefix}_42"
-        f"/ANON_STUDY_WF/ANON_SERIES_WF"
-    )
+    expected = f"{settings.storage_path}/{settings.anon_id_prefix}_42/ANON_STUDY_WF/ANON_SERIES_WF"
     assert loaded.working_folder == expected
 
 
