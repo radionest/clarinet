@@ -19,7 +19,6 @@ TaskIQ-based distributed task pipeline for long-running operations (GPU processi
 | `chain.py` | Pipeline chain builder DSL (step-by-step, queue routing) |
 | `middleware.py` | PipelineChainMiddleware, PipelineLoggingMiddleware, DeadLetterMiddleware |
 | `worker.py` | get_worker_queues() auto-detect, run_worker() entry point |
-| `exceptions.py` | Re-exports from `src.exceptions.domain` |
 
 ## Usage
 

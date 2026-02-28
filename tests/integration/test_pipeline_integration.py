@@ -17,9 +17,9 @@ import aio_pika
 import pytest
 
 from src.client import ClarinetClient
+from src.exceptions.domain import PipelineStepError
 from src.repositories.pipeline_definition_repository import PipelineDefinitionRepository
 from src.services.pipeline.chain import _TASK_REGISTRY
-from src.services.pipeline.exceptions import PipelineStepError
 from src.services.pipeline.message import PipelineMessage
 
 pytestmark = [

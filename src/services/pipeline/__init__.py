@@ -23,6 +23,8 @@ Example:
     pipeline = get_pipeline("ct_segmentation")
 """
 
+from src.exceptions.domain import PipelineConfigError, PipelineError, PipelineStepError
+
 from .broker import (
     DEFAULT_QUEUE,
     DICOM_QUEUE,
@@ -40,7 +42,6 @@ from .chain import (
     register_task,
     sync_pipeline_definitions,
 )
-from .exceptions import PipelineConfigError, PipelineError, PipelineStepError
 from .message import PipelineMessage
 from .middleware import DeadLetterMiddleware
 from .worker import get_worker_queues, run_worker
