@@ -3,11 +3,14 @@
 ## Technology Stack
 
 - **Gleam**: Functional language with type safety — pure Gleam, no JavaScript FFI
-- **Lustre** (~> 5.4): Elm-inspired web framework, MVU (Model-View-Update) architecture
+- **Lustre** (~> 5.6): Elm-inspired web framework, MVU (Model-View-Update) architecture
 - **Modem** (~> 2.1): Client-side routing
 - **Formosh**: Form handling (private: `git@github.com:radionest/gleam_formosh.git`)
 - **Plinth** (~> 0.7.2): DOM manipulation
 - **gleam_fetch** (~> 1.3): HTTP requests with automatic cookie handling
+- **gleam_javascript** (~> 1.0): JavaScript interop utilities
+- **multipart_form** (~> 1.0): Multipart form encoding (login)
+- **gleeunit** (~> 1.4): Test runner (dev dependency)
 
 ## Directory Structure
 

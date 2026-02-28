@@ -52,6 +52,9 @@ uv run clarinet db init         # Initialize DB with admin user
 make frontend-build             # Production build
 make frontend-deps              # Install dependencies
 
+# OHIF Viewer (optional)
+make ohif-build                 # Download and install OHIF Viewer (served at /ohif)
+
 # Build & cleanup
 make build                      # Full package build
 make clean                      # Clean artifacts

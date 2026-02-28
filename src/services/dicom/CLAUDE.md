@@ -10,6 +10,7 @@ dicom/
   operations.py   # Synchronous pynetdicom wrapper (C-FIND, C-GET, C-MOVE)
   handlers.py     # C-STORE event handlers (disk / memory / forward modes)
   client.py       # Async facade — delegates to operations via asyncio.to_thread()
+  anonymizer.py   # Anonymizer, PACS stubs (planned; not yet exported)
   __init__.py     # Public API re-exports
 ```
 
@@ -41,7 +42,11 @@ Env vars use `CLARINET_` prefix (e.g. `CLARINET_PACS_HOST`).
 ## Usage
 
 ```python
-from src.services.dicom import DicomClient, DicomNode, StudyQuery
+from src.services.dicom import (
+    DicomClient, DicomNode, StudyQuery, SeriesQuery,
+    PacsImportRequest, PacsStudyWithSeries, RetrieveResult,
+    StorageMode,
+)
 from src.settings import settings
 
 client = DicomClient(calling_aet=settings.dicom_aet, max_pdu=settings.dicom_max_pdu)

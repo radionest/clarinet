@@ -46,6 +46,19 @@ select(Record).options(
 - **STUDY**: must have `patient_id` + `study_uid`; `series_uid` must be `None`
 - **SERIES**: must have `patient_id` + `study_uid` + `series_uid`
 
+## Search Models
+
+`RecordFindResult` (in `record.py`) specifies a search criterion for JSON data fields:
+- `result_name` — data field name
+- `result_value` — expected value (str/bool/int/float)
+- `comparison_operator` — `RecordFindResultComparisonOperator` enum (eq/ne/lt/gt/contains)
+- `sql_type` — `@computed_field` that infers the SQL type from `result_value` (String/Boolean/Integer/Float) for use in SQLAlchemy JSON cast expressions
+
+`PatientBase.anon_id` — `@computed_field` derived from `auto_id`:
+```python
+f"{settings.anon_id_prefix}_{auto_id}"  # Returns None if auto_id is None
+```
+
 ## JSON Columns
 
 Use `sa_column=Column(JSON)` for dict/list fields:

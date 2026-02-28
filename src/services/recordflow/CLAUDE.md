@@ -15,7 +15,7 @@ Event-driven workflow engine that creates/updates/invalidates records on status 
 Workflows are defined in `*_flow.py` files:
 
 ```python
-from src.services.recordflow import record, series
+from src.services.recordflow import record, flow, series  # flow is an alias for record
 
 record('doctor_report')
     .on_status('finished')
@@ -107,15 +107,21 @@ Comparison operators: `==`, `!=`, `<`, `<=`, `>`, `>=`
 ## Engine Setup
 
 ```python
-from src.services.recordflow import RecordFlowEngine, discover_and_load_flows
+from src.services.recordflow import RecordFlowEngine, discover_and_load_flows, load_flows_from_file
 from pathlib import Path
 
 engine = RecordFlowEngine(client)
+# discover_and_load_flows accepts directories OR individual files:
 discover_and_load_flows(engine, [Path('flows/')])
+# or load a single file directly:
+# load_flows_from_file(Path('flows/ct_flow.py'))  # clears RECORD_REGISTRY/ENTITY_REGISTRY first
+
 await engine.handle_record_status_change(record, old_status)
 await engine.handle_record_data_update(record)  # For data update triggers
 await engine.handle_entity_created("series", patient_id, study_uid, series_uid)
 ```
+
+**Loader implementation**: uses `importlib.util.spec_from_file_location()` to load flow files as modules (replaces former `exec()`). `load_flows_from_file()` clears `RECORD_REGISTRY` and `ENTITY_REGISTRY` before each file load to prevent duplicate registrations.
 
 ## API Integration
 

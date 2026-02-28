@@ -14,7 +14,7 @@ TaskIQ-based distributed task pipeline for long-running operations (GPU processi
 | File | Purpose |
 |------|---------|
 | `__init__.py` | Public API: Pipeline, PipelineMessage, get_pipeline, etc. |
-| `broker.py` | AioPikaBroker singleton, SmartRetryMiddleware, result backend |
+| `broker.py` | `get_broker()` singleton + `create_broker(queue)` per-queue factory, middlewares, result backend |
 | `message.py` | PipelineMessage, PipelineResult (Pydantic models) |
 | `chain.py` | Pipeline chain builder DSL (step-by-step, queue routing) |
 | `middleware.py` | PipelineChainMiddleware, PipelineLoggingMiddleware, DeadLetterMiddleware |
@@ -39,7 +39,7 @@ imaging_pipeline = (
 ### Define a task
 
 ```python
-from src.services.pipeline import get_broker
+from src.services.pipeline import get_broker, register_task
 
 broker = get_broker()
 
@@ -49,6 +49,10 @@ async def fetch_dicom(msg: dict) -> dict:
     # ... fetch DICOM data ...
     return message.model_dump()
 ```
+
+Tasks added via `.step()` are auto-registered in `_TASK_REGISTRY`. For standalone tasks not
+used in a pipeline, call `register_task(fetch_dicom)` explicitly so `PipelineChainMiddleware`
+can dispatch them by name.
 
 ### Execute from RecordFlow
 
@@ -67,10 +71,12 @@ uv run clarinet worker --workers 4            # parallel workers
 ## Queue Routing
 
 - Exchange: `clarinet` (direct type)
-- Routing: task labels contain `routing_key` (e.g. `"gpu"`)
+- Routing key convention: `clarinet.gpu` → routing key `gpu`
 - Default queue: `clarinet.default` (all workers)
 - GPU queue: `clarinet.gpu` (workers with `have_gpu=True`)
 - DICOM queue: `clarinet.dicom` (workers with `have_dicom=True`)
+- Workers call `create_broker(queue_name)` per queue — each gets its own exchange/queue binding.
+  `get_broker()` returns the default singleton used for task dispatch in the application.
 
 ## Chain Advancement (DB-backed)
 
@@ -95,7 +101,7 @@ After each step, `PipelineChainMiddleware.post_execute()` fetches the definition
 ## Settings
 
 - `pipeline_enabled` (bool) — enable broker in app lifespan
-- `pipeline_result_backend_url` (str | None) — Redis URL for `wait_result()`
+- `pipeline_result_backend_url` (str | None) — Redis URL; if set, attaches `RedisAsyncResultBackend` enabling `task.wait_result()`
 - `pipeline_worker_prefetch` (int) — max tasks per worker
 - `pipeline_default_timeout` (int) — task timeout in seconds
 - `pipeline_retry_count` (int, default 3) — max retries for failed tasks

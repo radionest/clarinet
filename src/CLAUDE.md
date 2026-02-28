@@ -59,6 +59,23 @@ logger.error(f"Failed to connect to database: {error}")
 - API DI aliases and router patterns — see `api/CLAUDE.md`
 - Never query DB directly in routers; use repository/service layer
 
+## Service Layer Overview
+
+| Directory | Purpose |
+|---|---|
+| `services/recordflow/` | DSL-движок обработки записей; реагирует на смену статуса/данных Record |
+| `services/pipeline/` | Распределённая очередь задач (TaskIQ + RabbitMQ); длинные операции (GPU, DICOM-цепочки) |
+| `services/dicomweb/` | DICOMweb-прокси с двухуровневым кешем (память + диск) для OHIF |
+| `services/dicom/` | DICOM-клиент (pynetdicom): C-FIND/C-GET/C-STORE; анонимизация (`anonymizer.py`) |
+| `services/slicer/` | Интеграция с 3D Slicer через HTTP API; DSL-хелпер и PacsHelper |
+| `services/image/` | Утилиты обработки изображений (numpy) |
+| `services/admin_service.py` | Сводная административная логика |
+| `services/user_service.py` | Управление пользователями и ролями |
+| `services/study_service.py` | Управление исследованиями |
+| `services/session_cleanup.py` | Фоновый сервис очистки устаревших сессий |
+
+`src/client.py` — `ClarinetClient`: HTTP-клиент к собственному API (используется RecordFlow engine).
+
 ## Admin Management
 
 - Auto-created on `clarinet db init` (idempotent)

@@ -17,10 +17,13 @@ PaginationDep       = Annotated[PaginationParams, Depends()]
 # Repositories
 UserRepositoryDep, UserRoleRepositoryDep, StudyRepositoryDep,
 PatientRepositoryDep, SeriesRepositoryDep, RecordRepositoryDep,
-RecordTypeRepositoryDep
+RecordTypeRepositoryDep, PipelineDefinitionRepositoryDep
 
 # Services
-UserServiceDep, StudyServiceDep
+UserServiceDep, StudyServiceDep, AdminServiceDep, SlicerServiceDep
+
+# DICOM
+DicomClientDep, PacsNodeDep
 
 # DICOMweb proxy
 DicomWebCacheDep, DicomWebProxyServiceDep
@@ -38,13 +41,15 @@ XRepositoryDep = Annotated[XRepository, Depends(get_X_repository)]
 ## Application Lifespan (app.py)
 
 Startup sequence:
-1. Database init (`db_manager.initialize()`)
+1. Database init (`db_manager.create_db_and_tables_async()`)
 2. Default roles + demo RecordTypes creation
-3. Admin user creation (`create_admin_user()`)
-4. RecordFlow engine setup (if `recordflow_enabled`)
-5. Session cleanup service start (if `session_cleanup_enabled`)
+3. Admin user creation (`ensure_admin_exists()`)
+4. RecordFlow engine setup (if `recordflow_enabled`) → `app.state.recordflow_engine`
+5. Pipeline broker startup (if `pipeline_enabled`) → `app.state.pipeline_broker`; syncs pipeline definitions to DB
+6. Session cleanup service start (if `session_cleanup_enabled`)
+7. DICOMweb cache init (if `dicomweb_enabled`) → `app.state.dicomweb_cache`; cleanup service → `app.state.dicomweb_cleanup`
 
-Shutdown: stop cleanup service → close RecordFlow client → close DB.
+Shutdown (reverse order): stop DICOMweb cleanup → flush DICOMweb cache → stop session cleanup → shutdown pipeline broker → close RecordFlow client → close DB.
 
 ## Exception Handlers (exception_handlers.py)
 
@@ -52,11 +57,28 @@ Shutdown: stop cleanup service → close RecordFlow client → close DB.
 - `EntityNotFoundError` → 404
 - `EntityAlreadyExistsError` → 409
 - `AuthenticationError` → 401
+- `InvalidCredentialsError` → 401
 - `AuthorizationError` → 403
 - `ValidationError` → 422
 - `BusinessRuleViolationError` → 409
+- `DatabaseError` → 500 (logs traceback, returns generic message)
+- `SlicerConnectionError` → 502
+- `SlicerError` → 422
+- `AlreadyAnonymizedError` → 409
+- `AnonymizationFailedError` → 500 (logs traceback)
+- `FileNotFoundError` → 404
+- `Exception` → 500 (catch-all, logs traceback)
 
 Routers don't need try/except for these — just let domain exceptions propagate.
+
+## Pipeline Router (pipeline.py)
+
+Mounted at `/api/pipelines`, conditional on `pipeline_enabled`. Endpoints:
+- `GET /api/pipelines` — list all pipeline definitions from DB
+- `GET /api/pipelines/{name}/definition` — get definition by name (used by `PipelineChainMiddleware`)
+- `POST /api/pipelines/sync` — re-sync pipeline definitions to DB on demand
+
+Uses `PipelineDefinitionRepositoryDep`.
 
 ## RecordFlow Integration (record.py)
 
