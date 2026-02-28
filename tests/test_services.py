@@ -217,11 +217,34 @@ class TestAdminService:
             assert status.value in status_map
 
     @pytest.mark.asyncio
-    async def test_get_record_type_stats(self, env):
-        record_types, status_map, user_map = await env["service"].get_record_type_stats()
-        assert isinstance(record_types, list)
-        assert isinstance(status_map, dict)
-        assert isinstance(user_map, dict)
+    async def test_get_record_type_stats_empty(self, env):
+        result = await env["service"].get_record_type_stats()
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_get_record_type_stats_with_data(self, env):
+        from src.models.record import RecordType
+
+        rt = RecordType(name="test_stats_type", description="Test", label="TST")
+        env["session"].add(rt)
+        await env["session"].commit()
+
+        result = await env["service"].get_record_type_stats()
+        assert len(result) == 1
+
+        stat = result[0]
+        assert stat["name"] == "test_stats_type"
+        assert stat["description"] == "Test"
+        assert stat["label"] == "TST"
+        assert stat["level"] == "SERIES"  # default DicomQueryLevel
+        assert stat["role_name"] is None
+        assert stat["min_users"] == 1
+        assert stat["max_users"] is None
+        assert stat["total_records"] == 0
+        assert stat["unique_users"] == 0
+        # All RecordStatus keys present in records_by_status with 0 counts
+        for status in RecordStatus:
+            assert stat["records_by_status"][status.value] == 0
 
 
 # ===================================================================
