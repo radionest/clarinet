@@ -303,6 +303,7 @@ class TestFlowLoader:
 
         flow_file = tmp_path / "test_flow.py"
         flow_file.write_text(
+            "from src.services.recordflow import record\n"
             "record('test_record_1').on_status('finished').add_record('test_record_2')\n"
         )
         flows = load_flows_from_file(flow_file)
@@ -349,6 +350,7 @@ class TestFlowLoader:
 
         flow_file = tmp_path / "reg_flow.py"
         flow_file.write_text(
+            "from src.services.recordflow import record\n"
             "record('test_load_reg').on_status('finished').add_record('test_load_r2')\n"
         )
 

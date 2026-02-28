@@ -5,22 +5,20 @@ This module provides functions to load FlowRecord definitions from external
 Python files, enabling dynamic flow configuration.
 """
 
+from __future__ import annotations
+
+import importlib.util
 import sys
 from pathlib import Path
-from types import ModuleType
+from typing import TYPE_CHECKING
 
 from src.utils.logger import logger
 
 from .engine import RecordFlowEngine
-from .flow_record import (
-    ENTITY_REGISTRY,
-    RECORD_REGISTRY,
-    FlowRecord,
-    patient,
-    record,
-    series,
-    study,
-)
+from .flow_record import ENTITY_REGISTRY, RECORD_REGISTRY
+
+if TYPE_CHECKING:
+    from .flow_record import FlowRecord
 
 
 def load_flows_from_file(file_path: Path) -> list[FlowRecord]:
@@ -54,33 +52,15 @@ def load_flows_from_file(file_path: Path) -> list[FlowRecord]:
     ENTITY_REGISTRY.clear()
 
     try:
-        # Read and compile the file
-        with open(file_path, encoding="utf-8") as f:
-            content = f.read()
-
-        # Compile and execute the code
-        compiled = compile(content, str(file_path), "exec")
-
-        # Create a namespace with the necessary imports
-        namespace = {
-            "record": record,
-            "series": series,
-            "study": study,
-            "patient": patient,
-            "FlowRecord": FlowRecord,
-            "__file__": str(file_path),
-            "__name__": file_path.stem,
-        }
-
-        # Register a placeholder module in sys.modules so that decorators
-        # (e.g. taskiq @broker.task()) can resolve func.__module__ at decoration time.
-        # This mirrors the same approach used in worker.py.
         module_name = file_path.stem
-        if module_name not in sys.modules:
-            sys.modules[module_name] = ModuleType(module_name)
+        spec = importlib.util.spec_from_file_location(module_name, file_path)
+        if spec is None or spec.loader is None:
+            logger.error(f"Cannot create module spec for {file_path}")
+            return []
 
-        # Execute the code in the namespace
-        exec(compiled, namespace)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = module
+        spec.loader.exec_module(module)
 
         # Return only active flows (filter out reference-only FlowRecords
         # created for data access like record('type').data.field)
@@ -93,11 +73,8 @@ def load_flows_from_file(file_path: Path) -> list[FlowRecord]:
 
         return flows
 
-    except Exception as e:
-        logger.error(f"Error loading flows from {file_path}: {e}")
-        import traceback
-
-        traceback.print_exc()
+    except Exception:
+        logger.exception(f"Error loading flows from {file_path}")
         return []
 
 
