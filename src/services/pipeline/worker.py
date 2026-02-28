@@ -100,10 +100,16 @@ async def run_worker(
         if queue_name == DEFAULT_QUEUE:
             brokers.append(singleton)
         else:
-            # Create per-queue broker and copy task registrations
+            # Create per-queue broker and re-register all tasks using public API.
+            # register_task() creates a new AsyncTaskiqDecoratedTask bound to qbroker,
+            # preserving the original task name and labels.
             qbroker = create_broker(queue_name)
-            for task_name, task in singleton.get_all_tasks().items():
-                qbroker.local_task_registry[task_name] = task
+            for task in singleton.get_all_tasks().values():
+                qbroker.register_task(
+                    task.original_func,
+                    task_name=task.task_name,
+                    **task.labels,
+                )
             brokers.append(qbroker)
 
     # Start all brokers and begin consuming via TaskIQ receiver
