@@ -745,7 +745,7 @@ class TestPipelineChainNegative:
             async with connection:
                 channel = await connection.channel()
                 dlq = await channel.declare_queue(dlq_queue_name, durable=True)
-                msg = await dlq.get(fail=False)
+                msg = await dlq.get(fail=False, no_ack=True)
                 assert msg is not None, "No message found in DLQ after chain failure"
                 body = json.loads(msg.body)
 
@@ -829,7 +829,7 @@ class TestPipelineChainNegative:
             async with connection:
                 channel = await connection.channel()
                 dlq = await channel.declare_queue(dlq_queue_name, durable=True)
-                msg = await dlq.get(fail=False)
+                msg = await dlq.get(fail=False, no_ack=True)
                 assert msg is not None, "No chain_failure message in DLQ"
                 body = json.loads(msg.body)
 
@@ -917,7 +917,7 @@ class TestPipelineChainNegative:
             async with connection:
                 channel = await connection.channel()
                 dlq = await channel.declare_queue(dlq_queue_name, durable=True)
-                msg = await dlq.get(fail=False)
+                msg = await dlq.get(fail=False, no_ack=True)
                 assert msg is not None, "No chain_failure message in DLQ"
                 body = json.loads(msg.body)
 
@@ -981,7 +981,7 @@ class TestDeadLetterQueue:
             async with connection:
                 channel = await connection.channel()
                 dlq = await channel.declare_queue(dlq_queue_name, durable=True)
-                msg = await dlq.get(fail=False)
+                msg = await dlq.get(fail=False, no_ack=True)
                 assert msg is not None, "No message found in DLQ"
 
                 dlq_body = json.loads(msg.body)

@@ -192,8 +192,8 @@ def capture_logs() -> Generator[list[str]]:
     """
     messages: list[str] = []
 
-    def _sink(record: Any) -> None:
-        messages.append(record["message"])
+    def _sink(message: Any) -> None:
+        messages.append(message.record["message"])
 
     sink_id = logger.add(_sink, level="ERROR", format="{message}")
     yield messages
@@ -206,24 +206,27 @@ async def _purge_test_queues(
     rabbitmq_url: str,
     test_queues: dict[str, str],
 ) -> AsyncGenerator[None]:
-    """Purge all test queues after each pipeline-marked test."""
-    yield
-
-    # Only purge for tests marked with 'pipeline'
+    """Purge all test queues before and after each pipeline-marked test."""
     if "pipeline" not in {m.name for m in request.node.iter_markers()}:
+        yield
         return
 
     import aio_pika
 
-    connection = await aio_pika.connect_robust(rabbitmq_url)
-    async with connection:
-        channel = await connection.channel()
-        for queue_name in test_queues.values():
-            try:
-                queue = await channel.declare_queue(queue_name, passive=True)
-                await queue.purge()
-            except Exception:
-                pass
+    async def _purge() -> None:
+        connection = await aio_pika.connect_robust(rabbitmq_url)
+        async with connection:
+            channel = await connection.channel()
+            for queue_name in test_queues.values():
+                try:
+                    queue = await channel.declare_queue(queue_name, passive=True)
+                    await queue.purge()
+                except Exception:
+                    pass
+
+    await _purge()
+    yield
+    await _purge()
 
 
 @pytest_asyncio.fixture(scope="session", autouse=False)
