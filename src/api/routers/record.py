@@ -43,6 +43,7 @@ from src.models import (
 from src.repositories.record_repository import RecordSearchCriteria
 from src.services.file_validation import FileValidationResult, FileValidator
 from src.types import RecordData
+from src.utils.logger import logger
 from src.utils.validation import validate_json_by_schema
 
 router = APIRouter(
@@ -99,6 +100,9 @@ def validate_record_files(record: Record) -> FileValidationResult | None:
 
     working_folder = record.working_folder
     if working_folder is None:
+        logger.warning(
+            f"Cannot resolve working_folder for record {record.id}, skipping file validation"
+        )
         return None
 
     directory = Path(working_folder)

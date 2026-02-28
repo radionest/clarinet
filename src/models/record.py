@@ -20,7 +20,6 @@ from src.types import RecordData, RecordSchema, SlicerArgs
 
 from ..exceptions import ValidationError
 from ..settings import settings
-from ..utils.logger import logger
 from .base import BaseModel, DicomQueryLevel, RecordStatus
 from .file_schema import FileDefinition
 from .patient import Patient, PatientBase
@@ -228,9 +227,8 @@ class RecordBase(BaseModel):
     def _format_path(self, unformatted_path: str) -> str | None:
         """Format a path template with values from this record."""
         try:
-            # Get study and patient if they exist (only available in Record, not RecordBase)
             study = getattr(self, "study", None)
-            patient = study.patient if study and hasattr(study, "patient") else None
+            patient = getattr(self, "patient", None)
             series = getattr(self, "series", None)
 
             return unformatted_path.format(
@@ -244,8 +242,7 @@ class RecordBase(BaseModel):
                 user_id=self.user_id,
                 clarinet_storage_path=self.clarinet_storage_path or settings.storage_path,
             )
-        except (AttributeError, KeyError) as e:
-            logger.error(f"Error formatting path: {e}")
+        except (AttributeError, KeyError):
             return None
 
     def _format_slicer_kwargs(self, slicer_kwargs: SlicerArgs) -> SlicerArgs:
@@ -305,8 +302,8 @@ class RecordBase(BaseModel):
                     "Working folder attribute only available for Study and Series level record types."
                 )
 
+    @computed_field  # type: ignore[prop-decorator]
     @property
-    @computed_field
     def working_folder(self) -> str | None:
         """Get the working folder path for this record."""
         return self._get_working_folder()

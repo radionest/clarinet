@@ -11,7 +11,6 @@ from pydantic import computed_field
 from sqlmodel import Field, Relationship
 
 from ..settings import settings
-from ..utils.logger import logger
 from .base import BaseModel, DicomUID
 from .patient import Patient, PatientBase
 
@@ -96,8 +95,7 @@ class SeriesRead(SeriesBase):
                 series_anon_uid=self.anon_uid or self.series_uid,
                 clarinet_storage_path=settings.storage_path,
             )
-        except AttributeError as e:
-            logger.error(e)
+        except AttributeError:
             return None
 
     @computed_field
