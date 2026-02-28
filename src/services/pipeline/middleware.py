@@ -23,6 +23,7 @@ from src.utils.logger import logger
 from .broker import extract_routing_key
 
 if TYPE_CHECKING:
+    from aio_pika.abc import AbstractChannel, AbstractRobustConnection
     from taskiq import TaskiqMessage, TaskiqResult
 
 
@@ -87,6 +88,26 @@ class DeadLetterMiddleware(TaskiqMiddleware):
     def __init__(self, amqp_url: str | None = None) -> None:
         super().__init__()
         self._amqp_url = amqp_url
+        self._connection: AbstractRobustConnection | None = None
+        self._channel: AbstractChannel | None = None
+
+    async def startup(self) -> None:
+        """Open a persistent AMQP connection and declare the DLQ."""
+        import aio_pika
+
+        from .broker import DLQ_QUEUE, _build_amqp_url
+
+        url = self._amqp_url or _build_amqp_url()
+        self._connection = await aio_pika.connect_robust(url)
+        self._channel = await self._connection.channel()
+        await self._channel.declare_queue(DLQ_QUEUE, durable=True)
+
+    async def shutdown(self) -> None:
+        """Close the persistent AMQP connection."""
+        if self._connection is not None:
+            await self._connection.close()
+            self._connection = None
+            self._channel = None
 
     async def post_execute(self, message: TaskiqMessage, result: TaskiqResult[Any]) -> None:
         """Check if a failed task should be routed to the DLQ.
@@ -115,7 +136,14 @@ class DeadLetterMiddleware(TaskiqMiddleware):
         """
         import aio_pika
 
-        from .broker import DLQ_QUEUE, _build_amqp_url
+        from .broker import DLQ_QUEUE
+
+        if self._channel is None:
+            logger.error(
+                f"DLQ channel not initialized, cannot route task '{message.task_name}' "
+                f"(id={message.task_id}) — was startup() called?"
+            )
+            return
 
         try:
             error = result.error
@@ -130,19 +158,14 @@ class DeadLetterMiddleware(TaskiqMiddleware):
                 "error_detail": getattr(error, "detail", None),
                 "error_status_code": getattr(error, "status_code", None),
             }
-            url = self._amqp_url or _build_amqp_url()
-            connection = await aio_pika.connect_robust(url)
-            async with connection:
-                channel = await connection.channel()
-                await channel.declare_queue(DLQ_QUEUE, durable=True)
-                await channel.default_exchange.publish(
-                    aio_pika.Message(
-                        body=json.dumps(dlq_payload, default=str).encode(),
-                        content_type="application/json",
-                        delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
-                    ),
-                    routing_key=DLQ_QUEUE,
-                )
+            await self._channel.default_exchange.publish(
+                aio_pika.Message(
+                    body=json.dumps(dlq_payload, default=str).encode(),
+                    content_type="application/json",
+                    delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
+                ),
+                routing_key=DLQ_QUEUE,
+            )
             logger.warning(
                 f"Task '{message.task_name}' (id={message.task_id}) "
                 f"sent to dead letter queue: {result.error}"
@@ -172,9 +195,15 @@ class PipelineChainMiddleware(TaskiqMiddleware):
         self._client = client
         self._owns_client = client is None
         self._amqp_url = amqp_url
+        self._dlq_connection: AbstractRobustConnection | None = None
+        self._dlq_channel: AbstractChannel | None = None
 
     async def startup(self) -> None:
-        """Create and authenticate the ClarinetClient if not injected."""
+        """Create the ClarinetClient and open a persistent DLQ connection."""
+        import aio_pika
+
+        from .broker import DLQ_QUEUE, _build_amqp_url
+
         if self._client is None:
             self._client = ClarinetClient(
                 base_url=f"http://{settings.host}:{settings.port}/api",
@@ -184,11 +213,20 @@ class PipelineChainMiddleware(TaskiqMiddleware):
             )
             await self._client.login()
 
+        url = self._amqp_url or _build_amqp_url()
+        self._dlq_connection = await aio_pika.connect_robust(url)
+        self._dlq_channel = await self._dlq_connection.channel()
+        await self._dlq_channel.declare_queue(DLQ_QUEUE, durable=True)
+
     async def shutdown(self) -> None:
-        """Close the ClarinetClient if we own it."""
+        """Close the ClarinetClient and DLQ connection."""
         if self._owns_client and self._client is not None:
             await self._client.close()
             self._client = None
+        if self._dlq_connection is not None:
+            await self._dlq_connection.close()
+            self._dlq_connection = None
+            self._dlq_channel = None
 
     async def post_execute(self, message: TaskiqMessage, result: TaskiqResult[Any]) -> None:
         """After a step completes, dispatch the next step in the chain.
@@ -242,7 +280,14 @@ class PipelineChainMiddleware(TaskiqMiddleware):
         """
         import aio_pika
 
-        from .broker import DLQ_QUEUE, _build_amqp_url
+        from .broker import DLQ_QUEUE
+
+        if self._dlq_channel is None:
+            logger.error(
+                "DLQ channel not initialized for PipelineChainMiddleware, "
+                "cannot publish chain_failure — was startup() called?"
+            )
+            return
 
         pipeline_id = message.labels.get("pipeline_id", "unknown")
         step_index = message.labels.get("step_index", "?")
@@ -254,19 +299,14 @@ class PipelineChainMiddleware(TaskiqMiddleware):
             "error": reason,
         }
         try:
-            url = self._amqp_url or _build_amqp_url()
-            connection = await aio_pika.connect_robust(url)
-            async with connection:
-                channel = await connection.channel()
-                await channel.declare_queue(DLQ_QUEUE, durable=True)
-                await channel.default_exchange.publish(
-                    aio_pika.Message(
-                        body=json.dumps(dlq_payload, default=str).encode(),
-                        content_type="application/json",
-                        delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
-                    ),
-                    routing_key=DLQ_QUEUE,
-                )
+            await self._dlq_channel.default_exchange.publish(
+                aio_pika.Message(
+                    body=json.dumps(dlq_payload, default=str).encode(),
+                    content_type="application/json",
+                    delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
+                ),
+                routing_key=DLQ_QUEUE,
+            )
             logger.error(
                 f"Pipeline chain failure for '{pipeline_id}' step {step_index} → DLQ: {reason}"
             )

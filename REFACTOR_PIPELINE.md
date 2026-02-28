@@ -11,25 +11,6 @@
 
 ---
 
-## KISS — Нарушения
-
-### 5. DeadLetterMiddleware — новое подключение к RabbitMQ на каждый сбой (критично)
-
-`middleware.py:119` — `_publish_to_dlq()` создает **новое aio_pika соединение** при каждом вызове:
-
-```python
-connection = await aio_pika.connect_robust(_build_amqp_url())
-```
-
-Проблемы:
-- Дорогая операция (TCP handshake + AMQP auth) на каждый failure
-- Нет connection pooling
-- При каскадном сбое (много задач падают одновременно) — шторм подключений
-- Middleware работает внутри worker-процесса, где уже есть активное соединение broker'а
-
-**Рекомендация**: использовать встроенный механизм RabbitMQ DLQ через `x-dead-letter-exchange` / `x-dead-letter-routing-key` аргументы при декларации очередей в `create_broker()`. Это полностью исключает необходимость в `DeadLetterMiddleware` как классе и переносит маршрутизацию на уровень брокера. Альтернатива — получать `channel` из broker'а, а не создавать своё подключение.
-
-
 
 ## YAGNI — Мёртвый/ненужный код
 
@@ -92,45 +73,3 @@ Middleware используется только внутри `broker.py:76-88`.
 `worker.py:113-117` — константа создаётся при каждом вызове `run_worker()`.
 
 **Рекомендация**: вынести на уровень модуля.
-
-### 15. Worker's per-queue broker копирует task registry вручную
-
-`worker.py:104-106`:
-```python
-qbroker = create_broker(queue_name)
-for task_name, task in singleton.get_all_tasks().items():
-    qbroker.local_task_registry[task_name] = task
-```
-
-Это работает, но хрупко — зависит от внутреннего API TaskIQ (`local_task_registry`). При обновлении TaskIQ может сломаться.
-
----
-
-## Приоритеты
-
-| # | Проблема | Принцип | Приоритет |
-|---|----------|---------|-----------|
-| 5 | DLQ — новое подключение на каждый сбой | KISS | **Высокий** |
-| 6 | `exec()` для загрузки модулей | KISS | **Высокий** |
-| 1 | Routing key extraction x3 | DRY | Средний |
-| 2 | NoResultError проверка x2 | DRY | Средний |
-| 4 | Дубль dispatch в engine.py | DRY | Средний |
-| 7 | Chain сериализация в каждом label | KISS | Средний |
-| 8 | PipelineResult мёртвый код | YAGNI | Низкий |
-| 9 | exceptions.py прокси-файл | YAGNI | Низкий |
-| 10 | register_task() без вызовов | YAGNI | Низкий |
-| 3 | Log prefix дубль | DRY | Низкий |
-| 12 | DeadLetterMiddleware в публичном API | YAGNI | Низкий |
-| 14 | _ACK_TYPE_MAP внутри функции | KISS | Низкий |
-
-## Файлы для модификации
-
-- `src/services/pipeline/middleware.py` — рефакторинг DLQ, хелперы
-- `src/services/pipeline/broker.py` — routing key хелпер, DLQ через queue args
-- `src/services/pipeline/worker.py` — importlib, _ACK_TYPE_MAP
-- `src/services/pipeline/chain.py` — routing key хелпер, registry lookup вместо chain serialization
-- `src/services/pipeline/message.py` — удаление PipelineResult
-- `src/services/pipeline/__init__.py` — чистка экспортов
-- `src/services/pipeline/exceptions.py` — удаление файла
-- `src/services/recordflow/engine.py` — объединение dispatch методов
-- `src/api/app.py` — комментарий о роли broker в API

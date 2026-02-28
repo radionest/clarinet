@@ -694,30 +694,30 @@ class TestPipelineChainNegative:
         step2_executed: list[bool] = [False]
         step1_done = asyncio.Event()
 
-        broker = await pipeline_broker_factory(
-            "default",
-            clarinet_client=pipeline_clarinet_client,
-            with_middlewares=True,
-            as_worker=True,
-        )
-        try:
+        with patch("src.services.pipeline.broker.DLQ_QUEUE", dlq_queue_name):
+            broker = await pipeline_broker_factory(
+                "default",
+                clarinet_client=pipeline_clarinet_client,
+                with_middlewares=True,
+                as_worker=True,
+            )
+            try:
 
-            @broker.task(task_name="ghost_step1")
-            async def step1(data: dict[str, Any]) -> dict[str, Any]:
-                step1_done.set()
-                return data
+                @broker.task(task_name="ghost_step1")
+                async def step1(data: dict[str, Any]) -> dict[str, Any]:
+                    step1_done.set()
+                    return data
 
-            @broker.task(task_name="ghost_step2")
-            async def step2(data: dict[str, Any]) -> dict[str, Any]:
-                step2_executed[0] = True
-                return data
+                @broker.task(task_name="ghost_step2")
+                async def step2(data: dict[str, Any]) -> dict[str, Any]:
+                    step2_executed[0] = True
+                    return data
 
-            _TASK_REGISTRY["ghost_step1"] = step1
-            _TASK_REGISTRY["ghost_step2"] = step2
+                _TASK_REGISTRY["ghost_step1"] = step1
+                _TASK_REGISTRY["ghost_step2"] = step2
 
-            receiver = asyncio.create_task(run_receiver_task(broker))
+                receiver = asyncio.create_task(run_receiver_task(broker))
 
-            with patch("src.services.pipeline.broker.DLQ_QUEUE", dlq_queue_name):
                 await (
                     step1.kicker()
                     .with_labels(
@@ -733,31 +733,31 @@ class TestPipelineChainNegative:
                 # Allow time for chain-failure DLQ publish
                 await asyncio.sleep(1.5)
 
-            receiver.cancel()
-            with pytest.raises(asyncio.CancelledError):
-                await receiver
+                receiver.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await receiver
 
-            # step2 must NOT have been dispatched
-            assert not step2_executed[0], "step2 should not execute when pipeline not found"
+                # step2 must NOT have been dispatched
+                assert not step2_executed[0], "step2 should not execute when pipeline not found"
 
-            # DLQ must contain a chain_failure record for "ghost_chain"
-            connection = await aio_pika.connect_robust(rabbitmq_url)
-            async with connection:
-                channel = await connection.channel()
-                dlq = await channel.declare_queue(dlq_queue_name, durable=True)
-                msg = await dlq.get(fail=False, no_ack=True)
-                assert msg is not None, "No message found in DLQ after chain failure"
-                body = json.loads(msg.body)
+                # DLQ must contain a chain_failure record for "ghost_chain"
+                connection = await aio_pika.connect_robust(rabbitmq_url)
+                async with connection:
+                    channel = await connection.channel()
+                    dlq = await channel.declare_queue(dlq_queue_name, durable=True)
+                    msg = await dlq.get(fail=False, no_ack=True)
+                    assert msg is not None, "No message found in DLQ after chain failure"
+                    body = json.loads(msg.body)
 
-            assert body["error_type"] == "chain_failure"
-            assert body["labels"]["pipeline_id"] == "ghost_chain"
-            assert "not found" in body["error"].lower() or "404" in body["error"]
+                assert body["error_type"] == "chain_failure"
+                assert body["labels"]["pipeline_id"] == "ghost_chain"
+                assert "not found" in body["error"].lower() or "404" in body["error"]
 
-            # Log must contain the pipeline id and failure context
-            assert any("ghost_chain" in m for m in capture_logs)
-            assert any("not found" in m.lower() or "404" in m for m in capture_logs)
-        finally:
-            await broker.shutdown()
+                # Log must contain the pipeline id and failure context
+                assert any("ghost_chain" in m for m in capture_logs)
+                assert any("not found" in m.lower() or "404" in m for m in capture_logs)
+            finally:
+                await broker.shutdown()
 
     async def test_chain_failure_when_task_not_in_registry(
         self,
