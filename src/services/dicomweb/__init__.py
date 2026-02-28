@@ -3,6 +3,7 @@
 from src.services.dicomweb.cache import DicomWebCache
 from src.services.dicomweb.cleanup import DicomWebCacheCleanupService
 from src.services.dicomweb.converter import (
+    convert_datasets_to_dicom_json,
     dataset_to_dicom_json,
     image_result_to_dicom_json,
     series_result_to_dicom_json,
@@ -18,6 +19,7 @@ __all__ = [
     "DicomWebProxyService",
     "MemoryCachedSeries",
     "build_multipart_response",
+    "convert_datasets_to_dicom_json",
     "dataset_to_dicom_json",
     "extract_frames_from_dataset",
     "image_result_to_dicom_json",

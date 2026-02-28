@@ -4,12 +4,14 @@ Converts Pydantic models and pydicom Datasets into DICOM JSON format
 as defined by the DICOMweb standard (PS3.18 Appendix F).
 """
 
+from collections.abc import Iterable
 from typing import Any
 
 from pydicom import Dataset
 from pydicom.dataelem import DataElement
 
 from src.services.dicom.models import ImageResult, SeriesResult, StudyResult
+from src.utils.logger import logger
 
 
 def _tag_value(vr: str, value: Any) -> dict[str, Any]:
@@ -163,3 +165,25 @@ def dataset_to_dicom_json(ds: Dataset, base_url: str) -> dict[str, Any]:
         }
 
     return json_dict
+
+
+def convert_datasets_to_dicom_json(
+    datasets: Iterable[Dataset], base_url: str
+) -> list[dict[str, Any]]:
+    """Convert multiple pydicom Datasets to DICOM JSON, skipping unreadable instances.
+
+    Args:
+        datasets: Iterable of pydicom Datasets
+        base_url: Base URL for constructing BulkDataURIs
+
+    Returns:
+        List of DICOM JSON dicts (unreadable instances are logged and skipped)
+    """
+    metadata: list[dict[str, Any]] = []
+    for ds in datasets:
+        try:
+            metadata.append(dataset_to_dicom_json(ds, base_url))
+        except Exception as e:
+            sop_uid = getattr(ds, "SOPInstanceUID", "unknown")
+            logger.warning(f"Skipping unreadable instance {sop_uid}: {e}")
+    return metadata

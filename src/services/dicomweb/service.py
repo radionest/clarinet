@@ -14,7 +14,7 @@ from src.services.dicom.models import (
 )
 from src.services.dicomweb.cache import DicomWebCache
 from src.services.dicomweb.converter import (
-    dataset_to_dicom_json,
+    convert_datasets_to_dicom_json,
     image_result_to_dicom_json,
     series_result_to_dicom_json,
     study_result_to_dicom_json,
@@ -143,16 +143,7 @@ class DicomWebProxyService:
             pacs=self._pacs,
         )
 
-        metadata: list[dict[str, Any]] = []
-        for ds in cached.instances.values():
-            try:
-                json_obj = dataset_to_dicom_json(ds, base_url)
-                metadata.append(json_obj)
-            except Exception as e:
-                sop_uid = getattr(ds, "SOPInstanceUID", "unknown")
-                logger.warning(f"Skipping unreadable instance {sop_uid}: {e}")
-                continue
-
+        metadata = convert_datasets_to_dicom_json(cached.instances.values(), base_url)
         logger.info(f"WADO-RS metadata: {len(metadata)} instances for series {series_uid}")
         return metadata
 
