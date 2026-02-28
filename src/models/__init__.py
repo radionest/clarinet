@@ -17,6 +17,9 @@ from .file_schema import FileDefinition
 # Patient models
 from .patient import Patient, PatientBase, PatientRead, PatientSave
 
+# Pipeline definition models
+from .pipeline_definition import PipelineDefinition, PipelineDefinitionRead
+
 # Record models (formerly Task)
 from .record import (
     Record,
@@ -51,20 +54,17 @@ from .study import (
 from .user import User, UserRead, UserRole, UserRolesLink
 
 __all__ = [
-    # Authentication
     "AccessToken",
-    # Base
     "BaseModel",
     "DicomQueryLevel",
     "DicomUID",
-    # File schema
     "FileDefinition",
-    # Patient
     "Patient",
     "PatientBase",
     "PatientRead",
     "PatientSave",
-    # Record (formerly Task)
+    "PipelineDefinition",
+    "PipelineDefinitionRead",
     "Record",
     "RecordBase",
     "RecordCreate",
@@ -84,12 +84,10 @@ __all__ = [
     "SeriesFind",
     "SeriesRead",
     "SlicerSettings",
-    # Study
     "Study",
     "StudyBase",
     "StudyCreate",
     "StudyRead",
-    # User
     "User",
     "UserRead",
     "UserRole",

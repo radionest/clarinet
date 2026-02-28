@@ -2,8 +2,8 @@
 Pipeline chain builder DSL.
 
 Provides the Pipeline class for defining multi-step task chains
-with queue routing. Pipeline definitions are serialized into task
-labels so the PipelineChainMiddleware can advance the chain.
+with queue routing. Pipeline definitions are stored in the database
+and fetched by workers via the HTTP API at each chain step.
 
 Example:
     from src.services.pipeline import Pipeline
@@ -15,13 +15,12 @@ Example:
         .step(generate_report, queue="clarinet.default")
     )
 
-    # Execute:
+    # Execute (dispatches first step):
     await imaging_pipeline.run(message)
 """
 
 from __future__ import annotations
 
-import json
 from typing import TYPE_CHECKING, Any
 
 from src.utils.logger import logger
@@ -65,8 +64,9 @@ class Pipeline:
     """Declarative pipeline chain builder.
 
     Defines an ordered sequence of task steps with queue routing.
-    The chain definition is serialized into the first task's labels
-    so the PipelineChainMiddleware can advance through steps.
+    Pipeline definitions are synced to the database at application startup
+    (and on demand via ``POST /api/pipelines/sync``). Workers fetch them
+    via the HTTP API at each chain step.
 
     Args:
         name: Unique pipeline identifier.
@@ -108,23 +108,11 @@ class Pipeline:
 
         return self
 
-    def _serialize(self) -> str:
-        """Serialize pipeline chain definition to JSON.
-
-        Returns:
-            JSON string with pipeline_id and steps list.
-        """
-        chain = {
-            "pipeline_id": self.name,
-            "steps": [s.to_dict() for s in self.steps],
-        }
-        return json.dumps(chain)
-
     async def run(self, message: PipelineMessage, **extra_labels: str) -> Any:
         """Execute the pipeline by dispatching the first step.
 
-        The chain definition is attached as labels so the middleware
-        can advance through subsequent steps automatically.
+        Pipeline definitions must be synced to the database beforehand
+        (at startup or via ``POST /api/pipelines/sync``).
 
         Args:
             message: The initial pipeline message.
@@ -145,7 +133,6 @@ class Pipeline:
         labels = {
             "pipeline_id": self.name,
             "step_index": "0",
-            "pipeline_chain": self._serialize(),
             "routing_key": routing_key,
             **extra_labels,
         }
@@ -196,3 +183,24 @@ def get_all_pipelines() -> dict[str, Pipeline]:
         Dictionary mapping pipeline names to Pipeline instances.
     """
     return dict(_PIPELINE_REGISTRY)
+
+
+async def sync_pipeline_definitions() -> int:
+    """Sync all registered pipeline definitions to the database.
+
+    Called at application startup and via the sync API endpoint.
+
+    Returns:
+        Number of synced definitions.
+    """
+    from src.repositories.pipeline_definition_repository import PipelineDefinitionRepository
+    from src.utils.db_manager import db_manager
+
+    ###    Uses db_manager directly (same bootstrap pattern as ``add_default_user_roles`` in ``src/utils/bootstrap.py``).
+
+    async with db_manager.get_async_session_context() as session:
+        repo = PipelineDefinitionRepository(session)
+        for pipeline in _PIPELINE_REGISTRY.values():
+            await repo.upsert(pipeline.name, [s.to_dict() for s in pipeline.steps])
+
+    return len(_PIPELINE_REGISTRY)

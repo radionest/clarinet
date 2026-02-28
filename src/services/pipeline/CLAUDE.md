@@ -7,7 +7,7 @@ TaskIQ-based distributed task pipeline for long-running operations (GPU processi
 - **TaskIQ** as task queue (not FastStream) — built-in retry, DLQ, FastAPI DI compatibility
 - **AioPikaBroker** connects to RabbitMQ via existing `settings.rabbitmq_*` configuration
 - **Direct exchange** (`clarinet`) with queue-based routing (`clarinet.default`, `clarinet.gpu`, `clarinet.dicom`)
-- **PipelineChainMiddleware** advances multi-step pipelines via task labels
+- **PipelineChainMiddleware** advances multi-step pipelines via DB-backed definitions (HTTP API lookup)
 
 ## Module Structure
 
@@ -72,10 +72,16 @@ uv run clarinet worker --workers 4            # parallel workers
 - GPU queue: `clarinet.gpu` (workers with `have_gpu=True`)
 - DICOM queue: `clarinet.dicom` (workers with `have_dicom=True`)
 
-## Chain Advancement
+## Chain Advancement (DB-backed)
 
-Pipeline chains are serialized into the first task's labels as JSON (`pipeline_chain`).
-After each step, `PipelineChainMiddleware.post_execute()` reads the chain, finds the next step, and dispatches it to the correct queue. Chain stops on error.
+Pipeline definitions are stored in the `pipeline_definition` DB table (model: `src/models/pipeline_definition.py`).
+Definitions are synced to the database at application startup via `sync_pipeline_definitions()`
+(bootstrap pattern, same as `add_default_user_roles`). Can also be synced on demand via
+`POST /api/pipelines/sync`. `Pipeline.run()` only dispatches the first step — no DB writes.
+Task labels carry only `pipeline_id` + `step_index` (no serialized chain).
+After each step, `PipelineChainMiddleware.post_execute()` fetches the definition from the HTTP API
+(`GET /api/pipelines/{name}/definition`) and dispatches the next step. Chain stops on error.
+
 
 ## Retry & DLQ
 
@@ -96,6 +102,7 @@ After each step, `PipelineChainMiddleware.post_execute()` reads the chain, finds
 - `pipeline_retry_delay` (int, default 5) — initial retry delay in seconds
 - `pipeline_retry_max_delay` (int, default 120) — max retry delay with exponential backoff
 - `pipeline_ack_type` (str, default `when_executed`) — `when_received` | `when_executed` | `when_saved`
+
 
 ## RecordFlow Integration
 

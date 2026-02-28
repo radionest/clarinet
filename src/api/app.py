@@ -20,6 +20,7 @@ from src.api.routers import admin as admin
 from src.api.routers import auth as auth
 from src.api.routers import dicom as dicom
 from src.api.routers import dicomweb as dicomweb
+from src.api.routers import pipeline as pipeline
 from src.api.routers import record as record
 from src.api.routers import slicer  # slicer doesn't use database, no async version needed,
 from src.api.routers import study as study
@@ -96,12 +97,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     if settings.pipeline_enabled:
         try:
-            from src.services.pipeline import get_broker
+            from src.services.pipeline import get_broker, sync_pipeline_definitions
 
             broker = get_broker()
             await broker.startup()
             app.state.pipeline_broker = broker
             logger.info("Pipeline broker started")
+
+            count = await sync_pipeline_definitions()
+            logger.info(f"Synced {count} pipeline definition(s) to database")
         except Exception as e:
             logger.error(f"Failed to start pipeline broker: {e}")
             app.state.pipeline_broker = None
@@ -208,6 +212,7 @@ def create_app(root_path: str = "/") -> FastAPI:
     app.include_router(slicer.router, prefix="/api/slicer", tags=["Slicer"])
     app.include_router(admin.router, prefix="/api/admin", tags=["Admin"])
     app.include_router(dicom.router, prefix="/api/dicom", tags=["DICOM"])
+    app.include_router(pipeline.router, prefix="/api/pipelines", tags=["Pipelines"])
 
     # Mount DICOMweb proxy router (conditional on settings)
     if settings.dicomweb_enabled:

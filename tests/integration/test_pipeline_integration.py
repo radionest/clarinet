@@ -1,7 +1,7 @@
 """Integration tests for Pipeline service with real RabbitMQ on klara.
 
 Validates broker connectivity, task dispatch, queue routing, task execution,
-multi-step chain advancement, and middleware logging against a live AMQP broker.
+multi-step chain advancement (DB-backed), and middleware logging against a live AMQP broker.
 
 Auto-skipped when RabbitMQ on klara is unreachable.
 """
@@ -16,6 +16,8 @@ from unittest.mock import patch
 import aio_pika
 import pytest
 
+from src.client import ClarinetClient
+from src.repositories.pipeline_definition_repository import PipelineDefinitionRepository
 from src.services.pipeline.chain import _TASK_REGISTRY
 from src.services.pipeline.exceptions import PipelineStepError
 from src.services.pipeline.message import PipelineMessage
@@ -431,11 +433,29 @@ class TestPipelineChain:
         self,
         pipeline_broker_factory: Any,
         test_queues: dict[str, str],
+        test_session: Any,
+        pipeline_clarinet_client: ClarinetClient,
     ) -> None:
         """Pipeline with 2 steps. Step 2 receives step 1's output."""
         from taskiq.api import run_receiver_task
 
-        broker = await pipeline_broker_factory("default", with_middlewares=True, as_worker=True)
+        # Seed pipeline definition in DB
+        repo = PipelineDefinitionRepository(test_session)
+        await repo.upsert(
+            "test_chain2",
+            [
+                {"task_name": "chain2_step1", "queue": test_queues["default"]},
+                {"task_name": "chain2_step2", "queue": test_queues["default"]},
+            ],
+        )
+        await test_session.commit()
+
+        broker = await pipeline_broker_factory(
+            "default",
+            clarinet_client=pipeline_clarinet_client,
+            with_middlewares=True,
+            as_worker=True,
+        )
         try:
             execution_log: list[str] = []
             done_event = asyncio.Event()
@@ -456,35 +476,21 @@ class TestPipelineChain:
                 done_event.set()
                 return msg.model_dump()
 
-            # Register tasks in the pipeline registry
             _TASK_REGISTRY["chain2_step1"] = step1
             _TASK_REGISTRY["chain2_step2"] = step2
 
-            # Build chain definition
-            chain_def = {
-                "pipeline_id": "test_chain2",
-                "steps": [
-                    {"task_name": "chain2_step1", "queue": "test.default"},
-                    {"task_name": "chain2_step2", "queue": "test.default"},
-                ],
-            }
-
             receiver = asyncio.create_task(run_receiver_task(broker))
 
-            # Dispatch step 1 with chain labels
-            routing_key = "default"
             await (
                 step1.kicker()
                 .with_labels(
                     pipeline_id="test_chain2",
                     step_index="0",
-                    pipeline_chain=json.dumps(chain_def),
-                    routing_key=routing_key,
+                    routing_key="default",
                 )
                 .kiq(PipelineMessage(patient_id="P", study_uid="S").model_dump())
             )
 
-            # Wait until step 2 signals completion
             async with asyncio.timeout(10.0):
                 await done_event.wait()
 
@@ -500,11 +506,29 @@ class TestPipelineChain:
         self,
         pipeline_broker_factory: Any,
         test_queues: dict[str, str],
+        test_session: Any,
+        pipeline_clarinet_client: ClarinetClient,
     ) -> None:
         """3-step chain, each step adds key to payload. Final message has all 3 keys."""
         from taskiq.api import run_receiver_task
 
-        broker = await pipeline_broker_factory("default", with_middlewares=True, as_worker=True)
+        repo = PipelineDefinitionRepository(test_session)
+        await repo.upsert(
+            "test_accum",
+            [
+                {"task_name": "accum_step1", "queue": test_queues["default"]},
+                {"task_name": "accum_step2", "queue": test_queues["default"]},
+                {"task_name": "accum_step3", "queue": test_queues["default"]},
+            ],
+        )
+        await test_session.commit()
+
+        broker = await pipeline_broker_factory(
+            "default",
+            clarinet_client=pipeline_clarinet_client,
+            with_middlewares=True,
+            as_worker=True,
+        )
         try:
             final_payload: list[dict[str, Any]] = []
             done_event = asyncio.Event()
@@ -533,15 +557,6 @@ class TestPipelineChain:
             _TASK_REGISTRY["accum_step2"] = step2
             _TASK_REGISTRY["accum_step3"] = step3
 
-            chain_def = {
-                "pipeline_id": "test_accum",
-                "steps": [
-                    {"task_name": "accum_step1", "queue": "test.default"},
-                    {"task_name": "accum_step2", "queue": "test.default"},
-                    {"task_name": "accum_step3", "queue": "test.default"},
-                ],
-            }
-
             receiver = asyncio.create_task(run_receiver_task(broker))
 
             await (
@@ -549,7 +564,6 @@ class TestPipelineChain:
                 .with_labels(
                     pipeline_id="test_accum",
                     step_index="0",
-                    pipeline_chain=json.dumps(chain_def),
                     routing_key="default",
                 )
                 .kiq(PipelineMessage(patient_id="P", study_uid="S").model_dump())
@@ -573,11 +587,29 @@ class TestPipelineChain:
         self,
         pipeline_broker_factory: Any,
         test_queues: dict[str, str],
+        test_session: Any,
+        pipeline_clarinet_client: ClarinetClient,
     ) -> None:
         """3-step chain, step 2 raises. Only steps 1 and 2 execute."""
         from taskiq.api import run_receiver_task
 
-        broker = await pipeline_broker_factory("default", with_middlewares=True, as_worker=True)
+        repo = PipelineDefinitionRepository(test_session)
+        await repo.upsert(
+            "test_err_chain",
+            [
+                {"task_name": "err_step1", "queue": test_queues["default"]},
+                {"task_name": "err_step2", "queue": test_queues["default"]},
+                {"task_name": "err_step3", "queue": test_queues["default"]},
+            ],
+        )
+        await test_session.commit()
+
+        broker = await pipeline_broker_factory(
+            "default",
+            clarinet_client=pipeline_clarinet_client,
+            with_middlewares=True,
+            as_worker=True,
+        )
         try:
             execution_log: list[str] = []
             step2_done = asyncio.Event()
@@ -603,15 +635,6 @@ class TestPipelineChain:
             _TASK_REGISTRY["err_step2"] = step2
             _TASK_REGISTRY["err_step3"] = step3
 
-            chain_def = {
-                "pipeline_id": "test_err_chain",
-                "steps": [
-                    {"task_name": "err_step1", "queue": "test.default"},
-                    {"task_name": "err_step2", "queue": "test.default"},
-                    {"task_name": "err_step3", "queue": "test.default"},
-                ],
-            }
-
             receiver = asyncio.create_task(run_receiver_task(broker))
 
             await (
@@ -619,7 +642,6 @@ class TestPipelineChain:
                 .with_labels(
                     pipeline_id="test_err_chain",
                     step_index="0",
-                    pipeline_chain=json.dumps(chain_def),
                     routing_key="default",
                 )
                 .kiq(PipelineMessage(patient_id="P", study_uid="S").model_dump())
@@ -638,6 +660,274 @@ class TestPipelineChain:
             assert "step1" in execution_log
             assert "step2" in execution_log
             assert "step3" not in execution_log
+        finally:
+            await broker.shutdown()
+
+
+# ─── 6. Chain Failure Observability ─────────────────────────────────────────
+
+
+class TestPipelineChainNegative:
+    """Verify that chain advancement failures are routed to DLQ and logged.
+
+    Each test covers one silent-failure branch in PipelineChainMiddleware and
+    checks three things:
+      1. The next step is NOT executed.
+      2. A ``chain_failure`` record arrives in the DLQ.
+      3. An ERROR log containing the failure context is emitted.
+    """
+
+    async def test_chain_failure_when_pipeline_not_found(
+        self,
+        pipeline_broker_factory: Any,
+        rabbitmq_url: str,
+        test_queues: dict[str, str],
+        test_session: Any,
+        pipeline_clarinet_client: ClarinetClient,
+        capture_logs: list[str],
+    ) -> None:
+        """Step completes OK, but pipeline_id does not exist in DB → API 404 → DLQ."""
+        from taskiq.api import run_receiver_task
+
+        # NOTE: "ghost_chain" is intentionally NOT seeded in the DB.
+        dlq_queue_name = test_queues["dlq"]
+        step2_executed: list[bool] = [False]
+        step1_done = asyncio.Event()
+
+        broker = await pipeline_broker_factory(
+            "default",
+            clarinet_client=pipeline_clarinet_client,
+            with_middlewares=True,
+            as_worker=True,
+        )
+        try:
+
+            @broker.task(task_name="ghost_step1")
+            async def step1(data: dict[str, Any]) -> dict[str, Any]:
+                step1_done.set()
+                return data
+
+            @broker.task(task_name="ghost_step2")
+            async def step2(data: dict[str, Any]) -> dict[str, Any]:
+                step2_executed[0] = True
+                return data
+
+            _TASK_REGISTRY["ghost_step1"] = step1
+            _TASK_REGISTRY["ghost_step2"] = step2
+
+            receiver = asyncio.create_task(run_receiver_task(broker))
+
+            with patch("src.services.pipeline.broker.DLQ_QUEUE", dlq_queue_name):
+                await (
+                    step1.kicker()
+                    .with_labels(
+                        pipeline_id="ghost_chain",
+                        step_index="0",
+                        routing_key="default",
+                    )
+                    .kiq(PipelineMessage(patient_id="P", study_uid="S").model_dump())
+                )
+
+                async with asyncio.timeout(10.0):
+                    await step1_done.wait()
+                # Allow time for chain-failure DLQ publish
+                await asyncio.sleep(1.5)
+
+            receiver.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await receiver
+
+            # step2 must NOT have been dispatched
+            assert not step2_executed[0], "step2 should not execute when pipeline not found"
+
+            # DLQ must contain a chain_failure record for "ghost_chain"
+            connection = await aio_pika.connect_robust(rabbitmq_url)
+            async with connection:
+                channel = await connection.channel()
+                dlq = await channel.declare_queue(dlq_queue_name, durable=True)
+                msg = await dlq.get(fail=False)
+                assert msg is not None, "No message found in DLQ after chain failure"
+                body = json.loads(msg.body)
+
+            assert body["error_type"] == "chain_failure"
+            assert body["labels"]["pipeline_id"] == "ghost_chain"
+            assert "not found" in body["error"].lower() or "404" in body["error"]
+
+            # Log must contain the pipeline id and failure context
+            assert any("ghost_chain" in m for m in capture_logs)
+            assert any("not found" in m.lower() or "404" in m for m in capture_logs)
+        finally:
+            await broker.shutdown()
+
+    async def test_chain_failure_when_task_not_in_registry(
+        self,
+        pipeline_broker_factory: Any,
+        rabbitmq_url: str,
+        test_queues: dict[str, str],
+        test_session: Any,
+        pipeline_clarinet_client: ClarinetClient,
+        capture_logs: list[str],
+    ) -> None:
+        """Next step's task is absent from _TASK_REGISTRY → chain_failure → DLQ."""
+        from taskiq.api import run_receiver_task
+
+        dlq_queue_name = test_queues["dlq"]
+        repo = PipelineDefinitionRepository(test_session)
+        await repo.upsert(
+            "missing_task_chain",
+            [
+                {"task_name": "notfound_step1", "queue": test_queues["default"]},
+                # "notfound_step2_missing" is intentionally NOT registered below
+                {"task_name": "notfound_step2_missing", "queue": test_queues["default"]},
+            ],
+        )
+        await test_session.commit()
+
+        step1_done = asyncio.Event()
+        step2_executed: list[bool] = [False]
+
+        broker = await pipeline_broker_factory(
+            "default",
+            clarinet_client=pipeline_clarinet_client,
+            with_middlewares=True,
+            as_worker=True,
+        )
+        try:
+
+            @broker.task(task_name="notfound_step1")
+            async def step1(data: dict[str, Any]) -> dict[str, Any]:
+                step1_done.set()
+                return data
+
+            # Deliberately omit: _TASK_REGISTRY["notfound_step2_missing"] = ...
+            _TASK_REGISTRY["notfound_step1"] = step1
+
+            receiver = asyncio.create_task(run_receiver_task(broker))
+
+            with patch("src.services.pipeline.broker.DLQ_QUEUE", dlq_queue_name):
+                await (
+                    step1.kicker()
+                    .with_labels(
+                        pipeline_id="missing_task_chain",
+                        step_index="0",
+                        routing_key="default",
+                    )
+                    .kiq(PipelineMessage(patient_id="P", study_uid="S").model_dump())
+                )
+
+                async with asyncio.timeout(10.0):
+                    await step1_done.wait()
+                await asyncio.sleep(1.5)
+
+            receiver.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await receiver
+
+            assert not step2_executed[0]
+
+            connection = await aio_pika.connect_robust(rabbitmq_url)
+            async with connection:
+                channel = await connection.channel()
+                dlq = await channel.declare_queue(dlq_queue_name, durable=True)
+                msg = await dlq.get(fail=False)
+                assert msg is not None, "No chain_failure message in DLQ"
+                body = json.loads(msg.body)
+
+            assert body["error_type"] == "chain_failure"
+            assert body["labels"]["pipeline_id"] == "missing_task_chain"
+            assert "notfound_step2_missing" in body["error"]
+            assert "not in registry" in body["error"].lower() or "registry" in body["error"].lower()
+
+            assert any("notfound_step2_missing" in m for m in capture_logs)
+            assert any("registry" in m.lower() for m in capture_logs)
+        finally:
+            await broker.shutdown()
+
+    async def test_chain_failure_when_unexpected_result_type(
+        self,
+        pipeline_broker_factory: Any,
+        rabbitmq_url: str,
+        test_queues: dict[str, str],
+        test_session: Any,
+        pipeline_clarinet_client: ClarinetClient,
+        capture_logs: list[str],
+    ) -> None:
+        """Step returns a str instead of dict/PipelineMessage → chain_failure → DLQ."""
+        from taskiq.api import run_receiver_task
+
+        dlq_queue_name = test_queues["dlq"]
+        repo = PipelineDefinitionRepository(test_session)
+        await repo.upsert(
+            "bad_result_chain",
+            [
+                {"task_name": "bad_result_step1", "queue": test_queues["default"]},
+                {"task_name": "bad_result_step2", "queue": test_queues["default"]},
+            ],
+        )
+        await test_session.commit()
+
+        step1_done = asyncio.Event()
+        step2_executed: list[bool] = [False]
+
+        broker = await pipeline_broker_factory(
+            "default",
+            clarinet_client=pipeline_clarinet_client,
+            with_middlewares=True,
+            as_worker=True,
+        )
+        try:
+
+            @broker.task(task_name="bad_result_step1")
+            async def step1(data: dict[str, Any]) -> str:  # type: ignore[override]
+                step1_done.set()
+                return "not a dict or PipelineMessage"
+
+            @broker.task(task_name="bad_result_step2")
+            async def step2(data: dict[str, Any]) -> dict[str, Any]:
+                step2_executed[0] = True
+                return data
+
+            _TASK_REGISTRY["bad_result_step1"] = step1
+            _TASK_REGISTRY["bad_result_step2"] = step2
+
+            receiver = asyncio.create_task(run_receiver_task(broker))
+
+            with patch("src.services.pipeline.broker.DLQ_QUEUE", dlq_queue_name):
+                await (
+                    step1.kicker()
+                    .with_labels(
+                        pipeline_id="bad_result_chain",
+                        step_index="0",
+                        routing_key="default",
+                    )
+                    .kiq(PipelineMessage(patient_id="P", study_uid="S").model_dump())
+                )
+
+                async with asyncio.timeout(10.0):
+                    await step1_done.wait()
+                await asyncio.sleep(1.5)
+
+            receiver.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await receiver
+
+            assert not step2_executed[0], "step2 must not run when step1 returns wrong type"
+
+            connection = await aio_pika.connect_robust(rabbitmq_url)
+            async with connection:
+                channel = await connection.channel()
+                dlq = await channel.declare_queue(dlq_queue_name, durable=True)
+                msg = await dlq.get(fail=False)
+                assert msg is not None, "No chain_failure message in DLQ"
+                body = json.loads(msg.body)
+
+            assert body["error_type"] == "chain_failure"
+            assert body["labels"]["pipeline_id"] == "bad_result_chain"
+            assert "unexpected result type" in body["error"].lower()
+            assert "str" in body["error"]
+
+            assert any("unexpected result type" in m.lower() for m in capture_logs)
+            assert any("str" in m for m in capture_logs)
         finally:
             await broker.shutdown()
 

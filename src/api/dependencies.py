@@ -15,6 +15,7 @@ from src.api.auth_config import (
 from src.exceptions import ClarinetError
 from src.models import User
 from src.repositories.patient_repository import PatientRepository
+from src.repositories.pipeline_definition_repository import PipelineDefinitionRepository
 from src.repositories.record_repository import RecordRepository
 from src.repositories.record_type_repository import RecordTypeRepository
 from src.repositories.series_repository import SeriesRepository
@@ -120,6 +121,13 @@ async def get_record_type_repository(session: SessionDep) -> RecordTypeRepositor
     return RecordTypeRepository(session)
 
 
+async def get_pipeline_definition_repository(
+    session: SessionDep,
+) -> PipelineDefinitionRepository:
+    """Get pipeline definition repository instance."""
+    return PipelineDefinitionRepository(session)
+
+
 # Repository type aliases
 UserRepositoryDep = Annotated[UserRepository, Depends(get_user_repository)]
 UserRoleRepositoryDep = Annotated[UserRoleRepository, Depends(get_user_role_repository)]
@@ -128,6 +136,9 @@ PatientRepositoryDep = Annotated[PatientRepository, Depends(get_patient_reposito
 SeriesRepositoryDep = Annotated[SeriesRepository, Depends(get_series_repository)]
 RecordRepositoryDep = Annotated[RecordRepository, Depends(get_record_repository)]
 RecordTypeRepositoryDep = Annotated[RecordTypeRepository, Depends(get_record_type_repository)]
+PipelineDefinitionRepositoryDep = Annotated[
+    PipelineDefinitionRepository, Depends(get_pipeline_definition_repository)
+]
 
 # Service factory functions
 

@@ -33,7 +33,13 @@ from .broker import (
     get_broker,
     get_test_broker,
 )
-from .chain import Pipeline, get_all_pipelines, get_pipeline, register_task
+from .chain import (
+    Pipeline,
+    get_all_pipelines,
+    get_pipeline,
+    register_task,
+    sync_pipeline_definitions,
+)
 from .exceptions import PipelineConfigError, PipelineError, PipelineStepError
 from .message import PipelineMessage, PipelineResult
 from .middleware import DeadLetterMiddleware
@@ -60,4 +66,5 @@ __all__ = [
     "get_worker_queues",
     "register_task",
     "run_worker",
+    "sync_pipeline_definitions",
 ]

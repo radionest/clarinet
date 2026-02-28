@@ -1,8 +1,8 @@
 """
 TaskIQ middlewares for pipeline chain advancement, logging, and dead letter queue.
 
-PipelineChainMiddleware reads chain definition from task labels after each step
-and dispatches the next step in the pipeline.
+PipelineChainMiddleware fetches pipeline definitions from the HTTP API
+after each step and dispatches the next step in the pipeline.
 
 PipelineLoggingMiddleware logs task lifecycle events.
 
@@ -16,6 +16,8 @@ from typing import TYPE_CHECKING, Any
 
 from taskiq import TaskiqMiddleware
 
+from src.client import ClarinetAPIError, ClarinetClient
+from src.settings import settings
 from src.utils.logger import logger
 
 from .broker import extract_routing_key
@@ -152,19 +154,41 @@ class DeadLetterMiddleware(TaskiqMiddleware):
 class PipelineChainMiddleware(TaskiqMiddleware):
     """Advances pipeline chains after each step completes.
 
-    Reads the chain definition from task labels (``pipeline_chain``)
-    and dispatches the next step if the current step succeeded.
+    Fetches the pipeline definition from the HTTP API using the ``pipeline_id``
+    label, then dispatches the next step if the current step succeeded.
 
-    Chain label format (JSON):
-        {
-            "pipeline_id": "ct_segmentation",
-            "steps": [
-                {"task_name": "fetch_dicom", "queue": "clarinet.dicom"},
-                {"task_name": "run_segmentation", "queue": "clarinet.gpu"},
-                {"task_name": "generate_report", "queue": "clarinet.default"}
-            ]
-        }
+    If chain advancement fails for any reason, publishes a ``chain_failure``
+    record to the dead letter queue so the failure is observable.
+
+    Args:
+        client: Optional pre-configured ClarinetClient. If not provided,
+            one is created from settings during ``startup()`` and closed on ``shutdown()``.
+        amqp_url: Optional AMQP URL override for DLQ publishing. Falls back to
+            ``_build_amqp_url()`` when not provided (production default).
     """
+
+    def __init__(self, client: ClarinetClient | None = None, amqp_url: str | None = None) -> None:
+        super().__init__()
+        self._client = client
+        self._owns_client = client is None
+        self._amqp_url = amqp_url
+
+    async def startup(self) -> None:
+        """Create and authenticate the ClarinetClient if not injected."""
+        if self._client is None:
+            self._client = ClarinetClient(
+                base_url=f"http://{settings.host}:{settings.port}/api",
+                username=settings.admin_email,
+                password=settings.admin_password,
+                auto_login=False,
+            )
+            await self._client.login()
+
+    async def shutdown(self) -> None:
+        """Close the ClarinetClient if we own it."""
+        if self._owns_client and self._client is not None:
+            await self._client.close()
+            self._client = None
 
     async def post_execute(self, message: TaskiqMessage, result: TaskiqResult[Any]) -> None:
         """After a step completes, dispatch the next step in the chain.
@@ -173,8 +197,8 @@ class PipelineChainMiddleware(TaskiqMiddleware):
             message: The completed task message.
             result: The task execution result.
         """
-        chain_data = message.labels.get("pipeline_chain")
-        if not chain_data:
+        pipeline_id = message.labels.get("pipeline_id")
+        if not pipeline_id:
             return
 
         if result.is_err:
@@ -183,35 +207,110 @@ class PipelineChainMiddleware(TaskiqMiddleware):
             if isinstance(result.error, NoResultError):
                 return  # retry scheduled, don't stop chain
 
-            pipeline_id = message.labels.get("pipeline_id", "unknown")
             logger.warning(
                 f"Pipeline '{pipeline_id}' chain stopped at step "
                 f"{message.labels.get('step_index', '?')} due to error"
             )
             return
 
-        try:
-            chain = json.loads(chain_data) if isinstance(chain_data, str) else chain_data
-        except (json.JSONDecodeError, TypeError):
-            logger.error(f"Invalid pipeline_chain label: {chain_data}")
+        # Fetch pipeline definition from API
+        steps = await self._fetch_pipeline_steps(message, pipeline_id)
+        if steps is None:
             return
 
-        steps = chain.get("steps", [])
         current_index = int(message.labels.get("step_index", 0))
         next_index = current_index + 1
 
         if next_index >= len(steps):
-            logger.info(
-                f"Pipeline '{chain.get('pipeline_id', 'unknown')}' completed all {len(steps)} steps"
-            )
+            logger.info(f"Pipeline '{pipeline_id}' completed all {len(steps)} steps")
             return
 
         next_step = steps[next_index]
-        await self._dispatch_next_step(chain, next_step, next_index, result.return_value)
+        await self._dispatch_next_step(
+            message, pipeline_id, next_step, next_index, result.return_value
+        )
+
+    async def _publish_chain_failure_to_dlq(self, message: TaskiqMessage, reason: str) -> None:
+        """Publish a chain_failure record to the dead letter queue.
+
+        Called whenever chain advancement fails so the failure is observable
+        without access to logs.
+
+        Args:
+            message: The task message that completed (whose chain advancement failed).
+            reason: Human-readable description of what went wrong.
+        """
+        import aio_pika
+
+        from .broker import DLQ_QUEUE, _build_amqp_url
+
+        pipeline_id = message.labels.get("pipeline_id", "unknown")
+        step_index = message.labels.get("step_index", "?")
+        dlq_payload: dict[str, Any] = {
+            "task_name": message.task_name,
+            "task_id": message.task_id,
+            "labels": message.labels,
+            "error_type": "chain_failure",
+            "error": reason,
+        }
+        try:
+            url = self._amqp_url or _build_amqp_url()
+            connection = await aio_pika.connect_robust(url)
+            async with connection:
+                channel = await connection.channel()
+                await channel.declare_queue(DLQ_QUEUE, durable=True)
+                await channel.default_exchange.publish(
+                    aio_pika.Message(
+                        body=json.dumps(dlq_payload, default=str).encode(),
+                        content_type="application/json",
+                        delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
+                    ),
+                    routing_key=DLQ_QUEUE,
+                )
+            logger.error(
+                f"Pipeline chain failure for '{pipeline_id}' step {step_index} → DLQ: {reason}"
+            )
+        except Exception as e:
+            logger.error(f"Pipeline chain: failed to write chain_failure to DLQ: {e}")
+
+    async def _fetch_pipeline_steps(
+        self, message: TaskiqMessage, pipeline_id: str
+    ) -> list[dict[str, str]] | None:
+        """Fetch pipeline steps via ClarinetClient.
+
+        Args:
+            message: The current task message (used for DLQ context on failure).
+            pipeline_id: Pipeline name to look up.
+
+        Returns:
+            List of step dicts, or None on failure.
+        """
+        if self._client is None:
+            reason = f"Pipeline chain: client not initialized for '{pipeline_id}'"
+            logger.error(reason)
+            await self._publish_chain_failure_to_dlq(message, reason)
+            return None
+        try:
+            return await self._client.get_pipeline_definition(pipeline_id)
+        except ClarinetAPIError as e:
+            if e.status_code == 404:
+                reason = f"Pipeline chain: definition '{pipeline_id}' not found (404)"
+                logger.error(f"{reason} → DLQ")
+            else:
+                reason = f"Pipeline chain: failed to fetch '{pipeline_id}' [{e.status_code}]: {e}"
+                logger.error(f"{reason} → DLQ")
+            await self._publish_chain_failure_to_dlq(message, reason)
+            return None
+        except Exception as e:
+            reason = f"Pipeline chain: unexpected error fetching '{pipeline_id}': {e}"
+            logger.error(f"{reason} → DLQ")
+            await self._publish_chain_failure_to_dlq(message, reason)
+            return None
 
     async def _dispatch_next_step(
         self,
-        chain: dict[str, Any],
+        message: TaskiqMessage,
+        pipeline_id: str,
         next_step: dict[str, str],
         next_index: int,
         previous_result: Any,
@@ -219,7 +318,8 @@ class PipelineChainMiddleware(TaskiqMiddleware):
         """Send the next step's task to the appropriate queue.
 
         Args:
-            chain: Full chain definition dict.
+            message: The current task message (used for DLQ context on failure).
+            pipeline_id: Pipeline identifier.
             next_step: The next step definition (task_name, queue).
             next_index: Index of the next step.
             previous_result: Return value from the previous step.
@@ -230,17 +330,18 @@ class PipelineChainMiddleware(TaskiqMiddleware):
         task_func = _TASK_REGISTRY.get(task_name)
 
         if task_func is None:
-            logger.error(
-                f"Pipeline chain: task '{task_name}' not found in registry. "
-                f"Ensure the task module is imported by the worker."
+            reason = (
+                f"Pipeline chain: task '{task_name}' not in registry for "
+                f"'{pipeline_id}' step {next_index}"
             )
+            logger.error(f"{reason} → DLQ")
+            await self._publish_chain_failure_to_dlq(message, reason)
             return
 
-        # Build labels for the next step
-        next_labels = {
-            "pipeline_id": chain.get("pipeline_id", ""),
+        # Build labels for the next step — no pipeline_chain, just ID + index
+        next_labels: dict[str, str] = {
+            "pipeline_id": pipeline_id,
             "step_index": str(next_index),
-            "pipeline_chain": json.dumps(chain),
         }
 
         # Route to the correct queue via routing_key
@@ -253,24 +354,31 @@ class PipelineChainMiddleware(TaskiqMiddleware):
 
         if isinstance(previous_result, PipelineMessage):
             msg = previous_result.model_copy(
-                update={"pipeline_id": chain.get("pipeline_id"), "step_index": next_index}
+                update={"pipeline_id": pipeline_id, "step_index": next_index}
             )
         elif isinstance(previous_result, dict):
             msg = PipelineMessage(**previous_result).model_copy(
-                update={"pipeline_id": chain.get("pipeline_id"), "step_index": next_index}
+                update={"pipeline_id": pipeline_id, "step_index": next_index}
             )
         else:
-            logger.error(
-                f"Pipeline chain: unexpected result type {type(previous_result)} "
-                f"from step {next_index - 1}; cannot dispatch next step"
+            reason = (
+                f"Pipeline chain: unexpected result type {type(previous_result).__name__} "
+                f"at step {next_index - 1} of '{pipeline_id}'"
             )
+            logger.error(f"{reason} → DLQ")
+            await self._publish_chain_failure_to_dlq(message, reason)
             return
 
         try:
             await task_func.kicker().with_labels(**next_labels).kiq(msg.model_dump())
             logger.debug(
-                f"Pipeline '{chain.get('pipeline_id')}' dispatched step {next_index} "
+                f"Pipeline '{pipeline_id}' dispatched step {next_index} "
                 f"('{task_name}') to queue '{queue}'"
             )
         except Exception as e:
-            logger.error(f"Failed to dispatch pipeline step {next_index} ('{task_name}'): {e}")
+            reason = (
+                f"Pipeline chain: dispatch failed for '{pipeline_id}' "
+                f"step {next_index} ('{task_name}'): {e}"
+            )
+            logger.error(f"{reason} → DLQ")
+            await self._publish_chain_failure_to_dlq(message, reason)

@@ -5,7 +5,7 @@ Pure logic tests, no RabbitMQ. Uses InMemoryBroker for task execution tests.
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -148,22 +148,6 @@ class TestPipeline:
         assert "registered_task" in _TASK_REGISTRY
         assert _TASK_REGISTRY["registered_task"] is mock_task
 
-    def test_pipeline_serialization(self):
-        """Pipeline chain serializes to valid JSON."""
-        import json
-
-        mock_task = AsyncMock()
-        mock_task.task_name = "ser_task"
-
-        p = Pipeline("ser_test").step(mock_task, queue="clarinet.gpu")
-        chain_json = p._serialize()
-        chain = json.loads(chain_json)
-
-        assert chain["pipeline_id"] == "ser_test"
-        assert len(chain["steps"]) == 1
-        assert chain["steps"][0]["task_name"] == "ser_task"
-        assert chain["steps"][0]["queue"] == "clarinet.gpu"
-
     def test_pipeline_default_queue(self):
         """Steps default to clarinet.default queue."""
         mock_task = AsyncMock()
@@ -208,6 +192,90 @@ class TestPipeline:
         all_p = get_all_pipelines()
         assert "p1" in all_p
         assert "p2" in all_p
+
+    @pytest.mark.asyncio
+    async def test_pipeline_run_dispatches_first_step(self):
+        """Pipeline.run() dispatches the first step with correct labels."""
+        mock_task = MagicMock()
+        mock_task.task_name = "dispatch_task"
+
+        kicker_mock = MagicMock()
+        mock_task.kicker.return_value = kicker_mock
+        kicker_mock.with_labels.return_value = kicker_mock
+        kicker_mock.kiq = AsyncMock()
+
+        p = Pipeline("dispatch_test").step(mock_task)
+        msg = PipelineMessage(patient_id="PAT001", study_uid="1.2.3")
+
+        await p.run(msg)
+
+        mock_task.kicker.assert_called_once()
+        call_kwargs = kicker_mock.with_labels.call_args[1]
+        assert call_kwargs["pipeline_id"] == "dispatch_test"
+        assert call_kwargs["step_index"] == "0"
+        assert "pipeline_chain" not in call_kwargs
+
+
+# ─── sync_pipeline_definitions ────────────────────────────────────────────────
+
+
+class TestSyncPipelineDefinitions:
+    """Tests for sync_pipeline_definitions with real DB."""
+
+    @pytest.mark.asyncio
+    async def test_sync_persists_definitions(self, test_session):
+        """Syncing writes registered pipelines to the database."""
+        from src.repositories.pipeline_definition_repository import (
+            PipelineDefinitionRepository,
+        )
+
+        mock_task1 = AsyncMock()
+        mock_task1.task_name = "sync_step_a"
+        mock_task2 = AsyncMock()
+        mock_task2.task_name = "sync_step_b"
+
+        Pipeline("sync_test").step(mock_task1).step(mock_task2)
+
+        repo = PipelineDefinitionRepository(test_session)
+
+        # Sync using the repo directly (same logic as sync_pipeline_definitions)
+        for pipeline in _PIPELINE_REGISTRY.values():
+            await repo.upsert(pipeline.name, [s.to_dict() for s in pipeline.steps])
+
+        definition = await repo.get("sync_test")
+        assert definition.name == "sync_test"
+        assert len(definition.steps) == 2
+        assert definition.steps[0]["task_name"] == "sync_step_a"
+        assert definition.steps[1]["task_name"] == "sync_step_b"
+
+    @pytest.mark.asyncio
+    async def test_sync_updates_existing_definition(self, test_session):
+        """Syncing overwrites previously saved pipeline definition."""
+        from src.repositories.pipeline_definition_repository import (
+            PipelineDefinitionRepository,
+        )
+
+        mock_task1 = AsyncMock()
+        mock_task1.task_name = "update_step_1"
+        mock_task2 = AsyncMock()
+        mock_task2.task_name = "update_step_2"
+
+        repo = PipelineDefinitionRepository(test_session)
+
+        # First version: single step
+        p = Pipeline("update_test").step(mock_task1)
+        await repo.upsert(p.name, [s.to_dict() for s in p.steps])
+
+        definition = await repo.get("update_test")
+        assert len(definition.steps) == 1
+
+        # Second version: two steps (simulates code change + re-sync)
+        p.step(mock_task2)
+        await repo.upsert(p.name, [s.to_dict() for s in p.steps])
+
+        await test_session.refresh(definition)
+        assert len(definition.steps) == 2
+        assert definition.steps[1]["task_name"] == "update_step_2"
 
 
 # ─── Worker queue detection ──────────────────────────────────────────────────

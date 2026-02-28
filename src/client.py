@@ -977,6 +977,23 @@ class ClarinetClient:
 
         return await self.find_records(skip=skip, limit=limit, **filters)
 
+    async def get_pipeline_definition(self, name: str) -> list[dict[str, str]]:
+        """Get pipeline definition steps by name.
+
+        Args:
+            name: Pipeline name.
+
+        Returns:
+            Ordered list of step dicts with ``task_name`` and ``queue`` keys.
+
+        Raises:
+            ClarinetAPIError: If the pipeline is not found or the request fails.
+        """
+        response = await self._request("GET", f"/pipelines/{name}/definition")
+        data: dict[str, Any] = response.json()
+        steps: list[dict[str, str]] = data.get("steps", [])
+        return steps
+
     async def create_series_batch(
         self, series_data: list[dict[str, Any] | SeriesCreate]
     ) -> list[Series]:
