@@ -41,7 +41,7 @@ from .chain import (
     sync_pipeline_definitions,
 )
 from .exceptions import PipelineConfigError, PipelineError, PipelineStepError
-from .message import PipelineMessage, PipelineResult
+from .message import PipelineMessage
 from .middleware import DeadLetterMiddleware
 from .worker import get_worker_queues, run_worker
 
@@ -55,7 +55,6 @@ __all__ = [
     "PipelineConfigError",
     "PipelineError",
     "PipelineMessage",
-    "PipelineResult",
     "PipelineStepError",
     "create_broker",
     "extract_routing_key",

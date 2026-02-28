@@ -1,8 +1,7 @@
 """
-Pydantic models for pipeline messages and results.
+Pydantic models for pipeline messages.
 
 PipelineMessage carries context through pipeline steps.
-PipelineResult wraps step outputs with metadata.
 """
 
 from typing import Any
@@ -36,19 +35,3 @@ class PipelineMessage(BaseModel):
     payload: dict[str, Any] = Field(default_factory=dict)
     pipeline_id: str | None = None
     step_index: int = 0
-
-
-class PipelineResult(BaseModel):
-    """Result returned from a pipeline step.
-
-    Wraps the output message with success/error metadata.
-
-    Args:
-        success: Whether the step completed successfully.
-        message: The output message (may be modified by the step).
-        error: Error description if the step failed.
-    """
-
-    success: bool = True
-    message: PipelineMessage
-    error: str | None = None

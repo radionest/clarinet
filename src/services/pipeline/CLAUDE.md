@@ -15,7 +15,7 @@ TaskIQ-based distributed task pipeline for long-running operations (GPU processi
 |------|---------|
 | `__init__.py` | Public API: Pipeline, PipelineMessage, get_pipeline, etc. |
 | `broker.py` | `get_broker()` singleton + `create_broker(queue)` per-queue factory, middlewares, result backend |
-| `message.py` | PipelineMessage, PipelineResult (Pydantic models) |
+| `message.py` | PipelineMessage (Pydantic model) |
 | `chain.py` | Pipeline chain builder DSL (step-by-step, queue routing) |
 | `middleware.py` | PipelineChainMiddleware, PipelineLoggingMiddleware, DeadLetterMiddleware |
 | `worker.py` | get_worker_queues() auto-detect, run_worker() entry point |

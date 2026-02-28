@@ -15,7 +15,7 @@ from src.services.pipeline.chain import (
     _TASK_REGISTRY,
     Pipeline,
 )
-from src.services.pipeline.message import PipelineMessage, PipelineResult
+from src.services.pipeline.message import PipelineMessage
 from src.services.pipeline.worker import get_worker_queues
 
 
@@ -85,24 +85,6 @@ class TestPipelineMessage:
         assert updated.step_index == 1
         assert updated.patient_id == "PAT001"
         assert updated.payload == {"key": "value"}
-
-
-class TestPipelineResult:
-    """Tests for PipelineResult model."""
-
-    def test_success_result(self):
-        """Successful result wraps message."""
-        msg = PipelineMessage(patient_id="PAT001", study_uid="1.2.3")
-        result = PipelineResult(message=msg)
-        assert result.success is True
-        assert result.error is None
-
-    def test_error_result(self):
-        """Error result has success=False and error message."""
-        msg = PipelineMessage(patient_id="PAT001", study_uid="1.2.3")
-        result = PipelineResult(success=False, message=msg, error="Segmentation failed")
-        assert result.success is False
-        assert result.error == "Segmentation failed"
 
 
 # ─── Pipeline chain builder ─────────────────────────────────────────────────
