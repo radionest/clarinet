@@ -216,6 +216,21 @@ class StudyRepository(BaseRepository[Study]):
         result = await self.session.execute(statement)
         return result.scalar() or 0
 
+    async def update_anon_uid(self, study: Study, anon_uid: str) -> Study:
+        """Update study anonymous UID.
+
+        Args:
+            study: Study to update
+            anon_uid: New anonymous UID
+
+        Returns:
+            Updated study
+        """
+        study.anon_uid = anon_uid
+        await self.session.commit()
+        await self.session.refresh(study)
+        return study
+
     async def get_with_series(self, study_uid: str) -> Study:
         """Get study with loaded series.
 

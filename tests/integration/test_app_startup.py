@@ -95,6 +95,12 @@ async def test_startup_pipeline_enabled(
     monkeypatch.setattr(settings, "rabbitmq_port", RABBITMQ_PORT)
     monkeypatch.setattr(settings, "rabbitmq_login", "clarinet_test")
     monkeypatch.setattr(settings, "rabbitmq_password", "clarinet_test")
+    monkeypatch.setattr(settings, "rabbitmq_exchange", "clarinet_startup_test")
+
+    import src.services.pipeline.broker as broker_mod
+
+    monkeypatch.setattr(broker_mod, "DEFAULT_QUEUE", "clarinet_startup_test.default")
+    monkeypatch.setattr(broker_mod, "DLQ_QUEUE", "clarinet_startup_test.dlq")
 
     app = FastAPI(lifespan=lifespan)
 

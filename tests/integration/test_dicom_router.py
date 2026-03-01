@@ -11,19 +11,23 @@ Run:
 
 import asyncio
 from collections.abc import AsyncGenerator
+from pathlib import Path
 
+import pydicom
 import pytest
 import pytest_asyncio
 import requests
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import select
 
 from src.api.app import app
 from src.api.dependencies import get_dicom_client, get_pacs_node
 from src.models.patient import Patient
-from src.models.study import Study
+from src.models.study import Series, Study
 from src.services.dicom import DicomClient, DicomNode, SeriesQuery, StudyQuery
 from src.services.dicom.models import StudyResult
+from src.settings import settings
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -36,6 +40,24 @@ PACS_REST_URL = "http://192.168.122.151:8042"
 CALLING_AET = "CLARINET_TEST"
 
 DICOM_BASE = "/api/dicom"
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _delete_study_from_pacs(study_uid: str) -> None:
+    """Delete study from Orthanc PACS via REST API (best-effort cleanup)."""
+    try:
+        resp = requests.post(f"{PACS_REST_URL}/tools/lookup", data=study_uid, timeout=5)
+        resp.raise_for_status()
+        for item in resp.json():
+            if item.get("Type") == "Study":
+                requests.delete(f"{PACS_REST_URL}{item['Path']}", timeout=5)
+    except requests.RequestException:
+        pass  # Best-effort: don't fail tests if cleanup fails
+
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -465,3 +487,192 @@ async def test_import_series_descriptions_stored(
     for series in data["series"]:
         pacs_desc = pacs_descriptions.get(series["series_uid"])
         assert series["series_description"] == pacs_desc
+
+
+# ===========================================================================
+# D. POST /api/dicom/studies/{study_uid}/anonymize — E2E Anonymization
+# ===========================================================================
+
+
+@pytest_asyncio.fixture
+async def db_patient_with_anon_id(test_session: AsyncSession, pacs_patient_id: str) -> Patient:
+    """Create a Patient record with auto_id set (so anon_id is available)."""
+    patient = Patient(id=pacs_patient_id, name="SHIPILOV TEST", auto_id=42)
+    test_session.add(patient)
+    await test_session.commit()
+    await test_session.refresh(patient)
+    return patient
+
+
+@pytest_asyncio.fixture
+async def imported_study(
+    admin_logged_in: AsyncClient,
+    pacs_study: StudyResult,
+    db_patient_with_anon_id: Patient,
+) -> str:
+    """Import a study via endpoint and return its study_uid."""
+    response = await admin_logged_in.post(
+        f"{DICOM_BASE}/import-study",
+        json={
+            "study_instance_uid": pacs_study.study_instance_uid,
+            "patient_id": db_patient_with_anon_id.id,
+        },
+    )
+    assert response.status_code == 200
+    return pacs_study.study_instance_uid
+
+
+@pytest_asyncio.fixture
+async def anon_output_dir(tmp_path: Path) -> AsyncGenerator[Path]:
+    """Provide a temporary storage dir for anonymized DICOM files.
+
+    Overrides storage_path so that dcm_anon files land under tmp_path.
+    """
+    storage_dir = tmp_path / "storage"
+    storage_dir.mkdir()
+    original = settings.storage_path
+    settings.storage_path = str(storage_dir)
+    yield storage_dir
+    settings.storage_path = original
+
+
+@pytest.mark.dicom
+@pytest.mark.asyncio
+async def test_anonymize_via_endpoint_save_to_disk(
+    admin_logged_in: AsyncClient,
+    test_session: AsyncSession,
+    pacs_available: None,
+    imported_study: str,
+    anon_output_dir: Path,
+    db_patient_with_anon_id: Patient,
+) -> None:
+    """Anonymize study with save_to_disk=True produces valid DICOM files on disk."""
+    response = await admin_logged_in.post(
+        f"{DICOM_BASE}/studies/{imported_study}/anonymize",
+        json={"save_to_disk": True, "send_to_pacs": False},
+    )
+    assert response.status_code == 200
+    data = response.json()
+
+    assert data["instances_anonymized"] > 0
+    assert data["instances_failed"] == 0
+    assert data["anon_study_uid"].startswith("2.25.")
+
+    anon_study_uid = data["anon_study_uid"]
+    anon_patient_id = db_patient_with_anon_id.anon_id
+    assert anon_patient_id is not None
+
+    # Verify files on disk under {storage}/patient/study/series/dcm_anon/
+    patient_dir = anon_output_dir / anon_patient_id
+    assert patient_dir.exists(), f"Expected patient dir at {patient_dir}"
+
+    study_dir = patient_dir / anon_study_uid
+    assert study_dir.exists(), f"Expected study dir at {study_dir}"
+
+    # dcm_anon files are inside series/dcm_anon/ subdirectories
+    dcm_files = list(study_dir.rglob("dcm_anon/*.dcm"))
+    assert len(dcm_files) == data["instances_anonymized"]
+
+    # Verify each file is valid DICOM with anonymized tags
+    for dcm_file in dcm_files:
+        ds = pydicom.dcmread(dcm_file)
+        assert ds.PatientID == anon_patient_id
+        assert ds.StudyInstanceUID != imported_study
+        assert ds.StudyInstanceUID == anon_study_uid
+
+    # Verify DB: study.anon_uid and series.anon_uid are set
+    test_session.expire_all()
+    db_study = await test_session.get(Study, imported_study)
+    assert db_study is not None
+    assert db_study.anon_uid == anon_study_uid
+
+    result = await test_session.execute(select(Series).where(Series.study_uid == imported_study))
+    series_list = result.scalars().all()
+    for s in series_list:
+        assert s.anon_uid is not None, f"Series {s.series_uid} missing anon_uid"
+
+
+@pytest.mark.dicom
+@pytest.mark.asyncio
+async def test_anonymize_via_endpoint_send_to_pacs(
+    admin_logged_in: AsyncClient,
+    pacs_available: None,
+    imported_study: str,
+    db_patient_with_anon_id: Patient,
+) -> None:
+    """Anonymize study with send_to_pacs=True sends data to PACS."""
+    response = await admin_logged_in.post(
+        f"{DICOM_BASE}/studies/{imported_study}/anonymize",
+        json={"save_to_disk": False, "send_to_pacs": True},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    anon_study_uid = data["anon_study_uid"]
+
+    try:
+        assert data["sent_to_pacs"] is True
+        assert data["instances_anonymized"] > 0
+
+        anon_patient_id = db_patient_with_anon_id.anon_id
+
+        # Verify anonymized study is findable on PACS via C-FIND
+        client = DicomClient(calling_aet=CALLING_AET)
+        node = DicomNode(aet=PACS_AET, host=PACS_HOST, port=PACS_PORT)
+        found = await client.find_studies(StudyQuery(study_instance_uid=anon_study_uid), node)
+        assert found, f"Anonymized study {anon_study_uid} not found on PACS"
+        assert found[0].patient_id == anon_patient_id
+    finally:
+        _delete_study_from_pacs(anon_study_uid)
+
+
+@pytest.mark.dicom
+@pytest.mark.asyncio
+async def test_anonymize_idempotent(
+    admin_logged_in: AsyncClient,
+    pacs_available: None,
+    imported_study: str,
+    anon_output_dir: Path,
+    db_patient_with_anon_id: Patient,
+) -> None:
+    """Running anonymization twice on the same study produces identical results."""
+    # First run
+    resp1 = await admin_logged_in.post(
+        f"{DICOM_BASE}/studies/{imported_study}/anonymize",
+        json={"save_to_disk": True, "send_to_pacs": False},
+    )
+    assert resp1.status_code == 200
+    data1 = resp1.json()
+
+    # Second run
+    resp2 = await admin_logged_in.post(
+        f"{DICOM_BASE}/studies/{imported_study}/anonymize",
+        json={"save_to_disk": True, "send_to_pacs": False},
+    )
+    assert resp2.status_code == 200
+    data2 = resp2.json()
+
+    assert data1["anon_study_uid"] == data2["anon_study_uid"]
+    assert data1["instances_anonymized"] == data2["instances_anonymized"]
+    assert data2["instances_failed"] == 0
+
+    # Files on disk should still be valid
+    anon_patient_id = db_patient_with_anon_id.anon_id
+    assert anon_patient_id is not None
+    dcm_files = list(
+        (anon_output_dir / anon_patient_id / data2["anon_study_uid"]).rglob("dcm_anon/*.dcm")
+    )
+    assert len(dcm_files) == data2["instances_anonymized"]
+
+
+@pytest.mark.dicom
+@pytest.mark.asyncio
+async def test_anonymize_study_not_in_db(
+    admin_logged_in: AsyncClient,
+    pacs_available: None,
+) -> None:
+    """Anonymizing a non-existent study returns 404."""
+    response = await admin_logged_in.post(
+        f"{DICOM_BASE}/studies/1.2.3.FAKE/anonymize",
+        json={"save_to_disk": True, "send_to_pacs": False},
+    )
+    assert response.status_code == 404

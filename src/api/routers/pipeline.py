@@ -45,9 +45,6 @@ async def sync_definitions(
     Returns:
         Number of synced definitions.
     """
-    from src.services.pipeline.chain import _PIPELINE_REGISTRY
+    from src.services.pipeline import persist_definitions
 
-    for pipeline in _PIPELINE_REGISTRY.values():
-        await repo.upsert(pipeline.name, [s.to_dict() for s in pipeline.steps])
-
-    return {"synced": len(_PIPELINE_REGISTRY)}
+    return {"synced": await persist_definitions(repo)}

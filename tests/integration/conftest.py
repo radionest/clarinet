@@ -111,11 +111,15 @@ def pipeline_broker_factory(
             "default", clarinet_client=client, with_middlewares=True
         )
     """
+    from aio_pika import ExchangeType
     from taskiq.middlewares import SmartRetryMiddleware
     from taskiq_aio_pika import AioPikaBroker
+    from taskiq_aio_pika.exchange import Exchange
+    from taskiq_aio_pika.queue import Queue as RmqQueue
 
     from src.services.pipeline.middleware import (
         DeadLetterMiddleware,
+        DLQPublisher,
         PipelineChainMiddleware,
         PipelineLoggingMiddleware,
     )
@@ -132,15 +136,26 @@ def pipeline_broker_factory(
 
         broker = AioPikaBroker(
             url=rabbitmq_url,
-            exchange_name=test_exchange,
-            exchange_type="direct",
-            queue_name=queue_name,
-            routing_key=routing_key,
-            declare_exchange=True,
-            declare_queues=True,
+            exchange=Exchange(
+                name=test_exchange,
+                type=ExchangeType.DIRECT,
+                declare=True,
+            ),
+            task_queues=[
+                RmqQueue(
+                    name=queue_name,
+                    routing_key=routing_key,
+                    declare=True,
+                ),
+            ],
+            delay_queue=RmqQueue(
+                name=f"{queue_name}.delay",
+                declare=True,
+            ),
         )
 
         if with_middlewares:
+            dlq = DLQPublisher(amqp_url=rabbitmq_url)
             middlewares = [
                 SmartRetryMiddleware(
                     default_retry_count=3,
@@ -150,12 +165,10 @@ def pipeline_broker_factory(
                     use_delay_exponent=False,
                 ),
                 PipelineLoggingMiddleware(),
-                DeadLetterMiddleware(amqp_url=rabbitmq_url),
+                DeadLetterMiddleware(dlq),
             ]
             if clarinet_client is not None:
-                middlewares.append(
-                    PipelineChainMiddleware(client=clarinet_client, amqp_url=rabbitmq_url)
-                )
+                middlewares.append(PipelineChainMiddleware(dlq, client=clarinet_client))
             broker = broker.with_middlewares(*middlewares)
 
         if as_worker:

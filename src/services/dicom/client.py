@@ -2,9 +2,14 @@
 
 import asyncio
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pydicom import Dataset
 
 from src.services.dicom.models import (
     AssociationConfig,
+    BatchStoreResult,
     DicomNode,
     ImageQuery,
     ImageResult,
@@ -182,6 +187,65 @@ class DicomClient:
         logger.info(f"Found {len(results)} images")
         return results
 
+    async def _retrieve(
+        self,
+        study_uid: str,
+        peer: DicomNode,
+        level: QueryRetrieveLevel,
+        mode: StorageMode,
+        series_uid: str | None = None,
+        output_dir: Path | None = None,
+        patient_id: str | None = None,
+        timeout: float = 300.0,  # noqa: ASYNC109 — DICOM association timeout, not asyncio
+    ) -> RetrieveResult:
+        """Core retrieval logic shared by all get_* methods.
+
+        Args:
+            study_uid: Study instance UID
+            peer: DICOM peer node
+            level: Query/retrieve level (STUDY or SERIES)
+            mode: Storage mode (DISK or MEMORY)
+            series_uid: Series instance UID (required for SERIES level)
+            output_dir: Directory to save DICOM files (required for DISK mode)
+            patient_id: Optional patient ID for query
+            timeout: Operation timeout
+
+        Returns:
+            Retrieve result with statistics
+        """
+        label = "series" if level == QueryRetrieveLevel.SERIES else "study"
+        uid = series_uid or study_uid
+        dest = str(output_dir) if output_dir else "memory"
+        logger.info(f"Retrieving {label} {uid} to {dest}")
+
+        config = self._create_association_config(
+            called_aet=peer.aet,
+            peer_host=peer.host,
+            peer_port=peer.port,
+            timeout=timeout,
+        )
+
+        request = RetrieveRequest(
+            level=level,
+            study_instance_uid=study_uid,
+            series_instance_uid=series_uid,
+            patient_id=patient_id,
+        )
+
+        storage = StorageConfig(mode=mode, output_dir=output_dir)
+
+        result = await asyncio.to_thread(
+            self._operations.get_study,
+            config,
+            request,
+            storage,
+        )
+
+        logger.info(
+            f"Retrieved {label}: {result.num_completed} completed, {result.num_failed} failed"
+        )
+        return result
+
     async def get_study(
         self,
         study_uid: str,
@@ -205,37 +269,15 @@ class DicomClient:
         Raises:
             CONFLICT: If association fails
         """
-        logger.info(f"Retrieving study {study_uid} to {output_dir}")
-
-        config = self._create_association_config(
-            called_aet=peer.aet,
-            peer_host=peer.host,
-            peer_port=peer.port,
+        return await self._retrieve(
+            study_uid,
+            peer,
+            QueryRetrieveLevel.STUDY,
+            StorageMode.DISK,
+            output_dir=output_dir,
+            patient_id=patient_id,
             timeout=timeout,
         )
-
-        request = RetrieveRequest(
-            level=QueryRetrieveLevel.STUDY,
-            study_instance_uid=study_uid,
-            patient_id=patient_id,
-        )
-
-        storage = StorageConfig(
-            mode=StorageMode.DISK,
-            output_dir=output_dir,
-        )
-
-        result = await asyncio.to_thread(
-            self._operations.get_study,
-            config,
-            request,
-            storage,
-        )
-
-        logger.info(
-            f"Retrieved study: {result.num_completed} completed, {result.num_failed} failed"
-        )
-        return result
 
     async def get_series(
         self,
@@ -262,38 +304,16 @@ class DicomClient:
         Raises:
             CONFLICT: If association fails
         """
-        logger.info(f"Retrieving series {series_uid} to {output_dir}")
-
-        config = self._create_association_config(
-            called_aet=peer.aet,
-            peer_host=peer.host,
-            peer_port=peer.port,
+        return await self._retrieve(
+            study_uid,
+            peer,
+            QueryRetrieveLevel.SERIES,
+            StorageMode.DISK,
+            series_uid=series_uid,
+            output_dir=output_dir,
+            patient_id=patient_id,
             timeout=timeout,
         )
-
-        request = RetrieveRequest(
-            level=QueryRetrieveLevel.SERIES,
-            study_instance_uid=study_uid,
-            series_instance_uid=series_uid,
-            patient_id=patient_id,
-        )
-
-        storage = StorageConfig(
-            mode=StorageMode.DISK,
-            output_dir=output_dir,
-        )
-
-        result = await asyncio.to_thread(
-            self._operations.get_study,
-            config,
-            request,
-            storage,
-        )
-
-        logger.info(
-            f"Retrieved series: {result.num_completed} completed, {result.num_failed} failed"
-        )
-        return result
 
     async def get_study_to_memory(
         self,
@@ -316,35 +336,14 @@ class DicomClient:
         Raises:
             CONFLICT: If association fails
         """
-        logger.info(f"Retrieving study {study_uid} to memory")
-
-        config = self._create_association_config(
-            called_aet=peer.aet,
-            peer_host=peer.host,
-            peer_port=peer.port,
+        return await self._retrieve(
+            study_uid,
+            peer,
+            QueryRetrieveLevel.STUDY,
+            StorageMode.MEMORY,
+            patient_id=patient_id,
             timeout=timeout,
         )
-
-        request = RetrieveRequest(
-            level=QueryRetrieveLevel.STUDY,
-            study_instance_uid=study_uid,
-            patient_id=patient_id,
-        )
-
-        storage = StorageConfig(mode=StorageMode.MEMORY)
-
-        result = await asyncio.to_thread(
-            self._operations.get_study,
-            config,
-            request,
-            storage,
-        )
-
-        logger.info(
-            f"Retrieved study to memory: {result.num_completed} instances, "
-            f"{result.num_failed} failed"
-        )
-        return result
 
     async def get_series_to_memory(
         self,
@@ -369,8 +368,35 @@ class DicomClient:
         Raises:
             CONFLICT: If association fails
         """
-        logger.info(f"Retrieving series {series_uid} to memory")
+        return await self._retrieve(
+            study_uid,
+            peer,
+            QueryRetrieveLevel.SERIES,
+            StorageMode.MEMORY,
+            series_uid=series_uid,
+            patient_id=patient_id,
+            timeout=timeout,
+        )
 
+    async def store_instance(
+        self,
+        dataset: Dataset,
+        peer: DicomNode,
+        timeout: float = 30.0,  # noqa: ASYNC109 — DICOM association timeout, not asyncio
+    ) -> bool:
+        """Send a single DICOM instance to a peer via C-STORE.
+
+        Args:
+            dataset: pydicom Dataset to send
+            peer: DICOM peer node
+            timeout: Operation timeout
+
+        Returns:
+            True if C-STORE succeeded
+
+        Raises:
+            CONFLICT: If association fails
+        """
         config = self._create_association_config(
             called_aet=peer.aet,
             peer_host=peer.host,
@@ -378,27 +404,43 @@ class DicomClient:
             timeout=timeout,
         )
 
-        request = RetrieveRequest(
-            level=QueryRetrieveLevel.SERIES,
-            study_instance_uid=study_uid,
-            series_instance_uid=series_uid,
-            patient_id=patient_id,
-        )
-
-        storage = StorageConfig(mode=StorageMode.MEMORY)
-
-        result = await asyncio.to_thread(
-            self._operations.get_study,
+        return await asyncio.to_thread(
+            self._operations.store_instance,
             config,
-            request,
-            storage,
+            dataset,
         )
 
-        logger.info(
-            f"Retrieved series to memory: {result.num_completed} instances, "
-            f"{result.num_failed} failed"
+    async def store_instances_batch(
+        self,
+        datasets: list[Dataset],
+        peer: DicomNode,
+        timeout: float = 300.0,  # noqa: ASYNC109 — DICOM association timeout, not asyncio
+    ) -> BatchStoreResult:
+        """Send multiple DICOM instances via a single C-STORE association.
+
+        Args:
+            datasets: List of pydicom Datasets to send
+            peer: DICOM peer node
+            timeout: Operation timeout
+
+        Returns:
+            BatchStoreResult with counts and failed SOP UIDs
+
+        Raises:
+            CONFLICT: If association fails
+        """
+        config = self._create_association_config(
+            called_aet=peer.aet,
+            peer_host=peer.host,
+            peer_port=peer.port,
+            timeout=timeout,
         )
-        return result
+
+        return await asyncio.to_thread(
+            self._operations.store_instances_batch,
+            config,
+            datasets,
+        )
 
     async def move_study(
         self,

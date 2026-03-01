@@ -32,6 +32,7 @@ class DicomWebCache:
         max_size_gb: float = 10.0,
         memory_ttl_minutes: int = 30,
         memory_max_entries: int = 50,
+        storage_path: Path | None = None,
     ):
         """Initialize the cache.
 
@@ -41,8 +42,10 @@ class DicomWebCache:
             max_size_gb: Maximum disk cache size in gigabytes
             memory_ttl_minutes: Time-to-live for in-memory cache entries in minutes
             memory_max_entries: Maximum number of series in the in-memory TTLCache
+            storage_path: Base storage path for resolving dcm_anon folders
         """
         self._base_dir = base_dir
+        self._storage_path = storage_path
         self._ttl_seconds = ttl_hours * 3600
         self._max_size_bytes = int(max_size_gb * 1024**3)
         self._locks: dict[str, asyncio.Lock] = {}
@@ -50,6 +53,7 @@ class DicomWebCache:
             maxsize=memory_max_entries, ttl=memory_ttl_minutes * 60
         )
         self._disk_write_tasks: set[asyncio.Task[None]] = set()
+        self._dcm_anon_path_cache: dict[str, Path | None] = {}
 
     def _series_dir(self, study_uid: str, series_uid: str) -> Path:
         return self._base_dir / study_uid / series_uid
@@ -78,6 +82,69 @@ class DicomWebCache:
         key = self._cache_key(study_uid, series_uid)
         result: MemoryCachedSeries | None = self._memory_cache.get(key)
         return result
+
+    def _find_dcm_anon_dir(self, study_uid: str, series_uid: str) -> Path | None:
+        """Find dcm_anon directory for a given study/series UID.
+
+        Searches {storage_path}/*/study_uid/series_uid/dcm_anon/ across patient dirs.
+        Results are cached (both hits and misses).
+
+        Args:
+            study_uid: Study Instance UID
+            series_uid: Series Instance UID
+
+        Returns:
+            Path to dcm_anon directory if found, None otherwise
+        """
+        if self._storage_path is None:
+            return None
+
+        cache_key = self._cache_key(study_uid, series_uid)
+        if cache_key in self._dcm_anon_path_cache:
+            return self._dcm_anon_path_cache[cache_key]
+
+        # Iterate patient directories looking for matching study/series/dcm_anon
+        for patient_dir in self._storage_path.iterdir():
+            if not patient_dir.is_dir():
+                continue
+            dcm_anon_dir = patient_dir / study_uid / series_uid / "dcm_anon"
+            if dcm_anon_dir.is_dir():
+                self._dcm_anon_path_cache[cache_key] = dcm_anon_dir
+                return dcm_anon_dir
+
+        self._dcm_anon_path_cache[cache_key] = None
+        return None
+
+    def _load_from_dcm_anon(self, study_uid: str, series_uid: str) -> dict[str, Dataset] | None:
+        """Load series from dcm_anon directory (synchronous, call via to_thread).
+
+        Unlike _load_from_disk, this has no TTL check — dcm_anon files don't expire.
+
+        Args:
+            study_uid: Study Instance UID
+            series_uid: Series Instance UID
+
+        Returns:
+            Dict of datasets keyed by SOPInstanceUID, or None if not found
+        """
+        dcm_anon_dir = self._find_dcm_anon_dir(study_uid, series_uid)
+        if dcm_anon_dir is None:
+            return None
+
+        dcm_files = sorted(dcm_anon_dir.glob("*.dcm"))
+        if not dcm_files:
+            return None
+
+        instances: dict[str, Dataset] = {}
+        for path in dcm_files:
+            try:
+                ds = pydicom.dcmread(path)
+                instances[str(ds.SOPInstanceUID)] = ds
+            except Exception as e:
+                logger.warning(f"Skipping unreadable dcm_anon file {path}: {e}")
+                continue
+
+        return instances if instances else None
 
     def _put_to_memory(
         self,
@@ -196,10 +263,11 @@ class DicomWebCache:
     ) -> MemoryCachedSeries:
         """Ensure a series is in memory cache, loading from disk or PACS as needed.
 
-        Three-level lookup:
+        Four-level lookup:
         1. Memory hit -> return immediately
-        2. Disk hit -> load into memory, return
-        3. Cache miss -> C-GET to memory -> return -> background disk write
+        2. dcm_anon hit -> load into memory, return (no TTL — populated by anonymization)
+        3. Disk cache hit -> load into memory, return
+        4. Cache miss -> C-GET to memory -> return -> background disk write
 
         Args:
             study_uid: Study Instance UID
@@ -228,7 +296,20 @@ class DicomWebCache:
                 logger.debug(f"Memory cache hit for series {series_uid} (after lock)")
                 return cached
 
-            # 2. Disk hit
+            # 2. dcm_anon hit (anonymized files — no TTL expiration)
+            anon_instances = await asyncio.to_thread(
+                self._load_from_dcm_anon, study_uid, series_uid
+            )
+            if anon_instances is not None:
+                logger.info(
+                    f"dcm_anon hit for series {series_uid} — "
+                    f"loading {len(anon_instances)} instances to memory"
+                )
+                return self._put_to_memory(
+                    study_uid, series_uid, anon_instances, disk_persisted=True
+                )
+
+            # 3. Disk cache hit
             disk_instances = await asyncio.to_thread(self._load_from_disk, study_uid, series_uid)
             if disk_instances is not None:
                 logger.info(
@@ -272,7 +353,9 @@ class DicomWebCache:
     def read_instance_from_disk(
         self, study_uid: str, series_uid: str, instance_uid: str
     ) -> Dataset | None:
-        """Read a single DICOM instance from disk cache.
+        """Read a single DICOM instance from dcm_anon or disk cache.
+
+        Checks dcm_anon first, then falls back to dicomweb_cache.
 
         Args:
             study_uid: Study Instance UID
@@ -282,6 +365,17 @@ class DicomWebCache:
         Returns:
             pydicom Dataset if found and readable, None otherwise
         """
+        # Check dcm_anon first
+        dcm_anon_dir = self._find_dcm_anon_dir(study_uid, series_uid)
+        if dcm_anon_dir is not None:
+            anon_path = dcm_anon_dir / f"{instance_uid}.dcm"
+            if anon_path.exists():
+                try:
+                    return pydicom.dcmread(anon_path)
+                except Exception as e:
+                    logger.warning(f"Failed to read dcm_anon instance {anon_path}: {e}")
+
+        # Fall back to dicomweb_cache
         dcm_path = self._series_dir(study_uid, series_uid) / f"{instance_uid}.dcm"
         if not dcm_path.exists():
             return None
@@ -398,4 +492,5 @@ class DicomWebCache:
         self._disk_write_tasks.clear()
         self._memory_cache.clear()
         self._locks.clear()
+        self._dcm_anon_path_cache.clear()
         logger.info("DICOMweb cache shutdown complete")

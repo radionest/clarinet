@@ -36,6 +36,7 @@ def setup_exception_handlers(app: FastAPI) -> None:
         EntityAlreadyExistsError,
         EntityNotFoundError,
         InvalidCredentialsError,
+        PipelineError,
         SlicerConnectionError,
         SlicerError,
         ValidationError,
@@ -127,6 +128,15 @@ def setup_exception_handlers(app: FastAPI) -> None:
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             content={"detail": str(exc) if str(exc) else "Slicer operation failed"},
+        )
+
+    @app.exception_handler(PipelineError)
+    async def handle_pipeline_error(_: Request, exc: PipelineError) -> JSONResponse:
+        """Convert PipelineError to 500 response."""
+        logger.opt(exception=exc).error("Pipeline error")
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"detail": str(exc) if str(exc) else "Pipeline operation failed"},
         )
 
     @app.exception_handler(AlreadyAnonymizedError)

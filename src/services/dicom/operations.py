@@ -1,5 +1,7 @@
 """Synchronous DICOM operations using pynetdicom."""
 
+from collections.abc import Generator
+from contextlib import contextmanager
 from typing import Any
 
 from pydicom import Dataset
@@ -20,6 +22,7 @@ from src.exceptions.http import CONFLICT
 from src.services.dicom.handlers import create_store_handler
 from src.services.dicom.models import (
     AssociationConfig,
+    BatchStoreResult,
     ImageQuery,
     ImageResult,
     QueryRetrieveLevel,
@@ -113,6 +116,40 @@ class DicomOperations:
                 roles.append(build_role(cx.abstract_syntax, scp_role=True))
 
         return ae, roles
+
+    @contextmanager
+    def _association(
+        self,
+        ae: AE,
+        config: AssociationConfig,
+        **kwargs: Any,
+    ) -> Generator[Any]:
+        """Establish a DICOM association and guarantee release.
+
+        Args:
+            ae: Application Entity to associate with
+            config: Association configuration (peer host, port, AET)
+            **kwargs: Extra arguments for ae.associate() (evt_handlers, ext_neg)
+
+        Yields:
+            Established association
+
+        Raises:
+            CONFLICT: If association cannot be established
+        """
+        assoc = ae.associate(
+            config.peer_host,
+            config.peer_port,
+            ae_title=config.called_aet,
+            **kwargs,
+        )
+        if not assoc.is_established:
+            logger.error(f"Failed to establish association with {config.called_aet}")
+            raise CONFLICT.with_context("Failed to establish DICOM association")
+        try:
+            yield assoc
+        finally:
+            assoc.release()
 
     def _build_study_query_dataset(self, query: StudyQuery) -> Dataset:
         """Build DICOM dataset for study-level C-FIND.
@@ -228,17 +265,7 @@ class DicomOperations:
         ae = self._create_ae()
         ds = self._build_study_query_dataset(query)
 
-        assoc = ae.associate(
-            config.peer_host,
-            config.peer_port,
-            ae_title=config.called_aet,
-        )
-
-        if not assoc.is_established:
-            logger.error(f"Failed to establish association with {config.called_aet}")
-            raise CONFLICT.with_context("Failed to establish DICOM association")
-
-        try:
+        with self._association(ae, config) as assoc:
             results: list[StudyResult] = []
             responses = assoc.send_c_find(ds, PatientRootQueryRetrieveInformationModelFind)
 
@@ -259,9 +286,6 @@ class DicomOperations:
 
             return results
 
-        finally:
-            assoc.release()
-
     def find_series(self, config: AssociationConfig, query: SeriesQuery) -> list[SeriesResult]:
         """Execute C-FIND for series.
 
@@ -278,17 +302,7 @@ class DicomOperations:
         ae = self._create_ae()
         ds = self._build_series_query_dataset(query)
 
-        assoc = ae.associate(
-            config.peer_host,
-            config.peer_port,
-            ae_title=config.called_aet,
-        )
-
-        if not assoc.is_established:
-            logger.error(f"Failed to establish association with {config.called_aet}")
-            raise CONFLICT.with_context("Failed to establish DICOM association")
-
-        try:
+        with self._association(ae, config) as assoc:
             results: list[SeriesResult] = []
             responses = assoc.send_c_find(ds, PatientRootQueryRetrieveInformationModelFind)
 
@@ -306,9 +320,6 @@ class DicomOperations:
 
             return results
 
-        finally:
-            assoc.release()
-
     def find_images(self, config: AssociationConfig, query: ImageQuery) -> list[ImageResult]:
         """Execute C-FIND for images.
 
@@ -325,17 +336,7 @@ class DicomOperations:
         ae = self._create_ae()
         ds = self._build_image_query_dataset(query)
 
-        assoc = ae.associate(
-            config.peer_host,
-            config.peer_port,
-            ae_title=config.called_aet,
-        )
-
-        if not assoc.is_established:
-            logger.error(f"Failed to establish association with {config.called_aet}")
-            raise CONFLICT.with_context("Failed to establish DICOM association")
-
-        try:
+        with self._association(ae, config) as assoc:
             results: list[ImageResult] = []
             responses = assoc.send_c_find(ds, PatientRootQueryRetrieveInformationModelFind)
 
@@ -352,9 +353,6 @@ class DicomOperations:
                         logger.info(f"C-FIND completed successfully, found {len(results)} images")
 
             return results
-
-        finally:
-            assoc.release()
 
     def get_study(
         self, config: AssociationConfig, request: RetrieveRequest, storage: StorageConfig
@@ -384,19 +382,12 @@ class DicomOperations:
             destination_port=storage.destination_port,
         )
 
-        assoc = ae.associate(
-            config.peer_host,
-            config.peer_port,
-            ae_title=config.called_aet,
-            evt_handlers=handlers,  # type: ignore[arg-type]
-            ext_neg=roles,  # type: ignore[arg-type]
-        )
-
-        if not assoc.is_established:
-            logger.error(f"Failed to establish association with {config.called_aet}")
-            raise CONFLICT.with_context("Failed to establish DICOM association")
-
-        try:
+        with self._association(
+            ae,
+            config,
+            evt_handlers=handlers,
+            ext_neg=roles,
+        ) as assoc:
             result = RetrieveResult(status="pending")
             responses = assoc.send_c_get(ds, PatientRootQueryRetrieveInformationModelGet)
 
@@ -433,9 +424,6 @@ class DicomOperations:
 
             return result
 
-        finally:
-            assoc.release()
-
     def move_study(
         self, config: AssociationConfig, request: RetrieveRequest, destination_aet: str
     ) -> RetrieveResult:
@@ -455,17 +443,7 @@ class DicomOperations:
         ae = self._create_ae()
         ds = self._build_retrieve_dataset(request)
 
-        assoc = ae.associate(
-            config.peer_host,
-            config.peer_port,
-            ae_title=config.called_aet,
-        )
-
-        if not assoc.is_established:
-            logger.error(f"Failed to establish association with {config.called_aet}")
-            raise CONFLICT.with_context("Failed to establish DICOM association")
-
-        try:
+        with self._association(ae, config) as assoc:
             result = RetrieveResult(status="pending")
             responses = assoc.send_c_move(
                 ds, destination_aet, PatientRootQueryRetrieveInformationModelMove
@@ -500,8 +478,83 @@ class DicomOperations:
 
             return result
 
-        finally:
-            assoc.release()
+    def store_instance(self, config: AssociationConfig, dataset: Dataset) -> bool:
+        """Send a single DICOM instance to a peer via C-STORE.
+
+        Args:
+            config: Association configuration
+            dataset: DICOM dataset to send
+
+        Returns:
+            True if C-STORE succeeded
+
+        Raises:
+            CONFLICT: If association fails
+        """
+        ae = AE(ae_title=self.calling_aet)
+        ae.maximum_pdu_size = self.max_pdu
+
+        # Add storage contexts for the dataset's SOP class
+        for cx in StoragePresentationContexts:
+            if cx.abstract_syntax is not None:
+                ae.add_requested_context(cx.abstract_syntax)
+
+        with self._association(ae, config) as assoc:
+            status = assoc.send_c_store(dataset)
+            if status and status.Status == 0x0000:
+                logger.debug("C-STORE completed successfully")
+                return True
+            status_code = status.Status if status else "unknown"
+            logger.warning(f"C-STORE failed with status: {status_code}")
+            return False
+
+    def store_instances_batch(
+        self, config: AssociationConfig, datasets: list[Dataset]
+    ) -> BatchStoreResult:
+        """Send multiple DICOM instances via a single C-STORE association.
+
+        Args:
+            config: Association configuration
+            datasets: DICOM datasets to send
+
+        Returns:
+            BatchStoreResult with counts and failed SOP UIDs
+
+        Raises:
+            CONFLICT: If association fails
+        """
+        if not datasets:
+            return BatchStoreResult()
+
+        ae = AE(ae_title=self.calling_aet)
+        ae.maximum_pdu_size = self.max_pdu
+
+        for cx in StoragePresentationContexts:
+            if cx.abstract_syntax is not None:
+                ae.add_requested_context(cx.abstract_syntax)
+
+        result = BatchStoreResult()
+        with self._association(ae, config) as assoc:
+            for ds in datasets:
+                sop_uid = str(getattr(ds, "SOPInstanceUID", "unknown"))
+                try:
+                    status = assoc.send_c_store(ds)
+                    if status and status.Status == 0x0000:
+                        result.total_sent += 1
+                    else:
+                        status_code = status.Status if status else "unknown"
+                        logger.warning(f"C-STORE failed for {sop_uid}: status {status_code}")
+                        result.total_failed += 1
+                        result.failed_sop_uids.append(sop_uid)
+                except Exception:
+                    logger.exception(f"C-STORE exception for {sop_uid}")
+                    result.total_failed += 1
+                    result.failed_sop_uids.append(sop_uid)
+
+        logger.info(
+            f"Batch C-STORE completed: {result.total_sent} sent, {result.total_failed} failed"
+        )
+        return result
 
     def _parse_study_result(self, ds: Dataset) -> StudyResult:
         """Parse DICOM dataset to StudyResult.

@@ -2,9 +2,11 @@
 
 import asyncio
 
-from fastapi import APIRouter, BackgroundTasks, Request
+from fastapi import APIRouter, BackgroundTasks, Query, Request
+from fastapi.responses import JSONResponse
 
 from src.api.dependencies import (
+    AnonymizationServiceDep,
     DicomClientDep,
     PacsNodeDep,
     StudyRepositoryDep,
@@ -13,15 +15,23 @@ from src.api.dependencies import (
 )
 from src.models.study import StudyRead
 from src.services.dicom.models import (
+    AnonymizationResult,
+    AnonymizeStudyRequest,
+    BackgroundAnonymizationStatus,
     PacsImportRequest,
     PacsStudyWithSeries,
     SeriesQuery,
     StudyQuery,
 )
+from src.services.dicom.series_filter import SeriesFilter, SeriesFilterCriteria
+from src.settings import settings
 from src.utils.dicom import parse_dicom_date
 from src.utils.logger import logger
 
 router = APIRouter()
+
+# Strong references for fire-and-forget background tasks (prevents GC before completion)
+_background_tasks: set[asyncio.Task] = set()  # type: ignore[type-arg]
 
 
 @router.get("/patient/{patient_id}/studies", response_model=list[PacsStudyWithSeries])
@@ -133,6 +143,19 @@ async def import_study_from_pacs(
         peer=pacs,
     )
 
+    # Optionally filter series at import time
+    if settings.series_filter_on_import:
+        series_filter = SeriesFilter()
+        filter_result = series_filter.filter(
+            pacs_series,
+            to_criteria=SeriesFilterCriteria.from_series_result,
+        )
+        for fi in filter_result.excluded:
+            logger.info(
+                f"Import filter: skipping series {fi.item.series_instance_uid} ({fi.reason})"
+            )
+        pacs_series = filter_result.included
+
     # Create each series in local DB
     engine = getattr(http_request.app.state, "recordflow_engine", None)
     for idx, s in enumerate(pacs_series):
@@ -141,6 +164,8 @@ async def import_study_from_pacs(
                 "series_uid": s.series_instance_uid,
                 "series_description": s.series_description,
                 "series_number": s.series_number or (idx + 1),
+                "modality": s.modality,
+                "instance_count": s.number_of_series_related_instances,
                 "study_uid": request.study_instance_uid,
             }
         )
@@ -156,3 +181,73 @@ async def import_study_from_pacs(
     # Return full study with relations
     logger.info(f"Imported study {request.study_instance_uid} with {len(pacs_series)} series")
     return await service.get_study(request.study_instance_uid)
+
+
+@router.post(
+    "/studies/{study_uid}/anonymize",
+    response_model=AnonymizationResult,
+    responses={202: {"model": BackgroundAnonymizationStatus}},
+)
+async def anonymize_study(
+    study_uid: str,
+    _user: SuperUserDep,
+    service: AnonymizationServiceDep,
+    request: AnonymizeStudyRequest | None = None,
+    background: bool = Query(False, description="Run anonymization in the background"),
+) -> AnonymizationResult | JSONResponse:
+    """Anonymize a study: fetch from PACS, anonymize tags, distribute.
+
+    Args:
+        study_uid: Study Instance UID to anonymize
+        _user: Authenticated superuser
+        service: Anonymization service
+        request: Optional overrides for save_to_disk/send_to_pacs
+        background: If true, run in background and return immediately
+
+    Returns:
+        Anonymization result or status dict if running in background
+    """
+    save_to_disk = request.save_to_disk if request else None
+    send_to_pacs = request.send_to_pacs if request else None
+
+    if background:
+        result = await _dispatch_background_anonymization(study_uid, save_to_disk, send_to_pacs)
+        return JSONResponse(status_code=202, content=result.model_dump())
+
+    return await service.anonymize_study(
+        study_uid,
+        save_to_disk=save_to_disk,
+        send_to_pacs=send_to_pacs,
+    )
+
+
+async def _dispatch_background_anonymization(
+    study_uid: str,
+    save_to_disk: bool | None,
+    send_to_pacs: bool | None,
+) -> BackgroundAnonymizationStatus:
+    """Dispatch anonymization to pipeline or in-process background task.
+
+    Args:
+        study_uid: Study Instance UID to anonymize.
+        save_to_disk: Override for save-to-disk setting.
+        send_to_pacs: Override for send-to-PACS setting.
+
+    Returns:
+        Background anonymization status.
+    """
+    if settings.pipeline_enabled:
+        from src.services.dicom.tasks import get_anonymize_study_task
+
+        task = get_anonymize_study_task()
+        await task.kiq(study_uid, save_to_disk=save_to_disk, send_to_pacs=send_to_pacs)
+    else:
+        from src.services.dicom.tasks import anonymize_study_background
+
+        bg_task = asyncio.create_task(
+            anonymize_study_background(study_uid, save_to_disk, send_to_pacs)
+        )
+        _background_tasks.add(bg_task)
+        bg_task.add_done_callback(_background_tasks.discard)
+
+    return BackgroundAnonymizationStatus(study_uid=study_uid)

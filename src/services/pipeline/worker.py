@@ -66,6 +66,15 @@ def _load_task_modules() -> None:
             except Exception as e:
                 logger.error(f"Failed to load tasks from {flow_file}: {e}")
 
+    if settings.have_dicom:
+        try:
+            from src.services.dicom.tasks import get_anonymize_study_task
+
+            get_anonymize_study_task()
+            logger.info("Loaded built-in DICOM pipeline tasks")
+        except ImportError as e:
+            logger.warning(f"Could not load DICOM tasks: {e}")
+
 
 async def run_worker(
     queues: list[str] | None = None,

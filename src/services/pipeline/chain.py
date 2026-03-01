@@ -23,6 +23,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from src.exceptions.domain import PipelineConfigError
 from src.utils.logger import logger
 
 from .broker import DEFAULT_QUEUE, extract_routing_key
@@ -30,6 +31,8 @@ from .message import PipelineMessage
 
 if TYPE_CHECKING:
     from taskiq import AsyncTaskiqDecoratedTask
+
+    from src.repositories.pipeline_definition_repository import PipelineDefinitionRepository
 
 # Global registry: task_name -> decorated task function
 _TASK_REGISTRY: dict[str, AsyncTaskiqDecoratedTask[..., Any]] = {}
@@ -122,10 +125,10 @@ class Pipeline:
             The TaskIQ task handle for the first step.
 
         Raises:
-            ValueError: If the pipeline has no steps.
+            PipelineConfigError: If the pipeline has no steps.
         """
         if not self.steps:
-            raise ValueError(f"Pipeline '{self.name}' has no steps")
+            raise PipelineConfigError(f"Pipeline '{self.name}' has no steps")
 
         first_step = self.steps[0]
         routing_key = extract_routing_key(first_step.queue)
@@ -185,10 +188,25 @@ def get_all_pipelines() -> dict[str, Pipeline]:
     return dict(_PIPELINE_REGISTRY)
 
 
+async def persist_definitions(repo: PipelineDefinitionRepository) -> int:
+    """Persist all registered pipeline definitions to the database.
+
+    Args:
+        repo: Pipeline definition repository instance.
+
+    Returns:
+        Number of persisted definitions.
+    """
+    for pipeline in _PIPELINE_REGISTRY.values():
+        await repo.upsert(pipeline.name, [s.to_dict() for s in pipeline.steps])
+    return len(_PIPELINE_REGISTRY)
+
+
 async def sync_pipeline_definitions() -> int:
     """Sync all registered pipeline definitions to the database.
 
-    Called at application startup and via the sync API endpoint.
+    Bootstrap variant — creates its own session via db_manager.
+    Called at application startup.
 
     Returns:
         Number of synced definitions.
@@ -196,11 +214,5 @@ async def sync_pipeline_definitions() -> int:
     from src.repositories.pipeline_definition_repository import PipelineDefinitionRepository
     from src.utils.db_manager import db_manager
 
-    ###    Uses db_manager directly (same bootstrap pattern as ``add_default_user_roles`` in ``src/utils/bootstrap.py``).
-
     async with db_manager.get_async_session_context() as session:
-        repo = PipelineDefinitionRepository(session)
-        for pipeline in _PIPELINE_REGISTRY.values():
-            await repo.upsert(pipeline.name, [s.to_dict() for s in pipeline.steps])
-
-    return len(_PIPELINE_REGISTRY)
+        return await persist_definitions(PipelineDefinitionRepository(session))

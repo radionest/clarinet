@@ -9,11 +9,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from src.exceptions.domain import PipelineConfigError
 from src.services.pipeline.broker import DEFAULT_QUEUE, DICOM_QUEUE, GPU_QUEUE
 from src.services.pipeline.chain import (
     _PIPELINE_REGISTRY,
     _TASK_REGISTRY,
     Pipeline,
+    persist_definitions,
 )
 from src.services.pipeline.message import PipelineMessage
 from src.services.pipeline.worker import get_worker_queues
@@ -141,10 +143,10 @@ class TestPipeline:
 
     @pytest.mark.asyncio
     async def test_pipeline_run_empty_raises(self):
-        """Running a pipeline with no steps raises ValueError."""
+        """Running a pipeline with no steps raises PipelineConfigError."""
         p = Pipeline("empty")
         msg = PipelineMessage(patient_id="PAT001", study_uid="1.2.3")
-        with pytest.raises(ValueError, match="no steps"):
+        with pytest.raises(PipelineConfigError, match="no steps"):
             await p.run(msg)
 
     def test_pipeline_repr(self):
@@ -219,10 +221,7 @@ class TestSyncPipelineDefinitions:
         Pipeline("sync_test").step(mock_task1).step(mock_task2)
 
         repo = PipelineDefinitionRepository(test_session)
-
-        # Sync using the repo directly (same logic as sync_pipeline_definitions)
-        for pipeline in _PIPELINE_REGISTRY.values():
-            await repo.upsert(pipeline.name, [s.to_dict() for s in pipeline.steps])
+        await persist_definitions(repo)
 
         definition = await repo.get("sync_test")
         assert definition.name == "sync_test"
@@ -398,6 +397,78 @@ class TestPipelineExceptions:
 # ─── DeadLetterMiddleware ────────────────────────────────────────────────────
 
 
+class TestDLQPublisher:
+    """Tests for DLQPublisher shared AMQP publisher."""
+
+    @pytest.mark.asyncio
+    async def test_publish_without_startup_logs_error(self):
+        """Publishing before startup() logs an error and does not raise."""
+        from src.services.pipeline.middleware import DLQPublisher
+
+        publisher = DLQPublisher()
+
+        with patch("src.services.pipeline.middleware.logger") as mock_logger:
+            await publisher.publish({"key": "value"})
+            mock_logger.error.assert_called_once()
+            assert "not initialized" in mock_logger.error.call_args[0][0]
+
+    @pytest.mark.asyncio
+    async def test_startup_idempotent(self):
+        """Calling startup() twice only connects once."""
+        from src.services.pipeline.middleware import DLQPublisher
+
+        publisher = DLQPublisher(amqp_url="amqp://guest:guest@localhost/")
+
+        mock_connection = AsyncMock()
+        mock_channel = AsyncMock()
+        mock_connection.channel.return_value = mock_channel
+
+        with patch(
+            "aio_pika.connect_robust", new_callable=AsyncMock, return_value=mock_connection
+        ) as mock_connect:
+            await publisher.startup()
+            await publisher.startup()
+            mock_connect.assert_called_once()
+
+        await publisher.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_shutdown_clears_state(self):
+        """shutdown() closes connection and resets state to None."""
+        from src.services.pipeline.middleware import DLQPublisher
+
+        publisher = DLQPublisher()
+        mock_connection = AsyncMock()
+        publisher._connection = mock_connection
+        publisher._channel = AsyncMock()
+
+        await publisher.shutdown()
+
+        mock_connection.close.assert_called_once()
+        assert publisher._connection is None
+        assert publisher._channel is None
+
+    @pytest.mark.asyncio
+    async def test_publish_sends_json_message(self):
+        """publish() sends a JSON-encoded persistent message to the DLQ."""
+        import json
+
+        from src.services.pipeline.middleware import DLQPublisher
+
+        publisher = DLQPublisher()
+        mock_channel = AsyncMock()
+        publisher._channel = mock_channel
+
+        payload = {"task_name": "test", "error": "boom"}
+        await publisher.publish(payload)
+
+        mock_channel.default_exchange.publish.assert_called_once()
+        call_args = mock_channel.default_exchange.publish.call_args
+        message = call_args[0][0]
+        assert json.loads(message.body) == payload
+        assert call_args[1]["routing_key"] == "clarinet.dead_letter"
+
+
 class TestDeadLetterMiddleware:
     """Tests for DeadLetterMiddleware routing logic."""
 
@@ -406,9 +477,9 @@ class TestDeadLetterMiddleware:
         """Successful tasks are not routed to DLQ."""
         from taskiq import TaskiqMessage, TaskiqResult
 
-        from src.services.pipeline.middleware import DeadLetterMiddleware
+        from src.services.pipeline.middleware import DeadLetterMiddleware, DLQPublisher
 
-        middleware = DeadLetterMiddleware()
+        middleware = DeadLetterMiddleware(DLQPublisher())
         msg = TaskiqMessage(task_id="t1", task_name="test", labels={}, args=[], kwargs={})
         result = TaskiqResult(is_err=False, return_value={"ok": True}, execution_time=0.1)
 
@@ -422,9 +493,9 @@ class TestDeadLetterMiddleware:
         from taskiq import TaskiqMessage, TaskiqResult
         from taskiq.exceptions import NoResultError
 
-        from src.services.pipeline.middleware import DeadLetterMiddleware
+        from src.services.pipeline.middleware import DeadLetterMiddleware, DLQPublisher
 
-        middleware = DeadLetterMiddleware()
+        middleware = DeadLetterMiddleware(DLQPublisher())
         msg = TaskiqMessage(task_id="t2", task_name="test", labels={}, args=[], kwargs={})
         result = TaskiqResult(
             is_err=True, return_value=None, execution_time=0.1, error=NoResultError()
@@ -440,9 +511,9 @@ class TestDeadLetterMiddleware:
         from taskiq import TaskiqMessage, TaskiqResult
 
         from src.exceptions.domain import PipelineStepError
-        from src.services.pipeline.middleware import DeadLetterMiddleware
+        from src.services.pipeline.middleware import DeadLetterMiddleware, DLQPublisher
 
-        middleware = DeadLetterMiddleware()
+        middleware = DeadLetterMiddleware(DLQPublisher())
         msg = TaskiqMessage(task_id="t3", task_name="test_fail", labels={}, args=[], kwargs={})
         result = TaskiqResult(
             is_err=True,

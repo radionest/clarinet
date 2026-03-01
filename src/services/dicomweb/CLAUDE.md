@@ -11,24 +11,27 @@ dicomweb/
   models.py      # MemoryCachedSeries (in-memory with __slots__)
   converter.py   # DICOM JSON conversion (StudyResult/SeriesResult/ImageResult → tags)
   multipart.py   # WADO-RS multipart/related response builder + frame extraction
-  cache.py       # DicomWebCache — two-tier cache (memory + disk) with background persistence
+  cache.py       # DicomWebCache — four-tier cache (memory + dcm_anon + disk + PACS) with background persistence
   cleanup.py     # DicomWebCacheCleanupService — periodic disk cache TTL + size eviction
   service.py     # DicomWebProxyService — main entry point
   __init__.py    # Public API re-exports
 ```
 
-## Two-tier cache
+## Four-tier cache
 
 ```
-Request → Memory cache (cachetools.TTLCache[str, MemoryCachedSeries], O(1) lookup + LRU eviction)
+Request → 1. Memory cache (cachetools.TTLCache[str, MemoryCachedSeries], O(1) lookup + LRU eviction)
         ↓ miss
-        → Disk cache ({storage_path}/dicomweb_cache/{study}/{series}/*.dcm)
+        → 2. dcm_anon ({storage_path}/{patient}/{study}/{series}/dcm_anon/*.dcm — no TTL)
         ↓ miss
-        → C-GET to memory (StorageMode.MEMORY) → return immediately
-          → background asyncio.Task writes .dcm to disk
+        → 3. Disk cache ({storage_path}/dicomweb_cache/{study}/{series}/*.dcm)
+        ↓ miss
+        → 4. C-GET to memory (StorageMode.MEMORY) → return immediately
+          → background asyncio.Task writes .dcm to dicomweb_cache/
 ```
 
 - **Memory tier**: `TTLCache` holds `MemoryCachedSeries` with `dict[str, Dataset]` keyed by SOPInstanceUID. TTL controlled by `dicomweb_memory_cache_ttl_minutes`, max entries by `dicomweb_memory_cache_max_entries` (LRU eviction).
+- **dcm_anon tier**: Anonymized DICOM files written by `AnonymizationService` into working folder `dcm_anon/` subdirectories. No TTL — files persist until manually deleted. Path lookup iterates patient dirs and caches results in `_dcm_anon_path_cache`.
 - **Disk tier**: `.dcm` files + `.cached_at` marker. TTL controlled by `dicomweb_cache_ttl_hours`. Loaded into memory on first access after restart.
 - **Background persistence**: After C-GET to memory, `asyncio.create_task` writes datasets to disk via `asyncio.to_thread`. On shutdown, pending tasks are cancelled.
 

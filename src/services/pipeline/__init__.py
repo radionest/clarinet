@@ -39,11 +39,12 @@ from .chain import (
     Pipeline,
     get_all_pipelines,
     get_pipeline,
+    persist_definitions,
     register_task,
     sync_pipeline_definitions,
 )
 from .message import PipelineMessage
-from .middleware import DeadLetterMiddleware
+from .middleware import DeadLetterMiddleware, DLQPublisher
 from .worker import get_worker_queues, run_worker
 
 __all__ = [
@@ -51,6 +52,7 @@ __all__ = [
     "DICOM_QUEUE",
     "DLQ_QUEUE",
     "GPU_QUEUE",
+    "DLQPublisher",
     "DeadLetterMiddleware",
     "Pipeline",
     "PipelineConfigError",
@@ -64,6 +66,7 @@ __all__ = [
     "get_pipeline",
     "get_test_broker",
     "get_worker_queues",
+    "persist_definitions",
     "register_task",
     "run_worker",
     "sync_pipeline_definitions",

@@ -175,6 +175,28 @@ class Settings(BaseSettings):
     session_secure_cookie: bool = True  # HTTPS only in production
     session_cache_ttl_seconds: int = 30  # In-memory session validation cache TTL
 
+    # Anonymization settings
+    anon_uid_salt: str = "clarinet-anon-salt-change-in-production"
+    anon_save_to_disk: bool = True
+    anon_send_to_pacs: bool = False
+
+    # Series filter settings
+    series_filter_excluded_modalities: list[str] = [
+        "SR",
+        "KO",
+        "PR",
+        "DOC",
+        "RTDOSE",
+        "RTPLAN",
+        "RTSTRUCT",
+        "REG",
+        "FID",
+        "RWV",
+    ]
+    series_filter_min_instance_count: int | None = None
+    series_filter_unknown_modality_policy: str = "include"
+    series_filter_on_import: bool = False
+
     # RecordFlow settings
     recordflow_enabled: bool = False  # Enable RecordFlow workflow engine
     recordflow_paths: list[str] = []  # Directories containing *_flow.py files

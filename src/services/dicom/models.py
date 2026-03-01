@@ -2,7 +2,7 @@
 
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -136,6 +136,53 @@ class RetrieveResult(BaseModel):
     num_warning: int = 0
     failed_sop_instances: list[str] = Field(default_factory=list)
     instances: dict[str, Any] = Field(default_factory=dict)  # For C-GET with memory mode
+
+
+class SkippedSeriesInfo(BaseModel):
+    """Info about a series skipped during anonymization."""
+
+    series_uid: str
+    modality: str | None = None
+    series_description: str | None = None
+    reason: str
+
+
+class AnonymizationResult(BaseModel):
+    """Result of a study anonymization operation."""
+
+    study_uid: str
+    anon_study_uid: str
+    series_count: int
+    series_anonymized: int = 0
+    series_skipped: int = 0
+    instances_anonymized: int
+    instances_failed: int
+    instances_send_failed: int = 0
+    output_dir: str | None = None
+    sent_to_pacs: bool = False
+    skipped_series: list[SkippedSeriesInfo] = Field(default_factory=list)
+
+
+class AnonymizeStudyRequest(BaseModel):
+    """Request body for anonymizing a study."""
+
+    save_to_disk: bool | None = None
+    send_to_pacs: bool | None = None
+
+
+class BackgroundAnonymizationStatus(BaseModel):
+    """Response returned when anonymization is dispatched in the background."""
+
+    status: Literal["started"] = "started"
+    study_uid: str
+
+
+class BatchStoreResult(BaseModel):
+    """Result of a batch C-STORE operation (one association, multiple datasets)."""
+
+    total_sent: int = 0
+    total_failed: int = 0
+    failed_sop_uids: list[str] = Field(default_factory=list)
 
 
 class DicomNode(BaseModel):

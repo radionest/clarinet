@@ -22,6 +22,7 @@ from src.repositories.series_repository import SeriesRepository
 from src.repositories.study_repository import StudyRepository
 from src.repositories.user_repository import UserRepository, UserRoleRepository
 from src.services.admin_service import AdminService
+from src.services.anonymization_service import AnonymizationService
 from src.services.dicom import DicomClient
 from src.services.dicom.models import DicomNode
 from src.services.dicomweb import DicomWebCache, DicomWebProxyService
@@ -227,3 +228,20 @@ def get_dicomweb_proxy_service(
 
 DicomWebCacheDep = Annotated[DicomWebCache, Depends(get_dicomweb_cache)]
 DicomWebProxyServiceDep = Annotated[DicomWebProxyService, Depends(get_dicomweb_proxy_service)]
+
+
+# Anonymization dependencies
+
+
+async def get_anonymization_service(
+    study_repo: StudyRepositoryDep,
+    patient_repo: PatientRepositoryDep,
+    series_repo: SeriesRepositoryDep,
+    client: DicomClientDep,
+    pacs: PacsNodeDep,
+) -> AnonymizationService:
+    """Get anonymization service instance."""
+    return AnonymizationService(study_repo, patient_repo, series_repo, client, pacs)
+
+
+AnonymizationServiceDep = Annotated[AnonymizationService, Depends(get_anonymization_service)]

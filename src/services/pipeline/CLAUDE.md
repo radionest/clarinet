@@ -17,7 +17,7 @@ TaskIQ-based distributed task pipeline for long-running operations (GPU processi
 | `broker.py` | `get_broker()` singleton + `create_broker(queue)` per-queue factory, middlewares, result backend |
 | `message.py` | PipelineMessage (Pydantic model) |
 | `chain.py` | Pipeline chain builder DSL (step-by-step, queue routing) |
-| `middleware.py` | PipelineChainMiddleware, PipelineLoggingMiddleware, DeadLetterMiddleware |
+| `middleware.py` | DLQPublisher, PipelineChainMiddleware, PipelineLoggingMiddleware, DeadLetterMiddleware |
 | `worker.py` | get_worker_queues() auto-detect, run_worker() entry point |
 
 ## Usage
@@ -80,9 +80,10 @@ uv run clarinet worker --workers 4            # parallel workers
 ## Chain Advancement (DB-backed)
 
 Pipeline definitions are stored in the `pipeline_definition` DB table (model: `src/models/pipeline_definition.py`).
-Definitions are synced to the database at application startup via `sync_pipeline_definitions()`
-(bootstrap pattern, same as `add_default_user_roles`). Can also be synced on demand via
-`POST /api/pipelines/sync`. `Pipeline.run()` only dispatches the first step — no DB writes.
+Core sync logic lives in `persist_definitions(repo)` — iterates the registry and upserts each definition.
+At startup, `sync_pipeline_definitions()` wraps it with a db_manager session (bootstrap pattern).
+The `POST /api/pipelines/sync` endpoint calls `persist_definitions` directly with the DI-provided repo.
+`Pipeline.run()` only dispatches the first step — no DB writes.
 Task labels carry only `pipeline_id` + `step_index` (no serialized chain).
 After each step, `PipelineChainMiddleware.post_execute()` fetches the definition from the HTTP API
 (`GET /api/pipelines/{name}/definition`) and dispatches the next step. Chain stops on error.
@@ -92,10 +93,11 @@ After each step, `PipelineChainMiddleware.post_execute()` fetches the definition
 
 - **Retries enabled by default** via `SmartRetryMiddleware` with `default_retry_label=True`
 - 3 retries, exponential backoff + jitter, max delay 120s (all configurable via settings)
-- **`DeadLetterMiddleware`** routes terminal failures to `clarinet.dead_letter` queue after all retries are exhausted
+- **`DLQPublisher`** — shared AMQP connection to `clarinet.dead_letter`. One instance is created in `create_broker()` and passed to both `DeadLetterMiddleware` and `PipelineChainMiddleware` (composition pattern). Lifecycle owned by `DeadLetterMiddleware`.
+- **`DeadLetterMiddleware`** routes terminal failures to DLQ after all retries are exhausted
 - SmartRetryMiddleware sets `NoResultError` on retry; DeadLetterMiddleware skips those and only publishes real errors to DLQ
 - **`pipeline_ack_type`** controls when messages are acknowledged (default `when_executed` — message redelivered if worker crashes)
-- Middleware order: SmartRetry → Logging → DeadLetter → Chain
+- Middleware order: SmartRetry → Logging → DeadLetter → Chain (DeadLetter must be before Chain so DLQPublisher is started before chain middleware needs it)
 
 ## Settings
 

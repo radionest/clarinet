@@ -6,12 +6,13 @@ Async DICOM client for Query/Retrieve operations against external PACS servers (
 
 ```
 dicom/
-  models.py       # Pydantic models: DicomNode, queries, results, storage config
-  operations.py   # Synchronous pynetdicom wrapper (C-FIND, C-GET, C-MOVE)
-  handlers.py     # C-STORE event handlers (disk / memory / forward modes)
-  client.py       # Async facade — delegates to operations via asyncio.to_thread()
-  anonymizer.py   # Anonymizer, PACS stubs (planned; not yet exported)
-  __init__.py     # Public API re-exports
+  models.py         # Pydantic models: DicomNode, queries, results, storage config
+  operations.py     # Synchronous pynetdicom wrapper (C-FIND, C-GET, C-MOVE)
+  handlers.py       # C-STORE event handlers (disk / memory / forward modes)
+  client.py         # Async facade — delegates to operations via asyncio.to_thread()
+  anonymizer.py     # Anonymizer, PACS stubs (planned; not yet exported)
+  series_filter.py  # Configurable series filter (modality blocklist, instance count, unknown policy)
+  __init__.py       # Public API re-exports
 ```
 
 - `DicomClient` is the main entry point — all methods are async
@@ -55,6 +56,23 @@ pacs = DicomNode(aet=settings.pacs_aet, host=settings.pacs_host, port=settings.p
 studies = await client.find_studies(query=StudyQuery(patient_id="12345"), peer=pacs)
 result = await client.get_study(study_uid=studies[0].study_instance_uid, peer=pacs, output_dir=Path("./out"))
 ```
+
+## Series Filter
+
+`SeriesFilter` excludes non-image series (SR, KO, PR, etc.) at import and/or anonymization time.
+- Pure logic, no I/O — operates on `SeriesFilterCriteria` DTO
+- `SeriesFilterCriteria.from_series_result()` for import time (PACS C-FIND data)
+- `SeriesFilterCriteria.from_series()` for anonymization time (DB model)
+- Settings: `series_filter_excluded_modalities`, `series_filter_min_instance_count`, `series_filter_unknown_modality_policy`, `series_filter_on_import`
+
+## Batch C-STORE
+
+`store_instances_batch` sends multiple datasets over a single DICOM association (vs `store_instance` which opens one association per dataset).
+
+- **`operations.py`**: `store_instances_batch(config, datasets)` → `BatchStoreResult` (sync, one `ae.associate()`, loops `send_c_store`)
+- **`client.py`**: `store_instances_batch(datasets, peer)` → async wrapper via `asyncio.to_thread()`
+- **`models.py`**: `BatchStoreResult(total_sent, total_failed, failed_sop_uids)`
+- Used by `AnonymizationService._send_series_to_pacs()` for per-series batch distribution
 
 ## Key conventions
 

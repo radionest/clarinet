@@ -67,27 +67,44 @@ def create_broker(queue_name: str = DEFAULT_QUEUE) -> AsyncBroker:
     Returns:
         Configured AioPikaBroker instance.
     """
+    from aio_pika import ExchangeType
     from taskiq_aio_pika import AioPikaBroker
+    from taskiq_aio_pika.exchange import Exchange
+    from taskiq_aio_pika.queue import Queue as RmqQueue
 
     routing_key = extract_routing_key(queue_name)
 
-    broker_kwargs: dict[str, object] = {
-        "url": _build_amqp_url(),
-        "exchange_name": settings.rabbitmq_exchange,
-        "exchange_type": "direct",
-        "queue_name": queue_name,
-        "routing_key": routing_key,
-        "declare_exchange": True,
-        "declare_queues": True,
-    }
-
-    broker = AioPikaBroker(**broker_kwargs)  # type: ignore[arg-type]
+    broker = AioPikaBroker(
+        url=_build_amqp_url(),
+        exchange=Exchange(
+            name=settings.rabbitmq_exchange,
+            type=ExchangeType.DIRECT,
+            declare=True,
+        ),
+        task_queues=[
+            RmqQueue(
+                name=queue_name,
+                routing_key=routing_key,
+                declare=True,
+            ),
+        ],
+        delay_queue=RmqQueue(
+            name=f"{queue_name}.delay",
+            declare=True,
+        ),
+    )
 
     # Attach middlewares
     from taskiq.middlewares import SmartRetryMiddleware
 
-    from .middleware import DeadLetterMiddleware, PipelineChainMiddleware, PipelineLoggingMiddleware
+    from .middleware import (
+        DeadLetterMiddleware,
+        DLQPublisher,
+        PipelineChainMiddleware,
+        PipelineLoggingMiddleware,
+    )
 
+    dlq = DLQPublisher()
     broker = broker.with_middlewares(
         SmartRetryMiddleware(
             default_retry_count=settings.pipeline_retry_count,
@@ -98,8 +115,8 @@ def create_broker(queue_name: str = DEFAULT_QUEUE) -> AsyncBroker:
             max_delay_exponent=settings.pipeline_retry_max_delay,
         ),
         PipelineLoggingMiddleware(),
-        DeadLetterMiddleware(),
-        PipelineChainMiddleware(),
+        DeadLetterMiddleware(dlq),
+        PipelineChainMiddleware(dlq),
     )
 
     # Attach result backend if configured

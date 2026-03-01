@@ -59,6 +59,8 @@ class SeriesBase(BaseModel):
     series_uid: DicomUID | None = None
     series_description: str | None = Field(min_length=0, max_length=64, default=None)
     series_number: int = Field(gt=0, lt=100000)
+    modality: str | None = Field(default=None, max_length=16)
+    instance_count: int | None = Field(default=None, ge=0)
     anon_uid: str | None = Field(default=None)
     study_uid: DicomUID | None = Field(default=None)
 
@@ -124,6 +126,8 @@ class SeriesFind(SeriesBase):
     series_uid: str | None = None
     series_description: str | None = None
     series_number: int | None = None  # type: ignore
+    modality: str | None = None  # type: ignore
+    instance_count: int | None = None  # type: ignore
     anon_uid: str | None = None
     study_uid: str | None = None
     records: list[RecordFind] = Field(default_factory=list)  # Will contain RecordFind objects
