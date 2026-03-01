@@ -84,15 +84,15 @@ def trigger_recordflow(
         background_tasks.add_task(engine.handle_record_data_update, record_read)
 
 
-def validate_record_files(record: Record) -> FileValidationResult | None:
+def validate_record_files(record: RecordRead) -> FileValidationResult | None:
     """Validate input files for a record.
 
-    Record must have record_type, study, and series relations loaded
-    (via ``get_with_relations``), because ``record.working_folder`` accesses
-    the study and series relationships to build the path.
+    Accepts ``RecordRead`` (Pydantic) because ``working_folder`` and other
+    computed fields are defined on ``RecordRead``, not on the ORM ``Record``.
+    Callers should convert via ``RecordRead.model_validate(record)`` first.
 
     Args:
-        record: Record with record_type, study, and series loaded
+        record: RecordRead instance with all relations populated
 
     Returns:
         FileValidationResult if validation was performed, None if no input_files defined
@@ -289,7 +289,8 @@ async def add_record(
     record = await repo.create_with_relations(record)
 
     # Validate input files if defined
-    file_result = validate_record_files(record)
+    record_read = RecordRead.model_validate(record)
+    file_result = validate_record_files(record_read)
     if file_result and file_result.matched_files:
         await repo.set_files(record, file_result.matched_files)
         return await repo.get_with_relations(record.id)  # type: ignore[arg-type]
@@ -351,7 +352,8 @@ async def submit_record_data(
     validated_data = validate_record_data(record, data)
 
     # Validate input files if defined
-    file_result = validate_record_files(record)
+    record_read = RecordRead.model_validate(record)
+    file_result = validate_record_files(record_read)
     files: dict[str, str] | None = None
     if file_result and file_result.matched_files:
         files = file_result.matched_files
@@ -408,7 +410,8 @@ async def validate_files_endpoint(
     """
     record = await repo.get_with_relations(record_id)
 
-    result = validate_record_files(record)
+    record_read = RecordRead.model_validate(record)
+    result = validate_record_files(record_read)
     if result is None:
         return FileValidationResult(valid=True)
 

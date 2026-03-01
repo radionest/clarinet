@@ -482,16 +482,16 @@ class RecordFlowEngine:
             record_create = RecordCreate(
                 record_type_name=action.record_type_name,
                 patient_id=record.patient.id,
-                study_uid=record.study.study_uid,
+                study_uid=record.study.study_uid if record.study else None,
                 series_uid=series_uid,
                 user_id=action.user_id,
                 context_info=action.context_info
                 or f"Created by flow from record {record.record_type.name} (id={record.id})",
             )
             result = await self.clarinet_client.create_record(record_create)
+            study_uid = record.study.study_uid if record.study else "N/A"
             logger.info(
-                f"Created record '{action.record_type_name}' (id={result.id}) "
-                f"for study {record.study.study_uid}"
+                f"Created record '{action.record_type_name}' (id={result.id}) for study {study_uid}"
             )
         except Exception as e:
             logger.error(f"Failed to create record '{action.record_type_name}': {e}")

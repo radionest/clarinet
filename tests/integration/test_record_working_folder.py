@@ -1,12 +1,11 @@
-"""Tests for Record._format_path(), _get_working_folder(), and validate_record_files().
+"""Tests for RecordRead._format_path(), _get_working_folder(), and validate_record_files().
 
 Covers:
-- _format_path with all relations loaded vs fallback fields
+- _format_path with all relations loaded (via RecordRead)
 - Anon UID preference over real UIDs
 - Patient anon_id from auto_id
 - Invalid template handling
-- _get_working_folder for SERIES/STUDY/PATIENT levels
-- _get_working_folder None when record_type not loaded
+- working_folder for SERIES/STUDY/PATIENT levels
 - validate_record_files with empty input_files
 """
 
@@ -18,7 +17,7 @@ import pytest_asyncio
 from src.api.routers.record import validate_record_files
 from src.models.base import DicomQueryLevel, RecordStatus
 from src.models.patient import Patient
-from src.models.record import Record, RecordType
+from src.models.record import Record, RecordRead, RecordType
 from src.models.study import Series, Study
 from src.repositories.record_repository import RecordRepository
 from src.settings import settings
@@ -202,40 +201,11 @@ async def test_format_path_with_all_relations(
 
     repo = RecordRepository(test_session)
     loaded = await repo.get_with_relations(record.id)
+    record_read = RecordRead.model_validate(loaded)
 
     template = "{patient_id}/{study_anon_uid}/{series_anon_uid}"
-    result = loaded._format_path(template)
+    result = record_read._format_path(template)
 
-    assert result == f"{settings.anon_id_prefix}_42/ANON_STUDY_WF/ANON_SERIES_WF"
-
-
-@pytest.mark.asyncio
-async def test_format_path_fallback_without_relations(
-    test_session, patient_with_anon, study_with_anon, series_with_anon, rt_series
-):
-    """get_with_record_type still resolves relations via identity map → uses relation anon UIDs.
-
-    When record's own fallback fields (study_anon_uid, series_anon_uid) differ from
-    the relation objects, the relation values take priority because SQLAlchemy's
-    identity map resolves them even without explicit eager loading.
-    """
-    record = await _create_record(
-        test_session,
-        patient_id=patient_with_anon.id,
-        study_uid=study_with_anon.study_uid,
-        series_uid=series_with_anon.series_uid,
-        rt_name=rt_series.name,
-        study_anon_uid="FALLBACK_STUDY",
-        series_anon_uid="FALLBACK_SERIES",
-    )
-
-    repo = RecordRepository(test_session)
-    loaded = await repo.get_with_record_type(record.id)
-
-    template = "{patient_id}/{study_anon_uid}/{series_anon_uid}"
-    result = loaded._format_path(template)
-
-    # Relations are resolved from identity map → anon UIDs come from relation objects
     assert result == f"{settings.anon_id_prefix}_42/ANON_STUDY_WF/ANON_SERIES_WF"
 
 
@@ -254,10 +224,11 @@ async def test_format_path_anon_uids_preferred(
 
     repo = RecordRepository(test_session)
     loaded = await repo.get_with_relations(record.id)
+    record_read = RecordRead.model_validate(loaded)
 
     # study_anon_uid and series_anon_uid should come from the relation objects
     template = "{study_anon_uid}/{series_anon_uid}"
-    result = loaded._format_path(template)
+    result = record_read._format_path(template)
 
     assert result == "ANON_STUDY_WF/ANON_SERIES_WF"
     # Confirm these differ from the real UIDs
@@ -280,9 +251,10 @@ async def test_format_path_real_uid_fallback_when_no_anon(
 
     repo = RecordRepository(test_session)
     loaded = await repo.get_with_relations(record.id)
+    record_read = RecordRead.model_validate(loaded)
 
     template = "{study_anon_uid}/{series_anon_uid}"
-    result = loaded._format_path(template)
+    result = record_read._format_path(template)
 
     # No anon_uid on study/series → falls back to real UIDs
     assert result == f"{study_without_anon.study_uid}/{series_without_anon.series_uid}"
@@ -303,8 +275,9 @@ async def test_format_path_invalid_template_returns_none(
 
     repo = RecordRepository(test_session)
     loaded = await repo.get_with_relations(record.id)
+    record_read = RecordRead.model_validate(loaded)
 
-    result = loaded._format_path("{invalid_var}/path")
+    result = record_read._format_path("{invalid_var}/path")
     assert result is None
 
 
@@ -323,8 +296,9 @@ async def test_format_path_patient_anon_id_when_auto_id_set(
 
     repo = RecordRepository(test_session)
     loaded = await repo.get_with_relations(record.id)
+    record_read = RecordRead.model_validate(loaded)
 
-    result = loaded._format_path("{patient_id}")
+    result = record_read._format_path("{patient_id}")
     assert result == f"{settings.anon_id_prefix}_42"
 
 
@@ -344,8 +318,9 @@ async def test_format_path_patient_id_fallback_when_no_auto_id(
 
     repo = RecordRepository(test_session)
     loaded = await repo.get_with_relations(record.id)
+    record_read = RecordRead.model_validate(loaded)
 
-    result = loaded._format_path("{patient_id}")
+    result = record_read._format_path("{patient_id}")
     # anon_id is None (no auto_id) → falls back to self.patient_id
     assert result == test_patient.id
 
@@ -370,9 +345,10 @@ async def test_working_folder_series_level(
 
     repo = RecordRepository(test_session)
     loaded = await repo.get_with_relations(record.id)
+    record_read = RecordRead.model_validate(loaded)
 
     expected = f"{settings.storage_path}/{settings.anon_id_prefix}_42/ANON_STUDY_WF/ANON_SERIES_WF"
-    assert loaded.working_folder == expected
+    assert record_read.working_folder == expected
 
 
 @pytest.mark.asyncio
@@ -390,9 +366,10 @@ async def test_working_folder_study_level(
 
     repo = RecordRepository(test_session)
     loaded = await repo.get_with_relations(record.id)
+    record_read = RecordRead.model_validate(loaded)
 
     expected = f"{settings.storage_path}/{settings.anon_id_prefix}_42/ANON_STUDY_WF"
-    assert loaded.working_folder == expected
+    assert record_read.working_folder == expected
 
 
 @pytest.mark.asyncio
@@ -408,51 +385,10 @@ async def test_working_folder_patient_level(test_session, patient_with_anon, rt_
 
     repo = RecordRepository(test_session)
     loaded = await repo.get_with_relations(record.id)
+    record_read = RecordRead.model_validate(loaded)
 
     expected = f"{settings.storage_path}/{settings.anon_id_prefix}_42"
-    assert loaded.working_folder == expected
-
-
-def test_working_folder_none_without_record_type():
-    """RecordBase without record_type attribute → _get_working_folder returns None.
-
-    RecordBase (non-ORM) doesn't have a record_type relationship,
-    so hasattr check fails and _get_working_folder returns None.
-    """
-    from src.models.record import RecordBase
-
-    base = RecordBase(
-        patient_id="PAT001",
-        study_uid="1.2.3.4.5",
-        series_uid="1.2.3.4.5.1",
-        record_type_name="some_type",
-        status=RecordStatus.pending,
-    )
-    assert base._get_working_folder() is None
-
-
-@pytest.mark.asyncio
-async def test_working_folder_with_only_record_type_resolves_from_identity_map(
-    test_session, patient_with_anon, study_with_anon, series_with_anon, rt_series
-):
-    """get_with_record_type in same session → relations resolved from identity map."""
-    record = await _create_record(
-        test_session,
-        patient_id=patient_with_anon.id,
-        study_uid=study_with_anon.study_uid,
-        series_uid=series_with_anon.series_uid,
-        rt_name=rt_series.name,
-        study_anon_uid="FB_STUDY",
-        series_anon_uid="FB_SERIES",
-    )
-
-    repo = RecordRepository(test_session)
-    loaded = await repo.get_with_record_type(record.id)
-
-    # Even though only record_type was eagerly loaded, relations resolve
-    # from the session's identity map → uses anon UIDs from relation objects
-    expected = f"{settings.storage_path}/{settings.anon_id_prefix}_42/ANON_STUDY_WF/ANON_SERIES_WF"
-    assert loaded.working_folder == expected
+    assert record_read.working_folder == expected
 
 
 # ===========================================================================
@@ -474,8 +410,9 @@ async def test_validate_record_files_no_input_files(
     )
 
     repo = RecordRepository(test_session)
-    loaded = await repo.get_with_record_type(record.id)
+    loaded = await repo.get_with_relations(record.id)
+    record_read = RecordRead.model_validate(loaded)
 
     # rt_series has no input_files (empty list by default)
-    result = validate_record_files(loaded)
+    result = validate_record_files(record_read)
     assert result is None

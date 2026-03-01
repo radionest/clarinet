@@ -211,135 +211,6 @@ class RecordBase(BaseModel):
             return NotImplemented
         return self.id == other.id
 
-    @computed_field
-    def radiant(self) -> str | None:
-        """Generate a radiant URL for this record."""
-        # This computed field only works for Record instances that have a study relationship
-        if not hasattr(self, "study") or not hasattr(self, "patient"):
-            return None
-        study = getattr(self, "study", None)
-        if study is None:
-            return None
-        if study.anon_uid:
-            return f"radiant://?n=paet&v=PACS_PETROVA&n=pstv&v=0020000D&v={study.anon_uid}"
-        return f"radiant://?n=paet&v=PACS_PETROVA&n=pstv&v=0020000D&v={study.study_uid}"
-
-    def _format_path(self, unformatted_path: str) -> str | None:
-        """Format a path template with values from this record."""
-        try:
-            study = getattr(self, "study", None)
-            patient = getattr(self, "patient", None)
-            series = getattr(self, "series", None)
-
-            return unformatted_path.format(
-                patient_id=(patient.anon_id if patient else None) or self.patient_id,
-                patient_anon_name=patient.anon_name if patient else None,
-                study_uid=self.study_uid,
-                study_anon_uid=(study.anon_uid if study else self.study_anon_uid) or self.study_uid,
-                series_uid=self.series_uid,
-                series_anon_uid=(series.anon_uid if series else self.series_anon_uid)
-                or self.series_uid,
-                user_id=self.user_id,
-                clarinet_storage_path=self.clarinet_storage_path or settings.storage_path,
-            )
-        except (AttributeError, KeyError):
-            return None
-
-    def _format_slicer_kwargs(self, slicer_kwargs: SlicerArgs) -> SlicerArgs:
-        """Format Slicer script arguments with values from this record."""
-        if slicer_kwargs is None:
-            return {}
-        result: SlicerArgs = {}
-        for k, v in slicer_kwargs.items():
-            formatted = self._format_path(v)
-            if formatted is not None:
-                result[k] = formatted
-        return result
-
-    @computed_field
-    def slicer_args_formatted(self) -> SlicerArgs | None:
-        """Get formatted Slicer script arguments."""
-        if (
-            not hasattr(self, "record_type")
-            or self.record_type is None
-            or self.record_type.slicer_script_args is None
-        ):
-            return None
-
-        result = self._format_slicer_kwargs(self.record_type.slicer_script_args)
-        return result
-
-    @computed_field
-    def slicer_validator_args_formatted(self) -> SlicerArgs | None:
-        """Get formatted Slicer validator arguments."""
-        if (
-            not hasattr(self, "record_type")
-            or self.record_type is None
-            or self.record_type.slicer_result_validator_args is None
-        ):
-            return None
-        result = self._format_slicer_kwargs(self.record_type.slicer_result_validator_args)
-        return result
-
-    def _get_working_folder(self) -> str | None:
-        """Get the working folder path for this record."""
-        if not hasattr(self, "record_type") or self.record_type is None:
-            return None
-
-        match self.record_type.level:
-            case "SERIES":
-                return self._format_path(
-                    f"{settings.storage_path}/{{patient_id}}/{{study_anon_uid}}/{{series_anon_uid}}"
-                )
-            case "STUDY":
-                return self._format_path(
-                    f"{settings.storage_path}/{{patient_id}}/{{study_anon_uid}}"
-                )
-            case "PATIENT":
-                return self._format_path(f"{settings.storage_path}/{{patient_id}}")
-            case _:
-                raise NotImplementedError(
-                    "Working folder attribute only available for Study and Series level record types."
-                )
-
-    @computed_field  # type: ignore[prop-decorator]
-    @property
-    def working_folder(self) -> str | None:
-        """Get the working folder path for this record."""
-        return self._get_working_folder()
-
-    @computed_field
-    def slicer_all_args_formatted(self) -> SlicerArgs | None:
-        """Get all formatted Slicer arguments."""
-        # Get working folder
-        working_folder_path = self._get_working_folder()
-        if working_folder_path is None:
-            return None
-
-        all_args: SlicerArgs = {"working_folder": working_folder_path}
-
-        # Format slicer args if available
-        if (
-            hasattr(self, "record_type")
-            and self.record_type is not None
-            and self.record_type.slicer_script_args is not None
-        ):
-            formatted_args = self._format_slicer_kwargs(self.record_type.slicer_script_args)
-            all_args.update(formatted_args)
-
-        # Format validator args if available
-        if (
-            hasattr(self, "record_type")
-            and self.record_type is not None
-            and self.record_type.slicer_result_validator_args is not None
-        ):
-            formatted_validator = self._format_slicer_kwargs(
-                self.record_type.slicer_result_validator_args
-            )
-            all_args.update(formatted_validator)
-
-        return all_args
-
 
 class Record(RecordBase, table=True):
     """Model representing a record in the system."""
@@ -429,9 +300,106 @@ class RecordRead(RecordBase):
     started_at: datetime | None = None
     finished_at: datetime | None = None
     patient: PatientBase
-    study: StudyBase
+    study: StudyBase | None = None
     series: SeriesBase | None = None
     record_type: RecordTypeBase
+
+    @computed_field
+    def radiant(self) -> str | None:
+        """Generate a radiant URL for this record."""
+        if self.study is None:
+            return None
+        if self.study.anon_uid:
+            return f"radiant://?n=paet&v=PACS_PETROVA&n=pstv&v=0020000D&v={self.study.anon_uid}"
+        return f"radiant://?n=paet&v=PACS_PETROVA&n=pstv&v=0020000D&v={self.study.study_uid}"
+
+    def _format_path(self, unformatted_path: str) -> str | None:
+        """Format a path template with values from this record."""
+        try:
+            return unformatted_path.format(
+                patient_id=self.patient.anon_id
+                if self.patient.anon_id is not None
+                else self.patient_id,
+                patient_anon_name=self.patient.anon_name,
+                study_uid=self.study_uid,
+                study_anon_uid=(self.study.anon_uid if self.study else self.study_anon_uid)
+                or self.study_uid,
+                series_uid=self.series_uid,
+                series_anon_uid=(self.series.anon_uid if self.series else self.series_anon_uid)
+                or self.series_uid,
+                user_id=self.user_id,
+                clarinet_storage_path=self.clarinet_storage_path or settings.storage_path,
+            )
+        except (AttributeError, KeyError):
+            return None
+
+    def _format_slicer_kwargs(self, slicer_kwargs: SlicerArgs) -> SlicerArgs:
+        """Format Slicer script arguments with values from this record."""
+        if slicer_kwargs is None:
+            return {}
+        result: SlicerArgs = {}
+        for k, v in slicer_kwargs.items():
+            formatted = self._format_path(v)
+            if formatted is not None:
+                result[k] = formatted
+        return result
+
+    @computed_field
+    def slicer_args_formatted(self) -> SlicerArgs | None:
+        """Get formatted Slicer script arguments."""
+        if self.record_type.slicer_script_args is None:
+            return None
+        return self._format_slicer_kwargs(self.record_type.slicer_script_args)
+
+    @computed_field
+    def slicer_validator_args_formatted(self) -> SlicerArgs | None:
+        """Get formatted Slicer validator arguments."""
+        if self.record_type.slicer_result_validator_args is None:
+            return None
+        return self._format_slicer_kwargs(self.record_type.slicer_result_validator_args)
+
+    def _get_working_folder(self) -> str | None:
+        """Get the working folder path for this record."""
+        match self.record_type.level:
+            case "SERIES":
+                return self._format_path(
+                    f"{settings.storage_path}/{{patient_id}}/{{study_anon_uid}}/{{series_anon_uid}}"
+                )
+            case "STUDY":
+                return self._format_path(
+                    f"{settings.storage_path}/{{patient_id}}/{{study_anon_uid}}"
+                )
+            case "PATIENT":
+                return self._format_path(f"{settings.storage_path}/{{patient_id}}")
+            case _:
+                raise NotImplementedError(
+                    "Working folder attribute only available for Study and Series level record types."
+                )
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def working_folder(self) -> str | None:
+        """Get the working folder path for this record."""
+        return self._get_working_folder()
+
+    @computed_field
+    def slicer_all_args_formatted(self) -> SlicerArgs | None:
+        """Get all formatted Slicer arguments."""
+        working_folder_path = self._get_working_folder()
+        if working_folder_path is None:
+            return None
+
+        all_args: SlicerArgs = {"working_folder": working_folder_path}
+
+        if self.record_type.slicer_script_args is not None:
+            all_args.update(self._format_slicer_kwargs(self.record_type.slicer_script_args))
+
+        if self.record_type.slicer_result_validator_args is not None:
+            all_args.update(
+                self._format_slicer_kwargs(self.record_type.slicer_result_validator_args)
+            )
+
+        return all_args
 
 
 class RecordFind(SQLModel):

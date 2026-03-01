@@ -16,6 +16,7 @@ from src.api.dependencies import (
     get_client_ip,
 )
 from src.exceptions.domain import NoScriptError
+from src.models import RecordRead
 from src.settings import settings
 from src.utils.logger import logger
 
@@ -162,18 +163,19 @@ async def open_record_in_slicer(
         NoScriptError: If the record type has no slicer_script configured.
     """
     record = await record_repo.get_with_relations(record_id)
+    record_read = RecordRead.model_validate(record)
 
-    if not record.record_type or not record.record_type.slicer_script:
+    if not record_read.record_type.slicer_script:
         raise NoScriptError(f"Record type has no slicer_script configured for record {record_id}")
 
-    args: dict[str, str] | None = record.slicer_all_args_formatted  # type: ignore[assignment]
+    args: dict[str, str] | None = record_read.slicer_all_args_formatted  # type: ignore[assignment]
     context: dict[str, Any] = dict(args or {})
     context.update(_build_pacs_context())
 
     slicer_url = f"http://{client_ip}:{settings.slicer_port}"
     logger.info(f"Opening record {record_id} in Slicer at {slicer_url}")
     return await service.execute(
-        slicer_url, record.record_type.slicer_script, context, request_timeout=60.0
+        slicer_url, record_read.record_type.slicer_script, context, request_timeout=60.0
     )
 
 
@@ -204,18 +206,19 @@ async def validate_record_in_slicer(
         NoScriptError: If the record type has no slicer_result_validator configured.
     """
     record = await record_repo.get_with_relations(record_id)
+    record_read = RecordRead.model_validate(record)
 
-    if not record.record_type or not record.record_type.slicer_result_validator:
+    if not record_read.record_type.slicer_result_validator:
         raise NoScriptError(
             f"Record type has no slicer_result_validator configured for record {record_id}"
         )
 
-    args: dict[str, str] | None = record.slicer_all_args_formatted  # type: ignore[assignment]
+    args: dict[str, str] | None = record_read.slicer_all_args_formatted  # type: ignore[assignment]
     context: dict[str, Any] = dict(args or {})
     context.update(_build_pacs_context())
 
     slicer_url = f"http://{client_ip}:{settings.slicer_port}"
     logger.info(f"Validating record {record_id} in Slicer at {slicer_url}")
     return await service.execute(
-        slicer_url, record.record_type.slicer_result_validator, context, request_timeout=60.0
+        slicer_url, record_read.record_type.slicer_result_validator, context, request_timeout=60.0
     )

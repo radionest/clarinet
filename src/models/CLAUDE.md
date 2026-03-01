@@ -19,10 +19,15 @@
 
 ## Computed Fields & Eager Loading
 
-`Record` has computed fields that **silently return `None`** if relationships aren't loaded:
-- `working_folder` — needs `record_type` (checks `.level`)
-- `slicer_args_formatted` — needs `record_type` (checks `.slicer_script_args`)
-- `radiant` — needs `study`, `patient`
+Computed fields (`working_folder`, `radiant`, `slicer_args_formatted`, etc.) are defined on
+**`RecordRead`** (Pydantic), not on `RecordBase`/`Record` (ORM). This prevents `MissingGreenlet`
+errors from lazy-loading in async SQLAlchemy. Pattern (same as `SeriesRead.working_folder`):
+
+```python
+record = await repo.get_with_relations(record_id)
+record_read = RecordRead.model_validate(record)
+record_read.working_folder  # safe — all data is plain Pydantic fields
+```
 
 Always use `selectinload()` in repositories when fetching records for API responses:
 ```python

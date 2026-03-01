@@ -13,7 +13,7 @@ from src.utils.file_patterns import find_matching_file, resolve_pattern
 
 if TYPE_CHECKING:
     from src.models.file_schema import FileDefinition
-    from src.models.record import Record, RecordType
+    from src.models.record import RecordBase, RecordTypeBase
 
 
 @dataclass
@@ -63,12 +63,12 @@ class FileValidator:
         ...         print(f"Error: {error.message}")
     """
 
-    def __init__(self, record_type: RecordType):
+    def __init__(self, record_type: RecordTypeBase):
         self.record_type = record_type
 
     def validate_files(
         self,
-        record: Record,
+        record: RecordBase,
         file_definitions: list[FileDefinition] | None,
         directory: Path,
     ) -> FileValidationResult:
@@ -122,7 +122,7 @@ class FileValidator:
 
     def validate_input_files(
         self,
-        record: Record,
+        record: RecordBase,
         directory: Path,
     ) -> FileValidationResult:
         """Validate input files for a record.
@@ -138,7 +138,7 @@ class FileValidator:
 
     def validate_output_files(
         self,
-        record: Record,
+        record: RecordBase,
         directory: Path,
     ) -> FileValidationResult:
         """Validate output files for a record.
