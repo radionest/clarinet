@@ -433,3 +433,96 @@ async def test_delete_study_not_found(client: AsyncClient):
     """Test DELETE /studies/{study_uid} returns 404 for non-existent study."""
     response = await client.delete("/api/studies/9.9.9.9.9.9")
     assert response.status_code == 404
+
+
+# --- MissingGreenlet regression tests ---
+
+
+@pytest.mark.asyncio
+async def test_create_patient_no_lazy_load(fresh_client, test_session, test_user):
+    """Verify create_patient doesn't trigger lazy-load MissingGreenlet.
+
+    Regression test: uses fresh_client (separate session) to detect
+    MissingGreenlet errors from lazy-loading in async context.
+    """
+    login_resp = await fresh_client.post(
+        "/api/auth/login",
+        data={"username": "test@example.com", "password": "testpassword"},
+    )
+    assert login_resp.status_code in [200, 204]
+
+    response = await fresh_client.post(
+        "/api/patients",
+        json={"patient_id": "LAZY_PAT001", "patient_name": "Lazy Test Patient"},
+    )
+    assert response.status_code != 500
+    assert response.status_code == 201
+
+
+@pytest.mark.asyncio
+async def test_create_study_no_lazy_load(fresh_client, test_session, test_user):
+    """Verify create_study doesn't trigger lazy-load MissingGreenlet.
+
+    Regression test: uses fresh_client (separate session) to detect
+    MissingGreenlet errors from lazy-loading in async context.
+    """
+    # Pre-create patient in test_session
+    patient = Patient(id="LAZY_PAT002", name="Study Lazy Test")
+    test_session.add(patient)
+    await test_session.commit()
+
+    login_resp = await fresh_client.post(
+        "/api/auth/login",
+        data={"username": "test@example.com", "password": "testpassword"},
+    )
+    assert login_resp.status_code in [200, 204]
+
+    response = await fresh_client.post(
+        "/api/studies",
+        json={
+            "study_uid": "1.2.3.4.5.99.1",
+            "patient_id": "LAZY_PAT002",
+            "date": "2026-01-01",
+        },
+    )
+    assert response.status_code != 500
+    assert response.status_code == 201
+
+
+@pytest.mark.asyncio
+async def test_create_series_no_lazy_load(fresh_client, test_session, test_user):
+    """Verify create_series doesn't trigger lazy-load MissingGreenlet.
+
+    Regression test: uses fresh_client (separate session) to detect
+    MissingGreenlet errors from lazy-loading in async context.
+    """
+    # Pre-create patient and study in test_session
+    patient = Patient(id="LAZY_PAT003", name="Series Lazy Test")
+    test_session.add(patient)
+    await test_session.commit()
+
+    study = Study(
+        patient_id=patient.id,
+        study_uid="1.2.3.4.5.99.2",
+        date=datetime.now(UTC).date(),
+    )
+    test_session.add(study)
+    await test_session.commit()
+
+    login_resp = await fresh_client.post(
+        "/api/auth/login",
+        data={"username": "test@example.com", "password": "testpassword"},
+    )
+    assert login_resp.status_code in [200, 204]
+
+    response = await fresh_client.post(
+        "/api/series",
+        json={
+            "series_uid": "1.2.3.4.5.99.2.1",
+            "study_uid": "1.2.3.4.5.99.2",
+            "series_number": 1,
+            "series_description": "T1 Lazy Test",
+        },
+    )
+    assert response.status_code != 500
+    assert response.status_code == 201

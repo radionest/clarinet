@@ -19,6 +19,19 @@ class SeriesRepository(BaseRepository[Series]):
         """Initialize series repository with session."""
         super().__init__(session, Series)
 
+    async def create_with_relations(self, series: Series) -> Series:
+        """Create a series and return it with all relations loaded.
+
+        Args:
+            series: Series to create
+
+        Returns:
+            Created series with all relations loaded
+        """
+        self.session.add(series)
+        await self.session.commit()
+        return await self.get_with_relations(series.series_uid)
+
     async def get_with_relations(self, series_id: str) -> Series:
         """Get series with relations loaded.
 

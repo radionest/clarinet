@@ -287,7 +287,7 @@ class StudyService:
 
         series = Series(**series_data)
         series.study = study
-        return await self.series_repo.create(series)
+        return await self.series_repo.create_with_relations(series)
 
     async def find_series(self, find_query: SeriesFind) -> list[Series]:
         """Find series by criteria.
