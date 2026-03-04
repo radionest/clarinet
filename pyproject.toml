@@ -40,6 +40,7 @@ dependencies = [
     "greenlet>=3.0.0",
     "pynetdicom>=3.0.4",
     "cachetools>=7.0.0",
+    "tomli-w>=1.2.0",
 ]
 
 [project.optional-dependencies]

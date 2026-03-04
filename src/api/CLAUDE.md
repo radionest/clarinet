@@ -45,7 +45,7 @@ XRepositoryDep = Annotated[XRepository, Depends(get_X_repository)]
 
 Startup sequence:
 1. Database init (`db_manager.create_db_and_tables_async()`)
-2. Default roles + demo RecordTypes creation
+2. Default roles + config reconciliation (`reconcile_config()`) → stores `app.state.config_mode`, `app.state.config_tasks_path`
 3. Admin user creation (`ensure_admin_exists()`)
 4. RecordFlow engine setup (if `recordflow_enabled`) → `app.state.recordflow_engine`
 5. Pipeline broker startup (if `pipeline_enabled`) → `app.state.pipeline_broker`; syncs pipeline definitions to DB
@@ -82,6 +82,16 @@ Mounted at `/api/pipelines`, conditional on `pipeline_enabled`. Endpoints:
 - `POST /api/pipelines/sync` — re-sync pipeline definitions to DB on demand
 
 Uses `PipelineDefinitionRepositoryDep`.
+
+## Config Mode Guards (record.py)
+
+`require_mutable_config(request)` dependency in `dependencies.py`:
+- Raises `AuthorizationError` (→ 403) if `app.state.config_mode == "python"`
+- Applied to `POST /types`, `PATCH /types/{id}`, `DELETE /types/{id}`
+
+In TOML mode, these endpoints also trigger background TOML export/delete:
+- `POST /types` + `PATCH /types/{id}` → `export_record_type_to_toml()` + `export_data_schema_sidecar()`
+- `DELETE /types/{id}` → `delete_record_type_files()`
 
 ## RecordFlow Integration (record.py)
 

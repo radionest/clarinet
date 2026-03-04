@@ -25,6 +25,9 @@
 - `tests/test_dicomweb_cleanup.py` — unit tests for DICOMweb cache cleanup service
 - `tests/test_dicomweb_converter.py` — unit tests for DICOMweb data converters
 - `tests/test_config_loader.py` — unit tests for config loader (TOML/JSON discovery, file references, schema resolution)
+- `tests/integration/test_config_reconciler.py` — integration tests for config reconciler (create/update/unchanged/orphan/delete, file_registry + data_schema diffs)
+- `tests/integration/test_config_toml_sync.py` — integration tests for TOML bidirectional sync (bootstrap from TOML, export, round-trip)
+- `tests/integration/test_config_python_mode.py` — integration tests for Python config mode (loader, FileRef resolution, schema sidecars)
 
 ## Guidelines
 

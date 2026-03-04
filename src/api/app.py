@@ -31,7 +31,7 @@ from src.settings import settings
 from src.utils.admin import ensure_admin_exists
 from src.utils.bootstrap import (
     add_default_user_roles,
-    create_record_types_from_config,
+    reconcile_config,
 )
 from src.utils.db_manager import db_manager
 from src.utils.file_registry_resolver import load_project_file_registry
@@ -80,10 +80,20 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     logger.info("Database initialized with async support")
 
     await add_default_user_roles()
-    await create_record_types_from_config("./tasks/")
+
+    # Reconcile RecordType definitions (replaces create_record_types_from_config)
+    reconcile_result = await reconcile_config()
+    app.state.config_mode = settings.config_mode
+    app.state.config_tasks_path = settings.config_tasks_path
+    logger.info(
+        f"Config reconcile ({settings.config_mode} mode): "
+        f"{len(reconcile_result.created)} created, "
+        f"{len(reconcile_result.updated)} updated, "
+        f"{len(reconcile_result.orphaned)} orphaned"
+    )
 
     # Load project file registry for API use
-    app.state.project_file_registry = await load_project_file_registry("./tasks/")
+    app.state.project_file_registry = await load_project_file_registry(settings.config_tasks_path)
 
     try:
         await ensure_admin_exists()

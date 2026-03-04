@@ -10,7 +10,7 @@ import os
 from enum import Enum
 from functools import lru_cache
 from pathlib import Path
-from typing import Self
+from typing import Literal, Self
 
 from pydantic import field_validator
 from pydantic_settings import (
@@ -196,6 +196,11 @@ class Settings(BaseSettings):
     series_filter_min_instance_count: int | None = None
     series_filter_unknown_modality_policy: str = "include"
     series_filter_on_import: bool = False
+
+    # Config mode settings
+    config_mode: Literal["toml", "python"] = "toml"
+    config_tasks_path: str = "./tasks/"
+    config_delete_orphans: bool = False
 
     # RecordFlow settings
     recordflow_enabled: bool = False  # Enable RecordFlow workflow engine

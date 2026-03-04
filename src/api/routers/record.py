@@ -27,6 +27,12 @@ from src.api.dependencies import (
     RecordRepositoryDep,
     RecordTypeRepositoryDep,
     SeriesRepositoryDep,
+    require_mutable_config,
+)
+from src.config.toml_exporter import (
+    delete_record_type_files,
+    export_data_schema_sidecar,
+    export_record_type_to_toml,
 )
 from src.exceptions import CONFLICT, NOT_FOUND
 from src.exceptions.domain import ValidationError
@@ -175,9 +181,16 @@ async def find_record_type(
     return await repo.find(find_query)
 
 
-@router.post("/types", response_model=RecordType, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/types",
+    response_model=RecordType,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_mutable_config)],
+)
 async def add_record_type(
     record_type: RecordTypeCreate,
+    request: Request,
+    background_tasks: BackgroundTasks,
     repo: RecordTypeRepositoryDep,
     project_registry: ProjectFileRegistryDep,
     constrain_unique_names: bool = True,
@@ -185,6 +198,7 @@ async def add_record_type(
     """Create a new record type.
 
     Supports ``files`` references that resolve against the project file registry.
+    In TOML mode, exports the created RecordType to a TOML file.
     """
     # Resolve file references if present in raw request body
     props = record_type.model_dump(exclude_unset=True)
@@ -203,16 +217,33 @@ async def add_record_type(
     if constrain_unique_names:
         await repo.ensure_unique_name(record_type.name)
 
-    return await repo.create(new_record_type)
+    result = await repo.create(new_record_type)
+
+    # Export to TOML in background (TOML mode only)
+    if getattr(request.app.state, "config_mode", "toml") == "toml":
+        folder = Path(getattr(request.app.state, "config_tasks_path", "./tasks/"))
+        background_tasks.add_task(export_record_type_to_toml, result, folder)
+        background_tasks.add_task(export_data_schema_sidecar, result, folder)
+
+    return result
 
 
-@router.patch("/types/{record_type_id}", response_model=RecordType)
+@router.patch(
+    "/types/{record_type_id}",
+    response_model=RecordType,
+    dependencies=[Depends(require_mutable_config)],
+)
 async def update_record_type(
     record_type_id: str,
     record_type_update: RecordTypeOptional,
+    request: Request,
+    background_tasks: BackgroundTasks,
     repo: RecordTypeRepositoryDep,
 ) -> RecordType:
-    """Update an existing record type."""
+    """Update an existing record type.
+
+    In TOML mode, exports the updated RecordType to a TOML file.
+    """
     record_type = await repo.get(record_type_id)
 
     # Validate data schema if present
@@ -223,7 +254,15 @@ async def update_record_type(
             raise ValidationError(f"Data schema is invalid: {e}") from e
 
     update_data = record_type_update.model_dump(exclude_unset=True, exclude_none=True)
-    return await repo.update(record_type, update_data)
+    result = await repo.update(record_type, update_data)
+
+    # Export to TOML in background (TOML mode only)
+    if getattr(request.app.state, "config_mode", "toml") == "toml":
+        folder = Path(getattr(request.app.state, "config_tasks_path", "./tasks/"))
+        background_tasks.add_task(export_record_type_to_toml, result, folder)
+        background_tasks.add_task(export_data_schema_sidecar, result, folder)
+
+    return result
 
 
 @router.get("/types/{record_type_id}", response_model=RecordType)
@@ -235,14 +274,29 @@ async def get_record_type(
     return await repo.get(record_type_id)
 
 
-@router.delete("/types/{record_type_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/types/{record_type_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_mutable_config)],
+)
 async def delete_record_type(
     record_type_id: str,
+    request: Request,
+    background_tasks: BackgroundTasks,
     repo: RecordTypeRepositoryDep,
 ) -> None:
-    """Delete a record type."""
+    """Delete a record type.
+
+    In TOML mode, removes the corresponding TOML and schema files.
+    """
     record_type = await repo.get(record_type_id)
+    name = record_type.name
     await repo.delete(record_type)
+
+    # Delete TOML files in background (TOML mode only)
+    if getattr(request.app.state, "config_mode", "toml") == "toml":
+        folder = Path(getattr(request.app.state, "config_tasks_path", "./tasks/"))
+        background_tasks.add_task(delete_record_type_files, name, folder)
 
 
 # Record Endpoints

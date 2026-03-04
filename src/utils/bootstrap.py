@@ -5,6 +5,7 @@ This module provides functions to initialize the application with default data,
 such as user roles and record types, during startup.
 """
 
+from pathlib import Path
 from typing import Any
 
 from fastapi import HTTPException, status
@@ -12,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlmodel import select
 
+from src.config.reconciler import ReconcileResult, reconcile_record_types
 from src.models import RecordType, RecordTypeCreate, User, UserRole
 from src.utils.auth import get_password_hash
 from src.utils.config_loader import discover_config_files, load_record_config
@@ -293,6 +295,63 @@ async def create_record_types_from_config(
                 await _upsert_record_type(props, session)
             except Exception as e:
                 logger.error(f"Error processing record type {config_path.name}: {e}")
+
+
+async def reconcile_config(
+    folder: str | None = None,
+    suffix_filter: str = "",
+) -> ReconcileResult:
+    """Load config and reconcile RecordTypes with the database.
+
+    Dispatches by ``settings.config_mode``:
+    - ``"toml"``: discover TOML/JSON files, resolve file refs, then reconcile.
+    - ``"python"``: load Python config files, then reconcile.
+
+    Args:
+        folder: Override config folder (defaults to ``settings.config_tasks_path``).
+        suffix_filter: If non-empty, only include configs whose stem
+            contains this substring.
+
+    Returns:
+        ReconcileResult with counts per category.
+    """
+    from src.settings import settings
+
+    folder = folder or settings.config_tasks_path
+    all_props: list[dict[str, Any]] = []
+
+    if settings.config_mode == "python":
+        from src.config.python_loader import load_python_config
+
+        all_props = await load_python_config(Path(folder))
+    else:
+        # TOML mode — use existing loaders
+        config_files = discover_config_files(folder, suffix_filter)
+        if not config_files:
+            logger.warning(f"No record type configs found in {folder}")
+            return ReconcileResult()
+
+        logger.info(f"Found record type configs: {[p.stem for p in config_files]}")
+        project_registry = await load_project_file_registry(folder)
+
+        for config_path in config_files:
+            try:
+                props = await load_record_config(config_path)
+                if props is None:
+                    continue
+                props = resolve_task_files(props, project_registry)
+                all_props.append(props)
+            except Exception as e:
+                logger.error(f"Error processing record type {config_path.name}: {e}")
+
+    async with db_manager.get_async_session_context() as session:
+        result = await reconcile_record_types(
+            all_props,
+            session,
+            delete_orphans=settings.config_delete_orphans,
+        )
+
+    return result
 
 
 # Deprecated alias for backward compatibility

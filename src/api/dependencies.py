@@ -13,6 +13,7 @@ from src.api.auth_config import (
     optional_current_user,
 )
 from src.exceptions import ClarinetError
+from src.exceptions.domain import AuthorizationError
 from src.models import User
 from src.repositories.patient_repository import PatientRepository
 from src.repositories.pipeline_definition_repository import PipelineDefinitionRepository
@@ -256,3 +257,19 @@ def get_project_file_registry(request: Request) -> dict | None:
 
 
 ProjectFileRegistryDep = Annotated[dict | None, Depends(get_project_file_registry)]
+
+
+def require_mutable_config(request: Request) -> None:
+    """Raise AuthorizationError if config_mode is 'python'.
+
+    In Python config mode, RecordType mutations are disabled because
+    Python files are the single source of truth.
+
+    Args:
+        request: FastAPI request to access app state.
+
+    Raises:
+        AuthorizationError: If config_mode is 'python'.
+    """
+    if getattr(request.app.state, "config_mode", "toml") == "python":
+        raise AuthorizationError("RecordType mutations disabled in Python config mode")
