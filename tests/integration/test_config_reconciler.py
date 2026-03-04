@@ -18,11 +18,8 @@ def _make_props(
     level: str = "SERIES",
     **extra: object,
 ) -> dict:
-    """Helper to create a minimal valid RecordType props dict.
-
-    Includes defaults that match RecordTypeBase to avoid false diffs.
-    """
-    return {"name": name, "description": description, "level": level, "min_users": 1, **extra}
+    """Helper to create a minimal valid RecordType props dict."""
+    return {"name": name, "description": description, "level": level, **extra}
 
 
 @pytest_asyncio.fixture
@@ -204,3 +201,67 @@ async def test_reconcile_result_counts(test_session: AsyncSession) -> None:
     assert len(result.updated) == 1
     assert len(result.created) == 1
     assert result.errors == []
+
+
+@pytest.mark.asyncio
+async def test_none_config_matches_orm_default(
+    test_session: AsyncSession,
+    seed_record_type: RecordType,
+) -> None:
+    """Config with min_users=None should match DB ORM default (1) → unchanged."""
+    config = [
+        _make_props(
+            "existing_type",
+            description="Original description",
+            label="Original",
+            min_users=None,
+        ),
+    ]
+    result = await reconcile_record_types(config, test_session)
+
+    assert result.unchanged == ["existing_type"]
+    assert result.updated == []
+
+
+@pytest.mark.asyncio
+async def test_explicit_value_differs_from_default(
+    test_session: AsyncSession,
+    seed_record_type: RecordType,
+) -> None:
+    """Config with explicit min_users=3 should detect update vs DB default."""
+    config = [
+        _make_props(
+            "existing_type",
+            description="Original description",
+            label="Original",
+            min_users=3,
+        ),
+    ]
+    result = await reconcile_record_types(config, test_session)
+
+    assert result.updated == ["existing_type"]
+    assert "min_users" in result.updated or result.updated == ["existing_type"]
+
+    await test_session.refresh(seed_record_type)
+    assert seed_record_type.min_users == 3
+
+
+@pytest.mark.asyncio
+async def test_empty_collection_matches_factory_default(
+    test_session: AsyncSession,
+    seed_record_type: RecordType,
+) -> None:
+    """Config with data_schema={} and file_registry=[] should match ORM defaults → unchanged."""
+    config = [
+        _make_props(
+            "existing_type",
+            description="Original description",
+            label="Original",
+            data_schema={},
+            file_registry=[],
+        ),
+    ]
+    result = await reconcile_record_types(config, test_session)
+
+    assert result.unchanged == ["existing_type"]
+    assert result.updated == []

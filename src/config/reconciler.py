@@ -8,6 +8,7 @@ orphans no longer in the config.
 from dataclasses import dataclass, field
 from typing import Any
 
+from pydantic_core import PydanticUndefined
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 
@@ -79,11 +80,41 @@ def _normalize(value: Any) -> Any:
     return value
 
 
+def _get_field_default(field_name: str) -> Any:
+    """Get the normalized default value for a RecordType field.
+
+    Uses Pydantic v2 model introspection to extract the default from the
+    ORM model class. We intentionally use RecordType (table=True), not
+    RecordTypeBase, because the ORM class overrides JSON column defaults
+    with default_factory (e.g., file_registry: None in Base → [] in Table,
+    data_schema: None → {}). This is a standard SQLModel pattern to avoid
+    NULL in JSON columns, but it creates a default mismatch that the
+    reconciler must account for.
+    """
+    field_info = RecordType.model_fields.get(field_name)
+    if field_info is None:
+        return PydanticUndefined
+
+    if field_info.default is not PydanticUndefined:
+        return _normalize(field_info.default)
+    if field_info.default_factory is not None:
+        # mypy can't resolve Callable[[], Any] | Callable[[dict], Any] union
+        return _normalize(field_info.default_factory())  # type: ignore[call-arg]
+
+    return PydanticUndefined
+
+
 def _fields_differ(db_record_type: RecordType, config_props: dict[str, Any]) -> list[str]:
     """Return list of field names that differ between DB and config.
 
     Only compares fields that are explicitly present in *config_props*.
     Missing fields are assumed unchanged (keeps DB value).
+
+    Default-aware: when config specifies None for a field and the DB holds
+    the ORM default (e.g., min_users=1, data_schema={}), the field is
+    treated as unchanged. This prevents false update cycles caused by the
+    mismatch between RecordTypeBase defaults (None) and RecordType ORM
+    defaults that are applied on INSERT.
 
     Args:
         db_record_type: Existing RecordType from DB.
@@ -99,6 +130,14 @@ def _fields_differ(db_record_type: RecordType, config_props: dict[str, Any]) -> 
         db_val = _normalize(getattr(db_record_type, field_name, None))
         config_val = _normalize(config_props.get(field_name))
         if db_val != config_val:
+            # Config None + DB has ORM default → not a real change.
+            # This handles the mismatch between RecordTypeBase defaults (None)
+            # and RecordType ORM defaults (e.g., min_users=1, data_schema={}).
+            # Config loaders produce None for unspecified fields; the ORM fills
+            # its own defaults on INSERT. Treating this as "unchanged" prevents
+            # false updates on every reconcile cycle.
+            if config_val is None and db_val == _get_field_default(field_name):
+                continue
             changed.append(field_name)
     return changed
 
