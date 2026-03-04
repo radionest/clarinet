@@ -1,0 +1,13 @@
+name = "segment_MRIAG_single"
+description = "MRI angiography lesion segmentation"
+label = "MRI-AG segment"
+level = "STUDY"
+min_records = 1
+max_records = 4
+role = "doctor_MRI"
+slicer_script = "segment.py"
+
+[[files]]
+name = "segmentation_single"
+role = "output"
+required = true

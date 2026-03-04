@@ -1,0 +1,6 @@
+name = "first_check"
+description = "Initial assessment of every study added to the trial"
+label = "First check"
+level = "STUDY"
+min_records = 1
+max_records = 1

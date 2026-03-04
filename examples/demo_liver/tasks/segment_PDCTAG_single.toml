@@ -1,0 +1,13 @@
+name = "segment_PDCTAG_single"
+description = "PDCT angiography lesion segmentation"
+label = "PDCT-AG segment"
+level = "STUDY"
+min_records = 1
+max_records = 4
+role = "doctor_PDCT"
+slicer_script = "segment.py"
+
+[[files]]
+name = "segmentation_single"
+role = "output"
+required = true

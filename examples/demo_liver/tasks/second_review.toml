@@ -1,0 +1,17 @@
+name = "second_review"
+description = "Second review — doctor classifies lesions that were missed in the initial segmentation"
+label = "Second review"
+level = "SERIES"
+min_records = 1
+max_records = 1
+slicer_script = "second_review.py"
+
+[[files]]
+name = "master_projection"
+role = "input"
+required = true
+
+[[files]]
+name = "second_review_output"
+role = "output"
+required = true
