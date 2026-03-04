@@ -48,10 +48,7 @@ async def example_find_and_retrieve() -> None:
             patient_id=study.patient_id,
         )
 
-        print(
-            f"\nRetrieved {result.num_completed} instances, "
-            f"{result.num_failed} failed"
-        )
+        print(f"\nRetrieved {result.num_completed} instances, {result.num_failed} failed")
 
 
 async def example_find_and_move() -> None:
