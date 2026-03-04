@@ -69,7 +69,7 @@ def _get_task() -> Any:
 
     broker = get_broker()
 
-    @broker.task(task_name="anonymize_study", queue=DICOM_QUEUE)  # type: ignore[misc]
+    @broker.task(task_name="anonymize_study", queue=DICOM_QUEUE)
     async def anonymize_study_task(
         study_uid: str,
         save_to_disk: bool | None = None,
