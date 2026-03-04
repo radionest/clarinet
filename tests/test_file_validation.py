@@ -34,17 +34,28 @@ def mock_record() -> MagicMock:
 @pytest.fixture
 def mock_record_type() -> MagicMock:
     """Create a mock RecordType for testing."""
+    from src.models.file_schema import FileRole
+
     record_type = MagicMock()
     record_type.name = "ct_segmentation"
-    record_type.input_files = [
-        FileDefinition(name="ct_scan", pattern="ct_scan.nrrd", required=True),
+    record_type.file_registry = [
+        FileDefinition(name="ct_scan", pattern="ct_scan.nrrd", required=True, role=FileRole.INPUT),
         FileDefinition(
-            name="mask", pattern="mask_{id}.nrrd", required=False, description="Optional mask"
+            name="mask",
+            pattern="mask_{id}.nrrd",
+            required=False,
+            description="Optional mask",
+            role=FileRole.INPUT,
+        ),
+        FileDefinition(
+            name="segmentation",
+            pattern="seg_{id}.seg.nrrd",
+            required=True,
+            role=FileRole.OUTPUT,
         ),
     ]
-    record_type.output_files = [
-        FileDefinition(name="segmentation", pattern="seg_{id}.seg.nrrd", required=True),
-    ]
+    record_type.input_files = [f for f in record_type.file_registry if f.role == FileRole.INPUT]
+    record_type.output_files = [f for f in record_type.file_registry if f.role == FileRole.OUTPUT]
     return record_type
 
 
@@ -254,12 +265,16 @@ class TestFileValidatorEdgeCases:
         tmp_path: Path,
     ) -> None:
         """Test validation when multiple required files are missing."""
+        from src.models.file_schema import FileRole
+
         record_type = MagicMock()
-        record_type.input_files = [
-            FileDefinition(name="file1", pattern="file1.nrrd", required=True),
-            FileDefinition(name="file2", pattern="file2.nrrd", required=True),
-            FileDefinition(name="file3", pattern="file3.nrrd", required=True),
+        input_defs = [
+            FileDefinition(name="file1", pattern="file1.nrrd", required=True, role=FileRole.INPUT),
+            FileDefinition(name="file2", pattern="file2.nrrd", required=True, role=FileRole.INPUT),
+            FileDefinition(name="file3", pattern="file3.nrrd", required=True, role=FileRole.INPUT),
         ]
+        record_type.file_registry = input_defs
+        record_type.input_files = input_defs
 
         validator = FileValidator(record_type)
         result = validator.validate_files(
@@ -277,10 +292,19 @@ class TestFileValidatorEdgeCases:
         tmp_path: Path,
     ) -> None:
         """Test validation with data field in pattern."""
+        from src.models.file_schema import FileRole
+
         record_type = MagicMock()
-        record_type.input_files = [
-            FileDefinition(name="birads_file", pattern="birads_{data.BIRADS_R}.txt", required=True),
+        input_defs = [
+            FileDefinition(
+                name="birads_file",
+                pattern="birads_{data.BIRADS_R}.txt",
+                required=True,
+                role=FileRole.INPUT,
+            ),
         ]
+        record_type.file_registry = input_defs
+        record_type.input_files = input_defs
 
         # Create file with resolved name
         (tmp_path / "birads_4.txt").touch()

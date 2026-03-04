@@ -183,7 +183,7 @@ class RecordRepository(BaseRepository[Record]):
     async def find_pending_by_user(self, user_id: UUID) -> Sequence[Record]:
         """Find active (non-terminal) records assigned to a user with relations loaded.
 
-        Returns records that are not finished, failed, or paused.
+        Returns records that are not blocked, finished, failed, or paused.
 
         Args:
             user_id: User UUID to filter by
@@ -195,6 +195,7 @@ class RecordRepository(BaseRepository[Record]):
             select(Record)
             .where(
                 Record.user_id == user_id,
+                Record.status != RecordStatus.blocked,
                 Record.status != RecordStatus.finished,
                 Record.status != RecordStatus.failed,
                 Record.status != RecordStatus.pause,
@@ -274,6 +275,20 @@ class RecordRepository(BaseRepository[Record]):
         await self.session.commit()
         return await self.get_with_relations(record_id), old_status
 
+    async def update_checksums(self, record_id: int, checksums: dict[str, str]) -> None:
+        """Update file checksums on a record.
+
+        Args:
+            record_id: Record ID
+            checksums: New checksums dict (name -> SHA256)
+
+        Raises:
+            RecordNotFoundError: If record doesn't exist
+        """
+        record = await self.get(record_id)
+        record.file_checksums = checksums
+        await self.session.commit()
+
     async def set_files(self, record: Record, files: dict[str, str]) -> None:
         """Set matched files on a record.
 
@@ -297,8 +312,11 @@ class RecordRepository(BaseRepository[Record]):
         Raises:
             RecordNotFoundError: If record doesn't exist
             UserNotFoundError: If user doesn't exist
+            ValidationError: If record is blocked
         """
         record = await self.get(record_id)
+        if record.status == RecordStatus.blocked:
+            raise ValidationError("Cannot assign user to a blocked record")
         user = await self.session.get(User, user_id)
         if not user:
             raise UserNotFoundError(user_id)

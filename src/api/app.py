@@ -31,9 +31,10 @@ from src.settings import settings
 from src.utils.admin import ensure_admin_exists
 from src.utils.bootstrap import (
     add_default_user_roles,
-    create_demo_record_types_from_json,
+    create_record_types_from_config,
 )
 from src.utils.db_manager import db_manager
+from src.utils.file_registry_resolver import load_project_file_registry
 from src.utils.logger import logger
 
 
@@ -79,7 +80,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     logger.info("Database initialized with async support")
 
     await add_default_user_roles()
-    await create_demo_record_types_from_json("./tasks/", demo_suffix="")
+    await create_record_types_from_config("./tasks/")
+
+    # Load project file registry for API use
+    app.state.project_file_registry = await load_project_file_registry("./tasks/")
 
     try:
         await ensure_admin_exists()

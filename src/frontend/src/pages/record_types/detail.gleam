@@ -100,6 +100,7 @@ fn stats_cards(stat: RecordTypeStats) -> Element(Msg) {
   html.div([attribute.class("stats-grid")], [
     stat_card("Total Records", int.to_string(stat.total_records)),
     stat_card("Unique Users", int.to_string(stat.unique_users)),
+    stat_card("Blocked", int.to_string(counts.blocked)),
     stat_card("Pending", int.to_string(counts.pending)),
     stat_card("In Work", int.to_string(counts.inwork)),
     stat_card("Finished", int.to_string(counts.finished)),
@@ -165,6 +166,7 @@ fn record_row(record: Record) -> Element(Msg) {
 
 fn status_text(status: types.RecordStatus) -> String {
   case status {
+    types.Blocked -> "Blocked"
     types.Pending -> "Pending"
     types.InWork -> "In Progress"
     types.Finished -> "Completed"

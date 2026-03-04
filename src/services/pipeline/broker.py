@@ -71,11 +71,18 @@ def create_broker(queue_name: str = DEFAULT_QUEUE) -> AsyncBroker:
     from taskiq_aio_pika import AioPikaBroker
     from taskiq_aio_pika.exchange import Exchange
     from taskiq_aio_pika.queue import Queue as RmqQueue
+    from taskiq_aio_pika.queue import QueueType
 
     routing_key = extract_routing_key(queue_name)
 
     broker = AioPikaBroker(
         url=_build_amqp_url(),
+        dead_letter_queue=RmqQueue(
+            name=DLQ_QUEUE,
+            declare=True,
+            durable=True,
+            type=QueueType.CLASSIC,
+        ),
         exchange=Exchange(
             name=settings.rabbitmq_exchange,
             type=ExchangeType.DIRECT,
@@ -86,11 +93,15 @@ def create_broker(queue_name: str = DEFAULT_QUEUE) -> AsyncBroker:
                 name=queue_name,
                 routing_key=routing_key,
                 declare=True,
+                durable=True,
+                type=QueueType.CLASSIC,
             ),
         ],
         delay_queue=RmqQueue(
             name=f"{queue_name}.delay",
             declare=True,
+            durable=True,
+            type=QueueType.CLASSIC,
         ),
     )
 

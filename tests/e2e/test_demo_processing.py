@@ -1,0 +1,737 @@
+"""E2E tests: full demo research processing cycle.
+
+Loads actual RecordType definitions from ``examples/demo/tasks/``
+(TOML preferred, JSON fallback) and RecordFlow rules from
+``examples/demo/record_flow.py``, then exercises the complete processing
+chain through the API.
+"""
+
+import json
+from collections.abc import AsyncGenerator
+from datetime import UTC, datetime
+from pathlib import Path
+from uuid import uuid4
+
+import pytest
+import pytest_asyncio
+from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.api.app import app
+from src.client import ClarinetClient
+from src.models.base import DicomQueryLevel
+from src.models.patient import Patient
+from src.models.record import RecordType
+from src.models.study import Series, Study
+from src.models.user import UserRole
+from src.services.recordflow import RecordFlowEngine
+from src.services.recordflow.flow_loader import load_flows_from_file
+from src.services.recordflow.flow_record import ENTITY_REGISTRY, RECORD_REGISTRY
+from src.utils.config_loader import discover_config_files, load_record_config
+from src.utils.file_registry_resolver import resolve_task_files
+
+DEMO_DIR = Path(__file__).resolve().parent.parent.parent / "examples" / "demo"
+TASKS_DIR = DEMO_DIR / "tasks"
+FLOW_FILE = DEMO_DIR / "record_flow.py"
+
+
+# ---------------------------------------------------------------------------
+# Autouse fixtures + client override
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _clear_registry():
+    """Clear the global FlowRecord registries between tests."""
+    RECORD_REGISTRY.clear()
+    ENTITY_REGISTRY.clear()
+    yield
+    RECORD_REGISTRY.clear()
+    ENTITY_REGISTRY.clear()
+
+
+@pytest_asyncio.fixture
+async def client(test_session, test_settings) -> AsyncGenerator[AsyncClient]:
+    """Override e2e conftest's unauthenticated client with an authenticated one.
+
+    The e2e conftest yields ``unauthenticated_client`` as ``client``.
+    Demo processing tests need auth bypassed, so we re-create the root
+    conftest ``client`` pattern here (session + auth overrides in one fixture).
+    """
+    from httpx import ASGITransport
+
+    from src.api.auth_config import current_active_user, current_superuser
+    from src.models.user import User
+    from src.utils.auth import get_password_hash
+    from src.utils.database import get_async_session
+
+    mock_user = User(
+        id=uuid4(),
+        email="e2e_demo@test.com",
+        hashed_password=get_password_hash("mock"),
+        is_active=True,
+        is_verified=True,
+        is_superuser=True,
+    )
+    test_session.add(mock_user)
+    await test_session.commit()
+    await test_session.refresh(mock_user)
+
+    async def override_get_session():
+        yield test_session
+
+    async def override_get_settings():
+        return test_settings
+
+    app.dependency_overrides[get_async_session] = override_get_session
+    app.dependency_overrides[current_active_user] = lambda: mock_user
+    app.dependency_overrides[current_superuser] = lambda: mock_user
+
+    try:
+        from src.settings import get_settings
+
+        app.dependency_overrides[get_settings] = override_get_settings
+    except (ImportError, AttributeError):
+        pass
+
+    try:
+        import src.api.auth_config
+
+        src.api.auth_config.settings = test_settings
+    except (ImportError, AttributeError):
+        pass
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test", cookies={}) as ac:
+        original_request = ac.request
+
+        async def request_with_cookies(method, url, **kwargs):
+            if ac.cookies:
+                headers = kwargs.get("headers") or {}
+                cookie_header = "; ".join([f"{k}={v}" for k, v in ac.cookies.items()])
+                if cookie_header:
+                    headers["Cookie"] = cookie_header
+                    kwargs["headers"] = headers
+            return await original_request(method, url, **kwargs)
+
+        ac.request = request_with_cookies
+        yield ac
+
+    app.dependency_overrides.clear()
+
+
+# ---------------------------------------------------------------------------
+# Demo data fixtures
+# ---------------------------------------------------------------------------
+
+
+@pytest_asyncio.fixture
+async def demo_roles(test_session: AsyncSession) -> dict[str, UserRole]:
+    """Create UserRole rows required by demo RecordTypes."""
+    roles: dict[str, UserRole] = {}
+    for name in ("doctor", "auto", "expert"):
+        role = UserRole(name=name)
+        test_session.add(role)
+        roles[name] = role
+    await test_session.commit()
+    for role in roles.values():
+        await test_session.refresh(role)
+    return roles
+
+
+@pytest_asyncio.fixture
+async def demo_record_types(
+    test_session: AsyncSession,
+    demo_roles: dict[str, UserRole],
+) -> dict[str, RecordType]:
+    """Load all 6 RecordType definitions from the demo tasks directory.
+
+    Uses ``config_loader`` to discover TOML/JSON configs, resolve file
+    references and schemas, then inserts via direct ORM to match the
+    pattern used by other integration tests.
+    """
+    config_files = discover_config_files(str(TASKS_DIR))
+
+    # Load project file registry for resolving file references
+    registry_path = TASKS_DIR / "file_registry.json"
+    project_registry = json.loads(registry_path.read_text()) if registry_path.exists() else None
+
+    types: dict[str, RecordType] = {}
+    for config_path in config_files:
+        definition = await load_record_config(config_path)
+        if definition is None:
+            continue
+
+        # Resolve file references against project registry
+        definition = resolve_task_files(definition, project_registry)
+
+        rt = RecordType(**definition)
+        test_session.add(rt)
+        types[rt.name] = rt
+
+    await test_session.commit()
+    for rt in types.values():
+        await test_session.refresh(rt)
+    return types
+
+
+@pytest_asyncio.fixture
+async def demo_engine(
+    clarinet_client: ClarinetClient,
+) -> AsyncGenerator[RecordFlowEngine]:
+    """Load flows from demo record_flow.py and install engine into app.state."""
+    flows = load_flows_from_file(FLOW_FILE)
+    engine = RecordFlowEngine(clarinet_client)
+    for flow in flows:
+        engine.register_flow(flow)
+
+    app.state.recordflow_engine = engine
+    yield engine
+    app.state.recordflow_engine = None
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+async def _create_hierarchy(
+    session: AsyncSession,
+    engine: RecordFlowEngine | None = None,
+) -> dict:
+    """Create patient -> study -> series via ORM. Returns dict with IDs.
+
+    All entities are created via ORM to avoid the MissingGreenlet error
+    that occurs when ``POST /api/series`` accesses ``result.study.patient_id``
+    (lazy load after ``session.refresh``). If *engine* is provided, triggers
+    ``handle_entity_created`` for the series so that entity flows fire.
+    """
+    patient_id = f"E2E_PAT_{uuid4().hex[:8]}"
+    study_uid = f"1.2.826.0.1.{uuid4().int % 10**10}"
+    series_uid = f"{study_uid}.1"
+
+    patient = Patient(id=patient_id, name="E2E Patient")
+    session.add(patient)
+    await session.commit()
+
+    study = Study(
+        study_uid=study_uid,
+        patient_id=patient_id,
+        date=datetime.now(UTC).date(),
+    )
+    session.add(study)
+    await session.commit()
+
+    series = Series(
+        series_uid=series_uid,
+        series_number=1,
+        study_uid=study_uid,
+    )
+    session.add(series)
+    await session.commit()
+
+    if engine:
+        await engine.handle_entity_created(
+            "series",
+            patient_id=patient_id,
+            study_uid=study_uid,
+            series_uid=series_uid,
+        )
+
+    return {
+        "patient_id": patient_id,
+        "study_uid": study_uid,
+        "series_uid": series_uid,
+    }
+
+
+async def _add_series(
+    session: AsyncSession,
+    study_uid: str,
+    patient_id: str,
+    series_number: int,
+    engine: RecordFlowEngine | None = None,
+) -> str:
+    """Add another series to an existing study via ORM. Returns series_uid."""
+    series_uid = f"{study_uid}.{series_number}"
+
+    series = Series(
+        series_uid=series_uid,
+        series_number=series_number,
+        study_uid=study_uid,
+    )
+    session.add(series)
+    await session.commit()
+
+    if engine:
+        await engine.handle_entity_created(
+            "series",
+            patient_id=patient_id,
+            study_uid=study_uid,
+            series_uid=series_uid,
+        )
+
+    return series_uid
+
+
+async def _find_records(
+    client: AsyncClient,
+    record_type_name: str,
+    study_uid: str | None = None,
+    series_uid: str | None = None,
+) -> list[dict]:
+    """Find records of a given type via the API."""
+    params: dict = {"record_type_name": record_type_name}
+    if study_uid:
+        params["study_uid"] = study_uid
+    if series_uid:
+        params["series_uid"] = series_uid
+
+    resp = await client.post("/api/records/find", params=params)
+    assert resp.status_code == 200, resp.text
+    result: list[dict] = resp.json()
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Test: record types loaded
+# ---------------------------------------------------------------------------
+
+
+class TestDemoRecordTypes:
+    """Verify demo record types are loaded correctly."""
+
+    @pytest.mark.asyncio
+    async def test_record_types_loaded_correctly(
+        self,
+        demo_record_types: dict[str, RecordType],
+    ):
+        """All 6 demo record types are loaded with correct metadata."""
+        assert len(demo_record_types) == 6
+
+        # doctor_review
+        dr = demo_record_types["doctor_review"]
+        assert dr.level == DicomQueryLevel.SERIES
+        assert dr.role_name == "doctor"
+        assert dr.data_schema is not None
+        assert "diagnosis" in dr.data_schema.get("properties", {})
+
+        # ai_analysis
+        ai = demo_record_types["ai_analysis"]
+        assert ai.level == DicomQueryLevel.SERIES
+        assert ai.role_name == "auto"
+        assert ai.data_schema is not None
+        assert "ai_diagnosis" in ai.data_schema.get("properties", {})
+
+        # expert_check
+        ec = demo_record_types["expert_check"]
+        assert ec.level == DicomQueryLevel.SERIES
+        assert ec.role_name == "expert"
+        assert ec.data_schema is not None
+        assert "final_diagnosis" in ec.data_schema.get("properties", {})
+
+        # series_markup
+        sm = demo_record_types["series_markup"]
+        assert sm.level == DicomQueryLevel.SERIES
+        assert sm.role_name == "doctor"
+        assert sm.slicer_script is not None
+
+        # lesion_seg
+        ls = demo_record_types["lesion_seg"]
+        assert ls.level == DicomQueryLevel.SERIES
+        assert ls.role_name == "doctor"
+        assert ls.file_registry is not None
+        assert len(ls.file_registry) == 1
+
+        # air_volume
+        av = demo_record_types["air_volume"]
+        assert av.level == DicomQueryLevel.SERIES
+        assert av.role_name is None
+        assert av.file_registry is not None
+        assert len(av.file_registry) == 1
+
+
+# ---------------------------------------------------------------------------
+# Test: entity flows
+# ---------------------------------------------------------------------------
+
+
+class TestEntityFlows:
+    """Entity creation flows (series -> auto-create series_markup)."""
+
+    @pytest.mark.asyncio
+    async def test_series_creation_triggers_series_markup(
+        self,
+        client: AsyncClient,
+        test_session: AsyncSession,
+        demo_record_types: dict[str, RecordType],
+        demo_engine: RecordFlowEngine,
+    ):
+        """Creating a series auto-creates a series_markup record (Flow 4)."""
+        hierarchy = await _create_hierarchy(test_session, engine=demo_engine)
+
+        records = await _find_records(client, "series_markup", study_uid=hierarchy["study_uid"])
+        assert len(records) == 1
+        assert records[0]["series_uid"] == hierarchy["series_uid"]
+
+    @pytest.mark.asyncio
+    async def test_multiple_series_get_independent_markups(
+        self,
+        client: AsyncClient,
+        test_session: AsyncSession,
+        demo_record_types: dict[str, RecordType],
+        demo_engine: RecordFlowEngine,
+    ):
+        """Each series gets its own series_markup record."""
+        hierarchy = await _create_hierarchy(test_session, engine=demo_engine)
+        series_uid_2 = await _add_series(
+            test_session,
+            study_uid=hierarchy["study_uid"],
+            patient_id=hierarchy["patient_id"],
+            series_number=2,
+            engine=demo_engine,
+        )
+
+        records = await _find_records(client, "series_markup", study_uid=hierarchy["study_uid"])
+        assert len(records) == 2
+
+        series_uids = {r["series_uid"] for r in records}
+        assert series_uids == {hierarchy["series_uid"], series_uid_2}
+
+
+# ---------------------------------------------------------------------------
+# Test: doctor_review flows
+# ---------------------------------------------------------------------------
+
+
+class TestDoctorReviewFlows:
+    """Flows triggered by doctor_review completion."""
+
+    @pytest.mark.asyncio
+    async def test_doctor_review_finished_creates_ai_analysis(
+        self,
+        client: AsyncClient,
+        test_session: AsyncSession,
+        demo_record_types: dict[str, RecordType],
+        demo_engine: RecordFlowEngine,
+    ):
+        """Finishing a doctor_review with high confidence creates ai_analysis (Flow 1)."""
+        hierarchy = await _create_hierarchy(test_session, engine=demo_engine)
+
+        # Create doctor_review
+        resp = await client.post(
+            "/api/records/",
+            json={
+                "record_type_name": "doctor_review",
+                "patient_id": hierarchy["patient_id"],
+                "study_uid": hierarchy["study_uid"],
+                "series_uid": hierarchy["series_uid"],
+            },
+        )
+        assert resp.status_code == 201
+        record_id = resp.json()["id"]
+
+        # Submit data (auto-sets status to finished, triggers flows)
+        resp = await client.post(
+            f"/api/records/{record_id}/data",
+            json={"diagnosis": "Normal", "confidence": 90},
+        )
+        assert resp.status_code == 200
+
+        # Flow 1: ai_analysis should be created
+        ai_records = await _find_records(client, "ai_analysis", study_uid=hierarchy["study_uid"])
+        assert len(ai_records) == 1
+
+    @pytest.mark.asyncio
+    async def test_doctor_review_low_confidence_creates_expert_check(
+        self,
+        client: AsyncClient,
+        test_session: AsyncSession,
+        demo_record_types: dict[str, RecordType],
+        demo_engine: RecordFlowEngine,
+    ):
+        """Low confidence creates both ai_analysis AND expert_check (Flows 1+2)."""
+        hierarchy = await _create_hierarchy(test_session, engine=demo_engine)
+
+        resp = await client.post(
+            "/api/records/",
+            json={
+                "record_type_name": "doctor_review",
+                "patient_id": hierarchy["patient_id"],
+                "study_uid": hierarchy["study_uid"],
+                "series_uid": hierarchy["series_uid"],
+            },
+        )
+        record_id = resp.json()["id"]
+
+        # Submit with low confidence (50 < 70)
+        resp = await client.post(
+            f"/api/records/{record_id}/data",
+            json={"diagnosis": "Abnormal", "confidence": 50},
+        )
+        assert resp.status_code == 200
+
+        # Flow 1: ai_analysis
+        ai_records = await _find_records(client, "ai_analysis", study_uid=hierarchy["study_uid"])
+        assert len(ai_records) == 1
+
+        # Flow 2: expert_check (confidence < 70)
+        expert_records = await _find_records(
+            client, "expert_check", study_uid=hierarchy["study_uid"]
+        )
+        assert len(expert_records) == 1
+
+    @pytest.mark.asyncio
+    async def test_doctor_review_high_confidence_no_expert_check(
+        self,
+        client: AsyncClient,
+        test_session: AsyncSession,
+        demo_record_types: dict[str, RecordType],
+        demo_engine: RecordFlowEngine,
+    ):
+        """High confidence creates ai_analysis but NOT expert_check."""
+        hierarchy = await _create_hierarchy(test_session, engine=demo_engine)
+
+        resp = await client.post(
+            "/api/records/",
+            json={
+                "record_type_name": "doctor_review",
+                "patient_id": hierarchy["patient_id"],
+                "study_uid": hierarchy["study_uid"],
+                "series_uid": hierarchy["series_uid"],
+            },
+        )
+        record_id = resp.json()["id"]
+
+        resp = await client.post(
+            f"/api/records/{record_id}/data",
+            json={"diagnosis": "Normal", "confidence": 90},
+        )
+        assert resp.status_code == 200
+
+        # ai_analysis created (Flow 1)
+        ai_records = await _find_records(client, "ai_analysis", study_uid=hierarchy["study_uid"])
+        assert len(ai_records) == 1
+
+        # expert_check NOT created (Flow 2 condition false: confidence >= 70)
+        expert_records = await _find_records(
+            client, "expert_check", study_uid=hierarchy["study_uid"]
+        )
+        assert len(expert_records) == 0
+
+
+# ---------------------------------------------------------------------------
+# Test: cross-record flows
+# ---------------------------------------------------------------------------
+
+
+class TestCrossRecordFlows:
+    """Flows comparing data across record types."""
+
+    @pytest.mark.asyncio
+    async def test_ai_disagreement_creates_expert_check(
+        self,
+        client: AsyncClient,
+        test_session: AsyncSession,
+        demo_record_types: dict[str, RecordType],
+        demo_engine: RecordFlowEngine,
+    ):
+        """AI disagreement with doctor creates expert_check (Flow 3)."""
+        hierarchy = await _create_hierarchy(test_session, engine=demo_engine)
+
+        # Step 1: Create and finish doctor_review (high confidence -> no expert from Flow 2)
+        resp = await client.post(
+            "/api/records/",
+            json={
+                "record_type_name": "doctor_review",
+                "patient_id": hierarchy["patient_id"],
+                "study_uid": hierarchy["study_uid"],
+                "series_uid": hierarchy["series_uid"],
+            },
+        )
+        dr_id = resp.json()["id"]
+
+        resp = await client.post(
+            f"/api/records/{dr_id}/data",
+            json={"diagnosis": "Normal", "confidence": 90},
+        )
+        assert resp.status_code == 200
+
+        # Flow 1 creates ai_analysis
+        ai_records = await _find_records(client, "ai_analysis", study_uid=hierarchy["study_uid"])
+        assert len(ai_records) == 1
+        ai_id = ai_records[0]["id"]
+
+        # No expert_check yet (high confidence, no disagreement yet)
+        expert_before = await _find_records(
+            client, "expert_check", study_uid=hierarchy["study_uid"]
+        )
+        assert len(expert_before) == 0
+
+        # Step 2: Submit ai_analysis with DIFFERENT diagnosis -> Flow 3 triggers
+        resp = await client.post(
+            f"/api/records/{ai_id}/data",
+            json={"ai_diagnosis": "Abnormal", "ai_confidence": 0.85},
+        )
+        assert resp.status_code == 200
+
+        # Flow 3: expert_check created due to diagnosis disagreement
+        expert_records = await _find_records(
+            client, "expert_check", study_uid=hierarchy["study_uid"]
+        )
+        assert len(expert_records) == 1
+
+    @pytest.mark.asyncio
+    async def test_ai_agreement_no_expert_check(
+        self,
+        client: AsyncClient,
+        test_session: AsyncSession,
+        demo_record_types: dict[str, RecordType],
+        demo_engine: RecordFlowEngine,
+    ):
+        """AI agreement with doctor does NOT create expert_check from Flow 3."""
+        hierarchy = await _create_hierarchy(test_session, engine=demo_engine)
+
+        # Create and finish doctor_review
+        resp = await client.post(
+            "/api/records/",
+            json={
+                "record_type_name": "doctor_review",
+                "patient_id": hierarchy["patient_id"],
+                "study_uid": hierarchy["study_uid"],
+                "series_uid": hierarchy["series_uid"],
+            },
+        )
+        dr_id = resp.json()["id"]
+
+        resp = await client.post(
+            f"/api/records/{dr_id}/data",
+            json={"diagnosis": "Normal", "confidence": 90},
+        )
+        assert resp.status_code == 200
+
+        # ai_analysis auto-created by Flow 1
+        ai_records = await _find_records(client, "ai_analysis", study_uid=hierarchy["study_uid"])
+        assert len(ai_records) == 1
+        ai_id = ai_records[0]["id"]
+
+        # Submit ai_analysis with SAME diagnosis -> Flow 3 should NOT trigger
+        resp = await client.post(
+            f"/api/records/{ai_id}/data",
+            json={"ai_diagnosis": "Normal", "ai_confidence": 0.95},
+        )
+        assert resp.status_code == 200
+
+        # No expert_check from Flow 3 (diagnoses agree)
+        expert_records = await _find_records(
+            client, "expert_check", study_uid=hierarchy["study_uid"]
+        )
+        assert len(expert_records) == 0
+
+
+# ---------------------------------------------------------------------------
+# Test: full processing chain
+# ---------------------------------------------------------------------------
+
+
+class TestFullProcessingChain:
+    """Complete demo processing cycle end-to-end."""
+
+    @pytest.mark.asyncio
+    async def test_complete_demo_cycle(
+        self,
+        client: AsyncClient,
+        test_session: AsyncSession,
+        demo_record_types: dict[str, RecordType],
+        demo_engine: RecordFlowEngine,
+    ):
+        """Full chain: entities, markups, reviews, AI analysis, expert check."""
+        # 1. Create patient -> study -> series (Flow 4: auto-creates series_markup)
+        hierarchy = await _create_hierarchy(test_session, engine=demo_engine)
+        study_uid = hierarchy["study_uid"]
+        series_uid = hierarchy["series_uid"]
+
+        # 2. Verify series_markup exists (created by entity Flow 4)
+        markup_records = await _find_records(client, "series_markup", study_uid=study_uid)
+        assert len(markup_records) == 1
+        markup_id = markup_records[0]["id"]
+        assert markup_records[0]["series_uid"] == series_uid
+
+        # 3. Submit series_markup data (Flow 5: auto-creates lesion_seg)
+        resp = await client.post(
+            f"/api/records/{markup_id}/data",
+            json={"markup_type": "segmentation"},
+        )
+        assert resp.status_code == 200
+
+        # 4. Verify lesion_seg exists
+        lesion_records = await _find_records(client, "lesion_seg", study_uid=study_uid)
+        assert len(lesion_records) == 1
+        assert lesion_records[0]["series_uid"] == series_uid
+
+        # 5. Create doctor_review, submit with low confidence
+        #    (Flows 1+2: auto-create ai_analysis + expert_check)
+        resp = await client.post(
+            "/api/records/",
+            json={
+                "record_type_name": "doctor_review",
+                "patient_id": hierarchy["patient_id"],
+                "study_uid": study_uid,
+                "series_uid": series_uid,
+            },
+        )
+        assert resp.status_code == 201
+        dr_id = resp.json()["id"]
+
+        resp = await client.post(
+            f"/api/records/{dr_id}/data",
+            json={"diagnosis": "Suspicious", "confidence": 40},
+        )
+        assert resp.status_code == 200
+
+        # 6. Verify ai_analysis and expert_check exist
+        ai_records = await _find_records(client, "ai_analysis", study_uid=study_uid)
+        assert len(ai_records) == 1
+        ai_id = ai_records[0]["id"]
+
+        expert_records = await _find_records(client, "expert_check", study_uid=study_uid)
+        assert len(expert_records) == 1
+
+        # 7. Submit ai_analysis with different diagnosis
+        #    Flow 3 fires (ai_diagnosis != diagnosis), but expert_check creation
+        #    is rejected by max_users=1 constraint (one already exists from Flow 2)
+        resp = await client.post(
+            f"/api/records/{ai_id}/data",
+            json={"ai_diagnosis": "Normal", "ai_confidence": 0.7},
+        )
+        assert resp.status_code == 200
+
+        # Still 1 expert_check (max_users=1 prevents duplicate)
+        expert_records = await _find_records(client, "expert_check", study_uid=study_uid)
+        assert len(expert_records) == 1
+
+        # 8. Submit expert_check data
+        ec_id = expert_records[0]["id"]
+        resp = await client.post(
+            f"/api/records/{ec_id}/data",
+            json={
+                "final_diagnosis": "Suspicious",
+                "agrees_with_doctor": True,
+                "agrees_with_ai": False,
+            },
+        )
+        assert resp.status_code == 200
+
+        # 9. Verify all records in expected final states
+        all_records_resp = await client.post("/api/records/find", params={"study_uid": study_uid})
+        all_records = all_records_resp.json()
+
+        finished_ids = {r["id"] for r in all_records if r["status"] == "finished"}
+        assert dr_id in finished_ids
+        assert ai_id in finished_ids
+        assert ec_id in finished_ids
+        assert markup_id in finished_ids
+
+        # 10. Verify total record count for the study
+        # series_markup + lesion_seg + doctor_review + ai_analysis + expert_check = 5
+        assert len(all_records) == 5

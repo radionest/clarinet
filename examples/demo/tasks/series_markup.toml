@@ -1,0 +1,16 @@
+# Series Markup — series-level segmentation and annotation in 3D Slicer
+name = "series_markup"
+description = "Series-level segmentation and annotation in 3D Slicer"
+label = "Series Markup"
+level = "SERIES"
+role_name = "doctor"
+min_users = 1
+max_users = 1
+
+# Slicer script loaded from external .py file
+slicer_script = "series_markup_script.py"
+
+[slicer_script_args]
+working_folder = "{clarinet_storage_path}/{patient_id}/{study_anon_uid}/{series_anon_uid}"
+study_uid = "{study_uid}"
+series_uid = "{series_uid}"

@@ -72,6 +72,7 @@ async def admin_assign_record_user(
 class RecordTypeStatusCounts(PydanticBaseModel):
     """Per-status record counts for a record type."""
 
+    blocked: int = 0
     pending: int = 0
     inwork: int = 0
     finished: int = 0

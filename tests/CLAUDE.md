@@ -24,6 +24,7 @@
 - `tests/test_dicomweb_cache.py` — unit tests for DICOMweb two-tier cache (memory + disk)
 - `tests/test_dicomweb_cleanup.py` — unit tests for DICOMweb cache cleanup service
 - `tests/test_dicomweb_converter.py` — unit tests for DICOMweb data converters
+- `tests/test_config_loader.py` — unit tests for config loader (TOML/JSON discovery, file references, schema resolution)
 
 ## Guidelines
 

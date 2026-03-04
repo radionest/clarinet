@@ -153,6 +153,7 @@ fn record_base_decoder() -> decode.Decoder(models.Record) {
   )
 
   let status = case status_str {
+    "blocked" -> types.Blocked
     "pending" -> types.Pending
     "inwork" -> types.InWork
     "finished" -> types.Finished
@@ -174,6 +175,7 @@ fn record_base_decoder() -> decode.Decoder(models.Record) {
     series_anon_uid: None,
     clarinet_storage_path: None,
     files: None,
+    file_checksums: None,
     patient: None,
     study: None,
     series: None,

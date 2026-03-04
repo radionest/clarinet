@@ -11,6 +11,8 @@ pub type ApiError {
 
 // Record status (matching backend RecordStatus enum)
 pub type RecordStatus {
+  Blocked
+  // blocked in backend
   Pending
   // pending in backend
   InWork

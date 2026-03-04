@@ -66,6 +66,7 @@ class FlowRecord:
         self.record_name = record_name
         self.status_trigger: str | None = None
         self.data_update_trigger: bool = False
+        self.file_change_trigger: bool = False
         self.entity_trigger: str | None = entity_trigger
         self.conditions: list[FlowCondition] = []
         self.actions: list[FlowAction] = []
@@ -107,6 +108,18 @@ class FlowRecord:
             Self for method chaining.
         """
         self.data_update_trigger = True
+        return self
+
+    def on_file_change(self) -> FlowRecord:
+        """Trigger this flow when record file checksums change.
+
+        This trigger fires when file checksums are recomputed via
+        POST /records/{id}/check-files and changes are detected.
+
+        Returns:
+            Self for method chaining.
+        """
+        self.file_change_trigger = True
         return self
 
     def on_created(self) -> FlowRecord:
@@ -341,6 +354,7 @@ class FlowRecord:
         return bool(
             self.status_trigger
             or self.data_update_trigger
+            or self.file_change_trigger
             or self.entity_trigger
             or self.actions
             or self.conditions
@@ -373,6 +387,8 @@ class FlowRecord:
                 parts.append(f".on_status('{self.status_trigger}')")
             if self.data_update_trigger:
                 parts.append(".on_data_update()")
+            if self.file_change_trigger:
+                parts.append(".on_file_change()")
         return "".join(parts)
 
 

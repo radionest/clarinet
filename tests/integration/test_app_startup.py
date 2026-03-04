@@ -15,11 +15,47 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, patch
 
 import pytest
+import pytest_asyncio
 from fastapi import FastAPI
 
 from src.api.app import lifespan
 from src.settings import settings
 from src.utils.db_manager import db_manager
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _cleanup_startup_test_queues():
+    """Delete RabbitMQ queues created by startup tests."""
+    yield
+
+    import aio_pika
+
+    from tests.integration.conftest import RABBITMQ_HOST, RABBITMQ_PORT
+
+    try:
+        url = f"amqp://clarinet_test:clarinet_test@{RABBITMQ_HOST}:{RABBITMQ_PORT}/"
+        connection = await aio_pika.connect_robust(url)
+        async with connection:
+            channel = await connection.channel()
+            for name in [
+                "clarinet_startup_test.default",
+                "clarinet_startup_test.default.delay",
+                "clarinet_startup_test.dlq",
+            ]:
+                try:
+                    queue = await channel.declare_queue(name, passive=True)
+                    await queue.delete()
+                except Exception:
+                    pass
+            try:
+                exchange = await channel.declare_exchange(
+                    "clarinet_startup_test", aio_pika.ExchangeType.DIRECT, passive=True
+                )
+                await exchange.delete()
+            except Exception:
+                pass
+    except Exception:
+        pass  # RabbitMQ unreachable — skip cleanup
 
 
 @pytest.fixture(autouse=True)

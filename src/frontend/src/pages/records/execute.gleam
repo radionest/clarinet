@@ -221,6 +221,7 @@ fn render_readonly_data(record: Record) -> Element(Msg) {
 /// Render record status badge
 fn render_record_status(status: RecordStatus) -> Element(Msg) {
   let #(class, text) = case status {
+    types.Blocked -> #("badge-blocked", "Blocked")
     types.Pending -> #("badge-pending", "Pending")
     types.InWork -> #("badge-progress", "In Progress")
     types.Finished -> #("badge-success", "Completed")

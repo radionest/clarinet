@@ -1,0 +1,8 @@
+# AI Analysis — AI-generated analysis of a series
+name = "ai_analysis"
+description = "AI-generated analysis of a series"
+label = "AI Analysis"
+level = "SERIES"
+role_name = "auto"
+min_users = 1
+max_users = 1

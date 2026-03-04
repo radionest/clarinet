@@ -101,8 +101,7 @@ fn record_type_base_decoder() -> decode.Decoder(RecordType) {
     max_users: None,
     min_users: None,
     level: level,
-    input_files: None,
-    output_files: None,
+    file_registry: None,
     constraint_role: None,
     records: None,
   ))
@@ -206,6 +205,7 @@ pub fn record_decoder() -> decode.Decoder(Record) {
     series_anon_uid: None,
     clarinet_storage_path: None,
     files: None,
+    file_checksums: None,
     patient: None,
     study: None,
     series: None,
@@ -226,6 +226,7 @@ pub fn record_decoder() -> decode.Decoder(Record) {
 
 fn parse_status(status: String) -> types.RecordStatus {
   case status {
+    "blocked" -> types.Blocked
     "pending" -> types.Pending
     "inwork" -> types.InWork
     "finished" -> types.Finished
@@ -245,11 +246,20 @@ fn file_definition_decoder() -> decode.Decoder(FileDefinition) {
     decode.optional(decode.string),
   )
   use required <- decode.optional_field("required", True, decode.bool)
+  use multiple <- decode.optional_field("multiple", False, decode.bool)
+  use role_str <- decode.optional_field("role", "output", decode.string)
+  let role = case role_str {
+    "input" -> models.Input
+    "intermediate" -> models.Intermediate
+    _ -> models.Output
+  }
   decode.success(models.FileDefinition(
     name: name,
     pattern: pattern,
     description: description,
     required: required,
+    multiple: multiple,
+    role: role,
   ))
 }
 
@@ -312,13 +322,8 @@ pub fn record_type_full_decoder() -> decode.Decoder(RecordType) {
     None,
     decode.optional(decode.int),
   )
-  use input_files <- decode.optional_field(
-    "input_files",
-    None,
-    decode.optional(decode.list(file_definition_decoder())),
-  )
-  use output_files <- decode.optional_field(
-    "output_files",
+  use file_registry <- decode.optional_field(
+    "file_registry",
     None,
     decode.optional(decode.list(file_definition_decoder())),
   )
@@ -354,8 +359,7 @@ pub fn record_type_full_decoder() -> decode.Decoder(RecordType) {
     max_users: max_users,
     min_users: min_users,
     level: level,
-    input_files: input_files,
-    output_files: output_files,
+    file_registry: file_registry,
     constraint_role: constraint_role_name,
     records: None,
   ))

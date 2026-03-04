@@ -408,7 +408,6 @@ async def test_anonymize_instance_failure(client, test_session) -> None:
     mock_retrieve_result = RetrieveResult(status="success", num_completed=3, instances=instances)
 
     call_count = 0
-    original_anonymize = None
 
     def _anonymize_side_effect(dataset):
         nonlocal call_count

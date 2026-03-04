@@ -1,0 +1,12 @@
+# Air Volume — automated air ROI segmentation and volume calculation
+name = "air_volume"
+description = "Automated air ROI segmentation and volume calculation"
+label = "Air Volume"
+level = "SERIES"
+min_users = 0
+max_users = 0
+
+[[files]]
+name = "segmentation"
+role = "input"
+required = true

@@ -152,7 +152,7 @@ async def rt_with_input_files(test_session):
         description="Series level with input files",
         label="WF Files",
         level=DicomQueryLevel.SERIES,
-        input_files=[{"name": "master", "pattern": "master.nrrd"}],
+        file_registry=[{"name": "master", "pattern": "master.nrrd", "role": "input"}],
     )
     test_session.add(rt)
     await test_session.commit()

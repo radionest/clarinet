@@ -70,30 +70,18 @@ const record_type_edit_schema = "{
       \"title\": \"Data Schema (JSON)\",
       \"maxLength\": 50000
     },
-    \"input_files\": {
+    \"file_registry\": {
       \"type\": \"array\",
-      \"title\": \"Input Files\",
+      \"title\": \"File Registry\",
       \"items\": {
         \"type\": \"object\",
         \"properties\": {
           \"name\": { \"type\": \"string\", \"title\": \"Name\" },
           \"pattern\": { \"type\": \"string\", \"title\": \"Pattern\" },
           \"description\": { \"type\": \"string\", \"title\": \"Description\" },
-          \"required\": { \"type\": \"boolean\", \"title\": \"Required\", \"default\": true }
-        },
-        \"required\": [\"name\", \"pattern\"]
-      }
-    },
-    \"output_files\": {
-      \"type\": \"array\",
-      \"title\": \"Output Files\",
-      \"items\": {
-        \"type\": \"object\",
-        \"properties\": {
-          \"name\": { \"type\": \"string\", \"title\": \"Name\" },
-          \"pattern\": { \"type\": \"string\", \"title\": \"Pattern\" },
-          \"description\": { \"type\": \"string\", \"title\": \"Description\" },
-          \"required\": { \"type\": \"boolean\", \"title\": \"Required\", \"default\": true }
+          \"required\": { \"type\": \"boolean\", \"title\": \"Required\", \"default\": true },
+          \"multiple\": { \"type\": \"boolean\", \"title\": \"Multiple (collection)\", \"default\": false },
+          \"role\": { \"type\": \"string\", \"title\": \"Role\", \"enum\": [\"input\", \"output\", \"intermediate\"], \"default\": \"output\" }
         },
         \"required\": [\"name\", \"pattern\"]
       }
@@ -115,8 +103,7 @@ fn build_initial_values(rt: RecordType) -> String {
     #("slicer_script_args", dict_to_json_string(rt.slicer_script_args)),
     #("slicer_result_validator_args", dict_to_json_string(rt.slicer_result_validator_args)),
     #("data_schema", json.nullable(rt.data_schema, json.string)),
-    #("input_files", file_definitions_to_json(rt.input_files)),
-    #("output_files", file_definitions_to_json(rt.output_files)),
+    #("file_registry", file_definitions_to_json(rt.file_registry)),
   ]
   json.to_string(json.object(fields))
 }
@@ -153,11 +140,18 @@ fn file_definitions_to_json(
   case files {
     Some(file_list) ->
       json.array(file_list, fn(f) {
+        let role_str = case f.role {
+          models.Input -> "input"
+          models.Output -> "output"
+          models.Intermediate -> "intermediate"
+        }
         json.object([
           #("name", json.string(f.name)),
           #("pattern", json.string(f.pattern)),
           #("description", json.nullable(f.description, json.string)),
           #("required", json.bool(f.required)),
+          #("multiple", json.bool(f.multiple)),
+          #("role", json.string(role_str)),
         ])
       })
     None -> json.preprocessed_array([])

@@ -190,6 +190,7 @@ fn record_row(record: Record) -> Element(Msg) {
 
 fn status_text(status: types.RecordStatus) -> String {
   case status {
+    types.Blocked -> "Blocked"
     types.Pending -> "Pending"
     types.InWork -> "In Progress"
     types.Finished -> "Completed"

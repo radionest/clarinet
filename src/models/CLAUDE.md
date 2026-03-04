@@ -64,12 +64,52 @@ select(Record).options(
 f"{settings.anon_id_prefix}_{auto_id}"  # Returns None if auto_id is None
 ```
 
+## File Registry System
+
+`RecordType.file_registry` (`list[FileDefinition] | None`, JSON column) is the single catalog of all files.
+Each `FileDefinition` has: `name`, `pattern`, `description`, `required`, `multiple`, `role` (FileRole enum).
+
+- `FileRole`: `INPUT`, `OUTPUT`, `INTERMEDIATE`
+- `multiple=True`: collection (glob), `multiple=False`: singular file
+- `RecordTypeBase.input_files` / `output_files`: computed properties filtering by role
+- `Record.file_checksums`: `dict[str, str]` (name → SHA256) for change detection
+- `RecordFileAccessor` (`src/services/file_accessor.py`): attribute-based file access
+- `src/utils/file_checksums.py`: async SHA256 computation and change detection
+
+### Project-level File Registry
+
+A `file_registry.toml` (preferred) or `file_registry.json` in the tasks folder defines shared file definitions.
+TOML takes precedence when both exist.
+```toml
+[segmentation]
+pattern = "seg.nrrd"
+description = "Segmentation mask"
+```
+
+Task configs use `"files"` references instead of inline `"file_registry"`:
+```json
+{"files": [{"name": "segmentation", "role": "input", "required": true}]}
+```
+
+Resolution happens at **bootstrap time** via `src/utils/file_registry_resolver.py`.
+The DB model stays unchanged — `RecordType.file_registry` stores resolved `FileDefinition` objects.
+Backward-compatible: inline `"file_registry"` in task JSONs still works.
+
+## Record Status: `blocked`
+
+`RecordStatus.blocked` — record created but required input files not yet available.
+- Records with missing required input files get `blocked` status on creation (instead of raising)
+- `POST /records/{id}/check-files` auto-unblocks when files appear → transitions to `pending`
+- Blocked records cannot be assigned to users or accept data submissions
+- `find_pending_by_user()` excludes blocked records
+
 ## JSON Columns
 
 Use `sa_column=Column(JSON)` for dict/list fields:
 - `Record.data` — dynamic data per RecordType.data_schema
 - `Record.files` — `dict[str, str]` mapping FileDefinition.name → filename
-- `RecordType.slicer_script_args`, `data_schema`, `input_files`, `output_files`
+- `Record.file_checksums` — `dict[str, str]` mapping file key → SHA256
+- `RecordType.slicer_script_args`, `data_schema`, `file_registry`
 
 ## Custom Types
 
@@ -82,7 +122,7 @@ When changing `{Model}Read`, `{Model}Create`, or `{Model}Optional` schemas — u
 corresponding Gleam types in:
 - `src/frontend/src/api/models.gleam` — shared data models
 - `src/frontend/src/api/types.gleam` — type definitions
-- `src/frontend/src/api/records.gleam`, `studies.gleam`, `users.gleam`, `admin.gleam` — API-specific types
+- `src/frontend/src/api/records.gleam`, `series.gleam`, `studies.gleam`, `users.gleam`, `admin.gleam` — API-specific types
 
 Check field names, types, and optionality match between Python schemas and Gleam types.
 

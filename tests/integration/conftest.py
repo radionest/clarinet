@@ -116,6 +116,7 @@ def pipeline_broker_factory(
     from taskiq_aio_pika import AioPikaBroker
     from taskiq_aio_pika.exchange import Exchange
     from taskiq_aio_pika.queue import Queue as RmqQueue
+    from taskiq_aio_pika.queue import QueueType
 
     from src.services.pipeline.middleware import (
         DeadLetterMiddleware,
@@ -146,11 +147,15 @@ def pipeline_broker_factory(
                     name=queue_name,
                     routing_key=routing_key,
                     declare=True,
+                    durable=True,
+                    type=QueueType.CLASSIC,
                 ),
             ],
             delay_queue=RmqQueue(
                 name=f"{queue_name}.delay",
                 declare=True,
+                durable=True,
+                type=QueueType.CLASSIC,
             ),
         )
 
@@ -230,7 +235,11 @@ async def _purge_test_queues(
         connection = await aio_pika.connect_robust(rabbitmq_url)
         async with connection:
             channel = await connection.channel()
-            for queue_name in test_queues.values():
+            # Purge main queues AND their .delay counterparts
+            all_queue_names = list(test_queues.values())
+            for name in list(all_queue_names):
+                all_queue_names.append(f"{name}.delay")
+            for queue_name in all_queue_names:
                 try:
                     queue = await channel.declare_queue(queue_name, passive=True)
                     await queue.purge()
@@ -242,7 +251,7 @@ async def _purge_test_queues(
     await _purge()
 
 
-@pytest_asyncio.fixture(scope="session", autouse=False)
+@pytest_asyncio.fixture(scope="session", autouse=True)
 async def _delete_test_resources(
     rabbitmq_url: str,
     test_exchange: str,
@@ -257,7 +266,11 @@ async def _delete_test_resources(
         connection = await aio_pika.connect_robust(rabbitmq_url)
         async with connection:
             channel = await connection.channel()
-            for queue_name in test_queues.values():
+            # Delete main queues AND their .delay counterparts
+            all_queue_names = list(test_queues.values())
+            for name in list(all_queue_names):
+                all_queue_names.append(f"{name}.delay")
+            for queue_name in all_queue_names:
                 try:
                     queue = await channel.declare_queue(queue_name, passive=True)
                     await queue.delete()

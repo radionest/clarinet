@@ -5,11 +5,8 @@ This module provides functions to initialize the application with default data,
 such as user roles and record types, during startup.
 """
 
-import json
-import os
 from typing import Any
 
-import aiofiles
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -17,7 +14,9 @@ from sqlmodel import select
 
 from src.models import RecordType, RecordTypeCreate, User, UserRole
 from src.utils.auth import get_password_hash
+from src.utils.config_loader import discover_config_files, load_record_config
 from src.utils.db_manager import db_manager
+from src.utils.file_registry_resolver import load_project_file_registry, resolve_task_files
 from src.utils.logger import logger
 
 
@@ -242,56 +241,6 @@ async def initialize_application_data() -> None:
             raise
 
 
-def filter_record_schemas(record_files: list[str], filter_suffix: str = "demo") -> list[str]:
-    """
-    Filter record schema files by suffix.
-
-    Args:
-        record_files: List of record file names
-        filter_suffix: Suffix to filter by
-
-    Returns:
-        List of record names (without .json extension)
-    """
-    logger.info(f"Record type files found: {', '.join(record_files)}")
-    filtered_by_suffix = filter(lambda x: filter_suffix in x, record_files)
-    record_names = [t.removesuffix(".json") for t in filtered_by_suffix if "schema" not in t]
-    return record_names
-
-
-async def _load_record_properties(input_folder: str, record_name: str) -> dict[str, Any] | None:
-    """Load record type properties from JSON, resolving schema if needed.
-
-    Args:
-        input_folder: Path to the folder containing record type JSON files.
-        record_name: Name of the record type (without .json extension).
-
-    Returns:
-        Properties dict, or None if schema could not be found.
-    """
-    async with aiofiles.open(os.path.join(input_folder, f"{record_name}.json")) as f:
-        content = await f.read()
-        props: dict[str, Any] = json.loads(content)
-
-    if props.get("data_schema") is not None:
-        return props
-
-    # Legacy: rename result_schema → data_schema
-    if props.get("result_schema") is not None:
-        props["data_schema"] = props.pop("result_schema")
-        return props
-
-    # Try loading from separate schema file
-    try:
-        async with aiofiles.open(os.path.join(input_folder, f"{record_name}.schema.json")) as f:
-            content = await f.read()
-            props["data_schema"] = json.loads(content)
-        return props
-    except FileNotFoundError:
-        logger.warning(f"Cannot find schema for record type {record_name}!")
-        return None
-
-
 async def _upsert_record_type(props: dict[str, Any], session: AsyncSession) -> None:
     """Create a record type, logging conflicts as info.
 
@@ -310,32 +259,44 @@ async def _upsert_record_type(props: dict[str, Any], session: AsyncSession) -> N
             logger.error(f"Error creating record type {props.get('name')}: {e}")
 
 
-async def create_demo_record_types_from_json(input_folder: str, demo_suffix: str = "demo") -> None:
-    """
-    Create record types from JSON files in the specified folder.
+async def create_record_types_from_config(
+    folder: str,
+    suffix_filter: str = "",
+) -> None:
+    """Create record types from TOML/JSON config files in *folder*.
+
+    Discovers config files (TOML preferred over JSON), resolves file
+    references and schemas, then upserts each RecordType into the DB.
 
     Args:
-        input_folder: Path to the folder containing record type JSON files
-        demo_suffix: Suffix to filter record type files by
+        folder: Path to the folder containing config files.
+        suffix_filter: If non-empty, only include configs whose stem
+            contains this substring.
     """
-    try:
-        record_files = os.listdir(input_folder)
-    except FileNotFoundError:
-        logger.warning(f"Record types folder {input_folder} not found")
+    config_files = discover_config_files(folder, suffix_filter)
+    if not config_files:
+        logger.warning(f"No record type configs found in {folder}")
         return
 
-    record_names = filter_record_schemas(record_files, demo_suffix)
-    logger.info(f"Found record type schemas: {record_names}")
+    logger.info(f"Found record type configs: {[p.stem for p in config_files]}")
 
-    for record_name in record_names:
+    # Load project-level file registry (if present)
+    project_registry = await load_project_file_registry(folder)
+
+    for config_path in config_files:
         async with db_manager.get_async_session_context() as session:
             try:
-                props = await _load_record_properties(input_folder, record_name)
+                props = await load_record_config(config_path)
                 if props is None:
                     continue
+                props = resolve_task_files(props, project_registry)
                 await _upsert_record_type(props, session)
             except Exception as e:
-                logger.error(f"Error processing record type {record_name}: {e}")
+                logger.error(f"Error processing record type {config_path.name}: {e}")
+
+
+# Deprecated alias for backward compatibility
+create_demo_record_types_from_json = create_record_types_from_config
 
 
 async def add_record_type(record_type: RecordTypeCreate, session: AsyncSession) -> RecordType:

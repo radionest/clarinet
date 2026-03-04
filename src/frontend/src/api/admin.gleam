@@ -57,6 +57,7 @@ pub fn get_record_type_stats() -> Promise(Result(List(RecordTypeStats), ApiError
 fn record_type_status_counts_decoder() -> decode.Decoder(
   models.RecordTypeStatusCounts,
 ) {
+  use blocked <- decode.field("blocked", decode.int)
   use pending <- decode.field("pending", decode.int)
   use inwork <- decode.field("inwork", decode.int)
   use finished <- decode.field("finished", decode.int)
@@ -64,6 +65,7 @@ fn record_type_status_counts_decoder() -> decode.Decoder(
   use pause <- decode.field("pause", decode.int)
 
   decode.success(models.RecordTypeStatusCounts(
+    blocked: blocked,
     pending: pending,
     inwork: inwork,
     finished: finished,

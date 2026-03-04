@@ -16,11 +16,10 @@
     "slicer_result_validator_args": {
         "output_path": "{clarinet_storage_path}/{patient_id}/{study_anon_uid}/{series_anon_uid}/lesions_{user_id}.seg.nrrd"
     },
-    "output_files": [
+    "files": [
         {
             "name": "lesion_mask",
-            "pattern": "lesions_{user_id}.seg.nrrd",
-            "description": "Lesion segmentation mask",
+            "role": "output",
             "required": true
         }
     ]

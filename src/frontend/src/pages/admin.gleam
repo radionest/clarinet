@@ -98,6 +98,7 @@ fn record_row(model: Model, record: models.Record) -> Element(Msg) {
   }
 
   let status_str = case record.status {
+    types.Blocked -> "blocked"
     types.Pending -> "pending"
     types.InWork -> "inwork"
     types.Finished -> "finished"
@@ -201,6 +202,7 @@ fn admin_stat_card(label label: String, count count: Int, color color: String) -
 
 fn status_color(status: String) -> String {
   case status {
+    "blocked" -> "yellow"
     "pending" -> "blue"
     "inwork" -> "orange"
     "finished" -> "green"

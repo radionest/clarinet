@@ -32,13 +32,22 @@ pub type Study {
   )
 }
 
-// File definition for RecordType input/output files (matching backend)
+// File role enum (matching backend FileRole)
+pub type FileRole {
+  Input
+  Output
+  Intermediate
+}
+
+// File definition for RecordType file_registry (matching backend)
 pub type FileDefinition {
   FileDefinition(
     name: String,
     pattern: String,
     description: Option(String),
     required: Bool,
+    multiple: Bool,
+    role: FileRole,
   )
 }
 
@@ -60,8 +69,7 @@ pub type RecordType {
     max_users: Option(Int),
     min_users: Option(Int),
     level: DicomQueryLevel,
-    input_files: Option(List(FileDefinition)),
-    output_files: Option(List(FileDefinition)),
+    file_registry: Option(List(FileDefinition)),
     constraint_role: Option(String),
     records: Option(List(Record)),
   )
@@ -83,6 +91,7 @@ pub type Record {
     series_anon_uid: Option(String),
     clarinet_storage_path: Option(String),
     files: Option(Dict(String, String)),
+    file_checksums: Option(Dict(String, String)),
     patient: Option(Patient),
     study: Option(Study),
     series: Option(Series),
@@ -201,8 +210,7 @@ pub type RecordTypeCreate {
     max_users: Option(Int),
     min_users: Option(Int),
     level: DicomQueryLevel,
-    input_files: Option(List(FileDefinition)),
-    output_files: Option(List(FileDefinition)),
+    file_registry: Option(List(FileDefinition)),
   )
 }
 
@@ -331,6 +339,7 @@ pub type AdminStats {
 // Per-status record counts for a record type
 pub type RecordTypeStatusCounts {
   RecordTypeStatusCounts(
+    blocked: Int,
     pending: Int,
     inwork: Int,
     finished: Int,

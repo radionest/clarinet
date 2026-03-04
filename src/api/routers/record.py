@@ -18,10 +18,12 @@ from fastapi import (
     status,
 )
 from jsonschema import Draft202012Validator, SchemaError
+from sqlmodel import SQLModel
 
 from src.api.auth_config import current_active_user
 from src.api.dependencies import (
     PaginationDep,
+    ProjectFileRegistryDep,
     RecordRepositoryDep,
     RecordTypeRepositoryDep,
     SeriesRepositoryDep,
@@ -41,10 +43,21 @@ from src.models import (
     User,
 )
 from src.repositories.record_repository import RecordSearchCriteria
+from src.services.file_accessor import get_file_accessor
 from src.services.file_validation import FileValidationResult, FileValidator
 from src.types import RecordData
+from src.utils.file_checksums import checksums_changed, compute_checksums
+from src.utils.file_registry_resolver import resolve_task_files
 from src.utils.logger import logger
 from src.utils.validation import validate_json_by_schema
+
+
+class FileCheckResult(SQLModel):
+    """Response model for file check endpoint."""
+
+    changed_files: list[str]
+    checksums: dict[str, str]
+
 
 router = APIRouter(
     tags=["Records"],
@@ -84,7 +97,11 @@ def trigger_recordflow(
         background_tasks.add_task(engine.handle_record_data_update, record_read)
 
 
-def validate_record_files(record: RecordRead) -> FileValidationResult | None:
+def validate_record_files(
+    record: RecordRead,
+    *,
+    raise_on_invalid: bool = False,
+) -> FileValidationResult | None:
     """Validate input files for a record.
 
     Accepts ``RecordRead`` (Pydantic) because ``working_folder`` and other
@@ -93,6 +110,7 @@ def validate_record_files(record: RecordRead) -> FileValidationResult | None:
 
     Args:
         record: RecordRead instance with all relations populated
+        raise_on_invalid: If True, raise ValidationError on missing files.
 
     Returns:
         FileValidationResult if validation was performed, None if no input_files defined
@@ -110,7 +128,7 @@ def validate_record_files(record: RecordRead) -> FileValidationResult | None:
     directory = Path(working_folder)
     validator = FileValidator(record.record_type)
     result = validator.validate_input_files(record, directory)
-    if not result.valid:
+    if not result.valid and raise_on_invalid:
         errors = "; ".join(f"{e.file_name}: {e.message}" for e in result.errors)
         raise ValidationError(f"File validation failed: {errors}")
     return result
@@ -161,9 +179,18 @@ async def find_record_type(
 async def add_record_type(
     record_type: RecordTypeCreate,
     repo: RecordTypeRepositoryDep,
+    project_registry: ProjectFileRegistryDep,
     constrain_unique_names: bool = True,
 ) -> RecordType:
-    """Create a new record type."""
+    """Create a new record type.
+
+    Supports ``files`` references that resolve against the project file registry.
+    """
+    # Resolve file references if present in raw request body
+    props = record_type.model_dump(exclude_unset=True)
+    props = resolve_task_files(props, project_registry)
+    record_type = RecordTypeCreate(**props)
+
     new_record_type = RecordType.model_validate(record_type)
 
     # Validate data schema if present
@@ -284,16 +311,31 @@ async def add_record(
     new_record: RecordCreate,
     repo: RecordRepositoryDep,
 ) -> Record:
-    """Create a new record."""
+    """Create a new record.
+
+    If the RecordType defines required input files and they are not yet
+    present, the record is created with ``blocked`` status instead of
+    raising a validation error.
+    """
     record = Record(**new_record.model_dump())
     record = await repo.create_with_relations(record)
 
     # Validate input files if defined
     record_read = RecordRead.model_validate(record)
     file_result = validate_record_files(record_read)
-    if file_result and file_result.matched_files:
+
+    if file_result is None:
+        # No input files defined — stay pending
+        return record
+
+    if file_result.valid and file_result.matched_files:
         await repo.set_files(record, file_result.matched_files)
         return await repo.get_with_relations(record.id)  # type: ignore[arg-type]
+
+    if not file_result.valid:
+        # Required input files missing — set blocked
+        record, _ = await repo.update_status(record.id, RecordStatus.blocked)  # type: ignore[arg-type]
+        return record
 
     return record
 
@@ -345,15 +387,18 @@ async def submit_record_data(
     """Submit data for a record."""
     record = await repo.get_with_relations(record_id)
 
+    if record.status == RecordStatus.blocked:
+        raise CONFLICT.with_context("Record is blocked — required input files are missing.")
+
     if record.status == RecordStatus.finished:
         raise CONFLICT.with_context("Record already finished. Use PATCH to update the record data.")
 
     # Validate data against schema
     validated_data = validate_record_data(record, data)
 
-    # Validate input files if defined
+    # Validate input files if defined (raise on missing required files)
     record_read = RecordRead.model_validate(record)
-    file_result = validate_record_files(record_read)
+    file_result = validate_record_files(record_read, raise_on_invalid=True)
     files: dict[str, str] | None = None
     if file_result and file_result.matched_files:
         files = file_result.matched_files
@@ -416,6 +461,56 @@ async def validate_files_endpoint(
         return FileValidationResult(valid=True)
 
     return result
+
+
+@router.post("/{record_id}/check-files", response_model=FileCheckResult)
+async def check_record_files(
+    record_id: int,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    repo: RecordRepositoryDep,
+) -> FileCheckResult:
+    """Compute current file checksums, compare with stored, trigger invalidation if changed.
+
+    For ``blocked`` records, this endpoint also checks whether the required
+    input files have appeared and auto-transitions to ``pending`` if so.
+
+    Args:
+        record_id: ID of the record to check files for
+
+    Returns:
+        FileCheckResult with changed files and current checksums
+    """
+    record = await repo.get_with_relations(record_id)
+    record_read = RecordRead.model_validate(record)
+
+    # Auto-unblock: if record is blocked, check whether input files are now present
+    if record.status == RecordStatus.blocked:
+        file_result = validate_record_files(record_read)
+        if file_result is not None and file_result.valid:
+            old_status = record.status
+            if file_result.matched_files:
+                await repo.set_files(record, file_result.matched_files)
+            record, _ = await repo.update_status(record_id, RecordStatus.pending)
+            trigger_recordflow(request, background_tasks, record, old_status)
+            record_read = RecordRead.model_validate(record)
+        else:
+            # Still blocked — return early with empty result
+            return FileCheckResult(changed_files=[], checksums={})
+
+    accessor = get_file_accessor(record_read)
+
+    new_checksums = await compute_checksums(accessor)
+    changed = checksums_changed(record.file_checksums, new_checksums)
+
+    await repo.update_checksums(record_id, new_checksums)
+
+    if changed:
+        engine = getattr(request.app.state, "recordflow_engine", None)
+        if engine:
+            background_tasks.add_task(engine.handle_record_file_change, record_read)
+
+    return FileCheckResult(changed_files=list(changed), checksums=new_checksums)
 
 
 @router.post("/{record_id}/invalidate", response_model=RecordRead)

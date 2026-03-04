@@ -27,6 +27,9 @@ DicomClientDep, PacsNodeDep
 
 # DICOMweb proxy
 DicomWebCacheDep, DicomWebProxyServiceDep
+
+# File registry
+ProjectFileRegistryDep  # dict | None from app.state
 ```
 
 ### Factory pattern for new repos/services

@@ -21,6 +21,8 @@ from .flow_condition import FlowCondition
 from .flow_record import FlowRecord
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from src.client import ClarinetClient
     from src.models import RecordRead, RecordStatus
     from src.services.pipeline import PipelineMessage
@@ -76,6 +78,8 @@ class RecordFlowEngine:
 
         if flow.data_update_trigger:
             logger.info(f"Registered flow for record type '{flow.record_name}' on data update")
+        elif flow.file_change_trigger:
+            logger.info(f"Registered flow for record type '{flow.record_name}' on file change")
         elif flow.status_trigger:
             logger.info(
                 f"Registered flow for record type '{flow.record_name}' "
@@ -85,6 +89,41 @@ class RecordFlowEngine:
             logger.info(
                 f"Registered flow for record type '{flow.record_name}' on any status change"
             )
+
+    async def _dispatch_flows(
+        self,
+        record: RecordRead,
+        trigger_label: str,
+        predicate: Callable[[FlowRecord], bool],
+    ) -> None:
+        """Dispatch matching flows for a record event.
+
+        Common logic for all record-level handlers: checks flow registry,
+        builds context, and executes flows matching the predicate.
+
+        Args:
+            record: The record that triggered the event.
+            trigger_label: Human-readable label for logging (e.g. "status change").
+            predicate: Filter function selecting which flows to execute.
+        """
+        record_type_name = record.record_type.name
+
+        if record_type_name not in self.flows:
+            logger.debug(f"No flows registered for record type '{record_type_name}'")
+            return
+
+        logger.debug(
+            f"Processing {trigger_label} flows for record {record.id} ({record_type_name})"
+        )
+
+        record_context = await self._get_record_context(record)
+
+        for flow in self.flows[record_type_name]:
+            if predicate(flow):
+                logger.info(
+                    f"Executing {trigger_label} flow for '{record_type_name}' (id={record.id})"
+                )
+                await self._execute_flow(flow, record, record_context)
 
     async def handle_record_status_change(
         self,
@@ -100,31 +139,14 @@ class RecordFlowEngine:
             record: The record that changed status.
             old_status: The previous status (optional).
         """
-        record_type_name = record.record_type.name
+        current_status = record.status.value if hasattr(record.status, "value") else record.status
 
-        if record_type_name not in self.flows:
-            logger.debug(f"No flows registered for record type '{record_type_name}'")
-            return
-
-        logger.debug(f"Processing flows for record {record.id} ({record_type_name})")
-
-        # Get all records in the same study/series for context
-        record_context = await self._get_record_context(record)
-
-        # Execute relevant flows (skip data_update_trigger flows)
-        for flow in self.flows[record_type_name]:
-            if flow.data_update_trigger:
-                continue
-            # Execute if status matches or if no specific status trigger is set
-            current_status = (
-                record.status.value if hasattr(record.status, "value") else record.status
-            )
-            if flow.status_trigger is None or flow.status_trigger == current_status:
-                logger.info(
-                    f"Executing flow for record '{record_type_name}' "
-                    f"(id={record.id}) on status '{current_status}'"
-                )
-                await self._execute_flow(flow, record, record_context)
+        await self._dispatch_flows(
+            record,
+            "status change",
+            lambda f: not (f.data_update_trigger or f.file_change_trigger)
+            and (f.status_trigger is None or f.status_trigger == current_status),
+        )
 
     async def handle_record_data_update(self, record: RecordRead) -> None:
         """Handle a data update on a finished record.
@@ -135,22 +157,18 @@ class RecordFlowEngine:
         Args:
             record: The record whose data was updated.
         """
-        record_type_name = record.record_type.name
+        await self._dispatch_flows(record, "data update", lambda f: f.data_update_trigger)
 
-        if record_type_name not in self.flows:
-            logger.debug(f"No flows registered for record type '{record_type_name}'")
-            return
+    async def handle_record_file_change(self, record: RecordRead) -> None:
+        """Handle a record file change and execute relevant flows.
 
-        logger.debug(f"Processing data update flows for record {record.id} ({record_type_name})")
+        Only executes flows with file_change_trigger=True. This is called
+        when file checksums are recomputed and changes are detected.
 
-        record_context = await self._get_record_context(record)
-
-        for flow in self.flows[record_type_name]:
-            if flow.data_update_trigger:
-                logger.info(
-                    f"Executing data update flow for record '{record_type_name}' (id={record.id})"
-                )
-                await self._execute_flow(flow, record, record_context)
+        Args:
+            record: The record whose files changed.
+        """
+        await self._dispatch_flows(record, "file change", lambda f: f.file_change_trigger)
 
     async def handle_entity_created(
         self,

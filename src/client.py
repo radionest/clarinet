@@ -763,6 +763,22 @@ class ClarinetClient:
         )
         return RecordRead.model_validate(response.json())
 
+    async def check_record_files(self, record_id: int) -> dict[str, Any]:
+        """Check record files for changes and compute checksums.
+
+        Args:
+            record_id: Record ID
+
+        Returns:
+            Dict with 'changed_files' and 'checksums' keys
+        """
+        response = await self._request(
+            "POST",
+            f"/records/{record_id}/check-files",
+        )
+        result: dict[str, Any] = response.json()
+        return result
+
     async def find_records(
         self,
         skip: int = 0,

@@ -245,3 +245,14 @@ async def get_anonymization_service(
 
 
 AnonymizationServiceDep = Annotated[AnonymizationService, Depends(get_anonymization_service)]
+
+
+# Project file registry dependency
+
+
+def get_project_file_registry(request: Request) -> dict | None:
+    """Get project file registry from app state."""
+    return getattr(request.app.state, "project_file_registry", None)
+
+
+ProjectFileRegistryDep = Annotated[dict | None, Depends(get_project_file_registry)]

@@ -6,10 +6,10 @@
     "role_name": null,
     "min_users": 0,
     "max_users": 0,
-    "input_files": [
+    "files": [
         {
             "name": "segmentation",
-            "pattern": "low_dens.seg.nrrd",
+            "role": "input",
             "required": true
         }
     ]

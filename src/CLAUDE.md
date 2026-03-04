@@ -52,6 +52,17 @@ logger.error(f"Failed to connect to database: {error}")
 - Env vars: `CLARINET_` prefix; TOML files: `settings.toml`, `settings.custom.toml`
 - See `src/settings.py` for all available settings (admin, session, recordflow, etc.)
 
+### RecordType Config Files
+
+RecordType definitions support TOML (`.toml`, preferred) and JSON (`.json`).
+Config loader: `src/utils/config_loader.py`.
+
+- TOML takes precedence when both formats exist for the same stem
+- File references: `.py` for slicer scripts, `.json` for schemas
+- Sidecar schema: `{name}.schema.json` loaded automatically when `data_schema` absent
+- `file_registry.toml`/`.json` and `*.schema.json` excluded from config discovery
+- Bootstrap uses `create_record_types_from_config()` from `src/utils/bootstrap.py`
+
 ## Database & API
 
 - SQLModel for models; AsyncSession for operations — see `models/CLAUDE.md`

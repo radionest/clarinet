@@ -1,0 +1,10 @@
+{
+    "segmentation": {
+        "pattern": "low_dens.seg.nrrd",
+        "description": "Low-density segmentation mask"
+    },
+    "lesion_mask": {
+        "pattern": "lesions_{user_id}.seg.nrrd",
+        "description": "Lesion segmentation mask"
+    }
+}

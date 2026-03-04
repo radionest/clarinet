@@ -61,9 +61,10 @@ Actions are Pydantic models (not dicts). Each has a `type` Literal field:
 
 - **`on_status('finished')`** — fires when record status changes to specified value
 - **`on_data_update()`** — fires when `PATCH /records/{id}/data` updates a record's data
+- **`on_file_change()`** — fires when `POST /records/{id}/check-files` detects changed checksums
 - **Entity creation** — fires when a new entity (patient/study/series) is created
 
-Record triggers (`on_status`, `on_data_update`) are mutually exclusive per FlowRecord instance. Use separate `record()` calls for different triggers on the same type.
+Record triggers (`on_status`, `on_data_update`, `on_file_change`) are mutually exclusive per FlowRecord instance. Use separate `record()` calls for different triggers on the same type.
 
 Entity triggers use separate factory functions (`series()`, `study()`, `patient()`) and are stored in `ENTITY_REGISTRY`.
 

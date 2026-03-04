@@ -60,6 +60,7 @@ fn filter_bar(model: Model, all_records: List(Record)) -> Element(Msg) {
 
   let status_options = [
     #("", "All Statuses"),
+    #("blocked", "Blocked"),
     #("pending", "Pending"),
     #("inwork", "In Progress"),
     #("finished", "Completed"),
@@ -136,6 +137,7 @@ fn filter_bar(model: Model, all_records: List(Record)) -> Element(Msg) {
 
 fn status_to_string(status: types.RecordStatus) -> String {
   case status {
+    types.Blocked -> "blocked"
     types.Pending -> "pending"
     types.InWork -> "inwork"
     types.Finished -> "finished"
@@ -209,6 +211,7 @@ fn record_row(model: Model, record: Record) -> Element(Msg) {
   }
 
   let #(status_class, status_text) = case record.status {
+    types.Blocked -> #("badge-blocked", "Blocked")
     types.Pending -> #("badge-pending", "Pending")
     types.InWork -> #("badge-progress", "In Progress")
     types.Finished -> #("badge-success", "Completed")
