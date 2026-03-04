@@ -21,7 +21,7 @@ from src.types import RecordData, RecordSchema, SlicerArgs
 from ..exceptions import ValidationError
 from ..settings import settings
 from .base import BaseModel, DicomQueryLevel, RecordStatus
-from .file_schema import FileDefinition
+from .file_schema import FileDefinition, FileRole
 from .patient import Patient, PatientBase
 from .study import Series, SeriesBase, SeriesFind, Study, StudyBase
 from .user import User, UserRole
@@ -53,9 +53,34 @@ class RecordTypeBase(SQLModel):
     level: DicomQueryLevel = Field(default=DicomQueryLevel.SERIES)
 
     # File schema definitions
-    input_files: list[FileDefinition] | None = None
-    output_files: list[FileDefinition] | None = None
+    file_registry: list[FileDefinition] | None = None
     data_schema: RecordSchema | None = None
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def input_files(self) -> list[FileDefinition]:
+        """Input files filtered from file_registry."""
+        return [
+            f
+            for f in (
+                item if isinstance(item, FileDefinition) else FileDefinition(**item)
+                for item in (self.file_registry or [])
+            )
+            if f.role == FileRole.INPUT
+        ]
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def output_files(self) -> list[FileDefinition]:
+        """Output files filtered from file_registry."""
+        return [
+            f
+            for f in (
+                item if isinstance(item, FileDefinition) else FileDefinition(**item)
+                for item in (self.file_registry or [])
+            )
+            if f.role == FileRole.OUTPUT
+        ]
 
 
 class RecordType(RecordTypeBase, table=True):
@@ -69,9 +94,8 @@ class RecordType(RecordTypeBase, table=True):
         default_factory=dict, sa_column=Column(JSON)
     )
 
-    # File schema JSON columns
-    input_files: list[FileDefinition] | None = Field(default_factory=list, sa_column=Column(JSON))
-    output_files: list[FileDefinition] | None = Field(default_factory=list, sa_column=Column(JSON))
+    # File schema JSON column
+    file_registry: list[FileDefinition] | None = Field(default_factory=list, sa_column=Column(JSON))
 
     role_name: str | None = Field(foreign_key="userrole.name", default=None)
     constraint_role: UserRole | None = Relationship(back_populates="allowed_record_types")
@@ -92,8 +116,7 @@ class RecordTypeCreate(RecordTypeBase):
     """Pydantic model for creating a new record type."""
 
     data_schema: RecordSchema | None = None
-    input_files: list[FileDefinition] | None = None
-    output_files: list[FileDefinition] | None = None
+    file_registry: list[FileDefinition] | None = None
 
 
 class RecordTypeOptional(SQLModel):
@@ -114,8 +137,7 @@ class RecordTypeOptional(SQLModel):
     level: DicomQueryLevel | None = None
 
     # File schema fields
-    input_files: list[FileDefinition] | None = None
-    output_files: list[FileDefinition] | None = None
+    file_registry: list[FileDefinition] | None = None
 
     @field_validator(
         "data_schema", "slicer_script_args", "slicer_result_validator_args", mode="before"
@@ -201,6 +223,9 @@ class RecordBase(BaseModel):
     # Matched files from file validation
     files: dict[str, str] | None = None
 
+    # File checksums (name -> SHA256)
+    file_checksums: dict[str, str] | None = None
+
     # Study relationship field is only defined in Record subclass, not in base
 
     def __hash__(self) -> int:
@@ -245,6 +270,9 @@ class Record(RecordBase, table=True):
 
     # Matched files from file validation (key: file definition name, value: filename)
     files: dict[str, str] | None = Field(default_factory=dict, sa_column=Column(JSON))
+
+    # File checksums (name -> SHA256)
+    file_checksums: dict[str, str] | None = Field(default_factory=dict, sa_column=Column(JSON))
 
     created_at: datetime | None = Field(default_factory=lambda: datetime.now(UTC))
     changed_at: datetime | None = Field(

@@ -34,6 +34,7 @@ class BaseModel(SQLModel):
 class RecordStatus(str, enum.Enum):
     """Enumeration of possible record status values."""
 
+    blocked = "blocked"
     pending = "pending"
     inwork = "inwork"
     finished = "finished"
