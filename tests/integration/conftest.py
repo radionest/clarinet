@@ -229,10 +229,12 @@ async def _purge_test_queues(
         yield
         return
 
+    import asyncio
+
     import aio_pika
 
     async def _purge() -> None:
-        connection = await aio_pika.connect_robust(rabbitmq_url)
+        connection = await asyncio.wait_for(aio_pika.connect(rabbitmq_url), timeout=5)
         async with connection:
             channel = await connection.channel()
             # Purge main queues AND their .delay counterparts
@@ -260,10 +262,12 @@ async def _delete_test_resources(
     """Session finalizer: delete test queues and exchange from RabbitMQ."""
     yield
 
+    import asyncio
+
     import aio_pika
 
     try:
-        connection = await aio_pika.connect_robust(rabbitmq_url)
+        connection = await asyncio.wait_for(aio_pika.connect(rabbitmq_url), timeout=5)
         async with connection:
             channel = await connection.channel()
             # Delete main queues AND their .delay counterparts
