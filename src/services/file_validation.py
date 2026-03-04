@@ -127,6 +127,8 @@ class FileValidator:
     ) -> FileValidationResult:
         """Validate input files for a record.
 
+        Uses input_files computed from file_registry (role=input).
+
         Args:
             record: Record to validate input files for
             directory: Directory where input files should be located
@@ -142,6 +144,8 @@ class FileValidator:
         directory: Path,
     ) -> FileValidationResult:
         """Validate output files for a record.
+
+        Uses output_files computed from file_registry (role=output).
 
         Args:
             record: Record to validate output files for
