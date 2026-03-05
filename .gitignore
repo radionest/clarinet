@@ -20,14 +20,10 @@ pdm.lock
 dist/
 
 # Database
-clarinet.db
-*/clarinet_demo.db
-examples/demo/clarinet_demo.db
+*.db
 
 # Logs
-data/logs/clarinet.log
-examples/demo/data/logs/clarinet.log
-examples/test/data/logs/clarinet.log
+*.log
 
 # Generated data
 examples/demo/data/[0-9]*/
@@ -37,4 +33,8 @@ examples/demo/data/[0-9]*/
 
 # Misc
 .Rhistory
+
+# Scratch / planning docs
+TODO*.md
+TASKIQ_*.md
 REFACTOR.md
