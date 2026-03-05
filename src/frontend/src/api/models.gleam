@@ -48,6 +48,7 @@ pub type FileDefinition {
     required: Bool,
     multiple: Bool,
     role: FileRole,
+    level: Option(String),
   )
 }
 

@@ -79,6 +79,8 @@ def _record_type_to_toml_dict(rt: RecordType) -> dict[str, Any]:
                 file_entry["description"] = fd["description"]
             if fd.get("multiple"):
                 file_entry["multiple"] = True
+            if fd.get("level"):
+                file_entry["level"] = fd["level"]
             files.append(file_entry)
         if files:
             data["file_registry"] = files

@@ -29,7 +29,7 @@ lesion_seg = RecordType(
 )
 ```
 
-- `File`: pattern, multiple, level, description, name (auto-derived from variable name)
+- `File`: pattern, multiple, level (`DicomQueryLevel | None`, persisted to DB), description, name (auto-derived from variable name)
 - `FileRef(file, role, required)`: binds File to RecordType with role
 - `RecordTypeDef` (exported as `RecordType`): full RecordType definition
 

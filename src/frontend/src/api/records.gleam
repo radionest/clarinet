@@ -253,6 +253,11 @@ fn file_definition_decoder() -> decode.Decoder(FileDefinition) {
     "intermediate" -> models.Intermediate
     _ -> models.Output
   }
+  use level <- decode.optional_field(
+    "level",
+    None,
+    decode.optional(decode.string),
+  )
   decode.success(models.FileDefinition(
     name: name,
     pattern: pattern,
@@ -260,6 +265,7 @@ fn file_definition_decoder() -> decode.Decoder(FileDefinition) {
     required: required,
     multiple: multiple,
     role: role,
+    level: level,
   ))
 }
 

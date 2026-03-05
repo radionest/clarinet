@@ -31,6 +31,7 @@ class FileRegistryEntry(BaseModel):
     pattern: str
     description: str | None = None
     multiple: bool = False
+    level: str | None = None
 
 
 class FileReference(SQLModel):
@@ -120,6 +121,7 @@ def resolve_file_references(
                 required=ref.required,
                 multiple=entry.multiple,
                 role=ref.role,
+                level=entry.level,
             )
         )
     return resolved

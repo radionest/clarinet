@@ -17,6 +17,8 @@ from typing import TYPE_CHECKING
 from pydantic import field_validator
 from sqlmodel import Field, Relationship, SQLModel, UniqueConstraint
 
+from src.models.base import DicomQueryLevel
+
 if TYPE_CHECKING:
     from src.models.record import Record
     from src.models.record_type import RecordType
@@ -51,6 +53,7 @@ class FileDefinition(SQLModel, table=True):
     pattern: str = Field(max_length=500)
     description: str | None = None
     multiple: bool = Field(default=False)
+    level: DicomQueryLevel | None = None
 
     record_type_links: list[RecordTypeFileLink] = Relationship(
         back_populates="file_definition",
@@ -145,6 +148,7 @@ class FileDefinitionRead(SQLModel):
     required: bool = True
     multiple: bool = False
     role: FileRole = FileRole.OUTPUT
+    level: DicomQueryLevel | None = None
 
     @field_validator("name")
     @classmethod

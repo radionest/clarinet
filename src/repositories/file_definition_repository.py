@@ -35,7 +35,7 @@ class FileDefinitionRepository(BaseRepository[FileDefinition]):
         if existing is not None:
             # Update mutable fields if they changed
             changed = False
-            for field_name in ("pattern", "description", "multiple"):
+            for field_name in ("pattern", "description", "multiple", "level"):
                 if field_name in kwargs and getattr(existing, field_name) != kwargs[field_name]:
                     setattr(existing, field_name, kwargs[field_name])
                     changed = True
@@ -67,6 +67,7 @@ class FileDefinitionRepository(BaseRepository[FileDefinition]):
                 pattern=defn.pattern,
                 description=defn.description,
                 multiple=defn.multiple,
+                level=defn.level,
             )
             result_map[defn.name] = fd
         return result_map

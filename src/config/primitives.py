@@ -25,7 +25,7 @@ class File(BaseModel):
 
     pattern: str
     multiple: bool = False
-    level: str | None = None
+    level: DicomQueryLevel | None = None
     description: str | None = None
     name: str = ""
 
@@ -101,4 +101,5 @@ def fileref_to_file_definition(ref: FileRef) -> FileDefinitionRead:
         required=ref.required,
         multiple=ref.file.multiple,
         role=ref.role,
+        level=ref.file.level,
     )

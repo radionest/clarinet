@@ -218,6 +218,30 @@ class TestResolveFileReferences:
 
         assert len(resolved) == 0
 
+    def test_level_propagated_from_registry(self) -> None:
+        """Test that level from FileRegistryEntry propagates to FileDefinitionRead."""
+        registry = {
+            "patient_data": FileRegistryEntry(
+                pattern="data.json",
+                description="Patient-level data",
+                level="PATIENT",
+            ),
+            "series_seg": FileRegistryEntry(
+                pattern="seg.nrrd",
+                description="Series-level segmentation",
+            ),
+        }
+        files = [
+            {"name": "patient_data", "role": "input", "required": True},
+            {"name": "series_seg", "role": "output", "required": False},
+        ]
+
+        resolved = resolve_file_references(files, registry)
+
+        assert len(resolved) == 2
+        assert resolved[0].level == "PATIENT"
+        assert resolved[1].level is None
+
 
 class TestResolveTaskFiles:
     """Tests for resolve_task_files function."""

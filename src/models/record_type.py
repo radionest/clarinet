@@ -113,6 +113,7 @@ class RecordType(RecordTypeBase, table=True):
                 multiple=link.file_definition.multiple,
                 role=link.role,
                 required=link.required,
+                level=link.file_definition.level,
             )
             for link in (links or [])
         ]

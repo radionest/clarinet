@@ -201,6 +201,58 @@ async def test_reconcile_updates_on_change(
 
 
 @pytest.mark.asyncio
+async def test_file_level_persisted(
+    test_session: AsyncSession,
+    tmp_path,
+) -> None:
+    """File(level="PATIENT") → FileDefinition.level in DB."""
+    _write_files_catalog(
+        tmp_path,
+        """\
+        from src.config.primitives import File
+
+        patient_data = File(
+            pattern="data.json",
+            description="Patient-level data",
+            level="PATIENT",
+        )
+        """,
+    )
+    _write_record_types(
+        tmp_path,
+        """\
+        from src.config.primitives import RecordTypeDef, FileRef
+        from src.models.file_schema import FileRole
+        from files_catalog import patient_data
+
+        cross_level = RecordTypeDef(
+            name="cross_level",
+            description="Cross-level test",
+            level="SERIES",
+            files=[FileRef(patient_data, role=FileRole.INPUT)],
+        )
+        """,
+    )
+
+    config_items = await load_python_config(tmp_path)
+    await reconcile_record_types(config_items, test_session)
+
+    stmt = (
+        select(RecordType)
+        .where(RecordType.name == "cross_level")
+        .options(
+            selectinload(RecordType.file_links).selectinload(  # type: ignore[arg-type]
+                RecordTypeFileLink.file_definition
+            ),
+        )
+    )
+    rt = (await test_session.execute(stmt)).scalar_one()
+    file_registry = rt.file_registry
+    assert len(file_registry) == 1
+    assert file_registry[0].level == "PATIENT"
+
+
+@pytest.mark.asyncio
 async def test_python_mode_no_record_types_file(tmp_path) -> None:
     """Missing record_types.py → empty list."""
     result = await load_python_config(tmp_path)
