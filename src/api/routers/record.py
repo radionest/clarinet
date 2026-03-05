@@ -57,7 +57,6 @@ from src.services.file_validation import FileValidationResult, FileValidator
 from src.types import RecordData
 from src.utils.file_checksums import checksums_changed, compute_checksums
 from src.utils.file_registry_resolver import resolve_task_files
-from src.utils.logger import logger
 from src.utils.validation import validate_json_by_schema
 
 
@@ -130,14 +129,7 @@ def validate_record_files(
     if not input_defs:
         return None
 
-    working_folder = record.working_folder
-    if working_folder is None:
-        logger.warning(
-            f"Cannot resolve working_folder for record {record.id}, skipping file validation"
-        )
-        return None
-
-    directory = Path(working_folder)
+    directory = Path(record.working_folder)
     validator = FileValidator(input_defs)
     result = validator.validate(record, directory)
     if not result.valid and raise_on_invalid:
@@ -652,14 +644,10 @@ async def check_record_files(
             # Still blocked — return early with empty result
             return FileCheckResult(changed_files=[], checksums={})
 
-    working_folder = record_read.working_folder
-    if working_folder is None:
-        return FileCheckResult(changed_files=[], checksums={})
-
     new_checksums = await compute_checksums(
         record_read.record_type.file_registry or [],
         record_read,
-        Path(working_folder),
+        Path(record_read.working_folder),
     )
     changed = checksums_changed(record_read.file_checksums, new_checksums)
 

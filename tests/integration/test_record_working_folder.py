@@ -429,3 +429,95 @@ async def test_validate_record_files_no_input_files(
     # rt_series has no file_links (no input file definitions)
     result = validate_record_files(record_read)
     assert result is None
+
+
+# ===========================================================================
+# Group 4: _format_path_strict
+# ===========================================================================
+
+
+@pytest.mark.asyncio
+async def test_format_path_strict_raises_on_invalid_template(
+    test_session, patient_with_anon, study_with_anon, series_with_anon, rt_series
+):
+    """_format_path_strict with unknown placeholder → KeyError propagates."""
+    record = await _create_record(
+        test_session,
+        patient_id=patient_with_anon.id,
+        study_uid=study_with_anon.study_uid,
+        series_uid=series_with_anon.series_uid,
+        rt_name=rt_series.name,
+    )
+
+    repo = RecordRepository(test_session)
+    loaded = await repo.get_with_relations(record.id)
+    record_read = RecordRead.model_validate(loaded)
+
+    with pytest.raises(KeyError):
+        record_read._format_path_strict("{bad_placeholder}/path")
+
+
+@pytest.mark.asyncio
+async def test_working_folder_type_is_str(
+    test_session,
+    patient_with_anon,
+    study_with_anon,
+    series_with_anon,
+    rt_series,
+    rt_study,
+    rt_patient,
+):
+    """working_folder returns str (not None) for all three levels."""
+    # SERIES level
+    rec_series = await _create_record(
+        test_session,
+        patient_id=patient_with_anon.id,
+        study_uid=study_with_anon.study_uid,
+        series_uid=series_with_anon.series_uid,
+        rt_name=rt_series.name,
+    )
+    # STUDY level
+    rec_study = await _create_record(
+        test_session,
+        patient_id=patient_with_anon.id,
+        study_uid=study_with_anon.study_uid,
+        series_uid=None,
+        rt_name=rt_study.name,
+    )
+    # PATIENT level
+    rec_patient = await _create_record(
+        test_session,
+        patient_id=patient_with_anon.id,
+        study_uid=None,
+        series_uid=None,
+        rt_name=rt_patient.name,
+    )
+
+    repo = RecordRepository(test_session)
+    for rec in (rec_series, rec_study, rec_patient):
+        loaded = await repo.get_with_relations(rec.id)
+        record_read = RecordRead.model_validate(loaded)
+        assert isinstance(record_read.working_folder, str)
+
+
+@pytest.mark.asyncio
+async def test_slicer_all_args_always_has_working_folder(
+    test_session, patient_with_anon, study_with_anon, series_with_anon, rt_series
+):
+    """slicer_all_args_formatted always contains 'working_folder' key."""
+    record = await _create_record(
+        test_session,
+        patient_id=patient_with_anon.id,
+        study_uid=study_with_anon.study_uid,
+        series_uid=series_with_anon.series_uid,
+        rt_name=rt_series.name,
+    )
+
+    repo = RecordRepository(test_session)
+    loaded = await repo.get_with_relations(record.id)
+    record_read = RecordRead.model_validate(loaded)
+
+    all_args = record_read.slicer_all_args_formatted
+    assert isinstance(all_args, dict)
+    assert "working_folder" in all_args
+    assert isinstance(all_args["working_folder"], str)

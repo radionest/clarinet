@@ -85,27 +85,39 @@ class SeriesRead(SeriesBase):
     study: StudyRead
     records: list[Any] = Field(default_factory=list)  # Will contain RecordRead objects
 
+    def _format_path_strict(self, unformatted_path: str) -> str:
+        """Format a path with values from this series.
+
+        Raises on failure — use for system templates where all placeholders
+        are guaranteed to exist (e.g. working_folder).
+        """
+        return unformatted_path.format(
+            patient_id=self.study.patient.anon_id
+            if self.study.patient.anon_id is not None
+            else self.study.patient.id,
+            patient_anon_name=self.study.patient.anon_name,
+            study_uid=self.study_uid,
+            study_anon_uid=self.study.anon_uid or self.study_uid,
+            series_uid=self.series_uid,
+            series_anon_uid=self.anon_uid or self.series_uid,
+            clarinet_storage_path=settings.storage_path,
+        )
+
     def _format_path(self, unformatted_path: str) -> str | None:
-        """Format a path with values from this series."""
+        """Format a path template, returning None on failure.
+
+        Safe wrapper for user-defined templates where unknown placeholders
+        are expected.
+        """
         try:
-            return unformatted_path.format(
-                patient_id=self.study.patient.anon_id
-                if self.study.patient.anon_id is not None
-                else self.study.patient.id,
-                patient_anon_name=self.study.patient.anon_name,
-                study_uid=self.study_uid,
-                study_anon_uid=self.study.anon_uid or self.study_uid,
-                series_uid=self.series_uid,
-                series_anon_uid=self.anon_uid or self.series_uid,
-                clarinet_storage_path=settings.storage_path,
-            )
-        except AttributeError:
+            return self._format_path_strict(unformatted_path)
+        except (AttributeError, KeyError):
             return None
 
     @computed_field
-    def working_folder(self) -> str | None:
+    def working_folder(self) -> str:
         """Get the full path to the working folder for this series."""
-        return self._format_path(
+        return self._format_path_strict(
             "{clarinet_storage_path}/{patient_id}/{study_anon_uid}/{series_anon_uid}"
         )
 

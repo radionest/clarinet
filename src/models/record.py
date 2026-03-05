@@ -18,7 +18,7 @@ from sqlmodel import JSON, Column, Field, Relationship, SQLModel
 
 from src.types import RecordData, SlicerArgs
 
-from ..exceptions import ValidationError
+from ..exceptions import ConfigurationError, ValidationError
 from ..settings import settings
 from .base import BaseModel, RecordStatus
 from .file_schema import RecordFileLink, RecordFileLinkRead
@@ -266,23 +266,35 @@ class RecordRead(RecordBase):
             return f"radiant://?n=paet&v=PACS_PETROVA&n=pstv&v=0020000D&v={self.study.anon_uid}"
         return f"radiant://?n=paet&v=PACS_PETROVA&n=pstv&v=0020000D&v={self.study.study_uid}"
 
+    def _format_path_strict(self, unformatted_path: str) -> str:
+        """Format a path template with values from this record.
+
+        Raises on failure — use for system templates where all placeholders
+        are guaranteed to exist (e.g. working_folder).
+        """
+        return unformatted_path.format(
+            patient_id=self.patient.anon_id
+            if self.patient.anon_id is not None
+            else self.patient_id,
+            patient_anon_name=self.patient.anon_name,
+            study_uid=self.study_uid,
+            study_anon_uid=(self.study.anon_uid if self.study else self.study_anon_uid)
+            or self.study_uid,
+            series_uid=self.series_uid,
+            series_anon_uid=(self.series.anon_uid if self.series else self.series_anon_uid)
+            or self.series_uid,
+            user_id=self.user_id,
+            clarinet_storage_path=self.clarinet_storage_path or settings.storage_path,
+        )
+
     def _format_path(self, unformatted_path: str) -> str | None:
-        """Format a path template with values from this record."""
+        """Format a path template, returning None on failure.
+
+        Safe wrapper for user-defined templates (e.g. slicer kwargs)
+        where unknown placeholders are expected.
+        """
         try:
-            return unformatted_path.format(
-                patient_id=self.patient.anon_id
-                if self.patient.anon_id is not None
-                else self.patient_id,
-                patient_anon_name=self.patient.anon_name,
-                study_uid=self.study_uid,
-                study_anon_uid=(self.study.anon_uid if self.study else self.study_anon_uid)
-                or self.study_uid,
-                series_uid=self.series_uid,
-                series_anon_uid=(self.series.anon_uid if self.series else self.series_anon_uid)
-                or self.series_uid,
-                user_id=self.user_id,
-                clarinet_storage_path=self.clarinet_storage_path or settings.storage_path,
-            )
+            return self._format_path_strict(unformatted_path)
         except (AttributeError, KeyError):
             return None
 
@@ -311,38 +323,35 @@ class RecordRead(RecordBase):
             return None
         return self._format_slicer_kwargs(self.record_type.slicer_result_validator_args)
 
-    def _get_working_folder(self) -> str | None:
+    def _get_working_folder(self) -> str:
         """Get the working folder path for this record."""
         match self.record_type.level:
             case "SERIES":
-                return self._format_path(
+                return self._format_path_strict(
                     f"{settings.storage_path}/{{patient_id}}/{{study_anon_uid}}/{{series_anon_uid}}"
                 )
             case "STUDY":
-                return self._format_path(
+                return self._format_path_strict(
                     f"{settings.storage_path}/{{patient_id}}/{{study_anon_uid}}"
                 )
             case "PATIENT":
-                return self._format_path(f"{settings.storage_path}/{{patient_id}}")
+                return self._format_path_strict(f"{settings.storage_path}/{{patient_id}}")
             case _:
-                raise NotImplementedError(
-                    "Working folder attribute only available for Study and Series level record types."
+                raise ConfigurationError(
+                    f"Unknown record type level '{self.record_type.level}' — "
+                    "expected SERIES, STUDY, or PATIENT."
                 )
 
     @computed_field  # type: ignore[prop-decorator]
     @property
-    def working_folder(self) -> str | None:
+    def working_folder(self) -> str:
         """Get the working folder path for this record."""
         return self._get_working_folder()
 
     @computed_field
-    def slicer_all_args_formatted(self) -> SlicerArgs | None:
+    def slicer_all_args_formatted(self) -> SlicerArgs:
         """Get all formatted Slicer arguments."""
-        working_folder_path = self._get_working_folder()
-        if working_folder_path is None:
-            return None
-
-        all_args: SlicerArgs = {"working_folder": working_folder_path}
+        all_args: SlicerArgs = {"working_folder": self._get_working_folder()}
 
         if self.record_type.slicer_script_args is not None:
             all_args.update(self._format_slicer_kwargs(self.record_type.slicer_script_args))

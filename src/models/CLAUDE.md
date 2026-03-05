@@ -29,6 +29,16 @@ record_read = RecordRead.model_validate(record)
 record_read.working_folder  # safe — all data is plain Pydantic fields
 ```
 
+### Working Folder Contract
+
+`RecordRead.working_folder` and `SeriesRead.working_folder` return `str` (never `None`).
+Guaranteed by: exhaustive `DicomQueryLevel` enum, `validate_record_level` enforcing
+required UIDs per level, FK cascades preventing orphans, eager loading in all API paths.
+
+Two `_format_path` variants exist on `RecordRead` and `SeriesRead`:
+- `_format_path_strict(template) -> str` — raises on failure (system templates)
+- `_format_path(template) -> str | None` — returns None on failure (user-defined slicer templates)
+
 Always use `selectinload()` in repositories when fetching records for API responses:
 ```python
 select(Record).options(
