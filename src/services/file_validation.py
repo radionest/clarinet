@@ -13,7 +13,7 @@ from src.utils.file_patterns import find_matching_file, resolve_pattern
 
 if TYPE_CHECKING:
     from src.models.file_schema import FileDefinitionRead
-    from src.models.record import RecordBase, RecordTypeBase
+    from src.models.record import RecordBase
 
 
 @dataclass
@@ -50,45 +50,43 @@ class FileValidator:
     """Validator for files associated with Records.
 
     This validator checks that required files exist in the expected
-    directory and match the patterns defined in the RecordType.
+    directory and match the patterns defined in the file definitions.
 
     Args:
-        record_type: RecordType containing file definitions
+        file_definitions: List of FileDefinitionRead objects to validate against
 
     Examples:
-        >>> validator = FileValidator(record_type)
-        >>> result = validator.validate_input_files(record, Path("/data/study"))
+        >>> validator = FileValidator(input_file_defs)
+        >>> result = validator.validate(record, Path("/data/study"))
         >>> if not result.valid:
         ...     for error in result.errors:
         ...         print(f"Error: {error.message}")
     """
 
-    def __init__(self, record_type: RecordTypeBase):
-        self.record_type = record_type
+    def __init__(self, file_definitions: list[FileDefinitionRead]):
+        self._file_definitions = file_definitions
 
-    def validate_files(
+    def validate(
         self,
         record: RecordBase,
-        file_definitions: list[FileDefinitionRead] | None,
         directory: Path,
     ) -> FileValidationResult:
-        """Validate files against a list of file definitions.
+        """Validate files against the file definitions.
 
         Args:
             record: Record to validate files for
-            file_definitions: List of FileDefinitionRead objects to validate
             directory: Directory where files should be located
 
         Returns:
             FileValidationResult with validation status and matched files
         """
-        if not file_definitions:
+        if not self._file_definitions:
             return FileValidationResult(valid=True)
 
         errors: list[FileValidationError] = []
         matched: dict[str, str] = {}
 
-        for file_def in file_definitions:
+        for file_def in self._file_definitions:
             filename = find_matching_file(directory, file_def.pattern, record)
 
             if filename:
@@ -109,39 +107,3 @@ class FileValidator:
             errors=errors,
             matched_files=matched,
         )
-
-    def validate_input_files(
-        self,
-        record: RecordBase,
-        directory: Path,
-    ) -> FileValidationResult:
-        """Validate input files for a record.
-
-        Uses input_files computed from file_registry (role=input).
-
-        Args:
-            record: Record to validate input files for
-            directory: Directory where input files should be located
-
-        Returns:
-            FileValidationResult with validation status
-        """
-        return self.validate_files(record, self.record_type.input_files, directory)
-
-    def validate_output_files(
-        self,
-        record: RecordBase,
-        directory: Path,
-    ) -> FileValidationResult:
-        """Validate output files for a record.
-
-        Uses output_files computed from file_registry (role=output).
-
-        Args:
-            record: Record to validate output files for
-            directory: Directory where output files should be located
-
-        Returns:
-            FileValidationResult with validation status
-        """
-        return self.validate_files(record, self.record_type.output_files, directory)

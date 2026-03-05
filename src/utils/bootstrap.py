@@ -388,8 +388,8 @@ async def add_record_type(record_type: RecordTypeCreate, session: AsyncSession) 
     # Extract file_registry before creating the ORM object
     file_defs = record_type.file_registry or []
 
-    # Create RecordType without file_registry (it's a computed field on ORM)
-    create_data = record_type.model_dump(exclude={"file_registry", "input_files", "output_files"})
+    # Create RecordType without file_registry (it's M2M, not a column)
+    create_data = record_type.model_dump(exclude={"file_registry"})
     new_record_type = RecordType(**create_data)
     new_record_type.file_links = []
     session.add(new_record_type)

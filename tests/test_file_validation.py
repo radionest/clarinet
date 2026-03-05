@@ -10,7 +10,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from src.models.file_schema import FileDefinitionRead
+from src.models.file_schema import FileDefinitionRead, FileRole
 from src.services.file_validation import (
     FileValidationError,
     FileValidationResult,
@@ -32,13 +32,9 @@ def mock_record() -> MagicMock:
 
 
 @pytest.fixture
-def mock_record_type() -> MagicMock:
-    """Create a mock RecordType for testing."""
-    from src.models.file_schema import FileRole
-
-    record_type = MagicMock()
-    record_type.name = "ct_segmentation"
-    record_type.file_registry = [
+def input_defs() -> list[FileDefinitionRead]:
+    """Create input file definitions for testing."""
+    return [
         FileDefinitionRead(
             name="ct_scan", pattern="ct_scan.nrrd", required=True, role=FileRole.INPUT
         ),
@@ -49,6 +45,13 @@ def mock_record_type() -> MagicMock:
             description="Optional mask",
             role=FileRole.INPUT,
         ),
+    ]
+
+
+@pytest.fixture
+def output_defs() -> list[FileDefinitionRead]:
+    """Create output file definitions for testing."""
+    return [
         FileDefinitionRead(
             name="segmentation",
             pattern="seg_{id}.seg.nrrd",
@@ -56,15 +59,18 @@ def mock_record_type() -> MagicMock:
             role=FileRole.OUTPUT,
         ),
     ]
-    record_type.input_files = [f for f in record_type.file_registry if f.role == FileRole.INPUT]
-    record_type.output_files = [f for f in record_type.file_registry if f.role == FileRole.OUTPUT]
-    return record_type
 
 
 @pytest.fixture
-def validator(mock_record_type: MagicMock) -> FileValidator:
-    """Create FileValidator instance."""
-    return FileValidator(mock_record_type)
+def input_validator(input_defs: list[FileDefinitionRead]) -> FileValidator:
+    """Create FileValidator for input files."""
+    return FileValidator(input_defs)
+
+
+@pytest.fixture
+def output_validator(output_defs: list[FileDefinitionRead]) -> FileValidator:
+    """Create FileValidator for output files."""
+    return FileValidator(output_defs)
 
 
 class TestFileValidationError:
@@ -114,9 +120,9 @@ class TestFileValidationResult:
 class TestFileValidator:
     """Tests for FileValidator class."""
 
-    def test_validate_files_all_found(
+    def test_validate_all_found(
         self,
-        validator: FileValidator,
+        input_validator: FileValidator,
         mock_record: MagicMock,
         tmp_path: Path,
     ) -> None:
@@ -125,11 +131,7 @@ class TestFileValidator:
         (tmp_path / "ct_scan.nrrd").touch()
         (tmp_path / "mask_42.nrrd").touch()
 
-        result = validator.validate_files(
-            mock_record,
-            validator.record_type.input_files,
-            tmp_path,
-        )
+        result = input_validator.validate(mock_record, tmp_path)
 
         assert result.valid is True
         assert len(result.errors) == 0
@@ -138,29 +140,25 @@ class TestFileValidator:
         assert "mask" in result.matched_files
         assert result.matched_files["mask"] == "mask_42.nrrd"
 
-    def test_validate_files_required_missing(
+    def test_validate_required_missing(
         self,
-        validator: FileValidator,
+        input_validator: FileValidator,
         mock_record: MagicMock,
         tmp_path: Path,
     ) -> None:
         """Test validation when required file is missing."""
         # Don't create ct_scan.nrrd
 
-        result = validator.validate_files(
-            mock_record,
-            validator.record_type.input_files,
-            tmp_path,
-        )
+        result = input_validator.validate(mock_record, tmp_path)
 
         assert result.valid is False
         assert len(result.errors) == 1
         assert result.errors[0].file_name == "ct_scan"
         assert result.errors[0].error_type == "missing"
 
-    def test_validate_files_optional_missing(
+    def test_validate_optional_missing(
         self,
-        validator: FileValidator,
+        input_validator: FileValidator,
         mock_record: MagicMock,
         tmp_path: Path,
     ) -> None:
@@ -169,33 +167,28 @@ class TestFileValidator:
         (tmp_path / "ct_scan.nrrd").touch()
         # Don't create optional mask file
 
-        result = validator.validate_files(
-            mock_record,
-            validator.record_type.input_files,
-            tmp_path,
-        )
+        result = input_validator.validate(mock_record, tmp_path)
 
         assert result.valid is True
         assert len(result.errors) == 0
         assert "ct_scan" in result.matched_files
         assert "mask" not in result.matched_files
 
-    def test_validate_files_empty_definitions(
+    def test_validate_empty_definitions(
         self,
-        validator: FileValidator,
         mock_record: MagicMock,
         tmp_path: Path,
     ) -> None:
         """Test validation with empty file definitions."""
-        result = validator.validate_files(mock_record, None, tmp_path)
+        validator = FileValidator([])
+        result = validator.validate(mock_record, tmp_path)
 
         assert result.valid is True
         assert len(result.errors) == 0
         assert result.matched_files == {}
 
-    def test_validate_files_with_file_definition_read(
+    def test_validate_with_file_definition_read(
         self,
-        validator: FileValidator,
         mock_record: MagicMock,
         tmp_path: Path,
     ) -> None:
@@ -207,35 +200,36 @@ class TestFileValidator:
             FileDefinitionRead(name="ct_scan", pattern="ct_scan.nrrd", required=True),
         ]
 
-        result = validator.validate_files(mock_record, definitions, tmp_path)
+        validator = FileValidator(definitions)
+        result = validator.validate(mock_record, tmp_path)
 
         assert result.valid is True
         assert "ct_scan" in result.matched_files
 
     def test_validate_input_files(
         self,
-        validator: FileValidator,
+        input_validator: FileValidator,
         mock_record: MagicMock,
         tmp_path: Path,
     ) -> None:
-        """Test validate_input_files method."""
+        """Test validate method for input files."""
         (tmp_path / "ct_scan.nrrd").touch()
 
-        result = validator.validate_input_files(mock_record, tmp_path)
+        result = input_validator.validate(mock_record, tmp_path)
 
         assert result.valid is True
         assert "ct_scan" in result.matched_files
 
     def test_validate_output_files(
         self,
-        validator: FileValidator,
+        output_validator: FileValidator,
         mock_record: MagicMock,
         tmp_path: Path,
     ) -> None:
-        """Test validate_output_files method."""
+        """Test validate method for output files."""
         (tmp_path / "seg_42.seg.nrrd").touch()
 
-        result = validator.validate_output_files(mock_record, tmp_path)
+        result = output_validator.validate(mock_record, tmp_path)
 
         assert result.valid is True
         assert "segmentation" in result.matched_files
@@ -243,14 +237,14 @@ class TestFileValidator:
 
     def test_validate_output_files_missing(
         self,
-        validator: FileValidator,
+        output_validator: FileValidator,
         mock_record: MagicMock,
         tmp_path: Path,
     ) -> None:
-        """Test validate_output_files when file is missing."""
+        """Test validate method when output file is missing."""
         # Don't create the output file
 
-        result = validator.validate_output_files(mock_record, tmp_path)
+        result = output_validator.validate(mock_record, tmp_path)
 
         assert result.valid is False
         assert len(result.errors) == 1
@@ -266,9 +260,6 @@ class TestFileValidatorEdgeCases:
         tmp_path: Path,
     ) -> None:
         """Test validation when multiple required files are missing."""
-        from src.models.file_schema import FileRole
-
-        record_type = MagicMock()
         input_defs = [
             FileDefinitionRead(
                 name="file1", pattern="file1.nrrd", required=True, role=FileRole.INPUT
@@ -280,15 +271,9 @@ class TestFileValidatorEdgeCases:
                 name="file3", pattern="file3.nrrd", required=True, role=FileRole.INPUT
             ),
         ]
-        record_type.file_registry = input_defs
-        record_type.input_files = input_defs
 
-        validator = FileValidator(record_type)
-        result = validator.validate_files(
-            mock_record,
-            record_type.input_files,
-            tmp_path,
-        )
+        validator = FileValidator(input_defs)
+        result = validator.validate(mock_record, tmp_path)
 
         assert result.valid is False
         assert len(result.errors) == 3
@@ -299,9 +284,6 @@ class TestFileValidatorEdgeCases:
         tmp_path: Path,
     ) -> None:
         """Test validation with data field in pattern."""
-        from src.models.file_schema import FileRole
-
-        record_type = MagicMock()
         input_defs = [
             FileDefinitionRead(
                 name="birads_file",
@@ -310,18 +292,12 @@ class TestFileValidatorEdgeCases:
                 role=FileRole.INPUT,
             ),
         ]
-        record_type.file_registry = input_defs
-        record_type.input_files = input_defs
 
         # Create file with resolved name
         (tmp_path / "birads_4.txt").touch()
 
-        validator = FileValidator(record_type)
-        result = validator.validate_files(
-            mock_record,
-            record_type.input_files,
-            tmp_path,
-        )
+        validator = FileValidator(input_defs)
+        result = validator.validate(mock_record, tmp_path)
 
         assert result.valid is True
         assert result.matched_files["birads_file"] == "birads_4.txt"

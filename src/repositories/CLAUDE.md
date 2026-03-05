@@ -66,7 +66,9 @@ Beyond `BaseRepository`, `RecordRepository` has:
 | `find_pending_by_user(user_id)` | Pending/inwork records |
 | `create_with_relations(record)` | Create with eager load after commit |
 | `update_status(id, status)` | Status transition with validation |
-| `update_data(id, data)` | Partial JSON data update |
+| `update_data(id, data, new_status)` | Update data and optionally status |
+| `set_files(record, matched_files, fd_map)` | Create `RecordFileLink` rows from matched files |
+| `update_checksums(id, checksums)` | Update checksum on existing `RecordFileLink` rows |
 | `assign_user(id, user_id)` | Assign record to user |
 | `claim_record(id, user_id)` | Claim unassigned record |
 | `bulk_update_status(ids, status)` | Batch status update |
@@ -99,6 +101,7 @@ selectinload(RecordType.file_links).selectinload(RecordTypeFileLink.file_definit
 ```
 - `RecordTypeRepository`: `_file_links_eager_load()` helper, applied to `get()`, `get_all()`, `list_all()`, `find()`
 - `RecordRepository`: `_record_type_with_files()` helper chains through `Record.record_type`
+- `RecordRepository`: `_record_file_links_eager_load()` helper for `Record.file_links → FileDefinition`
 - `FileDefinitionRepository`: `get_or_create()`, `bulk_upsert()` for M2M link management
 
 ## N+1 Prevention

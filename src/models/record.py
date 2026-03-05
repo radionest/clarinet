@@ -21,6 +21,7 @@ from src.types import RecordData, SlicerArgs
 from ..exceptions import ValidationError
 from ..settings import settings
 from .base import BaseModel, RecordStatus
+from .file_schema import RecordFileLink
 from .patient import Patient, PatientBase
 from .record_type import (
     RecordType,
@@ -112,12 +113,6 @@ class RecordBase(BaseModel):
     # Storage path
     clarinet_storage_path: str | None = None
 
-    # Matched files from file validation
-    files: dict[str, str] | None = None
-
-    # File checksums (name -> SHA256)
-    file_checksums: dict[str, str] | None = None
-
     # Study relationship field is only defined in Record subclass, not in base
 
     def __hash__(self) -> int:
@@ -160,11 +155,11 @@ class Record(RecordBase, table=True):
 
     data: RecordData | None = Field(default_factory=dict, sa_column=Column(JSON))
 
-    # Matched files from file validation (key: file definition name, value: filename)
-    files: dict[str, str] | None = Field(default_factory=dict, sa_column=Column(JSON))
-
-    # File checksums (name -> SHA256)
-    file_checksums: dict[str, str] | None = Field(default_factory=dict, sa_column=Column(JSON))
+    # M2M relationship to FileDefinition via link table
+    file_links: list[RecordFileLink] = Relationship(
+        back_populates="record",
+        cascade_delete=True,
+    )
 
     created_at: datetime | None = Field(default_factory=lambda: datetime.now(UTC))
     changed_at: datetime | None = Field(
@@ -215,6 +210,8 @@ class RecordRead(RecordBase):
 
     id: int
     data: RecordData | None = None
+    files: dict[str, str] | None = None
+    file_checksums: dict[str, str] | None = None
     created_at: datetime | None = None
     changed_at: datetime | None = None
     started_at: datetime | None = None
@@ -223,6 +220,32 @@ class RecordRead(RecordBase):
     study: StudyBase | None = None
     series: SeriesBase | None = None
     record_type: RecordTypeRead
+
+    @model_validator(mode="before")
+    @classmethod
+    def populate_files_from_links(cls, data: Any) -> Any:
+        """Populate files and file_checksums from M2M file_links when validating from ORM."""
+        if isinstance(data, Record):
+            result: dict[str, Any] = {}
+            for field_name in cls.model_fields:
+                if field_name in ("files", "file_checksums"):
+                    continue
+                result[field_name] = getattr(data, field_name, None)
+            try:
+                links = data.file_links
+                result["files"] = {
+                    link.file_definition.name: link.filename for link in (links or [])
+                }
+                result["file_checksums"] = {
+                    link.file_definition.name: link.checksum
+                    for link in (links or [])
+                    if link.checksum
+                }
+            except Exception:
+                result["files"] = None
+                result["file_checksums"] = None
+            return result
+        return data
 
     @computed_field
     def radiant(self) -> str | None:

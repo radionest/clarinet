@@ -18,6 +18,7 @@ from pydantic import field_validator
 from sqlmodel import Field, Relationship, SQLModel, UniqueConstraint
 
 if TYPE_CHECKING:
+    from src.models.record import Record
     from src.models.record_type import RecordType
 
 
@@ -52,6 +53,9 @@ class FileDefinition(SQLModel, table=True):
     multiple: bool = Field(default=False)
 
     record_type_links: list[RecordTypeFileLink] = Relationship(
+        back_populates="file_definition",
+    )
+    record_file_links: list[RecordFileLink] = Relationship(
         back_populates="file_definition",
     )
 
@@ -93,6 +97,31 @@ class RecordTypeFileLink(SQLModel, table=True):
 
     record_type: RecordType = Relationship(back_populates="file_links")
     file_definition: FileDefinition = Relationship(back_populates="record_type_links")
+
+
+class RecordFileLink(SQLModel, table=True):
+    """M2M link between Record and FileDefinition.
+
+    Stores the actual matched filename and optional SHA256 checksum.
+
+    Attributes:
+        record_id: FK to Record.id.
+        file_definition_id: FK to FileDefinition.id.
+        filename: Actual matched filename.
+        checksum: Optional SHA256 checksum of the file.
+    """
+
+    __tablename__ = "record_file_link"
+
+    record_id: int = Field(foreign_key="record.id", primary_key=True, ondelete="CASCADE")
+    file_definition_id: int = Field(
+        foreign_key="filedefinition.id", primary_key=True, ondelete="CASCADE"
+    )
+    filename: str
+    checksum: str | None = None
+
+    record: Record = Relationship(back_populates="file_links")
+    file_definition: FileDefinition = Relationship(back_populates="record_file_links")
 
 
 class FileDefinitionRead(SQLModel):

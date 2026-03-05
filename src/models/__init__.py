@@ -12,7 +12,13 @@ from .auth import AccessToken
 from .base import BaseModel, DicomQueryLevel, DicomUID, RecordStatus
 
 # File schema models
-from .file_schema import FileDefinition, FileDefinitionRead, FileRole, RecordTypeFileLink
+from .file_schema import (
+    FileDefinition,
+    FileDefinitionRead,
+    FileRole,
+    RecordFileLink,
+    RecordTypeFileLink,
+)
 
 # Patient models
 from .patient import Patient, PatientBase, PatientRead, PatientSave
@@ -75,6 +81,7 @@ __all__ = [
     "Record",
     "RecordBase",
     "RecordCreate",
+    "RecordFileLink",
     "RecordFind",
     "RecordFindResult",
     "RecordFindResultComparisonOperator",

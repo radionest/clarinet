@@ -51,7 +51,7 @@ from src.models import (
     RecordTypeRead,
     User,
 )
-from src.models.file_schema import FileDefinitionRead, RecordTypeFileLink
+from src.models.file_schema import FileDefinitionRead, FileRole, RecordTypeFileLink
 from src.repositories.record_repository import RecordSearchCriteria
 from src.services.file_accessor import get_file_accessor
 from src.services.file_validation import FileValidationResult, FileValidator
@@ -123,9 +123,12 @@ def validate_record_files(
         raise_on_invalid: If True, raise ValidationError on missing files.
 
     Returns:
-        FileValidationResult if validation was performed, None if no input_files defined
+        FileValidationResult if validation was performed, None if no input files defined
     """
-    if not record.record_type.input_files:
+    input_defs = [
+        fd for fd in (record.record_type.file_registry or []) if fd.role == FileRole.INPUT
+    ]
+    if not input_defs:
         return None
 
     working_folder = record.working_folder
@@ -136,8 +139,8 @@ def validate_record_files(
         return None
 
     directory = Path(working_folder)
-    validator = FileValidator(record.record_type)
-    result = validator.validate_input_files(record, directory)
+    validator = FileValidator(input_defs)
+    result = validator.validate(record, directory)
     if not result.valid and raise_on_invalid:
         errors = "; ".join(f"{e.file_name}: {e.message}" for e in result.errors)
         raise ValidationError(f"File validation failed: {errors}")
@@ -226,8 +229,8 @@ async def add_record_type(
     if constrain_unique_names:
         await repo.ensure_unique_name(record_type.name)
 
-    # Create RecordType without file_registry (it's a computed field on ORM)
-    create_data = record_type.model_dump(exclude={"file_registry", "input_files", "output_files"})
+    # Create RecordType without file_registry (it's M2M, not a column)
+    create_data = record_type.model_dump(exclude={"file_registry"})
     new_record_type = RecordType(**create_data)
     new_record_type.file_links = []
     session.add(new_record_type)
@@ -312,9 +315,6 @@ async def update_record_type(
 
     # Handle file_registry update separately (it's M2M now)
     file_defs_raw = update_data.pop("file_registry", None)
-    # Also exclude computed fields that shouldn't be set
-    update_data.pop("input_files", None)
-    update_data.pop("output_files", None)
 
     if update_data:
         await repo.update(record_type, update_data)
@@ -484,7 +484,9 @@ async def add_record(
         return record
 
     if file_result.valid and file_result.matched_files:
-        await repo.set_files(record, file_result.matched_files)
+        rt = await repo.get_record_type(record.record_type_name)
+        fd_map = {link.file_definition.name: link.file_definition for link in rt.file_links}
+        await repo.set_files(record, file_result.matched_files, fd_map)
         return await repo.get_with_relations(record.id)  # type: ignore[arg-type]
 
     if not file_result.valid:
@@ -554,13 +556,15 @@ async def submit_record_data(
     # Validate input files if defined (raise on missing required files)
     record_read = RecordRead.model_validate(record)
     file_result = validate_record_files(record_read, raise_on_invalid=True)
-    files: dict[str, str] | None = None
+
     if file_result and file_result.matched_files:
-        files = file_result.matched_files
+        rt = await repo.get_record_type(record.record_type_name)
+        fd_map = {link.file_definition.name: link.file_definition for link in rt.file_links}
+        await repo.set_files(record, file_result.matched_files, fd_map)
 
     # Update record data, set finished status
     record, old_status = await repo.update_data(
-        record_id, validated_data, new_status=RecordStatus.finished, files=files
+        record_id, validated_data, new_status=RecordStatus.finished
     )
 
     # Trigger RecordFlow if enabled
@@ -645,7 +649,9 @@ async def check_record_files(
         if file_result is not None and file_result.valid:
             old_status = record.status
             if file_result.matched_files:
-                await repo.set_files(record, file_result.matched_files)
+                rt = await repo.get_record_type(record.record_type_name)
+                fd_map = {link.file_definition.name: link.file_definition for link in rt.file_links}
+                await repo.set_files(record, file_result.matched_files, fd_map)
             record, _ = await repo.update_status(record_id, RecordStatus.pending)
             trigger_recordflow(request, background_tasks, record, old_status)
             record_read = RecordRead.model_validate(record)
@@ -656,7 +662,7 @@ async def check_record_files(
     accessor = get_file_accessor(record_read)
 
     new_checksums = await compute_checksums(accessor)
-    changed = checksums_changed(record.file_checksums, new_checksums)
+    changed = checksums_changed(record_read.file_checksums, new_checksums)
 
     await repo.update_checksums(record_id, new_checksums)
 

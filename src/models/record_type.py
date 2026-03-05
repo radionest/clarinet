@@ -9,13 +9,13 @@ Slicer integration settings.
 import json as json_lib
 from typing import TYPE_CHECKING, Any
 
-from pydantic import computed_field, field_validator, model_validator
+from pydantic import field_validator, model_validator
 from sqlmodel import JSON, Column, Field, Relationship, SQLModel
 
 from src.types import RecordSchema, SlicerArgs
 
 from .base import DicomQueryLevel
-from .file_schema import FileDefinitionRead, FileRole, RecordTypeFileLink
+from .file_schema import FileDefinitionRead, RecordTypeFileLink
 from .user import UserRole
 
 if TYPE_CHECKING:
@@ -38,8 +38,6 @@ class RecordTypeBase(SQLModel):
     column on the ``RecordType`` table model. Instead:
     - ``RecordType``: populates ``file_registry`` from M2M ``file_links``
     - ``RecordTypeCreate`` / ``RecordTypeOptional``: defines it as a regular field
-
-    ``input_files`` / ``output_files`` use ``getattr`` to safely access it.
     """
 
     name: str
@@ -56,32 +54,6 @@ class RecordTypeBase(SQLModel):
     level: DicomQueryLevel = Field(default=DicomQueryLevel.SERIES)
 
     data_schema: RecordSchema | None = None
-
-    def _get_file_registry_items(self) -> list[FileDefinitionRead]:
-        """Get file_registry items as FileDefinitionRead objects.
-
-        Uses ``getattr`` because ``file_registry`` is not on every subclass.
-        """
-        registry: list[Any] | None = getattr(self, "file_registry", None)
-        result: list[FileDefinitionRead] = []
-        for item in registry or []:
-            if isinstance(item, FileDefinitionRead):
-                result.append(item)
-            else:
-                result.append(FileDefinitionRead(**item))
-        return result
-
-    @computed_field  # type: ignore[prop-decorator]
-    @property
-    def input_files(self) -> list[FileDefinitionRead]:
-        """Input files filtered from file_registry."""
-        return [f for f in self._get_file_registry_items() if f.role == FileRole.INPUT]
-
-    @computed_field  # type: ignore[prop-decorator]
-    @property
-    def output_files(self) -> list[FileDefinitionRead]:
-        """Output files filtered from file_registry."""
-        return [f for f in self._get_file_registry_items() if f.role == FileRole.OUTPUT]
 
 
 class RecordType(RecordTypeBase, table=True):

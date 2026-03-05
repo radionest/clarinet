@@ -20,7 +20,7 @@ from src.exceptions.domain import (
 )
 from src.models import Record
 from src.models.base import RecordStatus
-from src.models.file_schema import RecordTypeFileLink
+from src.models.file_schema import FileDefinition, RecordFileLink, RecordTypeFileLink
 from src.models.patient import Patient
 from src.models.record import RecordFindResult, RecordFindResultComparisonOperator, RecordType
 from src.models.study import Series, Study
@@ -65,6 +65,13 @@ def _record_type_with_files() -> Any:
     )
 
 
+def _record_file_links_eager_load() -> Any:
+    """Return selectinload chain for record → file_links → file_definition."""
+    return (
+        selectinload(Record.file_links).selectinload(RecordFileLink.file_definition)  # type: ignore[arg-type]  # type: ignore[arg-type]
+    )
+
+
 class RecordRepository(BaseRepository[Record]):
     """Repository for Record model operations."""
 
@@ -101,7 +108,11 @@ class RecordRepository(BaseRepository[Record]):
         Raises:
             RecordNotFoundError: If record doesn't exist
         """
-        statement = select(Record).where(Record.id == record_id).options(_record_type_with_files())
+        statement = (
+            select(Record)
+            .where(Record.id == record_id)
+            .options(_record_type_with_files(), _record_file_links_eager_load())
+        )
         result = await self.session.execute(statement)
         record = result.scalars().first()
         if not record:
@@ -128,6 +139,7 @@ class RecordRepository(BaseRepository[Record]):
                 selectinload(Record.study),  # type: ignore
                 selectinload(Record.series),  # type: ignore
                 _record_type_with_files(),
+                _record_file_links_eager_load(),
             )
         )
         result = await self.session.execute(statement)
@@ -153,6 +165,7 @@ class RecordRepository(BaseRepository[Record]):
                 selectinload(Record.study),  # type: ignore
                 selectinload(Record.series),  # type: ignore
                 _record_type_with_files(),
+                _record_file_links_eager_load(),
             )
             .offset(skip)
             .limit(limit)
@@ -181,6 +194,7 @@ class RecordRepository(BaseRepository[Record]):
                 selectinload(Record.study),  # type: ignore
                 selectinload(Record.series),  # type: ignore
                 _record_type_with_files(),
+                _record_file_links_eager_load(),
             )
             .offset(skip)
             .limit(limit)
@@ -213,6 +227,7 @@ class RecordRepository(BaseRepository[Record]):
                 selectinload(Record.study),  # type: ignore
                 selectinload(Record.series),  # type: ignore
                 _record_type_with_files(),
+                _record_file_links_eager_load(),
             )
         )
         result = await self.session.execute(statement)
@@ -257,15 +272,13 @@ class RecordRepository(BaseRepository[Record]):
         record_id: int,
         data: RecordData,
         new_status: RecordStatus | None = None,
-        files: dict[str, str] | None = None,
     ) -> tuple[Record, RecordStatus]:
-        """Update record data and optionally status and files.
+        """Update record data and optionally status.
 
         Args:
             record_id: Record ID
             data: New record data
             new_status: Optional new status to set
-            files: Optional matched files dict
 
         Returns:
             Tuple of (record with relations loaded, old status)
@@ -278,33 +291,53 @@ class RecordRepository(BaseRepository[Record]):
         record.data = data
         if new_status is not None:
             record.status = new_status
-        if files is not None:
-            record.files = files
         await self.session.commit()
         return await self.get_with_relations(record_id), old_status
 
     async def update_checksums(self, record_id: int, checksums: dict[str, str]) -> None:
-        """Update file checksums on a record.
+        """Update file checksums on existing RecordFileLink rows.
 
         Args:
             record_id: Record ID
-            checksums: New checksums dict (name -> SHA256)
+            checksums: New checksums dict (file definition name -> SHA256)
 
         Raises:
             RecordNotFoundError: If record doesn't exist
         """
-        record = await self.get(record_id)
-        record.file_checksums = checksums
+        record = await self.get_with_record_type(record_id)
+        for link in record.file_links or []:
+            key = link.file_definition.name
+            if key in checksums:
+                link.checksum = checksums[key]
         await self.session.commit()
 
-    async def set_files(self, record: Record, files: dict[str, str]) -> None:
-        """Set matched files on a record.
+    async def set_files(
+        self,
+        record: Record,
+        matched_files: dict[str, str],
+        fd_map: dict[str, FileDefinition],
+    ) -> None:
+        """Set matched files on a record by creating RecordFileLink rows.
 
         Args:
             record: Record to update (must be attached to session)
-            files: Matched files dict
+            matched_files: Dict mapping file definition name to filename
+            fd_map: Dict mapping file definition name to FileDefinition DB object
         """
-        record.files = files
+        # Remove existing file links
+        for link in list(record.file_links or []):
+            await self.session.delete(link)
+        await self.session.flush()
+
+        # Create new file links
+        for name, filename in matched_files.items():
+            fd = fd_map[name]
+            link = RecordFileLink(
+                record_id=record.id,  # type: ignore[arg-type]
+                file_definition_id=fd.id,  # type: ignore[arg-type]
+                filename=filename,
+            )
+            self.session.add(link)
         await self.session.commit()
 
     async def assign_user(self, record_id: int, user_id: UUID) -> tuple[Record, RecordStatus]:
@@ -547,6 +580,7 @@ class RecordRepository(BaseRepository[Record]):
                 selectinload(Record.study),  # type: ignore
                 selectinload(Record.series),  # type: ignore
                 _record_type_with_files(),
+                _record_file_links_eager_load(),
             )
         )
 

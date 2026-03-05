@@ -76,10 +76,11 @@ File definitions are stored in a normalized schema with M2M relationship:
 that builds `list[FileDefinitionRead]` from the links. `RecordTypeRead` has `file_registry`
 as a regular field, populated via `model_validator(mode="before")` from the ORM object.
 
+- **`RecordFileLink`** (`file_schema.py`, table): M2M link between `Record` and `FileDefinition` with `filename` and optional `checksum`
 - `FileRole`: `INPUT`, `OUTPUT`, `INTERMEDIATE`
 - `multiple=True`: collection (glob), `multiple=False`: singular file
-- `RecordTypeBase.input_files` / `output_files`: computed properties filtering by role (uses `getattr` to access `file_registry`)
-- `Record.file_checksums`: `dict[str, str]` (name → SHA256) for change detection
+- Callers filter `file_registry` by role directly (no `input_files`/`output_files` computed properties)
+- `RecordRead.files` / `RecordRead.file_checksums`: computed from `Record.file_links` via `model_validator(mode="before")`
 - `RecordFileAccessor` (`src/services/file_accessor.py`): attribute-based file access
 - `src/utils/file_checksums.py`: async SHA256 computation and change detection
 
@@ -91,6 +92,12 @@ selectinload(RecordType.file_links).selectinload(RecordTypeFileLink.file_definit
 ```
 This is handled by `_file_links_eager_load()` in `RecordTypeRepository` and
 `_record_type_with_files()` in `RecordRepository`.
+
+All queries fetching `Record` for API responses must also eager-load record file links:
+```python
+selectinload(Record.file_links).selectinload(RecordFileLink.file_definition)
+```
+This is handled by `_record_file_links_eager_load()` in `RecordRepository`.
 
 ### Project-level File Registry
 
@@ -123,9 +130,10 @@ Backward-compatible: inline `"file_registry"` in task JSONs still works.
 
 Use `sa_column=Column(JSON)` for dict/list fields:
 - `Record.data` — dynamic data per RecordType.data_schema
-- `Record.files` — `dict[str, str]` mapping FileDefinition.name → filename
-- `Record.file_checksums` — `dict[str, str]` mapping file key → SHA256
 - `RecordType.slicer_script_args`, `data_schema`
+
+Note: `Record.files` and `Record.file_checksums` are no longer JSON columns — they are
+stored in the `record_file_link` M2M table via `RecordFileLink`.
 
 ## Custom Types
 

@@ -6,7 +6,7 @@ Covers:
 - Patient anon_id from auto_id
 - Invalid template handling
 - working_folder for SERIES/STUDY/PATIENT levels
-- validate_record_files with empty input_files
+- validate_record_files with no input file definitions
 """
 
 from datetime import UTC, datetime
@@ -16,6 +16,7 @@ import pytest_asyncio
 
 from src.api.routers.record import validate_record_files
 from src.models.base import DicomQueryLevel, RecordStatus
+from src.models.file_schema import FileDefinition, FileRole, RecordTypeFileLink
 from src.models.patient import Patient
 from src.models.record import Record, RecordRead, RecordType
 from src.models.study import Series, Study
@@ -146,15 +147,27 @@ async def rt_patient(test_session):
 
 @pytest_asyncio.fixture
 async def rt_with_input_files(test_session):
-    """SERIES-level RecordType with input_files defined."""
+    """SERIES-level RecordType with input file definitions via M2M links."""
     rt = RecordType(
         name="wf_test_with_files",
         description="Series level with input files",
         label="WF Files",
         level=DicomQueryLevel.SERIES,
-        file_registry=[{"name": "master", "pattern": "master.nrrd", "role": "input"}],
     )
     test_session.add(rt)
+    await test_session.flush()
+
+    fd = FileDefinition(name="master", pattern="master.nrrd")
+    test_session.add(fd)
+    await test_session.flush()
+
+    link = RecordTypeFileLink(
+        record_type_name=rt.name,
+        file_definition_id=fd.id,
+        role=FileRole.INPUT,
+        required=True,
+    )
+    test_session.add(link)
     await test_session.commit()
     await test_session.refresh(rt)
     return rt
@@ -400,7 +413,7 @@ async def test_working_folder_patient_level(test_session, patient_with_anon, rt_
 async def test_validate_record_files_no_input_files(
     test_session, patient_with_anon, study_with_anon, series_with_anon, rt_series
 ):
-    """record_type.input_files is empty → returns None."""
+    """record_type.file_registry has no input files → returns None."""
     record = await _create_record(
         test_session,
         patient_id=patient_with_anon.id,
@@ -413,6 +426,6 @@ async def test_validate_record_files_no_input_files(
     loaded = await repo.get_with_relations(record.id)
     record_read = RecordRead.model_validate(loaded)
 
-    # rt_series has no input_files (empty list by default)
+    # rt_series has no file_links (no input file definitions)
     result = validate_record_files(record_read)
     assert result is None
