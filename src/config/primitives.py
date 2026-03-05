@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from src.models.base import DicomQueryLevel
-from src.models.file_schema import FileDefinition, FileRole
+from src.models.file_schema import FileDefinitionRead, FileRole
 
 
 @dataclass
@@ -80,16 +80,16 @@ class RecordTypeDef:
     slicer_result_validator_args: dict[str, str] | None = None
 
 
-def fileref_to_file_definition(ref: FileRef) -> FileDefinition:
-    """Convert a FileRef to a FileDefinition for DB storage.
+def fileref_to_file_definition(ref: FileRef) -> FileDefinitionRead:
+    """Convert a FileRef to a FileDefinitionRead for config processing.
 
     Args:
         ref: FileRef binding a File to a role.
 
     Returns:
-        FileDefinition ready for RecordType.file_registry.
+        FileDefinitionRead ready for reconciler consumption.
     """
-    return FileDefinition(
+    return FileDefinitionRead(
         name=ref.file.name,
         pattern=ref.file.pattern,
         description=ref.file.description,

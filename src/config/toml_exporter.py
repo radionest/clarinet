@@ -63,10 +63,11 @@ def _record_type_to_toml_dict(rt: RecordType) -> dict[str, Any]:
             data[field_name] = value
 
     # File registry → [[file_registry]] array of tables
-    if rt.file_registry:
+    file_registry = rt.get_file_registry()
+    if file_registry:
         files: list[dict[str, Any]] = []
-        for item in rt.file_registry:
-            fd = item.model_dump() if hasattr(item, "model_dump") else dict(item)
+        for item in file_registry:
+            fd = item.model_dump(mode="json")
             file_entry: dict[str, Any] = {"name": fd["name"]}
             if fd.get("pattern"):
                 file_entry["pattern"] = fd["pattern"]

@@ -3,6 +3,9 @@
 Compares a list of config-derived property dicts against existing DB rows,
 creating new RecordTypes, updating changed ones, and optionally deleting
 orphans no longer in the config.
+
+File definitions are normalized into the ``filedefinition`` table and
+bound to RecordTypes via ``recordtype_file_link`` (M2M).
 """
 
 from dataclasses import dataclass, field
@@ -10,12 +13,16 @@ from typing import Any
 
 from pydantic_core import PydanticUndefined
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 from sqlmodel import select
 
+from src.models.file_schema import RecordTypeFileLink
 from src.models.record import RecordType, RecordTypeCreate
+from src.repositories.file_definition_repository import FileDefinitionRepository
 from src.utils.logger import logger
 
 # Fields compared when detecting changes between config and DB.
+# file_registry is handled separately via link diff.
 _COMPARED_FIELDS: tuple[str, ...] = (
     "description",
     "label",
@@ -27,7 +34,6 @@ _COMPARED_FIELDS: tuple[str, ...] = (
     "slicer_script_args",
     "slicer_result_validator",
     "slicer_result_validator_args",
-    "file_registry",
     "data_schema",
 )
 
@@ -54,27 +60,12 @@ class ReconcileResult:
 def _normalize(value: Any) -> Any:
     """Normalize a value for comparison.
 
-    Enums are converted to their string value, empty lists/dicts become None,
-    and file_registry lists are sorted by name for stable comparison.
+    Enums are converted to their string value, empty lists/dicts become None.
     """
     if hasattr(value, "value"):
-        # Enum → string
         return value.value
-    if isinstance(value, list):
-        if not value:
-            return None
-        # Normalize list of dicts (file_registry) — sort by name
-        normalized = []
-        for item in value:
-            if hasattr(item, "model_dump"):
-                normalized.append(item.model_dump())
-            elif isinstance(item, dict):
-                normalized.append(item)
-            else:
-                normalized.append(item)
-        if normalized and isinstance(normalized[0], dict) and "name" in normalized[0]:
-            normalized = sorted(normalized, key=lambda d: d.get("name", ""))
-        return normalized
+    if isinstance(value, list) and not value:
+        return None
     if isinstance(value, dict) and not value:
         return None
     return value
@@ -84,12 +75,7 @@ def _get_field_default(field_name: str) -> Any:
     """Get the normalized default value for a RecordType field.
 
     Uses Pydantic v2 model introspection to extract the default from the
-    ORM model class. We intentionally use RecordType (table=True), not
-    RecordTypeBase, because the ORM class overrides JSON column defaults
-    with default_factory (e.g., file_registry: None in Base → [] in Table,
-    data_schema: None → {}). This is a standard SQLModel pattern to avoid
-    NULL in JSON columns, but it creates a default mismatch that the
-    reconciler must account for.
+    ORM model class.
     """
     field_info = RecordType.model_fields.get(field_name)
     if field_info is None:
@@ -98,23 +84,15 @@ def _get_field_default(field_name: str) -> Any:
     if field_info.default is not PydanticUndefined:
         return _normalize(field_info.default)
     if field_info.default_factory is not None:
-        # mypy can't resolve Callable[[], Any] | Callable[[dict], Any] union
         return _normalize(field_info.default_factory())  # type: ignore[call-arg]
 
     return PydanticUndefined
 
 
 def _fields_differ(db_record_type: RecordType, config_props: dict[str, Any]) -> list[str]:
-    """Return list of field names that differ between DB and config.
+    """Return list of scalar field names that differ between DB and config.
 
-    Only compares fields that are explicitly present in *config_props*.
-    Missing fields are assumed unchanged (keeps DB value).
-
-    Default-aware: when config specifies None for a field and the DB holds
-    the ORM default (e.g., min_users=1, data_schema={}), the field is
-    treated as unchanged. This prevents false update cycles caused by the
-    mismatch between RecordTypeBase defaults (None) and RecordType ORM
-    defaults that are applied on INSERT.
+    Does NOT compare file_registry — that is handled separately via link diff.
 
     Args:
         db_record_type: Existing RecordType from DB.
@@ -130,16 +108,117 @@ def _fields_differ(db_record_type: RecordType, config_props: dict[str, Any]) -> 
         db_val = _normalize(getattr(db_record_type, field_name, None))
         config_val = _normalize(config_props.get(field_name))
         if db_val != config_val:
-            # Config None + DB has ORM default → not a real change.
-            # This handles the mismatch between RecordTypeBase defaults (None)
-            # and RecordType ORM defaults (e.g., min_users=1, data_schema={}).
-            # Config loaders produce None for unspecified fields; the ORM fills
-            # its own defaults on INSERT. Treating this as "unchanged" prevents
-            # false updates on every reconcile cycle.
             if config_val is None and db_val == _get_field_default(field_name):
                 continue
             changed.append(field_name)
     return changed
+
+
+def _extract_file_defs(
+    config_props: dict[str, Any],
+) -> list[dict[str, Any]] | None:
+    """Extract file definition dicts from config props.
+
+    Returns None if file_registry is not in props (meaning: don't touch files).
+    Returns empty list if explicitly set to empty.
+    """
+    if "file_registry" not in config_props:
+        return None
+
+    raw = config_props["file_registry"]
+    if not raw:
+        return []
+
+    result: list[dict[str, Any]] = []
+    for item in raw:
+        if hasattr(item, "model_dump"):
+            result.append(item.model_dump())
+        elif isinstance(item, dict):
+            result.append(item)
+        else:
+            result.append(dict(item))
+    return result
+
+
+def _file_links_differ(
+    existing_links: list[RecordTypeFileLink],
+    config_defs: list[dict[str, Any]],
+) -> bool:
+    """Check whether the file link set differs from config definitions."""
+    if len(existing_links) != len(config_defs):
+        return True
+
+    # Build comparable sets
+    existing_set: set[tuple[str, str, bool]] = set()
+    for link in existing_links:
+        role_val = link.role.value if hasattr(link.role, "value") else str(link.role)
+        existing_set.add((link.file_definition.name, role_val, link.required))
+
+    config_set: set[tuple[str, str, bool]] = set()
+    for d in config_defs:
+        role = d.get("role", "output")
+        if hasattr(role, "value"):
+            role = role.value
+        config_set.add((d["name"], str(role), d.get("required", True)))
+
+    return existing_set != config_set
+
+
+async def _sync_file_links(
+    record_type: RecordType,
+    config_defs: list[dict[str, Any]],
+    fd_repo: FileDefinitionRepository,
+    session: AsyncSession,
+) -> None:
+    """Synchronize file links for a RecordType from config definitions.
+
+    Removes old links, upserts FileDefinitions, and creates new links.
+
+    Args:
+        record_type: RecordType to sync links for.
+        config_defs: List of flat file definition dicts.
+        fd_repo: FileDefinitionRepository for upserting.
+        session: Database session.
+    """
+    # Remove existing links
+    for link in list(record_type.file_links or []):
+        await session.delete(link)
+    await session.flush()
+
+    if not config_defs:
+        record_type.file_links = []
+        return
+
+    # Upsert FileDefinitions
+    fd_data = [
+        {
+            "name": d["name"],
+            "pattern": d["pattern"],
+            "description": d.get("description"),
+            "multiple": d.get("multiple", False),
+        }
+        for d in config_defs
+    ]
+    fd_map = await fd_repo.bulk_upsert(fd_data)
+
+    # Create new links
+    new_links: list[RecordTypeFileLink] = []
+    for d in config_defs:
+        fd = fd_map[d["name"]]
+        role = d.get("role", "output")
+        link = RecordTypeFileLink(
+            record_type_name=record_type.name,
+            file_definition_id=fd.id,  # type: ignore[arg-type]
+            role=role,
+            required=d.get("required", True),
+        )
+        session.add(link)
+        new_links.append(link)
+
+    await session.flush()
+
+    # Refresh links so they're fully loaded
+    record_type.file_links = new_links
 
 
 async def reconcile_record_types(
@@ -151,9 +230,9 @@ async def reconcile_record_types(
     """Diff config definitions against DB and apply changes.
 
     Algorithm:
-    1. Load all existing RecordTypes from DB.
+    1. Load all existing RecordTypes from DB with file_links.
     2. For each config entry: CREATE if new, UPDATE if changed, skip if identical.
-    3. DB names not in config → orphans (warn or delete).
+    3. DB names not in config -> orphans (warn or delete).
     4. Single commit at the end.
 
     Args:
@@ -165,9 +244,12 @@ async def reconcile_record_types(
         ReconcileResult with counts per category.
     """
     result = ReconcileResult()
+    fd_repo = FileDefinitionRepository(session)
 
-    # 1. Load existing RecordTypes
-    stmt = select(RecordType)
+    # 1. Load existing RecordTypes with file_links eagerly loaded
+    stmt = select(RecordType).options(
+        selectinload(RecordType.file_links).selectinload(RecordTypeFileLink.file_definition)  # type: ignore[arg-type]  # type: ignore[arg-type]
+    )
     db_result = await session.execute(stmt)
     db_types: dict[str, RecordType] = {rt.name: rt for rt in db_result.scalars().all()}
 
@@ -179,36 +261,48 @@ async def reconcile_record_types(
         config_names.add(name)
 
         try:
+            config_defs = _extract_file_defs(props)
+
             if name not in db_types:
-                # CREATE — ensure file_registry is stored as plain dicts
-                create_props = dict(props)
-                if create_props.get("file_registry"):
-                    create_props["file_registry"] = [
-                        fd.model_dump() if hasattr(fd, "model_dump") else fd
-                        for fd in create_props["file_registry"]
-                    ]
+                # CREATE — new RecordType
+                # Build create props WITHOUT file_registry (handled via links)
+                create_props = {k: v for k, v in props.items() if k != "file_registry"}
                 create_schema = RecordTypeCreate(**create_props)
                 new_rt = RecordType.model_validate(create_schema)
-                # Ensure file_registry is serializable as JSON
-                if new_rt.file_registry:
-                    serialized = [
-                        fd.model_dump() if hasattr(fd, "model_dump") else fd
-                        for fd in new_rt.file_registry
-                    ]
-                    new_rt.file_registry = serialized  # type: ignore[assignment]
+                new_rt.file_links = []  # Initialize empty, will be populated below
                 session.add(new_rt)
+                await session.flush()
+
+                # Sync file links
+                if config_defs:
+                    await _sync_file_links(new_rt, config_defs, fd_repo, session)
+
                 result.created.append(name)
                 logger.info(f"Config reconcile: created '{name}'")
             else:
-                # DIFF
+                # DIFF — check scalar fields and file links
                 existing = db_types[name]
                 changed_fields = _fields_differ(existing, props)
-                if changed_fields:
+
+                files_changed = False
+                if config_defs is not None:
+                    files_changed = _file_links_differ(existing.file_links or [], config_defs)
+
+                if changed_fields or files_changed:
+                    # Update scalar fields
                     for field_name in changed_fields:
                         setattr(existing, field_name, props.get(field_name))
+
+                    # Sync file links if they changed
+                    if files_changed and config_defs is not None:
+                        await _sync_file_links(existing, config_defs, fd_repo, session)
+
+                    all_changed = list(changed_fields)
+                    if files_changed:
+                        all_changed.append("file_registry")
                     result.updated.append(name)
                     logger.info(
-                        f"Config reconcile: updated '{name}' (fields: {', '.join(changed_fields)})"
+                        f"Config reconcile: updated '{name}' (fields: {', '.join(all_changed)})"
                     )
                 else:
                     result.unchanged.append(name)
