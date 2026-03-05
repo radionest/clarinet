@@ -78,9 +78,29 @@ f"{settings.anon_id_prefix}_{auto_id}"  # Returns None if auto_id is None
 
 File definitions are stored in a normalized schema with M2M relationship:
 
-- **`FileDefinition`** (`file_schema.py`, table): globally unique file definitions with `name`, `pattern`, `description`, `multiple`
-- **`RecordTypeFileLink`** (`file_schema.py`, table): M2M link between `RecordType` and `FileDefinition` with per-binding `role` and `required`
-- **`FileDefinitionRead`** (`file_schema.py`, DTO): flat Pydantic model merging identity + binding for API responses
+**`FileDefinition`** (`file_schema.py`, table) — globally unique file definitions:
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `name` | `str` | Unique, valid Python identifier |
+| `pattern` | `str` | Placeholders: `{id}`, `{patient_id}`, `{data.FIELD}`, etc. |
+| `description` | `str \| None` | Purpose description |
+| `multiple` | `bool` | `True` = glob collection, `False` = singular |
+| `level` | `DicomQueryLevel \| None` | Cross-level file access; `None` = same as RecordType |
+
+**`RecordTypeFileLink`** (`file_schema.py`, table) — M2M: RecordType ↔ FileDefinition:
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `role` | `FileRole` | `INPUT` / `OUTPUT` / `INTERMEDIATE` |
+| `required` | `bool` | Whether file must exist |
+
+**`FileDefinitionRead`** (`file_schema.py`, DTO) — flat merge of identity + binding for API:
+
+| Field | Source | Type |
+|-------|--------|------|
+| `name`, `pattern`, `description`, `multiple`, `level` | FileDefinition | identity |
+| `role`, `required` | RecordTypeFileLink | binding |
 
 `RecordType` has a `file_links` relationship (M2M) and a `file_registry` property
 that builds `list[FileDefinitionRead]` from the links. `RecordTypeRead` has `file_registry`

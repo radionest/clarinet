@@ -58,6 +58,15 @@ result = await session.execute(
 
 This only affects tests — production endpoints get a fresh session per request.
 
+**Reconciler tests:** When calling `reconcile_record_types()` twice in a row
+(e.g. create then update), `FileDefinition` attributes cached from the first
+pass will be stale. Call `session.expire_all()` between passes:
+```python
+await reconcile_record_types(config_v1, test_session)
+test_session.expire_all()  # flush cached FileDefinition from first reconcile
+await reconcile_record_types(config_v2, test_session)
+```
+
 ### `fresh_session` Fixture
 
 Use `fresh_session` (from `conftest.py`) instead of `test_session` when you need to
