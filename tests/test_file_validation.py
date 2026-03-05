@@ -10,7 +10,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from src.models.file_schema import FileDefinition
+from src.models.file_schema import FileDefinitionRead
 from src.services.file_validation import (
     FileValidationError,
     FileValidationResult,
@@ -39,15 +39,17 @@ def mock_record_type() -> MagicMock:
     record_type = MagicMock()
     record_type.name = "ct_segmentation"
     record_type.file_registry = [
-        FileDefinition(name="ct_scan", pattern="ct_scan.nrrd", required=True, role=FileRole.INPUT),
-        FileDefinition(
+        FileDefinitionRead(
+            name="ct_scan", pattern="ct_scan.nrrd", required=True, role=FileRole.INPUT
+        ),
+        FileDefinitionRead(
             name="mask",
             pattern="mask_{id}.nrrd",
             required=False,
             description="Optional mask",
             role=FileRole.INPUT,
         ),
-        FileDefinition(
+        FileDefinitionRead(
             name="segmentation",
             pattern="seg_{id}.seg.nrrd",
             required=True,
@@ -191,22 +193,21 @@ class TestFileValidator:
         assert len(result.errors) == 0
         assert result.matched_files == {}
 
-    def test_validate_files_with_dict_definitions(
+    def test_validate_files_with_file_definition_read(
         self,
         validator: FileValidator,
         mock_record: MagicMock,
         tmp_path: Path,
     ) -> None:
-        """Test validation with dict file definitions (JSON deserialized)."""
+        """Test validation with FileDefinitionRead objects."""
         # Create required file
         (tmp_path / "ct_scan.nrrd").touch()
 
-        # Use dict format as if deserialized from JSON
-        dict_definitions = [
-            {"name": "ct_scan", "pattern": "ct_scan.nrrd", "required": True},
+        definitions = [
+            FileDefinitionRead(name="ct_scan", pattern="ct_scan.nrrd", required=True),
         ]
 
-        result = validator.validate_files(mock_record, dict_definitions, tmp_path)  # type: ignore[arg-type]
+        result = validator.validate_files(mock_record, definitions, tmp_path)
 
         assert result.valid is True
         assert "ct_scan" in result.matched_files
@@ -269,9 +270,15 @@ class TestFileValidatorEdgeCases:
 
         record_type = MagicMock()
         input_defs = [
-            FileDefinition(name="file1", pattern="file1.nrrd", required=True, role=FileRole.INPUT),
-            FileDefinition(name="file2", pattern="file2.nrrd", required=True, role=FileRole.INPUT),
-            FileDefinition(name="file3", pattern="file3.nrrd", required=True, role=FileRole.INPUT),
+            FileDefinitionRead(
+                name="file1", pattern="file1.nrrd", required=True, role=FileRole.INPUT
+            ),
+            FileDefinitionRead(
+                name="file2", pattern="file2.nrrd", required=True, role=FileRole.INPUT
+            ),
+            FileDefinitionRead(
+                name="file3", pattern="file3.nrrd", required=True, role=FileRole.INPUT
+            ),
         ]
         record_type.file_registry = input_defs
         record_type.input_files = input_defs
@@ -296,7 +303,7 @@ class TestFileValidatorEdgeCases:
 
         record_type = MagicMock()
         input_defs = [
-            FileDefinition(
+            FileDefinitionRead(
                 name="birads_file",
                 pattern="birads_{data.BIRADS_R}.txt",
                 required=True,

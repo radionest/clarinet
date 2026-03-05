@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from src.models.file_schema import FileDefinition, FileRole
+from src.models.file_schema import FileDefinitionRead, FileRole
 from src.services.file_accessor import RecordFileAccessor, get_file_accessor
 
 
@@ -26,23 +26,23 @@ def mock_record() -> MagicMock:
     record.working_folder = "/tmp/test_working"
     record.record_type = MagicMock()
     record.record_type.file_registry = [
-        FileDefinition(
+        FileDefinitionRead(
             name="lung_mask",
             pattern="lung_mask.seg.nrrd",
             role=FileRole.INPUT,
         ),
-        FileDefinition(
+        FileDefinitionRead(
             name="user_segmentation",
             pattern="lesions_{user_id}.seg.nrrd",
             multiple=True,
             role=FileRole.INPUT,
         ),
-        FileDefinition(
+        FileDefinitionRead(
             name="consensus",
             pattern="lesions_consensus.seg.nrrd",
             role=FileRole.OUTPUT,
         ),
-        FileDefinition(
+        FileDefinitionRead(
             name="ai_result",
             pattern="ai_result_{id}.nrrd",
             role=FileRole.INTERMEDIATE,

@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from src.models.file_schema import FileDefinition, FileRole
+from src.models.file_schema import FileDefinitionRead, FileRole
 from src.services.file_accessor import RecordFileAccessor
 from src.utils.file_checksums import (
     checksums_changed,
@@ -31,12 +31,12 @@ def mock_record() -> MagicMock:
     record.working_folder = "/tmp/test"
     record.record_type = MagicMock()
     record.record_type.file_registry = [
-        FileDefinition(
+        FileDefinitionRead(
             name="single_file",
             pattern="result.nrrd",
             role=FileRole.OUTPUT,
         ),
-        FileDefinition(
+        FileDefinitionRead(
             name="user_segs",
             pattern="seg_{user_id}.nrrd",
             multiple=True,

@@ -8,10 +8,12 @@ import textwrap
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 from sqlmodel import select
 
 from src.config.python_loader import load_python_config
 from src.config.reconciler import reconcile_record_types
+from src.models.file_schema import RecordTypeFileLink
 from src.models.record import RecordType
 
 
@@ -101,20 +103,25 @@ async def test_file_refs_resolved(
     config_props = await load_python_config(tmp_path)
     await reconcile_record_types(config_props, test_session)
 
-    stmt = select(RecordType).where(RecordType.name == "ai_analysis")
+    stmt = (
+        select(RecordType)
+        .where(RecordType.name == "ai_analysis")
+        .options(
+            selectinload(RecordType.file_links).selectinload(  # type: ignore[arg-type]
+                RecordTypeFileLink.file_definition
+            ),
+        )
+    )
     rt = (await test_session.execute(stmt)).scalar_one()
-    assert rt.file_registry is not None
-    assert len(rt.file_registry) == 1
+    file_registry = rt.get_file_registry()
+    assert file_registry is not None
+    assert len(file_registry) == 1
 
-    fd = rt.file_registry[0]
-    if isinstance(fd, dict):
-        assert fd["name"] == "master_model"
-        assert fd["pattern"] == "master.nrrd"
-        assert fd["role"] == "output"
-        assert fd["required"] is False
-    else:
-        assert fd.name == "master_model"
-        assert fd.pattern == "master.nrrd"
+    fd = file_registry[0]
+    assert fd.name == "master_model"
+    assert fd.pattern == "master.nrrd"
+    assert fd.role == "output"
+    assert fd.required is False
 
 
 @pytest.mark.asyncio

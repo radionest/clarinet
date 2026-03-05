@@ -8,6 +8,7 @@ import json
 import pytest
 import tomli_w
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 from sqlmodel import select
 
 from src.config.reconciler import reconcile_record_types
@@ -16,6 +17,7 @@ from src.config.toml_exporter import (
     export_data_schema_sidecar,
     export_record_type_to_toml,
 )
+from src.models.file_schema import RecordTypeFileLink
 from src.models.record import RecordType
 from src.utils.config_loader import discover_config_files, load_record_config
 
@@ -188,10 +190,20 @@ async def test_file_registry_round_trip(
     props_list = [p for p in props_list if p is not None]
     await reconcile_record_types(props_list, test_session)
 
-    # Fetch from DB
-    stmt = select(RecordType).where(RecordType.name == "round_trip")
+    # Fetch from DB with eager loading
+    stmt = (
+        select(RecordType)
+        .where(RecordType.name == "round_trip")
+        .options(
+            selectinload(RecordType.file_links).selectinload(  # type: ignore[arg-type]
+                RecordTypeFileLink.file_definition
+            ),
+        )
+    )
     rt = (await test_session.execute(stmt)).scalar_one()
-    assert rt.file_registry is not None
+    file_registry = rt.get_file_registry()
+    assert file_registry is not None
+    assert len(file_registry) > 0
 
     # Export back to TOML
     export_dir = tmp_path / "export"

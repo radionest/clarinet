@@ -16,10 +16,13 @@ import pytest
 import pytest_asyncio
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+from sqlmodel import select
 
 from src.api.app import app
 from src.client import ClarinetClient
 from src.models.base import DicomQueryLevel
+from src.models.file_schema import FileDefinition, FileRole, RecordTypeFileLink
 from src.models.patient import Patient
 from src.models.record import RecordType
 from src.models.study import Series, Study
@@ -157,6 +160,8 @@ async def demo_record_types(
     project_registry = json.loads(registry_path.read_text()) if registry_path.exists() else None
 
     types: dict[str, RecordType] = {}
+    file_def_cache: dict[str, FileDefinition] = {}
+
     for config_path in config_files:
         definition = await load_record_config(config_path)
         if definition is None:
@@ -165,13 +170,57 @@ async def demo_record_types(
         # Resolve file references against project registry
         definition = resolve_task_files(definition, project_registry)
 
+        # Extract file_registry before creating ORM object
+        file_registry_data = definition.pop("file_registry", None)
+
         rt = RecordType(**definition)
+        rt.file_links = []
         test_session.add(rt)
+        await test_session.flush()
+
+        # Create file links
+        if file_registry_data:
+            for fd_data in file_registry_data:
+                fd_dict = fd_data if isinstance(fd_data, dict) else fd_data.model_dump()
+                name = fd_dict["name"]
+                if name not in file_def_cache:
+                    fd = FileDefinition(
+                        name=name,
+                        pattern=fd_dict.get("pattern", ""),
+                        description=fd_dict.get("description"),
+                        multiple=fd_dict.get("multiple", False),
+                    )
+                    test_session.add(fd)
+                    await test_session.flush()
+                    file_def_cache[name] = fd
+                else:
+                    fd = file_def_cache[name]
+
+                link = RecordTypeFileLink(
+                    record_type_name=rt.name,
+                    file_definition_id=fd.id,  # type: ignore[arg-type]
+                    role=fd_dict.get("role", FileRole.OUTPUT),
+                    required=fd_dict.get("required", True),
+                )
+                test_session.add(link)
+
         types[rt.name] = rt
 
     await test_session.commit()
-    for rt in types.values():
-        await test_session.refresh(rt)
+
+    # Expire cached state so selectinload can fetch fresh data
+    test_session.expire_all()
+
+    # Re-fetch with eager loading to populate file_links
+    stmt = select(RecordType).options(
+        selectinload(RecordType.file_links).selectinload(  # type: ignore[arg-type]
+            RecordTypeFileLink.file_definition
+        ),
+    )
+    result = await test_session.execute(stmt)
+    for rt in result.scalars().all():
+        if rt.name in types:
+            types[rt.name] = rt
     return types
 
 
@@ -340,15 +389,17 @@ class TestDemoRecordTypes:
         ls = demo_record_types["lesion_seg"]
         assert ls.level == DicomQueryLevel.SERIES
         assert ls.role_name == "doctor"
-        assert ls.file_registry is not None
-        assert len(ls.file_registry) == 1
+        ls_files = ls.get_file_registry()
+        assert ls_files is not None
+        assert len(ls_files) == 1
 
         # air_volume
         av = demo_record_types["air_volume"]
         assert av.level == DicomQueryLevel.SERIES
         assert av.role_name is None
-        assert av.file_registry is not None
-        assert len(av.file_registry) == 1
+        av_files = av.get_file_registry()
+        assert av_files is not None
+        assert len(av_files) == 1
 
 
 # ---------------------------------------------------------------------------
