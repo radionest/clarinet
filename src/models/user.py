@@ -18,7 +18,8 @@ from src.utils.fastapi_users_db import SQLModelBaseUserDB
 from .base import BaseModel
 
 if TYPE_CHECKING:
-    from .record import Record, RecordType
+    from .record import Record
+    from .record_type import RecordType
 
 
 class UserRolesLink(BaseModel, table=True):

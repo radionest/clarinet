@@ -29,6 +29,10 @@ from .record import (
     RecordFindResult,
     RecordFindResultComparisonOperator,
     RecordRead,
+)
+
+# Record type models
+from .record_type import (
     RecordType,
     RecordTypeBase,
     RecordTypeCreate,

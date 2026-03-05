@@ -18,7 +18,7 @@ from pydantic import field_validator
 from sqlmodel import Field, Relationship, SQLModel, UniqueConstraint
 
 if TYPE_CHECKING:
-    from src.models.record import RecordType
+    from src.models.record_type import RecordType
 
 
 class FileRole(str, Enum):
