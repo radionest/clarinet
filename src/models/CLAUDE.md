@@ -66,15 +66,31 @@ f"{settings.anon_id_prefix}_{auto_id}"  # Returns None if auto_id is None
 
 ## File Registry System
 
-`RecordType.file_registry` (`list[FileDefinition] | None`, JSON column) is the single catalog of all files.
-Each `FileDefinition` has: `name`, `pattern`, `description`, `required`, `multiple`, `role` (FileRole enum).
+File definitions are stored in a normalized schema with M2M relationship:
+
+- **`FileDefinition`** (`file_schema.py`, table): globally unique file definitions with `name`, `pattern`, `description`, `multiple`
+- **`RecordTypeFileLink`** (`file_schema.py`, table): M2M link between `RecordType` and `FileDefinition` with per-binding `role` and `required`
+- **`FileDefinitionRead`** (`file_schema.py`, DTO): flat Pydantic model merging identity + binding for API responses
+
+`RecordType` has a `file_links` relationship (M2M) and a `get_file_registry()` method
+that builds `list[FileDefinitionRead]` from the links. `RecordTypeRead` has `file_registry`
+as a regular field, populated via `model_validator(mode="before")` from the ORM object.
 
 - `FileRole`: `INPUT`, `OUTPUT`, `INTERMEDIATE`
 - `multiple=True`: collection (glob), `multiple=False`: singular file
-- `RecordTypeBase.input_files` / `output_files`: computed properties filtering by role
+- `RecordTypeBase.input_files` / `output_files`: computed properties filtering by role (uses `getattr` to access `file_registry`)
 - `Record.file_checksums`: `dict[str, str]` (name → SHA256) for change detection
 - `RecordFileAccessor` (`src/services/file_accessor.py`): attribute-based file access
 - `src/utils/file_checksums.py`: async SHA256 computation and change detection
+
+### Eager Loading for File Links
+
+All queries fetching `RecordType` must use eager loading for file_links:
+```python
+selectinload(RecordType.file_links).selectinload(RecordTypeFileLink.file_definition)
+```
+This is handled by `_file_links_eager_load()` in `RecordTypeRepository` and
+`_record_type_with_files()` in `RecordRepository`.
 
 ### Project-level File Registry
 
@@ -92,7 +108,7 @@ Task configs use `"files"` references instead of inline `"file_registry"`:
 ```
 
 Resolution happens at **bootstrap time** via `src/utils/file_registry_resolver.py`.
-The DB model stays unchanged — `RecordType.file_registry` stores resolved `FileDefinition` objects.
+The reconciler creates `FileDefinition` rows and `RecordTypeFileLink` rows from the resolved definitions.
 Backward-compatible: inline `"file_registry"` in task JSONs still works.
 
 ## Record Status: `blocked`
@@ -109,7 +125,7 @@ Use `sa_column=Column(JSON)` for dict/list fields:
 - `Record.data` — dynamic data per RecordType.data_schema
 - `Record.files` — `dict[str, str]` mapping FileDefinition.name → filename
 - `Record.file_checksums` — `dict[str, str]` mapping file key → SHA256
-- `RecordType.slicer_script_args`, `data_schema`, `file_registry`
+- `RecordType.slicer_script_args`, `data_schema`
 
 ## Custom Types
 

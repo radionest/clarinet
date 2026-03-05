@@ -91,6 +91,16 @@ Use `selectinload()` to avoid N+1. Nested loading for deep relations:
 selectinload(Patient.studies).selectinload(Study.series)
 ```
 
+### FileDefinition Eager Loading
+
+All `RecordType` queries must eagerly load file links:
+```python
+selectinload(RecordType.file_links).selectinload(RecordTypeFileLink.file_definition)
+```
+- `RecordTypeRepository`: `_file_links_eager_load()` helper, applied to `get()`, `get_all()`, `list_all()`, `find()`
+- `RecordRepository`: `_record_type_with_files()` helper chains through `Record.record_type`
+- `FileDefinitionRepository`: `get_or_create()`, `bulk_upsert()` for M2M link management
+
 ## N+1 Prevention
 
 For aggregate queries, batch-fetch related entities:

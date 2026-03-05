@@ -17,7 +17,7 @@ PaginationDep       = Annotated[PaginationParams, Depends()]
 # Repositories
 UserRepositoryDep, UserRoleRepositoryDep, StudyRepositoryDep,
 PatientRepositoryDep, SeriesRepositoryDep, RecordRepositoryDep,
-RecordTypeRepositoryDep, PipelineDefinitionRepositoryDep
+RecordTypeRepositoryDep, FileDefinitionRepositoryDep, PipelineDefinitionRepositoryDep
 
 # Services
 UserServiceDep, StudyServiceDep, AdminServiceDep, SlicerServiceDep
