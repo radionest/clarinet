@@ -86,7 +86,7 @@ as a regular field, populated via `model_validator(mode="before")` from the ORM 
 - **`RecordFileLinkRead`** (`file_schema.py`, DTO): per-file link with `name`, `filename`, `checksum`
 - `RecordRead.file_links`: `list[RecordFileLinkRead]` — structured M2M data, preferred over dict fields
 - `RecordRead.files` / `RecordRead.file_checksums`: **deprecated** dict fields (use `file_links` instead), computed from `Record.file_links` via `model_validator(mode="before")`
-- `RecordFileAccessor` (`src/services/file_accessor.py`): attribute-based file access
+- `src/utils/file_patterns.py`: `resolve_pattern()`, `glob_file_paths()` for pattern resolution
 - `src/utils/file_checksums.py`: async SHA256 computation and change detection
 
 ### Eager Loading for File Links
@@ -116,8 +116,8 @@ Two representations of file definitions serve different architectural layers:
 - **`file_registry`** (property on `RecordType`, field on `RecordTypeRead`):
   `list[FileDefinitionRead]` — flat merge of FileDefinition identity + binding metadata.
   On ORM: `@property` on `RecordType`. On DTO: regular field populated via `model_validator`.
-  Used for API responses, file validation (`FileValidator`), file access (`RecordFileAccessor`),
-  and config export.
+  Used for API responses, file validation (`FileValidator`), file path resolution
+  (`resolve_pattern`, `glob_file_paths`), and config export.
 
 **Rule of thumb:**
 - Writing to DB (creating/deleting links) → use `file_links` (ORM layer)

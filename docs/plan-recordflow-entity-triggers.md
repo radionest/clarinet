@@ -1,3 +1,5 @@
+> **Status: IMPLEMENTED** — see `src/services/recordflow/flow_record.py`
+
 # RecordFlow: Entity Creation Triggers
 
 Расширение RecordFlow триггерами на создание сущностей (Series, Study, Patient) для автоматического создания записей.
