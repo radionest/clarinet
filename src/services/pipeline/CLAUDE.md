@@ -39,21 +39,37 @@ imaging_pipeline = (
 
 ### Define a task
 
-```python
-from src.services.pipeline import get_broker, register_task
+Use `@pipeline_task()` — it handles PipelineMessage parsing, ClarinetClient lifecycle,
+and TaskContext construction automatically:
 
+```python
+from src.services.pipeline import pipeline_task, PipelineMessage, TaskContext
+
+@pipeline_task(queue="clarinet.dicom")
+async def fetch_dicom(msg: PipelineMessage, ctx: TaskContext):
+    path = ctx.files.resolve("dicom_source")
+    # ... fetch DICOM data using ctx.client, ctx.records ...
+    await ctx.client.update_record_data(msg.record_id, {"status": "fetched"})
+```
+
+The decorator also auto-registers the task in `_TASK_REGISTRY` (no manual `register_task()` needed).
+Retries are enabled by default (3x, exponential backoff + jitter). Extra kwargs are forwarded
+to `broker.task()`.
+
+**Legacy pattern** — `@broker.task` still works for simple tasks that don't need TaskContext:
+
+```python
 broker = get_broker()
 
-@broker.task  # retries enabled by default (3x, exponential backoff + jitter)
-async def fetch_dicom(msg: dict) -> dict:
+@broker.task
+async def simple_task(msg: dict) -> dict:
     message = PipelineMessage(**msg)
-    # ... fetch DICOM data ...
+    # ...
     return message.model_dump()
 ```
 
-Tasks added via `.step()` are auto-registered in `_TASK_REGISTRY`. For standalone tasks not
-used in a pipeline, call `register_task(fetch_dicom)` explicitly so `PipelineChainMiddleware`
-can dispatch them by name.
+For standalone `@broker.task` tasks not added via `.step()`, call `register_task(simple_task)`
+explicitly so `PipelineChainMiddleware` can dispatch them by name.
 
 ### Execute from RecordFlow
 
