@@ -80,7 +80,7 @@ class AnonymizationService:
         study = await self.study_repo.get_with_series(study_uid)
         patient = await self.patient_repo.get(study.patient_id)
 
-        anon_id: str | None = patient.anon_id  # type: ignore[assignment]
+        anon_id: str | None = patient.anon_id
         if anon_id is None:
             raise AnonymizationFailedError("Patient has no anon_id (auto_id not set)")
 

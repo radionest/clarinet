@@ -25,9 +25,15 @@ class PatientBase(BaseModel):
     anon_name: str | None = Field(default=None, min_length=5, max_length=50, unique=True)
     auto_id: int | None = Field(default=None)
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
+    @property
     def anon_id(self) -> str | None:
-        """Generate an anonymous ID using the auto_id."""
+        """Generate an anonymous ID using the auto_id.
+
+        Note: @property is required so that mypy resolves the return type as
+        ``str | None`` instead of ``Callable[[], str | None]``.  This is an
+        upstream mypy limitation (pydantic#11687).  Do NOT remove @property.
+        """
         if self.auto_id is None:
             return None
         return f"{settings.anon_id_prefix}_{self.auto_id}"

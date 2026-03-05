@@ -22,7 +22,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from src.exceptions.domain import PipelineStepError
 from src.models.base import DicomQueryLevel
@@ -111,8 +111,9 @@ class FileResolver:
             Dict mapping each available level to its ``Path``.
         """
         base = record.clarinet_storage_path or settings.storage_path
-        anon_id = cast("str | None", record.patient.anon_id)
-        patient_dir_name: str = anon_id if anon_id is not None else record.patient_id
+        patient_dir_name = (
+            record.patient.anon_id if record.patient.anon_id is not None else record.patient_id
+        )
         dirs: dict[DicomQueryLevel, Path] = {
             DicomQueryLevel.PATIENT: Path(base) / patient_dir_name,
         }
@@ -136,8 +137,7 @@ class FileResolver:
         """
         base = settings.storage_path
         patient = series.study.patient
-        anon_id = cast("str | None", patient.anon_id)
-        patient_dir_name: str = anon_id if anon_id is not None else patient.id
+        patient_dir_name = patient.anon_id if patient.anon_id is not None else patient.id
         study_dir_name: str = series.study.anon_uid or series.study.study_uid
         series_dir_name: str = series.anon_uid or series.series_uid or ""
         dirs: dict[DicomQueryLevel, Path] = {
@@ -159,8 +159,7 @@ class FileResolver:
         """
         base = settings.storage_path
         patient = study.patient
-        anon_id = cast("str | None", patient.anon_id)
-        patient_dir_name: str = anon_id if anon_id is not None else patient.id
+        patient_dir_name = patient.anon_id if patient.anon_id is not None else patient.id
         study_dir_name: str = study.anon_uid or study.study_uid
         patient_path = Path(base) / patient_dir_name
         dirs: dict[DicomQueryLevel, Path] = {

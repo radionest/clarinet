@@ -69,10 +69,12 @@ select(Record).options(
 - `comparison_operator` — `RecordFindResultComparisonOperator` enum (eq/ne/lt/gt/contains)
 - `sql_type` — `@computed_field` that infers the SQL type from `result_value` (String/Boolean/Integer/Float) for use in SQLAlchemy JSON cast expressions
 
-`PatientBase.anon_id` — `@computed_field` derived from `auto_id`:
+`PatientBase.anon_id` — `@computed_field` + `@property` derived from `auto_id`:
 ```python
 f"{settings.anon_id_prefix}_{auto_id}"  # Returns None if auto_id is None
 ```
+**Do NOT remove `@property`** — without it mypy sees the return type as
+`Callable[[], str | None]` instead of `str | None` (upstream mypy bug, pydantic#11687).
 
 ## File Registry System
 
