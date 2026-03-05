@@ -389,7 +389,7 @@ class TestDemoRecordTypes:
         ls = demo_record_types["lesion_seg"]
         assert ls.level == DicomQueryLevel.SERIES
         assert ls.role_name == "doctor"
-        ls_files = ls.get_file_registry()
+        ls_files = ls.file_registry
         assert ls_files is not None
         assert len(ls_files) == 1
 
@@ -397,7 +397,7 @@ class TestDemoRecordTypes:
         av = demo_record_types["air_volume"]
         assert av.level == DicomQueryLevel.SERIES
         assert av.role_name is None
-        av_files = av.get_file_registry()
+        av_files = av.file_registry
         assert av_files is not None
         assert len(av_files) == 1
 

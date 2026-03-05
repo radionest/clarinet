@@ -59,10 +59,9 @@ class RecordTypeBase(SQLModel):
 class RecordType(RecordTypeBase, table=True):
     """Model representing a type of record that can be created.
 
-    ``file_registry`` is NOT a DB column — it lives only on ``RecordTypeRead``
-    (the serialization model). Use ``RecordTypeRead.from_orm(rt)`` for API
-    responses that need ``file_registry``.  For code that needs file defs
-    directly, access ``file_links`` (must be eagerly loaded).
+    ``file_registry`` is a ``@property`` (not a DB column) that builds
+    ``list[FileDefinitionRead]`` from the M2M ``file_links`` relationship.
+    Requires eager loading of ``file_links``; returns ``[]`` otherwise.
     """
 
     name: str = Field(min_length=5, max_length=30, primary_key=True)
@@ -84,7 +83,8 @@ class RecordType(RecordTypeBase, table=True):
         cascade_delete=True,
     )
 
-    def get_file_registry(self) -> list[FileDefinitionRead]:
+    @property
+    def file_registry(self) -> list[FileDefinitionRead]:
         """Build flat file definitions from M2M links.
 
         Converts ORM relationships (file_links → RecordTypeFileLink → FileDefinition)
@@ -145,7 +145,7 @@ class RecordTypeRead(RecordTypeBase):
                     continue
                 result[field_name] = getattr(data, field_name, None)
             try:
-                result["file_registry"] = data.get_file_registry()
+                result["file_registry"] = data.file_registry
             except Exception:
                 result["file_registry"] = None
             return result

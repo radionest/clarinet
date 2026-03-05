@@ -72,9 +72,9 @@ File definitions are stored in a normalized schema with M2M relationship:
 - **`RecordTypeFileLink`** (`file_schema.py`, table): M2M link between `RecordType` and `FileDefinition` with per-binding `role` and `required`
 - **`FileDefinitionRead`** (`file_schema.py`, DTO): flat Pydantic model merging identity + binding for API responses
 
-`RecordType` has a `file_links` relationship (M2M) and a `get_file_registry()` method
+`RecordType` has a `file_links` relationship (M2M) and a `file_registry` property
 that builds `list[FileDefinitionRead]` from the links. `RecordTypeRead` has `file_registry`
-as a regular field, populated via `model_validator(mode="before")` from the ORM object.
+as a regular field, populated via `model_validator(mode="before")` from the ORM property.
 
 - **`RecordFileLink`** (`file_schema.py`, table): M2M link between `Record` and `FileDefinition` with `filename` and optional `checksum`
 - `FileRole`: `INPUT`, `OUTPUT`, `INTERMEDIATE`
@@ -113,10 +113,11 @@ Two representations of file definitions serve different architectural layers:
   Used internally for DB writes that need `FileDefinition.id` as FK
   (e.g. `set_files()` creating `RecordFileLink` rows).
 
-- **`file_registry`** (DTO, on `RecordTypeRead`): `list[FileDefinitionRead]` — flat merge of
-  FileDefinition identity + binding metadata. Computed by `get_file_registry()` via
-  `model_validator`. Used for API responses, file validation (`FileValidator`),
-  file access (`RecordFileAccessor`), and config export.
+- **`file_registry`** (property on `RecordType`, field on `RecordTypeRead`):
+  `list[FileDefinitionRead]` — flat merge of FileDefinition identity + binding metadata.
+  On ORM: `@property` on `RecordType`. On DTO: regular field populated via `model_validator`.
+  Used for API responses, file validation (`FileValidator`), file access (`RecordFileAccessor`),
+  and config export.
 
 **Rule of thumb:**
 - Writing to DB (creating/deleting links) → use `file_links` (ORM layer)
@@ -181,9 +182,9 @@ Use manual string forward references: `list["ModelName"]`.
 
 **Cannot override a parent field with `@computed_field` in Pydantic v2.**
 `TypeError: Field 'X' overrides symbol of same name in a parent class`.
-Pattern: use a method on ORM (`get_X()`) + a regular field on `*Read` DTO
-populated via `model_validator(mode="before")`. See `RecordType.get_file_registry()`
-→ `RecordTypeRead.file_registry`.
+Pattern: use a `@property` on ORM + a regular field on `*Read` DTO
+populated via `model_validator(mode="before")`. See `RecordType.file_registry`
+(property) → `RecordTypeRead.file_registry` (field).
 
 **`list`/`dict` fields in `table=True` models need `sa_column=Column(JSON)`.**
 Without it, SQLModel raises `ValueError: <class 'list'> has no matching SQLAlchemy type`

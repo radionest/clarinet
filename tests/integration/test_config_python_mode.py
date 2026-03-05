@@ -113,7 +113,7 @@ async def test_file_refs_resolved(
         )
     )
     rt = (await test_session.execute(stmt)).scalar_one()
-    file_registry = rt.get_file_registry()
+    file_registry = rt.file_registry
     assert file_registry is not None
     assert len(file_registry) == 1
 

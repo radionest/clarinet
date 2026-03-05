@@ -63,7 +63,7 @@ def _record_type_to_toml_dict(rt: RecordType) -> dict[str, Any]:
             data[field_name] = value
 
     # File registry → [[file_registry]] array of tables
-    file_registry = rt.get_file_registry()
+    file_registry = rt.file_registry
     if file_registry:
         files: list[dict[str, Any]] = []
         for item in file_registry:
