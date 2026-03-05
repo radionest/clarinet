@@ -7,7 +7,7 @@ supporting both singular files and collections (glob patterns).
 
 from pathlib import Path
 
-from src.models.file_schema import FileDefinition
+from src.models.file_schema import FileDefinitionRead
 from src.models.record import RecordRead
 from src.utils.file_patterns import PLACEHOLDER_REGEX, resolve_pattern
 
@@ -36,10 +36,10 @@ class RecordFileAccessor:
         if folder is None:
             raise ValueError("No working folder available for record")
         self._working_dir = Path(folder)
-        self._registry: dict[str, FileDefinition] = {}
+        self._registry: dict[str, FileDefinitionRead] = {}
         for fd in record.record_type.file_registry or []:
             if isinstance(fd, dict):
-                fd = FileDefinition.model_validate(fd)
+                fd = FileDefinitionRead.model_validate(fd)
             self._registry[fd.name] = fd
 
     def __getattr__(self, name: str) -> Path | list[Path]:
@@ -66,12 +66,12 @@ class RecordFileAccessor:
             return self._glob(fd)
         return self._resolve(fd)
 
-    def _resolve(self, fd: FileDefinition) -> Path:
+    def _resolve(self, fd: FileDefinitionRead) -> Path:
         """Resolve singular file pattern to Path."""
         filename = resolve_pattern(fd.pattern, self._record)
         return self._working_dir / filename
 
-    def _glob(self, fd: FileDefinition) -> list[Path]:
+    def _glob(self, fd: FileDefinitionRead) -> list[Path]:
         """Glob collection pattern, replacing all {placeholders} with *."""
         glob_pattern = PLACEHOLDER_REGEX.sub("*", fd.pattern)
         return sorted(self._working_dir.glob(glob_pattern))

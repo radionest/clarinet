@@ -14,7 +14,7 @@ import aiofiles
 from sqlmodel import SQLModel
 
 from src.exceptions.domain import ValidationError
-from src.models.file_schema import FileDefinition, FileRole
+from src.models.file_schema import FileDefinitionRead, FileRole
 from src.utils.logger import logger
 
 
@@ -69,7 +69,7 @@ async def load_project_file_registry(folder: str) -> dict[str, Any] | None:
 def resolve_file_references(
     files: list[dict[str, Any]],
     registry: dict[str, Any],
-) -> list[FileDefinition]:
+) -> list[FileDefinitionRead]:
     """Merge file references with the project-level registry.
 
     Each entry in *files* must have a ``name`` key that matches a key in
@@ -81,12 +81,12 @@ def resolve_file_references(
         registry: Project file registry mapping names to definition data.
 
     Returns:
-        List of fully resolved ``FileDefinition`` objects.
+        List of fully resolved ``FileDefinitionRead`` objects.
 
     Raises:
         ValidationError: If a reference name is not found in the registry.
     """
-    resolved: list[FileDefinition] = []
+    resolved: list[FileDefinitionRead] = []
     for ref_dict in files:
         ref = FileReference(**ref_dict)
         entry = registry.get(ref.name)
@@ -96,7 +96,7 @@ def resolve_file_references(
                 f"Available: {', '.join(registry.keys())}"
             )
         resolved.append(
-            FileDefinition(
+            FileDefinitionRead(
                 name=ref.name,
                 pattern=entry["pattern"],
                 description=entry.get("description"),

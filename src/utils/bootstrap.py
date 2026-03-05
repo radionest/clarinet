@@ -15,6 +15,8 @@ from sqlmodel import select
 
 from src.config.reconciler import ReconcileResult, reconcile_record_types
 from src.models import RecordType, RecordTypeCreate, User, UserRole
+from src.models.file_schema import FileDefinitionRead, RecordTypeFileLink
+from src.repositories.file_definition_repository import FileDefinitionRepository
 from src.utils.auth import get_password_hash
 from src.utils.config_loader import discover_config_files, load_record_config
 from src.utils.db_manager import db_manager
@@ -359,8 +361,7 @@ create_demo_record_types_from_json = create_record_types_from_config
 
 
 async def add_record_type(record_type: RecordTypeCreate, session: AsyncSession) -> RecordType:
-    """
-    Add a new record type to the database.
+    """Add a new record type to the database with file links.
 
     Args:
         record_type: The record type to add
@@ -384,21 +385,51 @@ async def add_record_type(record_type: RecordTypeCreate, session: AsyncSession) 
             detail=f"Record type with name {record_type.name} already exists",
         )
 
-    # Validate data schema if provided
-    if record_type.data_schema is not None:
-        try:
-            # In a real implementation, you might want to validate the schema
-            # using a library like jsonschema
-            pass
-        except Exception as e:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=f"Data schema is invalid: {e}",
-            ) from e
+    # Extract file_registry before creating the ORM object
+    file_defs = record_type.file_registry or []
 
-    # Create and save the record type
-    new_record_type = RecordType.model_validate(record_type)
+    # Create RecordType without file_registry (it's a computed field on ORM)
+    create_data = record_type.model_dump(exclude={"file_registry", "input_files", "output_files"})
+    new_record_type = RecordType(**create_data)
+    new_record_type.file_links = []
     session.add(new_record_type)
+    await session.flush()
+
+    # Create file links
+    if file_defs:
+        fd_repo = FileDefinitionRepository(session)
+        fd_data = [
+            {
+                "name": fd.name if isinstance(fd, FileDefinitionRead) else fd["name"],
+                "pattern": fd.pattern if isinstance(fd, FileDefinitionRead) else fd["pattern"],
+                "description": (
+                    fd.description if isinstance(fd, FileDefinitionRead) else fd.get("description")
+                ),
+                "multiple": (
+                    fd.multiple if isinstance(fd, FileDefinitionRead) else fd.get("multiple", False)
+                ),
+            }
+            for fd in file_defs
+        ]
+        fd_map = await fd_repo.bulk_upsert(fd_data)
+
+        for fd in file_defs:
+            if isinstance(fd, FileDefinitionRead):
+                name, role, required = fd.name, fd.role, fd.required
+            else:
+                name = fd["name"]
+                role = fd.get("role", "output")
+                required = fd.get("required", True)
+
+            file_def = fd_map[name]
+            link = RecordTypeFileLink(
+                record_type_name=new_record_type.name,
+                file_definition_id=file_def.id,  # type: ignore[arg-type]
+                role=role,
+                required=required,
+            )
+            session.add(link)
+
     await session.commit()
     await session.refresh(new_record_type)
 

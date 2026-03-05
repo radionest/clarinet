@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 from src.utils.file_patterns import find_matching_file, resolve_pattern
 
 if TYPE_CHECKING:
-    from src.models.file_schema import FileDefinition
+    from src.models.file_schema import FileDefinitionRead
     from src.models.record import RecordBase, RecordTypeBase
 
 
@@ -69,14 +69,14 @@ class FileValidator:
     def validate_files(
         self,
         record: RecordBase,
-        file_definitions: list[FileDefinition] | None,
+        file_definitions: list[FileDefinitionRead] | None,
         directory: Path,
     ) -> FileValidationResult:
         """Validate files against a list of file definitions.
 
         Args:
             record: Record to validate files for
-            file_definitions: List of FileDefinition objects to validate
+            file_definitions: List of FileDefinitionRead objects to validate
             directory: Directory where files should be located
 
         Returns:
@@ -89,28 +89,18 @@ class FileValidator:
         matched: dict[str, str] = {}
 
         for file_def in file_definitions:
-            # Convert dict to FileDefinition if needed (JSON deserialization)
-            if isinstance(file_def, dict):
-                name = file_def.get("name", "")
-                pattern = file_def.get("pattern", "")
-                required = file_def.get("required", True)
-            else:
-                name = file_def.name
-                pattern = file_def.pattern
-                required = file_def.required
-
-            filename = find_matching_file(directory, pattern, record)
+            filename = find_matching_file(directory, file_def.pattern, record)
 
             if filename:
-                matched[name] = filename
-            elif required:
-                expected_name = resolve_pattern(pattern, record)
+                matched[file_def.name] = filename
+            elif file_def.required:
+                expected_name = resolve_pattern(file_def.pattern, record)
                 errors.append(
                     FileValidationError(
-                        file_name=name,
+                        file_name=file_def.name,
                         error_type="missing",
-                        message=f"Required file '{name}' not found "
-                        f"(expected: {expected_name}, pattern: {pattern})",
+                        message=f"Required file '{file_def.name}' not found "
+                        f"(expected: {expected_name}, pattern: {file_def.pattern})",
                     )
                 )
 
