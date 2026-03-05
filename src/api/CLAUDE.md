@@ -64,6 +64,7 @@ Shutdown (reverse order): stop DICOMweb cleanup → flush DICOMweb cache → sto
 - `AuthorizationError` → 403
 - `ValidationError` → 422
 - `BusinessRuleViolationError` → 409
+- `ConfigurationError` → 500 (logs traceback, returns generic message)
 - `DatabaseError` → 500 (logs traceback, returns generic message)
 - `SlicerConnectionError` → 502
 - `SlicerError` → 422

@@ -32,6 +32,7 @@ def setup_exception_handlers(app: FastAPI) -> None:
         AuthenticationError,
         AuthorizationError,
         BusinessRuleViolationError,
+        ConfigurationError,
         DatabaseError,
         EntityAlreadyExistsError,
         EntityNotFoundError,
@@ -137,6 +138,15 @@ def setup_exception_handlers(app: FastAPI) -> None:
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content={"detail": str(exc) if str(exc) else "Pipeline operation failed"},
+        )
+
+    @app.exception_handler(ConfigurationError)
+    async def handle_configuration_error(_: Request, exc: ConfigurationError) -> JSONResponse:
+        """Convert ConfigurationError to 500 response."""
+        logger.opt(exception=exc).error("Configuration error")
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"detail": "Server configuration error"},
         )
 
     @app.exception_handler(AlreadyAnonymizedError)
