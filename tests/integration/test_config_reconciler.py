@@ -16,10 +16,18 @@ def _make_config(
     name: str,
     description: str = "test",
     level: str = "SERIES",
+    *,
+    file_registry: list[dict[str, object]] | None = None,
     **extra: object,
 ) -> RecordTypeCreate:
     """Helper to create a minimal valid RecordTypeCreate."""
-    return RecordTypeCreate(name=name, description=description, level=level, **extra)
+    return RecordTypeCreate(
+        name=name,
+        description=description,
+        level=level,
+        file_registry=file_registry,
+        **extra,
+    )
 
 
 @pytest_asyncio.fixture
@@ -244,6 +252,52 @@ async def test_explicit_value_differs_from_default(
 
     await test_session.refresh(seed_record_type)
     assert seed_record_type.min_users == 3
+
+
+@pytest.mark.asyncio
+async def test_file_level_change_triggers_update(
+    test_session: AsyncSession,
+) -> None:
+    """Changing file level triggers update via _file_links_differ."""
+    # Create initial with no level
+    config_v1 = [
+        _make_config(
+            "level_test1",
+            file_registry=[
+                {
+                    "name": "seg_file",
+                    "pattern": "seg.nrrd",
+                    "role": "output",
+                    "required": True,
+                    "multiple": False,
+                }
+            ],
+        ),
+    ]
+    result = await reconcile_record_types(config_v1, test_session)
+    assert result.created == ["level_test1"]
+
+    # Clear identity map so eager loading re-fetches the FileDefinition
+    test_session.expire_all()
+
+    # Update with level="PATIENT"
+    config_v2 = [
+        _make_config(
+            "level_test1",
+            file_registry=[
+                {
+                    "name": "seg_file",
+                    "pattern": "seg.nrrd",
+                    "role": "output",
+                    "required": True,
+                    "multiple": False,
+                    "level": "PATIENT",
+                }
+            ],
+        ),
+    ]
+    result = await reconcile_record_types(config_v2, test_session)
+    assert result.updated == ["level_test1"]
 
 
 @pytest.mark.asyncio
