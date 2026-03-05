@@ -21,7 +21,7 @@ from src.types import RecordData, RecordSchema, SlicerArgs
 from ..exceptions import ValidationError
 from ..settings import settings
 from .base import BaseModel, DicomQueryLevel, RecordStatus
-from .file_schema import FileDefinition, FileRole
+from .file_schema import FileDefinitionRead, FileRole, RecordTypeFileLink
 from .patient import Patient, PatientBase
 from .study import Series, SeriesBase, SeriesFind, Study, StudyBase
 from .user import User, UserRole
@@ -37,7 +37,15 @@ class SlicerSettings(SQLModel):
 
 
 class RecordTypeBase(SQLModel):
-    """Base model for record type data."""
+    """Base model for record type data.
+
+    ``file_registry`` is NOT defined here to avoid SQLModel creating a DB
+    column on the ``RecordType`` table model. Instead:
+    - ``RecordType``: populates ``file_registry`` from M2M ``file_links``
+    - ``RecordTypeCreate`` / ``RecordTypeOptional``: defines it as a regular field
+
+    ``input_files`` / ``output_files`` use ``getattr`` to safely access it.
+    """
 
     name: str
     description: str | None = None
@@ -52,39 +60,43 @@ class RecordTypeBase(SQLModel):
     min_users: int | None = Field(default=1)
     level: DicomQueryLevel = Field(default=DicomQueryLevel.SERIES)
 
-    # File schema definitions
-    file_registry: list[FileDefinition] | None = None
     data_schema: RecordSchema | None = None
 
-    @computed_field  # type: ignore[prop-decorator]
-    @property
-    def input_files(self) -> list[FileDefinition]:
-        """Input files filtered from file_registry."""
-        return [
-            f
-            for f in (
-                item if isinstance(item, FileDefinition) else FileDefinition(**item)
-                for item in (self.file_registry or [])
-            )
-            if f.role == FileRole.INPUT
-        ]
+    def _get_file_registry_items(self) -> list[FileDefinitionRead]:
+        """Get file_registry items as FileDefinitionRead objects.
+
+        Uses ``getattr`` because ``file_registry`` is not on every subclass.
+        """
+        registry: list[Any] | None = getattr(self, "file_registry", None)
+        result: list[FileDefinitionRead] = []
+        for item in registry or []:
+            if isinstance(item, FileDefinitionRead):
+                result.append(item)
+            else:
+                result.append(FileDefinitionRead(**item))
+        return result
 
     @computed_field  # type: ignore[prop-decorator]
     @property
-    def output_files(self) -> list[FileDefinition]:
+    def input_files(self) -> list[FileDefinitionRead]:
+        """Input files filtered from file_registry."""
+        return [f for f in self._get_file_registry_items() if f.role == FileRole.INPUT]
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def output_files(self) -> list[FileDefinitionRead]:
         """Output files filtered from file_registry."""
-        return [
-            f
-            for f in (
-                item if isinstance(item, FileDefinition) else FileDefinition(**item)
-                for item in (self.file_registry or [])
-            )
-            if f.role == FileRole.OUTPUT
-        ]
+        return [f for f in self._get_file_registry_items() if f.role == FileRole.OUTPUT]
 
 
 class RecordType(RecordTypeBase, table=True):
-    """Model representing a type of record that can be created."""
+    """Model representing a type of record that can be created.
+
+    ``file_registry`` is NOT a DB column — it lives only on ``RecordTypeRead``
+    (the serialization model). Use ``RecordTypeRead.from_orm(rt)`` for API
+    responses that need ``file_registry``.  For code that needs file defs
+    directly, access ``file_links`` (must be eagerly loaded).
+    """
 
     name: str = Field(min_length=5, max_length=30, primary_key=True)
     data_schema: RecordSchema | None = Field(default_factory=dict, sa_column=Column(JSON))
@@ -94,13 +106,38 @@ class RecordType(RecordTypeBase, table=True):
         default_factory=dict, sa_column=Column(JSON)
     )
 
-    # File schema JSON column
-    file_registry: list[FileDefinition] | None = Field(default_factory=list, sa_column=Column(JSON))
-
     role_name: str | None = Field(foreign_key="userrole.name", default=None)
     constraint_role: UserRole | None = Relationship(back_populates="allowed_record_types")
 
     records: list[Record] = Relationship(back_populates="record_type")
+
+    # M2M relationship to FileDefinition via link table
+    file_links: list[RecordTypeFileLink] = Relationship(
+        back_populates="record_type",
+        cascade_delete=True,
+    )
+
+    def get_file_registry(self) -> list[FileDefinitionRead]:
+        """Build flat file definitions from M2M links.
+
+        Returns empty list if ``file_links`` is not eagerly loaded (avoids
+        MissingGreenlet in async contexts).
+        """
+        try:
+            links = self.file_links
+        except Exception:
+            return []
+        return [
+            FileDefinitionRead(
+                name=link.file_definition.name,
+                pattern=link.file_definition.pattern,
+                description=link.file_definition.description,
+                multiple=link.file_definition.multiple,
+                role=link.role,
+                required=link.required,
+            )
+            for link in (links or [])
+        ]
 
     def __hash__(self) -> int:
         """Hash the RecordType by its name."""
@@ -112,11 +149,39 @@ class RecordType(RecordTypeBase, table=True):
         return self.name == other.name
 
 
+class RecordTypeRead(RecordTypeBase):
+    """Pydantic model for reading a record type with file definitions.
+
+    Adds ``file_registry`` (computed from M2M file_links) to the base fields.
+    Used in API responses wherever the full file registry is needed.
+    """
+
+    file_registry: list[FileDefinitionRead] | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def populate_file_registry(cls, data: Any) -> Any:
+        """Populate file_registry from file_links when validating from ORM."""
+        if isinstance(data, RecordType):
+            # ORM object — extract file_registry from file_links
+            result: dict[str, Any] = {}
+            for field_name in cls.model_fields:
+                if field_name == "file_registry":
+                    continue
+                result[field_name] = getattr(data, field_name, None)
+            try:
+                result["file_registry"] = data.get_file_registry()
+            except Exception:
+                result["file_registry"] = None
+            return result
+        return data
+
+
 class RecordTypeCreate(RecordTypeBase):
     """Pydantic model for creating a new record type."""
 
     data_schema: RecordSchema | None = None
-    file_registry: list[FileDefinition] | None = None
+    file_registry: list[FileDefinitionRead] | None = None
 
 
 class RecordTypeOptional(SQLModel):
@@ -137,7 +202,7 @@ class RecordTypeOptional(SQLModel):
     level: DicomQueryLevel | None = None
 
     # File schema fields
-    file_registry: list[FileDefinition] | None = None
+    file_registry: list[FileDefinitionRead] | None = None
 
     @field_validator(
         "data_schema", "slicer_script_args", "slicer_result_validator_args", mode="before"
@@ -330,7 +395,7 @@ class RecordRead(RecordBase):
     patient: PatientBase
     study: StudyBase | None = None
     series: SeriesBase | None = None
-    record_type: RecordTypeBase
+    record_type: RecordTypeRead
 
     @computed_field
     def radiant(self) -> str | None:

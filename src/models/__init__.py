@@ -12,7 +12,7 @@ from .auth import AccessToken
 from .base import BaseModel, DicomQueryLevel, DicomUID, RecordStatus
 
 # File schema models
-from .file_schema import FileDefinition, FileRole
+from .file_schema import FileDefinition, FileDefinitionRead, FileRole, RecordTypeFileLink
 
 # Patient models
 from .patient import Patient, PatientBase, PatientRead, PatientSave
@@ -34,6 +34,7 @@ from .record import (
     RecordTypeCreate,
     RecordTypeFind,
     RecordTypeOptional,
+    RecordTypeRead,
     SlicerSettings,
 )
 
@@ -59,6 +60,7 @@ __all__ = [
     "DicomQueryLevel",
     "DicomUID",
     "FileDefinition",
+    "FileDefinitionRead",
     "FileRole",
     "Patient",
     "PatientBase",
@@ -77,8 +79,10 @@ __all__ = [
     "RecordType",
     "RecordTypeBase",
     "RecordTypeCreate",
+    "RecordTypeFileLink",
     "RecordTypeFind",
     "RecordTypeOptional",
+    "RecordTypeRead",
     "Series",
     "SeriesBase",
     "SeriesCreate",

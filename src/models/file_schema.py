@@ -3,13 +3,22 @@ File schema models for the Clarinet framework.
 
 This module provides models for defining file requirements in RecordTypes,
 including input and output file definitions with pattern-based validation.
+
+FileDefinition is a DB table with globally unique names.
+RecordTypeFileLink is a M2M link table binding FileDefinition to RecordType
+with per-binding properties (role, required).
+FileDefinitionRead is a flat DTO merging identity + binding for API responses.
 """
 
 import re
 from enum import Enum
+from typing import TYPE_CHECKING
 
 from pydantic import field_validator
-from sqlmodel import SQLModel
+from sqlmodel import Field, Relationship, SQLModel, UniqueConstraint
+
+if TYPE_CHECKING:
+    from src.models.record import RecordType
 
 
 class FileRole(str, Enum):
@@ -20,31 +29,85 @@ class FileRole(str, Enum):
     INTERMEDIATE = "intermediate"
 
 
-class FileDefinition(SQLModel):
-    """Definition of a file for RecordType.
+class FileDefinition(SQLModel, table=True):
+    """Persistent file definition stored in DB.
 
     Attributes:
-        name: Unique identifier for this file definition (must be valid Python identifier)
+        id: Auto-increment primary key.
+        name: Globally unique identifier (valid Python identifier).
         pattern: Pattern with placeholders {field} for file name matching/generation.
             Supports placeholders: {id}, {user_id}, {patient_id}, {study_uid},
             {series_uid}, {data.FIELD}, {record_type.FIELD}
-        description: Optional description of the file purpose
-        required: Whether this file is required (default True)
-        multiple: Whether this is a collection (glob) vs singular file
-        role: File role in the processing pipeline (input/output/intermediate)
+        description: Optional description of the file purpose.
+        multiple: Whether this is a collection (glob) vs singular file.
+    """
 
-    Examples:
-        Static filename:
-            FileDefinition(name="master", pattern="master_model.nrrd")
+    __tablename__ = "filedefinition"
+    __table_args__ = (UniqueConstraint("name"),)
 
-        Dynamic with record ID:
-            FileDefinition(name="result", pattern="result_{id}.json")
+    id: int | None = Field(default=None, primary_key=True)
+    name: str = Field(index=True, max_length=100)
+    pattern: str = Field(max_length=500)
+    description: str | None = None
+    multiple: bool = Field(default=False)
 
-        Dynamic with data field:
-            FileDefinition(name="birads", pattern="birads_{data.BIRADS_R}.txt")
+    record_type_links: list[RecordTypeFileLink] = Relationship(
+        back_populates="file_definition",
+    )
 
-        Collection (multiple=True):
-            FileDefinition(name="user_segs", pattern="lesions_{user_id}.seg.nrrd", multiple=True)
+    @field_validator("name")
+    @classmethod
+    def validate_name_is_identifier(cls, v: str) -> str:
+        """Validate that name is a valid Python identifier."""
+        if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", v):
+            raise ValueError(f"File definition name must be a valid Python identifier, got: {v!r}")
+        return v
+
+
+class RecordTypeFileLink(SQLModel, table=True):
+    """M2M link between RecordType and FileDefinition.
+
+    Carries per-binding properties: role and required.
+
+    Attributes:
+        record_type_name: FK to RecordType.name.
+        file_definition_id: FK to FileDefinition.id.
+        role: File role in the processing pipeline (input/output/intermediate).
+        required: Whether this file is required.
+    """
+
+    __tablename__ = "recordtype_file_link"
+
+    record_type_name: str = Field(
+        foreign_key="recordtype.name",
+        primary_key=True,
+        ondelete="CASCADE",
+    )
+    file_definition_id: int = Field(
+        foreign_key="filedefinition.id",
+        primary_key=True,
+        ondelete="CASCADE",
+    )
+    role: FileRole = Field(default=FileRole.OUTPUT)
+    required: bool = Field(default=True)
+
+    record_type: RecordType = Relationship(back_populates="file_links")
+    file_definition: FileDefinition = Relationship(back_populates="record_type_links")
+
+
+class FileDefinitionRead(SQLModel):
+    """Flat file definition merging identity + binding for API responses.
+
+    Compatible with the old FileDefinition shape so that API consumers
+    see the same JSON structure they always did.
+
+    Attributes:
+        name: Unique identifier for this file definition.
+        pattern: Pattern with placeholders for file name matching/generation.
+        description: Optional description of the file purpose.
+        required: Whether this file is required (from binding).
+        multiple: Whether this is a collection (glob) vs singular file.
+        role: File role in the processing pipeline (from binding).
     """
 
     name: str
