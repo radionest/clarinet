@@ -95,13 +95,16 @@ class RecordType(RecordTypeBase, table=True):
         For DB operations that need ``FileDefinition`` ORM objects (e.g. creating
         RecordFileLink rows), access ``file_links`` directly instead.
 
-        Returns empty list if ``file_links`` is not eagerly loaded (avoids
-        MissingGreenlet in async contexts).
+        Raises ``RuntimeError`` if ``file_links`` is not eagerly loaded.
         """
         try:
             links = self.file_links
-        except Exception:
-            return []
+        except Exception as exc:
+            raise RuntimeError(
+                f"RecordType('{self.name}').file_links not eagerly loaded. "
+                f"Use selectinload(RecordType.file_links)"
+                f".selectinload(RecordTypeFileLink.file_definition)"
+            ) from exc
         return [
             FileDefinitionRead(
                 name=link.file_definition.name,
