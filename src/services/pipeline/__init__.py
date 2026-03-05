@@ -43,8 +43,10 @@ from .chain import (
     register_task,
     sync_pipeline_definitions,
 )
+from .context import FileResolver, RecordQuery, TaskContext, build_task_context
 from .message import PipelineMessage
 from .middleware import DeadLetterMiddleware, DLQPublisher
+from .task import pipeline_task
 from .worker import get_worker_queues, run_worker
 
 __all__ = [
@@ -54,11 +56,15 @@ __all__ = [
     "GPU_QUEUE",
     "DLQPublisher",
     "DeadLetterMiddleware",
+    "FileResolver",
     "Pipeline",
     "PipelineConfigError",
     "PipelineError",
     "PipelineMessage",
     "PipelineStepError",
+    "RecordQuery",
+    "TaskContext",
+    "build_task_context",
     "create_broker",
     "extract_routing_key",
     "get_all_pipelines",
@@ -67,6 +73,7 @@ __all__ = [
     "get_test_broker",
     "get_worker_queues",
     "persist_definitions",
+    "pipeline_task",
     "register_task",
     "run_worker",
     "sync_pipeline_definitions",
