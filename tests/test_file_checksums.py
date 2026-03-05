@@ -10,7 +10,6 @@ from unittest.mock import MagicMock
 import pytest
 
 from src.models.file_schema import FileDefinitionRead, FileRole
-from src.services.file_accessor import RecordFileAccessor
 from src.utils.file_checksums import (
     checksums_changed,
     compute_checksums,
@@ -100,8 +99,9 @@ class TestComputeChecksums:
         """Test computing checksums for singular files."""
         (tmp_path / "result.nrrd").write_text("data")
 
-        accessor = RecordFileAccessor(mock_record, working_folder=tmp_path)
-        checksums = await compute_checksums(accessor)
+        checksums = await compute_checksums(
+            mock_record.record_type.file_registry, mock_record, tmp_path
+        )
 
         assert "single_file" in checksums
         assert len(checksums["single_file"]) == 64
@@ -114,8 +114,9 @@ class TestComputeChecksums:
         (tmp_path / "seg_user-A.nrrd").write_text("data A")
         (tmp_path / "seg_user-B.nrrd").write_text("data B")
 
-        accessor = RecordFileAccessor(mock_record, working_folder=tmp_path)
-        checksums = await compute_checksums(accessor)
+        checksums = await compute_checksums(
+            mock_record.record_type.file_registry, mock_record, tmp_path
+        )
 
         # Collection keys use "name:filename" format
         collection_keys = [k for k in checksums if k.startswith("user_segs:")]
@@ -125,8 +126,9 @@ class TestComputeChecksums:
     async def test_skips_missing_files(self, mock_record: MagicMock, tmp_path: Path) -> None:
         """Test that missing files are skipped in checksums."""
         # Don't create any files
-        accessor = RecordFileAccessor(mock_record, working_folder=tmp_path)
-        checksums = await compute_checksums(accessor)
+        checksums = await compute_checksums(
+            mock_record.record_type.file_registry, mock_record, tmp_path
+        )
 
         assert len(checksums) == 0
 

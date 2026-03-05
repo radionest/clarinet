@@ -10,11 +10,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from src.models.file_schema import FileDefinitionRead, FileRole
 from src.utils.file_patterns import (
     PLACEHOLDER_REGEX,
-    find_matching_file,
-    generate_filename,
-    match_filename,
+    glob_file_paths,
     resolve_pattern,
     resolve_record_field,
 )
@@ -123,72 +122,47 @@ class TestResolvePattern:
         assert result == "ct_segmentation_output.nrrd"
 
 
-class TestMatchFilename:
-    """Tests for match_filename function."""
+class TestGlobFilePaths:
+    """Tests for glob_file_paths function."""
 
-    def test_exact_match(self, mock_record: MagicMock) -> None:
-        """Test exact filename match."""
-        assert match_filename("result_42.json", "result_{id}.json", mock_record) is True
+    def test_glob_matches_files(self, tmp_path: Path) -> None:
+        """Test globbing finds matching files."""
+        (tmp_path / "seg_user-A.nrrd").touch()
+        (tmp_path / "seg_user-B.nrrd").touch()
+        (tmp_path / "other.nrrd").touch()
 
-    def test_no_match(self, mock_record: MagicMock) -> None:
-        """Test filename that doesn't match."""
-        assert match_filename("result_99.json", "result_{id}.json", mock_record) is False
+        fd = FileDefinitionRead(
+            name="segs",
+            pattern="seg_{user_id}.nrrd",
+            multiple=True,
+            role=FileRole.INPUT,
+        )
+        paths = glob_file_paths(fd, tmp_path)
+        assert len(paths) == 2
+        assert all("seg_" in p.name for p in paths)
 
-    def test_static_match(self, mock_record: MagicMock) -> None:
-        """Test static filename match."""
-        assert match_filename("master_model.nrrd", "master_model.nrrd", mock_record) is True
+    def test_glob_empty_when_no_matches(self, tmp_path: Path) -> None:
+        """Test globbing returns empty list when no files match."""
+        fd = FileDefinitionRead(
+            name="segs",
+            pattern="seg_{user_id}.nrrd",
+            multiple=True,
+            role=FileRole.INPUT,
+        )
+        paths = glob_file_paths(fd, tmp_path)
+        assert paths == []
 
-    def test_static_no_match(self, mock_record: MagicMock) -> None:
-        """Test static filename no match."""
-        assert match_filename("other.nrrd", "master_model.nrrd", mock_record) is False
+    def test_glob_returns_sorted(self, tmp_path: Path) -> None:
+        """Test that glob results are sorted."""
+        (tmp_path / "seg_c.nrrd").touch()
+        (tmp_path / "seg_a.nrrd").touch()
+        (tmp_path / "seg_b.nrrd").touch()
 
-
-class TestFindMatchingFile:
-    """Tests for find_matching_file function."""
-
-    def test_file_found(self, mock_record: MagicMock, tmp_path: Path) -> None:
-        """Test finding existing file."""
-        # Create test file
-        test_file = tmp_path / "result_42.json"
-        test_file.touch()
-
-        result = find_matching_file(tmp_path, "result_{id}.json", mock_record)
-        assert result == "result_42.json"
-
-    def test_file_not_found(self, mock_record: MagicMock, tmp_path: Path) -> None:
-        """Test when file doesn't exist."""
-        result = find_matching_file(tmp_path, "result_{id}.json", mock_record)
-        assert result is None
-
-    def test_directory_not_exists(self, mock_record: MagicMock) -> None:
-        """Test when directory doesn't exist."""
-        non_existent = Path("/nonexistent/directory")
-        result = find_matching_file(non_existent, "result_{id}.json", mock_record)
-        assert result is None
-
-    def test_static_file_found(self, mock_record: MagicMock, tmp_path: Path) -> None:
-        """Test finding static filename."""
-        test_file = tmp_path / "master_model.nrrd"
-        test_file.touch()
-
-        result = find_matching_file(tmp_path, "master_model.nrrd", mock_record)
-        assert result == "master_model.nrrd"
-
-
-class TestGenerateFilename:
-    """Tests for generate_filename function."""
-
-    def test_generate_with_id(self, mock_record: MagicMock) -> None:
-        """Test generating filename with ID."""
-        result = generate_filename("seg_{id}.seg.nrrd", mock_record)
-        assert result == "seg_42.seg.nrrd"
-
-    def test_generate_static(self, mock_record: MagicMock) -> None:
-        """Test generating static filename."""
-        result = generate_filename("master_model.nrrd", mock_record)
-        assert result == "master_model.nrrd"
-
-    def test_generate_complex(self, mock_record: MagicMock) -> None:
-        """Test generating filename with multiple placeholders."""
-        result = generate_filename("{record_type.name}_{patient_id}_{id}.json", mock_record)
-        assert result == "ct_segmentation_patient-456_42.json"
+        fd = FileDefinitionRead(
+            name="segs",
+            pattern="seg_{user_id}.nrrd",
+            multiple=True,
+            role=FileRole.INPUT,
+        )
+        paths = glob_file_paths(fd, tmp_path)
+        assert [p.name for p in paths] == ["seg_a.nrrd", "seg_b.nrrd", "seg_c.nrrd"]

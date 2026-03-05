@@ -1,8 +1,8 @@
 """
 Utility functions for file pattern processing.
 
-This module provides functions for resolving file patterns with placeholders,
-matching filenames against patterns, and finding files in directories.
+This module provides functions for resolving file patterns with placeholders
+and finding files in directories.
 """
 
 import re
@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from src.models.file_schema import FileDefinitionRead
     from src.models.record import RecordBase
 
 PLACEHOLDER_REGEX = re.compile(r"\{([^}]+)\}")
@@ -82,72 +83,18 @@ def resolve_pattern(pattern: str, record: RecordBase) -> str:
     return PLACEHOLDER_REGEX.sub(replacer, pattern)
 
 
-def match_filename(filename: str, pattern: str, record: RecordBase) -> bool:
-    """Check if filename matches the pattern (exact match).
+def glob_file_paths(
+    fd: FileDefinitionRead,
+    working_dir: Path,
+) -> list[Path]:
+    """Glob collection file pattern, replacing placeholders with wildcards.
 
     Args:
-        filename: Filename to check
-        pattern: Pattern with placeholders
-        record: Record instance for placeholder resolution
+        fd: File definition with pattern (should have multiple=True)
+        working_dir: Base directory to glob in
 
     Returns:
-        True if filename exactly matches the resolved pattern
-
-    Examples:
-        >>> match_filename("result_42.json", "result_{id}.json", record)
-        True
-        >>> match_filename("result_99.json", "result_{id}.json", record)  # record.id == 42
-        False
+        Sorted list of matching Paths
     """
-    expected = resolve_pattern(pattern, record)
-    return filename == expected
-
-
-def find_matching_file(
-    directory: Path,
-    pattern: str,
-    record: RecordBase,
-) -> str | None:
-    """Find file in directory that matches the pattern.
-
-    Args:
-        directory: Directory to search in
-        pattern: Pattern with placeholders
-        record: Record instance for placeholder resolution
-
-    Returns:
-        Filename if found, None otherwise
-
-    Examples:
-        >>> find_matching_file(Path("/data"), "result_{id}.json", record)
-        "result_42.json"  # if file exists
-    """
-    if not directory.exists():
-        return None
-
-    expected_name = resolve_pattern(pattern, record)
-    expected_path = directory / expected_name
-
-    if expected_path.is_file():
-        return expected_name
-
-    return None
-
-
-def generate_filename(pattern: str, record: RecordBase) -> str:
-    """Generate filename from pattern using record values.
-
-    This is an alias for resolve_pattern for semantic clarity.
-
-    Args:
-        pattern: Pattern with placeholders
-        record: Record instance for placeholder resolution
-
-    Returns:
-        Generated filename
-
-    Examples:
-        >>> generate_filename("seg_{id}.seg.nrrd", record)
-        "seg_42.seg.nrrd"
-    """
-    return resolve_pattern(pattern, record)
+    glob_pattern = PLACEHOLDER_REGEX.sub("*", fd.pattern)
+    return sorted(working_dir.glob(glob_pattern))

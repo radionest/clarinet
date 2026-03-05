@@ -53,7 +53,6 @@ from src.models import (
 )
 from src.models.file_schema import FileDefinitionRead, FileRole, RecordTypeFileLink
 from src.repositories.record_repository import RecordSearchCriteria
-from src.services.file_accessor import get_file_accessor
 from src.services.file_validation import FileValidationResult, FileValidator
 from src.types import RecordData
 from src.utils.file_checksums import checksums_changed, compute_checksums
@@ -653,9 +652,15 @@ async def check_record_files(
             # Still blocked — return early with empty result
             return FileCheckResult(changed_files=[], checksums={})
 
-    accessor = get_file_accessor(record_read)
+    working_folder = record_read.working_folder
+    if working_folder is None:
+        return FileCheckResult(changed_files=[], checksums={})
 
-    new_checksums = await compute_checksums(accessor)
+    new_checksums = await compute_checksums(
+        record_read.record_type.file_registry or [],
+        record_read,
+        Path(working_folder),
+    )
     changed = checksums_changed(record_read.file_checksums, new_checksums)
 
     await repo.update_checksums(record_id, new_checksums)

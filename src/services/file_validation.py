@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from src.utils.file_patterns import find_matching_file, resolve_pattern
+from src.utils.file_patterns import resolve_pattern
 
 if TYPE_CHECKING:
     from src.models.file_schema import FileDefinitionRead
@@ -87,18 +87,18 @@ class FileValidator:
         matched: dict[str, str] = {}
 
         for file_def in self._file_definitions:
-            filename = find_matching_file(directory, file_def.pattern, record)
+            resolved = resolve_pattern(file_def.pattern, record)
+            filename = resolved if (directory / resolved).is_file() else None
 
             if filename:
                 matched[file_def.name] = filename
             elif file_def.required:
-                expected_name = resolve_pattern(file_def.pattern, record)
                 errors.append(
                     FileValidationError(
                         file_name=file_def.name,
                         error_type="missing",
                         message=f"Required file '{file_def.name}' not found "
-                        f"(expected: {expected_name}, pattern: {file_def.pattern})",
+                        f"(expected: {resolved}, pattern: {file_def.pattern})",
                     )
                 )
 

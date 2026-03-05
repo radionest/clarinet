@@ -2,7 +2,7 @@
 File checksum utilities for hash-based file change detection.
 
 Provides async-compatible SHA256 checksum computation for files
-tracked by RecordFileAccessor.
+defined in a record type's file registry.
 """
 
 import asyncio
@@ -11,7 +11,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from src.services.file_accessor import RecordFileAccessor
+    from src.models.file_schema import FileDefinitionRead
+    from src.models.record import RecordBase
 
 CHUNK_SIZE = 65536
 
@@ -39,34 +40,39 @@ async def compute_file_checksum(path: Path) -> str | None:
     return await asyncio.to_thread(_sha256, path)
 
 
-async def compute_checksums(accessor: RecordFileAccessor) -> dict[str, str]:
-    """Compute checksums for all existing files in accessor.
+async def compute_checksums(
+    file_defs: list[FileDefinitionRead],
+    record: RecordBase,
+    working_dir: Path,
+) -> dict[str, str]:
+    """Compute checksums for all existing files in file definitions.
 
     For singular files, key = file definition name.
     For collections (multiple=True), key = "name:filename".
 
     Args:
-        accessor: RecordFileAccessor with file registry populated
+        file_defs: List of file definitions to compute checksums for
+        record: Record for pattern placeholder resolution
+        working_dir: Base directory where files are located
 
     Returns:
         Dict mapping file key to SHA256 hex string
     """
-    checksums: dict[str, str] = {}
+    from src.utils.file_patterns import glob_file_paths, resolve_pattern
 
-    for name in accessor.available():
-        fd = accessor._registry[name]
+    checksums: dict[str, str] = {}
+    for fd in file_defs:
         if fd.multiple:
-            paths = accessor._glob(fd)
+            paths = glob_file_paths(fd, working_dir)
             for p in paths:
                 checksum = await compute_file_checksum(p)
                 if checksum is not None:
-                    checksums[f"{name}:{p.name}"] = checksum
+                    checksums[f"{fd.name}:{p.name}"] = checksum
         else:
-            path = accessor._resolve(fd)
+            path = working_dir / resolve_pattern(fd.pattern, record)
             checksum = await compute_file_checksum(path)
             if checksum is not None:
-                checksums[name] = checksum
-
+                checksums[fd.name] = checksum
     return checksums
 
 
