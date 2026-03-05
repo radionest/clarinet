@@ -36,3 +36,30 @@
 - All async tests need `@pytest.mark.asyncio`
 - Use `AsyncClient` from httpx for API testing
 - `pytest.mark.pipeline` marker for tests requiring RabbitMQ (auto-skip when unreachable)
+
+## Pitfalls
+
+### Identity Map Caching
+
+`expire_on_commit=False` is set globally (both production and tests). After creating
+M2M links and `commit()` in the same session, `selectinload` will NOT reload a
+relationship that is already cached in the identity map.
+
+Fix: call `session.expire_all()` (or `session.expire(entity)`) before re-fetching:
+```python
+session.add(link)
+await session.commit()
+session.expire_all()  # clear cached empty collection
+
+result = await session.execute(
+    select(Model).options(selectinload(Model.links).selectinload(Link.child))
+)
+```
+
+This only affects tests — production endpoints get a fresh session per request.
+
+### `fresh_session` Fixture
+
+Use `fresh_session` (from `conftest.py`) instead of `test_session` when you need to
+verify eager loading works correctly. It provides an empty identity map, simulating
+production behavior and catching `MissingGreenlet` errors that `test_session` masks.

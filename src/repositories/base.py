@@ -4,6 +4,7 @@ from collections.abc import Sequence
 from typing import Any, TypeVar
 
 from sqlalchemy import func
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import Select
 from sqlmodel import SQLModel, select
@@ -179,7 +180,11 @@ class BaseRepository[ModelT: SQLModel]:
         return entities
 
     async def update(
-        self, entity: ModelT, update_data: dict[str, Any], exclude_unset: bool = True
+        self,
+        entity: ModelT,
+        update_data: dict[str, Any],
+        exclude_unset: bool = True,
+        options: list[Any] | None = None,
     ) -> ModelT:
         """Update entity with given data.
 
@@ -187,6 +192,9 @@ class BaseRepository[ModelT: SQLModel]:
             entity: Entity to update
             update_data: Dictionary with fields to update
             exclude_unset: Whether to exclude unset values
+            options: Optional SQLAlchemy loader options (e.g. selectinload).
+                When provided, re-fetches via select() instead of session.refresh()
+                because refresh() does not support loader options.
 
         Returns:
             Updated entity
@@ -198,6 +206,26 @@ class BaseRepository[ModelT: SQLModel]:
                 setattr(entity, field, value)
 
         await self.session.commit()
+
+        if options:
+            # session.refresh() doesn't support loader options (selectinload etc.),
+            # so re-fetch via select().options() using the entity's primary key.
+            # Typed as Any to satisfy mypy — sa_inspect returns InstanceState / Mapper.
+            inst_state: Any = sa_inspect(entity)
+            identity = inst_state.identity  # tuple of PK values from identity map
+            mapper: Any = sa_inspect(self.model_class)
+            pk_cols = list(mapper.primary_key)  # list of PK Column objects
+
+            stmt = select(self.model_class).options(*options)
+            for col, val in zip(pk_cols, identity):
+                stmt = stmt.where(col == val)
+
+            result = await self.session.execute(stmt)
+            refreshed = result.scalars().first()
+            if refreshed is None:
+                raise EntityNotFoundError(f"{self.model_class.__name__} not found after update")
+            return refreshed
+
         await self.session.refresh(entity)
         return entity
 

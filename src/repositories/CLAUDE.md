@@ -15,7 +15,7 @@
 | `count(**filters)` | `int` | `0` |
 | `create(entity)` | `ModelT` | — (commits + refreshes) |
 | `create_many(entities)` | `list[ModelT]` | — |
-| `update(entity, update_data)` | `ModelT` | — |
+| `update(entity, update_data, options=)` | `ModelT` | — |
 | `delete(entity)` | `None` | — |
 | `delete_by_id(id)` | `bool` | returns `False` |
 
@@ -103,6 +103,28 @@ selectinload(RecordType.file_links).selectinload(RecordTypeFileLink.file_definit
 - `RecordRepository`: `_record_type_with_files()` helper chains through `Record.record_type`
 - `RecordRepository`: `_record_file_links_eager_load()` helper for `Record.file_links → FileDefinition`
 - `FileDefinitionRepository`: `get_or_create()`, `bulk_upsert()` for M2M link management
+
+### BaseRepository.update() and Relationships
+
+`BaseRepository.update()` accepts an optional `options` parameter for eager loading:
+```python
+await repo.update(entity, data, options=[selectinload(Model.relationship)])
+```
+
+Without `options`, `update()` uses `session.refresh()` which does NOT load relationships.
+Accessing a relationship after plain `update()` causes `MissingGreenlet` in async contexts.
+
+Alternatives when you don't use `options`:
+- Re-fetch via `repo.get()` (if the repo overrides `get()` with eager loading)
+- Use domain-specific methods like `update_status()`, `update_data()` that handle this internally
+
+### M2M Link Lifecycle
+
+Pattern for updating M2M relationships (e.g. file_links on RecordType):
+1. Delete existing links → `session.flush()`
+2. Create new link objects → `session.add()` each
+3. `session.commit()`
+4. Re-fetch parent with `selectinload` (via `repo.get()` or `update(options=...)`)
 
 ## N+1 Prevention
 

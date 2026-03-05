@@ -168,6 +168,22 @@ corresponding Gleam types in:
 
 Check field names, types, and optionality match between Python schemas and Gleam types.
 
+## Pitfalls
+
+**`from __future__ import annotations` is forbidden in `table=True` files.**
+It turns type hints into strings, breaking SQLAlchemy `Relationship()` parsing.
+Use manual string forward references: `list["ModelName"]`.
+
+**Cannot override a parent field with `@computed_field` in Pydantic v2.**
+`TypeError: Field 'X' overrides symbol of same name in a parent class`.
+Pattern: use a method on ORM (`get_X()`) + a regular field on `*Read` DTO
+populated via `model_validator(mode="before")`. See `RecordType.get_file_registry()`
+→ `RecordTypeRead.file_registry`.
+
+**`list`/`dict` fields in `table=True` models need `sa_column=Column(JSON)`.**
+Without it, SQLModel raises `ValueError: <class 'list'> has no matching SQLAlchemy type`
+because every inherited field becomes a DB column.
+
 ## Forward References
 
 Models use `TYPE_CHECKING` to avoid circular imports. Schemas with forward refs

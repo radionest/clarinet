@@ -5,6 +5,7 @@ from uuid import uuid4
 
 import pytest
 import pytest_asyncio
+from sqlalchemy.orm import selectinload
 
 from src.exceptions.domain import (
     EntityNotFoundError,
@@ -14,6 +15,7 @@ from src.exceptions.domain import (
     RecordTypeNotFoundError,
 )
 from src.models.base import DicomQueryLevel, RecordStatus
+from src.models.file_schema import FileDefinition, FileRole, RecordTypeFileLink
 from src.models.patient import Patient
 from src.models.record import Record, RecordFind, RecordType
 from src.models.study import Series, SeriesFind, Study
@@ -747,3 +749,37 @@ class TestRecordTypeRepository:
     async def test_ensure_unique_name_conflict(self, env):
         with pytest.raises(RecordTypeAlreadyExistsError):
             await env["repo"].ensure_unique_name("rt_test_00001")
+
+    @pytest.mark.asyncio
+    async def test_update_with_options_loads_relationships(self, test_session):
+        """update() with options returns entity with eagerly loaded relationships."""
+        repo = RecordTypeRepository(test_session)
+        rt = _make_record_type("rt_opts_001", description="Original")
+        rt = await repo.create(rt)
+
+        fd = FileDefinition(name="opts_seg", pattern="seg.nrrd")
+        test_session.add(fd)
+        await test_session.flush()
+
+        link = RecordTypeFileLink(
+            record_type_name="rt_opts_001",
+            file_definition_id=fd.id,
+            role=FileRole.OUTPUT,
+            required=True,
+        )
+        test_session.add(link)
+        await test_session.commit()
+
+        updated = await repo.update(
+            rt,
+            {"description": "Updated"},
+            options=[
+                selectinload(RecordType.file_links).selectinload(
+                    RecordTypeFileLink.file_definition
+                ),
+            ],
+        )
+
+        assert updated.description == "Updated"
+        assert len(updated.file_links) == 1
+        assert updated.file_links[0].file_definition.name == "opts_seg"
