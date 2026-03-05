@@ -84,15 +84,9 @@ Mounted at `/api/pipelines`, conditional on `pipeline_enabled`. Endpoints:
 
 Uses `PipelineDefinitionRepositoryDep`.
 
-## Config Mode Guards (record.py)
+## Config Mode Guards
 
-`require_mutable_config(request)` dependency in `dependencies.py`:
-- Raises `AuthorizationError` (→ 403) if `app.state.config_mode == "python"`
-- Applied to `POST /types`, `PATCH /types/{id}`, `DELETE /types/{id}`
-
-In TOML mode, these endpoints also trigger background TOML export/delete:
-- `POST /types` + `PATCH /types/{id}` → `export_record_type_to_toml()` + `export_data_schema_sidecar()`
-- `DELETE /types/{id}` → `delete_record_type_files()`
+Config mode guards on `/types` endpoints — see `src/config/CLAUDE.md`.
 
 ## RecordFlow Integration (record.py)
 

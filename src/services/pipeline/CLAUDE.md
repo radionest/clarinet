@@ -18,6 +18,8 @@ TaskIQ-based distributed task pipeline for long-running operations (GPU processi
 | `message.py` | PipelineMessage (Pydantic model) |
 | `chain.py` | Pipeline chain builder DSL (step-by-step, queue routing) |
 | `middleware.py` | DLQPublisher, PipelineChainMiddleware, PipelineLoggingMiddleware, DeadLetterMiddleware |
+| `context.py` | TaskContext system: FileResolver (sync), RecordQuery (async), build_task_context() |
+| `task.py` | `pipeline_task()` decorator factory — auto client lifecycle + TaskContext |
 | `worker.py` | get_worker_queues() auto-detect, run_worker() entry point |
 
 ## Usage
@@ -111,6 +113,47 @@ After each step, `PipelineChainMiddleware.post_execute()` fetches the definition
 - `pipeline_ack_type` (AcknowledgeType, default `when_executed`) — `when_received` | `when_executed` | `when_saved`
 
 
+## TaskContext System
+
+`pipeline_task()` decorator + `TaskContext` eliminate boilerplate in pipeline tasks.
+
+### Usage
+
+```python
+from src.services.pipeline import pipeline_task, PipelineMessage, TaskContext
+
+@pipeline_task(queue="clarinet.gpu")
+async def run_segmentation(msg: PipelineMessage, ctx: TaskContext):
+    if ctx.files.exists("segmentation"):
+        return
+    seg_path = await ctx.records.file_path(
+        "segment_CT_single", file="segmentation_single", series_uid=msg.series_uid,
+    )
+    img.save(result, ctx.files.resolve("master_model"))
+    await ctx.client.update_record_data(msg.record_id, {"status": "done"})
+```
+
+### Components
+
+| Class | Sync/Async | Purpose |
+|-------|-----------|---------|
+| `FileResolver` | sync | `resolve()`, `exists()`, `glob()`, `dir()` — file path operations |
+| `RecordQuery` | async | `find()`, `file_path()` — record lookup via HTTP client |
+| `TaskContext` | dataclass | Container: `files`, `records`, `client`, `msg` |
+
+### Context Building Fallback
+
+`build_task_context(msg, client)` makes one HTTP call:
+1. `msg.record_id` → `get_record()` → full context (working dirs, file registry, fields)
+2. `msg.series_uid` → `get_series()` → working dirs only (no file registry)
+3. `msg.study_uid` → `get_study()` → patient + study dirs only
+4. Nothing → empty context
+
+### Backward Compatibility
+
+`@broker.task()` still works unchanged. Both old and new tasks return `dict` (serialized
+PipelineMessage) — chain middleware compatible. No changes to middleware, chain, or broker.
+
 ## RecordFlow Integration
 
 `PipelineAction` in `flow_action.py` dispatches a pipeline from a RecordFlow trigger.
@@ -124,7 +167,7 @@ from src.services.pipeline import get_test_broker
 broker = get_test_broker()
 ```
 
-Unit tests: `tests/test_pipeline.py`
+Unit tests: `tests/test_pipeline.py`, `tests/test_pipeline_context.py`
 
 Integration tests: `tests/integration/test_pipeline_integration.py` (18 tests, real RabbitMQ on klara `192.168.122.151`)
 - `pytest.mark.pipeline` marker — auto-skips when RabbitMQ unreachable

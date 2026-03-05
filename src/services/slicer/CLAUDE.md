@@ -69,15 +69,7 @@ DIMSE (C-FIND + C-GET/C-MOVE) integration via `ctkDICOMQuery` / `ctkDICOMRetriev
 - `retrieve_study(study_instance_uid)` → queries PACS, retrieves series, loads into scene
 - Called internally by `SlicerHelper.load_study_from_pacs()` — not used directly by scripts
 
-**PACS settings** (`src/settings.py`):
-```python
-pacs_host: str = "localhost"      # Remote PACS hostname/IP
-pacs_port: int = 4242            # PACS DIMSE port
-pacs_aet: str = "ORTHANC"       # Called AE Title
-pacs_calling_aet: str = "SLICER" # Calling AE Title
-pacs_prefer_cget: bool = True    # C-GET (True) vs C-MOVE (False)
-pacs_move_aet: str = "SLICER"   # Move destination AET (C-MOVE only)
-```
+PACS settings: same `pacs_*` vars as DICOM service — see `src/services/dicom/CLAUDE.md`.
 
 **Usage via POST /exec:**
 ```json

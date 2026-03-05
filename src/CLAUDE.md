@@ -2,9 +2,6 @@
 
 ## Async Programming
 
-- `async/await` for all I/O operations; avoid blocking calls
-- `asyncio.gather()` for parallel independent tasks
-- Always handle exceptions in async functions
 - Use `AsyncSession` for DB operations: `get_async_session` from `src.utils.database`
 
 ## Lifespan Shutdown Pattern
@@ -22,10 +19,7 @@ def shutdown_fs_executor() -> None:
 
 ## Type Annotations & Imports
 
-- Type hints on all functions; mypy strict mode enabled (`pyproject.toml`)
-- `Optional[T]` instead of `Union[T, None]`; use `TypeVar`/`Generic` for generics
-- Group imports: stdlib → third-party → local; relative imports within package
-- Sort with ruff (includes isort). Avoid circular imports.
+- Avoid circular imports; use relative imports within package
 - Common type aliases in `src/types.py` — read file directly for full list
 
 ### Type Parameters (PEP 695)
@@ -45,8 +39,7 @@ Legacy `TypeVar` in `src/repositories/base.py` and `src/utils/common.py` is pre-
 ## Error Handling
 
 - Try blocks: max two function calls; no large try-except blocks
-- Custom exceptions from `src.exceptions.http`: NOT_FOUND, CONFLICT, etc.
-- Always log errors before handling; never bare except
+- Always log errors before handling
 
 ```python
 from src.exceptions.http import NOT_FOUND, CONFLICT
@@ -63,7 +56,6 @@ except IntegrityError as e:
 
 ## Logging
 
-- Always: `from src.utils.logger import logger` — never import loguru directly
 - Levels: DEBUG (detail), INFO (events), WARNING (unexpected), ERROR (failures), CRITICAL (system)
 
 ```python
@@ -75,17 +67,12 @@ logger.error(f"Failed to connect to database: {error}")
 
 ## Configuration
 
-- `from src.settings import settings` — `pydantic_settings.BaseSettings`
 - Env vars: `CLARINET_` prefix; TOML files: `settings.toml`, `settings.custom.toml`
 - See `src/settings.py` for all available settings (admin, session, recordflow, etc.)
 
 ### RecordType Config System
 
-Two mutually exclusive config modes per project (`settings.config_mode`):
-- **TOML mode** (default): bidirectional sync — TOML files ↔ DB via API
-- **Python mode**: Python files = single source of truth, API mutations disabled (403)
-
-Config package: `src/config/` — see `src/config/CLAUDE.md` for details.
+Config modes (TOML / Python) — see `src/config/CLAUDE.md` for details.
 
 Config loader: `src/utils/config_loader.py` (TOML/JSON discovery).
 - TOML takes precedence when both formats exist for the same stem
@@ -106,18 +93,18 @@ Old `create_record_types_from_config()` preserved as deprecated alias.
 
 | Directory | Purpose |
 |---|---|
-| `services/recordflow/` | DSL-движок обработки записей; реагирует на смену статуса/данных Record |
-| `services/pipeline/` | Распределённая очередь задач (TaskIQ + RabbitMQ); длинные операции (GPU, DICOM-цепочки) |
-| `services/dicomweb/` | DICOMweb-прокси с двухуровневым кешем (память + диск) для OHIF |
-| `services/dicom/` | DICOM-клиент (pynetdicom): C-FIND/C-GET/C-STORE; анонимизация (`anonymizer.py`) |
-| `services/slicer/` | Интеграция с 3D Slicer через HTTP API; DSL-хелпер и PacsHelper |
-| `services/image/` | Утилиты обработки изображений (numpy) |
-| `services/admin_service.py` | Сводная административная логика |
-| `services/user_service.py` | Управление пользователями и ролями |
-| `services/study_service.py` | Управление исследованиями |
-| `services/session_cleanup.py` | Фоновый сервис очистки устаревших сессий |
+| `services/recordflow/` | Record processing DSL engine; reacts to Record status/data changes |
+| `services/pipeline/` | Distributed task queue (TaskIQ + RabbitMQ); long ops (GPU, DICOM chains) |
+| `services/dicomweb/` | DICOMweb proxy with two-tier cache (memory + disk) for OHIF |
+| `services/dicom/` | DICOM client (pynetdicom): C-FIND/C-GET/C-STORE; anonymization (`anonymizer.py`) |
+| `services/slicer/` | 3D Slicer integration via HTTP API; DSL helper and PacsHelper |
+| `services/image/` | Image processing utilities (numpy) |
+| `services/admin_service.py` | Aggregated admin logic |
+| `services/user_service.py` | User and role management |
+| `services/study_service.py` | Study management |
+| `services/session_cleanup.py` | Background stale session cleanup service |
 
-`src/client.py` — `ClarinetClient`: HTTP-клиент к собственному API (используется RecordFlow engine).
+`src/client.py` — `ClarinetClient`: HTTP client to own API (used by RecordFlow engine).
 
 ## Admin Management
 
@@ -134,12 +121,6 @@ Old `create_record_types_from_config()` preserved as deprecated alias.
 - Auto cleanup service in `src/services/session_cleanup.py`
 - CLI: `uv run clarinet session stats`, `cleanup`, `revoke-user`, `list-user`
 - See `src/settings.py` for session config (expiry, sliding refresh, timeouts, cleanup)
-
-## Documentation
-
-- Google-style docstrings for all public functions and classes
-- Document API endpoints with FastAPI auto-documentation
-- Inline comments only for complex logic
 
 ## Alembic Migrations
 

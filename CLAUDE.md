@@ -16,10 +16,7 @@ Clarinet is a framework for clinical-radiological studies, built on FastAPI, SQL
 ## Code Style
 
 - All Python tools run through **uv**: `uv run <command>`
-- **Ruff** for formatting + linting (config in `.ruff.toml`): line length 100, target Python 3.14
-- **mypy** strict mode: `uv run mypy src/`
 - Type hints on all functions; `Optional[T]` not `Union[T, None]`
-- Group imports: stdlib → third-party → local (relative within package)
 - Google-style docstrings for public functions
 - Custom exceptions from `src.exceptions.http` (NOT_FOUND, CONFLICT, etc.)
 - Async/await for all I/O; `asyncio.gather()` for parallel independent tasks
