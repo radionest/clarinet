@@ -22,11 +22,13 @@ from sqlmodel import SQLModel
 
 from src.api.auth_config import current_active_user
 from src.api.dependencies import (
+    FileDefinitionRepositoryDep,
     PaginationDep,
     ProjectFileRegistryDep,
     RecordRepositoryDep,
     RecordTypeRepositoryDep,
     SeriesRepositoryDep,
+    SessionDep,
     require_mutable_config,
 )
 from src.config.toml_exporter import (
@@ -46,8 +48,10 @@ from src.models import (
     RecordTypeCreate,
     RecordTypeFind,
     RecordTypeOptional,
+    RecordTypeRead,
     User,
 )
+from src.models.file_schema import FileDefinitionRead, RecordTypeFileLink
 from src.repositories.record_repository import RecordSearchCriteria
 from src.services.file_accessor import get_file_accessor
 from src.services.file_validation import FileValidationResult, FileValidator
@@ -164,26 +168,28 @@ def validate_record_data(record: Record, data: RecordData) -> RecordData:
 # Record Type Endpoints
 
 
-@router.get("/types", response_model=list[RecordType])
+@router.get("/types", response_model=list[RecordTypeRead])
 async def get_all_record_types(
     repo: RecordTypeRepositoryDep,
-) -> Sequence[RecordType]:
+) -> list[RecordTypeRead]:
     """Get all record types."""
-    return await repo.list_all()
+    types = await repo.list_all()
+    return [RecordTypeRead.model_validate(rt) for rt in types]
 
 
-@router.post("/types/find", response_model=list[RecordType])
+@router.post("/types/find", response_model=list[RecordTypeRead])
 async def find_record_type(
     find_query: RecordTypeFind,
     repo: RecordTypeRepositoryDep,
-) -> Sequence[RecordType]:
+) -> list[RecordTypeRead]:
     """Find record types by criteria."""
-    return await repo.find(find_query)
+    types = await repo.find(find_query)
+    return [RecordTypeRead.model_validate(rt) for rt in types]
 
 
 @router.post(
     "/types",
-    response_model=RecordType,
+    response_model=RecordTypeRead,
     status_code=status.HTTP_201_CREATED,
     dependencies=[Depends(require_mutable_config)],
 )
@@ -192,9 +198,11 @@ async def add_record_type(
     request: Request,
     background_tasks: BackgroundTasks,
     repo: RecordTypeRepositoryDep,
+    fd_repo: FileDefinitionRepositoryDep,
+    session: SessionDep,
     project_registry: ProjectFileRegistryDep,
     constrain_unique_names: bool = True,
-) -> RecordType:
+) -> RecordTypeRead:
     """Create a new record type.
 
     Supports ``files`` references that resolve against the project file registry.
@@ -205,19 +213,64 @@ async def add_record_type(
     props = resolve_task_files(props, project_registry)
     record_type = RecordTypeCreate(**props)
 
-    new_record_type = RecordType.model_validate(record_type)
+    # Extract file definitions before creating ORM object
+    file_defs = record_type.file_registry or []
 
     # Validate data schema if present
-    if new_record_type.data_schema is not None:
+    if record_type.data_schema is not None:
         try:
-            Draft202012Validator.check_schema(new_record_type.data_schema)
+            Draft202012Validator.check_schema(record_type.data_schema)
         except SchemaError as e:
             raise ValidationError(f"Data schema is invalid: {e}") from e
 
     if constrain_unique_names:
         await repo.ensure_unique_name(record_type.name)
 
-    result = await repo.create(new_record_type)
+    # Create RecordType without file_registry (it's a computed field on ORM)
+    create_data = record_type.model_dump(exclude={"file_registry", "input_files", "output_files"})
+    new_record_type = RecordType(**create_data)
+    new_record_type.file_links = []
+    session.add(new_record_type)
+    await session.flush()
+
+    # Create file links
+    if file_defs:
+        fd_data = [
+            {
+                "name": fd.name if isinstance(fd, FileDefinitionRead) else fd["name"],
+                "pattern": fd.pattern if isinstance(fd, FileDefinitionRead) else fd["pattern"],
+                "description": (
+                    fd.description if isinstance(fd, FileDefinitionRead) else fd.get("description")
+                ),
+                "multiple": (
+                    fd.multiple if isinstance(fd, FileDefinitionRead) else fd.get("multiple", False)
+                ),
+            }
+            for fd in file_defs
+        ]
+        fd_map = await fd_repo.bulk_upsert(fd_data)
+
+        for fd in file_defs:
+            if isinstance(fd, FileDefinitionRead):
+                name, role, required = fd.name, fd.role, fd.required
+            else:
+                name = fd["name"]
+                role = fd.get("role", "output")
+                required = fd.get("required", True)
+
+            file_def_obj = fd_map[name]
+            link = RecordTypeFileLink(
+                record_type_name=new_record_type.name,
+                file_definition_id=file_def_obj.id,  # type: ignore[arg-type]
+                role=role,
+                required=required,
+            )
+            session.add(link)
+
+    await session.commit()
+
+    # Re-fetch with eager loading
+    result = await repo.get(new_record_type.name)
 
     # Export to TOML in background (TOML mode only)
     if getattr(request.app.state, "config_mode", "toml") == "toml":
@@ -225,12 +278,12 @@ async def add_record_type(
         background_tasks.add_task(export_record_type_to_toml, result, folder)
         background_tasks.add_task(export_data_schema_sidecar, result, folder)
 
-    return result
+    return RecordTypeRead.model_validate(result)
 
 
 @router.patch(
     "/types/{record_type_id}",
-    response_model=RecordType,
+    response_model=RecordTypeRead,
     dependencies=[Depends(require_mutable_config)],
 )
 async def update_record_type(
@@ -239,7 +292,9 @@ async def update_record_type(
     request: Request,
     background_tasks: BackgroundTasks,
     repo: RecordTypeRepositoryDep,
-) -> RecordType:
+    fd_repo: FileDefinitionRepositoryDep,
+    session: SessionDep,
+) -> RecordTypeRead:
     """Update an existing record type.
 
     In TOML mode, exports the updated RecordType to a TOML file.
@@ -254,7 +309,51 @@ async def update_record_type(
             raise ValidationError(f"Data schema is invalid: {e}") from e
 
     update_data = record_type_update.model_dump(exclude_unset=True, exclude_none=True)
-    result = await repo.update(record_type, update_data)
+
+    # Handle file_registry update separately (it's M2M now)
+    file_defs_raw = update_data.pop("file_registry", None)
+    # Also exclude computed fields that shouldn't be set
+    update_data.pop("input_files", None)
+    update_data.pop("output_files", None)
+
+    if update_data:
+        await repo.update(record_type, update_data)
+
+    # Sync file links if file_registry was provided
+    if file_defs_raw is not None:
+        # Re-fetch to get current links
+        current = await repo.get(record_type_id)
+        # Remove existing links
+        for link in list(current.file_links or []):
+            await session.delete(link)
+        await session.flush()
+
+        if file_defs_raw:
+            fd_data = [
+                {
+                    "name": fd["name"],
+                    "pattern": fd["pattern"],
+                    "description": fd.get("description"),
+                    "multiple": fd.get("multiple", False),
+                }
+                for fd in file_defs_raw
+            ]
+            fd_map = await fd_repo.bulk_upsert(fd_data)
+
+            for fd in file_defs_raw:
+                file_def_obj = fd_map[fd["name"]]
+                link = RecordTypeFileLink(
+                    record_type_name=current.name,
+                    file_definition_id=file_def_obj.id,  # type: ignore[arg-type]
+                    role=fd.get("role", "output"),
+                    required=fd.get("required", True),
+                )
+                session.add(link)
+
+        await session.commit()
+
+    # Always re-fetch with eager loading for response serialization
+    result = await repo.get(record_type_id)
 
     # Export to TOML in background (TOML mode only)
     if getattr(request.app.state, "config_mode", "toml") == "toml":
@@ -262,16 +361,17 @@ async def update_record_type(
         background_tasks.add_task(export_record_type_to_toml, result, folder)
         background_tasks.add_task(export_data_schema_sidecar, result, folder)
 
-    return result
+    return RecordTypeRead.model_validate(result)
 
 
-@router.get("/types/{record_type_id}", response_model=RecordType)
+@router.get("/types/{record_type_id}", response_model=RecordTypeRead)
 async def get_record_type(
     record_type_id: str,
     repo: RecordTypeRepositoryDep,
-) -> RecordType:
+) -> RecordTypeRead:
     """Get a record type by ID."""
-    return await repo.get(record_type_id)
+    rt = await repo.get(record_type_id)
+    return RecordTypeRead.model_validate(rt)
 
 
 @router.delete(
@@ -326,13 +426,14 @@ async def get_my_pending_records(
     return await repo.find_pending_by_user(user.id)
 
 
-@router.get("/available_types", response_model=dict[RecordType, int])
+@router.get("/available_types", response_model=dict[str, int])
 async def get_my_available_record_types(
     repo: RecordRepositoryDep,
     user: User = Depends(current_active_user),
-) -> dict[RecordType, int]:
+) -> dict[str, int]:
     """Get all record types available to the current user with record counts."""
-    return await repo.get_available_type_counts(user.id)
+    type_counts = await repo.get_available_type_counts(user.id)
+    return {rt.name: count for rt, count in type_counts.items()}
 
 
 @router.get("/{record_id}", response_model=RecordRead)

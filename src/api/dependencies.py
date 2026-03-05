@@ -15,6 +15,7 @@ from src.api.auth_config import (
 from src.exceptions import ClarinetError
 from src.exceptions.domain import AuthorizationError
 from src.models import User
+from src.repositories.file_definition_repository import FileDefinitionRepository
 from src.repositories.patient_repository import PatientRepository
 from src.repositories.pipeline_definition_repository import PipelineDefinitionRepository
 from src.repositories.record_repository import RecordRepository
@@ -113,6 +114,11 @@ async def get_series_repository(session: SessionDep) -> SeriesRepository:
     return SeriesRepository(session)
 
 
+async def get_file_definition_repository(session: SessionDep) -> FileDefinitionRepository:
+    """Get file definition repository instance."""
+    return FileDefinitionRepository(session)
+
+
 async def get_record_repository(session: SessionDep) -> RecordRepository:
     """Get record repository instance."""
     return RecordRepository(session)
@@ -131,6 +137,9 @@ async def get_pipeline_definition_repository(
 
 
 # Repository type aliases
+FileDefinitionRepositoryDep = Annotated[
+    FileDefinitionRepository, Depends(get_file_definition_repository)
+]
 UserRepositoryDep = Annotated[UserRepository, Depends(get_user_repository)]
 UserRoleRepositoryDep = Annotated[UserRoleRepository, Depends(get_user_role_repository)]
 StudyRepositoryDep = Annotated[StudyRepository, Depends(get_study_repository)]
