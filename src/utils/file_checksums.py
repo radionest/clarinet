@@ -5,10 +5,11 @@ Provides async-compatible SHA256 checksum computation for files
 defined in a record type's file registry.
 """
 
-import asyncio
 import hashlib
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+from src.utils.fs import run_in_fs_thread
 
 if TYPE_CHECKING:
     from src.models.file_schema import FileDefinitionRead
@@ -26,8 +27,15 @@ def _sha256(path: Path) -> str:
     return h.hexdigest()
 
 
+def _sha256_safe(path: Path) -> str | None:
+    """Compute SHA256 if the file exists, otherwise return None."""
+    if not path.is_file():
+        return None
+    return _sha256(path)
+
+
 async def compute_file_checksum(path: Path) -> str | None:
-    """Compute SHA256 of a file, async via to_thread.
+    """Compute SHA256 of a file in the dedicated FS thread pool.
 
     Args:
         path: Path to the file
@@ -35,9 +43,7 @@ async def compute_file_checksum(path: Path) -> str | None:
     Returns:
         Hex-encoded SHA256 string, or None if file is missing
     """
-    if not path.is_file():
-        return None
-    return await asyncio.to_thread(_sha256, path)
+    return await run_in_fs_thread(_sha256_safe, path)
 
 
 async def compute_checksums(
@@ -63,7 +69,7 @@ async def compute_checksums(
     checksums: dict[str, str] = {}
     for fd in file_defs:
         if fd.multiple:
-            paths = glob_file_paths(fd, working_dir)
+            paths = await run_in_fs_thread(glob_file_paths, fd, working_dir)
             for p in paths:
                 checksum = await compute_file_checksum(p)
                 if checksum is not None:

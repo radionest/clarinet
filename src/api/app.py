@@ -35,6 +35,7 @@ from src.utils.bootstrap import (
 )
 from src.utils.db_manager import db_manager
 from src.utils.file_registry_resolver import load_project_file_registry
+from src.utils.fs import shutdown_fs_executor
 from src.utils.logger import logger
 
 
@@ -172,6 +173,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
         if settings.recordflow_enabled:
             await _shutdown_recordflow(app)
+
+        shutdown_fs_executor()
 
         await db_manager.close()
         logger.info("Application shutdown")
