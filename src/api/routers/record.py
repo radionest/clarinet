@@ -51,11 +51,12 @@ from src.models import (
     RecordTypeRead,
     User,
 )
-from src.models.file_schema import FileDefinitionRead, FileRole, RecordTypeFileLink
+from src.models.file_schema import FileRole
 from src.repositories.record_repository import RecordSearchCriteria
 from src.services.file_validation import FileValidationResult, FileValidator
 from src.types import RecordData
 from src.utils.file_checksums import checksums_changed, compute_checksums
+from src.utils.file_link_sync import sync_file_links
 from src.utils.file_registry_resolver import resolve_task_files
 from src.utils.validation import validate_json_by_schema
 
@@ -229,37 +230,7 @@ async def add_record_type(
 
     # Create file links
     if file_defs:
-        fd_data = [
-            {
-                "name": fd.name if isinstance(fd, FileDefinitionRead) else fd["name"],
-                "pattern": fd.pattern if isinstance(fd, FileDefinitionRead) else fd["pattern"],
-                "description": (
-                    fd.description if isinstance(fd, FileDefinitionRead) else fd.get("description")
-                ),
-                "multiple": (
-                    fd.multiple if isinstance(fd, FileDefinitionRead) else fd.get("multiple", False)
-                ),
-            }
-            for fd in file_defs
-        ]
-        fd_map = await fd_repo.bulk_upsert(fd_data)
-
-        for fd in file_defs:
-            if isinstance(fd, FileDefinitionRead):
-                name, role, required = fd.name, fd.role, fd.required
-            else:
-                name = fd["name"]
-                role = fd.get("role", "output")
-                required = fd.get("required", True)
-
-            file_def_obj = fd_map[name]
-            link = RecordTypeFileLink(
-                record_type_name=new_record_type.name,
-                file_definition_id=file_def_obj.id,  # type: ignore[arg-type]
-                role=role,
-                required=required,
-            )
-            session.add(link)
+        await sync_file_links(new_record_type, file_defs, fd_repo, session)
 
     await session.commit()
 
@@ -312,35 +283,8 @@ async def update_record_type(
 
     # Sync file links if file_registry was provided
     if file_defs_raw is not None:
-        # Re-fetch to get current links
         current = await repo.get(record_type_id)
-        # Remove existing links
-        for link in list(current.file_links or []):
-            await session.delete(link)
-        await session.flush()
-
-        if file_defs_raw:
-            fd_data = [
-                {
-                    "name": fd["name"],
-                    "pattern": fd["pattern"],
-                    "description": fd.get("description"),
-                    "multiple": fd.get("multiple", False),
-                }
-                for fd in file_defs_raw
-            ]
-            fd_map = await fd_repo.bulk_upsert(fd_data)
-
-            for fd in file_defs_raw:
-                file_def_obj = fd_map[fd["name"]]
-                link = RecordTypeFileLink(
-                    record_type_name=current.name,
-                    file_definition_id=file_def_obj.id,  # type: ignore[arg-type]
-                    role=fd.get("role", "output"),
-                    required=fd.get("required", True),
-                )
-                session.add(link)
-
+        await sync_file_links(current, file_defs_raw, fd_repo, session, clear_existing=True)
         await session.commit()
 
     # Always re-fetch with eager loading for response serialization

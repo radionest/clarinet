@@ -19,6 +19,7 @@ from sqlmodel import select
 from src.models.file_schema import RecordTypeFileLink
 from src.models.record import RecordType, RecordTypeCreate
 from src.repositories.file_definition_repository import FileDefinitionRepository
+from src.utils.file_link_sync import sync_file_links
 from src.utils.logger import logger
 
 # Fields compared when detecting changes between config and DB.
@@ -164,63 +165,6 @@ def _file_links_differ(
     return existing_set != config_set
 
 
-async def _sync_file_links(
-    record_type: RecordType,
-    config_defs: list[dict[str, Any]],
-    fd_repo: FileDefinitionRepository,
-    session: AsyncSession,
-) -> None:
-    """Synchronize file links for a RecordType from config definitions.
-
-    Removes old links, upserts FileDefinitions, and creates new links.
-
-    Args:
-        record_type: RecordType to sync links for.
-        config_defs: List of flat file definition dicts.
-        fd_repo: FileDefinitionRepository for upserting.
-        session: Database session.
-    """
-    # Remove existing links
-    for link in list(record_type.file_links or []):
-        await session.delete(link)
-    await session.flush()
-
-    if not config_defs:
-        record_type.file_links = []
-        return
-
-    # Upsert FileDefinitions
-    fd_data = [
-        {
-            "name": d["name"],
-            "pattern": d["pattern"],
-            "description": d.get("description"),
-            "multiple": d.get("multiple", False),
-        }
-        for d in config_defs
-    ]
-    fd_map = await fd_repo.bulk_upsert(fd_data)
-
-    # Create new links
-    new_links: list[RecordTypeFileLink] = []
-    for d in config_defs:
-        fd = fd_map[d["name"]]
-        role = d.get("role", "output")
-        link = RecordTypeFileLink(
-            record_type_name=record_type.name,
-            file_definition_id=fd.id,  # type: ignore[arg-type]
-            role=role,
-            required=d.get("required", True),
-        )
-        session.add(link)
-        new_links.append(link)
-
-    await session.flush()
-
-    # Refresh links so they're fully loaded
-    record_type.file_links = new_links
-
-
 async def reconcile_record_types(
     config_props_list: list[dict[str, Any]],
     session: AsyncSession,
@@ -275,7 +219,7 @@ async def reconcile_record_types(
 
                 # Sync file links
                 if config_defs:
-                    await _sync_file_links(new_rt, config_defs, fd_repo, session)
+                    await sync_file_links(new_rt, config_defs, fd_repo, session)
 
                 result.created.append(name)
                 logger.info(f"Config reconcile: created '{name}'")
@@ -295,7 +239,9 @@ async def reconcile_record_types(
 
                     # Sync file links if they changed
                     if files_changed and config_defs is not None:
-                        await _sync_file_links(existing, config_defs, fd_repo, session)
+                        await sync_file_links(
+                            existing, config_defs, fd_repo, session, clear_existing=True
+                        )
 
                     all_changed = list(changed_fields)
                     if files_changed:
