@@ -99,6 +99,24 @@ selectinload(Record.file_links).selectinload(RecordFileLink.file_definition)
 ```
 This is handled by `_record_file_links_eager_load()` in `RecordRepository`.
 
+### ORM vs DTO: file_links vs file_registry
+
+Two representations of file definitions serve different architectural layers:
+
+- **`file_links`** (ORM, on `RecordType`/`Record`): SQLAlchemy relationships to
+  `RecordTypeFileLink`/`RecordFileLink`. Require eager loading (`selectinload`).
+  Used internally for DB writes that need `FileDefinition.id` as FK
+  (e.g. `set_files()` creating `RecordFileLink` rows).
+
+- **`file_registry`** (DTO, on `RecordTypeRead`): `list[FileDefinitionRead]` — flat merge of
+  FileDefinition identity + binding metadata. Computed by `get_file_registry()` via
+  `model_validator`. Used for API responses, file validation (`FileValidator`),
+  file access (`RecordFileAccessor`), and config export.
+
+**Rule of thumb:**
+- Writing to DB (creating/deleting links) → use `file_links` (ORM layer)
+- Reading file metadata for logic/API → use `file_registry` (DTO layer via `RecordTypeRead`)
+
 ### Project-level File Registry
 
 A `file_registry.toml` (preferred) or `file_registry.json` in the tasks folder defines shared file definitions.

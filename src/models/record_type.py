@@ -87,6 +87,14 @@ class RecordType(RecordTypeBase, table=True):
     def get_file_registry(self) -> list[FileDefinitionRead]:
         """Build flat file definitions from M2M links.
 
+        Converts ORM relationships (file_links → RecordTypeFileLink → FileDefinition)
+        into flat DTOs (FileDefinitionRead) by merging identity fields (name, pattern,
+        description, multiple) with per-binding fields (role, required).
+
+        Used by ``RecordTypeRead.model_validator`` for API serialization.
+        For DB operations that need ``FileDefinition`` ORM objects (e.g. creating
+        RecordFileLink rows), access ``file_links`` directly instead.
+
         Returns empty list if ``file_links`` is not eagerly loaded (avoids
         MissingGreenlet in async contexts).
         """

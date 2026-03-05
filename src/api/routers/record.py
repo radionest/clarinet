@@ -484,9 +484,7 @@ async def add_record(
         return record
 
     if file_result.valid and file_result.matched_files:
-        rt = await repo.get_record_type(record.record_type_name)
-        fd_map = {link.file_definition.name: link.file_definition for link in rt.file_links}
-        await repo.set_files(record, file_result.matched_files, fd_map)
+        await repo.set_files(record, file_result.matched_files)
         return await repo.get_with_relations(record.id)  # type: ignore[arg-type]
 
     if not file_result.valid:
@@ -558,9 +556,7 @@ async def submit_record_data(
     file_result = validate_record_files(record_read, raise_on_invalid=True)
 
     if file_result and file_result.matched_files:
-        rt = await repo.get_record_type(record.record_type_name)
-        fd_map = {link.file_definition.name: link.file_definition for link in rt.file_links}
-        await repo.set_files(record, file_result.matched_files, fd_map)
+        await repo.set_files(record, file_result.matched_files)
 
     # Update record data, set finished status
     record, old_status = await repo.update_data(
@@ -649,9 +645,7 @@ async def check_record_files(
         if file_result is not None and file_result.valid:
             old_status = record.status
             if file_result.matched_files:
-                rt = await repo.get_record_type(record.record_type_name)
-                fd_map = {link.file_definition.name: link.file_definition for link in rt.file_links}
-                await repo.set_files(record, file_result.matched_files, fd_map)
+                await repo.set_files(record, file_result.matched_files)
             record, _ = await repo.update_status(record_id, RecordStatus.pending)
             trigger_recordflow(request, background_tasks, record, old_status)
             record_read = RecordRead.model_validate(record)

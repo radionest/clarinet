@@ -20,7 +20,7 @@ from src.exceptions.domain import (
 )
 from src.models import Record
 from src.models.base import RecordStatus
-from src.models.file_schema import FileDefinition, RecordFileLink, RecordTypeFileLink
+from src.models.file_schema import RecordFileLink, RecordTypeFileLink
 from src.models.patient import Patient
 from src.models.record import RecordFindResult, RecordFindResultComparisonOperator, RecordType
 from src.models.study import Series, Study
@@ -315,15 +315,23 @@ class RecordRepository(BaseRepository[Record]):
         self,
         record: Record,
         matched_files: dict[str, str],
-        fd_map: dict[str, FileDefinition],
     ) -> None:
         """Set matched files on a record by creating RecordFileLink rows.
 
+        Builds the FileDefinition lookup from the record's eagerly loaded
+        ``record_type.file_links`` chain — no extra DB query needed.
+
         Args:
-            record: Record to update (must be attached to session)
-            matched_files: Dict mapping file definition name to filename
-            fd_map: Dict mapping file definition name to FileDefinition DB object
+            record: Record with ``record_type.file_links`` eagerly loaded
+                (via ``get_with_relations()`` or ``create_with_relations()``).
+            matched_files: Dict mapping file definition name to matched filename.
         """
+        # Build name → FileDefinition map from eager-loaded M2M links
+        fd_map = {
+            link.file_definition.name: link.file_definition
+            for link in record.record_type.file_links
+        }
+
         # Remove existing file links
         for link in list(record.file_links or []):
             await self.session.delete(link)
