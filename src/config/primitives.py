@@ -1,18 +1,18 @@
-"""Config-level dataclasses for RecordType definitions.
+"""Config-level models for RecordType definitions.
 
 These primitives are used in Python config files (``record_types.py``) to
 define RecordTypes in a declarative, type-safe way.
 """
 
-from dataclasses import dataclass, field
 from typing import Any
+
+from pydantic import BaseModel
 
 from src.models.base import DicomQueryLevel
 from src.models.file_schema import FileDefinitionRead, FileRole
 
 
-@dataclass
-class File:
+class File(BaseModel):
     """Shared file definition (equivalent to file_registry entry).
 
     Attributes:
@@ -30,9 +30,12 @@ class File:
     name: str = ""
 
 
-@dataclass(frozen=True)
-class FileRef:
+class FileRef(BaseModel, frozen=True):
     """Binds a File to a RecordType with a role.
+
+    Supports positional first argument for backward compatibility::
+
+        FileRef(seg_mask, role=FileRole.INPUT)
 
     Attributes:
         file: Reference to a File instance.
@@ -44,9 +47,11 @@ class FileRef:
     role: FileRole = FileRole.OUTPUT
     required: bool = True
 
+    def __init__(self, file: File, /, **kwargs: Any) -> None:
+        super().__init__(file=file, **kwargs)
 
-@dataclass
-class RecordTypeDef:
+
+class RecordTypeDef(BaseModel):
     """RecordType definition — maps to RecordTypeCreate fields.
 
     Attributes:
@@ -72,7 +77,7 @@ class RecordTypeDef:
     role_name: str | None = None
     min_users: int | None = 1
     max_users: int | None = None
-    files: list[FileRef] = field(default_factory=list)
+    files: list[FileRef] = []
     data_schema: dict[str, Any] | str | None = None
     slicer_script: str | None = None
     slicer_script_args: dict[str, str] | None = None

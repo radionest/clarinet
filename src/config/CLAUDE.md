@@ -14,7 +14,7 @@ config_delete_orphans: bool = False
 
 ## Primitives (`primitives.py`)
 
-User-facing dataclasses for Python config files:
+User-facing Pydantic BaseModels for Python config files:
 
 ```python
 from src.config import RecordType, File, FileRef
@@ -37,7 +37,7 @@ lesion_seg = RecordType(
 
 ```python
 async def reconcile_record_types(
-    config_props_list: list[dict],
+    config_items: list[RecordTypeCreate],
     session: AsyncSession,
     *,
     delete_orphans: bool = False,
@@ -48,12 +48,12 @@ Algorithm: SELECT all → for each config: CREATE if new, UPDATE if changed, ski
 
 `ReconcileResult`: created, updated, unchanged, orphaned, errors.
 
-Only compares fields explicitly present in config (missing = unchanged).
+Only compares fields explicitly set in config (via `model_fields_set` — missing = unchanged).
 
 ## Python Loader (`python_loader.py`)
 
 ```python
-async def load_python_config(folder: Path) -> list[dict[str, Any]]
+async def load_python_config(folder: Path) -> list[RecordTypeCreate]
 ```
 
 Expected folder structure:

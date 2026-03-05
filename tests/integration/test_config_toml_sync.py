@@ -18,7 +18,7 @@ from src.config.toml_exporter import (
     export_record_type_to_toml,
 )
 from src.models.file_schema import RecordTypeFileLink
-from src.models.record import RecordType
+from src.models.record import RecordType, RecordTypeCreate
 from src.utils.config_loader import discover_config_files, load_record_config
 
 
@@ -53,13 +53,13 @@ async def test_bootstrap_creates_from_toml(
 
     # Load via standard config pipeline
     config_files = discover_config_files(str(tmp_path))
-    config_props = []
+    config_items = []
     for cf in config_files:
         props = await load_record_config(cf)
         if props:
-            config_props.append(props)
+            config_items.append(RecordTypeCreate(**props))
 
-    result = await reconcile_record_types(config_props, test_session)
+    result = await reconcile_record_types(config_items, test_session)
     assert "seg_markup" in result.created
 
     # Verify in DB
@@ -84,9 +84,12 @@ async def test_bootstrap_updates_changed_toml(
     _write_schema(tmp_path, "seg_update", {"type": "object"})
 
     config_files = discover_config_files(str(tmp_path))
-    props_list = [await load_record_config(cf) for cf in config_files]
-    props_list = [p for p in props_list if p is not None]
-    await reconcile_record_types(props_list, test_session)
+    items = [
+        RecordTypeCreate(**p)
+        for cf in config_files
+        if (p := await load_record_config(cf)) is not None
+    ]
+    await reconcile_record_types(items, test_session)
 
     # Second: update TOML
     _write_toml(
@@ -97,9 +100,12 @@ async def test_bootstrap_updates_changed_toml(
     _write_schema(tmp_path, "seg_update", {"type": "object"})
 
     config_files = discover_config_files(str(tmp_path))
-    props_list = [await load_record_config(cf) for cf in config_files]
-    props_list = [p for p in props_list if p is not None]
-    result = await reconcile_record_types(props_list, test_session)
+    items = [
+        RecordTypeCreate(**p)
+        for cf in config_files
+        if (p := await load_record_config(cf)) is not None
+    ]
+    result = await reconcile_record_types(items, test_session)
     assert "seg_update" in result.updated
 
     stmt = select(RecordType).where(RecordType.name == "seg_update")
@@ -186,9 +192,12 @@ async def test_file_registry_round_trip(
 
     # Load and reconcile
     config_files = discover_config_files(str(tmp_path))
-    props_list = [await load_record_config(cf) for cf in config_files]
-    props_list = [p for p in props_list if p is not None]
-    await reconcile_record_types(props_list, test_session)
+    items = [
+        RecordTypeCreate(**p)
+        for cf in config_files
+        if (p := await load_record_config(cf)) is not None
+    ]
+    await reconcile_record_types(items, test_session)
 
     # Fetch from DB with eager loading
     stmt = (

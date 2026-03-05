@@ -31,21 +31,6 @@
 
 Пока это работает, но при добавлении `level` (нужно для demo_liver) этот DTO станет ещё тяжелее. Нет разделения между "что API показывает" и "что утилиты потребляют".
 
-### 2.2 isinstance-ветвление в POST /types
-
-`record.py:241-261` — `fd` может быть `FileDefinitionRead` или `dict`, что приводит к:
-```python
-name = fd.name if isinstance(fd, FileDefinitionRead) else fd["name"]
-```
-Это признак того, что тип `RecordTypeCreate.file_registry` слишком свободный.
-
-### 2.3 `resolve_task_files` мутирует dict in-place
-
-`file_registry_resolver.py:111-149` — pop `files`, сериализует `FileDefinitionRead` → `model_dump()`, вставляет как `file_registry`. Мутация + round-trip через Pydantic для простого маппинга.
-
-### 2.4 Sync I/O в async контексте
-
-`FileValidator.validate()` (`file_validation.py:91`) вызывает `path.is_file()` — блокирующий syscall. То же с `glob_file_paths()` (`file_patterns.py:100`) — `Path.glob()` блокирует event loop. При большом количестве файлов это заметно.
 
 ---
 
@@ -97,14 +82,6 @@ name = fd.name if isinstance(fd, FileDefinitionRead) else fd["name"]
 
 ## 5. Bottlenecks
 
-### 5.1 Последовательное хеширование
-
-`compute_checksums()` хеширует файлы один за одним:
-```python
-for fd in file_defs:
-    checksum = await compute_file_checksum(path)  # sequential
-```
-При 10+ файлах по 100MB каждый — это линейное время. `asyncio.gather()` для параллельного хеширования — easy win.
 
 ### 5.2 Delete-all + recreate при каждом обновлении
 
@@ -113,13 +90,6 @@ for fd in file_defs:
 ### 5.3 `update_checksums` загружает полный Record
 
 `record_repository.py:307` — `get_with_record_type(record_id)` загружает Record + RecordType + file_links + file_definitions, чтобы обновить 1 поле. Можно сделать одним `UPDATE ... WHERE record_id = ? AND file_definition_id IN (...)`.
-
-### 5.4 Sync I/O блокирует event loop
-
-- `FileValidator.validate()` — `Path.is_file()` x N файлов
-- `glob_file_paths()` — `Path.glob()` по файловой системе
-
-В production с NFS/сетевым хранилищем это может блокировать event loop на сотни мс.
 
 ---
 

@@ -5,7 +5,6 @@ with a single reusable function.
 """
 
 from collections.abc import Sequence
-from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,42 +13,9 @@ from src.models.record import RecordType
 from src.repositories.file_definition_repository import FileDefinitionRepository
 
 
-def _normalize_fd(fd: FileDefinitionRead | dict[str, Any]) -> tuple[dict[str, Any], str, bool]:
-    """Extract FileDefinition data, role, and required flag from either input type.
-
-    Args:
-        fd: A ``FileDefinitionRead`` instance or a plain dict.
-
-    Returns:
-        Tuple of (fd_data dict for bulk_upsert, role string, required bool).
-    """
-    if isinstance(fd, FileDefinitionRead):
-        fd_data = {
-            "name": fd.name,
-            "pattern": fd.pattern,
-            "description": fd.description,
-            "multiple": fd.multiple,
-        }
-        role = fd.role.value if hasattr(fd.role, "value") else str(fd.role)
-        required = fd.required
-    else:
-        fd_data = {
-            "name": fd["name"],
-            "pattern": fd["pattern"],
-            "description": fd.get("description"),
-            "multiple": fd.get("multiple", False),
-        }
-        role = fd.get("role", "output")
-        if hasattr(role, "value"):
-            role = role.value
-        required = fd.get("required", True)
-
-    return fd_data, role, required
-
-
 async def sync_file_links(
     record_type: RecordType,
-    file_defs: Sequence[FileDefinitionRead | dict[str, Any]],
+    file_defs: Sequence[FileDefinitionRead],
     fd_repo: FileDefinitionRepository,
     session: AsyncSession,
     *,
@@ -57,12 +23,11 @@ async def sync_file_links(
 ) -> list[RecordTypeFileLink]:
     """Synchronize file links for a RecordType.
 
-    Normalizes input (``FileDefinitionRead`` or plain dicts), upserts
-    ``FileDefinition`` rows, and creates ``RecordTypeFileLink`` entries.
+    Upserts ``FileDefinition`` rows and creates ``RecordTypeFileLink`` entries.
 
     Args:
         record_type: RecordType to sync links for.
-        file_defs: List of file definitions (``FileDefinitionRead`` or dicts).
+        file_defs: File definitions to link.
         fd_repo: Repository for upserting FileDefinitions.
         session: Database session.
         clear_existing: If True, delete existing file_links before creating new ones.
@@ -79,22 +44,19 @@ async def sync_file_links(
         record_type.file_links = []
         return []
 
-    # Normalize all entries
-    normalized = [_normalize_fd(fd) for fd in file_defs]
-
     # Bulk upsert FileDefinitions
-    fd_data_list = [fd_data for fd_data, _, _ in normalized]
-    fd_map = await fd_repo.bulk_upsert(fd_data_list)
+    fd_map = await fd_repo.bulk_upsert(file_defs)
 
     # Create links
     new_links: list[RecordTypeFileLink] = []
-    for fd_data, role, required in normalized:
-        file_def = fd_map[fd_data["name"]]
+    for fd in file_defs:
+        file_def = fd_map[fd.name]
+        role = fd.role.value if hasattr(fd.role, "value") else str(fd.role)
         link = RecordTypeFileLink(
             record_type_name=record_type.name,
             file_definition_id=file_def.id,  # type: ignore[arg-type]
             role=role,
-            required=required,
+            required=fd.required,
         )
         session.add(link)
         new_links.append(link)

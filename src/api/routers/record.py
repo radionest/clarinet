@@ -24,7 +24,6 @@ from src.api.auth_config import current_active_user
 from src.api.dependencies import (
     FileDefinitionRepositoryDep,
     PaginationDep,
-    ProjectFileRegistryDep,
     RecordRepositoryDep,
     RecordTypeRepositoryDep,
     SeriesRepositoryDep,
@@ -57,7 +56,6 @@ from src.services.file_validation import FileValidationResult, FileValidator
 from src.types import RecordData
 from src.utils.file_checksums import checksums_changed, compute_checksums
 from src.utils.file_link_sync import sync_file_links
-from src.utils.file_registry_resolver import resolve_task_files
 from src.utils.validation import validate_json_by_schema
 
 
@@ -195,19 +193,12 @@ async def add_record_type(
     repo: RecordTypeRepositoryDep,
     fd_repo: FileDefinitionRepositoryDep,
     session: SessionDep,
-    project_registry: ProjectFileRegistryDep,
     constrain_unique_names: bool = True,
 ) -> RecordTypeRead:
     """Create a new record type.
 
-    Supports ``files`` references that resolve against the project file registry.
     In TOML mode, exports the created RecordType to a TOML file.
     """
-    # Resolve file references if present in raw request body
-    props = record_type.model_dump(exclude_unset=True)
-    props = resolve_task_files(props, project_registry)
-    record_type = RecordTypeCreate(**props)
-
     # Extract file definitions before creating ORM object
     file_defs = record_type.file_registry or []
 
@@ -273,18 +264,22 @@ async def update_record_type(
         except SchemaError as e:
             raise ValidationError(f"Data schema is invalid: {e}") from e
 
-    update_data = record_type_update.model_dump(exclude_unset=True, exclude_none=True)
-
-    # Handle file_registry update separately (it's M2M now)
-    file_defs_raw = update_data.pop("file_registry", None)
+    # Extract file_registry before model_dump to preserve FileDefinitionRead objects
+    file_defs_set = "file_registry" in record_type_update.model_fields_set
+    file_defs = record_type_update.file_registry if file_defs_set else None
+    update_data = record_type_update.model_dump(
+        exclude_unset=True,
+        exclude_none=True,
+        exclude={"file_registry"},
+    )
 
     if update_data:
         await repo.update(record_type, update_data)
 
-    # Sync file links if file_registry was provided
-    if file_defs_raw is not None:
+    # Sync file links if file_registry was explicitly provided
+    if file_defs is not None:
         current = await repo.get(record_type_id)
-        await sync_file_links(current, file_defs_raw, fd_repo, session, clear_existing=True)
+        await sync_file_links(current, file_defs, fd_repo, session, clear_existing=True)
         await session.commit()
 
     # Always re-fetch with eager loading for response serialization

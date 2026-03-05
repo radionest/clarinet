@@ -33,6 +33,7 @@ from src.services.study_service import StudyService
 from src.services.user_service import UserService
 from src.settings import settings
 from src.utils.database import get_async_session
+from src.utils.file_registry_resolver import FileRegistryEntry
 
 # Type aliases for common dependencies
 CurrentUserDep = Annotated[User, Depends(current_active_user)]
@@ -260,12 +261,16 @@ AnonymizationServiceDep = Annotated[AnonymizationService, Depends(get_anonymizat
 # Project file registry dependency
 
 
-def get_project_file_registry(request: Request) -> dict | None:
+def get_project_file_registry(
+    request: Request,
+) -> dict[str, FileRegistryEntry] | None:
     """Get project file registry from app state."""
     return getattr(request.app.state, "project_file_registry", None)
 
 
-ProjectFileRegistryDep = Annotated[dict | None, Depends(get_project_file_registry)]
+ProjectFileRegistryDep = Annotated[
+    dict[str, FileRegistryEntry] | None, Depends(get_project_file_registry)
+]
 
 
 def require_mutable_config(request: Request) -> None:

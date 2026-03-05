@@ -31,7 +31,7 @@ from src.services.recordflow import RecordFlowEngine
 from src.services.recordflow.flow_loader import load_flows_from_file
 from src.services.recordflow.flow_record import ENTITY_REGISTRY, RECORD_REGISTRY
 from src.utils.config_loader import discover_config_files, load_record_config
-from src.utils.file_registry_resolver import resolve_task_files
+from src.utils.file_registry_resolver import FileRegistryEntry, resolve_task_files
 
 DEMO_DIR = Path(__file__).resolve().parent.parent.parent / "examples" / "demo"
 TASKS_DIR = DEMO_DIR / "tasks"
@@ -157,7 +157,13 @@ async def demo_record_types(
 
     # Load project file registry for resolving file references
     registry_path = TASKS_DIR / "file_registry.json"
-    project_registry = json.loads(registry_path.read_text()) if registry_path.exists() else None
+    if registry_path.exists():
+        raw_registry = json.loads(registry_path.read_text())
+        project_registry = {
+            name: FileRegistryEntry(**entry) for name, entry in raw_registry.items()
+        }
+    else:
+        project_registry = None
 
     types: dict[str, RecordType] = {}
     file_def_cache: dict[str, FileDefinition] = {}

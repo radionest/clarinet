@@ -6,7 +6,6 @@ such as user roles and record types, during startup.
 """
 
 from pathlib import Path
-from typing import Any
 
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -245,22 +244,21 @@ async def initialize_application_data() -> None:
             raise
 
 
-async def _upsert_record_type(props: dict[str, Any], session: AsyncSession) -> None:
+async def _upsert_record_type(record_type: RecordTypeCreate, session: AsyncSession) -> None:
     """Create a record type, logging conflicts as info.
 
     Args:
-        props: Record type properties dict.
+        record_type: Typed RecordTypeCreate object.
         session: Database session.
     """
-    new_record_type = RecordTypeCreate(**props)
     try:
-        await add_record_type(new_record_type, session=session)
-        logger.info(f"Created record type: {props.get('name')}")
+        await add_record_type(record_type, session=session)
+        logger.info(f"Created record type: {record_type.name}")
     except HTTPException as e:
         if e.status_code == status.HTTP_409_CONFLICT:
-            logger.info(f"Record type already exists: {props.get('name')}")
+            logger.info(f"Record type already exists: {record_type.name}")
         else:
-            logger.error(f"Error creating record type {props.get('name')}: {e}")
+            logger.error(f"Error creating record type {record_type.name}: {e}")
 
 
 async def create_record_types_from_config(
@@ -294,7 +292,8 @@ async def create_record_types_from_config(
                 if props is None:
                     continue
                 props = resolve_task_files(props, project_registry)
-                await _upsert_record_type(props, session)
+                record_type = RecordTypeCreate(**props)
+                await _upsert_record_type(record_type, session)
             except Exception as e:
                 logger.error(f"Error processing record type {config_path.name}: {e}")
 
@@ -320,12 +319,12 @@ async def reconcile_config(
     from src.settings import settings
 
     folder = folder or settings.config_tasks_path
-    all_props: list[dict[str, Any]] = []
+    all_items: list[RecordTypeCreate] = []
 
     if settings.config_mode == "python":
         from src.config.python_loader import load_python_config
 
-        all_props = await load_python_config(Path(folder))
+        all_items = await load_python_config(Path(folder))
     else:
         # TOML mode — use existing loaders
         config_files = discover_config_files(folder, suffix_filter)
@@ -342,13 +341,13 @@ async def reconcile_config(
                 if props is None:
                     continue
                 props = resolve_task_files(props, project_registry)
-                all_props.append(props)
+                all_items.append(RecordTypeCreate(**props))
             except Exception as e:
                 logger.error(f"Error processing record type {config_path.name}: {e}")
 
     async with db_manager.get_async_session_context() as session:
         result = await reconcile_record_types(
-            all_props,
+            all_items,
             session,
             delete_orphans=settings.config_delete_orphans,
         )

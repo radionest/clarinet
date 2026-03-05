@@ -10,6 +10,7 @@ from src.exceptions.domain import ValidationError
 from src.models.file_schema import FileRole
 from src.utils.file_registry_resolver import (
     FileReference,
+    FileRegistryEntry,
     load_project_file_registry,
     resolve_file_references,
     resolve_task_files,
@@ -60,11 +61,11 @@ class TestLoadProjectFileRegistry:
         assert result is not None
         assert len(result) == 2
         assert "ct_scan" in result
-        assert result["ct_scan"]["pattern"] == "*.dcm"
-        assert result["ct_scan"]["description"] == "CT scan DICOM files"
-        assert result["ct_scan"]["multiple"] is True
+        assert result["ct_scan"].pattern == "*.dcm"
+        assert result["ct_scan"].description == "CT scan DICOM files"
+        assert result["ct_scan"].multiple is True
         assert "segmentation" in result
-        assert result["segmentation"]["pattern"] == "seg.nrrd"
+        assert result["segmentation"].pattern == "seg.nrrd"
 
     @pytest.mark.asyncio
     async def test_load_nonexistent_registry(self, tmp_path: Path) -> None:
@@ -104,11 +105,11 @@ class TestLoadProjectFileRegistry:
         assert result is not None
         assert len(result) == 2
         assert "ct_scan" in result
-        assert result["ct_scan"]["pattern"] == "*.dcm"
-        assert result["ct_scan"]["description"] == "CT scan DICOM files"
-        assert result["ct_scan"]["multiple"] is True
+        assert result["ct_scan"].pattern == "*.dcm"
+        assert result["ct_scan"].description == "CT scan DICOM files"
+        assert result["ct_scan"].multiple is True
         assert "segmentation" in result
-        assert result["segmentation"]["pattern"] == "seg.nrrd"
+        assert result["segmentation"].pattern == "seg.nrrd"
 
     @pytest.mark.asyncio
     async def test_toml_takes_precedence_over_json(self, tmp_path: Path) -> None:
@@ -134,27 +135,25 @@ class TestResolveFileReferences:
     """Tests for resolve_file_references function."""
 
     @pytest.fixture
-    def sample_registry(self) -> dict[str, dict[str, str | bool]]:
+    def sample_registry(self) -> dict[str, FileRegistryEntry]:
         """Sample file registry for testing."""
         return {
-            "ct_scan": {
-                "pattern": "*.dcm",
-                "description": "CT scan DICOM files",
-                "multiple": True,
-            },
-            "segmentation": {
-                "pattern": "seg.nrrd",
-                "description": "Segmentation mask",
-                "multiple": False,
-            },
-            "report": {
-                "pattern": "report.pdf",
-            },
+            "ct_scan": FileRegistryEntry(
+                pattern="*.dcm",
+                description="CT scan DICOM files",
+                multiple=True,
+            ),
+            "segmentation": FileRegistryEntry(
+                pattern="seg.nrrd",
+                description="Segmentation mask",
+                multiple=False,
+            ),
+            "report": FileRegistryEntry(
+                pattern="report.pdf",
+            ),
         }
 
-    def test_resolve_single_reference(
-        self, sample_registry: dict[str, dict[str, str | bool]]
-    ) -> None:
+    def test_resolve_single_reference(self, sample_registry: dict[str, FileRegistryEntry]) -> None:
         """Test resolving a single file reference."""
         files = [{"name": "ct_scan", "role": "input", "required": True}]
 
@@ -169,7 +168,7 @@ class TestResolveFileReferences:
         assert resolved[0].role == FileRole.INPUT
 
     def test_resolve_multiple_references(
-        self, sample_registry: dict[str, dict[str, str | bool]]
+        self, sample_registry: dict[str, FileRegistryEntry]
     ) -> None:
         """Test resolving multiple file references."""
         files = [
@@ -190,9 +189,7 @@ class TestResolveFileReferences:
         assert resolved[2].pattern == "report.pdf"
         assert resolved[2].description is None
 
-    def test_resolve_unknown_reference(
-        self, sample_registry: dict[str, dict[str, str | bool]]
-    ) -> None:
+    def test_resolve_unknown_reference(self, sample_registry: dict[str, FileRegistryEntry]) -> None:
         """Test resolving an unknown file reference raises ValidationError."""
         files = [{"name": "unknown_file", "role": "input", "required": True}]
 
@@ -202,7 +199,7 @@ class TestResolveFileReferences:
         assert "File reference 'unknown_file' not found" in str(exc_info.value)
         assert "Available: ct_scan, segmentation, report" in str(exc_info.value)
 
-    def test_resolve_with_defaults(self, sample_registry: dict[str, dict[str, str | bool]]) -> None:
+    def test_resolve_with_defaults(self, sample_registry: dict[str, FileRegistryEntry]) -> None:
         """Test resolving references with default values."""
         files = [{"name": "ct_scan"}]
 
@@ -213,7 +210,7 @@ class TestResolveFileReferences:
         assert resolved[0].role == FileRole.OUTPUT
         assert resolved[0].required is True
 
-    def test_resolve_empty_list(self, sample_registry: dict[str, dict[str, str | bool]]) -> None:
+    def test_resolve_empty_list(self, sample_registry: dict[str, FileRegistryEntry]) -> None:
         """Test resolving empty file list."""
         files: list[dict[str, str]] = []
 
@@ -226,22 +223,22 @@ class TestResolveTaskFiles:
     """Tests for resolve_task_files function."""
 
     @pytest.fixture
-    def sample_registry(self) -> dict[str, dict[str, str | bool]]:
+    def sample_registry(self) -> dict[str, FileRegistryEntry]:
         """Sample file registry for testing."""
         return {
-            "ct_scan": {
-                "pattern": "*.dcm",
-                "description": "CT scan DICOM files",
-                "multiple": True,
-            },
-            "segmentation": {
-                "pattern": "seg.nrrd",
-                "description": "Segmentation mask",
-                "multiple": False,
-            },
+            "ct_scan": FileRegistryEntry(
+                pattern="*.dcm",
+                description="CT scan DICOM files",
+                multiple=True,
+            ),
+            "segmentation": FileRegistryEntry(
+                pattern="seg.nrrd",
+                description="Segmentation mask",
+                multiple=False,
+            ),
         }
 
-    def test_resolve_files_key(self, sample_registry: dict[str, dict[str, str | bool]]) -> None:
+    def test_resolve_files_key(self, sample_registry: dict[str, FileRegistryEntry]) -> None:
         """Test resolving task with 'files' key."""
         props = {
             "name": "Test Task",
@@ -256,13 +253,13 @@ class TestResolveTaskFiles:
         assert "files" not in resolved
         assert "file_registry" in resolved
         assert len(resolved["file_registry"]) == 2
-        assert resolved["file_registry"][0]["name"] == "ct_scan"
-        assert resolved["file_registry"][0]["pattern"] == "*.dcm"
-        assert resolved["file_registry"][1]["name"] == "segmentation"
+        assert resolved["file_registry"][0].name == "ct_scan"
+        assert resolved["file_registry"][0].pattern == "*.dcm"
+        assert resolved["file_registry"][1].name == "segmentation"
         assert resolved["name"] == "Test Task"
 
     def test_file_registry_key_passes_through(
-        self, sample_registry: dict[str, dict[str, str | bool]]
+        self, sample_registry: dict[str, FileRegistryEntry]
     ) -> None:
         """Test task with existing 'file_registry' key passes through unchanged."""
         props = {
@@ -284,9 +281,7 @@ class TestResolveTaskFiles:
         assert "file_registry" in resolved
         assert resolved["file_registry"][0]["name"] == "custom_file"
 
-    def test_both_keys_raises_error(
-        self, sample_registry: dict[str, dict[str, str | bool]]
-    ) -> None:
+    def test_both_keys_raises_error(self, sample_registry: dict[str, FileRegistryEntry]) -> None:
         """Test task with both 'files' and 'file_registry' raises ValidationError."""
         props = {
             "name": "Test Task",
@@ -300,7 +295,7 @@ class TestResolveTaskFiles:
         assert "must not have both 'files' and 'file_registry'" in str(exc_info.value)
 
     def test_no_files_key_passes_through(
-        self, sample_registry: dict[str, dict[str, str | bool]]
+        self, sample_registry: dict[str, FileRegistryEntry]
     ) -> None:
         """Test task without 'files' or 'file_registry' keys passes through."""
         props = {
@@ -348,7 +343,7 @@ class TestResolveTaskFiles:
         assert resolved == props
 
     def test_resolve_preserves_other_properties(
-        self, sample_registry: dict[str, dict[str, str | bool]]
+        self, sample_registry: dict[str, FileRegistryEntry]
     ) -> None:
         """Test that resolving files preserves other task properties."""
         props = {

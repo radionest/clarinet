@@ -57,11 +57,11 @@ async def test_bootstrap_loads_python_config(
         """,
     )
 
-    config_props = await load_python_config(tmp_path)
-    assert len(config_props) == 1
-    assert config_props[0]["name"] == "lesion_seg"
+    config_items = await load_python_config(tmp_path)
+    assert len(config_items) == 1
+    assert config_items[0].name == "lesion_seg"
 
-    result = await reconcile_record_types(config_props, test_session)
+    result = await reconcile_record_types(config_items, test_session)
     assert "lesion_seg" in result.created
 
     # Verify in DB
@@ -100,8 +100,8 @@ async def test_file_refs_resolved(
         """,
     )
 
-    config_props = await load_python_config(tmp_path)
-    await reconcile_record_types(config_props, test_session)
+    config_items = await load_python_config(tmp_path)
+    await reconcile_record_types(config_items, test_session)
 
     stmt = (
         select(RecordType)
@@ -146,10 +146,10 @@ async def test_schema_sidecar_loaded(
     schema = {"type": "object", "properties": {"grade": {"type": "integer"}}}
     (tmp_path / "sidecar_type.schema.json").write_text(json.dumps(schema))
 
-    config_props = await load_python_config(tmp_path)
-    assert len(config_props) == 1
-    assert config_props[0]["data_schema"] is not None
-    assert config_props[0]["data_schema"]["type"] == "object"
+    config_items = await load_python_config(tmp_path)
+    assert len(config_items) == 1
+    assert config_items[0].data_schema is not None
+    assert config_items[0].data_schema["type"] == "object"
 
 
 @pytest.mark.asyncio
@@ -172,8 +172,8 @@ async def test_reconcile_updates_on_change(
     )
     (tmp_path / "mutable_type.schema.json").write_text('{"type": "object"}')
 
-    config_props = await load_python_config(tmp_path)
-    await reconcile_record_types(config_props, test_session)
+    config_items = await load_python_config(tmp_path)
+    await reconcile_record_types(config_items, test_session)
 
     # Modify
     _write_record_types(
@@ -190,8 +190,8 @@ async def test_reconcile_updates_on_change(
     )
     (tmp_path / "mutable_type.schema.json").write_text('{"type": "object"}')
 
-    config_props = await load_python_config(tmp_path)
-    result = await reconcile_record_types(config_props, test_session)
+    config_items = await load_python_config(tmp_path)
+    result = await reconcile_record_types(config_items, test_session)
     assert "mutable_type" in result.updated
 
     stmt = select(RecordType).where(RecordType.name == "mutable_type")

@@ -2,7 +2,7 @@
 
 Discovers ``record_types.py`` in a given folder and collects all
 ``RecordTypeDef`` instances from its module namespace, converting them
-to property dicts compatible with ``RecordTypeCreate``.
+to ``RecordTypeCreate`` objects for the reconciler.
 
 Reuses the importlib pattern from ``src/services/recordflow/flow_loader.py``.
 """
@@ -17,6 +17,7 @@ from typing import Any
 import aiofiles
 
 from src.config.primitives import File, RecordTypeDef, fileref_to_file_definition
+from src.models.record import RecordTypeCreate
 from src.utils.logger import logger
 
 # Fields whose values can reference external .py files
@@ -130,67 +131,84 @@ async def _resolve_data_schema(rt_def: RecordTypeDef, folder: Path) -> dict[str,
     return None
 
 
-async def _resolve_script_fields(props: dict[str, Any], folder: Path) -> dict[str, Any]:
-    """Resolve .py file references in script fields to inline content.
+async def _resolve_script_field(value: str | None, folder: Path) -> str | None:
+    """Resolve a .py file reference to inline content.
 
     Args:
-        props: Properties dict (mutated in place).
+        value: Script value (inline string or .py path).
         folder: Config folder for resolving relative paths.
 
     Returns:
-        The mutated props dict.
+        Resolved inline script content, or original value.
     """
-    for field_name in _SCRIPT_FIELDS:
-        value = props.get(field_name)
-        if not isinstance(value, str) or not value.endswith(".py"):
-            continue
-        script_path = folder / value
-        if script_path.is_file():
-            async with aiofiles.open(script_path) as f:
-                props[field_name] = await f.read()
-    return props
+    if not isinstance(value, str) or not value.endswith(".py"):
+        return value
+    script_path = folder / value
+    if script_path.is_file():
+        async with aiofiles.open(script_path) as f:
+            return await f.read()
+    return value
 
 
-def _recordtype_def_to_props(rt_def: RecordTypeDef) -> dict[str, Any]:
-    """Convert a RecordTypeDef to a properties dict for RecordTypeCreate.
+async def _to_record_type_create(
+    rt_def: RecordTypeDef,
+    folder: Path,
+) -> RecordTypeCreate:
+    """Convert a RecordTypeDef to a RecordTypeCreate.
+
+    Resolves data_schema and script file references before constructing
+    the typed model.
 
     Args:
-        rt_def: RecordType definition.
+        rt_def: RecordType definition from Python config.
+        folder: Config folder for resolving relative paths.
 
     Returns:
-        Properties dict compatible with RecordTypeCreate(**props).
+        Typed RecordTypeCreate ready for reconciliation.
     """
-    props: dict[str, Any] = {
+    # Resolve data_schema
+    data_schema = await _resolve_data_schema(rt_def, folder)
+
+    # Resolve script fields
+    slicer_script = await _resolve_script_field(rt_def.slicer_script, folder)
+    slicer_result_validator = await _resolve_script_field(rt_def.slicer_result_validator, folder)
+
+    # Convert FileRef list to file_registry
+    file_registry = [fileref_to_file_definition(ref) for ref in rt_def.files] or None
+
+    # Build kwargs, only including fields that are explicitly set
+    kwargs: dict[str, Any] = {
         "name": rt_def.name,
         "level": rt_def.level,
     }
 
-    # Optional scalar fields
-    for field_name in (
-        "description",
-        "label",
-        "role_name",
-        "min_users",
-        "max_users",
-        "slicer_script",
-        "slicer_script_args",
-        "slicer_result_validator",
-        "slicer_result_validator_args",
-    ):
-        value = getattr(rt_def, field_name)
-        if value is not None:
-            props[field_name] = value
+    if rt_def.description is not None:
+        kwargs["description"] = rt_def.description
+    if rt_def.label is not None:
+        kwargs["label"] = rt_def.label
+    if rt_def.role_name is not None:
+        kwargs["role_name"] = rt_def.role_name
+    if rt_def.min_users is not None:
+        kwargs["min_users"] = rt_def.min_users
+    if rt_def.max_users is not None:
+        kwargs["max_users"] = rt_def.max_users
+    if slicer_script is not None:
+        kwargs["slicer_script"] = slicer_script
+    if rt_def.slicer_script_args is not None:
+        kwargs["slicer_script_args"] = rt_def.slicer_script_args
+    if slicer_result_validator is not None:
+        kwargs["slicer_result_validator"] = slicer_result_validator
+    if rt_def.slicer_result_validator_args is not None:
+        kwargs["slicer_result_validator_args"] = rt_def.slicer_result_validator_args
+    if data_schema is not None:
+        kwargs["data_schema"] = data_schema
+    if file_registry is not None:
+        kwargs["file_registry"] = file_registry
 
-    # Convert FileRef list to file_registry
-    if rt_def.files:
-        props["file_registry"] = [
-            fileref_to_file_definition(ref).model_dump() for ref in rt_def.files
-        ]
-
-    return props
+    return RecordTypeCreate(**kwargs)
 
 
-async def load_python_config(folder: Path) -> list[dict[str, Any]]:
+async def load_python_config(folder: Path) -> list[RecordTypeCreate]:
     """Load RecordType definitions from Python files in *folder*.
 
     Expected folder structure::
@@ -206,7 +224,7 @@ async def load_python_config(folder: Path) -> list[dict[str, Any]]:
         folder: Path to the folder containing Python config files.
 
     Returns:
-        List of property dicts compatible with RecordTypeCreate(**props).
+        List of RecordTypeCreate objects ready for reconciliation.
     """
     record_types_file = folder / "record_types.py"
     if not record_types_file.is_file():
@@ -243,20 +261,11 @@ async def load_python_config(folder: Path) -> list[dict[str, Any]]:
 
         logger.info(f"Found {len(rt_defs)} RecordTypeDef(s) in {record_types_file}")
 
-        # Convert to props dicts
-        result: list[dict[str, Any]] = []
+        # Convert to RecordTypeCreate objects
+        result: list[RecordTypeCreate] = []
         for _var_name, rt_def in rt_defs:
-            props = _recordtype_def_to_props(rt_def)
-
-            # Resolve data_schema
-            schema = await _resolve_data_schema(rt_def, folder)
-            if schema is not None:
-                props["data_schema"] = schema
-
-            # Resolve script file references
-            props = await _resolve_script_fields(props, folder)
-
-            result.append(props)
+            config_item = await _to_record_type_create(rt_def, folder)
+            result.append(config_item)
 
         return result
 

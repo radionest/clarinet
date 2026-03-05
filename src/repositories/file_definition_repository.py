@@ -1,11 +1,11 @@
 """Repository for FileDefinition database operations."""
 
-from typing import Any
+from collections.abc import Sequence
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 
-from src.models.file_schema import FileDefinition
+from src.models.file_schema import FileDefinition, FileDefinitionRead
 from src.repositories.base import BaseRepository
 
 
@@ -48,19 +48,25 @@ class FileDefinitionRepository(BaseRepository[FileDefinition]):
         await self.session.flush()
         return fd
 
-    async def bulk_upsert(self, definitions: list[dict[str, Any]]) -> dict[str, FileDefinition]:
+    async def bulk_upsert(
+        self,
+        definitions: Sequence[FileDefinitionRead],
+    ) -> dict[str, FileDefinition]:
         """Upsert multiple file definitions, returning a name→instance map.
 
         Args:
-            definitions: List of dicts with keys: name, pattern, description, multiple.
+            definitions: File definition DTOs to upsert.
 
         Returns:
             Dict mapping name to FileDefinition instance.
         """
         result_map: dict[str, FileDefinition] = {}
         for defn in definitions:
-            name = str(defn["name"])
-            kwargs = {k: v for k, v in defn.items() if k != "name"}
-            fd = await self.get_or_create(name, **kwargs)
-            result_map[name] = fd
+            fd = await self.get_or_create(
+                defn.name,
+                pattern=defn.pattern,
+                description=defn.description,
+                multiple=defn.multiple,
+            )
+            result_map[defn.name] = fd
         return result_map
