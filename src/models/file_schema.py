@@ -153,3 +153,11 @@ class FileDefinitionRead(SQLModel):
         if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", v):
             raise ValueError(f"File definition name must be a valid Python identifier, got: {v!r}")
         return v
+
+
+class RecordFileLinkRead(SQLModel):
+    """DTO for Record -> FileDefinition link in API responses."""
+
+    name: str
+    filename: str
+    checksum: str | None = None

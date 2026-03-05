@@ -21,7 +21,7 @@ from src.types import RecordData, SlicerArgs
 from ..exceptions import ValidationError
 from ..settings import settings
 from .base import BaseModel, RecordStatus
-from .file_schema import RecordFileLink
+from .file_schema import RecordFileLink, RecordFileLinkRead
 from .patient import Patient, PatientBase
 from .record_type import (
     RecordType,
@@ -210,8 +210,9 @@ class RecordRead(RecordBase):
 
     id: int
     data: RecordData | None = None
-    files: dict[str, str] | None = None
-    file_checksums: dict[str, str] | None = None
+    files: dict[str, str] | None = Field(default=None, schema_extra={"deprecated": True})
+    file_checksums: dict[str, str] | None = Field(default=None, schema_extra={"deprecated": True})
+    file_links: list[RecordFileLinkRead] | None = None
     created_at: datetime | None = None
     changed_at: datetime | None = None
     started_at: datetime | None = None
@@ -224,11 +225,11 @@ class RecordRead(RecordBase):
     @model_validator(mode="before")
     @classmethod
     def populate_files_from_links(cls, data: Any) -> Any:
-        """Populate files and file_checksums from M2M file_links when validating from ORM."""
+        """Populate files, file_checksums, and file_links from M2M when validating from ORM."""
         if isinstance(data, Record):
             result: dict[str, Any] = {}
             for field_name in cls.model_fields:
-                if field_name in ("files", "file_checksums"):
+                if field_name in ("files", "file_checksums", "file_links"):
                     continue
                 result[field_name] = getattr(data, field_name, None)
             try:
@@ -241,9 +242,18 @@ class RecordRead(RecordBase):
                     for link in (links or [])
                     if link.checksum
                 }
+                result["file_links"] = [
+                    RecordFileLinkRead(
+                        name=link.file_definition.name,
+                        filename=link.filename,
+                        checksum=link.checksum,
+                    )
+                    for link in (links or [])
+                ]
             except Exception:
                 result["files"] = None
                 result["file_checksums"] = None
+                result["file_links"] = None
             return result
         return data
 

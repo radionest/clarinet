@@ -80,7 +80,12 @@ as a regular field, populated via `model_validator(mode="before")` from the ORM 
 - `FileRole`: `INPUT`, `OUTPUT`, `INTERMEDIATE`
 - `multiple=True`: collection (glob), `multiple=False`: singular file
 - Callers filter `file_registry` by role directly (no `input_files`/`output_files` computed properties)
-- `RecordRead.files` / `RecordRead.file_checksums`: computed from `Record.file_links` via `model_validator(mode="before")`
+- **Note:** `FileDefinition` and `FileDefinitionRead` both define an identical
+  `validate_name_is_identifier` field validator. When changing validation logic,
+  update both classes in `file_schema.py`.
+- **`RecordFileLinkRead`** (`file_schema.py`, DTO): per-file link with `name`, `filename`, `checksum`
+- `RecordRead.file_links`: `list[RecordFileLinkRead]` — structured M2M data, preferred over dict fields
+- `RecordRead.files` / `RecordRead.file_checksums`: **deprecated** dict fields (use `file_links` instead), computed from `Record.file_links` via `model_validator(mode="before")`
 - `RecordFileAccessor` (`src/services/file_accessor.py`): attribute-based file access
 - `src/utils/file_checksums.py`: async SHA256 computation and change detection
 
@@ -183,6 +188,13 @@ populated via `model_validator(mode="before")`. See `RecordType.get_file_registr
 **`list`/`dict` fields in `table=True` models need `sa_column=Column(JSON)`.**
 Without it, SQLModel raises `ValueError: <class 'list'> has no matching SQLAlchemy type`
 because every inherited field becomes a DB column.
+
+**`SQLModel.Field()` uses `schema_extra`, not `json_schema_extra`.**
+SQLModel DTO classes (`table=False`, no `table=True`) still inherit from `SQLModel`, not
+`pydantic.BaseModel`. SQLModel's `Field()` accepts `schema_extra={"key": "value"}` for
+JSON Schema metadata, while Pydantic's `Field()` uses `json_schema_extra`. Using the wrong
+one silently does nothing. Rule: if the class inherits `SQLModel` → use `schema_extra`;
+if it inherits `pydantic.BaseModel` → use `json_schema_extra`.
 
 ## Forward References
 
