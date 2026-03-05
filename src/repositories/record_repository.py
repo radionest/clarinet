@@ -20,6 +20,7 @@ from src.exceptions.domain import (
 )
 from src.models import Record
 from src.models.base import RecordStatus
+from src.models.file_schema import RecordTypeFileLink
 from src.models.patient import Patient
 from src.models.record import RecordFindResult, RecordFindResultComparisonOperator, RecordType
 from src.models.study import Series, Study
@@ -53,6 +54,15 @@ _COMPARISON_OPS: dict[RecordFindResultComparisonOperator, Callable[..., Any]] = 
     RecordFindResultComparisonOperator.lt: lambda f, v: f < v,
     RecordFindResultComparisonOperator.contains: lambda f, v: f.like(f"%{v}%"),
 }
+
+
+def _record_type_with_files() -> Any:
+    """Return selectinload chain for record_type → file_links → file_definition."""
+    return (
+        selectinload(Record.record_type)  # type: ignore[arg-type]
+        .selectinload(RecordType.file_links)  # type: ignore[arg-type]
+        .selectinload(RecordTypeFileLink.file_definition)  # type: ignore[arg-type]
+    )
 
 
 class RecordRepository(BaseRepository[Record]):
@@ -91,9 +101,7 @@ class RecordRepository(BaseRepository[Record]):
         Raises:
             RecordNotFoundError: If record doesn't exist
         """
-        statement = (
-            select(Record).where(Record.id == record_id).options(selectinload(Record.record_type))  # type: ignore
-        )
+        statement = select(Record).where(Record.id == record_id).options(_record_type_with_files())
         result = await self.session.execute(statement)
         record = result.scalars().first()
         if not record:
@@ -119,7 +127,7 @@ class RecordRepository(BaseRepository[Record]):
                 selectinload(Record.patient),  # type: ignore
                 selectinload(Record.study),  # type: ignore
                 selectinload(Record.series),  # type: ignore
-                selectinload(Record.record_type),  # type: ignore
+                _record_type_with_files(),
             )
         )
         result = await self.session.execute(statement)
@@ -144,7 +152,7 @@ class RecordRepository(BaseRepository[Record]):
                 selectinload(Record.patient),  # type: ignore
                 selectinload(Record.study),  # type: ignore
                 selectinload(Record.series),  # type: ignore
-                selectinload(Record.record_type),  # type: ignore
+                _record_type_with_files(),
             )
             .offset(skip)
             .limit(limit)
@@ -172,7 +180,7 @@ class RecordRepository(BaseRepository[Record]):
                 selectinload(Record.patient),  # type: ignore
                 selectinload(Record.study),  # type: ignore
                 selectinload(Record.series),  # type: ignore
-                selectinload(Record.record_type),  # type: ignore
+                _record_type_with_files(),
             )
             .offset(skip)
             .limit(limit)
@@ -204,7 +212,7 @@ class RecordRepository(BaseRepository[Record]):
                 selectinload(Record.patient),  # type: ignore
                 selectinload(Record.study),  # type: ignore
                 selectinload(Record.series),  # type: ignore
-                selectinload(Record.record_type),  # type: ignore
+                _record_type_with_files(),
             )
         )
         result = await self.session.execute(statement)
@@ -429,7 +437,7 @@ class RecordRepository(BaseRepository[Record]):
         return result.scalar_one()
 
     async def get_record_type(self, name: str) -> RecordType:
-        """Get a RecordType by name.
+        """Get a RecordType by name with file_links eagerly loaded.
 
         Args:
             name: Record type name (primary key)
@@ -440,7 +448,15 @@ class RecordRepository(BaseRepository[Record]):
         Raises:
             RecordTypeNotFoundError: If record type doesn't exist
         """
-        record_type = await self.session.get(RecordType, name)
+        stmt = (
+            select(RecordType)
+            .where(RecordType.name == name)
+            .options(
+                selectinload(RecordType.file_links).selectinload(RecordTypeFileLink.file_definition)  # type: ignore[arg-type]  # type: ignore[arg-type]
+            )
+        )
+        result = await self.session.execute(stmt)
+        record_type = result.scalars().first()
         if not record_type:
             raise RecordTypeNotFoundError(name)
         return record_type
@@ -530,7 +546,7 @@ class RecordRepository(BaseRepository[Record]):
                 selectinload(Record.patient),  # type: ignore
                 selectinload(Record.study),  # type: ignore
                 selectinload(Record.series),  # type: ignore
-                selectinload(Record.record_type),  # type: ignore
+                _record_type_with_files(),
             )
         )
 
@@ -658,10 +674,14 @@ class RecordRepository(BaseRepository[Record]):
         if not rows:
             return {}
 
-        # Batch fetch RecordTypes to avoid N+1
+        # Batch fetch RecordTypes with file_links to avoid N+1
         names = [name for name, _ in rows]
         types_result = await self.session.execute(
-            select(RecordType).where(col(RecordType.name).in_(names))
+            select(RecordType)
+            .where(col(RecordType.name).in_(names))
+            .options(
+                selectinload(RecordType.file_links).selectinload(RecordTypeFileLink.file_definition)  # type: ignore[arg-type]  # type: ignore[arg-type]
+            )
         )
         type_map = {rt.name: rt for rt in types_result.scalars().all()}
 
