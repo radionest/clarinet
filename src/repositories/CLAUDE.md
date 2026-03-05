@@ -68,7 +68,7 @@ Beyond `BaseRepository`, `RecordRepository` has:
 | `update_status(id, status)` | Status transition with validation |
 | `update_data(id, data, new_status)` | Update data and optionally status |
 | `set_files(record, matched_files)` | Create `RecordFileLink` rows; builds fd_map internally from eager-loaded `file_links` |
-| `update_checksums(id, checksums)` | Update checksum on existing `RecordFileLink` rows |
+| `update_checksums(record, checksums)` | Update checksum on existing `RecordFileLink` rows |
 | `assign_user(id, user_id)` | Assign record to user |
 | `claim_record(id, user_id)` | Claim unassigned record |
 | `bulk_update_status(ids, status)` | Batch status update |

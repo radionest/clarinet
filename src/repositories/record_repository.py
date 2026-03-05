@@ -294,21 +294,16 @@ class RecordRepository(BaseRepository[Record]):
         await self.session.commit()
         return await self.get_with_relations(record_id), old_status
 
-    async def update_checksums(self, record_id: int, checksums: dict[str, str]) -> None:
+    async def update_checksums(self, record: Record, checksums: dict[str, str]) -> None:
         """Update file checksums on existing RecordFileLink rows.
 
         Args:
-            record_id: Record ID
+            record: Record with eager-loaded file_links
             checksums: New checksums dict (file definition name -> SHA256)
-
-        Raises:
-            RecordNotFoundError: If record doesn't exist
         """
-        record = await self.get_with_record_type(record_id)
         for link in record.file_links or []:
-            key = link.file_definition.name
-            if key in checksums:
-                link.checksum = checksums[key]
+            if link.file_definition.name in checksums:
+                link.checksum = checksums[link.file_definition.name]
         await self.session.commit()
 
     async def set_files(

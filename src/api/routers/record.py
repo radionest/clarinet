@@ -56,6 +56,7 @@ from src.services.file_validation import FileValidationResult, FileValidator
 from src.types import RecordData
 from src.utils.file_checksums import checksums_changed, compute_checksums
 from src.utils.file_link_sync import sync_file_links
+from src.utils.fs import run_in_fs_thread
 from src.utils.validation import validate_json_by_schema
 
 
@@ -104,7 +105,7 @@ def trigger_recordflow(
         background_tasks.add_task(engine.handle_record_data_update, record_read)
 
 
-def validate_record_files(
+async def validate_record_files(
     record: RecordRead,
     *,
     raise_on_invalid: bool = False,
@@ -114,6 +115,9 @@ def validate_record_files(
     Accepts ``RecordRead`` (Pydantic) because ``working_folder`` and other
     computed fields are defined on ``RecordRead``, not on the ORM ``Record``.
     Callers should convert via ``RecordRead.model_validate(record)`` first.
+
+    The blocking ``FileValidator.validate()`` call is offloaded to a
+    dedicated FS thread pool to avoid blocking the event loop.
 
     Args:
         record: RecordRead instance with all relations populated
@@ -130,7 +134,7 @@ def validate_record_files(
 
     directory = Path(record.working_folder)
     validator = FileValidator(input_defs)
-    result = validator.validate(record, directory)
+    result = await run_in_fs_thread(validator.validate, record, directory)
     if not result.valid and raise_on_invalid:
         errors = "; ".join(f"{e.file_name}: {e.message}" for e in result.errors)
         raise ValidationError(f"File validation failed: {errors}")
@@ -407,7 +411,7 @@ async def add_record(
 
     # Validate input files if defined
     record_read = RecordRead.model_validate(record)
-    file_result = validate_record_files(record_read)
+    file_result = await validate_record_files(record_read)
 
     if file_result is None:
         # No input files defined — stay pending
@@ -483,7 +487,7 @@ async def submit_record_data(
 
     # Validate input files if defined (raise on missing required files)
     record_read = RecordRead.model_validate(record)
-    file_result = validate_record_files(record_read, raise_on_invalid=True)
+    file_result = await validate_record_files(record_read, raise_on_invalid=True)
 
     if file_result and file_result.matched_files:
         await repo.set_files(record, file_result.matched_files)
@@ -541,7 +545,7 @@ async def validate_files_endpoint(
     record = await repo.get_with_relations(record_id)
 
     record_read = RecordRead.model_validate(record)
-    result = validate_record_files(record_read)
+    result = await validate_record_files(record_read)
     if result is None:
         return FileValidationResult(valid=True)
 
@@ -571,7 +575,7 @@ async def check_record_files(
 
     # Auto-unblock: if record is blocked, check whether input files are now present
     if record.status == RecordStatus.blocked:
-        file_result = validate_record_files(record_read)
+        file_result = await validate_record_files(record_read)
         if file_result is not None and file_result.valid:
             old_status = record.status
             if file_result.matched_files:
@@ -590,7 +594,7 @@ async def check_record_files(
     )
     changed = checksums_changed(record_read.file_checksums, new_checksums)
 
-    await repo.update_checksums(record_id, new_checksums)
+    await repo.update_checksums(record, new_checksums)
 
     if changed:
         engine = getattr(request.app.state, "recordflow_engine", None)
