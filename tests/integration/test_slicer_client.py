@@ -5,7 +5,7 @@ import pytest
 from src.exceptions import SlicerError
 from src.services.slicer.client import SlicerClient
 
-pytestmark = [pytest.mark.slicer, pytest.mark.asyncio]
+pytestmark = [pytest.mark.slicer, pytest.mark.asyncio, pytest.mark.usefixtures("_check_slicer")]
 
 
 async def test_ping(slicer_client: SlicerClient) -> None:

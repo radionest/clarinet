@@ -11,7 +11,7 @@ import pytest
 from src.services.slicer.helper import PacsHelper, SlicerHelper
 from src.services.slicer.service import SlicerService
 
-pytestmark = [pytest.mark.slicer, pytest.mark.asyncio]
+pytestmark = [pytest.mark.slicer, pytest.mark.asyncio, pytest.mark.usefixtures("_check_slicer")]
 
 
 async def test_load_volume(
@@ -121,7 +121,10 @@ print('workspace_ok')
 class TestPacsHelperConstruction:
     """Tests for PacsHelper that don't require a running Slicer."""
 
-    pytestmark: ClassVar[list[pytest.MarkDecorator]] = [pytest.mark.slicer]
+    pytestmark: ClassVar[list[pytest.MarkDecorator]] = [
+        pytest.mark.slicer,
+        pytest.mark.usefixtures("_check_slicer"),
+    ]
 
     def test_constructor_stores_params(self) -> None:
         """PacsHelper stores all connection parameters."""

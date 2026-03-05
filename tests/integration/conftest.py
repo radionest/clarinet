@@ -303,10 +303,26 @@ def _clear_pipeline_registries() -> Any:
     _PIPELINE_REGISTRY.clear()
 
 
+# ─── Slicer fixtures ────────────────────────────────────────────────────────
+
+SLICER_HOST = "localhost"
+SLICER_PORT = 2016
+
+
+@pytest.fixture(scope="session")
+def _check_slicer() -> None:
+    """Skip all slicer tests if 3D Slicer is unreachable."""
+    try:
+        sock = socket.create_connection((SLICER_HOST, SLICER_PORT), timeout=3)
+        sock.close()
+    except OSError:
+        pytest.skip(f"3D Slicer not reachable at {SLICER_HOST}:{SLICER_PORT}")
+
+
 @pytest.fixture
 def slicer_url() -> str:
     """Base URL for the local Slicer web server."""
-    return "http://localhost:2016"
+    return f"http://{SLICER_HOST}:{SLICER_PORT}"
 
 
 @pytest.fixture
