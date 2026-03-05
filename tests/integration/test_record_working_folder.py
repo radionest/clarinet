@@ -427,7 +427,7 @@ async def test_validate_record_files_no_input_files(
     record_read = RecordRead.model_validate(loaded)
 
     # rt_series has no file_links (no input file definitions)
-    result = validate_record_files(record_read)
+    result = await validate_record_files(record_read)
     assert result is None
 
 

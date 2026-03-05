@@ -63,3 +63,28 @@ This only affects tests — production endpoints get a fresh session per request
 Use `fresh_session` (from `conftest.py`) instead of `test_session` when you need to
 verify eager loading works correctly. It provides an empty identity map, simulating
 production behavior and catching `MissingGreenlet` errors that `test_session` masks.
+
+### Module-level Singletons in Tests
+
+Calling `shutdown()` on module-level singletons (thread pools, brokers, DB engines)
+breaks subsequent `lifespan()` invocations in the same test process.
+
+Two solutions:
+1. **`_reset_singletons` fixture** — save and restore originals around each test
+   (see `tests/integration/test_app_startup.py:62`):
+   ```python
+   @pytest.fixture(autouse=True)
+   def _reset_singletons():
+       import src.some_module as mod
+       orig = mod._singleton
+       yield
+       mod._singleton = orig
+   ```
+2. **Re-create in shutdown** — the shutdown function itself replaces the resource
+   (see `src/utils/fs.py:shutdown_fs_executor`):
+   ```python
+   def shutdown_resource():
+       global _resource
+       _resource.shutdown()
+       _resource = _make_resource()  # ready for next lifespan
+   ```

@@ -11,10 +11,6 @@
 
 ## 1. DRY — нарушения
 
-### 1.3 Извлечение `fd_data` из разных форматов
-
-`record.py:240-252` строит `fd_data` через isinstance-проверки (`FileDefinitionRead` vs `dict`), а `reconciler.py:193-201` делает то же самое но только для dict. Два разных способа извлечь `{name, pattern, description, multiple}`.
-
 ---
 
 ## 2. KISS — избыточная сложность
@@ -66,10 +62,6 @@
 
 Роутер выполняет работу, которая должна быть в `RecordTypeRepository.create_with_files()` или сервисе. Нарушение слоёв.
 
-### 4.2 Тихий fallback при отсутствии eager loading
-
-`RecordType.file_registry` property (record_type.py) возвращает `[]` если `file_links` не загружены. Это прячет баги — вызывающий код получает пустой реестр вместо ошибки и продолжает работу с неполными данными.
-
 ### 4.3 `validate_record_files` принимает `RecordRead`, не `Record`
 
 `record.py:109-146` — функция работает с `RecordRead` DTO потому что `working_folder` — computed field. Это протечка: бизнес-логика валидации привязана к DTO API-слоя. Решение — вычислять `working_folder` отдельно или сделать его доступным на ORM-уровне.
@@ -87,9 +79,6 @@
 
 `set_files()` (`record_repository.py:336-338`) и `_sync_file_links()` (`reconciler.py:184-186`) удаляют ВСЕ существующие links, затем создают заново. При обновлении 1 из 10 файлов — 10 DELETE + 10 INSERT вместо 1 UPDATE. Также провоцирует лишние CASCADE-проверки.
 
-### 5.3 `update_checksums` загружает полный Record
-
-`record_repository.py:307` — `get_with_record_type(record_id)` загружает Record + RecordType + file_links + file_definitions, чтобы обновить 1 поле. Можно сделать одним `UPDATE ... WHERE record_id = ? AND file_definition_id IN (...)`.
 
 ---
 

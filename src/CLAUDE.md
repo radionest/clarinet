@@ -7,6 +7,19 @@
 - Always handle exceptions in async functions
 - Use `AsyncSession` for DB operations: `get_async_session` from `src.utils.database`
 
+## Lifespan Shutdown Pattern
+
+Resources initialized in `lifespan()` and shut down in its `finally` block must be **re-creatable** for test compatibility. Multiple tests may invoke `lifespan()` sequentially in the same process. If `shutdown()` destroys a module-level singleton without recreating it, subsequent lifespans fail.
+
+Pattern: shutdown the old resource, then immediately replace it with a fresh instance:
+```python
+# src/utils/fs.py — reference implementation
+def shutdown_fs_executor() -> None:
+    global _fs_executor
+    _fs_executor.shutdown(wait=False)
+    _fs_executor = _make_executor()  # re-create for next lifespan
+```
+
 ## Type Annotations & Imports
 
 - Type hints on all functions; mypy strict mode enabled (`pyproject.toml`)
@@ -14,6 +27,20 @@
 - Group imports: stdlib → third-party → local; relative imports within package
 - Sort with ruff (includes isort). Avoid circular imports.
 - Common type aliases in `src/types.py` — read file directly for full list
+
+### Type Parameters (PEP 695)
+
+Use PEP 695 syntax for generics — Ruff UP040 flags old-style `TypeVar`:
+```python
+# Good — PEP 695
+def func[T](x: T) -> T: ...
+type Alias[T] = list[T]
+
+# Bad — flagged by UP040
+T = TypeVar("T")
+def func(x: T) -> T: ...
+```
+Legacy `TypeVar` in `src/repositories/base.py` and `src/utils/common.py` is pre-existing and exempt until refactored.
 
 ## Error Handling
 
