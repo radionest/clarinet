@@ -39,11 +39,13 @@ pub fn viewer_button(
 /// Render a viewer button for a record based on its DicomQueryLevel.
 /// If viewer_study_uids is set, opens all listed studies in OHIF.
 /// Otherwise falls back to single study_uid.
+/// Series filtering: viewer_series_uids > series_uid (for SERIES-level records).
 /// PATIENT or unknown level -> no button; STUDY -> study URL; SERIES -> study+series URL.
 pub fn record_viewer_button(
   study_uid: Option(String),
   series_uid: Option(String),
   viewer_study_uids: Option(List(String)),
+  viewer_series_uids: Option(List(String)),
   level: Option(types.DicomQueryLevel),
   class: String,
 ) -> Element(msg) {
@@ -56,8 +58,21 @@ pub fn record_viewer_button(
       }
       case uids {
         Some(uid_list) -> {
-          let joined = string.join(uid_list, ",")
-          let url = "/ohif/viewer?StudyInstanceUIDs=" <> joined
+          let study_part =
+            string.join(uid_list, "&StudyInstanceUIDs=")
+          let url = "/ohif/viewer?StudyInstanceUIDs=" <> study_part
+          // Determine series UIDs to include
+          let series_part = case viewer_series_uids {
+            Some(sids) if sids != [] ->
+              "&SeriesInstanceUIDs="
+              <> string.join(sids, "&SeriesInstanceUIDs=")
+            _ ->
+              case level, series_uid {
+                Some(types.Series), Some(s) -> "&SeriesInstanceUIDs=" <> s
+                _, _ -> ""
+              }
+          }
+          let url = url <> series_part
           html.a(
             [
               attribute.href(url),

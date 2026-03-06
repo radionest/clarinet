@@ -56,6 +56,7 @@ fn render_record_execution(
         record.study_uid,
         record.series_uid,
         record.viewer_study_uids,
+        record.viewer_series_uids,
         option.map(record.record_type, fn(rt) { rt.level }),
         "btn btn-primary",
       ),

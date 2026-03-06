@@ -170,6 +170,7 @@ class Record(RecordBase, table=True):
 
     data: RecordData | None = Field(default_factory=dict, sa_column=Column(JSON))
     viewer_study_uids: list[str] | None = Field(default=None, sa_column=Column(JSON))
+    viewer_series_uids: list[str] | None = Field(default=None, sa_column=Column(JSON))
 
     # M2M relationship to FileDefinition via link table
     file_links: list[RecordFileLink] = Relationship(
@@ -225,6 +226,7 @@ class RecordOptional(SQLModel):
     """Pydantic model for partial record updates."""
 
     viewer_study_uids: list[str] | None = None
+    viewer_series_uids: list[str] | None = None
 
 
 class RecordRead(RecordBase):
@@ -234,6 +236,7 @@ class RecordRead(RecordBase):
     parent_record_id: int | None = None
     data: RecordData | None = None
     viewer_study_uids: list[str] | None = None
+    viewer_series_uids: list[str] | None = None
     files: dict[str, str] | None = Field(default=None, schema_extra={"deprecated": True})
     file_checksums: dict[str, str] | None = Field(default=None, schema_extra={"deprecated": True})
     file_links: list[RecordFileLinkRead] | None = None

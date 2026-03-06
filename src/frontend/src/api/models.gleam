@@ -93,6 +93,7 @@ pub type Record {
     study_anon_uid: Option(String),
     series_anon_uid: Option(String),
     viewer_study_uids: Option(List(String)),
+    viewer_series_uids: Option(List(String)),
     clarinet_storage_path: Option(String),
     files: Option(Dict(String, String)),
     file_checksums: Option(Dict(String, String)),
