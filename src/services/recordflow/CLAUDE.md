@@ -55,6 +55,7 @@ Actions are Pydantic models (not dicts). Each has a `type` Literal field:
 - `.update_record('name', status='new_status')` → `UpdateRecordAction`
 - `.invalidate_records('type1', 'type2', mode='hard'|'soft', callback=fn)` → `InvalidateRecordsAction`
 - `.pipeline('name', **extra_payload)` → `PipelineAction` (dispatches to pipeline service)
+- `.do_task(task_func, **extra_payload)` → `PipelineAction` (auto-creates a single-step Pipeline named `_task:{task_name}` from a `@pipeline_task()`-decorated function; deduplicates across calls)
 - `.call(func)` → `CallFunctionAction`
 - `.else_()` — else branch
 - `.is_active_flow()` — check if flow has triggers/actions (vs data-reference only)

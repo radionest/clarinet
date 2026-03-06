@@ -22,7 +22,7 @@ Example usage:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from .flow_action import (
     CallFunctionAction,
@@ -352,6 +352,37 @@ class FlowRecord:
         Returns:
             Self for method chaining.
         """
+        action = PipelineAction(
+            pipeline_name=pipeline_name,
+            extra_payload=dict(extra_payload),
+        )
+
+        if self._current_condition:
+            self._current_condition.add_action(action)
+        else:
+            self.actions.append(action)
+
+        return self
+
+    def do_task(self, task_func: Any, **extra_payload: object) -> FlowRecord:
+        """Add a task dispatch action.
+
+        Creates an auto-pipeline from a @pipeline_task()-decorated function
+        and dispatches it to the task queue.
+
+        Args:
+            task_func: A @pipeline_task()-decorated function (AsyncTaskiqDecoratedTask).
+            **extra_payload: Additional key-value data for the pipeline message.
+
+        Returns:
+            Self for method chaining.
+        """
+        from src.services.pipeline import Pipeline, get_pipeline
+
+        pipeline_name = f"_task:{task_func.task_name}"
+        if get_pipeline(pipeline_name) is None:
+            Pipeline(pipeline_name).step(task_func)
+
         action = PipelineAction(
             pipeline_name=pipeline_name,
             extra_payload=dict(extra_payload),

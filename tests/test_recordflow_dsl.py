@@ -24,6 +24,7 @@ from src.services.recordflow import (
     FlowResult,
     InvalidateRecordsAction,
     LogicalComparison,
+    PipelineAction,
     UpdateRecordAction,
 )
 from src.services.recordflow.flow_record import patient, record, series, study
@@ -59,11 +60,17 @@ def make_record_read(
 @pytest.fixture(autouse=True)
 def _clear_registry():
     """Clear the global registries before each test."""
+    from src.services.pipeline.chain import _PIPELINE_REGISTRY, _TASK_REGISTRY
+
     RECORD_REGISTRY.clear()
     ENTITY_REGISTRY.clear()
+    _PIPELINE_REGISTRY.clear()
+    _TASK_REGISTRY.clear()
     yield
     RECORD_REGISTRY.clear()
     ENTITY_REGISTRY.clear()
+    _PIPELINE_REGISTRY.clear()
+    _TASK_REGISTRY.clear()
 
 
 # ─── FlowResult — expression tree ────────────────────────────────────────────
@@ -390,6 +397,78 @@ class TestFlowRecordDSL:
         assert isinstance(fr.actions[0], UpdateRecordAction)
         assert fr.actions[0].record_name == "target"
         assert fr.actions[0].status == "finished"
+
+    def test_do_task_creates_pipeline_action(self):
+        """do_task() creates a PipelineAction with _task: prefix."""
+        from unittest.mock import MagicMock
+
+        from src.services.pipeline.chain import _PIPELINE_REGISTRY
+
+        mock_task = MagicMock()
+        mock_task.task_name = "do_task_test_fn"
+
+        fr = FlowRecord("test_type")
+        result = fr.do_task(mock_task)
+
+        assert result is fr  # returns self for chaining
+        assert len(fr.actions) == 1
+        assert isinstance(fr.actions[0], PipelineAction)
+        assert fr.actions[0].pipeline_name == "_task:do_task_test_fn"
+
+        # Auto-Pipeline registered with one step
+        pipeline = _PIPELINE_REGISTRY["_task:do_task_test_fn"]
+        assert len(pipeline.steps) == 1
+        assert pipeline.steps[0].task is mock_task
+
+    def test_do_task_dedup_reuses_pipeline(self):
+        """Calling do_task() twice with the same task reuses one Pipeline."""
+        from unittest.mock import MagicMock
+
+        from src.services.pipeline.chain import _PIPELINE_REGISTRY
+
+        mock_task = MagicMock()
+        mock_task.task_name = "dedup_test_fn"
+
+        fr1 = FlowRecord("type_a")
+        fr1.do_task(mock_task)
+
+        fr2 = FlowRecord("type_b")
+        fr2.do_task(mock_task)
+
+        # Only one Pipeline created
+        assert "_task:dedup_test_fn" in _PIPELINE_REGISTRY
+        pipeline = _PIPELINE_REGISTRY["_task:dedup_test_fn"]
+        assert len(pipeline.steps) == 1
+
+    def test_do_task_conditional(self):
+        """do_task() after if_() attaches to condition.actions."""
+        from unittest.mock import MagicMock
+
+        mock_task = MagicMock()
+        mock_task.task_name = "cond_do_task_fn"
+
+        fr = FlowRecord("test_type")
+        fr.if_(FlowResult("r", ["x"]) == 1).do_task(mock_task)
+
+        assert len(fr.actions) == 0
+        assert len(fr.conditions) == 1
+        assert len(fr.conditions[0].actions) == 1
+        assert isinstance(fr.conditions[0].actions[0], PipelineAction)
+        assert fr.conditions[0].actions[0].pipeline_name == "_task:cond_do_task_fn"
+
+    def test_do_task_extra_payload(self):
+        """do_task() passes extra_payload through to PipelineAction."""
+        from unittest.mock import MagicMock
+
+        mock_task = MagicMock()
+        mock_task.task_name = "payload_test_fn"
+
+        fr = FlowRecord("test_type")
+        fr.do_task(mock_task, threshold=0.5, mode="fast")
+
+        action = fr.actions[0]
+        assert isinstance(action, PipelineAction)
+        assert action.extra_payload == {"threshold": 0.5, "mode": "fast"}
 
 
 # ─── FlowCondition — condition evaluation ─────────────────────────────────────

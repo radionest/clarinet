@@ -359,6 +359,33 @@ class TestPipelineActionDSL:
         # Verify it matches the FlowAction union
         assert isinstance(action, PipelineAction)
 
+    def test_do_task_creates_auto_pipeline(self):
+        """FlowRecord.do_task() auto-creates a single-step Pipeline."""
+        from src.services.pipeline import get_pipeline
+        from src.services.recordflow.flow_action import PipelineAction
+        from src.services.recordflow.flow_record import RECORD_REGISTRY, FlowRecord
+
+        RECORD_REGISTRY.clear()
+
+        mock_task = MagicMock()
+        mock_task.task_name = "auto_pipeline_task"
+
+        fr = FlowRecord("ct_scan")
+        fr.on_status("finished").do_task(mock_task, threshold=0.5)
+
+        # PipelineAction created with correct name
+        assert len(fr.actions) == 1
+        action = fr.actions[0]
+        assert isinstance(action, PipelineAction)
+        assert action.pipeline_name == "_task:auto_pipeline_task"
+        assert action.extra_payload == {"threshold": 0.5}
+
+        # Auto-Pipeline registered with one step
+        pipeline = get_pipeline("_task:auto_pipeline_task")
+        assert pipeline is not None
+        assert len(pipeline.steps) == 1
+        assert pipeline.steps[0].task is mock_task
+
 
 # ─── Exceptions ──────────────────────────────────────────────────────────────
 
