@@ -1,8 +1,5 @@
 """Integration tests for repository layer — real SQLite, no mocks."""
 
-from datetime import UTC, datetime
-from uuid import uuid4
-
 import pytest
 import pytest_asyncio
 from sqlalchemy.orm import selectinload
@@ -14,11 +11,10 @@ from src.exceptions.domain import (
     RecordTypeAlreadyExistsError,
     RecordTypeNotFoundError,
 )
-from src.models.base import DicomQueryLevel, RecordStatus
+from src.models.base import RecordStatus
 from src.models.file_schema import FileDefinition, FileRole, RecordTypeFileLink
-from src.models.patient import Patient
-from src.models.record import Record, RecordFind, RecordType
-from src.models.study import Series, SeriesFind, Study
+from src.models.record import RecordFind, RecordType
+from src.models.study import SeriesFind
 from src.models.user import User, UserRole
 from src.repositories.patient_repository import PatientRepository
 from src.repositories.record_repository import RecordRepository, RecordSearchCriteria
@@ -27,57 +23,14 @@ from src.repositories.series_repository import SeriesRepository
 from src.repositories.study_repository import StudyRepository
 from src.repositories.user_repository import UserRepository, UserRoleRepository
 from src.utils.auth import get_password_hash
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _make_patient(pid: str = "PAT_001", name: str = "Alice") -> Patient:
-    return Patient(id=pid, name=name)
-
-
-def _make_study(patient_id: str, uid: str = "1.2.3.100") -> Study:
-    return Study(patient_id=patient_id, study_uid=uid, date=datetime.now(UTC).date())
-
-
-def _make_series(study_uid: str, uid: str = "1.2.3.100.1", num: int = 1) -> Series:
-    return Series(study_uid=study_uid, series_uid=uid, series_number=num)
-
-
-def _make_user(**kw) -> User:
-    defaults = {
-        "id": uuid4(),
-        "email": f"u_{uuid4().hex[:6]}@test.com",
-        "hashed_password": get_password_hash("password123"),
-        "is_active": True,
-        "is_verified": True,
-        "is_superuser": False,
-    }
-    defaults.update(kw)
-    return User(**defaults)
-
-
-def _make_record_type(name: str = "test_rt_00001", **kw) -> RecordType:
-    defaults = {"name": name, "level": DicomQueryLevel.SERIES}
-    defaults.update(kw)
-    return RecordType(**defaults)
-
-
-async def _seed_record(session, patient_id, study_uid, series_uid, rt_name, **kw):
-    """Create a Record directly in the session (bypasses model validator)."""
-    rec = Record(
-        patient_id=patient_id,
-        study_uid=study_uid,
-        series_uid=series_uid,
-        record_type_name=rt_name,
-        **kw,
-    )
-    session.add(rec)
-    await session.commit()
-    await session.refresh(rec)
-    return rec
-
+from tests.utils.factories import (
+    make_patient,
+    make_record_type,
+    make_series,
+    make_study,
+    make_user,
+    seed_record,
+)
 
 # ===================================================================
 # BaseRepository (tested via PatientRepository as concrete impl)
@@ -93,7 +46,7 @@ class TestBaseRepository:
 
     @pytest_asyncio.fixture
     async def patient(self, test_session, repo):
-        return await repo.create(_make_patient("BASE_PAT", "Base Patient"))
+        return await repo.create(make_patient("BASE_PAT", "Base Patient"))
 
     @pytest.mark.asyncio
     async def test_get(self, repo, patient):
@@ -124,14 +77,14 @@ class TestBaseRepository:
     @pytest.mark.asyncio
     async def test_get_all_with_pagination(self, repo, test_session):
         for i in range(5):
-            await repo.create(_make_patient(f"PAG_{i}", f"P {i}"))
+            await repo.create(make_patient(f"PAG_{i}", f"P {i}"))
         page = await repo.get_all(skip=1, limit=2)
         assert len(page) == 2
 
     @pytest.mark.asyncio
     async def test_list_all(self, repo, test_session):
         for i in range(3):
-            await repo.create(_make_patient(f"LA_{i}", f"P {i}"))
+            await repo.create(make_patient(f"LA_{i}", f"P {i}"))
         result = await repo.list_all()
         assert len(result) >= 3
 
@@ -146,12 +99,12 @@ class TestBaseRepository:
 
     @pytest.mark.asyncio
     async def test_create(self, repo):
-        p = await repo.create(_make_patient("CR_1", "Create Test"))
+        p = await repo.create(make_patient("CR_1", "Create Test"))
         assert p.id == "CR_1"
 
     @pytest.mark.asyncio
     async def test_create_many(self, repo):
-        patients = [_make_patient(f"CM_{i}", f"CM {i}") for i in range(3)]
+        patients = [make_patient(f"CM_{i}", f"CM {i}") for i in range(3)]
         result = await repo.create_many(patients)
         assert len(result) == 3
 
@@ -168,13 +121,13 @@ class TestBaseRepository:
 
     @pytest.mark.asyncio
     async def test_delete(self, repo, test_session):
-        p = await repo.create(_make_patient("DEL_1", "Delete Me"))
+        p = await repo.create(make_patient("DEL_1", "Delete Me"))
         await repo.delete(p)
         assert await repo.get_optional("DEL_1") is None
 
     @pytest.mark.asyncio
     async def test_delete_by_id(self, repo, test_session):
-        await repo.create(_make_patient("DBI_1", "Delete By Id"))
+        await repo.create(make_patient("DBI_1", "Delete By Id"))
         assert await repo.delete_by_id("DBI_1") is True
 
     @pytest.mark.asyncio
@@ -193,15 +146,15 @@ class TestSeriesRepository:
     @pytest_asyncio.fixture
     async def env(self, test_session):
         """Seed patient → study → series."""
-        pat = _make_patient("SPAT", "Series Patient")
+        pat = make_patient("SPAT", "Series Patient")
         test_session.add(pat)
         await test_session.commit()
-        study = _make_study("SPAT", "1.2.3.200")
+        study = make_study("SPAT", "1.2.3.200")
         test_session.add(study)
         await test_session.commit()
-        s1 = _make_series("1.2.3.200", "1.2.3.200.1", 1)
+        s1 = make_series("1.2.3.200", "1.2.3.200.1", 1)
         s1.series_description = "Axial CT"
-        s2 = _make_series("1.2.3.200", "1.2.3.200.2", 2)
+        s2 = make_series("1.2.3.200", "1.2.3.200.2", 2)
         s2.series_description = "Coronal MR"
         test_session.add_all([s1, s2])
         await test_session.commit()
@@ -279,11 +232,11 @@ class TestSeriesRepository:
     @pytest.mark.asyncio
     async def test_find_by_criteria_is_absent(self, test_session, env):
         """find_by_criteria with is_absent=True filters out series that have a matching record."""
-        rt = _make_record_type("absent_rt_001")
+        rt = make_record_type("absent_rt_001")
         test_session.add(rt)
         await test_session.commit()
 
-        await _seed_record(
+        await seed_record(
             test_session,
             patient_id="SPAT",
             study_uid="1.2.3.200",
@@ -316,7 +269,7 @@ class TestUserRepository:
         role = UserRole(name="annotator")
         test_session.add(role)
         await test_session.commit()
-        user = _make_user(email="user_repo@test.com")
+        user = make_user(email="user_repo@test.com")
         user = await repo.create(user)
         return {"repo": repo, "role_repo": role_repo, "user": user, "role": role}
 
@@ -405,25 +358,25 @@ class TestRecordRepository:
     @pytest_asyncio.fixture
     async def env(self, test_session):
         """Seed patient → study → series → record_type → record."""
-        pat = _make_patient("RPAT", "Record Patient")
+        pat = make_patient("RPAT", "Record Patient")
         test_session.add(pat)
         await test_session.commit()
-        study = _make_study("RPAT", "1.2.3.300")
+        study = make_study("RPAT", "1.2.3.300")
         test_session.add(study)
         await test_session.commit()
-        series = _make_series("1.2.3.300", "1.2.3.300.1", 1)
+        series = make_series("1.2.3.300", "1.2.3.300.1", 1)
         test_session.add(series)
         await test_session.commit()
-        rt = _make_record_type("rec_rt_00001")
+        rt = make_record_type("rec_rt_00001")
         test_session.add(rt)
         await test_session.commit()
 
-        user = _make_user()
+        user = make_user()
         test_session.add(user)
         await test_session.commit()
         await test_session.refresh(user)
 
-        rec = await _seed_record(
+        rec = await seed_record(
             test_session,
             patient_id="RPAT",
             study_uid="1.2.3.300",
@@ -494,7 +447,7 @@ class TestRecordRepository:
 
     @pytest.mark.asyncio
     async def test_assign_user(self, env):
-        new_user = _make_user()
+        new_user = make_user()
         env["session"].add(new_user)
         await env["session"].commit()
         await env["session"].refresh(new_user)
@@ -582,13 +535,13 @@ class TestStudyRepository:
 
     @pytest_asyncio.fixture
     async def env(self, test_session):
-        pat = _make_patient("STPAT", "Study Patient")
+        pat = make_patient("STPAT", "Study Patient")
         test_session.add(pat)
         await test_session.commit()
-        study = _make_study("STPAT", "1.2.3.400")
+        study = make_study("STPAT", "1.2.3.400")
         test_session.add(study)
         await test_session.commit()
-        series = _make_series("1.2.3.400", "1.2.3.400.1", 1)
+        series = make_series("1.2.3.400", "1.2.3.400.1", 1)
         test_session.add(series)
         await test_session.commit()
         await test_session.refresh(study)
@@ -654,10 +607,10 @@ class TestPatientRepository:
     @pytest_asyncio.fixture
     async def env(self, test_session):
         repo = PatientRepository(test_session)
-        pat = await repo.create(_make_patient("PPAT1", "John Doe"))
-        await repo.create(_make_patient("PPAT2", "Jane Smith"))
+        pat = await repo.create(make_patient("PPAT1", "John Doe"))
+        await repo.create(make_patient("PPAT2", "Jane Smith"))
         # Add a study for PPAT1
-        study = _make_study("PPAT1", "1.2.3.500")
+        study = make_study("PPAT1", "1.2.3.500")
         test_session.add(study)
         await test_session.commit()
         return {"repo": repo, "patient": pat}
@@ -719,7 +672,7 @@ class TestRecordTypeRepository:
     @pytest_asyncio.fixture
     async def env(self, test_session):
         repo = RecordTypeRepository(test_session)
-        rt = _make_record_type("rt_test_00001", description="A test type")
+        rt = make_record_type("rt_test_00001", description="A test type")
         rt = await repo.create(rt)
         return {"repo": repo, "rt": rt}
 
@@ -754,7 +707,7 @@ class TestRecordTypeRepository:
     async def test_update_with_options_loads_relationships(self, test_session):
         """update() with options returns entity with eagerly loaded relationships."""
         repo = RecordTypeRepository(test_session)
-        rt = _make_record_type("rt_opts_001", description="Original")
+        rt = make_record_type("rt_opts_001", description="Original")
         rt = await repo.create(rt)
 
         fd = FileDefinition(name="opts_seg", pattern="seg.nrrd")
