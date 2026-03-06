@@ -24,15 +24,19 @@ from src.utils.logger import logger
 
 
 async def add_default_user_roles() -> None:
-    """
-    Add default user roles to the database if they don't exist.
+    """Add default user roles to the database if they don't exist.
 
-    Default roles include: doctor, auto, admin, expert, ordinator
+    Creates built-in roles (doctor, auto, admin, expert, ordinator)
+    plus any project-specific roles from ``settings.extra_roles``.
+    Duplicates between the two lists are ignored.
     """
+    from src.settings import settings
+
     default_roles = ["doctor", "auto", "admin", "expert", "ordinator"]
+    all_roles = list(dict.fromkeys(default_roles + settings.extra_roles))
 
     async with db_manager.get_async_session_context() as session:
-        for role_name in default_roles:
+        for role_name in all_roles:
             try:
                 await create_user_role(role_name, session=session)
                 logger.info(f"Created role: {role_name}")

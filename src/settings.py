@@ -149,6 +149,9 @@ class Settings(BaseSettings):
     # Security settings
     secret_key: str = "insecure-change-this-key-in-production"  # For session signing
 
+    # Role settings
+    extra_roles: list[str] = []
+
     # Admin user settings
     admin_username: str = "admin"
     admin_email: str = "admin@clarinet.ru"
