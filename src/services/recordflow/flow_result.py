@@ -177,3 +177,25 @@ class ConstantFlowResult(FlowResult):
 
     def __repr__(self) -> str:
         return f"ConstantFlowResult({self.value!r})"
+
+
+_SELF = "__self__"
+
+
+class Field(FlowResult):
+    """Proxy for referencing the triggering record's own data fields.
+
+    Unlike FlowResult which requires an explicit record type name,
+    Field resolves against whichever record triggered the flow.
+    Used with ``if_record()`` for concise self-referential conditions.
+
+    Example:
+        F = Field()
+        record("first_check")
+            .on_status("finished")
+            .if_record(F.is_good == True, F.study_type == "CT")
+            .add_record("segment_CT")
+    """
+
+    def __init__(self) -> None:
+        super().__init__(_SELF)

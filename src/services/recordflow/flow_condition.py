@@ -22,9 +22,15 @@ class FlowCondition:
     and a list of actions to execute when the condition is true.
     """
 
-    def __init__(self, condition: ComparisonResult | None, is_else: bool = False):
+    def __init__(
+        self,
+        condition: ComparisonResult | None,
+        is_else: bool = False,
+        on_missing: str = "raise",
+    ):
         self.condition = condition
         self.is_else = is_else
+        self.on_missing = on_missing
         self.actions: list[FlowAction] = []
 
     def add_condition(self, condition: ComparisonResult) -> None:
@@ -40,7 +46,11 @@ class FlowCondition:
         self.actions.append(action)
 
     def evaluate(self, record_context: dict[str, RecordRead]) -> bool:
-        """Evaluate whether this condition is true given the record context."""
+        """Evaluate whether this condition is true given the record context.
+
+        When ``on_missing="skip"``, missing or None fields cause the condition
+        to evaluate to False instead of raising an error.
+        """
         if self.is_else:
             # Else conditions are handled specially by the engine
             return True
@@ -48,7 +58,12 @@ class FlowCondition:
         if self.condition is None:
             return True  # No condition means always execute
 
-        return self.condition.evaluate(record_context)
+        try:
+            return self.condition.evaluate(record_context)
+        except (TypeError, ValueError):
+            if self.on_missing == "skip":
+                return False
+            raise
 
     def __repr__(self) -> str:
         if self.is_else:

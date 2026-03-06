@@ -30,7 +30,7 @@ from .flow_action import (
     PipelineAction,
     UpdateRecordAction,
 )
-from .flow_builder import flow, patient, record, series, study
+from .flow_builder import Field, flow, patient, record, series, study
 from .flow_condition import FlowCondition
 from .flow_loader import (
     discover_and_load_flows,
@@ -54,6 +54,7 @@ __all__ = [
     "ComparisonResult",
     "ConstantFlowResult",
     "CreateRecordAction",
+    "Field",
     "FieldComparison",
     "FlowAction",
     "FlowCondition",

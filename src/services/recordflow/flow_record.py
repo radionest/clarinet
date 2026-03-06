@@ -151,6 +151,42 @@ class FlowRecord:
             self.conditions.append(self._current_condition)
         return self
 
+    def if_record(self, *conditions: ComparisonResult, on_missing: str = "skip") -> FlowRecord:
+        """Add conditions on the triggering record's own data (AND semantics).
+
+        Combines multiple conditions with AND logic. Typically used with
+        the Field proxy for concise self-referential conditions.
+
+        Args:
+            *conditions: One or more comparisons (e.g. ``F.field == val``).
+            on_missing: How to handle missing/None fields during evaluation.
+                ``"skip"`` — treat condition as False (default).
+                ``"raise"`` — propagate the error.
+
+        Returns:
+            Self for method chaining.
+
+        Raises:
+            ValueError: If no conditions are provided.
+
+        Example:
+            F = Field()
+            record("first_check")
+                .on_status("finished")
+                .if_record(F.is_good == True, F.study_type == "CT")
+                .add_record("segment_CT")
+        """
+        if not conditions:
+            raise ValueError("if_record() requires at least one condition")
+
+        combined: ComparisonResult = conditions[0]
+        for cond in conditions[1:]:
+            combined = LogicalComparison(combined, cond, "and")
+
+        self._current_condition = FlowCondition(combined, on_missing=on_missing)
+        self.conditions.append(self._current_condition)
+        return self
+
     def or_(self, condition: ComparisonResult) -> FlowRecord:
         """Add an OR condition to the current condition block.
 

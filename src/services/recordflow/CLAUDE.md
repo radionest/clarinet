@@ -9,6 +9,7 @@ Event-driven workflow engine that creates/updates/invalidates records on status 
 - **FlowAction**: Typed Pydantic models for actions (`CreateRecordAction`, `UpdateRecordAction`, `CallFunctionAction`, `InvalidateRecordsAction`, `PipelineAction`)
 - **RecordFlowEngine**: Runtime execution engine — dispatches via `isinstance()` on action models
 - **FlowResult**: Lazy evaluation of data field comparisons
+- **Field**: Self-referential proxy (`F.field_name`) for triggering record's own data
 
 ## DSL Syntax
 
@@ -48,7 +49,8 @@ Actions are Pydantic models (not dicts). Each has a `type` Literal field:
 - `.on_status('status')` — trigger on status change
 - `.on_data_update()` — trigger when finished record's data is updated via PATCH
 - `.on_created()` — trigger on entity creation (for entity flows)
-- `.if_(condition)` / `.or_()` / `.and_()` — conditional logic
+- `.if_(condition)` / `.or_()` / `.and_()` — conditional logic (cross-record comparisons)
+- `.if_record(F.x == val, F.y > 0, on_missing="skip"|"raise")` — self-referential conditions with AND semantics
 - `.add_record('type', **kwargs)` → `CreateRecordAction` (supports `parent_record_id` kwarg; inherits `user_id` from triggering record)
 - `.update_record('name', status='new_status')` → `UpdateRecordAction`
 - `.invalidate_records('type1', 'type2', mode='hard'|'soft', callback=fn)` → `InvalidateRecordsAction`
@@ -97,11 +99,25 @@ Engine methods:
 
 ## Data Access
 
-Dot notation for record data fields:
+Two patterns for referencing record data fields:
+
 ```python
-record('report').data.findings.tumor_size   # Nested access
+# Cross-record: explicit record type name (creates side-effect FlowRecord)
+record('report').data.findings.tumor_size
 record('report').d.field_name               # Shorthand
+
+# Self-referential: Field proxy for triggering record's own data
+from src.services.recordflow import Field
+F = Field()
+record("first_check")
+    .on_status("finished")
+    .if_record(F.is_good == True, F.study_type == "CT")
+    .add_record("segment_CT")
 ```
+
+`if_record(*conditions, on_missing="skip")` — AND semantics for multiple conditions.
+`on_missing="skip"` (default): missing/None fields → condition evaluates to False.
+`on_missing="raise"`: missing fields → propagate error.
 
 Comparison operators: `==`, `!=`, `<`, `<=`, `>`, `>=`
 

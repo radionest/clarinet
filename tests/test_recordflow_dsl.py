@@ -17,6 +17,7 @@ from src.services.recordflow import (
     CallFunctionAction,
     ConstantFlowResult,
     CreateRecordAction,
+    Field,
     FieldComparison,
     FlowCondition,
     FlowRecord,
@@ -868,3 +869,271 @@ class TestEntityFlowEngine:
         assert call_log[0]["study_uid"] == "1.2.3"
         assert call_log[0]["series_uid"] == "1.2.3.4"
         assert call_log[0]["client"] is mock_client
+
+
+# ─── Field proxy — self-referential conditions ─────────────────────────────
+
+
+class TestFieldProxy:
+    """Tests for Field (F) proxy and if_record() method."""
+
+    def test_field_getattr_builds_self_ref(self):
+        """F.name creates FlowResult with __self__ record_name."""
+        F = Field()
+        ref = F.study_type
+        assert isinstance(ref, FlowResult)
+        assert ref.record_name == "__self__"
+        assert ref.field_path == ["study_type"]
+
+    def test_field_nested_access(self):
+        """F.findings.tumor_size builds nested field_path."""
+        F = Field()
+        ref = F.findings.tumor_size
+        assert ref.record_name == "__self__"
+        assert ref.field_path == ["findings", "tumor_size"]
+
+    def test_field_comparison_with_constant(self):
+        """F.field == value creates FieldComparison with ConstantFlowResult."""
+        F = Field()
+        cmp = F.is_good == True  # noqa: E712
+        assert isinstance(cmp, FieldComparison)
+        assert cmp.left.record_name == "__self__"
+        assert cmp.left.field_path == ["is_good"]
+        assert isinstance(cmp.right, ConstantFlowResult)
+
+    def test_field_evaluate_resolves_from_self(self):
+        """F-based comparison resolves __self__ key from context."""
+        F = Field()
+        cmp = F.score > 50
+        ctx = {"__self__": make_record_read("any_type", data={"score": 75})}
+        assert cmp.evaluate(ctx) is True
+
+    def test_field_evaluate_false(self):
+        """F-based comparison returns False when not met."""
+        F = Field()
+        cmp = F.score > 50
+        ctx = {"__self__": make_record_read("any_type", data={"score": 30})}
+        assert cmp.evaluate(ctx) is False
+
+    def test_field_nested_evaluate(self):
+        """F.a.b navigates nested data correctly."""
+        F = Field()
+        cmp = F.findings.tumor_size == 3.5
+        ctx = {"__self__": make_record_read("r", data={"findings": {"tumor_size": 3.5}})}
+        assert cmp.evaluate(ctx) is True
+
+    def test_field_all_operators(self):
+        """Field proxy works with all comparison operators."""
+        F = Field()
+        ctx = {"__self__": make_record_read("r", data={"v": 10})}
+
+        assert (F.v == 10).evaluate(ctx) is True
+        assert (F.v != 5).evaluate(ctx) is True
+        assert (F.v < 20).evaluate(ctx) is True
+        assert (F.v <= 10).evaluate(ctx) is True
+        assert (F.v > 5).evaluate(ctx) is True
+        assert (F.v >= 10).evaluate(ctx) is True
+
+
+class TestIfRecord:
+    """Tests for FlowRecord.if_record() method."""
+
+    def test_if_record_single_condition(self):
+        """if_record() with one condition creates a single FlowCondition."""
+        F = Field()
+        fr = FlowRecord("test")
+        fr.if_record(F.active == True).add_record("output")  # noqa: E712
+        assert len(fr.conditions) == 1
+        assert len(fr.conditions[0].actions) == 1
+
+    def test_if_record_multiple_conditions_and_semantics(self):
+        """if_record(A, B) combines with AND logic."""
+        F = Field()
+        fr = FlowRecord("test")
+        fr.if_record(F.is_good == True, F.study_type == "CT").add_record("output")  # noqa: E712
+
+        assert len(fr.conditions) == 1
+        condition = fr.conditions[0].condition
+        assert isinstance(condition, LogicalComparison)
+        assert condition.operator == "and"
+
+    def test_if_record_empty_raises(self):
+        """if_record() without conditions raises ValueError."""
+        fr = FlowRecord("test")
+        with pytest.raises(ValueError, match="requires at least one"):
+            fr.if_record()
+
+    def test_if_record_evaluates_true(self):
+        """if_record conditions pass when data matches."""
+        F = Field()
+        fr = FlowRecord("first_check")
+        fr.if_record(F.is_good == True, F.study_type == "CT").add_record("seg")  # noqa: E712
+
+        ctx = {
+            "__self__": make_record_read("first_check", data={"is_good": True, "study_type": "CT"}),
+        }
+        assert fr.conditions[0].evaluate(ctx) is True
+
+    def test_if_record_evaluates_false_on_mismatch(self):
+        """if_record AND fails when one field doesn't match."""
+        F = Field()
+        fr = FlowRecord("first_check")
+        fr.if_record(F.is_good == True, F.study_type == "CT").add_record("seg")  # noqa: E712
+
+        ctx = {
+            "__self__": make_record_read(
+                "first_check", data={"is_good": True, "study_type": "MRI"}
+            ),
+        }
+        assert fr.conditions[0].evaluate(ctx) is False
+
+    def test_if_record_on_missing_skip_returns_false(self):
+        """Missing field with on_missing='skip' evaluates to False."""
+        F = Field()
+        fr = FlowRecord("test")
+        fr.if_record(F.nonexistent_field > 0).add_record("output")
+
+        ctx = {"__self__": make_record_read("test", data={"other": 42})}
+        # nonexistent_field → None, None > 0 → TypeError → skip → False
+        assert fr.conditions[0].evaluate(ctx) is False
+
+    def test_if_record_on_missing_skip_nested(self):
+        """Missing nested field with on_missing='skip' evaluates to False."""
+        F = Field()
+        fr = FlowRecord("test")
+        fr.if_record(F.deep.nested.field == "x").add_record("output")
+
+        ctx = {"__self__": make_record_read("test", data={"unrelated": 1})}
+        # deep → None, then accessing nested on None → ValueError → skip → False
+        assert fr.conditions[0].evaluate(ctx) is False
+
+    def test_if_record_on_missing_raise_propagates(self):
+        """Missing field with on_missing='raise' raises TypeError."""
+        F = Field()
+        fr = FlowRecord("test")
+        fr.if_record(F.missing > 0, on_missing="raise").add_record("output")
+
+        ctx = {"__self__": make_record_read("test", data={})}
+        with pytest.raises(TypeError):
+            fr.conditions[0].evaluate(ctx)
+
+    def test_if_record_on_missing_skip_is_default(self):
+        """on_missing defaults to 'skip' for if_record."""
+        F = Field()
+        fr = FlowRecord("test")
+        fr.if_record(F.x > 0).add_record("output")
+        assert fr.conditions[0].on_missing == "skip"
+
+    def test_if_on_missing_raise_is_default(self):
+        """on_missing defaults to 'raise' for regular if_."""
+        fr = FlowRecord("test")
+        fr.if_(FlowResult("r", ["x"]) == 1).add_record("output")
+        assert fr.conditions[0].on_missing == "raise"
+
+    def test_if_record_none_data_skip(self):
+        """Record with None data and on_missing='skip' evaluates to False."""
+        F = Field()
+        fr = FlowRecord("test")
+        fr.if_record(F.anything == True).add_record("output")  # noqa: E712
+
+        ctx = {"__self__": make_record_read("test", data=None)}
+        assert fr.conditions[0].evaluate(ctx) is False
+
+
+class TestFieldProxyEngineIntegration:
+    """Tests for Field proxy through RecordFlowEngine."""
+
+    @pytest.mark.asyncio
+    async def test_engine_injects_self_and_evaluates_field(self):
+        """Engine puts triggering record into __self__ context key."""
+        from unittest.mock import AsyncMock
+
+        from src.services.recordflow.engine import RecordFlowEngine
+
+        mock_client = AsyncMock()
+        mock_client.find_records = AsyncMock(return_value=[])
+        mock_client.create_record = AsyncMock(return_value=make_record_read("seg", record_id=99))
+
+        engine = RecordFlowEngine(mock_client)
+
+        F = Field()
+        flow_def = FlowRecord("first_check")
+        flow_def.on_status("finished")
+        flow_def.if_record(F.is_good == True, F.study_type == "CT").add_record("seg")  # noqa: E712
+
+        engine.register_flow(flow_def)
+
+        test_record = make_record_read(
+            "first_check",
+            record_id=100,
+            status=RecordStatus.finished,
+            data={"is_good": True, "study_type": "CT"},
+        )
+
+        await engine.handle_record_status_change(test_record)
+
+        assert mock_client.create_record.call_count == 1
+        call_args = mock_client.create_record.call_args[0][0]
+        assert call_args.record_type_name == "seg"
+
+    @pytest.mark.asyncio
+    async def test_engine_field_condition_not_met_skips_action(self):
+        """Engine skips actions when Field condition is not met."""
+        from unittest.mock import AsyncMock
+
+        from src.services.recordflow.engine import RecordFlowEngine
+
+        mock_client = AsyncMock()
+        mock_client.find_records = AsyncMock(return_value=[])
+
+        engine = RecordFlowEngine(mock_client)
+
+        F = Field()
+        flow_def = FlowRecord("first_check")
+        flow_def.on_status("finished")
+        flow_def.if_record(F.is_good == True, F.study_type == "CT").add_record("seg")  # noqa: E712
+
+        engine.register_flow(flow_def)
+
+        test_record = make_record_read(
+            "first_check",
+            record_id=100,
+            status=RecordStatus.finished,
+            data={"is_good": True, "study_type": "MRI"},
+        )
+
+        await engine.handle_record_status_change(test_record)
+
+        assert mock_client.create_record.call_count == 0
+
+    @pytest.mark.asyncio
+    async def test_engine_field_missing_data_skips_gracefully(self):
+        """Engine gracefully skips when Field references missing data."""
+        from unittest.mock import AsyncMock
+
+        from src.services.recordflow.engine import RecordFlowEngine
+
+        mock_client = AsyncMock()
+        mock_client.find_records = AsyncMock(return_value=[])
+
+        engine = RecordFlowEngine(mock_client)
+
+        F = Field()
+        flow_def = FlowRecord("compare")
+        flow_def.on_status("finished")
+        flow_def.if_record(F.false_positive_num > 0).add_record("update_master")
+
+        engine.register_flow(flow_def)
+
+        # Record has no false_positive_num field
+        test_record = make_record_read(
+            "compare",
+            record_id=100,
+            status=RecordStatus.finished,
+            data={"other_field": 42},
+        )
+
+        await engine.handle_record_status_change(test_record)
+
+        # Should not crash, should not create record
+        assert mock_client.create_record.call_count == 0

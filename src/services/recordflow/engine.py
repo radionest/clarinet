@@ -19,6 +19,7 @@ from .flow_action import (
 )
 from .flow_condition import FlowCondition
 from .flow_record import FlowRecord
+from .flow_result import _SELF
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -435,6 +436,7 @@ class RecordFlowEngine:
         """
         # Add the current record to context
         context[flow.record_name] = record
+        context[_SELF] = record
 
         # Execute unconditional actions
         for action in flow.actions:
