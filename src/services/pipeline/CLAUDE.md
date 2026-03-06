@@ -56,6 +56,11 @@ The decorator also auto-registers the task in `_TASK_REGISTRY` (no manual `regis
 Retries are enabled by default (3x, exponential backoff + jitter). Extra kwargs are forwarded
 to `broker.task()`.
 
+**Automatic file change detection**: After successful task execution, the wrapper computes
+checksums for all files accessed via `ctx.files` (resolve/exists/glob) and compares them
+with pre-task snapshots. Changed files are reported to `POST /patients/{id}/file-events`,
+which triggers RecordFlow file flows (e.g. `file(master_model).on_update().invalidate_all_records(...)`).
+
 **Legacy pattern** — `@broker.task` still works for simple tasks that don't need TaskContext:
 
 ```python

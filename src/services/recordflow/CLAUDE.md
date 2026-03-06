@@ -5,6 +5,7 @@ Event-driven workflow engine that creates/updates/invalidates records on status 
 ## Core Concepts
 
 - **FlowRecord**: Trigger-activated workflow definition
+- **FlowFileRecord**: File-level trigger workflow definition (`flow_file.py`)
 - **FlowCondition**: Conditional blocks with actions
 - **FlowAction**: Typed Pydantic models for actions (`CreateRecordAction`, `UpdateRecordAction`, `CallFunctionAction`, `InvalidateRecordsAction`, `PipelineAction`)
 - **RecordFlowEngine**: Runtime execution engine — dispatches via `isinstance()` on action models
@@ -16,7 +17,7 @@ Event-driven workflow engine that creates/updates/invalidates records on status 
 Workflows are defined in `*_flow.py` files:
 
 ```python
-from src.services.recordflow import record, flow, series  # flow is an alias for record
+from src.services.recordflow import record, flow, series, file  # flow is an alias for record
 
 record('doctor_report')
     .on_status('finished')
@@ -30,6 +31,9 @@ record('master_model')
 
 # Auto-create record when a new series is imported
 series().on_created().add_record('series_markup')
+
+# Invalidate records when a project-level file changes
+file(master_model).on_update().invalidate_all_records('create_master_projection')
 ```
 
 ## Action Models (`flow_action.py`)
@@ -45,6 +49,7 @@ Actions are Pydantic models (not dicts). Each has a `type` Literal field:
 ## Key Methods
 
 - `record('type_name')` — create flow for a record type (always creates new instance)
+- `file(file_obj)` — create flow for a project-level file (accepts `.name` attr or string)
 - `series()` / `study()` / `patient()` — create entity creation flow
 - `.on_status('status')` — trigger on status change
 - `.on_finished()` — shorthand for `.on_status('finished')`
@@ -75,6 +80,10 @@ Record triggers (`on_status`, `on_data_update`, `on_file_change`) are mutually e
 
 Entity triggers use separate factory functions (`series()`, `study()`, `patient()`) and are stored in `ENTITY_REGISTRY`.
 
+- **File update** — fires when a project-level file changes (detected by pipeline task pre/post checksum comparison)
+
+File triggers use the `file()` factory function and are stored in `FILE_REGISTRY`.
+
 ## Invalidation
 
 `invalidate_records()` searches by **patient_id** (broadest scope), enabling cross-level invalidation:
@@ -101,6 +110,22 @@ and add them to `ENTITY_REGISTRY`. These are loaded alongside record flows by `l
 Engine methods:
 - `engine.handle_entity_created(entity_type, patient_id, study_uid?, series_uid?)` — main entry point
 - `engine._execute_entity_action()` — handles `create_record` and `call_function` actions
+
+## File Flows (`flow_file.py`)
+
+`file(file_obj)` creates a `FlowFileRecord` and adds it to `FILE_REGISTRY`. Accepts any object with `.name` attribute or a plain string.
+
+DSL methods:
+- `.on_update()` — trigger when file changes (checksum comparison)
+- `.invalidate_all_records('type1', 'type2', mode='hard'|'soft', callback=fn)` → `InvalidateRecordsAction`
+- `.call(func)` → `CallFunctionAction` (receives `file_name`, `patient_id`, `client` kwargs)
+
+Engine methods:
+- `engine.handle_file_update(file_name, patient_id)` — main entry point
+- File flows are stored in `engine.file_flows` dict (keyed by file name)
+- `_invalidate_by_file()` — like `_invalidate_records` but without source record (no self-skip)
+
+Event source: `@pipeline_task` wrapper computes pre/post checksums, notifies API via `POST /patients/{id}/file-events`.
 
 ## Data Access
 
@@ -136,14 +161,15 @@ engine = RecordFlowEngine(client)
 # discover_and_load_flows accepts directories OR individual files:
 discover_and_load_flows(engine, [Path('flows/')])
 # or load a single file directly:
-# load_flows_from_file(Path('flows/ct_flow.py'))  # clears RECORD_REGISTRY/ENTITY_REGISTRY first
+# load_flows_from_file(Path('flows/ct_flow.py'))  # clears RECORD_REGISTRY/ENTITY_REGISTRY/FILE_REGISTRY first
 
 await engine.handle_record_status_change(record, old_status)
 await engine.handle_record_data_update(record)  # For data update triggers
 await engine.handle_entity_created("series", patient_id, study_uid, series_uid)
+await engine.handle_file_update("master_model", patient_id)  # For file change triggers
 ```
 
-**Loader implementation**: uses `importlib.util.spec_from_file_location()` to load flow files as modules (replaces former `exec()`). `load_flows_from_file()` clears `RECORD_REGISTRY` and `ENTITY_REGISTRY` before each file load to prevent duplicate registrations.
+**Loader implementation**: uses `importlib.util.spec_from_file_location()` to load flow files as modules (replaces former `exec()`). `load_flows_from_file()` clears `RECORD_REGISTRY`, `ENTITY_REGISTRY`, and `FILE_REGISTRY` before each file load to prevent duplicate registrations.
 
 ## API Integration
 
@@ -152,6 +178,7 @@ await engine.handle_entity_created("series", patient_id, study_uid, series_uid)
 - `POST /records/{id}/invalidate` — direct invalidation endpoint (mode, source_record_id, reason)
 - `POST /patients`, `POST /studies`, `POST /series` trigger `handle_entity_created` via BackgroundTasks
 - `POST /dicom/import-study` triggers `handle_entity_created` for each imported series
+- `POST /patients/{id}/file-events` triggers `handle_file_update` via BackgroundTasks (called by pipeline task wrapper)
 
 ## Configuration
 
