@@ -1216,3 +1216,106 @@ class TestFieldProxyEngineIntegration:
 
         # Should not crash, should not create record
         assert mock_client.create_record.call_count == 0
+
+
+# ─── FlowRecord convenience methods ─────────────────────────────────────────
+
+
+class TestFlowRecordConvenience:
+    """Tests for FlowRecord convenience methods (on_finished, on_creation, etc.)."""
+
+    def test_on_finished_shortcut(self):
+        """on_finished() sets status_trigger to 'finished'."""
+        fr = FlowRecord("test_type")
+        result = fr.on_finished()
+        assert result is fr
+        assert fr.status_trigger == "finished"
+
+    def test_on_creation_alias(self):
+        """on_creation() is an alias for on_created()."""
+        fr = series()
+        result = fr.on_creation()
+        assert result is fr
+
+    def test_create_record_single(self):
+        """create_record() with one name creates one CreateRecordAction."""
+        fr = FlowRecord("test_type")
+        result = fr.create_record("child_type")
+        assert result is fr
+        assert len(fr.actions) == 1
+        assert isinstance(fr.actions[0], CreateRecordAction)
+        assert fr.actions[0].record_type_name == "child_type"
+
+    def test_create_record_multiple(self):
+        """create_record() with multiple names creates multiple CreateRecordActions."""
+        fr = FlowRecord("test_type")
+        fr.create_record("child_a", "child_b", "child_c")
+        assert len(fr.actions) == 3
+        names = [a.record_type_name for a in fr.actions]
+        assert names == ["child_a", "child_b", "child_c"]
+
+    def test_create_record_conditional(self):
+        """create_record() works after if_record()."""
+        F = Field()
+        fr = FlowRecord("test_type")
+        fr.if_record(F.active == True).create_record("output_a", "output_b")  # noqa: E712
+        assert len(fr.actions) == 0  # unconditional list is empty
+        assert len(fr.conditions) == 1
+        assert len(fr.conditions[0].actions) == 2
+        assert all(isinstance(a, CreateRecordAction) for a in fr.conditions[0].actions)
+
+    def test_invalidate_all_records_alias(self):
+        """invalidate_all_records() delegates to invalidate_records()."""
+        fr = FlowRecord("test_type")
+        fr.invalidate_all_records("child_a", "child_b", mode="soft")
+        assert len(fr.actions) == 1
+        assert isinstance(fr.actions[0], InvalidateRecordsAction)
+        assert fr.actions[0].record_type_names == ["child_a", "child_b"]
+        assert fr.actions[0].mode == "soft"
+
+
+# ─── Public facade — src.flow ───────────────────────────────────────────────
+
+
+class TestFlowFacade:
+    """Tests for the public src.flow facade module."""
+
+    def test_import_primitives(self):
+        """All DSL primitives are importable from src.flow."""
+        from src.flow import Field as F
+        from src.flow import patient as p
+        from src.flow import record as r
+        from src.flow import series as se
+        from src.flow import study as st
+        from src.flow import task as t
+
+        assert callable(r)
+        assert callable(st)
+        assert callable(se)
+        assert callable(p)
+        assert callable(t)
+        assert callable(F)
+
+    def test_task_bare_decorator(self):
+        """@task (no parens) decorates function via pipeline_task."""
+        from src.flow import task
+
+        @task
+        async def my_task(msg, ctx):
+            pass
+
+        # The decorated function should have a task_name attribute (from TaskIQ)
+        assert hasattr(my_task, "task_name")
+
+    def test_task_with_kwargs(self):
+        """@task(queue='q') returns a decorator."""
+        from src.flow import task
+
+        decorator = task(queue="clarinet.gpu")
+        assert callable(decorator)
+
+        @decorator
+        async def gpu_task(msg, ctx):
+            pass
+
+        assert hasattr(gpu_task, "task_name")

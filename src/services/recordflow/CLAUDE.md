@@ -47,13 +47,17 @@ Actions are Pydantic models (not dicts). Each has a `type` Literal field:
 - `record('type_name')` — create flow for a record type (always creates new instance)
 - `series()` / `study()` / `patient()` — create entity creation flow
 - `.on_status('status')` — trigger on status change
+- `.on_finished()` — shorthand for `.on_status('finished')`
 - `.on_data_update()` — trigger when finished record's data is updated via PATCH
 - `.on_created()` — trigger on entity creation (for entity flows)
+- `.on_creation()` — alias for `.on_created()`
 - `.if_(condition)` / `.or_()` / `.and_()` — conditional logic (cross-record comparisons)
 - `.if_record(F.x == val, F.y > 0, on_missing="skip"|"raise")` — self-referential conditions with AND semantics
 - `.add_record('type', **kwargs)` → `CreateRecordAction` (supports `parent_record_id` kwarg; inherits `user_id` from triggering record)
+- `.create_record('type1', 'type2')` — convenience wrapper calling `.add_record()` for each name
 - `.update_record('name', status='new_status')` → `UpdateRecordAction`
 - `.invalidate_records('type1', 'type2', mode='hard'|'soft', callback=fn)` → `InvalidateRecordsAction`
+- `.invalidate_all_records(...)` — alias for `.invalidate_records()`
 - `.pipeline('name', **extra_payload)` → `PipelineAction` (dispatches to pipeline service)
 - `.do_task(task_func, **extra_payload)` → `PipelineAction` (auto-creates a single-step Pipeline named `_task:{task_name}` from a `@pipeline_task()`-decorated function; deduplicates across calls)
 - `.call(func)` → `CallFunctionAction`

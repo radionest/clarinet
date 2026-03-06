@@ -133,6 +133,14 @@ class FlowRecord:
         """
         return self
 
+    def on_finished(self) -> FlowRecord:
+        """Shorthand for on_status('finished')."""
+        return self.on_status("finished")
+
+    def on_creation(self) -> FlowRecord:
+        """Alias for on_created()."""
+        return self.on_created()
+
     def if_(self, condition: ComparisonResult) -> FlowRecord:
         """Start a new condition block.
 
@@ -253,6 +261,21 @@ class FlowRecord:
 
         return self
 
+    def create_record(self, *record_type_names: str) -> FlowRecord:
+        """Create records for one or more record types.
+
+        Convenience wrapper around add_record() supporting multiple names.
+
+        Args:
+            *record_type_names: Names of record types to create.
+
+        Returns:
+            Self for method chaining.
+        """
+        for name in record_type_names:
+            self.add_record(name)
+        return self
+
     def update_record(self, record_name: str, **kwargs: object) -> FlowRecord:
         """Add a record update action.
 
@@ -338,6 +361,15 @@ class FlowRecord:
             self.actions.append(action)
 
         return self
+
+    def invalidate_all_records(
+        self,
+        *record_type_names: str,
+        mode: str = "hard",
+        callback: Callable | None = None,
+    ) -> FlowRecord:
+        """Alias for invalidate_records()."""
+        return self.invalidate_records(*record_type_names, mode=mode, callback=callback)
 
     def pipeline(self, pipeline_name: str, **extra_payload: object) -> FlowRecord:
         """Add a pipeline dispatch action.
