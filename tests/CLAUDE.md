@@ -28,6 +28,7 @@
 - `tests/integration/test_config_reconciler.py` — integration tests for config reconciler (create/update/unchanged/orphan/delete, file_registry + data_schema diffs)
 - `tests/integration/test_config_toml_sync.py` — integration tests for TOML bidirectional sync (bootstrap from TOML, export, round-trip)
 - `tests/integration/test_config_python_mode.py` — integration tests for Python config mode (loader, FileRef resolution, schema sidecars)
+- `tests/integration/test_parent_child.py` — integration tests for parent-child relationships (DAG validation, parent record type matching, API endpoints, config reconciler, search criteria, user_id inheritance)
 
 ## Guidelines
 
@@ -97,3 +98,59 @@ Two solutions:
        _resource.shutdown()
        _resource = _make_resource()  # ready for next lifespan
    ```
+
+## API Test Patterns
+
+### URL Constants
+
+Use `tests/utils/urls.py` instead of hardcoded URL strings. Full reference in `src/api/CLAUDE.md`.
+
+```python
+from tests.utils.urls import RECORDS_BASE, RECORD_TYPES
+
+resp = await client.post(RECORD_TYPES, json={...})
+resp = await client.get(f"{RECORDS_BASE}/{record_id}")
+resp = await client.patch(f"{RECORD_TYPES}/{name}", json={...})
+```
+
+### Model Factories
+
+Two modules serve different purposes:
+
+| Module | Style | DB? | Use when |
+|---|---|---|---|
+| `tests/utils/factories.py` | Sync functions (`make_patient()`) | No — returns instance | Building model objects for repo-level tests, seeding fixtures |
+| `tests/utils/test_helpers.py` | Async Factory classes (`PatientFactory.create_patient()`) | Yes — adds + commits | Need a fully persisted entity with DB-generated fields |
+
+```python
+# Lightweight instance (not persisted)
+from tests.utils.factories import make_patient, make_user, seed_record
+
+pat = make_patient("PAT_001", "Alice")
+session.add(pat)
+await session.commit()
+
+# Async factory (persisted automatically)
+from tests.utils.test_helpers import PatientFactory
+
+pat = await PatientFactory.create_patient(session, patient_id="PAT_001")
+```
+
+### Fixture Hierarchy
+
+| Fixture | Scope | Source | Purpose |
+|---|---|---|---|
+| `test_session` | function | `conftest.py` | Async SQLAlchemy session (rollback per test) |
+| `fresh_session` | function | `conftest.py` | Clean identity map — simulates production |
+| `client` | function | `conftest.py` | `httpx.AsyncClient` bound to test app |
+
+### Expected Status Codes
+
+| Pattern | Status |
+|---|---|
+| `POST` create (records, types, patients, studies, series, users, roles) | 201 |
+| `DELETE` entity / bulk operations | 204 |
+| `GET`, `PATCH`, `PUT`, other `POST` | 200 |
+| Entity not found | 404 |
+| Duplicate / conflict | 409 |
+| Validation error / business rule | 422 |
