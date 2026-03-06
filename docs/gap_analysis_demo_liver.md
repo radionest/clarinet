@@ -19,48 +19,6 @@ file(master_model).on_update().invalidate_all_records("create_master_projection"
 
 **What's needed**: New `file()` factory function + `on_update()` trigger. `FILE_REGISTRY` in the DSL registry. Engine dispatch for file-level events. This is the biggest architectural gap -- requires event propagation from file system or checksum monitoring.
 
----
-
----
-
-## 4. RecordFlow DSL: `.do_task(fn)` -- Unified Task Dispatch (NOT EXISTS)
-
-**Target DSL** (`pipeline_flow.py:137`):
-```python
-record(seg_type).on_finished().do_task(init_master_model)
-```
-
-**Current state**: Two separate methods: `.call(func)` (sync/async function in-process) and `.pipeline('name')` (distributed task queue). The target `.do_task(fn)` takes a `@task`-decorated function and dispatches it to the pipeline queue.
-
-**What's needed**: `.do_task(fn)` method on `FlowRecord` that creates a `PipelineAction` from a task-decorated function. Requires integration between RecordFlow actions and the pipeline task registry.
-
----
-
----
----
-
-## 8. Settings: `extra_roles` (NOT EXISTS)
-
-**Target DSL** (`settings.toml:1`):
-```toml
-extra_roles = ["doctor_CT", "doctor_MRI", "doctor_PDCT", "doctor_CT-AG"]
-```
-
-**Current state**: `src/settings.py` has no `extra_roles` setting. `UserRole` model exists with standard roles, but dynamic project-specific roles aren't supported.
-
-**What's needed**: `extra_roles: list[str]` in settings. Bootstrap logic to auto-create `UserRole` entries from this list. RecordType config uses `role = "doctor_CT"` which maps to `role_name` FK.
-
----
-
-## 9. Model Rename: `min_users`/`max_users` -> `min_records`/`max_records` (RENAME)
-
-**Target DSL**: All TOML configs use `min_records`/`max_records`.
-
-**Current state**: `RecordTypeBase` has `min_users`/`max_users` fields (`src/models/record_type.py:52-53`).
-
-**What's needed**: Rename fields + Alembic migration + update all references (API, frontend, config loader, reconciler, tests).
-
----
 
 ## 10. Public API: `from clarinet.flow import ...` (NOT EXISTS)
 
@@ -75,31 +33,4 @@ from clarinet.flow import Field as F, file, record, study, task
 
 ---
 
-## 11. Frontend: Multiple StudyInstanceUIDs Support (PARTIAL)
-
-**Current state** (`src/frontend/src/utils/viewer.gleam:11`): Builds URL with single UID:
-```gleam
-let base = "/ohif/viewer?StudyInstanceUIDs=" <> study_uid
-```
-
-**What's needed**: Accept `list[str]` of UIDs, join with `&StudyInstanceUIDs=`. OHIF natively supports this. Requires `lifecycle_open` (item 7) to populate the additional UIDs.
-
 ---
-
----
-
-## 13. Pipeline DSL: `@task` Decorator Naming (MINOR ALIGNMENT)
-
-**Target DSL** (`pipeline_flow.py:18`):
-```python
-from clarinet.flow import task
-
-@task
-def init_master_model(msg, ctx): ...
-```
-
-**Current state**: `@pipeline_task()` decorator in `src/services/pipeline/task.py`. The target DSL uses a simpler `@task` name.
-
-**What's needed**: Alias or rename. Minor.
-
---
