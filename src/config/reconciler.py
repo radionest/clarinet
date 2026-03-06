@@ -16,10 +16,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlmodel import select
 
+from src.exceptions.domain import ValidationError
 from src.models.file_schema import FileDefinitionRead, RecordTypeFileLink
 from src.models.record import RecordType, RecordTypeCreate
 from src.repositories.file_definition_repository import FileDefinitionRepository
 from src.utils.file_link_sync import sync_file_links
+from src.utils.graph_validation import detect_cycle
 from src.utils.logger import logger
 
 # Fields compared when detecting changes between config and DB.
@@ -28,6 +30,7 @@ _COMPARED_FIELDS: tuple[str, ...] = (
     "description",
     "label",
     "level",
+    "parent_type_name",
     "role_name",
     "min_users",
     "max_users",
@@ -241,7 +244,17 @@ async def reconcile_record_types(
             result.orphaned.append(orphan_name)
             logger.warning(f"Config reconcile: orphan '{orphan_name}' (not in config)")
 
-    # 4. Commit
+    # 4. DAG validation — check for cycles in parent_type_name graph
+    all_stmt = select(RecordType)
+    all_result = await session.execute(all_stmt)
+    all_types = all_result.scalars().all()
+    edges: dict[str, str | None] = {rt.name: rt.parent_type_name for rt in all_types}
+    cycle = detect_cycle(edges)
+    if cycle is not None:
+        path = " -> ".join(cycle)
+        raise ValidationError(f"RecordType parent_type_name graph has a cycle: {path}")
+
+    # 5. Commit
     await session.commit()
 
     logger.info(

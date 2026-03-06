@@ -59,6 +59,7 @@ pub type RecordType {
     // Primary key
     description: Option(String),
     label: Option(String),
+    parent_type_name: Option(String),
     slicer_script: Option(String),
     slicer_script_args: Option(Dict(String, String)),
     // SlicerArgs
@@ -88,6 +89,7 @@ pub type Record {
     record_type_name: String,
     user_id: Option(String),
     patient_id: String,
+    parent_record_id: Option(Int),
     study_anon_uid: Option(String),
     series_anon_uid: Option(String),
     clarinet_storage_path: Option(String),
@@ -202,6 +204,7 @@ pub type RecordTypeCreate {
     name: String,
     description: Option(String),
     label: Option(String),
+    parent_type_name: Option(String),
     slicer_script: Option(String),
     slicer_script_args: Option(Dict(String, String)),
     slicer_result_validator: Option(String),
@@ -224,6 +227,7 @@ pub type RecordCreate {
     record_type_name: String,
     user_id: Option(String),
     patient_id: String,
+    parent_record_id: Option(Int),
   )
 }
 
@@ -237,6 +241,7 @@ pub type RecordRead {
     record_type_name: String,
     user_id: Option(String),
     patient_id: String,
+    parent_record_id: Option(Int),
     data: Option(String),
     patient: Patient,
     study: Study,

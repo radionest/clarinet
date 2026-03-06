@@ -34,7 +34,7 @@ series().on_created().add_record('series_markup')
 ## Action Models (`flow_action.py`)
 
 Actions are Pydantic models (not dicts). Each has a `type` Literal field:
-- `CreateRecordAction(record_type_name, series_uid?, user_id?, context_info?)`
+- `CreateRecordAction(record_type_name, series_uid?, user_id?, parent_record_id?, context_info?)`
 - `UpdateRecordAction(record_name, status?)`
 - `CallFunctionAction(function, args, kwargs)` — needs `arbitrary_types_allowed`
 - `InvalidateRecordsAction(record_type_names, mode, callback?)` — needs `arbitrary_types_allowed`
@@ -49,7 +49,7 @@ Actions are Pydantic models (not dicts). Each has a `type` Literal field:
 - `.on_data_update()` — trigger when finished record's data is updated via PATCH
 - `.on_created()` — trigger on entity creation (for entity flows)
 - `.if_(condition)` / `.or_()` / `.and_()` — conditional logic
-- `.add_record('type', **kwargs)` → `CreateRecordAction`
+- `.add_record('type', **kwargs)` → `CreateRecordAction` (supports `parent_record_id` kwarg; inherits `user_id` from triggering record)
 - `.update_record('name', status='new_status')` → `UpdateRecordAction`
 - `.invalidate_records('type1', 'type2', mode='hard'|'soft', callback=fn)` → `InvalidateRecordsAction`
 - `.pipeline('name', **extra_payload)` → `PipelineAction` (dispatches to pipeline service)

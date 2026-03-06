@@ -206,6 +206,7 @@ class FlowRecord:
             record_type_name=record_type_name,
             series_uid=kwargs.get("series_uid"),  # type: ignore[arg-type]
             user_id=kwargs.get("user_id"),  # type: ignore[arg-type]
+            parent_record_id=kwargs.get("parent_record_id"),  # type: ignore[arg-type]
             context_info=kwargs.get("context_info"),  # type: ignore[arg-type]
         )
 

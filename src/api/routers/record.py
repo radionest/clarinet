@@ -216,6 +216,10 @@ async def add_record_type(
     if constrain_unique_names:
         await repo.ensure_unique_name(record_type.name)
 
+    # Validate parent type (DAG check)
+    if record_type.parent_type_name is not None:
+        await repo.validate_parent_type(record_type.name, record_type.parent_type_name)
+
     # Create RecordType without file_registry (it's M2M, not a column)
     create_data = record_type.model_dump(exclude={"file_registry"})
     new_record_type = RecordType(**create_data)
@@ -267,6 +271,10 @@ async def update_record_type(
             Draft202012Validator.check_schema(record_type_update.data_schema)
         except SchemaError as e:
             raise ValidationError(f"Data schema is invalid: {e}") from e
+
+    # Validate parent type if being updated (DAG check)
+    if "parent_type_name" in record_type_update.model_fields_set:
+        await repo.validate_parent_type(record_type_id, record_type_update.parent_type_name)
 
     # Extract file_registry before model_dump to preserve FileDefinitionRead objects
     file_defs_set = "file_registry" in record_type_update.model_fields_set
@@ -406,6 +414,15 @@ async def add_record(
     present, the record is created with ``blocked`` status instead of
     raising a validation error.
     """
+    # Validate and inherit from parent record if specified
+    if new_record.parent_record_id is not None:
+        parent = await repo.validate_parent_record(
+            new_record.parent_record_id, new_record.record_type_name
+        )
+        # Inherit user_id from parent if not explicitly set
+        if new_record.user_id is None:
+            new_record.user_id = parent.user_id
+
     record = Record(**new_record.model_dump())
     record = await repo.create_with_relations(record)
 

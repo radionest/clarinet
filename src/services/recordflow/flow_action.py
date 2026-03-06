@@ -32,6 +32,7 @@ class CreateRecordAction(_ActionBase):
     record_type_name: str
     series_uid: str | None = None
     user_id: str | None = None
+    parent_record_id: int | None = None
     context_info: str | None = None
 
 

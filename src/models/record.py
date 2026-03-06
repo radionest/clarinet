@@ -8,7 +8,7 @@ for backward compatibility.
 
 from datetime import UTC, datetime
 from enum import Enum
-from typing import Any
+from typing import Any, Optional
 from uuid import UUID
 
 from pydantic import computed_field, model_validator
@@ -106,6 +106,9 @@ class RecordBase(BaseModel):
     user_id: UUID | None = None
     patient_id: str
 
+    # Parent record link
+    parent_record_id: int | None = None
+
     # Anon UIDs (used in working_folder)
     study_anon_uid: str | None = None
     series_anon_uid: str | None = None
@@ -139,6 +142,17 @@ class Record(RecordBase, table=True):
         default=None, foreign_key="series.series_uid", ondelete="CASCADE"
     )
     series: Series | None = Relationship(back_populates="records")
+
+    parent_record_id: int | None = Field(
+        default=None,
+        foreign_key="record.id",
+        ondelete="SET NULL",
+    )
+    parent_record: Optional["Record"] = Relationship(  # noqa: UP045, UP037
+        back_populates="child_records",
+        sa_relationship_kwargs={"remote_side": "Record.id"},
+    )
+    child_records: list["Record"] = Relationship(back_populates="parent_record")  # noqa: UP037
 
     record_type_name: str = Field(foreign_key="recordtype.name")
     record_type: RecordType = Relationship(back_populates="records")
@@ -209,6 +223,7 @@ class RecordRead(RecordBase):
     """Pydantic model for reading record data with related entities."""
 
     id: int
+    parent_record_id: int | None = None
     data: RecordData | None = None
     files: dict[str, str] | None = Field(default=None, schema_extra={"deprecated": True})
     file_checksums: dict[str, str] | None = Field(default=None, schema_extra={"deprecated": True})

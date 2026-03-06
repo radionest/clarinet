@@ -43,6 +43,7 @@ class RecordSearchCriteria:
     user_id: UUID | None = None
     record_type_name: str | None = None
     record_status: RecordStatus | None = None
+    parent_record_id: int | None = None
     wo_user: bool | None = None
     random_one: bool = False
     data_queries: list[RecordFindResult] = field(default_factory=list)
@@ -497,6 +498,37 @@ class RecordRepository(BaseRepository[Record]):
             raise RecordTypeNotFoundError(name)
         return record_type
 
+    async def validate_parent_record(self, parent_record_id: int, child_type_name: str) -> Record:
+        """Validate parent_record_id is valid for this child type.
+
+        Args:
+            parent_record_id: ID of the proposed parent record.
+            child_type_name: Name of the child RecordType.
+
+        Returns:
+            Parent record (for user_id inheritance).
+
+        Raises:
+            RecordNotFoundError: If parent record doesn't exist.
+            ValidationError: If parent record type doesn't match child's parent_type_name.
+        """
+        parent = await self.get(parent_record_id)
+        child_type = await self.get_record_type(child_type_name)
+
+        if child_type.parent_type_name is None:
+            raise ValidationError(
+                f"RecordType '{child_type_name}' does not define a parent_type_name"
+            )
+
+        if parent.record_type_name != child_type.parent_type_name:
+            raise ValidationError(
+                f"Parent record type '{parent.record_type_name}' does not match "
+                f"expected parent type '{child_type.parent_type_name}' "
+                f"for child type '{child_type_name}'"
+            )
+
+        return parent
+
     async def check_constraints(
         self,
         record_type_name: str,
@@ -626,6 +658,10 @@ class RecordRepository(BaseRepository[Record]):
 
         if criteria.record_type_name:
             statement = statement.where(RecordType.name == criteria.record_type_name)
+
+        # Parent record filter
+        if criteria.parent_record_id is not None:
+            statement = statement.where(Record.parent_record_id == criteria.parent_record_id)
 
         # Data filters
         statement = self._apply_data_query_filters(statement, criteria.data_queries)

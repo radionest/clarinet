@@ -487,6 +487,10 @@ class RecordFlowEngine:
     ) -> None:
         """Create a new record.
 
+        Inherits ``user_id`` from the triggering record if not explicitly set.
+        If ``action.parent_record_id`` is set, passes it to the API which
+        validates type compatibility.
+
         Args:
             action: The CreateRecordAction with record details.
             record: The triggering record.
@@ -496,13 +500,19 @@ class RecordFlowEngine:
 
         series_uid = action.series_uid or (record.series.series_uid if record.series else None)
 
+        # Inherit user_id from triggering record if not explicitly set
+        user_id = action.user_id
+        if user_id is None and record.user_id is not None:
+            user_id = str(record.user_id)
+
         try:
             record_create = RecordCreate(
                 record_type_name=action.record_type_name,
                 patient_id=record.patient.id,
                 study_uid=record.study.study_uid if record.study else None,
                 series_uid=series_uid,
-                user_id=action.user_id,
+                user_id=user_id,
+                parent_record_id=action.parent_record_id,
                 context_info=action.context_info
                 or f"Created by flow from record {record.record_type.name} (id={record.id})",
             )

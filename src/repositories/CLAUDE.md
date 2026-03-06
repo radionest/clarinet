@@ -50,7 +50,7 @@ Special sentinel values for `anon_series_uid` / `anon_study_uid`:
 - `None` → no filter applied
 
 Other fields: `status`, `name` (record_type), `user_id`, `wo_user` (unassigned),
-`random_one`, `data_queries: list[RecordFindResult]` (JSON field queries with operators).
+`parent_record_id` (filter by parent), `random_one`, `data_queries: list[RecordFindResult]` (JSON field queries with operators).
 
 ## RecordRepository Specialized Methods
 
@@ -72,6 +72,7 @@ Beyond `BaseRepository`, `RecordRepository` has:
 | `assign_user(id, user_id)` | Assign record to user |
 | `claim_record(id, user_id)` | Claim unassigned record |
 | `bulk_update_status(ids, status)` | Batch status update |
+| `validate_parent_record(parent_id, child_type)` | Validate parent record type matches child's `parent_type_name` |
 | `check_constraints(record, record_type)` | Validate RecordType constraints |
 | `get_available_type_counts(user_id)` | Dict of available RecordType → count (batch-loaded to avoid N+1) |
 | `get_status_counts()` | Global status counts |

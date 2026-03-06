@@ -74,6 +74,7 @@ class RecordTypeDef(BaseModel):
     level: DicomQueryLevel = DicomQueryLevel.SERIES
     description: str | None = None
     label: str | None = None
+    parent_type_name: str | None = None
     role_name: str | None = None
     min_users: int | None = 1
     max_users: int | None = None

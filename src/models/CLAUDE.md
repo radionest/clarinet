@@ -61,6 +61,22 @@ select(Record).options(
 - **STUDY**: must have `patient_id` + `study_uid`; `series_uid` must be `None`
 - **SERIES**: must have `patient_id` + `study_uid` + `series_uid`
 
+## Parent-Child Relationships
+
+RecordType and Record support optional parent-child links for DAG workflows.
+
+**RecordType**: `parent_type_name` (FK → `recordtype.name`) defines which type can be a parent.
+- Self-referencing FK with `Relationship` (parent_type / child_types)
+- DAG constraint enforced by `detect_cycle()` from `src/utils/graph_validation.py`
+- Validated in `RecordTypeRepository.validate_parent_type()` before create/update
+
+**Record**: `parent_record_id` (FK → `record.id`, ON DELETE SET NULL) links to a specific parent record.
+- Self-referencing FK with `Relationship` (parent_record / child_records)
+- Validated in `RecordRepository.validate_parent_record()`: parent must exist and its type must match the child's `parent_type_name`
+- `user_id` is inherited from parent if not explicitly set on child
+
+**RecordFlow**: `CreateRecordAction` supports explicit `parent_record_id` kwarg and inherits `user_id` from the triggering record if not set.
+
 ## Search Models
 
 `RecordFindResult` (in `record.py`) specifies a search criterion for JSON data fields:

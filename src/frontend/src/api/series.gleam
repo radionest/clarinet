@@ -171,6 +171,7 @@ fn record_base_decoder() -> decode.Decoder(models.Record) {
     record_type_name: record_type_name,
     user_id: user_id,
     patient_id: patient_id,
+    parent_record_id: None,
     study_anon_uid: None,
     series_anon_uid: None,
     clarinet_storage_path: None,

@@ -74,6 +74,11 @@ fn record_type_base_decoder() -> decode.Decoder(RecordType) {
     None,
     decode.optional(decode.string),
   )
+  use parent_type_name <- decode.optional_field(
+    "parent_type_name",
+    None,
+    decode.optional(decode.string),
+  )
 
   let level = case level_str {
     None -> types.Series
@@ -92,6 +97,7 @@ fn record_type_base_decoder() -> decode.Decoder(RecordType) {
     name: name,
     description: description,
     label: label,
+    parent_type_name: parent_type_name,
     slicer_script: slicer_script,
     slicer_script_args: None,
     slicer_result_validator: slicer_result_validator,
@@ -150,6 +156,11 @@ pub fn record_decoder() -> decode.Decoder(Record) {
     decode.optional(decode.string),
   )
   use patient_id <- decode.field("patient_id", decode.string)
+  use parent_record_id <- decode.optional_field(
+    "parent_record_id",
+    None,
+    decode.optional(decode.int),
+  )
   use record_type <- decode.optional_field(
     "record_type",
     None,
@@ -201,6 +212,7 @@ pub fn record_decoder() -> decode.Decoder(Record) {
     record_type_name: record_type_name,
     user_id: user_id,
     patient_id: patient_id,
+    parent_record_id: parent_record_id,
     study_anon_uid: None,
     series_anon_uid: None,
     clarinet_storage_path: None,
@@ -338,6 +350,11 @@ pub fn record_type_full_decoder() -> decode.Decoder(RecordType) {
     None,
     decode.optional(decode.string),
   )
+  use parent_type_name <- decode.optional_field(
+    "parent_type_name",
+    None,
+    decode.optional(decode.string),
+  )
 
   let level = case level_str {
     None -> types.Series
@@ -356,6 +373,7 @@ pub fn record_type_full_decoder() -> decode.Decoder(RecordType) {
     name: name,
     description: description,
     label: label,
+    parent_type_name: parent_type_name,
     slicer_script: slicer_script,
     slicer_script_args: slicer_script_args,
     slicer_result_validator: slicer_result_validator,
