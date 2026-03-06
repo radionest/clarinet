@@ -698,6 +698,19 @@ class ClarinetClient:
         )
         return RecordRead.model_validate(response.json())
 
+    async def update_record(self, record_id: int, **fields: Any) -> RecordRead:
+        """Update record fields (partial update).
+
+        Args:
+            record_id: Record ID
+            **fields: Fields to update (e.g. viewer_study_uids=["1.2.3", "1.2.4"])
+
+        Returns:
+            Updated record
+        """
+        response = await self._request("PATCH", f"/records/{record_id}", json=fields)
+        return RecordRead.model_validate(response.json())
+
     async def invalidate_record(
         self,
         record_id: int,

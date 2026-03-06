@@ -174,6 +174,7 @@ fn record_base_decoder() -> decode.Decoder(models.Record) {
     parent_record_id: None,
     study_anon_uid: None,
     series_anon_uid: None,
+    viewer_study_uids: None,
     clarinet_storage_path: None,
     files: None,
     file_checksums: None,

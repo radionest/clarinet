@@ -5,7 +5,6 @@ level = "STUDY"
 min_records = 1
 max_records = 4
 role = "doctor_CT"
-lifecycle_open = "add_previous_ct_studies_to_viewer.py"
 slicer_script = "segment.py"
 
 [[files]]

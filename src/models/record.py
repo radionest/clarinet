@@ -43,6 +43,7 @@ __all__ = [
     "RecordFind",
     "RecordFindResult",
     "RecordFindResultComparisonOperator",
+    "RecordOptional",
     "RecordRead",
     "RecordType",
     "RecordTypeBase",
@@ -168,6 +169,7 @@ class Record(RecordBase, table=True):
     user: User | None = Relationship(back_populates="records")
 
     data: RecordData | None = Field(default_factory=dict, sa_column=Column(JSON))
+    viewer_study_uids: list[str] | None = Field(default=None, sa_column=Column(JSON))
 
     # M2M relationship to FileDefinition via link table
     file_links: list[RecordFileLink] = Relationship(
@@ -219,12 +221,19 @@ class RecordCreate(RecordBase):
     pass
 
 
+class RecordOptional(SQLModel):
+    """Pydantic model for partial record updates."""
+
+    viewer_study_uids: list[str] | None = None
+
+
 class RecordRead(RecordBase):
     """Pydantic model for reading record data with related entities."""
 
     id: int
     parent_record_id: int | None = None
     data: RecordData | None = None
+    viewer_study_uids: list[str] | None = None
     files: dict[str, str] | None = Field(default=None, schema_extra={"deprecated": True})
     file_checksums: dict[str, str] | None = Field(default=None, schema_extra={"deprecated": True})
     file_links: list[RecordFileLinkRead] | None = None
