@@ -792,6 +792,26 @@ class ClarinetClient:
         result: dict[str, Any] = response.json()
         return result
 
+    async def notify_file_changes(
+        self, patient_id: str, changed_files: list[str]
+    ) -> dict[str, Any]:
+        """Notify the API that project-level files have changed.
+
+        Args:
+            patient_id: The patient whose files changed.
+            changed_files: List of logical file names that changed.
+
+        Returns:
+            Response dict with dispatched file names.
+        """
+        response = await self._request(
+            "POST",
+            f"/patients/{patient_id}/file-events",
+            json=changed_files,
+        )
+        result: dict[str, Any] = response.json()
+        return result
+
     async def find_records(
         self,
         skip: int = 0,

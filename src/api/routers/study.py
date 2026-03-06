@@ -4,7 +4,7 @@ Async study router for the Clarinet framework.
 This module provides async API endpoints for managing medical imaging studies, series, and related data.
 """
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Request, status
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, Request, status
 
 from src.api.auth_config import current_active_user
 from src.api.dependencies import StudyServiceDep
@@ -78,6 +78,31 @@ async def delete_patient(
 ) -> None:
     """Delete a patient and all related studies, series, and records."""
     await service.delete_patient(patient_id)
+
+
+@router.post("/patients/{patient_id}/file-events")
+async def notify_file_events(
+    patient_id: str,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    changed_files: list[str] = Body(...),
+) -> dict[str, list[str]]:
+    """Notify that project-level files have changed for a patient.
+
+    Dispatches file update flows via the RecordFlow engine in background tasks.
+
+    Args:
+        patient_id: The patient whose files changed.
+        changed_files: List of logical file names that changed.
+
+    Returns:
+        Dict with the list of dispatched file names.
+    """
+    engine = getattr(request.app.state, "recordflow_engine", None)
+    if engine:
+        for file_name in changed_files:
+            background_tasks.add_task(engine.handle_file_update, file_name, patient_id)
+    return {"dispatched": changed_files}
 
 
 # Study endpoints
