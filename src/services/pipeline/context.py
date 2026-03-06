@@ -94,6 +94,7 @@ class FileResolver:
         self._record_type_level = record_type_level
         self._registry: dict[str, FileDefinitionRead] = {fd.name: fd for fd in file_registry}
         self._fields = fields
+        self._accessed_files: dict[str, Path] = {}
 
     # ── Static factories (used by build_task_context & RecordQuery) ──
 
@@ -237,7 +238,10 @@ class FileResolver:
         working_dir = self._working_dirs[level]
         merged = {**self._fields, **overrides}
         filename = _resolve_pattern_from_dict(fd.pattern, merged)
-        return working_dir / filename
+        path = working_dir / filename
+        if fd.name not in self._accessed_files:
+            self._accessed_files[fd.name] = path
+        return path
 
     def exists(self, file_def: FileDefinitionRead | str, **overrides: Any) -> bool:
         """Check whether a resolved file exists on disk.
@@ -265,7 +269,43 @@ class FileResolver:
         fd = self._lookup(file_def)
         level = fd.level or self._record_type_level
         working_dir = self._working_dirs[level]
-        return glob_file_paths(fd, working_dir)
+        paths = glob_file_paths(fd, working_dir)
+        if fd.name not in self._accessed_files:
+            self._accessed_files[fd.name] = paths[0] if paths else working_dir
+        return paths
+
+    @property
+    def accessed_files(self) -> dict[str, Path]:
+        """Return a copy of the accessed files mapping.
+
+        Returns:
+            Dict mapping file definition names to their resolved paths.
+        """
+        return dict(self._accessed_files)
+
+    async def snapshot_checksums(self) -> dict[str, str | None]:
+        """Compute checksums for all registered file definitions.
+
+        Iterates the file registry and resolves each file definition to a path
+        without tracking access. Used to capture pre-task state for change detection.
+
+        Returns:
+            Dict mapping file definition names to their SHA256 checksums (or None).
+        """
+        from src.utils.file_checksums import compute_file_checksum
+
+        checksums: dict[str, str | None] = {}
+        for fd in self._registry.values():
+            try:
+                level = fd.level or self._record_type_level
+                working_dir = self._working_dirs[level]
+                merged = dict(self._fields)
+                filename = _resolve_pattern_from_dict(fd.pattern, merged)
+                path = working_dir / filename
+                checksums[fd.name] = await compute_file_checksum(path)
+            except (KeyError, ValueError):
+                checksums[fd.name] = None
+        return checksums
 
 
 class RecordQuery:

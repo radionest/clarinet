@@ -23,7 +23,7 @@ from src.utils.logger import logger
 
 from .broker import get_broker
 from .chain import register_task
-from .context import build_task_context
+from .context import FileResolver, build_task_context
 from .message import PipelineMessage
 
 
@@ -63,7 +63,14 @@ def pipeline_task(
             try:
                 await client.login()
                 ctx = await build_task_context(message, client)
+                pre_checksums = await ctx.files.snapshot_checksums()
                 result = await fn(message, ctx)
+                changed = await _detect_file_changes(ctx.files, pre_checksums)
+                if changed and message.patient_id:
+                    try:
+                        await client.notify_file_changes(message.patient_id, changed)
+                    except Exception:
+                        logger.warning("Failed to notify file changes", exc_info=True)
                 if isinstance(result, PipelineMessage):
                     return result.model_dump()
                 return message.model_dump()
@@ -83,3 +90,24 @@ def pipeline_task(
         return decorated
 
     return decorator
+
+
+async def _detect_file_changes(files: FileResolver, pre: dict[str, str | None]) -> list[str]:
+    """Compare pre-task checksums with current state to detect file changes.
+
+    Args:
+        files: FileResolver with access tracking from the completed task.
+        pre: Pre-task checksums from ``snapshot_checksums()``.
+
+    Returns:
+        List of file definition names whose checksums changed.
+    """
+    from src.utils.file_checksums import compute_file_checksum
+
+    changed: list[str] = []
+    for name, path in files.accessed_files.items():
+        old = pre.get(name)
+        new = await compute_file_checksum(path) if path.is_file() else None
+        if old != new:
+            changed.append(name)
+    return changed
