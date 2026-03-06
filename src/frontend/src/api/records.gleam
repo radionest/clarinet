@@ -191,6 +191,16 @@ pub fn record_decoder() -> decode.Decoder(Record) {
     None,
     decode.optional(decode.string),
   )
+  use viewer_study_uids <- decode.optional_field(
+    "viewer_study_uids",
+    None,
+    decode.optional(decode.list(decode.string)),
+  )
+  use viewer_series_uids <- decode.optional_field(
+    "viewer_series_uids",
+    None,
+    decode.optional(decode.list(decode.string)),
+  )
   use data_dyn <- decode.optional_field(
     "data",
     None,
@@ -215,6 +225,8 @@ pub fn record_decoder() -> decode.Decoder(Record) {
     parent_record_id: parent_record_id,
     study_anon_uid: None,
     series_anon_uid: None,
+    viewer_study_uids: viewer_study_uids,
+    viewer_series_uids: viewer_series_uids,
     clarinet_storage_path: None,
     files: None,
     file_checksums: None,

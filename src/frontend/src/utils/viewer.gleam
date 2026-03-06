@@ -2,6 +2,7 @@
 
 import api/types
 import gleam/option.{type Option, None, Some}
+import gleam/string
 import lustre/attribute
 import lustre/element.{type Element}
 import lustre/element/html
@@ -36,16 +37,58 @@ pub fn viewer_button(
 }
 
 /// Render a viewer button for a record based on its DicomQueryLevel.
+/// If viewer_study_uids is set, opens all listed studies in OHIF.
+/// Otherwise falls back to single study_uid.
+/// Series filtering: viewer_series_uids > series_uid (for SERIES-level records).
 /// PATIENT or unknown level -> no button; STUDY -> study URL; SERIES -> study+series URL.
 pub fn record_viewer_button(
   study_uid: Option(String),
   series_uid: Option(String),
+  viewer_study_uids: Option(List(String)),
+  viewer_series_uids: Option(List(String)),
   level: Option(types.DicomQueryLevel),
   class: String,
 ) -> Element(msg) {
   case level {
-    Some(types.Study) -> viewer_button(study_uid, None, class)
-    Some(types.Series) -> viewer_button(study_uid, series_uid, class)
+    Some(types.Study) | Some(types.Series) -> {
+      // Use viewer_study_uids if available and non-empty
+      let uids = case viewer_study_uids {
+        Some(uids) if uids != [] -> Some(uids)
+        _ -> None
+      }
+      case uids {
+        Some(uid_list) -> {
+          let study_part =
+            string.join(uid_list, "&StudyInstanceUIDs=")
+          let url = "/ohif/viewer?StudyInstanceUIDs=" <> study_part
+          // Determine series UIDs to include
+          let series_part = case viewer_series_uids {
+            Some(sids) if sids != [] ->
+              "&SeriesInstanceUIDs="
+              <> string.join(sids, "&SeriesInstanceUIDs=")
+            _ ->
+              case level, series_uid {
+                Some(types.Series), Some(s) -> "&SeriesInstanceUIDs=" <> s
+                _, _ -> ""
+              }
+          }
+          let url = url <> series_part
+          html.a(
+            [
+              attribute.href(url),
+              attribute.target("_blank"),
+              attribute.class(class),
+            ],
+            [html.text("Open in Viewer")],
+          )
+        }
+        None ->
+          case level {
+            Some(types.Series) -> viewer_button(study_uid, series_uid, class)
+            _ -> viewer_button(study_uid, None, class)
+          }
+      }
+    }
     Some(types.Patient) | None -> element.none()
   }
 }

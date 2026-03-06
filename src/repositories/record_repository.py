@@ -295,6 +295,25 @@ class RecordRepository(BaseRepository[Record]):
         await self.session.commit()
         return await self.get_with_relations(record_id), old_status
 
+    async def update_fields(self, record_id: int, update_data: dict[str, Any]) -> Record:
+        """Update arbitrary fields on a record.
+
+        Args:
+            record_id: Record ID
+            update_data: Dictionary of field names to new values
+
+        Returns:
+            Updated record with relations loaded
+
+        Raises:
+            RecordNotFoundError: If record doesn't exist
+        """
+        record = await self.get(record_id)
+        for key, value in update_data.items():
+            setattr(record, key, value)
+        await self.session.commit()
+        return await self.get_with_relations(record_id)
+
     async def update_checksums(self, record: Record, checksums: dict[str, str]) -> None:
         """Update file checksums on existing RecordFileLink rows.
 

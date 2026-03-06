@@ -41,6 +41,7 @@ from src.models import (
     Record,
     RecordCreate,
     RecordFindResult,
+    RecordOptional,
     RecordRead,
     RecordStatus,
     RecordType,
@@ -541,6 +542,23 @@ async def update_record_data(
     trigger_recordflow(request, background_tasks, updated)
 
     return updated
+
+
+@router.patch("/{record_id}", response_model=RecordRead)
+async def update_record(
+    record_id: int,
+    record_update: RecordOptional,
+    repo: RecordRepositoryDep,
+) -> Record:
+    """Update a record with partial data.
+
+    Currently supports: viewer_study_uids.
+    Does NOT trigger RecordFlow (use PATCH /status for workflow transitions).
+    """
+    update_data = record_update.model_dump(exclude_unset=True)
+    if not update_data:
+        return await repo.get_with_relations(record_id)
+    return await repo.update_fields(record_id, update_data)
 
 
 @router.post("/{record_id}/validate-files")
