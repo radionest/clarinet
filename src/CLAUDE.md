@@ -80,7 +80,6 @@ Config loader: `src/utils/config_loader.py` (TOML/JSON discovery).
 - `file_registry.toml`/`.json` and `*.schema.json` excluded from config discovery
 
 Bootstrap uses `reconcile_config()` from `src/utils/bootstrap.py` — dispatches by mode.
-Old `create_record_types_from_config()` preserved as deprecated alias.
 
 ## Database & API
 

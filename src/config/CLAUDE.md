@@ -90,7 +90,7 @@ In TOML mode, these endpoints also trigger background TOML export/delete.
 
 ## Bootstrap Integration
 
-`reconcile_config()` in `bootstrap.py` replaces `create_record_types_from_config()`:
+`reconcile_config()` in `bootstrap.py`:
 - Dispatches by `settings.config_mode`
 - TOML: discover files → load → resolve file refs → reconcile
 - Python: `load_python_config()` → reconcile
