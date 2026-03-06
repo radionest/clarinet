@@ -1,0 +1,13 @@
+name = "segment_CT_with_archive"
+description = "CT lesion segmentation — current study plus all archive CT studies are available for review"
+label = "CT segment (with archive)"
+level = "STUDY"
+min_records = 1
+max_records = 4
+role = "doctor_CT"
+slicer_script = "segment.py"
+
+[[files]]
+name = "segmentation_with_archive"
+role = "output"
+required = true

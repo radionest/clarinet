@@ -1,0 +1,26 @@
+{
+    "type": "object",
+    "properties": {
+        "classifications": {
+            "type": "array",
+            "description": "Classification of each lesion from the projection that was not found in initial segmentation",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "lesion_num": {
+                        "type": "integer",
+                        "description": "ROI number from master model"
+                    },
+                    "classification": {
+                        "type": "string",
+                        "enum": ["metastasis", "unclear", "benign", "invisible"],
+                        "description": "Doctor's classification of the lesion"
+                    }
+                },
+                "required": ["lesion_num", "classification"]
+            }
+        }
+    },
+    "required": ["classifications"],
+    "unevaluatedProperties": false
+}

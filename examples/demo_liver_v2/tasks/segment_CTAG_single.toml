@@ -1,0 +1,13 @@
+name = "segment_CTAG_single"
+description = "CT angiography lesion segmentation"
+label = "CT-AG segment"
+level = "STUDY"
+min_records = 1
+max_records = 4
+role = "doctor_CT-AG"
+slicer_script = "segment.py"
+
+[[files]]
+name = "segmentation_single"
+role = "output"
+required = true

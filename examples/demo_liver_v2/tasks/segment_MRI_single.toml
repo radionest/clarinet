@@ -1,0 +1,13 @@
+name = "segment_MRI_single"
+description = "MRI lesion segmentation — only the current study is available for review"
+label = "MRI segment"
+level = "STUDY"
+min_records = 1
+max_records = 4
+role = "doctor_MRI"
+slicer_script = "segment.py"
+
+[[files]]
+name = "segmentation_single"
+role = "output"
+required = true
