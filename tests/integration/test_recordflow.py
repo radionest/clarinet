@@ -17,6 +17,7 @@ from src.models.patient import Patient
 from src.models.record import RecordCreate, RecordRead, RecordType
 from src.models.study import Study
 from src.services.recordflow import FlowRecord, FlowResult, RecordFlowEngine
+from src.services.recordflow.flow_file import FILE_REGISTRY
 from src.services.recordflow.flow_record import ENTITY_REGISTRY, RECORD_REGISTRY
 
 
@@ -25,9 +26,11 @@ def _clear_registry():
     """Clear the global FlowRecord registries between tests."""
     RECORD_REGISTRY.clear()
     ENTITY_REGISTRY.clear()
+    FILE_REGISTRY.clear()
     yield
     RECORD_REGISTRY.clear()
     ENTITY_REGISTRY.clear()
+    FILE_REGISTRY.clear()
 
 
 @pytest_asyncio.fixture(autouse=True)
@@ -1073,3 +1076,97 @@ class TestEntityFlowRuntime:
         )
         assert len(records) == 1
         assert records[0].series_uid == "9.8.7.6.5.4.3.2.1"
+
+
+class TestFileFlowIntegration:
+    """Integration tests for file update → invalidation chain."""
+
+    @pytest.mark.asyncio
+    async def test_file_update_invalidates_records(
+        self,
+        clarinet_client: ClarinetClient,
+        record_types: dict[str, RecordType],
+        test_patient: Patient,
+        test_study: Study,
+    ):
+        """handle_file_update() invalidates matching records via API."""
+        from src.services.recordflow.flow_file import FlowFileRecord
+
+        engine = RecordFlowEngine(clarinet_client)
+
+        # Register file flow: master_model change → invalidate child_analysis
+        fr = FlowFileRecord("master_model")
+        fr.on_update().invalidate_all_records("child_analysis", mode="hard")
+        engine.register_flow(fr)
+
+        # Create a finished child_analysis record
+        await _create_record_via_client(
+            clarinet_client,
+            "child_analysis",
+            test_patient.id,
+            test_study.study_uid,
+            status=RecordStatus.finished,
+        )
+
+        # Trigger file update
+        await engine.handle_file_update("master_model", test_patient.id)
+
+        # Verify child_analysis is now pending (invalidated)
+        records = await clarinet_client.find_records(
+            study_uid=test_study.study_uid,
+            record_type_name="child_analysis",
+        )
+        assert len(records) == 1
+        assert records[0].status == RecordStatus.pending
+        assert records[0].context_info is not None
+        assert "file change" in records[0].context_info
+
+    @pytest.mark.asyncio
+    async def test_file_event_endpoint(
+        self,
+        client: AsyncClient,
+        clarinet_client: ClarinetClient,
+        record_types: dict[str, RecordType],
+        test_patient: Patient,
+        test_study: Study,
+    ):
+        """POST /patients/{id}/file-events dispatches file flows via engine."""
+        from src.services.recordflow.flow_file import FlowFileRecord
+
+        engine = RecordFlowEngine(clarinet_client)
+
+        # Register file flow
+        fr = FlowFileRecord("master_model")
+        fr.on_update().invalidate_all_records("child_analysis", mode="hard")
+        engine.register_flow(fr)
+
+        # Install engine in app state
+        app.state.recordflow_engine = engine
+
+        # Create a finished child_analysis record
+        await _create_record_via_client(
+            clarinet_client,
+            "child_analysis",
+            test_patient.id,
+            test_study.study_uid,
+            status=RecordStatus.finished,
+        )
+
+        # Call file-events endpoint
+        resp = await client.post(
+            f"/api/patients/{test_patient.id}/file-events",
+            json=["master_model"],
+        )
+        assert resp.status_code == 200
+        assert resp.json()["dispatched"] == ["master_model"]
+
+        # Verify child_analysis was invalidated
+        records = await clarinet_client.find_records(
+            study_uid=test_study.study_uid,
+            record_type_name="child_analysis",
+        )
+        assert len(records) == 1
+        assert records[0].status == RecordStatus.pending
+
+        # Cleanup
+        app.state.recordflow_engine = None

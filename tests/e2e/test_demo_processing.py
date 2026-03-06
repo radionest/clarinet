@@ -28,6 +28,7 @@ from src.models.record import RecordType
 from src.models.study import Series, Study
 from src.models.user import UserRole
 from src.services.recordflow import RecordFlowEngine
+from src.services.recordflow.flow_file import FILE_REGISTRY
 from src.services.recordflow.flow_loader import load_flows_from_file
 from src.services.recordflow.flow_record import ENTITY_REGISTRY, RECORD_REGISTRY
 from src.utils.config_loader import discover_config_files, load_record_config
@@ -48,9 +49,11 @@ def _clear_registry():
     """Clear the global FlowRecord registries between tests."""
     RECORD_REGISTRY.clear()
     ENTITY_REGISTRY.clear()
+    FILE_REGISTRY.clear()
     yield
     RECORD_REGISTRY.clear()
     ENTITY_REGISTRY.clear()
+    FILE_REGISTRY.clear()
 
 
 @pytest_asyncio.fixture

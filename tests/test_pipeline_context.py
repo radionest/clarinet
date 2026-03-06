@@ -613,8 +613,12 @@ class TestPipelineTaskDecorator:
         mock_client = AsyncMock()
         mock_client_cls.return_value = mock_client
 
-        # Mock context
-        mock_ctx = MagicMock(spec=TaskContext)
+        # Mock context with files supporting snapshot_checksums and accessed_files
+        mock_files = MagicMock()
+        mock_files.snapshot_checksums = AsyncMock(return_value={})
+        mock_files.accessed_files = {}
+        mock_ctx = MagicMock()
+        mock_ctx.files = mock_files
         mock_build_ctx.return_value = mock_ctx
 
         # Import after mocking
@@ -662,7 +666,12 @@ class TestPipelineTaskDecorator:
 
         mock_client = AsyncMock()
         mock_client_cls.return_value = mock_client
-        mock_build_ctx.return_value = MagicMock(spec=TaskContext)
+        mock_files = MagicMock()
+        mock_files.snapshot_checksums = AsyncMock(return_value={})
+        mock_files.accessed_files = {}
+        mock_ctx = MagicMock()
+        mock_ctx.files = mock_files
+        mock_build_ctx.return_value = mock_ctx
 
         from src.services.pipeline.task import pipeline_task
 
@@ -701,7 +710,12 @@ class TestPipelineTaskDecorator:
 
         mock_client = AsyncMock()
         mock_client_cls.return_value = mock_client
-        mock_build_ctx.return_value = MagicMock(spec=TaskContext)
+        mock_files = MagicMock()
+        mock_files.snapshot_checksums = AsyncMock(return_value={})
+        mock_files.accessed_files = {}
+        mock_ctx = MagicMock()
+        mock_ctx.files = mock_files
+        mock_build_ctx.return_value = mock_ctx
 
         from src.services.pipeline.task import pipeline_task
 
@@ -741,7 +755,12 @@ class TestPipelineTaskDecorator:
 
         mock_client = AsyncMock()
         mock_client_cls.return_value = mock_client
-        mock_build_ctx.return_value = MagicMock(spec=TaskContext)
+        mock_files = MagicMock()
+        mock_files.snapshot_checksums = AsyncMock(return_value={})
+        mock_files.accessed_files = {}
+        mock_ctx = MagicMock()
+        mock_ctx.files = mock_files
+        mock_build_ctx.return_value = mock_ctx
 
         from src.services.pipeline.task import pipeline_task
 

@@ -13,6 +13,7 @@ from src.models.record import RecordRead, RecordTypeBase
 from src.models.study import StudyBase
 from src.services.recordflow import (
     ENTITY_REGISTRY,
+    FILE_REGISTRY,
     RECORD_REGISTRY,
     CallFunctionAction,
     ConstantFlowResult,
@@ -20,6 +21,7 @@ from src.services.recordflow import (
     Field,
     FieldComparison,
     FlowCondition,
+    FlowFileRecord,
     FlowRecord,
     FlowResult,
     InvalidateRecordsAction,
@@ -27,6 +29,7 @@ from src.services.recordflow import (
     PipelineAction,
     UpdateRecordAction,
 )
+from src.services.recordflow.flow_file import file
 from src.services.recordflow.flow_record import patient, record, series, study
 
 
@@ -64,11 +67,13 @@ def _clear_registry():
 
     RECORD_REGISTRY.clear()
     ENTITY_REGISTRY.clear()
+    FILE_REGISTRY.clear()
     _PIPELINE_REGISTRY.clear()
     _TASK_REGISTRY.clear()
     yield
     RECORD_REGISTRY.clear()
     ENTITY_REGISTRY.clear()
+    FILE_REGISTRY.clear()
     _PIPELINE_REGISTRY.clear()
     _TASK_REGISTRY.clear()
 
@@ -1319,3 +1324,216 @@ class TestFlowFacade:
             pass
 
         assert hasattr(gpu_task, "task_name")
+
+
+# ─── File flow DSL — builder ────────────────────────────────────────────────
+
+
+class TestFileFlowDSL:
+    """Tests for the file() factory and FlowFileRecord builder DSL."""
+
+    def test_file_factory_creates_and_registers(self):
+        """file() creates a FlowFileRecord and adds it to FILE_REGISTRY."""
+        fr = file("master_model")
+        assert isinstance(fr, FlowFileRecord)
+        assert fr.file_name == "master_model"
+        assert fr in FILE_REGISTRY
+
+    def test_file_factory_with_object(self):
+        """file() accepts objects with .name attribute."""
+        from dataclasses import dataclass
+
+        @dataclass
+        class File:
+            name: str
+
+        fr = file(File(name="seg_output"))
+        assert fr.file_name == "seg_output"
+        assert fr in FILE_REGISTRY
+
+    def test_file_factory_empty_name_raises(self):
+        """file() raises ValueError for empty name."""
+        with pytest.raises(ValueError, match="non-empty"):
+            file("")
+
+    def test_file_factory_no_name_attr_raises(self):
+        """file() raises ValueError for objects without .name."""
+        with pytest.raises(ValueError, match=r"\.name attribute"):
+            file(42)
+
+    def test_on_update_sets_trigger(self):
+        """on_update() sets update_trigger flag."""
+        fr = FlowFileRecord("test_file")
+        result = fr.on_update()
+        assert result is fr
+        assert fr.update_trigger is True
+
+    def test_invalidate_all_records_creates_action(self):
+        """invalidate_all_records() creates InvalidateRecordsAction."""
+        fr = FlowFileRecord("test_file")
+        fr.invalidate_all_records("child_a", "child_b", mode="hard")
+        assert len(fr.actions) == 1
+        assert isinstance(fr.actions[0], InvalidateRecordsAction)
+        assert fr.actions[0].record_type_names == ["child_a", "child_b"]
+        assert fr.actions[0].mode == "hard"
+
+    def test_call_creates_action(self):
+        """call() creates CallFunctionAction."""
+
+        def my_handler(**kwargs):
+            pass
+
+        fr = FlowFileRecord("test_file")
+        fr.call(my_handler)
+        assert len(fr.actions) == 1
+        assert isinstance(fr.actions[0], CallFunctionAction)
+        assert fr.actions[0].function is my_handler
+
+    def test_method_chaining(self):
+        """Full DSL chaining works end-to-end."""
+        fr = file("master_model").on_update().invalidate_all_records("projection", mode="hard")
+        assert fr.file_name == "master_model"
+        assert fr.update_trigger is True
+        assert len(fr.actions) == 1
+        assert fr.actions[0].record_type_names == ["projection"]
+
+    def test_is_active_flow(self):
+        """is_active_flow() returns True when flow has trigger or actions."""
+        fr = FlowFileRecord("test_file")
+        assert fr.is_active_flow() is False
+
+        fr.on_update()
+        assert fr.is_active_flow() is True
+
+    def test_is_active_flow_with_actions_only(self):
+        """is_active_flow() returns True when flow has actions without trigger."""
+        fr = FlowFileRecord("test_file")
+        fr.invalidate_all_records("child")
+        assert fr.is_active_flow() is True
+
+    def test_file_registry_is_separate(self):
+        """FILE_REGISTRY is separate from RECORD_REGISTRY and ENTITY_REGISTRY."""
+        file("test_file")
+        record("test_record")
+        series()
+        assert len(FILE_REGISTRY) == 1
+        assert len(RECORD_REGISTRY) == 1
+        assert len(ENTITY_REGISTRY) == 1
+
+    def test_repr(self):
+        """FlowFileRecord __repr__ shows file name and trigger."""
+        fr = file("master_model").on_update()
+        assert repr(fr) == "file('master_model').on_update()"
+
+
+class TestFileFlowEngine:
+    """Unit tests for file flow registration and execution in RecordFlowEngine."""
+
+    def test_register_file_flow_routes_to_file_flows(self):
+        """register_flow() routes FlowFileRecord to engine.file_flows."""
+        from unittest.mock import AsyncMock
+
+        from src.services.recordflow.engine import RecordFlowEngine
+
+        mock_client = AsyncMock()
+        engine = RecordFlowEngine(mock_client)
+
+        fr = FlowFileRecord("master_model")
+        fr.on_update().invalidate_all_records("projection")
+        engine.register_flow(fr)
+
+        assert "master_model" in engine.file_flows
+        assert len(engine.file_flows["master_model"]) == 1
+        assert len(engine.flows) == 0
+        assert len(engine.entity_flows) == 0
+
+    @pytest.mark.asyncio
+    async def test_handle_file_update_invalidates_records(self):
+        """handle_file_update() finds and invalidates matching records."""
+        from unittest.mock import AsyncMock
+
+        from src.services.recordflow.engine import RecordFlowEngine
+
+        mock_client = AsyncMock()
+
+        target_record = make_record_read("projection", record_id=10, status=RecordStatus.finished)
+        mock_client.find_records = AsyncMock(return_value=[target_record])
+        mock_client.invalidate_record = AsyncMock(return_value=target_record)
+
+        engine = RecordFlowEngine(mock_client)
+
+        fr = FlowFileRecord("master_model")
+        fr.on_update().invalidate_all_records("projection", mode="hard")
+        engine.register_flow(fr)
+
+        await engine.handle_file_update("master_model", "PAT001")
+
+        assert mock_client.invalidate_record.call_count == 1
+        call_kwargs = mock_client.invalidate_record.call_args[1]
+        assert call_kwargs["record_id"] == 10
+        assert call_kwargs["mode"] == "hard"
+        assert call_kwargs["source_record_id"] is None
+        assert "file change" in call_kwargs["reason"]
+
+    @pytest.mark.asyncio
+    async def test_handle_file_update_unknown_file(self):
+        """handle_file_update() does nothing for unknown file names."""
+        from unittest.mock import AsyncMock
+
+        from src.services.recordflow.engine import RecordFlowEngine
+
+        mock_client = AsyncMock()
+        engine = RecordFlowEngine(mock_client)
+
+        fr = FlowFileRecord("master_model")
+        fr.on_update().invalidate_all_records("projection")
+        engine.register_flow(fr)
+
+        await engine.handle_file_update("unknown_file", "PAT001")
+
+        assert mock_client.find_records.call_count == 0
+
+    @pytest.mark.asyncio
+    async def test_handle_file_update_calls_function(self):
+        """handle_file_update() executes CallFunctionAction with file kwargs."""
+        from unittest.mock import AsyncMock
+
+        from src.services.recordflow.engine import RecordFlowEngine
+
+        mock_client = AsyncMock()
+        engine = RecordFlowEngine(mock_client)
+
+        call_log: list[dict] = []
+
+        def file_handler(**kwargs):
+            call_log.append(dict(kwargs))
+
+        fr = FlowFileRecord("master_model")
+        fr.on_update().call(file_handler)
+        engine.register_flow(fr)
+
+        await engine.handle_file_update("master_model", "PAT001")
+
+        assert len(call_log) == 1
+        assert call_log[0]["file_name"] == "master_model"
+        assert call_log[0]["patient_id"] == "PAT001"
+        assert call_log[0]["client"] is mock_client
+
+    @pytest.mark.asyncio
+    async def test_handle_file_update_skips_no_trigger(self):
+        """handle_file_update() skips flows without update_trigger."""
+        from unittest.mock import AsyncMock
+
+        from src.services.recordflow.engine import RecordFlowEngine
+
+        mock_client = AsyncMock()
+        engine = RecordFlowEngine(mock_client)
+
+        # Flow without on_update()
+        fr = FlowFileRecord("master_model")
+        fr.invalidate_all_records("projection")
+        engine.register_flow(fr)
+
+        await engine.handle_file_update("master_model", "PAT001")
+
+        assert mock_client.find_records.call_count == 0
