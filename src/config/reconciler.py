@@ -68,9 +68,7 @@ def _normalize(value: Any) -> Any:
     """
     if hasattr(value, "value"):
         return value.value
-    if isinstance(value, list) and not value:
-        return None
-    if isinstance(value, dict) and not value:
+    if isinstance(value, (list,dict)) and not value:
         return None
     return value
 

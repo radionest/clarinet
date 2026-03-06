@@ -82,7 +82,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     await add_default_user_roles()
 
-    # Reconcile RecordType definitions (replaces create_record_types_from_config)
+    # Reconcile RecordType definitions
     reconcile_result = await reconcile_config()
     app.state.config_mode = settings.config_mode
     app.state.config_tasks_path = settings.config_tasks_path

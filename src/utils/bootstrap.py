@@ -264,44 +264,6 @@ async def _upsert_record_type(record_type: RecordTypeCreate, session: AsyncSessi
         else:
             logger.error(f"Error creating record type {record_type.name}: {e}")
 
-
-async def create_record_types_from_config(
-    folder: str,
-    suffix_filter: str = "",
-) -> None:
-    """Create record types from TOML/JSON config files in *folder*.
-
-    Discovers config files (TOML preferred over JSON), resolves file
-    references and schemas, then upserts each RecordType into the DB.
-
-    Args:
-        folder: Path to the folder containing config files.
-        suffix_filter: If non-empty, only include configs whose stem
-            contains this substring.
-    """
-    config_files = discover_config_files(folder, suffix_filter)
-    if not config_files:
-        logger.warning(f"No record type configs found in {folder}")
-        return
-
-    logger.info(f"Found record type configs: {[p.stem for p in config_files]}")
-
-    # Load project-level file registry (if present)
-    project_registry = await load_project_file_registry(folder)
-
-    for config_path in config_files:
-        async with db_manager.get_async_session_context() as session:
-            try:
-                props = await load_record_config(config_path)
-                if props is None:
-                    continue
-                props = resolve_task_files(props, project_registry)
-                record_type = RecordTypeCreate(**props)
-                await _upsert_record_type(record_type, session)
-            except Exception as e:
-                logger.error(f"Error processing record type {config_path.name}: {e}")
-
-
 async def reconcile_config(
     folder: str | None = None,
     suffix_filter: str = "",
@@ -357,10 +319,6 @@ async def reconcile_config(
         )
 
     return result
-
-
-# Deprecated alias for backward compatibility
-create_demo_record_types_from_json = create_record_types_from_config
 
 
 async def add_record_type(record_type: RecordTypeCreate, session: AsyncSession) -> RecordType:
