@@ -15,13 +15,15 @@ from typing import TYPE_CHECKING
 from src.utils.logger import logger
 
 from .engine import RecordFlowEngine
+from .flow_file import FILE_REGISTRY
 from .flow_record import ENTITY_REGISTRY, RECORD_REGISTRY
 
 if TYPE_CHECKING:
+    from .flow_file import FlowFileRecord
     from .flow_record import FlowRecord
 
 
-def load_flows_from_file(file_path: Path) -> list[FlowRecord]:
+def load_flows_from_file(file_path: Path) -> list[FlowRecord | FlowFileRecord]:
     """
     Load FlowRecord definitions from a Python file.
 
@@ -50,6 +52,7 @@ def load_flows_from_file(file_path: Path) -> list[FlowRecord]:
     # Clear the registries before loading a new file to avoid duplicates
     RECORD_REGISTRY.clear()
     ENTITY_REGISTRY.clear()
+    FILE_REGISTRY.clear()
 
     try:
         module_name = file_path.stem
@@ -67,7 +70,8 @@ def load_flows_from_file(file_path: Path) -> list[FlowRecord]:
         # Entity flows always have entity_trigger set, so they pass is_active_flow()
         record_flows = [f for f in RECORD_REGISTRY if f.is_active_flow()]
         entity_flows = list(ENTITY_REGISTRY)
-        flows = record_flows + entity_flows
+        file_flows = [f for f in FILE_REGISTRY if f.is_active_flow()]
+        flows: list[FlowRecord | FlowFileRecord] = record_flows + entity_flows + file_flows
         for flow in flows:
             logger.info(f"Loaded flow: {flow!r}")
 
@@ -98,7 +102,7 @@ def load_and_register_flows(engine: RecordFlowEngine, flow_files: list[Path]) ->
                 engine.register_flow(flow)
                 total_flows += 1
             except Exception as e:
-                logger.error(f"Error registering flow {flow.record_name}: {e}")
+                logger.error(f"Error registering flow {flow!r}: {e}")
 
     logger.info(f"Registered {total_flows} flows from {len(flow_files)} files")
     return total_flows

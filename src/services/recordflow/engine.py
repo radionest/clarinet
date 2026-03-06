@@ -18,6 +18,7 @@ from .flow_action import (
     UpdateRecordAction,
 )
 from .flow_condition import FlowCondition
+from .flow_file import FlowFileRecord
 from .flow_record import FlowRecord
 from .flow_result import _SELF
 
@@ -52,17 +53,26 @@ class RecordFlowEngine:
         self.clarinet_client = clarinet_client
         self.flows: dict[str, list[FlowRecord]] = {}
         self.entity_flows: dict[str, list[FlowRecord]] = {}
+        self.file_flows: dict[str, list[FlowFileRecord]] = {}
 
-    def register_flow(self, flow: FlowRecord) -> None:
+    def register_flow(self, flow: FlowRecord | FlowFileRecord) -> None:
         """Register a flow definition.
 
         Args:
-            flow: The FlowRecord to register.
+            flow: The FlowRecord or FlowFileRecord to register.
 
         Raises:
             ValueError: If the flow definition is invalid.
         """
         flow.validate()
+
+        # Route file flows to separate registry
+        if isinstance(flow, FlowFileRecord):
+            if flow.file_name not in self.file_flows:
+                self.file_flows[flow.file_name] = []
+            self.file_flows[flow.file_name].append(flow)
+            logger.info(f"Registered file flow for '{flow.file_name}' on update")
+            return
 
         # Route entity flows to separate registry
         if flow.entity_trigger:
@@ -683,3 +693,146 @@ class RecordFlowEngine:
             payload=action.extra_payload,
         )
         await self._run_pipeline(action, message, f"record {record.id} ({record.record_type.name})")
+
+    # ── File flow handling ──────────────────────────────────────────────────
+
+    async def handle_file_update(self, file_name: str, patient_id: str) -> None:
+        """Handle a project-level file change and execute relevant flows.
+
+        Called when a pipeline task detects that a file's checksum changed.
+        Iterates file flows registered for the given file name and executes
+        their actions scoped to the patient.
+
+        Args:
+            file_name: The logical file name (from file definition).
+            patient_id: The patient whose storage contains the changed file.
+        """
+        if file_name not in self.file_flows:
+            logger.debug(f"No file flows registered for '{file_name}'")
+            return
+
+        logger.debug(f"Processing file update flows for '{file_name}' (patient={patient_id})")
+
+        for flow in self.file_flows[file_name]:
+            if not flow.update_trigger:
+                continue
+            logger.info(f"Executing file flow for '{file_name}' (patient={patient_id})")
+            for action in flow.actions:
+                await self._execute_file_action(action, file_name, patient_id)
+
+    async def _execute_file_action(
+        self,
+        action: InvalidateRecordsAction | CallFunctionAction,
+        file_name: str,
+        patient_id: str,
+    ) -> None:
+        """Execute a single action for a file update flow.
+
+        Args:
+            action: The action model instance.
+            file_name: The logical file name that changed.
+            patient_id: The patient ID.
+        """
+        try:
+            match action:
+                case InvalidateRecordsAction():
+                    await self._invalidate_by_file(action, file_name, patient_id)
+                case CallFunctionAction():
+                    await self._call_file_function(action, file_name, patient_id)
+                case _:
+                    logger.warning(f"Unsupported file flow action type: {action.type}")
+        except Exception as e:
+            logger.error(f"Error executing file flow action {action.type}: {e}")
+
+    async def _invalidate_by_file(
+        self,
+        action: InvalidateRecordsAction,
+        file_name: str,
+        patient_id: str,
+    ) -> None:
+        """Invalidate records triggered by a file change.
+
+        Similar to ``_invalidate_records`` but without a source record:
+        invalidates ALL matching records for the patient.
+
+        Args:
+            action: The InvalidateRecordsAction with target types and mode.
+            file_name: The logical file name that changed.
+            patient_id: The patient ID.
+        """
+        for target_type_name in action.record_type_names:
+            try:
+                target_records = await self.clarinet_client.find_records(
+                    patient_id=patient_id,
+                    record_type_name=target_type_name,
+                    limit=1000,
+                )
+            except Exception as e:
+                logger.error(
+                    f"Failed to find records of type '{target_type_name}' "
+                    f"for patient {patient_id}: {e}"
+                )
+                continue
+
+            for target in target_records:
+                try:
+                    await self.clarinet_client.invalidate_record(
+                        record_id=target.id,
+                        mode=action.mode,
+                        source_record_id=None,
+                        reason=f"Invalidated by file change: {file_name}",
+                    )
+                    logger.info(
+                        f"Invalidated record '{target.record_type.name}' (id={target.id}) "
+                        f"mode='{action.mode}', triggered by file '{file_name}'"
+                    )
+                except Exception as e:
+                    logger.error(
+                        f"Failed to invalidate record '{target.record_type.name}' "
+                        f"(id={target.id}): {e}"
+                    )
+                    continue
+
+                if action.callback is not None:
+                    try:
+                        import asyncio
+
+                        result = action.callback(
+                            record=target,
+                            file_name=file_name,
+                            client=self.clarinet_client,
+                        )
+                        if asyncio.iscoroutine(result):
+                            await result
+                    except Exception as e:
+                        logger.error(
+                            f"Error in file invalidation callback for record {target.id}: {e}"
+                        )
+
+    async def _call_file_function(
+        self,
+        action: CallFunctionAction,
+        file_name: str,
+        patient_id: str,
+    ) -> None:
+        """Call a custom function from a file update flow.
+
+        Args:
+            action: The CallFunctionAction with function, args, and kwargs.
+            file_name: The logical file name that changed.
+            patient_id: The patient ID.
+        """
+        kwargs = {
+            "file_name": file_name,
+            "patient_id": patient_id,
+            "client": self.clarinet_client,
+        } | action.extra_kwargs
+
+        try:
+            import asyncio
+
+            result = action.function(*action.args, **kwargs)
+            if asyncio.iscoroutine(result):
+                await result
+        except Exception as e:
+            logger.error(f"Error calling file function {action.function.__name__}: {e}")

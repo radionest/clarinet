@@ -30,8 +30,9 @@ from .flow_action import (
     PipelineAction,
     UpdateRecordAction,
 )
-from .flow_builder import Field, flow, patient, record, series, study
+from .flow_builder import Field, file, flow, patient, record, series, study
 from .flow_condition import FlowCondition
+from .flow_file import FILE_REGISTRY, FlowFileRecord
 from .flow_loader import (
     discover_and_load_flows,
     find_flow_files,
@@ -49,6 +50,7 @@ from .flow_result import (
 
 __all__ = [
     "ENTITY_REGISTRY",
+    "FILE_REGISTRY",
     "RECORD_REGISTRY",
     "CallFunctionAction",
     "ComparisonResult",
@@ -58,6 +60,7 @@ __all__ = [
     "FieldComparison",
     "FlowAction",
     "FlowCondition",
+    "FlowFileRecord",
     "FlowRecord",
     "FlowResult",
     "InvalidateRecordsAction",
@@ -66,6 +69,7 @@ __all__ = [
     "RecordFlowEngine",
     "UpdateRecordAction",
     "discover_and_load_flows",
+    "file",
     "find_flow_files",
     "flow",
     "load_and_register_flows",
