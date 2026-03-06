@@ -1,4 +1,4 @@
 name = "new_test_type"
 description = "Test type created via client"
 level = "STUDY"
-min_users = 1
+min_records = 1

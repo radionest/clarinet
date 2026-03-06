@@ -60,8 +60,8 @@ class RecordTypeDef(BaseModel):
         description: Human-readable description.
         label: Short display label.
         role_name: Required user role name.
-        min_users: Minimum number of users.
-        max_users: Maximum number of users.
+        min_records: Minimum number of records.
+        max_records: Maximum number of records.
         files: List of FileRef bindings.
         data_schema: JSON Schema dict or path to .json file.
         slicer_script: Inline script or path to .py file.
@@ -76,8 +76,8 @@ class RecordTypeDef(BaseModel):
     label: str | None = None
     parent_type_name: str | None = None
     role_name: str | None = None
-    min_users: int | None = 1
-    max_users: int | None = None
+    min_records: int | None = 1
+    max_records: int | None = None
     files: list[FileRef] = []
     data_schema: dict[str, Any] | str | None = None
     slicer_script: str | None = None

@@ -4,8 +4,8 @@ description = "Series-level lesion segmentation in 3D Slicer"
 label = "Lesion Segmentation"
 level = "SERIES"
 role_name = "doctor"
-min_users = 1
-max_users = 1
+min_records = 1
+max_records = 1
 
 # Slicer script loaded from external .py file
 slicer_script = "lesion_seg_script.py"

@@ -756,14 +756,14 @@ class TestFullProcessingChain:
 
         # 7. Submit ai_analysis with different diagnosis
         #    Flow 3 fires (ai_diagnosis != diagnosis), but expert_check creation
-        #    is rejected by max_users=1 constraint (one already exists from Flow 2)
+        #    is rejected by max_records=1 constraint (one already exists from Flow 2)
         resp = await client.post(
             f"/api/records/{ai_id}/data",
             json={"ai_diagnosis": "Normal", "ai_confidence": 0.7},
         )
         assert resp.status_code == 200
 
-        # Still 1 expert_check (max_users=1 prevents duplicate)
+        # Still 1 expert_check (max_records=1 prevents duplicate)
         expert_records = await _find_records(client, "expert_check", study_uid=study_uid)
         assert len(expert_records) == 1
 

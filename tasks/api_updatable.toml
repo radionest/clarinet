@@ -1,4 +1,4 @@
 name = "api_updatable"
 level = "SERIES"
 parent_type_name = "api_base_type"
-min_users = 1
+min_records = 1

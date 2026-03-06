@@ -88,8 +88,8 @@ class RecordTypeStats(PydanticBaseModel):
     label: str | None = None
     level: str
     role_name: str | None = None
-    min_users: int | None = None
-    max_users: int | None = None
+    min_records: int | None = None
+    max_records: int | None = None
     total_records: int
     records_by_status: RecordTypeStatusCounts
     unique_users: int

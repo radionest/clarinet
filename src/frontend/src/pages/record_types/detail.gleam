@@ -77,16 +77,16 @@ fn info_card(stat: RecordTypeStats) -> Element(Msg) {
       html.dd([], [html.text(stat.level)]),
       html.dt([], [html.text("Role:")]),
       html.dd([], [html.text(option.unwrap(stat.role_name, "-"))]),
-      html.dt([], [html.text("Min Users:")]),
+      html.dt([], [html.text("Min Records:")]),
       html.dd([], [
-        html.text(case stat.min_users {
+        html.text(case stat.min_records {
           Some(n) -> int.to_string(n)
           None -> "-"
         }),
       ]),
-      html.dt([], [html.text("Max Users:")]),
+      html.dt([], [html.text("Max Records:")]),
       html.dd([], [
-        html.text(case stat.max_users {
+        html.text(case stat.max_records {
           Some(n) -> int.to_string(n)
           None -> "-"
         }),

@@ -23,8 +23,8 @@ _SCALAR_FIELDS: tuple[str, ...] = (
     "level",
     "parent_type_name",
     "role_name",
-    "min_users",
-    "max_users",
+    "min_records",
+    "max_records",
     "slicer_script",
     "slicer_result_validator",
 )

@@ -51,8 +51,8 @@ class RecordTypeBase(SQLModel):
     parent_type_name: str | None = None
 
     role_name: str | None = Field(default=None)
-    max_users: int | None = Field(default=None)
-    min_users: int | None = Field(default=1)
+    max_records: int | None = Field(default=None)
+    min_records: int | None = Field(default=1)
     level: DicomQueryLevel = Field(default=DicomQueryLevel.SERIES)
 
     data_schema: RecordSchema | None = None
@@ -197,8 +197,8 @@ class RecordTypeOptional(SQLModel):
     data_schema: RecordSchema | None = None
 
     role_name: str | None = Field(default=None)
-    max_users: int | None = Field(default=None)
-    min_users: int | None = Field(default=None)
+    max_records: int | None = Field(default=None)
+    min_records: int | None = Field(default=None)
     level: DicomQueryLevel | None = None
 
     # File schema fields

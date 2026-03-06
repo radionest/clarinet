@@ -216,13 +216,13 @@ async def test_none_config_matches_orm_default(
     test_session: AsyncSession,
     seed_record_type: RecordType,
 ) -> None:
-    """Config with min_users=None should match DB ORM default (1) → unchanged."""
+    """Config with min_records=None should match DB ORM default (1) → unchanged."""
     config = [
         _make_config(
             "existing_type",
             description="Original description",
             label="Original",
-            min_users=None,
+            min_records=None,
         ),
     ]
     result = await reconcile_record_types(config, test_session)
@@ -236,22 +236,22 @@ async def test_explicit_value_differs_from_default(
     test_session: AsyncSession,
     seed_record_type: RecordType,
 ) -> None:
-    """Config with explicit min_users=3 should detect update vs DB default."""
+    """Config with explicit min_records=3 should detect update vs DB default."""
     config = [
         _make_config(
             "existing_type",
             description="Original description",
             label="Original",
-            min_users=3,
+            min_records=3,
         ),
     ]
     result = await reconcile_record_types(config, test_session)
 
     assert result.updated == ["existing_type"]
-    assert "min_users" in result.updated or result.updated == ["existing_type"]
+    assert "min_records" in result.updated or result.updated == ["existing_type"]
 
     await test_session.refresh(seed_record_type)
-    assert seed_record_type.min_users == 3
+    assert seed_record_type.min_records == 3
 
 
 @pytest.mark.asyncio

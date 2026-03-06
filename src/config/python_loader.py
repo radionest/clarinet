@@ -190,10 +190,10 @@ async def _to_record_type_create(
         kwargs["parent_type_name"] = rt_def.parent_type_name
     if rt_def.role_name is not None:
         kwargs["role_name"] = rt_def.role_name
-    if rt_def.min_users is not None:
-        kwargs["min_users"] = rt_def.min_users
-    if rt_def.max_users is not None:
-        kwargs["max_users"] = rt_def.max_users
+    if rt_def.min_records is not None:
+        kwargs["min_records"] = rt_def.min_records
+    if rt_def.max_records is not None:
+        kwargs["max_records"] = rt_def.max_records
     if slicer_script is not None:
         kwargs["slicer_script"] = slicer_script
     if rt_def.slicer_script_args is not None:

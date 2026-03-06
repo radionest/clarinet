@@ -37,14 +37,14 @@ const record_type_edit_schema = "{
       \"type\": \"string\",
       \"title\": \"Role Name\"
     },
-    \"min_users\": {
+    \"min_records\": {
       \"type\": \"integer\",
-      \"title\": \"Min Users\",
+      \"title\": \"Min Records\",
       \"minimum\": 0
     },
-    \"max_users\": {
+    \"max_records\": {
       \"type\": \"integer\",
-      \"title\": \"Max Users\",
+      \"title\": \"Max Records\",
       \"minimum\": 1
     },
     \"slicer_script\": {
@@ -96,8 +96,8 @@ fn build_initial_values(rt: RecordType) -> String {
     #("label", json.nullable(rt.label, json.string)),
     #("level", level_to_json(rt.level)),
     #("role_name", json.nullable(rt.role_name, json.string)),
-    #("min_users", json.nullable(rt.min_users, json.int)),
-    #("max_users", json.nullable(rt.max_users, json.int)),
+    #("min_records", json.nullable(rt.min_records, json.int)),
+    #("max_records", json.nullable(rt.max_records, json.int)),
     #("slicer_script", json.nullable(rt.slicer_script, json.string)),
     #("slicer_result_validator", json.nullable(rt.slicer_result_validator, json.string)),
     #("slicer_script_args", dict_to_json_string(rt.slicer_script_args)),

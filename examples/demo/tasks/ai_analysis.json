@@ -4,6 +4,6 @@
     "label": "AI Analysis",
     "level": "SERIES",
     "role_name": "auto",
-    "min_users": 1,
-    "max_users": 1
+    "min_records": 1,
+    "max_records": 1
 }

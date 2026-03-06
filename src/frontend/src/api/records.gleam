@@ -104,8 +104,8 @@ fn record_type_base_decoder() -> decode.Decoder(RecordType) {
     slicer_result_validator_args: None,
     data_schema: data_schema,
     role_name: None,
-    max_users: None,
-    min_users: None,
+    max_records: None,
+    min_records: None,
     level: level,
     file_registry: None,
     constraint_role: None,
@@ -342,13 +342,13 @@ pub fn record_type_full_decoder() -> decode.Decoder(RecordType) {
     None,
     decode.optional(decode.string),
   )
-  use max_users <- decode.optional_field(
-    "max_users",
+  use max_records <- decode.optional_field(
+    "max_records",
     None,
     decode.optional(decode.int),
   )
-  use min_users <- decode.optional_field(
-    "min_users",
+  use min_records <- decode.optional_field(
+    "min_records",
     None,
     decode.optional(decode.int),
   )
@@ -392,8 +392,8 @@ pub fn record_type_full_decoder() -> decode.Decoder(RecordType) {
     slicer_result_validator_args: slicer_result_validator_args,
     data_schema: data_schema,
     role_name: role_name,
-    max_users: max_users,
-    min_users: min_users,
+    max_records: max_records,
+    min_records: min_records,
     level: level,
     file_registry: file_registry,
     constraint_role: constraint_role_name,

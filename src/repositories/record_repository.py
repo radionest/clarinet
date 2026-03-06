@@ -554,7 +554,7 @@ class RecordRepository(BaseRepository[Record]):
         series_uid: str | None,
         study_uid: str | None,
     ) -> None:
-        """Check if a new record can be created based on max_users constraint.
+        """Check if a new record can be created based on max_records constraint.
 
         Args:
             record_type_name: Record type name
@@ -568,10 +568,9 @@ class RecordRepository(BaseRepository[Record]):
         count = await self.count_by_type_and_context(record_type_name, series_uid, study_uid)
         record_type = await self.get_record_type(record_type_name)
 
-        if record_type.max_users and count >= record_type.max_users:
+        if record_type.max_records and count >= record_type.max_records:
             raise RecordConstraintViolationError(
-                f"The maximum users per record limit "
-                f"({count} of {record_type.max_users}) is reached"
+                f"The maximum records limit ({count} of {record_type.max_records}) is reached"
             )
 
     @staticmethod

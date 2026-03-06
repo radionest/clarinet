@@ -4,5 +4,5 @@ description = "Doctor review of a series with diagnosis and confidence assessmen
 label = "Doctor Review"
 level = "SERIES"
 role_name = "doctor"
-min_users = 1
-max_users = 3
+min_records = 1
+max_records = 3

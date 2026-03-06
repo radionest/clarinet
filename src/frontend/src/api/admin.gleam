@@ -81,8 +81,8 @@ fn record_type_stats_decoder() -> decode.Decoder(models.RecordTypeStats) {
   use label <- decode.field("label", decode.optional(decode.string))
   use level <- decode.field("level", decode.string)
   use role_name <- decode.field("role_name", decode.optional(decode.string))
-  use min_users <- decode.field("min_users", decode.optional(decode.int))
-  use max_users <- decode.field("max_users", decode.optional(decode.int))
+  use min_records <- decode.field("min_records", decode.optional(decode.int))
+  use max_records <- decode.field("max_records", decode.optional(decode.int))
   use total_records <- decode.field("total_records", decode.int)
   use records_by_status <- decode.field(
     "records_by_status",
@@ -96,8 +96,8 @@ fn record_type_stats_decoder() -> decode.Decoder(models.RecordTypeStats) {
     label: label,
     level: level,
     role_name: role_name,
-    min_users: min_users,
-    max_users: max_users,
+    min_records: min_records,
+    max_records: max_records,
     total_records: total_records,
     records_by_status: records_by_status,
     unique_users: unique_users,

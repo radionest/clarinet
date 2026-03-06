@@ -59,7 +59,7 @@
 
 - `extra_roles` — нет такого параметра в текущем `settings.py`. Нужна реализация динамических ролей.
 - `recordflow_paths = ["."]` — при запуске из другой директории разрешится некорректно.
-- `min_users` / `max_users` в настройках RecordType нужно переименовать в `min_records` / `max_records`.
+- ~~`min_users` / `max_users` в настройках RecordType нужно переименовать в `min_records` / `max_records`.~~ Done.
 
 ---
 
@@ -83,7 +83,7 @@
 | `role = "auto"` — автоматические записи | `record_types.toml` | Без user_id, видны в UI только для просмотра |
 | `file().on_update()` — триггеры на файлы | `pipeline_flow.py` | Расширение RecordFlow DSL |
 | `parent_record_id` — связь record-to-record | README.md | FK на Record, связь один-ко-многим |
-| `min_records` / `max_records` на RecordType | README.md | Замена min_users/max_users; уникальность (RecordType, User, UID) |
+| ~~`min_records` / `max_records` на RecordType~~ | README.md | ~~Замена min_users/max_users~~ Done |
 | `image_processor` сервис | `pipeline_flow.py` | Обработка изображений (split_islands, has_overlap и т.д.) |
 | Целевой DSL (`.on_finished()`, `F.field`, `.do_task()`) | `pipeline_flow.py` | Рефакторинг RecordFlow API |
 | Event-driven проверка хэша мастер-модели при финише проекции | README.md | Хранение хэша input-файла в записи, сверка при завершении |

@@ -497,12 +497,12 @@ class TestRecordRepository:
 
     @pytest.mark.asyncio
     async def test_check_constraints(self, env):
-        # max_users is None → no constraint → should pass
+        # max_records is None → no constraint → should pass
         await env["repo"].check_constraints("rec_rt_00001", "1.2.3.300.1", "1.2.3.300")
 
     @pytest.mark.asyncio
     async def test_check_constraints_violation(self, env):
-        env["rt"].max_users = 1
+        env["rt"].max_records = 1
         await env["session"].commit()
         with pytest.raises(RecordConstraintViolationError):
             await env["repo"].check_constraints("rec_rt_00001", "1.2.3.300.1", "1.2.3.300")

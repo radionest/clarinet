@@ -4,8 +4,8 @@
     "label": "Air Volume",
     "level": "SERIES",
     "role_name": null,
-    "min_users": 0,
-    "max_users": 0,
+    "min_records": 0,
+    "max_records": 0,
     "files": [
         {
             "name": "segmentation",

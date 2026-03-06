@@ -62,7 +62,7 @@ fn record_types_table(
 }
 
 fn record_type_row(stat: models.RecordTypeStats) -> Element(Msg) {
-  let min_max = case stat.min_users, stat.max_users {
+  let min_max = case stat.min_records, stat.max_records {
     Some(min), Some(max) -> int.to_string(min) <> "/" <> int.to_string(max)
     Some(min), None -> int.to_string(min) <> "/-"
     None, Some(max) -> "-/" <> int.to_string(max)

@@ -238,8 +238,8 @@ class TestAdminService:
         assert stat["label"] == "TST"
         assert stat["level"] == "SERIES"  # default DicomQueryLevel
         assert stat["role_name"] is None
-        assert stat["min_users"] == 1
-        assert stat["max_users"] is None
+        assert stat["min_records"] == 1
+        assert stat["max_records"] is None
         assert stat["total_records"] == 0
         assert stat["unique_users"] == 0
         # All RecordStatus keys present in records_by_status with 0 counts

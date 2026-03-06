@@ -4,8 +4,8 @@ description = "Series-level segmentation and annotation in 3D Slicer"
 label = "Series Markup"
 level = "SERIES"
 role_name = "doctor"
-min_users = 1
-max_users = 1
+min_records = 1
+max_records = 1
 
 # Slicer script loaded from external .py file
 slicer_script = "series_markup_script.py"
