@@ -19,18 +19,6 @@ file(master_model).on_update().invalidate_all_records("create_master_projection"
 
 **What's needed**: New `file()` factory function + `on_update()` trigger. `FILE_REGISTRY` in the DSL registry. Engine dispatch for file-level events. This is the biggest architectural gap -- requires event propagation from file system or checksum monitoring.
 
-
-## 10. Public API: `from clarinet.flow import ...` (NOT EXISTS)
-
-**Target DSL** (`pipeline_flow.py:9`):
-```python
-from clarinet.flow import Field as F, file, record, study, task
-```
-
-**Current state**: Internal imports `from src.services.recordflow import record, series, study`. No `clarinet.flow` public package.
-
-**What's needed**: `clarinet/flow.py` (or `src/flow.py`) re-exporting DSL primitives. `task` decorator re-export from pipeline. Package-level `__init__.py` adjustments.
-
 ---
 
 ---
