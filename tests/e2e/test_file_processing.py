@@ -19,11 +19,11 @@ import pytest_asyncio
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api.app import app
-from src.models.patient import Patient
-from src.models.study import Series, Study
-from src.services.recordflow.flow_file import FILE_REGISTRY
-from src.services.recordflow.flow_record import ENTITY_REGISTRY, RECORD_REGISTRY
+from clarinet.api.app import app
+from clarinet.models.patient import Patient
+from clarinet.models.study import Series, Study
+from clarinet.services.recordflow.flow_file import FILE_REGISTRY
+from clarinet.services.recordflow.flow_record import ENTITY_REGISTRY, RECORD_REGISTRY
 from tests.utils.urls import (
     PATIENTS_BASE,
     RECORD_TYPES,
@@ -58,10 +58,10 @@ async def client(test_session, test_settings) -> AsyncGenerator[AsyncClient]:
     """Override e2e conftest's unauthenticated client with an authenticated one."""
     from httpx import ASGITransport
 
-    from src.api.auth_config import current_active_user, current_superuser
-    from src.models.user import User
-    from src.utils.auth import get_password_hash
-    from src.utils.database import get_async_session
+    from clarinet.api.auth_config import current_active_user, current_superuser
+    from clarinet.models.user import User
+    from clarinet.utils.auth import get_password_hash
+    from clarinet.utils.database import get_async_session
 
     mock_user = User(
         id=uuid4(),
@@ -86,16 +86,16 @@ async def client(test_session, test_settings) -> AsyncGenerator[AsyncClient]:
     app.dependency_overrides[current_superuser] = lambda: mock_user
 
     try:
-        from src.settings import get_settings
+        from clarinet.settings import get_settings
 
         app.dependency_overrides[get_settings] = override_get_settings
     except (ImportError, AttributeError):
         pass
 
     try:
-        import src.api.auth_config
+        import clarinet.api.auth_config
 
-        src.api.auth_config.settings = test_settings
+        clarinet.api.auth_config.settings = test_settings
     except (ImportError, AttributeError):
         pass
 
@@ -164,7 +164,7 @@ def working_dir(monkeypatch, tmp_path) -> Path:
     falls back to the raw UIDs (study_uid, series_uid).
     The resulting working folder is: {storage_path}/{patient_id}/{study_uid}/{series_uid}/
     """
-    from src.settings import settings
+    from clarinet.settings import settings
 
     monkeypatch.setattr(settings, "storage_path", str(tmp_path))
     leaf = tmp_path / _PATIENT_ID / _STUDY_UID / _SERIES_UID
@@ -633,8 +633,8 @@ class TestBulkStatusUpdate:
         working_dir: Path,
     ):
         """Create 3 records -> bulk_update_status -> all records updated."""
-        from src.models.base import RecordStatus
-        from src.repositories.record_repository import RecordRepository
+        from clarinet.models.base import RecordStatus
+        from clarinet.repositories.record_repository import RecordRepository
 
         record_ids = []
         for _ in range(3):
@@ -659,8 +659,8 @@ class TestBulkStatusUpdate:
         working_dir: Path,
     ):
         """Mix of real + fake IDs -> real record updated, no error."""
-        from src.models.base import RecordStatus
-        from src.repositories.record_repository import RecordRepository
+        from clarinet.models.base import RecordStatus
+        from clarinet.repositories.record_repository import RecordRepository
 
         rec = await _create_record(client, "annotation", test_hierarchy)
         real_id = rec["id"]
