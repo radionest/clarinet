@@ -1,0 +1,295 @@
+"""Segmentation class — labeled masks with morphology, set operations, and ROI filtering."""
+
+from __future__ import annotations
+
+from typing import Any, Literal, Self
+
+import numpy as np
+from skimage.measure import label, regionprops
+from skimage.measure._regionprops import _RegionProperties
+from skimage.morphology import (
+    ball,
+    binary_opening,
+    dilation,
+    isotropic_dilation,
+    isotropic_erosion,
+    opening,
+)
+
+from clarinet.services.image.image import Image
+
+PropName = Literal["axis_major_length", "num_pixels", "area"]
+
+# Z-extent threshold: below this, use isotropic (spacing-aware) morphology;
+# above, fall back to ball structuring element for performance.
+_ISOTROPIC_Z_THRESHOLD = 200
+
+
+class Segmentation(Image):
+    """Labeled segmentation mask with morphological operations.
+
+    Extends Image with automatic labeling, connected-component analysis,
+    morphological operations, HU-based correction, ROI filtering, and
+    set operations (intersection, union, difference, etc.).
+
+    Args:
+        autolabel: If True, auto-label connected components on each img assignment.
+        template: Existing Image to copy metadata/shape from.
+        copy_data: If True and template is given, copy voxel data.
+    """
+
+    def __init__(
+        self,
+        autolabel: bool = True,
+        template: Any = None,
+        copy_data: bool = False,
+    ) -> None:
+        self.autolabel = autolabel
+        self._region_props: list[_RegionProperties] | None = None
+        super().__init__(template=template, copy_data=copy_data, dtype=np.uint8)
+
+    @Image.img.setter  # type: ignore[misc, attr-defined]
+    def img(self, vol: np.ndarray) -> None:
+        if self.autolabel:
+            self._img = label(vol).astype(np.uint8)
+        else:
+            self._img = vol.astype(np.uint8)
+        self._region_props = None
+
+    @property
+    def label_props(self) -> list[_RegionProperties]:
+        """Cached region properties for all labels."""
+        if self._region_props is None:
+            self._region_props = regionprops(self.img, spacing=self.spacing)
+        return self._region_props
+
+    @property
+    def count(self) -> int:
+        """Number of labeled regions."""
+        return len(self.label_props)
+
+    @property
+    def is_empty(self) -> bool:
+        """True if the mask contains no nonzero voxels."""
+        return bool(np.all(self._img == 0))
+
+    def separate_labels(self) -> None:
+        """Re-label connected components in the current mask."""
+        self.img = label(self._img)
+        self._region_props = None
+
+    def dilate(self, radius: int) -> None:
+        """Dilate the binary mask.
+
+        Args:
+            radius: Dilation radius in voxels.
+        """
+        if self.img.shape[-1] < _ISOTROPIC_Z_THRESHOLD:
+            self.img = isotropic_dilation(self.img > 0, radius, spacing=self.spacing)
+        else:
+            self.img = dilation(self.img > 0, footprint=ball(radius))
+
+    def binary_open(self, radius: int) -> None:
+        """Apply morphological opening (erosion + dilation) to the binary mask.
+
+        Args:
+            radius: Structuring element radius in voxels.
+        """
+        if self.img.shape[-1] < _ISOTROPIC_Z_THRESHOLD:
+            self.img = isotropic_erosion(self.img > 0, radius, spacing=self.spacing)
+            self.img = isotropic_dilation(self.img > 0, radius, spacing=self.spacing)
+        else:
+            self.img = binary_opening(image=self.img > 0, footprint=ball(radius))
+
+    def rois_hu_correction(
+        self,
+        hu_image: Image,
+        min_hu: float,
+        max_hu: float,
+        radius: int = 5,
+        white_mask: Self | None = None,
+    ) -> None:
+        """Correct ROIs using HU range filtering.
+
+        Dilates each ROI, optionally constrains to a white_mask, filters by HU range,
+        applies opening, and keeps only the largest connected component per label.
+
+        Args:
+            hu_image: Source CT image with Hounsfield Unit values.
+            min_hu: Minimum HU threshold.
+            max_hu: Maximum HU threshold.
+            radius: Dilation radius for ROI expansion.
+            white_mask: Optional mask to constrain the dilated ROIs.
+        """
+        temp_img = dilation(self.img, footprint=ball(radius))
+        if white_mask is not None:
+            temp_img[white_mask.img == 0] = 0
+            temp_img = np.where(self.img != 0, self.img, temp_img)
+        temp_img[hu_image.img < min_hu] = 0
+        temp_img[hu_image.img > max_hu] = 0
+        temp_img = opening(temp_img, footprint=ball(2))
+
+        for lbl in np.unique(temp_img)[1:]:
+            roi_img = label(temp_img == lbl)
+            temp_props = regionprops(roi_img)
+            temp_props.sort(key=lambda p: p["area"], reverse=True)
+            coords = temp_props[0].coords
+            temp_img[temp_img == lbl] = 0
+            temp_img[coords[:, 0], coords[:, 1], coords[:, 2]] = lbl
+        self.img = temp_img
+
+    def filtered_props(
+        self,
+        prop_name: PropName,
+        ge: float | int = -float("inf"),
+        le: float | int = float("inf"),
+    ) -> list[_RegionProperties]:
+        """Return region properties filtered by a numeric property range.
+
+        Args:
+            prop_name: Property name to filter on.
+            ge: Minimum value (inclusive).
+            le: Maximum value (inclusive).
+
+        Returns:
+            List of region properties within the specified range.
+        """
+        return [p for p in self.label_props if ge <= getattr(p, prop_name) <= le]
+
+    def filter_roi(
+        self,
+        prop_name: PropName,
+        ge: float | int = 0,
+        le: float | int = float("inf"),
+    ) -> np.ndarray:
+        """Return a binary mask of ROIs matching the property filter.
+
+        Args:
+            prop_name: Property name to filter on.
+            ge: Minimum value (inclusive).
+            le: Maximum value (inclusive).
+
+        Returns:
+            Binary numpy array with matching ROIs set to 1.
+        """
+        filtered_rois = self.filtered_props(prop_name=prop_name, ge=ge, le=le)
+        new_img = np.zeros(self.img.shape, dtype=np.uint8)
+        for roi in filtered_rois:
+            new_img[roi.coords[:, 0], roi.coords[:, 1], roi.coords[:, 2]] = 1
+        return new_img
+
+    def filter_segmentation(
+        self,
+        prop_name: PropName,
+        ge: float | int = 0,
+        le: float | int = float("inf"),
+    ) -> Segmentation:
+        """Return a new Segmentation containing only ROIs matching the property filter.
+
+        Args:
+            prop_name: Property name to filter on.
+            ge: Minimum value (inclusive).
+            le: Maximum value (inclusive).
+
+        Returns:
+            New Segmentation with only matching ROIs.
+        """
+        new_img = self.filter_roi(prop_name=prop_name, ge=ge, le=le)
+        new_seg = Segmentation(template=self)
+        new_seg.img = new_img
+        return new_seg
+
+    def subtract(self, other: Self) -> None:
+        """Zero out all voxels that are nonzero in `other` (in-place).
+
+        Args:
+            other: Segmentation to subtract.
+        """
+        img = self.img.copy()
+        img[other.img != 0] = 0
+        self.img = img
+
+    def append(self, other: Self | Image) -> None:
+        """Add ROIs from `other` that overlap with exactly one existing label.
+
+        Each connected component in `other` is checked for overlap with this mask:
+        - No overlap: skipped.
+        - Overlaps one label: merged with that label value.
+        - Overlaps multiple labels: raises ValueError.
+
+        Args:
+            other: Image or Segmentation whose ROIs to append.
+
+        Raises:
+            ValueError: If an ROI in `other` overlaps multiple labels.
+        """
+        for region in regionprops(label(other.img)):
+            coords = region.coords
+            intersection = self.img[coords[:, 0], coords[:, 1], coords[:, 2]]
+            unique_labels = list(np.unique(intersection))
+
+            match unique_labels:
+                case [0]:
+                    pass  # No overlap — skip
+                case [0, label_value] | [label_value]:
+                    self.img[coords[:, 0], coords[:, 1], coords[:, 2]] = label_value
+                case [0, *label_values]:
+                    raise ValueError(f"ROI overlaps multiple labels: {label_values}")
+                case _:
+                    raise ValueError("Unexpected label configuration during append")
+
+    def copy_from(self, other: Self) -> None:
+        """Replace this mask's voxel data with data from `other`.
+
+        Args:
+            other: Source segmentation to copy from.
+        """
+        self.img = other.img
+
+    def __and__(self, other: Self) -> Segmentation:
+        """Intersection: keep ROIs from self that overlap with other."""
+        output = Segmentation(template=self)
+        for region in self.label_props:
+            coords = region.coords
+            intersection = other.img[coords[:, 0], coords[:, 1], coords[:, 2]]
+            if np.sum(intersection > 0) > 2:
+                output.img[coords[:, 0], coords[:, 1], coords[:, 2]] = region.label
+        return output
+
+    def __or__(self, other: Self) -> Segmentation:
+        """Union: combine nonzero voxels from both masks."""
+        output = Segmentation(template=self)
+        combined = self.img.astype(np.uint16) + other.img.astype(np.uint16)
+        combined[combined != 0] = 1
+        output.img = combined
+        return output
+
+    def __sub__(self, other: Self) -> Segmentation:
+        """Difference: keep ROIs from self that do NOT overlap with other."""
+        if other.img.size == 1:
+            return Segmentation(template=self, copy_data=True)
+        output = Segmentation(template=self)
+        for region in self.label_props:
+            coords = region.coords
+            intersection = other.img[coords[:, 0], coords[:, 1], coords[:, 2]]
+            intersection_count = np.sum(intersection > 0)
+            if intersection_count == 0 or (
+                intersection_count < 10 and np.sum(self.img == region.label)
+            ):
+                output.img[coords[:, 0], coords[:, 1], coords[:, 2]] = int(region.label)
+        return output
+
+    def __add__(self, other: Self) -> Segmentation:
+        """Add: merge nonzero voxels from both masks (binary union)."""
+        if other.img.size == 1:
+            return Segmentation(template=self, copy_data=True)
+        output = Segmentation(template=self)
+        output.img[self.img > 0] = 1
+        output.img[other.img > 0] = 1
+        return output
+
+    def __xor__(self, other: Self) -> Segmentation:
+        """Symmetric difference: union minus intersection."""
+        conjunction = self | other
+        intersection = self & other
+        return conjunction - intersection
