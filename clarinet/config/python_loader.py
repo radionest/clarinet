@@ -1,10 +1,10 @@
 """Load RecordType definitions from Python config files.
 
 Discovers ``record_types.py`` in a given folder and collects all
-``RecordTypeDef`` instances from its module namespace, converting them
+``RecordDef`` instances from its module namespace, converting them
 to ``RecordTypeCreate`` objects for the reconciler.
 
-Reuses the importlib pattern from ``src/services/recordflow/flow_loader.py``.
+Reuses the importlib pattern from ``clarinet/services/recordflow/flow_loader.py``.
 """
 
 import importlib.util
@@ -16,7 +16,7 @@ from typing import Any
 
 import aiofiles
 
-from clarinet.config.primitives import File, RecordTypeDef, fileref_to_file_definition
+from clarinet.config.primitives import FileDef, RecordDef, fileref_to_file_definition
 from clarinet.models.record import RecordTypeCreate
 from clarinet.utils.logger import logger
 
@@ -81,20 +81,20 @@ def _collect_named_instances(module: types.ModuleType, cls: type[Any]) -> list[t
 
 
 def _set_file_names_from_module(module: types.ModuleType) -> None:
-    """Set ``name`` on File instances from their variable names in the module.
+    """Set ``name`` on FileDef instances from their variable names in the module.
 
     Only sets name if it's empty (not explicitly set by user).
 
     Args:
-        module: Python module containing File instances.
+        module: Python module containing FileDef instances.
     """
-    for attr_name, file_obj in _collect_named_instances(module, File):
+    for attr_name, file_obj in _collect_named_instances(module, FileDef):
         if not file_obj.name:
             file_obj.name = attr_name
 
 
-async def _resolve_data_schema(rt_def: RecordTypeDef, folder: Path) -> dict[str, Any] | None:
-    """Resolve data_schema from a RecordTypeDef.
+async def _resolve_data_schema(rt_def: RecordDef, folder: Path) -> dict[str, Any] | None:
+    """Resolve data_schema from a RecordDef.
 
     Resolution order:
     1. dict — use as-is.
@@ -151,10 +151,10 @@ async def _resolve_script_field(value: str | None, folder: Path) -> str | None:
 
 
 async def _to_record_type_create(
-    rt_def: RecordTypeDef,
+    rt_def: RecordDef,
     folder: Path,
 ) -> RecordTypeCreate:
-    """Convert a RecordTypeDef to a RecordTypeCreate.
+    """Convert a RecordDef to a RecordTypeCreate.
 
     Resolves data_schema and script file references before constructing
     the typed model.
@@ -216,11 +216,14 @@ async def load_python_config(folder: Path) -> list[RecordTypeCreate]:
     Expected folder structure::
 
         folder/
-            files_catalog.py   # File instances (optional)
-            record_types.py    # RecordTypeDef instances
+            files_catalog.py   # FileDef instances (optional)
+            record_types.py    # RecordDef instances
+
+    If ``files_catalog.py`` is absent, FileDef instances in
+    ``record_types.py`` get their names auto-derived (single-file mode).
 
     ``record_types.py`` imports from ``files_catalog.py`` to reference
-    shared File objects.
+    shared FileDef objects.
 
     Args:
         folder: Path to the folder containing Python config files.
@@ -241,10 +244,11 @@ async def load_python_config(folder: Path) -> list[RecordTypeCreate]:
 
     catalog_module_name: str | None = None
     try:
-        # Load files_catalog first (if present) to set File names.
+        # Load files_catalog first (if present) to set FileDef names.
         # Keep it in sys.modules so record_types.py can import it.
         files_catalog_file = folder / "files_catalog.py"
-        if files_catalog_file.is_file():
+        has_catalog = files_catalog_file.is_file()
+        if has_catalog:
             catalog_module = _load_module(files_catalog_file, keep_in_sys=True)
             if catalog_module:
                 catalog_module_name = files_catalog_file.stem
@@ -255,13 +259,17 @@ async def load_python_config(folder: Path) -> list[RecordTypeCreate]:
         if module is None:
             return []
 
-        # Collect RecordTypeDef instances
-        rt_defs = _collect_named_instances(module, RecordTypeDef)
+        # Single-file mode: set file names from record_types.py itself
+        if not has_catalog:
+            _set_file_names_from_module(module)
+
+        # Collect RecordDef instances
+        rt_defs = _collect_named_instances(module, RecordDef)
         if not rt_defs:
-            logger.warning(f"No RecordTypeDef instances found in {record_types_file}")
+            logger.warning(f"No RecordDef instances found in {record_types_file}")
             return []
 
-        logger.info(f"Found {len(rt_defs)} RecordTypeDef(s) in {record_types_file}")
+        logger.info(f"Found {len(rt_defs)} RecordDef(s) in {record_types_file}")
 
         # Convert to RecordTypeCreate objects
         result: list[RecordTypeCreate] = []

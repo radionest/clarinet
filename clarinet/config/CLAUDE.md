@@ -17,21 +17,26 @@ config_delete_orphans: bool = False
 User-facing Pydantic BaseModels for Python config files:
 
 ```python
-from clarinet.config import RecordType, File, FileRef
-from clarinet.models.file_schema import FileRole
+from clarinet.flow import FileDef, FileRef, RecordDef
 
-seg_mask = File(pattern="seg.nrrd", description="Segmentation mask")
+seg_mask = FileDef(pattern="seg.nrrd", description="Segmentation mask")
 
-lesion_seg = RecordType(
+lesion_seg = RecordDef(
     name="lesion_seg",
     description="Lesion segmentation",
-    files=[FileRef(seg_mask, role=FileRole.INPUT)],
+    files=[FileRef(seg_mask, "input")],
 )
 ```
 
-- `File`: pattern, multiple, level (`DicomQueryLevel | None`, persisted to DB), description, name (auto-derived from variable name)
-- `FileRef(file, role, required)`: binds File to RecordType with role
-- `RecordTypeDef` (exported as `RecordType`): full RecordType definition
+- `FileDef`: pattern, multiple, level (str or `DicomQueryLevel | None`), description, name (auto-derived)
+- `FileRef(file, role, required)`: binds FileDef to RecordDef with role; role accepts str (`"input"`) or `FileRole` enum
+- `RecordDef`: full RecordType definition; `role` is user-friendly alias for `role_name`; `level` accepts str or enum
+
+**String coercion:** `level` and `role` fields accept plain strings (`"SERIES"`, `"input"`) — validators coerce to enums automatically.
+
+**Backward compat aliases:** `File = FileDef`, `RecordTypeDef = RecordDef` (old names still work).
+
+**Single-file mode:** If no `files_catalog.py` exists, FileDef names are auto-derived from `record_types.py`.
 
 ## Reconciler (`reconciler.py`)
 
@@ -59,13 +64,19 @@ async def load_python_config(folder: Path) -> list[RecordTypeCreate]
 Expected folder structure:
 ```
 tasks/
-    files_catalog.py   # File instances (optional)
-    record_types.py    # RecordTypeDef instances
+    files_catalog.py   # FileDef instances (optional)
+    record_types.py    # RecordDef instances
+```
+
+Or single-file mode:
+```
+tasks/
+    record_types.py    # Both FileDef and RecordDef instances
 ```
 
 - Uses `importlib.util.spec_from_file_location()` (same pattern as RecordFlow loader)
 - `files_catalog.py` kept in `sys.modules` while `record_types.py` loads (for imports)
-- File names auto-derived from variable names in `files_catalog.py`
+- File names auto-derived from variable names (in `files_catalog.py` or `record_types.py`)
 - Resolves `data_schema`: dict as-is, `.json` path, or `{name}.schema.json` sidecar
 
 ## TOML Exporter (`toml_exporter.py`)

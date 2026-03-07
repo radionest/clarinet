@@ -6,18 +6,21 @@ Provides two config modes:
 
 User-facing API::
 
-    from clarinet.config import RecordType, File, FileRef
+    from clarinet.config import RecordDef, FileDef, FileRef
 
-    segmentation = File(pattern="seg.nrrd", description="Segmentation mask")
+    segmentation = FileDef(pattern="seg.nrrd", description="Segmentation mask")
 
-    lesion_seg = RecordType(
+    lesion_seg = RecordDef(
         name="lesion_seg",
         description="Lesion segmentation task",
-        files=[FileRef(segmentation, role=FileRole.INPUT)],
+        files=[FileRef(segmentation, "input")],
     )
 """
 
-from clarinet.config.primitives import File, FileRef
-from clarinet.config.primitives import RecordTypeDef as RecordType
+from clarinet.config.primitives import FileDef, FileRef, RecordDef
 
-__all__ = ["File", "FileRef", "RecordType"]
+# Backward compatibility aliases
+File = FileDef
+RecordType = RecordDef
+
+__all__ = ["File", "FileDef", "FileRef", "RecordDef", "RecordType"]

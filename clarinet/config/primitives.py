@@ -6,13 +6,27 @@ define RecordTypes in a declarative, type-safe way.
 
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from clarinet.models.base import DicomQueryLevel
 from clarinet.models.file_schema import FileDefinitionRead, FileRole
 
 
-class File(BaseModel):
+def _coerce_dicom_level(value: Any) -> Any:
+    """Coerce a string to DicomQueryLevel if possible."""
+    if isinstance(value, str) and not isinstance(value, DicomQueryLevel):
+        return DicomQueryLevel(value.upper())
+    return value
+
+
+def _coerce_file_role(value: Any) -> Any:
+    """Coerce a string to FileRole if possible."""
+    if isinstance(value, str) and not isinstance(value, FileRole):
+        return FileRole(value.lower())
+    return value
+
+
+class FileDef(BaseModel):
     """Shared file definition (equivalent to file_registry entry).
 
     Attributes:
@@ -29,29 +43,44 @@ class File(BaseModel):
     description: str | None = None
     name: str = ""
 
+    @field_validator("level", mode="before")
+    @classmethod
+    def _coerce_level(cls, v: Any) -> Any:
+        """Accept string literals like ``"PATIENT"`` for level."""
+        return _coerce_dicom_level(v)
+
 
 class FileRef(BaseModel, frozen=True):
-    """Binds a File to a RecordType with a role.
+    """Binds a FileDef to a RecordDef with a role.
 
-    Supports positional first argument for backward compatibility::
+    Supports positional arguments for convenience::
 
+        FileRef(seg_mask, "input")
         FileRef(seg_mask, role=FileRole.INPUT)
 
     Attributes:
-        file: Reference to a File instance.
+        file: Reference to a FileDef instance.
         role: File role in the processing pipeline.
         required: Whether this file is required.
     """
 
-    file: File
+    file: FileDef
     role: FileRole = FileRole.OUTPUT
     required: bool = True
 
-    def __init__(self, file: File, /, **kwargs: Any) -> None:
-        super().__init__(file=file, **kwargs)
+    def __init__(
+        self, file: FileDef, /, role: FileRole | str = FileRole.OUTPUT, **kwargs: Any
+    ) -> None:
+        super().__init__(file=file, role=role, **kwargs)
+
+    @field_validator("role", mode="before")
+    @classmethod
+    def _coerce_role(cls, v: Any) -> Any:
+        """Accept string literals like ``"input"`` for role."""
+        return _coerce_file_role(v)
 
 
-class RecordTypeDef(BaseModel):
+class RecordDef(BaseModel):
     """RecordType definition — maps to RecordTypeCreate fields.
 
     Attributes:
@@ -59,6 +88,7 @@ class RecordTypeDef(BaseModel):
         level: DICOM query level.
         description: Human-readable description.
         label: Short display label.
+        role: Required user role name (alias for role_name).
         role_name: Required user role name.
         min_records: Minimum number of records.
         max_records: Maximum number of records.
@@ -85,12 +115,24 @@ class RecordTypeDef(BaseModel):
     slicer_result_validator: str | None = None
     slicer_result_validator_args: dict[str, str] | None = None
 
+    def __init__(self, *, role: str | None = None, **kwargs: Any) -> None:
+        """Accept ``role`` as a user-friendly alias for ``role_name``."""
+        if role is not None and "role_name" not in kwargs:
+            kwargs["role_name"] = role
+        super().__init__(**kwargs)
+
+    @field_validator("level", mode="before")
+    @classmethod
+    def _coerce_level(cls, v: Any) -> Any:
+        """Accept string literals like ``"SERIES"`` for level."""
+        return _coerce_dicom_level(v)
+
 
 def fileref_to_file_definition(ref: FileRef) -> FileDefinitionRead:
     """Convert a FileRef to a FileDefinitionRead for config processing.
 
     Args:
-        ref: FileRef binding a File to a role.
+        ref: FileRef binding a FileDef to a role.
 
     Returns:
         FileDefinitionRead ready for reconciler consumption.
@@ -104,3 +146,8 @@ def fileref_to_file_definition(ref: FileRef) -> FileDefinitionRead:
         role=ref.role,
         level=ref.file.level,
     )
+
+
+# Backward compatibility aliases
+File = FileDef
+RecordTypeDef = RecordDef

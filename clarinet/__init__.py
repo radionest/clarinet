@@ -5,15 +5,14 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from clarinet.client import ClarinetClient as client
-from clarinet.config.primitives import File as FileDef
-from clarinet.config.primitives import RecordTypeDef
+from clarinet.config.primitives import FileDef, RecordDef
 
 if TYPE_CHECKING:
     from clarinet.services import dicom as dicom
 
 __all__ = [
     "FileDef",
-    "RecordTypeDef",
+    "RecordDef",
     "client",
     "dicom",
 ]
