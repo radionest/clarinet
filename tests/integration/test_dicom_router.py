@@ -80,10 +80,8 @@ def pacs_patient_id(pacs_available: None) -> str:
     client = DicomClient(calling_aet=CALLING_AET)
     node = DicomNode(aet=PACS_AET, host=PACS_HOST, port=PACS_PORT)
 
-    studies: list[StudyResult] = (
-        asyncio.get_event_loop_policy()
-        .new_event_loop()
-        .run_until_complete(client.find_studies(StudyQuery(patient_name="SHIPILOV*"), node))
+    studies: list[StudyResult] = asyncio.run(
+        client.find_studies(StudyQuery(patient_name="SHIPILOV*"), node)
     )
     assert studies, "No SHIPILOV studies found on test PACS"
     patient_id = studies[0].patient_id
@@ -97,10 +95,8 @@ def pacs_study(pacs_available: None) -> StudyResult:
     client = DicomClient(calling_aet=CALLING_AET)
     node = DicomNode(aet=PACS_AET, host=PACS_HOST, port=PACS_PORT)
 
-    studies: list[StudyResult] = (
-        asyncio.get_event_loop_policy()
-        .new_event_loop()
-        .run_until_complete(client.find_studies(StudyQuery(patient_name="SHIPILOV*"), node))
+    studies: list[StudyResult] = asyncio.run(
+        client.find_studies(StudyQuery(patient_name="SHIPILOV*"), node)
     )
     assert studies, "No SHIPILOV studies found on test PACS"
     return studies[0]

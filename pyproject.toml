@@ -165,3 +165,19 @@ markers = [
     "slicer: tests requiring a running 3D Slicer instance (deselect with '-m \"not slicer\"')",
     "pipeline: tests for pipeline task queue service",
 ]
+filterwarnings = [
+    # FastAPI + aiormq: asyncio.iscoroutinefunction deprecated in Python 3.14
+    "ignore::DeprecationWarning:fastapi",
+    "ignore::DeprecationWarning:aiormq",
+    # pydicom v4.0 deprecations (write_like_original, is_little_endian, is_implicit_VR)
+    "ignore:.*write_like_original.*:DeprecationWarning:pydicom",
+    "ignore:.*is_little_endian.*:DeprecationWarning:pydicom",
+    "ignore:.*is_implicit_VR.*:DeprecationWarning:pydicom",
+    # pydicom UserWarnings: fake UIDs in tests + ANONYMIZED encoding
+    "ignore:.*Invalid value for VR UI.*:UserWarning:pydicom",
+    "ignore:.*Unknown encoding.*:UserWarning:pydicom",
+    # pynetdicom unclosed sockets (connection timeout in negative tests)
+    "ignore::ResourceWarning:pynetdicom",
+    # SQLAlchemy async cleanup race condition in e2e tests
+    "ignore:.*coroutine.*was never awaited.*:RuntimeWarning",
+]

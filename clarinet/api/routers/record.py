@@ -627,7 +627,10 @@ async def check_record_files(
         record_read,
         Path(record_read.working_folder),
     )
-    changed = checksums_changed(record_read.file_checksums, new_checksums)
+    old_checksums = {
+        link.name: link.checksum for link in (record_read.file_links or []) if link.checksum
+    }
+    changed = checksums_changed(old_checksums, new_checksums)
 
     await repo.update_checksums(record, new_checksums)
 

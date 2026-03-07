@@ -106,11 +106,7 @@ def all_studies(dicom_client: DicomClient, orthanc_node: DicomNode) -> list[Stud
     """Cached list of all studies on the PACS (fetched once per session)."""
     import asyncio
 
-    return (
-        asyncio.get_event_loop_policy()
-        .new_event_loop()
-        .run_until_complete(dicom_client.find_studies(StudyQuery(), orthanc_node))
-    )
+    return asyncio.run(dicom_client.find_studies(StudyQuery(), orthanc_node))
 
 
 @pytest.fixture(scope="session")
@@ -141,11 +137,7 @@ def mr_series_list(
     import asyncio
 
     query = SeriesQuery(study_instance_uid=mr_study.study_instance_uid)
-    return (
-        asyncio.get_event_loop_policy()
-        .new_event_loop()
-        .run_until_complete(dicom_client.find_series(query, orthanc_node))
-    )
+    return asyncio.run(dicom_client.find_series(query, orthanc_node))
 
 
 # ===========================================================================
