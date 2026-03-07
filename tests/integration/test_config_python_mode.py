@@ -36,23 +36,22 @@ async def test_bootstrap_loads_python_config(
     _write_files_catalog(
         tmp_path,
         """\
-        from clarinet.config.primitives import File
+        from clarinet.config.primitives import FileDef
 
-        seg_mask = File(pattern="seg.nrrd", description="Segmentation mask")
+        seg_mask = FileDef(pattern="seg.nrrd", description="Segmentation mask")
         """,
     )
     _write_record_types(
         tmp_path,
         """\
-        from clarinet.config.primitives import RecordTypeDef, FileRef
-        from clarinet.models.file_schema import FileRole
+        from clarinet.config.primitives import RecordDef, FileRef
         from files_catalog import seg_mask
 
-        lesion_seg = RecordTypeDef(
+        lesion_seg = RecordDef(
             name="lesion_seg",
             description="Lesion segmentation",
             level="SERIES",
-            files=[FileRef(seg_mask, role=FileRole.INPUT)],
+            files=[FileRef(seg_mask, "input")],
         )
         """,
     )
@@ -79,19 +78,19 @@ async def test_file_refs_resolved(
     _write_files_catalog(
         tmp_path,
         """\
-        from clarinet.config.primitives import File
+        from clarinet.config.primitives import FileDef
 
-        master_model = File(pattern="master.nrrd", description="Master model")
+        master_model = FileDef(pattern="master.nrrd", description="Master model")
         """,
     )
     _write_record_types(
         tmp_path,
         """\
-        from clarinet.config.primitives import RecordTypeDef, FileRef
+        from clarinet.config.primitives import RecordDef, FileRef
         from clarinet.models.file_schema import FileRole
         from files_catalog import master_model
 
-        ai_analysis = RecordTypeDef(
+        ai_analysis = RecordDef(
             name="ai_analysis",
             description="AI analysis task",
             level="SERIES",
@@ -133,9 +132,9 @@ async def test_schema_sidecar_loaded(
     _write_record_types(
         tmp_path,
         """\
-        from clarinet.config.primitives import RecordTypeDef
+        from clarinet.config.primitives import RecordDef
 
-        sidecar_type = RecordTypeDef(
+        sidecar_type = RecordDef(
             name="sidecar_type",
             description="Type with sidecar schema",
             level="SERIES",
@@ -161,9 +160,9 @@ async def test_reconcile_updates_on_change(
     _write_record_types(
         tmp_path,
         """\
-        from clarinet.config.primitives import RecordTypeDef
+        from clarinet.config.primitives import RecordDef
 
-        mutable_type = RecordTypeDef(
+        mutable_type = RecordDef(
             name="mutable_type",
             description="Version 1",
             level="SERIES",
@@ -179,9 +178,9 @@ async def test_reconcile_updates_on_change(
     _write_record_types(
         tmp_path,
         """\
-        from clarinet.config.primitives import RecordTypeDef
+        from clarinet.config.primitives import RecordDef
 
-        mutable_type = RecordTypeDef(
+        mutable_type = RecordDef(
             name="mutable_type",
             description="Version 2",
             level="STUDY",
@@ -205,13 +204,13 @@ async def test_file_level_persisted(
     test_session: AsyncSession,
     tmp_path,
 ) -> None:
-    """File(level="PATIENT") → FileDefinition.level in DB."""
+    """FileDef(level="PATIENT") → FileDefinition.level in DB."""
     _write_files_catalog(
         tmp_path,
         """\
-        from clarinet.config.primitives import File
+        from clarinet.config.primitives import FileDef
 
-        patient_data = File(
+        patient_data = FileDef(
             pattern="data.json",
             description="Patient-level data",
             level="PATIENT",
@@ -221,15 +220,14 @@ async def test_file_level_persisted(
     _write_record_types(
         tmp_path,
         """\
-        from clarinet.config.primitives import RecordTypeDef, FileRef
-        from clarinet.models.file_schema import FileRole
+        from clarinet.config.primitives import RecordDef, FileRef
         from files_catalog import patient_data
 
-        cross_level = RecordTypeDef(
+        cross_level = RecordDef(
             name="cross_level",
             description="Cross-level test",
             level="SERIES",
-            files=[FileRef(patient_data, role=FileRole.INPUT)],
+            files=[FileRef(patient_data, "input")],
         )
         """,
     )
@@ -257,3 +255,93 @@ async def test_python_mode_no_record_types_file(tmp_path) -> None:
     """Missing record_types.py → empty list."""
     result = await load_python_config(tmp_path)
     assert result == []
+
+
+@pytest.mark.asyncio
+async def test_role_alias(
+    test_session: AsyncSession,
+    tmp_path,
+) -> None:
+    """RecordDef(role='doctor_CT') maps to role_name."""
+    _write_record_types(
+        tmp_path,
+        """\
+        from clarinet.config.primitives import RecordDef
+
+        with_role = RecordDef(
+            name="with_role",
+            description="Test role alias",
+            level="STUDY",
+            role="doctor_CT",
+        )
+        """,
+    )
+
+    config_items = await load_python_config(tmp_path)
+    assert len(config_items) == 1
+    assert config_items[0].role_name == "doctor_CT"
+
+    result = await reconcile_record_types(config_items, test_session)
+    assert "with_role" in result.created
+
+    stmt = select(RecordType).where(RecordType.name == "with_role")
+    rt = (await test_session.execute(stmt)).scalar_one()
+    assert rt.role_name == "doctor_CT"
+
+
+@pytest.mark.asyncio
+async def test_single_file_mode(
+    test_session: AsyncSession,
+    tmp_path,
+) -> None:
+    """FileDef + RecordDef in same record_types.py (no files_catalog.py)."""
+    _write_record_types(
+        tmp_path,
+        """\
+        from clarinet.config.primitives import FileDef, FileRef, RecordDef
+
+        my_file = FileDef(pattern="output.nrrd", description="Output file")
+
+        single_file_type = RecordDef(
+            name="single_file_type",
+            description="Single-file mode test",
+            level="SERIES",
+            files=[FileRef(my_file, "output")],
+        )
+        """,
+    )
+
+    config_items = await load_python_config(tmp_path)
+    assert len(config_items) == 1
+    assert config_items[0].file_registry is not None
+    assert len(config_items[0].file_registry) == 1
+    assert config_items[0].file_registry[0].name == "my_file"
+
+
+@pytest.mark.asyncio
+async def test_backward_compat_old_names(
+    tmp_path,
+) -> None:
+    """Old names File/RecordTypeDef still work via aliases."""
+    _write_record_types(
+        tmp_path,
+        """\
+        from clarinet.config.primitives import File, RecordTypeDef, FileRef
+        from clarinet.models.file_schema import FileRole
+
+        old_file = File(pattern="old.nrrd", description="Old name")
+
+        old_type = RecordTypeDef(
+            name="old_type",
+            description="Backward compat test",
+            level="SERIES",
+            files=[FileRef(old_file, role=FileRole.INPUT)],
+        )
+        """,
+    )
+
+    config_items = await load_python_config(tmp_path)
+    assert len(config_items) == 1
+    assert config_items[0].name == "old_type"
+    assert config_items[0].file_registry is not None
+    assert config_items[0].file_registry[0].name == "old_file"
