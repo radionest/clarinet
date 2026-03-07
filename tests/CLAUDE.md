@@ -85,13 +85,13 @@ Two solutions:
    ```python
    @pytest.fixture(autouse=True)
    def _reset_singletons():
-       import src.some_module as mod
+       import clarinet.some_module as mod
        orig = mod._singleton
        yield
        mod._singleton = orig
    ```
 2. **Re-create in shutdown** — the shutdown function itself replaces the resource
-   (see `src/utils/fs.py:shutdown_fs_executor`):
+   (see `clarinet/utils/fs.py:shutdown_fs_executor`):
    ```python
    def shutdown_resource():
        global _resource
@@ -103,7 +103,7 @@ Two solutions:
 
 ### URL Constants
 
-Use `tests/utils/urls.py` instead of hardcoded URL strings. Full reference in `src/api/CLAUDE.md`.
+Use `tests/utils/urls.py` instead of hardcoded URL strings. Full reference in `clarinet/api/CLAUDE.md`.
 
 ```python
 from tests.utils.urls import RECORDS_BASE, RECORD_TYPES

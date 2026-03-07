@@ -10,7 +10,7 @@
 
 ```bash
 cd examples/demo
-uv run python -c "from src.settings import settings; print(settings.debug, settings.admin_password)"
+uv run python -c "from clarinet.settings import settings; print(settings.debug, settings.admin_password)"
 # Вывод: False None
 # Ожидалось: True admin123
 ```
@@ -19,7 +19,7 @@ uv run python -c "from src.settings import settings; print(settings.debug, setti
 
 ### Конфигурация
 
-`src/settings.py`:
+`clarinet/settings.py`:
 ```python
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -43,7 +43,7 @@ database_name = "clarinet_demo"
 
 ### Гипотеза
 
-`pydantic_settings` с `SettingsConfigDict(toml_file=...)` может резолвить путь к TOML-файлу не от CWD, а от расположения модуля `settings.py` (т.е. от `src/settings.py`). В таком случае он ищет `src/settings.toml`, которого нет.
+`pydantic_settings` с `SettingsConfigDict(toml_file=...)` может резолвить путь к TOML-файлу не от CWD, а от расположения модуля `settings.py` (т.е. от `clarinet/settings.py`). В таком случае он ищет `src/settings.toml`, которого нет.
 
 ### Текущий workaround
 
@@ -54,7 +54,7 @@ CLARINET_DEBUG=true \
 CLARINET_ADMIN_PASSWORD=admin123 \
 CLARINET_DATABASE_DRIVER=sqlite \
 CLARINET_DATABASE_NAME=clarinet_demo \
-uv run python -m uvicorn src.api.app:app
+uv run python -m uvicorn clarinet.api.app:app
 ```
 
 ### Последствия
@@ -74,7 +74,7 @@ uv run python -m uvicorn src.api.app:app
 Когда `settings.debug = False` (из-за проблемы 1), cookie-транспорт настраивается как:
 
 ```python
-# src/api/auth_config.py:78
+# clarinet/api/auth_config.py:78
 cookie_secure=not settings.debug  # True когда debug=False
 ```
 

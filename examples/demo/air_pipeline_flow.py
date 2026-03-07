@@ -9,19 +9,19 @@ Three-step pipeline triggered on series creation:
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from src.services.pipeline import Pipeline, PipelineMessage, get_broker
-from src.services.recordflow import series
+from clarinet.services.pipeline import Pipeline, PipelineMessage, get_broker
+from clarinet.services.recordflow import series
 
 if TYPE_CHECKING:
-    from src.client import ClarinetClient
+    from clarinet.client import ClarinetClient
 
 broker = get_broker()
 
 
 async def _get_client() -> ClarinetClient:
     """Create an authenticated ClarinetClient with admin credentials."""
-    from src.client import ClarinetClient
-    from src.settings import settings
+    from clarinet.client import ClarinetClient
+    from clarinet.settings import settings
 
     client = ClarinetClient(
         f"http://{settings.host}:{settings.port}/api",
@@ -56,8 +56,8 @@ async def segment_air(msg: dict) -> dict:
     # Fetch DICOM from PACS via C-GET (skip if files already present)
     dcm_files = list(working_path.glob("*.dcm"))
     if not dcm_files:
-        from src.services.dicom import DicomClient, DicomNode
-        from src.settings import settings
+        from clarinet.services.dicom import DicomClient, DicomNode
+        from clarinet.settings import settings
 
         dicom_client = DicomClient(calling_aet=settings.dicom_aet, max_pdu=settings.dicom_max_pdu)
         pacs = DicomNode(
@@ -122,7 +122,7 @@ async def segment_air(msg: dict) -> dict:
 @broker.task()
 async def create_air_record(msg: dict) -> dict:
     """Create an air_volume record via the Clarinet API."""
-    from src.models import RecordCreate
+    from clarinet.models import RecordCreate
 
     message = PipelineMessage(**msg)
 

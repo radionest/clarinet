@@ -1,6 +1,6 @@
 """RecordFlow workflow definitions for the Clarinet demo project."""
 
-from src.services.recordflow import record, series
+from clarinet.services.recordflow import record, series
 
 # Flow 1: When doctor_review finishes -> always create ai_analysis
 (record("doctor_review").on_status("finished").add_record("ai_analysis"))

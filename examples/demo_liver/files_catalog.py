@@ -1,20 +1,11 @@
 # Регистр файлов проекта. Используется в pipeline_flow.py и FileAccessor.
 # Уровень (level) определяет папку хранения и гарантии координатной сетки.
 
-from dataclasses import dataclass
-from typing import Literal
-
-
-@dataclass
-class File:
-    pattern: str
-    multiple: bool
-    level: Literal["PATIENT", "STUDY", "SERIES"]
-
+from clarinet import FileDef
 
 # --- Мастер-модель (одна на пациента) ---
 
-master_model = File(
+master_model = FileDef(
     pattern="master_model.seg.nii",
     multiple=False,
     level="PATIENT",
@@ -23,14 +14,14 @@ master_model = File(
 # --- Сегментации врачей (per-user, привязаны к серии best_series) ---
 
 # Сегментация при просмотре только текущего исследования
-segmentation_single = File(
+segmentation_single = FileDef(
     pattern="segmentation_single_{user_id}.seg.nrrd",
     multiple=True,
     level="SERIES",
 )
 
 # Сегментация при просмотре с архивными КТ (расширенный контекст)
-segmentation_with_archive = File(
+segmentation_with_archive = FileDef(
     pattern="segmentation_with_archive_{user_id}.seg.nrrd",
     multiple=True,
     level="SERIES",
@@ -38,7 +29,7 @@ segmentation_with_archive = File(
 
 # --- Проекция мастер-модели (одна на серию) ---
 
-master_projection = File(
+master_projection = FileDef(
     pattern="master_projection.seg.nrrd",
     multiple=False,
     level="SERIES",
@@ -46,7 +37,7 @@ master_projection = File(
 
 # --- Second review (per-user, привязан к серии) ---
 
-second_review_output = File(
+second_review_output = FileDef(
     pattern="second_review_{user_id}.seg.nrrd",
     multiple=True,
     level="SERIES",

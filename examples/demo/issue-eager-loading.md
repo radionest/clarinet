@@ -72,13 +72,13 @@ fastapi.exceptions.ResponseValidationError: 7 validation errors:
 ### Где смотреть
 
 1. **Response models** — проверить, какие вложенные связи включены:
-   - `src/models/patient.py` — `PatientRead` (включает `studies`?)
-   - `src/models/study.py` — `StudyRead` (включает `series`?)
-   - `src/models/record.py` — `RecordRead` (включает `patient`?)
+   - `clarinet/models/patient.py` — `PatientRead` (включает `studies`?)
+   - `clarinet/models/study.py` — `StudyRead` (включает `series`?)
+   - `clarinet/models/record.py` — `RecordRead` (включает `patient`?)
 
 2. **Репозитории** — добавить eager loading:
-   - `src/repositories/patient_repository.py`
-   - `src/api/routers/study.py` (или `record.py`)
+   - `clarinet/repositories/patient_repository.py`
+   - `clarinet/api/routers/study.py` (или `record.py`)
 
 ### Предлагаемое решение
 

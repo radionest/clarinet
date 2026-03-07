@@ -13,12 +13,12 @@ import asyncio
 import sys
 from pathlib import Path
 
-# Add project root to path so we can import src
+# Add project root to path so we can import clarinet
 project_root = Path(__file__).resolve().parent.parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.client import ClarinetAPIError, ClarinetClient
-from src.models.base import RecordStatus
+from clarinet.client import ClarinetAPIError, ClarinetClient
+from clarinet.models.base import RecordStatus
 
 BASE_URL = "http://localhost:8000/api"
 

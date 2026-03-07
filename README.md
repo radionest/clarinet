@@ -23,7 +23,7 @@ Clarinet is a powerful framework designed to streamline the development of clini
 
 ```
 clarinet/
-├── src/                    # Backend source code
+├── clarinet/              # Backend source code (Python package)
 │   ├── api/               # FastAPI application
 │   │   ├── routers/       # API endpoints
 │   │   ├── auth_config.py # Authentication configuration
@@ -134,10 +134,10 @@ make frontend-build
 clarinet run --with-frontend
 
 # Backend only (API mode)
-uvicorn src.api.app:app --reload
+uvicorn clarinet.api.app:app --reload
 
 # Or using the CLI
-python -m src
+python -m clarinet
 ```
 
 The application will be available at `http://localhost:8000` with:
@@ -149,7 +149,7 @@ The application will be available at `http://localhost:8000` with:
 
 ### Frontend Development
 
-**Note**: The frontend is currently located at `src/frontend/`.
+**Note**: The frontend is currently located at `clarinet/frontend/`.
 
 #### Key Dependencies
 
@@ -165,7 +165,7 @@ The frontend uses native Gleam libraries for better type safety:
 
 ```bash
 # For embedded frontend (current structure)
-cd src/frontend
+cd clarinet/frontend
 gleam deps download  # Installs all Gleam dependencies
 gleam build --target javascript
 
@@ -244,13 +244,13 @@ pre-commit install
 pytest
 
 # Format code
-ruff format src/ tests/
+ruff format clarinet/ tests/
 
 # Lint code
-ruff check src/ tests/ --fix
+ruff check clarinet/ tests/ --fix
 
 # Type checking
-mypy src/
+mypy clarinet/
 ```
 
 ### Repository Pattern
@@ -289,7 +289,7 @@ Once the application is running, visit:
 
 Clarinet uses a hierarchical configuration system:
 
-1. Default settings in `src/settings.py`
+1. Default settings in `clarinet/settings.py`
 2. TOML configuration files (`settings.toml`)
 3. Environment variables (prefixed with `CLARINET_`)
 
@@ -318,7 +318,7 @@ await initialize_database()
 pytest
 
 # Run with coverage
-pytest --cov=src tests/
+pytest --cov=clarinet tests/
 
 # Run specific test file
 pytest tests/integration/test_api.py

@@ -3,12 +3,12 @@
 import asyncio
 from pathlib import Path
 
-from src.services.dicom import (
+from clarinet.services.dicom import (
     DicomClient,
     DicomNode,
     StudyQuery,
 )
-from src.settings import settings
+from clarinet.settings import settings
 
 
 async def example_find_and_retrieve() -> None:
@@ -121,7 +121,7 @@ async def example_find_series() -> None:
         port=11112,
     )
 
-    from src.services.dicom import SeriesQuery
+    from clarinet.services.dicom import SeriesQuery
 
     # Find all CT series in study
     series = await client.find_series(

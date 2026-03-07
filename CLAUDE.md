@@ -6,19 +6,19 @@ Clarinet is a framework for clinical-radiological studies, built on FastAPI, SQL
 
 - Follow KISS, SOLID, DRY, YAGNI principles
 - Composition over inheritance; each module has a single purpose
-- **Repository pattern**: all DB access through `src/repositories/`
-- **Service layer**: `src/services/` uses repositories; routers use services/repos
-- **Dependency injection**: `Annotated[X, Depends()]` aliases in `src/api/dependencies.py`
-- **Exception flow**: repos raise domain exceptions (`src/exceptions/domain.py`) → exception handlers convert to HTTP responses
-- **Logger**: always `from src.utils.logger import logger` — never import loguru directly
-- **Settings**: `from src.settings import settings` — env vars with `CLARINET_` prefix
+- **Repository pattern**: all DB access through `clarinet/repositories/`
+- **Service layer**: `clarinet/services/` uses repositories; routers use services/repos
+- **Dependency injection**: `Annotated[X, Depends()]` aliases in `clarinet/api/dependencies.py`
+- **Exception flow**: repos raise domain exceptions (`clarinet/exceptions/domain.py`) → exception handlers convert to HTTP responses
+- **Logger**: always `from clarinet.utils.logger import logger` — never import loguru directly
+- **Settings**: `from clarinet.settings import settings` — env vars with `CLARINET_` prefix
 
 ## Code Style
 
 - All Python tools run through **uv**: `uv run <command>`
 - Type hints on all functions; `Optional[T]` not `Union[T, None]`
 - Google-style docstrings for public functions
-- Custom exceptions from `src.exceptions.http` (NOT_FOUND, CONFLICT, etc.)
+- Custom exceptions from `clarinet.exceptions.http` (NOT_FOUND, CONFLICT, etc.)
 - Async/await for all I/O; `asyncio.gather()` for parallel independent tasks
 - No bare except — always specify exception type
 
@@ -82,5 +82,5 @@ After completing any task, review and update CLAUDE.md files if your changes:
 - Changed technology stack or dependencies
 - Fixed bugs caused by outdated documentation
 
-Scoped CLAUDE.md files exist in: `src/`, `src/models/`, `src/repositories/`, `src/api/`, `src/frontend/`, `src/frontend/build/packages/formosh/`, `src/services/recordflow/`, `src/services/pipeline/`, `src/services/dicom/`, `src/services/slicer/`, `src/services/dicomweb/`, `tests/`.
+Scoped CLAUDE.md files exist in: `clarinet/`, `clarinet/models/`, `clarinet/repositories/`, `clarinet/api/`, `clarinet/frontend/`, `clarinet/frontend/build/packages/formosh/`, `clarinet/services/recordflow/`, `clarinet/services/pipeline/`, `clarinet/services/dicom/`, `clarinet/services/slicer/`, `clarinet/services/dicomweb/`, `tests/`.
 Update the most specific file. Keep root CLAUDE.md minimal — move details to subdirectory files.

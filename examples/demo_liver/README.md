@@ -179,7 +179,7 @@ OHIF нативно поддерживает загрузку нескольки
 /ohif/viewer?StudyInstanceUIDs=1.2.3&StudyInstanceUIDs=1.2.4&StudyInstanceUIDs=1.2.5
 ```
 
-Текущая реализация (`src/frontend/src/utils/viewer.gleam`) строит URL с одним study_uid. Страница выполнения записи (`records/execute.gleam`) уже учитывает level записи при формировании кнопки просмотра.
+Текущая реализация (`clarinet/frontend/src/utils/viewer.gleam`) строит URL с одним study_uid. Страница выполнения записи (`records/execute.gleam`) уже учитывает level записи при формировании кнопки просмотра.
 
 ### Контракт
 
