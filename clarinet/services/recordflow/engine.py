@@ -454,15 +454,43 @@ class RecordFlowEngine:
 
         # Evaluate and execute conditional actions
         previous_condition_met = False
+        match_group_met: dict[int, bool] = {}
+
         for condition in flow.conditions:
+            group = condition.match_group
+
             if condition.is_else:
-                if not previous_condition_met:
+                if group is not None:
+                    should_fire = not match_group_met.get(group, False)
+                    # default() carries guard — evaluate it
+                    if should_fire and condition.condition is not None:
+                        try:
+                            should_fire = condition.condition.evaluate(context)
+                        except (TypeError, ValueError):
+                            if condition.on_missing == "skip":
+                                should_fire = False
+                            else:
+                                raise
+                else:
+                    should_fire = not previous_condition_met
+                if should_fire:
                     for action in condition.actions:
                         await self._execute_action(action, record, context)
-                break
+                if group is None:
+                    break
+                continue
+
+            # Stop-on-first-match: skip if group already matched
+            if group is not None and match_group_met.get(group, False):
+                continue
 
             result = await self._evaluate_and_run_condition(condition, context, record)
-            previous_condition_met = result is True
+
+            if group is not None:
+                if result is True:
+                    match_group_met[group] = True
+            else:
+                previous_condition_met = result is True
 
     async def _execute_action(
         self, action: FlowAction, record: RecordRead, context: dict[str, RecordRead]

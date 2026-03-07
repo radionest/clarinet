@@ -58,6 +58,9 @@ Actions are Pydantic models (not dicts). Each has a `type` Literal field:
 - `.on_creation()` — alias for `.on_created()`
 - `.if_(condition)` / `.or_()` / `.and_()` — conditional logic (cross-record comparisons)
 - `.if_record(F.x == val, F.y > 0, on_missing="skip"|"raise")` — self-referential conditions with AND semantics
+- `.match(F.field)` — start pattern matching on a field; absorbs preceding `if_record()` as guard
+- `.case(value)` — add a case branch (`guard AND field == value`); stop-on-first-match semantics
+- `.default()` — fallback branch; fires only when no case matched (and guard is True)
 - `.add_record('type', **kwargs)` → `CreateRecordAction` (supports `parent_record_id` kwarg; inherits `user_id` from triggering record)
 - `.create_record('type1', 'type2')` — convenience wrapper calling `.add_record()` for each name
 - `.update_record('name', status='new_status')` → `UpdateRecordAction`
@@ -150,6 +153,34 @@ record("first_check")
 `on_missing="raise"`: missing fields → propagate error.
 
 Comparison operators: `==`, `!=`, `<`, `<=`, `>`, `>=`
+
+## Match/Case — Pattern Matching (Python-style semantics)
+
+When multiple conditions share the same trigger and guard but differ only by one field value, use `match()/case()/default()` for Python-like pattern matching:
+
+```python
+(
+    record("first_check")
+    .on_finished()
+    .if_record(F.is_good == True)
+    .match(F.study_type)
+    .case("CT").create_record("seg_CT_single", "seg_CT_archive")
+    .case("MRI").create_record("seg_MRI_single")
+    .case("CT-AG").create_record("seg_CTAG_single")
+    .default().create_record("seg_unknown")
+)
+```
+
+**How it works:** Each `.case(value)` generates a `FlowCondition` with `match_group` set. The engine uses `match_group` for stop-on-first-match: once a case matches, remaining cases in the same group are skipped. `default()` fires only when no case in the group matched.
+
+- `.match(field)` — saves the match field and assigns a unique `match_group` id; absorbs a preceding `if_record()` (without actions) as guard
+- `.case(value)` — creates `FlowCondition(guard AND field == value, match_group=id)`
+- `.default()` — creates `FlowCondition(guard, is_else=True, match_group=id)`; fires only when no case in the group matched and the guard (if any) is True
+- **Stop-on-first-match**: the engine skips remaining cases after the first match in a group
+- Guard is optional: `match(F.x).case("a")` works without `if_record()`
+- When guard is False, neither cases nor default fire
+- `on_missing` from `if_record()` propagates to all case and default conditions
+- `validate()` fails if `match()` has no `case()` branches
 
 ## Engine Setup
 

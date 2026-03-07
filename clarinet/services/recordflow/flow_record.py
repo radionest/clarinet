@@ -71,6 +71,12 @@ class FlowRecord:
         self.conditions: list[FlowCondition] = []
         self.actions: list[FlowAction] = []
         self._current_condition: FlowCondition | None = None
+        self._match_field: FlowResult | None = None
+        self._match_guard: ComparisonResult | None = None
+        self._match_on_missing: str = "skip"
+        self._match_group_id: int = 0
+        self._match_group_counter: int = 0
+        self._match_case_count: int = 0
 
     @property
     def data(self) -> FlowResult:
@@ -233,6 +239,88 @@ class FlowRecord:
         # Combine with AND logic
         combined = LogicalComparison(self._current_condition.condition, condition, "and")
         self._current_condition.condition = combined
+        return self
+
+    def match(self, field: FlowResult) -> FlowRecord:
+        """Start a match block on a field for pattern matching.
+
+        If preceded by ``if_record()`` without actions, the guard condition
+        is absorbed and combined with each subsequent ``case()`` via AND.
+
+        Args:
+            field: The field to match on (e.g. ``F.study_type``).
+
+        Returns:
+            Self for method chaining.
+        """
+        self._match_field = field
+        self._match_group_counter += 1
+        self._match_group_id = self._match_group_counter
+
+        # Absorb preceding if_record() guard if it has no actions
+        if self._current_condition and not self._current_condition.actions:
+            self._match_guard = self._current_condition.condition
+            self._match_on_missing = self._current_condition.on_missing
+            self.conditions.remove(self._current_condition)
+            self._current_condition = None
+
+        return self
+
+    def case(self, value: Any) -> FlowRecord:
+        """Add a case branch to the current match block.
+
+        Creates a new ``FlowCondition`` with ``match_field == value``,
+        optionally combined with the guard from a preceding ``if_record()``.
+
+        Args:
+            value: The value to compare the match field against.
+
+        Returns:
+            Self for method chaining.
+
+        Raises:
+            ValueError: If called without a preceding ``match()``.
+        """
+        if self._match_field is None:
+            raise ValueError("case() must be called after match()")
+
+        case_condition: ComparisonResult = self._match_field == value
+        if self._match_guard is not None:
+            case_condition = LogicalComparison(self._match_guard, case_condition, "and")
+
+        self._current_condition = FlowCondition(
+            case_condition,
+            on_missing=self._match_on_missing,
+            match_group=self._match_group_id,
+        )
+        self.conditions.append(self._current_condition)
+        self._match_case_count += 1
+        return self
+
+    def default(self) -> FlowRecord:
+        """Add a default branch to the current match block.
+
+        The default branch fires only when no preceding ``case()`` in the
+        same match group matched.  If a guard was set via ``if_record()``,
+        the default also carries it — so when the guard is False, the
+        default does **not** fire.
+
+        Returns:
+            Self for method chaining.
+
+        Raises:
+            ValueError: If called without a preceding ``match()``.
+        """
+        if self._match_field is None:
+            raise ValueError("default() must be called after match()")
+
+        self._current_condition = FlowCondition(
+            self._match_guard,  # None when no guard
+            is_else=True,
+            on_missing=self._match_on_missing,
+            match_group=self._match_group_id,
+        )
+        self.conditions.append(self._current_condition)
         return self
 
     def add_record(self, record_type_name: str, **kwargs: object) -> FlowRecord:
@@ -475,6 +563,10 @@ class FlowRecord:
         for condition in self.conditions:
             if not condition.actions and not condition.is_else:
                 raise ValueError(f"Condition in flow '{self.record_name}' has no actions")
+
+        # match() without any case() is invalid
+        if self._match_field is not None and self._match_case_count == 0:
+            raise ValueError(f"match() in flow '{self.record_name}' has no case() branches")
 
         return True
 

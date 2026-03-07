@@ -1537,3 +1537,484 @@ class TestFileFlowEngine:
         await engine.handle_file_update("master_model", "PAT001")
 
         assert mock_client.find_records.call_count == 0
+
+
+# ─── Match/Case — pattern matching sugar ──────────────────────────────────
+
+
+class TestMatchCase:
+    """Tests for match()/case()/default() pattern matching DSL."""
+
+    def test_match_case_basic(self):
+        """match().case() sets match_group on conditions."""
+        F = Field()
+        fr = FlowRecord("test")
+        fr.on_finished()
+        fr.match(F.study_type).case("CT").create_record("seg_CT").case("MRI").create_record(
+            "seg_MRI"
+        )
+
+        assert len(fr.conditions) == 2
+
+        # Each condition has one action
+        assert len(fr.conditions[0].actions) == 1
+        assert fr.conditions[0].actions[0].record_type_name == "seg_CT"
+        assert len(fr.conditions[1].actions) == 1
+        assert fr.conditions[1].actions[0].record_type_name == "seg_MRI"
+
+        # Conditions are simple FieldComparison (no guard)
+        assert isinstance(fr.conditions[0].condition, FieldComparison)
+        assert isinstance(fr.conditions[1].condition, FieldComparison)
+
+        # Both conditions share the same match_group
+        assert fr.conditions[0].match_group is not None
+        assert fr.conditions[0].match_group == fr.conditions[1].match_group
+
+    def test_match_case_with_guard(self):
+        """if_record().match().case() combines guard AND field == value."""
+        F = Field()
+        fr = FlowRecord("first_check")
+        fr.on_finished()
+        (
+            fr.if_record(F.is_good == True)  # noqa: E712
+            .match(F.study_type)
+            .case("CT")
+            .create_record("seg_CT")
+            .case("MRI")
+            .create_record("seg_MRI")
+        )
+
+        assert len(fr.conditions) == 2
+
+        # Each condition is LogicalComparison(guard AND field==value)
+        for cond in fr.conditions:
+            assert isinstance(cond.condition, LogicalComparison)
+            assert cond.condition.operator == "and"
+
+    def test_match_case_evaluates_correct_branch(self):
+        """Only the matching case evaluates to True."""
+        F = Field()
+        fr = FlowRecord("first_check")
+        (
+            fr.if_record(F.is_good == True)  # noqa: E712
+            .match(F.study_type)
+            .case("CT")
+            .create_record("seg_CT")
+            .case("MRI")
+            .create_record("seg_MRI")
+        )
+
+        ctx_ct = {
+            "__self__": make_record_read("first_check", data={"is_good": True, "study_type": "CT"}),
+        }
+        assert fr.conditions[0].evaluate(ctx_ct) is True
+        assert fr.conditions[1].evaluate(ctx_ct) is False
+
+        ctx_mri = {
+            "__self__": make_record_read(
+                "first_check", data={"is_good": True, "study_type": "MRI"}
+            ),
+        }
+        assert fr.conditions[0].evaluate(ctx_mri) is False
+        assert fr.conditions[1].evaluate(ctx_mri) is True
+
+    def test_match_case_guard_false(self):
+        """When guard is False, no case matches."""
+        F = Field()
+        fr = FlowRecord("first_check")
+        (
+            fr.if_record(F.is_good == True)  # noqa: E712
+            .match(F.study_type)
+            .case("CT")
+            .create_record("seg_CT")
+            .case("MRI")
+            .create_record("seg_MRI")
+        )
+
+        ctx = {
+            "__self__": make_record_read(
+                "first_check", data={"is_good": False, "study_type": "CT"}
+            ),
+        }
+        assert fr.conditions[0].evaluate(ctx) is False
+        assert fr.conditions[1].evaluate(ctx) is False
+
+    def test_case_without_match_raises(self):
+        """case() without preceding match() raises ValueError."""
+        fr = FlowRecord("test")
+        with pytest.raises(ValueError, match="case.*must be called after match"):
+            fr.case("CT")
+
+    def test_match_without_case_validates_error(self):
+        """validate() fails when match() has no case() branches."""
+        F = Field()
+        fr = FlowRecord("test")
+        fr.match(F.study_type)
+        with pytest.raises(ValueError, match="has no case"):
+            fr.validate()
+
+    def test_match_case_multiple_actions_per_case(self):
+        """case().create_record('a', 'b') creates multiple actions in one case."""
+        F = Field()
+        fr = FlowRecord("test")
+        fr.match(F.study_type).case("CT").create_record("seg_single", "seg_archive")
+
+        assert len(fr.conditions) == 1
+        assert len(fr.conditions[0].actions) == 2
+        names = [a.record_type_name for a in fr.conditions[0].actions]
+        assert names == ["seg_single", "seg_archive"]
+
+    def test_match_case_preserves_on_missing(self):
+        """on_missing from if_record() propagates to case conditions."""
+        F = Field()
+        fr = FlowRecord("test")
+        (
+            fr.if_record(F.is_good == True, on_missing="raise")  # noqa: E712
+            .match(F.study_type)
+            .case("CT")
+            .create_record("seg_CT")
+        )
+
+        assert fr.conditions[0].on_missing == "raise"
+
+    def test_match_case_default_on_missing_skip(self):
+        """match() without if_record() uses default on_missing='skip'."""
+        F = Field()
+        fr = FlowRecord("test")
+        fr.match(F.study_type).case("CT").create_record("seg_CT")
+
+        assert fr.conditions[0].on_missing == "skip"
+
+    def test_default_fires_when_no_case_matches(self):
+        """default() fires when no case in the match group matched."""
+        F = Field()
+        fr = FlowRecord("test")
+        fr.on_finished()
+        (
+            fr.match(F.study_type)
+            .case("CT")
+            .create_record("seg_CT")
+            .case("MRI")
+            .create_record("seg_MRI")
+            .default()
+            .create_record("seg_unknown")
+        )
+
+        assert len(fr.conditions) == 3
+        # Last condition is the default (is_else=True with match_group)
+        assert fr.conditions[2].is_else is True
+        assert fr.conditions[2].match_group is not None
+        assert fr.conditions[2].match_group == fr.conditions[0].match_group
+
+    def test_default_skipped_when_case_matches(self):
+        """default() condition structure: no condition when no guard."""
+        F = Field()
+        fr = FlowRecord("test")
+        (
+            fr.match(F.study_type)
+            .case("CT")
+            .create_record("seg_CT")
+            .default()
+            .create_record("seg_default")
+        )
+
+        # default without guard has condition=None
+        assert fr.conditions[1].condition is None
+        assert fr.conditions[1].is_else is True
+
+    def test_default_guard_false_nothing_fires(self):
+        """default() carries guard from if_record() so it doesn't fire when guard is False."""
+        F = Field()
+        fr = FlowRecord("test")
+        (
+            fr.if_record(F.is_good == True)  # noqa: E712
+            .match(F.study_type)
+            .case("CT")
+            .create_record("seg_CT")
+            .default()
+            .create_record("seg_default")
+        )
+
+        # default condition carries the guard
+        assert fr.conditions[1].is_else is True
+        assert fr.conditions[1].condition is not None  # has guard
+
+    def test_default_no_guard_fires(self):
+        """default() without guard has condition=None (always fires when no case matched)."""
+        F = Field()
+        fr = FlowRecord("test")
+        (
+            fr.match(F.study_type)
+            .case("CT")
+            .create_record("seg_CT")
+            .default()
+            .create_record("seg_default")
+        )
+
+        assert fr.conditions[1].condition is None
+
+    def test_default_without_match_raises(self):
+        """default() without preceding match() raises ValueError."""
+        fr = FlowRecord("test")
+        with pytest.raises(ValueError, match="default.*must be called after match"):
+            fr.default()
+
+    def test_default_validates_ok(self):
+        """validate() passes for default() with actions (is_else is exempt)."""
+        F = Field()
+        fr = FlowRecord("test")
+        fr.on_finished()
+        (
+            fr.match(F.study_type)
+            .case("CT")
+            .create_record("seg_CT")
+            .default()
+            .create_record("seg_default")
+        )
+        assert fr.validate() is True
+
+    @pytest.mark.asyncio
+    async def test_engine_match_case(self):
+        """Engine stop-on-first-match: only the first matching case fires."""
+        from unittest.mock import AsyncMock
+
+        from clarinet.services.recordflow.engine import RecordFlowEngine
+
+        mock_client = AsyncMock()
+        mock_client.find_records = AsyncMock(return_value=[])
+        mock_client.create_record = AsyncMock(
+            return_value=make_record_read("seg_MRI", record_id=99)
+        )
+
+        engine = RecordFlowEngine(mock_client)
+
+        F = Field()
+        flow_def = FlowRecord("first_check")
+        flow_def.on_status("finished")
+        (
+            flow_def.if_record(F.is_good == True)  # noqa: E712
+            .match(F.study_type)
+            .case("CT")
+            .create_record("seg_CT_single", "seg_CT_archive")
+            .case("MRI")
+            .create_record("seg_MRI_single")
+            .case("CT-AG")
+            .create_record("seg_CTAG_single")
+        )
+
+        engine.register_flow(flow_def)
+
+        # Trigger with study_type=MRI
+        test_record = make_record_read(
+            "first_check",
+            record_id=100,
+            status=RecordStatus.finished,
+            data={"is_good": True, "study_type": "MRI"},
+        )
+
+        await engine.handle_record_status_change(test_record)
+
+        # Only MRI branch should fire (1 record)
+        assert mock_client.create_record.call_count == 1
+        call_args = mock_client.create_record.call_args[0][0]
+        assert call_args.record_type_name == "seg_MRI_single"
+
+    @pytest.mark.asyncio
+    async def test_engine_match_case_no_match(self):
+        """Engine does nothing when no case matches."""
+        from unittest.mock import AsyncMock
+
+        from clarinet.services.recordflow.engine import RecordFlowEngine
+
+        mock_client = AsyncMock()
+        mock_client.find_records = AsyncMock(return_value=[])
+
+        engine = RecordFlowEngine(mock_client)
+
+        F = Field()
+        flow_def = FlowRecord("first_check")
+        flow_def.on_status("finished")
+        (
+            flow_def.if_record(F.is_good == True)  # noqa: E712
+            .match(F.study_type)
+            .case("CT")
+            .create_record("seg_CT")
+        )
+
+        engine.register_flow(flow_def)
+
+        # Trigger with study_type=PET (no matching case)
+        test_record = make_record_read(
+            "first_check",
+            record_id=100,
+            status=RecordStatus.finished,
+            data={"is_good": True, "study_type": "PET"},
+        )
+
+        await engine.handle_record_status_change(test_record)
+
+        assert mock_client.create_record.call_count == 0
+
+    @pytest.mark.asyncio
+    async def test_engine_default_branch(self):
+        """Engine default branch fires when no case matches."""
+        from unittest.mock import AsyncMock
+
+        from clarinet.services.recordflow.engine import RecordFlowEngine
+
+        mock_client = AsyncMock()
+        mock_client.find_records = AsyncMock(return_value=[])
+        mock_client.create_record = AsyncMock(
+            return_value=make_record_read("seg_default", record_id=99)
+        )
+
+        engine = RecordFlowEngine(mock_client)
+
+        F = Field()
+        flow_def = FlowRecord("first_check")
+        flow_def.on_status("finished")
+        (
+            flow_def.match(F.study_type)
+            .case("CT")
+            .create_record("seg_CT")
+            .case("MRI")
+            .create_record("seg_MRI")
+            .default()
+            .create_record("seg_default")
+        )
+
+        engine.register_flow(flow_def)
+
+        # Trigger with study_type=PET (no matching case → default fires)
+        test_record = make_record_read(
+            "first_check",
+            record_id=100,
+            status=RecordStatus.finished,
+            data={"study_type": "PET"},
+        )
+
+        await engine.handle_record_status_change(test_record)
+
+        assert mock_client.create_record.call_count == 1
+        call_args = mock_client.create_record.call_args[0][0]
+        assert call_args.record_type_name == "seg_default"
+
+    @pytest.mark.asyncio
+    async def test_engine_default_skipped_when_case_matches(self):
+        """Engine default branch does NOT fire when a case matches."""
+        from unittest.mock import AsyncMock
+
+        from clarinet.services.recordflow.engine import RecordFlowEngine
+
+        mock_client = AsyncMock()
+        mock_client.find_records = AsyncMock(return_value=[])
+        mock_client.create_record = AsyncMock(return_value=make_record_read("seg_CT", record_id=99))
+
+        engine = RecordFlowEngine(mock_client)
+
+        F = Field()
+        flow_def = FlowRecord("first_check")
+        flow_def.on_status("finished")
+        (
+            flow_def.match(F.study_type)
+            .case("CT")
+            .create_record("seg_CT")
+            .case("MRI")
+            .create_record("seg_MRI")
+            .default()
+            .create_record("seg_default")
+        )
+
+        engine.register_flow(flow_def)
+
+        # Trigger with study_type=CT → CT branch fires, default skipped
+        test_record = make_record_read(
+            "first_check",
+            record_id=100,
+            status=RecordStatus.finished,
+            data={"study_type": "CT"},
+        )
+
+        await engine.handle_record_status_change(test_record)
+
+        assert mock_client.create_record.call_count == 1
+        call_args = mock_client.create_record.call_args[0][0]
+        assert call_args.record_type_name == "seg_CT"
+
+    @pytest.mark.asyncio
+    async def test_engine_default_guard_false_nothing_fires(self):
+        """When guard is False, neither cases nor default fire."""
+        from unittest.mock import AsyncMock
+
+        from clarinet.services.recordflow.engine import RecordFlowEngine
+
+        mock_client = AsyncMock()
+        mock_client.find_records = AsyncMock(return_value=[])
+
+        engine = RecordFlowEngine(mock_client)
+
+        F = Field()
+        flow_def = FlowRecord("first_check")
+        flow_def.on_status("finished")
+        (
+            flow_def.if_record(F.is_good == True)  # noqa: E712
+            .match(F.study_type)
+            .case("CT")
+            .create_record("seg_CT")
+            .default()
+            .create_record("seg_default")
+        )
+
+        engine.register_flow(flow_def)
+
+        # Guard is False (is_good=False), study_type=PET → nothing fires
+        test_record = make_record_read(
+            "first_check",
+            record_id=100,
+            status=RecordStatus.finished,
+            data={"is_good": False, "study_type": "PET"},
+        )
+
+        await engine.handle_record_status_change(test_record)
+
+        assert mock_client.create_record.call_count == 0
+
+    @pytest.mark.asyncio
+    async def test_engine_stop_on_first_match(self):
+        """Engine stops evaluating cases after the first match in a group."""
+        from unittest.mock import AsyncMock
+
+        from clarinet.services.recordflow.engine import RecordFlowEngine
+
+        mock_client = AsyncMock()
+        mock_client.find_records = AsyncMock(return_value=[])
+        mock_client.create_record = AsyncMock(return_value=make_record_read("seg", record_id=99))
+
+        engine = RecordFlowEngine(mock_client)
+
+        F = Field()
+        flow_def = FlowRecord("test")
+        flow_def.on_status("finished")
+        (
+            flow_def.match(F.score)
+            .case(10)
+            .create_record("first_match")
+            .case(10)
+            .create_record("second_match")
+        )
+
+        engine.register_flow(flow_def)
+
+        test_record = make_record_read(
+            "test",
+            record_id=100,
+            status=RecordStatus.finished,
+            data={"score": 10},
+        )
+
+        await engine.handle_record_status_change(test_record)
+
+        # Only the first matching case should fire
+        assert mock_client.create_record.call_count == 1
+        call_args = mock_client.create_record.call_args[0][0]
+        assert call_args.record_type_name == "first_match"

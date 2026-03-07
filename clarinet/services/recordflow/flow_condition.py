@@ -27,10 +27,12 @@ class FlowCondition:
         condition: ComparisonResult | None,
         is_else: bool = False,
         on_missing: str = "raise",
+        match_group: int | None = None,
     ):
         self.condition = condition
         self.is_else = is_else
         self.on_missing = on_missing
+        self.match_group = match_group
         self.actions: list[FlowAction] = []
 
     def add_condition(self, condition: ComparisonResult) -> None:
