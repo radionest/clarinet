@@ -17,6 +17,7 @@ rabbitmq_host = "192.168.122.151"
 rabbitmq_login = "clarinet_test"
 rabbitmq_password = "clarinet_test"
 
+config_mode = "python"
 recordflow_paths = ["./tasks"]
 frontend_enabled = true
 
