@@ -237,22 +237,14 @@ async def override_dicomweb_deps(tmp_path: Path) -> AsyncGenerator[None]:
     )
     (tmp_path / "dicomweb_cache").mkdir(exist_ok=True)
 
-    def _get_cache(_request=None, **_kw):
-        return cache
+    dicom_client = DicomClient(calling_aet=CALLING_AET)
+    pacs_node = DicomNode(aet=PACS_AET, host=PACS_HOST, port=PACS_PORT)
+    proxy_service = DicomWebProxyService(client=dicom_client, pacs=pacs_node, cache=cache)
 
-    def _get_proxy_service(_request=None, client=None, pacs=None, **_kw):
-        return DicomWebProxyService(
-            client=client or DicomClient(calling_aet=CALLING_AET),
-            pacs=pacs or DicomNode(aet=PACS_AET, host=PACS_HOST, port=PACS_PORT),
-            cache=cache,
-        )
-
-    app.dependency_overrides[get_dicom_client] = lambda: DicomClient(calling_aet=CALLING_AET)
-    app.dependency_overrides[get_pacs_node] = lambda: DicomNode(
-        aet=PACS_AET, host=PACS_HOST, port=PACS_PORT
-    )
-    app.dependency_overrides[get_dicomweb_cache] = _get_cache
-    app.dependency_overrides[get_dicomweb_proxy_service] = _get_proxy_service
+    app.dependency_overrides[get_dicom_client] = lambda: dicom_client
+    app.dependency_overrides[get_pacs_node] = lambda: pacs_node
+    app.dependency_overrides[get_dicomweb_cache] = lambda: cache
+    app.dependency_overrides[get_dicomweb_proxy_service] = lambda: proxy_service
 
     yield
 
