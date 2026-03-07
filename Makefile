@@ -32,16 +32,16 @@ frontend-build: ## Build frontend for production
 	@if [ -f "scripts/build_frontend.sh" ]; then \
 		bash scripts/build_frontend.sh; \
 	else \
-		cd src/frontend && \
+		cd clarinet/frontend && \
 		rm -rf build/ && \
 		gleam deps download && \
 		gleam build --target javascript && \
 		cd ../.. && \
 		rm -rf dist && \
 		mkdir -p dist/js dist/css dist/assets && \
-		cp -r src/frontend/build/dev/javascript/* dist/js/ && \
-		if [ -d "src/frontend/public" ]; then \
-			cp -r src/frontend/public/* dist/; \
+		cp -r clarinet/frontend/build/dev/javascript/* dist/js/ && \
+		if [ -d "clarinet/frontend/public" ]; then \
+			cp -r clarinet/frontend/public/* dist/; \
 		fi && \
 		echo "Frontend build complete! Output in dist/"; \
 	fi
@@ -49,17 +49,17 @@ frontend-build: ## Build frontend for production
 .PHONY: frontend-deps
 frontend-deps: ## Install frontend dependencies
 	@echo "Installing frontend dependencies..."
-	@cd src/frontend && gleam deps download
+	@cd clarinet/frontend && gleam deps download
 
 .PHONY: frontend-test
 frontend-test: ## Run frontend tests
 	@echo "Running frontend tests..."
-	@cd src/frontend && gleam test
+	@cd clarinet/frontend && gleam test
 
 .PHONY: frontend-clean
 frontend-clean: ## Clean frontend build artifacts
 	@echo "Cleaning frontend artifacts..."
-	@rm -rf src/frontend/build
+	@rm -rf clarinet/frontend/build
 	@rm -rf dist
 
 .PHONY: ohif-build
@@ -75,7 +75,7 @@ run-dev: ## Run development server with frontend
 .PHONY: run-api
 run-api: ## Run API server only (no frontend)
 	@echo "Starting API server..."
-	@uv run uvicorn src.api.app:app --reload --host 127.0.0.1 --port 8000
+	@uv run uvicorn clarinet.api.app:app --reload --host 127.0.0.1 --port 8000
 
 # =============================================================================
 # Code Quality Commands
@@ -84,17 +84,17 @@ run-api: ## Run API server only (no frontend)
 .PHONY: format
 format: ## Format code with ruff
 	@echo "Formatting code with ruff..."
-	@uv run ruff format src/ tests/
+	@uv run ruff format clarinet/ tests/
 
 .PHONY: lint
 lint: ## Check code with ruff (with fixes)
 	@echo "Checking code with ruff..."
-	@uv run ruff check src/ tests/ --fix
+	@uv run ruff check clarinet/ tests/ --fix
 
 .PHONY: typecheck
 typecheck: ## Type check with mypy
 	@echo "Type checking with mypy..."
-	@uv run mypy src/
+	@uv run mypy clarinet/
 
 .PHONY: pre-commit
 pre-commit: ## Run pre-commit hooks
@@ -118,7 +118,7 @@ test: ## Run backend tests
 .PHONY: test-cov
 test-cov: ## Run tests with coverage
 	@echo "Running tests with coverage..."
-	@uv run pytest --cov=src tests/
+	@uv run pytest --cov=clarinet tests/
 
 .PHONY: test-all
 test-all: test frontend-test ## Run all tests (backend + frontend)
@@ -142,7 +142,7 @@ dev-setup: ## Set up development environment
 	@echo "Setting up development environment..."
 	@uv sync --dev
 	@echo "Installing frontend dependencies..."
-	@cd src/frontend && gleam deps download
+	@cd clarinet/frontend && gleam deps download
 	@echo "Installing pre-commit hooks..."
 	@uv run pre-commit install
 	@echo "Development environment ready!"
