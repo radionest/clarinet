@@ -14,15 +14,15 @@ import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.config.reconciler import reconcile_record_types
-from src.exceptions.domain import (
+from clarinet.config.reconciler import reconcile_record_types
+from clarinet.exceptions.domain import (
     RecordNotFoundError,
     RecordTypeNotFoundError,
     ValidationError,
 )
-from src.repositories.record_repository import RecordRepository, RecordSearchCriteria
-from src.repositories.record_type_repository import RecordTypeRepository
-from src.utils.graph_validation import detect_cycle
+from clarinet.repositories.record_repository import RecordRepository, RecordSearchCriteria
+from clarinet.repositories.record_type_repository import RecordTypeRepository
+from clarinet.utils.graph_validation import detect_cycle
 from tests.utils.factories import (
     make_patient,
     make_record_type,

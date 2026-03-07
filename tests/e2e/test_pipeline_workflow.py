@@ -34,25 +34,25 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api.app import app
-from src.client import ClarinetClient
-from src.models.base import DicomQueryLevel
-from src.models.patient import Patient
-from src.models.record import RecordType
-from src.models.study import Series, Study
-from src.services.pipeline import Pipeline, PipelineMessage, get_pipeline
-from src.services.pipeline.chain import _PIPELINE_REGISTRY, _TASK_REGISTRY
-from src.services.pipeline.context import TaskContext, build_task_context
-from src.services.pipeline.task import pipeline_task
-from src.services.recordflow.engine import RecordFlowEngine
-from src.services.recordflow.flow_file import FILE_REGISTRY, file
-from src.services.recordflow.flow_record import (
+from clarinet.api.app import app
+from clarinet.client import ClarinetClient
+from clarinet.models.base import DicomQueryLevel
+from clarinet.models.patient import Patient
+from clarinet.models.record import RecordType
+from clarinet.models.study import Series, Study
+from clarinet.services.pipeline import Pipeline, PipelineMessage, get_pipeline
+from clarinet.services.pipeline.chain import _PIPELINE_REGISTRY, _TASK_REGISTRY
+from clarinet.services.pipeline.context import TaskContext, build_task_context
+from clarinet.services.pipeline.task import pipeline_task
+from clarinet.services.recordflow.engine import RecordFlowEngine
+from clarinet.services.recordflow.flow_file import FILE_REGISTRY, file
+from clarinet.services.recordflow.flow_record import (
     ENTITY_REGISTRY,
     RECORD_REGISTRY,
     record,
     study,
 )
-from src.services.recordflow.flow_result import Field
+from clarinet.services.recordflow.flow_result import Field
 from tests.utils.urls import PIPELINES_BASE, PIPELINES_SYNC, RECORDS_BASE, RECORDS_FIND
 
 pytestmark = pytest.mark.asyncio
@@ -86,10 +86,10 @@ async def client(test_session, test_settings) -> AsyncGenerator[AsyncClient]:
     Re-overrides the unauthenticated client from e2e conftest to use
     authenticated client for pipeline tests (same pattern as test_demo_processing).
     """
-    from src.api.auth_config import current_active_user, current_superuser
-    from src.models.user import User
-    from src.utils.auth import get_password_hash
-    from src.utils.database import get_async_session
+    from clarinet.api.auth_config import current_active_user, current_superuser
+    from clarinet.models.user import User
+    from clarinet.utils.auth import get_password_hash
+    from clarinet.utils.database import get_async_session
 
     mock_user = User(
         id=uuid4(),
@@ -114,16 +114,16 @@ async def client(test_session, test_settings) -> AsyncGenerator[AsyncClient]:
     app.dependency_overrides[current_superuser] = lambda: mock_user
 
     try:
-        from src.settings import get_settings
+        from clarinet.settings import get_settings
 
         app.dependency_overrides[get_settings] = override_get_settings
     except (ImportError, AttributeError):
         pass
 
     try:
-        import src.api.auth_config
+        import clarinet.api.auth_config
 
-        src.api.auth_config.settings = test_settings
+        clarinet.api.auth_config.settings = test_settings
     except (ImportError, AttributeError):
         pass
 
@@ -553,7 +553,7 @@ class TestPipelineBrokerConnectivity:
 
     async def test_task_registration_persists(self, pipeline_broker_factory: Any) -> None:
         """Test 12: Task registration persists in registry."""
-        from src.services.pipeline.chain import register_task
+        from clarinet.services.pipeline.chain import register_task
 
         broker = await pipeline_broker_factory()
 
@@ -581,7 +581,7 @@ class TestPipelineTaskDecorator:
         async def basic_task(msg: PipelineMessage, ctx: TaskContext) -> dict[str, Any]:
             return {"patient_id": msg.patient_id}
 
-        with patch("src.services.pipeline.task.ClarinetClient") as MockClient:
+        with patch("clarinet.services.pipeline.task.ClarinetClient") as MockClient:
             mock_client = AsyncMock()
             MockClient.return_value = mock_client
             mock_client.login = AsyncMock()
@@ -610,7 +610,7 @@ class TestPipelineTaskDecorator:
             received.append(msg)
             return msg.model_dump()
 
-        with patch("src.services.pipeline.task.ClarinetClient") as MockClient:
+        with patch("clarinet.services.pipeline.task.ClarinetClient") as MockClient:
             mock_client = AsyncMock()
             MockClient.return_value = mock_client
             mock_client.login = AsyncMock()
@@ -647,7 +647,7 @@ class TestPipelineTaskDecorator:
             captured_ctx.append(ctx)
             return msg.model_dump()
 
-        with patch("src.services.pipeline.task.ClarinetClient") as MockClient:
+        with patch("clarinet.services.pipeline.task.ClarinetClient") as MockClient:
             mock_client = AsyncMock()
             MockClient.return_value = mock_client
             mock_client.login = AsyncMock()
@@ -682,7 +682,7 @@ class TestPipelineTaskDecorator:
             task_executed = True
             return msg.model_dump()
 
-        with patch("src.services.pipeline.task.ClarinetClient") as MockClient:
+        with patch("clarinet.services.pipeline.task.ClarinetClient") as MockClient:
             mock_client = AsyncMock()
             MockClient.return_value = mock_client
             mock_client.login = AsyncMock()
@@ -722,7 +722,7 @@ class TestPipelineTaskDecorator:
             captured_ctx.append(ctx)
             return msg.model_dump()
 
-        with patch("src.services.pipeline.task.ClarinetClient") as MockClient:
+        with patch("clarinet.services.pipeline.task.ClarinetClient") as MockClient:
             mock_client = AsyncMock()
             MockClient.return_value = mock_client
             mock_client.login = AsyncMock()

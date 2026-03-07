@@ -11,15 +11,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlmodel import select
 
-from src.config.reconciler import reconcile_record_types
-from src.config.toml_exporter import (
+from clarinet.config.reconciler import reconcile_record_types
+from clarinet.config.toml_exporter import (
     delete_record_type_files,
     export_data_schema_sidecar,
     export_record_type_to_toml,
 )
-from src.models.file_schema import RecordTypeFileLink
-from src.models.record import RecordType, RecordTypeCreate
-from src.utils.config_loader import discover_config_files, load_record_config
+from clarinet.models.file_schema import RecordTypeFileLink
+from clarinet.models.record import RecordType, RecordTypeCreate
+from clarinet.utils.config_loader import discover_config_files, load_record_config
 
 
 def _write_toml(tmp_path, name: str, data: dict) -> None:

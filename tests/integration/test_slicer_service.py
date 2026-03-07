@@ -2,7 +2,7 @@
 
 import pytest
 
-from src.services.slicer.service import SlicerService
+from clarinet.services.slicer.service import SlicerService
 
 pytestmark = [pytest.mark.slicer, pytest.mark.asyncio, pytest.mark.usefixtures("_check_slicer")]
 

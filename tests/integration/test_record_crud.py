@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 import pytest
 from sqlmodel import select
 
-from src.models.record import Record, RecordStatus, RecordType
+from clarinet.models.record import Record, RecordStatus, RecordType
 
 
 @pytest.mark.asyncio
@@ -226,8 +226,8 @@ async def test_record_type_with_multiple_records(test_session, test_user, admin_
     await test_session.commit()
 
     # Create necessary objects
-    from src.models.patient import Patient
-    from src.models.study import Study
+    from clarinet.models.patient import Patient
+    from clarinet.models.study import Study
 
     patient = Patient(id="RECORD_PAT007", name="Multiple Records Patient", anon_name="ANON_REC_007")
     test_session.add(patient)

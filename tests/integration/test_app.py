@@ -4,8 +4,8 @@ import pytest
 from httpx import AsyncClient
 from sqlmodel import select
 
-from src.models.record import RecordType
-from src.models.user import User
+from clarinet.models.record import RecordType
+from clarinet.models.user import User
 
 
 @pytest.mark.asyncio

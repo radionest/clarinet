@@ -4,7 +4,7 @@ import pytest
 import pytest_asyncio
 from httpx import AsyncClient
 
-from src.models.record import RecordType
+from clarinet.models.record import RecordType
 
 # Base URL prefix for record endpoints
 BASE = "/api/records"

@@ -12,9 +12,9 @@ import pytest
 import pytest_asyncio
 from loguru import logger
 
-from src.client import ClarinetClient
-from src.services.slicer.client import SlicerClient
-from src.services.slicer.service import SlicerService
+from clarinet.client import ClarinetClient
+from clarinet.services.slicer.client import SlicerClient
+from clarinet.services.slicer.service import SlicerService
 
 # ─── Pipeline / RabbitMQ fixtures ────────────────────────────────────────────
 
@@ -72,8 +72,8 @@ async def pipeline_clarinet_client(
     """
     from httpx import ASGITransport, AsyncClient
 
-    from src.api.app import app
-    from src.utils.database import get_async_session
+    from clarinet.api.app import app
+    from clarinet.utils.database import get_async_session
 
     async def override_get_session() -> AsyncGenerator:
         yield test_session
@@ -118,7 +118,7 @@ def pipeline_broker_factory(
     from taskiq_aio_pika.queue import Queue as RmqQueue
     from taskiq_aio_pika.queue import QueueType
 
-    from src.services.pipeline.middleware import (
+    from clarinet.services.pipeline.middleware import (
         DeadLetterMiddleware,
         DLQPublisher,
         PipelineChainMiddleware,
@@ -294,7 +294,7 @@ async def _delete_test_resources(
 @pytest.fixture(autouse=False)
 def _clear_pipeline_registries() -> Any:
     """Clear pipeline task and pipeline registries before/after each test."""
-    from src.services.pipeline.chain import _PIPELINE_REGISTRY, _TASK_REGISTRY
+    from clarinet.services.pipeline.chain import _PIPELINE_REGISTRY, _TASK_REGISTRY
 
     _TASK_REGISTRY.clear()
     _PIPELINE_REGISTRY.clear()

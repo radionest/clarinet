@@ -4,7 +4,7 @@ import pytest
 from pydicom import Dataset
 from pydicom.uid import ExplicitVRLittleEndian
 
-from src.services.dicom.anonymizer import DicomAnonymizer
+from clarinet.services.dicom.anonymizer import DicomAnonymizer
 
 
 @pytest.fixture

@@ -4,25 +4,25 @@ import pytest
 import pytest_asyncio
 from sqlalchemy.orm import selectinload
 
-from src.exceptions.domain import (
+from clarinet.exceptions.domain import (
     EntityNotFoundError,
     RecordConstraintViolationError,
     RecordNotFoundError,
     RecordTypeAlreadyExistsError,
     RecordTypeNotFoundError,
 )
-from src.models.base import RecordStatus
-from src.models.file_schema import FileDefinition, FileRole, RecordTypeFileLink
-from src.models.record import RecordFind, RecordType
-from src.models.study import SeriesFind
-from src.models.user import User, UserRole
-from src.repositories.patient_repository import PatientRepository
-from src.repositories.record_repository import RecordRepository, RecordSearchCriteria
-from src.repositories.record_type_repository import RecordTypeRepository
-from src.repositories.series_repository import SeriesRepository
-from src.repositories.study_repository import StudyRepository
-from src.repositories.user_repository import UserRepository, UserRoleRepository
-from src.utils.auth import get_password_hash
+from clarinet.models.base import RecordStatus
+from clarinet.models.file_schema import FileDefinition, FileRole, RecordTypeFileLink
+from clarinet.models.record import RecordFind, RecordType
+from clarinet.models.study import SeriesFind
+from clarinet.models.user import User, UserRole
+from clarinet.repositories.patient_repository import PatientRepository
+from clarinet.repositories.record_repository import RecordRepository, RecordSearchCriteria
+from clarinet.repositories.record_type_repository import RecordTypeRepository
+from clarinet.repositories.series_repository import SeriesRepository
+from clarinet.repositories.study_repository import StudyRepository
+from clarinet.repositories.user_repository import UserRepository, UserRoleRepository
+from clarinet.utils.auth import get_password_hash
 from tests.utils.factories import (
     make_patient,
     make_record_type,
@@ -688,7 +688,7 @@ class TestRecordTypeRepository:
 
     @pytest.mark.asyncio
     async def test_find_by_name(self, env):
-        from src.models.record import RecordTypeFind
+        from clarinet.models.record import RecordTypeFind
 
         results = await env["repo"].find(RecordTypeFind(name="rt_test"))
         assert len(results) >= 1

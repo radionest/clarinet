@@ -14,14 +14,14 @@ from datetime import UTC, datetime
 import pytest
 import pytest_asyncio
 
-from src.api.routers.record import validate_record_files
-from src.models.base import DicomQueryLevel, RecordStatus
-from src.models.file_schema import FileDefinition, FileRole, RecordTypeFileLink
-from src.models.patient import Patient
-from src.models.record import Record, RecordRead, RecordType
-from src.models.study import Series, Study
-from src.repositories.record_repository import RecordRepository
-from src.settings import settings
+from clarinet.api.routers.record import validate_record_files
+from clarinet.models.base import DicomQueryLevel, RecordStatus
+from clarinet.models.file_schema import FileDefinition, FileRole, RecordTypeFileLink
+from clarinet.models.patient import Patient
+from clarinet.models.record import Record, RecordRead, RecordType
+from clarinet.models.study import Series, Study
+from clarinet.repositories.record_repository import RecordRepository
+from clarinet.settings import settings
 
 # ---------------------------------------------------------------------------
 # Local fixtures

@@ -10,8 +10,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from src.models.file_schema import FileDefinitionRead, FileRole
-from src.services.file_validation import (
+from clarinet.models.file_schema import FileDefinitionRead, FileRole
+from clarinet.services.file_validation import (
     FileValidationError,
     FileValidationResult,
     FileValidator,

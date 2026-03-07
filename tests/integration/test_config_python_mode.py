@@ -11,10 +11,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlmodel import select
 
-from src.config.python_loader import load_python_config
-from src.config.reconciler import reconcile_record_types
-from src.models.file_schema import RecordTypeFileLink
-from src.models.record import RecordType
+from clarinet.config.python_loader import load_python_config
+from clarinet.config.reconciler import reconcile_record_types
+from clarinet.models.file_schema import RecordTypeFileLink
+from clarinet.models.record import RecordType
 
 
 def _write_files_catalog(tmp_path, content: str) -> None:
@@ -36,7 +36,7 @@ async def test_bootstrap_loads_python_config(
     _write_files_catalog(
         tmp_path,
         """\
-        from src.config.primitives import File
+        from clarinet.config.primitives import File
 
         seg_mask = File(pattern="seg.nrrd", description="Segmentation mask")
         """,
@@ -44,8 +44,8 @@ async def test_bootstrap_loads_python_config(
     _write_record_types(
         tmp_path,
         """\
-        from src.config.primitives import RecordTypeDef, FileRef
-        from src.models.file_schema import FileRole
+        from clarinet.config.primitives import RecordTypeDef, FileRef
+        from clarinet.models.file_schema import FileRole
         from files_catalog import seg_mask
 
         lesion_seg = RecordTypeDef(
@@ -79,7 +79,7 @@ async def test_file_refs_resolved(
     _write_files_catalog(
         tmp_path,
         """\
-        from src.config.primitives import File
+        from clarinet.config.primitives import File
 
         master_model = File(pattern="master.nrrd", description="Master model")
         """,
@@ -87,8 +87,8 @@ async def test_file_refs_resolved(
     _write_record_types(
         tmp_path,
         """\
-        from src.config.primitives import RecordTypeDef, FileRef
-        from src.models.file_schema import FileRole
+        from clarinet.config.primitives import RecordTypeDef, FileRef
+        from clarinet.models.file_schema import FileRole
         from files_catalog import master_model
 
         ai_analysis = RecordTypeDef(
@@ -133,7 +133,7 @@ async def test_schema_sidecar_loaded(
     _write_record_types(
         tmp_path,
         """\
-        from src.config.primitives import RecordTypeDef
+        from clarinet.config.primitives import RecordTypeDef
 
         sidecar_type = RecordTypeDef(
             name="sidecar_type",
@@ -161,7 +161,7 @@ async def test_reconcile_updates_on_change(
     _write_record_types(
         tmp_path,
         """\
-        from src.config.primitives import RecordTypeDef
+        from clarinet.config.primitives import RecordTypeDef
 
         mutable_type = RecordTypeDef(
             name="mutable_type",
@@ -179,7 +179,7 @@ async def test_reconcile_updates_on_change(
     _write_record_types(
         tmp_path,
         """\
-        from src.config.primitives import RecordTypeDef
+        from clarinet.config.primitives import RecordTypeDef
 
         mutable_type = RecordTypeDef(
             name="mutable_type",
@@ -209,7 +209,7 @@ async def test_file_level_persisted(
     _write_files_catalog(
         tmp_path,
         """\
-        from src.config.primitives import File
+        from clarinet.config.primitives import File
 
         patient_data = File(
             pattern="data.json",
@@ -221,8 +221,8 @@ async def test_file_level_persisted(
     _write_record_types(
         tmp_path,
         """\
-        from src.config.primitives import RecordTypeDef, FileRef
-        from src.models.file_schema import FileRole
+        from clarinet.config.primitives import RecordTypeDef, FileRef
+        from clarinet.models.file_schema import FileRole
         from files_catalog import patient_data
 
         cross_level = RecordTypeDef(

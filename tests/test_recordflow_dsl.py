@@ -7,11 +7,11 @@ from datetime import UTC, datetime
 
 import pytest
 
-from src.models.base import DicomQueryLevel, RecordStatus
-from src.models.patient import PatientBase
-from src.models.record import RecordRead, RecordTypeBase
-from src.models.study import StudyBase
-from src.services.recordflow import (
+from clarinet.models.base import DicomQueryLevel, RecordStatus
+from clarinet.models.patient import PatientBase
+from clarinet.models.record import RecordRead, RecordTypeBase
+from clarinet.models.study import StudyBase
+from clarinet.services.recordflow import (
     ENTITY_REGISTRY,
     FILE_REGISTRY,
     RECORD_REGISTRY,
@@ -29,8 +29,8 @@ from src.services.recordflow import (
     PipelineAction,
     UpdateRecordAction,
 )
-from src.services.recordflow.flow_file import file
-from src.services.recordflow.flow_record import patient, record, series, study
+from clarinet.services.recordflow.flow_file import file
+from clarinet.services.recordflow.flow_record import patient, record, series, study
 
 
 def make_record_read(
@@ -63,7 +63,7 @@ def make_record_read(
 @pytest.fixture(autouse=True)
 def _clear_registry():
     """Clear the global registries before each test."""
-    from src.services.pipeline.chain import _PIPELINE_REGISTRY, _TASK_REGISTRY
+    from clarinet.services.pipeline.chain import _PIPELINE_REGISTRY, _TASK_REGISTRY
 
     RECORD_REGISTRY.clear()
     ENTITY_REGISTRY.clear()
@@ -407,7 +407,7 @@ class TestFlowRecordDSL:
         """do_task() creates a PipelineAction with _task: prefix."""
         from unittest.mock import MagicMock
 
-        from src.services.pipeline.chain import _PIPELINE_REGISTRY
+        from clarinet.services.pipeline.chain import _PIPELINE_REGISTRY
 
         mock_task = MagicMock()
         mock_task.task_name = "do_task_test_fn"
@@ -429,7 +429,7 @@ class TestFlowRecordDSL:
         """Calling do_task() twice with the same task reuses one Pipeline."""
         from unittest.mock import MagicMock
 
-        from src.services.pipeline.chain import _PIPELINE_REGISTRY
+        from clarinet.services.pipeline.chain import _PIPELINE_REGISTRY
 
         mock_task = MagicMock()
         mock_task.task_name = "dedup_test_fn"
@@ -526,7 +526,7 @@ class TestRecordFlowEngineUnit:
         """handle_record_data_update only executes flows with on_data_update."""
         from unittest.mock import AsyncMock
 
-        from src.services.recordflow.engine import RecordFlowEngine
+        from clarinet.services.recordflow.engine import RecordFlowEngine
 
         # Create mocked client
         mock_client = AsyncMock()
@@ -562,7 +562,7 @@ class TestRecordFlowEngineUnit:
         """handle_record_status_change skips flows with on_data_update."""
         from unittest.mock import AsyncMock
 
-        from src.services.recordflow.engine import RecordFlowEngine
+        from clarinet.services.recordflow.engine import RecordFlowEngine
 
         # Create mocked client
         mock_client = AsyncMock()
@@ -598,7 +598,7 @@ class TestRecordFlowEngineUnit:
         """_invalidate_records calls invalidate_record with mode='hard'."""
         from unittest.mock import AsyncMock
 
-        from src.services.recordflow.engine import RecordFlowEngine
+        from clarinet.services.recordflow.engine import RecordFlowEngine
 
         # Create mocked client
         mock_client = AsyncMock()
@@ -637,7 +637,7 @@ class TestRecordFlowEngineUnit:
         """_invalidate_records skips source record when it appears in results."""
         from unittest.mock import AsyncMock
 
-        from src.services.recordflow.engine import RecordFlowEngine
+        from clarinet.services.recordflow.engine import RecordFlowEngine
 
         # Create mocked client
         mock_client = AsyncMock()
@@ -669,7 +669,7 @@ class TestRecordFlowEngineUnit:
         """_invalidate_records calls callback with correct kwargs."""
         from unittest.mock import AsyncMock, Mock
 
-        from src.services.recordflow.engine import RecordFlowEngine
+        from clarinet.services.recordflow.engine import RecordFlowEngine
 
         # Create mocked client
         mock_client = AsyncMock()
@@ -709,7 +709,7 @@ class TestRecordFlowEngineUnit:
         """_invalidate_records calls invalidate_record with mode='soft'."""
         from unittest.mock import AsyncMock
 
-        from src.services.recordflow.engine import RecordFlowEngine
+        from clarinet.services.recordflow.engine import RecordFlowEngine
 
         # Create mocked client
         mock_client = AsyncMock()
@@ -744,7 +744,7 @@ class TestRecordFlowEngineUnit:
         """_invalidate_records processes multiple target record types."""
         from unittest.mock import AsyncMock
 
-        from src.services.recordflow.engine import RecordFlowEngine
+        from clarinet.services.recordflow.engine import RecordFlowEngine
 
         # Create mocked client
         mock_client = AsyncMock()
@@ -864,7 +864,7 @@ class TestEntityFlowEngine:
         """register_flow() routes entity flows to engine.entity_flows."""
         from unittest.mock import AsyncMock
 
-        from src.services.recordflow.engine import RecordFlowEngine
+        from clarinet.services.recordflow.engine import RecordFlowEngine
 
         mock_client = AsyncMock()
         engine = RecordFlowEngine(mock_client)
@@ -882,7 +882,7 @@ class TestEntityFlowEngine:
         """handle_entity_created() executes create_record action."""
         from unittest.mock import AsyncMock
 
-        from src.services.recordflow.engine import RecordFlowEngine
+        from clarinet.services.recordflow.engine import RecordFlowEngine
 
         mock_client = AsyncMock()
         mock_client.create_record = AsyncMock(
@@ -911,7 +911,7 @@ class TestEntityFlowEngine:
         """handle_entity_created() does nothing when no flows match."""
         from unittest.mock import AsyncMock
 
-        from src.services.recordflow.engine import RecordFlowEngine
+        from clarinet.services.recordflow.engine import RecordFlowEngine
 
         mock_client = AsyncMock()
         engine = RecordFlowEngine(mock_client)
@@ -930,7 +930,7 @@ class TestEntityFlowEngine:
         """handle_entity_created() executes call_function action with entity kwargs."""
         from unittest.mock import AsyncMock
 
-        from src.services.recordflow.engine import RecordFlowEngine
+        from clarinet.services.recordflow.engine import RecordFlowEngine
 
         mock_client = AsyncMock()
         engine = RecordFlowEngine(mock_client)
@@ -1132,7 +1132,7 @@ class TestFieldProxyEngineIntegration:
         """Engine puts triggering record into __self__ context key."""
         from unittest.mock import AsyncMock
 
-        from src.services.recordflow.engine import RecordFlowEngine
+        from clarinet.services.recordflow.engine import RecordFlowEngine
 
         mock_client = AsyncMock()
         mock_client.find_records = AsyncMock(return_value=[])
@@ -1165,7 +1165,7 @@ class TestFieldProxyEngineIntegration:
         """Engine skips actions when Field condition is not met."""
         from unittest.mock import AsyncMock
 
-        from src.services.recordflow.engine import RecordFlowEngine
+        from clarinet.services.recordflow.engine import RecordFlowEngine
 
         mock_client = AsyncMock()
         mock_client.find_records = AsyncMock(return_value=[])
@@ -1195,7 +1195,7 @@ class TestFieldProxyEngineIntegration:
         """Engine gracefully skips when Field references missing data."""
         from unittest.mock import AsyncMock
 
-        from src.services.recordflow.engine import RecordFlowEngine
+        from clarinet.services.recordflow.engine import RecordFlowEngine
 
         mock_client = AsyncMock()
         mock_client.find_records = AsyncMock(return_value=[])
@@ -1279,20 +1279,20 @@ class TestFlowRecordConvenience:
         assert fr.actions[0].mode == "soft"
 
 
-# ─── Public facade — src.flow ───────────────────────────────────────────────
+# ─── Public facade — clarinet.flow ───────────────────────────────────────────────
 
 
 class TestFlowFacade:
-    """Tests for the public src.flow facade module."""
+    """Tests for the public clarinet.flow facade module."""
 
     def test_import_primitives(self):
-        """All DSL primitives are importable from src.flow."""
-        from src.flow import Field as F
-        from src.flow import patient as p
-        from src.flow import record as r
-        from src.flow import series as se
-        from src.flow import study as st
-        from src.flow import task as t
+        """All DSL primitives are importable from clarinet.flow."""
+        from clarinet.flow import Field as F
+        from clarinet.flow import patient as p
+        from clarinet.flow import record as r
+        from clarinet.flow import series as se
+        from clarinet.flow import study as st
+        from clarinet.flow import task as t
 
         assert callable(r)
         assert callable(st)
@@ -1303,7 +1303,7 @@ class TestFlowFacade:
 
     def test_task_bare_decorator(self):
         """@task (no parens) decorates function via pipeline_task."""
-        from src.flow import task
+        from clarinet.flow import task
 
         @task
         async def my_task(msg, ctx):
@@ -1314,7 +1314,7 @@ class TestFlowFacade:
 
     def test_task_with_kwargs(self):
         """@task(queue='q') returns a decorator."""
-        from src.flow import task
+        from clarinet.flow import task
 
         decorator = task(queue="clarinet.gpu")
         assert callable(decorator)
@@ -1433,7 +1433,7 @@ class TestFileFlowEngine:
         """register_flow() routes FlowFileRecord to engine.file_flows."""
         from unittest.mock import AsyncMock
 
-        from src.services.recordflow.engine import RecordFlowEngine
+        from clarinet.services.recordflow.engine import RecordFlowEngine
 
         mock_client = AsyncMock()
         engine = RecordFlowEngine(mock_client)
@@ -1452,7 +1452,7 @@ class TestFileFlowEngine:
         """handle_file_update() finds and invalidates matching records."""
         from unittest.mock import AsyncMock
 
-        from src.services.recordflow.engine import RecordFlowEngine
+        from clarinet.services.recordflow.engine import RecordFlowEngine
 
         mock_client = AsyncMock()
 
@@ -1480,7 +1480,7 @@ class TestFileFlowEngine:
         """handle_file_update() does nothing for unknown file names."""
         from unittest.mock import AsyncMock
 
-        from src.services.recordflow.engine import RecordFlowEngine
+        from clarinet.services.recordflow.engine import RecordFlowEngine
 
         mock_client = AsyncMock()
         engine = RecordFlowEngine(mock_client)
@@ -1498,7 +1498,7 @@ class TestFileFlowEngine:
         """handle_file_update() executes CallFunctionAction with file kwargs."""
         from unittest.mock import AsyncMock
 
-        from src.services.recordflow.engine import RecordFlowEngine
+        from clarinet.services.recordflow.engine import RecordFlowEngine
 
         mock_client = AsyncMock()
         engine = RecordFlowEngine(mock_client)
@@ -1524,7 +1524,7 @@ class TestFileFlowEngine:
         """handle_file_update() skips flows without update_trigger."""
         from unittest.mock import AsyncMock
 
-        from src.services.recordflow.engine import RecordFlowEngine
+        from clarinet.services.recordflow.engine import RecordFlowEngine
 
         mock_client = AsyncMock()
         engine = RecordFlowEngine(mock_client)

@@ -18,7 +18,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from cachetools import TTLCache
 
-from src.services.dicomweb.cache import DicomWebCache
+from clarinet.services.dicomweb.cache import DicomWebCache
 from tests.conftest import create_disk_series
 
 

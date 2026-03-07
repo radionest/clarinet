@@ -8,8 +8,8 @@ import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 
-from src.config.reconciler import reconcile_record_types
-from src.models.record import RecordType, RecordTypeCreate
+from clarinet.config.reconciler import reconcile_record_types
+from clarinet.models.record import RecordType, RecordTypeCreate
 
 
 def _make_config(

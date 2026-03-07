@@ -2,8 +2,8 @@
 
 import pytest
 
-from src.services.dicom.models import SeriesResult
-from src.services.dicom.series_filter import (
+from clarinet.services.dicom.models import SeriesResult
+from clarinet.services.dicom.series_filter import (
     SeriesFilter,
     SeriesFilterCriteria,
 )
@@ -313,7 +313,7 @@ class TestCriteriaAdapters:
 
     def test_from_series(self) -> None:
         """SeriesFilterCriteria.from_series maps DB model fields correctly."""
-        from src.models.study import Series
+        from clarinet.models.study import Series
 
         s = Series(
             series_uid="1.2.3.4",
@@ -331,7 +331,7 @@ class TestCriteriaAdapters:
 
     def test_from_series_nulls(self) -> None:
         """SeriesFilterCriteria.from_series handles NULL fields."""
-        from src.models.study import Series
+        from clarinet.models.study import Series
 
         s = Series(
             series_uid="1.2.3.4",

@@ -1,10 +1,10 @@
-"""Unit tests for src.services.dicom.tasks — background anonymization."""
+"""Unit tests for clarinet.services.dicom.tasks — background anonymization."""
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.services.dicom.models import BackgroundAnonymizationStatus
+from clarinet.services.dicom.models import BackgroundAnonymizationStatus
 
 
 @pytest.mark.asyncio
@@ -13,8 +13,8 @@ async def test_create_anonymization_service_yields_service() -> None:
     mock_session = AsyncMock()
 
     with (
-        patch("src.utils.db_manager.db_manager") as mock_db,
-        patch("src.settings.settings") as mock_settings,
+        patch("clarinet.utils.db_manager.db_manager") as mock_db,
+        patch("clarinet.settings.settings") as mock_settings,
     ):
         # Set up the async context manager to yield mock session
         mock_ctx = AsyncMock()
@@ -28,10 +28,10 @@ async def test_create_anonymization_service_yields_service() -> None:
         mock_settings.pacs_host = "localhost"
         mock_settings.pacs_port = 11112
 
-        from src.services.dicom.tasks import _create_anonymization_service
+        from clarinet.services.dicom.tasks import _create_anonymization_service
 
         async with _create_anonymization_service() as service:
-            from src.services.anonymization_service import AnonymizationService
+            from clarinet.services.anonymization_service import AnonymizationService
 
             assert isinstance(service, AnonymizationService)
             assert service.study_repo.session is mock_session
@@ -46,12 +46,12 @@ async def test_anonymize_study_background_success() -> None:
     mock_service.anonymize_study = AsyncMock()
 
     with patch(
-        "src.services.dicom.tasks._create_anonymization_service",
+        "clarinet.services.dicom.tasks._create_anonymization_service",
     ) as mock_ctx:
         mock_ctx.return_value.__aenter__ = AsyncMock(return_value=mock_service)
         mock_ctx.return_value.__aexit__ = AsyncMock(return_value=False)
 
-        from src.services.dicom.tasks import anonymize_study_background
+        from clarinet.services.dicom.tasks import anonymize_study_background
 
         await anonymize_study_background("1.2.3", save_to_disk=True, send_to_pacs=False)
 
@@ -67,12 +67,12 @@ async def test_anonymize_study_background_catches_exceptions() -> None:
     mock_service.anonymize_study = AsyncMock(side_effect=RuntimeError("DB gone"))
 
     with patch(
-        "src.services.dicom.tasks._create_anonymization_service",
+        "clarinet.services.dicom.tasks._create_anonymization_service",
     ) as mock_ctx:
         mock_ctx.return_value.__aenter__ = AsyncMock(return_value=mock_service)
         mock_ctx.return_value.__aexit__ = AsyncMock(return_value=False)
 
-        from src.services.dicom.tasks import anonymize_study_background
+        from clarinet.services.dicom.tasks import anonymize_study_background
 
         # Should not raise
         await anonymize_study_background("1.2.3")
@@ -87,15 +87,15 @@ async def test_dispatch_background_pipeline_enabled() -> None:
     mock_task.kiq = AsyncMock()
 
     with (
-        patch("src.api.routers.dicom.settings") as mock_settings,
+        patch("clarinet.api.routers.dicom.settings") as mock_settings,
         patch(
-            "src.services.dicom.tasks.get_anonymize_study_task",
+            "clarinet.services.dicom.tasks.get_anonymize_study_task",
             return_value=mock_task,
         ),
     ):
         mock_settings.pipeline_enabled = True
 
-        from src.api.routers.dicom import _dispatch_background_anonymization
+        from clarinet.api.routers.dicom import _dispatch_background_anonymization
 
         result = await _dispatch_background_anonymization("1.2.3", True, False)
 
@@ -107,16 +107,16 @@ async def test_dispatch_background_pipeline_enabled() -> None:
 async def test_dispatch_background_pipeline_disabled() -> None:
     """When pipeline is disabled, dispatches via asyncio.create_task."""
     with (
-        patch("src.api.routers.dicom.settings") as mock_settings,
-        patch("src.api.routers.dicom.asyncio") as mock_asyncio,
+        patch("clarinet.api.routers.dicom.settings") as mock_settings,
+        patch("clarinet.api.routers.dicom.asyncio") as mock_asyncio,
         patch(
-            "src.services.dicom.tasks.anonymize_study_background",
+            "clarinet.services.dicom.tasks.anonymize_study_background",
         ) as mock_bg,
     ):
         mock_settings.pipeline_enabled = False
         mock_bg.return_value = AsyncMock()()
 
-        from src.api.routers.dicom import _dispatch_background_anonymization
+        from clarinet.api.routers.dicom import _dispatch_background_anonymization
 
         result = await _dispatch_background_anonymization("1.2.3", None, None)
 

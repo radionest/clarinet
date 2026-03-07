@@ -17,9 +17,9 @@ from uuid import uuid4
 import pytest
 from cachetools import TTLCache
 
-from src.api.auth_config import DatabaseStrategy
-from src.models.auth import AccessToken
-from src.models.user import User
+from clarinet.api.auth_config import DatabaseStrategy
+from clarinet.models.auth import AccessToken
+from clarinet.models.user import User
 
 
 @pytest.fixture(autouse=True)
@@ -86,7 +86,7 @@ class TestCacheHit:
         token_obj = _make_token(user)
         token_str = "test-token-abc"
 
-        with patch("src.api.auth_config.settings") as mock_settings:
+        with patch("clarinet.api.auth_config.settings") as mock_settings:
             mock_settings.session_cache_ttl_seconds = 30
             mock_settings.session_ip_check = False
             mock_settings.session_idle_timeout_minutes = 0
@@ -119,7 +119,7 @@ class TestCacheTTLExpiry:
         DatabaseStrategy._user_cache[token_str] = user
         await asyncio.sleep(0.02)  # let entry expire
 
-        with patch("src.api.auth_config.settings") as mock_settings:
+        with patch("clarinet.api.auth_config.settings") as mock_settings:
             mock_settings.session_cache_ttl_seconds = 30
 
             # Should NOT return cached user — TTL expired
@@ -143,7 +143,7 @@ class TestCacheTTLExpiry:
         # Insert a fresh cache entry
         DatabaseStrategy._user_cache[token_str] = user
 
-        with patch("src.api.auth_config.settings") as mock_settings:
+        with patch("clarinet.api.auth_config.settings") as mock_settings:
             mock_settings.session_cache_ttl_seconds = 30
 
             strategy = _make_strategy()
@@ -174,7 +174,7 @@ class TestCacheEviction:
         new_user = _make_user()
         token_obj = _make_token(new_user)
 
-        with patch("src.api.auth_config.settings") as mock_settings:
+        with patch("clarinet.api.auth_config.settings") as mock_settings:
             mock_settings.session_cache_ttl_seconds = 60
             mock_settings.session_ip_check = False
             mock_settings.session_idle_timeout_minutes = 0
@@ -218,7 +218,7 @@ class TestCacheInvalidation:
         user = _make_user()
         token_str = "token-invalid"
 
-        with patch("src.api.auth_config.settings") as mock_settings:
+        with patch("clarinet.api.auth_config.settings") as mock_settings:
             mock_settings.session_cache_ttl_seconds = 1
 
             # Create a short-TTL cache so the entry expires, forcing DB lookup
@@ -248,7 +248,7 @@ class TestCacheInvalidation:
 
         token_obj = _make_token(user)
 
-        with patch("src.api.auth_config.settings") as mock_settings:
+        with patch("clarinet.api.auth_config.settings") as mock_settings:
             mock_settings.session_cache_ttl_seconds = 30
             mock_settings.session_ip_check = False
             mock_settings.session_idle_timeout_minutes = 0
@@ -271,7 +271,7 @@ class TestCacheDisabled:
         token_obj = _make_token(user)
         token_str = "token-no-cache"
 
-        with patch("src.api.auth_config.settings") as mock_settings:
+        with patch("clarinet.api.auth_config.settings") as mock_settings:
             mock_settings.session_cache_ttl_seconds = 0
             mock_settings.session_ip_check = False
             mock_settings.session_idle_timeout_minutes = 0
@@ -302,7 +302,7 @@ class TestCacheDisabled:
     @pytest.mark.asyncio
     async def test_empty_token_returns_none(self):
         """read_token with empty string should query DB and find nothing."""
-        with patch("src.api.auth_config.settings") as mock_settings:
+        with patch("clarinet.api.auth_config.settings") as mock_settings:
             mock_settings.session_cache_ttl_seconds = 0
 
             strategy = _make_strategy(token_obj=None)

@@ -18,9 +18,9 @@ import pytest
 import pytest_asyncio
 from fastapi import FastAPI
 
-from src.api.app import lifespan
-from src.settings import settings
-from src.utils.db_manager import db_manager
+from clarinet.api.app import lifespan
+from clarinet.settings import settings
+from clarinet.utils.db_manager import db_manager
 
 
 @pytest_asyncio.fixture(autouse=True)
@@ -61,7 +61,7 @@ async def _cleanup_startup_test_queues():
 @pytest.fixture(autouse=True)
 def _reset_singletons():
     """Reset global singletons so each test gets a fresh engine/broker."""
-    import src.services.pipeline.broker as broker_mod
+    import clarinet.services.pipeline.broker as broker_mod
 
     orig_broker = broker_mod._broker
 
@@ -133,7 +133,7 @@ async def test_startup_pipeline_enabled(
     monkeypatch.setattr(settings, "rabbitmq_password", "clarinet_test")
     monkeypatch.setattr(settings, "rabbitmq_exchange", "clarinet_startup_test")
 
-    import src.services.pipeline.broker as broker_mod
+    import clarinet.services.pipeline.broker as broker_mod
 
     monkeypatch.setattr(broker_mod, "DEFAULT_QUEUE", "clarinet_startup_test.default")
     monkeypatch.setattr(broker_mod, "DLQ_QUEUE", "clarinet_startup_test.dlq")

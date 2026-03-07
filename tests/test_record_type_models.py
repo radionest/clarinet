@@ -3,7 +3,7 @@
 import pytest
 from pydantic import ValidationError
 
-from src.models.record import RecordTypeOptional
+from clarinet.models.record import RecordTypeOptional
 
 
 class TestParseJsonStrings:

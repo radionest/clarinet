@@ -17,10 +17,10 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-import src.api.auth_config as auth_config_module
-from src.models.auth import AccessToken
-from src.models.user import User, UserRole, UserRolesLink
-from src.settings import settings
+import clarinet.api.auth_config as auth_config_module
+from clarinet.models.auth import AccessToken
+from clarinet.models.user import User, UserRole, UserRolesLink
+from clarinet.settings import settings
 
 # Test constants
 MAX_CONCURRENT_SESSIONS = 2
@@ -313,8 +313,8 @@ class TestMultiSessionHandling:
     ):
         """Test user can have multiple active sessions."""
         # Override database session dependency for proper test database usage
-        from src.api.app import app
-        from src.utils.database import get_async_session
+        from clarinet.api.app import app
+        from clarinet.utils.database import get_async_session
 
         async def override_get_session():
             yield test_session
@@ -376,8 +376,8 @@ class TestMultiSessionHandling:
         # Set concurrent session limit
         with patch.object(settings, "session_concurrent_limit", MAX_CONCURRENT_SESSIONS):
             # Override database session dependency
-            from src.api.app import app
-            from src.utils.database import get_async_session
+            from clarinet.api.app import app
+            from clarinet.utils.database import get_async_session
 
             async def override_get_session():
                 yield test_session

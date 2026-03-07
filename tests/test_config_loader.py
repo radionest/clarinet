@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from src.utils.config_loader import (
+from clarinet.utils.config_loader import (
     discover_config_files,
     load_record_config,
 )

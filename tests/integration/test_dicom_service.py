@@ -16,7 +16,7 @@ import pydicom
 import pytest
 import requests
 
-from src.services.dicom import (
+from clarinet.services.dicom import (
     DicomClient,
     DicomNode,
     ImageQuery,
@@ -24,7 +24,7 @@ from src.services.dicom import (
     StudyQuery,
     StudyResult,
 )
-from src.services.dicom.models import SeriesResult
+from clarinet.services.dicom.models import SeriesResult
 
 # ---------------------------------------------------------------------------
 # Constants

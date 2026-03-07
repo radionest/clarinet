@@ -11,11 +11,11 @@ from datetime import UTC, datetime
 import pytest
 import pytest_asyncio
 
-from src.models.base import DicomQueryLevel, RecordStatus
-from src.models.patient import Patient
-from src.models.record import Record, RecordFind, RecordRead, RecordType, RecordTypeOptional
-from src.models.study import Series, SeriesFind, Study
-from src.repositories.series_repository import SeriesRepository
+from clarinet.models.base import DicomQueryLevel, RecordStatus
+from clarinet.models.patient import Patient
+from clarinet.models.record import Record, RecordFind, RecordRead, RecordType, RecordTypeOptional
+from clarinet.models.study import Series, SeriesFind, Study
+from clarinet.repositories.series_repository import SeriesRepository
 
 # ---------------------------------------------------------------------------
 # Group 1: RecordRead timestamps (started_at / finished_at)

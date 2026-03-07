@@ -21,13 +21,13 @@ from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 
-from src.api.app import app
-from src.api.dependencies import get_dicom_client, get_pacs_node
-from src.models.patient import Patient
-from src.models.study import Series, Study
-from src.services.dicom import DicomClient, DicomNode, SeriesQuery, StudyQuery
-from src.services.dicom.models import StudyResult
-from src.settings import settings
+from clarinet.api.app import app
+from clarinet.api.dependencies import get_dicom_client, get_pacs_node
+from clarinet.models.patient import Patient
+from clarinet.models.study import Series, Study
+from clarinet.services.dicom import DicomClient, DicomNode, SeriesQuery, StudyQuery
+from clarinet.services.dicom.models import StudyResult
+from clarinet.settings import settings
 
 # ---------------------------------------------------------------------------
 # Constants

@@ -6,8 +6,8 @@ import pytest
 from httpx import AsyncClient
 from sqlmodel import select
 
-from src.models.user import User, UserRole
-from src.utils.auth import get_password_hash, verify_password
+from clarinet.models.user import User, UserRole
+from clarinet.utils.auth import get_password_hash, verify_password
 
 
 @pytest.mark.asyncio
@@ -115,7 +115,7 @@ async def test_user_with_roles(test_session):
         await test_session.commit()
 
     # Add links through UserRolesLink
-    from src.models.user import UserRolesLink
+    from clarinet.models.user import UserRolesLink
 
     admin_link = UserRolesLink(user_id=user.id, role_name="admin")
     moderator_link = UserRolesLink(user_id=user.id, role_name="moderator")
@@ -125,7 +125,7 @@ async def test_user_with_roles(test_session):
     await test_session.commit()
 
     # Get user roles through UserRolesLink
-    from src.models.user import UserRolesLink
+    from clarinet.models.user import UserRolesLink
 
     statement = select(UserRolesLink).where(UserRolesLink.user_id == user.id)
     result = await test_session.execute(statement)

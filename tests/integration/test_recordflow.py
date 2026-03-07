@@ -10,15 +10,15 @@ import pytest_asyncio
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api.app import app
-from src.client import ClarinetClient
-from src.models.base import DicomQueryLevel, RecordStatus
-from src.models.patient import Patient
-from src.models.record import RecordCreate, RecordRead, RecordType
-from src.models.study import Study
-from src.services.recordflow import FlowRecord, FlowResult, RecordFlowEngine
-from src.services.recordflow.flow_file import FILE_REGISTRY
-from src.services.recordflow.flow_record import ENTITY_REGISTRY, RECORD_REGISTRY
+from clarinet.api.app import app
+from clarinet.client import ClarinetClient
+from clarinet.models.base import DicomQueryLevel, RecordStatus
+from clarinet.models.patient import Patient
+from clarinet.models.record import RecordCreate, RecordRead, RecordType
+from clarinet.models.study import Study
+from clarinet.services.recordflow import FlowRecord, FlowResult, RecordFlowEngine
+from clarinet.services.recordflow.flow_file import FILE_REGISTRY
+from clarinet.services.recordflow.flow_record import ENTITY_REGISTRY, RECORD_REGISTRY
 
 
 @pytest.fixture(autouse=True)
@@ -38,10 +38,10 @@ async def _auth_override(test_session: AsyncSession):
     """Bypass auth for recordflow integration tests."""
     from uuid import uuid4
 
-    from src.api.app import app
-    from src.api.auth_config import current_active_user, current_superuser
-    from src.models.user import User
-    from src.utils.auth import get_password_hash
+    from clarinet.api.app import app
+    from clarinet.api.auth_config import current_active_user, current_superuser
+    from clarinet.models.user import User
+    from clarinet.utils.auth import get_password_hash
 
     mock_user = User(
         id=uuid4(),
@@ -1090,7 +1090,7 @@ class TestFileFlowIntegration:
         test_study: Study,
     ):
         """handle_file_update() invalidates matching records via API."""
-        from src.services.recordflow.flow_file import FlowFileRecord
+        from clarinet.services.recordflow.flow_file import FlowFileRecord
 
         engine = RecordFlowEngine(clarinet_client)
 
@@ -1131,7 +1131,7 @@ class TestFileFlowIntegration:
         test_study: Study,
     ):
         """POST /patients/{id}/file-events dispatches file flows via engine."""
-        from src.services.recordflow.flow_file import FlowFileRecord
+        from clarinet.services.recordflow.flow_file import FlowFileRecord
 
         engine = RecordFlowEngine(clarinet_client)
 

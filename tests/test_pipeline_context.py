@@ -11,17 +11,17 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.exceptions.domain import PipelineStepError
-from src.models.base import DicomQueryLevel
-from src.models.file_schema import FileDefinitionRead, FileRole, RecordFileLinkRead
-from src.services.pipeline.context import (
+from clarinet.exceptions.domain import PipelineStepError
+from clarinet.models.base import DicomQueryLevel
+from clarinet.models.file_schema import FileDefinitionRead, FileRole, RecordFileLinkRead
+from clarinet.services.pipeline.context import (
     FileResolver,
     RecordQuery,
     TaskContext,
     _resolve_pattern_from_dict,
     build_task_context,
 )
-from src.services.pipeline.message import PipelineMessage
+from clarinet.services.pipeline.message import PipelineMessage
 
 # ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -152,7 +152,7 @@ class TestResolvePatternFromDict:
 class TestBuildWorkingDirs:
     """Tests for FileResolver.build_working_dirs."""
 
-    @patch("src.services.pipeline.context.settings")
+    @patch("clarinet.services.pipeline.context.settings")
     def test_series_level_record(self, mock_settings: MagicMock):
         mock_settings.storage_path = "/data"
         record = _make_record_read(level=DicomQueryLevel.SERIES)
@@ -166,7 +166,7 @@ class TestBuildWorkingDirs:
         assert dirs[DicomQueryLevel.STUDY] == Path("/data/CLARINET_1/9.8.7.6.5")
         assert dirs[DicomQueryLevel.SERIES] == Path("/data/CLARINET_1/9.8.7.6.5/9.8.7.6.5.4")
 
-    @patch("src.services.pipeline.context.settings")
+    @patch("clarinet.services.pipeline.context.settings")
     def test_study_level_record(self, mock_settings: MagicMock):
         mock_settings.storage_path = "/data"
         record = _make_record_read(level=DicomQueryLevel.STUDY)
@@ -179,7 +179,7 @@ class TestBuildWorkingDirs:
         assert DicomQueryLevel.STUDY in dirs
         assert DicomQueryLevel.SERIES not in dirs
 
-    @patch("src.services.pipeline.context.settings")
+    @patch("clarinet.services.pipeline.context.settings")
     def test_patient_level_record(self, mock_settings: MagicMock):
         mock_settings.storage_path = "/data"
         record = _make_record_read(level=DicomQueryLevel.PATIENT)
@@ -195,7 +195,7 @@ class TestBuildWorkingDirs:
         assert DicomQueryLevel.SERIES not in dirs
         assert dirs[DicomQueryLevel.PATIENT] == Path("/data/CLARINET_1")
 
-    @patch("src.services.pipeline.context.settings")
+    @patch("clarinet.services.pipeline.context.settings")
     def test_fallback_to_patient_id_when_no_anon(self, mock_settings: MagicMock):
         mock_settings.storage_path = "/data"
         record = _make_record_read()
@@ -205,7 +205,7 @@ class TestBuildWorkingDirs:
 
         assert dirs[DicomQueryLevel.PATIENT] == Path("/data/PAT001")
 
-    @patch("src.services.pipeline.context.settings")
+    @patch("clarinet.services.pipeline.context.settings")
     def test_custom_storage_path(self, mock_settings: MagicMock):
         mock_settings.storage_path = "/default"
         record = _make_record_read()
@@ -447,7 +447,7 @@ class TestRecordQuery:
         )
 
     @pytest.mark.asyncio
-    @patch("src.services.pipeline.context.settings")
+    @patch("clarinet.services.pipeline.context.settings")
     async def test_file_path_happy(self, mock_settings: MagicMock):
         mock_settings.storage_path = "/data"
         fd = _make_file_def(name="segmentation", pattern="seg.nrrd")
@@ -473,7 +473,7 @@ class TestRecordQuery:
             await rq.file_path("ct_seg", file="segmentation", series_uid="1.2.3")
 
     @pytest.mark.asyncio
-    @patch("src.services.pipeline.context.settings")
+    @patch("clarinet.services.pipeline.context.settings")
     async def test_file_path_uses_file_links(self, mock_settings: MagicMock):
         mock_settings.storage_path = "/data"
         fd = _make_file_def(name="segmentation", pattern="seg_{id}.nrrd")
@@ -498,7 +498,7 @@ class TestBuildTaskContext:
     """Tests for build_task_context."""
 
     @pytest.mark.asyncio
-    @patch("src.services.pipeline.context.settings")
+    @patch("clarinet.services.pipeline.context.settings")
     async def test_from_record_id(self, mock_settings: MagicMock):
         mock_settings.storage_path = "/data"
         fd = _make_file_def(name="seg", pattern="seg.nrrd")
@@ -518,7 +518,7 @@ class TestBuildTaskContext:
         assert ctx.msg is msg
 
     @pytest.mark.asyncio
-    @patch("src.services.pipeline.context.settings")
+    @patch("clarinet.services.pipeline.context.settings")
     async def test_from_series_uid(self, mock_settings: MagicMock):
         mock_settings.storage_path = "/data"
         series = MagicMock()
@@ -539,7 +539,7 @@ class TestBuildTaskContext:
         assert DicomQueryLevel.SERIES in ctx.files._working_dirs
 
     @pytest.mark.asyncio
-    @patch("src.services.pipeline.context.settings")
+    @patch("clarinet.services.pipeline.context.settings")
     async def test_from_study_uid(self, mock_settings: MagicMock):
         mock_settings.storage_path = "/data"
         study = MagicMock()
@@ -585,11 +585,11 @@ class TestPipelineTaskDecorator:
     """Tests for pipeline_task() decorator."""
 
     @pytest.mark.asyncio
-    @patch("src.services.pipeline.task.get_broker")
-    @patch("src.services.pipeline.task.register_task")
-    @patch("src.services.pipeline.task.build_task_context")
-    @patch("src.services.pipeline.task.ClarinetClient")
-    @patch("src.services.pipeline.task.settings")
+    @patch("clarinet.services.pipeline.task.get_broker")
+    @patch("clarinet.services.pipeline.task.register_task")
+    @patch("clarinet.services.pipeline.task.build_task_context")
+    @patch("clarinet.services.pipeline.task.ClarinetClient")
+    @patch("clarinet.services.pipeline.task.settings")
     async def test_calls_function(
         self,
         mock_settings: MagicMock,
@@ -622,7 +622,7 @@ class TestPipelineTaskDecorator:
         mock_build_ctx.return_value = mock_ctx
 
         # Import after mocking
-        from src.services.pipeline.task import pipeline_task
+        from clarinet.services.pipeline.task import pipeline_task
 
         called_with: dict = {}
 
@@ -641,11 +641,11 @@ class TestPipelineTaskDecorator:
         mock_client.close.assert_awaited_once()
 
     @pytest.mark.asyncio
-    @patch("src.services.pipeline.task.get_broker")
-    @patch("src.services.pipeline.task.register_task")
-    @patch("src.services.pipeline.task.build_task_context")
-    @patch("src.services.pipeline.task.ClarinetClient")
-    @patch("src.services.pipeline.task.settings")
+    @patch("clarinet.services.pipeline.task.get_broker")
+    @patch("clarinet.services.pipeline.task.register_task")
+    @patch("clarinet.services.pipeline.task.build_task_context")
+    @patch("clarinet.services.pipeline.task.ClarinetClient")
+    @patch("clarinet.services.pipeline.task.settings")
     async def test_returns_custom_message(
         self,
         mock_settings: MagicMock,
@@ -673,7 +673,7 @@ class TestPipelineTaskDecorator:
         mock_ctx.files = mock_files
         mock_build_ctx.return_value = mock_ctx
 
-        from src.services.pipeline.task import pipeline_task
+        from clarinet.services.pipeline.task import pipeline_task
 
         @pipeline_task()
         async def my_task(msg: PipelineMessage, ctx: MagicMock) -> PipelineMessage:
@@ -685,11 +685,11 @@ class TestPipelineTaskDecorator:
         assert result["payload"] == {"result": "ok"}
 
     @pytest.mark.asyncio
-    @patch("src.services.pipeline.task.get_broker")
-    @patch("src.services.pipeline.task.register_task")
-    @patch("src.services.pipeline.task.build_task_context")
-    @patch("src.services.pipeline.task.ClarinetClient")
-    @patch("src.services.pipeline.task.settings")
+    @patch("clarinet.services.pipeline.task.get_broker")
+    @patch("clarinet.services.pipeline.task.register_task")
+    @patch("clarinet.services.pipeline.task.build_task_context")
+    @patch("clarinet.services.pipeline.task.ClarinetClient")
+    @patch("clarinet.services.pipeline.task.settings")
     async def test_closes_client_on_error(
         self,
         mock_settings: MagicMock,
@@ -717,7 +717,7 @@ class TestPipelineTaskDecorator:
         mock_ctx.files = mock_files
         mock_build_ctx.return_value = mock_ctx
 
-        from src.services.pipeline.task import pipeline_task
+        from clarinet.services.pipeline.task import pipeline_task
 
         @pipeline_task()
         async def failing_task(msg: MagicMock, ctx: MagicMock) -> None:
@@ -730,11 +730,11 @@ class TestPipelineTaskDecorator:
         mock_client.close.assert_awaited_once()
 
     @pytest.mark.asyncio
-    @patch("src.services.pipeline.task.get_broker")
-    @patch("src.services.pipeline.task.register_task")
-    @patch("src.services.pipeline.task.build_task_context")
-    @patch("src.services.pipeline.task.ClarinetClient")
-    @patch("src.services.pipeline.task.settings")
+    @patch("clarinet.services.pipeline.task.get_broker")
+    @patch("clarinet.services.pipeline.task.register_task")
+    @patch("clarinet.services.pipeline.task.build_task_context")
+    @patch("clarinet.services.pipeline.task.ClarinetClient")
+    @patch("clarinet.services.pipeline.task.settings")
     async def test_propagates_errors(
         self,
         mock_settings: MagicMock,
@@ -762,7 +762,7 @@ class TestPipelineTaskDecorator:
         mock_ctx.files = mock_files
         mock_build_ctx.return_value = mock_ctx
 
-        from src.services.pipeline.task import pipeline_task
+        from clarinet.services.pipeline.task import pipeline_task
 
         @pipeline_task()
         async def error_task(msg: MagicMock, ctx: MagicMock) -> None:

@@ -10,12 +10,12 @@ from datetime import UTC, datetime
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.client import ClarinetAPIError, ClarinetAuthError, ClarinetClient
-from src.models import RecordType
-from src.models.patient import Patient
-from src.models.record import Record
-from src.models.study import Series, Study
-from src.models.user import User
+from clarinet.client import ClarinetAPIError, ClarinetAuthError, ClarinetClient
+from clarinet.models import RecordType
+from clarinet.models.patient import Patient
+from clarinet.models.record import Record
+from clarinet.models.study import Series, Study
+from clarinet.models.user import User
 
 
 class TestAuthentication:

@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 import pytest
 from httpx import AsyncClient
 
-from src.models.record import RecordStatus, RecordType
+from clarinet.models.record import RecordStatus, RecordType
 
 
 @pytest.mark.asyncio
@@ -166,9 +166,9 @@ async def test_update_record_status(client: AsyncClient, auth_headers, test_sess
     # Get user
     from sqlmodel import select
 
-    from src.models.patient import Patient
-    from src.models.record import Record
-    from src.models.user import User
+    from clarinet.models.patient import Patient
+    from clarinet.models.record import Record
+    from clarinet.models.user import User
 
     statement = select(User).where(User.email == "test@example.com")  # Query by email instead of ID
     result = await test_session.execute(statement)
@@ -239,7 +239,7 @@ async def test_create_patient(client: AsyncClient, auth_headers):
 async def test_create_study(client: AsyncClient, auth_headers, test_session):
     """Test creating study via API."""
     # Create patient in DB
-    from src.models.patient import Patient
+    from clarinet.models.patient import Patient
 
     patient = Patient(id="API_PAT002", name="Study Test Patient")
     test_session.add(patient)

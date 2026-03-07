@@ -6,9 +6,9 @@ from uuid import uuid4
 import pytest
 import pytest_asyncio
 
-from src.models.auth import AccessToken
-from src.models.user import User
-from src.utils.auth import get_password_hash
+from clarinet.models.auth import AccessToken
+from clarinet.models.user import User
+from clarinet.utils.auth import get_password_hash
 
 # ===================================================================
 # Common utilities
@@ -16,10 +16,10 @@ from src.utils.auth import get_password_hash
 
 
 class TestCommon:
-    """Tests for src.utils.common."""
+    """Tests for clarinet.utils.common."""
 
     def test_timing_decorator(self, capsys):
-        from src.utils.common import timing
+        from clarinet.utils.common import timing
 
         @timing
         def add(a: int, b: int) -> int:
@@ -32,7 +32,7 @@ class TestCommon:
         assert "sec" in captured.out
 
     def test_copy_object_decorator(self):
-        from src.utils.common import copy_object
+        from clarinet.utils.common import copy_object
 
         class Builder:
             def __init__(self, value: int = 0):
@@ -55,25 +55,25 @@ class TestCommon:
 
 
 class TestValidation:
-    """Tests for src.utils.validation."""
+    """Tests for clarinet.utils.validation."""
 
     def test_validate_valid_json(self):
-        from src.utils.validation import validate_json_by_schema
+        from clarinet.utils.validation import validate_json_by_schema
 
         schema = {"type": "object", "properties": {"name": {"type": "string"}}}
         assert validate_json_by_schema({"name": "Alice"}, schema) is True
 
     def test_validate_invalid_json(self):
-        from src.exceptions.domain import ValidationError
-        from src.utils.validation import validate_json_by_schema
+        from clarinet.exceptions.domain import ValidationError
+        from clarinet.utils.validation import validate_json_by_schema
 
         schema = {"type": "object", "properties": {"age": {"type": "integer"}}, "required": ["age"]}
         with pytest.raises(ValidationError, match="JSON validation failed"):
             validate_json_by_schema({}, schema)
 
     def test_validate_invalid_schema(self):
-        from src.exceptions.domain import ValidationError
-        from src.utils.validation import validate_json_by_schema
+        from clarinet.exceptions.domain import ValidationError
+        from clarinet.utils.validation import validate_json_by_schema
 
         bad_schema = {"type": "invalid_type_that_does_not_exist"}
         with pytest.raises(ValidationError, match="Invalid JSON schema"):
@@ -86,7 +86,7 @@ class TestValidation:
 
 
 class TestSessionUtils:
-    """Tests for src.utils.session."""
+    """Tests for clarinet.utils.session."""
 
     @pytest_asyncio.fixture
     async def env(self, test_session):
@@ -131,14 +131,14 @@ class TestSessionUtils:
 
     @pytest.mark.asyncio
     async def test_get_user_sessions(self, env):
-        from src.utils.session import get_user_sessions
+        from clarinet.utils.session import get_user_sessions
 
         sessions = await get_user_sessions(env["session"], env["user"].id, active_only=False)
         assert len(sessions) == 2
 
     @pytest.mark.asyncio
     async def test_get_user_sessions_active_only(self, env):
-        from src.utils.session import get_user_sessions
+        from clarinet.utils.session import get_user_sessions
 
         sessions = await get_user_sessions(env["session"], env["user"].id, active_only=True)
         assert len(sessions) == 1
@@ -146,14 +146,14 @@ class TestSessionUtils:
 
     @pytest.mark.asyncio
     async def test_revoke_user_sessions(self, env):
-        from src.utils.session import revoke_user_sessions
+        from clarinet.utils.session import revoke_user_sessions
 
         count = await revoke_user_sessions(env["session"], env["user"].id)
         assert count == 2
 
     @pytest.mark.asyncio
     async def test_revoke_except_current(self, env):
-        from src.utils.session import revoke_user_sessions
+        from clarinet.utils.session import revoke_user_sessions
 
         active_tok = env["active_token"].token
         count = await revoke_user_sessions(env["session"], env["user"].id, except_token=active_tok)
@@ -161,28 +161,28 @@ class TestSessionUtils:
 
     @pytest.mark.asyncio
     async def test_cleanup_expired_sessions(self, env):
-        from src.utils.session import cleanup_expired_sessions
+        from clarinet.utils.session import cleanup_expired_sessions
 
         deleted = await cleanup_expired_sessions(env["session"])
         assert deleted >= 1
 
     @pytest.mark.asyncio
     async def test_validate_session_token(self, env):
-        from src.utils.session import validate_session_token
+        from clarinet.utils.session import validate_session_token
 
         result = await validate_session_token(env["session"], env["active_token"].token)
         assert result is not None
 
     @pytest.mark.asyncio
     async def test_validate_session_token_expired(self, env):
-        from src.utils.session import validate_session_token
+        from clarinet.utils.session import validate_session_token
 
         result = await validate_session_token(env["session"], env["expired_token"].token)
         assert result is None
 
     @pytest.mark.asyncio
     async def test_validate_session_token_ignore_expiry(self, env):
-        from src.utils.session import validate_session_token
+        from clarinet.utils.session import validate_session_token
 
         result = await validate_session_token(
             env["session"], env["expired_token"].token, check_expiry=False
@@ -191,7 +191,7 @@ class TestSessionUtils:
 
     @pytest.mark.asyncio
     async def test_extend_session(self, env):
-        from src.utils.session import extend_session
+        from clarinet.utils.session import extend_session
 
         original_expiry = env["active_token"].expires_at
         extended = await extend_session(
@@ -202,14 +202,14 @@ class TestSessionUtils:
 
     @pytest.mark.asyncio
     async def test_extend_session_not_found(self, env):
-        from src.utils.session import extend_session
+        from clarinet.utils.session import extend_session
 
         result = await extend_session(env["session"], "nonexistent_token")
         assert result is None
 
     @pytest.mark.asyncio
     async def test_get_session_stats(self, env):
-        from src.utils.session import get_session_stats
+        from clarinet.utils.session import get_session_stats
 
         stats = await get_session_stats(env["session"])
         assert "total" in stats
@@ -224,7 +224,7 @@ class TestSessionUtils:
 
 
 class TestAdminUtils:
-    """Tests for src.utils.admin."""
+    """Tests for clarinet.utils.admin."""
 
     @pytest_asyncio.fixture
     async def env(self, test_session):
@@ -248,7 +248,7 @@ class TestAdminUtils:
 
     @pytest.mark.asyncio
     async def test_list_admin_users(self, env):
-        from src.utils.admin import list_admin_users
+        from clarinet.utils.admin import list_admin_users
 
         admins = await list_admin_users(env["session"])
         assert any(u.email == "admin_util@test.com" for u in admins)

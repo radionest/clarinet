@@ -9,16 +9,16 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.exceptions.domain import PipelineConfigError
-from src.services.pipeline.broker import DEFAULT_QUEUE, DICOM_QUEUE, GPU_QUEUE
-from src.services.pipeline.chain import (
+from clarinet.exceptions.domain import PipelineConfigError
+from clarinet.services.pipeline.broker import DEFAULT_QUEUE, DICOM_QUEUE, GPU_QUEUE
+from clarinet.services.pipeline.chain import (
     _PIPELINE_REGISTRY,
     _TASK_REGISTRY,
     Pipeline,
     persist_definitions,
 )
-from src.services.pipeline.message import PipelineMessage
-from src.services.pipeline.worker import get_worker_queues
+from clarinet.services.pipeline.message import PipelineMessage
+from clarinet.services.pipeline.worker import get_worker_queues
 
 
 @pytest.fixture(autouse=True)
@@ -161,7 +161,7 @@ class TestPipeline:
 
     def test_get_pipeline(self):
         """get_pipeline returns registered pipeline by name."""
-        from src.services.pipeline import get_pipeline
+        from clarinet.services.pipeline import get_pipeline
 
         Pipeline("lookup_test")
         assert get_pipeline("lookup_test") is not None
@@ -169,7 +169,7 @@ class TestPipeline:
 
     def test_get_all_pipelines(self):
         """get_all_pipelines returns all registered pipelines."""
-        from src.services.pipeline import get_all_pipelines
+        from clarinet.services.pipeline import get_all_pipelines
 
         Pipeline("p1")
         Pipeline("p2")
@@ -209,7 +209,7 @@ class TestSyncPipelineDefinitions:
     @pytest.mark.asyncio
     async def test_sync_persists_definitions(self, test_session):
         """Syncing writes registered pipelines to the database."""
-        from src.repositories.pipeline_definition_repository import (
+        from clarinet.repositories.pipeline_definition_repository import (
             PipelineDefinitionRepository,
         )
 
@@ -232,7 +232,7 @@ class TestSyncPipelineDefinitions:
     @pytest.mark.asyncio
     async def test_sync_updates_existing_definition(self, test_session):
         """Syncing overwrites previously saved pipeline definition."""
-        from src.repositories.pipeline_definition_repository import (
+        from clarinet.repositories.pipeline_definition_repository import (
             PipelineDefinitionRepository,
         )
 
@@ -267,7 +267,7 @@ class TestWorkerQueues:
 
     def test_default_queues(self):
         """Worker with no capabilities gets only default queue."""
-        with patch("src.services.pipeline.worker.settings") as mock_settings:
+        with patch("clarinet.services.pipeline.worker.settings") as mock_settings:
             mock_settings.have_gpu = False
             mock_settings.have_dicom = False
             queues = get_worker_queues()
@@ -275,7 +275,7 @@ class TestWorkerQueues:
 
     def test_gpu_queue(self):
         """Worker with GPU capability gets default + GPU queues."""
-        with patch("src.services.pipeline.worker.settings") as mock_settings:
+        with patch("clarinet.services.pipeline.worker.settings") as mock_settings:
             mock_settings.have_gpu = True
             mock_settings.have_dicom = False
             queues = get_worker_queues()
@@ -284,7 +284,7 @@ class TestWorkerQueues:
 
     def test_dicom_queue(self):
         """Worker with DICOM capability gets default + DICOM queues."""
-        with patch("src.services.pipeline.worker.settings") as mock_settings:
+        with patch("clarinet.services.pipeline.worker.settings") as mock_settings:
             mock_settings.have_gpu = False
             mock_settings.have_dicom = True
             queues = get_worker_queues()
@@ -293,7 +293,7 @@ class TestWorkerQueues:
 
     def test_all_queues(self):
         """Worker with all capabilities gets all queues."""
-        with patch("src.services.pipeline.worker.settings") as mock_settings:
+        with patch("clarinet.services.pipeline.worker.settings") as mock_settings:
             mock_settings.have_gpu = True
             mock_settings.have_dicom = True
             queues = get_worker_queues()
@@ -311,7 +311,7 @@ class TestPipelineActionDSL:
 
     def test_pipeline_action_model(self):
         """PipelineAction model is correctly formed."""
-        from src.services.recordflow.flow_action import PipelineAction
+        from clarinet.services.recordflow.flow_action import PipelineAction
 
         action = PipelineAction(pipeline_name="seg", extra_payload={"k": "v"})
         assert action.type == "pipeline"
@@ -320,8 +320,8 @@ class TestPipelineActionDSL:
 
     def test_flow_record_pipeline_method(self):
         """FlowRecord.pipeline() creates a PipelineAction."""
-        from src.services.recordflow.flow_action import PipelineAction
-        from src.services.recordflow.flow_record import RECORD_REGISTRY, record
+        from clarinet.services.recordflow.flow_action import PipelineAction
+        from clarinet.services.recordflow.flow_record import RECORD_REGISTRY, record
 
         RECORD_REGISTRY.clear()
         flow = record("ct_scan").on_status("finished").pipeline("ct_segmentation", threshold=0.5)
@@ -334,9 +334,9 @@ class TestPipelineActionDSL:
 
     def test_pipeline_in_conditional(self):
         """PipelineAction works inside conditional blocks."""
-        from src.services.recordflow.flow_action import PipelineAction
-        from src.services.recordflow.flow_record import RECORD_REGISTRY, record
-        from src.services.recordflow.flow_result import ConstantFlowResult
+        from clarinet.services.recordflow.flow_action import PipelineAction
+        from clarinet.services.recordflow.flow_record import RECORD_REGISTRY, record
+        from clarinet.services.recordflow.flow_result import ConstantFlowResult
 
         RECORD_REGISTRY.clear()
         flow = (
@@ -353,7 +353,7 @@ class TestPipelineActionDSL:
 
     def test_pipeline_action_in_union(self):
         """PipelineAction is included in FlowAction union type."""
-        from src.services.recordflow.flow_action import PipelineAction
+        from clarinet.services.recordflow.flow_action import PipelineAction
 
         action = PipelineAction(pipeline_name="test")
         # Verify it matches the FlowAction union
@@ -361,9 +361,9 @@ class TestPipelineActionDSL:
 
     def test_do_task_creates_auto_pipeline(self):
         """FlowRecord.do_task() auto-creates a single-step Pipeline."""
-        from src.services.pipeline import get_pipeline
-        from src.services.recordflow.flow_action import PipelineAction
-        from src.services.recordflow.flow_record import RECORD_REGISTRY, FlowRecord
+        from clarinet.services.pipeline import get_pipeline
+        from clarinet.services.recordflow.flow_action import PipelineAction
+        from clarinet.services.recordflow.flow_record import RECORD_REGISTRY, FlowRecord
 
         RECORD_REGISTRY.clear()
 
@@ -395,13 +395,13 @@ class TestPipelineExceptions:
 
     def test_pipeline_error_inherits_clarinet_error(self):
         """PipelineError is a ClarinetError."""
-        from src.exceptions.domain import ClarinetError, PipelineError
+        from clarinet.exceptions.domain import ClarinetError, PipelineError
 
         assert issubclass(PipelineError, ClarinetError)
 
     def test_pipeline_step_error(self):
         """PipelineStepError formats message correctly."""
-        from src.exceptions.domain import PipelineStepError
+        from clarinet.exceptions.domain import PipelineStepError
 
         err = PipelineStepError("segmentation", "GPU memory exhausted")
         assert "segmentation" in str(err)
@@ -409,13 +409,13 @@ class TestPipelineExceptions:
 
     def test_pipeline_config_error(self):
         """PipelineConfigError inherits from PipelineError."""
-        from src.exceptions.domain import PipelineConfigError, PipelineError
+        from clarinet.exceptions.domain import PipelineConfigError, PipelineError
 
         assert issubclass(PipelineConfigError, PipelineError)
 
     def test_with_context(self):
         """PipelineError supports with_context()."""
-        from src.exceptions.domain import PipelineError
+        from clarinet.exceptions.domain import PipelineError
 
         err = PipelineError().with_context("Broker unreachable")
         assert "Broker unreachable" in str(err)
@@ -430,11 +430,11 @@ class TestDLQPublisher:
     @pytest.mark.asyncio
     async def test_publish_without_startup_logs_error(self):
         """Publishing before startup() logs an error and does not raise."""
-        from src.services.pipeline.middleware import DLQPublisher
+        from clarinet.services.pipeline.middleware import DLQPublisher
 
         publisher = DLQPublisher()
 
-        with patch("src.services.pipeline.middleware.logger") as mock_logger:
+        with patch("clarinet.services.pipeline.middleware.logger") as mock_logger:
             await publisher.publish({"key": "value"})
             mock_logger.error.assert_called_once()
             assert "not initialized" in mock_logger.error.call_args[0][0]
@@ -442,7 +442,7 @@ class TestDLQPublisher:
     @pytest.mark.asyncio
     async def test_startup_idempotent(self):
         """Calling startup() twice only connects once."""
-        from src.services.pipeline.middleware import DLQPublisher
+        from clarinet.services.pipeline.middleware import DLQPublisher
 
         publisher = DLQPublisher(amqp_url="amqp://guest:guest@localhost/")
 
@@ -462,7 +462,7 @@ class TestDLQPublisher:
     @pytest.mark.asyncio
     async def test_shutdown_clears_state(self):
         """shutdown() closes connection and resets state to None."""
-        from src.services.pipeline.middleware import DLQPublisher
+        from clarinet.services.pipeline.middleware import DLQPublisher
 
         publisher = DLQPublisher()
         mock_connection = AsyncMock()
@@ -480,7 +480,7 @@ class TestDLQPublisher:
         """publish() sends a JSON-encoded persistent message to the DLQ."""
         import json
 
-        from src.services.pipeline.middleware import DLQPublisher
+        from clarinet.services.pipeline.middleware import DLQPublisher
 
         publisher = DLQPublisher()
         mock_channel = AsyncMock()
@@ -504,7 +504,7 @@ class TestDeadLetterMiddleware:
         """Successful tasks are not routed to DLQ."""
         from taskiq import TaskiqMessage, TaskiqResult
 
-        from src.services.pipeline.middleware import DeadLetterMiddleware, DLQPublisher
+        from clarinet.services.pipeline.middleware import DeadLetterMiddleware, DLQPublisher
 
         middleware = DeadLetterMiddleware(DLQPublisher())
         msg = TaskiqMessage(task_id="t1", task_name="test", labels={}, args=[], kwargs={})
@@ -520,7 +520,7 @@ class TestDeadLetterMiddleware:
         from taskiq import TaskiqMessage, TaskiqResult
         from taskiq.exceptions import NoResultError
 
-        from src.services.pipeline.middleware import DeadLetterMiddleware, DLQPublisher
+        from clarinet.services.pipeline.middleware import DeadLetterMiddleware, DLQPublisher
 
         middleware = DeadLetterMiddleware(DLQPublisher())
         msg = TaskiqMessage(task_id="t2", task_name="test", labels={}, args=[], kwargs={})
@@ -537,8 +537,8 @@ class TestDeadLetterMiddleware:
         """Tasks with real errors (retries exhausted) are routed to DLQ."""
         from taskiq import TaskiqMessage, TaskiqResult
 
-        from src.exceptions.domain import PipelineStepError
-        from src.services.pipeline.middleware import DeadLetterMiddleware, DLQPublisher
+        from clarinet.exceptions.domain import PipelineStepError
+        from clarinet.services.pipeline.middleware import DeadLetterMiddleware, DLQPublisher
 
         middleware = DeadLetterMiddleware(DLQPublisher())
         msg = TaskiqMessage(task_id="t3", task_name="test_fail", labels={}, args=[], kwargs={})
@@ -565,7 +565,7 @@ class TestRetryDefaults:
 
         from taskiq.middlewares import SmartRetryMiddleware
 
-        with patch("src.services.pipeline.broker.settings") as mock_settings:
+        with patch("clarinet.services.pipeline.broker.settings") as mock_settings:
             mock_settings.rabbitmq_login = "guest"
             mock_settings.rabbitmq_password = "guest"
             mock_settings.rabbitmq_host = "localhost"
@@ -576,7 +576,7 @@ class TestRetryDefaults:
             mock_settings.pipeline_retry_delay = 5
             mock_settings.pipeline_retry_max_delay = 120
 
-            from src.services.pipeline.broker import create_broker
+            from clarinet.services.pipeline.broker import create_broker
 
             broker = create_broker("test.default")
 

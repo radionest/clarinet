@@ -6,24 +6,24 @@ from uuid import uuid4
 import pytest
 import pytest_asyncio
 
-from src.exceptions.domain import (
+from clarinet.exceptions.domain import (
     InvalidCredentialsError,
     RoleAlreadyExistsError,
     UserAlreadyExistsError,
     UserAlreadyHasRoleError,
 )
-from src.models.base import RecordStatus
-from src.models.patient import Patient
-from src.models.study import Study
-from src.models.user import User, UserRole
-from src.repositories.patient_repository import PatientRepository
-from src.repositories.record_repository import RecordRepository
-from src.repositories.record_type_repository import RecordTypeRepository
-from src.repositories.study_repository import StudyRepository
-from src.repositories.user_repository import UserRepository, UserRoleRepository
-from src.services.admin_service import AdminService
-from src.services.user_service import UserService
-from src.utils.auth import get_password_hash, verify_password
+from clarinet.models.base import RecordStatus
+from clarinet.models.patient import Patient
+from clarinet.models.study import Study
+from clarinet.models.user import User, UserRole
+from clarinet.repositories.patient_repository import PatientRepository
+from clarinet.repositories.record_repository import RecordRepository
+from clarinet.repositories.record_type_repository import RecordTypeRepository
+from clarinet.repositories.study_repository import StudyRepository
+from clarinet.repositories.user_repository import UserRepository, UserRoleRepository
+from clarinet.services.admin_service import AdminService
+from clarinet.services.user_service import UserService
+from clarinet.utils.auth import get_password_hash, verify_password
 
 # ===================================================================
 # UserService
@@ -223,7 +223,7 @@ class TestAdminService:
 
     @pytest.mark.asyncio
     async def test_get_record_type_stats_with_data(self, env):
-        from src.models.record import RecordType
+        from clarinet.models.record import RecordType
 
         rt = RecordType(name="test_stats_type", description="Test", label="TST")
         env["session"].add(rt)
@@ -257,7 +257,7 @@ class TestAnonymousNameProvider:
 
     @pytest.mark.asyncio
     async def test_get_available_names(self, tmp_path):
-        from src.services.providers.anonymous_name_provider import AnonymousNameProvider
+        from clarinet.services.providers.anonymous_name_provider import AnonymousNameProvider
 
         names_file = tmp_path / "names.txt"
         names_file.write_text("Alice\nBob\nCharlie\n")
@@ -268,7 +268,7 @@ class TestAnonymousNameProvider:
 
     @pytest.mark.asyncio
     async def test_get_available_names_cached(self, tmp_path):
-        from src.services.providers.anonymous_name_provider import AnonymousNameProvider
+        from clarinet.services.providers.anonymous_name_provider import AnonymousNameProvider
 
         names_file = tmp_path / "names.txt"
         names_file.write_text("Alice\nBob\n")
@@ -282,7 +282,7 @@ class TestAnonymousNameProvider:
 
     @pytest.mark.asyncio
     async def test_clear_cache(self, tmp_path):
-        from src.services.providers.anonymous_name_provider import AnonymousNameProvider
+        from clarinet.services.providers.anonymous_name_provider import AnonymousNameProvider
 
         names_file = tmp_path / "names.txt"
         names_file.write_text("Alice\n")
@@ -297,7 +297,7 @@ class TestAnonymousNameProvider:
 
     @pytest.mark.asyncio
     async def test_file_not_found(self, tmp_path):
-        from src.services.providers.anonymous_name_provider import AnonymousNameProvider
+        from clarinet.services.providers.anonymous_name_provider import AnonymousNameProvider
 
         provider = AnonymousNameProvider(str(tmp_path / "nonexistent.txt"))
         names = await provider.get_available_names()
@@ -305,7 +305,7 @@ class TestAnonymousNameProvider:
 
     @pytest.mark.asyncio
     async def test_no_file_path(self):
-        from src.services.providers.anonymous_name_provider import AnonymousNameProvider
+        from clarinet.services.providers.anonymous_name_provider import AnonymousNameProvider
 
         provider = AnonymousNameProvider(None)
         names = await provider.get_available_names()
@@ -322,11 +322,11 @@ class TestFlowLoader:
 
     @pytest.mark.asyncio
     async def test_load_flows_from_file(self, tmp_path):
-        from src.services.recordflow.flow_loader import load_flows_from_file
+        from clarinet.services.recordflow.flow_loader import load_flows_from_file
 
         flow_file = tmp_path / "test_flow.py"
         flow_file.write_text(
-            "from src.services.recordflow import record\n"
+            "from clarinet.services.recordflow import record\n"
             "record('test_record_1').on_status('finished').add_record('test_record_2')\n"
         )
         flows = load_flows_from_file(flow_file)
@@ -334,7 +334,7 @@ class TestFlowLoader:
 
     @pytest.mark.asyncio
     async def test_load_flows_syntax_error(self, tmp_path):
-        from src.services.recordflow.flow_loader import load_flows_from_file
+        from clarinet.services.recordflow.flow_loader import load_flows_from_file
 
         flow_file = tmp_path / "bad_flow.py"
         flow_file.write_text("def broken(\n")
@@ -343,14 +343,14 @@ class TestFlowLoader:
 
     @pytest.mark.asyncio
     async def test_load_flows_file_not_found(self, tmp_path):
-        from src.services.recordflow.flow_loader import load_flows_from_file
+        from clarinet.services.recordflow.flow_loader import load_flows_from_file
 
         flows = load_flows_from_file(tmp_path / "nonexistent.py")
         assert flows == []
 
     @pytest.mark.asyncio
     async def test_find_flow_files(self, tmp_path):
-        from src.services.recordflow.flow_loader import find_flow_files
+        from clarinet.services.recordflow.flow_loader import find_flow_files
 
         (tmp_path / "a_flow.py").write_text("# flow")
         (tmp_path / "b_flow.py").write_text("# flow")
@@ -360,7 +360,7 @@ class TestFlowLoader:
 
     @pytest.mark.asyncio
     async def test_find_flow_files_empty_dir(self, tmp_path):
-        from src.services.recordflow.flow_loader import find_flow_files
+        from clarinet.services.recordflow.flow_loader import find_flow_files
 
         files = find_flow_files(tmp_path)
         assert files == []
@@ -369,11 +369,11 @@ class TestFlowLoader:
     async def test_load_and_register_flows(self, tmp_path):
         from unittest.mock import MagicMock
 
-        from src.services.recordflow.flow_loader import load_and_register_flows
+        from clarinet.services.recordflow.flow_loader import load_and_register_flows
 
         flow_file = tmp_path / "reg_flow.py"
         flow_file.write_text(
-            "from src.services.recordflow import record\n"
+            "from clarinet.services.recordflow import record\n"
             "record('test_load_reg').on_status('finished').add_record('test_load_r2')\n"
         )
 

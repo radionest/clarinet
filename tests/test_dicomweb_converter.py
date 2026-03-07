@@ -8,7 +8,7 @@ cause frame retrieval to fail with 404.
 from pydicom import Dataset
 from pydicom.uid import ExplicitVRLittleEndian, SecondaryCaptureImageStorage
 
-from src.services.dicomweb.converter import dataset_to_dicom_json
+from clarinet.services.dicomweb.converter import dataset_to_dicom_json
 
 
 def _make_dataset_with_pixel_data() -> Dataset:

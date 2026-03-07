@@ -6,10 +6,10 @@ import pytest
 from httpx import AsyncClient
 from sqlmodel import select
 
-from src.models.base import RecordStatus
-from src.models.patient import Patient
-from src.models.record import Record, RecordType
-from src.models.study import Series, Study
+from clarinet.models.base import RecordStatus
+from clarinet.models.patient import Patient
+from clarinet.models.record import Record, RecordType
+from clarinet.models.study import Series, Study
 
 
 @pytest.mark.asyncio

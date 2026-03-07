@@ -13,8 +13,8 @@ from unittest.mock import patch
 
 import pytest
 
-from src.services.dicomweb.cache import DicomWebCache
-from src.services.dicomweb.cleanup import DicomWebCacheCleanupService
+from clarinet.services.dicomweb.cache import DicomWebCache
+from clarinet.services.dicomweb.cleanup import DicomWebCacheCleanupService
 from tests.conftest import create_disk_series
 
 

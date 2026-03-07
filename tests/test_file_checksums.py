@@ -9,8 +9,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from src.models.file_schema import FileDefinitionRead, FileRole
-from src.utils.file_checksums import (
+from clarinet.models.file_schema import FileDefinitionRead, FileRole
+from clarinet.utils.file_checksums import (
     checksums_changed,
     compute_checksums,
     compute_file_checksum,

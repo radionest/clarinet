@@ -19,20 +19,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlmodel import select
 
-from src.api.app import app
-from src.client import ClarinetClient
-from src.models.base import DicomQueryLevel
-from src.models.file_schema import FileDefinition, FileRole, RecordTypeFileLink
-from src.models.patient import Patient
-from src.models.record import RecordType
-from src.models.study import Series, Study
-from src.models.user import UserRole
-from src.services.recordflow import RecordFlowEngine
-from src.services.recordflow.flow_file import FILE_REGISTRY
-from src.services.recordflow.flow_loader import load_flows_from_file
-from src.services.recordflow.flow_record import ENTITY_REGISTRY, RECORD_REGISTRY
-from src.utils.config_loader import discover_config_files, load_record_config
-from src.utils.file_registry_resolver import FileRegistryEntry, resolve_task_files
+from clarinet.api.app import app
+from clarinet.client import ClarinetClient
+from clarinet.models.base import DicomQueryLevel
+from clarinet.models.file_schema import FileDefinition, FileRole, RecordTypeFileLink
+from clarinet.models.patient import Patient
+from clarinet.models.record import RecordType
+from clarinet.models.study import Series, Study
+from clarinet.models.user import UserRole
+from clarinet.services.recordflow import RecordFlowEngine
+from clarinet.services.recordflow.flow_file import FILE_REGISTRY
+from clarinet.services.recordflow.flow_loader import load_flows_from_file
+from clarinet.services.recordflow.flow_record import ENTITY_REGISTRY, RECORD_REGISTRY
+from clarinet.utils.config_loader import discover_config_files, load_record_config
+from clarinet.utils.file_registry_resolver import FileRegistryEntry, resolve_task_files
 
 DEMO_DIR = Path(__file__).resolve().parent.parent.parent / "examples" / "demo"
 TASKS_DIR = DEMO_DIR / "tasks"
@@ -66,10 +66,10 @@ async def client(test_session, test_settings) -> AsyncGenerator[AsyncClient]:
     """
     from httpx import ASGITransport
 
-    from src.api.auth_config import current_active_user, current_superuser
-    from src.models.user import User
-    from src.utils.auth import get_password_hash
-    from src.utils.database import get_async_session
+    from clarinet.api.auth_config import current_active_user, current_superuser
+    from clarinet.models.user import User
+    from clarinet.utils.auth import get_password_hash
+    from clarinet.utils.database import get_async_session
 
     mock_user = User(
         id=uuid4(),
@@ -94,16 +94,16 @@ async def client(test_session, test_settings) -> AsyncGenerator[AsyncClient]:
     app.dependency_overrides[current_superuser] = lambda: mock_user
 
     try:
-        from src.settings import get_settings
+        from clarinet.settings import get_settings
 
         app.dependency_overrides[get_settings] = override_get_settings
     except (ImportError, AttributeError):
         pass
 
     try:
-        import src.api.auth_config
+        import clarinet.api.auth_config
 
-        src.api.auth_config.settings = test_settings
+        clarinet.api.auth_config.settings = test_settings
     except (ImportError, AttributeError):
         pass
 

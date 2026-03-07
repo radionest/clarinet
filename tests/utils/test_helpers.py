@@ -6,11 +6,11 @@ from typing import Any
 
 from sqlmodel import Session
 
-from src.models.patient import Patient
-from src.models.record import Record, RecordStatus, RecordType
-from src.models.study import Series, Study
-from src.models.user import User, UserRole
-from src.utils.auth import get_password_hash
+from clarinet.models.patient import Patient
+from clarinet.models.record import Record, RecordStatus, RecordType
+from clarinet.models.study import Series, Study
+from clarinet.models.user import User, UserRole
+from clarinet.utils.auth import get_password_hash
 
 
 class UserFactory:
@@ -45,7 +45,7 @@ class UserFactory:
 
         # Add roles if specified
         if roles:
-            from src.models.user import UserRolesLink
+            from clarinet.models.user import UserRolesLink
 
             for role_name in roles:
                 # First create role if it doesn't exist

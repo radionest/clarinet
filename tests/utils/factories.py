@@ -7,12 +7,12 @@ For async factories that create + commit, see ``test_helpers.py``.
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from src.models.base import DicomQueryLevel
-from src.models.patient import Patient
-from src.models.record import Record, RecordType, RecordTypeCreate
-from src.models.study import Series, Study
-from src.models.user import User
-from src.utils.auth import get_password_hash
+from clarinet.models.base import DicomQueryLevel
+from clarinet.models.patient import Patient
+from clarinet.models.record import Record, RecordType, RecordTypeCreate
+from clarinet.models.study import Series, Study
+from clarinet.models.user import User
+from clarinet.utils.auth import get_password_hash
 
 
 def make_patient(pid: str = "PAT_001", name: str = "Alice") -> Patient:

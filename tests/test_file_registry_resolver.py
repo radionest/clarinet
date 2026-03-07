@@ -6,9 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from src.exceptions.domain import ValidationError
-from src.models.file_schema import FileRole
-from src.utils.file_registry_resolver import (
+from clarinet.exceptions.domain import ValidationError
+from clarinet.models.file_schema import FileRole
+from clarinet.utils.file_registry_resolver import (
     FileReference,
     FileRegistryEntry,
     load_project_file_registry,

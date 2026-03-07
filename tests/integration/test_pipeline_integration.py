@@ -16,11 +16,11 @@ from unittest.mock import patch
 import aio_pika
 import pytest
 
-from src.client import ClarinetClient
-from src.exceptions.domain import PipelineStepError
-from src.repositories.pipeline_definition_repository import PipelineDefinitionRepository
-from src.services.pipeline.chain import _TASK_REGISTRY
-from src.services.pipeline.message import PipelineMessage
+from clarinet.client import ClarinetClient
+from clarinet.exceptions.domain import PipelineStepError
+from clarinet.repositories.pipeline_definition_repository import PipelineDefinitionRepository
+from clarinet.services.pipeline.chain import _TASK_REGISTRY
+from clarinet.services.pipeline.message import PipelineMessage
 
 pytestmark = [
     pytest.mark.pipeline,
@@ -694,7 +694,7 @@ class TestPipelineChainNegative:
         step2_executed: list[bool] = [False]
         step1_done = asyncio.Event()
 
-        with patch("src.services.pipeline.broker.DLQ_QUEUE", dlq_queue_name):
+        with patch("clarinet.services.pipeline.broker.DLQ_QUEUE", dlq_queue_name):
             broker = await pipeline_broker_factory(
                 "default",
                 clarinet_client=pipeline_clarinet_client,
@@ -804,7 +804,7 @@ class TestPipelineChainNegative:
 
             receiver = asyncio.create_task(run_receiver_task(broker))
 
-            with patch("src.services.pipeline.broker.DLQ_QUEUE", dlq_queue_name):
+            with patch("clarinet.services.pipeline.broker.DLQ_QUEUE", dlq_queue_name):
                 await (
                     step1.kicker()
                     .with_labels(
@@ -892,7 +892,7 @@ class TestPipelineChainNegative:
 
             receiver = asyncio.create_task(run_receiver_task(broker))
 
-            with patch("src.services.pipeline.broker.DLQ_QUEUE", dlq_queue_name):
+            with patch("clarinet.services.pipeline.broker.DLQ_QUEUE", dlq_queue_name):
                 await (
                     step1.kicker()
                     .with_labels(
@@ -963,7 +963,7 @@ class TestDeadLetterQueue:
             receiver = asyncio.create_task(run_receiver_task(broker))
 
             # Patch DLQ_QUEUE to use the test-isolated queue name
-            with patch("src.services.pipeline.broker.DLQ_QUEUE", dlq_queue_name):
+            with patch("clarinet.services.pipeline.broker.DLQ_QUEUE", dlq_queue_name):
                 await always_failing_task.kiq({"patient_id": "P", "study_uid": "S"})
 
                 # Wait for retries (3 retries with 1s delay) + DLQ publish
@@ -1003,7 +1003,7 @@ class TestMiddlewareLogging:
         pipeline_broker_factory: Any,
     ) -> None:
         """Dispatch task with pipeline labels — middleware pre_send is called."""
-        from src.services.pipeline.middleware import PipelineLoggingMiddleware
+        from clarinet.services.pipeline.middleware import PipelineLoggingMiddleware
 
         broker = await pipeline_broker_factory("default", with_middlewares=True)
         try:
@@ -1042,7 +1042,7 @@ class TestMiddlewareLogging:
         """Execute task via receiver — middleware post_execute is called."""
         from taskiq.api import run_receiver_task
 
-        from src.services.pipeline.middleware import PipelineLoggingMiddleware
+        from clarinet.services.pipeline.middleware import PipelineLoggingMiddleware
 
         broker = await pipeline_broker_factory("default", with_middlewares=True, as_worker=True)
         try:

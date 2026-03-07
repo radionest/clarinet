@@ -10,8 +10,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from src.models.file_schema import FileDefinitionRead, FileRole
-from src.utils.file_patterns import (
+from clarinet.models.file_schema import FileDefinitionRead, FileRole
+from clarinet.utils.file_patterns import (
     PLACEHOLDER_REGEX,
     glob_file_paths,
     resolve_pattern,

@@ -2,8 +2,8 @@
 
 import pytest
 
-from src.exceptions import SlicerError
-from src.services.slicer.client import SlicerClient
+from clarinet.exceptions import SlicerError
+from clarinet.services.slicer.client import SlicerClient
 
 pytestmark = [pytest.mark.slicer, pytest.mark.asyncio, pytest.mark.usefixtures("_check_slicer")]
 

@@ -13,12 +13,12 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 from sqlmodel import SQLModel
 
-from src.api.app import app
+from clarinet.api.app import app
 
 # Import all models to ensure metadata is populated
-from src.models import *  # noqa: F403
-from src.settings import Settings
-from src.utils.database import get_async_session
+from clarinet.models import *  # noqa: F403
+from clarinet.settings import Settings
+from clarinet.utils.database import get_async_session
 
 
 @pytest.fixture(scope="session")
@@ -90,9 +90,9 @@ async def fresh_session(test_engine) -> AsyncGenerator[AsyncSession]:
 @pytest_asyncio.fixture
 async def client(test_session, test_settings) -> AsyncGenerator[AsyncClient]:
     """Create test API client with auth bypassed (superuser)."""
-    from src.api.auth_config import current_active_user, current_superuser
-    from src.models.user import User
-    from src.utils.auth import get_password_hash
+    from clarinet.api.auth_config import current_active_user, current_superuser
+    from clarinet.models.user import User
+    from clarinet.utils.auth import get_password_hash
 
     # Create a test superuser for auth override
     mock_user = User(
@@ -119,7 +119,7 @@ async def client(test_session, test_settings) -> AsyncGenerator[AsyncClient]:
 
     # Override settings if such dependency exists
     try:
-        from src.settings import get_settings
+        from clarinet.settings import get_settings
 
         app.dependency_overrides[get_settings] = override_get_settings
     except (ImportError, AttributeError):
@@ -128,9 +128,9 @@ async def client(test_session, test_settings) -> AsyncGenerator[AsyncClient]:
     # Also override settings object directly in security module
     # Update auth_config settings if needed
     try:
-        import src.api.auth_config
+        import clarinet.api.auth_config
 
-        src.api.auth_config.settings = test_settings
+        clarinet.api.auth_config.settings = test_settings
     except (ImportError, AttributeError):
         pass
 
@@ -169,16 +169,16 @@ async def unauthenticated_client(test_session, test_settings) -> AsyncGenerator[
     app.dependency_overrides[get_async_session] = override_get_session
 
     try:
-        from src.settings import get_settings
+        from clarinet.settings import get_settings
 
         app.dependency_overrides[get_settings] = override_get_settings
     except (ImportError, AttributeError):
         pass
 
     try:
-        import src.api.auth_config
+        import clarinet.api.auth_config
 
-        src.api.auth_config.settings = test_settings
+        clarinet.api.auth_config.settings = test_settings
     except (ImportError, AttributeError):
         pass
 
@@ -219,16 +219,16 @@ async def fresh_client(fresh_session, test_settings) -> AsyncGenerator[AsyncClie
     app.dependency_overrides[get_async_session] = override_get_session
 
     try:
-        from src.settings import get_settings
+        from clarinet.settings import get_settings
 
         app.dependency_overrides[get_settings] = override_get_settings
     except (ImportError, AttributeError):
         pass
 
     try:
-        import src.api.auth_config
+        import clarinet.api.auth_config
 
-        src.api.auth_config.settings = test_settings
+        clarinet.api.auth_config.settings = test_settings
     except (ImportError, AttributeError):
         pass
 
@@ -264,7 +264,7 @@ def test_client(test_session, test_settings) -> TestClient:
     app.dependency_overrides[get_async_session] = override_get_session
 
     try:
-        from src.settings import get_settings
+        from clarinet.settings import get_settings
 
         app.dependency_overrides[get_settings] = override_get_settings
     except (ImportError, AttributeError):
@@ -279,8 +279,8 @@ def test_client(test_session, test_settings) -> TestClient:
 @pytest_asyncio.fixture
 async def test_user(test_session):
     """Create test user."""
-    from src.models.user import User
-    from src.utils.auth import get_password_hash
+    from clarinet.models.user import User
+    from clarinet.utils.auth import get_password_hash
 
     user = User(
         id=uuid4(),  # UUID as ID
@@ -299,8 +299,8 @@ async def test_user(test_session):
 @pytest_asyncio.fixture
 async def admin_user(test_session):
     """Create test administrator."""
-    from src.models.user import User, UserRole
-    from src.utils.auth import get_password_hash
+    from clarinet.models.user import User, UserRole
+    from clarinet.utils.auth import get_password_hash
 
     admin = User(
         id=uuid4(),  # UUID as ID
@@ -322,7 +322,7 @@ async def admin_user(test_session):
         await test_session.commit()
 
     # Link user with role through UserRolesLink
-    from src.models.user import UserRolesLink
+    from clarinet.models.user import UserRolesLink
 
     admin_link = UserRolesLink(user_id=admin.id, role_name="admin")
     test_session.add(admin_link)
@@ -370,7 +370,7 @@ async def admin_headers(client, admin_user):
 @pytest_asyncio.fixture
 async def test_patient(test_session):
     """Create test patient."""
-    from src.models.patient import Patient
+    from clarinet.models.patient import Patient
 
     patient = Patient(id="TEST_PAT001", name="Test Patient", anon_name="ANON_001")
     test_session.add(patient)
@@ -384,7 +384,7 @@ async def test_study(test_session, test_patient):
     """Create test study."""
     from datetime import UTC, datetime
 
-    from src.models.study import Study
+    from clarinet.models.study import Study
 
     study = Study(
         patient_id=test_patient.id,
@@ -401,7 +401,7 @@ async def test_study(test_session, test_patient):
 @pytest_asyncio.fixture
 async def test_series(test_session, test_study):
     """Create test series."""
-    from src.models.study import Series
+    from clarinet.models.study import Series
 
     series = Series(
         study_uid=test_study.study_uid,
@@ -418,7 +418,7 @@ async def test_series(test_session, test_study):
 @pytest_asyncio.fixture
 async def test_record_type(test_session):
     """Create test record type."""
-    from src.models.record import RecordType
+    from clarinet.models.record import RecordType
 
     record_type = RecordType(
         name="test_record_type",
@@ -444,7 +444,7 @@ async def clarinet_client(test_session, test_settings):
     """Create ClarinetClient for testing with real API."""
     from unittest.mock import patch
 
-    from src.client import ClarinetClient
+    from clarinet.client import ClarinetClient
 
     # Override database session dependency
     async def override_get_session():
@@ -456,7 +456,7 @@ async def clarinet_client(test_session, test_settings):
     app.dependency_overrides[get_async_session] = override_get_session
 
     try:
-        from src.settings import get_settings
+        from clarinet.settings import get_settings
 
         app.dependency_overrides[get_settings] = override_get_settings
     except (ImportError, AttributeError):
@@ -464,9 +464,9 @@ async def clarinet_client(test_session, test_settings):
 
     # Override settings in auth_config
     try:
-        import src.api.auth_config
+        import clarinet.api.auth_config
 
-        src.api.auth_config.settings = test_settings
+        clarinet.api.auth_config.settings = test_settings
     except (ImportError, AttributeError):
         pass
 
@@ -492,7 +492,7 @@ async def clarinet_client(test_session, test_settings):
     real_client.request = request_with_cookies
 
     # Patch httpx.AsyncClient to return our test client
-    with patch("src.client.httpx.AsyncClient", return_value=real_client):
+    with patch("clarinet.client.httpx.AsyncClient", return_value=real_client):
         # Create ClarinetClient with auto_login=False to avoid login on init
         client = ClarinetClient(
             base_url="http://test/api", username="test@example.com", auto_login=False

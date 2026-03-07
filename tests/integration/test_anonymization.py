@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from pydicom import Dataset
 
-from src.services.dicom.models import (
+from clarinet.services.dicom.models import (
     BackgroundAnonymizationStatus,
     BatchStoreResult,
     RetrieveResult,
@@ -31,8 +31,8 @@ async def test_anonymize_study_no_anon_id(client, test_session) -> None:
     """Returns 500 when patient has no anon_id (auto_id is None)."""
     from datetime import UTC, datetime
 
-    from src.models.patient import Patient
-    from src.models.study import Series, Study
+    from clarinet.models.patient import Patient
+    from clarinet.models.study import Series, Study
 
     # Create patient without auto_id
     patient = Patient(id="NO_ANON_PAT", name="No Anon")
@@ -64,8 +64,8 @@ async def test_anonymize_study_success(client, test_session) -> None:
     """Full anonymization flow with mocked PACS retrieval."""
     from datetime import UTC, datetime
 
-    from src.models.patient import Patient
-    from src.models.study import Series, Study
+    from clarinet.models.patient import Patient
+    from clarinet.models.study import Series, Study
 
     # Create patient with auto_id
     patient = Patient(id="ANON_PAT_001", name="Test Patient", auto_id=42)
@@ -112,12 +112,12 @@ async def test_anonymize_study_success(client, test_session) -> None:
 
     with (
         patch(
-            "src.services.dicom.client.DicomClient.get_series_to_memory",
+            "clarinet.services.dicom.client.DicomClient.get_series_to_memory",
             new_callable=AsyncMock,
             return_value=mock_retrieve_result,
         ),
-        patch("src.services.anonymization_service.settings") as mock_settings,
-        patch("src.services.dicom.series_filter.settings") as mock_filter_settings,
+        patch("clarinet.services.anonymization_service.settings") as mock_settings,
+        patch("clarinet.services.dicom.series_filter.settings") as mock_filter_settings,
     ):
         mock_settings.anon_uid_salt = "test-salt"
         mock_settings.anon_save_to_disk = False
@@ -148,8 +148,8 @@ async def test_anonymize_study_background(client, test_session) -> None:
     """Background mode returns immediately with status."""
     from datetime import UTC, datetime
 
-    from src.models.patient import Patient
-    from src.models.study import Series, Study
+    from clarinet.models.patient import Patient
+    from clarinet.models.study import Series, Study
 
     patient = Patient(id="BG_PAT_001", name="BG Patient", auto_id=99)
     test_session.add(patient)
@@ -172,7 +172,7 @@ async def test_anonymize_study_background(client, test_session) -> None:
     await test_session.commit()
 
     with patch(
-        "src.api.routers.dicom._dispatch_background_anonymization",
+        "clarinet.api.routers.dicom._dispatch_background_anonymization",
         new_callable=AsyncMock,
         return_value=BackgroundAnonymizationStatus(study_uid="1.2.777.1"),
     ):
@@ -189,8 +189,8 @@ async def test_anonymize_study_filters_sr_series(client, test_session) -> None:
     """SR series is excluded from anonymization and reported in skipped_series."""
     from datetime import UTC, datetime
 
-    from src.models.patient import Patient
-    from src.models.study import Series, Study
+    from clarinet.models.patient import Patient
+    from clarinet.models.study import Series, Study
 
     patient = Patient(id="FILTER_PAT_001", name="Filter Patient", auto_id=50)
     test_session.add(patient)
@@ -248,12 +248,12 @@ async def test_anonymize_study_filters_sr_series(client, test_session) -> None:
 
     with (
         patch(
-            "src.services.dicom.client.DicomClient.get_series_to_memory",
+            "clarinet.services.dicom.client.DicomClient.get_series_to_memory",
             new_callable=AsyncMock,
             return_value=mock_retrieve_result,
         ),
-        patch("src.services.anonymization_service.settings") as mock_settings,
-        patch("src.services.dicom.series_filter.settings") as mock_filter_settings,
+        patch("clarinet.services.anonymization_service.settings") as mock_settings,
+        patch("clarinet.services.dicom.series_filter.settings") as mock_filter_settings,
     ):
         mock_settings.anon_uid_salt = "test-salt"
         mock_settings.anon_save_to_disk = False
@@ -286,8 +286,8 @@ async def test_anonymize_pacs_retrieval_failure(client, test_session) -> None:
     """PACS retrieval failure on one series does not block other series."""
     from datetime import UTC, datetime
 
-    from src.models.patient import Patient
-    from src.models.study import Series, Study
+    from clarinet.models.patient import Patient
+    from clarinet.models.study import Series, Study
 
     patient = Patient(id="PACS_FAIL_PAT", name="PacsFail Patient", auto_id=60)
     test_session.add(patient)
@@ -337,12 +337,12 @@ async def test_anonymize_pacs_retrieval_failure(client, test_session) -> None:
 
     with (
         patch(
-            "src.services.dicom.client.DicomClient.get_series_to_memory",
+            "clarinet.services.dicom.client.DicomClient.get_series_to_memory",
             new_callable=AsyncMock,
             side_effect=_get_series_side_effect,
         ),
-        patch("src.services.anonymization_service.settings") as mock_settings,
-        patch("src.services.dicom.series_filter.settings") as mock_filter_settings,
+        patch("clarinet.services.anonymization_service.settings") as mock_settings,
+        patch("clarinet.services.dicom.series_filter.settings") as mock_filter_settings,
     ):
         mock_settings.anon_uid_salt = "test-salt"
         mock_settings.anon_save_to_disk = False
@@ -367,8 +367,8 @@ async def test_anonymize_instance_failure(client, test_session) -> None:
     """anonymize_dataset failure on one instance does not block others."""
     from datetime import UTC, datetime
 
-    from src.models.patient import Patient
-    from src.models.study import Series, Study
+    from clarinet.models.patient import Patient
+    from clarinet.models.study import Series, Study
 
     patient = Patient(id="INST_FAIL_PAT", name="InstFail Patient", auto_id=61)
     test_session.add(patient)
@@ -422,16 +422,16 @@ async def test_anonymize_instance_failure(client, test_session) -> None:
 
     with (
         patch(
-            "src.services.dicom.client.DicomClient.get_series_to_memory",
+            "clarinet.services.dicom.client.DicomClient.get_series_to_memory",
             new_callable=AsyncMock,
             return_value=mock_retrieve_result,
         ),
         patch(
-            "src.services.dicom.anonymizer.DicomAnonymizer.anonymize_dataset",
+            "clarinet.services.dicom.anonymizer.DicomAnonymizer.anonymize_dataset",
             side_effect=_anonymize_side_effect,
         ),
-        patch("src.services.anonymization_service.settings") as mock_settings,
-        patch("src.services.dicom.series_filter.settings") as mock_filter_settings,
+        patch("clarinet.services.anonymization_service.settings") as mock_settings,
+        patch("clarinet.services.dicom.series_filter.settings") as mock_filter_settings,
     ):
         mock_settings.anon_uid_salt = "test-salt"
         mock_settings.anon_save_to_disk = False
@@ -456,8 +456,8 @@ async def test_anonymize_send_to_pacs_failure_resilient(client, test_session) ->
     """C-STORE failure in _send_to_pacs does not crash the workflow."""
     from datetime import UTC, datetime
 
-    from src.models.patient import Patient
-    from src.models.study import Series, Study
+    from clarinet.models.patient import Patient
+    from clarinet.models.study import Series, Study
 
     patient = Patient(id="SEND_FAIL_PAT", name="SendFail Patient", auto_id=62)
     test_session.add(patient)
@@ -496,17 +496,17 @@ async def test_anonymize_send_to_pacs_failure_resilient(client, test_session) ->
 
     with (
         patch(
-            "src.services.dicom.client.DicomClient.get_series_to_memory",
+            "clarinet.services.dicom.client.DicomClient.get_series_to_memory",
             new_callable=AsyncMock,
             return_value=mock_retrieve_result,
         ),
         patch(
-            "src.services.dicom.client.DicomClient.store_instances_batch",
+            "clarinet.services.dicom.client.DicomClient.store_instances_batch",
             new_callable=AsyncMock,
             side_effect=Exception("C-STORE failed"),
         ),
-        patch("src.services.anonymization_service.settings") as mock_settings,
-        patch("src.services.dicom.series_filter.settings") as mock_filter_settings,
+        patch("clarinet.services.anonymization_service.settings") as mock_settings,
+        patch("clarinet.services.dicom.series_filter.settings") as mock_filter_settings,
     ):
         mock_settings.anon_uid_salt = "test-salt"
         mock_settings.anon_save_to_disk = False
@@ -532,8 +532,8 @@ async def test_anonymize_save_to_disk_error_graceful(client, test_session) -> No
     """Disk save error is caught by gather(return_exceptions=True) — response is still 200."""
     from datetime import UTC, datetime
 
-    from src.models.patient import Patient
-    from src.models.study import Series, Study
+    from clarinet.models.patient import Patient
+    from clarinet.models.study import Series, Study
 
     patient = Patient(id="DISK_FAIL_PAT", name="DiskFail Patient", auto_id=63)
     test_session.add(patient)
@@ -572,17 +572,17 @@ async def test_anonymize_save_to_disk_error_graceful(client, test_session) -> No
 
     with (
         patch(
-            "src.services.dicom.client.DicomClient.get_series_to_memory",
+            "clarinet.services.dicom.client.DicomClient.get_series_to_memory",
             new_callable=AsyncMock,
             return_value=mock_retrieve_result,
         ),
         patch(
-            "src.services.anonymization_service.AnonymizationService._save_series_to_disk",
+            "clarinet.services.anonymization_service.AnonymizationService._save_series_to_disk",
             new_callable=AsyncMock,
             side_effect=OSError("Disk write failed"),
         ),
-        patch("src.services.anonymization_service.settings") as mock_settings,
-        patch("src.services.dicom.series_filter.settings") as mock_filter_settings,
+        patch("clarinet.services.anonymization_service.settings") as mock_settings,
+        patch("clarinet.services.dicom.series_filter.settings") as mock_filter_settings,
     ):
         mock_settings.anon_uid_salt = "test-salt"
         mock_settings.anon_save_to_disk = True
@@ -608,8 +608,8 @@ async def test_anonymize_study_no_series(client, test_session) -> None:
     """Study with no series returns valid result with zeros."""
     from datetime import UTC, datetime
 
-    from src.models.patient import Patient
-    from src.models.study import Study
+    from clarinet.models.patient import Patient
+    from clarinet.models.study import Study
 
     patient = Patient(id="NOSERIES_PAT", name="NoSeries Patient", auto_id=64)
     test_session.add(patient)
@@ -624,8 +624,8 @@ async def test_anonymize_study_no_series(client, test_session) -> None:
     await test_session.commit()
 
     with (
-        patch("src.services.anonymization_service.settings") as mock_settings,
-        patch("src.services.dicom.series_filter.settings") as mock_filter_settings,
+        patch("clarinet.services.anonymization_service.settings") as mock_settings,
+        patch("clarinet.services.dicom.series_filter.settings") as mock_filter_settings,
     ):
         mock_settings.anon_uid_salt = "test-salt"
         mock_settings.anon_save_to_disk = False
@@ -651,8 +651,8 @@ async def test_anonymize_all_series_filtered(client, test_session) -> None:
     """All series filtered out (SR/KO) results in zero anonymized."""
     from datetime import UTC, datetime
 
-    from src.models.patient import Patient
-    from src.models.study import Series, Study
+    from clarinet.models.patient import Patient
+    from clarinet.models.study import Series, Study
 
     patient = Patient(id="ALLFILT_PAT", name="AllFilt Patient", auto_id=65)
     test_session.add(patient)
@@ -684,8 +684,8 @@ async def test_anonymize_all_series_filtered(client, test_session) -> None:
     await test_session.commit()
 
     with (
-        patch("src.services.anonymization_service.settings") as mock_settings,
-        patch("src.services.dicom.series_filter.settings") as mock_filter_settings,
+        patch("clarinet.services.anonymization_service.settings") as mock_settings,
+        patch("clarinet.services.dicom.series_filter.settings") as mock_filter_settings,
     ):
         mock_settings.anon_uid_salt = "test-salt"
         mock_settings.anon_save_to_disk = False
@@ -712,7 +712,7 @@ async def test_anonymize_patient_not_found(client, test_session) -> None:
     """Study exists but patient does not → 404."""
     from datetime import UTC, datetime
 
-    from src.models.study import Study
+    from clarinet.models.study import Study
 
     # Create study with a patient_id that doesn't exist as a Patient record
     study = Study(
@@ -724,8 +724,8 @@ async def test_anonymize_patient_not_found(client, test_session) -> None:
     await test_session.commit()
 
     with (
-        patch("src.services.anonymization_service.settings") as mock_settings,
-        patch("src.services.dicom.series_filter.settings") as mock_filter_settings,
+        patch("clarinet.services.anonymization_service.settings") as mock_settings,
+        patch("clarinet.services.dicom.series_filter.settings") as mock_filter_settings,
     ):
         mock_settings.anon_uid_salt = "test-salt"
         mock_settings.anon_save_to_disk = False
@@ -747,8 +747,8 @@ async def test_anonymize_batch_cstore_partial_failure(client, test_session) -> N
     """Batch C-STORE with partial failure reports correct send_failed count."""
     from datetime import UTC, datetime
 
-    from src.models.patient import Patient
-    from src.models.study import Series, Study
+    from clarinet.models.patient import Patient
+    from clarinet.models.study import Series, Study
 
     patient = Patient(id="BATCH_FAIL_PAT", name="BatchFail Patient", auto_id=66)
     test_session.add(patient)
@@ -794,17 +794,17 @@ async def test_anonymize_batch_cstore_partial_failure(client, test_session) -> N
 
     with (
         patch(
-            "src.services.dicom.client.DicomClient.get_series_to_memory",
+            "clarinet.services.dicom.client.DicomClient.get_series_to_memory",
             new_callable=AsyncMock,
             return_value=mock_retrieve_result,
         ),
         patch(
-            "src.services.dicom.client.DicomClient.store_instances_batch",
+            "clarinet.services.dicom.client.DicomClient.store_instances_batch",
             new_callable=AsyncMock,
             return_value=mock_batch_result,
         ),
-        patch("src.services.anonymization_service.settings") as mock_settings,
-        patch("src.services.dicom.series_filter.settings") as mock_filter_settings,
+        patch("clarinet.services.anonymization_service.settings") as mock_settings,
+        patch("clarinet.services.dicom.series_filter.settings") as mock_filter_settings,
     ):
         mock_settings.anon_uid_salt = "test-salt"
         mock_settings.anon_save_to_disk = False
