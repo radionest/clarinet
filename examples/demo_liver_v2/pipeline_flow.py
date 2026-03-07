@@ -83,43 +83,21 @@ async def compare_w_projection(msg: PipelineMessage, ctx: TaskContext) -> None:
 # При поступлении нового исследования создаётся first_check
 (study().on_creation().create_record("first_check"))
 
-# КТ -> две сегментации (single + with_archive)
+# Создание сегментаций по типу исследования
 (
     record("first_check")
     .on_finished()
-    .if_record(F.is_good == True, F.study_type == "CT")
+    .if_record(F.is_good == True)
+    .match(F.study_type)
+    .case("CT")
     .create_record("segment_CT_single", "segment_CT_with_archive")
-)
-
-# МРТ
-(
-    record("first_check")
-    .on_finished()
-    .if_record(F.is_good == True, F.study_type == "MRI")
+    .case("MRI")
     .create_record("segment_MRI_single")
-)
-
-# КТ-АГ
-(
-    record("first_check")
-    .on_finished()
-    .if_record(F.is_good == True, F.study_type == "CT-AG")
+    .case("CT-AG")
     .create_record("segment_CTAG_single")
-)
-
-# МРТ-АГ
-(
-    record("first_check")
-    .on_finished()
-    .if_record(F.is_good == True, F.study_type == "MRI-AG")
+    .case("MRI-AG")
     .create_record("segment_MRIAG_single")
-)
-
-# ПДКТ-АГ
-(
-    record("first_check")
-    .on_finished()
-    .if_record(F.is_good == True, F.study_type == "PDCT-AG")
+    .case("PDCT-AG")
     .create_record("segment_PDCTAG_single")
 )
 
