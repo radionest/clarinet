@@ -4,7 +4,7 @@ set -e
 echo "Building Clarinet frontend..."
 
 # Переход в директорию фронтенда
-cd src/frontend
+cd clarinet/frontend
 
 # Очистка старых артефактов сборки
 rm -rf build/
