@@ -246,6 +246,8 @@ class Image:
                     "DICOM writing is not supported. "
                     "Writing DICOM requires UID generation and IOD specification."
                 )
+            case _:
+                raise ImageError(f"Cannot save as {filetype.value}: unsupported format")
         logger.debug(f"Saved image as {filetype.value} to {path}")
         return path
 
