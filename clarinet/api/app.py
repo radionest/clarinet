@@ -13,6 +13,13 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
+try:
+    from fastapi.responses import ORJSONResponse
+
+    _default_response_class = ORJSONResponse
+except ImportError:
+    _default_response_class = None
+
 from clarinet.api.exception_handlers import setup_exception_handlers
 
 # Use relative imports for development
@@ -197,6 +204,10 @@ def create_app(root_path: str = "/") -> FastAPI:
     RecordRead.model_rebuild()
     StudyRead.model_rebuild()
     SeriesRead.model_rebuild()
+    response_kwargs = {}
+    if _default_response_class is not None:
+        response_kwargs["default_response_class"] = _default_response_class
+
     app = FastAPI(
         title="Clarinet",
         description="A Framework for Medical Image Analysis and Annotation",
@@ -204,6 +215,7 @@ def create_app(root_path: str = "/") -> FastAPI:
         debug=settings.debug,
         lifespan=lifespan,
         root_path=root_path,
+        **response_kwargs,
     )
 
     # Configure CORS
