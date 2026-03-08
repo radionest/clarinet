@@ -112,6 +112,7 @@ dev-dependencies = [
     "types-jsonschema>=4.23.0.20241208",
     "types-aiofiles>=24.1.0.20250822",
     "pre-commit>=4.3.0",
+    "pytest-xdist>=3.5.0",
 ]
 
 [tool.black]

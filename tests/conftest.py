@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 from sqlmodel import SQLModel
 
 from clarinet.api.app import app
@@ -45,15 +46,20 @@ def test_settings() -> Settings:
     )
 
 
-@pytest_asyncio.fixture
+@pytest_asyncio.fixture(scope="session")
 async def test_engine(test_settings):
-    """Create test database engine."""
-    # Use aiosqlite for async testing
+    """Create test database engine (one per session).
+
+    Uses StaticPool to ensure all connections share the same in-memory
+    SQLite database. Without StaticPool, each new connection would create
+    a separate empty database.
+    """
     database_url = "sqlite+aiosqlite:///:memory:"
     engine = create_async_engine(
         database_url,
         echo=False,
         connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
     )
 
     async with engine.begin() as conn:
@@ -71,7 +77,6 @@ async def test_session(test_engine) -> AsyncGenerator[AsyncSession]:
 
     async with async_session() as session:
         yield session
-        await session.rollback()
 
 
 @pytest_asyncio.fixture
@@ -434,9 +439,12 @@ async def test_record_type(test_session):
 
 @pytest_asyncio.fixture(autouse=True)
 async def clear_database(test_session):
-    """Clear database after each test."""
+    """Clear all table data after each test for isolation."""
     yield
-    # Cleanup occurs automatically through rollback in test_session
+    await test_session.rollback()
+    for table in reversed(SQLModel.metadata.sorted_tables):
+        await test_session.execute(table.delete())
+    await test_session.commit()
 
 
 @pytest_asyncio.fixture

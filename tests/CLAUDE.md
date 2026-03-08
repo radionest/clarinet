@@ -4,7 +4,7 @@
 
 - **pytest** + **pytest-asyncio** for async tests
 - Configuration in `tests/conftest.py`
-- Run: `make test`, `make test-cov`, `make test-integration`
+- Run: `make test`, `make test-fast`, `make test-cov`, `make test-integration`
 
 ## Structure
 
@@ -140,7 +140,8 @@ pat = await PatientFactory.create_patient(session, patient_id="PAT_001")
 
 | Fixture | Scope | Source | Purpose |
 |---|---|---|---|
-| `test_session` | function | `conftest.py` | Async SQLAlchemy session (rollback per test) |
+| `test_engine` | session | `conftest.py` | Async SQLAlchemy engine (one per worker, StaticPool) |
+| `test_session` | function | `conftest.py` | Async SQLAlchemy session (DELETE cleanup per test) |
 | `fresh_session` | function | `conftest.py` | Clean identity map — simulates production |
 | `client` | function | `conftest.py` | `httpx.AsyncClient` bound to test app |
 
@@ -154,3 +155,19 @@ pat = await PatientFactory.create_patient(session, patient_id="PAT_001")
 | Entity not found | 404 |
 | Duplicate / conflict | 409 |
 | Validation error / business rule | 422 |
+
+## Parallel Test Execution
+
+Tests support parallel execution via pytest-xdist. Each worker runs in a
+separate process with its own in-memory SQLite database.
+
+- `make test-fast` — parallel run (auto workers, excludes external services)
+- `make test` — sequential run (all tests)
+
+### Session-Scoped Engine
+
+The test engine is session-scoped: schema is created once per worker, data is
+cleaned via `DELETE FROM` after each test (autouse `clear_database` fixture).
+
+Important: `StaticPool` is required for in-memory SQLite with session-scoped
+engine — without it, each new connection creates a new empty database.

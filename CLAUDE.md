@@ -36,7 +36,8 @@ make typecheck                  # mypy
 make pre-commit                 # All pre-commit hooks
 
 # Testing
-make test                       # Backend tests
+make test                       # Backend tests (sequential)
+make test-fast                  # Backend tests (parallel, auto workers)
 make test-cov                   # With coverage
 make test-integration           # Integration tests only
 
