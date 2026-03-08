@@ -9,8 +9,8 @@ This version uses the implemented RecordFlow/Pipeline DSL
 (as opposed to demo_liver/ which uses aspirational syntax).
 """
 
-from src.services.pipeline import PipelineMessage, TaskContext, pipeline_task
-from src.services.recordflow import Field, file, record, study
+from clarinet.services.pipeline import PipelineMessage, TaskContext, pipeline_task
+from clarinet.services.recordflow import Field, file, record, study
 
 F = Field()
 
