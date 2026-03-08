@@ -1,7 +1,9 @@
 """Service layer for study-related business logic."""
 
+from __future__ import annotations
+
 import random
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from clarinet.exceptions.domain import (
     AlreadyAnonymizedError,
@@ -18,6 +20,9 @@ from clarinet.repositories.study_repository import StudyRepository
 from clarinet.services.providers import AnonymousNameProvider
 from clarinet.settings import settings
 
+if TYPE_CHECKING:
+    from clarinet.services.recordflow.engine import RecordFlowEngine
+
 
 class StudyService:
     """Service for study-related business logic."""
@@ -28,6 +33,7 @@ class StudyService:
         patient_repo: PatientRepository,
         series_repo: SeriesRepository,
         name_provider: AnonymousNameProvider | None = None,
+        engine: RecordFlowEngine | None = None,
     ):
         """Initialize study service with repositories.
 
@@ -36,11 +42,13 @@ class StudyService:
             patient_repo: Patient repository instance
             series_repo: Series repository instance
             name_provider: Optional anonymous name provider
+            engine: Optional RecordFlow engine (None when RecordFlow is disabled)
         """
         self.study_repo = study_repo
         self.patient_repo = patient_repo
         self.series_repo = series_repo
         self.name_provider = name_provider or AnonymousNameProvider(settings.anon_names_list)
+        self.engine = engine
 
     # Patient operations
 
@@ -88,7 +96,12 @@ class StudyService:
             raise PatientAlreadyExistsError(patient_data["id"])
 
         patient = Patient(**patient_data)
-        return await self.patient_repo.create(patient)
+        result = await self.patient_repo.create(patient)
+
+        if self.engine:
+            self.engine.fire(self.engine.handle_entity_created("patient", result.id))
+
+        return result
 
     async def anonymize_patient(self, patient_id: str) -> Patient:
         """Anonymize patient by assigning anonymous name.
@@ -207,7 +220,14 @@ class StudyService:
 
         study = Study(**study_data)
         study.patient = patient
-        return await self.study_repo.create(study)
+        result = await self.study_repo.create(study)
+
+        if self.engine:
+            self.engine.fire(
+                self.engine.handle_entity_created("study", result.patient_id, result.study_uid)
+            )
+
+        return result
 
     async def add_anonymized_study_uid(self, study_uid: str, anon_uid: str) -> Study:
         """Add anonymized UID to study.
@@ -287,7 +307,16 @@ class StudyService:
 
         series = Series(**series_data)
         series.study = study
-        return await self.series_repo.create_with_relations(series)
+        result = await self.series_repo.create_with_relations(series)
+
+        if self.engine:
+            self.engine.fire(
+                self.engine.handle_entity_created(
+                    "series", study.patient_id, result.study_uid, result.series_uid
+                )
+            )
+
+        return result
 
     async def find_series(self, find_query: SeriesFind) -> list[Series]:
         """Find series by criteria.
