@@ -227,17 +227,15 @@ class Segmentation(Image):
         for region in regionprops(label(other.img)):
             coords = region.coords
             intersection = self.img[coords[:, 0], coords[:, 1], coords[:, 2]]
-            unique_labels = list(np.unique(intersection))
+            unique_labels = [int(v) for v in np.unique(intersection) if v != 0]
 
             match unique_labels:
-                case [0]:
+                case []:
                     pass  # No overlap — skip
-                case [0, label_value] | [label_value]:
+                case [label_value]:
                     self.img[coords[:, 0], coords[:, 1], coords[:, 2]] = label_value
-                case [0, *label_values]:
+                case [*label_values]:
                     raise ValueError(f"ROI overlaps multiple labels: {label_values}")
-                case _:
-                    raise ValueError("Unexpected label configuration during append")
 
     def copy_from(self, other: Self) -> None:
         """Replace this mask's voxel data with data from `other`.

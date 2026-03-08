@@ -618,6 +618,44 @@ class TestSegmentation:
         # Appended voxels should get the same label
         assert seg._img[4, 4, 4] == label_value
 
+    def test_append_no_overlap_skips(self) -> None:
+        vol1 = np.zeros((10, 10, 5), dtype=np.uint8)
+        vol1[0:2, 0:2, 0:2] = 1
+
+        seg = Segmentation()
+        seg._spacing = (1.0, 1.0, 1.0)
+        seg.img = vol1
+        before = seg.img.copy()
+
+        vol2 = np.zeros((10, 10, 5), dtype=np.uint8)
+        vol2[8:10, 8:10, 3:5] = 1  # No overlap at all
+
+        other = Segmentation(autolabel=False)
+        other._spacing = (1.0, 1.0, 1.0)
+        other.img = vol2
+
+        seg.append(other)
+        np.testing.assert_array_equal(seg.img, before)
+
+    def test_append_multi_label_overlap_raises(self) -> None:
+        seg = Segmentation(autolabel=False)
+        seg._spacing = (1.0, 1.0, 1.0)
+        vol = np.zeros((10, 10, 5), dtype=np.uint8)
+        vol[2:5, 2:5, 2:4] = 1
+        vol[4:7, 4:7, 2:4] = 2  # Adjacent label
+        seg.img = vol
+
+        # ROI that spans both labels without touching background
+        vol2 = np.zeros((10, 10, 5), dtype=np.uint8)
+        vol2[3:6, 3:6, 2:4] = 1  # Overlaps label 1 and label 2
+
+        other = Segmentation(autolabel=False)
+        other._spacing = (1.0, 1.0, 1.0)
+        other.img = vol2
+
+        with pytest.raises(ValueError, match="ROI overlaps multiple labels"):
+            seg.append(other)
+
     def test_copy_from(self, seg_volume: np.ndarray) -> None:
         seg1 = Segmentation()
         seg1._spacing = (1.0, 1.0, 1.0)
