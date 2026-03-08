@@ -160,6 +160,7 @@ class ClarinetClient:
         method: str,
         endpoint: str,
         raise_for_status: bool = True,
+        _retried: bool = False,
         **kwargs: Any,
     ) -> httpx.Response:
         """Make HTTP request to API.
@@ -168,6 +169,7 @@ class ClarinetClient:
             method: HTTP method (GET, POST, etc.)
             endpoint: API endpoint (e.g., "/auth/login")
             raise_for_status: Raise exception on HTTP errors
+            _retried: Internal flag to prevent infinite retry loops.
             **kwargs: Additional arguments passed to httpx request
 
         Returns:
@@ -186,6 +188,22 @@ class ClarinetClient:
 
             if raise_for_status:
                 if response.status_code == 401:
+                    # Auto-retry with re-login (once, skip for auth endpoints)
+                    if (
+                        not _retried
+                        and self.username
+                        and self.password
+                        and "/auth/" not in endpoint
+                    ):
+                        logger.info("Session expired, re-authenticating...")
+                        await self.login()
+                        return await self._request(
+                            method,
+                            endpoint,
+                            raise_for_status=raise_for_status,
+                            _retried=True,
+                            **kwargs,
+                        )
                     raise ClarinetAuthError(
                         "Authentication required or session expired",
                         status_code=401,

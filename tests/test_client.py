@@ -6,7 +6,9 @@ using real FastAPI server and database.
 """
 
 from datetime import UTC, datetime
+from unittest.mock import AsyncMock, patch
 
+import httpx
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -577,3 +579,92 @@ class TestErrorHandling:
             await clarinet_client.get_patient("NONEXISTENT_PATIENT_ID")
 
         assert exc_info.value.status_code == 404
+
+
+class TestRetryOn401:
+    """Test auto-retry on 401 with re-login."""
+
+    @pytest.mark.asyncio
+    async def test_retry_on_401_re_authenticates(self) -> None:
+        """First request returns 401, login succeeds, retry returns 200."""
+        call_count = 0
+
+        async def mock_request(method, url, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return httpx.Response(401, text="Unauthorized")
+            return httpx.Response(200, json={"ok": True})
+
+        client = ClarinetClient(
+            "http://test", username="admin@test.com", password="secret", auto_login=False
+        )
+        client.client = AsyncMock()
+        client.client.request = mock_request
+
+        with patch.object(client, "login", new_callable=AsyncMock) as mock_login:
+            mock_login.return_value = None
+            response = await client._request("GET", "/patients")
+
+        assert response.status_code == 200
+        mock_login.assert_called_once()
+        assert call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_no_retry_for_auth_endpoints(self) -> None:
+        """401 on /auth/ endpoints raises immediately without retry."""
+
+        async def mock_request(method, url, **kwargs):
+            return httpx.Response(401, text="Unauthorized")
+
+        client = ClarinetClient(
+            "http://test", username="admin@test.com", password="secret", auto_login=False
+        )
+        client.client = AsyncMock()
+        client.client.request = mock_request
+
+        with (
+            patch.object(client, "login", new_callable=AsyncMock) as mock_login,
+            pytest.raises(ClarinetAuthError) as exc_info,
+        ):
+            await client._request("GET", "/auth/me")
+
+        assert exc_info.value.status_code == 401
+        mock_login.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_no_retry_without_credentials(self) -> None:
+        """401 without credentials raises immediately without retry."""
+
+        async def mock_request(method, url, **kwargs):
+            return httpx.Response(401, text="Unauthorized")
+
+        client = ClarinetClient("http://test", auto_login=False)
+        client.client = AsyncMock()
+        client.client.request = mock_request
+
+        with pytest.raises(ClarinetAuthError) as exc_info:
+            await client._request("GET", "/patients")
+
+        assert exc_info.value.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_no_infinite_retry_loop(self) -> None:
+        """If re-login succeeds but second request also returns 401, raises."""
+
+        async def mock_request(method, url, **kwargs):
+            return httpx.Response(401, text="Unauthorized")
+
+        client = ClarinetClient(
+            "http://test", username="admin@test.com", password="secret", auto_login=False
+        )
+        client.client = AsyncMock()
+        client.client.request = mock_request
+
+        with (
+            patch.object(client, "login", new_callable=AsyncMock) as mock_login,
+            pytest.raises(ClarinetAuthError),
+        ):
+            await client._request("GET", "/patients")
+
+        mock_login.assert_called_once()
