@@ -1,7 +1,7 @@
 // Static typed form for Patient creation
 import components/forms/base as form
 import gleam/dict.{type Dict}
-import gleam/option.{Some}
+import gleam/option.{None, Some}
 import lustre/attribute
 import lustre/element.{type Element}
 import lustre/element/html
@@ -65,7 +65,7 @@ pub fn view(
 
     // Form actions
     html.div([attribute.class("form-actions")], [
-      form.submit_button(text: "Create Patient", disabled: loading, on_click: Some(on_submit())),
+      form.submit_button(text: "Create Patient", disabled: loading, on_click: None),
       form.cancel_button(text: "Cancel", on_click: store.Navigate(router.Patients)),
     ]),
 

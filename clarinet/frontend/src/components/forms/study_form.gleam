@@ -121,7 +121,7 @@ pub fn view(
 
     // Form actions
     html.div([attribute.class("form-actions")], [
-      form.submit_button(text: "Save Study", disabled: loading, on_click: Some(on_submit())),
+      form.submit_button(text: "Save Study", disabled: loading, on_click: None),
       form.cancel_button(text: "Cancel", on_click: store.Navigate(router.Studies)),
     ]),
 

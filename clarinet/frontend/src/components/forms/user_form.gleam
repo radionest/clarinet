@@ -2,7 +2,7 @@
 import api/models.{type UserCreate}
 import components/forms/base as form
 import gleam/dict.{type Dict}
-import gleam/option.{Some}
+import gleam/option.{None, Some}
 import lustre/attribute
 import lustre/element.{type Element}
 import lustre/element/html
@@ -199,7 +199,7 @@ pub fn view(
           False -> "Create User"
         },
         disabled: loading,
-        on_click: Some(on_submit()),
+        on_click: None,
       ),
       form.cancel_button(text: "Cancel", on_click: store.Navigate(router.Users)),
     ]),
