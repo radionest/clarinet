@@ -110,21 +110,32 @@ Blobs must be at least ~4x4x4 voxels to survive the `opening(ball(2))` step.
 | `filter_roi(prop, ge, le)` | Binary `np.ndarray` (uint8) | no |
 | `filter_segmentation(prop, ge, le)` | New `Segmentation` | no |
 
-### Set Operations
+### Named Set Operations
 
-All set operations are **label-based** (operate on connected-component labels), not purely voxel-based. This has non-obvious consequences:
+All set operations are **label-based** (operate on connected-component labels), not purely voxel-based. Use the named methods below for configurable thresholds.
 
-| Operator | Semantics | Returns |
+| Method | Semantics | Key Parameters |
 |---|---|---|
-| `a & b` | Keep ROIs from `a` where overlap with `b` exceeds 2 voxels | New `Segmentation` |
-| `a \| b` | Binary union — all nonzero from both, result is single-valued | New `Segmentation` |
-| `a - b` | Keep ROIs from `a` with no overlap, or overlap < 10 voxels | New `Segmentation` |
-| `a + b` | Binary union (same as `\|` but via direct assignment) | New `Segmentation` |
-| `a ^ b` | `(a \| b) - (a & b)` | New `Segmentation` |
+| `a.intersection(b, *, min_overlap=1, min_overlap_ratio=None)` | Keep ROIs from `a` with sufficient overlap with `b` | `min_overlap`: min voxels (default 1). `min_overlap_ratio`: min fraction of label size. |
+| `a.union(b)` | Binary union — all nonzero from both, result is single-valued | — |
+| `a.difference(b, *, max_overlap=0, max_overlap_ratio=None)` | Keep ROIs from `a` with overlap below thresholds | `max_overlap`: max tolerated voxels. `max_overlap_ratio`: max fraction of label size. |
+| `a.symmetric_difference(b, *, min_overlap=1, min_overlap_ratio=None, max_overlap=0, max_overlap_ratio=None)` | `a.union(b).difference(a.intersection(b, ...))` | Passes params through to `intersection()` and `difference()`. |
 
-**Subtraction edge case (`__sub__`)**: keeps a label if overlap is 0, or if overlap < 10 voxels AND the label exists in self. When overlapping cubes form a single connected component in the union, XOR may return an empty result because the subtraction drops the entire unified label.
+**Union flattening**: the result is always binary (values 0 or 1). With `autolabel=True`, connected regions become a single label. Separate regions get different labels.
 
-**Union flattening (`__or__`)**: the result is always binary (values 0 or 1). With `autolabel=True`, connected regions become a single label. Separate regions get different labels.
+**Strict difference** (`max_overlap=0`, the default): drops any label with nonzero overlap. Use `max_overlap=N` to tolerate small overlaps.
+
+### Deprecated Operators
+
+The dunder operators delegate to the named methods above and emit `DeprecationWarning`. They preserve the old hardcoded thresholds for backward compatibility.
+
+| Operator | Delegates to | Notes |
+|---|---|---|
+| `a & b` | `a.intersection(b, min_overlap=3)` | Old threshold was `> 2` |
+| `a \| b` | `a.union(b)` | — |
+| `a - b` | `a.difference(b)` | Default `max_overlap=0` (strict) |
+| `a + b` | `a.union(b)` | — |
+| `a ^ b` | `a.symmetric_difference(b, min_overlap=3)` | Inherits old `&` threshold |
 
 ### In-Place Operations
 

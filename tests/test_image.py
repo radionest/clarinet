@@ -332,6 +332,103 @@ class TestSegmentation:
         assert mask.dtype == np.uint8
         assert np.count_nonzero(mask) > 0
 
+    # ---------------------------------------------------------------
+    # Named set operations
+    # ---------------------------------------------------------------
+
+    def test_intersection_default(self, seg_volume: np.ndarray) -> None:
+        """intersection() with default min_overlap=1 keeps any-overlap labels."""
+        seg1 = Segmentation()
+        seg1._spacing = (1.0, 1.0, 1.0)
+        seg1.img = seg_volume
+
+        seg2 = Segmentation()
+        seg2._spacing = (1.0, 1.0, 1.0)
+        seg2.img = seg_volume  # Same mask → full intersection
+
+        result = seg1.intersection(seg2)
+        assert isinstance(result, Segmentation)
+        assert not result.is_empty
+
+    def test_intersection_with_min_overlap(self) -> None:
+        """Labels with overlap below min_overlap are dropped."""
+        vol1 = np.zeros((10, 10, 5), dtype=np.uint8)
+        vol1[1:3, 1:3, 1:3] = 1  # 8 voxels
+        vol2 = np.zeros((10, 10, 5), dtype=np.uint8)
+        vol2[2:4, 2:4, 2:4] = 1  # overlaps at [2,2,2] — 1 voxel
+
+        seg1 = Segmentation()
+        seg1._spacing = (1.0, 1.0, 1.0)
+        seg1.img = vol1
+        seg2 = Segmentation()
+        seg2._spacing = (1.0, 1.0, 1.0)
+        seg2.img = vol2
+
+        # min_overlap=1 → kept (1 >= 1)
+        result = seg1.intersection(seg2, min_overlap=1)
+        assert not result.is_empty
+
+        # min_overlap=5 → dropped (1 < 5)
+        result = seg1.intersection(seg2, min_overlap=5)
+        assert result.is_empty
+
+    def test_intersection_with_ratio(self) -> None:
+        """min_overlap_ratio filters by overlap / label_size."""
+        vol1 = np.zeros((10, 10, 5), dtype=np.uint8)
+        vol1[1:3, 1:3, 1:3] = 1  # 8 voxels
+        vol2 = np.zeros((10, 10, 5), dtype=np.uint8)
+        vol2[1:3, 1:3, 1:2] = 1  # overlaps 4 voxels → ratio = 4/8 = 0.5
+
+        seg1 = Segmentation()
+        seg1._spacing = (1.0, 1.0, 1.0)
+        seg1.img = vol1
+        seg2 = Segmentation()
+        seg2._spacing = (1.0, 1.0, 1.0)
+        seg2.img = vol2
+
+        # ratio 0.5 >= 0.3 → kept
+        result = seg1.intersection(seg2, min_overlap_ratio=0.3)
+        assert not result.is_empty
+
+        # ratio 0.5 < 0.8 → dropped
+        result = seg1.intersection(seg2, min_overlap_ratio=0.8)
+        assert result.is_empty
+
+    def test_union(self) -> None:
+        """union() combines all nonzero voxels."""
+        vol1 = np.zeros((10, 10, 5), dtype=np.uint8)
+        vol1[1:3, 1:3, 1:3] = 1
+        vol2 = np.zeros((10, 10, 5), dtype=np.uint8)
+        vol2[6:8, 6:8, 1:3] = 1
+
+        seg1 = Segmentation(autolabel=False)
+        seg1._spacing = (1.0, 1.0, 1.0)
+        seg1.img = vol1
+
+        seg2 = Segmentation(autolabel=False)
+        seg2._spacing = (1.0, 1.0, 1.0)
+        seg2.img = vol2
+
+        result = seg1.union(seg2)
+        assert np.count_nonzero(result.img) == np.count_nonzero(vol1) + np.count_nonzero(vol2)
+
+    def test_symmetric_difference(self, seg_volume: np.ndarray) -> None:
+        """symmetric_difference() returns a valid Segmentation."""
+        seg1 = Segmentation()
+        seg1._spacing = (1.0, 1.0, 1.0)
+        seg1.img = seg_volume
+
+        seg2 = Segmentation()
+        seg2._spacing = (1.0, 1.0, 1.0)
+        seg2.img = seg_volume
+
+        result = seg1.symmetric_difference(seg2)
+        assert isinstance(result, Segmentation)
+
+    # ---------------------------------------------------------------
+    # Deprecated operators (emit DeprecationWarning)
+    # ---------------------------------------------------------------
+
     def test_and_operation(self, seg_volume: np.ndarray) -> None:
         seg1 = Segmentation()
         seg1._spacing = (1.0, 1.0, 1.0)
@@ -341,7 +438,8 @@ class TestSegmentation:
         seg2._spacing = (1.0, 1.0, 1.0)
         seg2.img = seg_volume  # Same mask → full intersection
 
-        result = seg1 & seg2
+        with pytest.warns(DeprecationWarning, match="intersection"):
+            result = seg1 & seg2
         assert isinstance(result, Segmentation)
         assert not result.is_empty
 
@@ -359,7 +457,8 @@ class TestSegmentation:
         seg2._spacing = (1.0, 1.0, 1.0)
         seg2.img = vol2
 
-        result = seg1 | seg2
+        with pytest.warns(DeprecationWarning, match="union"):
+            result = seg1 | seg2
         assert np.count_nonzero(result.img) == np.count_nonzero(vol1) + np.count_nonzero(vol2)
 
     def test_sub_operation(self) -> None:
@@ -376,9 +475,70 @@ class TestSegmentation:
         seg2._spacing = (1.0, 1.0, 1.0)
         seg2.img = vol2
 
-        result = seg1 - seg2
+        with pytest.warns(DeprecationWarning, match="difference"):
+            result = seg1 - seg2
         assert isinstance(result, Segmentation)
         # seg1 has no overlap with seg2, so result should keep seg1's ROI
+        assert not result.is_empty
+
+    def test_sub_drops_overlapping_label(self) -> None:
+        """__sub__ must drop labels with ANY overlap (no threshold tolerance)."""
+        vol1 = np.zeros((10, 10, 5), dtype=np.uint8)
+        vol1[1:5, 1:5, 1:4] = 1  # 48 voxels
+        vol2 = np.zeros((10, 10, 5), dtype=np.uint8)
+        vol2[4:6, 4:6, 3:4] = 1  # overlaps vol1 at [4,4,3] — 1 voxel
+
+        seg1 = Segmentation()
+        seg1._spacing = (1.0, 1.0, 1.0)
+        seg1.img = vol1
+        seg2 = Segmentation()
+        seg2._spacing = (1.0, 1.0, 1.0)
+        seg2.img = vol2
+
+        with pytest.warns(DeprecationWarning, match="difference"):
+            result = seg1 - seg2
+        assert result.is_empty  # strict subtraction drops the overlapping label
+
+    def test_difference_with_max_overlap(self) -> None:
+        vol1 = np.zeros((10, 10, 5), dtype=np.uint8)
+        vol1[1:5, 1:5, 1:4] = 1  # 48 voxels
+        vol2 = np.zeros((10, 10, 5), dtype=np.uint8)
+        vol2[4:6, 4:6, 3:4] = 1  # overlaps at 1 voxel
+
+        seg1 = Segmentation()
+        seg1._spacing = (1.0, 1.0, 1.0)
+        seg1.img = vol1
+        seg2 = Segmentation()
+        seg2._spacing = (1.0, 1.0, 1.0)
+        seg2.img = vol2
+
+        # max_overlap=0 → strict (same as __sub__)
+        assert seg1.difference(seg2, max_overlap=0).is_empty
+
+        # max_overlap=5 → tolerate small overlaps
+        result = seg1.difference(seg2, max_overlap=5)
+        assert not result.is_empty
+
+    def test_difference_with_ratio(self) -> None:
+        # Small ROI: 8 voxels, overlap 4 → ratio = 0.5
+        vol1 = np.zeros((10, 10, 5), dtype=np.uint8)
+        vol1[1:3, 1:3, 1:3] = 1  # 8 voxels
+        vol2 = np.zeros((10, 10, 5), dtype=np.uint8)
+        vol2[1:3, 1:3, 1:2] = 1  # overlaps 4 voxels
+
+        seg1 = Segmentation()
+        seg1._spacing = (1.0, 1.0, 1.0)
+        seg1.img = vol1
+        seg2 = Segmentation()
+        seg2._spacing = (1.0, 1.0, 1.0)
+        seg2.img = vol2
+
+        # max_overlap=10 but ratio 0.5 > 0.1 → dropped
+        result = seg1.difference(seg2, max_overlap=10, max_overlap_ratio=0.1)
+        assert result.is_empty
+
+        # ratio threshold 0.8 → 0.5 < 0.8, so kept
+        result = seg1.difference(seg2, max_overlap=10, max_overlap_ratio=0.8)
         assert not result.is_empty
 
     def test_add_operation(self) -> None:
@@ -395,7 +555,8 @@ class TestSegmentation:
         seg2._spacing = (1.0, 1.0, 1.0)
         seg2.img = vol2
 
-        result = seg1 + seg2
+        with pytest.warns(DeprecationWarning, match="union"):
+            result = seg1 + seg2
         total = np.count_nonzero(vol1) + np.count_nonzero(vol2)
         assert np.count_nonzero(result.img) == total
 
@@ -413,7 +574,8 @@ class TestSegmentation:
         seg2._spacing = (1.0, 1.0, 1.0)
         seg2.img = vol2
 
-        result = seg1 ^ seg2
+        with pytest.warns(DeprecationWarning, match="symmetric_difference"):
+            result = seg1 ^ seg2
         assert isinstance(result, Segmentation)
 
     def test_subtract_in_place(self) -> None:

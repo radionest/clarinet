@@ -304,7 +304,7 @@ class TestSegmentationProcessingChain:
     """Set operations chain with persistence."""
 
     def test_set_operations_chain_and_persistence(self, tmp_path: Path) -> None:
-        """Create 2 overlapping segmentations → &, |, ^ → chain → filter → save → read back."""
+        """Create 2 overlapping segmentations → named ops → chain → filter → save → read back."""
         shape = (30, 30, 16)
 
         # Create two segmentations with overlapping 7×7×7 cubes (3×3×5 overlap)
@@ -322,9 +322,9 @@ class TestSegmentationProcessingChain:
         seg_b._spacing = (1.0, 1.0, 1.0)
         seg_b.img = vol_b
 
-        # Basic set operations
-        intersection = seg_a & seg_b
-        union = seg_a | seg_b
+        # Basic set operations (named methods)
+        intersection = seg_a.intersection(seg_b)
+        union = seg_a.union(seg_b)
 
         assert np.count_nonzero(intersection.img) > 0, "Overlapping cubes must intersect"
         assert np.count_nonzero(union.img) > 0
@@ -333,16 +333,15 @@ class TestSegmentationProcessingChain:
         assert np.count_nonzero(union.img) >= np.count_nonzero(seg_a.img)
         assert np.count_nonzero(union.img) >= np.count_nonzero(seg_b.img)
 
-        # XOR = (a|b) - (a&b). Because __sub__ is label-based (not voxel-based),
-        # and the union forms a single connected component, the intersection
-        # overlaps with it → subtraction may drop the entire label. We verify
-        # XOR produces a valid Segmentation without asserting nonzero.
-        sym_diff = seg_a ^ seg_b
+        # symmetric_difference() = union - intersection. With default
+        # max_overlap=0 the difference is strict: drops any label overlapping
+        # the intersection → may produce empty result for connected components.
+        sym_diff = seg_a.symmetric_difference(seg_b)
         assert isinstance(sym_diff, Segmentation)
 
-        # Chain: ((a | b) & a) — should keep a's voxels that overlap with union
-        chain_step = (seg_a | seg_b) & seg_a
-        assert np.count_nonzero(chain_step.img) > 0, "a overlaps with (a|b)"
+        # Chain: union(a, b).intersection(a) — keep a's voxels that overlap with union
+        chain_step = seg_a.union(seg_b).intersection(seg_a)
+        assert np.count_nonzero(chain_step.img) > 0, "a overlaps with union(a, b)"
 
         # Filter: keep only ROIs with enough pixels
         filtered = chain_step.filter_segmentation("num_pixels", ge=3)

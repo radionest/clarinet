@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import warnings
 from typing import Any, Literal, Self
 
 import numpy as np
@@ -246,50 +247,196 @@ class Segmentation(Image):
         """
         self.img = other.img
 
-    def __and__(self, other: Self) -> Segmentation:
-        """Intersection: keep ROIs from self that overlap with other."""
+    # ------------------------------------------------------------------
+    # Named set operations (preferred API)
+    # ------------------------------------------------------------------
+
+    def intersection(
+        self,
+        other: Self,
+        *,
+        min_overlap: int = 1,
+        min_overlap_ratio: float | None = None,
+    ) -> Segmentation:
+        """Intersection: keep ROIs from self that overlap sufficiently with other.
+
+        Args:
+            other: Segmentation to intersect with.
+            min_overlap: Minimum absolute overlap in voxels to keep a label.
+            min_overlap_ratio: Minimum overlap as a fraction of label size
+                (0.0--1.0). ``None`` disables the ratio check.
+
+        Returns:
+            New Segmentation with only the kept labels.
+        """
         output = Segmentation(template=self)
         for region in self.label_props:
             coords = region.coords
-            intersection = other.img[coords[:, 0], coords[:, 1], coords[:, 2]]
-            if np.sum(intersection > 0) > 2:
+            overlap_mask = other.img[coords[:, 0], coords[:, 1], coords[:, 2]]
+            overlap = int(np.sum(overlap_mask > 0))
+            if overlap >= min_overlap:
+                if min_overlap_ratio is not None:
+                    total = int(np.sum(self.img == region.label))
+                    if overlap / total < min_overlap_ratio:
+                        continue
                 output.img[coords[:, 0], coords[:, 1], coords[:, 2]] = region.label
         return output
 
-    def __or__(self, other: Self) -> Segmentation:
-        """Union: combine nonzero voxels from both masks."""
+    def union(self, other: Self) -> Segmentation:
+        """Union: combine nonzero voxels from both masks into a binary result.
+
+        Args:
+            other: Segmentation to combine with.
+
+        Returns:
+            New Segmentation with all nonzero voxels from either mask.
+        """
+        if other.img.size == 1:
+            return Segmentation(template=self, copy_data=True)
         output = Segmentation(template=self)
         combined = self.img.astype(np.uint16) + other.img.astype(np.uint16)
         combined[combined != 0] = 1
         output.img = combined
         return output
 
-    def __sub__(self, other: Self) -> Segmentation:
-        """Difference: keep ROIs from self that do NOT overlap with other."""
+    def difference(
+        self,
+        other: Self,
+        *,
+        max_overlap: int = 0,
+        max_overlap_ratio: float | None = None,
+    ) -> Segmentation:
+        """Difference with tolerance: keep ROIs with overlap below thresholds.
+
+        A label is kept if its overlap with ``other`` is at most ``max_overlap``
+        voxels AND (if ``max_overlap_ratio`` is set) the overlap ratio
+        relative to the label's total voxels is below ``max_overlap_ratio``.
+
+        Args:
+            other: Segmentation to subtract.
+            max_overlap: Maximum absolute overlap in voxels to tolerate.
+            max_overlap_ratio: Maximum overlap as a fraction of label size
+                (0.0--1.0). ``None`` disables the ratio check.
+
+        Returns:
+            New Segmentation with only the kept labels.
+        """
         if other.img.size == 1:
             return Segmentation(template=self, copy_data=True)
         output = Segmentation(template=self)
         for region in self.label_props:
             coords = region.coords
             intersection = other.img[coords[:, 0], coords[:, 1], coords[:, 2]]
-            intersection_count = np.sum(intersection > 0)
-            if intersection_count == 0 or (
-                intersection_count < 10 and np.sum(self.img == region.label)
-            ):
+            overlap = int(np.sum(intersection > 0))
+            if overlap <= max_overlap:
+                if max_overlap_ratio is not None:
+                    total = int(np.sum(self.img == region.label))
+                    if overlap / total > max_overlap_ratio:
+                        continue
                 output.img[coords[:, 0], coords[:, 1], coords[:, 2]] = int(region.label)
         return output
 
+    def symmetric_difference(
+        self,
+        other: Self,
+        *,
+        min_overlap: int = 1,
+        min_overlap_ratio: float | None = None,
+        max_overlap: int = 0,
+        max_overlap_ratio: float | None = None,
+    ) -> Segmentation:
+        """Symmetric difference: voxels in the union but not in the intersection.
+
+        Computes ``self.union(other).difference(self.intersection(other, ...), ...)``.
+
+        Args:
+            other: Segmentation to compare with.
+            min_overlap: Passed to ``intersection()`` as ``min_overlap``.
+            min_overlap_ratio: Passed to ``intersection()`` as ``min_overlap_ratio``.
+            max_overlap: Passed to ``difference()`` as ``max_overlap``.
+            max_overlap_ratio: Passed to ``difference()`` as ``max_overlap_ratio``.
+
+        Returns:
+            New Segmentation with the symmetric difference.
+        """
+        combined = self.union(other)
+        intersected = self.intersection(
+            other, min_overlap=min_overlap, min_overlap_ratio=min_overlap_ratio,
+        )
+        return combined.difference(
+            intersected, max_overlap=max_overlap, max_overlap_ratio=max_overlap_ratio,
+        )
+
+    # ------------------------------------------------------------------
+    # Deprecated operators — delegate to named methods
+    # ------------------------------------------------------------------
+
+    def __and__(self, other: Self) -> Segmentation:
+        """Intersection: keep ROIs from self that overlap with other.
+
+        .. deprecated::
+            Use ``intersection()`` for configurable overlap thresholds.
+        """
+        warnings.warn(
+            "Segmentation.__and__ (& operator) is deprecated. "
+            "Use .intersection(other, min_overlap=...) instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.intersection(other, min_overlap=3)
+
+    def __or__(self, other: Self) -> Segmentation:
+        """Union: combine nonzero voxels from both masks.
+
+        .. deprecated::
+            Use ``union()`` instead.
+        """
+        warnings.warn(
+            "Segmentation.__or__ (| operator) is deprecated. "
+            "Use .union(other) instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.union(other)
+
+    def __sub__(self, other: Self) -> Segmentation:
+        """Difference: keep ROIs from self that do NOT overlap with other.
+
+        .. deprecated::
+            Use ``difference()`` for configurable overlap thresholds.
+        """
+        warnings.warn(
+            "Segmentation.__sub__ (- operator) is deprecated. "
+            "Use .difference(other, max_overlap=...) instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.difference(other)
+
     def __add__(self, other: Self) -> Segmentation:
-        """Add: merge nonzero voxels from both masks (binary union)."""
-        if other.img.size == 1:
-            return Segmentation(template=self, copy_data=True)
-        output = Segmentation(template=self)
-        output.img[self.img > 0] = 1
-        output.img[other.img > 0] = 1
-        return output
+        """Add: merge nonzero voxels from both masks (binary union).
+
+        .. deprecated::
+            Use ``union()`` instead.
+        """
+        warnings.warn(
+            "Segmentation.__add__ (+ operator) is deprecated. "
+            "Use .union(other) instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.union(other)
 
     def __xor__(self, other: Self) -> Segmentation:
-        """Symmetric difference: union minus intersection."""
-        conjunction = self | other
-        intersection = self & other
-        return conjunction - intersection
+        """Symmetric difference: union minus intersection.
+
+        .. deprecated::
+            Use ``symmetric_difference()`` for configurable overlap thresholds.
+        """
+        warnings.warn(
+            "Segmentation.__xor__ (^ operator) is deprecated. "
+            "Use .symmetric_difference(other, ...) instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.symmetric_difference(other, min_overlap=3)
