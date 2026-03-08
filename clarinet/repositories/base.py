@@ -160,7 +160,7 @@ class BaseRepository[ModelT: SQLModel]:
             Created entity with refreshed data
         """
         self.session.add(entity)
-        await self.session.commit()
+        await self.session.flush()
         await self.session.refresh(entity)
         return entity
 
@@ -174,7 +174,7 @@ class BaseRepository[ModelT: SQLModel]:
             List of created entities
         """
         self.session.add_all(entities)
-        await self.session.commit()
+        await self.session.flush()
         for entity in entities:
             await self.session.refresh(entity)
         return entities

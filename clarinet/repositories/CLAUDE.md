@@ -13,8 +13,8 @@
 | `get_all(skip, limit, **filters)` | `Sequence[ModelT]` | empty list |
 | `list_all(**filters)` | `Sequence[ModelT]` | empty list |
 | `count(**filters)` | `int` | `0` |
-| `create(entity)` | `ModelT` | — (commits + refreshes) |
-| `create_many(entities)` | `list[ModelT]` | — |
+| `create(entity)` | `ModelT` | — (flushes + refreshes, no commit) |
+| `create_many(entities)` | `list[ModelT]` | — (flushes + refreshes, no commit) |
 | `update(entity, update_data, options=)` | `ModelT` | — |
 | `delete(entity)` | `None` | — |
 | `delete_by_id(id)` | `bool` | returns `False` |
