@@ -5,7 +5,9 @@ This module provides the RecordFlowEngine class that monitors record status
 changes and executes registered flows when their conditions are met.
 """
 
-from typing import TYPE_CHECKING
+import asyncio
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
 
 from clarinet.utils.logger import logger
 
@@ -23,11 +25,48 @@ from .flow_record import FlowRecord
 from .flow_result import _SELF
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Coroutine
 
     from clarinet.client import ClarinetClient
     from clarinet.models import RecordRead, RecordStatus
     from clarinet.services.pipeline import PipelineMessage
+
+
+@dataclass(frozen=True, slots=True)
+class FlowContext:
+    """Unified execution context for all flow trigger types."""
+
+    record: RecordRead | None = None
+    record_context: dict[str, RecordRead] | None = None
+    patient_id: str | None = None
+    study_uid: str | None = None
+    series_uid: str | None = None
+    file_name: str | None = None
+
+    @staticmethod
+    def for_record(record: RecordRead, context: dict[str, RecordRead]) -> FlowContext:
+        """Build context for a record-triggered flow."""
+        return FlowContext(
+            record=record,
+            record_context=context,
+            patient_id=record.patient.id,
+            study_uid=record.study.study_uid if record.study else None,
+            series_uid=record.series.series_uid if record.series else None,
+        )
+
+    @staticmethod
+    def for_entity(
+        patient_id: str,
+        study_uid: str | None = None,
+        series_uid: str | None = None,
+    ) -> FlowContext:
+        """Build context for an entity-creation flow."""
+        return FlowContext(patient_id=patient_id, study_uid=study_uid, series_uid=series_uid)
+
+    @staticmethod
+    def for_file(file_name: str, patient_id: str) -> FlowContext:
+        """Build context for a file-update flow."""
+        return FlowContext(file_name=file_name, patient_id=patient_id)
 
 
 class RecordFlowEngine:
@@ -54,6 +93,32 @@ class RecordFlowEngine:
         self.flows: dict[str, list[FlowRecord]] = {}
         self.entity_flows: dict[str, list[FlowRecord]] = {}
         self.file_flows: dict[str, list[FlowFileRecord]] = {}
+        self._background_tasks: set[asyncio.Task[None]] = set()
+
+    async def _ensure_authenticated(self) -> None:
+        """Lazily authenticate the ClarinetClient on first use."""
+        if self.clarinet_client._authenticated:
+            return
+        if self.clarinet_client.username and self.clarinet_client.password:
+            await self.clarinet_client.login()
+
+    def fire(self, coro: Coroutine[Any, Any, Any]) -> None:
+        """Schedule a coroutine as a fire-and-forget background task.
+
+        Args:
+            coro: Coroutine to run in the background.
+        """
+        task = asyncio.create_task(coro)
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
+
+    @staticmethod
+    async def _maybe_await(func: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+        """Call a function and await the result if it is a coroutine."""
+        result = func(*args, **kwargs)
+        if asyncio.iscoroutine(result):
+            return await result
+        return result
 
     def register_flow(self, flow: FlowRecord | FlowFileRecord) -> None:
         """Register a flow definition.
@@ -100,6 +165,8 @@ class RecordFlowEngine:
             logger.info(
                 f"Registered flow for record type '{flow.record_name}' on any status change"
             )
+
+    # ── Public handlers ───────────────────────────────────────────────────
 
     async def _dispatch_flows(
         self,
@@ -208,104 +275,342 @@ class RecordFlowEngine:
             f"(patient={patient_id}, study={study_uid}, series={series_uid})"
         )
 
+        ctx = FlowContext.for_entity(patient_id, study_uid, series_uid)
         for flow in self.entity_flows[entity_type]:
             for action in flow.actions:
-                await self._execute_entity_action(action, patient_id, study_uid, series_uid)
+                await self._execute_action(action, ctx)
 
-    async def _execute_entity_action(
-        self,
-        action: FlowAction,
-        patient_id: str,
-        study_uid: str | None,
-        series_uid: str | None,
+    async def handle_file_update(self, file_name: str, patient_id: str) -> None:
+        """Handle a project-level file change and execute relevant flows.
+
+        Called when a pipeline task detects that a file's checksum changed.
+        Iterates file flows registered for the given file name and executes
+        their actions scoped to the patient.
+
+        Args:
+            file_name: The logical file name (from file definition).
+            patient_id: The patient whose storage contains the changed file.
+        """
+        if file_name not in self.file_flows:
+            logger.debug(f"No file flows registered for '{file_name}'")
+            return
+
+        logger.debug(f"Processing file update flows for '{file_name}' (patient={patient_id})")
+
+        ctx = FlowContext.for_file(file_name, patient_id)
+        for flow in self.file_flows[file_name]:
+            if not flow.update_trigger:
+                continue
+            logger.info(f"Executing file flow for '{file_name}' (patient={patient_id})")
+            for action in flow.actions:
+                await self._execute_action(action, ctx)
+
+    # ── Context helpers ───────────────────────────────────────────────────
+
+    def _update_context_from_records(
+        self, context: dict[str, RecordRead], records: list[RecordRead]
     ) -> None:
-        """Execute a single action for an entity creation flow.
+        """Merge records into context, keeping the latest by id for each record type."""
+        for r in records:
+            if not (r.record_type and r.record_type.name):
+                continue
+            name = r.record_type.name
+            if name not in context or (r.id and r.id > context[name].id):
+                context[name] = r
+
+    async def _get_record_context(self, record: RecordRead) -> dict[str, RecordRead]:
+        """Get all related records for evaluation context.
+
+        Fetches records at all hierarchy levels for the same patient:
+        patient-level, study-level, and series-level records. This enables
+        cross-level invalidation (e.g. series change invalidating patient record).
+
+        Args:
+            record: The triggering record.
+
+        Returns:
+            Dictionary mapping record type names to their latest record instances.
+        """
+        await self._ensure_authenticated()
+        context: dict[str, RecordRead] = {}
+
+        try:
+            if record.patient:
+                records = await self.clarinet_client.find_records(
+                    patient_id=record.patient.id, limit=1000
+                )
+                self._update_context_from_records(context, records)
+
+            elif record.study:
+                records = await self.clarinet_client.find_records(
+                    study_uid=record.study.study_uid, limit=1000
+                )
+                self._update_context_from_records(context, records)
+
+            elif record.series:
+                records = await self.clarinet_client.find_records(
+                    series_uid=record.series.series_uid, limit=1000
+                )
+                self._update_context_from_records(context, records)
+
+        except Exception as e:
+            logger.error(f"Error getting record context: {e}")
+
+        return context
+
+    # ── Flow execution ────────────────────────────────────────────────────
+
+    async def _evaluate_and_run_condition(
+        self,
+        condition: FlowCondition,
+        context: dict[str, RecordRead],
+        ctx: FlowContext,
+    ) -> bool | None:
+        """Evaluate a condition and run its actions.
+
+        Returns:
+            True/False for the condition result, or None on error.
+        """
+        try:
+            met = condition.evaluate(context)
+        except Exception as e:
+            logger.error(f"Error evaluating condition: {e}")
+            return None
+        if met:
+            for action in condition.actions:
+                await self._execute_action(action, ctx)
+        return met
+
+    async def _execute_flow(
+        self, flow: FlowRecord, record: RecordRead, context: dict[str, RecordRead]
+    ) -> None:
+        """Execute a flow for a specific record.
+
+        Args:
+            flow: The flow definition to execute.
+            record: The triggering record.
+            context: Dictionary of related records.
+        """
+        # Add the current record to context
+        context[flow.record_name] = record
+        context[_SELF] = record
+
+        ctx = FlowContext.for_record(record, context)
+
+        # Execute unconditional actions
+        for action in flow.actions:
+            await self._execute_action(action, ctx)
+
+        # Evaluate and execute conditional actions
+        previous_condition_met = False
+        match_group_met: dict[int, bool] = {}
+
+        for condition in flow.conditions:
+            group = condition.match_group
+
+            if condition.is_else:
+                if group is not None:
+                    should_fire = not match_group_met.get(group, False)
+                    # default() carries guard — evaluate it
+                    if should_fire and condition.condition is not None:
+                        try:
+                            should_fire = condition.condition.evaluate(context)
+                        except (TypeError, ValueError):
+                            if condition.on_missing == "skip":
+                                should_fire = False
+                            else:
+                                raise
+                else:
+                    should_fire = not previous_condition_met
+                if should_fire:
+                    for action in condition.actions:
+                        await self._execute_action(action, ctx)
+                if group is None:
+                    break
+                continue
+
+            # Stop-on-first-match: skip if group already matched
+            if group is not None and match_group_met.get(group, False):
+                continue
+
+            result = await self._evaluate_and_run_condition(condition, context, ctx)
+
+            if group is not None:
+                if result is True:
+                    match_group_met[group] = True
+            else:
+                previous_condition_met = result is True
+
+    # ── Unified action dispatcher ─────────────────────────────────────────
+
+    async def _execute_action(self, action: FlowAction, ctx: FlowContext) -> None:
+        """Execute a single action in the given context.
 
         Args:
             action: The action model instance.
-            patient_id: The patient ID.
-            study_uid: The study UID (if available).
-            series_uid: The series UID (if available).
+            ctx: The unified flow context.
         """
         try:
             match action:
                 case CreateRecordAction():
-                    await self._create_entity_record(action, patient_id, study_uid, series_uid)
+                    await self._create_record(action, ctx)
+                case UpdateRecordAction() if ctx.record is not None:
+                    await self._update_record(action, ctx)
+                case InvalidateRecordsAction():
+                    await self._invalidate_records(action, ctx)
                 case CallFunctionAction():
-                    await self._call_entity_function(action, patient_id, study_uid, series_uid)
-                case PipelineAction():
-                    await self._dispatch_entity_pipeline(action, patient_id, study_uid, series_uid)
+                    await self._call_function(action, ctx)
+                case PipelineAction() if ctx.file_name is None:
+                    await self._dispatch_pipeline(action, ctx)
                 case _:
-                    logger.warning(f"Unsupported entity action type: {action.type}")
+                    logger.warning(f"Unsupported action type for context: {action.type}")
         except Exception as e:
-            logger.error(f"Error executing entity action: {e}")
+            logger.error(f"Error executing action {action.type}: {e}")
 
-    async def _create_entity_record(
-        self,
-        action: CreateRecordAction,
-        patient_id: str,
-        study_uid: str | None,
-        series_uid: str | None,
-    ) -> None:
-        """Create a record from an entity creation flow.
+    # ── Action implementations ────────────────────────────────────────────
+
+    async def _create_record(self, action: CreateRecordAction, ctx: FlowContext) -> None:
+        """Create a new record.
+
+        Inherits ``user_id`` from the triggering record if not explicitly set
+        (record context only). ``parent_record_id`` is passed only when a
+        source record is present.
 
         Args:
             action: The CreateRecordAction with record details.
-            patient_id: The patient ID.
-            study_uid: The study UID (if available).
-            series_uid: The series UID (if available).
+            ctx: The unified flow context.
         """
+        await self._ensure_authenticated()
         from clarinet.models import RecordCreate
+
+        series_uid = action.series_uid or ctx.series_uid
+        user_id = action.user_id
+        parent_record_id: int | None = None
+
+        if ctx.record is not None:
+            if user_id is None and ctx.record.user_id is not None:
+                user_id = str(ctx.record.user_id)
+            parent_record_id = action.parent_record_id
+            default_info = (
+                f"Created by flow from record {ctx.record.record_type.name} (id={ctx.record.id})"
+            )
+        else:
+            default_info = (
+                f"Created by entity flow on "
+                f"{ctx.series_uid or ctx.study_uid or ctx.patient_id} creation"
+            )
 
         try:
             record_create = RecordCreate(
                 record_type_name=action.record_type_name,
-                patient_id=patient_id,
-                study_uid=study_uid,
-                series_uid=action.series_uid or series_uid,
-                user_id=action.user_id,
-                context_info=action.context_info
-                or f"Created by entity flow on {series_uid or study_uid or patient_id} creation",
+                patient_id=ctx.patient_id,
+                study_uid=ctx.study_uid,
+                series_uid=series_uid,
+                user_id=user_id,
+                parent_record_id=parent_record_id,
+                context_info=action.context_info or default_info,
             )
             result = await self.clarinet_client.create_record(record_create)
             logger.info(
-                f"Created record '{action.record_type_name}' (id={result.id}) from entity flow"
+                f"Created record '{action.record_type_name}' (id={result.id}) "
+                f"for {ctx.study_uid or ctx.patient_id}"
             )
         except Exception as e:
-            logger.error(
-                f"Failed to create record '{action.record_type_name}' from entity flow: {e}"
-            )
+            logger.error(f"Failed to create record '{action.record_type_name}': {e}")
 
-    async def _call_entity_function(
-        self,
-        action: CallFunctionAction,
-        patient_id: str,
-        study_uid: str | None,
-        series_uid: str | None,
-    ) -> None:
-        """Call a custom function from an entity creation flow.
+    async def _update_record(self, action: UpdateRecordAction, ctx: FlowContext) -> None:
+        """Update an existing record.
+
+        Args:
+            action: The UpdateRecordAction with target record name and status.
+            ctx: The unified flow context (must have record_context).
+        """
+        await self._ensure_authenticated()
+        from clarinet.models import RecordStatus
+
+        context = ctx.record_context
+        if context is None or action.record_name not in context:
+            logger.warning(f"Record '{action.record_name}' not found in context for update")
+            return
+
+        target_record = context[action.record_name]
+
+        # Update record status if specified
+        if action.status is not None:
+            try:
+                status: str | RecordStatus = action.status
+                if isinstance(status, str):
+                    status = RecordStatus(status)
+
+                await self.clarinet_client.update_record_status(target_record.id, status)
+                logger.info(
+                    f"Updated record '{action.record_name}' "
+                    f"(id={target_record.id}) status to {status}"
+                )
+            except Exception as e:
+                logger.error(f"Failed to update record status: {e}")
+
+    async def _call_function(self, action: CallFunctionAction, ctx: FlowContext) -> None:
+        """Call a custom function with context-appropriate kwargs.
 
         Args:
             action: The CallFunctionAction with function, args, and kwargs.
-            patient_id: The patient ID.
-            study_uid: The study UID (if available).
-            series_uid: The series UID (if available).
+            ctx: The unified flow context.
         """
-        kwargs = {
-            "patient_id": patient_id,
-            "study_uid": study_uid,
-            "series_uid": series_uid,
-            "client": self.clarinet_client,
-        } | action.extra_kwargs
+        if ctx.record is not None:
+            kwargs: dict[str, Any] = {
+                "record": ctx.record,
+                "context": ctx.record_context,
+                "client": self.clarinet_client,
+            }
+        elif ctx.file_name is not None:
+            kwargs = {
+                "file_name": ctx.file_name,
+                "patient_id": ctx.patient_id,
+                "client": self.clarinet_client,
+            }
+        else:
+            kwargs = {
+                "patient_id": ctx.patient_id,
+                "study_uid": ctx.study_uid,
+                "series_uid": ctx.series_uid,
+                "client": self.clarinet_client,
+            }
+        kwargs |= action.extra_kwargs
 
         try:
-            import asyncio
-
-            result = action.function(*action.args, **kwargs)
-            if asyncio.iscoroutine(result):
-                await result
+            await self._maybe_await(action.function, *action.args, **kwargs)
         except Exception as e:
-            logger.error(f"Error calling entity function {action.function.__name__}: {e}")
+            logger.error(f"Error calling function {action.function.__name__}: {e}")
+
+    async def _dispatch_pipeline(self, action: PipelineAction, ctx: FlowContext) -> None:
+        """Dispatch a task to a registered pipeline.
+
+        Builds a PipelineMessage from the context and sends it to the named
+        pipeline for distributed execution.
+
+        Args:
+            action: The PipelineAction with pipeline name and extra payload.
+            ctx: The unified flow context.
+        """
+        from clarinet.services.pipeline import PipelineMessage
+
+        message = PipelineMessage(
+            patient_id=ctx.patient_id or "",
+            study_uid=ctx.study_uid or "",
+            series_uid=ctx.series_uid,
+            record_id=ctx.record.id if ctx.record else None,
+            record_type_name=(
+                ctx.record.record_type.name if ctx.record and ctx.record.record_type else None
+            ),
+            payload=action.extra_payload,
+        )
+        label = (
+            f"record {ctx.record.id} ({ctx.record.record_type.name})"
+            if ctx.record
+            else f"entity (patient={ctx.patient_id})"
+        )
+        await self._run_pipeline(action, message, label)
 
     async def _run_pipeline(
         self,
@@ -336,277 +641,58 @@ class RecordFlowEngine:
         except Exception as e:
             logger.error(f"Failed to dispatch pipeline '{action.pipeline_name}': {e}")
 
-    async def _dispatch_entity_pipeline(
-        self,
-        action: PipelineAction,
-        patient_id: str,
-        study_uid: str | None,
-        series_uid: str | None,
-    ) -> None:
-        """Dispatch a pipeline from an entity creation flow.
+    # ── Invalidation ──────────────────────────────────────────────────────
+
+    async def _invalidate_records(self, action: InvalidateRecordsAction, ctx: FlowContext) -> None:
+        """Invalidate records of specified types.
+
+        Unified entry point for record-triggered and file-triggered invalidation.
+        Searches by patient_id (broadest scope) to find ALL records of target
+        types, covering all hierarchy levels.
 
         Args:
-            action: The PipelineAction with pipeline name and extra payload.
-            patient_id: The patient ID.
-            study_uid: The study UID (if available).
-            series_uid: The series UID (if available).
+            action: The InvalidateRecordsAction with target types, mode, and callback.
+            ctx: The unified flow context.
         """
-        from clarinet.services.pipeline import PipelineMessage
-
-        message = PipelineMessage(
-            patient_id=patient_id,
-            study_uid=study_uid or "",
-            series_uid=series_uid,
-            payload=action.extra_payload,
-        )
-        await self._run_pipeline(
-            action, message, f"entity (patient={patient_id}, series={series_uid})"
-        )
-
-    def _update_context_from_records(
-        self, context: dict[str, RecordRead], records: list[RecordRead]
-    ) -> None:
-        """Merge records into context, keeping the latest by id for each record type."""
-        for r in records:
-            if not (r.record_type and r.record_type.name):
-                continue
-            name = r.record_type.name
-            if name not in context or (r.id and r.id > context[name].id):
-                context[name] = r
-
-    async def _get_record_context(self, record: RecordRead) -> dict[str, RecordRead]:
-        """Get all related records for evaluation context.
-
-        Fetches records at all hierarchy levels for the same patient:
-        patient-level, study-level, and series-level records. This enables
-        cross-level invalidation (e.g. series change invalidating patient record).
-
-        Args:
-            record: The triggering record.
-
-        Returns:
-            Dictionary mapping record type names to their latest record instances.
-        """
-        context: dict[str, RecordRead] = {}
-
-        try:
-            if record.patient:
-                records = await self.clarinet_client.find_records(
-                    patient_id=record.patient.id, limit=1000
-                )
-                self._update_context_from_records(context, records)
-
-            elif record.study:
-                records = await self.clarinet_client.find_records(
-                    study_uid=record.study.study_uid, limit=1000
-                )
-                self._update_context_from_records(context, records)
-
-            elif record.series:
-                records = await self.clarinet_client.find_records(
-                    series_uid=record.series.series_uid, limit=1000
-                )
-                self._update_context_from_records(context, records)
-
-        except Exception as e:
-            logger.error(f"Error getting record context: {e}")
-
-        return context
-
-    async def _evaluate_and_run_condition(
-        self,
-        condition: FlowCondition,
-        context: dict[str, RecordRead],
-        record: RecordRead,
-    ) -> bool | None:
-        """Evaluate a condition and run its actions.
-
-        Returns:
-            True/False for the condition result, or None on error.
-        """
-        try:
-            met = condition.evaluate(context)
-        except Exception as e:
-            logger.error(f"Error evaluating condition: {e}")
-            return None
-        if met:
-            for action in condition.actions:
-                await self._execute_action(action, record, context)
-        return met
-
-    async def _execute_flow(
-        self, flow: FlowRecord, record: RecordRead, context: dict[str, RecordRead]
-    ) -> None:
-        """Execute a flow for a specific record.
-
-        Args:
-            flow: The flow definition to execute.
-            record: The triggering record.
-            context: Dictionary of related records.
-        """
-        # Add the current record to context
-        context[flow.record_name] = record
-        context[_SELF] = record
-
-        # Execute unconditional actions
-        for action in flow.actions:
-            await self._execute_action(action, record, context)
-
-        # Evaluate and execute conditional actions
-        previous_condition_met = False
-        match_group_met: dict[int, bool] = {}
-
-        for condition in flow.conditions:
-            group = condition.match_group
-
-            if condition.is_else:
-                if group is not None:
-                    should_fire = not match_group_met.get(group, False)
-                    # default() carries guard — evaluate it
-                    if should_fire and condition.condition is not None:
-                        try:
-                            should_fire = condition.condition.evaluate(context)
-                        except (TypeError, ValueError):
-                            if condition.on_missing == "skip":
-                                should_fire = False
-                            else:
-                                raise
-                else:
-                    should_fire = not previous_condition_met
-                if should_fire:
-                    for action in condition.actions:
-                        await self._execute_action(action, record, context)
-                if group is None:
-                    break
-                continue
-
-            # Stop-on-first-match: skip if group already matched
-            if group is not None and match_group_met.get(group, False):
-                continue
-
-            result = await self._evaluate_and_run_condition(condition, context, record)
-
-            if group is not None:
-                if result is True:
-                    match_group_met[group] = True
-            else:
-                previous_condition_met = result is True
-
-    async def _execute_action(
-        self, action: FlowAction, record: RecordRead, context: dict[str, RecordRead]
-    ) -> None:
-        """Execute a single action.
-
-        Args:
-            action: The action model instance.
-            record: The triggering record.
-            context: Dictionary of related records.
-        """
-        try:
-            match action:
-                case CreateRecordAction():
-                    await self._create_record(action, record, context)
-                case UpdateRecordAction():
-                    await self._update_record(action, record, context)
-                case InvalidateRecordsAction():
-                    await self._invalidate_records(action, record, context)
-                case CallFunctionAction():
-                    await self._call_function(action, record, context)
-                case PipelineAction():
-                    await self._dispatch_pipeline(action, record)
-                case _:
-                    logger.warning(f"Unknown action type: {action.type}")
-        except Exception as e:
-            logger.error(f"Error executing action {action.type}: {e}")
-
-    async def _create_record(
-        self,
-        action: CreateRecordAction,
-        record: RecordRead,
-        context: dict[str, RecordRead],  # noqa: ARG002 - kept for API consistency
-    ) -> None:
-        """Create a new record.
-
-        Inherits ``user_id`` from the triggering record if not explicitly set.
-        If ``action.parent_record_id`` is set, passes it to the API which
-        validates type compatibility.
-
-        Args:
-            action: The CreateRecordAction with record details.
-            record: The triggering record.
-            context: Dictionary of related records.
-        """
-        from clarinet.models import RecordCreate
-
-        series_uid = action.series_uid or (record.series.series_uid if record.series else None)
-
-        # Inherit user_id from triggering record if not explicitly set
-        user_id = action.user_id
-        if user_id is None and record.user_id is not None:
-            user_id = str(record.user_id)
-
-        try:
-            record_create = RecordCreate(
-                record_type_name=action.record_type_name,
-                patient_id=record.patient.id,
-                study_uid=record.study.study_uid if record.study else None,
-                series_uid=series_uid,
-                user_id=user_id,
-                parent_record_id=action.parent_record_id,
-                context_info=action.context_info
-                or f"Created by flow from record {record.record_type.name} (id={record.id})",
-            )
-            result = await self.clarinet_client.create_record(record_create)
-            study_uid = record.study.study_uid if record.study else "N/A"
-            logger.info(
-                f"Created record '{action.record_type_name}' (id={result.id}) for study {study_uid}"
-            )
-        except Exception as e:
-            logger.error(f"Failed to create record '{action.record_type_name}': {e}")
-
-    async def _update_record(
-        self,
-        action: UpdateRecordAction,
-        record: RecordRead,  # noqa: ARG002 - kept for API consistency
-        context: dict[str, RecordRead],
-    ) -> None:
-        """Update an existing record.
-
-        Args:
-            action: The UpdateRecordAction with target record name and status.
-            record: The triggering record.
-            context: Dictionary of related records.
-        """
-        from clarinet.models import RecordStatus
-
-        if action.record_name not in context:
-            logger.warning(f"Record '{action.record_name}' not found in context for update")
-            return
-
-        target_record = context[action.record_name]
-
-        # Update record status if specified
-        if action.status is not None:
+        await self._ensure_authenticated()
+        for target_type_name in action.record_type_names:
             try:
-                status: str | RecordStatus = action.status
-                if isinstance(status, str):
-                    status = RecordStatus(status)
-
-                await self.clarinet_client.update_record_status(target_record.id, status)
-                logger.info(
-                    f"Updated record '{action.record_name}' "
-                    f"(id={target_record.id}) status to {status}"
+                target_records = await self.clarinet_client.find_records(
+                    patient_id=ctx.patient_id,
+                    record_type_name=target_type_name,
+                    limit=1000,
                 )
             except Exception as e:
-                logger.error(f"Failed to update record status: {e}")
+                logger.error(
+                    f"Failed to find records of type '{target_type_name}' "
+                    f"for patient {ctx.patient_id}: {e}"
+                )
+                continue
 
-    async def _invalidate_single_record(
+            for target in target_records:
+                if ctx.record is not None:
+                    await self._invalidate_from_record(target, ctx.record, action)
+                elif ctx.file_name is not None:
+                    await self._invalidate_from_file(target, ctx, action)
+
+    async def _invalidate_from_record(
         self,
         target: RecordRead,
         source_record: RecordRead,
         action: InvalidateRecordsAction,
     ) -> None:
-        """Invalidate a single target record and run optional callback."""
+        """Invalidate a single target record triggered by another record.
+
+        Skips self-invalidation. Passes source_record_id to the API.
+
+        Args:
+            target: The record to invalidate.
+            source_record: The record that triggered the invalidation.
+            action: The InvalidateRecordsAction with mode and callback.
+        """
+        if target.id == source_record.id:
+            return
+
         try:
             await self.clarinet_client.invalidate_record(
                 record_id=target.id,
@@ -626,241 +712,55 @@ class RecordFlowEngine:
         if action.callback is None:
             return
         try:
-            import asyncio
-
-            result = action.callback(
+            await self._maybe_await(
+                action.callback,
                 record=target,
                 source_record=source_record,
                 client=self.clarinet_client,
             )
-            if asyncio.iscoroutine(result):
-                await result
         except Exception as e:
             logger.error(f"Error in invalidation callback for record {target.id}: {e}")
 
-    async def _invalidate_records(
+    async def _invalidate_from_file(
         self,
+        target: RecordRead,
+        ctx: FlowContext,
         action: InvalidateRecordsAction,
-        record: RecordRead,
-        context: dict[str, RecordRead],  # noqa: ARG002 - kept for API consistency
     ) -> None:
-        """Invalidate records of specified types related to the source record.
+        """Invalidate a single target record triggered by a file change.
 
-        Searches by patient_id (broadest scope) to find ALL records of
-        target types, covering all hierarchy levels. A series-level change
-        can invalidate patient-level records and vice versa.
+        No self-skip (no source record). Passes a reason string.
 
         Args:
-            action: The InvalidateRecordsAction with target types, mode, and callback.
-            record: The triggering record.
-            context: Dictionary of related records (not used; we query directly).
+            target: The record to invalidate.
+            ctx: The file flow context (must have file_name).
+            action: The InvalidateRecordsAction with mode and callback.
         """
-        for target_type_name in action.record_type_names:
-            try:
-                target_records = await self.clarinet_client.find_records(
-                    patient_id=record.patient.id,
-                    record_type_name=target_type_name,
-                    limit=1000,
-                )
-            except Exception as e:
-                logger.error(
-                    f"Failed to find records of type '{target_type_name}' "
-                    f"for patient {record.patient.id}: {e}"
-                )
-                continue
-
-            for target in target_records:
-                if target.id == record.id:
-                    continue
-                await self._invalidate_single_record(target, record, action)
-
-    async def _call_function(
-        self, action: CallFunctionAction, record: RecordRead, context: dict[str, RecordRead]
-    ) -> None:
-        """Call a custom function.
-
-        Args:
-            action: The CallFunctionAction with function, args, and kwargs.
-            record: The triggering record.
-            context: Dictionary of related records.
-        """
-        kwargs = {
-            "record": record,
-            "context": context,
-            "client": self.clarinet_client,
-        } | action.extra_kwargs
-
         try:
-            # Handle both sync and async functions
-            import asyncio
-
-            result = action.function(*action.args, **kwargs)
-            if asyncio.iscoroutine(result):
-                await result
+            await self.clarinet_client.invalidate_record(
+                record_id=target.id,
+                mode=action.mode,
+                source_record_id=None,
+                reason=f"Invalidated by file change: {ctx.file_name}",
+            )
+            logger.info(
+                f"Invalidated record '{target.record_type.name}' (id={target.id}) "
+                f"mode='{action.mode}', triggered by file '{ctx.file_name}'"
+            )
         except Exception as e:
-            logger.error(f"Error calling function {action.function.__name__}: {e}")
-
-    async def _dispatch_pipeline(self, action: PipelineAction, record: RecordRead) -> None:
-        """Dispatch a task to a registered pipeline.
-
-        Builds a PipelineMessage from the record context and sends it
-        to the named pipeline for distributed execution.
-
-        Args:
-            action: The PipelineAction with pipeline name and extra payload.
-            record: The triggering record.
-        """
-        from clarinet.services.pipeline import PipelineMessage
-
-        message = PipelineMessage(
-            patient_id=record.patient.id if record.patient else "",
-            study_uid=record.study.study_uid if record.study else "",
-            series_uid=record.series.series_uid if record.series else None,
-            record_id=record.id,
-            record_type_name=record.record_type.name if record.record_type else None,
-            payload=action.extra_payload,
-        )
-        await self._run_pipeline(action, message, f"record {record.id} ({record.record_type.name})")
-
-    # ── File flow handling ──────────────────────────────────────────────────
-
-    async def handle_file_update(self, file_name: str, patient_id: str) -> None:
-        """Handle a project-level file change and execute relevant flows.
-
-        Called when a pipeline task detects that a file's checksum changed.
-        Iterates file flows registered for the given file name and executes
-        their actions scoped to the patient.
-
-        Args:
-            file_name: The logical file name (from file definition).
-            patient_id: The patient whose storage contains the changed file.
-        """
-        if file_name not in self.file_flows:
-            logger.debug(f"No file flows registered for '{file_name}'")
+            logger.error(
+                f"Failed to invalidate record '{target.record_type.name}' (id={target.id}): {e}"
+            )
             return
 
-        logger.debug(f"Processing file update flows for '{file_name}' (patient={patient_id})")
-
-        for flow in self.file_flows[file_name]:
-            if not flow.update_trigger:
-                continue
-            logger.info(f"Executing file flow for '{file_name}' (patient={patient_id})")
-            for action in flow.actions:
-                await self._execute_file_action(action, file_name, patient_id)
-
-    async def _execute_file_action(
-        self,
-        action: InvalidateRecordsAction | CallFunctionAction,
-        file_name: str,
-        patient_id: str,
-    ) -> None:
-        """Execute a single action for a file update flow.
-
-        Args:
-            action: The action model instance.
-            file_name: The logical file name that changed.
-            patient_id: The patient ID.
-        """
+        if action.callback is None:
+            return
         try:
-            match action:
-                case InvalidateRecordsAction():
-                    await self._invalidate_by_file(action, file_name, patient_id)
-                case CallFunctionAction():
-                    await self._call_file_function(action, file_name, patient_id)
-                case _:
-                    logger.warning(f"Unsupported file flow action type: {action.type}")
+            await self._maybe_await(
+                action.callback,
+                record=target,
+                file_name=ctx.file_name,
+                client=self.clarinet_client,
+            )
         except Exception as e:
-            logger.error(f"Error executing file flow action {action.type}: {e}")
-
-    async def _invalidate_by_file(
-        self,
-        action: InvalidateRecordsAction,
-        file_name: str,
-        patient_id: str,
-    ) -> None:
-        """Invalidate records triggered by a file change.
-
-        Similar to ``_invalidate_records`` but without a source record:
-        invalidates ALL matching records for the patient.
-
-        Args:
-            action: The InvalidateRecordsAction with target types and mode.
-            file_name: The logical file name that changed.
-            patient_id: The patient ID.
-        """
-        for target_type_name in action.record_type_names:
-            try:
-                target_records = await self.clarinet_client.find_records(
-                    patient_id=patient_id,
-                    record_type_name=target_type_name,
-                    limit=1000,
-                )
-            except Exception as e:
-                logger.error(
-                    f"Failed to find records of type '{target_type_name}' "
-                    f"for patient {patient_id}: {e}"
-                )
-                continue
-
-            for target in target_records:
-                try:
-                    await self.clarinet_client.invalidate_record(
-                        record_id=target.id,
-                        mode=action.mode,
-                        source_record_id=None,
-                        reason=f"Invalidated by file change: {file_name}",
-                    )
-                    logger.info(
-                        f"Invalidated record '{target.record_type.name}' (id={target.id}) "
-                        f"mode='{action.mode}', triggered by file '{file_name}'"
-                    )
-                except Exception as e:
-                    logger.error(
-                        f"Failed to invalidate record '{target.record_type.name}' "
-                        f"(id={target.id}): {e}"
-                    )
-                    continue
-
-                if action.callback is not None:
-                    try:
-                        import asyncio
-
-                        result = action.callback(
-                            record=target,
-                            file_name=file_name,
-                            client=self.clarinet_client,
-                        )
-                        if asyncio.iscoroutine(result):
-                            await result
-                    except Exception as e:
-                        logger.error(
-                            f"Error in file invalidation callback for record {target.id}: {e}"
-                        )
-
-    async def _call_file_function(
-        self,
-        action: CallFunctionAction,
-        file_name: str,
-        patient_id: str,
-    ) -> None:
-        """Call a custom function from a file update flow.
-
-        Args:
-            action: The CallFunctionAction with function, args, and kwargs.
-            file_name: The logical file name that changed.
-            patient_id: The patient ID.
-        """
-        kwargs = {
-            "file_name": file_name,
-            "patient_id": patient_id,
-            "client": self.clarinet_client,
-        } | action.extra_kwargs
-
-        try:
-            import asyncio
-
-            result = action.function(*action.args, **kwargs)
-            if asyncio.iscoroutine(result):
-                await result
-        except Exception as e:
-            logger.error(f"Error calling file function {action.function.__name__}: {e}")
+            logger.error(f"Error in file invalidation callback for record {target.id}: {e}")
