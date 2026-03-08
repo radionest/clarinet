@@ -204,12 +204,19 @@ await engine.handle_file_update("master_model", patient_id)  # For file change t
 
 ## API Integration
 
-- `PATCH /records/{id}/status` triggers `handle_record_status_change` via BackgroundTasks
-- `PATCH /records/{id}/data` triggers `handle_record_data_update` via BackgroundTasks
+Triggers are dispatched via the **service layer** (awaited directly during the request):
+
+- `RecordService` (in `clarinet/services/record_service.py`) fires record-level triggers:
+  - `update_status()` → `handle_record_status_change` (if status changed)
+  - `assign_user()` → `handle_record_status_change` (if status changed)
+  - `submit_data()` → `handle_record_status_change` (always)
+  - `update_data()` → `handle_record_data_update` (always)
+  - `notify_file_change()` → `handle_record_file_change`
+  - `bulk_update_status()` → `handle_record_status_change` (per changed record)
+  - `notify_file_updates()` → `handle_file_update` (per file)
+- `StudyService` fires entity triggers via `engine.fire()` (fire-and-forget) in `create_patient()`, `create_study()`, `create_series()`
 - `POST /records/{id}/invalidate` — direct invalidation endpoint (mode, source_record_id, reason)
-- `POST /patients`, `POST /studies`, `POST /series` trigger `handle_entity_created` via BackgroundTasks
-- `POST /dicom/import-study` triggers `handle_entity_created` for each imported series
-- `POST /patients/{id}/file-events` triggers `handle_file_update` via BackgroundTasks (called by pipeline task wrapper)
+- `POST /patients/{id}/file-events` → `RecordService.notify_file_updates()` (called by pipeline task wrapper)
 
 ## Configuration
 

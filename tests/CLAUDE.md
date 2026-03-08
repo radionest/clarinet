@@ -4,7 +4,7 @@
 
 - **pytest** + **pytest-asyncio** for async tests
 - Configuration in `tests/conftest.py`
-- Run: `make test`, `make test-fast`, `make test-cov`, `make test-integration`
+- Run: `make test-fast` (default), `make test-unit`, `make test`, `make test-cov`, `make test-integration`
 
 ## Structure
 
@@ -161,8 +161,27 @@ pat = await PatientFactory.create_patient(session, patient_id="PAT_001")
 Tests support parallel execution via pytest-xdist. Each worker runs in a
 separate process with its own in-memory SQLite database.
 
-- `make test-fast` — parallel run (auto workers, excludes external services)
-- `make test` — sequential run (all tests)
+### Test Commands
+
+| Command | What runs | Parallel | Use when |
+|---|---|---|---|
+| `make test-fast` | All tests (default) | `-n auto` | Default — includes all service groups |
+| `make test-unit` | DB-only tests | `-n auto` | No RabbitMQ/DICOM/Slicer available |
+| `make test` | All tests | sequential | Debugging test order issues |
+| `make test-integration` | `tests/integration/` | sequential | Integration subset only |
+
+### Service Groups & Isolation
+
+Tests are safe to run in parallel across all groups:
+
+| Group | Marker | External service | Why parallel-safe |
+|---|---|---|---|
+| DB-only | _(none)_ | SQLite in-memory | Each xdist worker gets its own DB (StaticPool) |
+| Pipeline | `pipeline` | RabbitMQ | Unique exchange/queue names per session (`uuid4`) |
+| DICOM | `dicom` | PACS server | Read-only queries |
+| Slicer | `slicer` | 3D Slicer | Auto-skipped if unreachable |
+
+Unreachable services auto-skip via `_check_rabbitmq` / `_check_slicer` fixtures.
 
 ### Session-Scoped Engine
 

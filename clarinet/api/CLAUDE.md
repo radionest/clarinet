@@ -20,7 +20,7 @@ PatientRepositoryDep, SeriesRepositoryDep, RecordRepositoryDep,
 RecordTypeRepositoryDep, FileDefinitionRepositoryDep, PipelineDefinitionRepositoryDep
 
 # Services
-UserServiceDep, StudyServiceDep, AdminServiceDep, SlicerServiceDep
+UserServiceDep, StudyServiceDep, RecordServiceDep, AdminServiceDep, SlicerServiceDep
 
 # DICOM
 DicomClientDep, PacsNodeDep
@@ -88,14 +88,13 @@ Uses `PipelineDefinitionRepositoryDep`.
 
 Config mode guards on `/types` endpoints — see `clarinet/config/CLAUDE.md`.
 
-## RecordFlow Integration (record.py)
+## RecordFlow Integration
 
-Endpoints that trigger RecordFlow engine via `BackgroundTasks`:
-- `PATCH /records/{id}/status` → `engine.handle_record_status_change()`
-- `PATCH /records/{id}/data` → `engine.handle_record_data_update()`
-- `POST /records/{id}/assign` → `engine.handle_record_status_change()`
+RecordFlow triggers are dispatched via the **service layer**, not directly from routers:
 
-Engine is accessed via `request.app.state.recordflow_engine` (may be `None` if disabled).
+- `RecordService` wraps record mutations (`update_status`, `assign_user`, `submit_data`, `update_data`, `notify_file_change`, `bulk_update_status`, `notify_file_updates`) and fires the appropriate engine trigger (awaited directly).
+- `StudyService` fires entity-creation triggers via `engine.fire()` (fire-and-forget) in `create_patient()`, `create_study()`, `create_series()`.
+- Engine is injected via `get_recordflow_engine(request)` in `dependencies.py` (returns `None` when disabled).
 
 Direct invalidation endpoint:
 - `POST /records/{id}/invalidate` — body: `{mode, source_record_id, reason}`
