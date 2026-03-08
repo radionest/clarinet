@@ -673,8 +673,8 @@ class TestCOCO:
             "images": [
                 {
                     "id": 1,
-                    "width": 10,
-                    "height": 12,
+                    "width": 12,
+                    "height": 10,
                     "numberOfFrames": 8,
                     "seriesInstanceUID": "1.2.3.4",
                     "sopInstanceUID": "1.2.3.4.1",

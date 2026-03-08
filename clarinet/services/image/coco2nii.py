@@ -141,9 +141,10 @@ def _create_mask(annotation: COCOAnnotation, image_meta: COCOImage) -> np.ndarra
         image_meta: The COCO image entry with width/height.
 
     Returns:
-        2D binary numpy array of shape (width, height).
+        2D binary numpy array of shape (height, width).
     """
-    polygons = annotation.segmentation[0]
-    image_size = (image_meta.width, image_meta.height)
-    mask: np.ndarray = draw.polygon2mask(image_size, polygons)
+    raw_polygon = np.array(annotation.segmentation[0])  # (N, 2), cols=[x, y]
+    polygon_rc = raw_polygon[:, ::-1]  # swap to [row, col]
+    image_shape = (image_meta.height, image_meta.width)  # (rows, cols)
+    mask: np.ndarray = draw.polygon2mask(image_shape, polygon_rc)
     return mask
