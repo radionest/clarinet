@@ -3,6 +3,7 @@
 Uses clarinet_client fixture (real HTTP client → FastAPI app → in-memory SQLite).
 """
 
+import asyncio
 from collections.abc import AsyncGenerator
 
 import pytest
@@ -1069,13 +1070,63 @@ class TestEntityFlowRuntime:
         )
         assert resp.status_code == 201
 
-        # Verify: series_markup was created by the entity flow
+        # Verify: series_markup was created by the entity flow (fire-and-forget)
+        records = []
+        for _ in range(40):
+            records = await clarinet_client.find_records(
+                study_uid=test_study.study_uid,
+                record_type_name="series_markup",
+            )
+            if records:
+                break
+            await asyncio.sleep(0.05)
+        assert len(records) == 1
+        assert records[0].series_uid == "9.8.7.6.5.4.3.2.1"
+
+
+class TestLazyAuthentication:
+    """Tests for lazy authentication in RecordFlowEngine."""
+
+    @pytest.mark.asyncio
+    async def test_engine_authenticates_lazily_on_entity_created(
+        self,
+        clarinet_client: ClarinetClient,
+        record_types: dict[str, RecordType],
+        test_patient: Patient,
+        test_study: Study,
+    ):
+        """Engine calls _ensure_authenticated() and creates record without prior login."""
+        # Client is NOT authenticated (auto_login=False, no login() called)
+        assert clarinet_client._authenticated is False
+
+        # Give the client credentials so login() can succeed
+        clarinet_client.username = "flow_test@test.com"
+        clarinet_client.password = "mock"
+
+        engine = RecordFlowEngine(clarinet_client)
+
+        fr = FlowRecord("series", entity_trigger="series")
+        fr.add_record("series_markup")
+        engine.register_flow(fr)
+
+        # This should trigger _ensure_authenticated → login → create record
+        await engine.handle_entity_created(
+            "series",
+            patient_id=test_patient.id,
+            study_uid=test_study.study_uid,
+            series_uid="1.2.3.lazy.auth.test",
+        )
+
+        # Client should now be authenticated
+        assert clarinet_client._authenticated is True
+
+        # Record should have been created
         records = await clarinet_client.find_records(
             study_uid=test_study.study_uid,
             record_type_name="series_markup",
         )
         assert len(records) == 1
-        assert records[0].series_uid == "9.8.7.6.5.4.3.2.1"
+        assert records[0].series_uid == "1.2.3.lazy.auth.test"
 
 
 class TestFileFlowIntegration:
