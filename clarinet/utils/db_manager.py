@@ -68,7 +68,7 @@ class DatabaseManager:
             engine = create_async_engine(
                 async_url,
                 connect_args={"check_same_thread": False},
-                poolclass=StaticPool if settings.debug else None,
+                poolclass=StaticPool if (settings.debug and ":memory:" in async_url) else None,
                 echo=settings.debug,
                 json_serializer=_pydantic_json_serializer,
             )
