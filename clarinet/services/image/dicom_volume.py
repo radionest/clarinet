@@ -12,14 +12,17 @@ from clarinet.exceptions.domain import ImageReadError
 from clarinet.utils.logger import logger
 
 
-def read_dicom_series(directory: Path) -> tuple[np.ndarray, tuple[float, float, float]]:
+def read_dicom_series(
+    directory: Path,
+) -> tuple[np.ndarray, tuple[float, float, float], tuple[float, float, float], np.ndarray]:
     """Read all DICOM files in a directory and stack them into a 3D volume.
 
     Args:
         directory: Path to a directory containing .dcm files.
 
     Returns:
-        Tuple of (3D numpy array, spacing as (row, col, slice) in mm).
+        Tuple of (3D numpy array, spacing (row, col, slice) in mm,
+        origin (x, y, z), direction 3x3 matrix).
 
     Raises:
         ImageReadError: If the directory is empty, contains no valid DICOM files,
@@ -53,6 +56,7 @@ def read_dicom_series(directory: Path) -> tuple[np.ndarray, tuple[float, float, 
 
     sorted_datasets: Sequence[pydicom.Dataset] = _sort_slices(datasets)
     spacing = _extract_spacing(sorted_datasets)
+    origin, direction = _extract_orientation(sorted_datasets)
 
     try:
         volume = np.stack([ds.pixel_array for ds in sorted_datasets], axis=-1)
@@ -63,7 +67,7 @@ def read_dicom_series(directory: Path) -> tuple[np.ndarray, tuple[float, float, 
         f"Read {len(sorted_datasets)} DICOM slices from {directory.name}: "
         f"shape={volume.shape}, spacing={spacing}"
     )
-    return volume, spacing
+    return volume, spacing, origin, direction
 
 
 def _sort_slices(datasets: Sequence[pydicom.Dataset]) -> list[pydicom.Dataset]:
@@ -121,3 +125,50 @@ def _extract_spacing(datasets: Sequence[pydicom.Dataset]) -> tuple[float, float,
             slice_sp = 1.0
 
     return (row_sp, col_sp, slice_sp)
+
+
+def _extract_orientation(
+    datasets: Sequence[pydicom.Dataset],
+) -> tuple[tuple[float, float, float], np.ndarray]:
+    """Extract patient origin and direction cosines from DICOM datasets.
+
+    Args:
+        datasets: Sorted DICOM datasets (at least one).
+
+    Returns:
+        Tuple of (origin (x, y, z), 3x3 direction matrix with columns = axis directions).
+    """
+    ds0 = datasets[0]
+
+    # Origin from first slice
+    try:
+        ipp = ds0.ImagePositionPatient
+        origin = (float(ipp[0]), float(ipp[1]), float(ipp[2]))
+    except (AttributeError, TypeError, IndexError):
+        origin = (0.0, 0.0, 0.0)
+
+    # Direction from ImageOrientationPatient
+    direction = np.eye(3)
+    try:
+        iop = [float(v) for v in ds0.ImageOrientationPatient]
+        row_dir = np.array(iop[:3])
+        col_dir = np.array(iop[3:6])
+
+        # Slice direction: prefer computed from multi-slice positions
+        if len(datasets) > 1:
+            try:
+                pos0 = np.array([float(v) for v in datasets[0].ImagePositionPatient])
+                pos1 = np.array([float(v) for v in datasets[1].ImagePositionPatient])
+                slice_dir = pos1 - pos0
+                norm = np.linalg.norm(slice_dir)
+                slice_dir = slice_dir / norm if norm > 0 else np.cross(row_dir, col_dir)
+            except (AttributeError, TypeError, IndexError):
+                slice_dir = np.cross(row_dir, col_dir)
+        else:
+            slice_dir = np.cross(row_dir, col_dir)
+
+        direction = np.column_stack([row_dir, col_dir, slice_dir])
+    except (AttributeError, TypeError, IndexError):
+        pass
+
+    return origin, direction

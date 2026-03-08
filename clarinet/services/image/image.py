@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Self
 
 import nibabel
+import nibabel.affines
 import nibabel.loadsave
 import nrrd
 import numpy as np
@@ -44,6 +45,8 @@ class Image:
     ) -> None:
         self._img: np.ndarray | None = None
         self._spacing: tuple[float, float, float] = (1.0, 1.0, 1.0)
+        self._origin: tuple[float, float, float] = (0.0, 0.0, 0.0)
+        self._direction: np.ndarray = np.eye(3)
         self._source_path: Path | None = None
         self._filetype: FileType | None = None
         self._nifti_image: Any = None
@@ -53,6 +56,8 @@ class Image:
         if template is not None:
             self._source_path = template._source_path
             self.spacing = template.spacing
+            self._origin = template._origin
+            self._direction = template._direction.copy()
             self._nifti_image = getattr(template, "_nifti_image", None)
             self._nrrd_header = getattr(template, "_nrrd_header", None)
             self._filetype = template._filetype
@@ -82,6 +87,29 @@ class Image:
         if len(values) != 3:
             raise ValueError(f"Spacing must be a 3-tuple, got length {len(values)}")
         self._spacing = (float(values[0]), float(values[1]), float(values[2]))
+
+    @property
+    def origin(self) -> tuple[float, float, float]:
+        """Patient-space origin (x, y, z) in mm."""
+        return self._origin
+
+    @origin.setter
+    def origin(self, values: tuple[float, float, float]) -> None:
+        if len(values) != 3:
+            raise ValueError(f"Origin must be a 3-tuple, got length {len(values)}")
+        self._origin = (float(values[0]), float(values[1]), float(values[2]))
+
+    @property
+    def direction(self) -> np.ndarray:
+        """3x3 direction cosine matrix (columns = unit direction vectors per axis)."""
+        return self._direction
+
+    @direction.setter
+    def direction(self, value: np.ndarray) -> None:
+        arr = np.asarray(value, dtype=float)
+        if arr.shape != (3, 3):
+            raise ValueError(f"Direction must be a 3x3 matrix, got shape {arr.shape}")
+        self._direction = arr
 
     @property
     def shape(self) -> tuple[int, ...]:
@@ -128,7 +156,12 @@ class Image:
             raise ImageReadError(f"Failed to read NIfTI file: {file_path}") from e
 
         self._source_path = file_path
-        self.spacing = self._nifti_image.header.get_zooms()[:3]
+        affine = self._nifti_image.affine
+        zooms = nibabel.affines.voxel_sizes(affine)
+        self.spacing = tuple(zooms[:3])
+        # Normalize columns to get unit direction vectors
+        self._direction = affine[:3, :3] / zooms[:3]
+        self._origin = (float(affine[0, 3]), float(affine[1, 3]), float(affine[2, 3]))
         self.img = self._nifti_image.get_fdata()
         self._filetype = FileType.NIFTI
         logger.debug(f"Read NIfTI {file_path.name}: shape={self.shape}, dtype={self.img.dtype}")
@@ -151,13 +184,22 @@ class Image:
         self._nrrd_header = header
         self._source_path = file_path
 
-        spacings = header.get("spacings")
-        if spacings is not None:
-            self.spacing = tuple(spacings[:3])
+        # Prefer space directions (carries both spacing and orientation)
+        space_dirs = header.get("space directions")
+        if space_dirs is not None:
+            arr = np.asarray(space_dirs[:3], dtype=float)
+            norms = np.linalg.norm(arr, axis=1)
+            self.spacing = (float(norms[0]), float(norms[1]), float(norms[2]))
+            self._direction = (arr / norms[:, np.newaxis]).T
         else:
-            space_dirs = header.get("space directions")
-            if space_dirs is not None:
-                self.spacing = tuple(np.abs(space_dirs[[0, 1, 2], [0, 1, 2]]))
+            spacings = header.get("spacings")
+            if spacings is not None:
+                self.spacing = tuple(spacings[:3])
+
+        space_origin = header.get("space origin")
+        if space_origin is not None:
+            vals = space_origin[:3]
+            self._origin = (float(vals[0]), float(vals[1]), float(vals[2]))
 
         self.img = data
         self._filetype = FileType.NRRD
@@ -175,9 +217,11 @@ class Image:
         from clarinet.services.image.dicom_volume import read_dicom_series
 
         directory = Path(directory)
-        data, spacing = read_dicom_series(directory)
+        data, spacing, origin, direction = read_dicom_series(directory)
         self._source_path = directory
         self.spacing = spacing
+        self._origin = origin
+        self._direction = direction
         self.img = data
         self._filetype = FileType.DICOM
         logger.debug(f"Read DICOM series from {directory}: shape={self.shape}")
@@ -254,7 +298,9 @@ class Image:
     def _save_nifti(self, path: Path) -> None:
         """Write voxel data to a NIfTI file."""
         try:
-            affine = self._nifti_image.affine if self._nifti_image is not None else np.eye(4)
+            affine = np.eye(4)
+            affine[:3, :3] = self._direction * np.array(self.spacing)
+            affine[:3, 3] = self._origin
             new_image = nibabel.Nifti1Image(self.img, affine, dtype=self.img.dtype)
             nibabel.save(new_image, str(path))
         except Exception as e:
@@ -263,9 +309,16 @@ class Image:
     def _save_nrrd(self, path: Path) -> None:
         """Write voxel data to an NRRD file."""
         try:
-            header = {}
+            header: dict[str, Any] = {}
             if self._nrrd_header is not None:
                 header = {k: v for k, v in self._nrrd_header.items() if not k.startswith("Segment")}
+            # Always write canonical spatial metadata
+            space_dirs = (self._direction * np.array(self.spacing)).T
+            header["space directions"] = space_dirs
+            header["space origin"] = np.array(self._origin)
+            header.pop("spacings", None)  # space directions supersedes spacings
+            if "space" not in header:
+                header["space"] = "left-posterior-superior"
             nrrd.write(str(path), self.img, header)
         except Exception as e:
             raise ImageWriteError(f"Failed to write NRRD file: {path}") from e

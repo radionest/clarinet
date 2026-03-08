@@ -76,6 +76,7 @@ def dicom_series_dir(tmp_path: Path, synthetic_volume: np.ndarray) -> Path:
         ds.PixelSpacing = [VOLUME_SPACING[0], VOLUME_SPACING[1]]
         ds.SliceThickness = VOLUME_SPACING[2]
         ds.ImagePositionPatient = [0.0, 0.0, float(i * VOLUME_SPACING[2])]
+        ds.ImageOrientationPatient = [1, 0, 0, 0, 1, 0]
         ds.InstanceNumber = i + 1
         ds.PixelData = synthetic_volume[:, :, i].tobytes()
         pydicom.dcmwrite(str(filename), ds)
@@ -94,12 +95,7 @@ class TestFormatConversionPipeline:
     def test_nifti_to_nrrd_to_nifti_roundtrip(
         self, nifti_volume_path: Path, tmp_path: Path
     ) -> None:
-        """NIfTI → NRRD → NIfTI roundtrip preserves voxel data.
-
-        Known limitation: when saving NIfTI→NRRD, _nrrd_header is None so
-        spacing is not embedded in the NRRD file. The NRRD read falls back
-        to default spacing (1,1,1). Voxel data is fully preserved.
-        """
+        """NIfTI → NRRD → NIfTI roundtrip preserves voxel data and spacing."""
         # Step 1: Read NIfTI
         img1 = Image(dtype=np.int16)
         img1.read(nifti_volume_path)
@@ -111,14 +107,11 @@ class TestFormatConversionPipeline:
         img1.save_as(nrrd_path, FileType.NRRD)
         assert nrrd_path.exists()
 
-        # Step 3: Read NRRD — voxels preserved, spacing lost (known limitation)
+        # Step 3: Read NRRD — spacing preserved via canonical spatial model
         img2 = Image(dtype=np.int16)
         img2.read(nrrd_path)
         np.testing.assert_array_equal(img2.img, original_data)
-        # Spacing falls back to (1,1,1) because NIfTI source has no _nrrd_header
-        assert pytest.approx(img2.spacing, abs=1e-4) == (1.0, 1.0, 1.0), (
-            "Expected default spacing: NIfTI→NRRD does not embed spacing in header"
-        )
+        assert pytest.approx(img2.spacing, abs=1e-4) == original_spacing
 
         # Step 4: Save back to NIfTI
         nifti_out = tmp_path / "roundtrip.nii.gz"
@@ -129,13 +122,10 @@ class TestFormatConversionPipeline:
         img3 = Image(dtype=np.int16)
         img3.read(nifti_out)
         np.testing.assert_array_equal(img3.img, original_data)
+        assert pytest.approx(img3.spacing, abs=1e-4) == original_spacing
 
     def test_nrrd_to_nifti_to_nrrd_roundtrip(self, tmp_path: Path) -> None:
-        """NRRD → NIfTI → NRRD roundtrip preserves voxel data and spacing.
-
-        Unlike NIfTI→NRRD, when the source is NRRD the _nrrd_header carries
-        spacing info through the chain.
-        """
+        """NRRD → NIfTI → NRRD roundtrip preserves voxel data and spacing."""
         rng = np.random.default_rng(seed=99)
         data = rng.integers(0, 300, size=VOLUME_SHAPE, dtype=np.int16)
         header = {"spacings": list(VOLUME_SPACING)}
@@ -151,29 +141,26 @@ class TestFormatConversionPipeline:
         nifti_path = tmp_path / "intermediate.nii.gz"
         img1.save_as(nifti_path, FileType.NIFTI)
 
-        # Step 3: Read NIfTI — spacing comes from the _nifti_image that was
-        # None (NRRD source), so affine is np.eye(4) → spacing (1,1,1)
+        # Step 3: Read NIfTI — spacing preserved via canonical spatial model
         img2 = Image(dtype=np.int16)
         img2.read(nifti_path)
         np.testing.assert_array_equal(img2.img, data)
+        assert pytest.approx(img2.spacing, abs=1e-4) == VOLUME_SPACING
 
         # Step 4: Save back as NRRD
         nrrd_out = tmp_path / "roundtrip.nrrd"
         img2.save_as(nrrd_out, FileType.NRRD)
 
-        # Step 5: Read final NRRD — voxels preserved
+        # Step 5: Read final NRRD — voxels and spacing preserved
         img3 = Image(dtype=np.int16)
         img3.read(nrrd_out)
         np.testing.assert_array_equal(img3.img, data)
+        assert pytest.approx(img3.spacing, abs=1e-4) == VOLUME_SPACING
 
     def test_dicom_to_nifti_preserves_data(
         self, dicom_series_dir: Path, synthetic_volume: np.ndarray, tmp_path: Path
     ) -> None:
-        """DICOM series → NIfTI preserves voxel data.
-
-        Known limitation: _save_nifti uses np.eye(4) when _nifti_image is None
-        (DICOM source), so spacing is NOT encoded in the NIfTI affine.
-        """
+        """DICOM series → NIfTI preserves voxel data and spacing."""
         # Step 1: Read DICOM
         img = Image(dtype=np.int16)
         img.read_dicom_series(dicom_series_dir)
@@ -191,10 +178,8 @@ class TestFormatConversionPipeline:
         # Voxel data preserved
         np.testing.assert_array_equal(img2.img, synthetic_volume)
 
-        # Document: spacing falls back to np.eye(4) → (1.0, 1.0, 1.0)
-        assert pytest.approx(img2.spacing, abs=1e-4) == (1.0, 1.0, 1.0), (
-            "Expected spacing=(1,1,1) because DICOM→NIfTI uses np.eye(4) affine"
-        )
+        # Spacing preserved via canonical spatial model
+        assert pytest.approx(img2.spacing, abs=1e-4) == VOLUME_SPACING
 
 
 # ---------------------------------------------------------------------------
@@ -531,3 +516,165 @@ class TestDegradedDICOMInput:
             f"Expected shape {VOLUME_SHAPE} (16 valid slices), got {img.shape}"
         )
         assert pytest.approx(img.spacing, abs=1e-4) == VOLUME_SPACING
+
+
+# ---------------------------------------------------------------------------
+# 8. Spatial Preservation Across Formats
+# ---------------------------------------------------------------------------
+
+
+class TestSpatialPreservation:
+    """Verify spacing, origin, and direction survive cross-format conversions."""
+
+    def test_nifti_to_nrrd_spacing(self, nifti_volume_path: Path, tmp_path: Path) -> None:
+        """NIfTI → NRRD preserves spacing."""
+        img = Image(dtype=np.int16)
+        img.read(nifti_volume_path)
+
+        nrrd_path = tmp_path / "out.nrrd"
+        img.save_as(nrrd_path, FileType.NRRD)
+
+        img2 = Image(dtype=np.int16)
+        img2.read(nrrd_path)
+        assert pytest.approx(img2.spacing, abs=1e-4) == VOLUME_SPACING
+
+    def test_nrrd_to_nifti_spacing(self, tmp_path: Path) -> None:
+        """NRRD → NIfTI preserves spacing."""
+        data = np.zeros(VOLUME_SHAPE, dtype=np.int16)
+        header = {"spacings": list(VOLUME_SPACING)}
+        src = tmp_path / "source.nrrd"
+        nrrd.write(str(src), data, header)
+
+        img = Image(dtype=np.int16)
+        img.read(src)
+
+        nifti_path = tmp_path / "out.nii.gz"
+        img.save_as(nifti_path, FileType.NIFTI)
+
+        img2 = Image(dtype=np.int16)
+        img2.read(nifti_path)
+        assert pytest.approx(img2.spacing, abs=1e-4) == VOLUME_SPACING
+
+    def test_dicom_to_nifti_spacing(
+        self, dicom_series_dir: Path, tmp_path: Path
+    ) -> None:
+        """DICOM → NIfTI preserves spacing and origin."""
+        img = Image(dtype=np.int16)
+        img.read_dicom_series(dicom_series_dir)
+
+        nifti_path = tmp_path / "out.nii.gz"
+        img.save_as(nifti_path, FileType.NIFTI)
+
+        img2 = Image(dtype=np.int16)
+        img2.read(nifti_path)
+        assert pytest.approx(img2.spacing, abs=1e-4) == VOLUME_SPACING
+        assert pytest.approx(img2.origin, abs=1e-4) == (0.0, 0.0, 0.0)
+
+    def test_dicom_to_nrrd_spacing(
+        self, dicom_series_dir: Path, tmp_path: Path
+    ) -> None:
+        """DICOM → NRRD preserves spacing."""
+        img = Image(dtype=np.int16)
+        img.read_dicom_series(dicom_series_dir)
+
+        nrrd_path = tmp_path / "out.nrrd"
+        img.save_as(nrrd_path, FileType.NRRD)
+
+        img2 = Image(dtype=np.int16)
+        img2.read(nrrd_path)
+        assert pytest.approx(img2.spacing, abs=1e-4) == VOLUME_SPACING
+
+    def test_oblique_nifti_roundtrip(self, tmp_path: Path) -> None:
+        """Rotated affine survives NIfTI → save → read roundtrip."""
+        angle = np.radians(15)
+        rotation = np.array([
+            [np.cos(angle), -np.sin(angle), 0],
+            [np.sin(angle), np.cos(angle), 0],
+            [0, 0, 1],
+        ])
+        spacing = VOLUME_SPACING
+        origin = (5.0, -10.0, 25.0)
+
+        affine = np.eye(4)
+        affine[:3, :3] = rotation * np.array(spacing)
+        affine[:3, 3] = origin
+
+        data = np.zeros(VOLUME_SHAPE, dtype=np.int16)
+        nib_img = nibabel.Nifti1Image(data, affine, dtype=np.int16)
+        src = tmp_path / "oblique.nii.gz"
+        nibabel.save(nib_img, str(src))
+
+        img = Image(dtype=np.int16)
+        img.read(src)
+        assert pytest.approx(img.spacing, abs=1e-4) == spacing
+        assert pytest.approx(img.origin, abs=1e-4) == origin
+        np.testing.assert_array_almost_equal(img.direction, rotation, decimal=4)
+
+        # Save and read back
+        out = tmp_path / "oblique_out.nii.gz"
+        img.save_as(out, FileType.NIFTI)
+
+        img2 = Image(dtype=np.int16)
+        img2.read(out)
+        assert pytest.approx(img2.spacing, abs=1e-4) == spacing
+        assert pytest.approx(img2.origin, abs=1e-4) == origin
+        np.testing.assert_array_almost_equal(img2.direction, rotation, decimal=4)
+
+    def test_oblique_nifti_to_nrrd_roundtrip(self, tmp_path: Path) -> None:
+        """Rotated affine survives NIfTI → NRRD → NIfTI."""
+        angle = np.radians(20)
+        rotation = np.array([
+            [np.cos(angle), -np.sin(angle), 0],
+            [np.sin(angle), np.cos(angle), 0],
+            [0, 0, 1],
+        ])
+        spacing = VOLUME_SPACING
+        origin = (1.0, 2.0, 3.0)
+
+        affine = np.eye(4)
+        affine[:3, :3] = rotation * np.array(spacing)
+        affine[:3, 3] = origin
+
+        data = np.zeros(VOLUME_SHAPE, dtype=np.int16)
+        nib_img = nibabel.Nifti1Image(data, affine, dtype=np.int16)
+        src = tmp_path / "oblique_src.nii.gz"
+        nibabel.save(nib_img, str(src))
+
+        # NIfTI → NRRD
+        img = Image(dtype=np.int16)
+        img.read(src)
+        nrrd_path = tmp_path / "oblique.nrrd"
+        img.save_as(nrrd_path, FileType.NRRD)
+
+        # NRRD → NIfTI
+        img2 = Image(dtype=np.int16)
+        img2.read(nrrd_path)
+        nifti_out = tmp_path / "oblique_roundtrip.nii.gz"
+        img2.save_as(nifti_out, FileType.NIFTI)
+
+        img3 = Image(dtype=np.int16)
+        img3.read(nifti_out)
+        assert pytest.approx(img3.spacing, abs=1e-4) == spacing
+        assert pytest.approx(img3.origin, abs=1e-4) == origin
+        np.testing.assert_array_almost_equal(img3.direction, rotation, decimal=4)
+
+    def test_template_preserves_spatial(
+        self, dicom_series_dir: Path, tmp_path: Path
+    ) -> None:
+        """Origin and direction propagate through template creation."""
+        source = Image()
+        source.read_dicom_series(dicom_series_dir)
+
+        copy = Image(template=source, copy_data=True)
+        assert copy.origin == source.origin
+        np.testing.assert_array_equal(copy.direction, source.direction)
+        assert copy.spacing == source.spacing
+
+        # Save template copy as NIfTI and verify spatial metadata
+        out = tmp_path / "template_copy.nii.gz"
+        copy.save_as(out, FileType.NIFTI)
+
+        readback = Image()
+        readback.read(out)
+        assert pytest.approx(readback.spacing, abs=1e-4) == source.spacing
+        assert pytest.approx(readback.origin, abs=1e-4) == source.origin

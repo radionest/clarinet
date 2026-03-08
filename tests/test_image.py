@@ -74,6 +74,7 @@ def dicom_dir(tmp_path: Path) -> Path:
         ds.PixelSpacing = [0.5, 0.6]
         ds.SliceThickness = 2.0
         ds.ImagePositionPatient = [0.0, 0.0, float(i * 2)]
+        ds.ImageOrientationPatient = [1, 0, 0, 0, 1, 0]
         ds.InstanceNumber = i + 1
         ds.PixelData = np.ones((4, 5), dtype=np.uint16).tobytes()
         pydicom.dcmwrite(str(filename), ds)
@@ -169,6 +170,82 @@ class TestImage:
         out_nrrd = tmp_path / "converted.nrrd"
         result = img.save_as(out_nrrd, FileType.NRRD)
         assert result.exists()
+
+    def test_origin_property(self, nifti_path: Path) -> None:
+        img = Image()
+        img.read(nifti_path)
+        # nifti_path fixture has affine = diag([0.5, 0.6, 0.7, 1.0]) → origin = (0, 0, 0)
+        assert img.origin == (0.0, 0.0, 0.0)
+
+        img.origin = (10.0, 20.0, 30.0)
+        assert img.origin == (10.0, 20.0, 30.0)
+
+    def test_origin_validation(self) -> None:
+        img = Image()
+        with pytest.raises(ValueError, match="3-tuple"):
+            img.origin = (1.0, 2.0)  # type: ignore[arg-type]
+
+    def test_direction_property(self, nifti_path: Path) -> None:
+        img = Image()
+        img.read(nifti_path)
+        # nifti_path fixture has diagonal affine → direction is identity
+        np.testing.assert_array_almost_equal(img.direction, np.eye(3))
+
+    def test_direction_validation(self) -> None:
+        img = Image()
+        with pytest.raises(ValueError, match="3x3"):
+            img.direction = np.eye(4)
+
+    def test_nifti_reads_direction_from_affine(self, tmp_path: Path) -> None:
+        """NIfTI with non-trivial affine extracts correct direction."""
+        # 30-degree rotation around Z
+        angle = np.radians(30)
+        rotation = np.array([
+            [np.cos(angle), -np.sin(angle), 0],
+            [np.sin(angle), np.cos(angle), 0],
+            [0, 0, 1],
+        ])
+        spacing = (0.5, 0.6, 0.7)
+        origin = (10.0, 20.0, 30.0)
+
+        affine = np.eye(4)
+        affine[:3, :3] = rotation * np.array(spacing)
+        affine[:3, 3] = origin
+
+        data = np.zeros((4, 4, 4), dtype=np.int16)
+        nib_img = nibabel.Nifti1Image(data, affine, dtype=np.int16)
+        path = tmp_path / "rotated.nii.gz"
+        nibabel.save(nib_img, str(path))
+
+        img = Image()
+        img.read(path)
+        assert pytest.approx(img.spacing, abs=1e-4) == spacing
+        assert pytest.approx(img.origin, abs=1e-4) == origin
+        np.testing.assert_array_almost_equal(img.direction, rotation, decimal=4)
+
+    def test_nrrd_reads_direction_from_space_directions(self, tmp_path: Path) -> None:
+        """NRRD with space directions extracts correct spacing and direction."""
+        data = np.zeros((4, 4, 4), dtype=np.int16)
+        header = {
+            "space directions": np.array([[0.5, 0.0, 0.0], [0.0, 0.6, 0.0], [0.0, 0.0, 0.7]]),
+            "space origin": np.array([10.0, 20.0, 30.0]),
+            "space": "left-posterior-superior",
+        }
+        path = tmp_path / "with_dirs.nrrd"
+        nrrd.write(str(path), data, header)
+
+        img = Image()
+        img.read(path)
+        assert pytest.approx(img.spacing, abs=1e-4) == (0.5, 0.6, 0.7)
+        assert pytest.approx(img.origin, abs=1e-4) == (10.0, 20.0, 30.0)
+        np.testing.assert_array_almost_equal(img.direction, np.eye(3), decimal=4)
+
+    def test_dicom_reads_origin(self, dicom_dir: Path) -> None:
+        """DICOM series extracts origin from ImagePositionPatient."""
+        img = Image()
+        img.read_dicom_series(dicom_dir)
+        # First slice has ImagePositionPatient = [0.0, 0.0, 0.0]
+        assert img.origin == (0.0, 0.0, 0.0)
 
     def test_save_as_dicom_raises(self, nifti_path: Path, tmp_path: Path) -> None:
         img = Image()
