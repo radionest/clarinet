@@ -7,67 +7,10 @@ Image service is a well-isolated synchronous library for medical image I/O and s
 Below are the issues found, grouped by severity.
 
 ---
-
-## HIGH: Bugs and Logic Errors
-
-
-### 2. `save_as` missing exhaustive match (`image.py:239-249`)
-
-```python
-match filetype:
-    case FileType.NIFTI: ...
-    case FileType.NRRD: ...
-    case FileType.DICOM: raise ...
-    # no case _:
-logger.debug(f"Saved image as ...")
-return path
-```
-
-Unlike `save()` which has `case _: raise ImageError(...)`, `save_as()` lacks it. If a new `FileType` variant is added, this will silently do nothing and return the path.
-
-### 3. `_create_mask` axis order may be transposed (`coco2nii.py:147-148`)
-
-```python
-image_size = (image_meta.width, image_meta.height)
-mask = draw.polygon2mask(image_size, polygons)
-```
-
-`skimage.draw.polygon2mask` first argument is `image_shape = (rows, cols)`, which in image convention is `(height, width)`. Passing `(width, height)` produces a transposed mask. If width == height, this bug is invisible.
-
-### 4. `append` misses multi-label overlap without zero (`segmentation.py:231-239`)
-
-```python
-match unique_labels:
-    case [0]: pass
-    case [0, label_value] | [label_value]: ...
-    case [0, *label_values]: raise ValueError(f"ROI overlaps multiple labels: {label_values}")
-    case _: raise ValueError("Unexpected label configuration during append")
-```
-
-If all coordinates overlap with 2+ labels and none are background, e.g. `[2, 3]`, it falls to `case _:` with generic "Unexpected label configuration" instead of the specific "overlaps multiple labels" message. Should be:
-```python
-case [0, *label_values] | [*label_values] if len(label_values) > 1:
-    raise ValueError(f"ROI overlaps multiple labels: {label_values}")
-```
-
 ---
 
 ## MEDIUM: Design Issues
 
-### 5. Cross-format spacing loss is avoidable (`image.py:255, 264`)
-
-`_save_nifti` falls back to `np.eye(4)` when `_nifti_image` is None. `_save_nrrd` passes empty `{}` when `_nrrd_header` is None. In both cases `self.spacing` is available and could be used to build the metadata:
-
-```python
-# _save_nifti: build affine from spacing
-affine = self._nifti_image.affine if self._nifti_image else np.diag([*self.spacing, 1.0])
-
-# _save_nrrd: inject spacing into header
-if self._nrrd_header is None:
-    header = {"spacings": list(self.spacing)}
-```
-
-This would fix NIfTI->NRRD, NRRD->NIfTI, DICOM->any spacing loss with minimal code change. Currently 4 out of 6 format conversion paths lose spacing.
 
 ### 6. `rois_hu_correction` ignores isotropic threshold (`segmentation.py:124`)
 
