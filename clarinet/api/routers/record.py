@@ -25,6 +25,7 @@ from clarinet.api.dependencies import (
     FileDefinitionRepositoryDep,
     PaginationDep,
     RecordRepositoryDep,
+    RecordServiceDep,
     RecordTypeRepositoryDep,
     SeriesRepositoryDep,
     SessionDep,
@@ -79,31 +80,6 @@ router = APIRouter(
 
 
 # Helpers
-
-
-def trigger_recordflow(
-    request: Request,
-    background_tasks: BackgroundTasks,
-    record: Record,
-    old_status: RecordStatus | None = None,
-) -> None:
-    """Trigger RecordFlow engine in background if enabled.
-
-    Args:
-        request: FastAPI request to access app state.
-        background_tasks: FastAPI background tasks.
-        record: Record that changed.
-        old_status: Previous status. If provided, triggers status change handler;
-            otherwise triggers data update handler.
-    """
-    engine = getattr(request.app.state, "recordflow_engine", None)
-    if not engine:
-        return
-    record_read = RecordRead.model_validate(record)
-    if old_status is not None:
-        background_tasks.add_task(engine.handle_record_status_change, record_read, old_status)
-    else:
-        background_tasks.add_task(engine.handle_record_data_update, record_read)
 
 
 async def validate_record_files(
@@ -451,17 +427,10 @@ async def add_record(
 async def update_record_status(
     record_id: int,
     record_status: RecordStatus,
-    request: Request,
-    background_tasks: BackgroundTasks,
-    repo: RecordRepositoryDep,
+    service: RecordServiceDep,
 ) -> Record:
     """Update a record's status."""
-    record, old_status = await repo.update_status(record_id, record_status)
-
-    # Trigger RecordFlow if enabled and status changed
-    if old_status != record_status:
-        trigger_recordflow(request, background_tasks, record, old_status)
-
+    record, _ = await service.update_status(record_id, record_status)
     return record
 
 
@@ -469,26 +438,18 @@ async def update_record_status(
 async def assign_record_to_user(
     record_id: int,
     user_id: UUID,
-    request: Request,
-    background_tasks: BackgroundTasks,
-    repo: RecordRepositoryDep,
+    service: RecordServiceDep,
 ) -> Record:
     """Assign a record to a user."""
-    record, old_status = await repo.assign_user(record_id, user_id)
-
-    # Trigger RecordFlow if enabled and status changed
-    if old_status != record.status:
-        trigger_recordflow(request, background_tasks, record, old_status)
-
+    record, _ = await service.assign_user(record_id, user_id)
     return record
 
 
 @router.post("/{record_id}/data", response_model=RecordRead)
 async def submit_record_data(
     record_id: int,
-    request: Request,
-    background_tasks: BackgroundTasks,
     repo: RecordRepositoryDep,
+    service: RecordServiceDep,
     data: RecordData = Body(),
 ) -> Record:
     """Submit data for a record."""
@@ -511,12 +472,7 @@ async def submit_record_data(
         await repo.set_files(record, file_result.matched_files)
 
     # Update record data, set finished status
-    record, old_status = await repo.update_data(
-        record_id, validated_data, new_status=RecordStatus.finished
-    )
-
-    # Trigger RecordFlow if enabled
-    trigger_recordflow(request, background_tasks, record, old_status)
+    record, _ = await service.submit_data(record_id, validated_data, RecordStatus.finished)
 
     return record
 
@@ -524,9 +480,8 @@ async def submit_record_data(
 @router.patch("/{record_id}/data", response_model=RecordRead)
 async def update_record_data(
     record_id: int,
-    request: Request,
-    background_tasks: BackgroundTasks,
     repo: RecordRepositoryDep,
+    service: RecordServiceDep,
     data: RecordData = Body(),
 ) -> Record:
     """Update a record's data."""
@@ -536,10 +491,7 @@ async def update_record_data(
         raise CONFLICT.with_context("Record is not finished yet. Use POST to submit record data.")
 
     validated_data = validate_record_data(record, data)
-    updated, _ = await repo.update_data(record_id, validated_data)
-
-    # Trigger RecordFlow data update flows if enabled
-    trigger_recordflow(request, background_tasks, updated)
+    updated, _ = await service.update_data(record_id, validated_data)
 
     return updated
 
@@ -590,9 +542,8 @@ async def validate_files_endpoint(
 @router.post("/{record_id}/check-files", response_model=FileCheckResult)
 async def check_record_files(
     record_id: int,
-    request: Request,
-    background_tasks: BackgroundTasks,
     repo: RecordRepositoryDep,
+    service: RecordServiceDep,
 ) -> FileCheckResult:
     """Compute current file checksums, compare with stored, trigger invalidation if changed.
 
@@ -612,11 +563,9 @@ async def check_record_files(
     if record.status == RecordStatus.blocked:
         file_result = await validate_record_files(record_read)
         if file_result is not None and file_result.valid:
-            old_status = record.status
             if file_result.matched_files:
                 await repo.set_files(record, file_result.matched_files)
-            record, _ = await repo.update_status(record_id, RecordStatus.pending)
-            trigger_recordflow(request, background_tasks, record, old_status)
+            record, _ = await service.update_status(record_id, RecordStatus.pending)
             record_read = RecordRead.model_validate(record)
         else:
             # Still blocked — return early with empty result
@@ -635,9 +584,7 @@ async def check_record_files(
     await repo.update_checksums(record, new_checksums)
 
     if changed:
-        engine = getattr(request.app.state, "recordflow_engine", None)
-        if engine:
-            background_tasks.add_task(engine.handle_record_file_change, record_read)
+        await service.notify_file_change(record)
 
     return FileCheckResult(changed_files=list(changed), checksums=new_checksums)
 
@@ -711,10 +658,10 @@ async def find_records(
 async def bulk_update_record_status(
     record_ids: list[int],
     new_status: RecordStatus,
-    repo: RecordRepositoryDep,
+    service: RecordServiceDep,
 ) -> None:
     """Update status for multiple records at once."""
-    await repo.bulk_update_status(record_ids, new_status)
+    await service.bulk_update_status(record_ids, new_status)
 
 
 # Dependency functions (used by other parts of the application)

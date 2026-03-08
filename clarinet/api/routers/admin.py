@@ -5,7 +5,7 @@ from uuid import UUID
 from fastapi import APIRouter
 from pydantic import BaseModel as PydanticBaseModel
 
-from clarinet.api.dependencies import AdminServiceDep, RecordRepositoryDep, SuperUserDep
+from clarinet.api.dependencies import AdminServiceDep, RecordServiceDep, SuperUserDep
 from clarinet.models import Record, RecordRead
 
 router = APIRouter()
@@ -52,7 +52,7 @@ async def admin_assign_record_user(
     record_id: int,
     user_id: UUID,
     _current_user: SuperUserDep,
-    repo: RecordRepositoryDep,
+    service: RecordServiceDep,
 ) -> Record:
     """Assign a user to a record (superuser only).
 
@@ -60,13 +60,13 @@ async def admin_assign_record_user(
         record_id: The record to assign.
         user_id: The user UUID to assign.
         _current_user: Authenticated superuser (enforced by dependency).
-        repo: Record repository.
+        service: Record service.
 
     Returns:
         Updated record with all relations loaded.
     """
-    await repo.assign_user(record_id, user_id)
-    return await repo.get_with_relations(record_id)
+    record, _ = await service.assign_user(record_id, user_id)
+    return record
 
 
 class RecordTypeStatusCounts(PydanticBaseModel):

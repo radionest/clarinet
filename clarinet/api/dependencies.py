@@ -28,6 +28,8 @@ from clarinet.services.anonymization_service import AnonymizationService
 from clarinet.services.dicom import DicomClient
 from clarinet.services.dicom.models import DicomNode
 from clarinet.services.dicomweb import DicomWebCache, DicomWebProxyService
+from clarinet.services.record_service import RecordService
+from clarinet.services.recordflow.engine import RecordFlowEngine
 from clarinet.services.slicer.service import SlicerService
 from clarinet.services.study_service import StudyService
 from clarinet.services.user_service import UserService
@@ -155,6 +157,11 @@ PipelineDefinitionRepositoryDep = Annotated[
 # Service factory functions
 
 
+def get_recordflow_engine(request: Request) -> RecordFlowEngine | None:
+    """Get RecordFlow engine from app state (None when disabled)."""
+    return getattr(request.app.state, "recordflow_engine", None)
+
+
 async def get_user_service(
     user_repo: UserRepositoryDep, role_repo: UserRoleRepositoryDep
 ) -> UserService:
@@ -166,9 +173,20 @@ async def get_study_service(
     study_repo: StudyRepositoryDep,
     patient_repo: PatientRepositoryDep,
     series_repo: SeriesRepositoryDep,
+    request: Request,
 ) -> StudyService:
     """Get study service instance with injected repositories."""
-    return StudyService(study_repo, patient_repo, series_repo)
+    return StudyService(
+        study_repo, patient_repo, series_repo, engine=get_recordflow_engine(request)
+    )
+
+
+async def get_record_service(
+    record_repo: RecordRepositoryDep,
+    request: Request,
+) -> RecordService:
+    """Get record service instance with injected repository and engine."""
+    return RecordService(record_repo, get_recordflow_engine(request))
 
 
 async def get_admin_service(
@@ -193,6 +211,7 @@ async def get_slicer_service() -> SlicerService:
 # Service type aliases
 UserServiceDep = Annotated[UserService, Depends(get_user_service)]
 StudyServiceDep = Annotated[StudyService, Depends(get_study_service)]
+RecordServiceDep = Annotated[RecordService, Depends(get_record_service)]
 AdminServiceDep = Annotated[AdminService, Depends(get_admin_service)]
 SlicerServiceDep = Annotated[SlicerService, Depends(get_slicer_service)]
 

@@ -4,10 +4,10 @@ Async study router for the Clarinet framework.
 This module provides async API endpoints for managing medical imaging studies, series, and related data.
 """
 
-from fastapi import APIRouter, BackgroundTasks, Body, Depends, Request, status
+from fastapi import APIRouter, Body, Depends, status
 
 from clarinet.api.auth_config import current_active_user
-from clarinet.api.dependencies import StudyServiceDep
+from clarinet.api.dependencies import RecordServiceDep, StudyServiceDep
 from clarinet.models import (
     DicomUID,
     Patient,
@@ -48,18 +48,10 @@ async def get_patient_details(
 async def add_patient(
     patient: PatientSave,
     service: StudyServiceDep,
-    request: Request,
-    background_tasks: BackgroundTasks,
 ) -> Patient:
     """Create a new patient."""
     patient_data = patient.model_dump()
-    result = await service.create_patient(patient_data)
-
-    engine = getattr(request.app.state, "recordflow_engine", None)
-    if engine:
-        background_tasks.add_task(engine.handle_entity_created, "patient", result.id)
-
-    return result
+    return await service.create_patient(patient_data)
 
 
 @router.post("/patients/{patient_id}/anonymize", response_model=Patient)
@@ -83,8 +75,7 @@ async def delete_patient(
 @router.post("/patients/{patient_id}/file-events")
 async def notify_file_events(
     patient_id: str,
-    request: Request,
-    background_tasks: BackgroundTasks,
+    service: RecordServiceDep,
     changed_files: list[str] = Body(...),
 ) -> dict[str, list[str]]:
     """Notify that project-level files have changed for a patient.
@@ -98,10 +89,7 @@ async def notify_file_events(
     Returns:
         Dict with the list of dispatched file names.
     """
-    engine = getattr(request.app.state, "recordflow_engine", None)
-    if engine:
-        for file_name in changed_files:
-            background_tasks.add_task(engine.handle_file_update, file_name, patient_id)
+    await service.notify_file_updates(patient_id, changed_files)
     return {"dispatched": changed_files}
 
 
@@ -138,20 +126,10 @@ async def get_study_series(
 async def add_study(
     study: StudyCreate,
     service: StudyServiceDep,
-    request: Request,
-    background_tasks: BackgroundTasks,
 ) -> Study:
     """Create a new study."""
     study_data = study.model_dump()
-    result = await service.create_study(study_data)
-
-    engine = getattr(request.app.state, "recordflow_engine", None)
-    if engine:
-        background_tasks.add_task(
-            engine.handle_entity_created, "study", result.patient_id, result.study_uid
-        )
-
-    return result
+    return await service.create_study(study_data)
 
 
 @router.delete("/studies/{study_uid}", status_code=status.HTTP_204_NO_CONTENT)
@@ -195,24 +173,10 @@ async def get_series_details(
 async def add_series(
     series: SeriesCreate,
     service: StudyServiceDep,
-    request: Request,
-    background_tasks: BackgroundTasks,
 ) -> Series:
     """Create a new series."""
     series_data = series.model_dump()
-    result = await service.create_series(series_data)
-
-    engine = getattr(request.app.state, "recordflow_engine", None)
-    if engine:
-        background_tasks.add_task(
-            engine.handle_entity_created,
-            "series",
-            result.study.patient_id,
-            result.study_uid,
-            result.series_uid,
-        )
-
-    return result
+    return await service.create_series(series_data)
 
 
 @router.post("/series/find", response_model=list[SeriesRead])

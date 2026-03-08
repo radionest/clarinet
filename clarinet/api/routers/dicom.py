@@ -2,7 +2,7 @@
 
 import asyncio
 
-from fastapi import APIRouter, BackgroundTasks, Query, Request
+from fastapi import APIRouter, Query
 from fastapi.responses import JSONResponse
 
 from clarinet.api.dependencies import (
@@ -90,8 +90,6 @@ async def search_patient_studies(
 
 @router.post("/import-study", response_model=StudyRead)
 async def import_study_from_pacs(
-    http_request: Request,
-    background_tasks: BackgroundTasks,
     request: PacsImportRequest,
     _user: SuperUserDep,
     client: DicomClientDep,
@@ -128,7 +126,7 @@ async def import_study_from_pacs(
 
     study_date = parse_dicom_date(pacs_study.study_date)
 
-    # Create study in local DB
+    # Create study in local DB (triggers entity flow automatically via StudyService)
     await service.create_study(
         {
             "study_uid": request.study_instance_uid,
@@ -156,8 +154,7 @@ async def import_study_from_pacs(
             )
         pacs_series = filter_result.included
 
-    # Create each series in local DB
-    engine = getattr(http_request.app.state, "recordflow_engine", None)
+    # Create each series in local DB (triggers entity flow automatically via StudyService)
     for idx, s in enumerate(pacs_series):
         await service.create_series(
             {
@@ -169,14 +166,6 @@ async def import_study_from_pacs(
                 "study_uid": request.study_instance_uid,
             }
         )
-        if engine:
-            background_tasks.add_task(
-                engine.handle_entity_created,
-                "series",
-                request.patient_id,
-                request.study_instance_uid,
-                s.series_instance_uid,
-            )
 
     # Return full study with relations
     logger.info(f"Imported study {request.study_instance_uid} with {len(pacs_series)} series")
