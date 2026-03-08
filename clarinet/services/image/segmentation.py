@@ -359,10 +359,14 @@ class Segmentation(Image):
         """
         combined = self.union(other)
         intersected = self.intersection(
-            other, min_overlap=min_overlap, min_overlap_ratio=min_overlap_ratio,
+            other,
+            min_overlap=min_overlap,
+            min_overlap_ratio=min_overlap_ratio,
         )
         return combined.difference(
-            intersected, max_overlap=max_overlap, max_overlap_ratio=max_overlap_ratio,
+            intersected,
+            max_overlap=max_overlap,
+            max_overlap_ratio=max_overlap_ratio,
         )
 
     # ------------------------------------------------------------------
@@ -390,8 +394,7 @@ class Segmentation(Image):
             Use ``union()`` instead.
         """
         warnings.warn(
-            "Segmentation.__or__ (| operator) is deprecated. "
-            "Use .union(other) instead.",
+            "Segmentation.__or__ (| operator) is deprecated. Use .union(other) instead.",
             DeprecationWarning,
             stacklevel=2,
         )
@@ -418,8 +421,7 @@ class Segmentation(Image):
             Use ``union()`` instead.
         """
         warnings.warn(
-            "Segmentation.__add__ (+ operator) is deprecated. "
-            "Use .union(other) instead.",
+            "Segmentation.__add__ (+ operator) is deprecated. Use .union(other) instead.",
             DeprecationWarning,
             stacklevel=2,
         )

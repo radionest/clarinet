@@ -200,11 +200,13 @@ class TestImage:
         """NIfTI with non-trivial affine extracts correct direction."""
         # 30-degree rotation around Z
         angle = np.radians(30)
-        rotation = np.array([
-            [np.cos(angle), -np.sin(angle), 0],
-            [np.sin(angle), np.cos(angle), 0],
-            [0, 0, 1],
-        ])
+        rotation = np.array(
+            [
+                [np.cos(angle), -np.sin(angle), 0],
+                [np.sin(angle), np.cos(angle), 0],
+                [0, 0, 1],
+            ]
+        )
         spacing = (0.5, 0.6, 0.7)
         origin = (10.0, 20.0, 30.0)
 

@@ -292,12 +292,12 @@ class TestSegmentationProcessingChain:
         """Create 2 overlapping segmentations → named ops → chain → filter → save → read back."""
         shape = (30, 30, 16)
 
-        # Create two segmentations with overlapping 7×7×7 cubes (3×3×5 overlap)
+        # Create two segmentations with overlapping 7x7x7 cubes (3x3x5 overlap)
         vol_a = np.zeros(shape, dtype=np.uint8)
-        vol_a[5:12, 5:12, 3:10] = 1  # 7×7×7 cube
+        vol_a[5:12, 5:12, 3:10] = 1  # 7x7x7 cube
 
         vol_b = np.zeros(shape, dtype=np.uint8)
-        vol_b[9:16, 9:16, 5:12] = 1  # 7×7×7 cube, overlaps with a at [9:12, 9:12, 5:10]
+        vol_b[9:16, 9:16, 5:12] = 1  # 7x7x7 cube, overlaps with a at [9:12, 9:12, 5:10]
 
         seg_a = Segmentation(autolabel=True)
         seg_a._spacing = (1.0, 1.0, 1.0)
@@ -364,7 +364,7 @@ class TestHUCorrectionWorkflow:
         hu_image._img = ct_data
         hu_image._spacing = (1.0, 1.0, 1.0)
 
-        # Create matching 3-label segmentation (blobs must be ≥4×4×4 to survive
+        # Create matching 3-label segmentation (blobs must be >=4x4x4 to survive
         # opening(ball(2)) in rois_hu_correction)
         seg_data = np.zeros(shape, dtype=np.uint8)
         seg_data[5:12, 5:12, 5:12] = 1  # Label 1 at HU=50
@@ -555,9 +555,7 @@ class TestSpatialPreservation:
         img2.read(nifti_path)
         assert pytest.approx(img2.spacing, abs=1e-4) == VOLUME_SPACING
 
-    def test_dicom_to_nifti_spacing(
-        self, dicom_series_dir: Path, tmp_path: Path
-    ) -> None:
+    def test_dicom_to_nifti_spacing(self, dicom_series_dir: Path, tmp_path: Path) -> None:
         """DICOM → NIfTI preserves spacing and origin."""
         img = Image(dtype=np.int16)
         img.read_dicom_series(dicom_series_dir)
@@ -570,9 +568,7 @@ class TestSpatialPreservation:
         assert pytest.approx(img2.spacing, abs=1e-4) == VOLUME_SPACING
         assert pytest.approx(img2.origin, abs=1e-4) == (0.0, 0.0, 0.0)
 
-    def test_dicom_to_nrrd_spacing(
-        self, dicom_series_dir: Path, tmp_path: Path
-    ) -> None:
+    def test_dicom_to_nrrd_spacing(self, dicom_series_dir: Path, tmp_path: Path) -> None:
         """DICOM → NRRD preserves spacing."""
         img = Image(dtype=np.int16)
         img.read_dicom_series(dicom_series_dir)
@@ -587,11 +583,13 @@ class TestSpatialPreservation:
     def test_oblique_nifti_roundtrip(self, tmp_path: Path) -> None:
         """Rotated affine survives NIfTI → save → read roundtrip."""
         angle = np.radians(15)
-        rotation = np.array([
-            [np.cos(angle), -np.sin(angle), 0],
-            [np.sin(angle), np.cos(angle), 0],
-            [0, 0, 1],
-        ])
+        rotation = np.array(
+            [
+                [np.cos(angle), -np.sin(angle), 0],
+                [np.sin(angle), np.cos(angle), 0],
+                [0, 0, 1],
+            ]
+        )
         spacing = VOLUME_SPACING
         origin = (5.0, -10.0, 25.0)
 
@@ -623,11 +621,13 @@ class TestSpatialPreservation:
     def test_oblique_nifti_to_nrrd_roundtrip(self, tmp_path: Path) -> None:
         """Rotated affine survives NIfTI → NRRD → NIfTI."""
         angle = np.radians(20)
-        rotation = np.array([
-            [np.cos(angle), -np.sin(angle), 0],
-            [np.sin(angle), np.cos(angle), 0],
-            [0, 0, 1],
-        ])
+        rotation = np.array(
+            [
+                [np.cos(angle), -np.sin(angle), 0],
+                [np.sin(angle), np.cos(angle), 0],
+                [0, 0, 1],
+            ]
+        )
         spacing = VOLUME_SPACING
         origin = (1.0, 2.0, 3.0)
 
@@ -658,9 +658,7 @@ class TestSpatialPreservation:
         assert pytest.approx(img3.origin, abs=1e-4) == origin
         np.testing.assert_array_almost_equal(img3.direction, rotation, decimal=4)
 
-    def test_template_preserves_spatial(
-        self, dicom_series_dir: Path, tmp_path: Path
-    ) -> None:
+    def test_template_preserves_spatial(self, dicom_series_dir: Path, tmp_path: Path) -> None:
         """Origin and direction propagate through template creation."""
         source = Image()
         source.read_dicom_series(dicom_series_dir)
