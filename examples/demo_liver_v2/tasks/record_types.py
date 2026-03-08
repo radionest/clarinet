@@ -43,6 +43,7 @@ first_check = RecordDef(
     description="Initial assessment of every study added to the trial",
     label="First check",
     level="STUDY",
+    role="doctor",
     min_records=1,
     max_records=1,
 )

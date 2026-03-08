@@ -26,7 +26,7 @@ dist/
 *.log
 
 # Generated data
-examples/demo/data/[0-9]*/
+examples/*/data/
 
 # DICOM
 **/dicomweb_cache

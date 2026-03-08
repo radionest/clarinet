@@ -123,8 +123,13 @@ test-cov: ## Run tests with coverage
 test-all: test frontend-test ## Run all tests (backend + frontend)
 
 .PHONY: test-fast
-test-fast: ## Run tests in parallel (auto workers)
-	@echo "Running tests in parallel..."
+test-fast: ## Run all tests in parallel (auto workers, all service groups)
+	@echo "Running all tests in parallel..."
+	@uv run pytest -n auto
+
+.PHONY: test-unit
+test-unit: ## Run DB-only tests in parallel (no external services)
+	@echo "Running DB-only tests in parallel..."
 	@uv run pytest -n auto -m "not pipeline and not dicom and not slicer"
 
 .PHONY: test-integration
