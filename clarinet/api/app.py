@@ -238,7 +238,7 @@ def create_app(root_path: str = "/") -> FastAPI:
         logger.info("DICOMweb proxy enabled at /dicom-web")
 
     # OHIF Viewer directory (checked at request time for SPA routing)
-    ohif_dir = Path(__file__).parent.parent / "ohif"
+    ohif_dir = settings.ohif_path
     if settings.ohif_enabled:
         ohif_index = ohif_dir / "index.html"
         if ohif_index.exists():
@@ -246,7 +246,7 @@ def create_app(root_path: str = "/") -> FastAPI:
         else:
             logger.warning(
                 "OHIF enabled but index.html not found. "
-                "Run 'make ohif-build' to download OHIF Viewer."
+                "Run 'clarinet ohif install' to download OHIF Viewer."
             )
 
     # Serve frontend if enabled
@@ -291,7 +291,7 @@ def create_app(root_path: str = "/") -> FastAPI:
 
                 raise HTTPException(
                     status_code=404,
-                    detail="OHIF Viewer not installed. Run 'make ohif-build'.",
+                    detail="OHIF Viewer not installed. Run 'clarinet ohif install'.",
                 )
 
             # Check if static directory exists

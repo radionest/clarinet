@@ -145,6 +145,12 @@ class Settings(BaseSettings):
 
     # OHIF viewer settings
     ohif_enabled: bool = True
+    ohif_default_version: str = "3.12.0"
+
+    @property
+    def ohif_path(self) -> Path:
+        """Path to OHIF Viewer runtime files."""
+        return Path(self.storage_path) / "ohif"
 
     # Security settings
     secret_key: str = "insecure-change-this-key-in-production"  # For session signing

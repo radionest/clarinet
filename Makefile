@@ -64,8 +64,7 @@ frontend-clean: ## Clean frontend build artifacts
 
 .PHONY: ohif-build
 ohif-build: ## Download and install OHIF Viewer
-	@echo "Building OHIF Viewer..."
-	@bash scripts/build_ohif.sh
+	@uv run clarinet ohif install
 
 .PHONY: run-dev
 run-dev: ## Run development server with frontend

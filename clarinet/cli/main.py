@@ -9,10 +9,14 @@ import asyncio
 import contextlib
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
 import sys
+import tarfile
+import tempfile
+import urllib.request
 from pathlib import Path
 
 from clarinet.settings import settings
@@ -438,6 +442,176 @@ def clean_frontend() -> None:
         logger.info("No build artifacts to clean")
 
 
+def _patch_ohif_paths(ohif_dir: Path) -> None:
+    """Rewrite asset paths in OHIF files for /ohif/ base path.
+
+    Ports the path-patching logic from the former build_ohif.sh into pure Python.
+    """
+    # --- index.html ---
+    index_html = ohif_dir / "index.html"
+    if index_html.exists():
+        html = index_html.read_text()
+        html = html.replace("window.PUBLIC_URL = '/';", "window.PUBLIC_URL = '/ohif/';")
+        html = re.sub(r'href="/(?!ohif/)(?!/)', 'href="/ohif/', html)
+        html = re.sub(r'src="/(?!ohif/)(?!/)', 'src="/ohif/', html)
+        html = re.sub(r'content="/(?!ohif/)(?!/)', 'content="/ohif/', html)
+        index_html.write_text(html)
+
+    # --- JS bundles: webpack public path ---
+    for js_file in ohif_dir.glob("*.bundle.*.js"):
+        content = js_file.read_text()
+        patched = content.replace('__webpack_require__.p = "/"', '__webpack_require__.p = "/ohif/"')
+        if patched != content:
+            js_file.write_text(patched)
+
+    # --- CSS bundle: root-relative url() references ---
+    css_file = ohif_dir / "app.bundle.css"
+    if css_file.exists():
+        css = css_file.read_text()
+        css = re.sub(r"url\(/([^o)])", r"url(/ohif/\1", css)
+        css_file.write_text(css)
+
+    # --- manifest.json: icon paths ---
+    manifest = ohif_dir / "manifest.json"
+    if manifest.exists():
+        content = manifest.read_text()
+        content = content.replace('"/assets/', '"/ohif/assets/')
+        manifest.write_text(content)
+
+
+def _clean_ohif_dir(ohif_dir: Path, preserve_config: bool) -> None:
+    """Remove files from OHIF dir, preserving .ohif-version and optionally app-config.js."""
+    if not ohif_dir.exists():
+        return
+    keep = {".ohif-version"}
+    if preserve_config:
+        keep.add("app-config.js")
+    for item in ohif_dir.iterdir():
+        if item.name in keep:
+            continue
+        if item.is_dir():
+            shutil.rmtree(item)
+        else:
+            item.unlink()
+
+
+def _install_config_template(ohif_dir: Path) -> None:
+    """Copy app-config.js template from package to runtime directory."""
+    import clarinet
+
+    template = Path(clarinet.__file__).parent / "ohif" / "app-config.js"
+    if template.exists():
+        shutil.copy2(template, ohif_dir / "app-config.js")
+        logger.info("Installed app-config.js from package template")
+    else:
+        logger.warning("app-config.js template not found in package")
+
+
+def install_ohif(version: str | None = None, force_config: bool = False) -> None:
+    """Download OHIF Viewer from npm and install into runtime directory.
+
+    Args:
+        version: OHIF version to install (default from settings).
+        force_config: Overwrite existing app-config.js with package template.
+    """
+    version = version or settings.ohif_default_version
+    ohif_dir = settings.ohif_path
+
+    # Idempotent: skip if already installed at this version
+    version_file = ohif_dir / ".ohif-version"
+    if version_file.exists() and version_file.read_text().strip() == version and not force_config:
+        logger.info(f"OHIF Viewer v{version} already installed at {ohif_dir}")
+        return
+
+    npm_url = f"https://registry.npmjs.org/@ohif/app/-/app-{version}.tgz"
+    logger.info(f"Downloading OHIF Viewer v{version} from npm...")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+        tarball = tmp_path / "ohif.tgz"
+
+        try:
+            urllib.request.urlretrieve(npm_url, tarball)
+        except Exception as e:
+            logger.error(f"Failed to download OHIF v{version}: {e}")
+            sys.exit(1)
+
+        with tarfile.open(tarball, "r:gz") as tf:
+            tf.extractall(tmp_path)
+
+        dist_dir = tmp_path / "package" / "dist"
+        if not dist_dir.exists():
+            logger.error("dist/ directory not found in @ohif/app package")
+            sys.exit(1)
+
+        # Prepare target directory
+        ohif_dir.mkdir(parents=True, exist_ok=True)
+        preserve_config = not force_config and (ohif_dir / "app-config.js").exists()
+        _clean_ohif_dir(ohif_dir, preserve_config=preserve_config)
+
+        # Copy built files
+        shutil.copytree(dist_dir, ohif_dir, dirs_exist_ok=True)
+
+        # Install config template if needed
+        if not preserve_config:
+            _install_config_template(ohif_dir)
+
+    # Patch paths for /ohif/ base
+    logger.info("Patching asset paths for /ohif/ base path...")
+    _patch_ohif_paths(ohif_dir)
+
+    # Write version marker
+    version_file.write_text(version)
+    logger.info(f"OHIF Viewer v{version} installed to {ohif_dir}")
+
+
+def ohif_status() -> None:
+    """Show OHIF Viewer installation status."""
+    ohif_dir = settings.ohif_path
+    version_file = ohif_dir / ".ohif-version"
+    index_file = ohif_dir / "index.html"
+
+    if not ohif_dir.exists():
+        print("OHIF Viewer: not installed")
+        print(f"  Expected path: {ohif_dir}")
+        print("  Run 'clarinet ohif install' to install")
+        return
+
+    version = version_file.read_text().strip() if version_file.exists() else "unknown"
+    has_index = index_file.exists()
+
+    print(f"OHIF Viewer: v{version}")
+    print(f"  Path: {ohif_dir}")
+    print(f"  index.html: {'found' if has_index else 'MISSING'}")
+    print(f"  Config: {'found' if (ohif_dir / 'app-config.js').exists() else 'MISSING'}")
+
+    if not has_index:
+        print("  WARNING: index.html missing, viewer may not work")
+
+
+def uninstall_ohif() -> None:
+    """Remove OHIF Viewer runtime files."""
+    ohif_dir = settings.ohif_path
+    if not ohif_dir.exists():
+        logger.info("OHIF Viewer not installed, nothing to remove")
+        return
+    shutil.rmtree(ohif_dir)
+    logger.info(f"OHIF Viewer removed from {ohif_dir}")
+
+
+def handle_ohif_command(args: argparse.Namespace) -> None:
+    """Handle OHIF-related commands."""
+    if args.ohif_command == "install":
+        install_ohif(version=args.version, force_config=args.force_config)
+    elif args.ohif_command == "status":
+        ohif_status()
+    elif args.ohif_command == "uninstall":
+        uninstall_ohif()
+    else:
+        logger.error(f"Unknown ohif command: {args.ohif_command}")
+        sys.exit(1)
+
+
 def handle_frontend_command(args: argparse.Namespace) -> None:
     """Handle frontend-related commands."""
     if args.frontend_command == "install":
@@ -519,6 +693,29 @@ def main() -> None:
 
     # frontend clean
     frontend_subparsers.add_parser("clean", help="Clean build artifacts")
+
+    # ohif command
+    ohif_parser = subparsers.add_parser("ohif", help="OHIF Viewer management commands")
+    ohif_subparsers = ohif_parser.add_subparsers(dest="ohif_command")
+
+    # ohif install
+    ohif_install_parser = ohif_subparsers.add_parser(
+        "install", help="Download and install OHIF Viewer"
+    )
+    ohif_install_parser.add_argument(
+        "--version", type=str, default=None, help="OHIF version (default: from settings)"
+    )
+    ohif_install_parser.add_argument(
+        "--force-config",
+        action="store_true",
+        help="Overwrite existing app-config.js with package template",
+    )
+
+    # ohif status
+    ohif_subparsers.add_parser("status", help="Show OHIF Viewer installation status")
+
+    # ohif uninstall
+    ohif_subparsers.add_parser("uninstall", help="Remove OHIF Viewer runtime files")
 
     # worker command
     worker_parser = subparsers.add_parser("worker", help="Run pipeline task worker")
@@ -619,6 +816,8 @@ def main() -> None:
         init_alembic_in_project()
     elif args.command == "frontend":
         handle_frontend_command(args)
+    elif args.command == "ohif":
+        handle_ohif_command(args)
     else:
         parser.print_help()
         sys.exit(1)
