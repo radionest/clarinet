@@ -16,6 +16,7 @@ import numpy as np
 from clarinet.services.image import FileType, Segmentation
 from clarinet.services.pipeline import PipelineMessage, TaskContext, pipeline_task
 from clarinet.services.recordflow import Field, file, record, study
+from clarinet.utils.logger import logger
 
 F = Field()
 
@@ -88,6 +89,53 @@ async def compare_w_projection(msg: PipelineMessage, ctx: TaskContext) -> None:
     )
 
 
+@pipeline_task(queue="clarinet.dicom")
+async def anonymize_study_pipeline(msg: PipelineMessage, ctx: TaskContext) -> None:
+    """Anonymize the study: fetch from PACS, anonymize tags, distribute."""
+    assert msg.record_id is not None
+
+    # Get study_type from first_check for downstream matching
+    first_checks = await ctx.records.find("first_check", study_uid=msg.study_uid)
+    first_data = first_checks[0].data if first_checks else None
+    study_type = first_data.get("study_type") if first_data else None
+
+    # Check if already anonymized
+    study = await ctx.client.get_study(msg.study_uid)
+    if study.anon_uid is not None:
+        logger.info(f"Study {msg.study_uid} already anonymized, skipping")
+        await ctx.client.submit_record_data(
+            msg.record_id,
+            {
+                "study_type": study_type,
+                "skipped": True,
+                "anon_study_uid": study.anon_uid,
+            },
+        )
+        return
+
+    # Ensure patient has anon_name (anon_id is always set via auto_id)
+    try:
+        await ctx.client.anonymize_patient(msg.patient_id)
+    except Exception:
+        logger.debug(f"Patient {msg.patient_id} already anonymized")
+
+    # Run anonymization (fresh DB session, direct PACS access)
+    from clarinet.services.dicom.tasks import _create_anonymization_service
+
+    async with _create_anonymization_service() as service:
+        result = await service.anonymize_study(msg.study_uid)
+
+    await ctx.client.submit_record_data(
+        msg.record_id,
+        {
+            "study_type": study_type,
+            "anon_study_uid": result.anon_study_uid,
+            "instances_anonymized": result.instances_anonymized,
+            "instances_failed": result.instances_failed,
+        },
+    )
+
+
 # ---------------------------------------------------------------------------
 # Flow: создание записей по результатам first_check
 # ---------------------------------------------------------------------------
@@ -95,11 +143,16 @@ async def compare_w_projection(msg: PipelineMessage, ctx: TaskContext) -> None:
 # При поступлении нового исследования создаётся first_check
 (study().on_creation().create_record("first_check"))
 
-# Создание сегментаций по типу исследования
+# first_check → anonymize_study (instead of direct segmentation creation)
+(record("first_check").on_finished().if_record(F.is_good == True).create_record("anonymize_study"))
+
+# Run anonymization on creation
+(record("anonymize_study").on_status("pending").do_task(anonymize_study_pipeline))
+
+# After anonymization → create segmentations by study_type
 (
-    record("first_check")
+    record("anonymize_study")
     .on_finished()
-    .if_record(F.is_good == True)
     .match(F.study_type)
     .case("CT")
     .create_record("segment_CT_single", "segment_CT_with_archive")
