@@ -51,9 +51,7 @@ class PatientRepository(BaseRepository[Patient]):
 
     async def _next_auto_id(self) -> int:
         """Return MAX(auto_id) + 1, or 1 if no patients exist."""
-        result = await self.session.execute(
-            select(func.coalesce(func.max(Patient.auto_id), 0))
-        )
+        result = await self.session.execute(select(func.coalesce(func.max(Patient.auto_id), 0)))
         current_max: int = result.scalar_one()  # type: ignore[assignment]
         return current_max + 1
 
