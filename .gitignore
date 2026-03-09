@@ -19,6 +19,9 @@ pdm.lock
 **/build/**
 dist/
 
+# Gleam (generated)
+clarinet/frontend/manifest.toml
+
 # Database
 *.db
 
