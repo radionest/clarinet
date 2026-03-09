@@ -180,6 +180,10 @@ db-migration: ## Create new migration from model changes
 # Utility Commands
 # =============================================================================
 
+.PHONY: clean-rabbitmq
+clean-rabbitmq: ## Clean orphaned test queues/exchanges from RabbitMQ
+	@uv run clarinet rabbitmq clean
+
 .PHONY: clean
 clean: frontend-clean ## Clean all build artifacts
 	@echo "Cleaning all build artifacts..."

@@ -612,6 +612,46 @@ def handle_ohif_command(args: argparse.Namespace) -> None:
         sys.exit(1)
 
 
+async def _rabbitmq_clean(dry_run: bool = False) -> None:
+    """Delete orphaned test queues/exchanges from RabbitMQ."""
+    from clarinet.services.pipeline.rabbitmq_cleanup import cleanup_test_resources
+
+    result = await cleanup_test_resources(
+        host=settings.rabbitmq_host,
+        management_port=settings.rabbitmq_management_port,
+        login=settings.rabbitmq_login,
+        password=settings.rabbitmq_password,
+        dry_run=dry_run,
+    )
+
+    if dry_run:
+        print(
+            f"Found {result['queues_found']} test queues, {result['exchanges_found']} test exchanges"
+        )
+        print("Run without --dry-run to delete them.")
+    else:
+        print(f"Deleted {result['queues_deleted']} queues, {result['exchanges_deleted']} exchanges")
+
+
+async def _rabbitmq_status() -> None:
+    """Show RabbitMQ queue statistics."""
+    from clarinet.services.pipeline.rabbitmq_cleanup import get_queue_stats
+
+    stats = await get_queue_stats(
+        host=settings.rabbitmq_host,
+        management_port=settings.rabbitmq_management_port,
+        login=settings.rabbitmq_login,
+        password=settings.rabbitmq_password,
+    )
+
+    print("RabbitMQ Queue Statistics")
+    print(f"  Total queues:     {stats['total_queues']}")
+    print(f"  Test queues:      {stats['test_queues']}")
+    print(f"  Total exchanges:  {stats['total_exchanges']}")
+    print(f"  Test exchanges:   {stats['test_exchanges']}")
+    print(f"  Stuck messages:   {stats['stuck_messages']}")
+
+
 def handle_frontend_command(args: argparse.Namespace) -> None:
     """Handle frontend-related commands."""
     if args.frontend_command == "install":
@@ -729,6 +769,21 @@ def main() -> None:
         "--workers", type=int, default=2, help="Number of concurrent worker tasks (default: 2)"
     )
 
+    # rabbitmq command
+    rabbitmq_parser = subparsers.add_parser("rabbitmq", help="RabbitMQ management commands")
+    rabbitmq_subparsers = rabbitmq_parser.add_subparsers(dest="rabbitmq_command")
+
+    # rabbitmq clean
+    rabbitmq_clean_parser = rabbitmq_subparsers.add_parser(
+        "clean", help="Delete orphaned test queues/exchanges"
+    )
+    rabbitmq_clean_parser.add_argument(
+        "--dry-run", action="store_true", help="Show what would be deleted without deleting"
+    )
+
+    # rabbitmq status
+    rabbitmq_subparsers.add_parser("status", help="Show RabbitMQ queue statistics")
+
     # session command
     session_parser = subparsers.add_parser("session", help="Session management commands")
     session_subparsers = session_parser.add_subparsers(dest="session_command")
@@ -814,6 +869,13 @@ def main() -> None:
         from clarinet.utils.migrations import init_alembic_in_project
 
         init_alembic_in_project()
+    elif args.command == "rabbitmq":
+        if args.rabbitmq_command == "clean":
+            asyncio.run(_rabbitmq_clean(dry_run=args.dry_run))
+        elif args.rabbitmq_command == "status":
+            asyncio.run(_rabbitmq_status())
+        else:
+            rabbitmq_parser.print_help()
     elif args.command == "frontend":
         handle_frontend_command(args)
     elif args.command == "ohif":

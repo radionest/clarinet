@@ -28,6 +28,34 @@ def rabbitmq_url() -> str:
     return f"amqp://clarinet_test:clarinet_test@{RABBITMQ_HOST}:{RABBITMQ_PORT}/"
 
 
+@pytest_asyncio.fixture(scope="session", autouse=True)
+async def _cleanup_orphaned_e2e_resources() -> AsyncGenerator[None]:
+    """Delete orphaned test queues/exchanges from previous e2e runs.
+
+    Runs before all tests. Uses Management HTTP API.
+    Silent on failure (RabbitMQ may be unreachable).
+    """
+    try:
+        from clarinet.services.pipeline.rabbitmq_cleanup import cleanup_test_resources
+
+        result = await cleanup_test_resources(
+            host=RABBITMQ_HOST,
+            management_port=15672,
+            login="clarinet",
+            password="clarinet",
+        )
+        if result["queues_deleted"] or result["exchanges_deleted"]:
+            from loguru import logger
+
+            logger.info(
+                f"Cleaned orphaned RabbitMQ resources: "
+                f"{result['queues_deleted']} queues, {result['exchanges_deleted']} exchanges"
+            )
+    except Exception:
+        pass  # RabbitMQ unreachable — skip cleanup
+    yield
+
+
 @pytest.fixture(scope="session")
 def _check_rabbitmq() -> None:
     """Skip all pipeline tests if RabbitMQ on klara is unreachable."""
@@ -96,6 +124,7 @@ def pipeline_broker_factory(
                     declare=True,
                     durable=True,
                     type=QueueType.CLASSIC,
+                    arguments={"x-expires": 3600000},
                 ),
             ],
             delay_queue=RmqQueue(
@@ -103,6 +132,7 @@ def pipeline_broker_factory(
                 declare=True,
                 durable=True,
                 type=QueueType.CLASSIC,
+                arguments={"x-expires": 3600000},
             ),
         )
 

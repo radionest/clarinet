@@ -112,6 +112,7 @@ class Settings(BaseSettings):
     rabbitmq_host: str = "localhost"
     rabbitmq_port: int = 5672
     rabbitmq_exchange: str = "clarinet"
+    rabbitmq_management_port: int = 15672
     rabbitmq_max_consumers: int = 0
 
     # Queue requirements

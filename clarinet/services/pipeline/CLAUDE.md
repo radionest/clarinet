@@ -21,6 +21,7 @@ TaskIQ-based distributed task pipeline for long-running operations (GPU processi
 | `context.py` | TaskContext system: FileResolver (sync), RecordQuery (async), build_task_context() |
 | `task.py` | `pipeline_task()` decorator factory — auto client lifecycle + TaskContext |
 | `worker.py` | get_worker_queues() auto-detect, run_worker() entry point |
+| `rabbitmq_cleanup.py` | Test resource cleanup via Management HTTP API (queues/exchanges) |
 
 ## Usage
 
@@ -193,7 +194,11 @@ Unit tests: `tests/test_pipeline.py`, `tests/test_pipeline_context.py`
 Integration tests: `tests/integration/test_pipeline_integration.py` (18 tests, real RabbitMQ on klara `192.168.122.151`)
 - `pytest.mark.pipeline` marker — auto-skips when RabbitMQ unreachable
 - Run: `uv run pytest -m pipeline -v` or `make test-integration`
-- Fixtures in `tests/integration/conftest.py`: `pipeline_broker_factory`, `_check_rabbitmq`, `_purge_test_queues`
+- Fixtures in `tests/integration/conftest.py`: `pipeline_broker_factory`, `_check_rabbitmq`, `_purge_test_queues`, `_cleanup_orphaned_test_resources`
+- Test queues created with `x-expires: 3600000` (1h) — auto-deleted by RabbitMQ if abandoned
+- Pre-session cleanup fixture deletes orphaned test resources via Management HTTP API
+- CLI: `uv run clarinet rabbitmq clean` / `--dry-run` / `uv run clarinet rabbitmq status`
+- Makefile: `make clean-rabbitmq`
 
 ## Dependencies
 
