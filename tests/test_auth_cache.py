@@ -25,9 +25,10 @@ from clarinet.models.user import User
 @pytest.fixture(autouse=True)
 def clear_cache():
     """Clear the class-level cache before and after each test."""
+    original_cache = DatabaseStrategy._user_cache
     DatabaseStrategy._user_cache.clear()
     yield
-    DatabaseStrategy._user_cache.clear()
+    DatabaseStrategy._user_cache = original_cache
 
 
 def _make_user(*, active: bool = True) -> User:

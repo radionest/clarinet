@@ -166,9 +166,13 @@ async def test_startup_pipeline_rabbitmq_unavailable(startup_settings, capture_l
     """
     monkeypatch.setattr(settings, "pipeline_enabled", True)
 
-    mock_connect = AsyncMock(side_effect=ConnectionError("mocked: RabbitMQ unreachable"))
+    mock_broker = AsyncMock()
+    mock_broker.startup = AsyncMock(
+        side_effect=ConnectionError("mocked: RabbitMQ unreachable"),
+    )
+    mock_broker.shutdown = AsyncMock()
 
-    with patch("aio_pika.connect_robust", mock_connect):
+    with patch("clarinet.services.pipeline.get_broker", return_value=mock_broker):
         app = FastAPI(lifespan=lifespan)
 
         async with lifespan(app):

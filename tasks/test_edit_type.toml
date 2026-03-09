@@ -1,5 +1,5 @@
 name = "test_edit_type"
-description = "Only this changes"
+description = "Original description"
 label = "Original Label"
 level = "SERIES"
 min_records = 1
