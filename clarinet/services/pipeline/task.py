@@ -52,7 +52,7 @@ def pipeline_task(
     def decorator(fn: Callable[..., Any]) -> Any:
         @functools.wraps(fn)
         async def wrapper(msg: dict[str, Any]) -> dict[str, Any]:
-            message = PipelineMessage(**msg)
+            message = PipelineMessage.model_validate(msg)
             base_url = f"http://{settings.host}:{settings.port}"
             client = ClarinetClient(
                 base_url=base_url,
