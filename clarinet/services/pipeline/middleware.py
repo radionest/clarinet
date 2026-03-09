@@ -263,7 +263,7 @@ class PipelineChainMiddleware(TaskiqMiddleware):
             return self._client
 
         client = ClarinetClient(
-            base_url=f"http://{settings.host}:{settings.port}/api",
+            base_url=settings.api_base_url,
             username=settings.admin_email,
             password=settings.admin_password,
             auto_login=False,
@@ -436,7 +436,7 @@ class PipelineChainMiddleware(TaskiqMiddleware):
                 update={"pipeline_id": pipeline_id, "step_index": next_index}
             )
         elif isinstance(previous_result, dict):
-            msg = PipelineMessage(**previous_result).model_copy(
+            msg = PipelineMessage.model_validate(previous_result).model_copy(
                 update={"pipeline_id": pipeline_id, "step_index": next_index}
             )
         else:

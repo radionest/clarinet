@@ -52,7 +52,7 @@ async def _init_recordflow(app: FastAPI) -> None:
     from clarinet.services.recordflow import RecordFlowEngine, discover_and_load_flows
 
     client = ClarinetClient(
-        base_url=f"http://{settings.host}:{settings.port}/api",
+        base_url=settings.api_base_url,
         username=settings.admin_email,
         password=settings.admin_password,
         auto_login=False,
