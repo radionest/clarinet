@@ -100,8 +100,38 @@ fn on_url_change(uri: Uri) -> Msg {
   store.OnRouteChange(route)
 }
 
-// Update function
+// Update function — wrapper with auto-dismiss for notifications
 pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
+  let #(new_model, eff) = update_inner(model, msg)
+  let dismiss_effects = auto_dismiss_effects(model, new_model)
+  #(new_model, effect.batch([eff, dismiss_effects]))
+}
+
+// Auto-dismiss helper: schedule clearing notifications after 5 seconds
+fn auto_dismiss_effect(msg: Msg, delay_ms: Int) -> Effect(Msg) {
+  use dispatch <- effect.from
+  let _ = global.set_timeout(delay_ms, fn() { dispatch(msg) })
+  Nil
+}
+
+// Detect new error/success messages and schedule auto-dismiss
+fn auto_dismiss_effects(old: Model, new: Model) -> Effect(Msg) {
+  let success_eff = case old.success_message, new.success_message {
+    None, Some(_) -> auto_dismiss_effect(store.ClearSuccessMessage, 5000)
+    Some(old_msg), Some(new_msg) if old_msg != new_msg ->
+      auto_dismiss_effect(store.ClearSuccessMessage, 5000)
+    _, _ -> effect.none()
+  }
+  let error_eff = case old.error, new.error {
+    None, Some(_) -> auto_dismiss_effect(store.ClearError, 5000)
+    Some(old_msg), Some(new_msg) if old_msg != new_msg ->
+      auto_dismiss_effect(store.ClearError, 5000)
+    _, _ -> effect.none()
+  }
+  effect.batch([success_eff, error_eff])
+}
+
+fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
   case msg {
     // Routing
     store.OnRouteChange(route) -> {
