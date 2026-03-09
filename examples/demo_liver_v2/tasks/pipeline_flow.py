@@ -9,6 +9,11 @@ This version uses the implemented RecordFlow/Pipeline DSL
 (as opposed to demo_liver/ which uses aspirational syntax).
 """
 
+import asyncio
+
+import numpy as np
+
+from clarinet.services.image import FileType, Segmentation
 from clarinet.services.pipeline import PipelineMessage, TaskContext, pipeline_task
 from clarinet.services.recordflow import Field, file, record, study
 
@@ -26,17 +31,18 @@ async def init_master_model(_msg: PipelineMessage, ctx: TaskContext) -> None:
     Берёт сегментацию врача, разделяет на отдельные ROI с уникальными номерами,
     сохраняет как master_model на уровне PATIENT.
     """
-    import image_processor as img
-
     if ctx.files.exists("master_model"):
-        return  # мастер-модель уже существует
+        return
 
-    volume = img.load(ctx.files.resolve("segmentation_single"))
-    rois = img.split_islands(volume)
-    new_img = img.new(size_from=volume)
-    for num, roi_val in enumerate(rois):
-        new_img[roi_val] = num
-    img.save(new_img, ctx.files.resolve("master_model"))
+    seg_path = ctx.files.resolve("segmentation_single")
+    master_path = ctx.files.resolve("master_model")
+
+    def _create_master() -> None:
+        seg = Segmentation()  # autolabel → each island gets unique number
+        seg.read(seg_path)
+        seg.save_as(master_path, FileType.NIFTI)
+
+    await asyncio.to_thread(_create_master)
 
 
 @pipeline_task()
@@ -44,27 +50,33 @@ async def compare_w_projection(msg: PipelineMessage, ctx: TaskContext) -> None:
     """Автоматическое сравнение сегментации врача с проекцией мастер-модели.
 
     Для каждого ROI проверяет пересечение:
-    - пересечение есть -> один и тот же очаг
-    - пересечения нет -> false negative или false positive
+    - пересечение есть → один и тот же очаг
+    - пересечения нет → false negative или false positive
 
     Результат записывается в data записи compare_with_projection.
     """
-    import image_processor as img
-
     assert msg.record_id is not None
-    segmentation = img.load(ctx.files.resolve("segmentation_single"))
-    projection = img.load(ctx.files.resolve("master_projection"))
 
-    false_negative = []  # очаги на проекции, не найденные врачом
-    false_positive_num = 0  # очаги врача, отсутствующие на проекции
+    seg_path = ctx.files.resolve("segmentation_single")
+    proj_path = ctx.files.resolve("master_projection")
 
-    for roi_num in img.unique(projection):
-        if not img.has_overlap(projection, roi_num, segmentation):
-            false_negative.append({"lesion_num": roi_num})
+    def _compare() -> tuple[list[dict[str, int]], int]:
+        seg = Segmentation()  # autolabel=True for doctor's ROIs
+        seg.read(seg_path)
 
-    for roi_num in img.unique(segmentation):
-        if not img.has_overlap(segmentation, roi_num, projection):
-            false_positive_num += 1
+        proj = Segmentation(autolabel=False)  # preserve master model labels
+        proj.read(proj_path)
+
+        # Очаги на проекции, не найденные врачом
+        fn = proj.difference(seg)
+        false_neg = [{"lesion_num": int(lbl)} for lbl in np.unique(fn.img) if lbl != 0]
+
+        # Очаги врача, отсутствующие на проекции
+        fp = seg.difference(proj)
+
+        return false_neg, fp.count
+
+    false_negative, false_positive_num = await asyncio.to_thread(_compare)
 
     await ctx.client.update_record_data(
         msg.record_id,
