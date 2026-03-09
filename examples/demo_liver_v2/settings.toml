@@ -1,8 +1,12 @@
 extra_roles = ["doctor_CT", "doctor_MRI", "doctor_PDCT", "doctor_CT-AG"]
 
+debug = true
+log_level = "DEBUG"
+log_console_level = "INFO"
+
 port = 8000
 host = "127.0.0.1"
-debug = true
+
 database_driver = "sqlite"
 database_name = "clarinet_liver_demo"
 storage_path = "./data"
