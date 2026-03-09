@@ -22,6 +22,7 @@ Usage inside Slicer (what the user writes)::
 from __future__ import annotations
 
 import os
+import re
 from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
@@ -443,3 +444,332 @@ class SlicerHelper:
             move_aet=pacs_move_aet,  # type: ignore[name-defined]  # noqa: F821
         )
         return pacs.retrieve_study(study_instance_uid)
+
+    def get_segment_names(self, segmentation: SegmentationBuilder | Any) -> list[str]:
+        """Get ordered list of segment names from a segmentation node.
+
+        Args:
+            segmentation: SegmentationBuilder or raw segmentation node.
+
+        Returns:
+            List of segment names in index order.
+        """
+        node = segmentation.node if isinstance(segmentation, SegmentationBuilder) else segmentation
+        vtk_seg = node.GetSegmentation()
+        names: list[str] = []
+        for i in range(vtk_seg.GetNumberOfSegments()):
+            seg_id = vtk_seg.GetNthSegmentID(i)
+            names.append(vtk_seg.GetSegment(seg_id).GetName())
+        return names
+
+    def get_segment_centroid(
+        self,
+        segmentation: SegmentationBuilder | Any,
+        segment_name: str,
+    ) -> tuple[float, float, float] | None:
+        """Compute the RAS centroid of a named segment.
+
+        Args:
+            segmentation: SegmentationBuilder or raw segmentation node.
+            segment_name: Name of the segment to find.
+
+        Returns:
+            (R, A, S) centroid tuple, or None if the segment is empty.
+        """
+        node = segmentation.node if isinstance(segmentation, SegmentationBuilder) else segmentation
+        vtk_seg = node.GetSegmentation()
+
+        # Find segment ID by name
+        seg_id = None
+        for i in range(vtk_seg.GetNumberOfSegments()):
+            sid = vtk_seg.GetNthSegmentID(i)
+            if vtk_seg.GetSegment(sid).GetName() == segment_name:
+                seg_id = sid
+                break
+
+        if seg_id is None:
+            return None
+
+        import SegmentStatistics  # type: ignore[import-not-found]
+
+        stats_logic = SegmentStatistics.SegmentStatisticsLogic()
+        stats_logic.getParameterNode().SetParameter("Segmentation", node.GetID())
+        stats_logic.getParameterNode().SetParameter(
+            "LabelmapSegmentStatisticsPlugin.centroid_ras.enabled", "True"
+        )
+        stats_logic.computeStatistics()
+        stats = stats_logic.getStatistics()
+
+        centroid_key = f"{seg_id}.LabelmapSegmentStatisticsPlugin.centroid_ras"
+        if centroid_key not in stats:
+            return None
+
+        centroid = stats[centroid_key]
+        return (centroid[0], centroid[1], centroid[2])
+
+    def copy_segments(
+        self,
+        source_seg: SegmentationBuilder | Any,
+        target_seg: SegmentationBuilder | Any,
+        segment_names: list[str] | None = None,
+        empty: bool = False,
+    ) -> None:
+        """Copy segments from one segmentation to another.
+
+        Args:
+            source_seg: Source segmentation (SegmentationBuilder or node).
+            target_seg: Target segmentation (SegmentationBuilder or node).
+            segment_names: Optional list of segment names to copy. Copies all if None.
+            empty: If True, copy only segment metadata (name + color) without data.
+        """
+        source_node = source_seg.node if isinstance(source_seg, SegmentationBuilder) else source_seg
+        target_node = target_seg.node if isinstance(target_seg, SegmentationBuilder) else target_seg
+        source_vtk_seg = source_node.GetSegmentation()
+        target_vtk_seg = target_node.GetSegmentation()
+
+        for i in range(source_vtk_seg.GetNumberOfSegments()):
+            seg_id = source_vtk_seg.GetNthSegmentID(i)
+            segment = source_vtk_seg.GetSegment(seg_id)
+            name = segment.GetName()
+
+            if segment_names is not None and name not in segment_names:
+                continue
+
+            if empty:
+                color = segment.GetColor()
+                target_vtk_seg.AddEmptySegment(name, name, color)
+            else:
+                target_vtk_seg.CopySegmentFromSegmentation(source_vtk_seg, seg_id)
+
+    def auto_number_segment(
+        self,
+        segmentation: SegmentationBuilder | Any,
+        prefix: str = "ROI",
+        start_from: int | None = None,
+    ) -> int:
+        """Add a new numbered segment with the next available number.
+
+        Parses existing segment names matching ``{prefix}_{N}`` to find the
+        highest number, then creates ``{prefix}_{N+1}``.
+
+        Args:
+            segmentation: SegmentationBuilder or raw segmentation node.
+            prefix: Name prefix for numbered segments.
+            start_from: Force a specific number instead of auto-detecting.
+
+        Returns:
+            The number assigned to the new segment.
+        """
+        node = segmentation.node if isinstance(segmentation, SegmentationBuilder) else segmentation
+        vtk_seg = node.GetSegmentation()
+        names = self.get_segment_names(segmentation)
+
+        if start_from is not None:
+            next_num = start_from
+        else:
+            max_num = 0
+            pattern = re.compile(rf"^{re.escape(prefix)}_(\d+)$")
+            for name in names:
+                m = pattern.match(name)
+                if m:
+                    max_num = max(max_num, int(m.group(1)))
+            next_num = max_num + 1
+
+        vtk_seg.AddEmptySegment(f"{prefix}_{next_num}", f"{prefix}_{next_num}")
+        return next_num
+
+    def subtract_segmentations(
+        self,
+        seg_a: SegmentationBuilder | Any,
+        seg_b: SegmentationBuilder | Any,
+        output_name: str | None = None,
+        max_overlap: int = 0,
+        max_overlap_ratio: float | None = None,
+    ) -> Any:
+        """ROI-level subtraction: remove segments from seg_a that overlap with seg_b.
+
+        For each segment in seg_a, counts voxel overlap with the merged seg_b
+        labelmap. Segments exceeding overlap thresholds are removed.
+
+        Args:
+            seg_a: Segmentation to subtract from (SegmentationBuilder or node).
+            seg_b: Segmentation to subtract (SegmentationBuilder or node).
+            output_name: If set, create a new node with surviving segments instead
+                         of modifying seg_a in-place.
+            max_overlap: Maximum allowed overlap voxel count (segments with more are removed).
+            max_overlap_ratio: Maximum allowed overlap ratio (overlap/total). Both
+                               thresholds must be exceeded for removal when set.
+
+        Returns:
+            The output segmentation node (new node if output_name, else seg_a node).
+        """
+        import numpy as np  # type: ignore[import-not-found]
+
+        node_a = seg_a.node if isinstance(seg_a, SegmentationBuilder) else seg_a
+        node_b = seg_b.node if isinstance(seg_b, SegmentationBuilder) else seg_b
+
+        # Export seg_b to a merged labelmap
+        seg_logic = slicer.modules.segmentations.logic()
+        labelmap_b = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLLabelMapVolumeNode", "_sub_b")
+        seg_logic.ExportAllSegmentsToLabelmapNode(node_b, labelmap_b)
+        arr_b = slicer.util.arrayFromVolume(labelmap_b)
+
+        vtk_seg_a = node_a.GetSegmentation()
+        segments_to_remove: list[str] = []
+
+        for i in range(vtk_seg_a.GetNumberOfSegments()):
+            seg_id = vtk_seg_a.GetNthSegmentID(i)
+
+            # Export single segment to temporary labelmap
+            tmp_label = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLLabelMapVolumeNode", "_sub_tmp")
+            seg_logic.ExportSegmentsToLabelmapNode(node_a, [seg_id], tmp_label)
+            arr_a = slicer.util.arrayFromVolume(tmp_label)
+
+            mask_a = arr_a > 0
+            total = int(np.sum(mask_a))
+            if total == 0:
+                slicer.mrmlScene.RemoveNode(tmp_label)
+                continue
+
+            overlap = int(np.sum(mask_a & (arr_b > 0)))
+
+            remove = overlap > max_overlap
+            if max_overlap_ratio is not None:
+                remove = remove and (overlap / total > max_overlap_ratio)
+
+            if remove:
+                segments_to_remove.append(seg_id)
+
+            slicer.mrmlScene.RemoveNode(tmp_label)
+
+        slicer.mrmlScene.RemoveNode(labelmap_b)
+
+        if output_name is not None:
+            # Create new segmentation with surviving segments
+            output_node = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentationNode", output_name)
+            output_node.CreateDefaultDisplayNodes()
+            if self._image_node is not None:
+                output_node.SetReferenceImageGeometryParameterFromVolumeNode(self._image_node)
+            output_vtk = output_node.GetSegmentation()
+            for i in range(vtk_seg_a.GetNumberOfSegments()):
+                seg_id = vtk_seg_a.GetNthSegmentID(i)
+                if seg_id not in segments_to_remove:
+                    output_vtk.CopySegmentFromSegmentation(vtk_seg_a, seg_id)
+            return output_node
+
+        # In-place removal
+        for seg_id in segments_to_remove:
+            vtk_seg_a.RemoveSegment(seg_id)
+        return node_a
+
+    def set_dual_layout(
+        self,
+        volume_a: Any,
+        volume_b: Any,
+        seg_a: SegmentationBuilder | Any | None = None,
+        seg_b: SegmentationBuilder | Any | None = None,
+        linked: bool = True,
+    ) -> None:
+        """Set side-by-side layout with two volumes and optional segmentations.
+
+        Args:
+            volume_a: Volume node for the left (Red) view.
+            volume_b: Volume node for the right (Yellow) view.
+            seg_a: Optional segmentation visible only in the left view.
+            seg_b: Optional segmentation visible only in the right view.
+            linked: If True, link slice navigation between views.
+        """
+        layout_node = self._layout_manager.layoutLogic().GetLayoutNode()
+        layout_node.SetViewArrangement(slicer.vtkMRMLLayoutNode.SlicerLayoutSideBySideView)
+
+        # Configure Red (left) composite
+        red_widget = self._layout_manager.sliceWidget("Red")
+        red_composite = red_widget.mrmlSliceCompositeNode()
+        red_composite.SetBackgroundVolumeID(volume_a.GetID())
+
+        # Configure Yellow (right) composite
+        yellow_widget = self._layout_manager.sliceWidget("Yellow")
+        yellow_composite = yellow_widget.mrmlSliceCompositeNode()
+        yellow_composite.SetBackgroundVolumeID(volume_b.GetID())
+
+        # Restrict segmentation visibility to specific views
+        if seg_a is not None:
+            node_a = seg_a.node if isinstance(seg_a, SegmentationBuilder) else seg_a
+            display_a = node_a.GetDisplayNode()
+            if display_a is not None:
+                display_a.SetViewNodeIDs(["vtkMRMLSliceNodeRed"])
+
+        if seg_b is not None:
+            node_b = seg_b.node if isinstance(seg_b, SegmentationBuilder) else seg_b
+            display_b = node_b.GetDisplayNode()
+            if display_b is not None:
+                display_b.SetViewNodeIDs(["vtkMRMLSliceNodeYellow"])
+
+        # Link slice navigation (SetLinkedControl lives on SliceCompositeNode)
+        if linked:
+            red_composite = self._scene.GetNodeByID("vtkMRMLSliceCompositeNodeRed")
+            yellow_composite = self._scene.GetNodeByID("vtkMRMLSliceCompositeNodeYellow")
+            if red_composite is not None:
+                red_composite.SetLinkedControl(True)
+            if yellow_composite is not None:
+                yellow_composite.SetLinkedControl(True)
+
+        self._layout_manager.resetSliceViews()
+
+    def setup_segment_focus_observer(
+        self,
+        editable_seg: SegmentationBuilder | Any,
+        reference_seg: SegmentationBuilder | Any,
+    ) -> None:
+        """Auto-navigate to reference centroid when selecting an empty segment.
+
+        When the user selects a segment in the editor, if that segment is empty
+        in the editable segmentation, the views jump to the centroid of the
+        same-named segment in the reference segmentation.
+
+        Args:
+            editable_seg: The segmentation being edited.
+            reference_seg: Reference segmentation with populated segments.
+        """
+        editable_node = (
+            editable_seg.node if isinstance(editable_seg, SegmentationBuilder) else editable_seg
+        )
+        reference_node = (
+            reference_seg.node if isinstance(reference_seg, SegmentationBuilder) else reference_seg
+        )
+
+        editor_node = self._scene.GetFirstNodeByClass("vtkMRMLSegmentEditorNode")
+        if editor_node is None:
+            return
+
+        helper_ref = self  # capture for closure
+
+        def on_segment_changed(caller: Any, _event: Any) -> None:
+            seg_id = caller.GetSelectedSegmentID()
+            if seg_id is None:
+                return
+
+            vtk_seg = editable_node.GetSegmentation()
+            segment = vtk_seg.GetSegment(seg_id)
+            if segment is None:
+                return
+
+            segment_name = segment.GetName()
+
+            # Check if the segment is empty via binary labelmap
+            labelmap = vtk_seg.GetSegmentBinaryLabelmapRepresentation(seg_id)
+            if labelmap is not None and labelmap.GetExtent()[0] <= labelmap.GetExtent()[1]:
+                # Segment has data — not empty, skip navigation
+                return
+
+            centroid = helper_ref.get_segment_centroid(reference_node, segment_name)
+            if centroid is None:
+                return
+
+            r, a, s = centroid
+            for slice_name in ["Red", "Yellow"]:
+                slice_node = helper_ref._scene.GetNodeByID(f"vtkMRMLSliceNode{slice_name}")
+                if slice_node is not None:
+                    slice_node.JumpSlice(r, a, s)
+
+        editor_node.AddObserver(vtk.vtkCommand.ModifiedEvent, on_segment_changed)

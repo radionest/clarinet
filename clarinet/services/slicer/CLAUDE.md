@@ -60,6 +60,13 @@ Runs inside Slicer Python environment. Has `_Dummy` fallback for testing outside
 - `add_view_shortcuts()` — a/s/c keys for view switching
 - `add_shortcuts(shortcuts: list[tuple[str, str]])` — custom keyboard shortcuts (key→layout or key→exec code)
 - `load_study_from_pacs(study_instance_uid)` → list of loaded MRML node IDs
+- `get_segment_names(segmentation)` → `list[str]` — ordered segment names from a segmentation node
+- `get_segment_centroid(segmentation, segment_name)` → `tuple[float,float,float] | None` — RAS centroid via SegmentStatistics; None if empty
+- `copy_segments(source_seg, target_seg, segment_names=None, empty=False)` — copy segments between segmentations; `empty=True` copies only metadata (name + color)
+- `auto_number_segment(segmentation, prefix="ROI", start_from=None)` → `int` — adds `{prefix}_{N+1}` segment, returns assigned number
+- `subtract_segmentations(seg_a, seg_b, output_name=None, max_overlap=0, max_overlap_ratio=None)` — ROI-level subtraction: removes seg_a segments overlapping with seg_b. In-place or new node if `output_name` set
+- `set_dual_layout(volume_a, volume_b, seg_a=None, seg_b=None, linked=True)` — side-by-side view with Red/Yellow composites and per-view segmentation visibility
+- `setup_segment_focus_observer(editable_seg, reference_seg)` — auto-jump to reference centroid when selecting an empty segment in the editor
 
 ## PacsHelper (`helper.py`)
 
