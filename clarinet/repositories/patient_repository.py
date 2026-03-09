@@ -3,12 +3,17 @@
 from collections.abc import Sequence
 
 from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlmodel import select
 
+from clarinet.exceptions.domain import DatabaseIntegrityError
 from clarinet.models import Patient, Study
 from clarinet.repositories.base import BaseRepository
+from clarinet.utils.logger import logger
+
+_MAX_AUTO_ID_RETRIES = 3
 
 
 class PatientRepository(BaseRepository[Patient]):
@@ -17,6 +22,40 @@ class PatientRepository(BaseRepository[Patient]):
     def __init__(self, session: AsyncSession):
         """Initialize patient repository with session."""
         super().__init__(session, Patient)
+
+    async def create(self, entity: Patient) -> Patient:
+        """Create patient, auto-assigning auto_id if not provided."""
+        if entity.auto_id is not None:
+            return await super().create(entity)
+
+        for attempt in range(1, _MAX_AUTO_ID_RETRIES + 1):
+            entity.auto_id = await self._next_auto_id()
+            try:
+                self.session.add(entity)
+                await self.session.flush()
+                await self.session.refresh(entity)
+                return entity
+            except IntegrityError as exc:
+                logger.warning(
+                    f"auto_id conflict on attempt {attempt}/{_MAX_AUTO_ID_RETRIES}: {exc}"
+                )
+                await self.session.rollback()
+                if attempt == _MAX_AUTO_ID_RETRIES:
+                    raise DatabaseIntegrityError(
+                        f"Failed to assign unique auto_id after {_MAX_AUTO_ID_RETRIES} attempts"
+                    ) from exc
+                if entity in self.session:
+                    self.session.expunge(entity)
+
+        raise DatabaseIntegrityError("Failed to assign unique auto_id")  # unreachable
+
+    async def _next_auto_id(self) -> int:
+        """Return MAX(auto_id) + 1, or 1 if no patients exist."""
+        result = await self.session.execute(
+            select(func.coalesce(func.max(Patient.auto_id), 0))
+        )
+        current_max: int = result.scalar_one()  # type: ignore[assignment]
+        return current_max + 1
 
     async def get_all_with_studies(self, skip: int = 0, limit: int = 100) -> Sequence[Patient]:
         """Get all patients with studies loaded.

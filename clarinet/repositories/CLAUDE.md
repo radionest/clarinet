@@ -87,6 +87,12 @@ Beyond `BaseRepository`, `RecordRepository` has:
 - Default reason: `"Invalidated by record #{source_record_id}"`
 - `context_info` is appended (newline-separated), never overwritten
 
+## PatientRepository: auto_id Generation
+
+`PatientRepository.create()` overrides the base `create()` to auto-assign `auto_id = MAX(auto_id) + 1`
+when `entity.auto_id is None`. Retries up to 3 times on `IntegrityError` (UNIQUE conflict).
+If `auto_id` is explicitly provided, falls through to `super().create()` without the MAX query.
+
 ## Eager Loading
 
 Use `selectinload()` to avoid N+1. Nested loading for deep relations:

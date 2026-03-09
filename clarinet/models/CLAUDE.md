@@ -92,6 +92,10 @@ f"{settings.anon_id_prefix}_{auto_id}"  # Returns None if auto_id is None
 **Do NOT remove `@property`** — without it mypy sees the return type as
 `Callable[[], str | None]` instead of `str | None` (upstream mypy bug, pydantic#11687).
 
+`Patient.auto_id` — unique non-PK integer. Auto-assigned by `PatientRepository.create()`
+via `MAX(auto_id) + 1`. The `sa_column` has `unique=True` but **no** `autoincrement`
+(SQLite ignores autoincrement on non-PK columns).
+
 ## File Registry System
 
 File definitions are stored in a normalized schema with M2M relationship:

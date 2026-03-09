@@ -52,8 +52,7 @@ class Patient(PatientBase, table=True):
         default=None,
         sa_column=Column(
             Integer,
-            nullable=True,  # SQLite needs nullable for autoincrement non-primary key
-            autoincrement=True,
+            nullable=True,
             unique=True,
         ),
     )

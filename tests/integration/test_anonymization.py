@@ -28,7 +28,11 @@ async def test_anonymize_study_not_found(client) -> None:
 
 @pytest.mark.asyncio
 async def test_anonymize_study_no_anon_id(client, test_session) -> None:
-    """Returns 500 when patient has no anon_id (auto_id is None)."""
+    """Returns 500 when patient has no anon_id (auto_id is None).
+
+    Note: patient is created via session.add() (bypassing PatientRepository),
+    so auto_id remains None — this tests the defensive path in anonymization.
+    """
     from datetime import UTC, datetime
 
     from clarinet.models.patient import Patient
