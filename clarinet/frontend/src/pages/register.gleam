@@ -42,8 +42,11 @@ fn register_form(model: Model) -> Element(Msg) {
     [
       // Email field
       html.div([attribute.class("form-group")], [
-        html.label([attribute.for("reg-email")], [html.text("Email")]),
+        html.label([attribute.for("reg-email"), attribute.class("form-label")], [
+          html.text("Email"),
+        ]),
         html.input([
+          attribute.class("form-input"),
           attribute.type_("email"),
           attribute.id("reg-email"),
           attribute.name("email"),
@@ -60,8 +63,12 @@ fn register_form(model: Model) -> Element(Msg) {
 
       // Password field
       html.div([attribute.class("form-group")], [
-        html.label([attribute.for("reg-password")], [html.text("Password")]),
+        html.label(
+          [attribute.for("reg-password"), attribute.class("form-label")],
+          [html.text("Password")],
+        ),
         html.input([
+          attribute.class("form-input"),
           attribute.type_("password"),
           attribute.id("reg-password"),
           attribute.name("password"),
@@ -79,10 +86,12 @@ fn register_form(model: Model) -> Element(Msg) {
 
       // Password confirmation field
       html.div([attribute.class("form-group")], [
-        html.label([attribute.for("reg-password-confirm")], [
-          html.text("Confirm Password"),
-        ]),
+        html.label(
+          [attribute.for("reg-password-confirm"), attribute.class("form-label")],
+          [html.text("Confirm Password")],
+        ),
         html.input([
+          attribute.class("form-input"),
           attribute.type_("password"),
           attribute.id("reg-password-confirm"),
           attribute.name("password-confirm"),

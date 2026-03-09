@@ -40,8 +40,11 @@ fn login_form(model: Model) -> Element(Msg) {
     [
       // Email field
       html.div([attribute.class("form-group")], [
-        html.label([attribute.for("email")], [html.text("Email")]),
+        html.label([attribute.for("email"), attribute.class("form-label")], [
+          html.text("Email"),
+        ]),
         html.input([
+          attribute.class("form-input"),
           attribute.type_("email"),
           attribute.id("email"),
           attribute.name("email"),
@@ -55,8 +58,12 @@ fn login_form(model: Model) -> Element(Msg) {
 
       // Password field
       html.div([attribute.class("form-group")], [
-        html.label([attribute.for("password")], [html.text("Password")]),
+        html.label(
+          [attribute.for("password"), attribute.class("form-label")],
+          [html.text("Password")],
+        ),
         html.input([
+          attribute.class("form-input"),
           attribute.type_("password"),
           attribute.id("password"),
           attribute.name("password"),
