@@ -33,7 +33,12 @@ class InterceptHandler(logging.Handler):
 
         # Find caller from where the logged message originated
         frame, depth = inspect.currentframe(), 0
-        while frame and frame.f_code.co_filename == logging.__file__:
+        while frame:
+            filename = frame.f_code.co_filename
+            is_logging = filename == logging.__file__
+            is_frozen = "importlib" in filename and "_bootstrap" in filename
+            if depth > 0 and not (is_logging or is_frozen):
+                break
             frame = frame.f_back
             depth += 1
 
@@ -42,6 +47,7 @@ class InterceptHandler(logging.Handler):
 
 def setup_logging(
     level: str = "INFO",
+    console_level: str | None = None,
     format: str | None = None,
     log_to_file: bool = False,
     log_file: str | Path | None = None,
@@ -54,6 +60,7 @@ def setup_logging(
 
     Args:
         level: Minimum log level to capture
+        console_level: Minimum log level for console output (defaults to level)
         format: Log message format string
         log_to_file: Whether to log to a file in addition to console
         log_file: Path to log file (will be created if doesn't exist)
@@ -74,7 +81,7 @@ def setup_logging(
     # Add console handler
     _logger.add(
         sys.stderr,
-        level=level,
+        level=console_level or level,
         format=format,
         colorize=True,
         backtrace=True,
@@ -102,14 +109,11 @@ def setup_logging(
     # Intercept standard library logging
     logging.basicConfig(handlers=[InterceptHandler()], level=0, force=True)
 
-    # Capture common libraries' logs
-    for log_name in ["uvicorn", "uvicorn.error", "fastapi", "sqlalchemy"]:
-        logging.getLogger(log_name).handlers = [InterceptHandler()]
-
 
 # Configure logging with settings from config
 setup_logging(
     level=settings.log_level,
+    console_level=settings.log_console_level,
     format=settings.log_format,
     log_to_file=settings.log_to_file,
     log_file=settings.get_log_dir() / "clarinet.log" if settings.log_to_file else None,

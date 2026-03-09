@@ -10,7 +10,7 @@ import os
 from enum import Enum
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal, Self
+from typing import Any, Literal, Self
 
 from pydantic import field_validator
 from pydantic_settings import (
@@ -236,6 +236,15 @@ class Settings(BaseSettings):
     log_rotation: str = "20 MB"
     log_retention: str = "1 week"
     log_format: str | None = None  # Use default if None
+    log_console_level: str | None = None  # If None, uses log_level
+
+    def model_post_init(self, __context: Any) -> None:
+        """Link debug flag to log_level when log_level is not explicitly set."""
+        if self.debug and self.log_level == "INFO":
+            self.log_level = "DEBUG"
+        # Default console to INFO when debug makes file-level DEBUG
+        if self.log_console_level is None and self.log_level == "DEBUG":
+            self.log_console_level = "INFO"
 
     # Project customization
     project_path: Path | None = None
