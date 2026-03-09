@@ -329,6 +329,132 @@ class TestRecordServiceTriggers:
         await service.notify_file_updates(patient_id, changed_files)
 
 
+class TestCreateRecord:
+    """Test RecordService.create_record fires RecordFlow triggers."""
+
+    @pytest.mark.asyncio
+    async def test_create_record_no_files_fires_trigger(self) -> None:
+        """create_record fires status-change trigger with old_status=None."""
+        record_mock = MagicMock()
+        record_mock.id = 1
+        record_read_mock = MagicMock()
+
+        repo_mock = AsyncMock()
+        repo_mock.create_with_relations.return_value = record_mock
+
+        engine_mock = AsyncMock()
+        service = RecordService(repo_mock, engine_mock)
+
+        with (
+            patch("clarinet.services.record_service.RecordRead") as patched_read,
+            patch("clarinet.services.record_service.validate_record_files") as patched_vrf,
+        ):
+            patched_read.model_validate.return_value = record_read_mock
+            patched_vrf.return_value = None  # no input files defined
+
+            result = await service.create_record(record_mock)
+
+            repo_mock.create_with_relations.assert_awaited_once_with(record_mock)
+            patched_vrf.assert_awaited_once_with(record_read_mock)
+            engine_mock.handle_record_status_change.assert_awaited_once_with(record_read_mock, None)
+            assert result == record_mock
+
+    @pytest.mark.asyncio
+    async def test_create_record_valid_files_sets_files(self) -> None:
+        """create_record sets matched files when validation passes."""
+        record_mock = MagicMock()
+        record_mock.id = 1
+        refreshed_mock = MagicMock()
+        record_read_mock = MagicMock()
+        refreshed_read_mock = MagicMock()
+
+        file_result_mock = MagicMock()
+        file_result_mock.valid = True
+        file_result_mock.matched_files = {"input": "file.nii.gz"}
+
+        repo_mock = AsyncMock()
+        repo_mock.create_with_relations.return_value = record_mock
+        repo_mock.get_with_relations.return_value = refreshed_mock
+
+        engine_mock = AsyncMock()
+        service = RecordService(repo_mock, engine_mock)
+
+        with (
+            patch("clarinet.services.record_service.RecordRead") as patched_read,
+            patch("clarinet.services.record_service.validate_record_files") as patched_vrf,
+        ):
+            patched_read.model_validate.side_effect = [record_read_mock, refreshed_read_mock]
+            patched_vrf.return_value = file_result_mock
+
+            result = await service.create_record(record_mock)
+
+            repo_mock.set_files.assert_awaited_once_with(record_mock, {"input": "file.nii.gz"})
+            repo_mock.get_with_relations.assert_awaited_once()
+            engine_mock.handle_record_status_change.assert_awaited_once_with(
+                refreshed_read_mock, None
+            )
+            assert result == refreshed_mock
+
+    @pytest.mark.asyncio
+    async def test_create_record_missing_files_blocks(self) -> None:
+        """create_record sets blocked status when required files are missing."""
+        record_mock = MagicMock()
+        record_mock.id = 1
+        blocked_mock = MagicMock()
+        blocked_mock.status = RecordStatus.blocked
+        record_read_mock = MagicMock()
+        blocked_read_mock = MagicMock()
+
+        file_result_mock = MagicMock()
+        file_result_mock.valid = False
+        file_result_mock.matched_files = {}
+
+        repo_mock = AsyncMock()
+        repo_mock.create_with_relations.return_value = record_mock
+        repo_mock.update_status.return_value = (blocked_mock, RecordStatus.pending)
+
+        engine_mock = AsyncMock()
+        service = RecordService(repo_mock, engine_mock)
+
+        with (
+            patch("clarinet.services.record_service.RecordRead") as patched_read,
+            patch("clarinet.services.record_service.validate_record_files") as patched_vrf,
+        ):
+            patched_read.model_validate.side_effect = [record_read_mock, blocked_read_mock]
+            patched_vrf.return_value = file_result_mock
+
+            result = await service.create_record(record_mock)
+
+            repo_mock.update_status.assert_awaited_once_with(1, RecordStatus.blocked)
+            engine_mock.handle_record_status_change.assert_awaited_once_with(
+                blocked_read_mock, None
+            )
+            assert result == blocked_mock
+
+    @pytest.mark.asyncio
+    async def test_create_record_no_trigger_when_engine_none(self) -> None:
+        """create_record does not fire trigger when engine is None."""
+        record_mock = MagicMock()
+        record_mock.id = 1
+
+        repo_mock = AsyncMock()
+        repo_mock.create_with_relations.return_value = record_mock
+
+        service = RecordService(repo_mock, engine=None)
+
+        with (
+            patch("clarinet.services.record_service.RecordRead") as patched_read,
+            patch("clarinet.services.record_service.validate_record_files") as patched_vrf,
+        ):
+            patched_read.model_validate.return_value = MagicMock()
+            patched_vrf.return_value = None
+
+            result = await service.create_record(record_mock)
+
+            repo_mock.create_with_relations.assert_awaited_once_with(record_mock)
+            assert result == record_mock
+
+
 class TestStudyServiceEntityTriggers:
     """Test StudyService entity creation fires RecordFlow triggers."""
 

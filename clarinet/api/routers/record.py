@@ -54,14 +54,12 @@ from clarinet.models import (
     RecordTypeRead,
     User,
 )
-from clarinet.models.file_schema import FileRole
 from clarinet.repositories.record_repository import RecordSearchCriteria
-from clarinet.services.file_validation import FileValidationResult, FileValidator
+from clarinet.services.file_validation import FileValidationResult, validate_record_files
 from clarinet.services.schema_hydration import hydrate_schema
 from clarinet.types import RecordData
 from clarinet.utils.file_checksums import checksums_changed, compute_checksums
 from clarinet.utils.file_link_sync import sync_file_links
-from clarinet.utils.fs import run_in_fs_thread
 from clarinet.utils.validation import validate_json_by_schema
 
 
@@ -83,42 +81,6 @@ router = APIRouter(
 
 
 # Helpers
-
-
-async def validate_record_files(
-    record: RecordRead,
-    *,
-    raise_on_invalid: bool = False,
-) -> FileValidationResult | None:
-    """Validate input files for a record.
-
-    Accepts ``RecordRead`` (Pydantic) because ``working_folder`` and other
-    computed fields are defined on ``RecordRead``, not on the ORM ``Record``.
-    Callers should convert via ``RecordRead.model_validate(record)`` first.
-
-    The blocking ``FileValidator.validate()`` call is offloaded to a
-    dedicated FS thread pool to avoid blocking the event loop.
-
-    Args:
-        record: RecordRead instance with all relations populated
-        raise_on_invalid: If True, raise ValidationError on missing files.
-
-    Returns:
-        FileValidationResult if validation was performed, None if no input files defined
-    """
-    input_defs = [
-        fd for fd in (record.record_type.file_registry or []) if fd.role == FileRole.INPUT
-    ]
-    if not input_defs:
-        return None
-
-    directory = Path(record.working_folder)
-    validator = FileValidator(input_defs)
-    result = await run_in_fs_thread(validator.validate, record, directory)
-    if not result.valid and raise_on_invalid:
-        errors = "; ".join(f"{e.file_name}: {e.message}" for e in result.errors)
-        raise ValidationError(f"File validation failed: {errors}")
-    return result
 
 
 async def validate_record_data(
@@ -417,6 +379,7 @@ async def check_record_constraints(
 async def add_record(
     new_record: RecordCreate,
     repo: RecordRepositoryDep,
+    service: RecordServiceDep,
 ) -> Record:
     """Create a new record.
 
@@ -434,26 +397,7 @@ async def add_record(
             new_record.user_id = parent.user_id
 
     record = Record(**new_record.model_dump())
-    record = await repo.create_with_relations(record)
-
-    # Validate input files if defined
-    record_read = RecordRead.model_validate(record)
-    file_result = await validate_record_files(record_read)
-
-    if file_result is None:
-        # No input files defined — stay pending
-        return record
-
-    if file_result.valid and file_result.matched_files:
-        await repo.set_files(record, file_result.matched_files)
-        return await repo.get_with_relations(record.id)  # type: ignore[arg-type]
-
-    if not file_result.valid:
-        # Required input files missing — set blocked
-        record, _ = await repo.update_status(record.id, RecordStatus.blocked)  # type: ignore[arg-type]
-        return record
-
-    return record
+    return await service.create_record(record)
 
 
 @router.patch("/{record_id}/status", response_model=RecordRead)

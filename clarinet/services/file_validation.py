@@ -9,11 +9,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from clarinet.exceptions.domain import ValidationError
+from clarinet.models.file_schema import FileRole
 from clarinet.utils.file_patterns import resolve_pattern
+from clarinet.utils.fs import run_in_fs_thread
 
 if TYPE_CHECKING:
     from clarinet.models.file_schema import FileDefinitionRead
-    from clarinet.models.record import RecordBase
+    from clarinet.models.record import RecordBase, RecordRead
 
 
 @dataclass
@@ -107,3 +110,39 @@ class FileValidator:
             errors=errors,
             matched_files=matched,
         )
+
+
+async def validate_record_files(
+    record: RecordRead,
+    *,
+    raise_on_invalid: bool = False,
+) -> FileValidationResult | None:
+    """Validate input files for a record.
+
+    Accepts ``RecordRead`` (Pydantic) because ``working_folder`` and other
+    computed fields are defined on ``RecordRead``, not on the ORM ``Record``.
+    Callers should convert via ``RecordRead.model_validate(record)`` first.
+
+    The blocking ``FileValidator.validate()`` call is offloaded to a
+    dedicated FS thread pool to avoid blocking the event loop.
+
+    Args:
+        record: RecordRead instance with all relations populated
+        raise_on_invalid: If True, raise ValidationError on missing files.
+
+    Returns:
+        FileValidationResult if validation was performed, None if no input files defined
+    """
+    input_defs = [
+        fd for fd in (record.record_type.file_registry or []) if fd.role == FileRole.INPUT
+    ]
+    if not input_defs:
+        return None
+
+    directory = Path(record.working_folder)
+    validator = FileValidator(input_defs)
+    result = await run_in_fs_thread(validator.validate, record, directory)
+    if not result.valid and raise_on_invalid:
+        errors = "; ".join(f"{e.file_name}: {e.message}" for e in result.errors)
+        raise ValidationError(f"File validation failed: {errors}")
+    return result

@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 from uuid import UUID
 
 from clarinet.models import Record, RecordRead, RecordStatus
+from clarinet.services.file_validation import validate_record_files
 
 if TYPE_CHECKING:
     from clarinet.repositories.record_repository import RecordRepository
@@ -30,6 +31,33 @@ class RecordService:
         self.engine = engine
 
     # ── Public methods ───────────────────────────────────────────────────
+
+    async def create_record(self, record: Record) -> Record:
+        """Create a record with file validation, blocking, and RecordFlow trigger.
+
+        Args:
+            record: Record ORM instance to persist.
+
+        Returns:
+            Created record with relations loaded.
+        """
+        record = await self.repo.create_with_relations(record)
+
+        # Validate input files
+        record_read = RecordRead.model_validate(record)
+        file_result = await validate_record_files(record_read)
+
+        if file_result is not None:
+            if file_result.valid and file_result.matched_files:
+                await self.repo.set_files(record, file_result.matched_files)
+                record = await self.repo.get_with_relations(record.id)  # type: ignore[arg-type]
+            elif not file_result.valid:
+                record, _ = await self.repo.update_status(record.id, RecordStatus.blocked)  # type: ignore[arg-type]
+
+        # Fire status-change trigger for the initial status
+        await self._fire_status_change(record, old_status=None)
+
+        return record
 
     async def update_status(
         self, record_id: int, new_status: RecordStatus
@@ -141,7 +169,7 @@ class RecordService:
 
     # ── Private helpers ──────────────────────────────────────────────────
 
-    async def _fire_status_change(self, record: Record, old_status: RecordStatus) -> None:
+    async def _fire_status_change(self, record: Record, old_status: RecordStatus | None) -> None:
         """Convert record to RecordRead and fire status-change trigger."""
         if not self.engine:
             return
