@@ -251,6 +251,11 @@ class Settings(BaseSettings):
     project_static_path: Path | None = None
 
     @property
+    def api_base_url(self) -> str:
+        """Base URL for internal API client connections."""
+        return f"http://{self.host}:{self.port}/api"
+
+    @property
     def session_expire_seconds(self) -> int:
         """Get session expiration time in seconds."""
         return self.session_expire_hours * 3600

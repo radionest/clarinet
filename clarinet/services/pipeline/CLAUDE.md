@@ -68,7 +68,7 @@ broker = get_broker()
 
 @broker.task
 async def simple_task(msg: dict) -> dict:
-    message = PipelineMessage(**msg)
+    message = PipelineMessage.model_validate(msg)
     # ...
     return message.model_dump()
 ```

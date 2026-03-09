@@ -24,7 +24,7 @@ async def _get_client() -> ClarinetClient:
     from clarinet.settings import settings
 
     client = ClarinetClient(
-        f"http://{settings.host}:{settings.port}/api",
+        settings.api_base_url,
         username=settings.admin_email,
         password=settings.admin_password,
     )
@@ -38,7 +38,7 @@ async def segment_air(msg: dict) -> dict:
     import nrrd
     import numpy as np
 
-    message = PipelineMessage(**msg)
+    message = PipelineMessage.model_validate(msg)
 
     client = await _get_client()
     try:
@@ -124,7 +124,7 @@ async def create_air_record(msg: dict) -> dict:
     """Create an air_volume record via the Clarinet API."""
     from clarinet.models import RecordCreate
 
-    message = PipelineMessage(**msg)
+    message = PipelineMessage.model_validate(msg)
 
     client = await _get_client()
     try:
@@ -151,7 +151,7 @@ async def calculate_air_volume(msg: dict) -> dict:
     import nrrd
     import numpy as np
 
-    message = PipelineMessage(**msg)
+    message = PipelineMessage.model_validate(msg)
 
     working_dir = message.payload.get("working_dir")
     record_id = message.payload.get("record_id")
