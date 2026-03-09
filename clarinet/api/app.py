@@ -103,6 +103,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # Load project file registry for API use
     app.state.project_file_registry = await load_project_file_registry(settings.config_tasks_path)
 
+    # Load custom schema hydrators from tasks folder
+    from clarinet.services.schema_hydration import load_custom_hydrators
+
+    hydrator_count = load_custom_hydrators(settings.config_tasks_path)
+    if hydrator_count:
+        logger.info(f"Loaded {hydrator_count} custom schema hydrator(s)")
+
     try:
         await ensure_admin_exists()
     except RuntimeError as e:

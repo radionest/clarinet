@@ -17,7 +17,9 @@ from fastapi import (
     Request,
     status,
 )
+from fastapi.responses import JSONResponse
 from jsonschema import Draft202012Validator, SchemaError
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import SQLModel
 
 from clarinet.api.auth_config import current_active_user
@@ -55,6 +57,7 @@ from clarinet.models import (
 from clarinet.models.file_schema import FileRole
 from clarinet.repositories.record_repository import RecordSearchCriteria
 from clarinet.services.file_validation import FileValidationResult, FileValidator
+from clarinet.services.schema_hydration import hydrate_schema
 from clarinet.types import RecordData
 from clarinet.utils.file_checksums import checksums_changed, compute_checksums
 from clarinet.utils.file_link_sync import sync_file_links
@@ -118,23 +121,28 @@ async def validate_record_files(
     return result
 
 
-def validate_record_data(record: Record, data: RecordData) -> RecordData:
-    """Validate record data against its record type schema.
+async def validate_record_data(
+    record: Record, data: RecordData, session: AsyncSession
+) -> RecordData:
+    """Validate record data against its hydrated record type schema.
 
+    Resolves ``x-options`` markers to ``oneOf`` before validation.
     Record must have record_type relation loaded.
 
     Args:
-        record: Record with record_type loaded
-        data: Data to validate
+        record: Record with record_type loaded.
+        data: Data to validate.
+        session: Async DB session for schema hydration.
 
     Returns:
-        Validated data
+        Validated data.
 
     Raises:
-        ValidationError: If data does not match schema
+        ValidationError: If data does not match schema.
     """
     if record.record_type.data_schema:
-        validate_json_by_schema(data, record.record_type.data_schema)
+        hydrated = await hydrate_schema(record.record_type.data_schema, record, session)
+        validate_json_by_schema(data, hydrated)
 
     return data
 
@@ -365,6 +373,31 @@ async def get_record(
     return RecordRead.model_validate(record)
 
 
+@router.get("/{record_id}/schema", response_class=JSONResponse)
+async def get_hydrated_schema(
+    record_id: int,
+    repo: RecordRepositoryDep,
+    session: SessionDep,
+) -> JSONResponse:
+    """Return the record type's JSON Schema with ``x-options`` resolved.
+
+    Args:
+        record_id: ID of the record.
+
+    Returns:
+        Hydrated JSON Schema dict.
+
+    Raises:
+        NOT_FOUND: If the record or its data_schema does not exist.
+    """
+    record = await repo.get_with_relations(record_id)
+    schema = record.record_type.data_schema
+    if not schema:
+        raise NOT_FOUND.with_context("Record type has no data schema")
+    hydrated = await hydrate_schema(schema, record, session)
+    return JSONResponse(content=hydrated)
+
+
 async def check_record_constraints(
     new_record: RecordCreate,
     repo: RecordRepositoryDep,
@@ -450,6 +483,7 @@ async def submit_record_data(
     record_id: int,
     repo: RecordRepositoryDep,
     service: RecordServiceDep,
+    session: SessionDep,
     data: RecordData = Body(),
 ) -> Record:
     """Submit data for a record."""
@@ -461,8 +495,7 @@ async def submit_record_data(
     if record.status == RecordStatus.finished:
         raise CONFLICT.with_context("Record already finished. Use PATCH to update the record data.")
 
-    # Validate data against schema
-    validated_data = validate_record_data(record, data)
+    validated_data = await validate_record_data(record, data, session)
 
     # Validate input files if defined (raise on missing required files)
     record_read = RecordRead.model_validate(record)
@@ -482,6 +515,7 @@ async def update_record_data(
     record_id: int,
     repo: RecordRepositoryDep,
     service: RecordServiceDep,
+    session: SessionDep,
     data: RecordData = Body(),
 ) -> Record:
     """Update a record's data."""
@@ -490,7 +524,7 @@ async def update_record_data(
     if record.status != RecordStatus.finished:
         raise CONFLICT.with_context("Record is not finished yet. Use POST to submit record data.")
 
-    validated_data = validate_record_data(record, data)
+    validated_data = await validate_record_data(record, data, session)
     updated, _ = await service.update_data(record_id, validated_data)
 
     return updated

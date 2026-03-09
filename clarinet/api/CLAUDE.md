@@ -46,6 +46,7 @@ XRepositoryDep = Annotated[XRepository, Depends(get_X_repository)]
 Startup sequence:
 1. Database init (`db_manager.create_db_and_tables_async()`)
 2. Default roles + config reconciliation (`reconcile_config()`) → stores `app.state.config_mode`, `app.state.config_tasks_path`
+2b. Load project file registry + custom schema hydrators from tasks folder
 3. Admin user creation (`ensure_admin_exists()`)
 4. RecordFlow engine setup (if `recordflow_enabled`) → `app.state.recordflow_engine`
 5. Pipeline broker startup (if `pipeline_enabled`) → `app.state.pipeline_broker`; syncs pipeline definitions to DB
@@ -171,6 +172,7 @@ grouped by router prefix. Status codes: 201 = POST create, 204 = DELETE/bulk, 20
 | `/api/records/available_types` | GET | 200 | Available record types for user |
 | `/api/records/bulk/status` | PATCH | 204 | Bulk status update |
 | `/api/records/{id}` | GET | 200 | Get record |
+| `/api/records/{id}/schema` | GET | 200 | Hydrated JSON Schema (x-options → oneOf) |
 | `/api/records/{id}/status` | PATCH | 200 | Update status |
 | `/api/records/{id}/user` | PATCH | 200 | Assign user |
 | `/api/records/{id}/data` | POST | 200 | Submit data |

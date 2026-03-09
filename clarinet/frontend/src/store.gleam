@@ -66,6 +66,8 @@ pub type Model {
     slicer_loading: Bool,
     slicer_available: Option(Bool),
     slicer_ping_timer: Option(global.TimerID),
+    // Hydrated schemas cache (record_id -> schema JSON string)
+    hydrated_schemas: Dict(String, String),
   )
 }
 
@@ -207,6 +209,10 @@ pub type Msg {
   SlicerPingTimerStarted(global.TimerID)
   StopSlicerPingTimer
 
+  // Schema hydration
+  LoadHydratedSchema(record_id: String)
+  HydratedSchemaLoaded(record_id: String, result: Result(String, ApiError))
+
   // Misc
   NoOp
   RefreshData
@@ -254,6 +260,7 @@ pub fn init() -> Model {
     slicer_loading: False,
     slicer_available: None,
     slicer_ping_timer: None,
+    hydrated_schemas: dict.new(),
   )
 }
 

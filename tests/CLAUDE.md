@@ -29,6 +29,8 @@
 - `tests/integration/test_config_toml_sync.py` — integration tests for TOML bidirectional sync (bootstrap from TOML, export, round-trip)
 - `tests/integration/test_config_python_mode.py` — integration tests for Python config mode (loader, FileRef resolution, schema sidecars)
 - `tests/integration/test_parent_child.py` — integration tests for parent-child relationships (DAG validation, parent record type matching, API endpoints, config reconciler, search criteria, user_id inheritance)
+- `tests/test_schema_hydration.py` — unit tests for schema hydration (registry, walker, built-in study_series hydrator, edge cases)
+- `tests/integration/test_schema_hydration_api.py` — integration tests for schema hydration API (GET /records/{id}/schema, POST data validation against hydrated oneOf)
 
 ## Guidelines
 

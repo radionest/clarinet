@@ -148,7 +148,13 @@ fn render_dynamic_form(
   record_type: RecordType,
   record_id: String,
 ) -> Element(Msg) {
-  case record_type.data_schema {
+  // Prefer hydrated schema (with oneOf) over static schema
+  let effective_schema = case dict.get(model.hydrated_schemas, record_id) {
+    Ok(hydrated) -> Some(hydrated)
+    Error(_) -> record_type.data_schema
+  }
+
+  case effective_schema {
     Some(schema_json) -> {
       let can_edit =
         permissions.can_fill_record(record, model.user)

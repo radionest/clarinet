@@ -401,6 +401,19 @@ pub fn record_type_full_decoder() -> decode.Decoder(RecordType) {
   ))
 }
 
+/// Get hydrated schema for a record (x-options resolved to oneOf)
+pub fn get_hydrated_schema(
+  record_id: String,
+) -> Promise(Result(String, ApiError)) {
+  http_client.get("/records/" <> record_id <> "/schema")
+  |> promise.map(fn(res) {
+    case res {
+      Ok(data) -> Ok(json_utils.dynamic_to_string(data))
+      Error(err) -> Error(err)
+    }
+  })
+}
+
 /// Get a single record type by name
 pub fn get_record_type(name: String) -> Promise(Result(RecordType, ApiError)) {
   http_client.get("/records/types/" <> name)

@@ -19,8 +19,8 @@
             },
             "best_series": {
                 "type": "string",
-                "pattern": "^[0-9.]+$",
-                "description": "DICOM UID of the best series for metastasis visualization"
+                "description": "DICOM UID of the best series for metastasis visualization",
+                "x-options": {"source": "study_series"}
             }
         },
         "required": ["study_type", "best_series"]

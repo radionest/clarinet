@@ -1034,6 +1034,30 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       #(store.clear_pacs(model), effect.none())
     }
 
+    // Schema hydration
+    store.LoadHydratedSchema(record_id) -> {
+      let eff =
+        effect.from(fn(dispatch) {
+          records.get_hydrated_schema(record_id)
+          |> promise.map(fn(result) {
+            dispatch(store.HydratedSchemaLoaded(record_id, result))
+          })
+          Nil
+        })
+      #(model, eff)
+    }
+
+    store.HydratedSchemaLoaded(record_id, Ok(schema_json)) -> {
+      let schemas =
+        dict.insert(model.hydrated_schemas, record_id, schema_json)
+      #(store.Model(..model, hydrated_schemas: schemas), effect.none())
+    }
+
+    store.HydratedSchemaLoaded(_record_id, Error(_)) -> {
+      // Silently fall back to static schema
+      #(model, effect.none())
+    }
+
     // Default case
     _ -> #(model, effect.none())
   }
@@ -1212,6 +1236,7 @@ fn load_route_data(model: Model, route: Route) -> Effect(Msg) {
     router.RecordDetail(id), Some(_) ->
       effect.batch([
         dispatch_msg(store.LoadRecordDetail(id)),
+        dispatch_msg(store.LoadHydratedSchema(id)),
         start_slicer_ping_timer(),
       ])
     router.Patients, Some(models.User(is_superuser: True, ..)) ->
