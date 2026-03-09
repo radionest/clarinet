@@ -771,3 +771,78 @@ class TestPipelineTaskDecorator:
         msg_dict = {"patient_id": "PAT001", "study_uid": "1.2.3"}
         with pytest.raises(PipelineStepError, match="boom"):
             await error_task(msg_dict)
+
+    @pytest.mark.asyncio
+    @patch("clarinet.services.pipeline.task.get_broker")
+    @patch("clarinet.services.pipeline.task.register_task")
+    @patch("clarinet.services.pipeline.task.build_task_context")
+    @patch("clarinet.services.pipeline.task.ClarinetClient")
+    @patch("clarinet.services.pipeline.task.settings")
+    async def test_client_base_url_includes_api_prefix(
+        self,
+        mock_settings: MagicMock,
+        mock_client_cls: MagicMock,
+        mock_build_ctx: MagicMock,
+        mock_register: MagicMock,
+        mock_get_broker: MagicMock,
+    ):
+        """ClarinetClient must be created with base_url containing /api."""
+        mock_settings.api_base_url = "http://localhost:8000/api"
+        mock_settings.admin_email = "admin@test.com"
+        mock_settings.admin_password = "pass"
+
+        mock_broker = MagicMock()
+        mock_task_decorator = MagicMock(side_effect=lambda fn: fn)
+        mock_broker.task = MagicMock(return_value=mock_task_decorator)
+        mock_get_broker.return_value = mock_broker
+
+        mock_client = AsyncMock()
+        mock_client_cls.return_value = mock_client
+        mock_files = MagicMock()
+        mock_files.snapshot_checksums = AsyncMock(return_value={})
+        mock_files.accessed_files = {}
+        mock_ctx = MagicMock()
+        mock_ctx.files = mock_files
+        mock_build_ctx.return_value = mock_ctx
+
+        from clarinet.services.pipeline.task import pipeline_task
+
+        @pipeline_task()
+        async def noop_task(msg: MagicMock, ctx: MagicMock) -> None:
+            pass
+
+        await noop_task({"patient_id": "PAT001", "study_uid": "1.2.3"})
+
+        mock_client_cls.assert_called_once()
+        call_kwargs = mock_client_cls.call_args
+        base_url = call_kwargs.kwargs.get("base_url") or call_kwargs.args[0]
+        assert base_url.endswith("/api"), f"base_url should end with /api, got: {base_url}"
+
+
+class TestPipelineTaskIntegration:
+    """Integration test: verify auth route is reachable with /api prefix."""
+
+    def test_auth_login_route_accepts_post(self):
+        """Verify POST /api/auth/login resolves (not 405) in the FastAPI app.
+
+        The original bug: ``task.py`` built ``base_url`` without ``/api``,
+        so ``POST /auth/login`` hit the SPA catch-all and returned 405.
+        With ``settings.api_base_url`` the client posts to ``/api/auth/login``.
+        """
+        from starlette.routing import Match
+
+        from clarinet.api.app import create_app
+
+        app = create_app()
+
+        # Check that POST /api/auth/login matches a route (not the SPA catch-all)
+        scope = {"type": "http", "method": "POST", "path": "/api/auth/login"}
+        matched = False
+        for route in app.routes:
+            match, _ = route.matches(scope)
+            if match == Match.FULL:
+                matched = True
+                # Ensure it's the API router, not the SPA fallback
+                assert "auth" in str(route.path).lower() or hasattr(route, "routes")
+                break
+        assert matched, "POST /api/auth/login should match a route in the app"
