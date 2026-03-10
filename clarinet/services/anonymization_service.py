@@ -176,6 +176,16 @@ class AnonymizationService:
                 else:
                     total_send_failed += r.send_failed
 
+        # Check failure threshold
+        total_instances = total_anonymized + total_failed
+        if total_instances > 0:
+            failure_ratio = total_failed / total_instances
+            if failure_ratio >= settings.anon_failure_threshold:
+                raise AnonymizationFailedError(
+                    f"{total_failed}/{total_instances} instances failed "
+                    f"(threshold: {settings.anon_failure_threshold:.0%})"
+                )
+
         # Update study anon_uid in DB
         await self.study_repo.update_anon_uid(study, anon_study_uid)
 
