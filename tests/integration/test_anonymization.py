@@ -126,6 +126,7 @@ async def test_anonymize_study_success(client, test_session) -> None:
         mock_settings.anon_uid_salt = "test-salt"
         mock_settings.anon_save_to_disk = False
         mock_settings.anon_send_to_pacs = False
+        mock_settings.anon_failure_threshold = 0.5
         mock_filter_settings.series_filter_excluded_modalities = ["SR", "KO", "PR"]
         mock_filter_settings.series_filter_min_instance_count = None
         mock_filter_settings.series_filter_unknown_modality_policy = "include"
@@ -262,6 +263,7 @@ async def test_anonymize_study_filters_sr_series(client, test_session) -> None:
         mock_settings.anon_uid_salt = "test-salt"
         mock_settings.anon_save_to_disk = False
         mock_settings.anon_send_to_pacs = False
+        mock_settings.anon_failure_threshold = 0.5
         mock_filter_settings.series_filter_excluded_modalities = ["SR", "KO", "PR"]
         mock_filter_settings.series_filter_min_instance_count = None
         mock_filter_settings.series_filter_unknown_modality_policy = "include"
@@ -351,6 +353,7 @@ async def test_anonymize_pacs_retrieval_failure(client, test_session) -> None:
         mock_settings.anon_uid_salt = "test-salt"
         mock_settings.anon_save_to_disk = False
         mock_settings.anon_send_to_pacs = False
+        mock_settings.anon_failure_threshold = 1.0  # Allow partial failure for resilience test
         mock_filter_settings.series_filter_excluded_modalities = ["SR", "KO", "PR"]
         mock_filter_settings.series_filter_min_instance_count = None
         mock_filter_settings.series_filter_unknown_modality_policy = "include"
@@ -440,6 +443,7 @@ async def test_anonymize_instance_failure(client, test_session) -> None:
         mock_settings.anon_uid_salt = "test-salt"
         mock_settings.anon_save_to_disk = False
         mock_settings.anon_send_to_pacs = False
+        mock_settings.anon_failure_threshold = 0.5
         mock_filter_settings.series_filter_excluded_modalities = ["SR", "KO", "PR"]
         mock_filter_settings.series_filter_min_instance_count = None
         mock_filter_settings.series_filter_unknown_modality_policy = "include"
@@ -515,6 +519,7 @@ async def test_anonymize_send_to_pacs_failure_resilient(client, test_session) ->
         mock_settings.anon_uid_salt = "test-salt"
         mock_settings.anon_save_to_disk = False
         mock_settings.anon_send_to_pacs = True
+        mock_settings.anon_failure_threshold = 0.5
         mock_filter_settings.series_filter_excluded_modalities = ["SR", "KO", "PR"]
         mock_filter_settings.series_filter_min_instance_count = None
         mock_filter_settings.series_filter_unknown_modality_policy = "include"
@@ -591,6 +596,7 @@ async def test_anonymize_save_to_disk_error_graceful(client, test_session) -> No
         mock_settings.anon_uid_salt = "test-salt"
         mock_settings.anon_save_to_disk = True
         mock_settings.anon_send_to_pacs = False
+        mock_settings.anon_failure_threshold = 0.5
         mock_settings.storage_path = "/tmp/test_anon"
         mock_filter_settings.series_filter_excluded_modalities = ["SR", "KO", "PR"]
         mock_filter_settings.series_filter_min_instance_count = None
@@ -634,6 +640,7 @@ async def test_anonymize_study_no_series(client, test_session) -> None:
         mock_settings.anon_uid_salt = "test-salt"
         mock_settings.anon_save_to_disk = False
         mock_settings.anon_send_to_pacs = False
+        mock_settings.anon_failure_threshold = 0.5
         mock_filter_settings.series_filter_excluded_modalities = ["SR", "KO", "PR"]
         mock_filter_settings.series_filter_min_instance_count = None
         mock_filter_settings.series_filter_unknown_modality_policy = "include"
@@ -694,6 +701,7 @@ async def test_anonymize_all_series_filtered(client, test_session) -> None:
         mock_settings.anon_uid_salt = "test-salt"
         mock_settings.anon_save_to_disk = False
         mock_settings.anon_send_to_pacs = False
+        mock_settings.anon_failure_threshold = 0.5
         mock_filter_settings.series_filter_excluded_modalities = ["SR", "KO", "PR"]
         mock_filter_settings.series_filter_min_instance_count = None
         mock_filter_settings.series_filter_unknown_modality_policy = "include"
@@ -734,6 +742,7 @@ async def test_anonymize_patient_not_found(client, test_session) -> None:
         mock_settings.anon_uid_salt = "test-salt"
         mock_settings.anon_save_to_disk = False
         mock_settings.anon_send_to_pacs = False
+        mock_settings.anon_failure_threshold = 0.5
         mock_filter_settings.series_filter_excluded_modalities = ["SR", "KO", "PR"]
         mock_filter_settings.series_filter_min_instance_count = None
         mock_filter_settings.series_filter_unknown_modality_policy = "include"
@@ -813,6 +822,7 @@ async def test_anonymize_batch_cstore_partial_failure(client, test_session) -> N
         mock_settings.anon_uid_salt = "test-salt"
         mock_settings.anon_save_to_disk = False
         mock_settings.anon_send_to_pacs = True
+        mock_settings.anon_failure_threshold = 0.5
         mock_filter_settings.series_filter_excluded_modalities = ["SR", "KO", "PR"]
         mock_filter_settings.series_filter_min_instance_count = None
         mock_filter_settings.series_filter_unknown_modality_policy = "include"

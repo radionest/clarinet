@@ -189,6 +189,7 @@ class Settings(BaseSettings):
     anon_uid_salt: str = "clarinet-anon-salt-change-in-production"
     anon_save_to_disk: bool = True
     anon_send_to_pacs: bool = False
+    anon_failure_threshold: float = 0.5  # Max allowed failure ratio (0.0-1.0)
 
     # Series filter settings
     series_filter_excluded_modalities: list[str] = [

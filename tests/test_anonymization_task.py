@@ -3,7 +3,10 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from pydicom import Dataset
 
+from clarinet.exceptions.domain import AnonymizationFailedError
+from clarinet.services.anonymization_service import AnonymizationService
 from clarinet.services.dicom.models import BackgroundAnonymizationStatus
 
 
@@ -101,6 +104,133 @@ async def test_dispatch_background_pipeline_enabled() -> None:
 
     assert result == BackgroundAnonymizationStatus(study_uid="1.2.3")
     mock_task.kiq.assert_awaited_once_with("1.2.3", save_to_disk=True, send_to_pacs=False)
+
+
+@pytest.mark.asyncio
+async def test_anonymize_study_raises_on_failure_threshold() -> None:
+    """anonymize_study raises AnonymizationFailedError when failure ratio >= threshold."""
+    # Create a mock study with one series
+    mock_series = MagicMock()
+    mock_series.series_uid = "1.2.3.4.5.6"
+    mock_series.modality = "CT"
+    mock_series.series_description = "Axial"
+
+    mock_study = MagicMock()
+    mock_study.patient_id = 1
+    mock_study.series = [mock_series]
+
+    mock_patient = MagicMock()
+    mock_patient.anon_id = "ANON_001"
+    mock_patient.anon_name = "AnonName"
+
+    # Build a dataset that will fail during anonymization
+    bad_ds = Dataset()
+    # Intentionally missing required tags → anonymizer will raise KeyError
+
+    mock_retrieve_result = MagicMock()
+    mock_retrieve_result.instances = {"1.2.3.100": bad_ds}
+
+    study_repo = AsyncMock()
+    study_repo.get_with_series = AsyncMock(return_value=mock_study)
+    study_repo.update_anon_uid = AsyncMock()
+
+    patient_repo = AsyncMock()
+    patient_repo.get = AsyncMock(return_value=mock_patient)
+
+    series_repo = AsyncMock()
+    series_repo.update_anon_uid = AsyncMock()
+
+    dicom_client = AsyncMock()
+    dicom_client.get_series_to_memory = AsyncMock(return_value=mock_retrieve_result)
+
+    pacs = MagicMock()
+
+    service = AnonymizationService(
+        study_repo=study_repo,
+        patient_repo=patient_repo,
+        series_repo=series_repo,
+        dicom_client=dicom_client,
+        pacs=pacs,
+    )
+
+    with patch("clarinet.services.anonymization_service.settings") as mock_settings:
+        mock_settings.anon_save_to_disk = False
+        mock_settings.anon_send_to_pacs = False
+        mock_settings.anon_uid_salt = "test-salt"
+        mock_settings.anon_failure_threshold = 0.5
+        mock_settings.series_filter_excluded_modalities = []
+        mock_settings.series_filter_min_instance_count = 0
+        mock_settings.series_filter_unknown_modality_policy = "include"
+
+        with pytest.raises(AnonymizationFailedError, match="1/1 instances failed"):
+            await service.anonymize_study("1.2.3.4.5")
+
+
+@pytest.mark.asyncio
+async def test_anonymize_study_succeeds_below_threshold() -> None:
+    """anonymize_study completes when failure ratio is below threshold."""
+    mock_series = MagicMock()
+    mock_series.series_uid = "1.2.3.4.5.6"
+    mock_series.modality = "CT"
+    mock_series.series_description = "Axial"
+
+    mock_study = MagicMock()
+    mock_study.patient_id = 1
+    mock_study.series = [mock_series]
+
+    mock_patient = MagicMock()
+    mock_patient.anon_id = "ANON_001"
+    mock_patient.anon_name = "AnonName"
+
+    # Build a valid dataset
+    good_ds = Dataset()
+    good_ds.PatientID = "REAL_PAT"
+    good_ds.PatientName = "Real^Name"
+    good_ds.StudyInstanceUID = "1.2.3.4.5"
+    good_ds.SeriesInstanceUID = "1.2.3.4.5.6"
+    good_ds.SOPInstanceUID = "1.2.3.100"
+    good_ds.SOPClassUID = "1.2.840.10008.5.1.4.1.1.2"
+
+    mock_retrieve_result = MagicMock()
+    mock_retrieve_result.instances = {"1.2.3.100": good_ds}
+
+    study_repo = AsyncMock()
+    study_repo.get_with_series = AsyncMock(return_value=mock_study)
+    study_repo.update_anon_uid = AsyncMock()
+
+    patient_repo = AsyncMock()
+    patient_repo.get = AsyncMock(return_value=mock_patient)
+
+    series_repo = AsyncMock()
+    series_repo.update_anon_uid = AsyncMock()
+
+    dicom_client = AsyncMock()
+    dicom_client.get_series_to_memory = AsyncMock(return_value=mock_retrieve_result)
+
+    pacs = MagicMock()
+
+    service = AnonymizationService(
+        study_repo=study_repo,
+        patient_repo=patient_repo,
+        series_repo=series_repo,
+        dicom_client=dicom_client,
+        pacs=pacs,
+    )
+
+    with patch("clarinet.services.anonymization_service.settings") as mock_settings:
+        mock_settings.anon_save_to_disk = False
+        mock_settings.anon_send_to_pacs = False
+        mock_settings.anon_uid_salt = "test-salt"
+        mock_settings.anon_failure_threshold = 0.5
+        mock_settings.series_filter_excluded_modalities = []
+        mock_settings.series_filter_min_instance_count = 0
+        mock_settings.series_filter_unknown_modality_policy = "include"
+        mock_settings.storage_path = "/tmp/test"
+
+        result = await service.anonymize_study("1.2.3.4.5")
+
+    assert result.instances_anonymized == 1
+    assert result.instances_failed == 0
 
 
 @pytest.mark.asyncio
