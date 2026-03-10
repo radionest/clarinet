@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any, Optional
 from pydantic import field_validator, model_validator
 from sqlmodel import JSON, Column, Field, Relationship, SQLModel
 
-from clarinet.types import RecordSchema, SlicerArgs
+from clarinet.types import RecordSchema, SlicerArgs, SlicerHydratorNames
 
 from .base import DicomQueryLevel
 from .file_schema import FileDefinitionRead, RecordTypeFileLink
@@ -56,6 +56,7 @@ class RecordTypeBase(SQLModel):
     level: DicomQueryLevel = Field(default=DicomQueryLevel.SERIES)
 
     data_schema: RecordSchema | None = None
+    slicer_context_hydrators: SlicerHydratorNames | None = None
 
 
 class RecordType(RecordTypeBase, table=True):
@@ -72,6 +73,9 @@ class RecordType(RecordTypeBase, table=True):
     slicer_script_args: SlicerArgs | None = Field(default_factory=dict, sa_column=Column(JSON))
     slicer_result_validator_args: SlicerArgs | None = Field(
         default_factory=dict, sa_column=Column(JSON)
+    )
+    slicer_context_hydrators: SlicerHydratorNames | None = Field(
+        default=None, sa_column=Column(JSON)
     )
 
     parent_type_name: str | None = Field(
@@ -195,6 +199,7 @@ class RecordTypeOptional(SQLModel):
     slicer_result_validator: str | None = None
     slicer_result_validator_args: SlicerArgs | None = None
     data_schema: RecordSchema | None = None
+    slicer_context_hydrators: SlicerHydratorNames | None = None
 
     role_name: str | None = Field(default=None)
     max_records: int | None = Field(default=None)
@@ -205,7 +210,11 @@ class RecordTypeOptional(SQLModel):
     file_registry: list[FileDefinitionRead] | None = None
 
     @field_validator(
-        "data_schema", "slicer_script_args", "slicer_result_validator_args", mode="before"
+        "data_schema",
+        "slicer_script_args",
+        "slicer_result_validator_args",
+        "slicer_context_hydrators",
+        mode="before",
     )
     @classmethod
     def parse_json_strings(cls, v: Any) -> Any:

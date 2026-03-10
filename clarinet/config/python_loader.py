@@ -202,6 +202,8 @@ async def _to_record_type_create(
         kwargs["slicer_result_validator"] = slicer_result_validator
     if rt_def.slicer_result_validator_args is not None:
         kwargs["slicer_result_validator_args"] = rt_def.slicer_result_validator_args
+    if rt_def.slicer_context_hydrators is not None:
+        kwargs["slicer_context_hydrators"] = rt_def.slicer_context_hydrators
     if data_schema is not None:
         kwargs["data_schema"] = data_schema
     if file_registry is not None:
