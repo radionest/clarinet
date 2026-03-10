@@ -13,9 +13,11 @@ import asyncio
 
 import numpy as np
 
+from clarinet.models.base import RecordStatus
 from clarinet.services.image import FileType, Segmentation
 from clarinet.services.pipeline import PipelineMessage, TaskContext, pipeline_task
 from clarinet.services.recordflow import Field, file, record, study
+from clarinet.settings import settings
 from clarinet.utils.logger import logger
 
 F = Field()
@@ -91,17 +93,28 @@ async def compare_w_projection(msg: PipelineMessage, ctx: TaskContext) -> None:
 
 @pipeline_task(queue="clarinet.dicom")
 async def anonymize_study_pipeline(msg: PipelineMessage, ctx: TaskContext) -> None:
-    """Anonymize the study: fetch from PACS, anonymize tags, distribute."""
+    """Anonymize the study: fetch from PACS, anonymize tags, send to PACS."""
     assert msg.record_id is not None
+
+    do_send = msg.payload.get("send_to_pacs", settings.anon_send_to_pacs)
 
     # Get study_type from first_check for downstream matching
     first_checks = await ctx.records.find("first_check", study_uid=msg.study_uid)
     first_data = first_checks[0].data if first_checks else None
     study_type = first_data.get("study_type") if first_data else None
 
-    # Check if already anonymized
+    # Smart skip-guard: allow re-run if previous attempt failed or didn't send
     study = await ctx.client.get_study(msg.study_uid)
-    if study.anon_uid is not None:
+    record = await ctx.client.get_record(msg.record_id)
+    prev_data = record.data or {}
+
+    already_done = (
+        study.anon_uid is not None
+        and "error" not in prev_data
+        and (prev_data.get("sent_to_pacs", False) or not do_send)
+    )
+
+    if already_done:
         logger.info(f"Study {msg.study_uid} already anonymized, skipping")
         await ctx.client.submit_record_data(
             msg.record_id,
@@ -122,8 +135,17 @@ async def anonymize_study_pipeline(msg: PipelineMessage, ctx: TaskContext) -> No
     # Run anonymization (fresh DB session, direct PACS access)
     from clarinet.services.dicom.tasks import _create_anonymization_service
 
-    async with _create_anonymization_service() as service:
-        result = await service.anonymize_study(msg.study_uid)
+    try:
+        async with _create_anonymization_service() as service:
+            result = await service.anonymize_study(msg.study_uid, send_to_pacs=do_send)
+    except Exception as exc:
+        logger.exception(f"Anonymization failed for study {msg.study_uid}")
+        await ctx.client.submit_record_data(
+            msg.record_id,
+            {"study_type": study_type, "error": str(exc)},
+        )
+        await ctx.client.update_record_status(msg.record_id, RecordStatus.failed)
+        return
 
     await ctx.client.submit_record_data(
         msg.record_id,
@@ -132,6 +154,11 @@ async def anonymize_study_pipeline(msg: PipelineMessage, ctx: TaskContext) -> No
             "anon_study_uid": result.anon_study_uid,
             "instances_anonymized": result.instances_anonymized,
             "instances_failed": result.instances_failed,
+            "instances_send_failed": result.instances_send_failed,
+            "sent_to_pacs": result.sent_to_pacs,
+            "series_count": result.series_count,
+            "series_anonymized": result.series_anonymized,
+            "series_skipped": result.series_skipped,
         },
     )
 
@@ -147,7 +174,11 @@ async def anonymize_study_pipeline(msg: PipelineMessage, ctx: TaskContext) -> No
 (record("first_check").on_finished().if_record(F.is_good == True).create_record("anonymize_study"))
 
 # Run anonymization on creation
-(record("anonymize_study").on_status("pending").do_task(anonymize_study_pipeline))
+(
+    record("anonymize_study")
+    .on_status("pending")
+    .do_task(anonymize_study_pipeline, send_to_pacs=True)
+)
 
 # After anonymization → create segmentations by study_type
 (
