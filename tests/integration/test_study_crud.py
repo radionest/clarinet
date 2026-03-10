@@ -439,7 +439,7 @@ async def test_delete_study_not_found(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_create_patient_no_lazy_load(fresh_client, test_session, test_user):
+async def test_create_patient_no_lazy_load(fresh_client, test_session, admin_user):
     """Verify create_patient doesn't trigger lazy-load MissingGreenlet.
 
     Regression test: uses fresh_client (separate session) to detect
@@ -447,7 +447,7 @@ async def test_create_patient_no_lazy_load(fresh_client, test_session, test_user
     """
     login_resp = await fresh_client.post(
         "/api/auth/login",
-        data={"username": "test@example.com", "password": "testpassword"},
+        data={"username": "admin@example.com", "password": "adminpassword"},
     )
     assert login_resp.status_code in [200, 204]
 
@@ -460,7 +460,7 @@ async def test_create_patient_no_lazy_load(fresh_client, test_session, test_user
 
 
 @pytest.mark.asyncio
-async def test_create_study_no_lazy_load(fresh_client, test_session, test_user):
+async def test_create_study_no_lazy_load(fresh_client, test_session, admin_user):
     """Verify create_study doesn't trigger lazy-load MissingGreenlet.
 
     Regression test: uses fresh_client (separate session) to detect
@@ -473,7 +473,7 @@ async def test_create_study_no_lazy_load(fresh_client, test_session, test_user):
 
     login_resp = await fresh_client.post(
         "/api/auth/login",
-        data={"username": "test@example.com", "password": "testpassword"},
+        data={"username": "admin@example.com", "password": "adminpassword"},
     )
     assert login_resp.status_code in [200, 204]
 
@@ -490,7 +490,7 @@ async def test_create_study_no_lazy_load(fresh_client, test_session, test_user):
 
 
 @pytest.mark.asyncio
-async def test_create_series_no_lazy_load(fresh_client, test_session, test_user):
+async def test_create_series_no_lazy_load(fresh_client, test_session, admin_user):
     """Verify create_series doesn't trigger lazy-load MissingGreenlet.
 
     Regression test: uses fresh_client (separate session) to detect
@@ -511,7 +511,7 @@ async def test_create_series_no_lazy_load(fresh_client, test_session, test_user)
 
     login_resp = await fresh_client.post(
         "/api/auth/login",
-        data={"username": "test@example.com", "password": "testpassword"},
+        data={"username": "admin@example.com", "password": "adminpassword"},
     )
     assert login_resp.status_code in [200, 204]
 

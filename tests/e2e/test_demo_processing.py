@@ -61,69 +61,14 @@ async def client(test_session, test_settings) -> AsyncGenerator[AsyncClient]:
     """Override e2e conftest's unauthenticated client with an authenticated one.
 
     The e2e conftest yields ``unauthenticated_client`` as ``client``.
-    Demo processing tests need auth bypassed, so we re-create the root
-    conftest ``client`` pattern here (session + auth overrides in one fixture).
+    Demo processing tests need auth bypassed, so we re-use the shared
+    ``create_authenticated_client`` helper from root conftest.
     """
-    from httpx import ASGITransport
+    from tests.conftest import create_authenticated_client, create_mock_superuser
 
-    from clarinet.api.auth_config import current_active_user, current_superuser
-    from clarinet.models.user import User
-    from clarinet.utils.auth import get_password_hash
-    from clarinet.utils.database import get_async_session
-
-    mock_user = User(
-        id=uuid4(),
-        email="e2e_demo@test.com",
-        hashed_password=get_password_hash("mock"),
-        is_active=True,
-        is_verified=True,
-        is_superuser=True,
-    )
-    test_session.add(mock_user)
-    await test_session.commit()
-    await test_session.refresh(mock_user)
-
-    async def override_get_session():
-        yield test_session
-
-    async def override_get_settings():
-        return test_settings
-
-    app.dependency_overrides[get_async_session] = override_get_session
-    app.dependency_overrides[current_active_user] = lambda: mock_user
-    app.dependency_overrides[current_superuser] = lambda: mock_user
-
-    try:
-        from clarinet.settings import get_settings
-
-        app.dependency_overrides[get_settings] = override_get_settings
-    except (ImportError, AttributeError):
-        pass
-
-    try:
-        import clarinet.api.auth_config
-
-        clarinet.api.auth_config.settings = test_settings
-    except (ImportError, AttributeError):
-        pass
-
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test", cookies={}) as ac:
-        original_request = ac.request
-
-        async def request_with_cookies(method, url, **kwargs):
-            if ac.cookies:
-                headers = kwargs.get("headers") or {}
-                cookie_header = "; ".join([f"{k}={v}" for k, v in ac.cookies.items()])
-                if cookie_header:
-                    headers["Cookie"] = cookie_header
-                    kwargs["headers"] = headers
-            return await original_request(method, url, **kwargs)
-
-        ac.request = request_with_cookies
+    mock_user = await create_mock_superuser(test_session, email="e2e_demo@test.com")
+    async for ac in create_authenticated_client(mock_user, test_session, test_settings):
         yield ac
-
-    app.dependency_overrides.clear()
 
 
 # ---------------------------------------------------------------------------

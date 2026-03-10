@@ -25,27 +25,27 @@ class TestAuthentication:
 
     @pytest.mark.asyncio
     async def test_login_success(
-        self, clarinet_client: ClarinetClient, test_user: User, test_session: AsyncSession
+        self, clarinet_client: ClarinetClient, admin_user: User, test_session: AsyncSession
     ) -> None:
         """Test successful login with real server."""
-        user = await clarinet_client.login(username=test_user.email, password="testpassword")
+        user = await clarinet_client.login(username=admin_user.email, password="adminpassword")
 
         assert clarinet_client._authenticated is True
-        assert user.email == test_user.email
+        assert user.email == admin_user.email
 
     @pytest.mark.asyncio
-    async def test_login_failure(self, clarinet_client: ClarinetClient, test_user: User) -> None:
+    async def test_login_failure(self, clarinet_client: ClarinetClient, admin_user: User) -> None:
         """Test login failure with wrong password."""
         with pytest.raises(ClarinetAuthError):
-            await clarinet_client.login(username=test_user.email, password="wrongpassword")
+            await clarinet_client.login(username=admin_user.email, password="wrongpassword")
 
     @pytest.mark.asyncio
     async def test_logout(
-        self, clarinet_client: ClarinetClient, test_user: User, test_session: AsyncSession
+        self, clarinet_client: ClarinetClient, admin_user: User, test_session: AsyncSession
     ) -> None:
         """Test logout clears session."""
         # Login first
-        await clarinet_client.login(username=test_user.email, password="testpassword")
+        await clarinet_client.login(username=admin_user.email, password="adminpassword")
         assert clarinet_client._authenticated is True
 
         # Logout
@@ -54,17 +54,17 @@ class TestAuthentication:
 
     @pytest.mark.asyncio
     async def test_get_me(
-        self, clarinet_client: ClarinetClient, test_user: User, test_session: AsyncSession
+        self, clarinet_client: ClarinetClient, admin_user: User, test_session: AsyncSession
     ) -> None:
         """Test get current user."""
         # Login first
-        await clarinet_client.login(username=test_user.email, password="testpassword")
+        await clarinet_client.login(username=admin_user.email, password="adminpassword")
 
         # Get current user
         user = await clarinet_client.get_me()
 
-        assert user.email == test_user.email
-        assert str(user.id) == str(test_user.id)
+        assert user.email == admin_user.email
+        assert str(user.id) == str(admin_user.id)
 
 
 class TestPatientManagement:
@@ -74,13 +74,13 @@ class TestPatientManagement:
     async def test_get_patients(
         self,
         clarinet_client: ClarinetClient,
-        test_user: User,
+        admin_user: User,
         test_patient: Patient,
         test_session: AsyncSession,
     ) -> None:
         """Test getting all patients."""
         # Login
-        await clarinet_client.login(username=test_user.email, password="testpassword")
+        await clarinet_client.login(username=admin_user.email, password="adminpassword")
 
         # Get patients
         patients = await clarinet_client.get_patients()
@@ -93,13 +93,13 @@ class TestPatientManagement:
     async def test_get_patient(
         self,
         clarinet_client: ClarinetClient,
-        test_user: User,
+        admin_user: User,
         test_patient: Patient,
         test_session: AsyncSession,
     ) -> None:
         """Test getting patient by ID."""
         # Login
-        await clarinet_client.login(username=test_user.email, password="testpassword")
+        await clarinet_client.login(username=admin_user.email, password="adminpassword")
 
         # Get patient
         patient = await clarinet_client.get_patient(test_patient.id)
@@ -111,12 +111,12 @@ class TestPatientManagement:
     async def test_create_patient(
         self,
         clarinet_client: ClarinetClient,
-        test_user: User,
+        admin_user: User,
         test_session: AsyncSession,
     ) -> None:
         """Test creating a patient."""
         # Login
-        await clarinet_client.login(username=test_user.email, password="testpassword")
+        await clarinet_client.login(username=admin_user.email, password="adminpassword")
 
         # Create patient
         patient_data = {"patient_id": "P_TEST_999", "patient_name": "Test Patient Created"}
@@ -134,12 +134,12 @@ class TestPatientManagement:
     async def test_anonymize_patient(
         self,
         clarinet_client: ClarinetClient,
-        test_user: User,
+        admin_user: User,
         test_session: AsyncSession,
     ) -> None:
         """Test anonymizing a patient."""
         # Login
-        await clarinet_client.login(username=test_user.email, password="testpassword")
+        await clarinet_client.login(username=admin_user.email, password="adminpassword")
 
         # Create patient without anon_name
         new_patient = Patient(id="TEST_PAT_ANON", name="Patient To Anonymize")
@@ -160,13 +160,13 @@ class TestStudyManagement:
     async def test_get_studies(
         self,
         clarinet_client: ClarinetClient,
-        test_user: User,
+        admin_user: User,
         test_study: Study,
         test_session: AsyncSession,
     ) -> None:
         """Test getting all studies."""
         # Login
-        await clarinet_client.login(username=test_user.email, password="testpassword")
+        await clarinet_client.login(username=admin_user.email, password="adminpassword")
 
         # Get studies
         studies = await clarinet_client.get_studies()
@@ -179,13 +179,13 @@ class TestStudyManagement:
     async def test_get_study(
         self,
         clarinet_client: ClarinetClient,
-        test_user: User,
+        admin_user: User,
         test_study: Study,
         test_session: AsyncSession,
     ) -> None:
         """Test getting study by UID."""
         # Login
-        await clarinet_client.login(username=test_user.email, password="testpassword")
+        await clarinet_client.login(username=admin_user.email, password="adminpassword")
 
         # Get study
         study = await clarinet_client.get_study(test_study.study_uid)
@@ -197,13 +197,13 @@ class TestStudyManagement:
     async def test_create_study(
         self,
         clarinet_client: ClarinetClient,
-        test_user: User,
+        admin_user: User,
         test_patient: Patient,
         test_session: AsyncSession,
     ) -> None:
         """Test creating a study."""
         # Login
-        await clarinet_client.login(username=test_user.email, password="testpassword")
+        await clarinet_client.login(username=admin_user.email, password="adminpassword")
 
         # Create study
         study_data = {
@@ -225,13 +225,13 @@ class TestStudyManagement:
     async def test_get_study_series(
         self,
         clarinet_client: ClarinetClient,
-        test_user: User,
+        admin_user: User,
         test_study: Study,
         test_session: AsyncSession,
     ) -> None:
         """Test getting series for a study."""
         # Login
-        await clarinet_client.login(username=test_user.email, password="testpassword")
+        await clarinet_client.login(username=admin_user.email, password="adminpassword")
 
         # Create a series for the test study
         series = Series(
@@ -258,13 +258,13 @@ class TestSeriesManagement:
     async def test_create_series(
         self,
         clarinet_client: ClarinetClient,
-        test_user: User,
+        admin_user: User,
         test_study: Study,
         test_session: AsyncSession,
     ) -> None:
         """Test creating a series."""
         # Login
-        await clarinet_client.login(username=test_user.email, password="testpassword")
+        await clarinet_client.login(username=admin_user.email, password="adminpassword")
 
         # Create series
         series_data = {
@@ -291,12 +291,12 @@ class TestRecordManagement:
     async def test_get_record_types(
         self,
         clarinet_client: ClarinetClient,
-        test_user: User,
+        admin_user: User,
         test_session: AsyncSession,
     ) -> None:
         """Test getting all record types."""
         # Login
-        await clarinet_client.login(username=test_user.email, password="testpassword")
+        await clarinet_client.login(username=admin_user.email, password="adminpassword")
 
         # Create a test record type
         record_type = RecordType(name="test_type", level="SERIES")
@@ -314,12 +314,12 @@ class TestRecordManagement:
     async def test_create_record_type(
         self,
         clarinet_client: ClarinetClient,
-        test_user: User,
+        admin_user: User,
         test_session: AsyncSession,
     ) -> None:
         """Test creating a record type."""
         # Login
-        await clarinet_client.login(username=test_user.email, password="testpassword")
+        await clarinet_client.login(username=admin_user.email, password="adminpassword")
 
         # Create record type
         type_data = {
@@ -343,14 +343,14 @@ class TestRecordManagement:
     async def test_get_my_records(
         self,
         clarinet_client: ClarinetClient,
-        test_user: User,
+        admin_user: User,
         test_patient: Patient,
         test_study: Study,
         test_session: AsyncSession,
     ) -> None:
         """Test getting records assigned to current user."""
         # Login
-        await clarinet_client.login(username=test_user.email, password="testpassword")
+        await clarinet_client.login(username=admin_user.email, password="adminpassword")
 
         # Create record type if not exists
         record_type = await test_session.get(RecordType, "test_record")
@@ -359,13 +359,13 @@ class TestRecordManagement:
             test_session.add(record_type)
             await test_session.commit()
 
-        # Create a record assigned to test_user
+        # Create a record assigned to admin_user
         record = Record(
             status="pending",
             patient_id=test_patient.id,
             study_uid=test_study.study_uid,
             record_type_name=record_type.name,
-            user_id=test_user.id,
+            user_id=admin_user.id,
         )
         test_session.add(record)
         await test_session.commit()
@@ -374,9 +374,9 @@ class TestRecordManagement:
         records = await clarinet_client.get_my_records()
 
         assert len(records) >= 1
-        # Check that at least one record belongs to test_user
+        # Check that at least one record belongs to admin_user
         user_record_ids = [r.user_id for r in records if r.user_id]
-        assert str(test_user.id) in [str(uid) for uid in user_record_ids]
+        assert str(admin_user.id) in [str(uid) for uid in user_record_ids]
 
 
 class TestHighLevelMethods:
@@ -386,13 +386,13 @@ class TestHighLevelMethods:
     async def test_create_studies_batch(
         self,
         clarinet_client: ClarinetClient,
-        test_user: User,
+        admin_user: User,
         test_patient: Patient,
         test_session: AsyncSession,
     ) -> None:
         """Test creating multiple studies."""
         # Login
-        await clarinet_client.login(username=test_user.email, password="testpassword")
+        await clarinet_client.login(username=admin_user.email, password="adminpassword")
 
         # Create studies batch
         studies_data = [
@@ -424,12 +424,12 @@ class TestHighLevelMethods:
     async def test_create_patient_with_studies(
         self,
         clarinet_client: ClarinetClient,
-        test_user: User,
+        admin_user: User,
         test_session: AsyncSession,
     ) -> None:
         """Test creating patient with studies."""
         # Login
-        await clarinet_client.login(username=test_user.email, password="testpassword")
+        await clarinet_client.login(username=admin_user.email, password="adminpassword")
 
         # Create patient with studies
         patient_data = {"patient_id": "P_BATCH", "patient_name": "Patient with Studies"}
@@ -461,14 +461,14 @@ class TestHighLevelMethods:
     async def test_get_study_hierarchy(
         self,
         clarinet_client: ClarinetClient,
-        test_user: User,
+        admin_user: User,
         test_study: Study,
         test_patient: Patient,
         test_session: AsyncSession,
     ) -> None:
         """Test getting complete study hierarchy."""
         # Login
-        await clarinet_client.login(username=test_user.email, password="testpassword")
+        await clarinet_client.login(username=admin_user.email, password="adminpassword")
 
         # Create a series for the study
         series = Series(
@@ -496,13 +496,13 @@ class TestHighLevelMethods:
     async def test_create_series_batch(
         self,
         clarinet_client: ClarinetClient,
-        test_user: User,
+        admin_user: User,
         test_study: Study,
         test_session: AsyncSession,
     ) -> None:
         """Test creating multiple series."""
         # Login
-        await clarinet_client.login(username=test_user.email, password="testpassword")
+        await clarinet_client.login(username=admin_user.email, password="adminpassword")
 
         # Create series batch
         series_data = [
@@ -538,13 +538,13 @@ class TestErrorHandling:
     async def test_api_error_on_duplicate(
         self,
         clarinet_client: ClarinetClient,
-        test_user: User,
+        admin_user: User,
         test_patient: Patient,
         test_session: AsyncSession,
     ) -> None:
         """Test API error handling on duplicate patient."""
         # Login
-        await clarinet_client.login(username=test_user.email, password="testpassword")
+        await clarinet_client.login(username=admin_user.email, password="adminpassword")
 
         # Try to create duplicate patient
         patient_data = {"patient_id": test_patient.id, "patient_name": "Duplicate"}
@@ -567,12 +567,12 @@ class TestErrorHandling:
     async def test_not_found_error(
         self,
         clarinet_client: ClarinetClient,
-        test_user: User,
+        admin_user: User,
         test_session: AsyncSession,
     ) -> None:
         """Test not found error."""
         # Login
-        await clarinet_client.login(username=test_user.email, password="testpassword")
+        await clarinet_client.login(username=admin_user.email, password="adminpassword")
 
         # Try to get non-existent patient
         with pytest.raises(ClarinetAPIError) as exc_info:

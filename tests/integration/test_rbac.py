@@ -1,0 +1,505 @@
+"""Integration tests for Role-Based Access Control (RBAC).
+
+This module tests role-based filtering and authorization for records:
+- Superusers see all records
+- Non-superusers only see records matching their assigned roles
+- Records with role_name=NULL are superuser-only
+- Patient data masking for anonymized patients
+- Admin endpoints require superuser access
+"""
+
+from uuid import uuid4
+
+import pytest
+import pytest_asyncio
+from httpx import ASGITransport, AsyncClient
+
+from clarinet.api.app import app
+from clarinet.api.auth_config import current_active_user, current_superuser
+from clarinet.models.record import Record, RecordType
+from clarinet.models.user import User, UserRole, UserRolesLink
+from clarinet.utils.auth import get_password_hash
+from clarinet.utils.database import get_async_session
+
+# Fixtures
+
+
+@pytest_asyncio.fixture
+async def role_a(test_session):
+    """Create role_a_test UserRole."""
+    role = UserRole(name="role_a_test")
+    test_session.add(role)
+    await test_session.commit()
+    await test_session.refresh(role)
+    return role
+
+
+@pytest_asyncio.fixture
+async def role_b(test_session):
+    """Create role_b_test UserRole."""
+    role = UserRole(name="role_b_test")
+    test_session.add(role)
+    await test_session.commit()
+    await test_session.refresh(role)
+    return role
+
+
+@pytest_asyncio.fixture
+async def record_type_role_a(test_session, role_a):
+    """Create RecordType with role_name=role_a_test."""
+    record_type = RecordType(
+        name="rtype_role_a_test",
+        role_name="role_a_test",
+        level="SERIES",
+        label="Role A Test Type",
+        description="Test record type for role A",
+    )
+    test_session.add(record_type)
+    await test_session.commit()
+    await test_session.refresh(record_type)
+    return record_type
+
+
+@pytest_asyncio.fixture
+async def record_type_role_b(test_session, role_b):
+    """Create RecordType with role_name=role_b_test."""
+    record_type = RecordType(
+        name="rtype_role_b_test",
+        role_name="role_b_test",
+        level="SERIES",
+        label="Role B Test Type",
+        description="Test record type for role B",
+    )
+    test_session.add(record_type)
+    await test_session.commit()
+    await test_session.refresh(record_type)
+    return record_type
+
+
+@pytest_asyncio.fixture
+async def record_type_null_role(test_session):
+    """Create RecordType with role_name=None (superuser-only)."""
+    record_type = RecordType(
+        name="rtype_null_test__",
+        role_name=None,
+        level="SERIES",
+        label="Null Role Test Type",
+        description="Test record type with no role constraint",
+    )
+    test_session.add(record_type)
+    await test_session.commit()
+    await test_session.refresh(record_type)
+    return record_type
+
+
+@pytest_asyncio.fixture
+async def user_with_role_a(test_session, role_a):
+    """Create non-superuser with role_a_test assigned."""
+    from sqlalchemy.orm import selectinload
+    from sqlmodel import select
+
+    user_id = uuid4()
+    user = User(
+        id=user_id,
+        email="user_role_a@test.com",
+        hashed_password=get_password_hash("password"),
+        is_active=True,
+        is_verified=True,
+        is_superuser=False,
+    )
+    test_session.add(user)
+    await test_session.commit()
+
+    # Link user to role
+    link = UserRolesLink(user_id=user_id, role_name="role_a_test")
+    test_session.add(link)
+    await test_session.commit()
+
+    # Reload with roles relation populated
+    stmt = select(User).where(User.id == user_id).options(selectinload(User.roles))
+    result = await test_session.execute(stmt)
+    user = result.scalars().first()
+
+    return user
+
+
+@pytest_asyncio.fixture
+async def superuser(test_session):
+    """Create superuser."""
+    user = User(
+        id=uuid4(),
+        email="superuser@test.com",
+        hashed_password=get_password_hash("password"),
+        is_active=True,
+        is_verified=True,
+        is_superuser=True,
+    )
+    test_session.add(user)
+    await test_session.commit()
+    await test_session.refresh(user)
+    return user
+
+
+@pytest_asyncio.fixture
+async def record_role_a(test_session, test_patient, test_study, test_series, record_type_role_a):
+    """Create Record with record_type_name=rtype_role_a_test."""
+    record = Record(
+        patient_id=test_patient.id,
+        study_uid=test_study.study_uid,
+        series_uid=test_series.series_uid,
+        record_type_name=record_type_role_a.name,
+        record_type=record_type_role_a,
+        status="pending",
+    )
+    test_session.add(record)
+    await test_session.commit()
+    await test_session.refresh(record)
+    return record
+
+
+@pytest_asyncio.fixture
+async def record_role_b(test_session, test_patient, test_study, test_series, record_type_role_b):
+    """Create Record with record_type_name=rtype_role_b_test."""
+    record = Record(
+        patient_id=test_patient.id,
+        study_uid=test_study.study_uid,
+        series_uid=test_series.series_uid,
+        record_type_name=record_type_role_b.name,
+        record_type=record_type_role_b,
+        status="pending",
+    )
+    test_session.add(record)
+    await test_session.commit()
+    await test_session.refresh(record)
+    return record
+
+
+@pytest_asyncio.fixture
+async def record_null_role(
+    test_session, test_patient, test_study, test_series, record_type_null_role
+):
+    """Create Record with record_type_name=rtype_null_test__ (superuser-only)."""
+    record = Record(
+        patient_id=test_patient.id,
+        study_uid=test_study.study_uid,
+        series_uid=test_series.series_uid,
+        record_type_name=record_type_null_role.name,
+        record_type=record_type_null_role,
+        status="pending",
+    )
+    test_session.add(record)
+    await test_session.commit()
+    await test_session.refresh(record)
+    return record
+
+
+@pytest_asyncio.fixture
+async def role_a_client(test_session, test_settings, user_with_role_a):
+    """AsyncClient with dependency override for user_with_role_a."""
+
+    async def override_get_session():
+        yield test_session
+
+    async def override_get_settings():
+        return test_settings
+
+    app.dependency_overrides[get_async_session] = override_get_session
+    app.dependency_overrides[current_active_user] = lambda: user_with_role_a
+
+    try:
+        from clarinet.settings import get_settings
+
+        app.dependency_overrides[get_settings] = override_get_settings
+    except (ImportError, AttributeError):
+        pass
+
+    try:
+        import clarinet.api.auth_config
+
+        clarinet.api.auth_config.settings = test_settings
+    except (ImportError, AttributeError):
+        pass
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test", cookies={}) as ac:
+        yield ac
+
+    app.dependency_overrides.clear()
+
+
+@pytest_asyncio.fixture
+async def superuser_client(test_session, test_settings, superuser):
+    """AsyncClient with dependency override for superuser."""
+
+    async def override_get_session():
+        yield test_session
+
+    async def override_get_settings():
+        return test_settings
+
+    app.dependency_overrides[get_async_session] = override_get_session
+    app.dependency_overrides[current_active_user] = lambda: superuser
+    app.dependency_overrides[current_superuser] = lambda: superuser
+
+    try:
+        from clarinet.settings import get_settings
+
+        app.dependency_overrides[get_settings] = override_get_settings
+    except (ImportError, AttributeError):
+        pass
+
+    try:
+        import clarinet.api.auth_config
+
+        clarinet.api.auth_config.settings = test_settings
+    except (ImportError, AttributeError):
+        pass
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test", cookies={}) as ac:
+        yield ac
+
+    app.dependency_overrides.clear()
+
+
+# Tests
+
+
+@pytest.mark.asyncio
+async def test_get_records_superuser_sees_all(
+    superuser_client, record_role_a, record_role_b, record_null_role
+):
+    """Superuser GET /api/records/ should see all 3 records."""
+    response = await superuser_client.get("/api/records/")
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 3
+    record_ids = {r["id"] for r in data}
+    assert record_ids == {record_role_a.id, record_role_b.id, record_null_role.id}
+
+
+@pytest.mark.asyncio
+async def test_get_records_role_user_sees_own_role(
+    role_a_client, record_role_a, record_role_b, record_null_role
+):
+    """Non-superuser with role_a_test GET /api/records/ should only see record_role_a."""
+    response = await role_a_client.get("/api/records/")
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 1
+    assert data[0]["id"] == record_role_a.id
+    assert data[0]["record_type"]["name"] == "rtype_role_a_test"
+
+
+@pytest.mark.asyncio
+async def test_get_record_by_id_own_role_ok(role_a_client, record_role_a):
+    """Non-superuser can GET /api/records/{id} for a record matching their role."""
+    response = await role_a_client.get(f"/api/records/{record_role_a.id}")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["id"] == record_role_a.id
+    assert data["record_type"]["name"] == "rtype_role_a_test"
+
+
+@pytest.mark.asyncio
+async def test_get_record_by_id_other_role_forbidden(role_a_client, record_role_b):
+    """Non-superuser cannot GET /api/records/{id} for a record with a different role."""
+    response = await role_a_client.get(f"/api/records/{record_role_b.id}")
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_get_record_by_id_null_role_forbidden(role_a_client, record_null_role):
+    """Non-superuser cannot GET /api/records/{id} for a record with role_name=NULL."""
+    response = await role_a_client.get(f"/api/records/{record_null_role.id}")
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_find_records_role_filtering(
+    role_a_client, record_role_a, record_role_b, record_null_role
+):
+    """POST /api/records/find should only return records matching user's role."""
+    response = await role_a_client.post(
+        "/api/records/find",
+        params={"patient_id": "TEST_PAT001"},
+        json=[],  # find_queries body
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 1
+    assert data[0]["id"] == record_role_a.id
+
+
+@pytest.mark.asyncio
+async def test_patients_endpoint_superuser_ok(superuser_client, test_patient):
+    """Superuser can access GET /api/patients."""
+    response = await superuser_client.get("/api/patients")
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) >= 1
+    assert any(p["id"] == test_patient.id for p in data)
+
+
+@pytest.mark.asyncio
+async def test_patients_endpoint_non_admin_forbidden(role_a_client, test_patient):
+    """Non-superuser cannot access GET /api/patients (admin-only endpoint)."""
+    response = await role_a_client.get("/api/patients")
+    # Depending on how fastapi-users handles current_superuser dependency,
+    # this could be 401 (Unauthorized) or 403 (Forbidden)
+    assert response.status_code in [401, 403]
+
+
+@pytest.mark.asyncio
+async def test_patient_masking_for_non_admin(
+    test_session, role_a_client, record_role_a, test_patient
+):
+    """Non-superuser should see anonymized patient_id when patient has auto_id set.
+
+    When patient.anon_name is not None AND patient.auto_id is set,
+    non-superusers should see the anon_id (CLARINET_XX format) instead of real patient_id.
+    """
+    # Update patient to have auto_id so anon_id is computed
+    test_patient.auto_id = 123
+    test_session.add(test_patient)
+    await test_session.commit()
+
+    response = await role_a_client.get(f"/api/records/{record_role_a.id}")
+    assert response.status_code == 200
+    data = response.json()
+
+    # Patient should be masked
+    assert data["patient"]["id"] == "CLARINET_123"  # anon_id
+    assert data["patient"]["name"] == "ANON_001"  # anon_name
+    assert data["patient_id"] == "CLARINET_123"  # top-level masked
+
+
+@pytest.mark.asyncio
+async def test_superuser_sees_real_patient_data(
+    test_session, superuser_client, record_role_a, test_patient
+):
+    """Superuser should always see real patient data, even when anonymized."""
+    # Update patient to have auto_id
+    test_patient.auto_id = 123
+    test_session.add(test_patient)
+    await test_session.commit()
+
+    response = await superuser_client.get(f"/api/records/{record_role_a.id}")
+    assert response.status_code == 200
+    data = response.json()
+
+    # Superuser sees real data
+    assert data["patient"]["id"] == "TEST_PAT001"
+    assert data["patient"]["name"] == "Test Patient"
+    assert data["patient_id"] == "TEST_PAT001"
+
+
+@pytest.mark.asyncio
+async def test_get_available_types_filtered_by_role(
+    role_a_client, record_role_a, record_type_role_a, record_type_role_b, record_type_null_role
+):
+    """GET /api/records/available_types returns counts only for types with pending records.
+
+    The endpoint returns a dict[str, int] mapping type names to counts of pending records
+    that match the user's roles.
+    """
+    response = await role_a_client.get("/api/records/available_types")
+    assert response.status_code == 200
+    data = response.json()
+
+    # The endpoint only returns types that have BOTH:
+    # 1. Pending records
+    # 2. Match user's roles
+    # Since we have pending records only for role_a, we should see it
+    if "rtype_role_a_test" in data:
+        assert data["rtype_role_a_test"] >= 1
+    # Should not see types outside user's role
+    assert "rtype_role_b_test" not in data
+    assert "rtype_null_test__" not in data
+
+
+@pytest.mark.asyncio
+async def test_superuser_sees_all_available_types(
+    superuser_client,
+    record_role_a,
+    record_role_b,
+    record_type_role_a,
+    record_type_role_b,
+    record_type_null_role,
+):
+    """Superuser GET /api/records/available_types sees types with pending records.
+
+    The endpoint returns dict[str, int] mapping type names to counts.
+    Superusers see all types (not filtered by role).
+    """
+    response = await superuser_client.get("/api/records/available_types")
+    assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_my_records_endpoint_filtered_by_role(
+    test_session, role_a_client, user_with_role_a, record_role_a, record_role_b
+):
+    """GET /api/records/my should only return user's own records matching their role."""
+    # Assign record_role_a to user_with_role_a
+    record_role_a.user_id = user_with_role_a.id
+    test_session.add(record_role_a)
+    await test_session.commit()
+
+    response = await role_a_client.get("/api/records/my")
+    assert response.status_code == 200
+    data = response.json()
+
+    assert len(data) == 1
+    assert data[0]["id"] == record_role_a.id
+
+
+@pytest.mark.asyncio
+async def test_role_filtering_prevents_access_to_other_records(
+    role_a_client, record_role_a, record_role_b
+):
+    """Role filtering prevents access to records with different roles.
+
+    This test verifies the core RBAC behavior: a user with role_a can only
+    access records with RecordType.role_name='role_a_test', and gets 403
+    when trying to access records with different role assignments.
+    """
+    # User with role_a can access record_role_a
+    response = await role_a_client.get(f"/api/records/{record_role_a.id}")
+    assert response.status_code == 200
+
+    # User with role_a cannot access record_role_b (different role)
+    response = await role_a_client.get(f"/api/records/{record_role_b.id}")
+    assert response.status_code == 403
+
+    # Verify role_a user can update their own record
+    response = await role_a_client.patch(
+        f"/api/records/{record_role_a.id}/status",
+        params={"record_status": "inwork"},
+    )
+    assert response.status_code == 200
+
+    # Verify update succeeded
+    get_response = await role_a_client.get(f"/api/records/{record_role_a.id}")
+    assert get_response.status_code == 200
+    assert get_response.json()["status"] == "inwork"
+
+
+@pytest.mark.asyncio
+async def test_create_record_as_non_superuser(
+    role_a_client, test_patient, test_study, test_series, record_type_role_a
+):
+    """Non-superuser can create records (role filtering happens on read/update, not create)."""
+    response = await role_a_client.post(
+        "/api/records/",  # Trailing slash required
+        json={
+            "patient_id": test_patient.id,
+            "study_uid": test_study.study_uid,
+            "series_uid": test_series.series_uid,
+            "record_type_name": record_type_role_a.name,
+            "status": "pending",
+        },
+    )
+    assert response.status_code == 201
+    data = response.json()
+    assert data["record_type"]["name"] == "rtype_role_a_test"

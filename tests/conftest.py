@@ -18,6 +18,7 @@ from clarinet.api.app import app
 
 # Import all models to ensure metadata is populated
 from clarinet.models import *  # noqa: F403
+from clarinet.models.user import User
 from clarinet.settings import Settings
 from clarinet.utils.database import get_async_session
 
@@ -92,25 +93,52 @@ async def fresh_session(test_engine) -> AsyncGenerator[AsyncSession]:
         yield session
 
 
-@pytest_asyncio.fixture
-async def client(test_session, test_settings) -> AsyncGenerator[AsyncClient]:
-    """Create test API client with auth bypassed (superuser)."""
-    from clarinet.api.auth_config import current_active_user, current_superuser
+async def create_mock_superuser(
+    session: AsyncSession, email: str = "mock@test.com"
+) -> User:
+    """Create a mock superuser detached from the session.
+
+    Expunged after refresh to prevent MissingGreenlet when other
+    fixtures call ``session.expire_all()``.
+
+    Args:
+        session: Async session to persist the user in.
+        email: Email for the mock user (vary per fixture for debugging).
+
+    Returns:
+        Detached User instance with all scalar attributes loaded.
+    """
     from clarinet.models.user import User
     from clarinet.utils.auth import get_password_hash
 
-    # Create a test superuser for auth override
-    mock_user = User(
+    user = User(
         id=uuid4(),
-        email="mock@test.com",
+        email=email,
         hashed_password=get_password_hash("mock"),
         is_active=True,
         is_verified=True,
         is_superuser=True,
     )
-    test_session.add(mock_user)
-    await test_session.commit()
-    await test_session.refresh(mock_user)
+    session.add(user)
+    await session.commit()
+    await session.refresh(user)
+    session.expunge(user)
+    return user
+
+
+def setup_auth_overrides(
+    mock_user: User,
+    test_session: AsyncSession,
+    test_settings: Settings,
+) -> None:
+    """Set up common dependency overrides for authenticated test clients.
+
+    Args:
+        mock_user: Detached superuser returned by ``create_mock_superuser``.
+        test_session: Test database session.
+        test_settings: Test settings object.
+    """
+    from clarinet.api.auth_config import current_active_user, current_superuser
 
     async def override_get_session():
         yield test_session
@@ -122,7 +150,6 @@ async def client(test_session, test_settings) -> AsyncGenerator[AsyncClient]:
     app.dependency_overrides[current_active_user] = lambda: mock_user
     app.dependency_overrides[current_superuser] = lambda: mock_user
 
-    # Override settings if such dependency exists
     try:
         from clarinet.settings import get_settings
 
@@ -130,8 +157,6 @@ async def client(test_session, test_settings) -> AsyncGenerator[AsyncClient]:
     except (ImportError, AttributeError):
         pass
 
-    # Also override settings object directly in security module
-    # Update auth_config settings if needed
     try:
         import clarinet.api.auth_config
 
@@ -139,14 +164,33 @@ async def client(test_session, test_settings) -> AsyncGenerator[AsyncClient]:
     except (ImportError, AttributeError):
         pass
 
+
+async def create_authenticated_client(
+    mock_user: User,
+    test_session: AsyncSession,
+    test_settings: Settings,
+    base_url: str = "http://test",
+) -> AsyncGenerator[AsyncClient]:
+    """Create an authenticated AsyncClient with auth and session overrides.
+
+    Async generator — use with ``async for`` or as the body of a fixture.
+
+    Args:
+        mock_user: Detached superuser returned by ``create_mock_superuser``.
+        test_session: Test database session.
+        test_settings: Test settings object.
+        base_url: Base URL for the test client.
+
+    Yields:
+        Configured AsyncClient with cookie handling.
+    """
+    setup_auth_overrides(mock_user, test_session, test_settings)
+
     transport = ASGITransport(app=app)
-    # Use cookies=True to enable cookie jar
-    async with AsyncClient(transport=transport, base_url="http://test", cookies={}) as ac:
-        # Patch the client to properly handle cookies
+    async with AsyncClient(transport=transport, base_url=base_url, cookies={}) as ac:
         original_request = ac.request
 
         async def request_with_cookies(method, url, **kwargs):
-            # Always include cookies in headers
             if ac.cookies:
                 headers = kwargs.get("headers") or {}
                 cookie_header = "; ".join([f"{k}={v}" for k, v in ac.cookies.items()])
@@ -159,6 +203,14 @@ async def client(test_session, test_settings) -> AsyncGenerator[AsyncClient]:
         yield ac
 
     app.dependency_overrides.clear()
+
+
+@pytest_asyncio.fixture
+async def client(test_session, test_settings) -> AsyncGenerator[AsyncClient]:
+    """Create test API client with auth bypassed (superuser)."""
+    mock_user = await create_mock_superuser(test_session)
+    async for ac in create_authenticated_client(mock_user, test_session, test_settings):
+        yield ac
 
 
 @pytest_asyncio.fixture

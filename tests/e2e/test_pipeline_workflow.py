@@ -27,11 +27,10 @@ from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
-from uuid import uuid4
 
 import pytest
 import pytest_asyncio
-from httpx import ASGITransport, AsyncClient
+from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from clarinet.api.app import app
@@ -84,66 +83,13 @@ async def client(test_session, test_settings) -> AsyncGenerator[AsyncClient]:
     """Override e2e conftest's unauthenticated client with an authenticated one.
 
     Re-overrides the unauthenticated client from e2e conftest to use
-    authenticated client for pipeline tests (same pattern as test_demo_processing).
+    authenticated client for pipeline tests.
     """
-    from clarinet.api.auth_config import current_active_user, current_superuser
-    from clarinet.models.user import User
-    from clarinet.utils.auth import get_password_hash
-    from clarinet.utils.database import get_async_session
+    from tests.conftest import create_authenticated_client, create_mock_superuser
 
-    mock_user = User(
-        id=uuid4(),
-        email="e2e_pipeline@test.com",
-        hashed_password=get_password_hash("mock"),
-        is_active=True,
-        is_verified=True,
-        is_superuser=True,
-    )
-    test_session.add(mock_user)
-    await test_session.commit()
-    await test_session.refresh(mock_user)
-
-    async def override_get_session():
-        yield test_session
-
-    async def override_get_settings():
-        return test_settings
-
-    app.dependency_overrides[get_async_session] = override_get_session
-    app.dependency_overrides[current_active_user] = lambda: mock_user
-    app.dependency_overrides[current_superuser] = lambda: mock_user
-
-    try:
-        from clarinet.settings import get_settings
-
-        app.dependency_overrides[get_settings] = override_get_settings
-    except (ImportError, AttributeError):
-        pass
-
-    try:
-        import clarinet.api.auth_config
-
-        clarinet.api.auth_config.settings = test_settings
-    except (ImportError, AttributeError):
-        pass
-
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test", cookies={}) as ac:
-        original_request = ac.request
-
-        async def request_with_cookies(method, url, **kwargs):
-            if ac.cookies:
-                headers = kwargs.get("headers") or {}
-                cookie_header = "; ".join([f"{k}={v}" for k, v in ac.cookies.items()])
-                if cookie_header:
-                    headers["Cookie"] = cookie_header
-                    kwargs["headers"] = headers
-            return await original_request(method, url, **kwargs)
-
-        ac.request = request_with_cookies
+    mock_user = await create_mock_superuser(test_session, email="e2e_pipeline@test.com")
+    async for ac in create_authenticated_client(mock_user, test_session, test_settings):
         yield ac
-
-    app.dependency_overrides.clear()
 
 
 @pytest_asyncio.fixture
@@ -421,6 +367,7 @@ class TestPipelineDefinitionEndpoints:
 
 
 @pytest.mark.pipeline
+@pytest.mark.xdist_group("pipeline")
 @pytest.mark.usefixtures("_check_rabbitmq")
 class TestPipelineTaskDispatch:
     """Test pipeline task dispatch with real broker.
@@ -484,6 +431,7 @@ class TestPipelineTaskDispatch:
 
 
 @pytest.mark.pipeline
+@pytest.mark.xdist_group("pipeline")
 @pytest.mark.usefixtures("_check_rabbitmq")
 class TestPipelineWithRecordLifecycle:
     """Test pipeline integration with record lifecycle."""
@@ -542,6 +490,7 @@ class TestPipelineWithRecordLifecycle:
 
 
 @pytest.mark.pipeline
+@pytest.mark.xdist_group("pipeline")
 @pytest.mark.usefixtures("_check_rabbitmq")
 class TestPipelineBrokerConnectivity:
     """Test broker lifecycle and connectivity."""
