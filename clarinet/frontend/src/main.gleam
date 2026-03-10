@@ -574,6 +574,42 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       #(store.set_error(model, Some(error)), effect.none())
     }
 
+    // Slicer record completion (no form)
+    store.CompleteRecord(record_id) -> {
+      let eff = {
+        use dispatch <- effect.from
+        records.submit_record_data(record_id)
+        |> promise.tap(fn(result) {
+          dispatch(store.CompleteRecordResult(record_id, result))
+        })
+        Nil
+      }
+      #(store.set_loading(model, True), eff)
+    }
+
+    store.CompleteRecordResult(record_id, Ok(record)) -> {
+      let slicer_effect = case dict.get(model.records, record_id) {
+        Ok(models.Record(record_type: Some(models.RecordType(slicer_result_validator: Some(_), ..)), ..)) ->
+          dispatch_msg(store.SlicerValidate(record_id))
+        Ok(models.Record(record_type: Some(models.RecordType(slicer_script: Some(_), ..)), ..)) ->
+          dispatch_msg(store.SlicerClearScene)
+        _ -> effect.none()
+      }
+      #(
+        model
+          |> store.cache_record(record)
+          |> store.set_loading(False)
+          |> store.set_success("Record completed successfully"),
+        effect.batch([
+          dispatch_msg(store.LoadRecordDetail(record_id)),
+          slicer_effect,
+        ]),
+      )
+    }
+
+    store.CompleteRecordResult(_record_id, Error(err)) ->
+      handle_api_error(model, err, "Failed to complete record")
+
     // RecordType edit
     store.LoadRecordTypeForEdit(name) ->
       load_with_effect(
