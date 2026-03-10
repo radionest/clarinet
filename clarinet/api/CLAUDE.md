@@ -32,6 +32,31 @@ DicomWebCacheDep, DicomWebProxyServiceDep
 ProjectFileRegistryDep  # dict | None from app.state
 ```
 
+### RBAC Dependencies (dependencies.py)
+
+```python
+# Role-based access control
+AuthorizedRecordDep = Annotated[Record, Depends(authorize_record_access)]
+```
+
+- `get_user_role_names(user)` — extracts `{role.name for role in user.roles}` with try/except
+- `authorize_record_access` — checks superuser → role_name match → raises `AuthorizationError`
+- `mask_records(records, user)` — converts `Record` → `RecordRead` + masks patient data for non-superusers
+
+### Router Auth Levels
+
+Changing auth levels on routers has cascading impact on tests — check `tests/test_client.py`,
+`tests/integration/test_study_crud.py`, and all e2e test fixtures.
+
+| Router | Auth Level | Notes |
+|--------|-----------|-------|
+| `record.py` | `CurrentUserDep` | Role-based filtering on list/find endpoints; `AuthorizedRecordDep` on single-record endpoints |
+| `study.py` | `current_superuser` | Admin-only (patients, studies, series) |
+| `record_type.py` | `current_superuser` | Admin-only for mutations; read is open to authenticated |
+| `user.py` | `current_superuser` | Admin-only |
+| `admin.py` | `current_superuser` | Admin-only |
+| `dicomweb.py` | `CurrentUserDep` | Any authenticated user |
+
 ### Factory pattern for new repos/services
 
 ```python

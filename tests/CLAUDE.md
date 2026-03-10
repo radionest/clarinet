@@ -40,6 +40,35 @@
 - Use `AsyncClient` from httpx for API testing
 - `pytest.mark.pipeline` marker for tests requiring RabbitMQ (auto-skip when unreachable)
 
+## Auth Fixtures Reference
+
+| Fixture | Auth Level | Source | Used By |
+|---------|-----------|--------|---------|
+| `client` | superuser (overridden) | `conftest.py` | Most integration + unit tests |
+| `unauthenticated_client` | no auth | `conftest.py` | Auth workflow e2e tests |
+| `clarinet_client` | real login (cookies) | `conftest.py` | RecordFlow integration, ClarinetClient tests |
+| `fresh_client` | session override only | `conftest.py` | Lazy-load regression tests |
+
+### Mock User Helper
+
+Use `create_mock_superuser()` and `create_authenticated_client()` from `tests/conftest.py`
+when overriding the `client` fixture in e2e tests:
+
+```python
+from tests.conftest import create_authenticated_client, create_mock_superuser
+
+@pytest_asyncio.fixture
+async def client(test_session, test_settings) -> AsyncGenerator[AsyncClient]:
+    mock_user = await create_mock_superuser(test_session, email="my_test@test.com")
+    async for ac in create_authenticated_client(mock_user, test_session, test_settings):
+        yield ac
+```
+
+`create_mock_superuser` **expunges** the user after `refresh()` — this prevents
+`MissingGreenlet` when other fixtures (e.g. `demo_record_types`) call
+`session.expire_all()`. Without expunge, accessing `user.is_superuser` in an
+endpoint triggers a lazy-load on the expired object in async context.
+
 ## Pitfalls
 
 ### Identity Map Caching
