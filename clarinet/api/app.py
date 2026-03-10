@@ -111,6 +111,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     if hydrator_count:
         logger.info(f"Loaded {hydrator_count} custom schema hydrator(s)")
 
+    # Load custom slicer context hydrators from tasks folder
+    from clarinet.services.slicer.context_hydration import load_custom_slicer_hydrators
+
+    slicer_hydrator_count = load_custom_slicer_hydrators(settings.config_tasks_path)
+    if slicer_hydrator_count:
+        logger.info(f"Loaded {slicer_hydrator_count} custom slicer context hydrator(s)")
+
     try:
         await ensure_admin_exists()
     except RuntimeError as e:
