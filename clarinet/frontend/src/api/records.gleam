@@ -4,7 +4,9 @@ import api/models.{type FileDefinition, type Record, type RecordType, type User}
 import api/types.{type ApiError}
 import gleam/dict
 import gleam/dynamic/decode
+import gleam/int
 import gleam/javascript/promise.{type Promise}
+import gleam/json
 import gleam/option.{None, Some}
 import gleam/result
 import utils/json_utils
@@ -399,6 +401,26 @@ pub fn record_type_full_decoder() -> decode.Decoder(RecordType) {
     constraint_role: constraint_role_name,
     records: None,
   ))
+}
+
+/// Assign a user to a record (sets status to inwork)
+pub fn assign_record_user(
+  record_id: Int,
+  user_id: String,
+) -> Promise(Result(Record, ApiError)) {
+  let path =
+    "/records/"
+    <> int.to_string(record_id)
+    <> "/user?user_id="
+    <> user_id
+  http_client.patch(path, json.to_string(json.object([])))
+  |> promise.map(fn(res) {
+    result.try(res, http_client.decode_response(
+      _,
+      record_decoder(),
+      "Invalid record data",
+    ))
+  })
 }
 
 /// Submit empty data for a record without data_schema (slicer completion)

@@ -315,6 +315,61 @@ async def test_record_data_json_field(test_session, test_user, test_patient, tes
 
 
 @pytest.mark.asyncio
+async def test_submit_auto_assigns_user_when_none(
+    client, test_session, test_patient, test_study, test_record_type
+):
+    """Submit from admin auto-assigns user_id when record has no user."""
+    record = Record(
+        patient_id=test_patient.id,
+        study_uid=test_study.study_uid,
+        user_id=None,
+        record_type_name=test_record_type.name,
+        status=RecordStatus.pending,
+    )
+    test_session.add(record)
+    await test_session.commit()
+    await test_session.refresh(record)
+    assert record.user_id is None
+
+    response = await client.post(
+        f"/api/records/{record.id}/data",
+        json={},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "finished"
+    # client fixture uses a mock superuser — user_id should be auto-assigned
+    assert data["user_id"] is not None
+
+
+@pytest.mark.asyncio
+async def test_submit_preserves_existing_user(
+    client, test_session, test_user, test_patient, test_study, test_record_type
+):
+    """Submit does not overwrite an already-assigned user_id."""
+    record = Record(
+        patient_id=test_patient.id,
+        study_uid=test_study.study_uid,
+        user_id=test_user.id,
+        record_type_name=test_record_type.name,
+        status=RecordStatus.pending,
+    )
+    test_session.add(record)
+    await test_session.commit()
+    await test_session.refresh(record)
+
+    response = await client.post(
+        f"/api/records/{record.id}/data",
+        json={},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "finished"
+    # user_id should remain the originally assigned user, not the submitting admin
+    assert data["user_id"] == str(test_user.id)
+
+
+@pytest.mark.asyncio
 async def test_submit_record_data_no_lazy_load(
     fresh_client, test_session, test_user, test_patient, test_study, test_record_type
 ):

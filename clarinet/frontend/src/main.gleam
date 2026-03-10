@@ -553,7 +553,35 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         model
         |> store.cache_record(record)
         |> store.set_loading(False)
-      #(new_model, effect.none())
+      // Auto-assign admin to unassigned pending/inwork records
+      let assign_effect = case record.user_id, record.status, model.user {
+        None, types.Pending, Some(models.User(id: uid, is_superuser: True, ..))
+        | None, types.InWork, Some(models.User(id: uid, is_superuser: True, ..))
+        -> {
+          case record.id {
+            Some(rid) -> {
+              use dispatch <- effect.from
+              records.assign_record_user(rid, uid)
+              |> promise.tap(fn(result) {
+                dispatch(store.AutoAssignResult(result))
+              })
+              Nil
+            }
+            None -> effect.none()
+          }
+        }
+        _, _, _ -> effect.none()
+      }
+      #(new_model, assign_effect)
+    }
+
+    store.AutoAssignResult(Ok(record)) -> {
+      #(store.cache_record(model, record), effect.none())
+    }
+
+    store.AutoAssignResult(Error(_)) -> {
+      // Silently ignore — admin can still work without assignment
+      #(model, effect.none())
     }
 
     store.RecordDetailLoaded(Error(err)) ->

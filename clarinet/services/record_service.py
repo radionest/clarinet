@@ -96,17 +96,27 @@ class RecordService:
         record_id: int,
         data: RecordData,
         new_status: RecordStatus,
+        user_id: UUID | None = None,
     ) -> tuple[Record, RecordStatus]:
         """Submit record data with a status transition and fire RecordFlow trigger.
+
+        Auto-assigns ``user_id`` when the record has no user yet (admin bypass).
 
         Args:
             record_id: Record ID.
             data: Validated record data.
             new_status: New status to set alongside data.
+            user_id: Current user ID; assigned to the record when it has no user.
 
         Returns:
             Tuple of (updated record, old status).
         """
+        if user_id is not None:
+            record = await self.repo.get(record_id)
+            if record.user_id is None:
+                record.user_id = user_id
+                await self.repo.session.commit()
+
         record, old_status = await self.repo.update_data(record_id, data, new_status=new_status)
         await self._fire_status_change(record, old_status)
         return record, old_status
