@@ -65,6 +65,38 @@ logger.info(f"User {user_id} created new record")
 logger.error(f"Failed to connect to database: {error}")
 ```
 
+### Log File Format
+
+File logs default to JSON-lines (`log_serialize=True`). Each line has short keys:
+
+| Key | Content |
+|-----|---------|
+| `t` | ISO timestamp |
+| `l` | Level (INFO, ERROR, …) |
+| `mod` | Module name |
+| `fn` | Function name |
+| `line` | Line number |
+| `msg` | Log message |
+| `exc` | Traceback (only on exceptions) |
+
+Set `CLARINET_LOG_SERIALIZE=false` for plain-text file logs.
+
+### Searching JSON Logs
+
+```bash
+# All errors
+jq 'select(.l == "ERROR")' clarinet.log
+
+# Errors with tracebacks
+jq 'select(.exc != null)' clarinet.log
+
+# Filter by module
+jq 'select(.mod | startswith("clarinet.services"))' clarinet.log
+
+# Plain grep still works
+grep '"l":"ERROR"' clarinet.log
+```
+
 ## Configuration
 
 - Env vars: `CLARINET_` prefix; TOML files: `settings.toml`, `settings.custom.toml`
