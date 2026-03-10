@@ -1,3 +1,4 @@
+name="НИР Печень"
 extra_roles = ["doctor_CT", "doctor_MRI", "doctor_PDCT", "doctor_CT-AG"]
 
 debug = true
