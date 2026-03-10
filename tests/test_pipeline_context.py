@@ -819,6 +819,78 @@ class TestPipelineTaskDecorator:
         assert base_url.endswith("/api"), f"base_url should end with /api, got: {base_url}"
 
 
+class TestFileDefPassThrough:
+    """Tests for FileDef (config primitive) pass-through in FileResolver."""
+
+    def test_resolve_filedef_bypasses_registry(self):
+        """FileDef objects resolve correctly even with an empty registry."""
+        from clarinet.config.primitives import FileDef
+
+        fd = FileDef(
+            pattern="master_model.seg.nii",
+            level="PATIENT",
+            name="master_model",
+        )
+        dirs = {
+            DicomQueryLevel.PATIENT: Path("/data/P1"),
+            DicomQueryLevel.STUDY: Path("/data/P1/S1"),
+            DicomQueryLevel.SERIES: Path("/data/P1/S1/SE1"),
+        }
+        resolver = FileResolver(
+            working_dirs=dirs,
+            record_type_level=DicomQueryLevel.STUDY,
+            file_registry=[],  # empty — FileDef not in registry
+            fields={},
+        )
+
+        result = resolver.resolve(fd)
+
+        assert result == Path("/data/P1/master_model.seg.nii")
+
+    def test_exists_filedef_bypasses_registry(self, tmp_path: Path):
+        """FileDef objects work with exists() even with an empty registry."""
+        from clarinet.config.primitives import FileDef
+
+        (tmp_path / "master_model.seg.nii").touch()
+
+        fd = FileDef(
+            pattern="master_model.seg.nii",
+            level="PATIENT",
+            name="master_model",
+        )
+        dirs = {DicomQueryLevel.PATIENT: tmp_path}
+        resolver = FileResolver(
+            working_dirs=dirs,
+            record_type_level=DicomQueryLevel.STUDY,
+            file_registry=[],
+            fields={},
+        )
+
+        assert resolver.exists(fd) is True
+
+    def test_filedef_tracks_accessed_files(self):
+        """FileDef objects are tracked in accessed_files by name."""
+        from clarinet.config.primitives import FileDef
+
+        fd = FileDef(
+            pattern="master_model.seg.nii",
+            level="PATIENT",
+            name="master_model",
+        )
+        dirs = {DicomQueryLevel.PATIENT: Path("/data/P1")}
+        resolver = FileResolver(
+            working_dirs=dirs,
+            record_type_level=DicomQueryLevel.STUDY,
+            file_registry=[],
+            fields={},
+        )
+
+        resolver.resolve(fd)
+
+        assert "master_model" in resolver.accessed_files
+        assert resolver.accessed_files["master_model"] == Path("/data/P1/master_model.seg.nii")
+
+
 class TestPipelineTaskIntegration:
     """Integration test: verify auth route is reachable with /api prefix."""
 
