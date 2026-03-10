@@ -6,14 +6,68 @@ using loguru for powerful, flexible logging capabilities.
 
 """
 
+from __future__ import annotations
+
 import inspect
+import json
 import logging
 import sys
+import traceback
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from loguru import logger as _logger
 
 from ..settings import settings
+
+if TYPE_CHECKING:
+    from loguru import Record
+
+try:
+    import orjson
+
+    def _json_dumps(data: dict) -> str:
+        """Serialize dict to compact JSON string using orjson."""
+        return orjson.dumps(data, default=str).decode()
+
+except ImportError:
+
+    def _json_dumps(data: dict) -> str:
+        """Serialize dict to compact JSON string using stdlib json."""
+        return json.dumps(data, separators=(",", ":"), default=str)
+
+
+def _json_format(record: Record) -> str:
+    """Format a loguru record as a JSON line.
+
+    Stores the serialized JSON in ``record["extra"]["_json"]`` and returns
+    a loguru template that references it so curly braces in log messages
+    don't conflict with loguru's ``{}`` interpolation.
+    """
+    subset: dict = {
+        "t": record["time"].strftime("%Y-%m-%dT%H:%M:%S.%f%z"),
+        "l": record["level"].name,
+        "mod": record["name"],
+        "fn": record["function"],
+        "line": record["line"],
+        "msg": record["message"],
+    }
+
+    if record["exception"] is not None:
+        exc = record["exception"]
+        if exc.type is not None:
+            subset["exc"] = "".join(traceback.format_exception(exc.type, exc.value, exc.traceback))
+
+    record["extra"]["_json"] = _json_dumps(subset)
+    return "{extra[_json]}\n"
+
+
+_CONSOLE_FORMAT = (
+    "<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | "
+    "<level>{level: <8}</level> | "
+    "<cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - "
+    "<level>{message}</level>"
+)
 
 
 class InterceptHandler(logging.Handler):
@@ -66,15 +120,9 @@ def setup_logging(
         log_file: Path to log file (will be created if doesn't exist)
         rotation: When to rotate log files (size or time)
         retention: How long to keep log files
-        serialize: Whether to serialize logs as JSON (useful for log aggregation)
+        serialize: Whether to format file logs as JSON lines
     """
-    # Remove default handlers
-
-    if format is None:
-        format = "<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | \
-                  <level>{level: <8}</level> | \
-                  <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - \
-                  <level>{message}</level>"
+    console_format = format or _CONSOLE_FORMAT
 
     _logger.remove()
 
@@ -82,7 +130,7 @@ def setup_logging(
     _logger.add(
         sys.stderr,
         level=console_level or level,
-        format=format,
+        format=console_format,
         colorize=True,
         backtrace=True,
         diagnose=True,
@@ -94,16 +142,17 @@ def setup_logging(
         log_path = Path(log_file)
         log_path.parent.mkdir(parents=True, exist_ok=True)
 
+        file_format = _json_format if serialize else console_format
+
         _logger.add(
             str(log_path),
             level=level,
-            format=format,
+            format=file_format,
             rotation=rotation,
             retention=retention,
             compression="zip",
-            serialize=serialize,
             backtrace=True,
-            diagnose=True,
+            diagnose=not serialize,
         )
 
     # Intercept standard library logging
@@ -119,6 +168,7 @@ setup_logging(
     log_file=settings.get_log_dir() / "clarinet.log" if settings.log_to_file else None,
     rotation=settings.log_rotation,
     retention=settings.log_retention,
+    serialize=settings.log_serialize,
 )
 
 # Export loguru's logger as the module's logger

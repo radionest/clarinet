@@ -239,6 +239,7 @@ class Settings(BaseSettings):
     log_retention: str = "1 week"
     log_format: str | None = None  # Use default if None
     log_console_level: str | None = None  # If None, uses log_level
+    log_serialize: bool = True  # JSON format for file logs
 
     def model_post_init(self, __context: Any) -> None:
         """Link debug flag to log_level when log_level is not explicitly set."""
