@@ -128,12 +128,12 @@ test-all: test frontend-test ## Run all tests (backend + frontend)
 .PHONY: test-fast
 test-fast: ## Run all tests in parallel (auto workers, all service groups)
 	@echo "Running all tests in parallel..."
-	@uv run pytest -n auto
+	@uv run pytest -n auto --dist loadgroup
 
 .PHONY: test-unit
 test-unit: ## Run DB-only tests in parallel (no external services)
 	@echo "Running DB-only tests in parallel..."
-	@uv run pytest -n auto -m "not pipeline and not dicom and not slicer"
+	@uv run pytest -n auto --dist loadgroup -m "not pipeline and not dicom and not slicer"
 
 .PHONY: test-integration
 test-integration: ## Run integration tests only

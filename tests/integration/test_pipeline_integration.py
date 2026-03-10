@@ -25,6 +25,7 @@ from clarinet.services.pipeline.message import PipelineMessage
 pytestmark = [
     pytest.mark.pipeline,
     pytest.mark.asyncio,
+    pytest.mark.xdist_group("pipeline"),
     pytest.mark.usefixtures("_check_rabbitmq", "_purge_test_queues", "_clear_pipeline_registries"),
 ]
 

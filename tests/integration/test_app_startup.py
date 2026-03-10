@@ -116,6 +116,7 @@ async def test_startup_pipeline_disabled(startup_settings, capture_logs):
 
 @pytest.mark.asyncio
 @pytest.mark.pipeline
+@pytest.mark.xdist_group("pipeline")
 async def test_startup_pipeline_enabled(
     startup_settings, capture_logs, _check_rabbitmq, monkeypatch
 ):

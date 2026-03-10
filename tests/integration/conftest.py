@@ -274,7 +274,12 @@ async def _purge_test_queues(
                     queue = await channel.declare_queue(queue_name, passive=True)
                     await queue.purge()
                 except Exception:
-                    pass
+                    # Queue may not exist yet (passive=True fails) or channel
+                    # closed after NOT_FOUND — reopen channel for next iteration
+                    try:
+                        channel = await connection.channel()
+                    except Exception:
+                        break
 
     await _purge()
     yield
