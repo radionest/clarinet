@@ -594,9 +594,17 @@ def downgrade() -> None:
         logger.warning(f"script.py.mako already exists in {alembic_dir}")
 
     logger.info(f"Alembic initialized successfully in {project_path}")
-    logger.info(
-        'You can now run "alembic revision --autogenerate -m initial" to create your first migration'
-    )
+
+    # Auto-generate and apply initial migration
+    try:
+        config = get_alembic_config(project_path)
+        revision = command.revision(config, message="initial", autogenerate=True)
+        logger.info(f"Created initial migration: {revision}")
+        command.upgrade(config, "head")
+        logger.info("Applied initial migration")
+    except Exception as e:
+        logger.error(f"Failed to create initial migration: {e}")
+        logger.info('You can create it manually: alembic revision --autogenerate -m "initial"')
 
 
 # CLI helper functions for common operations
