@@ -12,6 +12,7 @@ This version uses the implemented RecordFlow/Pipeline DSL
 import asyncio
 
 import numpy as np
+from record_types import master_model, master_projection, segmentation_single
 
 from clarinet.models.base import RecordStatus
 from clarinet.services.image import FileType, Segmentation
@@ -34,11 +35,11 @@ async def init_master_model(_msg: PipelineMessage, ctx: TaskContext) -> None:
     Берёт сегментацию врача, разделяет на отдельные ROI с уникальными номерами,
     сохраняет как master_model на уровне PATIENT.
     """
-    if ctx.files.exists("master_model"):
+    if ctx.files.exists(master_model):
         return
 
-    seg_path = ctx.files.resolve("segmentation_single")
-    master_path = ctx.files.resolve("master_model")
+    seg_path = ctx.files.resolve(segmentation_single)
+    master_path = ctx.files.resolve(master_model)
 
     def _create_master() -> None:
         seg = Segmentation()  # autolabel → each island gets unique number
@@ -60,8 +61,8 @@ async def compare_w_projection(msg: PipelineMessage, ctx: TaskContext) -> None:
     """
     assert msg.record_id is not None
 
-    seg_path = ctx.files.resolve("segmentation_single")
-    proj_path = ctx.files.resolve("master_projection")
+    seg_path = ctx.files.resolve(segmentation_single)
+    proj_path = ctx.files.resolve(master_projection)
 
     def _compare() -> tuple[list[dict[str, int]], int]:
         seg = Segmentation()  # autolabel=True for doctor's ROIs

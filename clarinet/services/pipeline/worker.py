@@ -41,30 +41,58 @@ def _load_task_modules() -> None:
     Discovers ``*_flow.py`` files from ``settings.recordflow_paths`` and
     loads them via ``importlib.util`` so that ``@broker.task()`` decorators
     populate the singleton broker's task registry.
+
+    Before loading, adds the tasks directory to ``sys.path`` and pre-loads
+    ``record_types.py`` (if present) so that sibling imports like
+    ``from record_types import master_model`` work in flow files.
     """
     import importlib.util
     import sys
     from pathlib import Path
 
+    from clarinet.config.python_loader import _load_module, _set_file_names_from_module
     from clarinet.services.recordflow.flow_loader import find_flow_files
 
     for path_str in settings.recordflow_paths:
         path = Path(path_str)
+        tasks_dir = path if path.is_dir() else path.parent
         flow_files = find_flow_files(path) if path.is_dir() else [path]
-        for flow_file in flow_files:
-            module_name = flow_file.stem
-            try:
-                spec = importlib.util.spec_from_file_location(module_name, flow_file)
-                if spec is None or spec.loader is None:
-                    logger.error(f"Cannot create module spec for {flow_file}")
-                    continue
 
-                module = importlib.util.module_from_spec(spec)
-                sys.modules[module_name] = module
-                spec.loader.exec_module(module)
-                logger.info(f"Loaded pipeline tasks from {flow_file}")
-            except Exception as e:
-                logger.error(f"Failed to load tasks from {flow_file}: {e}")
+        # Add tasks directory to sys.path so sibling imports work
+        tasks_dir_str = str(tasks_dir.resolve())
+        added_to_path = tasks_dir_str not in sys.path
+        if added_to_path:
+            sys.path.insert(0, tasks_dir_str)
+
+        # Pre-load record_types.py so flow files can import FileDef objects
+        record_types_file = tasks_dir / "record_types.py"
+        rt_module_name: str | None = None
+        if record_types_file.is_file() and record_types_file.stem not in sys.modules:
+            rt_module = _load_module(record_types_file, keep_in_sys=True)
+            if rt_module:
+                rt_module_name = record_types_file.stem
+                _set_file_names_from_module(rt_module)
+
+        try:
+            for flow_file in flow_files:
+                module_name = flow_file.stem
+                try:
+                    spec = importlib.util.spec_from_file_location(module_name, flow_file)
+                    if spec is None or spec.loader is None:
+                        logger.error(f"Cannot create module spec for {flow_file}")
+                        continue
+
+                    module = importlib.util.module_from_spec(spec)
+                    sys.modules[module_name] = module
+                    spec.loader.exec_module(module)
+                    logger.info(f"Loaded pipeline tasks from {flow_file}")
+                except Exception as e:
+                    logger.error(f"Failed to load tasks from {flow_file}: {e}")
+        finally:
+            if rt_module_name:
+                sys.modules.pop(rt_module_name, None)
+            if added_to_path and tasks_dir_str in sys.path:
+                sys.path.remove(tasks_dir_str)
 
     if settings.have_dicom:
         try:
