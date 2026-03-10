@@ -3,32 +3,29 @@
 Loads the master model segmentation and allows the expert to add new
 numbered ROIs. Press ``N`` to auto-add the next numbered segment.
 
-Context variables (injected by SlicerService):
+Context variables (injected by build_slicer_context):
     working_folder: Absolute path to the working directory (auto).
-    master_model_path: Path to the master model segmentation file.
-    output_path: Where to save the updated master model.
-    study_uid: DICOM Study Instance UID to load from PACS.
+    master_model: Path to the master model segmentation file (auto, from file_registry).
+    output_file: Same as master_model (auto, first OUTPUT file).
+    best_study_uid: Anon UID of the patient's first study (hydrated, for PACS load).
     pacs_*: PACS connection parameters (auto).
-    doctor_segmentation_path: Optional doctor segmentation for reference (auto).
 """
 
 import os
 
 s = SlicerHelper(working_folder)  # type: ignore[name-defined]  # noqa: F821
-s.load_study_from_pacs(study_uid)  # type: ignore[name-defined]  # noqa: F821
+
+# Load volume from PACS (best_study_uid is hydrated for PATIENT-level records)
+try:
+    s.load_study_from_pacs(best_study_uid)  # type: ignore[name-defined]
+except NameError:
+    pass
 
 # Load or create master model
-if os.path.isfile(master_model_path):  # type: ignore[name-defined]  # noqa: F821
-    master_seg = s.load_segmentation(master_model_path, "MasterModel")  # type: ignore[name-defined]  # noqa: F821
+if os.path.isfile(master_model):  # type: ignore[name-defined]  # noqa: F821
+    master_seg = s.load_segmentation(master_model, "MasterModel")  # type: ignore[name-defined]  # noqa: F821
 else:
     master_seg = s.create_segmentation("MasterModel")
-
-# Optionally load doctor segmentation for reference
-try:
-    if doctor_segmentation_path and os.path.isfile(doctor_segmentation_path):  # type: ignore[name-defined]
-        s.load_segmentation(doctor_segmentation_path, "DoctorRef")  # type: ignore[name-defined]
-except NameError:
-    pass  # doctor_segmentation_path not provided
 
 # Setup editor on master model
 s.setup_editor(master_seg, effect="Paint", brush_size=5.0)
