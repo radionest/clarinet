@@ -37,6 +37,11 @@ examples/*/data/
 # Misc
 .Rhistory
 
+# VM deploy artifacts
+*.qcow2
+*.iso
+*-rendered.yaml
+
 # Scratch / planning docs
 TODO*.md
 TASKIQ_*.md

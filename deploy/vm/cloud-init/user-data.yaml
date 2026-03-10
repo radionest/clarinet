@@ -1,0 +1,23 @@
+#cloud-config
+# Clarinet VM cloud-init user data
+# Placeholder __SSH_PUBLIC_KEY__ is replaced by vm.sh at runtime
+
+users:
+  - name: clarinet
+    groups: sudo
+    shell: /bin/bash
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    ssh_authorized_keys:
+      - __SSH_PUBLIC_KEY__
+
+package_update: true
+packages:
+  - curl
+  - build-essential
+  - git
+  - jq
+  - qemu-guest-agent
+  - cloud-guest-utils
+
+runcmd:
+  - systemctl enable --now qemu-guest-agent
