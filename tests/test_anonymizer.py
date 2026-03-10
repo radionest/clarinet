@@ -218,7 +218,7 @@ class TestAnonymizeDatasetEdgeCases:
             anonymizer.anonymize_dataset(ds)
 
     def test_private_tags_removed(self, anonymizer: DicomAnonymizer) -> None:
-        """Private tags are removed when delete_private_tags=True."""
+        """Private tags are removed before anonymization."""
         ds = Dataset()
         ds.PatientID = "REAL_PAT"
         ds.PatientName = "Real^Name"
@@ -233,6 +233,27 @@ class TestAnonymizeDatasetEdgeCases:
 
         anonymizer.anonymize_dataset(ds)
 
+        private_tags = [t for t in ds if t.is_private]
+        assert private_tags == []
+
+    def test_implicit_vr_private_tags_do_not_crash(self, anonymizer: DicomAnonymizer) -> None:
+        """Private tags with implicit VR (e.g. Philips) don't cause BytesLengthException."""
+        ds = Dataset()
+        ds.PatientID = "REAL_PAT"
+        ds.PatientName = "Real^Name"
+        ds.StudyInstanceUID = "1.2.3.4.5"
+        ds.SeriesInstanceUID = "1.2.3.4.5.6"
+        ds.SOPInstanceUID = "1.2.3.100"
+        ds.SOPClassUID = "1.2.840.10008.5.1.4.1.1.2"
+
+        # Simulate vendor private tags (odd group = private)
+        ds.add_new(0x01F11001, "LO", "PhilipsPrivate1")
+        ds.add_new(0x01F11026, "LO", "PhilipsPrivate2")
+        ds.add_new(0x00091010, "UN", b"\x00" * 100)  # Unknown VR private tag
+
+        anonymizer.anonymize_dataset(ds)
+
+        assert ds.PatientID == "CLARINET_1"
         private_tags = [t for t in ds if t.is_private]
         assert private_tags == []
 

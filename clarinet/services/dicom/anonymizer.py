@@ -95,10 +95,14 @@ class DicomAnonymizer:
             (0x0002, 0x0003): _set_sop_uid,  # MediaStorageSOPInstanceUID
         }
 
+        # Remove private tags before walk() to avoid BytesLengthException
+        # on malformed vendor-specific tags (e.g. Philips implicit VR)
+        dataset.remove_private_tags()
+
         simpledicomanonymizer.anonymize_dataset(
             dataset,
             extra_anonymization_rules=extra_rules,
-            delete_private_tags=True,
+            delete_private_tags=False,
         )
 
         logger.debug(
