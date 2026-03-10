@@ -155,9 +155,9 @@ pub type Msg {
   SubmitPatientForm
   PatientFormSubmitted(Result(Patient, ApiError))
 
-  // Record data submission
-  SubmitRecordData(record_id: String, data: Json)
-  RecordDataSaved(Result(Record, ApiError))
+  // Slicer record completion (no form)
+  CompleteRecord(record_id: String)
+  CompleteRecordResult(record_id: String, result: Result(Record, ApiError))
 
   // Formosh form events
   FormSubmitSuccess(record_id: String)

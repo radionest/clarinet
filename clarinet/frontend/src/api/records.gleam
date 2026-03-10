@@ -401,6 +401,20 @@ pub fn record_type_full_decoder() -> decode.Decoder(RecordType) {
   ))
 }
 
+/// Submit empty data for a record without data_schema (slicer completion)
+pub fn submit_record_data(
+  record_id: String,
+) -> Promise(Result(Record, ApiError)) {
+  http_client.post("/records/" <> record_id <> "/data", "{}")
+  |> promise.map(fn(res) {
+    result.try(res, http_client.decode_response(
+      _,
+      record_decoder(),
+      "Invalid record data",
+    ))
+  })
+}
+
 /// Get hydrated schema for a record (x-options resolved to oneOf)
 pub fn get_hydrated_schema(
   record_id: String,

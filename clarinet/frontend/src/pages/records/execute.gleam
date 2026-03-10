@@ -165,11 +165,32 @@ fn render_dynamic_form(
       }
     }
     None -> {
+      let can_complete = permissions.can_fill_record(record, model.user)
       html.div([attribute.class("no-schema")], [
-        html.p([], [html.text("This record does not have a data form defined.")]),
-        case record.data {
-          Some(data) -> render_raw_data(data)
-          None -> html.text("No data submitted.")
+        case can_complete {
+          True ->
+            html.div([attribute.class("complete-record-actions")], [
+              html.p([], [
+                html.text("This record does not require form data."),
+              ]),
+              html.button(
+                [
+                  attribute.class("btn btn-success"),
+                  event.on_click(store.CompleteRecord(record_id)),
+                ],
+                [html.text("Complete Record")],
+              ),
+            ])
+          False ->
+            html.div([], [
+              html.p([], [
+                html.text("This record does not have a data form defined."),
+              ]),
+              case record.data {
+                Some(data) -> render_raw_data(data)
+                None -> html.text("No data submitted.")
+              },
+            ])
         },
       ])
     }
