@@ -5,4 +5,4 @@ level = "SERIES"
 min_records = 1
 
 [slicer_script_args]
-new_arg = "new_val"
+arg1 = "val1"
