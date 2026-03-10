@@ -17,6 +17,7 @@ from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlmodel import JSON, Column, Field, Relationship, SQLModel
 
 from clarinet.types import RecordData, SlicerArgs
+from clarinet.utils.logger import logger
 
 from ..exceptions import ConfigurationError, ValidationError
 from ..settings import settings
@@ -293,11 +294,15 @@ class RecordRead(RecordBase):
             return f"radiant://?n=paet&v=PACS_PETROVA&n=pstv&v=0020000D&v={self.study.anon_uid}"
         return f"radiant://?n=paet&v=PACS_PETROVA&n=pstv&v=0020000D&v={self.study.study_uid}"
 
-    def _format_path_strict(self, unformatted_path: str) -> str:
+    def _format_path_strict(self, unformatted_path: str, **extra: Any) -> str:
         """Format a path template with values from this record.
 
         Raises on failure — use for system templates where all placeholders
         are guaranteed to exist (e.g. working_folder).
+
+        Args:
+            unformatted_path: Template string with ``{placeholder}`` tokens.
+            **extra: Additional placeholder values (e.g. ``working_folder``).
         """
         return unformatted_path.format(
             patient_id=self.patient.anon_id
@@ -312,28 +317,43 @@ class RecordRead(RecordBase):
             or self.series_uid,
             user_id=self.user_id,
             clarinet_storage_path=self.clarinet_storage_path or settings.storage_path,
+            **extra,
         )
 
-    def _format_path(self, unformatted_path: str) -> str | None:
+    def _format_path(self, unformatted_path: str, **extra: Any) -> str | None:
         """Format a path template, returning None on failure.
 
         Safe wrapper for user-defined templates (e.g. slicer kwargs)
         where unknown placeholders are expected.
+
+        Args:
+            unformatted_path: Template string with ``{placeholder}`` tokens.
+            **extra: Additional placeholder values (e.g. ``working_folder``).
         """
         try:
-            return self._format_path_strict(unformatted_path)
+            return self._format_path_strict(unformatted_path, **extra)
         except (AttributeError, KeyError):
             return None
 
-    def _format_slicer_kwargs(self, slicer_kwargs: SlicerArgs) -> SlicerArgs:
-        """Format Slicer script arguments with values from this record."""
+    def _format_slicer_kwargs(
+        self, slicer_kwargs: SlicerArgs, extra_vars: dict[str, Any] | None = None
+    ) -> SlicerArgs:
+        """Format Slicer script arguments with values from this record.
+
+        Args:
+            slicer_kwargs: Dict of arg_name -> template string.
+            extra_vars: Additional placeholder values (e.g. ``working_folder``).
+        """
         if slicer_kwargs is None:
             return {}
+        extra = extra_vars or {}
         result: SlicerArgs = {}
         for k, v in slicer_kwargs.items():
-            formatted = self._format_path(v)
+            formatted = self._format_path(v, **extra)
             if formatted is not None:
                 result[k] = formatted
+            else:
+                logger.warning(f"Slicer arg '{k}': could not resolve template '{v}'")
         return result
 
     @computed_field
@@ -341,14 +361,16 @@ class RecordRead(RecordBase):
         """Get formatted Slicer script arguments."""
         if self.record_type.slicer_script_args is None:
             return None
-        return self._format_slicer_kwargs(self.record_type.slicer_script_args)
+        extra = {"working_folder": self._get_working_folder()}
+        return self._format_slicer_kwargs(self.record_type.slicer_script_args, extra)
 
     @computed_field
     def slicer_validator_args_formatted(self) -> SlicerArgs | None:
         """Get formatted Slicer validator arguments."""
         if self.record_type.slicer_result_validator_args is None:
             return None
-        return self._format_slicer_kwargs(self.record_type.slicer_result_validator_args)
+        extra = {"working_folder": self._get_working_folder()}
+        return self._format_slicer_kwargs(self.record_type.slicer_result_validator_args, extra)
 
     def _get_working_folder(self) -> str:
         """Get the working folder path for this record."""
@@ -378,14 +400,16 @@ class RecordRead(RecordBase):
     @computed_field
     def slicer_all_args_formatted(self) -> SlicerArgs:
         """Get all formatted Slicer arguments."""
-        all_args: SlicerArgs = {"working_folder": self._get_working_folder()}
+        wf = self._get_working_folder()
+        extra = {"working_folder": wf}
+        all_args: SlicerArgs = {"working_folder": wf}
 
         if self.record_type.slicer_script_args is not None:
-            all_args.update(self._format_slicer_kwargs(self.record_type.slicer_script_args))
+            all_args.update(self._format_slicer_kwargs(self.record_type.slicer_script_args, extra))
 
         if self.record_type.slicer_result_validator_args is not None:
             all_args.update(
-                self._format_slicer_kwargs(self.record_type.slicer_result_validator_args)
+                self._format_slicer_kwargs(self.record_type.slicer_result_validator_args, extra)
             )
 
         return all_args
