@@ -1,4 +1,5 @@
 // Global state management
+import api/info.{type ProjectInfo}
 import api/models.{
   type AdminStats, type PacsStudyWithSeries, type Patient, type RecordTypeStats,
   type Series, type Study, type Record, type RecordType, type User,
@@ -20,6 +21,9 @@ pub type Model {
     // Authentication (using cookie-based auth)
     user: Option(User),
     checking_session: Bool,
+    // Project branding
+    project_name: String,
+    project_description: String,
     // UI State
     loading: Bool,
     error: Option(String),
@@ -213,6 +217,9 @@ pub type Msg {
   LoadHydratedSchema(record_id: String)
   HydratedSchemaLoaded(record_id: String, result: Result(String, ApiError))
 
+  // Project info
+  ProjectInfoLoaded(Result(ProjectInfo, ApiError))
+
   // Misc
   NoOp
   RefreshData
@@ -225,6 +232,8 @@ pub fn init() -> Model {
     route: router.Home,
     user: None,
     checking_session: True,
+    project_name: "Clarinet",
+    project_description: "Medical Imaging Framework",
     loading: False,
     error: None,
     success_message: None,

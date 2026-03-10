@@ -249,6 +249,10 @@ class Settings(BaseSettings):
         if self.log_console_level is None and self.log_level == "DEBUG":
             self.log_console_level = "INFO"
 
+    # Project branding
+    project_name: str = "Clarinet"
+    project_description: str = "Medical Imaging Framework"
+
     # Project customization
     project_path: Path | None = None
     project_static_path: Path | None = None

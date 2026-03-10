@@ -29,7 +29,7 @@ pub fn view(model: Model) -> Element(Msg) {
       }
       None -> {
         html.div([attribute.class("welcome-section")], [
-          html.h2([], [html.text("Welcome to Clarinet")]),
+          html.h2([], [html.text("Welcome to " <> model.project_name)]),
           html.p([], [html.text("Please log in to access the dashboard.")]),
           html.a(
             [

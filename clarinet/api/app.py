@@ -27,6 +27,7 @@ from clarinet.api.routers import admin as admin
 from clarinet.api.routers import auth as auth
 from clarinet.api.routers import dicom as dicom
 from clarinet.api.routers import dicomweb as dicomweb
+from clarinet.api.routers import info as info
 from clarinet.api.routers import pipeline as pipeline
 from clarinet.api.routers import record as record
 from clarinet.api.routers import slicer  # slicer doesn't use database, no async version needed,
@@ -216,8 +217,8 @@ def create_app(root_path: str = "/") -> FastAPI:
         response_kwargs["default_response_class"] = _default_response_class
 
     app = FastAPI(
-        title="Clarinet",
-        description="A Framework for Medical Image Analysis and Annotation",
+        title=settings.project_name,
+        description=settings.project_description,
         version="0.1.0",
         debug=settings.debug,
         lifespan=lifespan,
@@ -242,6 +243,7 @@ def create_app(root_path: str = "/") -> FastAPI:
     setup_exception_handlers(app)
 
     # Include routers with /api prefix for backend endpoints
+    app.include_router(info.router, prefix="/api")
     app.include_router(auth.router, prefix="/api/auth")
     app.include_router(user.router, prefix="/api/user", tags=["Users"])
     app.include_router(record.router, prefix="/api/records", tags=["Records"])

@@ -11,9 +11,9 @@ pub fn view(model: Model) -> Element(Msg) {
   html.div([attribute.class("login-page")], [
     html.div([attribute.class("login-container")], [
       html.div([attribute.class("login-card card")], [
-        html.h1([attribute.class("login-title")], [html.text("Clarinet")]),
+        html.h1([attribute.class("login-title")], [html.text(model.project_name)]),
         html.p([attribute.class("login-subtitle text-muted")], [
-          html.text("Medical Imaging Framework"),
+          html.text(model.project_description),
         ]),
         login_form(model),
         html.div([attribute.class("login-footer")], [

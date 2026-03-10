@@ -13,7 +13,7 @@ pub fn view(model: Model, content: Element(Msg)) -> Element(Msg) {
     navbar(model),
     notifications(model),
     html.main([attribute.class("main-content")], [content]),
-    footer(),
+    footer(model),
   ])
 }
 
@@ -21,7 +21,7 @@ pub fn view(model: Model, content: Element(Msg)) -> Element(Msg) {
 fn navbar(model: Model) -> Element(Msg) {
   html.nav([attribute.class("navbar")], [
     html.div([attribute.class("navbar-brand")], [
-      nav_link(route: router.Home, text: "Clarinet", current_route: model.route),
+      nav_link(route: router.Home, text: model.project_name, current_route: model.route),
     ]),
     html.div([attribute.class("navbar-menu")], [
       nav_link(route: router.Records, text: "Records", current_route: model.route),
@@ -120,11 +120,11 @@ fn success_notification(message: String) -> Element(Msg) {
 }
 
 // Footer
-fn footer() -> Element(Msg) {
+fn footer(model: Model) -> Element(Msg) {
   html.footer([attribute.class("app-footer")], [
     html.div([attribute.class("container")], [
       html.p([], [
-        html.text("© 2024 Clarinet Medical Imaging Framework"),
+        html.text("© 2024 " <> model.project_name <> " " <> model.project_description),
       ]),
     ]),
   ])

@@ -2,6 +2,7 @@
 import api/admin
 import api/auth
 import api/dicom
+import api/info
 import api/models
 import api/patients
 import api/records
@@ -82,12 +83,21 @@ fn init(_flags) -> #(Model, Effect(Msg)) {
     Nil
   }
 
+  // Fetch project branding info
+  let fetch_info_effect = {
+    use dispatch <- effect.from
+    info.get_project_info()
+    |> promise.tap(fn(result) { dispatch(store.ProjectInfoLoaded(result)) })
+    Nil
+  }
+
   #(
     model_with_route,
     effect.batch([
       modem.init(on_url_change),
       register_formosh_effect,
       check_session_effect,
+      fetch_info_effect,
     ]),
   )
 }
@@ -359,7 +369,7 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         |> store.set_loading(False)
         |> store.clear_messages()
         |> store.clear_auth_forms()
-        |> store.set_success("Registration successful! Welcome to Clarinet.")
+        |> store.set_success("Registration successful! Welcome to " <> model.project_name <> ".")
         |> store.set_route(router.Home)
 
       #(new_model, modem.push("/", option.None, option.None))
@@ -1121,6 +1131,23 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
 
     store.HydratedSchemaLoaded(_record_id, Error(_)) -> {
       // Silently fall back to static schema
+      #(model, effect.none())
+    }
+
+    // Project info
+    store.ProjectInfoLoaded(Ok(project_info)) -> {
+      #(
+        store.Model(
+          ..model,
+          project_name: project_info.project_name,
+          project_description: project_info.project_description,
+        ),
+        effect.none(),
+      )
+    }
+
+    store.ProjectInfoLoaded(Error(_)) -> {
+      // Silently ignore — defaults are already set
       #(model, effect.none())
     }
 

@@ -16,7 +16,7 @@ pub fn view(model: Model) -> Element(Msg) {
           html.text("Create Account"),
         ]),
         html.p([attribute.class("register-subtitle text-muted")], [
-          html.text("Register for Clarinet Medical Imaging Framework"),
+          html.text("Register for " <> model.project_name <> " " <> model.project_description),
         ]),
         register_form(model),
         html.div([attribute.class("register-footer")], [
