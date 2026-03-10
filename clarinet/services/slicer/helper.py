@@ -284,6 +284,14 @@ class SlicerHelper:
         seg_node.CreateDefaultDisplayNodes()
         return seg_node
 
+    def set_source_volume(self, node: Any) -> None:
+        """Set the source volume node for segmentation editing.
+
+        Args:
+            node: A vtkMRMLScalarVolumeNode to use as source volume.
+        """
+        self._image_node = node
+
     def setup_editor(
         self,
         segmentation: SegmentationBuilder | Any,
@@ -291,6 +299,7 @@ class SlicerHelper:
         brush_size: float = 20.0,
         threshold: tuple[float, float] | None = None,
         sphere_brush: bool = True,
+        source_volume: Any = None,
     ) -> None:
         """Open SegmentEditor and configure tools.
 
@@ -300,6 +309,7 @@ class SlicerHelper:
             brush_size: Brush diameter in mm.
             threshold: Optional (min, max) threshold values for Threshold effect.
             sphere_brush: Use spherical brush (True) or circular (False).
+            source_volume: Override source volume node. Falls back to ``_image_node``.
         """
         seg_node = (
             segmentation.node if isinstance(segmentation, SegmentationBuilder) else segmentation
@@ -309,8 +319,9 @@ class SlicerHelper:
         self._editor_widget = slicer.modules.segmenteditor.widgetRepresentation().self().editor
         self._editor_widget.setSegmentationNode(seg_node)
 
-        if self._image_node is not None:
-            self._editor_widget.setSourceVolumeNode(self._image_node)
+        volume = source_volume if source_volume is not None else self._image_node
+        if volume is not None:
+            self._editor_widget.setSourceVolumeNode(volume)
 
         # Configure effect
         self._editor_widget.setActiveEffectByName(effect)
@@ -443,7 +454,16 @@ class SlicerHelper:
             prefer_cget=pacs_prefer_cget,  # type: ignore[name-defined]  # noqa: F821
             move_aet=pacs_move_aet,  # type: ignore[name-defined]  # noqa: F821
         )
-        return pacs.retrieve_study(study_instance_uid)
+        node_ids = pacs.retrieve_study(study_instance_uid)
+
+        # Auto-set first scalar volume as source for Segment Editor
+        for nid in node_ids or []:
+            node = self._scene.GetNodeByID(nid)
+            if node is not None and node.IsA("vtkMRMLScalarVolumeNode"):
+                self._image_node = node
+                break
+
+        return node_ids or []
 
     def get_segment_names(self, segmentation: SegmentationBuilder | Any) -> list[str]:
         """Get ordered list of segment names from a segmentation node.

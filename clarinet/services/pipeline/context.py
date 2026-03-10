@@ -32,11 +32,14 @@ from clarinet.utils.logger import logger
 
 if TYPE_CHECKING:
     from clarinet.client import ClarinetClient
+    from clarinet.config.primitives import FileDef
     from clarinet.models.file_schema import FileDefinitionRead
     from clarinet.models.record import RecordRead
     from clarinet.models.study import SeriesRead, StudyRead
 
     from .message import PipelineMessage
+
+    type FileDefArg = FileDefinitionRead | FileDef | str
 
 
 def _resolve_pattern_from_dict(pattern: str, fields: dict[str, Any]) -> str:
@@ -207,14 +210,19 @@ class FileResolver:
         level = level or self._record_type_level
         return self._working_dirs[level]
 
-    def _lookup(self, file_def: FileDefinitionRead | str) -> FileDefinitionRead:
+    def _lookup(self, file_def: FileDefArg) -> FileDefinitionRead | FileDef:
         """Resolve a file definition by name or pass-through.
 
+        Accepts ``FileDefinitionRead``, ``FileDef`` (config primitive),
+        or a string name. Non-string objects are returned as-is, enabling
+        cross-record-type file access when passing ``FileDef`` objects
+        that are not in this record type's registry.
+
         Args:
-            file_def: ``FileDefinitionRead`` instance or its ``name``.
+            file_def: ``FileDefinitionRead``, ``FileDef``, or name string.
 
         Returns:
-            The resolved ``FileDefinitionRead``.
+            The resolved file definition object.
 
         Raises:
             KeyError: If string name is not in the registry.
@@ -223,7 +231,7 @@ class FileResolver:
             return self._registry[file_def]
         return file_def
 
-    def resolve(self, file_def: FileDefinitionRead | str, **overrides: Any) -> Path:
+    def resolve(self, file_def: FileDefArg, **overrides: Any) -> Path:
         """Resolve a file definition pattern to an absolute path.
 
         Args:
@@ -243,7 +251,7 @@ class FileResolver:
             self._accessed_files[fd.name] = path
         return path
 
-    def exists(self, file_def: FileDefinitionRead | str, **overrides: Any) -> bool:
+    def exists(self, file_def: FileDefArg, **overrides: Any) -> bool:
         """Check whether a resolved file exists on disk.
 
         Args:
@@ -255,7 +263,7 @@ class FileResolver:
         """
         return self.resolve(file_def, **overrides).is_file()
 
-    def glob(self, file_def: FileDefinitionRead | str) -> list[Path]:
+    def glob(self, file_def: FileDefArg) -> list[Path]:
         """Glob a collection file definition (``multiple=True``).
 
         Replaces all placeholders with ``*`` and globs in the working dir.
@@ -269,7 +277,7 @@ class FileResolver:
         fd = self._lookup(file_def)
         level = fd.level or self._record_type_level
         working_dir = self._working_dirs[level]
-        paths = glob_file_paths(fd, working_dir)
+        paths = glob_file_paths(fd, working_dir)  # type: ignore[arg-type]
         if fd.name not in self._accessed_files:
             self._accessed_files[fd.name] = paths[0] if paths else working_dir
         return paths

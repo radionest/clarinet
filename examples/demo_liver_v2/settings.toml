@@ -1,4 +1,5 @@
-name="НИР Печень"
+project_name="НИР Печень"
+project_description="Большое исследование артериографии для выявления метастазов колректального рака в печень"
 extra_roles = ["doctor_CT", "doctor_MRI", "doctor_PDCT", "doctor_CT-AG"]
 
 debug = true

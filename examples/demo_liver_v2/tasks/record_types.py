@@ -11,6 +11,7 @@ from clarinet.flow import FileDef, FileRef, RecordDef
 
 master_model = FileDef(
     pattern="master_model.seg.nii",
+    level="PATIENT",
     description="Master model segmentation — one ROI per lesion with unique number",
 )
 
@@ -67,15 +68,9 @@ segment_CT_single = RecordDef(
     max_records=4,
     role="doctor_CT",
     slicer_script="segment.py",
-    slicer_script_args={
-        "study_uid": "{study_anon_uid}",
-        "output_path": "{working_folder}/segmentation_single_{user_id}.seg.nrrd",
-    },
     slicer_result_validator="segment_validator.py",
-    slicer_result_validator_args={
-        "output_path": "{working_folder}/segmentation_single_{user_id}.seg.nrrd",
-    },
     files=[FileRef(segmentation_single, "output")],
+    # study_uid, segmentation_single, output_file, working_folder — auto-injected
 )
 
 segment_CT_with_archive = RecordDef(
@@ -87,15 +82,9 @@ segment_CT_with_archive = RecordDef(
     max_records=4,
     role="doctor_CT",
     slicer_script="segment.py",
-    slicer_script_args={
-        "study_uid": "{study_anon_uid}",
-        "output_path": "{working_folder}/segmentation_with_archive_{user_id}.seg.nrrd",
-    },
     slicer_result_validator="segment_validator.py",
-    slicer_result_validator_args={
-        "output_path": "{working_folder}/segmentation_with_archive_{user_id}.seg.nrrd",
-    },
     files=[FileRef(segmentation_with_archive, "output")],
+    # study_uid, segmentation_with_archive, output_file, working_folder — auto-injected
 )
 
 segment_MRI_single = RecordDef(
@@ -107,15 +96,9 @@ segment_MRI_single = RecordDef(
     max_records=4,
     role="doctor_MRI",
     slicer_script="segment.py",
-    slicer_script_args={
-        "study_uid": "{study_anon_uid}",
-        "output_path": "{working_folder}/segmentation_single_{user_id}.seg.nrrd",
-    },
     slicer_result_validator="segment_validator.py",
-    slicer_result_validator_args={
-        "output_path": "{working_folder}/segmentation_single_{user_id}.seg.nrrd",
-    },
     files=[FileRef(segmentation_single, "output")],
+    # study_uid, segmentation_single, output_file, working_folder — auto-injected
 )
 
 segment_MRIAG_single = RecordDef(
@@ -127,15 +110,9 @@ segment_MRIAG_single = RecordDef(
     max_records=4,
     role="doctor_MRI",
     slicer_script="segment.py",
-    slicer_script_args={
-        "study_uid": "{study_anon_uid}",
-        "output_path": "{working_folder}/segmentation_single_{user_id}.seg.nrrd",
-    },
     slicer_result_validator="segment_validator.py",
-    slicer_result_validator_args={
-        "output_path": "{working_folder}/segmentation_single_{user_id}.seg.nrrd",
-    },
     files=[FileRef(segmentation_single, "output")],
+    # study_uid, segmentation_single, output_file, working_folder — auto-injected
 )
 
 segment_CTAG_single = RecordDef(
@@ -147,15 +124,9 @@ segment_CTAG_single = RecordDef(
     max_records=4,
     role="doctor_CT-AG",
     slicer_script="segment.py",
-    slicer_script_args={
-        "study_uid": "{study_anon_uid}",
-        "output_path": "{working_folder}/segmentation_single_{user_id}.seg.nrrd",
-    },
     slicer_result_validator="segment_validator.py",
-    slicer_result_validator_args={
-        "output_path": "{working_folder}/segmentation_single_{user_id}.seg.nrrd",
-    },
     files=[FileRef(segmentation_single, "output")],
+    # study_uid, segmentation_single, output_file, working_folder — auto-injected
 )
 
 segment_PDCTAG_single = RecordDef(
@@ -167,15 +138,9 @@ segment_PDCTAG_single = RecordDef(
     max_records=4,
     role="doctor_PDCT",
     slicer_script="segment.py",
-    slicer_script_args={
-        "study_uid": "{study_anon_uid}",
-        "output_path": "{working_folder}/segmentation_single_{user_id}.seg.nrrd",
-    },
     slicer_result_validator="segment_validator.py",
-    slicer_result_validator_args={
-        "output_path": "{working_folder}/segmentation_single_{user_id}.seg.nrrd",
-    },
     files=[FileRef(segmentation_single, "output")],
+    # study_uid, segmentation_single, output_file, working_folder — auto-injected
 )
 
 create_master_projection = RecordDef(
@@ -188,18 +153,14 @@ create_master_projection = RecordDef(
     role="expert",
     slicer_script="create_projection.py",
     slicer_script_args={
-        "master_model_path": "{clarinet_storage_path}/{patient_id}/master_model.seg.nii",
         "target_study_uid": "{study_anon_uid}",
-        "output_path": "{working_folder}/master_projection.seg.nrrd",
     },
     slicer_result_validator="projection_validator.py",
-    slicer_result_validator_args={
-        "output_path": "{working_folder}/master_projection.seg.nrrd",
-    },
     files=[
         FileRef(master_model, "input"),
         FileRef(master_projection, "output"),
     ],
+    # master_model, master_projection, output_file, working_folder — auto-injected
 )
 
 compare_with_projection = RecordDef(
@@ -224,20 +185,14 @@ second_review = RecordDef(
     min_records=1,
     max_records=1,
     slicer_script="second_review.py",
-    slicer_script_args={
-        "master_projection_path": "{working_folder}/master_projection.seg.nrrd",
-        "doctor_segmentation_path": "{working_folder}/segmentation_single_{user_id}.seg.nrrd",
-        "output_path": "{working_folder}/second_review_{user_id}.seg.nrrd",
-        "study_uid": "{study_anon_uid}",
-    },
     slicer_result_validator="second_review_validator.py",
-    slicer_result_validator_args={
-        "output_path": "{working_folder}/second_review_{user_id}.seg.nrrd",
-    },
     files=[
         FileRef(master_projection, "input"),
+        FileRef(segmentation_single, "input"),
         FileRef(second_review_output, "output"),
     ],
+    # master_projection, segmentation_single, second_review_output,
+    # output_file, study_uid, working_folder — auto-injected
 )
 
 update_master_model = RecordDef(
@@ -249,14 +204,8 @@ update_master_model = RecordDef(
     max_records=1,
     role="expert",
     slicer_script="update_master_model.py",
-    slicer_script_args={
-        "master_model_path": "{clarinet_storage_path}/{patient_id}/master_model.seg.nii",
-        "output_path": "{clarinet_storage_path}/{patient_id}/master_model.seg.nii",
-        "study_uid": "{study_anon_uid}",
-    },
     slicer_result_validator="master_model_validator.py",
-    slicer_result_validator_args={
-        "output_path": "{clarinet_storage_path}/{patient_id}/master_model.seg.nii",
-    },
     files=[FileRef(master_model, "output")],
+    slicer_context_hydrators=["patient_first_study"],
+    # master_model, output_file, working_folder, best_study_uid — auto-injected
 )

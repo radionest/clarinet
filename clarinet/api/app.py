@@ -27,6 +27,7 @@ from clarinet.api.routers import admin as admin
 from clarinet.api.routers import auth as auth
 from clarinet.api.routers import dicom as dicom
 from clarinet.api.routers import dicomweb as dicomweb
+from clarinet.api.routers import health as health
 from clarinet.api.routers import info as info
 from clarinet.api.routers import pipeline as pipeline
 from clarinet.api.routers import record as record
@@ -110,6 +111,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     hydrator_count = load_custom_hydrators(settings.config_tasks_path)
     if hydrator_count:
         logger.info(f"Loaded {hydrator_count} custom schema hydrator(s)")
+
+    # Load custom slicer context hydrators from tasks folder
+    from clarinet.services.slicer.context_hydration import load_custom_slicer_hydrators
+
+    slicer_hydrator_count = load_custom_slicer_hydrators(settings.config_tasks_path)
+    if slicer_hydrator_count:
+        logger.info(f"Loaded {slicer_hydrator_count} custom slicer context hydrator(s)")
 
     try:
         await ensure_admin_exists()
@@ -252,6 +260,7 @@ def create_app(root_path: str = "/") -> FastAPI:
     app.include_router(admin.router, prefix="/api/admin", tags=["Admin"])
     app.include_router(dicom.router, prefix="/api/dicom", tags=["DICOM"])
     app.include_router(pipeline.router, prefix="/api/pipelines", tags=["Pipelines"])
+    app.include_router(health.router, prefix="/api", tags=["Health"])
 
     # Mount DICOMweb proxy router (conditional on settings)
     if settings.dicomweb_enabled:

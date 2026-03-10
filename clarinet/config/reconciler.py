@@ -38,6 +38,7 @@ _COMPARED_FIELDS: tuple[str, ...] = (
     "slicer_script_args",
     "slicer_result_validator",
     "slicer_result_validator_args",
+    "slicer_context_hydrators",
     "data_schema",
 )
 
@@ -68,7 +69,7 @@ def _normalize(value: Any) -> Any:
     """
     if hasattr(value, "value"):
         return value.value
-    if isinstance(value, (list, dict)) and not value:
+    if isinstance(value, list | dict) and not value:
         return None
     return value
 

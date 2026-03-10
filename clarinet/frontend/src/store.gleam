@@ -220,6 +220,10 @@ pub type Msg {
   // Project info
   ProjectInfoLoaded(Result(ProjectInfo, ApiError))
 
+  // Auto-assign
+  AutoAssignResult(Result(Record, ApiError))
+
+
   // Misc
   NoOp
   RefreshData

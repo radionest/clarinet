@@ -521,3 +521,47 @@ async def test_slicer_all_args_always_has_working_folder(
     assert isinstance(all_args, dict)
     assert "working_folder" in all_args
     assert isinstance(all_args["working_folder"], str)
+
+
+@pytest.mark.asyncio
+async def test_slicer_args_working_folder_placeholder(
+    test_session, patient_with_anon, study_with_anon
+):
+    """slicer_script_args with {working_folder} placeholder resolves correctly."""
+    rt = RecordType(
+        name="wf_test_slicer_args",
+        description="Test working_folder in slicer args",
+        label="WF Slicer Args",
+        level=DicomQueryLevel.STUDY,
+        slicer_script_args={
+            "output_path": "{working_folder}/output.nrrd",
+            "study_uid": "{study_anon_uid}",
+        },
+    )
+    test_session.add(rt)
+    await test_session.commit()
+    await test_session.refresh(rt)
+
+    record = await _create_record(
+        test_session,
+        patient_id=patient_with_anon.id,
+        study_uid=study_with_anon.study_uid,
+        series_uid=None,
+        rt_name=rt.name,
+    )
+
+    repo = RecordRepository(test_session)
+    loaded = await repo.get_with_relations(record.id)
+    record_read = RecordRead.model_validate(loaded)
+
+    # {working_folder} should be resolved in slicer_args_formatted
+    args = record_read.slicer_args_formatted
+    assert args is not None
+    assert "output_path" in args
+    expected_wf = f"{settings.storage_path}/{settings.anon_id_prefix}_42/ANON_STUDY_WF"
+    assert args["output_path"] == f"{expected_wf}/output.nrrd"
+    assert args["study_uid"] == "ANON_STUDY_WF"
+
+    # Also verify in slicer_all_args_formatted
+    all_args = record_read.slicer_all_args_formatted
+    assert all_args["output_path"] == f"{expected_wf}/output.nrrd"

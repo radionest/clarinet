@@ -1,0 +1,26 @@
+[Unit]
+Description=Clarinet API Server
+After=network.target postgresql.service rabbitmq-server.service
+Wants=postgresql.service rabbitmq-server.service
+
+[Service]
+Type=simple
+User=clarinet
+Group=clarinet
+WorkingDirectory=/opt/clarinet
+ExecStart=/opt/clarinet/venv/bin/clarinet run --host 127.0.0.1 --port 8000
+Restart=on-failure
+RestartSec=5
+
+# Environment
+EnvironmentFile=-/opt/clarinet/env
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/clarinet /var/log/clarinet /opt/clarinet
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

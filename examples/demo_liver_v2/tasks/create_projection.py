@@ -4,11 +4,12 @@ Dual-viewport workflow: master model + volume on the left, target volume +
 empty projection on the right. Auto-navigates to master ROI centroid when
 selecting an empty projection segment.
 
-Context variables (injected by SlicerService):
+Context variables (injected by build_slicer_context):
     working_folder: Absolute path to the working directory (auto).
-    master_model_path: Path to the master model segmentation file.
-    target_study_uid: DICOM Study Instance UID for the target volume.
-    output_path: Where to save the projection result.
+    master_model: Path to the master model segmentation file (auto, from file_registry).
+    master_projection: Path to the projection output (auto, from file_registry).
+    output_file: Same as master_projection (auto, first OUTPUT file).
+    target_study_uid: DICOM Study Instance UID for the target volume (custom arg).
     pacs_*: PACS connection parameters (auto).
 """
 
@@ -21,11 +22,11 @@ master_node_ids = s.load_study_from_pacs(target_study_uid)  # type: ignore[name-
 target_vol = slicer.mrmlScene.GetNodeByID(master_node_ids[0])  # type: ignore[name-defined]  # noqa: F821
 
 # Load master model segmentation
-master_seg = s.load_segmentation(master_model_path, "MasterModel")  # type: ignore[name-defined]  # noqa: F821
+master_seg = s.load_segmentation(master_model, "MasterModel")  # type: ignore[name-defined]  # noqa: F821
 
 # Create empty projection with same segment structure
-if os.path.isfile(output_path):  # type: ignore[name-defined]  # noqa: F821
-    projection = s.load_segmentation(output_path, "Projection")  # type: ignore[name-defined]  # noqa: F821
+if os.path.isfile(master_projection):  # type: ignore[name-defined]  # noqa: F821
+    projection = s.load_segmentation(master_projection, "Projection")  # type: ignore[name-defined]  # noqa: F821
 else:
     projection = s.create_segmentation("Projection")
     s.copy_segments(master_seg, projection, empty=True)

@@ -31,6 +31,10 @@ def load_flows_from_file(file_path: Path) -> list[FlowRecord | FlowFileRecord]:
     The flows are automatically registered in RECORD_REGISTRY when the
     file is executed.
 
+    Before loading, adds the parent directory to ``sys.path`` and pre-loads
+    ``record_types.py`` (if present as a sibling) so that flow files can use
+    ``from record_types import master_model`` for cross-record-type file access.
+
     Args:
         file_path: Path to the Python file containing flow definitions.
 
@@ -53,6 +57,24 @@ def load_flows_from_file(file_path: Path) -> list[FlowRecord | FlowFileRecord]:
     RECORD_REGISTRY.clear()
     ENTITY_REGISTRY.clear()
     FILE_REGISTRY.clear()
+
+    # Add parent directory to sys.path so sibling imports work
+    parent_dir = file_path.parent
+    parent_dir_str = str(parent_dir.resolve())
+    added_to_path = parent_dir_str not in sys.path
+    if added_to_path:
+        sys.path.insert(0, parent_dir_str)
+
+    # Pre-load record_types.py so flow files can import FileDef objects
+    from clarinet.config.python_loader import _load_module, _set_file_names_from_module
+
+    record_types_file = parent_dir / "record_types.py"
+    rt_module_name: str | None = None
+    if record_types_file.is_file() and record_types_file.stem not in sys.modules:
+        rt_module = _load_module(record_types_file, keep_in_sys=True)
+        if rt_module:
+            rt_module_name = record_types_file.stem
+            _set_file_names_from_module(rt_module)
 
     try:
         module_name = file_path.stem
@@ -80,6 +102,12 @@ def load_flows_from_file(file_path: Path) -> list[FlowRecord | FlowFileRecord]:
     except Exception:
         logger.exception(f"Error loading flows from {file_path}")
         return []
+
+    finally:
+        if rt_module_name:
+            sys.modules.pop(rt_module_name, None)
+        if added_to_path and parent_dir_str in sys.path:
+            sys.path.remove(parent_dir_str)
 
 
 def load_and_register_flows(engine: RecordFlowEngine, flow_files: list[Path]) -> int:

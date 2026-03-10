@@ -17,6 +17,7 @@ from clarinet.api.dependencies import (
 )
 from clarinet.exceptions.domain import NoScriptError
 from clarinet.models import RecordRead
+from clarinet.services.slicer.context import build_slicer_context_async
 from clarinet.settings import settings
 from clarinet.utils.logger import logger
 
@@ -103,18 +104,6 @@ async def ping_slicer(
     return {"ok": ok}
 
 
-def _build_pacs_context() -> dict[str, Any]:
-    """Build PACS settings context dict for Slicer scripts."""
-    return {
-        "pacs_host": settings.pacs_host,
-        "pacs_port": settings.pacs_port,
-        "pacs_aet": settings.pacs_aet,
-        "pacs_calling_aet": settings.pacs_calling_aet,
-        "pacs_prefer_cget": settings.pacs_prefer_cget,
-        "pacs_move_aet": settings.pacs_move_aet,
-    }
-
-
 @router.post("/clear")
 async def clear_slicer_scene(
     service: SlicerServiceDep,
@@ -168,9 +157,7 @@ async def open_record_in_slicer(
     if not record_read.record_type.slicer_script:
         raise NoScriptError(f"Record type has no slicer_script configured for record {record_id}")
 
-    args: dict[str, str] | None = record_read.slicer_all_args_formatted  # type: ignore[assignment]
-    context: dict[str, Any] = dict(args or {})
-    context.update(_build_pacs_context())
+    context = await build_slicer_context_async(record_read, record_repo.session)
 
     slicer_url = f"http://{client_ip}:{settings.slicer_port}"
     logger.info(f"Opening record {record_id} in Slicer at {slicer_url}")
@@ -213,9 +200,7 @@ async def validate_record_in_slicer(
             f"Record type has no slicer_result_validator configured for record {record_id}"
         )
 
-    args: dict[str, str] | None = record_read.slicer_all_args_formatted  # type: ignore[assignment]
-    context: dict[str, Any] = dict(args or {})
-    context.update(_build_pacs_context())
+    context = await build_slicer_context_async(record_read, record_repo.session)
 
     slicer_url = f"http://{client_ip}:{settings.slicer_port}"
     logger.info(f"Validating record {record_id} in Slicer at {slicer_url}")

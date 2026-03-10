@@ -1,3 +1,3 @@
-"""Validator — export the MasterModel node to output_path."""
+"""Validator — export the MasterModel node to output_file."""
 
-export_segmentation("MasterModel", output_path)  # type: ignore[name-defined]  # noqa: F821
+export_segmentation("MasterModel", output_file)  # type: ignore[name-defined]  # noqa: F821

@@ -24,6 +24,7 @@ from sqlmodel import SQLModel
 
 from clarinet.api.auth_config import current_active_user
 from clarinet.api.dependencies import (
+    CurrentUserDep,
     FileDefinitionRepositoryDep,
     PaginationDep,
     RecordRepositoryDep,
@@ -428,6 +429,7 @@ async def submit_record_data(
     repo: RecordRepositoryDep,
     service: RecordServiceDep,
     session: SessionDep,
+    current_user: CurrentUserDep,
     data: RecordData = Body(),
 ) -> Record:
     """Submit data for a record."""
@@ -448,8 +450,10 @@ async def submit_record_data(
     if file_result and file_result.matched_files:
         await repo.set_files(record, file_result.matched_files)
 
-    # Update record data, set finished status
-    record, _ = await service.submit_data(record_id, validated_data, RecordStatus.finished)
+    # Update record data, set finished status (auto-assign user if missing)
+    record, _ = await service.submit_data(
+        record_id, validated_data, RecordStatus.finished, user_id=current_user.id
+    )
 
     return record
 

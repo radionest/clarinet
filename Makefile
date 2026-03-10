@@ -21,6 +21,9 @@ help: ## Show this help message
 	@echo ""
 	@echo "Utility commands:"
 	@grep -E '^clean[^:]*:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-20s %s\n", $$1, $$2}'
+	@echo ""
+	@echo "VM deploy commands:"
+	@grep -E '^vm-[^:]*:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-20s %s\n", $$1, $$2}'
 
 # =============================================================================
 # Frontend Commands
@@ -202,6 +205,44 @@ clean-all: clean ## Deep clean including virtual environment
 	@rm -rf .venv
 	@rm -rf node_modules
 	@echo "Deep clean complete!"
+
+# =============================================================================
+# VM Deploy Commands
+# =============================================================================
+
+VM_SH := deploy/vm/vm.sh
+
+.PHONY: vm-create
+vm-create: ## Create test VM from cloud image
+	@bash $(VM_SH) create
+
+.PHONY: vm-destroy
+vm-destroy: ## Destroy test VM and all storage
+	@bash $(VM_SH) destroy
+
+.PHONY: vm-ssh
+vm-ssh: ## SSH into test VM
+	@bash $(VM_SH) ssh
+
+.PHONY: vm-status
+vm-status: ## Show test VM status
+	@bash $(VM_SH) status
+
+.PHONY: vm-deploy
+vm-deploy: build ## Build wheel and deploy to VM
+	@bash $(VM_SH) deploy
+
+.PHONY: vm-smoke
+vm-smoke: ## Run smoke tests against running VM
+	@bash deploy/test/smoke-test.sh
+
+.PHONY: vm-test
+vm-test: ## Full E2E: create VM -> deploy -> test -> cleanup
+	@bash deploy/test/deploy-test.sh
+
+.PHONY: vm-reimage
+vm-reimage: ## Destroy + recreate VM (clean slate)
+	@bash $(VM_SH) reimage
 
 # Default target
 .DEFAULT_GOAL := help
