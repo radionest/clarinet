@@ -5,7 +5,6 @@ This module provides async API endpoints for managing records, record types, and
 Formerly known as task router.
 """
 
-from collections.abc import Sequence
 from pathlib import Path
 from uuid import UUID
 
@@ -24,6 +23,7 @@ from sqlmodel import SQLModel
 
 from clarinet.api.auth_config import current_active_user
 from clarinet.api.dependencies import (
+    AuthorizedRecordDep,
     CurrentUserDep,
     FileDefinitionRepositoryDep,
     PaginationDep,
@@ -32,15 +32,17 @@ from clarinet.api.dependencies import (
     RecordTypeRepositoryDep,
     SeriesRepositoryDep,
     SessionDep,
+    get_user_role_names,
     require_mutable_config,
 )
+from clarinet.api.masking import mask_record_patient_data, mask_records
 from clarinet.config.toml_exporter import (
     delete_record_type_files,
     export_data_schema_sidecar,
     export_record_type_to_toml,
 )
 from clarinet.exceptions import CONFLICT, NOT_FOUND
-from clarinet.exceptions.domain import ValidationError
+from clarinet.exceptions.domain import AuthorizationError, ValidationError
 from clarinet.models import (
     Record,
     RecordCreate,
@@ -293,27 +295,42 @@ async def delete_record_type(
 
 
 @router.get("/", response_model=list[RecordRead])
-async def get_all_records(repo: RecordRepositoryDep) -> Sequence[Record]:
-    """Get all records with relations loaded."""
-    return await repo.get_all_with_relations()
+async def get_all_records(
+    repo: RecordRepositoryDep,
+    user: CurrentUserDep,
+) -> list[RecordRead]:
+    """Get all records with relations loaded.
+
+    Superusers see all records. Non-superusers see only records matching their roles.
+    """
+    if user.is_superuser:
+        records = await repo.get_all_with_relations()
+    else:
+        role_names = get_user_role_names(user)
+        records = await repo.get_all_for_user_roles(role_names)
+    return mask_records(records, user)
 
 
 @router.get("/my", response_model=list[RecordRead])
 async def get_my_records(
     repo: RecordRepositoryDep,
-    user: User = Depends(current_active_user),
-) -> Sequence[Record]:
+    user: CurrentUserDep,
+) -> list[RecordRead]:
     """Get all records assigned to the current user with relations loaded."""
-    return await repo.find_by_user(user.id)
+    role_names = None if user.is_superuser else get_user_role_names(user)
+    records = await repo.find_by_user(user.id, role_names=role_names)
+    return mask_records(records, user)
 
 
 @router.get("/my/pending", response_model=list[RecordRead])
 async def get_my_pending_records(
     repo: RecordRepositoryDep,
-    user: User = Depends(current_active_user),
-) -> Sequence[Record]:
+    user: CurrentUserDep,
+) -> list[RecordRead]:
     """Get all pending records assigned to the current user with relations loaded."""
-    return await repo.find_pending_by_user(user.id)
+    role_names = None if user.is_superuser else get_user_role_names(user)
+    records = await repo.find_pending_by_user(user.id, role_names=role_names)
+    return mask_records(records, user)
 
 
 @router.get("/available_types", response_model=dict[str, int])
@@ -328,18 +345,16 @@ async def get_my_available_record_types(
 
 @router.get("/{record_id}", response_model=RecordRead)
 async def get_record(
-    record_id: int,
-    repo: RecordRepositoryDep,
+    record: AuthorizedRecordDep,
+    user: CurrentUserDep,
 ) -> RecordRead:
     """Get a record by ID."""
-    record = await repo.get_with_relations(record_id)
-    return RecordRead.model_validate(record)
+    return mask_record_patient_data(RecordRead.model_validate(record), user)
 
 
 @router.get("/{record_id}/schema", response_class=JSONResponse)
 async def get_hydrated_schema(
-    record_id: int,
-    repo: RecordRepositoryDep,
+    record: AuthorizedRecordDep,
     session: SessionDep,
 ) -> JSONResponse:
     """Return the record type's JSON Schema with ``x-options`` resolved.
@@ -353,7 +368,6 @@ async def get_hydrated_schema(
     Raises:
         NOT_FOUND: If the record or its data_schema does not exist.
     """
-    record = await repo.get_with_relations(record_id)
     schema = record.record_type.data_schema
     if not schema:
         raise NOT_FOUND.with_context("Record type has no data schema")
@@ -406,10 +420,12 @@ async def update_record_status(
     record_id: int,
     record_status: RecordStatus,
     service: RecordServiceDep,
-) -> Record:
+    _authorized_record: AuthorizedRecordDep,
+    user: CurrentUserDep,
+) -> RecordRead:
     """Update a record's status."""
     record, _ = await service.update_status(record_id, record_status)
-    return record
+    return mask_record_patient_data(RecordRead.model_validate(record), user)
 
 
 @router.patch("/{record_id}/user", response_model=RecordRead)
@@ -417,23 +433,26 @@ async def assign_record_to_user(
     record_id: int,
     user_id: UUID,
     service: RecordServiceDep,
-) -> Record:
+    _authorized_record: AuthorizedRecordDep,
+    user: CurrentUserDep,
+) -> RecordRead:
     """Assign a record to a user."""
     record, _ = await service.assign_user(record_id, user_id)
-    return record
+    return mask_record_patient_data(RecordRead.model_validate(record), user)
 
 
 @router.post("/{record_id}/data", response_model=RecordRead)
 async def submit_record_data(
     record_id: int,
+    authorized_record: AuthorizedRecordDep,
     repo: RecordRepositoryDep,
     service: RecordServiceDep,
     session: SessionDep,
-    current_user: CurrentUserDep,
+    user: CurrentUserDep,
     data: RecordData = Body(),
-) -> Record:
+) -> RecordRead:
     """Submit data for a record."""
-    record = await repo.get_with_relations(record_id)
+    record = authorized_record
 
     if record.status == RecordStatus.blocked:
         raise CONFLICT.with_context("Record is blocked — required input files are missing.")
@@ -451,23 +470,24 @@ async def submit_record_data(
         await repo.set_files(record, file_result.matched_files)
 
     # Update record data, set finished status (auto-assign user if missing)
-    record, _ = await service.submit_data(
-        record_id, validated_data, RecordStatus.finished, user_id=current_user.id
+    updated, _ = await service.submit_data(
+        record_id, validated_data, RecordStatus.finished, user_id=user.id
     )
 
-    return record
+    return mask_record_patient_data(RecordRead.model_validate(updated), user)
 
 
 @router.patch("/{record_id}/data", response_model=RecordRead)
 async def update_record_data(
     record_id: int,
-    repo: RecordRepositoryDep,
+    authorized_record: AuthorizedRecordDep,
     service: RecordServiceDep,
     session: SessionDep,
+    user: CurrentUserDep,
     data: RecordData = Body(),
-) -> Record:
+) -> RecordRead:
     """Update a record's data."""
-    record = await repo.get_with_record_type(record_id)
+    record = authorized_record
 
     if record.status != RecordStatus.finished:
         raise CONFLICT.with_context("Record is not finished yet. Use POST to submit record data.")
@@ -475,7 +495,7 @@ async def update_record_data(
     validated_data = await validate_record_data(record, data, session)
     updated, _ = await service.update_data(record_id, validated_data)
 
-    return updated
+    return mask_record_patient_data(RecordRead.model_validate(updated), user)
 
 
 @router.patch("/{record_id}", response_model=RecordRead)
@@ -497,8 +517,7 @@ async def update_record(
 
 @router.post("/{record_id}/validate-files")
 async def validate_files_endpoint(
-    record_id: int,
-    repo: RecordRepositoryDep,
+    record: AuthorizedRecordDep,
 ) -> FileValidationResult:
     """Validate input files for a record without saving the result.
 
@@ -511,8 +530,6 @@ async def validate_files_endpoint(
     Returns:
         FileValidationResult with validation status and matched files
     """
-    record = await repo.get_with_relations(record_id)
-
     record_read = RecordRead.model_validate(record)
     result = await validate_record_files(record_read)
     if result is None:
@@ -524,6 +541,7 @@ async def validate_files_endpoint(
 @router.post("/{record_id}/check-files", response_model=FileCheckResult)
 async def check_record_files(
     record_id: int,
+    authorized_record: AuthorizedRecordDep,
     repo: RecordRepositoryDep,
     service: RecordServiceDep,
 ) -> FileCheckResult:
@@ -538,7 +556,7 @@ async def check_record_files(
     Returns:
         FileCheckResult with changed files and current checksums
     """
-    record = await repo.get_with_relations(record_id)
+    record = authorized_record
     record_read = RecordRead.model_validate(record)
 
     # Auto-unblock: if record is blocked, check whether input files are now present
@@ -574,6 +592,7 @@ async def check_record_files(
 @router.post("/{record_id}/invalidate", response_model=RecordRead)
 async def invalidate_record(
     record_id: int,
+    _authorized_record: AuthorizedRecordDep,
     repo: RecordRepositoryDep,
     mode: str = Body(default="hard"),
     source_record_id: int | None = Body(default=None),
@@ -605,6 +624,7 @@ async def invalidate_record(
 async def find_records(
     pagination: PaginationDep,
     repo: RecordRepositoryDep,
+    user: CurrentUserDep,
     find_queries: list[RecordFindResult] = Body(default=[]),
     patient_id: str | None = None,
     patient_anon_id: str | None = None,
@@ -617,8 +637,9 @@ async def find_records(
     record_status: RecordStatus | None = None,
     wo_user: bool | None = None,
     random_one: bool = False,
-) -> Sequence[Record]:
+) -> list[RecordRead]:
     """Find records by various criteria."""
+    role_names = None if user.is_superuser else get_user_role_names(user)
     criteria = RecordSearchCriteria(
         patient_id=patient_id,
         patient_anon_id=patient_anon_id,
@@ -631,9 +652,11 @@ async def find_records(
         record_status=record_status,
         wo_user=wo_user,
         random_one=random_one,
+        role_names=role_names,
         data_queries=find_queries,
     )
-    return await repo.find_by_criteria(criteria, skip=pagination.skip, limit=pagination.limit)
+    records = await repo.find_by_criteria(criteria, skip=pagination.skip, limit=pagination.limit)
+    return mask_records(records, user)
 
 
 @router.patch("/bulk/status", status_code=status.HTTP_204_NO_CONTENT)
@@ -641,8 +664,17 @@ async def bulk_update_record_status(
     record_ids: list[int],
     new_status: RecordStatus,
     service: RecordServiceDep,
+    user: CurrentUserDep,
+    repo: RecordRepositoryDep,
 ) -> None:
     """Update status for multiple records at once."""
+    if not user.is_superuser:
+        user_roles = get_user_role_names(user)
+        for rid in record_ids:
+            record = await repo.get_with_relations(rid)
+            role_name = record.record_type.role_name
+            if role_name is None or role_name not in user_roles:
+                raise AuthorizationError(f"Insufficient permissions to access record {rid}")
     await service.bulk_update_status(record_ids, new_status)
 
 

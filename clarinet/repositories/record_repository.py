@@ -46,6 +46,7 @@ class RecordSearchCriteria:
     parent_record_id: int | None = None
     wo_user: bool | None = None
     random_one: bool = False
+    role_names: set[str] | None = None
     data_queries: list[RecordFindResult] = field(default_factory=list)
 
 
@@ -174,8 +175,44 @@ class RecordRepository(BaseRepository[Record]):
         result = await self.session.execute(statement)
         return result.scalars().all()
 
+    async def get_all_for_user_roles(
+        self, role_names: set[str], skip: int = 0, limit: int = 100
+    ) -> Sequence[Record]:
+        """Get all records whose RecordType.role_name matches one of the given roles.
+
+        Records with role_name=NULL are excluded (superuser-only).
+
+        Args:
+            role_names: Set of role names to filter by
+            skip: Number of records to skip
+            limit: Maximum number of records to return
+
+        Returns:
+            List of records with patient, study, series, and record_type loaded
+        """
+        statement = (
+            select(Record)
+            .join(RecordType)
+            .where(col(RecordType.role_name).in_(list(role_names)))
+            .options(
+                selectinload(Record.patient),  # type: ignore
+                selectinload(Record.study),  # type: ignore
+                selectinload(Record.series),  # type: ignore
+                _record_type_with_files(),
+                _record_file_links_eager_load(),
+            )
+            .offset(skip)
+            .limit(limit)
+        )
+        result = await self.session.execute(statement)
+        return result.scalars().all()
+
     async def find_by_user(
-        self, user_id: UUID, skip: int = 0, limit: int = 100
+        self,
+        user_id: UUID,
+        skip: int = 0,
+        limit: int = 100,
+        role_names: set[str] | None = None,
     ) -> Sequence[Record]:
         """Find records assigned to a specific user with relations loaded.
 
@@ -183,6 +220,7 @@ class RecordRepository(BaseRepository[Record]):
             user_id: User UUID to filter by
             skip: Number of records to skip
             limit: Maximum number of records to return
+            role_names: Optional set of role names to filter by
 
         Returns:
             List of records with patient, study, series, and record_type loaded
@@ -200,16 +238,23 @@ class RecordRepository(BaseRepository[Record]):
             .offset(skip)
             .limit(limit)
         )
+        if role_names is not None:
+            statement = statement.join(RecordType).where(
+                col(RecordType.role_name).in_(list(role_names))
+            )
         result = await self.session.execute(statement)
         return result.scalars().all()
 
-    async def find_pending_by_user(self, user_id: UUID) -> Sequence[Record]:
+    async def find_pending_by_user(
+        self, user_id: UUID, role_names: set[str] | None = None
+    ) -> Sequence[Record]:
         """Find active (non-terminal) records assigned to a user with relations loaded.
 
         Returns records that are not blocked, finished, failed, or paused.
 
         Args:
             user_id: User UUID to filter by
+            role_names: Optional set of role names to filter by
 
         Returns:
             List of active records with patient, study, series, and record_type loaded
@@ -231,6 +276,10 @@ class RecordRepository(BaseRepository[Record]):
                 _record_file_links_eager_load(),
             )
         )
+        if role_names is not None:
+            statement = statement.join(RecordType).where(
+                col(RecordType.role_name).in_(list(role_names))
+            )
         result = await self.session.execute(statement)
         return result.scalars().all()
 
@@ -680,6 +729,10 @@ class RecordRepository(BaseRepository[Record]):
         # Parent record filter
         if criteria.parent_record_id is not None:
             statement = statement.where(Record.parent_record_id == criteria.parent_record_id)
+
+        # Role-based access filter
+        if criteria.role_names is not None:
+            statement = statement.where(col(RecordType.role_name).in_(list(criteria.role_names)))
 
         # Data filters
         statement = self._apply_data_query_filters(statement, criteria.data_queries)

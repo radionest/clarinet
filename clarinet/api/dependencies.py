@@ -14,7 +14,7 @@ from clarinet.api.auth_config import (
 )
 from clarinet.exceptions import ClarinetError
 from clarinet.exceptions.domain import AuthorizationError
-from clarinet.models import User
+from clarinet.models import Record, User
 from clarinet.repositories.file_definition_repository import FileDefinitionRepository
 from clarinet.repositories.patient_repository import PatientRepository
 from clarinet.repositories.pipeline_definition_repository import PipelineDefinitionRepository
@@ -290,6 +290,63 @@ def get_project_file_registry(
 ProjectFileRegistryDep = Annotated[
     dict[str, FileRegistryEntry] | None, Depends(get_project_file_registry)
 ]
+
+
+def get_user_role_names(user: User) -> set[str]:
+    """Extract role names from a user.
+
+    Args:
+        user: User with roles relation (eagerly loaded in auth flow).
+
+    Returns:
+        Set of role name strings.
+    """
+    try:
+        return {role.name for role in user.roles}
+    except Exception:
+        return set()
+
+
+async def authorize_record_access(
+    record_id: int,
+    user: CurrentUserDep,
+    repo: RecordRepositoryDep,
+) -> Record:
+    """Authorize access to a record based on user roles.
+
+    Superusers can access any record. Non-superusers can only access records
+    whose RecordType.role_name matches one of their roles. Records with
+    role_name=NULL are superuser-only.
+
+    Args:
+        record_id: Record ID to authorize access for.
+        user: Current authenticated user.
+        repo: Record repository.
+
+    Returns:
+        Record with relations loaded.
+
+    Raises:
+        RecordNotFoundError: If record doesn't exist.
+        AuthorizationError: If user lacks required role.
+    """
+    record = await repo.get_with_relations(record_id)
+
+    if user.is_superuser:
+        return record
+
+    role_name = record.record_type.role_name
+    if role_name is None:
+        raise AuthorizationError("Insufficient permissions to access this record")
+
+    user_roles = get_user_role_names(user)
+    if role_name not in user_roles:
+        raise AuthorizationError("Insufficient permissions to access this record")
+
+    return record
+
+
+AuthorizedRecordDep = Annotated[Record, Depends(authorize_record_access)]
 
 
 def require_mutable_config(request: Request) -> None:

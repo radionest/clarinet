@@ -18,6 +18,7 @@ from fastapi_users.authentication import (
 )
 from sqlalchemy import CursorResult, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 from sqlmodel import col
 
 from clarinet.models.auth import AccessToken
@@ -214,8 +215,12 @@ class DatabaseStrategy(Strategy[User, UUID]):
 
         await self.session.commit()
 
-        # Get user
-        user_stmt = select(User).where(User.id == access_token.user_id)  # type: ignore[arg-type]
+        # Get user with roles eagerly loaded (survives expunge for caching)
+        user_stmt = (
+            select(User)
+            .where(User.id == access_token.user_id)  # type: ignore[arg-type]
+            .options(selectinload(User.roles))  # type: ignore[arg-type]
+        )
         user_result = await self.session.execute(user_stmt)
         user = user_result.scalar_one_or_none()
 

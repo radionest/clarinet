@@ -6,7 +6,7 @@ This module provides async API endpoints for managing medical imaging studies, s
 
 from fastapi import APIRouter, Body, Depends, status
 
-from clarinet.api.auth_config import current_active_user
+from clarinet.api.auth_config import current_superuser
 from clarinet.api.dependencies import RecordServiceDep, StudyServiceDep
 from clarinet.models import (
     DicomUID,
@@ -21,7 +21,7 @@ from clarinet.models import (
 from clarinet.models.patient import PatientRead
 from clarinet.models.study import SeriesFind, StudyRead
 
-router = APIRouter(dependencies=[Depends(current_active_user)])
+router = APIRouter(dependencies=[Depends(current_superuser)])
 
 
 # Patient endpoints
