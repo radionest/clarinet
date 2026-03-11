@@ -51,10 +51,15 @@ class DLQPublisher:
     Args:
         amqp_url: Optional AMQP URL override. Falls back to
             ``_build_amqp_url()`` when not provided (production default).
+        queue_name: Optional queue name override. Falls back to
+            ``DLQ_QUEUE`` when not provided (production default).
+            Frozen after ``startup()`` — all subsequent ``publish()``
+            calls use the resolved name.
     """
 
-    def __init__(self, amqp_url: str | None = None) -> None:
+    def __init__(self, amqp_url: str | None = None, queue_name: str | None = None) -> None:
         self._amqp_url = amqp_url
+        self._queue_name = queue_name
         self._connection: AbstractRobustConnection | None = None
         self._channel: AbstractChannel | None = None
 
@@ -71,9 +76,11 @@ class DLQPublisher:
         from .broker import DLQ_QUEUE, _build_amqp_url
 
         url = self._amqp_url or _build_amqp_url()
+        queue = self._queue_name or DLQ_QUEUE
+        self._queue_name = queue  # freeze resolved name
         self._connection = await aio_pika.connect_robust(url)
         self._channel = await self._connection.channel()
-        await self._channel.declare_queue(DLQ_QUEUE, durable=True)
+        await self._channel.declare_queue(queue, durable=True)
 
     async def shutdown(self) -> None:
         """Close the persistent AMQP connection."""
@@ -94,9 +101,7 @@ class DLQPublisher:
         """
         import aio_pika
 
-        from .broker import DLQ_QUEUE
-
-        if self._channel is None:
+        if self._channel is None or self._queue_name is None:
             logger.error("DLQ channel not initialized, cannot publish — was startup() called?")
             return
 
@@ -106,7 +111,7 @@ class DLQPublisher:
                 content_type="application/json",
                 delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
             ),
-            routing_key=DLQ_QUEUE,
+            routing_key=self._queue_name,
         )
 
 

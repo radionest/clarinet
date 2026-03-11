@@ -482,7 +482,7 @@ class TestDLQPublisher:
 
         from clarinet.services.pipeline.middleware import DLQPublisher
 
-        publisher = DLQPublisher()
+        publisher = DLQPublisher(queue_name="clarinet.dead_letter")
         mock_channel = AsyncMock()
         publisher._channel = mock_channel
 
