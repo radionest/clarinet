@@ -33,6 +33,7 @@ examples/*/data/
 
 # DICOM
 **/dicomweb_cache
+**/test_dataset/**
 
 # Misc
 .Rhistory
