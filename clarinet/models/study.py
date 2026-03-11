@@ -24,6 +24,7 @@ class StudyBase(BaseModel):
     study_uid: DicomUID = Field()
     date: date
     anon_uid: str | None = None
+    study_description: str | None = None
     patient_id: str
 
 

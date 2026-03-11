@@ -43,12 +43,14 @@ pub fn study_decoder() -> decode.Decoder(Study) {
   use study_uid <- decode.field("study_uid", decode.string)
   use date <- decode.field("date", decode.string)
   use anon_uid <- decode.optional_field("anon_uid", None, decode.optional(decode.string))
+  use study_description <- decode.optional_field("study_description", None, decode.optional(decode.string))
   use patient_id <- decode.field("patient_id", decode.string)
 
   decode.success(models.Study(
     study_uid: study_uid,
     date: date,
     anon_uid: anon_uid,
+    study_description: study_description,
     patient_id: patient_id,
     patient: None,
     series: None,
@@ -61,6 +63,7 @@ pub fn study_detail_decoder() -> decode.Decoder(Study) {
   use study_uid <- decode.field("study_uid", decode.string)
   use date <- decode.field("date", decode.string)
   use anon_uid <- decode.optional_field("anon_uid", None, decode.optional(decode.string))
+  use study_description <- decode.optional_field("study_description", None, decode.optional(decode.string))
   use patient_id <- decode.field("patient_id", decode.string)
   use patient <- decode.optional_field(
     "patient",
@@ -77,6 +80,7 @@ pub fn study_detail_decoder() -> decode.Decoder(Study) {
     study_uid: study_uid,
     date: date,
     anon_uid: anon_uid,
+    study_description: study_description,
     patient_id: patient_id,
     patient: patient,
     series: study_series,

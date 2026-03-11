@@ -123,7 +123,8 @@ fn studies_section(studies: Option(List(Study))) -> Element(Msg) {
 }
 
 fn study_row(study: Study) -> Element(Msg) {
-  let #(modalities, description, series_count) = case study.series {
+  let description = option.unwrap(study.study_description, "-")
+  let #(modalities, series_count) = case study.series {
     Some(series_list) -> {
       let mods =
         series_list
@@ -133,17 +134,9 @@ fn study_row(study: Study) -> Element(Msg) {
         [] -> "-"
         _ -> string.join(mods, "/")
       }
-      let desc = case
-        list.filter_map(series_list, fn(s) {
-          option.to_result(s.series_description, Nil)
-        })
-      {
-        [first, ..] -> first
-        [] -> "-"
-      }
-      #(mods_str, desc, int.to_string(list.length(series_list)))
+      #(mods_str, int.to_string(list.length(series_list)))
     }
-    None -> #("-", "-", "0")
+    None -> #("-", "0")
   }
 
   html.tr([], [
