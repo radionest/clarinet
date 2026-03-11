@@ -159,6 +159,26 @@ def setup_logging(
     logging.basicConfig(handlers=[InterceptHandler()], level=0, force=True)
 
 
+def reconfigure_for_worker() -> None:
+    """Re-initialize logging to write to clarinet_worker.log.
+
+    This re-calls :func:`setup_logging` using the same settings but
+    directing file logs to ``clarinet_worker.log`` when file logging is
+    enabled. It is intended to be called by the pipeline worker process
+    early during startup so worker logs are separated from the API server.
+    """
+    setup_logging(
+        level=settings.log_level,
+        console_level=settings.log_console_level,
+        format=settings.log_format,
+        log_to_file=settings.log_to_file,
+        log_file=settings.get_log_dir() / "clarinet_worker.log" if settings.log_to_file else None,
+        rotation=settings.log_rotation,
+        retention=settings.log_retention,
+        serialize=settings.log_serialize,
+    )
+
+
 # Configure logging with settings from config
 setup_logging(
     level=settings.log_level,

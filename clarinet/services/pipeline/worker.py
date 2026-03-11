@@ -8,7 +8,7 @@ the machine's capabilities (GPU, DICOM) from settings.
 from __future__ import annotations
 
 from clarinet.settings import settings
-from clarinet.utils.logger import logger
+from clarinet.utils.logger import logger, reconfigure_for_worker
 
 from .broker import DEFAULT_QUEUE, DICOM_QUEUE, GPU_QUEUE
 
@@ -121,6 +121,9 @@ async def run_worker(
     import signal
 
     from .broker import create_broker, get_broker
+
+    # Reconfigure logging so the worker writes to clarinet_worker.log
+    reconfigure_for_worker()
 
     _load_task_modules()
 
