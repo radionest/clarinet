@@ -1,6 +1,6 @@
 // Series detail page (admin only)
 import api/models.{type Record, type Series}
-import api/types
+import utils/status
 import gleam/dict
 import gleam/int
 import gleam/list
@@ -147,7 +147,7 @@ fn record_row(record: Record) -> Element(Msg) {
   html.tr([], [
     html.td([], [html.text(record_id_str)]),
     html.td([], [html.text(record.record_type_name)]),
-    html.td([], [html.text(status_text(record.status))]),
+    html.td([], [html.text(status.display_text(record.status))]),
     html.td([], [html.text(record.patient_id)]),
     html.td([], [
       html.a(
@@ -159,17 +159,6 @@ fn record_row(record: Record) -> Element(Msg) {
       ),
     ]),
   ])
-}
-
-fn status_text(status: types.RecordStatus) -> String {
-  case status {
-    types.Blocked -> "Blocked"
-    types.Pending -> "Pending"
-    types.InWork -> "In Progress"
-    types.Finished -> "Completed"
-    types.Failed -> "Failed"
-    types.Paused -> "Paused"
-  }
 }
 
 fn loading_view(series_uid: String) -> Element(Msg) {

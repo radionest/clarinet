@@ -1,6 +1,6 @@
 // Admin Dashboard page
 import api/models
-import api/types
+import utils/status
 import gleam/dict
 import gleam/int
 import gleam/list
@@ -20,6 +20,7 @@ pub fn view(model: Model) -> Element(Msg) {
         html.div([attribute.class("dashboard-content")], [
           overview_section(stats),
           status_section(stats),
+          roles_section(model),
           records_section(model),
         ])
       None ->
@@ -55,6 +56,86 @@ fn status_section(stats: models.AdminStats) -> Element(Msg) {
           admin_stat_card(label: status, count: count, color: status_color(status))
         }),
     ),
+  ])
+}
+
+fn roles_section(model: Model) -> Element(Msg) {
+  html.div([attribute.class("dashboard-section")], [
+    html.h3([], [html.text("Role Matrix")]),
+    case model.role_matrix {
+      None ->
+        html.p([attribute.class("text-muted")], [
+          html.text("Loading role matrix..."),
+        ])
+      Some(matrix) ->
+        case matrix.roles {
+          [] ->
+            html.p([attribute.class("text-muted")], [
+              html.text("No roles defined."),
+            ])
+          roles ->
+            html.div([attribute.class("table-responsive")], [
+              html.table([attribute.class("table")], [
+                html.thead([], [
+                  html.tr(
+                    [],
+                    [
+                      html.th([], [html.text("User")]),
+                      ..list.map(roles, fn(role) {
+                        html.th([], [html.text(role)])
+                      })
+                    ],
+                  ),
+                ]),
+                html.tbody(
+                  [],
+                  matrix.users
+                    |> list.sort(fn(a, b) { string.compare(a.email, b.email) })
+                    |> list.map(fn(user) { role_matrix_row(model, user, roles) }),
+                ),
+              ]),
+            ])
+        }
+    },
+  ])
+}
+
+fn role_matrix_row(
+  model: Model,
+  user: models.UserRoleInfo,
+  roles: List(String),
+) -> Element(Msg) {
+  let is_inactive = !user.is_active
+  let row_class = case is_inactive {
+    True -> "text-muted"
+    False -> ""
+  }
+
+  html.tr([attribute.class(row_class)], [
+    html.td([], [
+      html.text(user.email),
+      case user.is_superuser {
+        True ->
+          html.span([attribute.class("badge badge-purple")], [
+            html.text("admin"),
+          ])
+        False -> html.text("")
+      },
+    ]),
+    ..list.map(roles, fn(role) {
+      let has_role = list.contains(user.role_names, role)
+      let is_toggling = model.role_toggling == Some(#(user.id, role))
+
+      html.td([], [
+        html.input([
+          attribute.type_("checkbox"),
+          attribute.class("checkbox-input"),
+          attribute.checked(has_role),
+          attribute.disabled(is_toggling),
+          event.on_click(store.ToggleUserRole(user.id, role, !has_role)),
+        ]),
+      ])
+    })
   ])
 }
 
@@ -97,14 +178,7 @@ fn record_row(model: Model, record: models.Record) -> Element(Msg) {
     None -> 0
   }
 
-  let status_str = case record.status {
-    types.Blocked -> "blocked"
-    types.Pending -> "pending"
-    types.InWork -> "inwork"
-    types.Finished -> "finished"
-    types.Failed -> "failed"
-    types.Paused -> "pause"
-  }
+  let status_str = status.to_backend_string(record.status)
 
   let is_editing = model.admin_editing_record_id == Some(record_id)
 

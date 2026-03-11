@@ -344,6 +344,22 @@ pub type AdminStats {
   )
 }
 
+// User with role assignments for role matrix
+pub type UserRoleInfo {
+  UserRoleInfo(
+    id: String,
+    email: String,
+    is_active: Bool,
+    is_superuser: Bool,
+    role_names: List(String),
+  )
+}
+
+// Role matrix: all roles and all users with their assignments
+pub type RoleMatrix {
+  RoleMatrix(roles: List(String), users: List(UserRoleInfo))
+}
+
 // Per-status record counts for a record type
 pub type RecordTypeStatusCounts {
   RecordTypeStatusCounts(

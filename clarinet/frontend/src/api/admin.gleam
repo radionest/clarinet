@@ -104,6 +104,65 @@ fn record_type_stats_decoder() -> decode.Decoder(models.RecordTypeStats) {
   ))
 }
 
+// Get role matrix (all roles + users with assignments)
+pub fn get_role_matrix() -> Promise(Result(models.RoleMatrix, ApiError)) {
+  http_client.get("/admin/role-matrix")
+  |> promise.map(fn(res) {
+    result.try(res, http_client.decode_response(
+      _,
+      role_matrix_decoder(),
+      "Invalid role matrix data",
+    ))
+  })
+}
+
+// Add a role to a user
+pub fn add_user_role(
+  user_id: String,
+  role_name: String,
+) -> Promise(Result(Nil, ApiError)) {
+  http_client.post("/user/" <> user_id <> "/roles/" <> role_name, "{}")
+  |> promise.map(fn(res) {
+    result.map(res, fn(_) { Nil })
+  })
+}
+
+// Remove a role from a user
+pub fn remove_user_role(
+  user_id: String,
+  role_name: String,
+) -> Promise(Result(Nil, ApiError)) {
+  http_client.delete("/user/" <> user_id <> "/roles/" <> role_name)
+  |> promise.map(fn(res) {
+    result.map(res, fn(_) { Nil })
+  })
+}
+
+// Decoder for UserRoleInfo
+fn user_role_info_decoder() -> decode.Decoder(models.UserRoleInfo) {
+  use id <- decode.field("id", decode.string)
+  use email <- decode.field("email", decode.string)
+  use is_active <- decode.field("is_active", decode.bool)
+  use is_superuser <- decode.field("is_superuser", decode.bool)
+  use role_names <- decode.field("role_names", decode.list(decode.string))
+
+  decode.success(models.UserRoleInfo(
+    id: id,
+    email: email,
+    is_active: is_active,
+    is_superuser: is_superuser,
+    role_names: role_names,
+  ))
+}
+
+// Decoder for RoleMatrix
+fn role_matrix_decoder() -> decode.Decoder(models.RoleMatrix) {
+  use roles <- decode.field("roles", decode.list(decode.string))
+  use users <- decode.field("users", decode.list(user_role_info_decoder()))
+
+  decode.success(models.RoleMatrix(roles: roles, users: users))
+}
+
 // Assign a user to a record (superuser only)
 pub fn assign_record_user(
   record_id: Int,

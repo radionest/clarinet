@@ -400,7 +400,7 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         |> promise.tap(fn(_) { dispatch(store.LogoutComplete) })
         Nil
       }
-      #(store.clear_user(model), logout_effect)
+      #(store.reset_for_logout(model), logout_effect)
     }
 
     store.LogoutComplete -> {
@@ -412,11 +412,11 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
 
     // UI Messages
     store.ClearError -> {
-      #(store.clear_messages(model), effect.none())
+      #(store.Model(..model, error: None), effect.none())
     }
 
     store.ClearSuccessMessage -> {
-      #(store.clear_messages(model), effect.none())
+      #(store.Model(..model, success_message: None), effect.none())
     }
 
     // Data loading - Studies
@@ -531,7 +531,7 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     store.AdminAssignUserResult(Ok(record)) -> {
       let new_model =
         model
-        |> store.update_record(record)
+        |> store.cache_record(record)
         |> store.set_loading(False)
         |> store.set_success("User assigned successfully")
       #(new_model, effect.none())
@@ -553,10 +553,10 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         model
         |> store.cache_record(record)
         |> store.set_loading(False)
-      // Auto-assign admin to unassigned pending/inwork records
+      // Auto-assign user to unassigned pending/inwork records
       let assign_effect = case record.user_id, record.status, model.user {
-        None, types.Pending, Some(models.User(id: uid, is_superuser: True, ..))
-        | None, types.InWork, Some(models.User(id: uid, is_superuser: True, ..))
+        None, types.Pending, Some(models.User(id: uid, ..))
+        | None, types.InWork, Some(models.User(id: uid, ..))
         -> {
           case record.id {
             Some(rid) -> {
@@ -1179,6 +1179,54 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       #(model, effect.none())
     }
 
+    // Role matrix
+    store.LoadRoleMatrix ->
+      load_with_effect(model, admin.get_role_matrix, store.RoleMatrixLoaded)
+
+    store.RoleMatrixLoaded(Ok(matrix)) -> {
+      let new_model =
+        store.Model(..model, role_matrix: Some(matrix), loading: False)
+      #(new_model, effect.none())
+    }
+
+    store.RoleMatrixLoaded(Error(err)) ->
+      handle_api_error(model, err, "Failed to load role matrix")
+
+    store.ToggleUserRole(user_id, role_name, add) -> {
+      let toggle_effect = {
+        use dispatch <- effect.from
+        let api_call = case add {
+          True -> admin.add_user_role(user_id, role_name)
+          False -> admin.remove_user_role(user_id, role_name)
+        }
+        api_call
+        |> promise.tap(fn(result) {
+          dispatch(store.UserRoleToggled(result))
+        })
+        Nil
+      }
+      #(
+        store.Model(..model, role_toggling: Some(#(user_id, role_name))),
+        toggle_effect,
+      )
+    }
+
+    store.UserRoleToggled(Ok(_)) -> {
+      let new_model =
+        store.Model(..model, role_toggling: None)
+        |> store.set_success("Role updated successfully")
+      #(new_model, dispatch_msg(store.LoadRoleMatrix))
+    }
+
+    store.UserRoleToggled(Error(err)) -> {
+      let new_model = store.Model(..model, role_toggling: None)
+      handle_api_error(new_model, err, "Failed to update role")
+    }
+
+    store.SetError(error) -> {
+      #(store.set_error(model, error), effect.none())
+    }
+
     // Default case
     _ -> #(model, effect.none())
   }
@@ -1227,7 +1275,7 @@ fn handle_api_error(
     types.AuthError(_) -> {
       let new_model =
         model
-        |> store.clear_user()
+        |> store.reset_for_logout()
         |> store.set_loading(False)
         |> store.set_error(Some("Session expired. Please log in again."))
         |> store.set_route(router.Login)
@@ -1375,6 +1423,7 @@ fn load_route_data(model: Model, route: Route) -> Effect(Msg) {
         dispatch_msg(store.LoadAdminStats),
         dispatch_msg(store.LoadRecords),
         dispatch_msg(store.LoadUsers),
+        dispatch_msg(store.LoadRoleMatrix),
       ])
     router.AdminRecordTypes, Some(_) ->
       dispatch_msg(store.LoadRecordTypeStats)

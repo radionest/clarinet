@@ -2,7 +2,7 @@
 import api/info.{type ProjectInfo}
 import api/models.{
   type AdminStats, type PacsStudyWithSeries, type Patient, type RecordTypeStats,
-  type Series, type Study, type Record, type RecordType, type User,
+  type RoleMatrix, type Series, type Study, type Record, type RecordType, type User,
 }
 import api/types.{type ApiError}
 import gleam/dict.{type Dict}
@@ -72,6 +72,9 @@ pub type Model {
     slicer_ping_timer: Option(global.TimerID),
     // Hydrated schemas cache (record_id -> schema JSON string)
     hydrated_schemas: Dict(String, String),
+    // Role matrix
+    role_matrix: Option(RoleMatrix),
+    role_toggling: Option(#(String, String)),
   )
 }
 
@@ -223,6 +226,11 @@ pub type Msg {
   // Auto-assign
   AutoAssignResult(Result(Record, ApiError))
 
+  // Role matrix
+  LoadRoleMatrix
+  RoleMatrixLoaded(Result(RoleMatrix, ApiError))
+  ToggleUserRole(user_id: String, role_name: String, add: Bool)
+  UserRoleToggled(Result(Nil, ApiError))
 
   // Misc
   NoOp
@@ -274,6 +282,8 @@ pub fn init() -> Model {
     slicer_available: None,
     slicer_ping_timer: None,
     hydrated_schemas: dict.new(),
+    role_matrix: None,
+    role_toggling: None,
   )
 }
 
@@ -288,6 +298,16 @@ pub fn set_user(model: Model, user: User) -> Model {
 
 pub fn clear_user(model: Model) -> Model {
   Model(..model, user: None)
+}
+
+pub fn reset_for_logout(model: Model) -> Model {
+  let fresh = init()
+  Model(
+    ..fresh,
+    project_name: model.project_name,
+    project_description: model.project_description,
+    checking_session: False,
+  )
 }
 
 pub fn set_loading(model: Model, loading: Bool) -> Model {
@@ -392,13 +412,3 @@ pub fn clear_pacs(model: Model) -> Model {
   Model(..model, pacs_studies: [], pacs_loading: False, pacs_importing: None)
 }
 
-// Update a record in the records dict cache
-pub fn update_record(model: Model, updated: Record) -> Model {
-  case updated.id {
-    Some(id) -> {
-      let records = dict.insert(model.records, int.to_string(id), updated)
-      Model(..model, records: records)
-    }
-    None -> model
-  }
-}

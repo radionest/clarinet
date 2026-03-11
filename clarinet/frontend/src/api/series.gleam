@@ -2,6 +2,7 @@
 import api/http_client
 import api/models.{type Series}
 import api/types.{type ApiError}
+import utils/status
 import gleam/dynamic/decode
 import gleam/javascript/promise.{type Promise}
 import gleam/option.{None}
@@ -152,15 +153,7 @@ fn record_base_decoder() -> decode.Decoder(models.Record) {
     decode.optional(decode.string),
   )
 
-  let status = case status_str {
-    "blocked" -> types.Blocked
-    "pending" -> types.Pending
-    "inwork" -> types.InWork
-    "finished" -> types.Finished
-    "failed" -> types.Failed
-    "pause" -> types.Paused
-    _ -> types.Pending
-  }
+  let status = status.from_backend_string(status_str)
 
   decode.success(models.Record(
     id: id,

@@ -1,7 +1,9 @@
 // Record API endpoints
 import api/http_client
-import api/models.{type FileDefinition, type Record, type RecordType, type User}
+import api/models.{type FileDefinition, type Record, type RecordType}
 import api/types.{type ApiError}
+import api/users
+import utils/status
 import gleam/dict
 import gleam/dynamic/decode
 import gleam/int
@@ -115,23 +117,6 @@ fn record_type_base_decoder() -> decode.Decoder(RecordType) {
   ))
 }
 
-// Decoder for nested User
-fn user_base_decoder() -> decode.Decoder(User) {
-  use id <- decode.field("id", decode.string)
-  use email <- decode.field("email", decode.string)
-  use is_active <- decode.optional_field("is_active", True, decode.bool)
-  use is_superuser <- decode.optional_field("is_superuser", False, decode.bool)
-  use is_verified <- decode.optional_field("is_verified", False, decode.bool)
-
-  decode.success(models.User(
-    id: id,
-    email: email,
-    is_active: is_active,
-    is_superuser: is_superuser,
-    is_verified: is_verified,
-  ))
-}
-
 // Public decoder for reuse
 pub fn record_decoder() -> decode.Decoder(Record) {
   use id <- decode.optional_field("id", None, decode.optional(decode.int))
@@ -171,7 +156,7 @@ pub fn record_decoder() -> decode.Decoder(Record) {
   use user <- decode.optional_field(
     "user",
     None,
-    decode.optional(user_base_decoder()),
+    decode.optional(users.user_decoder()),
   )
   use created_at <- decode.optional_field(
     "created_at",
@@ -209,7 +194,7 @@ pub fn record_decoder() -> decode.Decoder(Record) {
     decode.optional(decode.dynamic),
   )
 
-  let status = parse_status(status_str)
+  let status = status.from_backend_string(status_str)
   let data = case data_dyn {
     Some(dyn) -> Some(json_utils.dynamic_to_string(dyn))
     None -> None
@@ -248,18 +233,6 @@ pub fn record_decoder() -> decode.Decoder(Record) {
     slicer_validator_args_formatted: None,
     slicer_all_args_formatted: None,
   ))
-}
-
-fn parse_status(status: String) -> types.RecordStatus {
-  case status {
-    "blocked" -> types.Blocked
-    "pending" -> types.Pending
-    "inwork" -> types.InWork
-    "finished" -> types.Finished
-    "failed" -> types.Failed
-    "pause" -> types.Paused
-    _ -> types.Pending
-  }
 }
 
 // Decoder for FileDefinition

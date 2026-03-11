@@ -2,6 +2,7 @@
 import api/models.{type Record}
 import api/types
 import utils/permissions
+import utils/status
 import components/forms/base
 import gleam/dict
 import gleam/int
@@ -21,7 +22,7 @@ pub fn view(model: Model) -> Element(Msg) {
 
   let title = case is_admin {
     True -> "All Records"
-    False -> "My Records"
+    False -> "Records"
   }
 
   html.div([attribute.class("container")], [
@@ -135,24 +136,13 @@ fn filter_bar(model: Model, all_records: List(Record)) -> Element(Msg) {
   ])
 }
 
-fn status_to_string(status: types.RecordStatus) -> String {
-  case status {
-    types.Blocked -> "blocked"
-    types.Pending -> "pending"
-    types.InWork -> "inwork"
-    types.Finished -> "finished"
-    types.Failed -> "failed"
-    types.Paused -> "paused"
-  }
-}
-
 fn apply_filters(
   records: List(Record),
   filters: dict.Dict(String, String),
 ) -> List(Record) {
   list.filter(records, fn(record) {
     let status_ok = case dict.get(filters, "status") {
-      Ok(status_filter) -> status_to_string(record.status) == status_filter
+      Ok(status_filter) -> status.to_backend_string(record.status) == status_filter
       Error(_) -> True
     }
 

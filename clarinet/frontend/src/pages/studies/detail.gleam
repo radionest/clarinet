@@ -1,6 +1,6 @@
 // Study detail page (admin only)
 import api/models.{type Patient, type Record, type Series, type Study}
-import api/types
+import utils/status
 import gleam/dict
 import gleam/int
 import gleam/list
@@ -210,7 +210,7 @@ fn record_row(record: Record) -> Element(Msg) {
   html.tr([], [
     html.td([], [html.text(record_id_str)]),
     html.td([], [html.text(type_label)]),
-    html.td([], [html.text(status_text(record.status))]),
+    html.td([], [html.text(status.display_text(record.status))]),
     html.td([], [
       html.a(
         [
@@ -221,17 +221,6 @@ fn record_row(record: Record) -> Element(Msg) {
       ),
     ]),
   ])
-}
-
-fn status_text(status: types.RecordStatus) -> String {
-  case status {
-    types.Blocked -> "Blocked"
-    types.Pending -> "Pending"
-    types.InWork -> "In Progress"
-    types.Finished -> "Completed"
-    types.Failed -> "Failed"
-    types.Paused -> "Paused"
-  }
 }
 
 fn loading_view(study_uid: String) -> Element(Msg) {

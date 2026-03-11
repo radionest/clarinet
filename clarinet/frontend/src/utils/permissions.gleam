@@ -6,7 +6,10 @@ import gleam/option.{type Option, Some}
 /// Check if user has permission to act on a record
 pub fn has_record_permission(user: Option(User), record: Record) -> Bool {
   case user {
-    Some(u) -> u.is_superuser || record.user_id == Some(u.id)
+    Some(u) ->
+      u.is_superuser
+      || record.user_id == Some(u.id)
+      || record.user_id == option.None
     _ -> False
   }
 }
