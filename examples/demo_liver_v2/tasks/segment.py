@@ -21,7 +21,12 @@ else:
 if os.path.isfile(output_file):  # type: ignore[name-defined]  # noqa: F821
     seg = s.load_segmentation(output_file, "Segmentation")  # type: ignore[name-defined]  # noqa: F821
 else:
-    seg = s.create_segmentation("Segmentation").add_segment("Lesions", (1.0, 0.0, 0.0))
+    seg = (
+        s.create_segmentation("Segmentation")
+        .add_segment("mts", (1.0, 0.0, 0.0))
+        .add_segment("unclear", (1.0, 1.0, 0.0))
+        .add_segment("benign", (0.0, 1.0, 0.0))
+    )
 
 s.setup_editor(seg, effect="Paint", brush_size=5.0)
 s.set_layout("axial")

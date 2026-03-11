@@ -10,12 +10,15 @@ This version uses the implemented RecordFlow/Pipeline DSL
 """
 
 import asyncio
+import shutil
+from pathlib import Path
 
 import numpy as np
 from record_types import master_model, master_projection, segmentation_single
+from seg_utils import master_label_converter, save_seg_nrrd
 
 from clarinet.models.base import RecordStatus
-from clarinet.services.image import FileType, Segmentation
+from clarinet.services.image import Segmentation
 from clarinet.services.pipeline import PipelineMessage, TaskContext, pipeline_task
 from clarinet.services.recordflow import Field, file, record, study
 from clarinet.settings import settings
@@ -32,8 +35,9 @@ F = Field()
 async def init_master_model(_msg: PipelineMessage, ctx: TaskContext) -> None:
     """Создание мастер-модели по первой завершённой КТ-сегментации.
 
-    Берёт сегментацию врача, разделяет на отдельные ROI с уникальными номерами,
-    сохраняет как master_model на уровне PATIENT.
+    Берёт сегментацию врача, бинаризует все ненулевые вокселы,
+    разделяет на connected components с уникальными номерами,
+    сохраняет как .seg.nrrd с именованными сегментами.
     """
     if ctx.files.exists(master_model):
         return
@@ -42,11 +46,49 @@ async def init_master_model(_msg: PipelineMessage, ctx: TaskContext) -> None:
     master_path = ctx.files.resolve(master_model)
 
     def _create_master() -> None:
-        seg = Segmentation()  # autolabel → each island gets unique number
+        from skimage.measure import label
+
+        seg = Segmentation(autolabel=False)
         seg.read(seg_path)
-        seg.save_as(master_path, FileType.NIFTI)
+        # Бинаризация: все категории (mts/unclear/benign) → единый foreground
+        labeled = label(seg.img > 0).astype(np.uint8)
+        unique = sorted(int(lbl) for lbl in np.unique(labeled) if lbl != 0)
+        names = [str(lbl) for lbl in unique]
+        Path(master_path).parent.mkdir(parents=True, exist_ok=True)
+        save_seg_nrrd(
+            labeled,
+            master_path,
+            names,
+            master_label_converter,
+            spacing=seg.spacing,
+            origin=seg._origin,
+            direction=seg._direction,
+        )
 
     await asyncio.to_thread(_create_master)
+
+
+@pipeline_task()
+async def auto_project_ct(msg: PipelineMessage, ctx: TaskContext) -> None:
+    """Авто-создание проекции для КТ — копия мастер-модели.
+
+    Для КТ-исследований проекция совпадает с мастер-моделью (та же
+    координатная система). Для не-КТ запись остаётся в pending для эксперта.
+    """
+    assert msg.record_id is not None
+
+    # Определяем тип исследования из first_check
+    first_checks = await ctx.records.find("first_check", study_uid=msg.study_uid)
+    study_type = (first_checks[0].data or {}).get("study_type") if first_checks else None
+    if study_type != "CT":
+        return  # Не КТ → оставляем в pending для эксперта
+
+    master_path = ctx.files.resolve(master_model)
+    proj_path = ctx.files.resolve(master_projection)
+    Path(proj_path).parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(str(master_path), str(proj_path))
+
+    await ctx.client.submit_record_data(msg.record_id, {})
 
 
 @pipeline_task()
@@ -65,8 +107,12 @@ async def compare_w_projection(msg: PipelineMessage, ctx: TaskContext) -> None:
     proj_path = ctx.files.resolve(master_projection)
 
     def _compare() -> tuple[list[dict[str, int]], int]:
-        seg = Segmentation()  # autolabel=True for doctor's ROIs
-        seg.read(seg_path)
+        # Бинаризация сегментации врача перед labeling:
+        # mts/unclear/benign → единый foreground → connected components
+        raw = Segmentation(autolabel=False)
+        raw.read(seg_path)
+        seg = Segmentation(autolabel=True)
+        seg.img = (raw.img > 0).astype(np.uint8)
 
         proj = Segmentation(autolabel=False)  # preserve master model labels
         proj.read(proj_path)
@@ -221,6 +267,12 @@ for seg_type in SEGMENT_TYPES:
 
 # segment_CT_with_archive тоже запускает проекцию
 (record("segment_CT_with_archive").on_finished().create_record("create_master_projection"))
+
+# ---------------------------------------------------------------------------
+# Flow: авто-проекция для КТ при создании записи
+# ---------------------------------------------------------------------------
+
+(record("create_master_projection").on_status("pending").do_task(auto_project_ct))
 
 # ---------------------------------------------------------------------------
 # Flow: после завершения проекции -> автоматическое сравнение

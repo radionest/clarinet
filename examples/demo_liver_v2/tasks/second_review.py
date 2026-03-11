@@ -31,10 +31,10 @@ if os.path.isfile(output_file):  # type: ignore[name-defined]  # noqa: F821
 else:
     classification = (
         s.create_segmentation("Classification")
-        .add_segment("Metastasis", (1.0, 0.0, 0.0))
-        .add_segment("Unclear", (1.0, 1.0, 0.0))
-        .add_segment("Benign", (0.0, 1.0, 0.0))
-        .add_segment("Invisible", (0.5, 0.5, 0.5))
+        .add_segment("mts", (1.0, 0.0, 0.0))
+        .add_segment("unclear", (1.0, 1.0, 0.0))
+        .add_segment("benign", (0.0, 1.0, 0.0))
+        .add_segment("invisible", (0.5, 0.5, 0.5))
     )
 
 s.setup_editor(classification, effect="Islands", brush_size=5.0)

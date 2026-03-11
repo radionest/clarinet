@@ -33,6 +33,6 @@ s.set_layout("axial")
 s.add_view_shortcuts()
 
 # Add shortcut N to auto-number a new ROI segment
-s.add_shortcuts([("n", "s.auto_number_segment(master_seg)")])
+s.add_shortcuts([("n", 's.auto_number_segment(master_seg, prefix="")')])
 
 s.annotate("Update master model — press N for new ROI")

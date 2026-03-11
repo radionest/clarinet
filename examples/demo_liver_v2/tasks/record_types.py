@@ -10,7 +10,7 @@ from clarinet.flow import FileDef, FileRef, RecordDef
 # ---------------------------------------------------------------------------
 
 master_model = FileDef(
-    pattern="master_model.seg.nii",
+    pattern="master_model.seg.nrrd",
     level="PATIENT",
     description="Master model segmentation — one ROI per lesion with unique number",
 )
