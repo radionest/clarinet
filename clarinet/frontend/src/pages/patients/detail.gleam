@@ -107,9 +107,11 @@ fn studies_section(studies: Option(List(Study))) -> Element(Msg) {
           html.table([attribute.class("table")], [
             html.thead([], [
               html.tr([], [
-                html.th([], [html.text("Study UID")]),
                 html.th([], [html.text("Date")]),
-                html.th([], [html.text("Anon UID")]),
+                html.th([], [html.text("Modalities")]),
+                html.th([], [html.text("Description")]),
+                html.th([], [html.text("Series")]),
+                html.th([], [html.text("Anonymized")]),
                 html.th([], [html.text("Actions")]),
               ]),
             ]),
@@ -121,10 +123,46 @@ fn studies_section(studies: Option(List(Study))) -> Element(Msg) {
 }
 
 fn study_row(study: Study) -> Element(Msg) {
+  let #(modalities, description, series_count) = case study.series {
+    Some(series_list) -> {
+      let mods =
+        series_list
+        |> list.filter_map(fn(s) { option.to_result(s.modality, Nil) })
+        |> list.unique
+      let mods_str = case mods {
+        [] -> "-"
+        _ -> string.join(mods, "/")
+      }
+      let desc = case
+        list.filter_map(series_list, fn(s) {
+          option.to_result(s.series_description, Nil)
+        })
+      {
+        [first, ..] -> first
+        [] -> "-"
+      }
+      #(mods_str, desc, int.to_string(list.length(series_list)))
+    }
+    None -> #("-", "-", "0")
+  }
+
   html.tr([], [
-    html.td([], [html.text(study.study_uid)]),
     html.td([], [html.text(study.date)]),
-    html.td([], [html.text(option.unwrap(study.anon_uid, "-"))]),
+    html.td([], [html.text(modalities)]),
+    html.td([], [html.text(description)]),
+    html.td([], [html.text(series_count)]),
+    html.td([], [
+      case study.anon_uid {
+        Some(_) ->
+          html.span([attribute.class("badge badge-success")], [
+            html.text("Yes"),
+          ])
+        None ->
+          html.span([attribute.class("badge badge-muted")], [
+            html.text("No"),
+          ])
+      },
+    ]),
     html.td([], [
       html.a(
         [

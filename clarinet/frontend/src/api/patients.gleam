@@ -83,7 +83,7 @@ pub fn patient_decoder() -> decode.Decoder(Patient) {
   use patient_studies <- decode.optional_field(
     "studies",
     None,
-    decode.optional(decode.list(studies.study_decoder())),
+    decode.optional(decode.list(studies.study_detail_decoder())),
   )
 
   decode.success(models.Patient(

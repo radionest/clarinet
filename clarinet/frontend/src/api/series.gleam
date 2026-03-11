@@ -29,6 +29,16 @@ pub fn series_base_decoder() -> decode.Decoder(Series) {
     decode.optional(decode.string),
   )
   use series_number <- decode.field("series_number", decode.int)
+  use modality <- decode.optional_field(
+    "modality",
+    None,
+    decode.optional(decode.string),
+  )
+  use instance_count <- decode.optional_field(
+    "instance_count",
+    None,
+    decode.optional(decode.int),
+  )
   use anon_uid <- decode.optional_field("anon_uid", None, decode.optional(decode.string))
   use study_uid <- decode.field("study_uid", decode.string)
   use working_folder <- decode.optional_field(
@@ -41,6 +51,8 @@ pub fn series_base_decoder() -> decode.Decoder(Series) {
     series_uid: series_uid,
     series_description: series_description,
     series_number: series_number,
+    modality: modality,
+    instance_count: instance_count,
     anon_uid: anon_uid,
     study_uid: study_uid,
     study: None,
@@ -58,6 +70,16 @@ fn series_detail_decoder() -> decode.Decoder(Series) {
     decode.optional(decode.string),
   )
   use series_number <- decode.field("series_number", decode.int)
+  use modality <- decode.optional_field(
+    "modality",
+    None,
+    decode.optional(decode.string),
+  )
+  use instance_count <- decode.optional_field(
+    "instance_count",
+    None,
+    decode.optional(decode.int),
+  )
   use anon_uid <- decode.optional_field("anon_uid", None, decode.optional(decode.string))
   use study_uid <- decode.field("study_uid", decode.string)
   use working_folder <- decode.optional_field(
@@ -80,6 +102,8 @@ fn series_detail_decoder() -> decode.Decoder(Series) {
     series_uid: series_uid,
     series_description: series_description,
     series_number: series_number,
+    modality: modality,
+    instance_count: instance_count,
     anon_uid: anon_uid,
     study_uid: study_uid,
     study: study,

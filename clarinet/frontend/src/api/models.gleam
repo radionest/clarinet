@@ -137,6 +137,8 @@ pub type Series {
     // Primary key (DicomUID)
     series_description: Option(String),
     series_number: Int,
+    modality: Option(String),
+    instance_count: Option(Int),
     anon_uid: Option(String),
     study_uid: String,
     study: Option(Study),
