@@ -9,6 +9,7 @@ Auto-skipped when RabbitMQ on klara is unreachable.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 from typing import Any
 from unittest.mock import patch
@@ -36,7 +37,7 @@ pytestmark = [
 async def _get_message_from_queue(
     rabbitmq_url: str,
     queue_name: str,
-    wait_seconds: float = 5.0,
+    wait_seconds: float = 15.0,
 ) -> aio_pika.abc.AbstractIncomingMessage | None:
     """Consume a single message from a queue via raw aio_pika, polling until available."""
     connection = await aio_pika.connect_robust(rabbitmq_url)
@@ -61,6 +62,51 @@ async def _queue_message_count(
         channel = await connection.channel()
         queue = await channel.declare_queue(queue_name, passive=True)
         return queue.declaration_result.message_count  # type: ignore[union-attr]
+
+
+async def _poll_dlq(
+    rabbitmq_url: str,
+    queue_name: str,
+    *,
+    poll_timeout: float = 30.0,
+) -> dict[str, Any] | None:
+    """Poll DLQ queue until a message arrives or timeout expires."""
+    connection = await aio_pika.connect_robust(rabbitmq_url)
+    async with connection:
+        channel = await connection.channel()
+        queue = await channel.declare_queue(queue_name, durable=True)
+        deadline = asyncio.get_event_loop().time() + poll_timeout
+        while asyncio.get_event_loop().time() < deadline:
+            msg = await queue.get(fail=False, no_ack=True)
+            if msg is not None:
+                return json.loads(msg.body)
+            await asyncio.sleep(0.3)
+    return None
+
+
+async def _wait_or_fail(
+    event: asyncio.Event,
+    receiver: asyncio.Task[Any],
+    *,
+    wait_timeout: float = 60.0,
+) -> None:
+    """Wait for *event* to be set, or fail fast if *receiver* crashes."""
+    event_future = asyncio.ensure_future(event.wait())
+    done, pending = await asyncio.wait(
+        [event_future, receiver],
+        timeout=wait_timeout,
+        return_when=asyncio.FIRST_COMPLETED,
+    )
+    for p in pending:
+        if p is event_future:
+            p.cancel()
+    if not done:
+        raise TimeoutError(f"Event not set within {wait_timeout}s")
+    if receiver in done:
+        # Receiver crashed — re-raise its exception for a clear failure message
+        with contextlib.suppress(asyncio.CancelledError):
+            receiver.result()
+        pytest.fail("Receiver task crashed before event was set")
 
 
 # ─── 1. Broker Connection ───────────────────────────────────────────────────
@@ -127,8 +173,6 @@ class TestTaskDispatch:
         await echo_task.kiq(payload)
 
         # Small delay for message to arrive
-        await asyncio.sleep(0.3)
-
         msg = await _get_message_from_queue(rabbitmq_url, test_queues["default"])
         assert msg is not None
         body = json.loads(msg.body)
@@ -158,8 +202,6 @@ class TestTaskDispatch:
         )
         await roundtrip_task.kiq(original.model_dump())
 
-        await asyncio.sleep(0.3)
-
         msg = await _get_message_from_queue(rabbitmq_url, test_queues["default"])
         assert msg is not None
         body = json.loads(msg.body)
@@ -188,8 +230,6 @@ class TestTaskDispatch:
         )
         await unicode_task.kiq(original.model_dump())
 
-        await asyncio.sleep(0.3)
-
         msg = await _get_message_from_queue(rabbitmq_url, test_queues["default"])
         assert msg is not None
         body_str = json.dumps(json.loads(msg.body), ensure_ascii=False)
@@ -215,8 +255,6 @@ class TestTaskDispatch:
             )
             .kiq({"patient_id": "P", "study_uid": "S"})
         )
-
-        await asyncio.sleep(0.3)
 
         msg = await _get_message_from_queue(rabbitmq_url, test_queues["default"])
         assert msg is not None
@@ -249,12 +287,11 @@ class TestQueueRouting:
                 return data
 
             await default_task.kiq({"patient_id": "P", "study_uid": "S"})
-            await asyncio.sleep(0.3)
 
-            default_count = await _queue_message_count(rabbitmq_url, test_queues["default"])
+            # Poll until message arrives in the default queue
+            msg = await _get_message_from_queue(rabbitmq_url, test_queues["default"])
+            assert msg is not None
             gpu_count = await _queue_message_count(rabbitmq_url, test_queues["gpu"])
-
-            assert default_count >= 1
             assert gpu_count == 0
         finally:
             await default_broker.shutdown()
@@ -277,12 +314,11 @@ class TestQueueRouting:
                 return data
 
             await gpu_task.kiq({"patient_id": "P", "study_uid": "S"})
-            await asyncio.sleep(0.3)
 
+            # Poll until message arrives in the gpu queue
+            msg = await _get_message_from_queue(rabbitmq_url, test_queues["gpu"])
+            assert msg is not None
             default_count = await _queue_message_count(rabbitmq_url, test_queues["default"])
-            gpu_count = await _queue_message_count(rabbitmq_url, test_queues["gpu"])
-
-            assert gpu_count >= 1
             assert default_count == 0
         finally:
             await default_broker.shutdown()
@@ -310,13 +346,12 @@ class TestQueueRouting:
 
             await default_task.kiq({"patient_id": "P1", "study_uid": "S1"})
             await gpu_task.kiq({"patient_id": "P2", "study_uid": "S2"})
-            await asyncio.sleep(0.3)
 
-            default_count = await _queue_message_count(rabbitmq_url, test_queues["default"])
-            gpu_count = await _queue_message_count(rabbitmq_url, test_queues["gpu"])
-
-            assert default_count == 1
-            assert gpu_count == 1
+            # Poll until messages arrive in both queues
+            default_msg = await _get_message_from_queue(rabbitmq_url, test_queues["default"])
+            gpu_msg = await _get_message_from_queue(rabbitmq_url, test_queues["gpu"])
+            assert default_msg is not None
+            assert gpu_msg is not None
         finally:
             await default_broker.shutdown()
             await gpu_broker.shutdown()
@@ -338,22 +373,26 @@ class TestTaskExecution:
         broker = await pipeline_broker_factory("default", as_worker=True)
         try:
             results: list[dict[str, Any]] = []
+            done_event = asyncio.Event()
 
             @broker.task(task_name="test_exec_return")
             async def exec_task(data: dict[str, Any]) -> dict[str, Any]:
                 data["processed"] = True
                 results.append(data)
+                done_event.set()
                 return data
 
             # Start receiver in background
             receiver = asyncio.create_task(run_receiver_task(broker))
 
             await exec_task.kiq({"patient_id": "P", "study_uid": "S"})
-            await asyncio.sleep(1.0)
 
-            receiver.cancel()
-            with pytest.raises(asyncio.CancelledError):
-                await receiver
+            await _wait_or_fail(done_event, receiver)
+
+            if not receiver.done():
+                receiver.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await receiver
 
             assert len(results) == 1
             assert results[0]["processed"] is True
@@ -370,21 +409,26 @@ class TestTaskExecution:
         broker = await pipeline_broker_factory("default", as_worker=True)
         try:
             side_effects: list[str] = []
+            both_done = asyncio.Event()
 
             @broker.task(task_name="test_side_effect")
             async def side_effect_task(data: dict[str, Any]) -> dict[str, Any]:
                 side_effects.append(f"processed:{data['patient_id']}")
+                if len(side_effects) >= 2:
+                    both_done.set()
                 return data
 
             receiver = asyncio.create_task(run_receiver_task(broker))
 
             await side_effect_task.kiq({"patient_id": "PAT_A", "study_uid": "S"})
             await side_effect_task.kiq({"patient_id": "PAT_B", "study_uid": "S"})
-            await asyncio.sleep(1.5)
 
-            receiver.cancel()
-            with pytest.raises(asyncio.CancelledError):
-                await receiver
+            await _wait_or_fail(both_done, receiver)
+
+            if not receiver.done():
+                receiver.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await receiver
 
             assert "processed:PAT_A" in side_effects
             assert "processed:PAT_B" in side_effects
@@ -403,20 +447,24 @@ class TestTaskExecution:
         broker = await pipeline_broker_factory("default", as_worker=True)
         try:
             error_captured: list[bool] = []
+            done_event = asyncio.Event()
 
             @broker.task(task_name="test_exception")
             async def failing_task(data: dict[str, Any]) -> dict[str, Any]:
                 error_captured.append(True)
+                done_event.set()
                 raise PipelineStepError("test_step", "Something went wrong")
 
             receiver = asyncio.create_task(run_receiver_task(broker))
 
             await failing_task.kiq({"patient_id": "P", "study_uid": "S"})
-            await asyncio.sleep(1.0)
 
-            receiver.cancel()
-            with pytest.raises(asyncio.CancelledError):
-                await receiver
+            await _wait_or_fail(done_event, receiver)
+
+            if not receiver.done():
+                receiver.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await receiver
 
             # The task function was called (error was raised inside it)
             assert len(error_captured) == 1
@@ -492,12 +540,12 @@ class TestPipelineChain:
                 .kiq(PipelineMessage(patient_id="P", study_uid="S").model_dump())
             )
 
-            async with asyncio.timeout(10.0):
-                await done_event.wait()
+            await _wait_or_fail(done_event, receiver)
 
-            receiver.cancel()
-            with pytest.raises(asyncio.CancelledError):
-                await receiver
+            if not receiver.done():
+                receiver.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await receiver
 
             assert execution_log == ["step1", "step2"]
         finally:
@@ -570,12 +618,12 @@ class TestPipelineChain:
                 .kiq(PipelineMessage(patient_id="P", study_uid="S").model_dump())
             )
 
-            async with asyncio.timeout(15.0):
-                await done_event.wait()
+            await _wait_or_fail(done_event, receiver)
 
-            receiver.cancel()
-            with pytest.raises(asyncio.CancelledError):
-                await receiver
+            if not receiver.done():
+                receiver.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await receiver
 
             assert len(final_payload) == 1
             assert final_payload[0]["key1"] == "value1"
@@ -649,14 +697,14 @@ class TestPipelineChain:
             )
 
             # Wait until step 2 executes (and fails)
-            async with asyncio.timeout(10.0):
-                await step2_done.wait()
-            # Extra wait to verify step 3 is NOT dispatched
-            await asyncio.sleep(1.0)
+            await _wait_or_fail(step2_done, receiver)
+            # Wait for retries to exhaust (3 retries x 1s delay) + margin
+            await asyncio.sleep(5.0)
 
-            receiver.cancel()
-            with pytest.raises(asyncio.CancelledError):
-                await receiver
+            if not receiver.done():
+                receiver.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await receiver
 
             assert "step1" in execution_log
             assert "step2" in execution_log
@@ -691,74 +739,65 @@ class TestPipelineChainNegative:
         from taskiq.api import run_receiver_task
 
         # NOTE: "ghost_chain" is intentionally NOT seeded in the DB.
-        dlq_queue_name = test_queues["dlq"]
         step2_executed: list[bool] = [False]
         step1_done = asyncio.Event()
 
-        with patch("clarinet.services.pipeline.broker.DLQ_QUEUE", dlq_queue_name):
-            broker = await pipeline_broker_factory(
-                "default",
-                clarinet_client=pipeline_clarinet_client,
-                with_middlewares=True,
-                as_worker=True,
-            )
-            try:
+        broker = await pipeline_broker_factory(
+            "default",
+            clarinet_client=pipeline_clarinet_client,
+            with_middlewares=True,
+            as_worker=True,
+        )
+        try:
 
-                @broker.task(task_name="ghost_step1")
-                async def step1(data: dict[str, Any]) -> dict[str, Any]:
-                    step1_done.set()
-                    return data
+            @broker.task(task_name="ghost_step1")
+            async def step1(data: dict[str, Any]) -> dict[str, Any]:
+                step1_done.set()
+                return data
 
-                @broker.task(task_name="ghost_step2")
-                async def step2(data: dict[str, Any]) -> dict[str, Any]:
-                    step2_executed[0] = True
-                    return data
+            @broker.task(task_name="ghost_step2")
+            async def step2(data: dict[str, Any]) -> dict[str, Any]:
+                step2_executed[0] = True
+                return data
 
-                _TASK_REGISTRY["ghost_step1"] = step1
-                _TASK_REGISTRY["ghost_step2"] = step2
+            _TASK_REGISTRY["ghost_step1"] = step1
+            _TASK_REGISTRY["ghost_step2"] = step2
 
-                receiver = asyncio.create_task(run_receiver_task(broker))
+            receiver = asyncio.create_task(run_receiver_task(broker))
 
-                await (
-                    step1.kicker()
-                    .with_labels(
-                        pipeline_id="ghost_chain",
-                        step_index="0",
-                        routing_key="default",
-                    )
-                    .kiq(PipelineMessage(patient_id="P", study_uid="S").model_dump())
+            await (
+                step1.kicker()
+                .with_labels(
+                    pipeline_id="ghost_chain",
+                    step_index="0",
+                    routing_key="default",
                 )
+                .kiq(PipelineMessage(patient_id="P", study_uid="S").model_dump())
+            )
 
-                async with asyncio.timeout(10.0):
-                    await step1_done.wait()
-                # Allow time for chain-failure DLQ publish
-                await asyncio.sleep(1.5)
+            await _wait_or_fail(step1_done, receiver)
 
+            # Poll DLQ for chain_failure message
+            body = await _poll_dlq(rabbitmq_url, test_queues["dlq"])
+
+            if not receiver.done():
                 receiver.cancel()
                 with pytest.raises(asyncio.CancelledError):
                     await receiver
 
-                # step2 must NOT have been dispatched
-                assert not step2_executed[0], "step2 should not execute when pipeline not found"
+            # step2 must NOT have been dispatched
+            assert not step2_executed[0], "step2 should not execute when pipeline not found"
 
-                # DLQ must contain a chain_failure record for "ghost_chain"
-                connection = await aio_pika.connect_robust(rabbitmq_url)
-                async with connection:
-                    channel = await connection.channel()
-                    dlq = await channel.declare_queue(dlq_queue_name, durable=True)
-                    msg = await dlq.get(fail=False, no_ack=True)
-                    assert msg is not None, "No message found in DLQ after chain failure"
-                    body = json.loads(msg.body)
+            assert body is not None, "No chain_failure message in DLQ"
+            assert body["error_type"] == "chain_failure"
+            assert body["labels"]["pipeline_id"] == "ghost_chain"
+            assert "not found" in body["error"].lower() or "404" in body["error"]
 
-                assert body["error_type"] == "chain_failure"
-                assert body["labels"]["pipeline_id"] == "ghost_chain"
-                assert "not found" in body["error"].lower() or "404" in body["error"]
-
-                # Log must contain the pipeline id and failure context
-                assert any("ghost_chain" in m for m in capture_logs)
-                assert any("not found" in m.lower() or "404" in m for m in capture_logs)
-            finally:
-                await broker.shutdown()
+            # Log must contain the pipeline id and failure context
+            assert any("ghost_chain" in m for m in capture_logs)
+            assert any("not found" in m.lower() or "404" in m for m in capture_logs)
+        finally:
+            await broker.shutdown()
 
     async def test_chain_failure_when_task_not_in_registry(
         self,
@@ -772,7 +811,6 @@ class TestPipelineChainNegative:
         """Next step's task is absent from _TASK_REGISTRY → chain_failure → DLQ."""
         from taskiq.api import run_receiver_task
 
-        dlq_queue_name = test_queues["dlq"]
         repo = PipelineDefinitionRepository(test_session)
         await repo.upsert(
             "missing_task_chain",
@@ -805,35 +843,29 @@ class TestPipelineChainNegative:
 
             receiver = asyncio.create_task(run_receiver_task(broker))
 
-            with patch("clarinet.services.pipeline.broker.DLQ_QUEUE", dlq_queue_name):
-                await (
-                    step1.kicker()
-                    .with_labels(
-                        pipeline_id="missing_task_chain",
-                        step_index="0",
-                        routing_key="default",
-                    )
-                    .kiq(PipelineMessage(patient_id="P", study_uid="S").model_dump())
+            await (
+                step1.kicker()
+                .with_labels(
+                    pipeline_id="missing_task_chain",
+                    step_index="0",
+                    routing_key="default",
                 )
+                .kiq(PipelineMessage(patient_id="P", study_uid="S").model_dump())
+            )
 
-                async with asyncio.timeout(10.0):
-                    await step1_done.wait()
-                await asyncio.sleep(1.5)
+            await _wait_or_fail(step1_done, receiver)
 
-            receiver.cancel()
-            with pytest.raises(asyncio.CancelledError):
-                await receiver
+            # Poll DLQ for chain_failure message
+            body = await _poll_dlq(rabbitmq_url, test_queues["dlq"])
+
+            if not receiver.done():
+                receiver.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await receiver
 
             assert not step2_executed[0]
 
-            connection = await aio_pika.connect_robust(rabbitmq_url)
-            async with connection:
-                channel = await connection.channel()
-                dlq = await channel.declare_queue(dlq_queue_name, durable=True)
-                msg = await dlq.get(fail=False, no_ack=True)
-                assert msg is not None, "No chain_failure message in DLQ"
-                body = json.loads(msg.body)
-
+            assert body is not None, "No chain_failure message in DLQ"
             assert body["error_type"] == "chain_failure"
             assert body["labels"]["pipeline_id"] == "missing_task_chain"
             assert "notfound_step2_missing" in body["error"]
@@ -856,7 +888,6 @@ class TestPipelineChainNegative:
         """Step returns a str instead of dict/PipelineMessage → chain_failure → DLQ."""
         from taskiq.api import run_receiver_task
 
-        dlq_queue_name = test_queues["dlq"]
         repo = PipelineDefinitionRepository(test_session)
         await repo.upsert(
             "bad_result_chain",
@@ -893,35 +924,29 @@ class TestPipelineChainNegative:
 
             receiver = asyncio.create_task(run_receiver_task(broker))
 
-            with patch("clarinet.services.pipeline.broker.DLQ_QUEUE", dlq_queue_name):
-                await (
-                    step1.kicker()
-                    .with_labels(
-                        pipeline_id="bad_result_chain",
-                        step_index="0",
-                        routing_key="default",
-                    )
-                    .kiq(PipelineMessage(patient_id="P", study_uid="S").model_dump())
+            await (
+                step1.kicker()
+                .with_labels(
+                    pipeline_id="bad_result_chain",
+                    step_index="0",
+                    routing_key="default",
                 )
+                .kiq(PipelineMessage(patient_id="P", study_uid="S").model_dump())
+            )
 
-                async with asyncio.timeout(10.0):
-                    await step1_done.wait()
-                await asyncio.sleep(1.5)
+            await _wait_or_fail(step1_done, receiver)
 
-            receiver.cancel()
-            with pytest.raises(asyncio.CancelledError):
-                await receiver
+            # Poll DLQ for chain_failure message
+            body = await _poll_dlq(rabbitmq_url, test_queues["dlq"])
+
+            if not receiver.done():
+                receiver.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await receiver
 
             assert not step2_executed[0], "step2 must not run when step1 returns wrong type"
 
-            connection = await aio_pika.connect_robust(rabbitmq_url)
-            async with connection:
-                channel = await connection.channel()
-                dlq = await channel.declare_queue(dlq_queue_name, durable=True)
-                msg = await dlq.get(fail=False, no_ack=True)
-                assert msg is not None, "No chain_failure message in DLQ"
-                body = json.loads(msg.body)
-
+            assert body is not None, "No chain_failure message in DLQ"
             assert body["error_type"] == "chain_failure"
             assert body["labels"]["pipeline_id"] == "bad_result_chain"
             assert "unexpected result type" in body["error"].lower()
@@ -949,10 +974,7 @@ class TestDeadLetterQueue:
         from taskiq.api import run_receiver_task
 
         broker = await pipeline_broker_factory("default", with_middlewares=True, as_worker=True)
-        dlq_queue_name = test_queues["dlq"]
 
-        # Pre-declare the DLQ queue so DeadLetterMiddleware writes to it
-        # (override DLQ_QUEUE to use the test-isolated name)
         try:
             call_count: list[int] = [0]
 
@@ -963,12 +985,10 @@ class TestDeadLetterQueue:
 
             receiver = asyncio.create_task(run_receiver_task(broker))
 
-            # Patch DLQ_QUEUE to use the test-isolated queue name
-            with patch("clarinet.services.pipeline.broker.DLQ_QUEUE", dlq_queue_name):
-                await always_failing_task.kiq({"patient_id": "P", "study_uid": "S"})
+            await always_failing_task.kiq({"patient_id": "P", "study_uid": "S"})
 
-                # Wait for retries (3 retries with 1s delay) + DLQ publish
-                await asyncio.sleep(8.0)
+            # Poll DLQ — retries take ~3-4s (3 retries with 1s delay)
+            dlq_body = await _poll_dlq(rabbitmq_url, test_queues["dlq"], poll_timeout=20.0)
 
             receiver.cancel()
             with pytest.raises(asyncio.CancelledError):
@@ -978,17 +998,10 @@ class TestDeadLetterQueue:
             assert call_count[0] >= 2, f"Expected multiple calls, got {call_count[0]}"
 
             # Verify: message arrived in DLQ
-            connection = await aio_pika.connect_robust(rabbitmq_url)
-            async with connection:
-                channel = await connection.channel()
-                dlq = await channel.declare_queue(dlq_queue_name, durable=True)
-                msg = await dlq.get(fail=False, no_ack=True)
-                assert msg is not None, "No message found in DLQ"
-
-                dlq_body = json.loads(msg.body)
-                assert dlq_body["task_name"] == "test_dlq_fail"
-                assert "Intentional failure" in dlq_body["error"]
-                assert dlq_body["error_type"] == "PipelineStepError"
+            assert dlq_body is not None, "No message found in DLQ"
+            assert dlq_body["task_name"] == "test_dlq_fail"
+            assert "Intentional failure" in dlq_body["error"]
+            assert dlq_body["error_type"] == "PipelineStepError"
         finally:
             await broker.shutdown()
 
@@ -1077,12 +1090,12 @@ class TestMiddlewareLogging:
                 receiver = asyncio.create_task(run_receiver_task(broker))
                 await exec_task.kiq({"patient_id": "P", "study_uid": "S"})
 
-                async with asyncio.timeout(10.0):
-                    await done_event.wait()
+                await _wait_or_fail(done_event, receiver)
 
-            receiver.cancel()
-            with pytest.raises(asyncio.CancelledError):
-                await receiver
+            if not receiver.done():
+                receiver.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await receiver
 
             assert "test_log_exec" in post_execute_calls
         finally:

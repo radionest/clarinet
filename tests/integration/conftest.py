@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import socket
 from collections.abc import AsyncGenerator, Generator
 from pathlib import Path
@@ -20,38 +21,14 @@ from clarinet.services.slicer.service import SlicerService
 
 RABBITMQ_HOST = "192.168.122.151"  # klara VM
 RABBITMQ_PORT = 5672
+RABBITMQ_MANAGEMENT_PORT = 15672
+RABBITMQ_MANAGEMENT_AUTH = ("clarinet", "clarinet")
 
 
 @pytest.fixture(scope="session")
 def rabbitmq_url() -> str:
     """AMQP connection URL for RabbitMQ on klara."""
     return f"amqp://clarinet_test:clarinet_test@{RABBITMQ_HOST}:{RABBITMQ_PORT}/"
-
-
-@pytest_asyncio.fixture(scope="session", autouse=True)
-async def _cleanup_orphaned_test_resources() -> AsyncGenerator[None]:
-    """Delete orphaned test queues/exchanges from previous test runs.
-
-    Runs before all tests. Uses Management HTTP API.
-    Silent on failure (RabbitMQ may be unreachable).
-    """
-    try:
-        from clarinet.services.pipeline.rabbitmq_cleanup import cleanup_test_resources
-
-        result = await cleanup_test_resources(
-            host=RABBITMQ_HOST,
-            management_port=15672,
-            login="clarinet",
-            password="clarinet",
-        )
-        if result["queues_deleted"] or result["exchanges_deleted"]:
-            logger.info(
-                f"Cleaned orphaned RabbitMQ resources: "
-                f"{result['queues_deleted']} queues, {result['exchanges_deleted']} exchanges"
-            )
-    except Exception:
-        pass  # RabbitMQ unreachable — skip cleanup
-    yield
 
 
 @pytest.fixture(scope="session")
@@ -188,7 +165,7 @@ def pipeline_broker_factory(
         )
 
         if with_middlewares:
-            dlq = DLQPublisher(amqp_url=rabbitmq_url)
+            dlq = DLQPublisher(amqp_url=rabbitmq_url, queue_name=test_queues["dlq"])
             middlewares = [
                 SmartRetryMiddleware(
                     default_retry_count=3,
@@ -249,37 +226,33 @@ def capture_logs() -> Generator[list[str]]:
 @pytest_asyncio.fixture(autouse=False)
 async def _purge_test_queues(
     request: pytest.FixtureRequest,
-    rabbitmq_url: str,
     test_queues: dict[str, str],
 ) -> AsyncGenerator[None]:
-    """Purge all test queues before and after each pipeline-marked test."""
+    """Purge all test queues before and after each pipeline-marked test.
+
+    Uses the RabbitMQ Management HTTP API instead of AMQP to avoid
+    channel-close cascades that destabilize broker connections under
+    parallel xdist load.
+    """
     if "pipeline" not in {m.name for m in request.node.iter_markers()}:
         yield
         return
 
-    import asyncio
+    from urllib.parse import quote
 
-    import aio_pika
+    import httpx
+
+    management_url = f"http://{RABBITMQ_HOST}:{RABBITMQ_MANAGEMENT_PORT}"
 
     async def _purge() -> None:
-        connection = await asyncio.wait_for(aio_pika.connect(rabbitmq_url), timeout=5)
-        async with connection:
-            channel = await connection.channel()
-            # Purge main queues AND their .delay counterparts
-            all_queue_names = list(test_queues.values())
-            for name in list(all_queue_names):
-                all_queue_names.append(f"{name}.delay")
+        all_queue_names = list(test_queues.values())
+        for name in list(all_queue_names):
+            all_queue_names.append(f"{name}.delay")
+        async with httpx.AsyncClient(auth=RABBITMQ_MANAGEMENT_AUTH, timeout=5) as client:
             for queue_name in all_queue_names:
-                try:
-                    queue = await channel.declare_queue(queue_name, passive=True)
-                    await queue.purge()
-                except Exception:
-                    # Queue may not exist yet (passive=True fails) or channel
-                    # closed after NOT_FOUND — reopen channel for next iteration
-                    try:
-                        channel = await connection.channel()
-                    except Exception:
-                        break
+                encoded = quote(queue_name, safe="")
+                with contextlib.suppress(Exception):
+                    await client.delete(f"{management_url}/api/queues/%2F/{encoded}/contents")
 
     await _purge()
     yield
