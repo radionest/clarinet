@@ -341,11 +341,28 @@ fn pacs_study_rows(
       ]),
     ])
 
-  // Series detail rows
-  let series_rows =
-    list.map(ps.series, fn(s) { pacs_series_row(s) })
-
-  [study_row, ..series_rows]
+  case ps.series {
+    [] -> [study_row]
+    series -> {
+      let series_details_row =
+        html.tr([attribute.class("pacs-series-details-row")], [
+          html.td([attribute.attribute("colspan", "5")], [
+            element.element("details", [attribute.class("pacs-series-details")], [
+              element.element("summary", [], [
+                html.text("Show series"),
+              ]),
+              html.table([attribute.class("series-table")], [
+                html.tbody(
+                  [],
+                  list.map(series, fn(s) { pacs_series_row(s) }),
+                ),
+              ]),
+            ]),
+          ]),
+        ])
+      [study_row, series_details_row]
+    }
+  }
 }
 
 fn pacs_series_row(s: PacsSeriesResult) -> Element(Msg) {
@@ -357,9 +374,8 @@ fn pacs_series_row(s: PacsSeriesResult) -> Element(Msg) {
   }
 
   html.tr([attribute.class("series-detail-row")], [
-    html.td([], []),
     html.td([], [html.text(modality)]),
-    html.td([attribute.attribute("colspan", "2")], [html.text(description)]),
+    html.td([], [html.text(description)]),
     html.td([], [html.text(image_count)]),
   ])
 }

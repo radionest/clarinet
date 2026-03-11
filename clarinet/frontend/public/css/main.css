@@ -1016,15 +1016,38 @@ h6 { font-size: 1rem; }
     word-break: break-all;
 }
 
-.series-detail-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: var(--spacing-sm) 0;
+.pacs-series-details-row > td {
+    padding-top: 0;
+}
+
+.pacs-series-details-row:hover {
+    background: inherit;
+}
+
+.pacs-series-details summary {
+    cursor: pointer;
+    color: var(--accent-color);
+    font-size: 0.875rem;
+    padding: var(--spacing-xs) 0;
+    user-select: none;
+}
+
+.pacs-series-details summary:hover {
+    text-decoration: underline;
+}
+
+.series-table {
+    width: 100%;
+    margin-top: var(--spacing-xs);
+}
+
+.series-table .series-detail-row td {
+    padding: var(--spacing-xs) var(--spacing-md);
+    font-size: 0.875rem;
     border-bottom: 1px solid var(--border-color);
 }
 
-.series-detail-row:last-child {
+.series-table .series-detail-row:last-child td {
     border-bottom: none;
 }
 
