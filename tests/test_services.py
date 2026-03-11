@@ -11,17 +11,21 @@ from clarinet.exceptions.domain import (
     RoleAlreadyExistsError,
     UserAlreadyExistsError,
     UserAlreadyHasRoleError,
+    ValidationError,
 )
 from clarinet.models.base import RecordStatus
 from clarinet.models.patient import Patient
+from clarinet.models.record import RecordTypeCreate, RecordTypeOptional
 from clarinet.models.study import Study
 from clarinet.models.user import User, UserRole
+from clarinet.repositories.file_definition_repository import FileDefinitionRepository
 from clarinet.repositories.patient_repository import PatientRepository
 from clarinet.repositories.record_repository import RecordRepository
 from clarinet.repositories.record_type_repository import RecordTypeRepository
 from clarinet.repositories.study_repository import StudyRepository
-from clarinet.repositories.user_repository import UserRepository, UserRoleRepository
+from clarinet.repositories.user_repository import UserRepository
 from clarinet.services.admin_service import AdminService
+from clarinet.services.record_type_service import RecordTypeService
 from clarinet.services.user_service import UserService
 from clarinet.utils.auth import get_password_hash, verify_password
 
@@ -36,8 +40,7 @@ class TestUserService:
     @pytest_asyncio.fixture
     async def env(self, test_session):
         user_repo = UserRepository(test_session)
-        role_repo = UserRoleRepository(test_session)
-        service = UserService(user_repo, role_repo)
+        service = UserService(user_repo)
         # Create a role for testing
         role = UserRole(name="reviewer")
         test_session.add(role)
@@ -181,13 +184,18 @@ class TestAdminService:
         return {"service": service, "session": test_session}
 
     @pytest.mark.asyncio
-    async def test_get_total_counts_empty(self, env):
-        studies, records, _users, _patients = await env["service"].get_total_counts()
-        assert isinstance(studies, int)
-        assert isinstance(records, int)
+    async def test_get_stats_empty(self, env):
+        stats = await env["service"].get_stats()
+        assert isinstance(stats.total_studies, int)
+        assert isinstance(stats.total_records, int)
+        assert isinstance(stats.total_users, int)
+        assert isinstance(stats.total_patients, int)
+        # All RecordStatus values should be present
+        for status in RecordStatus:
+            assert status.value in stats.records_by_status
 
     @pytest.mark.asyncio
-    async def test_get_total_counts_with_data(self, env):
+    async def test_get_stats_with_data(self, env):
         session = env["session"]
         pat = Patient(id="ADMIN_PAT", name="Admin Patient")
         session.add(pat)
@@ -204,17 +212,10 @@ class TestAdminService:
         session.add(user)
         await session.commit()
 
-        studies, _records, users, patients = await env["service"].get_total_counts()
-        assert studies >= 1
-        assert patients >= 1
-        assert users >= 1
-
-    @pytest.mark.asyncio
-    async def test_get_records_by_status(self, env):
-        status_map = await env["service"].get_records_by_status()
-        # All RecordStatus values should be present
-        for status in RecordStatus:
-            assert status.value in status_map
+        stats = await env["service"].get_stats()
+        assert stats.total_studies >= 1
+        assert stats.total_patients >= 1
+        assert stats.total_users >= 1
 
     @pytest.mark.asyncio
     async def test_get_record_type_stats_empty(self, env):
@@ -233,18 +234,19 @@ class TestAdminService:
         assert len(result) == 1
 
         stat = result[0]
-        assert stat["name"] == "test_stats_type"
-        assert stat["description"] == "Test"
-        assert stat["label"] == "TST"
-        assert stat["level"] == "SERIES"  # default DicomQueryLevel
-        assert stat["role_name"] is None
-        assert stat["min_records"] == 1
-        assert stat["max_records"] is None
-        assert stat["total_records"] == 0
-        assert stat["unique_users"] == 0
+        assert stat.name == "test_stats_type"
+        assert stat.description == "Test"
+        assert stat.label == "TST"
+        assert stat.level == "SERIES"  # default DicomQueryLevel
+        assert stat.role_name is None
+        assert stat.min_records == 1
+        assert stat.max_records is None
+        assert stat.total_records == 0
+        assert stat.unique_users == 0
         # All RecordStatus keys present in records_by_status with 0 counts
+        status_counts = stat.records_by_status.model_dump()
         for status in RecordStatus:
-            assert stat["records_by_status"][status.value] == 0
+            assert status_counts[status.value] == 0
 
 
 # ===================================================================
@@ -381,3 +383,84 @@ class TestFlowLoader:
         count = load_and_register_flows(engine, [flow_file])
         assert count >= 1
         assert engine.register_flow.called
+
+
+# ===================================================================
+# RecordTypeService
+# ===================================================================
+
+
+class TestRecordTypeService:
+    """Tests for RecordTypeService."""
+
+    @pytest_asyncio.fixture
+    async def env(self, test_session):
+        rt_repo = RecordTypeRepository(test_session)
+        fd_repo = FileDefinitionRepository(test_session)
+        service = RecordTypeService(rt_repo, fd_repo, test_session)
+        return {"service": service, "session": test_session, "rt_repo": rt_repo}
+
+    @pytest.mark.asyncio
+    async def test_create_record_type(self, env):
+        dto = RecordTypeCreate(name="svc_rt_create", label="CRT")
+        result = await env["service"].create_record_type(dto)
+        assert result.name == "svc_rt_create"
+        assert result.label == "CRT"
+
+    @pytest.mark.asyncio
+    async def test_create_record_type_invalid_schema(self, env):
+        dto = RecordTypeCreate(
+            name="svc_rt_bad_schema",
+            data_schema={"type": "invalid_not_a_type"},
+        )
+        with pytest.raises(ValidationError, match="Data schema is invalid"):
+            await env["service"].create_record_type(dto)
+
+    @pytest.mark.asyncio
+    async def test_update_record_type(self, env):
+        dto = RecordTypeCreate(name="svc_rt_upd", description="Original")
+        await env["service"].create_record_type(dto)
+
+        update = RecordTypeOptional(description="Updated")
+        update.model_fields_set.add("description")
+        result = await env["service"].update_record_type("svc_rt_upd", update)
+        assert result.description == "Updated"
+
+    @pytest.mark.asyncio
+    async def test_validate_record_data_valid(self, env):
+        from unittest.mock import MagicMock
+
+        schema = {
+            "type": "object",
+            "properties": {"score": {"type": "integer"}},
+            "required": ["score"],
+        }
+        dto = RecordTypeCreate(name="svc_rt_valid", data_schema=schema)
+        rt = await env["service"].create_record_type(dto)
+
+        record = MagicMock()
+        record.record_type = rt
+        record.study_uid = None
+
+        data = {"score": 42}
+        result = await env["service"].validate_record_data(record, data)
+        assert result == data
+
+    @pytest.mark.asyncio
+    async def test_validate_record_data_invalid(self, env):
+        from unittest.mock import MagicMock
+
+        schema = {
+            "type": "object",
+            "properties": {"score": {"type": "integer"}},
+            "required": ["score"],
+        }
+        dto = RecordTypeCreate(name="svc_rt_invalid", data_schema=schema)
+        rt = await env["service"].create_record_type(dto)
+
+        record = MagicMock()
+        record.record_type = rt
+        record.study_uid = None
+
+        with pytest.raises(ValidationError):
+            await env["service"].validate_record_data(record, {"score": "not_int"})

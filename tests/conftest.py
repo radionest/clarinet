@@ -93,9 +93,7 @@ async def fresh_session(test_engine) -> AsyncGenerator[AsyncSession]:
         yield session
 
 
-async def create_mock_superuser(
-    session: AsyncSession, email: str = "mock@test.com"
-) -> User:
+async def create_mock_superuser(session: AsyncSession, email: str = "mock@test.com") -> User:
     """Create a mock superuser detached from the session.
 
     Expunged after refresh to prevent MissingGreenlet when other
