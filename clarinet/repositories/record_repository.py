@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import distinct, func
+from sqlalchemy import distinct, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlmodel import col, select
@@ -213,6 +213,7 @@ class RecordRepository(BaseRepository[Record]):
         skip: int = 0,
         limit: int = 100,
         role_names: set[str] | None = None,
+        include_unassigned: bool = False,
     ) -> Sequence[Record]:
         """Find records assigned to a specific user with relations loaded.
 
@@ -221,13 +222,19 @@ class RecordRepository(BaseRepository[Record]):
             skip: Number of records to skip
             limit: Maximum number of records to return
             role_names: Optional set of role names to filter by
+            include_unassigned: If True, also include records with user_id=NULL
 
         Returns:
             List of records with patient, study, series, and record_type loaded
         """
+        user_filter = (
+            or_(col(Record.user_id) == user_id, col(Record.user_id).is_(None))
+            if include_unassigned
+            else col(Record.user_id) == user_id
+        )
         statement = (
             select(Record)
-            .where(Record.user_id == user_id)
+            .where(user_filter)
             .options(
                 selectinload(Record.patient),  # type: ignore
                 selectinload(Record.study),  # type: ignore
@@ -246,7 +253,10 @@ class RecordRepository(BaseRepository[Record]):
         return result.scalars().all()
 
     async def find_pending_by_user(
-        self, user_id: UUID, role_names: set[str] | None = None
+        self,
+        user_id: UUID,
+        role_names: set[str] | None = None,
+        include_unassigned: bool = False,
     ) -> Sequence[Record]:
         """Find active (non-terminal) records assigned to a user with relations loaded.
 
@@ -255,14 +265,20 @@ class RecordRepository(BaseRepository[Record]):
         Args:
             user_id: User UUID to filter by
             role_names: Optional set of role names to filter by
+            include_unassigned: If True, also include records with user_id=NULL
 
         Returns:
             List of active records with patient, study, series, and record_type loaded
         """
+        user_filter = (
+            or_(col(Record.user_id) == user_id, col(Record.user_id).is_(None))
+            if include_unassigned
+            else col(Record.user_id) == user_id
+        )
         statement = (
             select(Record)
             .where(
-                Record.user_id == user_id,
+                user_filter,
                 Record.status != RecordStatus.blocked,
                 Record.status != RecordStatus.finished,
                 Record.status != RecordStatus.failed,
@@ -438,6 +454,18 @@ class RecordRepository(BaseRepository[Record]):
         record.status = RecordStatus.inwork
         await self.session.commit()
         return await self.get_with_relations(record_id), old_status
+
+    async def ensure_user_assigned(self, record_id: int, user_id: UUID) -> None:
+        """Assign user to a record only if it has no user yet.
+
+        Args:
+            record_id: Record ID.
+            user_id: User UUID to assign.
+        """
+        record = await self.get(record_id)
+        if record.user_id is None:
+            record.user_id = user_id
+            await self.session.commit()
 
     async def claim_record(self, record_id: int, user_id: UUID) -> Record:
         """Assign user and set status to inwork.

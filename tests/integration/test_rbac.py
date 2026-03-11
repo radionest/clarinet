@@ -440,7 +440,11 @@ async def test_superuser_sees_all_available_types(
 async def test_my_records_endpoint_filtered_by_role(
     test_session, role_a_client, user_with_role_a, record_role_a, record_role_b
 ):
-    """GET /api/records/my should only return user's own records matching their role."""
+    """GET /api/records/my returns assigned + unassigned records matching user's role.
+
+    Non-superusers see their own assigned records AND unassigned records matching
+    their roles. Records assigned to other roles should not appear.
+    """
     # Assign record_role_a to user_with_role_a
     record_role_a.user_id = user_with_role_a.id
     test_session.add(record_role_a)
@@ -450,6 +454,7 @@ async def test_my_records_endpoint_filtered_by_role(
     assert response.status_code == 200
     data = response.json()
 
+    # Should see assigned record_role_a; record_role_b is a different role (unassigned but wrong role)
     assert len(data) == 1
     assert data[0]["id"] == record_role_a.id
 
@@ -503,3 +508,83 @@ async def test_create_record_as_non_superuser(
     assert response.status_code == 201
     data = response.json()
     assert data["record_type"]["name"] == "rtype_role_a_test"
+
+
+@pytest.mark.asyncio
+async def test_my_records_includes_unassigned_matching_role(
+    test_session,
+    role_a_client,
+    user_with_role_a,
+    record_role_a,
+    test_patient,
+    test_study,
+    test_series,
+    record_type_role_a,
+):
+    """GET /api/records/my includes unassigned records matching the user's role."""
+    # Assign record_role_a to user
+    record_role_a.user_id = user_with_role_a.id
+    test_session.add(record_role_a)
+    await test_session.commit()
+
+    # Create a second unassigned record with same role
+    unassigned_record = Record(
+        patient_id=test_patient.id,
+        study_uid=test_study.study_uid,
+        series_uid=test_series.series_uid,
+        record_type_name=record_type_role_a.name,
+        record_type=record_type_role_a,
+        status="pending",
+        user_id=None,
+    )
+    test_session.add(unassigned_record)
+    await test_session.commit()
+    await test_session.refresh(unassigned_record)
+
+    response = await role_a_client.get("/api/records/my")
+    assert response.status_code == 200
+    data = response.json()
+
+    record_ids = {r["id"] for r in data}
+    assert record_role_a.id in record_ids
+    assert unassigned_record.id in record_ids
+    assert len(data) == 2
+
+
+@pytest.mark.asyncio
+async def test_my_records_excludes_other_user_assigned_records(
+    test_session,
+    role_a_client,
+    user_with_role_a,
+    record_role_a,
+    test_patient,
+    test_study,
+    test_series,
+    record_type_role_a,
+):
+    """GET /api/records/my excludes records assigned to other users, even if role matches."""
+    # Create another user
+    other_user_id = uuid4()
+    other_user = User(
+        id=other_user_id,
+        email="other_user@test.com",
+        hashed_password=get_password_hash("password"),
+        is_active=True,
+        is_verified=True,
+        is_superuser=False,
+    )
+    test_session.add(other_user)
+    await test_session.commit()
+
+    # Assign record_role_a to the other user
+    record_role_a.user_id = other_user_id
+    test_session.add(record_role_a)
+    await test_session.commit()
+
+    response = await role_a_client.get("/api/records/my")
+    assert response.status_code == 200
+    data = response.json()
+
+    # The record is assigned to another user, should not appear
+    record_ids = {r["id"] for r in data}
+    assert record_role_a.id not in record_ids

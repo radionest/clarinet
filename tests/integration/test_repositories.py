@@ -21,7 +21,7 @@ from clarinet.repositories.record_repository import RecordRepository, RecordSear
 from clarinet.repositories.record_type_repository import RecordTypeRepository
 from clarinet.repositories.series_repository import SeriesRepository
 from clarinet.repositories.study_repository import StudyRepository
-from clarinet.repositories.user_repository import UserRepository, UserRoleRepository
+from clarinet.repositories.user_repository import UserRepository
 from clarinet.utils.auth import get_password_hash
 from tests.utils.factories import (
     make_patient,
@@ -265,13 +265,12 @@ class TestUserRepository:
     @pytest_asyncio.fixture
     async def env(self, test_session):
         repo = UserRepository(test_session)
-        role_repo = UserRoleRepository(test_session)
         role = UserRole(name="annotator")
         test_session.add(role)
         await test_session.commit()
         user = make_user(email="user_repo@test.com")
         user = await repo.create(user)
-        return {"repo": repo, "role_repo": role_repo, "user": user, "role": role}
+        return {"repo": repo, "user": user, "role": role}
 
     @pytest.mark.asyncio
     async def test_get_with_roles(self, env):
@@ -460,6 +459,32 @@ class TestRecordRepository:
         rec = await env["repo"].claim_record(env["record"].id, env["user"].id)
         assert rec.user_id == env["user"].id
         assert rec.status == RecordStatus.inwork
+
+    @pytest.mark.asyncio
+    async def test_ensure_user_assigned_when_no_user(self, env):
+        # Clear user assignment
+        env["record"].user_id = None
+        await env["session"].commit()
+        new_user = make_user()
+        env["session"].add(new_user)
+        await env["session"].commit()
+        await env["session"].refresh(new_user)
+
+        await env["repo"].ensure_user_assigned(env["record"].id, new_user.id)
+        rec = await env["repo"].get(env["record"].id)
+        assert rec.user_id == new_user.id
+
+    @pytest.mark.asyncio
+    async def test_ensure_user_assigned_noop_when_set(self, env):
+        original_user_id = env["user"].id
+        new_user = make_user()
+        env["session"].add(new_user)
+        await env["session"].commit()
+        await env["session"].refresh(new_user)
+
+        await env["repo"].ensure_user_assigned(env["record"].id, new_user.id)
+        rec = await env["repo"].get(env["record"].id)
+        assert rec.user_id == original_user_id  # should NOT change
 
     @pytest.mark.asyncio
     async def test_bulk_update_status(self, env):

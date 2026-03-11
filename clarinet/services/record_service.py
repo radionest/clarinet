@@ -112,10 +112,7 @@ class RecordService:
             Tuple of (updated record, old status).
         """
         if user_id is not None:
-            record = await self.repo.get(record_id)
-            if record.user_id is None:
-                record.user_id = user_id
-                await self.repo.session.commit()
+            await self.repo.ensure_user_assigned(record_id, user_id)
 
         record, old_status = await self.repo.update_data(record_id, data, new_status=new_status)
         await self._fire_status_change(record, old_status)
