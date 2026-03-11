@@ -17,19 +17,17 @@ from fastapi import (
     status,
 )
 from fastapi.responses import JSONResponse
-from jsonschema import Draft202012Validator, SchemaError
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import SQLModel
 
 from clarinet.api.auth_config import current_active_user
 from clarinet.api.dependencies import (
     AuthorizedRecordDep,
     CurrentUserDep,
-    FileDefinitionRepositoryDep,
     PaginationDep,
     RecordRepositoryDep,
     RecordServiceDep,
     RecordTypeRepositoryDep,
+    RecordTypeServiceDep,
     SeriesRepositoryDep,
     SessionDep,
     get_user_role_names,
@@ -42,7 +40,7 @@ from clarinet.config.toml_exporter import (
     export_record_type_to_toml,
 )
 from clarinet.exceptions import CONFLICT, NOT_FOUND
-from clarinet.exceptions.domain import AuthorizationError, ValidationError
+from clarinet.exceptions.domain import AuthorizationError
 from clarinet.models import (
     Record,
     RecordCreate,
@@ -50,7 +48,6 @@ from clarinet.models import (
     RecordOptional,
     RecordRead,
     RecordStatus,
-    RecordType,
     RecordTypeCreate,
     RecordTypeFind,
     RecordTypeOptional,
@@ -62,8 +59,6 @@ from clarinet.services.file_validation import FileValidationResult, validate_rec
 from clarinet.services.schema_hydration import hydrate_schema
 from clarinet.types import RecordData
 from clarinet.utils.file_checksums import checksums_changed, compute_checksums
-from clarinet.utils.file_link_sync import sync_file_links
-from clarinet.utils.validation import validate_json_by_schema
 
 
 class FileCheckResult(SQLModel):
@@ -81,35 +76,6 @@ router = APIRouter(
     },
     dependencies=[Depends(current_active_user)],
 )
-
-
-# Helpers
-
-
-async def validate_record_data(
-    record: Record, data: RecordData, session: AsyncSession
-) -> RecordData:
-    """Validate record data against its hydrated record type schema.
-
-    Resolves ``x-options`` markers to ``oneOf`` before validation.
-    Record must have record_type relation loaded.
-
-    Args:
-        record: Record with record_type loaded.
-        data: Data to validate.
-        session: Async DB session for schema hydration.
-
-    Returns:
-        Validated data.
-
-    Raises:
-        ValidationError: If data does not match schema.
-    """
-    if record.record_type.data_schema:
-        hydrated = await hydrate_schema(record.record_type.data_schema, record, session)
-        validate_json_by_schema(data, hydrated)
-
-    return data
 
 
 # Record Type Endpoints
@@ -144,47 +110,14 @@ async def add_record_type(
     record_type: RecordTypeCreate,
     request: Request,
     background_tasks: BackgroundTasks,
-    repo: RecordTypeRepositoryDep,
-    fd_repo: FileDefinitionRepositoryDep,
-    session: SessionDep,
+    service: RecordTypeServiceDep,
     constrain_unique_names: bool = True,
 ) -> RecordTypeRead:
     """Create a new record type.
 
     In TOML mode, exports the created RecordType to a TOML file.
     """
-    # Extract file definitions before creating ORM object
-    file_defs = record_type.file_registry or []
-
-    # Validate data schema if present
-    if record_type.data_schema is not None:
-        try:
-            Draft202012Validator.check_schema(record_type.data_schema)
-        except SchemaError as e:
-            raise ValidationError(f"Data schema is invalid: {e}") from e
-
-    if constrain_unique_names:
-        await repo.ensure_unique_name(record_type.name)
-
-    # Validate parent type (DAG check)
-    if record_type.parent_type_name is not None:
-        await repo.validate_parent_type(record_type.name, record_type.parent_type_name)
-
-    # Create RecordType without file_registry (it's M2M, not a column)
-    create_data = record_type.model_dump(exclude={"file_registry"})
-    new_record_type = RecordType(**create_data)
-    new_record_type.file_links = []
-    session.add(new_record_type)
-    await session.flush()
-
-    # Create file links
-    if file_defs:
-        await sync_file_links(new_record_type, file_defs, fd_repo, session)
-
-    await session.commit()
-
-    # Re-fetch with eager loading
-    result = await repo.get(new_record_type.name)
+    result = await service.create_record_type(record_type, constrain_unique_names)
 
     # Export to TOML in background (TOML mode only)
     if getattr(request.app.state, "config_mode", "toml") == "toml":
@@ -205,47 +138,13 @@ async def update_record_type(
     record_type_update: RecordTypeOptional,
     request: Request,
     background_tasks: BackgroundTasks,
-    repo: RecordTypeRepositoryDep,
-    fd_repo: FileDefinitionRepositoryDep,
-    session: SessionDep,
+    service: RecordTypeServiceDep,
 ) -> RecordTypeRead:
     """Update an existing record type.
 
     In TOML mode, exports the updated RecordType to a TOML file.
     """
-    record_type = await repo.get(record_type_id)
-
-    # Validate data schema if present
-    if record_type_update.data_schema is not None:
-        try:
-            Draft202012Validator.check_schema(record_type_update.data_schema)
-        except SchemaError as e:
-            raise ValidationError(f"Data schema is invalid: {e}") from e
-
-    # Validate parent type if being updated (DAG check)
-    if "parent_type_name" in record_type_update.model_fields_set:
-        await repo.validate_parent_type(record_type_id, record_type_update.parent_type_name)
-
-    # Extract file_registry before model_dump to preserve FileDefinitionRead objects
-    file_defs_set = "file_registry" in record_type_update.model_fields_set
-    file_defs = record_type_update.file_registry if file_defs_set else None
-    update_data = record_type_update.model_dump(
-        exclude_unset=True,
-        exclude_none=True,
-        exclude={"file_registry"},
-    )
-
-    if update_data:
-        await repo.update(record_type, update_data)
-
-    # Sync file links if file_registry was explicitly provided
-    if file_defs is not None:
-        current = await repo.get(record_type_id)
-        await sync_file_links(current, file_defs, fd_repo, session, clear_existing=True)
-        await session.commit()
-
-    # Always re-fetch with eager loading for response serialization
-    result = await repo.get(record_type_id)
+    result = await service.update_record_type(record_type_id, record_type_update)
 
     # Export to TOML in background (TOML mode only)
     if getattr(request.app.state, "config_mode", "toml") == "toml":
@@ -316,9 +215,17 @@ async def get_my_records(
     repo: RecordRepositoryDep,
     user: CurrentUserDep,
 ) -> list[RecordRead]:
-    """Get all records assigned to the current user with relations loaded."""
+    """Get records for the current user with relations loaded.
+
+    Superusers see only their own assigned records.
+    Non-superusers see their assigned records plus unassigned records matching their roles.
+    """
     role_names = None if user.is_superuser else get_user_role_names(user)
-    records = await repo.find_by_user(user.id, role_names=role_names)
+    records = await repo.find_by_user(
+        user.id,
+        role_names=role_names,
+        include_unassigned=not user.is_superuser,
+    )
     return mask_records(records, user)
 
 
@@ -327,9 +234,17 @@ async def get_my_pending_records(
     repo: RecordRepositoryDep,
     user: CurrentUserDep,
 ) -> list[RecordRead]:
-    """Get all pending records assigned to the current user with relations loaded."""
+    """Get pending records for the current user with relations loaded.
+
+    Superusers see only their own pending records.
+    Non-superusers see their pending records plus unassigned pending records matching their roles.
+    """
     role_names = None if user.is_superuser else get_user_role_names(user)
-    records = await repo.find_pending_by_user(user.id, role_names=role_names)
+    records = await repo.find_pending_by_user(
+        user.id,
+        role_names=role_names,
+        include_unassigned=not user.is_superuser,
+    )
     return mask_records(records, user)
 
 
@@ -447,7 +362,7 @@ async def submit_record_data(
     authorized_record: AuthorizedRecordDep,
     repo: RecordRepositoryDep,
     service: RecordServiceDep,
-    session: SessionDep,
+    rt_service: RecordTypeServiceDep,
     user: CurrentUserDep,
     data: RecordData = Body(),
 ) -> RecordRead:
@@ -460,7 +375,7 @@ async def submit_record_data(
     if record.status == RecordStatus.finished:
         raise CONFLICT.with_context("Record already finished. Use PATCH to update the record data.")
 
-    validated_data = await validate_record_data(record, data, session)
+    validated_data = await rt_service.validate_record_data(record, data)
 
     # Validate input files if defined (raise on missing required files)
     record_read = RecordRead.model_validate(record)
@@ -482,7 +397,7 @@ async def update_record_data(
     record_id: int,
     authorized_record: AuthorizedRecordDep,
     service: RecordServiceDep,
-    session: SessionDep,
+    rt_service: RecordTypeServiceDep,
     user: CurrentUserDep,
     data: RecordData = Body(),
 ) -> RecordRead:
@@ -492,7 +407,7 @@ async def update_record_data(
     if record.status != RecordStatus.finished:
         raise CONFLICT.with_context("Record is not finished yet. Use POST to submit record data.")
 
-    validated_data = await validate_record_data(record, data, session)
+    validated_data = await rt_service.validate_record_data(record, data)
     updated, _ = await service.update_data(record_id, validated_data)
 
     return mask_record_patient_data(RecordRead.model_validate(updated), user)

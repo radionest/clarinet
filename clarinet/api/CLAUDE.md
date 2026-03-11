@@ -15,12 +15,12 @@ SessionDep          = Annotated[AsyncSession, Depends(get_async_session)]
 PaginationDep       = Annotated[PaginationParams, Depends()]
 
 # Repositories
-UserRepositoryDep, UserRoleRepositoryDep, StudyRepositoryDep,
+UserRepositoryDep, StudyRepositoryDep,
 PatientRepositoryDep, SeriesRepositoryDep, RecordRepositoryDep,
 RecordTypeRepositoryDep, FileDefinitionRepositoryDep, PipelineDefinitionRepositoryDep
 
 # Services
-UserServiceDep, StudyServiceDep, RecordServiceDep, AdminServiceDep, SlicerServiceDep
+UserServiceDep, StudyServiceDep, RecordServiceDep, RecordTypeServiceDep, AdminServiceDep, SlicerServiceDep
 
 # DICOM
 DicomClientDep, PacsNodeDep

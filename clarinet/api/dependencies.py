@@ -22,13 +22,14 @@ from clarinet.repositories.record_repository import RecordRepository
 from clarinet.repositories.record_type_repository import RecordTypeRepository
 from clarinet.repositories.series_repository import SeriesRepository
 from clarinet.repositories.study_repository import StudyRepository
-from clarinet.repositories.user_repository import UserRepository, UserRoleRepository
+from clarinet.repositories.user_repository import UserRepository
 from clarinet.services.admin_service import AdminService
 from clarinet.services.anonymization_service import AnonymizationService
 from clarinet.services.dicom import DicomClient
 from clarinet.services.dicom.models import DicomNode
 from clarinet.services.dicomweb import DicomWebCache, DicomWebProxyService
 from clarinet.services.record_service import RecordService
+from clarinet.services.record_type_service import RecordTypeService
 from clarinet.services.recordflow.engine import RecordFlowEngine
 from clarinet.services.slicer.service import SlicerService
 from clarinet.services.study_service import StudyService
@@ -97,11 +98,6 @@ async def get_user_repository(session: SessionDep) -> UserRepository:
     return UserRepository(session)
 
 
-async def get_user_role_repository(session: SessionDep) -> UserRoleRepository:
-    """Get user role repository instance."""
-    return UserRoleRepository(session)
-
-
 async def get_study_repository(session: SessionDep) -> StudyRepository:
     """Get study repository instance."""
     return StudyRepository(session)
@@ -144,7 +140,6 @@ FileDefinitionRepositoryDep = Annotated[
     FileDefinitionRepository, Depends(get_file_definition_repository)
 ]
 UserRepositoryDep = Annotated[UserRepository, Depends(get_user_repository)]
-UserRoleRepositoryDep = Annotated[UserRoleRepository, Depends(get_user_role_repository)]
 StudyRepositoryDep = Annotated[StudyRepository, Depends(get_study_repository)]
 PatientRepositoryDep = Annotated[PatientRepository, Depends(get_patient_repository)]
 SeriesRepositoryDep = Annotated[SeriesRepository, Depends(get_series_repository)]
@@ -162,11 +157,9 @@ def get_recordflow_engine(request: Request) -> RecordFlowEngine | None:
     return getattr(request.app.state, "recordflow_engine", None)
 
 
-async def get_user_service(
-    user_repo: UserRepositoryDep, role_repo: UserRoleRepositoryDep
-) -> UserService:
-    """Get user service instance with injected repositories."""
-    return UserService(user_repo, role_repo)
+async def get_user_service(user_repo: UserRepositoryDep) -> UserService:
+    """Get user service instance with injected repository."""
+    return UserService(user_repo)
 
 
 async def get_study_service(
@@ -187,6 +180,15 @@ async def get_record_service(
 ) -> RecordService:
     """Get record service instance with injected repository and engine."""
     return RecordService(record_repo, get_recordflow_engine(request))
+
+
+async def get_record_type_service(
+    record_type_repo: RecordTypeRepositoryDep,
+    fd_repo: FileDefinitionRepositoryDep,
+    session: SessionDep,
+) -> RecordTypeService:
+    """Get record type service instance with injected repositories."""
+    return RecordTypeService(record_type_repo, fd_repo, session)
 
 
 async def get_admin_service(
@@ -212,6 +214,7 @@ async def get_slicer_service() -> SlicerService:
 UserServiceDep = Annotated[UserService, Depends(get_user_service)]
 StudyServiceDep = Annotated[StudyService, Depends(get_study_service)]
 RecordServiceDep = Annotated[RecordService, Depends(get_record_service)]
+RecordTypeServiceDep = Annotated[RecordTypeService, Depends(get_record_type_service)]
 AdminServiceDep = Annotated[AdminService, Depends(get_admin_service)]
 SlicerServiceDep = Annotated[SlicerService, Depends(get_slicer_service)]
 

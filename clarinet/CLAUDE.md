@@ -134,6 +134,7 @@ Bootstrap uses `reconcile_config()` from `clarinet/utils/bootstrap.py` — dispa
 | `services/user_service.py` | User and role management |
 | `services/study_service.py` | Study management (+ entity-creation RecordFlow triggers) |
 | `services/record_service.py` | Record mutations with automatic RecordFlow triggers |
+| `services/record_type_service.py` | RecordType CRUD and record data validation against schema |
 | `services/session_cleanup.py` | Background stale session cleanup service |
 
 `clarinet/client.py` — `ClarinetClient`: HTTP client to own API (used by RecordFlow engine).
