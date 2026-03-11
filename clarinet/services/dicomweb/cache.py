@@ -33,6 +33,7 @@ class DicomWebCache:
         memory_ttl_minutes: int = 30,
         memory_max_entries: int = 50,
         storage_path: Path | None = None,
+        disk_write_concurrency: int = 4,
     ):
         """Initialize the cache.
 
@@ -43,6 +44,7 @@ class DicomWebCache:
             memory_ttl_minutes: Time-to-live for in-memory cache entries in minutes
             memory_max_entries: Maximum number of series in the in-memory TTLCache
             storage_path: Base storage path for resolving dcm_anon folders
+            disk_write_concurrency: Max concurrent background disk write operations
         """
         self._base_dir = base_dir
         self._storage_path = storage_path
@@ -54,6 +56,7 @@ class DicomWebCache:
         )
         self._disk_write_tasks: set[asyncio.Task[None]] = set()
         self._dcm_anon_path_cache: dict[str, Path | None] = {}
+        self._disk_write_semaphore = asyncio.Semaphore(disk_write_concurrency)
 
     def _series_dir(self, study_uid: str, series_uid: str) -> Path:
         return self._base_dir / study_uid / series_uid
@@ -235,24 +238,28 @@ class DicomWebCache:
     ) -> None:
         """Write series to disk in background, update memory entry on completion.
 
+        Guarded by ``_disk_write_semaphore`` to limit concurrent thread-pool usage
+        and avoid starving other ``asyncio.to_thread`` callers (e.g. metadata conversion).
+
         Args:
             study_uid: Study Instance UID
             series_uid: Series Instance UID
             instances: Dict of datasets keyed by SOPInstanceUID
         """
-        try:
-            await asyncio.to_thread(self._write_to_disk, study_uid, series_uid, instances)
-            # Mark memory entry as disk-persisted
-            key = self._cache_key(study_uid, series_uid)
-            cached = self._memory_cache.get(key)
-            if cached is not None:
-                cached.disk_persisted = True
-            logger.info(
-                f"Background disk write complete for series {series_uid} "
-                f"({len(instances)} instances)"
-            )
-        except Exception as e:
-            logger.error(f"Background disk write failed for series {series_uid}: {e}")
+        async with self._disk_write_semaphore:
+            try:
+                await asyncio.to_thread(self._write_to_disk, study_uid, series_uid, instances)
+                # Mark memory entry as disk-persisted
+                key = self._cache_key(study_uid, series_uid)
+                cached = self._memory_cache.get(key)
+                if cached is not None:
+                    cached.disk_persisted = True
+                logger.info(
+                    f"Background disk write complete for series {series_uid} "
+                    f"({len(instances)} instances)"
+                )
+            except Exception as e:
+                logger.error(f"Background disk write failed for series {series_uid}: {e}")
 
     async def ensure_series_cached(
         self,

@@ -33,7 +33,7 @@ Request → 1. Memory cache (cachetools.TTLCache[str, MemoryCachedSeries], O(1) 
 - **Memory tier**: `TTLCache` holds `MemoryCachedSeries` with `dict[str, Dataset]` keyed by SOPInstanceUID. TTL controlled by `dicomweb_memory_cache_ttl_minutes`, max entries by `dicomweb_memory_cache_max_entries` (LRU eviction).
 - **dcm_anon tier**: Anonymized DICOM files written by `AnonymizationService` into working folder `dcm_anon/` subdirectories. No TTL — files persist until manually deleted. Path lookup iterates patient dirs and caches results in `_dcm_anon_path_cache`.
 - **Disk tier**: `.dcm` files + `.cached_at` marker. TTL controlled by `dicomweb_cache_ttl_hours`. Loaded into memory on first access after restart.
-- **Background persistence**: After C-GET to memory, `asyncio.create_task` writes datasets to disk via `asyncio.to_thread`. On shutdown, pending tasks are cancelled.
+- **Background persistence**: After C-GET to memory, `asyncio.create_task` writes datasets to disk via `asyncio.to_thread`, guarded by `_disk_write_semaphore` (default 4) to avoid flooding the thread pool. On shutdown, pending tasks are cancelled.
 
 ## Flow
 
@@ -44,7 +44,7 @@ OHIF (iframe/tab) → DICOMweb HTTP → FastAPI /dicom-web/ router
 ```
 
 - **QIDO-RS** (search): translates query params → `StudyQuery`/`SeriesQuery`/`ImageQuery` → C-FIND → DICOM JSON response
-- **WADO-RS metadata**: ensure_series_cached → iterate `MemoryCachedSeries.instances.values()` → strip PixelData from copy → DICOM JSON with BulkDataURIs
+- **WADO-RS metadata**: ensure_series_cached → `asyncio.to_thread(convert_datasets_to_dicom_json)` (CPU-bound `to_json_dict()` runs off event loop) → DICOM JSON with BulkDataURIs
 - **WADO-RS frames**: ensure_series_cached → O(1) `instances.get(sop_uid)` → extract pixel data → multipart/related response
 - **WADO-RS study metadata**: C-FIND series → `ensure_study_cached()` — single study-level C-GET instead of N per-series C-GETs
 
@@ -59,6 +59,7 @@ OHIF (iframe/tab) → DICOMweb HTTP → FastAPI /dicom-web/ router
 | `dicomweb_memory_cache_max_entries` | `200` | Max series in memory TTLCache (LRU eviction) |
 | `dicomweb_cache_cleanup_enabled` | `True` | Enable periodic disk cache cleanup |
 | `dicomweb_cache_cleanup_interval` | `86400` | Cleanup interval in seconds (default: 24h) |
+| `dicomweb_disk_write_concurrency` | `4` | Max concurrent background disk write threads |
 | `ohif_enabled` | `True` | Mount OHIF static files at `/ohif` |
 
 ## Disk cache cleanup service

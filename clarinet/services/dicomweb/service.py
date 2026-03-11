@@ -19,11 +19,38 @@ from clarinet.services.dicomweb.converter import (
     series_result_to_dicom_json,
     study_result_to_dicom_json,
 )
+from clarinet.services.dicomweb.models import MemoryCachedSeries
 from clarinet.services.dicomweb.multipart import (
     build_multipart_response,
     extract_frames_from_dataset,
 )
 from clarinet.utils.logger import logger
+
+
+def _build_study_metadata(
+    cached_map: dict[str, MemoryCachedSeries],
+    series_uids: list[str],
+    base_url: str,
+) -> list[dict[str, Any]]:
+    """Build DICOM JSON metadata for all series in a study (CPU-bound, run via to_thread).
+
+    Args:
+        cached_map: Mapping of series_uid → MemoryCachedSeries
+        series_uids: Ordered list of series UIDs to include
+        base_url: Base URL for constructing BulkDataURIs
+
+    Returns:
+        Combined list of DICOM JSON metadata objects
+    """
+    all_metadata: list[dict[str, Any]] = []
+    for series_uid in series_uids:
+        cached = cached_map.get(series_uid)
+        if cached is None:
+            continue
+        all_metadata.extend(
+            convert_datasets_to_dicom_json(list(cached.instances.values()), base_url)
+        )
+    return all_metadata
 
 
 class DicomWebProxyService:
@@ -143,7 +170,9 @@ class DicomWebProxyService:
             pacs=self._pacs,
         )
 
-        metadata = convert_datasets_to_dicom_json(cached.instances.values(), base_url)
+        metadata = await asyncio.to_thread(
+            convert_datasets_to_dicom_json, list(cached.instances.values()), base_url
+        )
         logger.info(f"WADO-RS metadata: {len(metadata)} instances for series {series_uid}")
         return metadata
 
@@ -176,14 +205,9 @@ class DicomWebProxyService:
             pacs=self._pacs,
         )
 
-        all_metadata: list[dict[str, Any]] = []
-        for series_uid in series_uids:
-            cached = cached_map.get(series_uid)
-            if cached is None:
-                logger.warning(f"Series {series_uid} not found in study cache")
-                continue
-            metadata = convert_datasets_to_dicom_json(cached.instances.values(), base_url)
-            all_metadata.extend(metadata)
+        all_metadata = await asyncio.to_thread(
+            _build_study_metadata, cached_map, series_uids, base_url
+        )
 
         logger.info(
             f"WADO-RS study metadata: {len(all_metadata)} instances "

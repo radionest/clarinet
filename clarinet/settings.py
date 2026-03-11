@@ -145,6 +145,7 @@ class Settings(BaseSettings):
     dicomweb_memory_cache_max_entries: int = 200
     dicomweb_cache_cleanup_enabled: bool = True
     dicomweb_cache_cleanup_interval: int = 86400  # 24 hours in seconds
+    dicomweb_disk_write_concurrency: int = 4  # Max concurrent background disk writes
 
     # OHIF viewer settings
     ohif_enabled: bool = True

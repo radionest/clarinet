@@ -169,6 +169,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
             memory_ttl_minutes=settings.dicomweb_memory_cache_ttl_minutes,
             memory_max_entries=settings.dicomweb_memory_cache_max_entries,
             storage_path=Path(settings.storage_path),
+            disk_write_concurrency=settings.dicomweb_disk_write_concurrency,
         )
         logger.info("DICOMweb cache initialized (two-tier: memory + disk)")
 

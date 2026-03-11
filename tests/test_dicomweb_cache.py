@@ -365,6 +365,53 @@ class TestEvictBySize:
         assert not (tmp_cache_dir / "study_lonely").exists()
 
 
+class TestDiskWriteConcurrency:
+    """Test that _disk_write_semaphore limits concurrent disk writes."""
+
+    @pytest.mark.asyncio
+    async def test_disk_write_concurrency_limited(self, tmp_cache_dir: Path) -> None:
+        """Concurrent disk writes should be limited by semaphore."""
+        cache = DicomWebCache(
+            base_dir=tmp_cache_dir,
+            disk_write_concurrency=2,
+        )
+
+        peak_concurrent = 0
+        current_concurrent = 0
+        lock = asyncio.Lock()
+
+        original_write = cache._write_to_disk
+
+        def slow_write(study_uid: str, series_uid: str, instances: dict[str, Any]) -> None:
+            """Replacement _write_to_disk that tracks concurrency."""
+            nonlocal peak_concurrent, current_concurrent
+            # asyncio.Lock can't be used in a thread, use a simple counter
+            # Thread-safety: GIL ensures += and -= are atomic for ints
+            current_concurrent += 1
+            if current_concurrent > peak_concurrent:
+                peak_concurrent = current_concurrent
+            import time
+
+            time.sleep(0.05)  # simulate I/O
+            current_concurrent -= 1
+
+        cache._write_to_disk = slow_write  # type: ignore[assignment]
+
+        instances = _make_instances(1)
+
+        # Launch 5 concurrent background writes
+        tasks = [
+            asyncio.create_task(cache._write_to_disk_background("study1", f"series_{i}", instances))
+            for i in range(5)
+        ]
+        await asyncio.gather(*tasks)
+
+        # Peak concurrency should not exceed the semaphore limit of 2
+        assert peak_concurrent <= 2
+        # But we should have actually had concurrent execution
+        assert peak_concurrent == 2
+
+
 class TestStudyLevelCache:
     """Test ensure_study_cached() — study-level C-GET with grouping and locking."""
 
