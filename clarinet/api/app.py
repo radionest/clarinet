@@ -152,6 +152,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         await session_cleanup_service.start()
         logger.info("Session cleanup service started")
 
+    # Initialize DICOM association semaphore
+    from clarinet.services.dicom.operations import DicomOperations
+
+    DicomOperations.set_association_semaphore(settings.dicom_max_concurrent_associations)
+
     # Initialize DICOMweb cache singleton
     if settings.dicomweb_enabled:
         from clarinet.services.dicomweb.cache import DicomWebCache

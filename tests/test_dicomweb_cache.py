@@ -10,15 +10,17 @@ Tests cover:
 - Size-based eviction: oldest removed when over limit
 """
 
+import asyncio
 import time
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from cachetools import TTLCache
 
 from clarinet.services.dicomweb.cache import DicomWebCache
+from clarinet.services.dicomweb.models import MemoryCachedSeries
 from tests.conftest import create_disk_series
 
 
@@ -361,3 +363,227 @@ class TestEvictBySize:
 
         cache.evict_by_size()
         assert not (tmp_cache_dir / "study_lonely").exists()
+
+
+class TestStudyLevelCache:
+    """Test ensure_study_cached() — study-level C-GET with grouping and locking."""
+
+    @pytest.mark.asyncio
+    async def test_all_series_cached_no_cget(self, cache: DicomWebCache) -> None:
+        """When all series are already in memory, get_study_to_memory should NOT be called."""
+        instances_a = _make_instances(2)
+        instances_b = _make_instances(3)
+        cache._put_to_memory("study1", "series_a", instances_a)
+        cache._put_to_memory("study1", "series_b", instances_b)
+
+        # Mock client and pacs
+        mock_client = MagicMock()
+        mock_pacs = MagicMock()
+
+        result = await cache.ensure_study_cached(
+            study_uid="study1",
+            series_uids=["series_a", "series_b"],
+            client=mock_client,
+            pacs=mock_pacs,
+        )
+
+        # Should return both series from memory
+        assert len(result) == 2
+        assert "series_a" in result
+        assert "series_b" in result
+        assert result["series_a"].series_uid == "series_a"
+        assert result["series_b"].series_uid == "series_b"
+
+        # Client should NOT have been called
+        mock_client.get_study_to_memory.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_partial_cache_fetches_missing(self, cache: DicomWebCache) -> None:
+        """Some series in memory, some missing — one study C-GET with correct grouping."""
+        # Pre-populate series_a in memory
+        instances_a = _make_instances(2)
+        cache._put_to_memory("study1", "series_a", instances_a)
+
+        # Mock client to return instances for series_b and series_c
+        mock_client = MagicMock()
+        mock_pacs = MagicMock()
+
+        # Create mock datasets for series_b and series_c
+        ds_b1 = MagicMock()
+        ds_b1.SOPInstanceUID = "sop_b1"
+        ds_b1.SeriesInstanceUID = "series_b"
+
+        ds_b2 = MagicMock()
+        ds_b2.SOPInstanceUID = "sop_b2"
+        ds_b2.SeriesInstanceUID = "series_b"
+
+        ds_c1 = MagicMock()
+        ds_c1.SOPInstanceUID = "sop_c1"
+        ds_c1.SeriesInstanceUID = "series_c"
+
+        # Create mock RetrieveResult
+        mock_result = MagicMock()
+        mock_result.instances = {
+            "sop_b1": ds_b1,
+            "sop_b2": ds_b2,
+            "sop_c1": ds_c1,
+        }
+        mock_result.num_completed = 3
+        mock_result.status = 0x0000
+
+        # Make get_study_to_memory an AsyncMock
+        mock_client.get_study_to_memory = AsyncMock(return_value=mock_result)
+
+        result = await cache.ensure_study_cached(
+            study_uid="study1",
+            series_uids=["series_a", "series_b", "series_c"],
+            client=mock_client,
+            pacs=mock_pacs,
+        )
+
+        # Should have all 3 series
+        assert len(result) == 3
+        assert "series_a" in result
+        assert "series_b" in result
+        assert "series_c" in result
+
+        # series_a should be the original cached entry
+        assert result["series_a"].series_uid == "series_a"
+        assert len(result["series_a"].instances) == 2
+
+        # series_b should have 2 instances
+        assert result["series_b"].series_uid == "series_b"
+        assert len(result["series_b"].instances) == 2
+
+        # series_c should have 1 instance
+        assert result["series_c"].series_uid == "series_c"
+        assert len(result["series_c"].instances) == 1
+
+        # Study C-GET should have been called exactly once
+        mock_client.get_study_to_memory.assert_called_once_with(study_uid="study1", peer=mock_pacs)
+
+    @pytest.mark.asyncio
+    async def test_unexpected_series_cached(self, cache: DicomWebCache) -> None:
+        """C-GET returns extra series (SR/KO) not in series_uids — they get cached too."""
+        mock_client = MagicMock()
+        mock_pacs = MagicMock()
+
+        # Create datasets for requested series_a and unexpected series_sr
+        ds_a1 = MagicMock()
+        ds_a1.SOPInstanceUID = "sop_a1"
+        ds_a1.SeriesInstanceUID = "series_a"
+
+        ds_sr1 = MagicMock()
+        ds_sr1.SOPInstanceUID = "sop_sr1"
+        ds_sr1.SeriesInstanceUID = "series_sr"
+
+        mock_result = MagicMock()
+        mock_result.instances = {
+            "sop_a1": ds_a1,
+            "sop_sr1": ds_sr1,
+        }
+        mock_result.num_completed = 2
+        mock_result.status = 0x0000
+
+        mock_client.get_study_to_memory = AsyncMock(return_value=mock_result)
+
+        result = await cache.ensure_study_cached(
+            study_uid="study1",
+            series_uids=["series_a"],  # Only request series_a
+            client=mock_client,
+            pacs=mock_pacs,
+        )
+
+        # Result should only contain requested series_a
+        assert len(result) == 1
+        assert "series_a" in result
+        assert "series_sr" not in result
+
+        # But series_sr should be cached in memory
+        cached_sr = cache._get_from_memory("study1", "series_sr")
+        assert cached_sr is not None
+        assert cached_sr.series_uid == "series_sr"
+        assert len(cached_sr.instances) == 1
+
+    @pytest.mark.asyncio
+    async def test_empty_cget_raises(self, cache: DicomWebCache) -> None:
+        """C-GET returns num_completed=0 — should raise RuntimeError."""
+        mock_client = MagicMock()
+        mock_pacs = MagicMock()
+
+        # Mock empty result
+        mock_result = MagicMock()
+        mock_result.instances = {}
+        mock_result.num_completed = 0
+        mock_result.status = 0xA701  # Failed: Out of Resources
+
+        mock_client.get_study_to_memory = AsyncMock(return_value=mock_result)
+
+        with pytest.raises(RuntimeError, match="Study C-GET returned 0 instances"):
+            await cache.ensure_study_cached(
+                study_uid="study1",
+                series_uids=["series_a"],
+                client=mock_client,
+                pacs=mock_pacs,
+            )
+
+    @pytest.mark.asyncio
+    async def test_study_lock_prevents_duplicate(self, cache: DicomWebCache) -> None:
+        """Two concurrent calls — only one C-GET should execute."""
+        mock_client = MagicMock()
+        mock_pacs = MagicMock()
+
+        # Create datasets
+        ds_a1 = MagicMock()
+        ds_a1.SOPInstanceUID = "sop_a1"
+        ds_a1.SeriesInstanceUID = "series_a"
+
+        mock_result = MagicMock()
+        mock_result.instances = {"sop_a1": ds_a1}
+        mock_result.num_completed = 1
+        mock_result.status = 0x0000
+
+        # Create an event to coordinate timing
+        first_call_started = asyncio.Event()
+        first_call_proceed = asyncio.Event()
+
+        async def mock_get_study(study_uid: str, peer: Any) -> Any:
+            """Mock that allows us to control timing."""
+            first_call_started.set()
+            await first_call_proceed.wait()
+            return mock_result
+
+        mock_client.get_study_to_memory = AsyncMock(side_effect=mock_get_study)
+
+        async def call_ensure_cached() -> dict[str, MemoryCachedSeries]:
+            return await cache.ensure_study_cached(
+                study_uid="study1",
+                series_uids=["series_a"],
+                client=mock_client,
+                pacs=mock_pacs,
+            )
+
+        # Start both calls concurrently
+        task1 = asyncio.create_task(call_ensure_cached())
+        task2 = asyncio.create_task(call_ensure_cached())
+
+        # Wait for first call to start
+        await first_call_started.wait()
+
+        # Give second call a chance to reach the lock
+        await asyncio.sleep(0.01)
+
+        # Let the first call complete
+        first_call_proceed.set()
+
+        # Both should complete successfully
+        result1, result2 = await asyncio.gather(task1, task2)
+
+        # Both should return the same cached series
+        assert len(result1) == 1
+        assert len(result2) == 1
+        assert "series_a" in result1
+        assert "series_a" in result2
+
+        # Client should have been called exactly once
+        assert mock_client.get_study_to_memory.call_count == 1

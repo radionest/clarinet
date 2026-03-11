@@ -1,5 +1,6 @@
 """Synchronous DICOM operations using pynetdicom."""
 
+import threading
 from collections.abc import Generator
 from contextlib import contextmanager
 from typing import Any
@@ -62,6 +63,18 @@ def _set_ds_fields(ds: Dataset, fields: dict[str, Any]) -> None:
 
 class DicomOperations:
     """Synchronous DICOM operations wrapper for pynetdicom."""
+
+    _association_semaphore: threading.Semaphore | None = None
+
+    @classmethod
+    def set_association_semaphore(cls, max_concurrent: int) -> None:
+        """Set global semaphore to limit concurrent DICOM associations.
+
+        Args:
+            max_concurrent: Maximum number of concurrent associations
+        """
+        cls._association_semaphore = threading.Semaphore(max_concurrent)
+        logger.info(f"DICOM association semaphore set to {max_concurrent}")
 
     def __init__(self, calling_aet: str, max_pdu: int = 16384):
         """Initialize DICOM operations.
@@ -126,6 +139,9 @@ class DicomOperations:
     ) -> Generator[Any]:
         """Establish a DICOM association and guarantee release.
 
+        Acquires the global semaphore (if configured) before establishing the
+        association, limiting the total number of concurrent DICOM connections.
+
         Args:
             ae: Application Entity to associate with
             config: Association configuration (peer host, port, AET)
@@ -137,19 +153,26 @@ class DicomOperations:
         Raises:
             CONFLICT: If association cannot be established
         """
-        assoc = ae.associate(
-            config.peer_host,
-            config.peer_port,
-            ae_title=config.called_aet,
-            **kwargs,
-        )
-        if not assoc.is_established:
-            logger.error(f"Failed to establish association with {config.called_aet}")
-            raise CONFLICT.with_context("Failed to establish DICOM association")
+        semaphore = DicomOperations._association_semaphore
+        if semaphore is not None:
+            semaphore.acquire()
         try:
-            yield assoc
+            assoc = ae.associate(
+                config.peer_host,
+                config.peer_port,
+                ae_title=config.called_aet,
+                **kwargs,
+            )
+            if not assoc.is_established:
+                logger.error(f"Failed to establish association with {config.called_aet}")
+                raise CONFLICT.with_context("Failed to establish DICOM association")
+            try:
+                yield assoc
+            finally:
+                assoc.release()
         finally:
-            assoc.release()
+            if semaphore is not None:
+                semaphore.release()
 
     def _build_study_query_dataset(self, query: StudyQuery) -> Dataset:
         """Build DICOM dataset for study-level C-FIND.

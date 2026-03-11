@@ -27,6 +27,7 @@ dicom/
 | `dicom_port` | `11112` | Local DICOM port |
 | `dicom_ip` | `None` | Local DICOM IP |
 | `dicom_max_pdu` | `16384` | Maximum PDU size |
+| `dicom_max_concurrent_associations` | `8` | Global semaphore limit for concurrent DICOM associations |
 | `pacs_aet` | `ORTHANC` | Remote PACS AE title |
 | `pacs_host` | `localhost` | Remote PACS host |
 | `pacs_port` | `4242` | Remote PACS port |
@@ -73,6 +74,10 @@ result = await client.get_study(study_uid=studies[0].study_instance_uid, peer=pa
 - **`client.py`**: `store_instances_batch(datasets, peer)` → async wrapper via `asyncio.to_thread()`
 - **`models.py`**: `BatchStoreResult(total_sent, total_failed, failed_sop_uids)`
 - Used by `AnonymizationService._send_series_to_pacs()` for per-series batch distribution
+
+## Association Semaphore
+
+`DicomOperations._association()` enforces a global `threading.Semaphore` to limit concurrent DICOM associations across all operations (DICOMweb, anonymization, import). Initialized in app lifespan via `DicomOperations.set_association_semaphore(settings.dicom_max_concurrent_associations)`. Uses `threading.Semaphore` (not `asyncio.Semaphore`) because `_association()` is synchronous, called via `asyncio.to_thread()`.
 
 ## Key conventions
 

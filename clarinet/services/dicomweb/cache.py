@@ -350,6 +350,143 @@ class DicomWebCache:
 
             return entry
 
+    async def ensure_study_cached(
+        self,
+        study_uid: str,
+        series_uids: list[str],
+        client: DicomClient,
+        pacs: DicomNode,
+    ) -> dict[str, MemoryCachedSeries]:
+        """Ensure all series of a study are cached, using a single study-level C-GET.
+
+        Checks memory → dcm_anon → disk for each series. Missing series are fetched
+        with one study-level C-GET instead of N per-series C-GETs, avoiding PACS
+        association overload for large studies.
+
+        Args:
+            study_uid: Study Instance UID
+            series_uids: List of Series Instance UIDs to cache
+            client: DICOM client for C-GET operations
+            pacs: Target PACS node
+
+        Returns:
+            Dict mapping series_uid → MemoryCachedSeries for all requested series
+
+        Raises:
+            RuntimeError: If C-GET returns no instances for missing series
+        """
+        result: dict[str, MemoryCachedSeries] = {}
+        missing_series: list[str] = []
+
+        # Check all tiers for each series
+        for series_uid in series_uids:
+            # 1. Memory hit
+            cached = self._get_from_memory(study_uid, series_uid)
+            if cached is not None:
+                result[series_uid] = cached
+                continue
+
+            # 2. dcm_anon hit
+            anon_instances = await asyncio.to_thread(
+                self._load_from_dcm_anon, study_uid, series_uid
+            )
+            if anon_instances is not None:
+                logger.info(
+                    f"dcm_anon hit for series {series_uid} — "
+                    f"loading {len(anon_instances)} instances to memory"
+                )
+                result[series_uid] = self._put_to_memory(
+                    study_uid, series_uid, anon_instances, disk_persisted=True
+                )
+                continue
+
+            # 3. Disk cache hit
+            disk_instances = await asyncio.to_thread(self._load_from_disk, study_uid, series_uid)
+            if disk_instances is not None:
+                logger.info(
+                    f"Disk cache hit for series {series_uid} — "
+                    f"loading {len(disk_instances)} instances to memory"
+                )
+                result[series_uid] = self._put_to_memory(
+                    study_uid, series_uid, disk_instances, disk_persisted=True
+                )
+                continue
+
+            missing_series.append(series_uid)
+
+        if not missing_series:
+            logger.debug(f"All {len(series_uids)} series for study {study_uid} found in cache")
+            return result
+
+        # Study-level lock to prevent duplicate study C-GETs
+        study_lock_key = f"{study_uid}/__STUDY__"
+        if study_lock_key not in self._locks:
+            self._locks[study_lock_key] = asyncio.Lock()
+        study_lock = self._locks[study_lock_key]
+
+        async with study_lock:
+            # Double-check: another coroutine may have fetched while we waited
+            still_missing: list[str] = []
+            for series_uid in missing_series:
+                cached = self._get_from_memory(study_uid, series_uid)
+                if cached is not None:
+                    result[series_uid] = cached
+                else:
+                    still_missing.append(series_uid)
+
+            if not still_missing:
+                logger.debug(f"All missing series for study {study_uid} resolved after lock")
+                return result
+
+            # Single study-level C-GET
+            logger.info(
+                f"Cache miss for {len(still_missing)} series — "
+                f"retrieving study {study_uid} via single C-GET"
+            )
+            cget_result = await client.get_study_to_memory(study_uid=study_uid, peer=pacs)
+
+            if cget_result.num_completed == 0:
+                raise RuntimeError(
+                    f"Study C-GET returned 0 instances for study {study_uid} "
+                    f"(status: {cget_result.status})"
+                )
+
+            # Group instances by SeriesInstanceUID
+            grouped: dict[str, dict[str, object]] = {}
+            for sop_uid, ds in cget_result.instances.items():
+                ser_uid = str(ds.SeriesInstanceUID)
+                if ser_uid not in grouped:
+                    grouped[ser_uid] = {}
+                grouped[ser_uid][sop_uid] = ds
+
+            logger.info(
+                f"Study C-GET completed: {cget_result.num_completed} instances "
+                f"across {len(grouped)} series"
+            )
+
+            # Cache all series from C-GET (including unexpected SR/KO/PR)
+            requested_set = set(series_uids)
+            for ser_uid, instances in grouped.items():
+                entry = self._put_to_memory(study_uid, ser_uid, instances, disk_persisted=False)
+
+                if ser_uid in requested_set:
+                    result[ser_uid] = entry
+
+                if ser_uid not in requested_set:
+                    logger.debug(
+                        f"Cached unexpected series {ser_uid} from study C-GET "
+                        f"({len(instances)} instances)"
+                    )
+
+                # Schedule background disk write
+                task = asyncio.create_task(
+                    self._write_to_disk_background(study_uid, ser_uid, instances)
+                )
+                self._disk_write_tasks.add(task)
+                task.add_done_callback(self._disk_write_tasks.discard)
+
+        return result
+
     def read_instance_from_disk(
         self, study_uid: str, series_uid: str, instance_uid: str
     ) -> Dataset | None:

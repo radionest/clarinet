@@ -150,7 +150,8 @@ class DicomWebProxyService:
     async def retrieve_study_metadata(self, study_uid: str, base_url: str) -> list[dict[str, Any]]:
         """WADO-RS: Retrieve metadata for all instances in a study.
 
-        Discovers series via C-FIND, then retrieves metadata for each series in parallel.
+        Discovers series via C-FIND, then retrieves all series with a single study-level
+        C-GET (instead of N parallel per-series C-GETs) to avoid PACS association overload.
 
         Args:
             study_uid: Study Instance UID
@@ -167,14 +168,27 @@ class DicomWebProxyService:
         if not series_uids:
             return []
 
-        # Retrieve metadata for all series in parallel
-        tasks = [self.retrieve_series_metadata(study_uid, uid, base_url) for uid in series_uids]
-        all_results = await asyncio.gather(*tasks)
+        # Single study-level C-GET instead of N per-series C-GETs
+        cached_map = await self._cache.ensure_study_cached(
+            study_uid=study_uid,
+            series_uids=series_uids,
+            client=self._client,
+            pacs=self._pacs,
+        )
 
         all_metadata: list[dict[str, Any]] = []
-        for series_meta in all_results:
-            all_metadata.extend(series_meta)
+        for series_uid in series_uids:
+            cached = cached_map.get(series_uid)
+            if cached is None:
+                logger.warning(f"Series {series_uid} not found in study cache")
+                continue
+            metadata = convert_datasets_to_dicom_json(cached.instances.values(), base_url)
+            all_metadata.extend(metadata)
 
+        logger.info(
+            f"WADO-RS study metadata: {len(all_metadata)} instances "
+            f"across {len(series_uids)} series for study {study_uid}"
+        )
         return all_metadata
 
     async def retrieve_frames(

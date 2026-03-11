@@ -46,7 +46,7 @@ OHIF (iframe/tab) → DICOMweb HTTP → FastAPI /dicom-web/ router
 - **QIDO-RS** (search): translates query params → `StudyQuery`/`SeriesQuery`/`ImageQuery` → C-FIND → DICOM JSON response
 - **WADO-RS metadata**: ensure_series_cached → iterate `MemoryCachedSeries.instances.values()` → strip PixelData from copy → DICOM JSON with BulkDataURIs
 - **WADO-RS frames**: ensure_series_cached → O(1) `instances.get(sop_uid)` → extract pixel data → multipart/related response
-- **WADO-RS study metadata**: C-FIND series → `asyncio.gather()` parallel metadata retrieval per series
+- **WADO-RS study metadata**: C-FIND series → `ensure_study_cached()` — single study-level C-GET instead of N per-series C-GETs
 
 ## Settings (`clarinet/settings.py`)
 
@@ -56,7 +56,7 @@ OHIF (iframe/tab) → DICOMweb HTTP → FastAPI /dicom-web/ router
 | `dicomweb_cache_ttl_hours` | `24` | Disk cache TTL in hours |
 | `dicomweb_cache_max_size_gb` | `10.0` | Max disk cache size in GB |
 | `dicomweb_memory_cache_ttl_minutes` | `30` | In-memory cache TTL in minutes |
-| `dicomweb_memory_cache_max_entries` | `50` | Max series in memory TTLCache (LRU eviction) |
+| `dicomweb_memory_cache_max_entries` | `200` | Max series in memory TTLCache (LRU eviction) |
 | `dicomweb_cache_cleanup_enabled` | `True` | Enable periodic disk cache cleanup |
 | `dicomweb_cache_cleanup_interval` | `86400` | Cleanup interval in seconds (default: 24h) |
 | `ohif_enabled` | `True` | Mount OHIF static files at `/ohif` |
@@ -80,6 +80,7 @@ Both methods run off the event loop via `asyncio.to_thread()`. The service follo
 ## Key conventions
 
 - Same-origin serving: OHIF at `/ohif`, DICOMweb at `/dicom-web` — cookies work automatically
-- Cache uses `asyncio.Lock` per (study_uid, series_uid) to prevent duplicate C-GETs
+- Cache uses `asyncio.Lock` per (study_uid, series_uid) to prevent duplicate C-GETs; study-level lock (`{study_uid}/__STUDY__`) prevents duplicate study C-GETs
+- `ensure_study_cached()` retrieves all missing series in one study-level C-GET, groups by SeriesInstanceUID, caches unexpected series (SR/KO/PR) too
 - `FileNotFoundError` raised when cached instance not found (router handles as 404)
 - `StorageHandler.stored_instances` is `dict[str, Dataset]` keyed by SOPInstanceUID (not a list)
