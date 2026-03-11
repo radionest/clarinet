@@ -1,5 +1,7 @@
 """DICOM client for query-retrieve operations."""
 
+from pynetdicom import _config as _pynetdicom_config  # type: ignore[import-not-found]
+
 from clarinet.services.dicom.anonymizer import DicomAnonymizer
 from clarinet.services.dicom.client import DicomClient
 from clarinet.services.dicom.models import (
@@ -26,6 +28,10 @@ from clarinet.services.dicom.series_filter import (
     SeriesFilterCriteria,
     SeriesFilterResult,
 )
+from clarinet.settings import settings
+
+_pynetdicom_config.LOG_RESPONSE_IDENTIFIERS = settings.dicom_log_identifiers
+_pynetdicom_config.LOG_REQUEST_IDENTIFIERS = settings.dicom_log_identifiers
 
 __all__ = [
     "AnonymizationResult",
