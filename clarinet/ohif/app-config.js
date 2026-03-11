@@ -28,6 +28,7 @@ window.config = {
         condition: ({ instance }) => instance?.PatientID,
       },
     ],
+    'studyBrowser.studyMode': 'primary',
   },
   dataSources: [
     {
