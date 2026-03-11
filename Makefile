@@ -135,6 +135,12 @@ test-unit: ## Run DB-only tests in parallel (no external services)
 	@echo "Running DB-only tests in parallel..."
 	@uv run pytest -n auto --dist loadgroup -m "not pipeline and not dicom and not slicer"
 
+.PHONY: test-debug
+test-debug: ## Run tests with full JSON diagnostics (test report + app logs)
+	@echo "Running tests with full diagnostics..."
+	@CLARINET_LOG_DIR=/tmp uv run pytest -n auto --dist loadgroup \
+		--json-report --json-report-file=/tmp/clarinet-test-report.json
+
 .PHONY: test-integration
 test-integration: ## Run integration tests only
 	@echo "Running integration tests..."

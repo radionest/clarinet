@@ -118,6 +118,7 @@ dev-dependencies = [
     "types-aiofiles>=24.1.0.20250822",
     "pre-commit>=4.3.0",
     "pytest-xdist>=3.5.0",
+    "pytest-json-report>=1.5.0",
 ]
 
 [tool.black]
@@ -164,6 +165,7 @@ ignore_missing_imports = true
 
 
 [tool.pytest.ini_options]
+addopts = "--json-report --json-report-file=/tmp/clarinet-test-report.json -q"
 testpaths = ["tests"]
 python_files = "test_*.py"
 markers = [
