@@ -633,12 +633,14 @@ class SlicerHelper:
     ) -> int:
         """Add a new numbered segment with the next available number.
 
-        Parses existing segment names matching ``{prefix}_{N}`` to find the
-        highest number, then creates ``{prefix}_{N+1}``.
+        Parses existing segment names matching ``{prefix}_{N}`` (or just ``N``
+        when *prefix* is empty) to find the highest number, then creates the
+        next one.
 
         Args:
             segmentation: SegmentationBuilder or raw segmentation node.
-            prefix: Name prefix for numbered segments.
+            prefix: Name prefix for numbered segments. Empty string produces
+                plain numeric names (``"1"``, ``"2"``, …).
             start_from: Force a specific number instead of auto-detecting.
 
         Returns:
@@ -652,14 +654,18 @@ class SlicerHelper:
             next_num = start_from
         else:
             max_num = 0
-            pattern = re.compile(rf"^{re.escape(prefix)}_(\d+)$")
+            if prefix:
+                pattern = re.compile(rf"^{re.escape(prefix)}_(\d+)$")
+            else:
+                pattern = re.compile(r"^(\d+)$")
             for name in names:
                 m = pattern.match(name)
                 if m:
                     max_num = max(max_num, int(m.group(1)))
             next_num = max_num + 1
 
-        vtk_seg.AddEmptySegment(f"{prefix}_{next_num}", f"{prefix}_{next_num}")
+        seg_name = f"{prefix}_{next_num}" if prefix else str(next_num)
+        vtk_seg.AddEmptySegment(seg_name, seg_name)
         return next_num
 
     def subtract_segmentations(
