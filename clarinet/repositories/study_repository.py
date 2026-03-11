@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlmodel import select
 
+from clarinet.exceptions.domain import StudyNotFoundError
 from clarinet.models import Patient, Record, Study
 from clarinet.repositories.base import BaseRepository
 
@@ -28,7 +29,7 @@ class StudyRepository(BaseRepository[Study]):
             Study with relations loaded
 
         Raises:
-            NOT_FOUND: If study doesn't exist
+            StudyNotFoundError: If study doesn't exist.
         """
         statement = (
             select(Study)
@@ -43,9 +44,7 @@ class StudyRepository(BaseRepository[Study]):
         study = result.scalars().first()
 
         if not study:
-            from clarinet.exceptions import NOT_FOUND
-
-            raise NOT_FOUND.with_context(f"Study {study_id} not found")
+            raise StudyNotFoundError(study_id)
 
         return study
 
@@ -140,9 +139,7 @@ class StudyRepository(BaseRepository[Study]):
         result = await self.session.execute(statement)
         study = result.scalars().first()
         if not study:
-            from clarinet.exceptions import NOT_FOUND
-
-            raise NOT_FOUND.with_context(f"Study {study_uid} not found")
+            raise StudyNotFoundError(study_uid)
         return study
 
     async def get_records(self, study_id: str) -> list[Record]:
@@ -241,7 +238,7 @@ class StudyRepository(BaseRepository[Study]):
             Study with series loaded
 
         Raises:
-            NOT_FOUND: If study doesn't exist
+            StudyNotFoundError: If study doesn't exist.
         """
         study = await self.get_by_uid(study_uid)
         await self.session.refresh(study, ["series"])

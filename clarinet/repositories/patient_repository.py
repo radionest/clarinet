@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlmodel import select
 
-from clarinet.exceptions.domain import DatabaseIntegrityError
+from clarinet.exceptions.domain import DatabaseIntegrityError, PatientNotFoundError
 from clarinet.models import Patient, Study
 from clarinet.repositories.base import BaseRepository
 from clarinet.utils.logger import logger
@@ -86,7 +86,7 @@ class PatientRepository(BaseRepository[Patient]):
             Patient with studies loaded
 
         Raises:
-            NOT_FOUND: If patient doesn't exist
+            PatientNotFoundError: If patient doesn't exist.
         """
         statement = (
             select(Patient)
@@ -99,9 +99,7 @@ class PatientRepository(BaseRepository[Patient]):
         patient = result.scalars().first()
 
         if not patient:
-            from clarinet.exceptions import NOT_FOUND
-
-            raise NOT_FOUND.with_context(f"Patient {patient_id} not found")
+            raise PatientNotFoundError(patient_id)
 
         return patient
 

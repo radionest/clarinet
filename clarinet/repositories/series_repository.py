@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlmodel import select
 
+from clarinet.exceptions.domain import EntityNotFoundError, SeriesNotFoundError
 from clarinet.models import Record, Series, Study
 from clarinet.models.study import SeriesFind
 from clarinet.repositories.base import BaseRepository
@@ -42,7 +43,7 @@ class SeriesRepository(BaseRepository[Series]):
             Series with relations loaded
 
         Raises:
-            NOT_FOUND: If series doesn't exist
+            SeriesNotFoundError: If series doesn't exist.
         """
         statement = (
             select(Series)
@@ -57,9 +58,7 @@ class SeriesRepository(BaseRepository[Series]):
         series = result.scalars().first()
 
         if not series:
-            from clarinet.exceptions import NOT_FOUND
-
-            raise NOT_FOUND.with_context(f"Series {series_id} not found")
+            raise SeriesNotFoundError(series_id)
 
         return series
 
@@ -250,7 +249,7 @@ class SeriesRepository(BaseRepository[Series]):
             Random series
 
         Raises:
-            NOT_FOUND: If no series exist
+            EntityNotFoundError: If no series exist.
         """
         statement = (
             select(Series)
@@ -262,9 +261,7 @@ class SeriesRepository(BaseRepository[Series]):
         series = result.scalars().first()
 
         if not series:
-            from clarinet.exceptions import NOT_FOUND
-
-            raise NOT_FOUND.with_context("No series found")
+            raise EntityNotFoundError("No series found")
 
         return series
 
