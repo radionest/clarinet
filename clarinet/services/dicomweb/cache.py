@@ -301,7 +301,7 @@ class DicomWebCache:
                 self._load_from_dcm_anon, study_uid, series_uid
             )
             if anon_instances is not None:
-                logger.info(
+                logger.debug(
                     f"dcm_anon hit for series {series_uid} — "
                     f"loading {len(anon_instances)} instances to memory"
                 )
@@ -312,7 +312,7 @@ class DicomWebCache:
             # 3. Disk cache hit
             disk_instances = await asyncio.to_thread(self._load_from_disk, study_uid, series_uid)
             if disk_instances is not None:
-                logger.info(
+                logger.debug(
                     f"Disk cache hit for series {series_uid} — "
                     f"loading {len(disk_instances)} instances to memory"
                 )
@@ -321,7 +321,7 @@ class DicomWebCache:
                 )
 
             # 3. Cache miss — retrieve from PACS to memory
-            logger.info(f"Cache miss — retrieving series {series_uid} via C-GET (memory mode)")
+            logger.debug(f"Cache miss — retrieving series {series_uid} via C-GET (memory mode)")
             result = await client.get_series_to_memory(
                 study_uid=study_uid,
                 series_uid=series_uid,
@@ -337,7 +337,7 @@ class DicomWebCache:
             entry = self._put_to_memory(
                 study_uid, series_uid, result.instances, disk_persisted=False
             )
-            logger.info(
+            logger.debug(
                 f"Cached {len(result.instances)} instances for series {series_uid} (memory)"
             )
 

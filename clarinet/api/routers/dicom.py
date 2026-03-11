@@ -149,7 +149,7 @@ async def import_study_from_pacs(
             to_criteria=SeriesFilterCriteria.from_series_result,
         )
         for fi in filter_result.excluded:
-            logger.info(
+            logger.debug(
                 f"Import filter: skipping series {fi.item.series_instance_uid} ({fi.reason})"
             )
         pacs_series = filter_result.included

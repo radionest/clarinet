@@ -95,7 +95,7 @@ class DicomClient:
         Raises:
             CONFLICT: If association fails
         """
-        logger.info(f"Searching studies on {peer.aet}@{peer.host}:{peer.port}")
+        logger.debug(f"Searching studies on {peer.aet}@{peer.host}:{peer.port}")
 
         config = self._create_association_config(
             called_aet=peer.aet,
@@ -132,7 +132,7 @@ class DicomClient:
         Raises:
             CONFLICT: If association fails
         """
-        logger.info(f"Searching series on {peer.aet}@{peer.host}:{peer.port}")
+        logger.debug(f"Searching series on {peer.aet}@{peer.host}:{peer.port}")
 
         config = self._create_association_config(
             called_aet=peer.aet,
@@ -169,7 +169,7 @@ class DicomClient:
         Raises:
             CONFLICT: If association fails
         """
-        logger.info(f"Searching images on {peer.aet}@{peer.host}:{peer.port}")
+        logger.debug(f"Searching images on {peer.aet}@{peer.host}:{peer.port}")
 
         config = self._create_association_config(
             called_aet=peer.aet,
@@ -216,7 +216,7 @@ class DicomClient:
         label = "series" if level == QueryRetrieveLevel.SERIES else "study"
         uid = series_uid or study_uid
         dest = str(output_dir) if output_dir else "memory"
-        logger.info(f"Retrieving {label} {uid} to {dest}")
+        logger.debug(f"Retrieving {label} {uid} to {dest}")
 
         config = self._create_association_config(
             called_aet=peer.aet,
@@ -465,7 +465,7 @@ class DicomClient:
         Raises:
             CONFLICT: If association fails
         """
-        logger.info(f"Moving study {study_uid} to {destination_aet}")
+        logger.debug(f"Moving study {study_uid} to {destination_aet}")
 
         config = self._create_association_config(
             called_aet=peer.aet,
@@ -515,7 +515,7 @@ class DicomClient:
         Raises:
             CONFLICT: If association fails
         """
-        logger.info(f"Moving series {series_uid} to {destination_aet}")
+        logger.debug(f"Moving series {series_uid} to {destination_aet}")
 
         config = self._create_association_config(
             called_aet=peer.aet,

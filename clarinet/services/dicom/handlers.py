@@ -101,7 +101,7 @@ class StorageHandler:
             filepath = self.output_dir / filename
 
             ds.save_as(filepath, enforce_file_format=True)
-            logger.info(f"Stored instance to {filepath}")
+            logger.debug(f"Stored instance to {filepath}")
             return 0x0000  # Success
 
         except Exception as e:
@@ -165,7 +165,7 @@ class StorageHandler:
         try:
             status = assoc.send_c_store(ds)
             if status and status.Status == 0x0000:
-                logger.info(f"Forwarded instance {ds.SOPInstanceUID} to {self.destination_aet}")
+                logger.debug(f"Forwarded instance {ds.SOPInstanceUID} to {self.destination_aet}")
                 return 0x0000
             logger.error(
                 f"Failed to forward instance {ds.SOPInstanceUID}: "
