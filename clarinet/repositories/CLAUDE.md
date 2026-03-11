@@ -70,6 +70,7 @@ Beyond `BaseRepository`, `RecordRepository` has:
 | `set_files(record, matched_files)` | Create `RecordFileLink` rows; builds fd_map internally from eager-loaded `file_links` |
 | `update_checksums(record, checksums)` | Update checksum on existing `RecordFileLink` rows |
 | `assign_user(id, user_id)` | Assign record to user |
+| `ensure_user_assigned(id, user_id)` | Assign user only if record has no user yet |
 | `claim_record(id, user_id)` | Claim unassigned record |
 | `bulk_update_status(ids, status)` | Batch status update |
 | `validate_parent_record(parent_id, child_type)` | Validate parent record type matches child's `parent_type_name` |

@@ -15,6 +15,7 @@ class UserRepository(BaseRepository[User]):
     def __init__(self, session: AsyncSession):
         """Initialize user repository with session."""
         super().__init__(session, User)
+        self._role_repo = BaseRepository(session, UserRole)
 
     async def get_with_roles(self, user_id: UUID) -> User:
         """Get user with roles loaded.
@@ -174,33 +175,50 @@ class UserRepository(BaseRepository[User]):
         await self.session.refresh(user)
         return user
 
-
-class UserRoleRepository(BaseRepository[UserRole]):
-    """Repository for UserRole model operations."""
-
-    def __init__(self, session: AsyncSession):
-        """Initialize user role repository with session."""
-        super().__init__(session, UserRole)
-
-    async def find_by_name(self, name: str) -> UserRole | None:
-        """Find role by name.
+    async def get_role(self, name: str) -> UserRole:
+        """Get role by name or raise EntityNotFoundError.
 
         Args:
             name: Role name
 
         Returns:
-            Role if found, None otherwise
-        """
-        return await self.get_by(name=name)
+            Role object
 
-    async def get_users_for_role(self, role: UserRole) -> list[User]:
-        """Get all users with a specific role.
+        Raises:
+            EntityNotFoundError: If role doesn't exist
+        """
+        return await self._role_repo.get(name)
+
+    async def get_all_roles(self, skip: int = 0, limit: int = 100) -> list[UserRole]:
+        """Get all available roles.
 
         Args:
-            role: Role to search for
+            skip: Number of records to skip
+            limit: Maximum number of records
 
         Returns:
-            List of users with the role
+            List of roles
         """
-        await self.session.refresh(role, ["users"])
-        return list(role.users)
+        return list(await self._role_repo.get_all(skip=skip, limit=limit))
+
+    async def role_exists(self, name: str) -> bool:
+        """Check if role exists.
+
+        Args:
+            name: Role name
+
+        Returns:
+            True if role exists
+        """
+        return await self._role_repo.exists(name=name)
+
+    async def create_role(self, role: UserRole) -> UserRole:
+        """Create new role.
+
+        Args:
+            role: Role to create
+
+        Returns:
+            Created role
+        """
+        return await self._role_repo.create(role)
