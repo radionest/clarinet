@@ -49,11 +49,12 @@ class AdminService:
         Returns:
             AdminStats with total counts and per-status record breakdown.
         """
-        (total_studies, total_records, total_users, total_patients), records_by_status = (
-            await asyncio.gather(
-                self._get_total_counts(),
-                self._get_records_by_status(),
-            )
+        (
+            (total_studies, total_records, total_users, total_patients),
+            records_by_status,
+        ) = await asyncio.gather(
+            self._get_total_counts(),
+            self._get_records_by_status(),
         )
         return AdminStats(
             total_studies=total_studies,
