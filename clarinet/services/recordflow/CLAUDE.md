@@ -39,7 +39,7 @@ file(master_model).on_update().invalidate_all_records('create_master_projection'
 ## Action Models (`flow_action.py`)
 
 Actions are Pydantic models (not dicts). Each has a `type` Literal field:
-- `CreateRecordAction(record_type_name, series_uid?, user_id?, parent_record_id?, context_info?)`
+- `CreateRecordAction(record_type_name, series_uid?, user_id?, parent_record_id?, inherit_user?, context_info?)`
 - `UpdateRecordAction(record_name, status?)`
 - `CallFunctionAction(function, args, kwargs)` — needs `arbitrary_types_allowed`
 - `InvalidateRecordsAction(record_type_names, mode, callback?)` — needs `arbitrary_types_allowed`
@@ -61,8 +61,8 @@ Actions are Pydantic models (not dicts). Each has a `type` Literal field:
 - `.match(F.field)` — start pattern matching on a field; absorbs preceding `if_record()` as guard
 - `.case(value)` — add a case branch (`guard AND field == value`); stop-on-first-match semantics
 - `.default()` — fallback branch; fires only when no case matched (and guard is True)
-- `.add_record('type', **kwargs)` → `CreateRecordAction` (supports `parent_record_id` kwarg; inherits `user_id` from triggering record)
-- `.create_record('type1', 'type2')` — convenience wrapper calling `.add_record()` for each name
+- `.add_record('type', **kwargs)` → `CreateRecordAction` (supports `parent_record_id`, `inherit_user` kwargs)
+- `.create_record('type1', 'type2', inherit_user=False)` — convenience wrapper calling `.add_record()` for each name
 - `.update_record('name', status='new_status')` → `UpdateRecordAction`
 - `.invalidate_records('type1', 'type2', mode='hard'|'soft', callback=fn)` → `InvalidateRecordsAction`
 - `.invalidate_all_records(...)` — alias for `.invalidate_records()`
@@ -98,6 +98,24 @@ Modes:
 - **soft**: only append reason to `context_info`
 
 Optional `callback(record, source_record, client)` for per-project custom behavior.
+
+## User Inheritance & Parent Record Auto-Resolve
+
+When a flow creates a child record from a record-triggered flow:
+
+1. **`parent_record_id` auto-resolve**: If `parent_record_id` is not explicitly set, the engine checks if the child RecordType's `parent_type_name` matches the triggering record's type name. If so, `parent_record_id` is set to the triggering record's ID automatically. The API-level parent inheritance then handles `user_id` inheritance.
+
+2. **`inherit_user` flag** (default `False`): For non-linked records (no parent-child RecordType relationship), set `inherit_user=True` to explicitly inherit `user_id` from the triggering record. Without this flag, `user_id` is `None` for unlinked child records.
+
+3. **Explicit `user_id`** in `add_record()` always takes priority over both mechanisms.
+
+```python
+# Linked types: parent_record_id auto-resolved, user_id inherited via API
+record("parent_type").on_finished().create_record("child_type")
+
+# Non-linked: explicit opt-in for user inheritance
+record("trigger").on_finished().add_record("unlinked_output", inherit_user=True)
+```
 
 ## record() Factory
 

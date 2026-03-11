@@ -329,7 +329,7 @@ class FlowRecord:
         Args:
             record_type_name: The name of the record type to create.
             **kwargs: Additional parameters for record creation
-                     (e.g., user_id, context_info, series_uid).
+                     (e.g., user_id, context_info, series_uid, inherit_user).
 
         Returns:
             Self for method chaining.
@@ -339,6 +339,7 @@ class FlowRecord:
             series_uid=kwargs.get("series_uid"),  # type: ignore[arg-type]
             user_id=kwargs.get("user_id"),  # type: ignore[arg-type]
             parent_record_id=kwargs.get("parent_record_id"),  # type: ignore[arg-type]
+            inherit_user=kwargs.get("inherit_user", False),  # type: ignore[arg-type]
             context_info=kwargs.get("context_info"),  # type: ignore[arg-type]
         )
 
@@ -349,19 +350,20 @@ class FlowRecord:
 
         return self
 
-    def create_record(self, *record_type_names: str) -> FlowRecord:
+    def create_record(self, *record_type_names: str, inherit_user: bool = False) -> FlowRecord:
         """Create records for one or more record types.
 
         Convenience wrapper around add_record() supporting multiple names.
 
         Args:
             *record_type_names: Names of record types to create.
+            inherit_user: If True, inherit user_id from triggering record.
 
         Returns:
             Self for method chaining.
         """
         for name in record_type_names:
-            self.add_record(name)
+            self.add_record(name, inherit_user=inherit_user)
         return self
 
     def update_record(self, record_name: str, **kwargs: object) -> FlowRecord:

@@ -564,16 +564,16 @@ class ClarinetClient:
         response = await self._request("GET", "/records/types")
         return [RecordType.model_validate(t) for t in response.json()]
 
-    async def get_record_type(self, record_type_id: int) -> RecordType:
-        """Get record type by ID.
+    async def get_record_type(self, name: str) -> RecordType:
+        """Get a record type by name.
 
         Args:
-            record_type_id: Record type ID
+            name: Record type name (primary key).
 
         Returns:
-            Record type data
+            Record type data.
         """
-        response = await self._request("GET", f"/records/types/{record_type_id}")
+        response = await self._request("GET", f"/records/types/{name}")
         return RecordType.model_validate(response.json())
 
     async def create_record_type(

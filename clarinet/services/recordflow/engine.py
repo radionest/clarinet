@@ -9,6 +9,7 @@ import asyncio
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from clarinet.client import ClarinetAPIError
 from clarinet.utils.logger import logger
 
 from .flow_action import (
@@ -485,12 +486,23 @@ class RecordFlowEngine:
 
         series_uid = action.series_uid or ctx.series_uid
         user_id = action.user_id
-        parent_record_id: int | None = None
+        parent_record_id = action.parent_record_id
 
         if ctx.record is not None:
-            if user_id is None and ctx.record.user_id is not None:
+            # Auto-resolve parent_record_id when RecordTypes are linked
+            if parent_record_id is None:
+                try:
+                    child_type = await self.clarinet_client.get_record_type(action.record_type_name)
+                except ClarinetAPIError:
+                    child_type = None
+                if child_type and child_type.parent_type_name == ctx.record.record_type.name:
+                    parent_record_id = ctx.record.id
+
+            # Inherit user_id only if explicitly requested (for non-linked records).
+            # Linked records get user_id via API-level parent inheritance.
+            if action.inherit_user and user_id is None and ctx.record.user_id is not None:
                 user_id = str(ctx.record.user_id)
-            parent_record_id = action.parent_record_id
+
             default_info = (
                 f"Created by flow from record {ctx.record.record_type.name} (id={ctx.record.id})"
             )

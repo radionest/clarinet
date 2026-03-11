@@ -25,6 +25,10 @@ class CreateRecordAction(_ActionBase):
         record_type_name: Name of the record type to create.
         series_uid: Optional series UID override.
         user_id: Optional user ID to assign.
+        parent_record_id: Optional explicit parent record ID.
+        inherit_user: If True, inherit user_id from triggering record
+            (for non-linked records). Linked records inherit user_id
+            via API-level parent inheritance automatically.
         context_info: Optional context information string.
     """
 
@@ -33,6 +37,7 @@ class CreateRecordAction(_ActionBase):
     series_uid: str | None = None
     user_id: str | None = None
     parent_record_id: int | None = None
+    inherit_user: bool = False
     context_info: str | None = None
 
 
