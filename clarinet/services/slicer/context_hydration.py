@@ -19,6 +19,7 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from clarinet.repositories.record_repository import RecordRepository
 from clarinet.repositories.study_repository import StudyRepository
 from clarinet.utils.logger import logger
 
@@ -31,6 +32,7 @@ class SlicerHydrationContext:
     """Pre-built dependencies available to slicer context hydrators."""
 
     study_repo: StudyRepository
+    record_repo: RecordRepository
 
     @classmethod
     def from_session(cls, session: AsyncSession) -> SlicerHydrationContext:
@@ -39,7 +41,10 @@ class SlicerHydrationContext:
         Args:
             session: Async DB session for the current request.
         """
-        return cls(study_repo=StudyRepository(session))
+        return cls(
+            study_repo=StudyRepository(session),
+            record_repo=RecordRepository(session),
+        )
 
 
 type SlicerHydratorFunc = Callable[

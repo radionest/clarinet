@@ -199,6 +199,39 @@ class PacsHelper:
         temp_db.closeDatabase()
         return loaded_node_ids or []
 
+    def retrieve_series(self, study_instance_uid: str, series_instance_uid: str) -> list[str]:
+        """Retrieve a single series from PACS and load into the MRML scene.
+
+        Skips C-FIND (the series UID is already known) and goes directly to
+        C-GET/C-MOVE, then loads the series via ``DICOMUtils``.
+
+        Args:
+            study_instance_uid: DICOM Study Instance UID.
+            series_instance_uid: DICOM Series Instance UID to retrieve.
+
+        Returns:
+            List of loaded MRML node IDs.
+        """
+        retrieve = ctk.ctkDICOMRetrieve()
+        retrieve.callingAETitle = self.calling_aet
+        retrieve.calledAETitle = self.called_aet
+        retrieve.host = self.host
+        retrieve.port = self.port
+        retrieve.setDatabase(slicer.dicomDatabase)
+
+        if not self.prefer_cget:
+            retrieve.setMoveDestinationAETitle(self.move_aet)
+
+        if self.prefer_cget:
+            retrieve.getSeries(study_instance_uid, series_instance_uid)
+        else:
+            retrieve.moveSeries(study_instance_uid, series_instance_uid)
+
+        from DICOMLib import DICOMUtils  # type: ignore[import-not-found]
+
+        loaded_node_ids: list[str] = DICOMUtils.loadSeriesByUID([series_instance_uid])
+        return loaded_node_ids or []
+
 
 class SlicerHelper:
     """DSL for concise 3D Slicer workspace setup.
@@ -455,6 +488,37 @@ class SlicerHelper:
             move_aet=pacs_move_aet,  # type: ignore[name-defined]  # noqa: F821
         )
         node_ids = pacs.retrieve_study(study_instance_uid)
+
+        # Auto-set first scalar volume as source for Segment Editor
+        for nid in node_ids or []:
+            node = self._scene.GetNodeByID(nid)
+            if node is not None and node.IsA("vtkMRMLScalarVolumeNode"):
+                self._image_node = node
+                break
+
+        return node_ids or []
+
+    def load_series_from_pacs(self, study_instance_uid: str, series_instance_uid: str) -> list[str]:
+        """Load a single DICOM series from PACS into the current scene.
+
+        Requires ``pacs_*`` context variables to be injected by SlicerService.
+
+        Args:
+            study_instance_uid: DICOM Study Instance UID.
+            series_instance_uid: DICOM Series Instance UID to retrieve.
+
+        Returns:
+            List of loaded MRML node IDs.
+        """
+        pacs = PacsHelper(
+            host=pacs_host,  # type: ignore[name-defined]  # noqa: F821
+            port=pacs_port,  # type: ignore[name-defined]  # noqa: F821
+            called_aet=pacs_aet,  # type: ignore[name-defined]  # noqa: F821
+            calling_aet=pacs_calling_aet,  # type: ignore[name-defined]  # noqa: F821
+            prefer_cget=pacs_prefer_cget,  # type: ignore[name-defined]  # noqa: F821
+            move_aet=pacs_move_aet,  # type: ignore[name-defined]  # noqa: F821
+        )
+        node_ids = pacs.retrieve_series(study_instance_uid, series_instance_uid)
 
         # Auto-set first scalar volume as source for Segment Editor
         for nid in node_ids or []:

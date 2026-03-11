@@ -197,7 +197,8 @@ def test_load_broken_file(tmp_path):
 
 
 def test_hydration_context_from_session():
-    """from_session creates context with StudyRepository."""
+    """from_session creates context with StudyRepository and RecordRepository."""
     mock_session = AsyncMock()
     ctx = SlicerHydrationContext.from_session(mock_session)
     assert ctx.study_repo is not None
+    assert ctx.record_repo is not None

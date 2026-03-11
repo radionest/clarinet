@@ -69,8 +69,9 @@ segment_CT_single = RecordDef(
     role="doctor_CT",
     slicer_script="segment.py",
     slicer_result_validator="segment_validator.py",
+    slicer_context_hydrators=["best_series_from_first_check"],
     files=[FileRef(segmentation_single, "output")],
-    # study_uid, segmentation_single, output_file, working_folder — auto-injected
+    # study_uid, segmentation_single, output_file, working_folder, best_series_uid — auto-injected
 )
 
 segment_CT_with_archive = RecordDef(
@@ -83,8 +84,9 @@ segment_CT_with_archive = RecordDef(
     role="doctor_CT",
     slicer_script="segment.py",
     slicer_result_validator="segment_validator.py",
+    slicer_context_hydrators=["best_series_from_first_check"],
     files=[FileRef(segmentation_with_archive, "output")],
-    # study_uid, segmentation_with_archive, output_file, working_folder — auto-injected
+    # study_uid, segmentation_with_archive, output_file, working_folder, best_series_uid — auto-injected
 )
 
 segment_MRI_single = RecordDef(
@@ -97,8 +99,9 @@ segment_MRI_single = RecordDef(
     role="doctor_MRI",
     slicer_script="segment.py",
     slicer_result_validator="segment_validator.py",
+    slicer_context_hydrators=["best_series_from_first_check"],
     files=[FileRef(segmentation_single, "output")],
-    # study_uid, segmentation_single, output_file, working_folder — auto-injected
+    # study_uid, segmentation_single, output_file, working_folder, best_series_uid — auto-injected
 )
 
 segment_MRIAG_single = RecordDef(
@@ -111,8 +114,9 @@ segment_MRIAG_single = RecordDef(
     role="doctor_MRI",
     slicer_script="segment.py",
     slicer_result_validator="segment_validator.py",
+    slicer_context_hydrators=["best_series_from_first_check"],
     files=[FileRef(segmentation_single, "output")],
-    # study_uid, segmentation_single, output_file, working_folder — auto-injected
+    # study_uid, segmentation_single, output_file, working_folder, best_series_uid — auto-injected
 )
 
 segment_CTAG_single = RecordDef(
@@ -125,8 +129,9 @@ segment_CTAG_single = RecordDef(
     role="doctor_CT-AG",
     slicer_script="segment.py",
     slicer_result_validator="segment_validator.py",
+    slicer_context_hydrators=["best_series_from_first_check"],
     files=[FileRef(segmentation_single, "output")],
-    # study_uid, segmentation_single, output_file, working_folder — auto-injected
+    # study_uid, segmentation_single, output_file, working_folder, best_series_uid — auto-injected
 )
 
 segment_PDCTAG_single = RecordDef(
@@ -139,8 +144,9 @@ segment_PDCTAG_single = RecordDef(
     role="doctor_PDCT",
     slicer_script="segment.py",
     slicer_result_validator="segment_validator.py",
+    slicer_context_hydrators=["best_series_from_first_check"],
     files=[FileRef(segmentation_single, "output")],
-    # study_uid, segmentation_single, output_file, working_folder — auto-injected
+    # study_uid, segmentation_single, output_file, working_folder, best_series_uid — auto-injected
 )
 
 create_master_projection = RecordDef(

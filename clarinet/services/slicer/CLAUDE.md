@@ -51,7 +51,7 @@ Decorator-based registry for async context enrichment. Mirrors `clarinet/service
 
 ### Components
 
-- `SlicerHydrationContext(frozen dataclass)` — holds `StudyRepository`; created via `.from_session(session)`
+- `SlicerHydrationContext(frozen dataclass)` — holds `StudyRepository` and `RecordRepository`; created via `.from_session(session)`
 - `@slicer_context_hydrator("name")` — registers an async function that returns `dict[str, Any]` to merge into context
 - `hydrate_slicer_context(context, record, session, names)` — runs named hydrators sequentially, merges results
 - `load_custom_slicer_hydrators(folder)` — loads `context_hydrators.py` from tasks folder at startup
@@ -124,6 +124,7 @@ Runs inside Slicer Python environment. Has `_Dummy` fallback for testing outside
 - `add_view_shortcuts()` — a/s/c keys for view switching
 - `add_shortcuts(shortcuts: list[tuple[str, str]])` — custom keyboard shortcuts (key→layout or key→exec code)
 - `load_study_from_pacs(study_instance_uid)` → list of loaded MRML node IDs; **auto-sets first scalar volume as `_image_node`**
+- `load_series_from_pacs(study_instance_uid, series_instance_uid)` → list of loaded MRML node IDs; **loads only the specified series; auto-sets first scalar volume as `_image_node`**
 - `get_segment_names(segmentation)` → `list[str]` — ordered segment names from a segmentation node
 - `get_segment_centroid(segmentation, segment_name)` → `tuple[float,float,float] | None` — RAS centroid via SegmentStatistics; None if empty
 - `copy_segments(source_seg, target_seg, segment_names=None, empty=False)` — copy segments between segmentations; `empty=True` copies only metadata (name + color)
@@ -134,15 +135,16 @@ Runs inside Slicer Python environment. Has `_Dummy` fallback for testing outside
 
 ### Source volume auto-detection
 
-`load_study_from_pacs()` iterates loaded node IDs and sets the first `vtkMRMLScalarVolumeNode` as `_image_node`. This ensures `setup_editor()` can call `setSourceVolumeNode()` without manual `set_source_volume()`.
+`load_study_from_pacs()` and `load_series_from_pacs()` iterate loaded node IDs and set the first `vtkMRMLScalarVolumeNode` as `_image_node`. This ensures `setup_editor()` can call `setSourceVolumeNode()` without manual `set_source_volume()`.
 
 ## PacsHelper (`helper.py`)
 
 DIMSE (C-FIND + C-GET/C-MOVE) integration via `ctkDICOMQuery` / `ctkDICOMRetrieve`.
 
 - `PacsHelper(host, port, called_aet, calling_aet, prefer_cget, move_aet)` — connection params
-- `retrieve_study(study_instance_uid)` → queries PACS, retrieves series, loads into scene
-- Called internally by `SlicerHelper.load_study_from_pacs()` — not used directly by scripts
+- `retrieve_study(study_instance_uid)` → queries PACS via C-FIND, retrieves ALL series, loads into scene
+- `retrieve_series(study_instance_uid, series_instance_uid)` → retrieves a single series via direct C-GET/C-MOVE (no C-FIND)
+- Called internally by `SlicerHelper.load_study_from_pacs()` and `load_series_from_pacs()` — not used directly by scripts
 
 PACS settings: same `pacs_*` vars as DICOM service — see `clarinet/services/dicom/CLAUDE.md`.
 
