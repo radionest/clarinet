@@ -39,6 +39,15 @@ async def get_my_roles(
 
 
 # Role management endpoints (must come before /{user_id} routes)
+@router.get("/roles", response_model=list[UserRole])
+async def list_roles(
+    service: UserServiceDep,
+    _current_user: SuperUserDep,
+) -> list[UserRole]:
+    """List all available roles."""
+    return await service.list_roles()
+
+
 @router.get("/roles/{role_name}", response_model=UserRole)
 async def get_role_details(
     role_name: str,

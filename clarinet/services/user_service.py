@@ -10,22 +10,20 @@ from clarinet.exceptions.domain import (
     UserAlreadyHasRoleError,
 )
 from clarinet.models import User, UserRole
-from clarinet.repositories.user_repository import UserRepository, UserRoleRepository
+from clarinet.repositories.user_repository import UserRepository
 from clarinet.utils.auth import get_password_hash, verify_password
 
 
 class UserService:
     """Service for user-related business logic."""
 
-    def __init__(self, user_repo: UserRepository, role_repo: UserRoleRepository):
-        """Initialize user service with repositories.
+    def __init__(self, user_repo: UserRepository):
+        """Initialize user service with repository.
 
         Args:
             user_repo: User repository instance
-            role_repo: User role repository instance
         """
         self.user_repo = user_repo
-        self.role_repo = role_repo
 
     async def get_user(self, user_id: UUID) -> User:
         """Get user by ID.
@@ -155,6 +153,14 @@ class UserService:
         users = await self.user_repo.get_all(skip=skip, limit=limit)
         return list(users)
 
+    async def list_roles(self) -> list[UserRole]:
+        """List all available roles.
+
+        Returns:
+            List of all roles
+        """
+        return await self.user_repo.get_all_roles()
+
     async def get_user_roles(self, user_id: UUID) -> list[UserRole]:
         """Get roles for a user.
 
@@ -185,7 +191,7 @@ class UserService:
             UserAlreadyHasRoleError: If user already has the role
         """
         user = await self.user_repo.get(user_id)
-        role = await self.role_repo.get(role_name)
+        role = await self.user_repo.get_role(role_name)
 
         # Check if already has role
         if await self.user_repo.has_role(user, role_name):
@@ -207,7 +213,7 @@ class UserService:
             EntityNotFoundError: If user or role doesn't exist
         """
         user = await self.user_repo.get(user_id)
-        role = await self.role_repo.get(role_name)
+        role = await self.user_repo.get_role(role_name)
 
         return await self.user_repo.remove_role(user, role)
 
@@ -224,11 +230,11 @@ class UserService:
             RoleAlreadyExistsError: If role already exists
         """
         # Check if role exists
-        if await self.role_repo.exists(name=name):
+        if await self.user_repo.role_exists(name):
             raise RoleAlreadyExistsError(name)
 
         role = UserRole(name=name)
-        return await self.role_repo.create(role)
+        return await self.user_repo.create_role(role)
 
     async def get_role(self, name: str) -> UserRole:
         """Get role by name.
@@ -242,7 +248,7 @@ class UserService:
         Raises:
             EntityNotFoundError: If role doesn't exist
         """
-        return await self.role_repo.get(name)
+        return await self.user_repo.get_role(name)
 
     async def activate_user(self, user_id: UUID) -> User:
         """Activate user account.

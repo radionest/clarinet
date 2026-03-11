@@ -5,6 +5,9 @@ This package contains the SQLModel-based models that define the database schema
 and data structures used throughout the Clarinet framework.
 """
 
+# Admin dashboard schemas
+from .admin import AdminStats, RecordTypeStats, RoleMatrixResponse, UserRoleInfo
+
 # Authentication models
 from .auth import AccessToken
 
@@ -67,6 +70,7 @@ from .user import User, UserRead, UserRole, UserRolesLink
 
 __all__ = [
     "AccessToken",
+    "AdminStats",
     "BaseModel",
     "DicomQueryLevel",
     "DicomUID",
@@ -96,6 +100,8 @@ __all__ = [
     "RecordTypeFind",
     "RecordTypeOptional",
     "RecordTypeRead",
+    "RecordTypeStats",
+    "RoleMatrixResponse",
     "Series",
     "SeriesBase",
     "SeriesCreate",
@@ -109,5 +115,6 @@ __all__ = [
     "User",
     "UserRead",
     "UserRole",
+    "UserRoleInfo",
     "UserRolesLink",
 ]

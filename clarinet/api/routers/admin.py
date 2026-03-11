@@ -3,22 +3,12 @@
 from uuid import UUID
 
 from fastapi import APIRouter
-from pydantic import BaseModel as PydanticBaseModel
 
 from clarinet.api.dependencies import AdminServiceDep, RecordServiceDep, SuperUserDep
 from clarinet.models import Record, RecordRead
+from clarinet.models.admin import AdminStats, RecordTypeStats, RoleMatrixResponse
 
 router = APIRouter()
-
-
-class AdminStats(PydanticBaseModel):
-    """Aggregate system statistics for admin dashboard."""
-
-    total_studies: int
-    total_records: int
-    total_users: int
-    total_patients: int
-    records_by_status: dict[str, int]
 
 
 @router.get("/stats", response_model=AdminStats)
@@ -35,16 +25,7 @@ async def get_admin_stats(
     Returns:
         AdminStats with total counts and per-status record breakdown.
     """
-    total_studies, total_records, total_users, total_patients = await service.get_total_counts()
-    records_by_status = await service.get_records_by_status()
-
-    return AdminStats(
-        total_studies=total_studies,
-        total_records=total_records,
-        total_users=total_users,
-        total_patients=total_patients,
-        records_by_status=records_by_status,
-    )
+    return await service.get_stats()
 
 
 @router.patch("/records/{record_id}/assign", response_model=RecordRead)
@@ -69,37 +50,28 @@ async def admin_assign_record_user(
     return record
 
 
-class RecordTypeStatusCounts(PydanticBaseModel):
-    """Per-status record counts for a record type."""
+@router.get("/role-matrix", response_model=RoleMatrixResponse)
+async def get_role_matrix(
+    _current_user: SuperUserDep,
+    service: AdminServiceDep,
+) -> RoleMatrixResponse:
+    """Get role matrix for admin dashboard.
 
-    blocked: int = 0
-    pending: int = 0
-    inwork: int = 0
-    finished: int = 0
-    failed: int = 0
-    pause: int = 0
+    Args:
+        _current_user: Authenticated superuser (enforced by dependency).
+        service: Admin service.
 
-
-class RecordTypeStats(PydanticBaseModel):
-    """Record type with aggregate statistics."""
-
-    name: str
-    description: str | None = None
-    label: str | None = None
-    level: str
-    role_name: str | None = None
-    min_records: int | None = None
-    max_records: int | None = None
-    total_records: int
-    records_by_status: RecordTypeStatusCounts
-    unique_users: int
+    Returns:
+        RoleMatrixResponse with all roles and users with their assignments.
+    """
+    return await service.get_role_matrix()
 
 
 @router.get("/record-types/stats", response_model=list[RecordTypeStats])
 async def get_record_type_stats(
     _current_user: SuperUserDep,
     service: AdminServiceDep,
-) -> list[dict]:
+) -> list[RecordTypeStats]:
     """Get per-record-type statistics.
 
     Args:
