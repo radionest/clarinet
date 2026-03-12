@@ -115,17 +115,17 @@ async def record_types(test_session: AsyncSession) -> dict[str, RecordType]:
         "first_check": RecordType(
             name="first_check",
             description="Initial check",
-            level=DicomQueryLevel.SERIES,
+            level=DicomQueryLevel.STUDY,
         ),
         "segment_CT_single": RecordType(
             name="segment_CT_single",
             description="CT segmentation",
-            level=DicomQueryLevel.SERIES,
+            level=DicomQueryLevel.STUDY,
         ),
         "segment_MRI_single": RecordType(
             name="segment_MRI_single",
             description="MRI segmentation",
-            level=DicomQueryLevel.SERIES,
+            level=DicomQueryLevel.STUDY,
         ),
         "create_master_projection": RecordType(
             name="create_master_projection",
