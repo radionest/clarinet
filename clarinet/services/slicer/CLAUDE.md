@@ -142,9 +142,13 @@ Runs inside Slicer Python environment. Has `_Dummy` fallback for testing outside
 DIMSE (C-FIND + C-GET/C-MOVE) integration via `ctkDICOMQuery` / `ctkDICOMRetrieve`.
 
 - `PacsHelper(host, port, called_aet, calling_aet, prefer_cget, move_aet)` — connection params
-- `retrieve_study(study_instance_uid)` → queries PACS via C-FIND, retrieves ALL series, loads into scene
-- `retrieve_series(study_instance_uid, series_instance_uid)` → retrieves a single series via direct C-GET/C-MOVE (no C-FIND)
+- `retrieve_study(study_instance_uid)` → **local-first**: checks `slicer.dicomDatabase` for existing series, falls back to C-FIND + C-GET/C-MOVE from PACS
+- `retrieve_series(study_instance_uid, series_instance_uid)` → **local-first**: checks `slicer.dicomDatabase.filesForSeries()`, falls back to C-GET/C-MOVE (no C-FIND)
 - Called internally by `SlicerHelper.load_study_from_pacs()` and `load_series_from_pacs()` — not used directly by scripts
+
+### Local-first lookup strategy
+
+Both `retrieve_study()` and `retrieve_series()` check Slicer's local DICOM database (`slicer.dicomDatabase`) before contacting the PACS server. If data is found locally, it is loaded directly via `DICOMUtils.loadSeriesByUID()`, avoiding network round-trips. This makes reopening previously loaded studies/series near-instant.
 
 PACS settings: same `pacs_*` vars as DICOM service — see `clarinet/services/dicom/CLAUDE.md`.
 

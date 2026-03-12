@@ -147,10 +147,10 @@ class PacsHelper:
         self.move_aet = move_aet
 
     def retrieve_study(self, study_instance_uid: str) -> list[str]:
-        """Query PACS by Study UID, retrieve matching series, load into scene.
+        """Load a DICOM study into the MRML scene (local-first).
 
-        Uses ctkDICOMQuery for C-FIND, then ctkDICOMRetrieve for C-GET/C-MOVE,
-        and finally DICOMUtils to load the matching series into the MRML scene.
+        Checks Slicer's local DICOM database first and loads from there if the
+        study already exists. Falls back to C-FIND + C-GET/C-MOVE from PACS.
 
         Args:
             study_instance_uid: DICOM Study Instance UID to retrieve.
@@ -158,7 +158,17 @@ class PacsHelper:
         Returns:
             List of loaded MRML node IDs.
         """
-        # 1. C-FIND: query PACS for the study
+        # 1. Check local Slicer DICOM database
+        db = slicer.dicomDatabase
+        local_series: list[str] = db.seriesForStudy(study_instance_uid) if db else []
+        if local_series:
+            from DICOMLib import DICOMUtils  # type: ignore[import-not-found]
+
+            loaded: list[str] = DICOMUtils.loadSeriesByUID(local_series)
+            if loaded:
+                return loaded
+
+        # 2. C-FIND: query PACS for the study
         query = ctk.ctkDICOMQuery()
         query.callingAETitle = self.calling_aet
         query.calledAETitle = self.called_aet
@@ -170,7 +180,7 @@ class PacsHelper:
         temp_db.openDatabase("")
         query.query(temp_db)
 
-        # 2. C-GET/C-MOVE: retrieve series into Slicer DICOM database
+        # 3. C-GET/C-MOVE: retrieve series into Slicer DICOM database
         retrieve = ctk.ctkDICOMRetrieve()
         retrieve.callingAETitle = self.calling_aet
         retrieve.calledAETitle = self.called_aet
@@ -191,7 +201,7 @@ class PacsHelper:
                 retrieve.moveSeries(study_uid, series_uid)
             retrieved_series_uids.append(series_uid)
 
-        # 3. Load ONLY the retrieved series into the MRML scene
+        # 4. Load ONLY the retrieved series into the MRML scene
         from DICOMLib import DICOMUtils  # type: ignore[import-not-found]
 
         loaded_node_ids: list[str] = DICOMUtils.loadSeriesByUID(retrieved_series_uids)
@@ -200,10 +210,11 @@ class PacsHelper:
         return loaded_node_ids or []
 
     def retrieve_series(self, study_instance_uid: str, series_instance_uid: str) -> list[str]:
-        """Retrieve a single series from PACS and load into the MRML scene.
+        """Load a single DICOM series into the MRML scene (local-first).
 
-        Skips C-FIND (the series UID is already known) and goes directly to
-        C-GET/C-MOVE, then loads the series via ``DICOMUtils``.
+        Checks Slicer's local DICOM database first and loads from there if the
+        series already exists. Falls back to C-GET/C-MOVE from PACS (no C-FIND
+        needed since the series UID is already known).
 
         Args:
             study_instance_uid: DICOM Study Instance UID.
@@ -212,6 +223,16 @@ class PacsHelper:
         Returns:
             List of loaded MRML node IDs.
         """
+        # 1. Check local Slicer DICOM database
+        db = slicer.dicomDatabase
+        if db and db.filesForSeries(series_instance_uid):
+            from DICOMLib import DICOMUtils  # type: ignore[import-not-found]
+
+            loaded: list[str] = DICOMUtils.loadSeriesByUID([series_instance_uid])
+            if loaded:
+                return loaded
+
+        # 2. Fallback: C-GET/C-MOVE from PACS
         retrieve = ctk.ctkDICOMRetrieve()
         retrieve.callingAETitle = self.calling_aet
         retrieve.calledAETitle = self.called_aet
