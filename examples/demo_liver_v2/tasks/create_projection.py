@@ -2,7 +2,7 @@
 
 Dual-viewport workflow: CT reference (model) volume + master segmentation on
 the left, target series volume + empty projection on the right.  Auto-navigates
-to master ROI centroid when selecting an empty projection segment.
+Red to master ROI centroid and Yellow to projection centroid on segment select.
 
 Loading order matters — ``load_series_from_pacs`` auto-sets ``_image_node`` to
 the last loaded volume, which ``load_segmentation`` uses as reference geometry.
@@ -51,7 +51,12 @@ s.set_dual_layout(model_vol, target_vol, seg_a=master_seg, seg_b=projection, lin
 # 6. Setup editor on projection with target volume as source
 s.setup_editor(projection, effect="Paint", brush_size=5.0, source_volume=target_vol)
 
-# 7. Auto-navigate to master ROI when selecting empty projection segment
-s.setup_segment_focus_observer(projection, master_seg)
+# 7. Auto-navigate: Red → MasterModel centroid, Yellow → Projection centroid
+s.setup_segment_focus_observer(
+    projection, master_seg,
+    reference_views=["Red"],
+    editable_views=["Yellow"],
+    only_empty=False,
+)
 
 s.annotate("Project master model ROIs onto target study")

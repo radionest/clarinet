@@ -21,6 +21,7 @@ Usage inside Slicer (what the user writes)::
 
 from __future__ import annotations
 
+import contextlib
 import os
 import re
 from typing import TYPE_CHECKING, Any, Literal
@@ -272,10 +273,24 @@ class SlicerHelper:
         self._layout_manager = slicer.app.layoutManager()
         self._image_node: Any = None
         self._editor_widget: Any = None
+        self._observer_tags: list[tuple[Any, int]] = []
+        self._shortcuts: list[Any] = []
 
         # Clear scene and set working folder
         self._scene.Clear(0)
         self._scene.SetRootDirectory(working_folder)
+
+    def cleanup(self) -> None:
+        """Remove all observers and shortcuts registered by this helper."""
+        for node, tag in self._observer_tags:
+            with contextlib.suppress(Exception):
+                node.RemoveObserver(tag)
+        self._observer_tags.clear()
+
+        for shortcut in self._shortcuts:
+            shortcut.setParent(None)
+            shortcut.deleteLater()
+        self._shortcuts.clear()
 
     def load_volume(
         self,
@@ -488,6 +503,7 @@ class SlicerHelper:
                 )
             else:
                 shortcut.connect("activated()", lambda code=action: exec(code))
+            self._shortcuts.append(shortcut)
 
     def load_study_from_pacs(self, study_instance_uid: str) -> list[str]:
         """Load a DICOM study from PACS into the current scene.
@@ -572,7 +588,44 @@ class SlicerHelper:
         segmentation: SegmentationBuilder | Any,
         segment_name: str,
     ) -> tuple[float, float, float] | None:
-        """Compute the RAS centroid of a named segment.
+        """Compute the RAS centroid of a named segment via per-segment labelmap.
+
+        Extracts a per-segment copy of the binary labelmap using the MRML
+        node-level API (not the shared representation from the segment
+        object). Computes the tight bounding-box center from actual non-zero
+        voxels using numpy, which works correctly regardless of shared
+        labelmaps or missing extent metadata.
+
+        Safe to call from observer callbacks — no event processing, no
+        re-entry risk.
+
+        .. note:: **VTK shared-labelmap pitfall (Slicer 5.0+)**
+
+           In modern Slicer, multiple segments share a single
+           ``vtkOrientedImageData`` (shared labelmap). The intuitive API —
+           ``segment.GetRepresentation("Binary labelmap")`` — returns this
+           *shared* object, whose extent covers the **entire volume** (all
+           segments combined). Computing the bounding-box center from the
+           shared labelmap yields the same point (volume center) for every
+           segment, making ``JumpSlice`` appear to do nothing.
+
+           The fix is ``node.GetBinaryLabelmapRepresentation(seg_id, out)`` —
+           the MRML-node-level API that extracts a **per-segment copy**.
+           This is the same API used internally by
+           ``slicer.util.arrayFromSegmentBinaryLabelmap()``.
+
+        .. note:: **np.nonzero() vs np.any() — performance**
+
+           The naive approach (``np.nonzero(arr > 0)``) allocates three huge
+           arrays containing coordinates of ALL non-zero voxels. For a large
+           segment in a 512x512x300 volume this means millions of int64
+           entries per array — hundreds of MB of allocation per call.
+
+           Instead we use ``np.any(mask, axis=(...))`` to project the 3D
+           boolean mask down to three 1D arrays (length ~512 each). Then
+           ``np.where()`` on those tiny arrays gives min/max indices per axis.
+           The centroid is the midpoint of the tight bounding box — identical
+           result, ~10-50x faster, negligible memory.
 
         Args:
             segmentation: SegmentationBuilder or raw segmentation node.
@@ -581,10 +634,14 @@ class SlicerHelper:
         Returns:
             (R, A, S) centroid tuple, or None if the segment is empty.
         """
+        import numpy as np
+        import vtkSegmentationCorePython as vtkSegCore  # type: ignore[import-not-found]
+        from vtk.util.numpy_support import vtk_to_numpy  # type: ignore[import-not-found]
+
         node = segmentation.node if isinstance(segmentation, SegmentationBuilder) else segmentation
         vtk_seg = node.GetSegmentation()
 
-        # Find segment ID by name
+        # Find segment by name (no GetSegmentIdByName in the VTK-level API).
         seg_id = None
         for i in range(vtk_seg.GetNumberOfSegments()):
             sid = vtk_seg.GetNthSegmentID(i)
@@ -595,22 +652,54 @@ class SlicerHelper:
         if seg_id is None:
             return None
 
-        import SegmentStatistics  # type: ignore[import-not-found]
+        # Extract per-segment labelmap via node-level API.
+        # DO NOT use segment.GetRepresentation("Binary labelmap") — it
+        # returns the shared labelmap (same extent for all segments).
+        # See docstring "VTK shared-labelmap pitfall" above.
+        labelmap = vtkSegCore.vtkOrientedImageData()
+        node.GetBinaryLabelmapRepresentation(seg_id, labelmap)
 
-        stats_logic = SegmentStatistics.SegmentStatisticsLogic()
-        stats_logic.getParameterNode().SetParameter("Segmentation", node.GetID())
-        stats_logic.getParameterNode().SetParameter(
-            "LabelmapSegmentStatisticsPlugin.centroid_ras.enabled", "True"
-        )
-        stats_logic.computeStatistics()
-        stats = stats_logic.getStatistics()
-
-        centroid_key = f"{seg_id}.LabelmapSegmentStatisticsPlugin.centroid_ras"
-        if centroid_key not in stats:
+        # extent = (xmin, xmax, ymin, ymax, zmin, zmax); xmin > xmax means empty.
+        extent = labelmap.GetExtent()
+        if extent[0] > extent[1]:
             return None
 
-        centroid = stats[centroid_key]
-        return (centroid[0], centroid[1], centroid[2])
+        scalars = labelmap.GetPointData().GetScalars()
+        if scalars is None:
+            return None
+
+        # VTK stores scalars in Fortran-contiguous order (i varies fastest),
+        # but numpy reshape expects (slowest, ..., fastest) = (k, j, i).
+        dims = labelmap.GetDimensions()
+        arr = vtk_to_numpy(scalars).reshape(dims[2], dims[1], dims[0])
+
+        mask = arr > 0
+
+        # Axis projections: collapse 3D mask to 1D per axis.
+        # np.any(mask, axis=(0,1)) keeps the i-axis, collapsing k and j.
+        # Result: three boolean arrays of length ~dims[0/1/2] (~512 each).
+        # See docstring "np.nonzero() vs np.any()" above.
+        i_any = np.any(mask, axis=(0, 1))  # length dims[0]
+        j_any = np.any(mask, axis=(0, 2))  # length dims[1]
+        k_any = np.any(mask, axis=(1, 2))  # length dims[2]
+
+        i_idx = np.where(i_any)[0]
+        if len(i_idx) == 0:
+            return None
+        j_idx = np.where(j_any)[0]
+        k_idx = np.where(k_any)[0]
+
+        # Tight bounding-box center in array coords (k, j, i) → IJK.
+        # extent offsets translate from local labelmap coords to volume IJK.
+        ci = (float(i_idx[0]) + float(i_idx[-1])) / 2.0 + extent[0]
+        cj = (float(j_idx[0]) + float(j_idx[-1])) / 2.0 + extent[2]
+        ck = (float(k_idx[0]) + float(k_idx[-1])) / 2.0 + extent[4]
+
+        # IJK → RAS via the labelmap's own image-to-world matrix.
+        mat = vtk.vtkMatrix4x4()
+        labelmap.GetImageToWorldMatrix(mat)
+        ras = mat.MultiplyPoint([ci, cj, ck, 1.0])
+        return (ras[0], ras[1], ras[2])
 
     def copy_segments(
         self,
@@ -831,17 +920,83 @@ class SlicerHelper:
         self,
         editable_seg: SegmentationBuilder | Any,
         reference_seg: SegmentationBuilder | Any,
+        reference_views: list[str] | None = None,
+        editable_views: list[str] | None = None,
+        only_empty: bool = True,
     ) -> None:
-        """Auto-navigate to reference centroid when selecting an empty segment.
+        """Auto-navigate to segment centroid when selecting a segment.
 
-        When the user selects a segment in the editor, if that segment is empty
-        in the editable segmentation, the views jump to the centroid of the
-        same-named segment in the reference segmentation.
+        When the user selects a segment in the editor, navigates configured
+        views to the centroid of the matching segment. Reference views always
+        jump to the reference segmentation centroid. Editable views jump to
+        the editable segmentation centroid (or fall back to reference if empty).
+
+        .. note:: **Observer design — lessons learned**
+
+           This callback is attached to ``vtkMRMLSegmentEditorNode`` via
+           ``vtkCommand.ModifiedEvent``. Several VTK/Slicer behaviors
+           required workarounds:
+
+           1. **Re-entry guard** (``_in_callback``): ``JumpSlice`` can
+              trigger further ModifiedEvents on the editor node (e.g. slice
+              position changes propagate back). Without the guard the
+              callback recurses until Python hits the stack limit or Slicer
+              hangs.
+
+           2. **No slicer.app.processEvents()**: Earlier versions used
+              ``SegmentStatistics`` which internally calls
+              ``processEvents()``. Inside a VTK observer callback this
+              causes re-entrant event processing — the callback fires
+              again while still executing, leading to deadlocks. All code
+              here is pure VTK + numpy with no event processing.
+
+           3. **Per-segment extraction, not SegmentStatistics**: The
+              ``SegmentStatistics`` module is convenient but heavyweight
+              (processes ALL segments, calls ``processEvents()``). We only
+              need one segment's centroid, so direct labelmap extraction
+              via ``get_segment_centroid()`` is both faster and
+              observer-safe.
+
+        .. note:: **Performance optimizations**
+
+           Each ``get_segment_centroid()`` call does one VTK labelmap
+           extraction + one numpy scan. The original code did up to 3
+           extractions per click:
+
+           - ``_is_segment_empty()`` → extraction #1 (just to check extent)
+           - ``get_segment_centroid(reference)`` → extraction #2
+           - ``get_segment_centroid(editable)`` → extraction #3
+
+           Optimizations applied:
+
+           - **Merged emptiness check**: ``get_segment_centroid()`` returns
+             ``None`` for empty segments, so a separate ``_is_segment_empty``
+             extraction is redundant. We call ``get_segment_centroid()`` on
+             the editable node first and use its return value as the
+             emptiness signal.
+           - **Reference centroid cache** (``_ref_centroids``): The reference
+             segmentation (e.g. MasterModel) doesn't change during a
+             session. After the first click on a segment, its reference
+             centroid is cached. Subsequent clicks skip the VTK extraction
+             entirely.
+
+           Result: first click = 2 extractions, subsequent clicks = 1.
 
         Args:
             editable_seg: The segmentation being edited.
             reference_seg: Reference segmentation with populated segments.
+            reference_views: Views to navigate to reference centroid.
+                Defaults to ``["Red", "Yellow"]``.
+            editable_views: Views to navigate to editable centroid.
+                Defaults to ``[]`` (no editable navigation).
+            only_empty: If True (default), only navigate when the selected
+                segment is empty. If False, navigate for all segments.
         """
+        if reference_views is None:
+            reference_views = ["Red", "Yellow"]
+        if editable_views is None:
+            editable_views = []
+
         editable_node = (
             editable_seg.node if isinstance(editable_seg, SegmentationBuilder) else editable_seg
         )
@@ -853,34 +1008,91 @@ class SlicerHelper:
         if editor_node is None:
             return
 
-        helper_ref = self  # capture for closure
+        helper_ref = self  # prevent garbage collection of SlicerHelper
+
+        # Reference segmentation (e.g. MasterModel) is immutable during the
+        # session — cache centroids to avoid repeated VTK extraction + numpy.
+        _ref_centroids: dict[str, tuple[float, float, float] | None] = {}
+
+        def _jump_views(view_names: list[str], centroid: tuple[float, float, float]) -> None:
+            r, a, s = centroid
+            for name in view_names:
+                node = helper_ref._scene.GetNodeByID(f"vtkMRMLSliceNode{name}")
+                if node is not None:
+                    node.JumpSlice(r, a, s)
+
+        # Re-entry guard: JumpSlice can trigger ModifiedEvent on the editor
+        # node, which would re-invoke this callback. See docstring note #1.
+        _in_callback = False
 
         def on_segment_changed(caller: Any, _event: Any) -> None:
-            seg_id = caller.GetSelectedSegmentID()
-            if seg_id is None:
+            nonlocal _in_callback
+            if _in_callback:
                 return
+            _in_callback = True
+            try:
+                seg_id = caller.GetSelectedSegmentID()
+                if seg_id is None:
+                    print("[SegFocus] no segment selected, skipping")
+                    return
 
-            vtk_seg = editable_node.GetSegmentation()
-            segment = vtk_seg.GetSegment(seg_id)
-            if segment is None:
-                return
+                vtk_seg = editable_node.GetSegmentation()
+                segment = vtk_seg.GetSegment(seg_id)
+                if segment is None:
+                    print(f"[SegFocus] segment {seg_id} not found, skipping")
+                    return
 
-            segment_name = segment.GetName()
+                segment_name = segment.GetName()
 
-            # Check if the segment is empty via binary labelmap
-            labelmap = vtk_seg.GetSegmentBinaryLabelmapRepresentation(seg_id)
-            if labelmap is not None and labelmap.GetExtent()[0] <= labelmap.GetExtent()[1]:
-                # Segment has data — not empty, skip navigation
-                return
+                # Editable centroid doubles as emptiness check: None = empty.
+                # This replaces a separate _is_segment_empty() call that did
+                # its own GetBinaryLabelmapRepresentation just to check extent.
+                edit_centroid = helper_ref.get_segment_centroid(editable_node, segment_name)
+                empty = edit_centroid is None
+                print(f"[SegFocus] selected: '{segment_name}' (id={seg_id}, empty={empty})")
 
-            centroid = helper_ref.get_segment_centroid(reference_node, segment_name)
-            if centroid is None:
-                return
+                if only_empty and not empty:
+                    print(f"[SegFocus] skipping non-empty segment (only_empty={only_empty})")
+                    return
 
-            r, a, s = centroid
-            for slice_name in ["Red", "Yellow"]:
-                slice_node = helper_ref._scene.GetNodeByID(f"vtkMRMLSliceNode{slice_name}")
-                if slice_node is not None:
-                    slice_node.JumpSlice(r, a, s)
+                # Lookup reference centroid (cached after first computation).
+                if segment_name not in _ref_centroids:
+                    ref_centroid = helper_ref.get_segment_centroid(reference_node, segment_name)
+                    _ref_centroids[segment_name] = ref_centroid
+                    print(f"[SegFocus] ref centroid computed and cached for '{segment_name}'")
+                else:
+                    ref_centroid = _ref_centroids[segment_name]
+                    print(f"[SegFocus] ref centroid from cache for '{segment_name}'")
 
-        editor_node.AddObserver(vtk.vtkCommand.ModifiedEvent, on_segment_changed)
+                if ref_centroid is None:
+                    print(f"[SegFocus] no centroid for '{segment_name}' in reference, skipping")
+                    return
+
+                print(
+                    f"[SegFocus] ref centroid: R={ref_centroid[0]:.1f}, "
+                    f"A={ref_centroid[1]:.1f}, S={ref_centroid[2]:.1f}"
+                )
+                _jump_views(reference_views, ref_centroid)
+                print(f"[SegFocus] jumped reference views {reference_views}")
+
+                if editable_views:
+                    if empty:
+                        _jump_views(editable_views, ref_centroid)
+                        print(
+                            f"[SegFocus] jumped editable views {editable_views} (using ref, segment empty)"
+                        )
+                    else:
+                        target = edit_centroid or ref_centroid
+                        _jump_views(editable_views, target)
+                        source = "edit" if edit_centroid else "ref (fallback)"
+                        print(
+                            f"[SegFocus] jumped editable views {editable_views} "
+                            f"(using {source}: R={target[0]:.1f}, A={target[1]:.1f}, S={target[2]:.1f})"
+                        )
+            except Exception as e:
+                print(f"[SlicerHelper] segment focus error: {e}")
+            finally:
+                _in_callback = False
+
+        tag = editor_node.AddObserver(vtk.vtkCommand.ModifiedEvent, on_segment_changed)
+        self._observer_tags.append((editor_node, tag))

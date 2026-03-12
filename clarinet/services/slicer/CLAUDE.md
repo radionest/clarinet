@@ -113,7 +113,8 @@ Runs inside Slicer Python environment. Has `_Dummy` fallback for testing outside
 
 ### SlicerHelper class
 
-- `SlicerHelper(working_folder)` — clears scene, sets root dir
+- `SlicerHelper(working_folder)` — clears scene, sets root dir; tracks observers/shortcuts for cleanup
+- `cleanup()` — removes all observers and shortcuts registered by this helper instance
 - `load_volume(path, window=)` → image node
 - `set_source_volume(node)` — explicitly set the source volume node for segmentation editing
 - `create_segmentation(name)` → `SegmentationBuilder` (fluent `.add_segment()`, `.select_segment(name)`)
@@ -122,16 +123,26 @@ Runs inside Slicer Python environment. Has `_Dummy` fallback for testing outside
 - `set_layout("axial"|"sagittal"|"coronal"|"four_up")`
 - `annotate(text)`, `configure_slab(thickness=)`, `setup_edit_mask(path)`
 - `add_view_shortcuts()` — a/s/c keys for view switching
-- `add_shortcuts(shortcuts: list[tuple[str, str]])` — custom keyboard shortcuts (key→layout or key→exec code)
+- `add_shortcuts(shortcuts: list[tuple[str, str]])` — custom keyboard shortcuts (key→layout or key→exec code); tracked for `cleanup()`
 - `load_study_from_pacs(study_instance_uid)` → list of loaded MRML node IDs; **auto-sets first scalar volume as `_image_node`**
 - `load_series_from_pacs(study_instance_uid, series_instance_uid)` → list of loaded MRML node IDs; **loads only the specified series; auto-sets first scalar volume as `_image_node`**
 - `get_segment_names(segmentation)` → `list[str]` — ordered segment names from a segmentation node
-- `get_segment_centroid(segmentation, segment_name)` → `tuple[float,float,float] | None` — RAS centroid via SegmentStatistics; None if empty
+- `get_segment_centroid(segmentation, segment_name)` → `tuple[float,float,float] | None` — extracts per-segment labelmap via `node.GetBinaryLabelmapRepresentation()` and computes tight non-zero voxel center with numpy; handles shared labelmaps and missing extent metadata; observer-safe (no event processing); None if empty
 - `copy_segments(source_seg, target_seg, segment_names=None, empty=False)` — copy segments between segmentations; `empty=True` copies only metadata (name + color)
 - `auto_number_segment(segmentation, prefix="ROI", start_from=None)` → `int` — adds `{prefix}_{N+1}` segment, returns assigned number
 - `subtract_segmentations(seg_a, seg_b, output_name=None, max_overlap=0, max_overlap_ratio=None)` — ROI-level subtraction: removes seg_a segments overlapping with seg_b. In-place or new node if `output_name` set
 - `set_dual_layout(volume_a, volume_b, seg_a=None, seg_b=None, linked=True)` — side-by-side view with Red/Yellow composites and per-view segmentation visibility
-- `setup_segment_focus_observer(editable_seg, reference_seg)` — auto-jump to reference centroid when selecting an empty segment in the editor
+- `setup_segment_focus_observer(editable_seg, reference_seg, reference_views=, editable_views=, only_empty=)` — auto-navigate to segment centroid on selection; `reference_views` (default `["Red", "Yellow"]`) jump to reference centroid, `editable_views` (default `[]`) jump to editable centroid (falls back to reference if empty); `only_empty=True` (default) skips non-empty segments; observer tracked for `cleanup()`; caches reference centroids (immutable during session)
+
+### VTK / Slicer pitfalls (learned the hard way)
+
+1. **Shared labelmaps (Slicer 5.0+):** `segment.GetRepresentation("Binary labelmap")` returns the *shared* labelmap — same `vtkOrientedImageData` for all segments. Its extent covers the entire volume, so bounding-box center is identical for every segment (= volume center). Use `node.GetBinaryLabelmapRepresentation(seg_id, output)` instead — this is the MRML-node-level API that extracts a **per-segment copy**.
+
+2. **Observer re-entry:** `JumpSlice` and other Slicer operations can trigger `ModifiedEvent` on `vtkMRMLSegmentEditorNode`, re-invoking the callback while it's still running. Always use a `_in_callback` guard flag.
+
+3. **No processEvents() in callbacks:** `SegmentStatistics` and some Slicer utilities call `slicer.app.processEvents()` internally. Inside a VTK observer callback this causes re-entrant event processing → deadlocks. Use only pure VTK + numpy operations.
+
+4. **np.nonzero() on large volumes:** `np.nonzero(arr > 0)` allocates 3 arrays of coordinates for ALL non-zero voxels — millions of int64 entries for a 512x512x300 segment. Use `np.any(mask, axis=(...))` projections instead (three 1D arrays of ~512 entries).
 
 ### Source volume auto-detection
 
