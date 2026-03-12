@@ -121,12 +121,27 @@ class FileResolver:
         dirs: dict[DicomQueryLevel, Path] = {
             DicomQueryLevel.PATIENT: Path(base) / patient_dir_name,
         }
+
+        # STUDY directory — prefer relationship, fall back to record-level anon UID
+        study_dir_name: str | None = None
         if record.study is not None:
             study_dir_name = record.study.anon_uid or record.study_uid or ""
+        elif record.study_uid:
+            study_dir_name = record.study_anon_uid or record.study_uid
+
+        if study_dir_name:
             dirs[DicomQueryLevel.STUDY] = dirs[DicomQueryLevel.PATIENT] / study_dir_name
+
+            # SERIES directory — same fallback pattern
+            series_dir_name: str | None = None
             if record.series is not None:
                 series_dir_name = record.series.anon_uid or record.series_uid or ""
+            elif record.series_uid:
+                series_dir_name = record.series_anon_uid or record.series_uid
+
+            if series_dir_name:
                 dirs[DicomQueryLevel.SERIES] = dirs[DicomQueryLevel.STUDY] / series_dir_name
+
         return dirs
 
     @staticmethod

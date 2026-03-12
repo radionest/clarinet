@@ -139,11 +139,21 @@ def build_slicer_context(record: RecordRead) -> dict[str, Any]:
             file_registry=file_registry,
             fields=fields,
         )
+        unresolved: list[str] = []
         for fd in file_registry:
             try:
                 context[fd.name] = str(resolver.resolve(fd))
             except (KeyError, ValueError) as exc:
                 logger.warning(f"Slicer context: could not resolve file '{fd.name}' — {exc}")
+                unresolved.append(fd.name)
+
+        if unresolved:
+            from clarinet.exceptions.domain import ScriptArgumentError
+
+            raise ScriptArgumentError(
+                f"Cannot build Slicer context: unresolved files {unresolved}. "
+                f"Record may be missing required UIDs for its level."
+            )
 
         # -- Layer 3: output_file convenience alias --
         output_files = [fd for fd in file_registry if fd.role == FileRole.OUTPUT]
