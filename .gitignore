@@ -52,3 +52,6 @@ REFACTOR.md
 
 # Test RecordType configs (scratch/development)
 /tasks/
+
+# Dev notes (centralized storage via symlink)
+dev-notes
