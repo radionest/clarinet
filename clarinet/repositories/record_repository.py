@@ -650,6 +650,17 @@ class RecordRepository(BaseRepository[Record]):
                 f"The maximum records limit ({count} of {record_type.max_records}) is reached"
             )
 
+        # Validate level-UID consistency
+        level = record_type.level
+        if level in ("STUDY", "SERIES") and not study_uid:
+            raise RecordConstraintViolationError(
+                f"Records of level {level} require study_uid"
+            )
+        if level == "SERIES" and not series_uid:
+            raise RecordConstraintViolationError(
+                f"Records of level SERIES require series_uid"
+            )
+
     @staticmethod
     def _apply_anon_uid_filter(
         statement: Any,

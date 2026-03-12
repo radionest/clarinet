@@ -190,7 +190,7 @@ class Record(RecordBase, table=True):
     @model_validator(mode="after")
     def validate_record_level(self) -> Record:
         match (self.record_type.level, self.patient_id, self.study_uid, self.series_uid):
-            case ("PATIENT", _, None, None) | ("STUDY", _, _, None) | ("SERIES", _, _, _):
+            case ("PATIENT", _, None, None) | ("STUDY", _, _, None) | ("SERIES", _, str(), str()):
                 return self
             case ("STUDY" | "SERIES", _, None, _):
                 raise ValidationError("Records of level STUDY or SERIES should have Study UID.")
