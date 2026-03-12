@@ -45,5 +45,10 @@ examples/*/data/
 
 # Scratch / planning docs
 TODO*.md
+todo*.md
+docs/*.png
 TASKIQ_*.md
 REFACTOR.md
+
+# Test RecordType configs (scratch/development)
+/tasks/
