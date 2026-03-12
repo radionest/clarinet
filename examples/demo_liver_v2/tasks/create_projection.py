@@ -14,7 +14,10 @@ Context variables (injected by build_slicer_context):
 """
 
 import os
+from typing import TYPE_CHECKING
 
+if TYPE_CHECKING:
+    from clarinet.services.slicer.helper import SlicerHelper  # type: ignore[import]
 s = SlicerHelper(working_folder)  # type: ignore[name-defined]  # noqa: F821
 
 # Load master volume (first loaded node is the volume)
