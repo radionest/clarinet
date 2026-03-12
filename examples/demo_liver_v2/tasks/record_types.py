@@ -158,15 +158,16 @@ create_master_projection = RecordDef(
     max_records=1,
     role="expert",
     slicer_script="create_projection.py",
-    slicer_script_args={
-        "target_study_uid": "{study_anon_uid}",
-    },
+    slicer_context_hydrators=["best_series_from_first_check", "model_series_for_projection"],
     slicer_result_validator="projection_validator.py",
     files=[
         FileRef(master_model, "input"),
         FileRef(master_projection, "output"),
     ],
-    # master_model, master_projection, output_file, working_folder — auto-injected
+    # study_uid, series_uid — auto (SERIES-level)
+    # best_series_uid — from best_series_from_first_check hydrator
+    # model_study_uid, model_series_uid — from model_series_for_projection hydrator
+    # master_model, master_projection, output_file, working_folder, pacs_* — auto
 )
 
 compare_with_projection = RecordDef(

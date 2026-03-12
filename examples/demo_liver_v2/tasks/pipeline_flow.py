@@ -9,9 +9,12 @@ This version uses the implemented RecordFlow/Pipeline DSL
 (as opposed to demo_liver/ which uses aspirational syntax).
 """
 
+from __future__ import annotations
+
 import asyncio
 import shutil
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from record_types import master_model, master_projection, segmentation_single
@@ -23,6 +26,10 @@ from clarinet.services.pipeline import PipelineMessage, TaskContext, pipeline_ta
 from clarinet.services.recordflow import Field, file, record, study
 from clarinet.settings import settings
 from clarinet.utils.logger import logger
+
+if TYPE_CHECKING:
+    from clarinet.client import ClarinetClient
+    from clarinet.models.record import RecordRead
 
 F = Field()
 
@@ -210,6 +217,40 @@ async def anonymize_study_pipeline(msg: PipelineMessage, ctx: TaskContext) -> No
     )
 
 
+async def create_projection_record(
+    record: RecordRead,
+    context: dict[str, Any],
+    client: ClarinetClient,
+) -> None:
+    """Create ``create_master_projection`` with series_uid from first_check."""
+    first_checks = await client.find_records(
+        record_type_name="first_check",
+        study_uid=record.study_uid,
+    )
+    if not first_checks:
+        logger.warning(f"No first_check for study {record.study_uid}, skipping projection")
+        return
+
+    best_series = (first_checks[0].data or {}).get("best_series")
+    if not best_series:
+        logger.warning(f"No best_series in first_check for study {record.study_uid}")
+        return
+
+    from clarinet.models import RecordCreate
+
+    await client.create_record(
+        RecordCreate(
+            record_type_name="create_master_projection",
+            patient_id=record.patient_id,
+            study_uid=record.study_uid,
+            series_uid=best_series,
+            context_info=(
+                f"Created by flow from record {record.record_type.name} (id={record.id})"
+            ),
+        )
+    )
+
+
 # ---------------------------------------------------------------------------
 # Flow: создание записей по результатам first_check
 # ---------------------------------------------------------------------------
@@ -263,10 +304,10 @@ for seg_type in SEGMENT_TYPES:
         (record(seg_type).on_finished().do_task(init_master_model))
 
     # Создание проекции мастер-модели на серию сегментации
-    (record(seg_type).on_finished().create_record("create_master_projection"))
+    (record(seg_type).on_finished().call(create_projection_record))
 
 # segment_CT_with_archive тоже запускает проекцию
-(record("segment_CT_with_archive").on_finished().create_record("create_master_projection"))
+(record("segment_CT_with_archive").on_finished().call(create_projection_record))
 
 # ---------------------------------------------------------------------------
 # Flow: авто-проекция для КТ при создании записи
