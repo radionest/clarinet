@@ -37,6 +37,7 @@ examples/*/data/
 
 # Misc
 .Rhistory
+*.docx
 
 # VM deploy artifacts
 *.qcow2
