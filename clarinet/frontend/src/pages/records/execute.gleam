@@ -5,6 +5,7 @@ import formosh/component as formosh_component
 import gleam/dict
 import gleam/dynamic/decode
 import gleam/list
+import gleam/int
 import gleam/option.{None, Some}
 import lustre/attribute
 import lustre/element.{type Element}
@@ -80,6 +81,17 @@ fn render_record_execution(
         ],
         [html.text("Back to Records")],
       ),
+      case permissions.can_restart_record(record, model.user) {
+        True ->
+          html.button(
+            [
+              attribute.class("btn btn-warning"),
+              event.on_click(store.RestartRecord(record_id)),
+            ],
+            [html.text("Restart")],
+          )
+        False -> element.none()
+      },
     ]),
   ])
 }
@@ -261,27 +273,72 @@ fn render_record_status(status: RecordStatus) -> Element(Msg) {
   html.span([attribute.class("badge " <> class)], [html.text(text)])
 }
 
+/// Format series label from modality and description
+fn format_series_label(
+  modality: option.Option(String),
+  description: option.Option(String),
+) -> String {
+  case modality, description {
+    Some(m), Some(d) -> m <> " - " <> d
+    Some(m), None -> m
+    None, Some(d) -> d
+    None, None -> "-"
+  }
+}
+
 /// Render record metadata
 fn render_record_metadata(record: Record) -> Element(Msg) {
   html.div([attribute.class("record-metadata")], [
     html.dl([], [
       html.dt([], [html.text("Patient:")]),
       html.dd([], [html.text(record.patient_id)]),
-      case record.study_uid {
-        Some(uid) ->
+      case record.study {
+        Some(study) ->
           element.fragment([
             html.dt([], [html.text("Study:")]),
-            html.dd([], [html.text(uid)]),
+            html.dd([], [
+              html.text(
+                option.unwrap(study.study_description, study.study_uid)
+                <> " (" <> study.date <> ")",
+              ),
+            ]),
           ])
-        None -> element.none()
+        None ->
+          case record.study_uid {
+            Some(uid) ->
+              element.fragment([
+                html.dt([], [html.text("Study:")]),
+                html.dd([], [html.text(uid)]),
+              ])
+            None -> element.none()
+          }
       },
-      case record.series_uid {
-        Some(uid) ->
+      case record.series {
+        Some(series) ->
           element.fragment([
             html.dt([], [html.text("Series:")]),
-            html.dd([], [html.text(uid)]),
+            html.dd([], [
+              html.text(
+                format_series_label(
+                  series.modality,
+                  series.series_description,
+                )
+                <> case series.instance_count {
+                  Some(n) -> " (" <> int.to_string(n) <> " img)"
+                  None -> ""
+                },
+              ),
+            ]),
           ])
-        None -> element.none()
+        None ->
+          case record.series_uid {
+            Some(uid) ->
+              element.fragment([
+                html.dt([], [html.text("Series:")]),
+                html.dd([], [html.text(uid)]),
+              ])
+            None -> element.none()
+          }
       },
       case record.created_at {
         Some(date) ->

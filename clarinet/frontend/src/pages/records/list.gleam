@@ -8,6 +8,7 @@ import gleam/dict
 import gleam/int
 import gleam/list
 import gleam/option.{None, Some}
+import gleam/string
 import lustre/attribute
 import lustre/element.{type Element}
 import lustre/element/html
@@ -179,6 +180,8 @@ fn records_table(model: Model, all_records: List(Record)) -> Element(Msg) {
               html.th([], [html.text("Record Type")]),
               html.th([], [html.text("Status")]),
               html.th([], [html.text("Patient")]),
+              html.th([], [html.text("Study / Series")]),
+              html.th([], [html.text("Modality")]),
               html.th([], [html.text("Actions")]),
             ]),
           ]),
@@ -211,6 +214,7 @@ fn record_row(model: Model, record: Record) -> Element(Msg) {
 
   let can_fill = permissions.can_fill_record(record, model.user)
   let can_edit = permissions.can_edit_record(record, model.user)
+  let can_restart = permissions.can_restart_record(record, model.user)
 
   html.tr([], [
     html.td([], [html.text(record_id_str)]),
@@ -221,6 +225,17 @@ fn record_row(model: Model, record: Record) -> Element(Msg) {
       ]),
     ]),
     html.td([], [html.text(record.patient_id)]),
+    html.td([], [html.text(format_study_series_summary(record))]),
+    html.td([], [
+      html.text(case record.series {
+        Some(series) -> option.unwrap(series.modality, "-")
+        None ->
+          case record.study {
+            Some(study) -> option.unwrap(study.modalities_in_study, "-")
+            None -> "-"
+          }
+      }),
+    ]),
     html.td([], [
       case can_fill, can_edit {
         True, _ ->
@@ -248,8 +263,47 @@ fn record_row(model: Model, record: Record) -> Element(Msg) {
             [html.text("View")],
           )
       },
+      case can_restart {
+        True ->
+          html.button(
+            [
+              attribute.class("btn btn-sm btn-warning"),
+              event.on_click(store.RestartRecord(record_id_str)),
+            ],
+            [html.text("Restart")],
+          )
+        False -> element.none()
+      },
     ]),
   ])
 }
 
-import gleam/string
+fn format_study_series_summary(record: Record) -> String {
+  let study_part = case record.study {
+    Some(study) -> option.unwrap(study.study_description, "-")
+    None -> "-"
+  }
+
+  let series_part = case record.series {
+    Some(series) -> {
+      let label = case series.modality, series.series_description {
+        Some(m), Some(d) -> m <> " - " <> d
+        Some(m), None -> m
+        None, Some(d) -> d
+        None, None -> "-"
+      }
+      case series.instance_count {
+        Some(n) -> label <> " (" <> int.to_string(n) <> " img)"
+        None -> label
+      }
+    }
+    None -> "-"
+  }
+
+  case study_part, series_part {
+    "-", "-" -> "-"
+    s, "-" -> s
+    "-", sr -> sr
+    s, sr -> s <> " / " <> sr
+  }
+}

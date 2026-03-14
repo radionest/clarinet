@@ -26,6 +26,7 @@ pub type Study {
     // date type in backend
     anon_uid: Option(String),
     study_description: Option(String),
+    modalities_in_study: Option(String),
     patient_id: String,
     patient: Option(Patient),
     series: Option(List(Series)),

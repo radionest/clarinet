@@ -226,6 +226,10 @@ pub type Msg {
   // Auto-assign
   AutoAssignResult(Result(Record, ApiError))
 
+  // Restart auto task
+  RestartRecord(record_id: String)
+  RestartRecordResult(Result(Record, ApiError))
+
   // Role matrix
   LoadRoleMatrix
   RoleMatrixLoaded(Result(RoleMatrix, ApiError))

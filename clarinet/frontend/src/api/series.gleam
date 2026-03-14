@@ -118,6 +118,7 @@ fn study_base_decoder() -> decode.Decoder(models.Study) {
   use date <- decode.field("date", decode.string)
   use anon_uid <- decode.optional_field("anon_uid", None, decode.optional(decode.string))
   use study_description <- decode.optional_field("study_description", None, decode.optional(decode.string))
+  use modalities_in_study <- decode.optional_field("modalities_in_study", None, decode.optional(decode.string))
   use patient_id <- decode.field("patient_id", decode.string)
 
   decode.success(models.Study(
@@ -125,6 +126,7 @@ fn study_base_decoder() -> decode.Decoder(models.Study) {
     date: date,
     anon_uid: anon_uid,
     study_description: study_description,
+    modalities_in_study: modalities_in_study,
     patient_id: patient_id,
     patient: None,
     series: None,

@@ -584,6 +584,32 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       #(model, effect.none())
     }
 
+    // Restart auto task
+    store.RestartRecord(record_id) -> {
+      let eff = {
+        use dispatch <- effect.from
+        records.restart_record(record_id)
+        |> promise.tap(fn(result) {
+          dispatch(store.RestartRecordResult(result))
+        })
+        Nil
+      }
+      #(store.set_loading(model, True), eff)
+    }
+
+    store.RestartRecordResult(Ok(record)) -> {
+      #(
+        model
+          |> store.cache_record(record)
+          |> store.set_loading(False)
+          |> store.set_success("Record restarted successfully"),
+        dispatch_msg(store.LoadRecords),
+      )
+    }
+
+    store.RestartRecordResult(Error(err)) ->
+      handle_api_error(model, err, "Failed to restart record")
+
     store.RecordDetailLoaded(Error(err)) ->
       handle_api_error(model, err, "Failed to load record")
 

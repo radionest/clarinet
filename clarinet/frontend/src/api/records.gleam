@@ -83,6 +83,11 @@ fn record_type_base_decoder() -> decode.Decoder(RecordType) {
     None,
     decode.optional(decode.string),
   )
+  use role_name <- decode.optional_field(
+    "role_name",
+    None,
+    decode.optional(decode.string),
+  )
 
   let level = case level_str {
     None -> types.Series
@@ -107,13 +112,87 @@ fn record_type_base_decoder() -> decode.Decoder(RecordType) {
     slicer_result_validator: slicer_result_validator,
     slicer_result_validator_args: None,
     data_schema: data_schema,
-    role_name: None,
+    role_name: role_name,
     max_records: None,
     min_records: None,
     level: level,
     file_registry: None,
     constraint_role: None,
     records: None,
+  ))
+}
+
+// Inline study decoder to avoid circular deps with studies.gleam
+fn study_base_decoder() -> decode.Decoder(models.Study) {
+  use study_uid <- decode.field("study_uid", decode.string)
+  use date <- decode.field("date", decode.string)
+  use anon_uid <- decode.optional_field(
+    "anon_uid",
+    None,
+    decode.optional(decode.string),
+  )
+  use study_description <- decode.optional_field(
+    "study_description",
+    None,
+    decode.optional(decode.string),
+  )
+  use modalities_in_study <- decode.optional_field(
+    "modalities_in_study",
+    None,
+    decode.optional(decode.string),
+  )
+  use patient_id <- decode.field("patient_id", decode.string)
+
+  decode.success(models.Study(
+    study_uid: study_uid,
+    date: date,
+    anon_uid: anon_uid,
+    study_description: study_description,
+    modalities_in_study: modalities_in_study,
+    patient_id: patient_id,
+    patient: None,
+    series: None,
+    records: None,
+  ))
+}
+
+// Inline series decoder to avoid circular deps with series.gleam
+fn series_base_decoder() -> decode.Decoder(models.Series) {
+  use series_uid <- decode.field("series_uid", decode.string)
+  use series_description <- decode.optional_field(
+    "series_description",
+    None,
+    decode.optional(decode.string),
+  )
+  use series_number <- decode.optional_field("series_number", 0, decode.int)
+  use modality <- decode.optional_field(
+    "modality",
+    None,
+    decode.optional(decode.string),
+  )
+  use instance_count <- decode.optional_field(
+    "instance_count",
+    None,
+    decode.optional(decode.int),
+  )
+  use anon_uid <- decode.optional_field(
+    "anon_uid",
+    None,
+    decode.optional(decode.string),
+  )
+  use study_uid <- decode.field("study_uid", decode.string)
+
+  decode.success(models.Series(
+    series_uid: series_uid,
+    series_description: series_description,
+    series_number: series_number,
+    modality: modality,
+    instance_count: instance_count,
+    anon_uid: anon_uid,
+    study_uid: study_uid,
+    study: None,
+    records: None,
+    working_folder: None,
   ))
 }
 
@@ -193,6 +272,16 @@ pub fn record_decoder() -> decode.Decoder(Record) {
     None,
     decode.optional(decode.dynamic),
   )
+  use study <- decode.optional_field(
+    "study",
+    None,
+    decode.optional(study_base_decoder()),
+  )
+  use series <- decode.optional_field(
+    "series",
+    None,
+    decode.optional(series_base_decoder()),
+  )
 
   let status = status.from_backend_string(status_str)
   let data = case data_dyn {
@@ -218,8 +307,8 @@ pub fn record_decoder() -> decode.Decoder(Record) {
     files: None,
     file_checksums: None,
     patient: None,
-    study: None,
-    series: None,
+    study: study,
+    series: series,
     record_type: record_type,
     user: user,
     data: data,
@@ -402,6 +491,25 @@ pub fn submit_record_data(
   record_id: String,
 ) -> Promise(Result(Record, ApiError)) {
   http_client.post("/records/" <> record_id <> "/data", "{}")
+  |> promise.map(fn(res) {
+    result.try(res, http_client.decode_response(
+      _,
+      record_decoder(),
+      "Invalid record data",
+    ))
+  })
+}
+
+/// Restart an auto task by invalidating it (hard mode)
+pub fn restart_record(
+  record_id: String,
+) -> Promise(Result(Record, ApiError)) {
+  let body =
+    json.object([
+      #("mode", json.string("hard")),
+      #("reason", json.string("Manually restarted")),
+    ])
+  http_client.post("/records/" <> record_id <> "/invalidate", json.to_string(body))
   |> promise.map(fn(res) {
     result.try(res, http_client.decode_response(
       _,
