@@ -233,7 +233,8 @@ Triggers are dispatched via the **service layer** (awaited directly during the r
   - `bulk_update_status()` → `handle_record_status_change` (per changed record)
   - `notify_file_updates()` → `handle_file_update` (per file)
 - `StudyService` fires entity triggers via `engine.fire()` (fire-and-forget) in `create_patient()`, `create_study()`, `create_series()`
-- `POST /records/{id}/invalidate` — direct invalidation endpoint (mode, source_record_id, reason)
+- `invalidate_record()` → `handle_record_status_change` (hard mode, if status changed)
+- `POST /records/{id}/invalidate` — invalidation endpoint (mode, source_record_id, reason); routes through RecordService, fires RecordFlow on hard mode
 - `POST /patients/{id}/file-events` → `RecordService.notify_file_updates()` (called by pipeline task wrapper)
 
 ## Configuration
