@@ -1,0 +1,29 @@
+{
+    "type": "object",
+    "properties": {
+        "is_good": {
+            "type": "boolean",
+            "description": "Whether the study is suitable for the trial"
+        }
+    },
+    "required": ["is_good"],
+    "if": {
+        "properties": { "is_good": { "const": true } }
+    },
+    "then": {
+        "properties": {
+            "study_type": {
+                "type": "string",
+                "enum": ["CT-archive", "CT", "MRI", "CT-AG", "MRI-AG", "PDCT-AG"],
+                "description": "Modality type"
+            },
+            "best_series": {
+                "type": "string",
+                "description": "DICOM UID of the best series for metastasis visualization",
+                "x-options": {"source": "study_series"}
+            }
+        },
+        "required": ["study_type", "best_series"]
+    },
+    "unevaluatedProperties": false
+}
