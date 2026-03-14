@@ -7,7 +7,7 @@ window.config = {
   maxNumberOfWebWorkers: 3,
   showLoadingIndicator: true,
   strictZSpacingForVolumeViewport: true,
-  customizationService: {
+  customizationService: [{
     'viewportOverlay.topRight': [
       {
         id: 'PatientNameOverlay',
@@ -28,8 +28,8 @@ window.config = {
         condition: ({ instance }) => instance?.PatientID,
       },
     ],
-    'studyBrowser.studyMode': 'primary',
-  },
+    'studyBrowser.studyMode': {$set: 'primary'},
+  }],
   dataSources: [
     {
       namespace: '@ohif/extension-default.dataSourcesModule.dicomweb',
