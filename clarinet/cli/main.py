@@ -88,22 +88,16 @@ secret_key = "change-this-secret-key-in-production"
     logger.info(f"Project initialized at {project_path}")
 
 
-def run_server(
-    host: str | None = None, port: int | None = None, with_frontend: bool = False
-) -> None:
+def run_server(host: str | None = None, port: int | None = None, headless: bool = False) -> None:
     """Run the Clarinet development server."""
     host = host or settings.host or "127.0.0.1"
     port = port or settings.port or 8000
 
-    if with_frontend:
-        # Run both backend and frontend
-        logger.info(f"Starting Clarinet server with frontend at http://{host}:{port}")
-        asyncio.run(run_with_frontend(host, port))
-    else:
+    if headless:
         # Run only backend
         import uvicorn
 
-        logger.info(f"Starting Clarinet server at http://{host}:{port}")
+        logger.info(f"Starting Clarinet server (headless) at http://{host}:{port}")
 
         uvicorn.run(
             "clarinet.api.app:app",
@@ -112,6 +106,10 @@ def run_server(
             reload=getattr(settings, "debug", True),
             log_level="info" if getattr(settings, "debug", True) else "warning",
         )
+    else:
+        # Run both backend and frontend
+        logger.info(f"Starting Clarinet server with frontend at http://{host}:{port}")
+        asyncio.run(run_with_frontend(host, port))
 
 
 async def _run_gleam_command(
@@ -691,7 +689,7 @@ def main() -> None:
         "--port", type=int, default=None, help="Port to bind to (default: 8000)"
     )
     run_parser.add_argument(
-        "--with-frontend", action="store_true", help="Also start the frontend development server"
+        "--headless", action="store_true", help="Run API server only, without the frontend"
     )
 
     # db command
@@ -821,7 +819,7 @@ def main() -> None:
     if args.command == "init":
         init_project(args.path)
     elif args.command == "run":
-        run_server(args.host, args.port, args.with_frontend)
+        run_server(args.host, args.port, headless=args.headless)
     elif args.command == "db":
         if args.db_command == "init":
             asyncio.run(init_database())

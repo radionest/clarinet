@@ -70,14 +70,14 @@ ohif-build: ## Download and install OHIF Viewer
 	@uv run clarinet ohif install
 
 .PHONY: run-dev
-run-dev: ## Run development server with frontend
+run-dev: ## Run development server with frontend (default)
 	@echo "Starting development server with frontend..."
-	@uv run clarinet run --with-frontend
+	@uv run clarinet run
 
 .PHONY: run-api
 run-api: ## Run API server only (no frontend)
 	@echo "Starting API server..."
-	@uv run uvicorn clarinet.api.app:app --reload --host 127.0.0.1 --port 8000
+	@uv run clarinet run --headless
 
 # =============================================================================
 # Code Quality Commands
