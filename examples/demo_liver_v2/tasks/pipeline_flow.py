@@ -14,7 +14,7 @@ from __future__ import annotations
 import asyncio
 import shutil
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import numpy as np
 from record_types import master_model, master_projection, segmentation_single
@@ -50,6 +50,10 @@ async def init_master_model(_msg: PipelineMessage, ctx: TaskContext) -> None:
         return
 
     seg_path = ctx.files.resolve(segmentation_single)
+    if not seg_path.is_file():
+        raise FileNotFoundError(
+            f"Segmentation file not found: {seg_path} — file may not have been saved yet"
+        )
     master_path = ctx.files.resolve(master_model)
 
     def _create_master() -> None:
@@ -219,7 +223,6 @@ async def anonymize_study_pipeline(msg: PipelineMessage, ctx: TaskContext) -> No
 
 async def create_projection_record(
     record: RecordRead,
-    context: dict[str, Any],
     client: ClarinetClient,
 ) -> None:
     """Create ``create_master_projection`` with series_uid from first_check."""
@@ -299,15 +302,14 @@ SEGMENT_TYPES = [
 ]
 
 for seg_type in SEGMENT_TYPES:
-    # Создание мастер-модели по первой завершённой КТ-сегментации
-    if seg_type == "segment_CT_single":
-        (record(seg_type).on_finished().do_task(init_master_model))
-
     # Создание проекции мастер-модели на серию сегментации
     (record(seg_type).on_finished().call(create_projection_record))
 
 # segment_CT_with_archive тоже запускает проекцию
 (record("segment_CT_with_archive").on_finished().call(create_projection_record))
+
+# Создание мастер-модели по первой завершённой КТ-сегментации с архивом
+(record("segment_CT_with_archive").on_finished().do_task(init_master_model))
 
 # ---------------------------------------------------------------------------
 # Flow: авто-проекция для КТ при создании записи
@@ -349,3 +351,24 @@ for seg_type in SEGMENT_TYPES:
 # ---------------------------------------------------------------------------
 
 (file("master_model").on_update().invalidate_all_records("create_master_projection"))
+
+# ---------------------------------------------------------------------------
+# Flow: стадии 10-14 (MDK → хирургия → гистология)
+# ---------------------------------------------------------------------------
+
+# MDK conclusion → resection_model (expert creates 3D model)
+(record("mdk_conclusion").on_finished().create_record("resection_model"))
+
+# resection_model → resection_plan (expert plans resection zones)
+(record("resection_model").on_finished().create_record("resection_plan"))
+
+# Intraop: if additional lesions found → update master model
+(
+    record("intraop_protocol")
+    .on_finished()
+    .if_record(F.additionally_found > 0)
+    .create_record("update_master_model")
+)
+
+# Note: retrospective_semiotics (stage 8) — created manually by coordinator
+# after 4-7 week washout period (no automatic trigger)

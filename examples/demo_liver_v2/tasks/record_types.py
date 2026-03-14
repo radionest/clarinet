@@ -35,6 +35,12 @@ second_review_output = FileDef(
     description="Second review classification: metastasis/unclear/benign/invisible",
 )
 
+resection_model_file = FileDef(
+    pattern="resection_model.seg.nrrd",
+    level="PATIENT",
+    description="3D resection model — liver parenchyma, vessels, corrected lesion boundaries",
+)
+
 # ---------------------------------------------------------------------------
 # Record types
 # ---------------------------------------------------------------------------
@@ -45,8 +51,8 @@ first_check = RecordDef(
     label="First check",
     level="STUDY",
     role="doctor",
-    min_records=1,
-    max_records=1,
+    min_records=2,
+    max_records=2,
 )
 
 anonymize_study = RecordDef(
@@ -64,7 +70,7 @@ segment_CT_single = RecordDef(
     description="CT lesion segmentation — only the current study is available for review",
     label="CT segment (single)",
     level="STUDY",
-    min_records=1,
+    min_records=2,
     max_records=4,
     role="doctor_CT",
     slicer_script="segment.py",
@@ -79,7 +85,7 @@ segment_CT_with_archive = RecordDef(
     description="CT lesion segmentation — current study plus all archive CT studies are available for review",
     label="CT segment (with archive)",
     level="STUDY",
-    min_records=1,
+    min_records=2,
     max_records=4,
     role="doctor_CT",
     slicer_script="segment.py",
@@ -94,7 +100,7 @@ segment_MRI_single = RecordDef(
     description="MRI lesion segmentation — only the current study is available for review",
     label="MRI segment",
     level="STUDY",
-    min_records=1,
+    min_records=2,
     max_records=4,
     role="doctor_MRI",
     slicer_script="segment.py",
@@ -109,7 +115,7 @@ segment_MRIAG_single = RecordDef(
     description="MRI angiography lesion segmentation",
     label="MRI-AG segment",
     level="STUDY",
-    min_records=1,
+    min_records=2,
     max_records=4,
     role="doctor_MRI",
     slicer_script="segment.py",
@@ -124,7 +130,7 @@ segment_CTAG_single = RecordDef(
     description="CT angiography lesion segmentation",
     label="CT-AG segment",
     level="STUDY",
-    min_records=1,
+    min_records=2,
     max_records=4,
     role="doctor_CT-AG",
     slicer_script="segment.py",
@@ -139,7 +145,7 @@ segment_PDCTAG_single = RecordDef(
     description="PDCT angiography lesion segmentation",
     label="PDCT-AG segment",
     level="STUDY",
-    min_records=1,
+    min_records=2,
     max_records=4,
     role="doctor_PDCT",
     slicer_script="segment.py",
@@ -215,4 +221,143 @@ update_master_model = RecordDef(
     files=[FileRef(master_model, "output")],
     slicer_context_hydrators=["patient_first_study"],
     # master_model, output_file, working_folder, best_study_uid — auto-injected
+)
+
+# ---------------------------------------------------------------------------
+# Stage 8: Retrospective semiotics
+# ---------------------------------------------------------------------------
+
+retrospective_semiotics = RecordDef(
+    name="retrospective_semiotics",
+    description=(
+        "Retrospective semiotics assessment — radiological characteristics "
+        "of each lesion on a given modality (after 4-7 week washout period)"
+    ),
+    label="Semiotics",
+    level="SERIES",
+    role="generic",
+    min_records=2,
+    max_records=4,
+    files=[FileRef(master_projection, "input")],
+    # Data: per-lesion semiotics (contrast pattern, signal, morphology, borders, etc.)
+    # No Slicer script — OHIF viewer + form-based data entry
+)
+
+# ---------------------------------------------------------------------------
+# Stage 10: MDK conclusion
+# ---------------------------------------------------------------------------
+
+mdk_conclusion = RecordDef(
+    name="mdk_conclusion",
+    description=(
+        "MDK conclusion — multidisciplinary council classifies all lesions "
+        "and defines treatment plan"
+    ),
+    label="MDK",
+    level="PATIENT",
+    role="mdk",
+    min_records=1,
+    max_records=1,
+    files=[FileRef(master_model, "input")],
+    # Data per lesion: classification (metastasis, disappeared_metastasis, unclear,
+    #   cyst, hemangioma, benign_unclear) + treatment (cluster_removal, isolated_removal, not_planned)
+)
+
+# ---------------------------------------------------------------------------
+# Stage 11: Resection planning
+# ---------------------------------------------------------------------------
+
+resection_model = RecordDef(
+    name="resection_model",
+    description=(
+        "3D model for resection planning — liver parenchyma, portal/hepatic veins, "
+        "corrected lesion ROIs"
+    ),
+    label="Resection model",
+    level="PATIENT",
+    role="expert",
+    min_records=1,
+    max_records=1,
+    slicer_script="resection_model.py",
+    slicer_result_validator="resection_model_validator.py",
+    slicer_context_hydrators=["patient_first_study"],
+    files=[
+        FileRef(master_model, "input"),
+        FileRef(resection_model_file, "output"),
+    ],
+)
+
+resection_plan = RecordDef(
+    name="resection_plan",
+    description=(
+        "Resection planning — cluster definition, resection zones, residual parenchyma volume"
+    ),
+    label="Resection plan",
+    level="PATIENT",
+    role="expert",
+    min_records=1,
+    max_records=1,
+    slicer_script="resection_plan.py",
+    files=[
+        FileRef(resection_model_file, "input"),
+        FileRef(master_model, "input"),
+    ],
+    # Data: per-lesion cluster assignment, resection zones, residual volume
+)
+
+# ---------------------------------------------------------------------------
+# Stage 12: Intraoperative protocol
+# ---------------------------------------------------------------------------
+
+intraop_protocol = RecordDef(
+    name="intraop_protocol",
+    description=(
+        "Intraoperative protocol — US lesion marking, found/not-found/additional "
+        "classification, fragment numbering"
+    ),
+    label="Surgery protocol",
+    level="PATIENT",
+    role="surgeon",
+    min_records=1,
+    max_records=1,
+    files=[FileRef(master_model, "input")],
+    # Data per lesion: us_found (bool), removed (bool), fragment_number (int)
+    # Data additional: additionally_found_lesions list
+)
+
+# ---------------------------------------------------------------------------
+# Stage 13: Post-operative CT review
+# ---------------------------------------------------------------------------
+
+postop_ct_review = RecordDef(
+    name="postop_ct_review",
+    description=(
+        "Post-operative CT review — complication screening, "
+        "master model update for intraop findings"
+    ),
+    label="Post-op CT",
+    level="STUDY",
+    role="doctor_CT",
+    min_records=1,
+    max_records=2,
+)
+
+# ---------------------------------------------------------------------------
+# Stage 14: Histology
+# ---------------------------------------------------------------------------
+
+histology = RecordDef(
+    name="histology",
+    description=(
+        "Histological examination — macroscopic and microscopic analysis "
+        "per fragment and per lesion"
+    ),
+    label="Histology",
+    level="PATIENT",
+    role="pathologist",
+    min_records=1,
+    max_records=1,
+    files=[FileRef(master_model, "input")],
+    # Data per lesion: macro_visible (bool), micro_visible (bool),
+    #   tumor_cells (yes/no/no_data), tumor_fibrotic_ratio (float, nullable)
 )
