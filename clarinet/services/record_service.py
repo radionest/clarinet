@@ -162,6 +162,40 @@ class RecordService:
                 updated = await self.repo.get_with_relations(record_id)
                 await self._fire_status_change(updated, old_status)
 
+    async def invalidate_record(
+        self,
+        record_id: int,
+        mode: str,
+        source_record_id: int | None = None,
+        reason: str | None = None,
+    ) -> Record:
+        """Invalidate a record and fire RecordFlow trigger on hard mode.
+
+        Args:
+            record_id: ID of the record to invalidate.
+            mode: "hard" resets to pending, "soft" only appends reason.
+            source_record_id: ID of the triggering record.
+            reason: Human-readable reason.
+
+        Returns:
+            Updated record with relations.
+        """
+        old_record = await self.repo.get(record_id)
+        old_status = old_record.status
+
+        record = await self.repo.invalidate_record(
+            record_id=record_id,
+            mode=mode,
+            source_record_id=source_record_id,
+            reason=reason,
+        )
+
+        # Fire trigger on hard mode if status actually changed
+        if mode == "hard" and old_status != record.status:
+            await self._fire_status_change(record, old_status)
+
+        return record
+
     async def notify_file_updates(self, patient_id: str, changed_files: list[str]) -> None:
         """Fire file-update triggers for project-level file changes.
 

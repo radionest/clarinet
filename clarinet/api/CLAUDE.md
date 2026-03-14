@@ -122,8 +122,8 @@ RecordFlow triggers are dispatched via the **service layer**, not directly from 
 - `StudyService` fires entity-creation triggers via `engine.fire()` (fire-and-forget) in `create_patient()`, `create_study()`, `create_series()`.
 - Engine is injected via `get_recordflow_engine(request)` in `dependencies.py` (returns `None` when disabled).
 
-Direct invalidation endpoint:
-- `POST /records/{id}/invalidate` — body: `{mode, source_record_id, reason}`
+Invalidation (routes through RecordService):
+- `POST /records/{id}/invalidate` — body: `{mode, source_record_id, reason}`; hard mode fires RecordFlow triggers (enables auto task restart)
 
 ## DICOMweb Proxy Router (dicomweb.py)
 

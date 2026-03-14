@@ -508,15 +508,15 @@ async def check_record_files(
 async def invalidate_record(
     record_id: int,
     _authorized_record: AuthorizedRecordDep,
-    repo: RecordRepositoryDep,
+    service: RecordServiceDep,
     mode: str = Body(default="hard"),
     source_record_id: int | None = Body(default=None),
     reason: str | None = Body(default=None),
-) -> Record:
+) -> RecordRead:
     """Invalidate a record.
 
-    Hard mode resets status to pending (keeps user assignment).
-    Soft mode only appends the reason to context_info.
+    Hard mode resets status to pending (keeps user assignment) and fires
+    RecordFlow triggers. Soft mode only appends the reason to context_info.
 
     Args:
         record_id: ID of the record to invalidate.
@@ -527,12 +527,13 @@ async def invalidate_record(
     Returns:
         Updated record.
     """
-    return await repo.invalidate_record(
+    record = await service.invalidate_record(
         record_id=record_id,
         mode=mode,
         source_record_id=source_record_id,
         reason=reason,
     )
+    return RecordRead.model_validate(record)
 
 
 @router.post("/find", response_model=list[RecordRead])
