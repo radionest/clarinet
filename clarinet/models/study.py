@@ -25,6 +25,7 @@ class StudyBase(BaseModel):
     date: date
     anon_uid: str | None = None
     study_description: str | None = None
+    modalities_in_study: str | None = None
     patient_id: str
 
 

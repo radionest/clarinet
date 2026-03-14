@@ -133,6 +133,7 @@ async def import_study_from_pacs(
             "date": study_date,
             "patient_id": request.patient_id,
             "study_description": pacs_study.study_description,
+            "modalities_in_study": pacs_study.modalities_in_study,
         }
     )
 
