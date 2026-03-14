@@ -10,6 +10,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from clarinet.models.base import DicomQueryLevel
 from clarinet.models.file_schema import FileDefinitionRead, FileRole
 from clarinet.services.file_validation import (
     FileValidationError,
@@ -301,3 +302,176 @@ class TestFileValidatorEdgeCases:
 
         assert result.valid is True
         assert result.matched_files["birads_file"] == "birads_4.txt"
+
+
+class TestFileValidatorCrossLevel:
+    """Tests for cross-level file validation using working_dirs."""
+
+    def test_cross_level_file_found(
+        self,
+        mock_record: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        """PATIENT-level file found in PATIENT dir when record is SERIES-level."""
+        patient_dir = tmp_path / "patient"
+        series_dir = tmp_path / "patient" / "study" / "series"
+        patient_dir.mkdir(parents=True)
+        series_dir.mkdir(parents=True)
+
+        # File exists at PATIENT level, not at SERIES level
+        (patient_dir / "master_model.seg.nrrd").touch()
+
+        defs = [
+            FileDefinitionRead(
+                name="master_model",
+                pattern="master_model.seg.nrrd",
+                required=True,
+                role=FileRole.INPUT,
+                level=DicomQueryLevel.PATIENT,
+            ),
+        ]
+        working_dirs = {
+            DicomQueryLevel.PATIENT: patient_dir,
+            DicomQueryLevel.SERIES: series_dir,
+        }
+
+        validator = FileValidator(defs)
+        result = validator.validate(mock_record, series_dir, working_dirs)
+
+        assert result.valid is True
+        assert result.matched_files["master_model"] == "master_model.seg.nrrd"
+
+    def test_cross_level_file_missing(
+        self,
+        mock_record: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        """PATIENT-level file missing at PATIENT dir reports error."""
+        patient_dir = tmp_path / "patient"
+        series_dir = tmp_path / "patient" / "study" / "series"
+        patient_dir.mkdir(parents=True)
+        series_dir.mkdir(parents=True)
+
+        # File does NOT exist at PATIENT level
+        defs = [
+            FileDefinitionRead(
+                name="master_model",
+                pattern="master_model.seg.nrrd",
+                required=True,
+                role=FileRole.INPUT,
+                level=DicomQueryLevel.PATIENT,
+            ),
+        ]
+        working_dirs = {
+            DicomQueryLevel.PATIENT: patient_dir,
+            DicomQueryLevel.SERIES: series_dir,
+        }
+
+        validator = FileValidator(defs)
+        result = validator.validate(mock_record, series_dir, working_dirs)
+
+        assert result.valid is False
+        assert len(result.errors) == 1
+        assert result.errors[0].file_name == "master_model"
+
+    def test_no_level_uses_default_dir(
+        self,
+        mock_record: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        """File def with level=None falls back to the default directory param."""
+        patient_dir = tmp_path / "patient"
+        series_dir = tmp_path / "patient" / "study" / "series"
+        patient_dir.mkdir(parents=True)
+        series_dir.mkdir(parents=True)
+
+        # File only exists at series (default) level
+        (series_dir / "scan.nrrd").touch()
+
+        defs = [
+            FileDefinitionRead(
+                name="scan",
+                pattern="scan.nrrd",
+                required=True,
+                role=FileRole.INPUT,
+                level=None,
+            ),
+        ]
+        working_dirs = {
+            DicomQueryLevel.PATIENT: patient_dir,
+            DicomQueryLevel.SERIES: series_dir,
+        }
+
+        validator = FileValidator(defs)
+        result = validator.validate(mock_record, series_dir, working_dirs)
+
+        assert result.valid is True
+        assert result.matched_files["scan"] == "scan.nrrd"
+
+    def test_working_dirs_none_falls_back(
+        self,
+        mock_record: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        """When working_dirs=None, even level-tagged files use default directory."""
+        (tmp_path / "master_model.seg.nrrd").touch()
+
+        defs = [
+            FileDefinitionRead(
+                name="master_model",
+                pattern="master_model.seg.nrrd",
+                required=True,
+                role=FileRole.INPUT,
+                level=DicomQueryLevel.PATIENT,
+            ),
+        ]
+
+        validator = FileValidator(defs)
+        # No working_dirs passed — backward compat
+        result = validator.validate(mock_record, tmp_path)
+
+        assert result.valid is True
+        assert result.matched_files["master_model"] == "master_model.seg.nrrd"
+
+    def test_mixed_levels(
+        self,
+        mock_record: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        """Mix of PATIENT-level and default-level files validated correctly."""
+        patient_dir = tmp_path / "patient"
+        series_dir = tmp_path / "patient" / "study" / "series"
+        patient_dir.mkdir(parents=True)
+        series_dir.mkdir(parents=True)
+
+        # PATIENT-level file at patient dir
+        (patient_dir / "master_model.seg.nrrd").touch()
+        # Default-level file at series dir
+        (series_dir / "scan.nrrd").touch()
+
+        defs = [
+            FileDefinitionRead(
+                name="master_model",
+                pattern="master_model.seg.nrrd",
+                required=True,
+                role=FileRole.INPUT,
+                level=DicomQueryLevel.PATIENT,
+            ),
+            FileDefinitionRead(
+                name="scan",
+                pattern="scan.nrrd",
+                required=True,
+                role=FileRole.INPUT,
+            ),
+        ]
+        working_dirs = {
+            DicomQueryLevel.PATIENT: patient_dir,
+            DicomQueryLevel.SERIES: series_dir,
+        }
+
+        validator = FileValidator(defs)
+        result = validator.validate(mock_record, series_dir, working_dirs)
+
+        assert result.valid is True
+        assert result.matched_files["master_model"] == "master_model.seg.nrrd"
+        assert result.matched_files["scan"] == "scan.nrrd"
