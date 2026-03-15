@@ -115,12 +115,12 @@ pre-commit-install: ## Install pre-commit hooks
 .PHONY: test
 test: ## Run backend tests
 	@echo "Running backend tests..."
-	@uv run pytest
+	@./scripts/run_tests.sh
 
 .PHONY: test-cov
 test-cov: ## Run tests with coverage
 	@echo "Running tests with coverage..."
-	@uv run pytest --cov=clarinet tests/
+	@./scripts/run_tests.sh --cov=clarinet tests/
 
 .PHONY: test-all
 test-all: test frontend-test ## Run all tests (backend + frontend)
@@ -128,23 +128,22 @@ test-all: test frontend-test ## Run all tests (backend + frontend)
 .PHONY: test-fast
 test-fast: ## Run all tests in parallel (auto workers, all service groups)
 	@echo "Running all tests in parallel..."
-	@uv run pytest -n auto --dist loadgroup
+	@./scripts/run_tests.sh -n auto --dist loadgroup
 
 .PHONY: test-unit
 test-unit: ## Run DB-only tests in parallel (no external services)
 	@echo "Running DB-only tests in parallel..."
-	@uv run pytest -n auto --dist loadgroup -m "not pipeline and not dicom and not slicer"
+	@./scripts/run_tests.sh -n auto --dist loadgroup -m "not pipeline and not dicom and not slicer"
 
 .PHONY: test-debug
 test-debug: ## Run tests with full JSON diagnostics (test report + app logs)
 	@echo "Running tests with full diagnostics..."
-	@CLARINET_LOG_DIR=/tmp uv run pytest -n auto --dist loadgroup \
-		--json-report --json-report-file=/tmp/clarinet-test-report.json
+	@CLARINET_LOG_DIR=/tmp ./scripts/run_tests.sh -n auto --dist loadgroup
 
 .PHONY: test-integration
 test-integration: ## Run integration tests only
 	@echo "Running integration tests..."
-	@uv run pytest tests/integration/
+	@./scripts/run_tests.sh tests/integration/
 
 # =============================================================================
 # Build and Install Commands

@@ -71,6 +71,19 @@ endpoint triggers a lazy-load on the expired object in async context.
 
 ## Pitfalls
 
+### MagicMock Auto-Creates Attributes
+
+`MagicMock()` returns a new mock object (truthy) for any attribute access — not `None`.
+When production code adds `if record.field is not None`, all mock records in tests
+must explicitly set `record_mock.field = None` or the branch will execute unexpectedly.
+
+Prefer `spec=` to constrain mocks:
+```python
+record_mock = MagicMock(spec=Record)
+record_mock.id = 1
+record_mock.parent_record_id = None  # explicit — MagicMock default is NOT None
+```
+
 ### Identity Map Caching
 
 `expire_on_commit=False` is set globally (both production and tests). After creating
@@ -221,6 +234,16 @@ cleaned via `DELETE FROM` after each test (autouse `clear_database` fixture).
 
 Important: `StaticPool` is required for in-memory SQLite with session-scoped
 engine — without it, each new connection creates a new empty database.
+
+## Background and CI Test Runs
+
+All `make test-*` targets use `scripts/run_tests.sh` which prints a `=== Test Summary ===`
+line with pass/fail/skip counts parsed from the JSON report via `jq`.
+
+- JSON report: `/tmp/clarinet-test-report.json` — written **atomically at session end**
+- During a background run the file contains **stale data from the previous run**
+- To get results from a background run: wait for completion, then read the summary
+- pynetdicom loguru errors ("I/O operation on closed file") at end of output are **noise**, not test failures — suppressed via `_suppress_pynetdicom_logging` fixture in `conftest.py`
 
 ## Debugging Test Failures
 

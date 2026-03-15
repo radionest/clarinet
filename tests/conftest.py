@@ -23,6 +23,22 @@ from clarinet.settings import Settings
 from clarinet.utils.database import get_async_session
 
 
+@pytest.fixture(autouse=True, scope="session")
+def _suppress_pynetdicom_logging():
+    """Prevent pynetdicom background threads from polluting test output.
+
+    pynetdicom spawns threads for DICOM associations that may outlive
+    individual tests. Their logs go through InterceptHandler → loguru,
+    causing "I/O operation on closed file" noise when stderr is closed.
+    """
+    import logging
+
+    pynetdicom_logger = logging.getLogger("pynetdicom")
+    pynetdicom_logger.propagate = False
+    pynetdicom_logger.addHandler(logging.NullHandler())
+    yield
+
+
 @pytest.fixture(scope="session")
 def event_loop() -> Generator:
     """Create event loop for the entire test session."""
