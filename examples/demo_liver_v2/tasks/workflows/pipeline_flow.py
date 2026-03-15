@@ -14,7 +14,7 @@ from __future__ import annotations
 import asyncio
 import shutil
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from record_types import master_model, master_projection, segmentation_single
@@ -223,6 +223,7 @@ async def anonymize_study_pipeline(msg: PipelineMessage, ctx: TaskContext) -> No
 
 async def create_projection_record(
     record: RecordRead,
+    context: dict[str, Any],
     client: ClarinetClient,
 ) -> None:
     """Create ``create_master_projection`` with series_uid from first_check."""
@@ -252,6 +253,50 @@ async def create_projection_record(
             ),
         )
     )
+
+
+async def create_comparison_record(
+    record: RecordRead,
+    context: dict[str, Any],
+    client: ClarinetClient,
+) -> None:
+    """Create ``compare_with_projection`` linked to the segmentation as parent."""
+    first_checks = await client.find_records(
+        record_type_name="first_check",
+        study_uid=record.study_uid,
+    )
+    best_series = (first_checks[0].data or {}).get("best_series") if first_checks else None
+    if not best_series:
+        logger.warning(f"No best_series in first_check for study {record.study_uid}")
+        return
+
+    from clarinet.models import RecordCreate
+
+    await client.create_record(
+        RecordCreate(
+            record_type_name="compare_with_projection",
+            patient_id=record.patient_id,
+            study_uid=record.study_uid,
+            series_uid=best_series,
+            parent_record_id=record.id,
+            context_info=(f"Created by flow from {record.record_type.name} (id={record.id})"),
+        )
+    )
+
+
+async def unblock_comparisons(
+    record: RecordRead,
+    context: dict[str, Any],
+    client: ClarinetClient,
+) -> None:
+    """Check-files on all blocked ``compare_with_projection`` for this series."""
+    comparisons = await client.find_records(
+        record_type_name="compare_with_projection",
+        series_uid=record.series_uid,
+        record_status="blocked",
+    )
+    for comp in comparisons:
+        await client.check_record_files(comp.id)
 
 
 # ---------------------------------------------------------------------------
@@ -304,9 +349,12 @@ SEGMENT_TYPES = [
 for seg_type in SEGMENT_TYPES:
     # Создание проекции мастер-модели на серию сегментации
     (record(seg_type).on_finished().call(create_projection_record))
+    # Каждая сегментация создаёт compare_with_projection, привязанный к себе как parent
+    (record(seg_type).on_finished().call(create_comparison_record))
 
-# segment_CT_with_archive тоже запускает проекцию
+# segment_CT_with_archive тоже запускает проекцию и сравнение
 (record("segment_CT_with_archive").on_finished().call(create_projection_record))
+(record("segment_CT_with_archive").on_finished().call(create_comparison_record))
 
 # Создание мастер-модели по первой завершённой КТ-сегментации с архивом
 (record("segment_CT_with_archive").on_finished().do_task(init_master_model))
@@ -318,10 +366,10 @@ for seg_type in SEGMENT_TYPES:
 (record("create_master_projection").on_status("pending").do_task(auto_project_ct))
 
 # ---------------------------------------------------------------------------
-# Flow: после завершения проекции -> автоматическое сравнение
+# Flow: после завершения проекции -> разблокировка сравнений
 # ---------------------------------------------------------------------------
 
-(record("create_master_projection").on_finished().create_record("compare_with_projection"))
+(record("create_master_projection").on_finished().call(unblock_comparisons))
 
 # Автозаполнение compare_with_projection при создании (role=auto)
 (record("compare_with_projection").on_status("pending").do_task(compare_w_projection))
