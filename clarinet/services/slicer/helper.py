@@ -165,7 +165,9 @@ class PacsHelper:
         if local_series:
             from DICOMLib import DICOMUtils  # type: ignore[import-not-found]
 
-            loaded: list[str] = DICOMUtils.loadSeriesByUID(local_series)
+            # list() required: db.seriesForStudy() returns QStringList (tuple in PythonQt),
+            # but DICOMUtils.loadSeriesByUID() checks isinstance(x, list)
+            loaded: list[str] = DICOMUtils.loadSeriesByUID(list(local_series))
             if loaded:
                 return loaded
 
@@ -701,6 +703,40 @@ class SlicerHelper:
         ras = mat.MultiplyPoint([ci, cj, ck, 1.0])
         return (ras[0], ras[1], ras[2])
 
+    def _local_to_world_centroid(
+        self,
+        segmentation: SegmentationBuilder | Any,
+        segment_name: str,
+    ) -> tuple[float, float, float] | None:
+        """Convert a segment centroid from local RAS to world RAS.
+
+        ``get_segment_centroid`` returns coordinates in the labelmap's own
+        image-to-world space (local RAS). If the segmentation node has a
+        parent MRML transform (e.g. an alignment transform), this method
+        applies it to produce world RAS coordinates suitable for
+        ``JumpSlice``.
+
+        Args:
+            segmentation: Segmentation node or SegmentationBuilder.
+            segment_name: Name of the segment.
+
+        Returns:
+            World RAS centroid or None if the segment is empty.
+        """
+        local = self.get_segment_centroid(segmentation, segment_name)
+        if local is None:
+            return None
+
+        node = segmentation.node if isinstance(segmentation, SegmentationBuilder) else segmentation
+        parent_tf = node.GetParentTransformNode()
+        if parent_tf is None:
+            return local
+
+        mat = vtk.vtkMatrix4x4()
+        parent_tf.GetMatrixTransformToWorld(mat)
+        world = mat.MultiplyPoint([local[0], local[1], local[2], 1.0])
+        return (world[0], world[1], world[2])
+
     def copy_segments(
         self,
         source_seg: SegmentationBuilder | Any,
@@ -734,6 +770,35 @@ class SlicerHelper:
                 target_vtk_seg.AddEmptySegment(name, name, color)
             else:
                 target_vtk_seg.CopySegmentFromSegmentation(source_vtk_seg, seg_id)
+
+    def rename_segments(
+        self,
+        segmentation: SegmentationBuilder | Any,
+        prefix: str = "NEW",
+        color: tuple[float, float, float] | None = None,
+        start_from: int = 1,
+    ) -> int:
+        """Rename all segments to {prefix}_{N} with optional color.
+
+        Args:
+            segmentation: Segmentation node or SegmentationBuilder.
+            prefix: Name prefix for segments.
+            color: Optional RGB color tuple (0.0-1.0) to apply to all segments.
+            start_from: Starting number for renaming.
+
+        Returns:
+            Number of renamed segments.
+        """
+        node = segmentation.node if isinstance(segmentation, SegmentationBuilder) else segmentation
+        vtk_seg = node.GetSegmentation()
+        count = vtk_seg.GetNumberOfSegments()
+        for i in range(count):
+            sid = vtk_seg.GetNthSegmentID(i)
+            segment = vtk_seg.GetSegment(sid)
+            segment.SetName(f"{prefix}_{start_from + i}")
+            if color is not None:
+                segment.SetColor(*color)
+        return int(count)
 
     def auto_number_segment(
         self,
@@ -808,27 +873,32 @@ class SlicerHelper:
         node_a = seg_a.node if isinstance(seg_a, SegmentationBuilder) else seg_a
         node_b = seg_b.node if isinstance(seg_b, SegmentationBuilder) else seg_b
 
-        # Export seg_b to a merged labelmap
+        # Align both to the same reference grid
+        if self._image_node is not None:
+            node_a.SetReferenceImageGeometryParameterFromVolumeNode(self._image_node)
+            node_b.SetReferenceImageGeometryParameterFromVolumeNode(self._image_node)
+
         seg_logic = slicer.modules.segmentations.logic()
+
+        # Export both with mode 0 (reference geometry extent) → same shape
         labelmap_b = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLLabelMapVolumeNode", "_sub_b")
-        seg_logic.ExportAllSegmentsToLabelmapNode(node_b, labelmap_b)
+        seg_logic.ExportAllSegmentsToLabelmapNode(node_b, labelmap_b, 0)
         arr_b = slicer.util.arrayFromVolume(labelmap_b)
+
+        labelmap_a = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLLabelMapVolumeNode", "_sub_a")
+        seg_logic.ExportAllSegmentsToLabelmapNode(node_a, labelmap_a, 0)
+        arr_a = slicer.util.arrayFromVolume(labelmap_a)
 
         vtk_seg_a = node_a.GetSegmentation()
         segments_to_remove: list[str] = []
 
         for i in range(vtk_seg_a.GetNumberOfSegments()):
             seg_id = vtk_seg_a.GetNthSegmentID(i)
+            label_value = i + 1  # merged labelmap: segment 0 → label 1
 
-            # Export single segment to temporary labelmap
-            tmp_label = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLLabelMapVolumeNode", "_sub_tmp")
-            seg_logic.ExportSegmentsToLabelmapNode(node_a, [seg_id], tmp_label)
-            arr_a = slicer.util.arrayFromVolume(tmp_label)
-
-            mask_a = arr_a > 0
+            mask_a = arr_a == label_value
             total = int(np.sum(mask_a))
             if total == 0:
-                slicer.mrmlScene.RemoveNode(tmp_label)
                 continue
 
             overlap = int(np.sum(mask_a & (arr_b > 0)))
@@ -836,12 +906,10 @@ class SlicerHelper:
             remove = overlap > max_overlap
             if max_overlap_ratio is not None:
                 remove = remove and (overlap / total > max_overlap_ratio)
-
             if remove:
                 segments_to_remove.append(seg_id)
 
-            slicer.mrmlScene.RemoveNode(tmp_label)
-
+        slicer.mrmlScene.RemoveNode(labelmap_a)
         slicer.mrmlScene.RemoveNode(labelmap_b)
 
         if output_name is not None:
@@ -861,6 +929,73 @@ class SlicerHelper:
         for seg_id in segments_to_remove:
             vtk_seg_a.RemoveSegment(seg_id)
         return node_a
+
+    def binarize_and_split_islands(
+        self,
+        segmentation: SegmentationBuilder | Any,
+        output_name: str = "_BinarizedIslands",
+        min_island_size: int = 1,
+    ) -> Any:
+        """Binarize all segments into one mask, then split into connected components.
+
+        Merges all segments into a single binary labelmap (any label > 0),
+        then uses the Islands effect to split connected components into
+        individual segments.
+
+        Args:
+            segmentation: Input segmentation (SegmentationBuilder or node).
+            output_name: Name for the output segmentation node.
+            min_island_size: Minimum island size in voxels (smaller removed).
+
+        Returns:
+            A new vtkMRMLSegmentationNode with one segment per connected component.
+        """
+        import numpy as np  # type: ignore[import-not-found]
+
+        node = segmentation.node if isinstance(segmentation, SegmentationBuilder) else segmentation
+
+        if self._image_node is not None:
+            node.SetReferenceImageGeometryParameterFromVolumeNode(self._image_node)
+
+        seg_logic = slicer.modules.segmentations.logic()
+
+        # Phase A — merge all segments into a single binary labelmap
+        labelmap = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLLabelMapVolumeNode", "_bin_tmp")
+        seg_logic.ExportAllSegmentsToLabelmapNode(node, labelmap, 0)
+        arr = slicer.util.arrayFromVolume(labelmap)
+        arr_binary = (arr > 0).astype(np.uint8)
+        slicer.util.updateVolumeFromArray(labelmap, arr_binary)
+
+        output_node = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentationNode", output_name)
+        output_node.CreateDefaultDisplayNodes()
+        if self._image_node is not None:
+            output_node.SetReferenceImageGeometryParameterFromVolumeNode(self._image_node)
+        seg_logic.ImportLabelmapToSegmentationNode(labelmap, output_node)
+        slicer.mrmlScene.RemoveNode(labelmap)
+
+        # Phase B — split islands via Segment Editor Islands effect
+        merged_seg_id = output_node.GetSegmentation().GetNthSegmentID(0)
+
+        editor_node = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentEditorNode", "_bin_editor")
+        editor_node.SetSelectedSegmentID(merged_seg_id)
+
+        widget = slicer.qMRMLSegmentEditorWidget()
+        widget.setMRMLScene(slicer.mrmlScene)
+        widget.setMRMLSegmentEditorNode(editor_node)
+        widget.setSegmentationNode(output_node)
+        if self._image_node is not None:
+            widget.setSourceVolumeNode(self._image_node)
+
+        widget.setActiveEffectByName("Islands")
+        effect = widget.activeEffect()
+        effect.setParameter("Operation", "SPLIT_ISLANDS_TO_SEGMENTS")
+        effect.setParameter("MinimumSize", str(min_island_size))
+        effect.self().onApply()
+
+        slicer.mrmlScene.RemoveNode(editor_node)
+        widget.deleteLater()
+
+        return output_node
 
     def _detect_acquisition_orientation(self, volume_node: Any) -> str:
         """Determine natural acquisition plane from volume's direction matrix.
@@ -963,6 +1098,119 @@ class SlicerHelper:
         if yellow_node is not None:
             yellow_node.SetOrientation(orient_b)
 
+    def align_by_center(
+        self,
+        moving_volume: Any,
+        reference_volume: Any,
+        moving_segmentation: SegmentationBuilder | Any | None = None,
+        transform_name: str = "AlignTransform",
+    ) -> Any:
+        """Align two volumes by translating their image centers.
+
+        Creates a ``vtkMRMLLinearTransformNode`` that shifts *moving_volume*
+        so its center coincides with *reference_volume*'s center. Optionally
+        applies the same transform to a segmentation.
+
+        Args:
+            moving_volume: Volume node to be transformed.
+            reference_volume: Target volume node (stays in place).
+            moving_segmentation: Optional segmentation to co-transform.
+            transform_name: MRML node name for the transform.
+
+        Returns:
+            The created ``vtkMRMLLinearTransformNode``.
+        """
+        ref_bounds = [0.0] * 6
+        mov_bounds = [0.0] * 6
+        reference_volume.GetRASBounds(ref_bounds)
+        moving_volume.GetRASBounds(mov_bounds)
+
+        ref_center = [(ref_bounds[i] + ref_bounds[i + 1]) / 2.0 for i in (0, 2, 4)]
+        mov_center = [(mov_bounds[i] + mov_bounds[i + 1]) / 2.0 for i in (0, 2, 4)]
+
+        mat = vtk.vtkMatrix4x4()
+        mat.Identity()
+        for i in range(3):
+            mat.SetElement(i, 3, ref_center[i] - mov_center[i])
+
+        tf_node = slicer.mrmlScene.AddNewNodeByClass(
+            "vtkMRMLLinearTransformNode",
+            transform_name,
+        )
+        tf_node.SetMatrixTransformToParent(mat)
+
+        moving_volume.SetAndObserveTransformNodeID(tf_node.GetID())
+        if moving_segmentation is not None:
+            seg_node = (
+                moving_segmentation.node
+                if isinstance(moving_segmentation, SegmentationBuilder)
+                else moving_segmentation
+            )
+            seg_node.SetAndObserveTransformNodeID(tf_node.GetID())
+
+        # Reset slice views so they recompute their extent/range to account
+        # for the newly transformed volume position.  Without this, scrolling
+        # in one view sends the other view outside the transformed data → black.
+        self._layout_manager.resetSliceViews()
+
+        return tf_node
+
+    def refine_alignment_by_centroids(
+        self,
+        moving_seg: SegmentationBuilder | Any,
+        reference_seg: SegmentationBuilder | Any,
+        transform_node: Any,
+        min_landmarks: int = 1,
+    ) -> int:
+        """Refine alignment using matching segment centroids.
+
+        Collects centroids of segments present in both segmentations,
+        computes a rigid-body transform via ``vtkLandmarkTransform``
+        (Horn method), and **replaces** the matrix on *transform_node*.
+
+        Moving centroids are in LOCAL RAS (before transform); reference
+        centroids are in world RAS (reference has no parent transform).
+
+        Args:
+            moving_seg: Moving segmentation (under *transform_node*).
+            reference_seg: Reference segmentation (stationary).
+            transform_node: Transform node to update in-place.
+            min_landmarks: Minimum landmark pairs required to update.
+
+        Returns:
+            Number of landmark pairs used (0 means no change applied).
+        """
+        moving_names = set(self.get_segment_names(moving_seg))
+        ref_names = set(self.get_segment_names(reference_seg))
+        common = moving_names & ref_names
+
+        source_pts = vtk.vtkPoints()
+        target_pts = vtk.vtkPoints()
+
+        for name in sorted(common):
+            mov_c = self.get_segment_centroid(moving_seg, name)
+            ref_c = self.get_segment_centroid(reference_seg, name)
+            if mov_c is None or ref_c is None:
+                continue
+            source_pts.InsertNextPoint(mov_c)
+            target_pts.InsertNextPoint(ref_c)
+
+        n_pairs = source_pts.GetNumberOfPoints()
+        if n_pairs < min_landmarks:
+            return 0
+
+        landmark_tf = vtk.vtkLandmarkTransform()
+        landmark_tf.SetSourceLandmarks(source_pts)
+        landmark_tf.SetTargetLandmarks(target_pts)
+        landmark_tf.SetModeToRigidBody()
+        landmark_tf.Update()
+
+        matrix = vtk.vtkMatrix4x4()
+        landmark_tf.GetMatrix(matrix)
+        transform_node.SetMatrixTransformToParent(matrix)
+
+        return int(n_pairs)
+
     def setup_segment_focus_observer(
         self,
         editable_seg: SegmentationBuilder | Any,
@@ -970,6 +1218,7 @@ class SlicerHelper:
         reference_views: list[str] | None = None,
         editable_views: list[str] | None = None,
         only_empty: bool = True,
+        on_refine: Any | None = None,
     ) -> None:
         """Auto-navigate to segment centroid when selecting a segment.
 
@@ -1038,6 +1287,9 @@ class SlicerHelper:
                 Defaults to ``[]`` (no editable navigation).
             only_empty: If True (default), only navigate when the selected
                 segment is empty. If False, navigate for all segments.
+            on_refine: Optional callback invoked before centroid computation
+                on each segment switch. Use to update alignment transforms
+                so that centroids reflect the latest registration.
         """
         if reference_views is None:
             reference_views = ["Red", "Yellow"]
@@ -1091,10 +1343,14 @@ class SlicerHelper:
 
                 segment_name = segment.GetName()
 
+                # Run refinement callback (e.g. update alignment transform)
+                # BEFORE centroid computation so coordinates are up-to-date.
+                if on_refine is not None:
+                    on_refine()
+
                 # Editable centroid doubles as emptiness check: None = empty.
-                # This replaces a separate _is_segment_empty() call that did
-                # its own GetBinaryLabelmapRepresentation just to check extent.
-                edit_centroid = helper_ref.get_segment_centroid(editable_node, segment_name)
+                # Use _local_to_world_centroid to account for parent transforms.
+                edit_centroid = helper_ref._local_to_world_centroid(editable_node, segment_name)
                 empty = edit_centroid is None
                 print(f"[SegFocus] selected: '{segment_name}' (id={seg_id}, empty={empty})")
 
@@ -1103,8 +1359,9 @@ class SlicerHelper:
                     return
 
                 # Lookup reference centroid (cached after first computation).
+                # Reference has no parent transform, so world = local.
                 if segment_name not in _ref_centroids:
-                    ref_centroid = helper_ref.get_segment_centroid(reference_node, segment_name)
+                    ref_centroid = helper_ref._local_to_world_centroid(reference_node, segment_name)
                     _ref_centroids[segment_name] = ref_centroid
                     print(f"[SegFocus] ref centroid computed and cached for '{segment_name}'")
                 else:

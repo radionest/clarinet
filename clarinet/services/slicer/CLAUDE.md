@@ -129,10 +129,15 @@ Runs inside Slicer Python environment. Has `_Dummy` fallback for testing outside
 - `get_segment_names(segmentation)` → `list[str]` — ordered segment names from a segmentation node
 - `get_segment_centroid(segmentation, segment_name)` → `tuple[float,float,float] | None` — extracts per-segment labelmap via `node.GetBinaryLabelmapRepresentation()` and computes tight non-zero voxel center with numpy; handles shared labelmaps and missing extent metadata; observer-safe (no event processing); None if empty
 - `copy_segments(source_seg, target_seg, segment_names=None, empty=False)` — copy segments between segmentations; `empty=True` copies only metadata (name + color)
+- `rename_segments(segmentation, prefix="NEW", color=None, start_from=1)` → `int` — rename all segments to `{prefix}_{N}` with optional color; returns count
 - `auto_number_segment(segmentation, prefix="ROI", start_from=None)` → `int` — adds `{prefix}_{N+1}` segment, returns assigned number
 - `subtract_segmentations(seg_a, seg_b, output_name=None, max_overlap=0, max_overlap_ratio=None)` — ROI-level subtraction: removes seg_a segments overlapping with seg_b. In-place or new node if `output_name` set
+- `binarize_and_split_islands(segmentation, output_name="_BinarizedIslands", min_island_size=1)` — merges all segments into a single binary mask (any label > 0), then splits connected components into individual segments via Islands effect. Returns new segmentation node. Used to convert multi-category segmentations (e.g. mts/unclear/benign) into per-island segments for ROI-level comparison
 - `set_dual_layout(volume_a, volume_b, seg_a=None, seg_b=None, linked=True, orientation_a=None, orientation_b=None)` — side-by-side view with Red/Yellow composites, per-view segmentation visibility, and auto-detected orientation per volume (reads IJK-to-RAS direction matrix); pass `orientation_a`/`orientation_b` ("Axial", "Sagittal", "Coronal") to override auto-detection
-- `setup_segment_focus_observer(editable_seg, reference_seg, reference_views=, editable_views=, only_empty=)` — auto-navigate to segment centroid on selection; `reference_views` (default `["Red", "Yellow"]`) jump to reference centroid, `editable_views` (default `[]`) jump to editable centroid (falls back to reference if empty); `only_empty=True` (default) skips non-empty segments; observer tracked for `cleanup()`; caches reference centroids (immutable during session)
+- `align_by_center(moving_volume, reference_volume, moving_segmentation=None, transform_name="AlignTransform")` → `vtkMRMLLinearTransformNode` — pure translation aligning image centers; applies transform to moving volume (and optional segmentation)
+- `refine_alignment_by_centroids(moving_seg, reference_seg, transform_node, min_landmarks=1)` → `int` — computes rigid-body transform (vtkLandmarkTransform / Horn method) from matching segment centroids in LOCAL RAS; replaces matrix on existing transform node; returns number of landmark pairs used (0 = no change). Edge cases: 1 pt = translation, 2 pts = translation + partial rotation, 3+ = full rigid
+- `_local_to_world_centroid(segmentation, segment_name)` → `tuple[float,float,float] | None` — converts `get_segment_centroid()` local RAS to world RAS by applying parent MRML transform (if any); returns local directly when no parent transform exists
+- `setup_segment_focus_observer(editable_seg, reference_seg, reference_views=, editable_views=, only_empty=, on_refine=)` — auto-navigate to segment centroid on selection; `reference_views` (default `["Red", "Yellow"]`) jump to reference centroid, `editable_views` (default `[]`) jump to editable centroid (falls back to reference if empty); `only_empty=True` (default) skips non-empty segments; `on_refine` optional callback invoked before centroid computation on each segment switch (use to update alignment transforms); observer tracked for `cleanup()`; caches reference centroids (immutable during session); uses `_local_to_world_centroid` for transform-aware coordinates
 
 ### VTK / Slicer pitfalls (learned the hard way)
 
@@ -143,6 +148,12 @@ Runs inside Slicer Python environment. Has `_Dummy` fallback for testing outside
 3. **No processEvents() in callbacks:** `SegmentStatistics` and some Slicer utilities call `slicer.app.processEvents()` internally. Inside a VTK observer callback this causes re-entrant event processing → deadlocks. Use only pure VTK + numpy operations.
 
 4. **np.nonzero() on large volumes:** `np.nonzero(arr > 0)` allocates 3 arrays of coordinates for ALL non-zero voxels — millions of int64 entries for a 512x512x300 segment. Use `np.any(mask, axis=(...))` projections instead (three 1D arrays of ~512 entries).
+
+5. **ExportAllSegmentsToLabelmapNode extent (Slicer 5.10):** In Slicer 5.10 the function accepts at most 3 args: `(segmentationNode, labelmapNode, extentComputationMode)`. The 4-arg form with `referenceVolumeNode` does **not** exist. Use `extentComputationMode=0` for reference-geometry-based extent (not `2` as in newer Slicer docs). Without the 3rd arg, each export crops to the segmentation's own bounding box — two segmentations in the same space produce different-shaped arrays, breaking voxel-level comparison. Pattern:
+   ```python
+   seg.SetReferenceImageGeometryParameterFromVolumeNode(volume)
+   seg_logic.ExportAllSegmentsToLabelmapNode(seg, labelmap, 0)
+   ```
 
 ### Source volume auto-detection
 
