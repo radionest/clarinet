@@ -57,12 +57,21 @@ def resolve_record_field(record: RecordBase, field_path: str) -> str:
     return str(obj) if obj is not None else ""
 
 
-def resolve_pattern(pattern: str, record: RecordBase) -> str:
-    """Replace placeholders {field} with values from record.
+def resolve_pattern(
+    pattern: str,
+    record: RecordBase,
+    *fallbacks: RecordBase | None,
+) -> str:
+    """Replace placeholders {field} with values from record, with fallback chain.
+
+    Tries the primary record first, then each fallback in order. This allows
+    patterns like ``{user_id}`` to resolve from a parent record when the
+    current record (e.g. an auto-record) has no user.
 
     Args:
         pattern: Pattern string with placeholders like {id}, {data.FIELD}
-        record: Record instance to get values from
+        record: Primary record instance to get values from
+        *fallbacks: Additional records to try if the field is empty on primary
 
     Returns:
         Pattern with placeholders replaced by actual values
@@ -70,15 +79,20 @@ def resolve_pattern(pattern: str, record: RecordBase) -> str:
     Examples:
         >>> resolve_pattern("result_{id}.json", record)
         "result_42.json"
-        >>> resolve_pattern("birads_{data.BIRADS_R}.txt", record)
-        "birads_4.txt"
-        >>> resolve_pattern("seg_{study_uid}_{id}.seg.nrrd", record)
-        "seg_1.2.3.4.5_42.seg.nrrd"
+        >>> resolve_pattern("seg_{user_id}.nrrd", auto_record, parent_record)
+        "seg_user-123.nrrd"  # user_id from parent
     """
 
     def replacer(match: re.Match[str]) -> str:
         field_path = match.group(1)
-        return resolve_record_field(record, field_path)
+        value = resolve_record_field(record, field_path)
+        if not value:
+            for fb in fallbacks:
+                if fb is not None:
+                    value = resolve_record_field(fb, field_path)
+                    if value:
+                        break
+        return value
 
     return PLACEHOLDER_REGEX.sub(replacer, pattern)
 

@@ -18,6 +18,7 @@ from fastapi import (
 )
 from fastapi.responses import JSONResponse
 from sqlmodel import SQLModel
+from starlette.responses import Response
 
 from clarinet.api.auth_config import current_active_user
 from clarinet.api.dependencies import (
@@ -267,25 +268,29 @@ async def get_record(
     return mask_record_patient_data(RecordRead.model_validate(record), user)
 
 
-@router.get("/{record_id}/schema", response_class=JSONResponse)
+@router.get(
+    "/{record_id}/schema",
+    response_class=JSONResponse,
+    responses={
+        200: {"description": "Hydrated JSON Schema with x-options resolved"},
+        204: {"description": "Record type has no data schema"},
+    },
+)
 async def get_hydrated_schema(
     record: AuthorizedRecordDep,
     session: SessionDep,
-) -> JSONResponse:
+) -> Response:
     """Return the record type's JSON Schema with ``x-options`` resolved.
 
     Args:
         record_id: ID of the record.
 
     Returns:
-        Hydrated JSON Schema dict.
-
-    Raises:
-        NOT_FOUND: If the record or its data_schema does not exist.
+        Hydrated JSON Schema dict, or 204 if the record type has no data_schema.
     """
     schema = record.record_type.data_schema
     if not schema:
-        raise NOT_FOUND.with_context("Record type has no data schema")
+        return Response(status_code=204)
     hydrated = await hydrate_schema(schema, record, session)
     return JSONResponse(content=hydrated)
 
@@ -319,9 +324,7 @@ async def add_record(
     """
     # Validate and inherit from parent record if specified
     if new_record.parent_record_id is not None:
-        parent = await repo.validate_parent_record(
-            new_record.parent_record_id, new_record.record_type_name
-        )
+        parent = await repo.validate_parent_record(new_record.parent_record_id)
         # Inherit user_id from parent if not explicitly set
         if new_record.user_id is None:
             new_record.user_id = parent.user_id
@@ -379,7 +382,13 @@ async def submit_record_data(
 
     # Validate input files if defined (raise on missing required files)
     record_read = RecordRead.model_validate(record)
-    file_result = await validate_record_files(record_read, raise_on_invalid=True)
+    parent_read = None
+    if record.parent_record_id is not None:
+        parent = await repo.get_with_relations(record.parent_record_id)
+        parent_read = RecordRead.model_validate(parent)
+    file_result = await validate_record_files(
+        record_read, raise_on_invalid=True, parent=parent_read
+    )
 
     if file_result and file_result.matched_files:
         await repo.set_files(record, file_result.matched_files)
@@ -433,6 +442,7 @@ async def update_record(
 @router.post("/{record_id}/validate-files")
 async def validate_files_endpoint(
     record: AuthorizedRecordDep,
+    repo: RecordRepositoryDep,
 ) -> FileValidationResult:
     """Validate input files for a record without saving the result.
 
@@ -446,7 +456,11 @@ async def validate_files_endpoint(
         FileValidationResult with validation status and matched files
     """
     record_read = RecordRead.model_validate(record)
-    result = await validate_record_files(record_read)
+    parent_read = None
+    if record.parent_record_id is not None:
+        parent = await repo.get_with_relations(record.parent_record_id)
+        parent_read = RecordRead.model_validate(parent)
+    result = await validate_record_files(record_read, parent=parent_read)
     if result is None:
         return FileValidationResult(valid=True)
 
@@ -474,9 +488,15 @@ async def check_record_files(
     record = authorized_record
     record_read = RecordRead.model_validate(record)
 
+    # Fetch parent for fallback pattern resolution
+    parent_read = None
+    if record.parent_record_id is not None:
+        parent = await repo.get_with_relations(record.parent_record_id)
+        parent_read = RecordRead.model_validate(parent)
+
     # Auto-unblock: if record is blocked, check whether input files are now present
     if record.status == RecordStatus.blocked:
-        file_result = await validate_record_files(record_read)
+        file_result = await validate_record_files(record_read, parent=parent_read)
         if file_result is not None and file_result.valid:
             if file_result.matched_files:
                 await repo.set_files(record, file_result.matched_files)

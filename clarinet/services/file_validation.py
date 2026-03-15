@@ -119,6 +119,7 @@ class FileValidator:
         record: RecordBase,
         directory: Path,
         working_dirs: dict[DicomQueryLevel, Path] | None = None,
+        parent: RecordBase | None = None,
     ) -> FileValidationResult:
         """Validate files against the file definitions.
 
@@ -129,6 +130,7 @@ class FileValidator:
                 file lookups.  When a file definition has a ``level``
                 attribute, the corresponding directory from this map is
                 used instead of *directory*.
+            parent: Optional parent record for fallback pattern resolution.
 
         Returns:
             FileValidationResult with validation status and matched files
@@ -140,7 +142,7 @@ class FileValidator:
         matched: dict[str, str] = {}
 
         for file_def in self._file_definitions:
-            resolved = resolve_pattern(file_def.pattern, record)
+            resolved = resolve_pattern(file_def.pattern, record, parent)
 
             # Level-aware directory resolution
             if file_def.level and working_dirs and file_def.level in working_dirs:
@@ -173,6 +175,7 @@ async def validate_record_files(
     record: RecordRead,
     *,
     raise_on_invalid: bool = False,
+    parent: RecordRead | None = None,
 ) -> FileValidationResult | None:
     """Validate input files for a record.
 
@@ -186,6 +189,7 @@ async def validate_record_files(
     Args:
         record: RecordRead instance with all relations populated
         raise_on_invalid: If True, raise ValidationError on missing files.
+        parent: Optional parent record for fallback pattern resolution.
 
     Returns:
         FileValidationResult if validation was performed, None if no input files defined
@@ -199,7 +203,7 @@ async def validate_record_files(
     directory = Path(record.working_folder)
     working_dirs = _build_working_dirs(record)
     validator = FileValidator(input_defs)
-    result = await run_in_fs_thread(validator.validate, record, directory, working_dirs)
+    result = await run_in_fs_thread(validator.validate, record, directory, working_dirs, parent)
     if not result.valid and raise_on_invalid:
         errors = "; ".join(f"{e.file_name}: {e.message}" for e in result.errors)
         raise ValidationError(f"File validation failed: {errors}")

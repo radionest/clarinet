@@ -17,21 +17,25 @@ master_model = FileDef(
 
 segmentation_single = FileDef(
     pattern="segmentation_single_{user_id}.seg.nrrd",
+    level="STUDY",
     description="Segmentation from single-study review",
 )
 
 segmentation_with_archive = FileDef(
     pattern="segmentation_with_archive_{user_id}.seg.nrrd",
+    level="STUDY",
     description="Segmentation from review with archive CT studies",
 )
 
 master_projection = FileDef(
     pattern="master_projection.seg.nrrd",
+    level="SERIES",
     description="Projection of master model onto a specific series coordinate space",
 )
 
 second_review_output = FileDef(
     pattern="second_review_{user_id}.seg.nrrd",
+    level="SERIES",
     description="Second review classification: metastasis/unclear/benign/invisible",
 )
 
@@ -182,8 +186,8 @@ compare_with_projection = RecordDef(
     description="Automatic comparison of doctor segmentation with master model projection",
     label="Compare with projection",
     level="SERIES",
-    min_records=1,
-    max_records=1,
+    min_records=2,
+    max_records=4,
     role="auto",
     data_schema="schemas/compare_with_projection.schema.json",
     files=[

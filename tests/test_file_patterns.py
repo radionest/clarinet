@@ -121,6 +121,33 @@ class TestResolvePattern:
         result = resolve_pattern("{record_type.name}_output.nrrd", mock_record)
         assert result == "ct_segmentation_output.nrrd"
 
+    def test_fallback_to_parent(self, mock_record: MagicMock) -> None:
+        """Test that {user_id} resolves from parent when empty on record."""
+        child = MagicMock()
+        child.user_id = None
+        child.id = 99
+        child.data = {}
+
+        result = resolve_pattern("seg_{user_id}.nrrd", child, mock_record)
+        assert result == "seg_user-123.nrrd"
+
+    def test_record_takes_precedence_over_parent(self, mock_record: MagicMock) -> None:
+        """Test that record value is used when both record and parent have the field."""
+        parent = MagicMock()
+        parent.user_id = "parent-user"
+
+        result = resolve_pattern("seg_{user_id}.nrrd", mock_record, parent)
+        assert result == "seg_user-123.nrrd"
+
+    def test_no_parent_empty_field(self) -> None:
+        """Test that empty field resolves to empty string when no parent given."""
+        child = MagicMock()
+        child.user_id = None
+        child.id = 99
+
+        result = resolve_pattern("seg_{user_id}.nrrd", child)
+        assert result == "seg_.nrrd"
+
 
 class TestGlobFilePaths:
     """Tests for glob_file_paths function."""

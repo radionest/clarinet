@@ -38,7 +38,7 @@ async def test_bootstrap_loads_python_config(
         """\
         from clarinet.config.primitives import FileDef
 
-        seg_mask = FileDef(pattern="seg.nrrd", description="Segmentation mask")
+        seg_mask = FileDef(pattern="seg.nrrd", level="SERIES", description="Segmentation mask")
         """,
     )
     _write_record_types(
@@ -80,7 +80,7 @@ async def test_file_refs_resolved(
         """\
         from clarinet.config.primitives import FileDef
 
-        master_model = FileDef(pattern="master.nrrd", description="Master model")
+        master_model = FileDef(pattern="master.nrrd", level="SERIES", description="Master model")
         """,
     )
     _write_record_types(
@@ -300,7 +300,7 @@ async def test_single_file_mode(
         """\
         from clarinet.config.primitives import FileDef, FileRef, RecordDef
 
-        my_file = FileDef(pattern="output.nrrd", description="Output file")
+        my_file = FileDef(pattern="output.nrrd", level="SERIES", description="Output file")
 
         single_file_type = RecordDef(
             name="single_file_type",
@@ -329,7 +329,7 @@ async def test_backward_compat_old_names(
         from clarinet.config.primitives import File, RecordTypeDef, FileRef
         from clarinet.models.file_schema import FileRole
 
-        old_file = File(pattern="old.nrrd", description="Old name")
+        old_file = File(pattern="old.nrrd", level="SERIES", description="Old name")
 
         old_type = RecordTypeDef(
             name="old_type",

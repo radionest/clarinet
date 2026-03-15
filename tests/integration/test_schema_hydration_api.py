@@ -151,10 +151,10 @@ class TestGetHydratedSchema:
             assert "title" in opt
             assert "#" in opt["title"]
 
-    async def test_no_data_schema_returns_404(
+    async def test_no_data_schema_returns_204(
         self, client, test_session, study_with_series, record_type_no_schema
     ):
-        """GET /records/{id}/schema returns 404 when no data_schema."""
+        """GET /records/{id}/schema returns 204 when no data_schema."""
         data = study_with_series
         rec = Record(
             record_type_name=record_type_no_schema.name,
@@ -167,7 +167,7 @@ class TestGetHydratedSchema:
         await test_session.refresh(rec)
 
         resp = await client.get(f"{RECORDS_BASE}/{rec.id}/schema")
-        assert resp.status_code == 404
+        assert resp.status_code == 204
 
     async def test_static_schema_returned_unchanged(
         self, client, test_session, study_with_series, record_type_static_schema

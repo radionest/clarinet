@@ -137,7 +137,21 @@ Bootstrap uses `reconcile_config()` from `clarinet/utils/bootstrap.py` — dispa
 | `services/record_type_service.py` | RecordType CRUD and record data validation against schema |
 | `services/session_cleanup.py` | Background stale session cleanup service |
 
-`clarinet/client.py` — `ClarinetClient`: HTTP client to own API (used by RecordFlow engine).
+`clarinet/client.py` — `ClarinetClient`: HTTP client to own API (used by RecordFlow engine and pipeline tasks).
+
+Key methods:
+
+| Method | Description |
+|---|---|
+| `create_record(RecordCreate)` | Create a record |
+| `get_record(record_id)` | Get record by ID |
+| `find_records(**filters)` | Search records (query params: `record_type_name`, `study_uid`, `series_uid`, `record_status`, etc.) |
+| `submit_record_data(record_id, data)` | Submit data + set finished |
+| `update_record_data(record_id, data)` | Update data on finished record |
+| `update_record_status(record_id, status)` | Change record status |
+| `check_record_files(record_id)` | Compute checksums, auto-unblock if blocked |
+| `get_study(study_uid)` | Get study |
+| `anonymize_patient(patient_id)` | Trigger patient anonymization |
 
 ## Admin Management
 

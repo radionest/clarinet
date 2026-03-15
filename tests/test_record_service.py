@@ -337,6 +337,7 @@ class TestCreateRecord:
         """create_record fires status-change trigger with old_status=None."""
         record_mock = MagicMock()
         record_mock.id = 1
+        record_mock.parent_record_id = None
         record_read_mock = MagicMock()
 
         repo_mock = AsyncMock()
@@ -355,7 +356,7 @@ class TestCreateRecord:
             result = await service.create_record(record_mock)
 
             repo_mock.create_with_relations.assert_awaited_once_with(record_mock)
-            patched_vrf.assert_awaited_once_with(record_read_mock)
+            patched_vrf.assert_awaited_once_with(record_read_mock, parent=None)
             engine_mock.handle_record_status_change.assert_awaited_once_with(record_read_mock, None)
             assert result == record_mock
 
@@ -364,6 +365,7 @@ class TestCreateRecord:
         """create_record sets matched files when validation passes."""
         record_mock = MagicMock()
         record_mock.id = 1
+        record_mock.parent_record_id = None
         refreshed_mock = MagicMock()
         record_read_mock = MagicMock()
         refreshed_read_mock = MagicMock()
@@ -400,6 +402,7 @@ class TestCreateRecord:
         """create_record sets blocked status when required files are missing."""
         record_mock = MagicMock()
         record_mock.id = 1
+        record_mock.parent_record_id = None
         blocked_mock = MagicMock()
         blocked_mock.status = RecordStatus.blocked
         record_read_mock = MagicMock()
@@ -436,6 +439,7 @@ class TestCreateRecord:
         """create_record does not fire trigger when engine is None."""
         record_mock = MagicMock()
         record_mock.id = 1
+        record_mock.parent_record_id = None
 
         repo_mock = AsyncMock()
         repo_mock.create_with_relations.return_value = record_mock

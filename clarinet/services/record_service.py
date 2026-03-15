@@ -43,9 +43,15 @@ class RecordService:
         """
         record = await self.repo.create_with_relations(record)
 
+        # Fetch parent for fallback pattern resolution
+        parent_read = None
+        if record.parent_record_id is not None:
+            parent = await self.repo.get_with_relations(record.parent_record_id)
+            parent_read = RecordRead.model_validate(parent)
+
         # Validate input files
         record_read = RecordRead.model_validate(record)
-        file_result = await validate_record_files(record_read)
+        file_result = await validate_record_files(record_read, parent=parent_read)
 
         if file_result is not None:
             if file_result.valid and file_result.matched_files:
@@ -87,6 +93,20 @@ class RecordService:
             Tuple of (updated record, old status).
         """
         record, old_status = await self.repo.assign_user(record_id, user_id)
+        if old_status != record.status:
+            await self._fire_status_change(record, old_status)
+        return record, old_status
+
+    async def unassign_user(self, record_id: int) -> tuple[Record, RecordStatus]:
+        """Remove user from a record and fire RecordFlow trigger if status changed.
+
+        Args:
+            record_id: Record ID.
+
+        Returns:
+            Tuple of (updated record, old status).
+        """
+        record, old_status = await self.repo.unassign_user(record_id)
         if old_status != record.status:
             await self._fire_status_change(record, old_status)
         return record, old_status
