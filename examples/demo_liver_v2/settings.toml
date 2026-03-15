@@ -25,7 +25,9 @@ rabbitmq_password = "clarinet_test"
 
 anon_send_to_pacs = true
 config_mode = "python"
-recordflow_paths = ["./tasks"]
+config_record_types_file = "definitions/record_types.py"
+config_context_hydrators_file = "hydrators/context_hydrators.py"
+recordflow_paths = ["./tasks/workflows"]
 frontend_enabled = true
 
 # DICOM settings (local node)
