@@ -151,6 +151,16 @@ async def open_record_in_slicer(
     Raises:
         NoScriptError: If the record type has no slicer_script configured.
     """
+    logger.info(
+        f"Starting Slicer open operation: record_id={record_id}, user_id={_current_user.id}",
+        extra={
+            "record_id": record_id,
+            "user_id": str(_current_user.id),
+            "operation": "slicer_open",
+            "timeout": 60.0,
+        },
+    )
+
     record = await record_repo.get_with_relations(record_id)
     record_read = RecordRead.model_validate(record)
 
@@ -161,9 +171,21 @@ async def open_record_in_slicer(
 
     slicer_url = f"http://{client_ip}:{settings.slicer_port}"
     logger.info(f"Opening record {record_id} in Slicer at {slicer_url}")
-    return await service.execute(
+
+    result = await service.execute(
         slicer_url, record_read.record_type.slicer_script, context, request_timeout=60.0
     )
+
+    logger.info(
+        f"Slicer open operation completed: record_id={record_id}",
+        extra={
+            "record_id": record_id,
+            "user_id": str(_current_user.id),
+            "operation": "slicer_open_complete",
+        },
+    )
+
+    return result
 
 
 @router.post("/records/{record_id}/validate")
@@ -192,6 +214,16 @@ async def validate_record_in_slicer(
     Raises:
         NoScriptError: If the record type has no slicer_result_validator configured.
     """
+    logger.info(
+        f"Starting Slicer validation operation: record_id={record_id}, user_id={_current_user.id}",
+        extra={
+            "record_id": record_id,
+            "user_id": str(_current_user.id),
+            "operation": "slicer_validate",
+            "timeout": 60.0,
+        },
+    )
+
     record = await record_repo.get_with_relations(record_id)
     record_read = RecordRead.model_validate(record)
 
@@ -204,6 +236,18 @@ async def validate_record_in_slicer(
 
     slicer_url = f"http://{client_ip}:{settings.slicer_port}"
     logger.info(f"Validating record {record_id} in Slicer at {slicer_url}")
-    return await service.execute(
+
+    result = await service.execute(
         slicer_url, record_read.record_type.slicer_result_validator, context, request_timeout=60.0
     )
+
+    logger.info(
+        f"Slicer validation operation completed: record_id={record_id}",
+        extra={
+            "record_id": record_id,
+            "user_id": str(_current_user.id),
+            "operation": "slicer_validate_complete",
+        },
+    )
+
+    return result

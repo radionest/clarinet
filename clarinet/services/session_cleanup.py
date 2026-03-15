@@ -86,17 +86,38 @@ class SessionCleanupService:
                 # Delete in batches to avoid locking
                 deleted_total = 0
                 while deleted_total < expired_count:
-                    # SQLite doesn't support LIMIT in DELETE, use subquery
-                    subquery = (
-                        select(col(AccessToken.token))
+                    # Get tokens to delete (with details for logging)
+                    tokens_query = (
+                        select(AccessToken)
                         .where(AccessToken.expires_at <= datetime.now(UTC))  # type:ignore[arg-type]
                         .limit(self.batch_size)
-                        .subquery()
                     )
+                    tokens_result = await session.execute(tokens_query)
+                    tokens_to_delete = tokens_result.scalars().all()
 
-                    delete_stmt = delete(AccessToken).where(
-                        col(AccessToken.token).in_(select(subquery))
-                    )
+                    if not tokens_to_delete:
+                        break
+
+                    # Log details before deletion
+                    for token_obj in tokens_to_delete:
+                        logger.debug(
+                            f"Deleting expired session: token={token_obj.token[:8]}..., "
+                            f"user_id={token_obj.user_id}, "
+                            f"expired_at={token_obj.expires_at.isoformat()}, "
+                            f"last_accessed={token_obj.last_accessed.isoformat()}",
+                            extra={
+                                "token_preview": token_obj.token[:8],
+                                "user_id": str(token_obj.user_id),
+                                "expires_at": token_obj.expires_at.isoformat(),
+                                "last_accessed": token_obj.last_accessed.isoformat(),
+                                "created_at": token_obj.created_at.isoformat(),
+                                "reason": "expired",
+                            },
+                        )
+
+                    # SQLite doesn't support LIMIT in DELETE, use subquery
+                    token_ids = [t.token for t in tokens_to_delete]
+                    delete_stmt = delete(AccessToken).where(col(AccessToken.token).in_(token_ids))
 
                     dr: CursorResult[Any] = await session.execute(delete_stmt)  # type: ignore[assignment]
                     await session.commit()
@@ -107,7 +128,7 @@ class SessionCleanupService:
                     if deleted_count == 0:
                         break
 
-                    logger.debug(f"Deleted {deleted_count} expired sessions")
+                    logger.debug(f"Deleted {deleted_count} expired sessions in batch")
 
                     # Small delay between batches
                     if deleted_total < expired_count:
@@ -120,13 +141,39 @@ class SessionCleanupService:
                     cutoff_date = datetime.now(UTC) - timedelta(
                         days=settings.session_cleanup_retention_days
                     )
-                    old_stmt = delete(AccessToken).where(
+
+                    # Get old tokens for logging
+                    old_tokens_query = select(AccessToken).where(
                         AccessToken.created_at < cutoff_date  # type:ignore[arg-type]
                     )
-                    old_result: CursorResult[Any] = await session.execute(old_stmt)  # type: ignore[assignment]
-                    await session.commit()
+                    old_tokens_result = await session.execute(old_tokens_query)
+                    old_tokens = old_tokens_result.scalars().all()
 
-                    if old_result.rowcount > 0:
+                    if old_tokens:
+                        for token_obj in old_tokens:
+                            age_days = (datetime.now(UTC) - token_obj.created_at).days
+                            logger.warning(
+                                f"Deleting ancient session: token={token_obj.token[:8]}..., "
+                                f"user_id={token_obj.user_id}, "
+                                f"age={age_days} days, "
+                                f"last_accessed={token_obj.last_accessed.isoformat()}",
+                                extra={
+                                    "token_preview": token_obj.token[:8],
+                                    "user_id": str(token_obj.user_id),
+                                    "age_days": age_days,
+                                    "created_at": token_obj.created_at.isoformat(),
+                                    "last_accessed": token_obj.last_accessed.isoformat(),
+                                    "expires_at": token_obj.expires_at.isoformat(),
+                                    "reason": "ancient",
+                                },
+                            )
+
+                        old_stmt = delete(AccessToken).where(
+                            AccessToken.created_at < cutoff_date  # type:ignore[arg-type]
+                        )
+                        old_result: CursorResult[Any] = await session.execute(old_stmt)  # type: ignore[assignment]
+                        await session.commit()
+
                         logger.info(f"Removed {old_result.rowcount} ancient sessions")
 
             except Exception as e:

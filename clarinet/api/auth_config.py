@@ -147,6 +147,14 @@ class DatabaseStrategy(Strategy[User, UUID]):
         # Check in-memory cache for recent validations
         ttl = settings.session_cache_ttl_seconds
         if ttl > 0 and token in self._user_cache:
+            logger.debug(
+                f"Token {token[:8]}... validated from cache",
+                extra={
+                    "token_preview": token[:8],
+                    "cache_hit": True,
+                    "request_path": self.request.url.path if self.request else None,
+                },
+            )
             return self._user_cache[token]  # type: ignore[no-any-return]
 
         # Query token with expiration check
@@ -158,7 +166,19 @@ class DatabaseStrategy(Strategy[User, UUID]):
         access_token = result.scalar_one_or_none()
 
         if not access_token:
-            logger.debug(f"Token {token[:8]}... not found or expired")
+            logger.warning(
+                f"Token validation failed: token={token[:8]}..., "
+                f"path={self.request.url.path if self.request else 'N/A'}, "
+                f"ip={self.request.client.host if self.request and self.request.client else 'N/A'}",
+                extra={
+                    "token_preview": token[:8],
+                    "request_path": self.request.url.path if self.request else None,
+                    "request_ip": self.request.client.host
+                    if self.request and self.request.client
+                    else None,
+                    "reason": "not_found_or_expired",
+                },
+            )
             self._user_cache.pop(token, None)
             return None
 
@@ -168,8 +188,17 @@ class DatabaseStrategy(Strategy[User, UUID]):
             if access_token.ip_address and request_ip != access_token.ip_address:
                 logger.warning(
                     f"IP mismatch for token {token[:8]}...: "
-                    f"{request_ip} != {access_token.ip_address}"
+                    f"{request_ip} != {access_token.ip_address}, "
+                    f"path={self.request.url.path}",
+                    extra={
+                        "token_preview": token[:8],
+                        "request_ip": request_ip,
+                        "session_ip": access_token.ip_address,
+                        "request_path": self.request.url.path,
+                        "reason": "ip_mismatch",
+                    },
                 )
+                self._user_cache.pop(token, None)
                 return None
 
         # Check idle timeout
@@ -181,7 +210,20 @@ class DatabaseStrategy(Strategy[User, UUID]):
             idle_duration = datetime.now(UTC) - last_accessed
             max_idle = timedelta(minutes=settings.session_idle_timeout_minutes)
             if idle_duration > max_idle:
-                logger.info(f"Session {token[:8]}... expired due to inactivity")
+                logger.warning(
+                    f"Session idle timeout: token={token[:8]}..., "
+                    f"idle_duration={idle_duration.total_seconds():.1f}s, "
+                    f"max={max_idle.total_seconds():.1f}s, "
+                    f"path={self.request.url.path if self.request else 'N/A'}",
+                    extra={
+                        "token_preview": token[:8],
+                        "idle_duration_seconds": idle_duration.total_seconds(),
+                        "max_idle_seconds": max_idle.total_seconds(),
+                        "last_accessed": last_accessed.isoformat(),
+                        "request_path": self.request.url.path if self.request else None,
+                        "reason": "idle_timeout",
+                    },
+                )
                 self._user_cache.pop(token, None)
                 return None
 
@@ -225,7 +267,21 @@ class DatabaseStrategy(Strategy[User, UUID]):
         user = user_result.scalar_one_or_none()
 
         if not user or not user.is_active:
-            logger.warning(f"User {access_token.user_id} not found or inactive")
+            logger.warning(
+                f"User validation failed: user_id={access_token.user_id}, "
+                f"token={token[:8]}..., "
+                f"user_exists={user is not None}, "
+                f"user_active={user.is_active if user else False}, "
+                f"path={self.request.url.path if self.request else 'N/A'}",
+                extra={
+                    "token_preview": token[:8],
+                    "user_id": str(access_token.user_id),
+                    "user_exists": user is not None,
+                    "user_active": user.is_active if user else False,
+                    "request_path": self.request.url.path if self.request else None,
+                    "reason": "user_not_found" if not user else "user_inactive",
+                },
+            )
             self._user_cache.pop(token, None)
             return None
 
@@ -233,6 +289,24 @@ class DatabaseStrategy(Strategy[User, UUID]):
         if ttl > 0:
             self.session.expunge(user)
             self._user_cache[token] = user
+            logger.debug(
+                f"Token {token[:8]}... validated successfully and cached",
+                extra={
+                    "token_preview": token[:8],
+                    "user_id": str(user.id),
+                    "request_path": self.request.url.path if self.request else None,
+                    "cache_stored": True,
+                },
+            )
+        else:
+            logger.debug(
+                f"Token {token[:8]}... validated successfully (no cache)",
+                extra={
+                    "token_preview": token[:8],
+                    "user_id": str(user.id),
+                    "request_path": self.request.url.path if self.request else None,
+                },
+            )
 
         return user  # type: ignore[return-value]
 

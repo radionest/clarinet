@@ -153,7 +153,8 @@ def setup_logging(
 
     _logger.remove()
 
-    # Add console handler
+    # Add console handler (enqueue for thread safety — background threads
+    # from pynetdicom et al. may outlive the main thread / pytest teardown)
     _logger.add(
         sys.stderr,
         level=console_level or level,
@@ -162,6 +163,7 @@ def setup_logging(
         colorize=True,
         backtrace=True,
         diagnose=True,
+        enqueue=True,
     )
 
     # Add file handler if requested
@@ -181,6 +183,7 @@ def setup_logging(
             compression="zip",
             backtrace=True,
             diagnose=not serialize,
+            enqueue=True,
         )
 
     # Intercept standard library logging
