@@ -156,6 +156,7 @@ class DatabaseManager:
             AsyncSession: SQLModel async session
         """
         async with self.get_async_session_context() as session:
+            await session.connection()
             yield session
 
     async def close(self) -> None:

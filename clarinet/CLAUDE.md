@@ -4,6 +4,16 @@
 
 - Use `AsyncSession` for DB operations: `get_async_session` from `clarinet.utils.database`
 
+### `asyncio.gather` + AsyncSession
+
+`AsyncSession` is **not concurrency-safe**. All repositories in a single request share one session via FastAPI DI.
+
+`asyncio.gather` with **read-only SELECT queries** (count, list, scalar aggregates) is safe because:
+- Connection is pre-provisioned in `get_async_session` (`await session.connection()`)
+- No identity map mutations, no flush, no state transitions
+
+`asyncio.gather` with **write operations** (add, flush, delete, update) on the same session is **NOT safe** — will cause `InvalidRequestError` or `IllegalStateChangeError`. Use sequential `await` for writes.
+
 ## Lifespan Shutdown Pattern
 
 Resources initialized in `lifespan()` and shut down in its `finally` block must be **re-creatable** for test compatibility. Multiple tests may invoke `lifespan()` sequentially in the same process. If `shutdown()` destroys a module-level singleton without recreating it, subsequent lifespans fail.
