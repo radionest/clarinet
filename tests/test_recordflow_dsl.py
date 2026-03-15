@@ -334,19 +334,19 @@ class TestFlowRecordDSL:
     def test_or_without_if_raises(self):
         """or_() without preceding if_() raises ValueError."""
         fr = FlowRecord("test_type")
-        with pytest.raises(ValueError, match="or_.*must be called after if_"):
+        with pytest.raises(ValueError, match=r"or_.*must be called after if_"):
             fr.or_(FlowResult("r", ["x"]) == 1)
 
     def test_and_without_if_raises(self):
         """and_() without preceding if_() raises ValueError."""
         fr = FlowRecord("test_type")
-        with pytest.raises(ValueError, match="and_.*must be called after if_"):
+        with pytest.raises(ValueError, match=r"and_.*must be called after if_"):
             fr.and_(FlowResult("r", ["x"]) == 1)
 
     def test_else_without_if_raises(self):
         """else_() without preceding if_() raises ValueError."""
         fr = FlowRecord("test_type")
-        with pytest.raises(ValueError, match="else_.*must be called after if_"):
+        with pytest.raises(ValueError, match=r"else_.*must be called after if_"):
             fr.else_()
 
     def test_add_record_unconditional(self):
@@ -1791,7 +1791,7 @@ class TestMatchCase:
     def test_case_without_match_raises(self):
         """case() without preceding match() raises ValueError."""
         fr = FlowRecord("test")
-        with pytest.raises(ValueError, match="case.*must be called after match"):
+        with pytest.raises(ValueError, match=r"case.*must be called after match"):
             fr.case("CT")
 
     def test_match_without_case_validates_error(self):
@@ -1905,7 +1905,7 @@ class TestMatchCase:
     def test_default_without_match_raises(self):
         """default() without preceding match() raises ValueError."""
         fr = FlowRecord("test")
-        with pytest.raises(ValueError, match="default.*must be called after match"):
+        with pytest.raises(ValueError, match=r"default.*must be called after match"):
             fr.default()
 
     def test_default_validates_ok(self):

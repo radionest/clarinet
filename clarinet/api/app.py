@@ -11,12 +11,12 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 try:
     from fastapi.responses import ORJSONResponse
 
-    _default_response_class = ORJSONResponse
+    _default_response_class: type[ORJSONResponse] | None = ORJSONResponse
 except ImportError:
     _default_response_class = None
 
@@ -209,7 +209,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         logger.info("Application shutdown")
 
 
-# noinspection PyTypeChecker
 def create_app(root_path: str = "/") -> FastAPI:
     """
     Create and configure the FastAPI application.
@@ -226,10 +225,6 @@ def create_app(root_path: str = "/") -> FastAPI:
     RecordRead.model_rebuild()
     StudyRead.model_rebuild()
     SeriesRead.model_rebuild()
-    response_kwargs = {}
-    if _default_response_class is not None:
-        response_kwargs["default_response_class"] = _default_response_class
-
     app = FastAPI(
         title=settings.project_name,
         description=settings.project_description,
@@ -237,7 +232,7 @@ def create_app(root_path: str = "/") -> FastAPI:
         debug=settings.debug,
         lifespan=lifespan,
         root_path=root_path,
-        **response_kwargs,
+        default_response_class=_default_response_class or JSONResponse,
     )
 
     # Configure CORS

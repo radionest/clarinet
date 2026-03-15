@@ -378,9 +378,6 @@ class TestDiskWriteConcurrency:
 
         peak_concurrent = 0
         current_concurrent = 0
-        lock = asyncio.Lock()
-
-        original_write = cache._write_to_disk
 
         def slow_write(study_uid: str, series_uid: str, instances: dict[str, Any]) -> None:
             """Replacement _write_to_disk that tracks concurrency."""

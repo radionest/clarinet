@@ -126,4 +126,3 @@ class RecordTypeRepository(BaseRepository[RecordType]):
         existing = await self.get_by(name=name)
         if existing:
             raise RecordTypeAlreadyExistsError(name)
-
