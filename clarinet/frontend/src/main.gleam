@@ -543,6 +543,45 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     store.AdminAssignUserResult(Error(err)) ->
       handle_api_error(model, err, "Failed to assign user to record")
 
+    // Admin status change
+    store.AdminToggleStatusDropdown(record_id) -> {
+      #(
+        store.Model(..model, admin_editing_status_record_id: record_id),
+        effect.none(),
+      )
+    }
+
+    store.AdminChangeStatus(record_id, status) -> {
+      let change_effect = {
+        use dispatch <- effect.from
+        admin.update_record_status(record_id, status)
+        |> promise.tap(fn(result) {
+          dispatch(store.AdminChangeStatusResult(result))
+        })
+        Nil
+      }
+      #(
+        store.Model(
+          ..model,
+          admin_editing_status_record_id: None,
+          loading: True,
+        ),
+        change_effect,
+      )
+    }
+
+    store.AdminChangeStatusResult(Ok(record)) -> {
+      let new_model =
+        model
+        |> store.cache_record(record)
+        |> store.set_loading(False)
+        |> store.set_success("Status updated successfully")
+      #(new_model, effect.none())
+    }
+
+    store.AdminChangeStatusResult(Error(err)) ->
+      handle_api_error(model, err, "Failed to update record status")
+
     // Data loading - Record Detail
     store.LoadRecordDetail(id) ->
       load_with_effect(

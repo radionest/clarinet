@@ -1,5 +1,6 @@
 // Admin Dashboard page
 import api/models
+import api/types
 import utils/status
 import gleam/dict
 import gleam/int
@@ -178,17 +179,13 @@ fn record_row(model: Model, record: models.Record) -> Element(Msg) {
     None -> 0
   }
 
-  let status_str = status.to_backend_string(record.status)
-
   let is_editing = model.admin_editing_record_id == Some(record_id)
 
   html.tr([], [
     html.td([], [html.text(int.to_string(record_id))]),
     html.td([], [html.text(record.record_type_name)]),
     html.td([], [
-      html.span([attribute.class("badge badge-" <> status_color(status_str))], [
-        html.text(status_str),
-      ]),
+      status_cell(model: model, record_id: record_id, status: record.status),
     ]),
     html.td([], [html.text(record.patient_id)]),
     html.td([], [assign_cell(model: model, record_id: record_id, user_id: record.user_id, is_editing: is_editing)]),
@@ -259,6 +256,62 @@ fn user_dropdown(model: Model, record_id: Int) -> Element(Msg) {
       [
         attribute.class("btn btn-sm btn-outline"),
         event.on_click(store.AdminToggleAssignDropdown(None)),
+      ],
+      [html.text("Cancel")],
+    ),
+  ])
+}
+
+fn status_cell(
+  model model: Model,
+  record_id record_id: Int,
+  status record_status: types.RecordStatus,
+) -> Element(Msg) {
+  let is_editing = model.admin_editing_status_record_id == Some(record_id)
+  let status_str = status.to_backend_string(record_status)
+  case is_editing {
+    True -> html.div([attribute.class("assign-cell")], [status_dropdown(record_id)])
+    False ->
+      html.div([attribute.class("assign-cell")], [
+        html.span([attribute.class("badge badge-" <> status_color(status_str))], [
+          html.text(status_str),
+        ]),
+        html.text(" "),
+        html.button(
+          [
+            attribute.class("btn btn-sm btn-outline"),
+            event.on_click(store.AdminToggleStatusDropdown(Some(record_id))),
+          ],
+          [html.text("Change")],
+        ),
+      ])
+  }
+}
+
+fn status_dropdown(record_id: Int) -> Element(Msg) {
+  let statuses = ["blocked", "pending", "inwork", "finished", "failed", "pause"]
+  html.div([attribute.class("assign-dropdown")], [
+    html.select(
+      [
+        attribute.class("form-select form-select-sm"),
+        event.on_input(fn(value) {
+          case value {
+            "" -> store.AdminToggleStatusDropdown(None)
+            s -> store.AdminChangeStatus(record_id, s)
+          }
+        }),
+      ],
+      [
+        html.option([attribute.value("")], "Select status..."),
+        ..list.map(statuses, fn(s) {
+          html.option([attribute.value(s)], s)
+        })
+      ],
+    ),
+    html.button(
+      [
+        attribute.class("btn btn-sm btn-outline"),
+        event.on_click(store.AdminToggleStatusDropdown(None)),
       ],
       [html.text("Cancel")],
     ),

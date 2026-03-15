@@ -59,6 +59,7 @@ pub type Model {
     admin_stats: Option(AdminStats),
     record_type_stats: Option(List(RecordTypeStats)),
     admin_editing_record_id: Option(Int),
+    admin_editing_status_record_id: Option(Int),
     // Modal state
     modal_open: Bool,
     modal_content: ModalContent,
@@ -146,6 +147,11 @@ pub type Msg {
   AdminToggleAssignDropdown(record_id: Option(Int))
   AdminAssignUser(record_id: Int, user_id: String)
   AdminAssignUserResult(Result(Record, ApiError))
+
+  // Admin status change
+  AdminToggleStatusDropdown(record_id: Option(Int))
+  AdminChangeStatus(record_id: Int, status: String)
+  AdminChangeStatusResult(Result(Record, ApiError))
 
   // Form handling
   UpdateStudyForm(dynamic.Dynamic)
@@ -277,6 +283,7 @@ pub fn init() -> Model {
     admin_stats: None,
     record_type_stats: None,
     admin_editing_record_id: None,
+    admin_editing_status_record_id: None,
     modal_open: False,
     modal_content: NoModal,
     pacs_studies: [],
