@@ -139,7 +139,7 @@ async def compare_w_projection(msg: PipelineMessage, ctx: TaskContext) -> None:
 
     false_negative, false_positive_num = await asyncio.to_thread(_compare)
 
-    await ctx.client.update_record_data(
+    await ctx.client.submit_record_data(
         msg.record_id,
         {
             "false_negative": false_negative,

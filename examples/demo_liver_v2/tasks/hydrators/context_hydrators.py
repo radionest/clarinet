@@ -3,6 +3,7 @@
 Loaded automatically at startup by ``load_custom_slicer_hydrators()``.
 """
 
+import os
 from typing import Any
 
 from clarinet.models.record import RecordRead
@@ -121,3 +122,85 @@ async def hydrate_model_series_for_projection(
             }
 
     return {}
+
+
+@slicer_context_hydrator("projection_for_update")
+async def hydrate_projection_for_update(
+    record: RecordRead,
+    context: dict[str, Any],
+    ctx: SlicerHydrationContext,
+) -> dict[str, Any]:
+    """Inject projection and doctor segmentation paths for master model update.
+
+    Finds a ``compare_with_projection`` record with false positives for this
+    patient, resolves the target study/series UIDs, and builds file paths for
+    the projection and doctor segmentation so the Slicer script can compute
+    NEW_* false-positive ROIs at runtime.
+
+    Returns:
+        Dict with ``target_study_uid``, ``target_series_uid``,
+        ``projection_path``, ``doctor_segmentation_path``;
+        or empty dict if no comparison with false positives exists
+        (graceful fallback for intraop trigger).
+    """
+    criteria = RecordSearchCriteria(
+        patient_id=record.patient_id,
+        record_type_name="compare_with_projection",
+    )
+    comparisons = await ctx.record_repo.find_by_criteria(criteria)
+
+    # Find first comparison with false positives
+    comp = None
+    for c in comparisons:
+        if (c.data or {}).get("false_positive_num", 0) > 0:
+            comp = c
+            break
+
+    if comp is None:
+        return {}
+
+    # Get doctor user_id from parent segmentation record
+    if comp.parent_record_id is None:
+        return {}
+    parent_record = await ctx.record_repo.get(comp.parent_record_id)
+    user_id = parent_record.user_id
+    if user_id is None:
+        return {}
+
+    # Resolve study and series to anonymized UIDs
+    if comp.study_uid is None:
+        return {}
+    study = await ctx.study_repo.get_with_series(comp.study_uid)
+    study_anon_uid = study.anon_uid or study.study_uid
+
+    # Find the target series
+    target_series_uid = None
+    if comp.series_uid:
+        for series in study.series:
+            if series.series_uid == comp.series_uid:
+                target_series_uid = series.anon_uid or series.series_uid
+                break
+
+    if target_series_uid is None:
+        return {}
+
+    # Build file paths following FileResolver.build_working_dirs convention
+    patient_dir = context.get("working_folder", "")
+    projection_path = os.path.join(
+        patient_dir,
+        study_anon_uid,
+        target_series_uid,
+        "master_projection.seg.nrrd",
+    )
+    doctor_segmentation_path = os.path.join(
+        patient_dir,
+        study_anon_uid,
+        f"segmentation_single_{user_id}.seg.nrrd",
+    )
+
+    return {
+        "target_study_uid": study_anon_uid,
+        "target_series_uid": target_series_uid,
+        "projection_path": projection_path,
+        "doctor_segmentation_path": doctor_segmentation_path,
+    }

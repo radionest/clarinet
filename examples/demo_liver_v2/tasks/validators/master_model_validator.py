@@ -1,4 +1,4 @@
-"""Validator — check master model: names must be digits, immutability check."""
+"""Validator — auto-number segments, check names are digits, immutability check."""
 
 import os
 import re
@@ -6,6 +6,27 @@ import re
 node = slicer.util.getNode("MasterModel")  # type: ignore[name-defined]  # noqa: F821
 seg = node.GetSegmentation()
 
+# ---------------------------------------------------------------------------
+# Auto-numbering: rename non-numeric segments to next available number
+# ---------------------------------------------------------------------------
+max_num = 0
+non_numeric_sids = []
+
+for i in range(seg.GetNumberOfSegments()):
+    sid = seg.GetNthSegmentID(i)
+    name = seg.GetSegment(sid).GetName()
+    if re.match(r"^\d+$", name):
+        max_num = max(max_num, int(name))
+    else:
+        non_numeric_sids.append(sid)
+
+for sid in non_numeric_sids:
+    max_num += 1
+    seg.GetSegment(sid).SetName(str(max_num))
+
+# ---------------------------------------------------------------------------
+# Validation: all segment names must now be digits
+# ---------------------------------------------------------------------------
 current_names = []
 for i in range(seg.GetNumberOfSegments()):
     sid = seg.GetNthSegmentID(i)

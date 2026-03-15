@@ -225,7 +225,11 @@ update_master_model = RecordDef(
     slicer_script="scripts/update_master_model.py",
     slicer_result_validator="validators/master_model_validator.py",
     files=[FileRef(master_model, "output")],
-    slicer_context_hydrators=["patient_first_study"],
+    slicer_context_hydrators=[
+        "patient_first_study",            # best_study_uid (fallback for intraop trigger)
+        "model_series_for_projection",    # model_study_uid, model_series_uid (CT ref)
+        "projection_for_update",          # target_study_uid, target_series_uid, projection_path, doctor_segmentation_path
+    ],
     # master_model, output_file, working_folder, best_study_uid — auto-injected
 )
 

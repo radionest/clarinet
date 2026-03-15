@@ -21,9 +21,10 @@ Context variables (injected by build_slicer_context):
 """
 
 import os
-from typing import TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
+    slicer = Any
     from clarinet.services.slicer.helper import SlicerHelper  # type: ignore[import]
 s = SlicerHelper(working_folder)  # type: ignore[name-defined]  # noqa: F821
 
@@ -45,19 +46,28 @@ else:
     projection = s.create_segmentation("Projection")
     s.copy_segments(master_seg, projection, empty=True)
 
-# 5. Side-by-side: model CT on left, target + projection on right
-s.set_dual_layout(model_vol, target_vol, seg_a=master_seg, seg_b=projection, linked=True)
+# 5. Side-by-side: model CT on left, target + projection on right (unlinked — different coord spaces)
+s.set_dual_layout(model_vol, target_vol, seg_a=master_seg, seg_b=projection, linked=False)
 
-# 6. Setup editor on projection with target volume as source
+# 6. Rigid alignment: center-based initially, refined by segment centroids on each switch
+align_tf = s.align_by_center(target_vol, model_vol, moving_segmentation=projection)
+
+
+def _refine() -> None:
+    s.refine_alignment_by_centroids(projection, master_seg, align_tf)
+
+
+# 7. Setup editor on projection with target volume as source
 s.setup_editor(projection, effect="Paint", brush_size=5.0, source_volume=target_vol)
 
-# 7. Auto-navigate: Red → MasterModel centroid, Yellow → Projection centroid
+# 8. Auto-navigate: Red → MasterModel centroid, Yellow → Projection centroid
 s.setup_segment_focus_observer(
     projection,
     master_seg,
     reference_views=["Red"],
     editable_views=["Yellow"],
     only_empty=False,
+    on_refine=_refine,
 )
 
 s.annotate("Project master model ROIs onto target study")
