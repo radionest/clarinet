@@ -862,6 +862,35 @@ class SlicerHelper:
             vtk_seg_a.RemoveSegment(seg_id)
         return node_a
 
+    def _detect_acquisition_orientation(self, volume_node: Any) -> str:
+        """Determine natural acquisition plane from volume's direction matrix.
+
+        Args:
+            volume_node: Loaded vtkMRMLScalarVolumeNode.
+
+        Returns:
+            "Axial", "Sagittal", or "Coronal".
+        """
+        import numpy as np  # type: ignore[import-not-found]
+
+        try:
+            mat = vtk.vtkMatrix4x4()
+            volume_node.GetIJKToRASDirectionMatrix(mat)
+
+            # Third column = slice normal direction
+            slice_normal = np.array(
+                [
+                    mat.GetElement(0, 2),
+                    mat.GetElement(1, 2),
+                    mat.GetElement(2, 2),
+                ]
+            )
+            dominant = int(np.argmax(np.abs(slice_normal)))
+            # 0=L/R → Sagittal, 1=A/P → Coronal, 2=S/I → Axial
+            return {0: "Sagittal", 1: "Coronal", 2: "Axial"}[dominant]
+        except Exception:
+            return "Axial"
+
     def set_dual_layout(
         self,
         volume_a: Any,
@@ -869,6 +898,8 @@ class SlicerHelper:
         seg_a: SegmentationBuilder | Any | None = None,
         seg_b: SegmentationBuilder | Any | None = None,
         linked: bool = True,
+        orientation_a: str | None = None,
+        orientation_b: str | None = None,
     ) -> None:
         """Set side-by-side layout with two volumes and optional segmentations.
 
@@ -878,6 +909,10 @@ class SlicerHelper:
             seg_a: Optional segmentation visible only in the left view.
             seg_b: Optional segmentation visible only in the right view.
             linked: If True, link slice navigation between views.
+            orientation_a: Orientation for left view ("Axial", "Sagittal",
+                "Coronal"). Auto-detected from volume_a if None.
+            orientation_b: Orientation for right view ("Axial", "Sagittal",
+                "Coronal"). Auto-detected from volume_b if None.
         """
         layout_node = self._layout_manager.layoutLogic().GetLayoutNode()
         layout_node.SetViewArrangement(slicer.vtkMRMLLayoutNode.SlicerLayoutSideBySideView)
@@ -915,6 +950,18 @@ class SlicerHelper:
                 yellow_composite.SetLinkedControl(True)
 
         self._layout_manager.resetSliceViews()
+
+        # Set per-view orientation (auto-detect from volume if not specified)
+        orient_a = orientation_a or self._detect_acquisition_orientation(volume_a)
+        orient_b = orientation_b or self._detect_acquisition_orientation(volume_b)
+
+        red_node = self._scene.GetNodeByID("vtkMRMLSliceNodeRed")
+        yellow_node = self._scene.GetNodeByID("vtkMRMLSliceNodeYellow")
+
+        if red_node is not None:
+            red_node.SetOrientation(orient_a)
+        if yellow_node is not None:
+            yellow_node.SetOrientation(orient_b)
 
     def setup_segment_focus_observer(
         self,

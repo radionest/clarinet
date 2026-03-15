@@ -131,7 +131,7 @@ Runs inside Slicer Python environment. Has `_Dummy` fallback for testing outside
 - `copy_segments(source_seg, target_seg, segment_names=None, empty=False)` — copy segments between segmentations; `empty=True` copies only metadata (name + color)
 - `auto_number_segment(segmentation, prefix="ROI", start_from=None)` → `int` — adds `{prefix}_{N+1}` segment, returns assigned number
 - `subtract_segmentations(seg_a, seg_b, output_name=None, max_overlap=0, max_overlap_ratio=None)` — ROI-level subtraction: removes seg_a segments overlapping with seg_b. In-place or new node if `output_name` set
-- `set_dual_layout(volume_a, volume_b, seg_a=None, seg_b=None, linked=True)` — side-by-side view with Red/Yellow composites and per-view segmentation visibility
+- `set_dual_layout(volume_a, volume_b, seg_a=None, seg_b=None, linked=True, orientation_a=None, orientation_b=None)` — side-by-side view with Red/Yellow composites, per-view segmentation visibility, and auto-detected orientation per volume (reads IJK-to-RAS direction matrix); pass `orientation_a`/`orientation_b` ("Axial", "Sagittal", "Coronal") to override auto-detection
 - `setup_segment_focus_observer(editable_seg, reference_seg, reference_views=, editable_views=, only_empty=)` — auto-navigate to segment centroid on selection; `reference_views` (default `["Red", "Yellow"]`) jump to reference centroid, `editable_views` (default `[]`) jump to editable centroid (falls back to reference if empty); `only_empty=True` (default) skips non-empty segments; observer tracked for `cleanup()`; caches reference centroids (immutable during session)
 
 ### VTK / Slicer pitfalls (learned the hard way)
