@@ -182,3 +182,38 @@ pub fn assign_record_user(
     ))
   })
 }
+
+// Update record status (superuser only)
+pub fn update_record_status(
+  record_id: Int,
+  status: String,
+) -> Promise(Result(Record, ApiError)) {
+  let path =
+    "/admin/records/"
+    <> int.to_string(record_id)
+    <> "/status?record_status="
+    <> status
+  http_client.patch(path, json.to_string(json.object([])))
+  |> promise.map(fn(res) {
+    result.try(res, http_client.decode_response(
+      _,
+      records.record_decoder(),
+      "Invalid record data",
+    ))
+  })
+}
+
+// Unassign user from a record (superuser only)
+pub fn unassign_record_user(
+  record_id: Int,
+) -> Promise(Result(Record, ApiError)) {
+  let path = "/admin/records/" <> int.to_string(record_id) <> "/user"
+  http_client.delete(path)
+  |> promise.map(fn(res) {
+    result.try(res, http_client.decode_response(
+      _,
+      records.record_decoder(),
+      "Invalid record data",
+    ))
+  })
+}

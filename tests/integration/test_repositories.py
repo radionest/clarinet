@@ -487,6 +487,27 @@ class TestRecordRepository:
         assert rec.user_id == original_user_id  # should NOT change
 
     @pytest.mark.asyncio
+    async def test_unassign_user(self, env):
+        # Start with inwork + assigned user
+        env["record"].status = RecordStatus.inwork
+        await env["session"].commit()
+
+        rec, old_status = await env["repo"].unassign_user(env["record"].id)
+        assert rec.user_id is None
+        assert rec.status == RecordStatus.pending
+        assert old_status == RecordStatus.inwork
+
+    @pytest.mark.asyncio
+    async def test_unassign_user_finished_keeps_status(self, env):
+        env["record"].status = RecordStatus.finished
+        await env["session"].commit()
+
+        rec, old_status = await env["repo"].unassign_user(env["record"].id)
+        assert rec.user_id is None
+        assert rec.status == RecordStatus.finished
+        assert old_status == RecordStatus.finished
+
+    @pytest.mark.asyncio
     async def test_bulk_update_status(self, env):
         await env["repo"].bulk_update_status([env["record"].id], RecordStatus.pause)
         rec = await env["repo"].get(env["record"].id)

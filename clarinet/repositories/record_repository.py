@@ -455,6 +455,28 @@ class RecordRepository(BaseRepository[Record]):
         await self.session.commit()
         return await self.get_with_relations(record_id), old_status
 
+    async def unassign_user(self, record_id: int) -> tuple[Record, RecordStatus]:
+        """Remove user assignment from a record.
+
+        If the record is currently inwork, status is reset to pending.
+
+        Args:
+            record_id: Record ID.
+
+        Returns:
+            Tuple of (record with relations loaded, old status).
+
+        Raises:
+            RecordNotFoundError: If record doesn't exist.
+        """
+        record = await self.get(record_id)
+        old_status = record.status
+        record.user_id = None
+        if record.status == RecordStatus.inwork:
+            record.status = RecordStatus.pending
+        await self.session.commit()
+        return await self.get_with_relations(record_id), old_status
+
     async def ensure_user_assigned(self, record_id: int, user_id: UUID) -> None:
         """Assign user to a record only if it has no user yet.
 
@@ -594,36 +616,19 @@ class RecordRepository(BaseRepository[Record]):
             raise RecordTypeNotFoundError(name)
         return record_type
 
-    async def validate_parent_record(self, parent_record_id: int, child_type_name: str) -> Record:
-        """Validate parent_record_id is valid for this child type.
+    async def validate_parent_record(self, parent_record_id: int) -> Record:
+        """Validate parent record exists and return it (for user_id inheritance).
 
         Args:
             parent_record_id: ID of the proposed parent record.
-            child_type_name: Name of the child RecordType.
 
         Returns:
-            Parent record (for user_id inheritance).
+            Parent record.
 
         Raises:
             RecordNotFoundError: If parent record doesn't exist.
-            ValidationError: If parent record type doesn't match child's parent_type_name.
         """
-        parent = await self.get(parent_record_id)
-        child_type = await self.get_record_type(child_type_name)
-
-        if child_type.parent_type_name is None:
-            raise ValidationError(
-                f"RecordType '{child_type_name}' does not define a parent_type_name"
-            )
-
-        if parent.record_type_name != child_type.parent_type_name:
-            raise ValidationError(
-                f"Parent record type '{parent.record_type_name}' does not match "
-                f"expected parent type '{child_type.parent_type_name}' "
-                f"for child type '{child_type_name}'"
-            )
-
-        return parent
+        return await self.get(parent_record_id)
 
     async def check_constraints(
         self,

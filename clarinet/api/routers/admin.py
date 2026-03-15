@@ -7,6 +7,7 @@ from fastapi import APIRouter
 from clarinet.api.dependencies import AdminServiceDep, RecordServiceDep, SuperUserDep
 from clarinet.models import Record, RecordRead
 from clarinet.models.admin import AdminStats, RecordTypeStats, RoleMatrixResponse
+from clarinet.models.base import RecordStatus
 
 router = APIRouter()
 
@@ -47,6 +48,50 @@ async def admin_assign_record_user(
         Updated record with all relations loaded.
     """
     record, _ = await service.assign_user(record_id, user_id)
+    return record
+
+
+@router.patch("/records/{record_id}/status", response_model=RecordRead)
+async def admin_update_record_status(
+    record_id: int,
+    record_status: RecordStatus,
+    _current_user: SuperUserDep,
+    service: RecordServiceDep,
+) -> Record:
+    """Set any status on a record (superuser only).
+
+    Args:
+        record_id: The record to update.
+        record_status: New status to set.
+        _current_user: Authenticated superuser (enforced by dependency).
+        service: Record service.
+
+    Returns:
+        Updated record with all relations loaded.
+    """
+    record, _ = await service.update_status(record_id, record_status)
+    return record
+
+
+@router.delete("/records/{record_id}/user", response_model=RecordRead)
+async def admin_unassign_record_user(
+    record_id: int,
+    _current_user: SuperUserDep,
+    service: RecordServiceDep,
+) -> Record:
+    """Remove user assignment from a record (superuser only).
+
+    If the record is inwork, status is reset to pending.
+
+    Args:
+        record_id: The record to unassign.
+        _current_user: Authenticated superuser (enforced by dependency).
+        service: Record service.
+
+    Returns:
+        Updated record with all relations loaded.
+    """
+    record, _ = await service.unassign_user(record_id)
     return record
 
 

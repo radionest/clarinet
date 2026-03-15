@@ -245,6 +245,8 @@ grouped by router prefix. Status codes: 201 = POST create, 204 = DELETE/bulk, 20
 |---|---|---|---|
 | `/api/admin/stats` | GET | 200 | Admin stats |
 | `/api/admin/records/{id}/assign` | PATCH | 200 | Admin assign record |
+| `/api/admin/records/{id}/status` | PATCH | 200 | Admin set record status |
+| `/api/admin/records/{id}/user` | DELETE | 200 | Admin unassign record user |
 | `/api/admin/record-types/stats` | GET | 200 | Record type stats |
 
 ### DICOM (`/api/dicom`)
