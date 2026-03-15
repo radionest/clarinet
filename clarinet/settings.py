@@ -216,6 +216,12 @@ class Settings(BaseSettings):
     config_tasks_path: str = "./tasks/"
     config_delete_orphans: bool = False
 
+    # Config file locations (relative to config_tasks_path)
+    config_record_types_file: str = "record_types.py"
+    config_files_catalog_file: str = "files_catalog.py"
+    config_context_hydrators_file: str = "context_hydrators.py"
+    config_schema_hydrators_file: str = "hydrators.py"
+
     # RecordFlow settings
     recordflow_enabled: bool = False  # Enable RecordFlow workflow engine
     recordflow_paths: list[str] = []  # Directories containing *_flow.py files
@@ -243,6 +249,7 @@ class Settings(BaseSettings):
     log_format: str | None = None  # Use default if None
     log_console_level: str | None = None  # If None, uses log_level
     log_serialize: bool = True  # JSON format for file logs
+    log_noisy_libraries: list[str] = ["pynetdicom"]  # Suppress console INFO/DEBUG from these
 
     def model_post_init(self, __context: Any) -> None:
         """Link debug flag to log_level when log_level is not explicitly set."""

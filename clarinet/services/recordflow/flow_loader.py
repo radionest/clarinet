@@ -67,8 +67,29 @@ def load_flows_from_file(file_path: Path) -> list[FlowRecord | FlowFileRecord]:
 
     # Pre-load record_types.py so flow files can import FileDef objects
     from clarinet.config.python_loader import _load_module, _set_file_names_from_module
+    from clarinet.settings import settings
+
+    # Add config_tasks_path to sys.path so package-style imports work
+    # (e.g. ``from utils.seg_utils import ...`` when utils/ is under tasks/)
+    config_dir_str = str(Path(settings.config_tasks_path).resolve())
+    added_config_dir = config_dir_str != parent_dir_str and config_dir_str not in sys.path
+    if added_config_dir:
+        sys.path.insert(0, config_dir_str)
 
     record_types_file = parent_dir / "record_types.py"
+    if not record_types_file.is_file():
+        # Fallback: look up via settings relative to config_tasks_path
+        config_dir = Path(settings.config_tasks_path).resolve()
+        candidate = config_dir / settings.config_record_types_file
+        if candidate.is_file():
+            record_types_file = candidate
+
+    # If record_types is in a subdirectory, add its parent to sys.path
+    rt_parent_str = str(record_types_file.parent.resolve())
+    added_rt_parent = rt_parent_str != parent_dir_str and rt_parent_str not in sys.path
+    if added_rt_parent:
+        sys.path.insert(0, rt_parent_str)
+
     rt_module_name: str | None = None
     if record_types_file.is_file() and record_types_file.stem not in sys.modules:
         rt_module = _load_module(record_types_file, keep_in_sys=True)
@@ -106,6 +127,10 @@ def load_flows_from_file(file_path: Path) -> list[FlowRecord | FlowFileRecord]:
     finally:
         if rt_module_name:
             sys.modules.pop(rt_module_name, None)
+        if added_rt_parent and rt_parent_str in sys.path:
+            sys.path.remove(rt_parent_str)
+        if added_config_dir and config_dir_str in sys.path:
+            sys.path.remove(config_dir_str)
         if added_to_path and parent_dir_str in sys.path:
             sys.path.remove(parent_dir_str)
 

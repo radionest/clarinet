@@ -233,9 +233,11 @@ async def load_python_config(folder: Path) -> list[RecordTypeCreate]:
     Returns:
         List of RecordTypeCreate objects ready for reconciliation.
     """
-    record_types_file = folder / "record_types.py"
+    from clarinet.settings import settings
+
+    record_types_file = folder / settings.config_record_types_file
     if not record_types_file.is_file():
-        logger.warning(f"No record_types.py found in {folder}")
+        logger.warning(f"No {settings.config_record_types_file} found in {folder}")
         return []
 
     # Add folder to sys.path temporarily so imports work
@@ -244,11 +246,17 @@ async def load_python_config(folder: Path) -> list[RecordTypeCreate]:
     if added_to_path:
         sys.path.insert(0, folder_str)
 
+    # If record_types_file is in a subdirectory, add its parent too
+    rt_parent = str(record_types_file.parent.resolve())
+    added_rt_parent = rt_parent != folder_str and rt_parent not in sys.path
+    if added_rt_parent:
+        sys.path.insert(0, rt_parent)
+
     catalog_module_name: str | None = None
     try:
         # Load files_catalog first (if present) to set FileDef names.
         # Keep it in sys.modules so record_types.py can import it.
-        files_catalog_file = folder / "files_catalog.py"
+        files_catalog_file = folder / settings.config_files_catalog_file
         has_catalog = files_catalog_file.is_file()
         if has_catalog:
             catalog_module = _load_module(files_catalog_file, keep_in_sys=True)
@@ -285,5 +293,7 @@ async def load_python_config(folder: Path) -> list[RecordTypeCreate]:
         # Clean up sys.modules and sys.path
         if catalog_module_name:
             sys.modules.pop(catalog_module_name, None)
+        if added_rt_parent and rt_parent in sys.path:
+            sys.path.remove(rt_parent)
         if added_to_path and folder_str in sys.path:
             sys.path.remove(folder_str)

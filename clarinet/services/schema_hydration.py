@@ -77,7 +77,7 @@ def schema_hydrator(source_name: str) -> Callable[[HydratorFunc], HydratorFunc]:
 @schema_hydrator("study_series")
 async def hydrate_study_series(
     record: Record,
-    options: dict[str, Any],
+    _options: dict[str, Any],
     ctx: HydrationContext,
 ) -> list[dict[str, Any]]:
     """Return series belonging to the record's study as ``oneOf`` items.
@@ -223,11 +223,20 @@ def load_custom_hydrators(folder: str | Path) -> int:
     Returns:
         Number of *new* hydrators added (0 if file not found).
     """
-    path = Path(folder) / "hydrators.py"
+    from clarinet.settings import settings
+
+    path = Path(folder) / settings.config_schema_hydrators_file
     if not path.exists():
         return 0
 
     before = set(_HYDRATOR_REGISTRY)
+
+    # If hydrators file is in a subdirectory, add its parent to sys.path
+    folder_str = str(Path(folder).resolve())
+    parent_str = str(path.parent.resolve())
+    added_parent = parent_str != folder_str and parent_str not in sys.path
+    if added_parent:
+        sys.path.insert(0, parent_str)
 
     try:
         module_name = "clarinet_custom_hydrators"
@@ -241,6 +250,9 @@ def load_custom_hydrators(folder: str | Path) -> int:
     except Exception:
         logger.exception(f"Error loading custom hydrators from {path}")
         return 0
+    finally:
+        if added_parent and parent_str in sys.path:
+            sys.path.remove(parent_str)
 
     added = set(_HYDRATOR_REGISTRY) - before
     if added:

@@ -345,3 +345,79 @@ async def test_backward_compat_old_names(
     assert config_items[0].name == "old_type"
     assert config_items[0].file_registry is not None
     assert config_items[0].file_registry[0].name == "old_file"
+
+
+@pytest.mark.asyncio
+async def test_custom_record_types_path(
+    tmp_path,
+) -> None:
+    """record_types.py loaded from subdirectory via config_record_types_file."""
+    (tmp_path / "definitions").mkdir()
+    (tmp_path / "definitions" / "record_types.py").write_text(
+        textwrap.dedent("""\
+        from clarinet.config.primitives import RecordDef
+
+        custom_path_type = RecordDef(
+            name="custom_path_type",
+            description="Loaded from subdirectory",
+            level="SERIES",
+        )
+        """)
+    )
+
+    from clarinet.settings import settings
+
+    orig = settings.config_record_types_file
+    settings.config_record_types_file = "definitions/record_types.py"
+    try:
+        config_items = await load_python_config(tmp_path)
+    finally:
+        settings.config_record_types_file = orig
+
+    assert len(config_items) == 1
+    assert config_items[0].name == "custom_path_type"
+
+
+@pytest.mark.asyncio
+async def test_custom_files_catalog_path(
+    test_session: AsyncSession,
+    tmp_path,
+) -> None:
+    """files_catalog.py loaded from subdirectory via config_files_catalog_file."""
+    (tmp_path / "definitions").mkdir()
+    (tmp_path / "definitions" / "files_catalog.py").write_text(
+        textwrap.dedent("""\
+        from clarinet.config.primitives import FileDef
+
+        custom_file = FileDef(pattern="custom.nrrd", description="Custom file")
+        """)
+    )
+    (tmp_path / "definitions" / "record_types.py").write_text(
+        textwrap.dedent("""\
+        from clarinet.config.primitives import RecordDef, FileRef
+        from files_catalog import custom_file
+
+        catalog_test = RecordDef(
+            name="catalog_test",
+            description="Uses custom catalog path",
+            level="SERIES",
+            files=[FileRef(custom_file, "input")],
+        )
+        """)
+    )
+
+    from clarinet.settings import settings
+
+    orig_rt = settings.config_record_types_file
+    orig_fc = settings.config_files_catalog_file
+    settings.config_record_types_file = "definitions/record_types.py"
+    settings.config_files_catalog_file = "definitions/files_catalog.py"
+    try:
+        config_items = await load_python_config(tmp_path)
+    finally:
+        settings.config_record_types_file = orig_rt
+        settings.config_files_catalog_file = orig_fc
+
+    assert len(config_items) == 1
+    assert config_items[0].file_registry is not None
+    assert config_items[0].file_registry[0].name == "custom_file"

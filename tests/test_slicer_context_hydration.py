@@ -202,3 +202,29 @@ def test_hydration_context_from_session():
     ctx = SlicerHydrationContext.from_session(mock_session)
     assert ctx.study_repo is not None
     assert ctx.record_repo is not None
+
+
+def test_load_from_subdirectory(tmp_path):
+    """context_hydrators.py loaded from subdirectory via config_context_hydrators_file."""
+    (tmp_path / "hydrators").mkdir()
+    (tmp_path / "hydrators" / "context_hydrators.py").write_text(
+        textwrap.dedent("""\
+        from clarinet.services.slicer.context_hydration import slicer_context_hydrator
+
+        @slicer_context_hydrator("subdir_test")
+        async def subdir_test(record, context, ctx):
+            return {"subdir": True}
+        """)
+    )
+
+    from clarinet.settings import settings
+
+    orig = settings.config_context_hydrators_file
+    settings.config_context_hydrators_file = "hydrators/context_hydrators.py"
+    try:
+        count = load_custom_slicer_hydrators(tmp_path)
+    finally:
+        settings.config_context_hydrators_file = orig
+
+    assert count == 1
+    assert "subdir_test" in _SLICER_HYDRATOR_REGISTRY

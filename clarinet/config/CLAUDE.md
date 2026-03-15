@@ -10,6 +10,12 @@ Two mutually exclusive config modes per project:
 config_mode: Literal["toml", "python"] = "toml"
 config_tasks_path: str = "./tasks/"
 config_delete_orphans: bool = False
+
+# Config file locations (relative to config_tasks_path)
+config_record_types_file: str = "record_types.py"
+config_files_catalog_file: str = "files_catalog.py"
+config_context_hydrators_file: str = "context_hydrators.py"  # slicer context hydrators
+config_schema_hydrators_file: str = "hydrators.py"           # schema hydrators
 ```
 
 ## Primitives (`primitives.py`)
@@ -61,7 +67,7 @@ Only compares fields explicitly set in config (via `model_fields_set` — missin
 async def load_python_config(folder: Path) -> list[RecordTypeCreate]
 ```
 
-Expected folder structure:
+Expected folder structure (default):
 ```
 tasks/
     files_catalog.py   # FileDef instances (optional)
@@ -72,6 +78,14 @@ Or single-file mode:
 ```
 tasks/
     record_types.py    # Both FileDef and RecordDef instances
+```
+
+Custom file locations via settings (paths relative to `config_tasks_path`):
+```
+tasks/
+    definitions/
+        files_catalog.py    # config_files_catalog_file = "definitions/files_catalog.py"
+        record_types.py     # config_record_types_file = "definitions/record_types.py"
 ```
 
 - Uses `importlib.util.spec_from_file_location()` (same pattern as RecordFlow loader)

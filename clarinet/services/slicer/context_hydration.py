@@ -121,11 +121,20 @@ def load_custom_slicer_hydrators(folder: str | Path) -> int:
     Returns:
         Number of *new* hydrators added (0 if file not found).
     """
-    path = Path(folder) / "context_hydrators.py"
+    from clarinet.settings import settings
+
+    path = Path(folder) / settings.config_context_hydrators_file
     if not path.exists():
         return 0
 
     before = set(_SLICER_HYDRATOR_REGISTRY)
+
+    # If hydrators file is in a subdirectory, add its parent to sys.path
+    folder_str = str(Path(folder).resolve())
+    parent_str = str(path.parent.resolve())
+    added_parent = parent_str != folder_str and parent_str not in sys.path
+    if added_parent:
+        sys.path.insert(0, parent_str)
 
     try:
         module_name = "clarinet_custom_slicer_hydrators"
@@ -139,6 +148,9 @@ def load_custom_slicer_hydrators(folder: str | Path) -> int:
     except Exception:
         logger.exception(f"Error loading custom slicer context hydrators from {path}")
         return 0
+    finally:
+        if added_parent and parent_str in sys.path:
+            sys.path.remove(parent_str)
 
     added = set(_SLICER_HYDRATOR_REGISTRY) - before
     if added:
