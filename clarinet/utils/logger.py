@@ -21,6 +21,8 @@ from loguru import logger as _logger
 from ..settings import settings
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from loguru import Record
 
 try:
@@ -70,6 +72,27 @@ _CONSOLE_FORMAT = (
 )
 
 
+_WARNING_LEVEL_NO = 30
+
+
+def _make_noisy_library_filter(prefixes: list[str]) -> Callable[[Record], bool]:
+    """Create a loguru filter that suppresses DEBUG/INFO from noisy libraries.
+
+    Args:
+        prefixes: Library name prefixes to suppress (e.g. ["pynetdicom"]).
+            Empty list disables filtering.
+    """
+    prefix_tuple = tuple(prefixes)
+
+    def _filter(record: Record) -> bool:
+        name = record["name"]
+        if name and name.startswith(prefix_tuple):
+            return record["level"].no >= _WARNING_LEVEL_NO
+        return True
+
+    return _filter
+
+
 class InterceptHandler(logging.Handler):
     """
     Logging handler intercepting standard library logs and redirecting to loguru.
@@ -108,6 +131,7 @@ def setup_logging(
     rotation: str = "20 MB",
     retention: str = "1 week",
     serialize: bool = False,
+    noisy_libraries: list[str] | None = None,
 ) -> None:
     """
     Configure logging for the application.
@@ -121,8 +145,11 @@ def setup_logging(
         rotation: When to rotate log files (size or time)
         retention: How long to keep log files
         serialize: Whether to format file logs as JSON lines
+        noisy_libraries: Library name prefixes to suppress on console (DEBUG/INFO hidden,
+            WARNING+ still shown). Pass empty list to disable filtering.
     """
     console_format = format or _CONSOLE_FORMAT
+    console_filter = _make_noisy_library_filter(noisy_libraries) if noisy_libraries else None
 
     _logger.remove()
 
@@ -131,6 +158,7 @@ def setup_logging(
         sys.stderr,
         level=console_level or level,
         format=console_format,
+        filter=console_filter,
         colorize=True,
         backtrace=True,
         diagnose=True,
@@ -176,6 +204,7 @@ def reconfigure_for_worker() -> None:
         rotation=settings.log_rotation,
         retention=settings.log_retention,
         serialize=settings.log_serialize,
+        noisy_libraries=settings.log_noisy_libraries,
     )
 
 
@@ -189,6 +218,7 @@ setup_logging(
     rotation=settings.log_rotation,
     retention=settings.log_retention,
     serialize=settings.log_serialize,
+    noisy_libraries=settings.log_noisy_libraries,
 )
 
 # Export loguru's logger as the module's logger
