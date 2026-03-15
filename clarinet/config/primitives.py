@@ -39,7 +39,7 @@ class FileDef(BaseModel):
 
     pattern: str
     multiple: bool = False
-    level: DicomQueryLevel | None = None
+    level: DicomQueryLevel
     description: str | None = None
     name: str = ""
 
@@ -104,7 +104,6 @@ class RecordDef(BaseModel):
     level: DicomQueryLevel = DicomQueryLevel.SERIES
     description: str | None = None
     label: str | None = None
-    parent_type_name: str | None = None
     role_name: str | None = None
     min_records: int | None = 1
     max_records: int | None = None

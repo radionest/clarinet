@@ -5,6 +5,7 @@ import api/types.{type ApiError}
 import api/users
 import utils/status
 import gleam/dict
+import gleam/dynamic
 import gleam/dynamic/decode
 import gleam/int
 import gleam/javascript/promise.{type Promise}
@@ -78,11 +79,6 @@ fn record_type_base_decoder() -> decode.Decoder(RecordType) {
     None,
     decode.optional(decode.string),
   )
-  use parent_type_name <- decode.optional_field(
-    "parent_type_name",
-    None,
-    decode.optional(decode.string),
-  )
   use role_name <- decode.optional_field(
     "role_name",
     None,
@@ -106,7 +102,6 @@ fn record_type_base_decoder() -> decode.Decoder(RecordType) {
     name: name,
     description: description,
     label: label,
-    parent_type_name: parent_type_name,
     slicer_script: slicer_script,
     slicer_script_args: None,
     slicer_result_validator: slicer_result_validator,
@@ -426,12 +421,6 @@ pub fn record_type_full_decoder() -> decode.Decoder(RecordType) {
     None,
     decode.optional(decode.string),
   )
-  use parent_type_name <- decode.optional_field(
-    "parent_type_name",
-    None,
-    decode.optional(decode.string),
-  )
-
   let level = case level_str {
     None -> types.Series
     Some("patient") | Some("PATIENT") -> types.Patient
@@ -449,7 +438,6 @@ pub fn record_type_full_decoder() -> decode.Decoder(RecordType) {
     name: name,
     description: description,
     label: label,
-    parent_type_name: parent_type_name,
     slicer_script: slicer_script,
     slicer_script_args: slicer_script_args,
     slicer_result_validator: slicer_result_validator,
@@ -525,7 +513,10 @@ pub fn get_hydrated_schema(
 ) -> Promise(Result(String, ApiError)) {
   http_client.get("/records/" <> record_id <> "/schema")
   |> promise.map(fn(res) {
+    let nil_value = dynamic.nil()
     case res {
+      Ok(data) if data == nil_value ->
+        Error(types.ServerError(204, "No schema"))
       Ok(data) -> Ok(json_utils.dynamic_to_string(data))
       Error(err) -> Error(err)
     }

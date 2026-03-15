@@ -25,7 +25,7 @@ User-facing Pydantic BaseModels for Python config files:
 ```python
 from clarinet.flow import FileDef, FileRef, RecordDef
 
-seg_mask = FileDef(pattern="seg.nrrd", description="Segmentation mask")
+seg_mask = FileDef(pattern="seg.nrrd", level="SERIES", description="Segmentation mask")
 
 lesion_seg = RecordDef(
     name="lesion_seg",
@@ -34,13 +34,15 @@ lesion_seg = RecordDef(
 )
 ```
 
-- `FileDef`: pattern, multiple, level (str or `DicomQueryLevel | None`), description, name (auto-derived)
+- `FileDef`: pattern, multiple, level (str or `DicomQueryLevel`, **required**), description, name (auto-derived)
 - `FileRef(file, role, required)`: binds FileDef to RecordDef with role; role accepts str (`"input"`) or `FileRole` enum
 - `RecordDef`: full RecordType definition; `role` is user-friendly alias for `role_name`; `level` accepts str or enum
 
 **String coercion:** `level` and `role` fields accept plain strings (`"SERIES"`, `"input"`) — validators coerce to enums automatically.
 
 **Backward compat aliases:** `File = FileDef`, `RecordTypeDef = RecordDef` (old names still work).
+When searching for usages of `FileDef` or `RecordDef`, always search for both the canonical
+name and the alias (e.g., `(FileDef|File)\(`) — tests and user configs may use either.
 
 **Single-file mode:** If no `files_catalog.py` exists, FileDef names are auto-derived from `record_types.py`.
 

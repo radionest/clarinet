@@ -72,9 +72,6 @@ class RecordTypeService:
         if constrain_unique_names:
             await self.repo.ensure_unique_name(record_type.name)
 
-        if record_type.parent_type_name is not None:
-            await self.repo.validate_parent_type(record_type.name, record_type.parent_type_name)
-
         create_data = record_type.model_dump(exclude={"file_registry"})
         new_rt = RecordType(**create_data)
         new_rt.file_links = []
@@ -109,9 +106,6 @@ class RecordTypeService:
 
         if update.data_schema is not None:
             _validate_json_schema(update.data_schema)
-
-        if "parent_type_name" in update.model_fields_set:
-            await self.repo.validate_parent_type(record_type_id, update.parent_type_name)
 
         file_defs_set = "file_registry" in update.model_fields_set
         file_defs = update.file_registry if file_defs_set else None

@@ -7,7 +7,7 @@ Slicer integration settings.
 """
 
 import json as json_lib
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 from pydantic import field_validator, model_validator
 from sqlmodel import JSON, Column, Field, Relationship, SQLModel
@@ -48,8 +48,6 @@ class RecordTypeBase(SQLModel):
     slicer_result_validator: str | None = None
     slicer_result_validator_args: SlicerArgs | None = None
 
-    parent_type_name: str | None = None
-
     role_name: str | None = Field(default=None)
     max_records: int | None = Field(default=None)
     min_records: int | None = Field(default=1)
@@ -76,24 +74,6 @@ class RecordType(RecordTypeBase, table=True):
     )
     slicer_context_hydrators: SlicerHydratorNames | None = Field(
         default=None, sa_column=Column(JSON)
-    )
-
-    parent_type_name: str | None = Field(
-        foreign_key="recordtype.name",
-        default=None,
-    )
-    parent_type: Optional["RecordType"] = Relationship(  # noqa: UP045, UP037
-        back_populates="child_types",
-        sa_relationship_kwargs={
-            "remote_side": "RecordType.name",
-            "foreign_keys": "[RecordType.parent_type_name]",
-        },
-    )
-    child_types: list["RecordType"] = Relationship(  # noqa: UP037
-        back_populates="parent_type",
-        sa_relationship_kwargs={
-            "foreign_keys": "[RecordType.parent_type_name]",
-        },
     )
 
     role_name: str | None = Field(foreign_key="userrole.name", default=None)
@@ -193,7 +173,6 @@ class RecordTypeOptional(SQLModel):
     name: str | None = None
     description: str | None = None
     label: str | None = None
-    parent_type_name: str | None = None
     slicer_script: str | None = None
     slicer_script_args: SlicerArgs | None = None
     slicer_result_validator: str | None = None

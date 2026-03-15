@@ -61,7 +61,6 @@ pub type RecordType {
     // Primary key
     description: Option(String),
     label: Option(String),
-    parent_type_name: Option(String),
     slicer_script: Option(String),
     slicer_script_args: Option(Dict(String, String)),
     // SlicerArgs
@@ -210,7 +209,6 @@ pub type RecordTypeCreate {
     name: String,
     description: Option(String),
     label: Option(String),
-    parent_type_name: Option(String),
     slicer_script: Option(String),
     slicer_script_args: Option(Dict(String, String)),
     slicer_result_validator: Option(String),

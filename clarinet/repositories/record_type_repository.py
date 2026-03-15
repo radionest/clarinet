@@ -12,12 +12,10 @@ from sqlmodel import select
 from clarinet.exceptions.domain import (
     RecordTypeAlreadyExistsError,
     RecordTypeNotFoundError,
-    ValidationError,
 )
 from clarinet.models.file_schema import RecordTypeFileLink
 from clarinet.models.record import RecordType, RecordTypeFind
 from clarinet.repositories.base import BaseRepository
-from clarinet.utils.graph_validation import detect_cycle
 
 
 def _file_links_eager_load() -> list[Any]:
@@ -129,31 +127,3 @@ class RecordTypeRepository(BaseRepository[RecordType]):
         if existing:
             raise RecordTypeAlreadyExistsError(name)
 
-    async def validate_parent_type(self, name: str, parent_type_name: str | None) -> None:
-        """Validate that setting parent_type_name won't create a cycle.
-
-        Args:
-            name: Name of the RecordType being created/updated.
-            parent_type_name: Proposed parent type name.
-
-        Raises:
-            RecordTypeNotFoundError: If parent type doesn't exist.
-            ValidationError: If assignment would create a cycle.
-        """
-        if parent_type_name is None:
-            return
-
-        # Check parent exists
-        parent = await self.get_by(name=parent_type_name)
-        if not parent:
-            raise RecordTypeNotFoundError(parent_type_name)
-
-        # Load all edges and simulate the new one
-        all_types = await self.list_all()
-        edges: dict[str, str | None] = {rt.name: rt.parent_type_name for rt in all_types}
-        edges[name] = parent_type_name
-
-        cycle = detect_cycle(edges)
-        if cycle is not None:
-            path = " -> ".join(cycle)
-            raise ValidationError(f"Setting parent_type_name would create a cycle: {path}")

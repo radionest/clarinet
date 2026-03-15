@@ -21,7 +21,6 @@ _SCALAR_FIELDS: tuple[str, ...] = (
     "description",
     "label",
     "level",
-    "parent_type_name",
     "role_name",
     "min_records",
     "max_records",

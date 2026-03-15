@@ -811,82 +811,16 @@ class TestRecordFlowEngineUnit:
         assert invalidated_ids == {2, 3}
 
 
-# ─── Engine — inherit_user + auto-resolve parent_record_id ──────────────────
+# ─── Engine — inherit_user + explicit parent_record_id ───────────────────────
 
 
-class TestEngineInheritUserAndParentResolve:
-    """Unit tests for inherit_user flag and auto-resolve parent_record_id."""
-
-    @pytest.mark.asyncio
-    async def test_engine_auto_resolves_parent_record_id(self):
-        """Engine sets parent_record_id when child type's parent_type_name matches."""
-        from unittest.mock import AsyncMock, MagicMock
-
-        from clarinet.services.recordflow.engine import RecordFlowEngine
-
-        mock_client = AsyncMock()
-        mock_client.find_records = AsyncMock(return_value=[])
-        mock_client.create_record = AsyncMock(
-            return_value=make_record_read("child_type", record_id=99)
-        )
-
-        # Mock get_record_type: child's parent_type_name == trigger's type
-        child_rt = MagicMock()
-        child_rt.parent_type_name = "parent_type"
-        mock_client.get_record_type = AsyncMock(return_value=child_rt)
-
-        engine = RecordFlowEngine(mock_client)
-
-        flow = FlowRecord("parent_type")
-        flow.on_status("finished")
-        flow.add_record("child_type")
-        engine.register_flow(flow)
-
-        test_record = make_record_read("parent_type", record_id=10, status=RecordStatus.finished)
-
-        await engine.handle_record_status_change(test_record)
-
-        assert mock_client.create_record.call_count == 1
-        call_args = mock_client.create_record.call_args[0][0]
-        assert call_args.parent_record_id == 10
-
-    @pytest.mark.asyncio
-    async def test_engine_no_parent_record_id_for_unlinked(self):
-        """Engine does not set parent_record_id when types are not linked."""
-        from unittest.mock import AsyncMock, MagicMock
-
-        from clarinet.services.recordflow.engine import RecordFlowEngine
-
-        mock_client = AsyncMock()
-        mock_client.find_records = AsyncMock(return_value=[])
-        mock_client.create_record = AsyncMock(
-            return_value=make_record_read("unlinked_type", record_id=99)
-        )
-
-        # Mock get_record_type: child has no parent link
-        child_rt = MagicMock()
-        child_rt.parent_type_name = None
-        mock_client.get_record_type = AsyncMock(return_value=child_rt)
-
-        engine = RecordFlowEngine(mock_client)
-
-        flow = FlowRecord("trigger_type")
-        flow.on_status("finished")
-        flow.add_record("unlinked_type")
-        engine.register_flow(flow)
-
-        test_record = make_record_read("trigger_type", record_id=10, status=RecordStatus.finished)
-
-        await engine.handle_record_status_change(test_record)
-
-        assert mock_client.create_record.call_count == 1
-        call_args = mock_client.create_record.call_args[0][0]
-        assert call_args.parent_record_id is None
+class TestEngineInheritUserAndParent:
+    """Unit tests for inherit_user flag and explicit parent_record_id."""
 
     @pytest.mark.asyncio
     async def test_engine_no_user_inherit_by_default(self):
         """Engine does not inherit user_id without inherit_user=True."""
-        from unittest.mock import AsyncMock, MagicMock
+        from unittest.mock import AsyncMock
         from uuid import UUID
 
         from clarinet.services.recordflow.engine import RecordFlowEngine
@@ -896,10 +830,6 @@ class TestEngineInheritUserAndParentResolve:
         mock_client = AsyncMock()
         mock_client.find_records = AsyncMock(return_value=[])
         mock_client.create_record = AsyncMock(return_value=make_record_read("output", record_id=99))
-
-        child_rt = MagicMock()
-        child_rt.parent_type_name = None
-        mock_client.get_record_type = AsyncMock(return_value=child_rt)
 
         engine = RecordFlowEngine(mock_client)
 
@@ -920,7 +850,7 @@ class TestEngineInheritUserAndParentResolve:
     @pytest.mark.asyncio
     async def test_engine_inherit_user_true(self):
         """Engine inherits user_id when inherit_user=True."""
-        from unittest.mock import AsyncMock, MagicMock
+        from unittest.mock import AsyncMock
         from uuid import UUID
 
         from clarinet.services.recordflow.engine import RecordFlowEngine
@@ -930,10 +860,6 @@ class TestEngineInheritUserAndParentResolve:
         mock_client = AsyncMock()
         mock_client.find_records = AsyncMock(return_value=[])
         mock_client.create_record = AsyncMock(return_value=make_record_read("output", record_id=99))
-
-        child_rt = MagicMock()
-        child_rt.parent_type_name = None
-        mock_client.get_record_type = AsyncMock(return_value=child_rt)
 
         engine = RecordFlowEngine(mock_client)
 
@@ -954,7 +880,7 @@ class TestEngineInheritUserAndParentResolve:
     @pytest.mark.asyncio
     async def test_engine_explicit_user_id_overrides_all(self):
         """Explicit user_id in add_record() takes priority over inherit_user."""
-        from unittest.mock import AsyncMock, MagicMock
+        from unittest.mock import AsyncMock
         from uuid import UUID
 
         from clarinet.services.recordflow.engine import RecordFlowEngine
@@ -965,10 +891,6 @@ class TestEngineInheritUserAndParentResolve:
         mock_client = AsyncMock()
         mock_client.find_records = AsyncMock(return_value=[])
         mock_client.create_record = AsyncMock(return_value=make_record_read("output", record_id=99))
-
-        child_rt = MagicMock()
-        child_rt.parent_type_name = None
-        mock_client.get_record_type = AsyncMock(return_value=child_rt)
 
         engine = RecordFlowEngine(mock_client)
 
@@ -987,8 +909,8 @@ class TestEngineInheritUserAndParentResolve:
         assert str(call_args.user_id) == explicit_uuid
 
     @pytest.mark.asyncio
-    async def test_engine_explicit_parent_record_id_not_overridden(self):
-        """Explicit parent_record_id in add_record() is not overridden by auto-resolve."""
+    async def test_engine_explicit_parent_record_id_preserved(self):
+        """Explicit parent_record_id in add_record() is passed through to create_record."""
         from unittest.mock import AsyncMock
 
         from clarinet.services.recordflow.engine import RecordFlowEngine
@@ -1010,8 +932,6 @@ class TestEngineInheritUserAndParentResolve:
 
         await engine.handle_record_status_change(test_record)
 
-        # Should NOT call get_record_type since parent_record_id is already set
-        assert mock_client.get_record_type.call_count == 0
         assert mock_client.create_record.call_count == 1
         call_args = mock_client.create_record.call_args[0][0]
         assert call_args.parent_record_id == 42

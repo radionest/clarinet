@@ -186,8 +186,6 @@ async def _to_record_type_create(
         kwargs["description"] = rt_def.description
     if rt_def.label is not None:
         kwargs["label"] = rt_def.label
-    if rt_def.parent_type_name is not None:
-        kwargs["parent_type_name"] = rt_def.parent_type_name
     if rt_def.role_name is not None:
         kwargs["role_name"] = rt_def.role_name
     if rt_def.min_records is not None:

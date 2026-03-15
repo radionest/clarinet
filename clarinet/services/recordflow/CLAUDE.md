@@ -99,21 +99,21 @@ Modes:
 
 Optional `callback(record, source_record, client)` for per-project custom behavior.
 
-## User Inheritance & Parent Record Auto-Resolve
+## User Inheritance & Parent Record
 
 When a flow creates a child record from a record-triggered flow:
 
-1. **`parent_record_id` auto-resolve**: If `parent_record_id` is not explicitly set, the engine checks if the child RecordType's `parent_type_name` matches the triggering record's type name. If so, `parent_record_id` is set to the triggering record's ID automatically. The API-level parent inheritance then handles `user_id` inheritance.
+1. **`parent_record_id`**: Set explicitly via `add_record("type", parent_record_id=42)`. No auto-resolve — flows must specify parent links explicitly.
 
-2. **`inherit_user` flag** (default `False`): For non-linked records (no parent-child RecordType relationship), set `inherit_user=True` to explicitly inherit `user_id` from the triggering record. Without this flag, `user_id` is `None` for unlinked child records.
+2. **`inherit_user` flag** (default `False`): Set `inherit_user=True` to inherit `user_id` from the triggering record. Without this flag, `user_id` is `None` for child records.
 
-3. **Explicit `user_id`** in `add_record()` always takes priority over both mechanisms.
+3. **Explicit `user_id`** in `add_record()` always takes priority over `inherit_user`.
 
 ```python
-# Linked types: parent_record_id auto-resolved, user_id inherited via API
-record("parent_type").on_finished().create_record("child_type")
+# Explicit parent link + user inheritance via API
+record("parent_type").on_finished().add_record("child_type", parent_record_id=42)
 
-# Non-linked: explicit opt-in for user inheritance
+# User inheritance without parent link
 record("trigger").on_finished().add_record("unlinked_output", inherit_user=True)
 ```
 
