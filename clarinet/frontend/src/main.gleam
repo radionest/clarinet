@@ -17,13 +17,12 @@ import formosh/component as formosh_component
 import gleam/dict
 import gleam/dynamic/decode
 import gleam/int
-import gleam/io
 import gleam/javascript/promise
-import gleam/string
-import plinth/javascript/global
 import gleam/list
 import gleam/option.{None, Some}
+import gleam/string
 import gleam/uri.{type Uri}
+import utils/logger
 import lustre
 import lustre/attribute
 import lustre/effect.{type Effect}
@@ -32,20 +31,21 @@ import lustre/element/html
 import lustre/event
 import modem
 import pages/admin as admin_page
-import pages/record_types/detail as record_type_detail
-import pages/record_types/edit as record_type_edit
-import pages/record_types/list as record_types_list
 import pages/home
 import pages/login
 import pages/patients/detail as patient_detail
 import pages/patients/list as patients_list
 import pages/patients/new as patient_new
+import pages/record_types/detail as record_type_detail
+import pages/record_types/edit as record_type_edit
+import pages/record_types/list as record_types_list
 import pages/records/execute as record_execute
 import pages/records/list as records_list
 import pages/register
 import pages/series/detail as series_detail
 import pages/studies/detail as study_detail
 import pages/studies/list as studies_list
+import plinth/javascript/global
 import router.{type Route}
 import store.{type Model, type Msg}
 
@@ -104,9 +104,9 @@ fn init(_flags) -> #(Model, Effect(Msg)) {
 
 // Handle URL changes from modem
 fn on_url_change(uri: Uri) -> Msg {
-  io.println(">>> on_url_change fired, uri: " <> string.inspect(uri))
+  logger.debug("router", "on_url_change fired, uri: " <> string.inspect(uri))
   let route = router.parse_route(uri)
-  io.println(">>> parsed route: " <> string.inspect(route))
+  logger.debug("router", "parsed route: " <> string.inspect(route))
   store.OnRouteChange(route)
 }
 
@@ -145,10 +145,14 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
   case msg {
     // Routing
     store.OnRouteChange(route) -> {
-      io.println(
-        ">>> OnRouteChange handler, route: " <> string.inspect(route)
-        <> ", checking_session: " <> string.inspect(model.checking_session)
-        <> ", user: " <> string.inspect(model.user),
+      logger.debug(
+        "router",
+        "OnRouteChange route: "
+        <> string.inspect(route)
+        <> ", checking_session: "
+        <> string.inspect(model.checking_session)
+        <> ", user: "
+        <> string.inspect(model.user),
       )
       // Stop any existing slicer ping timer when changing routes
       let stop_timer_effect = case model.slicer_ping_timer {
@@ -226,10 +230,10 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     }
 
     store.Navigate(route) -> {
-      io.println(">>> Navigate handler, route: " <> string.inspect(route))
+      logger.debug("router", "Navigate route: " <> string.inspect(route))
       // Use Modem to update URL without page reload
       let path = router.route_to_path(route)
-      io.println(">>> Navigate pushing path: " <> path)
+      logger.debug("router", "pushing path: " <> path)
       #(model, modem.push(path, option.None, option.None))
     }
 
@@ -245,11 +249,10 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           let route = model.route
           let is_auth_page = route == router.Login || route == router.Register
           case router.requires_auth(route), new_model.user, is_auth_page {
-            False, Some(_), True ->
-              #(
-                store.set_route(new_model, router.Home),
-                modem.push("/", option.None, option.None),
-              )
+            False, Some(_), True -> #(
+              store.set_route(new_model, router.Home),
+              modem.push("/", option.None, option.None),
+            )
             _, _, _ ->
               case router.requires_admin_role(route), new_model.user {
                 True, Some(models.User(is_superuser: False, ..)) -> #(
@@ -264,11 +267,10 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           // No valid session - redirect to login if on protected route
           let new_model = store.Model(..model, checking_session: False)
           case router.requires_auth(model.route) {
-            True ->
-              #(
-                store.set_route(new_model, router.Login),
-                modem.push("/login", option.None, option.None),
-              )
+            True -> #(
+              store.set_route(new_model, router.Login),
+              modem.push("/login", option.None, option.None),
+            )
             False -> #(new_model, effect.none())
           }
         }
@@ -369,7 +371,9 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         |> store.set_loading(False)
         |> store.clear_messages()
         |> store.clear_auth_forms()
-        |> store.set_success("Registration successful! Welcome to " <> model.project_name <> ".")
+        |> store.set_success(
+          "Registration successful! Welcome to " <> model.project_name <> ".",
+        )
         |> store.set_route(router.Home)
 
       #(new_model, modem.push("/", option.None, option.None))
@@ -470,8 +474,7 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         list.fold(users_list, model.users, fn(acc, user) {
           dict.insert(acc, user.id, user)
         })
-      let new_model =
-        store.Model(..model, users: users_dict, loading: False)
+      let new_model = store.Model(..model, users: users_dict, loading: False)
       #(new_model, effect.none())
     }
 
@@ -615,14 +618,28 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
 
     // Formosh form events
     store.FormSubmitSuccess(record_id) -> {
+      logger.info("form", "submit success: record_id=" <> record_id)
       // Check if this record type has a validator or slicer_script
       let slicer_effect = case dict.get(model.records, record_id) {
-        Ok(models.Record(record_type: Some(models.RecordType(slicer_result_validator: Some(_), ..)), ..)) ->
+        Ok(models.Record(
+          record_type: Some(models.RecordType(
+            slicer_result_validator: Some(_),
+            ..,
+          )),
+          ..,
+        )) -> {
+          logger.info("slicer", "triggering validation after form submit")
           // Has validator: validate first, scene will clear after validation succeeds
           dispatch_msg(store.SlicerValidate(record_id))
-        Ok(models.Record(record_type: Some(models.RecordType(slicer_script: Some(_), ..)), ..)) ->
+        }
+        Ok(models.Record(
+          record_type: Some(models.RecordType(slicer_script: Some(_), ..)),
+          ..,
+        )) -> {
+          logger.info("slicer", "clearing scene after form submit")
           // Has slicer_script but no validator: clear scene directly
           dispatch_msg(store.SlicerClearScene)
+        }
         _ -> effect.none()
       }
       #(
@@ -653,10 +670,17 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
 
     store.CompleteRecordResult(record_id, Ok(record)) -> {
       let slicer_effect = case dict.get(model.records, record_id) {
-        Ok(models.Record(record_type: Some(models.RecordType(slicer_result_validator: Some(_), ..)), ..)) ->
-          dispatch_msg(store.SlicerValidate(record_id))
-        Ok(models.Record(record_type: Some(models.RecordType(slicer_script: Some(_), ..)), ..)) ->
-          dispatch_msg(store.SlicerClearScene)
+        Ok(models.Record(
+          record_type: Some(models.RecordType(
+            slicer_result_validator: Some(_),
+            ..,
+          )),
+          ..,
+        )) -> dispatch_msg(store.SlicerValidate(record_id))
+        Ok(models.Record(
+          record_type: Some(models.RecordType(slicer_script: Some(_), ..)),
+          ..,
+        )) -> dispatch_msg(store.SlicerClearScene)
         _ -> effect.none()
       }
       #(
@@ -722,6 +746,16 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
 
     // Slicer operations
     store.OpenInSlicer(record_id) -> {
+      logger.info(
+        "slicer",
+        "opening: record_id="
+        <> record_id
+        <> ", user="
+        <> case model.user {
+          Some(user) -> user.email
+          None -> "none"
+        },
+      )
       let open_effect = {
         use dispatch <- effect.from
         slicer.open_record(record_id)
@@ -732,6 +766,7 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     }
 
     store.SlicerOpenResult(Ok(_)) -> {
+      logger.info("slicer", "open completed")
       #(
         store.Model(..model, slicer_loading: False)
           |> store.set_success("Workspace opened in 3D Slicer"),
@@ -741,7 +776,8 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
 
     store.SlicerOpenResult(Error(err)) -> {
       let error_msg = case err {
-        types.ServerError(502, _) -> "3D Slicer is not reachable. Is it running?"
+        types.ServerError(502, _) ->
+          "3D Slicer is not reachable. Is it running?"
         types.ServerError(_, msg) -> "Slicer error: " <> msg
         types.NetworkError(msg) -> "Network error: " <> msg
         _ -> "Failed to open record in Slicer"
@@ -754,6 +790,16 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     }
 
     store.SlicerValidate(record_id) -> {
+      logger.info(
+        "slicer",
+        "validating: record_id="
+        <> record_id
+        <> ", user="
+        <> case model.user {
+          Some(user) -> user.email
+          None -> "none"
+        },
+      )
       let validate_effect = {
         use dispatch <- effect.from
         slicer.validate_record(record_id)
@@ -766,6 +812,7 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     }
 
     store.SlicerValidateResult(Ok(_)) -> {
+      logger.info("slicer", "validation completed")
       #(
         store.Model(..model, slicer_loading: False)
           |> store.set_success("Slicer validation completed"),
@@ -830,10 +877,7 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     }
 
     store.SlicerPingTimerStarted(timer_id) -> {
-      #(
-        store.Model(..model, slicer_ping_timer: Some(timer_id)),
-        effect.none(),
-      )
+      #(store.Model(..model, slicer_ping_timer: Some(timer_id)), effect.none())
     }
 
     store.StopSlicerPingTimer -> {
@@ -994,10 +1038,13 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         |> store.set_loading(False)
         |> store.set_success("Patient deleted successfully")
         |> store.set_route(router.Patients)
-      #(new_model, effect.batch([
-        modem.push("/patients", option.None, option.None),
-        dispatch_msg(store.LoadPatients),
-      ]))
+      #(
+        new_model,
+        effect.batch([
+          modem.push("/patients", option.None, option.None),
+          dispatch_msg(store.LoadPatients),
+        ]),
+      )
     }
 
     store.PatientDeleted(Error(err)) ->
@@ -1044,10 +1091,14 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       let close_model =
         store.Model(..model, modal_open: False, modal_content: store.NoModal)
       case model.modal_content {
-        store.ConfirmDelete("patient", id) ->
-          #(close_model, dispatch_msg(store.DeletePatient(id)))
-        store.ConfirmDelete("study", uid) ->
-          #(close_model, dispatch_msg(store.DeleteStudy(uid)))
+        store.ConfirmDelete("patient", id) -> #(
+          close_model,
+          dispatch_msg(store.DeletePatient(id)),
+        )
+        store.ConfirmDelete("study", uid) -> #(
+          close_model,
+          dispatch_msg(store.DeleteStudy(uid)),
+        )
         _ -> #(close_model, effect.none())
       }
     }
@@ -1116,15 +1167,10 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       let import_effect = {
         use dispatch <- effect.from
         dicom.import_study(study_uid, patient_id)
-        |> promise.tap(fn(result) {
-          dispatch(store.PacsStudyImported(result))
-        })
+        |> promise.tap(fn(result) { dispatch(store.PacsStudyImported(result)) })
         Nil
       }
-      #(
-        store.Model(..model, pacs_importing: Some(study_uid)),
-        import_effect,
-      )
+      #(store.Model(..model, pacs_importing: Some(study_uid)), import_effect)
     }
 
     store.PacsStudyImported(Ok(study)) -> {
@@ -1132,8 +1178,7 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       let updated_pacs =
         list.map(model.pacs_studies, fn(ps) {
           case ps.study.study_instance_uid == study.study_uid {
-            True ->
-              models.PacsStudyWithSeries(..ps, already_exists: True)
+            True -> models.PacsStudyWithSeries(..ps, already_exists: True)
             False -> ps
           }
         })
@@ -1141,15 +1186,12 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         model
         |> store.cache_study(study)
         |> fn(m) {
-          store.Model(
-            ..m,
-            pacs_importing: None,
-            pacs_studies: updated_pacs,
-          )
+          store.Model(..m, pacs_importing: None, pacs_studies: updated_pacs)
         }
         |> store.set_success("Study imported from PACS successfully")
       // Reload patient detail to show new study
-      let reload_effect = dispatch_msg(store.LoadPatientDetail(study.patient_id))
+      let reload_effect =
+        dispatch_msg(store.LoadPatientDetail(study.patient_id))
       #(new_model, reload_effect)
     }
 
@@ -1178,8 +1220,7 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     }
 
     store.HydratedSchemaLoaded(record_id, Ok(schema_json)) -> {
-      let schemas =
-        dict.insert(model.hydrated_schemas, record_id, schema_json)
+      let schemas = dict.insert(model.hydrated_schemas, record_id, schema_json)
       #(store.Model(..model, hydrated_schemas: schemas), effect.none())
     }
 
@@ -1226,9 +1267,7 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           False -> admin.remove_user_role(user_id, role_name)
         }
         api_call
-        |> promise.tap(fn(result) {
-          dispatch(store.UserRoleToggled(result))
-        })
+        |> promise.tap(fn(result) { dispatch(store.UserRoleToggled(result)) })
         Nil
       }
       #(
@@ -1298,7 +1337,24 @@ fn handle_api_error(
   fallback_msg: String,
 ) -> #(Model, Effect(Msg)) {
   case err {
-    types.AuthError(_) -> {
+    types.AuthError(msg) -> {
+      // Log detailed auth error for debugging
+      logger.error(
+        "auth",
+        "session error - msg: "
+        <> msg
+        <> ", route: "
+        <> string.inspect(model.route)
+        <> ", user_id: "
+        <> case model.user {
+          Some(user) -> user.id
+          None -> "none"
+        }
+        <> ", slicer_loading: "
+        <> string.inspect(model.slicer_loading)
+        <> ", loading: "
+        <> string.inspect(model.loading),
+      )
       let new_model =
         model
         |> store.reset_for_logout()
@@ -1338,7 +1394,8 @@ fn view_content(model: Model) -> Element(Msg) {
     router.Records -> records_list.view(model)
     router.RecordDetail(id) -> record_execute.view(model, id)
     router.RecordNew -> html.div([], [html.text("New record page")])
-    router.RecordTypeDesign(_id) -> html.div([], [html.text("Record type design page")])
+    router.RecordTypeDesign(_id) ->
+      html.div([], [html.text("Record type design page")])
     router.Patients -> patients_list.view(model)
     router.PatientNew -> patient_new.view(model)
     router.PatientDetail(id) -> patient_detail.view(model, id)
@@ -1451,8 +1508,7 @@ fn load_route_data(model: Model, route: Route) -> Effect(Msg) {
         dispatch_msg(store.LoadUsers),
         dispatch_msg(store.LoadRoleMatrix),
       ])
-    router.AdminRecordTypes, Some(_) ->
-      dispatch_msg(store.LoadRecordTypeStats)
+    router.AdminRecordTypes, Some(_) -> dispatch_msg(store.LoadRecordTypeStats)
     router.AdminRecordTypeDetail(_), Some(_) ->
       effect.batch([
         dispatch_msg(store.LoadRecordTypeStats),
