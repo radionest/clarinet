@@ -1,0 +1,12 @@
+# Schemathesis configuration
+# Docs: https://schemathesis.readthedocs.io/
+
+[generation]
+max-examples = 50
+mode = "all"
+
+[phases.stateful]
+enabled = false
+
+[output.sanitization]
+enabled = false

@@ -4,12 +4,13 @@
 
 - **pytest** + **pytest-asyncio** for async tests
 - Configuration in `tests/conftest.py`
-- Run: `make test-fast` (default), `make test-unit`, `make test`, `make test-cov`, `make test-integration`
+- Run: `make test-fast` (default), `make test-unit`, `make test`, `make test-cov`, `make test-integration`, `make test-schema`
 
 ## Structure
 
 - `tests/integration/` — integration tests (API endpoints, CRUD)
 - `tests/e2e/` — end-to-end tests (auth workflows)
+- `tests/schema/` — Schemathesis property-based API schema tests
 - `tests/utils/` — test helpers
 - Root `tests/` — unit tests (client, file patterns, validation)
 
@@ -299,3 +300,40 @@ jq 'select(.mod | startswith("clarinet.services.pipeline"))' /tmp/clarinet.log
 | `line` | Line number |
 | `msg` | Log message |
 | `exc` | Traceback (only on exceptions) |
+
+## Schema Tests (Schemathesis)
+
+Property-based API testing using Schemathesis. Generates requests from OpenAPI schema
+and validates response conformance, status codes, and absence of 500 errors.
+
+### Running
+
+```bash
+make test-schema              # Quick run (max_examples=10)
+make test-schema-verbose      # Verbose with tracebacks
+```
+
+### Architecture
+
+- `tests/schema/conftest.py` — session-scoped fixtures: in-memory SQLite, auth overrides, no-op lifespan
+- `tests/schema/test_api_schema.py` — parametrized tests over all API endpoints
+- `schemathesis.toml` — Schemathesis configuration (project root)
+- Marker: `@pytest.mark.schema` — excluded from `make test-unit` and `make test-fast`
+
+### Key design decisions
+
+- **ASGI mode** (no running server): `schemathesis.openapi.from_dict(app.openapi())` + `loaded.app = app`
+- **No-op lifespan**: real lifespan uses `db_manager` directly (not DI), which conflicts with test DB.
+  Schema tests replace it with `_noop_lifespan` and manage their own DB via `test_engine`.
+- **Schema loaded via `app.openapi()`**: avoids triggering lifespan that `from_asgi()` would trigger.
+- **Per-request sessions**: `override_get_session` creates a fresh session per request from a shared
+  session factory. Prevents `PendingRollbackError` cascading across schemathesis requests.
+- **fastapi-users endpoints excluded**: `/api/auth/login`, `/logout`, `/register` — auto-generated, not under our control.
+
+### Interpreting results
+
+Schemathesis subtests show as `u` (pass) or `F` (fail) within a single parametrized test.
+Common failure categories:
+- **500 errors**: real bugs — fix the endpoint handler
+- **Undocumented status codes**: add `responses=` to the router
+- **Response schema violations**: fix `response_model` or serialization
