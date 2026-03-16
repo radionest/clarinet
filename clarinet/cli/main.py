@@ -157,13 +157,10 @@ secret_key = "change-this-secret-key-in-production"
 # dicom_max_concurrent_associations = 8
 # dicom_log_identifiers = false
 
-# ── PACS remote ──────────────────────────────────────
+# ── PACS remote (backend DICOM service) ──────────────
 # pacs_host = "localhost"
 # pacs_port = 4242
 # pacs_aet = "ORTHANC"
-# pacs_calling_aet = "SLICER"
-# pacs_prefer_cget = true
-# pacs_move_aet = "SLICER"
 
 # ── 3D Slicer ────────────────────────────────────────
 # slicer_script_paths = []

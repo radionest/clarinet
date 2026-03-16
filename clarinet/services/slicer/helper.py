@@ -128,7 +128,8 @@ class PacsHelper:
     """DSL for PACS query/retrieve inside 3D Slicer via DIMSE.
 
     Wraps ``ctkDICOMQuery`` + ``ctkDICOMRetrieve`` into concise methods.
-    Connection params are injected as context variables by SlicerService.
+    Use ``PacsHelper.from_slicer()`` to read connection params from Slicer's
+    DICOM module, or pass them explicitly for testing.
     """
 
     def __init__(
@@ -146,6 +147,60 @@ class PacsHelper:
         self.calling_aet = calling_aet
         self.prefer_cget = prefer_cget
         self.move_aet = move_aet
+
+    @classmethod
+    def from_slicer(cls, server_name: str | None = None) -> PacsHelper:
+        """Create PacsHelper from Slicer's configured PACS servers.
+
+        Reads connection parameters from Slicer's DICOM module, so each user's
+        local Slicer configuration (including their own calling AE title) is used.
+
+        Args:
+            server_name: Optional connection name to select a specific server.
+                If None, uses the first query/retrieve-enabled server.
+
+        Raises:
+            SlicerHelperError: If no PACS server is configured in Slicer.
+        """
+        browser = (
+            slicer.modules.dicom.widgetRepresentation().self().browserWidget.dicomVisualBrowser
+        )
+
+        server = None
+        if server_name:
+            for i in range(browser.serversCount()):
+                s = browser.server(i)
+                if s.connectionName == server_name:
+                    server = s
+                    break
+            if server is None:
+                raise SlicerHelperError(
+                    f"PACS server '{server_name}' not found in Slicer. "
+                    f"Configure it in Edit > Application Settings > DICOM."
+                )
+        else:
+            for i in range(browser.serversCount()):
+                s = browser.server(i)
+                if s.queryRetrieveEnabled:
+                    server = s
+                    break
+            if server is None and browser.serversCount() > 0:
+                server = browser.server(0)
+
+        if server is None:
+            raise SlicerHelperError(
+                "No PACS server configured in Slicer. "
+                "Add one in Edit > Application Settings > DICOM."
+            )
+
+        return cls(
+            host=server.host,
+            port=server.port,
+            called_aet=server.calledAETitle,
+            calling_aet=server.callingAETitle,
+            prefer_cget=(server.retrieveProtocol == ctk.ctkDICOMServer.CGET),
+            move_aet=server.callingAETitle,
+        )
 
     def retrieve_study(self, study_instance_uid: str) -> list[str]:
         """Load a DICOM study into the MRML scene (local-first).
@@ -507,25 +562,21 @@ class SlicerHelper:
                 shortcut.connect("activated()", lambda code=action: exec(code))
             self._shortcuts.append(shortcut)
 
-    def load_study_from_pacs(self, study_instance_uid: str) -> list[str]:
+    def load_study_from_pacs(
+        self, study_instance_uid: str, server_name: str | None = None
+    ) -> list[str]:
         """Load a DICOM study from PACS into the current scene.
 
-        Requires ``pacs_*`` context variables to be injected by SlicerService.
+        Reads PACS connection params from Slicer's DICOM module configuration.
 
         Args:
             study_instance_uid: DICOM Study Instance UID to retrieve.
+            server_name: Optional PACS server name configured in Slicer.
 
         Returns:
             List of loaded MRML node IDs.
         """
-        pacs = PacsHelper(
-            host=pacs_host,  # type: ignore[name-defined]  # noqa: F821
-            port=pacs_port,  # type: ignore[name-defined]  # noqa: F821
-            called_aet=pacs_aet,  # type: ignore[name-defined]  # noqa: F821
-            calling_aet=pacs_calling_aet,  # type: ignore[name-defined]  # noqa: F821
-            prefer_cget=pacs_prefer_cget,  # type: ignore[name-defined]  # noqa: F821
-            move_aet=pacs_move_aet,  # type: ignore[name-defined]  # noqa: F821
-        )
+        pacs = PacsHelper.from_slicer(server_name)
         node_ids = pacs.retrieve_study(study_instance_uid)
 
         # Auto-set first scalar volume as source for Segment Editor
@@ -537,26 +588,25 @@ class SlicerHelper:
 
         return node_ids or []
 
-    def load_series_from_pacs(self, study_instance_uid: str, series_instance_uid: str) -> list[str]:
+    def load_series_from_pacs(
+        self,
+        study_instance_uid: str,
+        series_instance_uid: str,
+        server_name: str | None = None,
+    ) -> list[str]:
         """Load a single DICOM series from PACS into the current scene.
 
-        Requires ``pacs_*`` context variables to be injected by SlicerService.
+        Reads PACS connection params from Slicer's DICOM module configuration.
 
         Args:
             study_instance_uid: DICOM Study Instance UID.
             series_instance_uid: DICOM Series Instance UID to retrieve.
+            server_name: Optional PACS server name configured in Slicer.
 
         Returns:
             List of loaded MRML node IDs.
         """
-        pacs = PacsHelper(
-            host=pacs_host,  # type: ignore[name-defined]  # noqa: F821
-            port=pacs_port,  # type: ignore[name-defined]  # noqa: F821
-            called_aet=pacs_aet,  # type: ignore[name-defined]  # noqa: F821
-            calling_aet=pacs_calling_aet,  # type: ignore[name-defined]  # noqa: F821
-            prefer_cget=pacs_prefer_cget,  # type: ignore[name-defined]  # noqa: F821
-            move_aet=pacs_move_aet,  # type: ignore[name-defined]  # noqa: F821
-        )
+        pacs = PacsHelper.from_slicer(server_name)
         node_ids = pacs.retrieve_series(study_instance_uid, series_instance_uid)
 
         # Auto-set first scalar volume as source for Segment Editor

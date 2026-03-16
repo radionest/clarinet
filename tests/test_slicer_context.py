@@ -7,7 +7,6 @@ Covers:
 - Cross-level file resolution (e.g. master_model at PATIENT level)
 - Custom slicer_script_args override
 - Unresolved template warning
-- PACS settings injection
 """
 
 from datetime import date
@@ -104,12 +103,6 @@ def _make_record_read(
 def test_standard_vars_study_level(mock_settings):
     """STUDY level → working_folder + study_uid present."""
     mock_settings.storage_path = "/storage"
-    mock_settings.pacs_host = "localhost"
-    mock_settings.pacs_port = 4242
-    mock_settings.pacs_aet = "ORTHANC"
-    mock_settings.pacs_calling_aet = "SLICER"
-    mock_settings.pacs_prefer_cget = True
-    mock_settings.pacs_move_aet = "SLICER"
 
     record = _make_record_read(level=DicomQueryLevel.STUDY)
     ctx = build_slicer_context(record)
@@ -123,12 +116,6 @@ def test_standard_vars_study_level(mock_settings):
 def test_standard_vars_series_level(mock_settings):
     """SERIES level → working_folder + study_uid + series_uid present."""
     mock_settings.storage_path = "/storage"
-    mock_settings.pacs_host = "localhost"
-    mock_settings.pacs_port = 4242
-    mock_settings.pacs_aet = "ORTHANC"
-    mock_settings.pacs_calling_aet = "SLICER"
-    mock_settings.pacs_prefer_cget = True
-    mock_settings.pacs_move_aet = "SLICER"
 
     record = _make_record_read(
         level=DicomQueryLevel.SERIES,
@@ -148,12 +135,6 @@ def test_standard_vars_series_level(mock_settings):
 def test_standard_vars_patient_level(mock_settings):
     """PATIENT level → working_folder only (no study_uid/series_uid)."""
     mock_settings.storage_path = "/storage"
-    mock_settings.pacs_host = "localhost"
-    mock_settings.pacs_port = 4242
-    mock_settings.pacs_aet = "ORTHANC"
-    mock_settings.pacs_calling_aet = "SLICER"
-    mock_settings.pacs_prefer_cget = True
-    mock_settings.pacs_move_aet = "SLICER"
 
     record = _make_record_read(
         level=DicomQueryLevel.PATIENT,
@@ -176,12 +157,6 @@ def test_standard_vars_patient_level(mock_settings):
 def test_file_paths_from_registry(mock_settings):
     """FileDefinition names → resolved absolute paths in context."""
     mock_settings.storage_path = "/storage"
-    mock_settings.pacs_host = "localhost"
-    mock_settings.pacs_port = 4242
-    mock_settings.pacs_aet = "ORTHANC"
-    mock_settings.pacs_calling_aet = "SLICER"
-    mock_settings.pacs_prefer_cget = True
-    mock_settings.pacs_move_aet = "SLICER"
 
     seg_fd = FileDefinitionRead(
         name="segmentation_single",
@@ -202,12 +177,6 @@ def test_file_paths_from_registry(mock_settings):
 def test_output_file_alias(mock_settings):
     """First OUTPUT file → output_file convenience alias."""
     mock_settings.storage_path = "/storage"
-    mock_settings.pacs_host = "localhost"
-    mock_settings.pacs_port = 4242
-    mock_settings.pacs_aet = "ORTHANC"
-    mock_settings.pacs_calling_aet = "SLICER"
-    mock_settings.pacs_prefer_cget = True
-    mock_settings.pacs_move_aet = "SLICER"
 
     input_fd = FileDefinitionRead(
         name="master_model",
@@ -237,12 +206,6 @@ def test_output_file_alias(mock_settings):
 def test_cross_level_file_resolution(mock_settings):
     """master_model (PATIENT level) resolved from SERIES-level record."""
     mock_settings.storage_path = "/storage"
-    mock_settings.pacs_host = "localhost"
-    mock_settings.pacs_port = 4242
-    mock_settings.pacs_aet = "ORTHANC"
-    mock_settings.pacs_calling_aet = "SLICER"
-    mock_settings.pacs_prefer_cget = True
-    mock_settings.pacs_move_aet = "SLICER"
 
     master_fd = FileDefinitionRead(
         name="master_model",
@@ -272,12 +235,6 @@ def test_cross_level_file_resolution(mock_settings):
 def test_custom_args_override(mock_settings):
     """Custom slicer_script_args override auto-injected values."""
     mock_settings.storage_path = "/storage"
-    mock_settings.pacs_host = "localhost"
-    mock_settings.pacs_port = 4242
-    mock_settings.pacs_aet = "ORTHANC"
-    mock_settings.pacs_calling_aet = "SLICER"
-    mock_settings.pacs_prefer_cget = True
-    mock_settings.pacs_move_aet = "SLICER"
 
     record = _make_record_read(
         level=DicomQueryLevel.SERIES,
@@ -303,12 +260,6 @@ def test_custom_args_override(mock_settings):
 def test_unresolved_template_skipped(mock_settings):
     """Unknown placeholder in custom args → key skipped (warning logged via loguru)."""
     mock_settings.storage_path = "/storage"
-    mock_settings.pacs_host = "localhost"
-    mock_settings.pacs_port = 4242
-    mock_settings.pacs_aet = "ORTHANC"
-    mock_settings.pacs_calling_aet = "SLICER"
-    mock_settings.pacs_prefer_cget = True
-    mock_settings.pacs_move_aet = "SLICER"
 
     record = _make_record_read(
         level=DicomQueryLevel.STUDY,
@@ -326,33 +277,6 @@ def test_unresolved_template_skipped(mock_settings):
 
 
 # ---------------------------------------------------------------------------
-# PACS settings
-# ---------------------------------------------------------------------------
-
-
-@patch("clarinet.services.slicer.context.settings")
-def test_pacs_settings_injected(mock_settings):
-    """PACS settings always present in context."""
-    mock_settings.storage_path = "/storage"
-    mock_settings.pacs_host = "pacs.example.com"
-    mock_settings.pacs_port = 11112
-    mock_settings.pacs_aet = "MYPACS"
-    mock_settings.pacs_calling_aet = "CLARINET"
-    mock_settings.pacs_prefer_cget = False
-    mock_settings.pacs_move_aet = "CLARINET_MOVE"
-
-    record = _make_record_read(level=DicomQueryLevel.STUDY)
-    ctx = build_slicer_context(record)
-
-    assert ctx["pacs_host"] == "pacs.example.com"
-    assert ctx["pacs_port"] == 11112
-    assert ctx["pacs_aet"] == "MYPACS"
-    assert ctx["pacs_calling_aet"] == "CLARINET"
-    assert ctx["pacs_prefer_cget"] is False
-    assert ctx["pacs_move_aet"] == "CLARINET_MOVE"
-
-
-# ---------------------------------------------------------------------------
 # No output files → no output_file key
 # ---------------------------------------------------------------------------
 
@@ -361,12 +285,6 @@ def test_pacs_settings_injected(mock_settings):
 def test_no_output_file_when_no_outputs(mock_settings):
     """No OUTPUT files in registry → output_file key absent."""
     mock_settings.storage_path = "/storage"
-    mock_settings.pacs_host = "localhost"
-    mock_settings.pacs_port = 4242
-    mock_settings.pacs_aet = "ORTHANC"
-    mock_settings.pacs_calling_aet = "SLICER"
-    mock_settings.pacs_prefer_cget = True
-    mock_settings.pacs_move_aet = "SLICER"
 
     input_fd = FileDefinitionRead(
         name="some_input",
@@ -393,12 +311,6 @@ def test_no_output_file_when_no_outputs(mock_settings):
 async def test_build_slicer_context_async_no_hydrators(mock_settings):
     """build_slicer_context_async without hydrators returns same as sync."""
     mock_settings.storage_path = "/storage"
-    mock_settings.pacs_host = "localhost"
-    mock_settings.pacs_port = 4242
-    mock_settings.pacs_aet = "ORTHANC"
-    mock_settings.pacs_calling_aet = "SLICER"
-    mock_settings.pacs_prefer_cget = True
-    mock_settings.pacs_move_aet = "SLICER"
 
     record = _make_record_read(level=DicomQueryLevel.STUDY)
     mock_session = AsyncMock()

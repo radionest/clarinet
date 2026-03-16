@@ -28,7 +28,6 @@ HTTP-based integration with **3D Slicer** desktop application. Sends Python scri
 3. **`output_file`** (auto): first OUTPUT file from file_registry — convenience alias for scripts
 4. **Custom `slicer_script_args`** (template-resolved with all vars above)
 5. **Custom `slicer_result_validator_args`** (same)
-6. **PACS settings** (`pacs_host`, `pacs_port`, etc.)
 
 `build_slicer_context_async(record, session)` wraps the sync function and runs any `slicer_context_hydrators` registered on the record type.
 
@@ -163,7 +162,8 @@ Runs inside Slicer Python environment. Has `_Dummy` fallback for testing outside
 
 DIMSE (C-FIND + C-GET/C-MOVE) integration via `ctkDICOMQuery` / `ctkDICOMRetrieve`.
 
-- `PacsHelper(host, port, called_aet, calling_aet, prefer_cget, move_aet)` — connection params
+- `PacsHelper(host, port, called_aet, calling_aet, prefer_cget, move_aet)` — explicit connection params (for testing)
+- `PacsHelper.from_slicer(server_name=None)` — reads PACS config from Slicer's DICOM module (`ctkDICOMVisualBrowser`); picks first query/retrieve-enabled server or falls back to first server. Each user configures PACS once in `Edit > Application Settings > DICOM`
 - `retrieve_study(study_instance_uid)` → **local-first**: checks `slicer.dicomDatabase` for existing series, falls back to C-FIND + C-GET/C-MOVE from PACS
 - `retrieve_series(study_instance_uid, series_instance_uid)` → **local-first**: checks `slicer.dicomDatabase.filesForSeries()`, falls back to C-GET/C-MOVE (no C-FIND)
 - Called internally by `SlicerHelper.load_study_from_pacs()` and `load_series_from_pacs()` — not used directly by scripts
@@ -172,21 +172,20 @@ DIMSE (C-FIND + C-GET/C-MOVE) integration via `ctkDICOMQuery` / `ctkDICOMRetriev
 
 Both `retrieve_study()` and `retrieve_series()` check Slicer's local DICOM database (`slicer.dicomDatabase`) before contacting the PACS server. If data is found locally, it is loaded directly via `DICOMUtils.loadSeriesByUID()`, avoiding network round-trips. This makes reopening previously loaded studies/series near-instant.
 
-PACS settings: same `pacs_*` vars as DICOM service — see `clarinet/services/dicom/CLAUDE.md`.
+### PACS configuration
+
+PACS connection params for Slicer are **not** in `settings.py`. Each user configures their PACS server in Slicer's GUI (`Edit > Application Settings > DICOM`), including their own calling AE title. `PacsHelper.from_slicer()` reads this configuration at runtime.
+
+Backend DICOM service (`clarinet/services/dicom/`) still uses `settings.pacs_host`, `settings.pacs_port`, `settings.pacs_aet` for server-side operations.
 
 **Usage via POST /exec:**
 ```json
 {
-  "script": "s = SlicerHelper('/tmp')\nloaded = s.load_study_from_pacs('1.2.840...')",
-  "context": {
-    "pacs_host": "192.168.1.10", "pacs_port": 4242,
-    "pacs_aet": "PACS", "pacs_calling_aet": "SLICER",
-    "pacs_prefer_cget": true, "pacs_move_aet": "SLICER"
-  }
+  "script": "s = SlicerHelper('/tmp')\nloaded = s.load_study_from_pacs('1.2.840...')"
 }
 ```
 
-Context variables are injected by `SlicerService._build_context_block()` — no new endpoint needed.
+No PACS context variables needed — `PacsHelper.from_slicer()` reads config directly from Slicer.
 
 ## Router Endpoints (`clarinet/api/routers/slicer.py`)
 

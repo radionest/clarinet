@@ -1,7 +1,7 @@
 """Slicer script context builder.
 
-Automatically injects standard variables, file paths from the file registry,
-and PACS settings into the context dict sent to Slicer scripts.
+Automatically injects standard variables and file paths from the file registry
+into the context dict sent to Slicer scripts.
 
 Layers (later overrides earlier):
 1. Standard vars: working_folder, study_uid, series_uid (by level)
@@ -9,7 +9,6 @@ Layers (later overrides earlier):
 3. output_file: first OUTPUT file from file_registry (convenience alias)
 4. Custom slicer_script_args (template-resolved with all vars above)
 5. Custom slicer_result_validator_args (same)
-6. PACS settings
 """
 
 from typing import TYPE_CHECKING, Any
@@ -58,18 +57,6 @@ def build_template_vars(record: RecordRead) -> dict[str, Any]:
     }
 
 
-def _build_pacs_context() -> dict[str, Any]:
-    """Build PACS settings context dict for Slicer scripts."""
-    return {
-        "pacs_host": settings.pacs_host,
-        "pacs_port": settings.pacs_port,
-        "pacs_aet": settings.pacs_aet,
-        "pacs_calling_aet": settings.pacs_calling_aet,
-        "pacs_prefer_cget": settings.pacs_prefer_cget,
-        "pacs_move_aet": settings.pacs_move_aet,
-    }
-
-
 def _resolve_custom_args(
     args: dict[str, str] | None,
     format_vars: dict[str, Any],
@@ -103,7 +90,6 @@ def build_slicer_context(record: RecordRead) -> dict[str, Any]:
     3. output_file: first OUTPUT file from file_registry (convenience alias)
     4. Custom slicer_script_args (template-resolved with all vars above)
     5. Custom slicer_result_validator_args (same)
-    6. PACS settings
 
     Args:
         record: Fully-loaded ``RecordRead`` with relations.
@@ -173,9 +159,6 @@ def build_slicer_context(record: RecordRead) -> dict[str, Any]:
         context.update(
             _resolve_custom_args(record.record_type.slicer_result_validator_args, format_vars)
         )
-
-    # -- Layer 6: PACS settings --
-    context.update(_build_pacs_context())
 
     return context
 

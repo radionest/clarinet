@@ -98,13 +98,10 @@ class Settings(BaseSettings):
     slicer_port: int = 2016
     slicer_timeout: float = 10.0
 
-    # PACS server settings (remote PACS)
+    # PACS server settings (used by backend DICOM service for anonymization etc.)
     pacs_host: str = "localhost"
     pacs_port: int = 4242
     pacs_aet: str = "ORTHANC"
-    pacs_calling_aet: str = "SLICER"
-    pacs_prefer_cget: bool = True
-    pacs_move_aet: str = "SLICER"
 
     # RabbitMQ settings
     rabbitmq_login: str = "guest"
