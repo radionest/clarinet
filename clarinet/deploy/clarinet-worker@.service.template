@@ -1,0 +1,22 @@
+[Unit]
+Description=Clarinet Pipeline Worker (%i)
+After=network.target rabbitmq-server.service
+Wants=rabbitmq-server.service
+
+[Service]
+Type=simple
+User=$user
+Group=$group
+WorkingDirectory=$working_directory
+ExecStart=$exec_path worker --queues %i --workers $workers
+Restart=on-failure
+RestartSec=5
+EnvironmentFile=-$env_file
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=$read_write_paths
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

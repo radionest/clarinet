@@ -1,0 +1,22 @@
+[Unit]
+Description=Clarinet API Server
+After=network.target postgresql.service rabbitmq-server.service
+Wants=postgresql.service rabbitmq-server.service
+
+[Service]
+Type=simple
+User=$user
+Group=$group
+WorkingDirectory=$working_directory
+ExecStart=$exec_path run --headless --host $host --port $port
+Restart=on-failure
+RestartSec=5
+EnvironmentFile=-$env_file
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=$read_write_paths
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

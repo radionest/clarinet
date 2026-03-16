@@ -814,6 +814,22 @@ def main() -> None:
     # session cleanup-all
     session_subparsers.add_parser("cleanup-all", help="Remove ALL sessions (dangerous!)")
 
+    # deploy command
+    deploy_parser = subparsers.add_parser("deploy", help="Generate deployment configurations")
+    deploy_subparsers = deploy_parser.add_subparsers(dest="deploy_command")
+
+    systemd_parser = deploy_subparsers.add_parser("systemd", help="Generate systemd unit files")
+    systemd_parser.add_argument("--user", help="Service user (default: current user)")
+    systemd_parser.add_argument("--group", help="Service group (default: user's primary group)")
+    systemd_parser.add_argument("--working-dir", help="Working directory (default: cwd)")
+    systemd_parser.add_argument(
+        "--workers", type=int, default=2, help="Worker concurrency (default: 2)"
+    )
+    systemd_parser.add_argument("--output-dir", help="Write files to directory instead of stdout")
+    systemd_parser.add_argument(
+        "--env-file", help="Path to EnvironmentFile (default: {working-dir}/env)"
+    )
+
     args = parser.parse_args()
 
     if args.command == "init":
@@ -878,6 +894,13 @@ def main() -> None:
         handle_frontend_command(args)
     elif args.command == "ohif":
         handle_ohif_command(args)
+    elif args.command == "deploy":
+        if args.deploy_command == "systemd":
+            from clarinet.cli.deploy import generate_systemd
+
+            generate_systemd(args)
+        else:
+            deploy_parser.print_help()
     else:
         parser.print_help()
         sys.exit(1)
