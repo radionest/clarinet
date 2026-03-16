@@ -389,7 +389,7 @@ async def test_custom_files_catalog_path(
         textwrap.dedent("""\
         from clarinet.config.primitives import FileDef
 
-        custom_file = FileDef(pattern="custom.nrrd", description="Custom file")
+        custom_file = FileDef(pattern="custom.nrrd", level="SERIES", description="Custom file")
         """)
     )
     (tmp_path / "definitions" / "record_types.py").write_text(
