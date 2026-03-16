@@ -81,7 +81,7 @@ class PaginationParams:
 
     def __init__(
         self,
-        skip: int = Query(0, ge=0, description="Number of items to skip"),
+        skip: int = Query(0, ge=0, le=100000, description="Number of items to skip"),
         limit: int = Query(100, ge=1, le=1000, description="Maximum number of items to return"),
     ):
         self.skip = skip

@@ -97,7 +97,7 @@ class RecordTypeRepository(BaseRepository[RecordType]):
         """Find record types by criteria.
 
         Args:
-            criteria: Search criteria with optional name, constraint_role, constraint_user_num
+            criteria: Search criteria with optional name, constraint_role
 
         Returns:
             Matching record types
@@ -108,6 +108,8 @@ class RecordTypeRepository(BaseRepository[RecordType]):
         for key, value in find_terms.items():
             if key == "name":
                 statement = statement.where(cast(RecordType.name, SQLString).like(f"%{value}%"))
+            elif key == "constraint_role":
+                statement = statement.where(RecordType.role_name == value)
             else:
                 statement = statement.where(getattr(RecordType, key) == value)
 

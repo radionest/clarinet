@@ -167,17 +167,10 @@ class DatabaseStrategy(Strategy[User, UUID]):
 
         if not access_token:
             logger.warning(
-                f"Token validation failed: token={token[:8]}..., "
-                f"path={self.request.url.path if self.request else 'N/A'}, "
-                f"ip={self.request.client.host if self.request and self.request.client else 'N/A'}",
-                extra={
-                    "token_preview": token[:8],
-                    "request_path": self.request.url.path if self.request else None,
-                    "request_ip": self.request.client.host
-                    if self.request and self.request.client
-                    else None,
-                    "reason": "not_found_or_expired",
-                },
+                "Token validation failed: token={}..., path={}, ip={}",
+                token[:8],
+                self.request.url.path if self.request else "N/A",
+                self.request.client.host if self.request and self.request.client else "N/A",
             )
             self._user_cache.pop(token, None)
             return None
@@ -253,7 +246,7 @@ class DatabaseStrategy(Strategy[User, UUID]):
                     new_expiry = min(new_expiry, absolute_limit)
 
                 access_token.expires_at = new_expiry
-                logger.debug(f"Extended session {token[:8]}... to {new_expiry.isoformat()}")
+                logger.debug("Extended session {}... to {}", token[:8], new_expiry.isoformat())
 
         await self.session.commit()
 
