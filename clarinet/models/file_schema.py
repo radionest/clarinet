@@ -98,7 +98,7 @@ class RecordTypeFileLink(SQLModel, table=True):
     role: FileRole = Field(default=FileRole.OUTPUT)
     required: bool = Field(default=True)
 
-    record_type: RecordType = Relationship(back_populates="file_links")
+    record_type: "RecordType" = Relationship(back_populates="file_links")
     file_definition: FileDefinition = Relationship(back_populates="record_type_links")
 
 
@@ -123,7 +123,7 @@ class RecordFileLink(SQLModel, table=True):
     filename: str
     checksum: str | None = None
 
-    record: Record = Relationship(back_populates="file_links")
+    record: "Record" = Relationship(back_populates="file_links")
     file_definition: FileDefinition = Relationship(back_populates="record_file_links")
 
 
