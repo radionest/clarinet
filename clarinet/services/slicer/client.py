@@ -64,7 +64,7 @@ class SlicerClient:
         """Close the underlying HTTP client."""
         await self._client.aclose()
 
-    async def __aenter__(self) -> SlicerClient:
+    async def __aenter__(self) -> "SlicerClient":
         return self
 
     async def __aexit__(self, *args: object) -> None:

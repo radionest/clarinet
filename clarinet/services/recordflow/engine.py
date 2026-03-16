@@ -44,7 +44,7 @@ class FlowContext:
     file_name: str | None = None
 
     @staticmethod
-    def for_record(record: RecordRead, context: dict[str, RecordRead]) -> FlowContext:
+    def for_record(record: RecordRead, context: dict[str, RecordRead]) -> "FlowContext":
         """Build context for a record-triggered flow."""
         return FlowContext(
             record=record,
@@ -59,12 +59,12 @@ class FlowContext:
         patient_id: str,
         study_uid: str | None = None,
         series_uid: str | None = None,
-    ) -> FlowContext:
+    ) -> "FlowContext":
         """Build context for an entity-creation flow."""
         return FlowContext(patient_id=patient_id, study_uid=study_uid, series_uid=series_uid)
 
     @staticmethod
-    def for_file(file_name: str, patient_id: str) -> FlowContext:
+    def for_file(file_name: str, patient_id: str) -> "FlowContext":
         """Build context for a file-update flow."""
         return FlowContext(file_name=file_name, patient_id=patient_id)
 

@@ -35,7 +35,7 @@ class SlicerHydrationContext:
     record_repo: RecordRepository
 
     @classmethod
-    def from_session(cls, session: AsyncSession) -> SlicerHydrationContext:
+    def from_session(cls, session: AsyncSession) -> "SlicerHydrationContext":
         """Build context from a DB session.
 
         Args:

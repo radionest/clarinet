@@ -24,7 +24,7 @@ class ComparisonResult(ABC):
 class FieldComparison(ComparisonResult):
     """Represents a comparison between record data fields."""
 
-    def __init__(self, left: FlowResult, right: FlowResult, operator: str):
+    def __init__(self, left: "FlowResult", right: "FlowResult", operator: str):
         self.left = left
         self.right = right
         self.operator = operator
@@ -96,7 +96,7 @@ class FlowResult:
             else:
                 self.field_path = field_path
 
-    def __getattr__(self, name: str) -> FlowResult:
+    def __getattr__(self, name: str) -> "FlowResult":
         """Allow chaining attribute access for nested fields."""
         if name.startswith("_"):
             raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{name}'")
