@@ -172,6 +172,10 @@ pub type Msg {
   CompleteRecord(record_id: String)
   CompleteRecordResult(record_id: String, result: Result(Record, ApiError))
 
+  // Re-submit finished record (no form, PATCH)
+  ResubmitRecord(record_id: String)
+  ResubmitRecordResult(record_id: String, result: Result(Record, ApiError))
+
   // Formosh form events
   FormSubmitSuccess(record_id: String)
   FormSubmitError(error: String)

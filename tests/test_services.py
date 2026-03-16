@@ -226,7 +226,7 @@ class TestAdminService:
     async def test_get_record_type_stats_with_data(self, env):
         from clarinet.models.record import RecordType
 
-        rt = RecordType(name="test_stats_type", description="Test", label="TST")
+        rt = RecordType(name="test-stats-type", description="Test", label="TST")
         env["session"].add(rt)
         await env["session"].commit()
 
@@ -234,7 +234,7 @@ class TestAdminService:
         assert len(result) == 1
 
         stat = result[0]
-        assert stat.name == "test_stats_type"
+        assert stat.name == "test-stats-type"
         assert stat.description == "Test"
         assert stat.label == "TST"
         assert stat.level == "SERIES"  # default DicomQueryLevel
@@ -329,7 +329,7 @@ class TestFlowLoader:
         flow_file = tmp_path / "test_flow.py"
         flow_file.write_text(
             "from clarinet.services.recordflow import record\n"
-            "record('test_record_1').on_status('finished').add_record('test_record_2')\n"
+            "record('test-record-1').on_status('finished').add_record('test-record-2')\n"
         )
         flows = load_flows_from_file(flow_file)
         assert len(flows) >= 1
@@ -376,7 +376,7 @@ class TestFlowLoader:
         flow_file = tmp_path / "reg_flow.py"
         flow_file.write_text(
             "from clarinet.services.recordflow import record\n"
-            "record('test_load_reg').on_status('finished').add_record('test_load_r2')\n"
+            "record('test-load-reg').on_status('finished').add_record('test-load-r2')\n"
         )
 
         engine = MagicMock()
@@ -402,15 +402,15 @@ class TestRecordTypeService:
 
     @pytest.mark.asyncio
     async def test_create_record_type(self, env):
-        dto = RecordTypeCreate(name="svc_rt_create", label="CRT")
+        dto = RecordTypeCreate(name="svc-rt-create", label="CRT")
         result = await env["service"].create_record_type(dto)
-        assert result.name == "svc_rt_create"
+        assert result.name == "svc-rt-create"
         assert result.label == "CRT"
 
     @pytest.mark.asyncio
     async def test_create_record_type_invalid_schema(self, env):
         dto = RecordTypeCreate(
-            name="svc_rt_bad_schema",
+            name="svc-rt-bad-schema",
             data_schema={"type": "invalid_not_a_type"},
         )
         with pytest.raises(ValidationError, match="Data schema is invalid"):
@@ -418,12 +418,12 @@ class TestRecordTypeService:
 
     @pytest.mark.asyncio
     async def test_update_record_type(self, env):
-        dto = RecordTypeCreate(name="svc_rt_upd", description="Original")
+        dto = RecordTypeCreate(name="svc-rt-upd", description="Original")
         await env["service"].create_record_type(dto)
 
         update = RecordTypeOptional(description="Updated")
         update.model_fields_set.add("description")
-        result = await env["service"].update_record_type("svc_rt_upd", update)
+        result = await env["service"].update_record_type("svc-rt-upd", update)
         assert result.description == "Updated"
 
     @pytest.mark.asyncio
@@ -435,7 +435,7 @@ class TestRecordTypeService:
             "properties": {"score": {"type": "integer"}},
             "required": ["score"],
         }
-        dto = RecordTypeCreate(name="svc_rt_valid", data_schema=schema)
+        dto = RecordTypeCreate(name="svc-rt-valid", data_schema=schema)
         rt = await env["service"].create_record_type(dto)
 
         record = MagicMock()
@@ -455,7 +455,7 @@ class TestRecordTypeService:
             "properties": {"score": {"type": "integer"}},
             "required": ["score"],
         }
-        dto = RecordTypeCreate(name="svc_rt_invalid", data_schema=schema)
+        dto = RecordTypeCreate(name="svc-rt-invalid", data_schema=schema)
         rt = await env["service"].create_record_type(dto)
 
         record = MagicMock()

@@ -1,5 +1,5 @@
 # AI Analysis — AI-generated analysis of a series
-name = "ai_analysis"
+name = "ai-analysis"
 description = "AI-generated analysis of a series"
 label = "AI Analysis"
 level = "SERIES"

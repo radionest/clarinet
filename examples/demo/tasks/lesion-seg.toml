@@ -1,5 +1,5 @@
 # Lesion Segmentation — series-level lesion segmentation in 3D Slicer
-name = "lesion_seg"
+name = "lesion-seg"
 description = "Series-level lesion segmentation in 3D Slicer"
 label = "Lesion Segmentation"
 level = "SERIES"

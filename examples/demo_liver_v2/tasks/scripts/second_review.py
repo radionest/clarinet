@@ -6,7 +6,7 @@ ROIs, then presents a classification segmentation for the reviewer.
 Context variables (injected by build_slicer_context):
     working_folder: Absolute path to the working directory (auto).
     master_projection: Path to the master projection segmentation (auto, from file_registry).
-    segmentation_single: Path to the doctor's initial segmentation (auto, from file_registry).
+    segmentation: Path to the doctor's initial segmentation (auto, from file_registry).
     second_review_output: Path to the classification result (auto, from file_registry).
     output_file: Same as second_review_output (auto, first OUTPUT file).
     study_uid: DICOM Study Instance UID to load from PACS (auto).
@@ -20,7 +20,7 @@ s.load_study_from_pacs(study_uid)  # type: ignore[name-defined]  # noqa: F821
 
 # Load projection and doctor segmentation
 projection = s.load_segmentation(master_projection, "Projection")  # type: ignore[name-defined]  # noqa: F821
-doctor_seg = s.load_segmentation(segmentation_single, "DoctorSeg")  # type: ignore[name-defined]  # noqa: F821
+doctor_seg = s.load_segmentation(segmentation, "DoctorSeg")  # type: ignore[name-defined]  # noqa: F821
 
 # Subtract doctor's segmentation from projection to find missed lesions
 missed = s.subtract_segmentations(projection, doctor_seg, "MissedLesions")

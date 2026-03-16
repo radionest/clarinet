@@ -42,12 +42,12 @@ async def test_bootstrap_creates_from_toml(
     """Write TOML to tmp_path → reconcile → verify DB."""
     _write_toml(
         tmp_path,
-        "seg_markup",
-        {"name": "seg_markup", "description": "Segmentation", "level": "SERIES"},
+        "seg-markup",
+        {"name": "seg-markup", "description": "Segmentation", "level": "SERIES"},
     )
     _write_schema(
         tmp_path,
-        "seg_markup",
+        "seg-markup",
         {"type": "object", "properties": {"score": {"type": "number"}}},
     )
 
@@ -60,10 +60,10 @@ async def test_bootstrap_creates_from_toml(
             config_items.append(RecordTypeCreate(**props))
 
     result = await reconcile_record_types(config_items, test_session)
-    assert "seg_markup" in result.created
+    assert "seg-markup" in result.created
 
     # Verify in DB
-    stmt = select(RecordType).where(RecordType.name == "seg_markup")
+    stmt = select(RecordType).where(RecordType.name == "seg-markup")
     rt = (await test_session.execute(stmt)).scalar_one()
     assert rt.description == "Segmentation"
     assert rt.data_schema is not None
@@ -78,10 +78,10 @@ async def test_bootstrap_updates_changed_toml(
     # First: create initial
     _write_toml(
         tmp_path,
-        "seg_update",
-        {"name": "seg_update", "description": "Original", "level": "SERIES"},
+        "seg-update",
+        {"name": "seg-update", "description": "Original", "level": "SERIES"},
     )
-    _write_schema(tmp_path, "seg_update", {"type": "object"})
+    _write_schema(tmp_path, "seg-update", {"type": "object"})
 
     config_files = discover_config_files(str(tmp_path))
     items = [
@@ -94,10 +94,10 @@ async def test_bootstrap_updates_changed_toml(
     # Second: update TOML
     _write_toml(
         tmp_path,
-        "seg_update",
-        {"name": "seg_update", "description": "Updated", "level": "SERIES"},
+        "seg-update",
+        {"name": "seg-update", "description": "Updated", "level": "SERIES"},
     )
-    _write_schema(tmp_path, "seg_update", {"type": "object"})
+    _write_schema(tmp_path, "seg-update", {"type": "object"})
 
     config_files = discover_config_files(str(tmp_path))
     items = [
@@ -106,9 +106,9 @@ async def test_bootstrap_updates_changed_toml(
         if (p := await load_record_config(cf)) is not None
     ]
     result = await reconcile_record_types(items, test_session)
-    assert "seg_update" in result.updated
+    assert "seg-update" in result.updated
 
-    stmt = select(RecordType).where(RecordType.name == "seg_update")
+    stmt = select(RecordType).where(RecordType.name == "seg-update")
     rt = (await test_session.execute(stmt)).scalar_one()
     assert rt.description == "Updated"
 
@@ -117,7 +117,7 @@ async def test_bootstrap_updates_changed_toml(
 async def test_export_record_type_to_toml(tmp_path) -> None:
     """Export RecordType → verify TOML written to disk."""
     rt = RecordType(
-        name="export_test",
+        name="export-test",
         description="Exported",
         level="SERIES",
         label="Test",
@@ -125,12 +125,12 @@ async def test_export_record_type_to_toml(tmp_path) -> None:
 
     path = await export_record_type_to_toml(rt, tmp_path)
     assert path.exists()
-    assert path.name == "export_test.toml"
+    assert path.name == "export-test.toml"
 
     import tomllib
 
     content = tomllib.loads(path.read_text())
-    assert content["name"] == "export_test"
+    assert content["name"] == "export-test"
     assert content["description"] == "Exported"
 
 
@@ -138,7 +138,7 @@ async def test_export_record_type_to_toml(tmp_path) -> None:
 async def test_export_data_schema_sidecar(tmp_path) -> None:
     """data_schema → {name}.schema.json written."""
     rt = RecordType(
-        name="schema_test",
+        name="schema-test",
         description="Schema export",
         level="SERIES",
         data_schema={"type": "object", "properties": {"val": {"type": "integer"}}},
@@ -146,7 +146,7 @@ async def test_export_data_schema_sidecar(tmp_path) -> None:
 
     path = await export_data_schema_sidecar(rt, tmp_path)
     assert path is not None
-    assert path.name == "schema_test.schema.json"
+    assert path.name == "schema-test.schema.json"
 
     content = json.loads(path.read_text())
     assert content["type"] == "object"
@@ -180,15 +180,15 @@ async def test_file_registry_round_trip(
     }
     _write_toml(
         tmp_path,
-        "round_trip",
+        "round-trip",
         {
-            "name": "round_trip",
+            "name": "round-trip",
             "description": "Round trip test",
             "level": "SERIES",
             "file_registry": [file_def],
         },
     )
-    _write_schema(tmp_path, "round_trip", {"type": "object"})
+    _write_schema(tmp_path, "round-trip", {"type": "object"})
 
     # Load and reconcile
     config_files = discover_config_files(str(tmp_path))
@@ -202,7 +202,7 @@ async def test_file_registry_round_trip(
     # Fetch from DB with eager loading
     stmt = (
         select(RecordType)
-        .where(RecordType.name == "round_trip")
+        .where(RecordType.name == "round-trip")
         .options(
             selectinload(RecordType.file_links).selectinload(  # type: ignore[arg-type]
                 RecordTypeFileLink.file_definition
@@ -220,6 +220,6 @@ async def test_file_registry_round_trip(
 
     import tomllib
 
-    exported = tomllib.loads((export_dir / "round_trip.toml").read_text())
+    exported = tomllib.loads((export_dir / "round-trip.toml").read_text())
     assert "file_registry" in exported
     assert exported["file_registry"][0]["name"] == "seg_mask"

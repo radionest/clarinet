@@ -488,6 +488,48 @@ pub fn submit_record_data(
   })
 }
 
+/// Re-submit data for a finished record without data_schema (PATCH)
+pub fn resubmit_record_data(
+  record_id: String,
+) -> Promise(Result(Record, ApiError)) {
+  http_client.patch("/records/" <> record_id <> "/data", "{}")
+  |> promise.map(fn(res) {
+    result.try(res, http_client.decode_response(
+      _,
+      record_decoder(),
+      "Invalid record data",
+    ))
+  })
+}
+
+/// Submit record with server-side Slicer validation (POST /submit)
+pub fn submit_record(
+  record_id: String,
+) -> Promise(Result(Record, ApiError)) {
+  http_client.post("/records/" <> record_id <> "/submit", "{}")
+  |> promise.map(fn(res) {
+    result.try(res, http_client.decode_response(
+      _,
+      record_decoder(),
+      "Invalid record data",
+    ))
+  })
+}
+
+/// Re-submit record with server-side Slicer validation (PATCH /submit)
+pub fn resubmit_record(
+  record_id: String,
+) -> Promise(Result(Record, ApiError)) {
+  http_client.patch("/records/" <> record_id <> "/submit", "{}")
+  |> promise.map(fn(res) {
+    result.try(res, http_client.decode_response(
+      _,
+      record_decoder(),
+      "Invalid record data",
+    ))
+  })
+}
+
 /// Restart an auto task by invalidating it (hard mode)
 pub fn restart_record(
   record_id: String,

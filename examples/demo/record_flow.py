@@ -2,26 +2,26 @@
 
 from clarinet.services.recordflow import record, series
 
-# Flow 1: When doctor_review finishes -> always create ai_analysis
-(record("doctor_review").on_status("finished").add_record("ai_analysis"))
+# Flow 1: When doctor-review finishes -> always create ai-analysis
+(record("doctor-review").on_status("finished").add_record("ai-analysis"))
 
-# Flow 2: When doctor_review finishes with low confidence -> create expert_check
+# Flow 2: When doctor-review finishes with low confidence -> create expert-check
 (
-    record("doctor_review")
+    record("doctor-review")
     .on_status("finished")
-    .if_(record("doctor_review").data.confidence < 70)
-    .add_record("expert_check")
+    .if_(record("doctor-review").data.confidence < 70)
+    .add_record("expert-check")
 )
 
-# Flow 3: When ai_analysis finishes and disagrees with doctor -> create expert_check
+# Flow 3: When ai-analysis finishes and disagrees with doctor -> create expert-check
 (
-    record("ai_analysis")
+    record("ai-analysis")
     .on_status("finished")
-    .if_(record("ai_analysis").data.ai_diagnosis != record("doctor_review").data.diagnosis)
-    .add_record("expert_check")
+    .if_(record("ai-analysis").data.ai_diagnosis != record("doctor-review").data.diagnosis)
+    .add_record("expert-check")
 )
 
-# Flow 4: When a new series is created -> auto-create series_markup record
-(series().on_created().add_record("series_markup"))
+# Flow 4: When a new series is created -> auto-create series-markup record
+(series().on_created().add_record("series-markup"))
 
-(record("series_markup").on_status("finished").add_record("lesion_seg"))
+(record("series-markup").on_status("finished").add_record("lesion-seg"))

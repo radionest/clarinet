@@ -6,6 +6,7 @@ Formerly known as task router.
 """
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from fastapi import (
@@ -31,6 +32,8 @@ from clarinet.api.dependencies import (
     RecordTypeServiceDep,
     SeriesRepositoryDep,
     SessionDep,
+    SlicerServiceDep,
+    get_client_ip,
     get_user_role_names,
     require_mutable_config,
 )
@@ -58,8 +61,18 @@ from clarinet.models import (
 from clarinet.repositories.record_repository import RecordSearchCriteria
 from clarinet.services.file_validation import FileValidationResult, validate_record_files
 from clarinet.services.schema_hydration import hydrate_schema
+from clarinet.services.slicer.context import build_slicer_context_async
+from clarinet.settings import settings
 from clarinet.types import RecordData
 from clarinet.utils.file_checksums import checksums_changed, compute_checksums
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from clarinet.repositories.record_repository import RecordRepository
+    from clarinet.services.record_service import RecordService
+    from clarinet.services.record_type_service import RecordTypeService
+    from clarinet.services.slicer.service import SlicerService
 
 
 class FileCheckResult(SQLModel):
@@ -362,6 +375,84 @@ async def assign_record_to_user(
     return mask_record_patient_data(RecordRead.model_validate(record), user)
 
 
+async def _process_submission(
+    *,
+    record_id: int,
+    record: Record,
+    data: RecordData,
+    user: User,
+    repo: RecordRepository,
+    service: RecordService,
+    rt_service: RecordTypeService,
+    is_update: bool,
+    slicer_service: SlicerService | None = None,
+    session: AsyncSession | None = None,
+    client_ip: str | None = None,
+) -> RecordRead:
+    """Validate, optionally run Slicer, and persist record data.
+
+    Shared logic for POST/PATCH ``/data`` and ``/submit`` endpoints.
+
+    Args:
+        record_id: Record ID.
+        record: Authorized ORM record.
+        data: Submitted form data.
+        user: Current user (for masking and user assignment).
+        repo: Record repository (for parent/file operations).
+        service: Record service (submit / update).
+        rt_service: RecordType service (schema validation).
+        is_update: ``True`` for PATCH (update), ``False`` for POST (submit).
+        slicer_service: Optional Slicer service for validation.
+        session: DB session, required when *slicer_service* is provided.
+        client_ip: Client IP, required when *slicer_service* is provided.
+
+    Returns:
+        Masked ``RecordRead``.
+    """
+    validated_data = await rt_service.validate_record_data(record, data)
+    record_read = RecordRead.model_validate(record)
+
+    # Load parent once — reused by slicer context and file validation
+    parent_read: RecordRead | None = None
+    if record.parent_record_id is not None:
+        parent_orm = await repo.get_with_relations(record.parent_record_id)
+        parent_read = RecordRead.model_validate(parent_orm)
+
+    # Run Slicer validation if configured
+    if (
+        slicer_service is not None
+        and session is not None
+        and client_ip is not None
+        and record_read.record_type.slicer_result_validator
+    ):
+        context = await build_slicer_context_async(
+            record_read, session, parent=parent_read,
+        )
+        slicer_url = f"http://{client_ip}:{settings.slicer_port}"
+        await slicer_service.execute(
+            slicer_url,
+            record_read.record_type.slicer_result_validator,
+            context,
+            request_timeout=60.0,
+        )
+
+    if is_update:
+        updated, _ = await service.update_data(record_id, validated_data)
+    else:
+        # Validate input files (raise on missing required files)
+        file_result = await validate_record_files(
+            record_read, raise_on_invalid=True, parent=parent_read,
+        )
+        if file_result and file_result.matched_files:
+            await repo.set_files(record, file_result.matched_files)
+
+        updated, _ = await service.submit_data(
+            record_id, validated_data, RecordStatus.finished, user_id=user.id,
+        )
+
+    return mask_record_patient_data(RecordRead.model_validate(updated), user)
+
+
 @router.post("/{record_id}/data", response_model=RecordRead)
 async def submit_record_data(
     record_id: int,
@@ -381,33 +472,17 @@ async def submit_record_data(
     if record.status == RecordStatus.finished:
         raise CONFLICT.with_context("Record already finished. Use PATCH to update the record data.")
 
-    validated_data = await rt_service.validate_record_data(record, data)
-
-    # Validate input files if defined (raise on missing required files)
-    record_read = RecordRead.model_validate(record)
-    parent_read = None
-    if record.parent_record_id is not None:
-        parent = await repo.get_with_relations(record.parent_record_id)
-        parent_read = RecordRead.model_validate(parent)
-    file_result = await validate_record_files(
-        record_read, raise_on_invalid=True, parent=parent_read
+    return await _process_submission(
+        record_id=record_id, record=record, data=data, user=user,
+        repo=repo, service=service, rt_service=rt_service, is_update=False,
     )
-
-    if file_result and file_result.matched_files:
-        await repo.set_files(record, file_result.matched_files)
-
-    # Update record data, set finished status (auto-assign user if missing)
-    updated, _ = await service.submit_data(
-        record_id, validated_data, RecordStatus.finished, user_id=user.id
-    )
-
-    return mask_record_patient_data(RecordRead.model_validate(updated), user)
 
 
 @router.patch("/{record_id}/data", response_model=RecordRead)
 async def update_record_data(
     record_id: int,
     authorized_record: AuthorizedRecordDep,
+    repo: RecordRepositoryDep,
     service: RecordServiceDep,
     rt_service: RecordTypeServiceDep,
     user: CurrentUserDep,
@@ -419,10 +494,93 @@ async def update_record_data(
     if record.status != RecordStatus.finished:
         raise CONFLICT.with_context("Record is not finished yet. Use POST to submit record data.")
 
-    validated_data = await rt_service.validate_record_data(record, data)
-    updated, _ = await service.update_data(record_id, validated_data)
+    return await _process_submission(
+        record_id=record_id, record=record, data=data, user=user,
+        repo=repo, service=service, rt_service=rt_service, is_update=True,
+    )
 
-    return mask_record_patient_data(RecordRead.model_validate(updated), user)
+
+@router.post("/{record_id}/submit", response_model=RecordRead)
+async def submit_record_with_validation(
+    record_id: int,
+    authorized_record: AuthorizedRecordDep,
+    repo: RecordRepositoryDep,
+    service: RecordServiceDep,
+    rt_service: RecordTypeServiceDep,
+    slicer_service: SlicerServiceDep,
+    session: SessionDep,
+    user: CurrentUserDep,
+    client_ip: str = Depends(get_client_ip),
+    data: RecordData = Body(default={}),
+) -> RecordRead:
+    """Submit data for a record, running Slicer validation first if configured.
+
+    For records with a ``slicer_result_validator``, the validator script is
+    executed on the user's local Slicer instance before the data is saved.
+    This ensures output files are written to disk before downstream triggers fire.
+
+    Args:
+        record_id: Record ID.
+        data: Form data (may be empty for no-schema records).
+
+    Returns:
+        Updated record.
+
+    Raises:
+        SlicerError: If Slicer validation fails (-> 422).
+        SlicerConnectionError: If Slicer is unreachable (-> 502).
+    """
+    record = authorized_record
+
+    if record.status == RecordStatus.blocked:
+        raise CONFLICT.with_context("Record is blocked — required input files are missing.")
+
+    if record.status == RecordStatus.finished:
+        raise CONFLICT.with_context("Record already finished. Use PATCH to update the record data.")
+
+    return await _process_submission(
+        record_id=record_id, record=record, data=data, user=user,
+        repo=repo, service=service, rt_service=rt_service, is_update=False,
+        slicer_service=slicer_service, session=session, client_ip=client_ip,
+    )
+
+
+@router.patch("/{record_id}/submit", response_model=RecordRead)
+async def resubmit_record_with_validation(
+    record_id: int,
+    authorized_record: AuthorizedRecordDep,
+    repo: RecordRepositoryDep,
+    service: RecordServiceDep,
+    rt_service: RecordTypeServiceDep,
+    slicer_service: SlicerServiceDep,
+    session: SessionDep,
+    user: CurrentUserDep,
+    client_ip: str = Depends(get_client_ip),
+    data: RecordData = Body(default={}),
+) -> RecordRead:
+    """Re-submit data for a finished record, running Slicer validation first if configured.
+
+    Args:
+        record_id: Record ID.
+        data: Form data (may be empty for no-schema records).
+
+    Returns:
+        Updated record.
+
+    Raises:
+        SlicerError: If Slicer validation fails (-> 422).
+        SlicerConnectionError: If Slicer is unreachable (-> 502).
+    """
+    record = authorized_record
+
+    if record.status != RecordStatus.finished:
+        raise CONFLICT.with_context("Record is not finished yet. Use POST to submit record data.")
+
+    return await _process_submission(
+        record_id=record_id, record=record, data=data, user=user,
+        repo=repo, service=service, rt_service=rt_service, is_update=True,
+        slicer_service=slicer_service, session=session, client_ip=client_ip,
+    )
 
 
 @router.patch("/{record_id}", response_model=RecordRead)

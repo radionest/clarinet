@@ -1,5 +1,5 @@
 # Expert Check — expert verification of conflicting diagnoses
-name = "expert_check"
+name = "expert-check"
 description = "Expert verification of conflicting diagnoses"
 label = "Expert Check"
 level = "SERIES"

@@ -30,7 +30,7 @@ def mock_record() -> MagicMock:
     record.series_uid = "1.2.3.4.5.6"
     record.data = {"BIRADS_R": 4, "confidence": 0.95, "nested": {"field": "value"}}
     record.record_type = MagicMock()
-    record.record_type.name = "ct_segmentation"
+    record.record_type.name = "ct-segmentation"
     record.record_type.level = "SERIES"
     return record
 
@@ -75,7 +75,7 @@ class TestResolveRecordField:
 
     def test_resolve_record_type_field(self, mock_record: MagicMock) -> None:
         """Test resolving record_type fields."""
-        assert resolve_record_field(mock_record, "record_type.name") == "ct_segmentation"
+        assert resolve_record_field(mock_record, "record_type.name") == "ct-segmentation"
 
     def test_resolve_missing_field(self) -> None:
         """Test resolving non-existent field returns empty string."""
@@ -119,7 +119,7 @@ class TestResolvePattern:
     def test_record_type_placeholder(self, mock_record: MagicMock) -> None:
         """Test pattern with record_type field placeholder."""
         result = resolve_pattern("{record_type.name}_output.nrrd", mock_record)
-        assert result == "ct_segmentation_output.nrrd"
+        assert result == "ct-segmentation_output.nrrd"
 
     def test_fallback_to_parent(self, mock_record: MagicMock) -> None:
         """Test that {user_id} resolves from parent when empty on record."""
@@ -147,6 +147,53 @@ class TestResolvePattern:
 
         result = resolve_pattern("seg_{user_id}.nrrd", child)
         assert result == "seg_.nrrd"
+
+
+class TestOriginType:
+    """Tests for the {origin_type} virtual field."""
+
+    def test_origin_type_resolves_from_parent(self, mock_record: MagicMock) -> None:
+        """When parent is given, {origin_type} resolves to parent's type name."""
+        child = MagicMock()
+        child.record_type = MagicMock()
+        child.record_type.name = "child-type"
+
+        mock_record.record_type.name = "parent-type"
+
+        result = resolve_pattern("seg_{origin_type}.nrrd", child, mock_record)
+        assert result == "seg_parent-type.nrrd"
+
+    def test_origin_type_fallback_to_own(self) -> None:
+        """Without parent, {origin_type} resolves to own record type name."""
+        record = MagicMock()
+        record.record_type = MagicMock()
+        record.record_type.name = "my-type"
+
+        result = resolve_pattern("seg_{origin_type}.nrrd", record)
+        assert result == "seg_my-type.nrrd"
+
+    def test_origin_type_combined_with_regular(self, mock_record: MagicMock) -> None:
+        """Pattern with both {origin_type} and {user_id} resolves correctly."""
+        child = MagicMock()
+        child.record_type = MagicMock()
+        child.record_type.name = "child-type"
+        child.user_id = "user-456"
+
+        mock_record.record_type.name = "parent-type"
+
+        result = resolve_pattern(
+            "segmentation_{origin_type}_{user_id}.seg.nrrd", child, mock_record
+        )
+        assert result == "segmentation_parent-type_user-456.seg.nrrd"
+
+    def test_regular_fields_unaffected(self, mock_record: MagicMock) -> None:
+        """{record_type.name} still prefers primary record (normal priority)."""
+        parent = MagicMock()
+        parent.record_type = MagicMock()
+        parent.record_type.name = "parent-type"
+
+        result = resolve_pattern("{record_type.name}_output.nrrd", mock_record, parent)
+        assert result == "ct-segmentation_output.nrrd"
 
 
 class TestGlobFilePaths:

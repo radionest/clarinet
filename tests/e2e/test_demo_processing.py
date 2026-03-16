@@ -313,34 +313,34 @@ class TestDemoRecordTypes:
         assert len(demo_record_types) == 6
 
         # doctor_review
-        dr = demo_record_types["doctor_review"]
+        dr = demo_record_types["doctor-review"]
         assert dr.level == DicomQueryLevel.SERIES
         assert dr.role_name == "doctor"
         assert dr.data_schema is not None
         assert "diagnosis" in dr.data_schema.get("properties", {})
 
         # ai_analysis
-        ai = demo_record_types["ai_analysis"]
+        ai = demo_record_types["ai-analysis"]
         assert ai.level == DicomQueryLevel.SERIES
         assert ai.role_name == "auto"
         assert ai.data_schema is not None
         assert "ai_diagnosis" in ai.data_schema.get("properties", {})
 
         # expert_check
-        ec = demo_record_types["expert_check"]
+        ec = demo_record_types["expert-check"]
         assert ec.level == DicomQueryLevel.SERIES
         assert ec.role_name == "expert"
         assert ec.data_schema is not None
         assert "final_diagnosis" in ec.data_schema.get("properties", {})
 
         # series_markup
-        sm = demo_record_types["series_markup"]
+        sm = demo_record_types["series-markup"]
         assert sm.level == DicomQueryLevel.SERIES
         assert sm.role_name == "doctor"
         assert sm.slicer_script is not None
 
         # lesion_seg
-        ls = demo_record_types["lesion_seg"]
+        ls = demo_record_types["lesion-seg"]
         assert ls.level == DicomQueryLevel.SERIES
         assert ls.role_name == "doctor"
         ls_files = ls.file_registry
@@ -348,7 +348,7 @@ class TestDemoRecordTypes:
         assert len(ls_files) == 1
 
         # air_volume
-        av = demo_record_types["air_volume"]
+        av = demo_record_types["air-volume"]
         assert av.level == DicomQueryLevel.SERIES
         assert av.role_name is None
         av_files = av.file_registry
@@ -375,7 +375,7 @@ class TestEntityFlows:
         """Creating a series auto-creates a series_markup record (Flow 4)."""
         hierarchy = await _create_hierarchy(test_session, engine=demo_engine)
 
-        records = await _find_records(client, "series_markup", study_uid=hierarchy["study_uid"])
+        records = await _find_records(client, "series-markup", study_uid=hierarchy["study_uid"])
         assert len(records) == 1
         assert records[0]["series_uid"] == hierarchy["series_uid"]
 
@@ -397,7 +397,7 @@ class TestEntityFlows:
             engine=demo_engine,
         )
 
-        records = await _find_records(client, "series_markup", study_uid=hierarchy["study_uid"])
+        records = await _find_records(client, "series-markup", study_uid=hierarchy["study_uid"])
         assert len(records) == 2
 
         series_uids = {r["series_uid"] for r in records}
@@ -427,7 +427,7 @@ class TestDoctorReviewFlows:
         resp = await client.post(
             "/api/records/",
             json={
-                "record_type_name": "doctor_review",
+                "record_type_name": "doctor-review",
                 "patient_id": hierarchy["patient_id"],
                 "study_uid": hierarchy["study_uid"],
                 "series_uid": hierarchy["series_uid"],
@@ -444,7 +444,7 @@ class TestDoctorReviewFlows:
         assert resp.status_code == 200
 
         # Flow 1: ai_analysis should be created
-        ai_records = await _find_records(client, "ai_analysis", study_uid=hierarchy["study_uid"])
+        ai_records = await _find_records(client, "ai-analysis", study_uid=hierarchy["study_uid"])
         assert len(ai_records) == 1
 
     @pytest.mark.asyncio
@@ -461,7 +461,7 @@ class TestDoctorReviewFlows:
         resp = await client.post(
             "/api/records/",
             json={
-                "record_type_name": "doctor_review",
+                "record_type_name": "doctor-review",
                 "patient_id": hierarchy["patient_id"],
                 "study_uid": hierarchy["study_uid"],
                 "series_uid": hierarchy["series_uid"],
@@ -477,12 +477,12 @@ class TestDoctorReviewFlows:
         assert resp.status_code == 200
 
         # Flow 1: ai_analysis
-        ai_records = await _find_records(client, "ai_analysis", study_uid=hierarchy["study_uid"])
+        ai_records = await _find_records(client, "ai-analysis", study_uid=hierarchy["study_uid"])
         assert len(ai_records) == 1
 
         # Flow 2: expert_check (confidence < 70)
         expert_records = await _find_records(
-            client, "expert_check", study_uid=hierarchy["study_uid"]
+            client, "expert-check", study_uid=hierarchy["study_uid"]
         )
         assert len(expert_records) == 1
 
@@ -500,7 +500,7 @@ class TestDoctorReviewFlows:
         resp = await client.post(
             "/api/records/",
             json={
-                "record_type_name": "doctor_review",
+                "record_type_name": "doctor-review",
                 "patient_id": hierarchy["patient_id"],
                 "study_uid": hierarchy["study_uid"],
                 "series_uid": hierarchy["series_uid"],
@@ -515,12 +515,12 @@ class TestDoctorReviewFlows:
         assert resp.status_code == 200
 
         # ai_analysis created (Flow 1)
-        ai_records = await _find_records(client, "ai_analysis", study_uid=hierarchy["study_uid"])
+        ai_records = await _find_records(client, "ai-analysis", study_uid=hierarchy["study_uid"])
         assert len(ai_records) == 1
 
         # expert_check NOT created (Flow 2 condition false: confidence >= 70)
         expert_records = await _find_records(
-            client, "expert_check", study_uid=hierarchy["study_uid"]
+            client, "expert-check", study_uid=hierarchy["study_uid"]
         )
         assert len(expert_records) == 0
 
@@ -548,7 +548,7 @@ class TestCrossRecordFlows:
         resp = await client.post(
             "/api/records/",
             json={
-                "record_type_name": "doctor_review",
+                "record_type_name": "doctor-review",
                 "patient_id": hierarchy["patient_id"],
                 "study_uid": hierarchy["study_uid"],
                 "series_uid": hierarchy["series_uid"],
@@ -563,13 +563,13 @@ class TestCrossRecordFlows:
         assert resp.status_code == 200
 
         # Flow 1 creates ai_analysis
-        ai_records = await _find_records(client, "ai_analysis", study_uid=hierarchy["study_uid"])
+        ai_records = await _find_records(client, "ai-analysis", study_uid=hierarchy["study_uid"])
         assert len(ai_records) == 1
         ai_id = ai_records[0]["id"]
 
         # No expert_check yet (high confidence, no disagreement yet)
         expert_before = await _find_records(
-            client, "expert_check", study_uid=hierarchy["study_uid"]
+            client, "expert-check", study_uid=hierarchy["study_uid"]
         )
         assert len(expert_before) == 0
 
@@ -582,7 +582,7 @@ class TestCrossRecordFlows:
 
         # Flow 3: expert_check created due to diagnosis disagreement
         expert_records = await _find_records(
-            client, "expert_check", study_uid=hierarchy["study_uid"]
+            client, "expert-check", study_uid=hierarchy["study_uid"]
         )
         assert len(expert_records) == 1
 
@@ -601,7 +601,7 @@ class TestCrossRecordFlows:
         resp = await client.post(
             "/api/records/",
             json={
-                "record_type_name": "doctor_review",
+                "record_type_name": "doctor-review",
                 "patient_id": hierarchy["patient_id"],
                 "study_uid": hierarchy["study_uid"],
                 "series_uid": hierarchy["series_uid"],
@@ -616,7 +616,7 @@ class TestCrossRecordFlows:
         assert resp.status_code == 200
 
         # ai_analysis auto-created by Flow 1
-        ai_records = await _find_records(client, "ai_analysis", study_uid=hierarchy["study_uid"])
+        ai_records = await _find_records(client, "ai-analysis", study_uid=hierarchy["study_uid"])
         assert len(ai_records) == 1
         ai_id = ai_records[0]["id"]
 
@@ -629,7 +629,7 @@ class TestCrossRecordFlows:
 
         # No expert_check from Flow 3 (diagnoses agree)
         expert_records = await _find_records(
-            client, "expert_check", study_uid=hierarchy["study_uid"]
+            client, "expert-check", study_uid=hierarchy["study_uid"]
         )
         assert len(expert_records) == 0
 
@@ -657,7 +657,7 @@ class TestFullProcessingChain:
         series_uid = hierarchy["series_uid"]
 
         # 2. Verify series_markup exists (created by entity Flow 4)
-        markup_records = await _find_records(client, "series_markup", study_uid=study_uid)
+        markup_records = await _find_records(client, "series-markup", study_uid=study_uid)
         assert len(markup_records) == 1
         markup_id = markup_records[0]["id"]
         assert markup_records[0]["series_uid"] == series_uid
@@ -670,7 +670,7 @@ class TestFullProcessingChain:
         assert resp.status_code == 200
 
         # 4. Verify lesion_seg exists
-        lesion_records = await _find_records(client, "lesion_seg", study_uid=study_uid)
+        lesion_records = await _find_records(client, "lesion-seg", study_uid=study_uid)
         assert len(lesion_records) == 1
         assert lesion_records[0]["series_uid"] == series_uid
 
@@ -679,7 +679,7 @@ class TestFullProcessingChain:
         resp = await client.post(
             "/api/records/",
             json={
-                "record_type_name": "doctor_review",
+                "record_type_name": "doctor-review",
                 "patient_id": hierarchy["patient_id"],
                 "study_uid": study_uid,
                 "series_uid": series_uid,
@@ -695,11 +695,11 @@ class TestFullProcessingChain:
         assert resp.status_code == 200
 
         # 6. Verify ai_analysis and expert_check exist
-        ai_records = await _find_records(client, "ai_analysis", study_uid=study_uid)
+        ai_records = await _find_records(client, "ai-analysis", study_uid=study_uid)
         assert len(ai_records) == 1
         ai_id = ai_records[0]["id"]
 
-        expert_records = await _find_records(client, "expert_check", study_uid=study_uid)
+        expert_records = await _find_records(client, "expert-check", study_uid=study_uid)
         assert len(expert_records) == 1
 
         # 7. Submit ai_analysis with different diagnosis
@@ -712,7 +712,7 @@ class TestFullProcessingChain:
         assert resp.status_code == 200
 
         # Still 1 expert_check (max_records=1 prevents duplicate)
-        expert_records = await _find_records(client, "expert_check", study_uid=study_uid)
+        expert_records = await _find_records(client, "expert-check", study_uid=study_uid)
         assert len(expert_records) == 1
 
         # 8. Submit expert_check data

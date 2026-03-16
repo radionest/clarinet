@@ -143,7 +143,10 @@ class TestRecordServiceTriggers:
 
         service = RecordService(repo_mock, engine_mock)
 
-        with patch("clarinet.services.record_service.RecordRead") as patched:
+        with (
+            patch("clarinet.services.record_service.RecordRead") as patched,
+            patch.object(service, "_emit_output_file_events", new_callable=AsyncMock) as emit_mock,
+        ):
             patched.model_validate.return_value = record_read_mock
             result, result_old_status = await service.submit_data(1, data, RecordStatus.finished)
 
@@ -154,6 +157,7 @@ class TestRecordServiceTriggers:
             engine_mock.handle_record_status_change.assert_awaited_once_with(
                 record_read_mock, old_status
             )
+            emit_mock.assert_awaited_once_with(record_mock)
             assert result == record_mock
             assert result_old_status == old_status
 
@@ -313,9 +317,9 @@ class TestRecordServiceTriggers:
         await service.notify_file_updates(patient_id, changed_files)
 
         assert engine_mock.handle_file_update.await_count == 3
-        engine_mock.handle_file_update.assert_any_await("file1.txt", patient_id)
-        engine_mock.handle_file_update.assert_any_await("file2.txt", patient_id)
-        engine_mock.handle_file_update.assert_any_await("file3.txt", patient_id)
+        engine_mock.handle_file_update.assert_any_await("file1.txt", patient_id, source_record=None)
+        engine_mock.handle_file_update.assert_any_await("file2.txt", patient_id, source_record=None)
+        engine_mock.handle_file_update.assert_any_await("file3.txt", patient_id, source_record=None)
 
     @pytest.mark.asyncio
     async def test_notify_file_updates_no_trigger_when_engine_none(self) -> None:

@@ -178,9 +178,10 @@ fn render_dynamic_form(
     }
     None -> {
       let can_complete = permissions.can_fill_record(record, model.user)
+      let can_resubmit = permissions.can_edit_record(record, model.user)
       html.div([attribute.class("no-schema")], [
-        case can_complete {
-          True ->
+        case can_complete, can_resubmit {
+          True, _ ->
             html.div([attribute.class("complete-record-actions")], [
               html.p([], [
                 html.text("This record does not require form data."),
@@ -193,7 +194,20 @@ fn render_dynamic_form(
                 [html.text("Complete Record")],
               ),
             ])
-          False ->
+          _, True ->
+            html.div([attribute.class("complete-record-actions")], [
+              html.p([], [
+                html.text("Record completed. Re-submit after changes."),
+              ]),
+              html.button(
+                [
+                  attribute.class("btn btn-success"),
+                  event.on_click(store.ResubmitRecord(record_id)),
+                ],
+                [html.text("Re-submit")],
+              ),
+            ])
+          _, _ ->
             html.div([], [
               html.p([], [
                 html.text("This record does not have a data form defined."),
@@ -215,7 +229,11 @@ fn render_editable_form(
   record_id: String,
   record: Record,
 ) -> Element(Msg) {
-  let submit_url = "/api/records/" <> record_id <> "/data"
+  let submit_url = case record.record_type {
+    Some(models.RecordType(slicer_result_validator: Some(_), ..)) ->
+      "/api/records/" <> record_id <> "/submit"
+    _ -> "/api/records/" <> record_id <> "/data"
+  }
   let is_finished = record.status == types.Finished
   let method = case is_finished {
     True -> "PATCH"
@@ -244,7 +262,15 @@ fn decode_form_submit(record_id: String) -> decode.Decoder(Msg) {
 
   case status {
     "success" -> decode.success(store.FormSubmitSuccess(record_id))
-    _ -> decode.success(store.FormSubmitError("Submission failed"))
+    _ -> {
+      use error <- decode.then(
+        decode.one_of(
+          decode.at(["detail", "error"], decode.string),
+          [decode.success("Submission failed")],
+        ),
+      )
+      decode.success(store.FormSubmitError(error))
+    }
   }
 }
 

@@ -86,7 +86,22 @@ pub fn process_response(
     403 -> promise.resolve(Error(types.AuthError("Forbidden")))
     404 -> promise.resolve(Error(types.ServerError(404, "Not Found")))
     400 -> promise.resolve(Error(types.ValidationError([])))
-    code -> promise.resolve(Error(types.ServerError(code, "Server error")))
+    code -> {
+      use body_result <- promise.await(fetch.read_text_body(response))
+      case body_result {
+        Ok(text_response) -> {
+          let detail = case json.parse(
+            text_response.body,
+            decode.at(["detail"], decode.string),
+          ) {
+            Ok(msg) -> msg
+            Error(_) -> "Server error"
+          }
+          promise.resolve(Error(types.ServerError(code, detail)))
+        }
+        Error(_) -> promise.resolve(Error(types.ServerError(code, "Server error")))
+      }
+    }
   }
 }
 

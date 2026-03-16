@@ -289,7 +289,7 @@ class TestLoadRecordConfig:
         (tmp_path / "task.schema.json").write_text(json.dumps(schema))
 
         toml_content = """\
-name = "volume_calc"
+name = "volume-calc"
 description = "Calculate lung volume"
 level = "SERIES"
 slicer_script = "process.py"
@@ -299,7 +299,7 @@ slicer_script = "process.py"
         result = await load_record_config(tmp_path / "task.toml")
 
         assert result is not None
-        assert result["name"] == "volume_calc"
+        assert result["name"] == "volume-calc"
         assert result["slicer_script"] == script_content
         assert result["data_schema"] == schema
 

@@ -81,7 +81,7 @@ def _make_record_read(
         )
 
     record_type = RecordTypeRead(
-        name="test_type_xxxxx",
+        name="test-type-xxxxx",
         level=DicomQueryLevel.SERIES if series_uid else DicomQueryLevel.STUDY,
     )
 
@@ -90,7 +90,7 @@ def _make_record_read(
         patient_id=patient_id,
         study_uid=study_uid,
         series_uid=series_uid,
-        record_type_name="test_type_xxxxx",
+        record_type_name="test-type-xxxxx",
         patient=patient,
         study=study,
         series=series,
@@ -280,7 +280,7 @@ class TestMaskRecordPatientData:
         )
 
         record_type = RecordTypeRead(
-            name="patient_type",
+            name="patient-type",
             level=DicomQueryLevel.PATIENT,
         )
 
@@ -289,7 +289,7 @@ class TestMaskRecordPatientData:
             patient_id="REAL_PAT_001",
             study_uid=None,
             series_uid=None,
-            record_type_name="patient_type",
+            record_type_name="patient-type",
             patient=patient,
             study=None,
             series=None,
@@ -366,7 +366,7 @@ class TestMaskRecords:
         )
 
         record_type = RecordTypeRead(
-            name="test_type_xxxxx",
+            name="test-type-xxxxx",
             level=DicomQueryLevel.STUDY,
         )
 
@@ -377,7 +377,7 @@ class TestMaskRecords:
             patient_id="PAT_001",
             study_uid="1.2.3.4.5.6.7.8.1",
             series_uid=None,
-            record_type_name="test_type_xxxxx",
+            record_type_name="test-type-xxxxx",
             patient=patient1,
             study=study1,
             series=None,
@@ -389,7 +389,7 @@ class TestMaskRecords:
             patient_id="PAT_002",
             study_uid="1.2.3.4.5.6.7.8.2",
             series_uid=None,
-            record_type_name="test_type_xxxxx",
+            record_type_name="test-type-xxxxx",
             patient=patient2,
             study=study2,
             series=None,
@@ -438,7 +438,7 @@ class TestMaskRecords:
         )
 
         record_type = RecordTypeRead(
-            name="test_type_xxxxx",
+            name="test-type-xxxxx",
             level=DicomQueryLevel.STUDY,
         )
 
@@ -447,7 +447,7 @@ class TestMaskRecords:
             patient_id="PAT_001",
             study_uid="1.2.3.4.5.6.7.8",
             series_uid=None,
-            record_type_name="test_type_xxxxx",
+            record_type_name="test-type-xxxxx",
             patient=patient,
             study=study,
             series=None,

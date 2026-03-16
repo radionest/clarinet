@@ -20,6 +20,7 @@ from clarinet.models.file_schema import FileRole
 from clarinet.services.pipeline.context import FileResolver
 from clarinet.services.slicer.context_hydration import hydrate_slicer_context
 from clarinet.settings import settings
+from clarinet.utils.file_patterns import resolve_origin_type
 from clarinet.utils.logger import logger
 
 if TYPE_CHECKING:
@@ -81,7 +82,11 @@ def _resolve_custom_args(
     return resolved
 
 
-def build_slicer_context(record: RecordRead) -> dict[str, Any]:
+def build_slicer_context(
+    record: RecordRead,
+    *,
+    parent: RecordRead | None = None,
+) -> dict[str, Any]:
     """Build complete Slicer script context from a record.
 
     Layers (later overrides earlier):
@@ -93,6 +98,7 @@ def build_slicer_context(record: RecordRead) -> dict[str, Any]:
 
     Args:
         record: Fully-loaded ``RecordRead`` with relations.
+        parent: Optional parent record for ``origin_type`` resolution.
 
     Returns:
         Context dict ready for injection into Slicer scripts.
@@ -119,6 +125,8 @@ def build_slicer_context(record: RecordRead) -> dict[str, Any]:
     # -- Layer 2: File paths from file_registry --
     if file_registry:
         fields = FileResolver.build_fields(record)
+        if parent is not None:
+            fields["origin_type"] = resolve_origin_type(record, parent)
         resolver = FileResolver(
             working_dirs=working_dirs,
             record_type_level=record_level,
@@ -166,6 +174,8 @@ def build_slicer_context(record: RecordRead) -> dict[str, Any]:
 async def build_slicer_context_async(
     record: RecordRead,
     session: AsyncSession,
+    *,
+    parent: RecordRead | None = None,
 ) -> dict[str, Any]:
     """Build Slicer context with optional async hydration.
 
@@ -175,11 +185,23 @@ async def build_slicer_context_async(
     Args:
         record: Fully-loaded ``RecordRead`` with relations.
         session: Async DB session for hydrator queries.
+        parent: Optional pre-loaded parent record. When provided, skips the
+            DB lookup. When ``None`` and ``record.parent_record_id`` is set,
+            the parent is loaded via repository.
 
     Returns:
         Context dict ready for injection into Slicer scripts.
     """
-    context = build_slicer_context(record)
+    # Load parent for origin_type resolution (skip if already provided)
+    if parent is None and record.parent_record_id is not None:
+        from clarinet.repositories.record_repository import RecordRepository
+
+        repo = RecordRepository(session)
+        parent_orm = await repo.get_with_relations(record.parent_record_id)
+        if parent_orm:
+            parent = RecordRead.model_validate(parent_orm)
+
+    context = build_slicer_context(record, parent=parent)
 
     hydrator_names = record.record_type.slicer_context_hydrators
     if hydrator_names:

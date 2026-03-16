@@ -50,7 +50,7 @@ async def hydrate_best_series_from_first_check(
         Dict with ``best_series_uid`` (anon UID) or empty dict if not found.
     """
     criteria = RecordSearchCriteria(
-        record_type_name="first_check",
+        record_type_name="first-check",
         study_uid=record.study_uid,
     )
     first_check_records = await ctx.record_repo.find_by_criteria(criteria)
@@ -92,7 +92,7 @@ async def hydrate_model_series_for_projection(
     """
     criteria = RecordSearchCriteria(
         patient_id=record.patient_id,
-        record_type_name="first_check",
+        record_type_name="first-check",
     )
     first_check_records = await ctx.record_repo.find_by_criteria(criteria)
 
@@ -145,7 +145,7 @@ async def hydrate_projection_for_update(
     """
     criteria = RecordSearchCriteria(
         patient_id=record.patient_id,
-        record_type_name="compare_with_projection",
+        record_type_name="compare-with-projection",
     )
     comparisons = await ctx.record_repo.find_by_criteria(criteria)
 
@@ -192,10 +192,11 @@ async def hydrate_projection_for_update(
         target_series_uid,
         "master_projection.seg.nrrd",
     )
+    parent_type = parent_record.record_type_name  # FK field, always available
     doctor_segmentation_path = os.path.join(
         patient_dir,
         study_anon_uid,
-        f"segmentation_single_{user_id}.seg.nrrd",
+        f"segmentation_{parent_type}_{user_id}.seg.nrrd",
     )
 
     return {

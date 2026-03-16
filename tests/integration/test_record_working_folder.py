@@ -104,7 +104,7 @@ async def series_without_anon(test_session, study_without_anon):
 async def rt_series(test_session):
     """SERIES-level RecordType."""
     rt = RecordType(
-        name="wf_test_series",
+        name="wf-test-series",
         description="Series level for working folder tests",
         label="WF Series",
         level=DicomQueryLevel.SERIES,
@@ -119,7 +119,7 @@ async def rt_series(test_session):
 async def rt_study(test_session):
     """STUDY-level RecordType."""
     rt = RecordType(
-        name="wf_test_study",
+        name="wf-test-study",
         description="Study level for working folder tests",
         label="WF Study",
         level=DicomQueryLevel.STUDY,
@@ -134,7 +134,7 @@ async def rt_study(test_session):
 async def rt_patient(test_session):
     """PATIENT-level RecordType."""
     rt = RecordType(
-        name="wf_test_patient",
+        name="wf-test-patient",
         description="Patient level for working folder tests",
         label="WF Patient",
         level=DicomQueryLevel.PATIENT,
@@ -149,7 +149,7 @@ async def rt_patient(test_session):
 async def rt_with_input_files(test_session):
     """SERIES-level RecordType with input file definitions via M2M links."""
     rt = RecordType(
-        name="wf_test_with_files",
+        name="wf-test-with-files",
         description="Series level with input files",
         label="WF Files",
         level=DicomQueryLevel.SERIES,
@@ -529,7 +529,7 @@ async def test_slicer_args_working_folder_placeholder(
 ):
     """slicer_script_args with {working_folder} placeholder resolves correctly."""
     rt = RecordType(
-        name="wf_test_slicer_args",
+        name="wf-test-slicer-args",
         description="Test working_folder in slicer args",
         label="WF Slicer Args",
         level=DicomQueryLevel.STUDY,

@@ -14,7 +14,7 @@ BASE = "/api/records"
 async def sample_record_type(test_session) -> RecordType:
     """Create a sample RecordType in the DB for testing."""
     rt = RecordType(
-        name="test_edit_type",
+        name="test-edit-type",
         description="Original description",
         label="Original Label",
         data_schema={"type": "object", "properties": {"field1": {"type": "string"}}},

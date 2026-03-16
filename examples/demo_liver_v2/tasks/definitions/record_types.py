@@ -15,16 +15,10 @@ master_model = FileDef(
     description="Master model segmentation — one ROI per lesion with unique number",
 )
 
-segmentation_single = FileDef(
-    pattern="segmentation_single_{user_id}.seg.nrrd",
+segmentation = FileDef(
+    pattern="segmentation_{origin_type}_{user_id}.seg.nrrd",
     level="STUDY",
-    description="Segmentation from single-study review",
-)
-
-segmentation_with_archive = FileDef(
-    pattern="segmentation_with_archive_{user_id}.seg.nrrd",
-    level="STUDY",
-    description="Segmentation from review with archive CT studies",
+    description="Segmentation mask keyed by producing record type",
 )
 
 master_projection = FileDef(
@@ -50,18 +44,18 @@ resection_model_file = FileDef(
 # ---------------------------------------------------------------------------
 
 first_check = RecordDef(
-    name="first_check",
+    name="first-check",
     description="Initial assessment of every study added to the trial",
     label="First check",
     level="STUDY",
     role="doctor",
     min_records=2,
     max_records=2,
-    data_schema="schemas/first_check.schema.json",
+    data_schema="schemas/first-check.schema.json",
 )
 
 anonymize_study = RecordDef(
-    name="anonymize_study",
+    name="anonymize-study",
     description="Automatic study anonymization — fetches from PACS, anonymizes DICOM, distributes",
     label="Anonymize study",
     level="STUDY",
@@ -71,7 +65,7 @@ anonymize_study = RecordDef(
 )
 
 segment_CT_single = RecordDef(
-    name="segment_CT_single",
+    name="segment-ct-single",
     description="CT lesion segmentation — only the current study is available for review",
     label="CT segment (single)",
     level="STUDY",
@@ -81,12 +75,12 @@ segment_CT_single = RecordDef(
     slicer_script="scripts/segment.py",
     slicer_result_validator="validators/segment_validator.py",
     slicer_context_hydrators=["best_series_from_first_check"],
-    files=[FileRef(segmentation_single, "output")],
-    # study_uid, segmentation_single, output_file, working_folder, best_series_uid — auto-injected
+    files=[FileRef(segmentation, "output")],
+    # study_uid, segmentation, output_file, working_folder, best_series_uid — auto-injected
 )
 
 segment_CT_with_archive = RecordDef(
-    name="segment_CT_with_archive",
+    name="segment-ct-with-archive",
     description="CT lesion segmentation — current study plus all archive CT studies are available for review",
     label="CT segment (with archive)",
     level="STUDY",
@@ -96,12 +90,12 @@ segment_CT_with_archive = RecordDef(
     slicer_script="scripts/segment.py",
     slicer_result_validator="validators/segment_validator.py",
     slicer_context_hydrators=["best_series_from_first_check"],
-    files=[FileRef(segmentation_with_archive, "output")],
-    # study_uid, segmentation_with_archive, output_file, working_folder, best_series_uid — auto-injected
+    files=[FileRef(segmentation, "output")],
+    # study_uid, segmentation, output_file, working_folder, best_series_uid — auto-injected
 )
 
 segment_MRI_single = RecordDef(
-    name="segment_MRI_single",
+    name="segment-mri-single",
     description="MRI lesion segmentation — only the current study is available for review",
     label="MRI segment",
     level="STUDY",
@@ -111,12 +105,12 @@ segment_MRI_single = RecordDef(
     slicer_script="scripts/segment.py",
     slicer_result_validator="validators/segment_validator.py",
     slicer_context_hydrators=["best_series_from_first_check"],
-    files=[FileRef(segmentation_single, "output")],
-    # study_uid, segmentation_single, output_file, working_folder, best_series_uid — auto-injected
+    files=[FileRef(segmentation, "output")],
+    # study_uid, segmentation, output_file, working_folder, best_series_uid — auto-injected
 )
 
 segment_MRIAG_single = RecordDef(
-    name="segment_MRIAG_single",
+    name="segment-mriag-single",
     description="MRI angiography lesion segmentation",
     label="MRI-AG segment",
     level="STUDY",
@@ -126,12 +120,12 @@ segment_MRIAG_single = RecordDef(
     slicer_script="scripts/segment.py",
     slicer_result_validator="validators/segment_validator.py",
     slicer_context_hydrators=["best_series_from_first_check"],
-    files=[FileRef(segmentation_single, "output")],
-    # study_uid, segmentation_single, output_file, working_folder, best_series_uid — auto-injected
+    files=[FileRef(segmentation, "output")],
+    # study_uid, segmentation, output_file, working_folder, best_series_uid — auto-injected
 )
 
 segment_CTAG_single = RecordDef(
-    name="segment_CTAG_single",
+    name="segment-ctag-single",
     description="CT angiography lesion segmentation",
     label="CT-AG segment",
     level="STUDY",
@@ -141,12 +135,12 @@ segment_CTAG_single = RecordDef(
     slicer_script="scripts/segment.py",
     slicer_result_validator="validators/segment_validator.py",
     slicer_context_hydrators=["best_series_from_first_check"],
-    files=[FileRef(segmentation_single, "output")],
-    # study_uid, segmentation_single, output_file, working_folder, best_series_uid — auto-injected
+    files=[FileRef(segmentation, "output")],
+    # study_uid, segmentation, output_file, working_folder, best_series_uid — auto-injected
 )
 
 segment_PDCTAG_single = RecordDef(
-    name="segment_PDCTAG_single",
+    name="segment-pdctag-single",
     description="PDCT angiography lesion segmentation",
     label="PDCT-AG segment",
     level="STUDY",
@@ -156,12 +150,12 @@ segment_PDCTAG_single = RecordDef(
     slicer_script="scripts/segment.py",
     slicer_result_validator="validators/segment_validator.py",
     slicer_context_hydrators=["best_series_from_first_check"],
-    files=[FileRef(segmentation_single, "output")],
-    # study_uid, segmentation_single, output_file, working_folder, best_series_uid — auto-injected
+    files=[FileRef(segmentation, "output")],
+    # study_uid, segmentation, output_file, working_folder, best_series_uid — auto-injected
 )
 
 create_master_projection = RecordDef(
-    name="create_master_projection",
+    name="create-master-projection",
     description="Manual projection of the master model onto a specific series coordinate space",
     label="Create projection",
     level="SERIES",
@@ -182,22 +176,22 @@ create_master_projection = RecordDef(
 )
 
 compare_with_projection = RecordDef(
-    name="compare_with_projection",
+    name="compare-with-projection",
     description="Automatic comparison of doctor segmentation with master model projection",
     label="Compare with projection",
     level="SERIES",
     min_records=2,
     max_records=4,
     role="auto",
-    data_schema="schemas/compare_with_projection.schema.json",
+    data_schema="schemas/compare-with-projection.schema.json",
     files=[
         FileRef(master_projection, "input"),
-        FileRef(segmentation_single, "input"),
+        FileRef(segmentation, "input"),
     ],
 )
 
 second_review = RecordDef(
-    name="second_review",
+    name="second-review",
     description="Second review — doctor classifies lesions that were missed in the initial segmentation",
     label="Second review",
     level="SERIES",
@@ -207,15 +201,15 @@ second_review = RecordDef(
     slicer_result_validator="validators/second_review_validator.py",
     files=[
         FileRef(master_projection, "input"),
-        FileRef(segmentation_single, "input"),
+        FileRef(segmentation, "input"),
         FileRef(second_review_output, "output"),
     ],
-    # master_projection, segmentation_single, second_review_output,
+    # master_projection, segmentation, second_review_output,
     # output_file, study_uid, working_folder — auto-injected
 )
 
 update_master_model = RecordDef(
-    name="update_master_model",
+    name="update-master-model",
     description="Expert manually adds new ROIs to the master model based on comparison results",
     label="Update master model",
     level="PATIENT",
@@ -238,7 +232,7 @@ update_master_model = RecordDef(
 # ---------------------------------------------------------------------------
 
 retrospective_semiotics = RecordDef(
-    name="retrospective_semiotics",
+    name="retrospective-semiotics",
     description=(
         "Retrospective semiotics assessment — radiological characteristics "
         "of each lesion on a given modality (after 4-7 week washout period)"
@@ -258,7 +252,7 @@ retrospective_semiotics = RecordDef(
 # ---------------------------------------------------------------------------
 
 mdk_conclusion = RecordDef(
-    name="mdk_conclusion",
+    name="mdk-conclusion",
     description=(
         "MDK conclusion — multidisciplinary council classifies all lesions "
         "and defines treatment plan"
@@ -278,7 +272,7 @@ mdk_conclusion = RecordDef(
 # ---------------------------------------------------------------------------
 
 resection_model = RecordDef(
-    name="resection_model",
+    name="resection-model",
     description=(
         "3D model for resection planning — liver parenchyma, portal/hepatic veins, "
         "corrected lesion ROIs"
@@ -298,7 +292,7 @@ resection_model = RecordDef(
 )
 
 resection_plan = RecordDef(
-    name="resection_plan",
+    name="resection-plan",
     description=(
         "Resection planning — cluster definition, resection zones, residual parenchyma volume"
     ),
@@ -320,7 +314,7 @@ resection_plan = RecordDef(
 # ---------------------------------------------------------------------------
 
 intraop_protocol = RecordDef(
-    name="intraop_protocol",
+    name="intraop-protocol",
     description=(
         "Intraoperative protocol — US lesion marking, found/not-found/additional "
         "classification, fragment numbering"
@@ -340,7 +334,7 @@ intraop_protocol = RecordDef(
 # ---------------------------------------------------------------------------
 
 postop_ct_review = RecordDef(
-    name="postop_ct_review",
+    name="postop-ct-review",
     description=(
         "Post-operative CT review — complication screening, "
         "master model update for intraop findings"

@@ -232,7 +232,7 @@ class TestSeriesRepository:
     @pytest.mark.asyncio
     async def test_find_by_criteria_is_absent(self, test_session, env):
         """find_by_criteria with is_absent=True filters out series that have a matching record."""
-        rt = make_record_type("absent_rt_001")
+        rt = make_record_type("absent-rt-001")
         test_session.add(rt)
         await test_session.commit()
 
@@ -241,12 +241,12 @@ class TestSeriesRepository:
             patient_id="SPAT",
             study_uid="1.2.3.200",
             series_uid="1.2.3.200.1",
-            rt_name="absent_rt_001",
+            rt_name="absent-rt-001",
         )
 
         query = SeriesFind(
             study_uid="1.2.3.200",
-            records=[RecordFind(record_type_name="absent_rt_001", is_absent=True)],
+            records=[RecordFind(record_type_name="absent-rt-001", is_absent=True)],
         )
         result = await env["repo"].find_by_criteria(query)
         # s1 has the record → excluded; s2 has none → included
@@ -366,7 +366,7 @@ class TestRecordRepository:
         series = make_series("1.2.3.300", "1.2.3.300.1", 1)
         test_session.add(series)
         await test_session.commit()
-        rt = make_record_type("rec_rt_00001")
+        rt = make_record_type("rec-rt-00001")
         test_session.add(rt)
         await test_session.commit()
 
@@ -380,7 +380,7 @@ class TestRecordRepository:
             patient_id="RPAT",
             study_uid="1.2.3.300",
             series_uid="1.2.3.300.1",
-            rt_name="rec_rt_00001",
+            rt_name="rec-rt-00001",
             user_id=user.id,
         )
         repo = RecordRepository(test_session)
@@ -409,7 +409,7 @@ class TestRecordRepository:
     async def test_get_with_record_type(self, env):
         rec = await env["repo"].get_with_record_type(env["record"].id)
         assert rec.record_type is not None
-        assert rec.record_type.name == "rec_rt_00001"
+        assert rec.record_type.name == "rec-rt-00001"
 
     @pytest.mark.asyncio
     async def test_get_with_relations(self, env):
@@ -537,25 +537,25 @@ class TestRecordRepository:
     @pytest.mark.asyncio
     async def test_count_by_type_and_context(self, env):
         count = await env["repo"].count_by_type_and_context(
-            "rec_rt_00001", "1.2.3.300.1", "1.2.3.300"
+            "rec-rt-00001", "1.2.3.300.1", "1.2.3.300"
         )
         assert count == 1
 
     @pytest.mark.asyncio
     async def test_check_constraints(self, env):
         # max_records is None → no constraint → should pass
-        await env["repo"].check_constraints("rec_rt_00001", "1.2.3.300.1", "1.2.3.300")
+        await env["repo"].check_constraints("rec-rt-00001", "1.2.3.300.1", "1.2.3.300")
 
     @pytest.mark.asyncio
     async def test_check_constraints_violation(self, env):
         env["rt"].max_records = 1
         await env["session"].commit()
         with pytest.raises(RecordConstraintViolationError):
-            await env["repo"].check_constraints("rec_rt_00001", "1.2.3.300.1", "1.2.3.300")
+            await env["repo"].check_constraints("rec-rt-00001", "1.2.3.300.1", "1.2.3.300")
 
     @pytest.mark.asyncio
     async def test_find_by_criteria(self, env):
-        criteria = RecordSearchCriteria(record_type_name="rec_rt_00001")
+        criteria = RecordSearchCriteria(record_type_name="rec-rt-00001")
         records = await env["repo"].find_by_criteria(criteria)
         assert len(records) >= 1
 
@@ -568,7 +568,7 @@ class TestRecordRepository:
     @pytest.mark.asyncio
     async def test_get_per_type_status_counts(self, env):
         counts = await env["repo"].get_per_type_status_counts()
-        assert "rec_rt_00001" in counts
+        assert "rec-rt-00001" in counts
 
 
 # ===================================================================
@@ -718,14 +718,14 @@ class TestRecordTypeRepository:
     @pytest_asyncio.fixture
     async def env(self, test_session):
         repo = RecordTypeRepository(test_session)
-        rt = make_record_type("rt_test_00001", description="A test type")
+        rt = make_record_type("rt-test-00001", description="A test type")
         rt = await repo.create(rt)
         return {"repo": repo, "rt": rt}
 
     @pytest.mark.asyncio
     async def test_get(self, env):
-        found = await env["repo"].get("rt_test_00001")
-        assert found.name == "rt_test_00001"
+        found = await env["repo"].get("rt-test-00001")
+        assert found.name == "rt-test-00001"
 
     @pytest.mark.asyncio
     async def test_get_not_found(self, env):
@@ -736,7 +736,7 @@ class TestRecordTypeRepository:
     async def test_find_by_name(self, env):
         from clarinet.models.record import RecordTypeFind
 
-        results = await env["repo"].find(RecordTypeFind(name="rt_test"))
+        results = await env["repo"].find(RecordTypeFind(name="rt-test"))
         assert len(results) >= 1
 
     @pytest.mark.asyncio
@@ -747,13 +747,13 @@ class TestRecordTypeRepository:
     @pytest.mark.asyncio
     async def test_ensure_unique_name_conflict(self, env):
         with pytest.raises(RecordTypeAlreadyExistsError):
-            await env["repo"].ensure_unique_name("rt_test_00001")
+            await env["repo"].ensure_unique_name("rt-test-00001")
 
     @pytest.mark.asyncio
     async def test_update_with_options_loads_relationships(self, test_session):
         """update() with options returns entity with eagerly loaded relationships."""
         repo = RecordTypeRepository(test_session)
-        rt = make_record_type("rt_opts_001", description="Original")
+        rt = make_record_type("rt-opts-001", description="Original")
         rt = await repo.create(rt)
 
         fd = FileDefinition(name="opts_seg", pattern="seg.nrrd")
@@ -761,7 +761,7 @@ class TestRecordTypeRepository:
         await test_session.flush()
 
         link = RecordTypeFileLink(
-            record_type_name="rt_opts_001",
+            record_type_name="rt-opts-001",
             file_definition_id=fd.id,
             role=FileRole.OUTPUT,
             required=True,

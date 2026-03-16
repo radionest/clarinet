@@ -48,7 +48,7 @@ async def role_b(test_session):
 async def record_type_role_a(test_session, role_a):
     """Create RecordType with role_name=role_a_test."""
     record_type = RecordType(
-        name="rtype_role_a_test",
+        name="rtype-role-a-test",
         role_name="role_a_test",
         level="SERIES",
         label="Role A Test Type",
@@ -64,7 +64,7 @@ async def record_type_role_a(test_session, role_a):
 async def record_type_role_b(test_session, role_b):
     """Create RecordType with role_name=role_b_test."""
     record_type = RecordType(
-        name="rtype_role_b_test",
+        name="rtype-role-b-test",
         role_name="role_b_test",
         level="SERIES",
         label="Role B Test Type",
@@ -80,7 +80,7 @@ async def record_type_role_b(test_session, role_b):
 async def record_type_null_role(test_session):
     """Create RecordType with role_name=None (superuser-only)."""
     record_type = RecordType(
-        name="rtype_null_test__",
+        name="rtype-null-test",
         role_name=None,
         level="SERIES",
         label="Null Role Test Type",
@@ -288,7 +288,7 @@ async def test_get_records_role_user_sees_own_role(
     data = response.json()
     assert len(data) == 1
     assert data[0]["id"] == record_role_a.id
-    assert data[0]["record_type"]["name"] == "rtype_role_a_test"
+    assert data[0]["record_type"]["name"] == "rtype-role-a-test"
 
 
 @pytest.mark.asyncio
@@ -298,7 +298,7 @@ async def test_get_record_by_id_own_role_ok(role_a_client, record_role_a):
     assert response.status_code == 200
     data = response.json()
     assert data["id"] == record_role_a.id
-    assert data["record_type"]["name"] == "rtype_role_a_test"
+    assert data["record_type"]["name"] == "rtype-role-a-test"
 
 
 @pytest.mark.asyncio
@@ -411,11 +411,11 @@ async def test_get_available_types_filtered_by_role(
     # 1. Pending records
     # 2. Match user's roles
     # Since we have pending records only for role_a, we should see it
-    if "rtype_role_a_test" in data:
-        assert data["rtype_role_a_test"] >= 1
+    if "rtype-role-a-test" in data:
+        assert data["rtype-role-a-test"] >= 1
     # Should not see types outside user's role
-    assert "rtype_role_b_test" not in data
-    assert "rtype_null_test__" not in data
+    assert "rtype-role-b-test" not in data
+    assert "rtype-null-test" not in data
 
 
 @pytest.mark.asyncio
@@ -507,7 +507,7 @@ async def test_create_record_as_non_superuser(
     )
     assert response.status_code == 201
     data = response.json()
-    assert data["record_type"]["name"] == "rtype_role_a_test"
+    assert data["record_type"]["name"] == "rtype-role-a-test"
 
 
 @pytest.mark.asyncio

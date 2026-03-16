@@ -68,14 +68,14 @@ async def record_types(test_session: AsyncSession) -> dict[str, RecordType]:
     """Create record types used by flow tests."""
     types = {}
     study_level_types = [
-        "doctor_report",
-        "ai_analysis",
-        "expert_check",
-        "confirm_birads",
-        "parent_model",
-        "child_analysis",
+        "doctor-report",
+        "ai-analysis",
+        "expert-check",
+        "confirm-birads",
+        "parent-model",
+        "child-analysis",
     ]
-    series_level_types = ["series_markup"]
+    series_level_types = ["series-markup"]
     for name in study_level_types:
         rt = RecordType(name=name, level=DicomQueryLevel.STUDY)
         test_session.add(rt)
@@ -137,14 +137,14 @@ class TestRecordFlowIntegration:
     ):
         """Unconditional flow on status=finished creates a new record."""
         # Define flow: doctor_report finished → create ai_analysis
-        flow = FlowRecord("doctor_report")
-        flow.on_status("finished").add_record("ai_analysis")
+        flow = FlowRecord("doctor-report")
+        flow.on_status("finished").add_record("ai-analysis")
         flow_engine.register_flow(flow)
 
         # Create trigger record
         trigger = await _create_record_via_client(
             clarinet_client,
-            "doctor_report",
+            "doctor-report",
             test_patient.id,
             test_study.study_uid,
             status=RecordStatus.finished,
@@ -156,10 +156,10 @@ class TestRecordFlowIntegration:
         # Verify: ai_analysis record was created
         records = await clarinet_client.find_records(
             study_uid=test_study.study_uid,
-            record_type_name="ai_analysis",
+            record_type_name="ai-analysis",
         )
         assert len(records) == 1
-        assert records[0].record_type.name == "ai_analysis"
+        assert records[0].record_type.name == "ai-analysis"
 
     @pytest.mark.asyncio
     async def test_conditional_flow_true(
@@ -172,15 +172,15 @@ class TestRecordFlowIntegration:
     ):
         """Conditional flow executes when condition is True (confidence < 70)."""
         # Define flow
-        flow = FlowRecord("doctor_report")
+        flow = FlowRecord("doctor-report")
         flow.on_status("finished")
-        flow.if_(FlowResult("doctor_report", ["confidence"]) < 70).add_record("expert_check")
+        flow.if_(FlowResult("doctor-report", ["confidence"]) < 70).add_record("expert-check")
         flow_engine.register_flow(flow)
 
         # Create trigger record with confidence=50 (< 70 → True)
         trigger = await _create_record_via_client(
             clarinet_client,
-            "doctor_report",
+            "doctor-report",
             test_patient.id,
             test_study.study_uid,
             status=RecordStatus.finished,
@@ -191,7 +191,7 @@ class TestRecordFlowIntegration:
 
         records = await clarinet_client.find_records(
             study_uid=test_study.study_uid,
-            record_type_name="expert_check",
+            record_type_name="expert-check",
         )
         assert len(records) == 1
 
@@ -205,15 +205,15 @@ class TestRecordFlowIntegration:
         test_study: Study,
     ):
         """Conditional flow does NOT execute when condition is False (confidence >= 70)."""
-        flow = FlowRecord("doctor_report")
+        flow = FlowRecord("doctor-report")
         flow.on_status("finished")
-        flow.if_(FlowResult("doctor_report", ["confidence"]) < 70).add_record("expert_check")
+        flow.if_(FlowResult("doctor-report", ["confidence"]) < 70).add_record("expert-check")
         flow_engine.register_flow(flow)
 
         # confidence=90 → condition False
         trigger = await _create_record_via_client(
             clarinet_client,
-            "doctor_report",
+            "doctor-report",
             test_patient.id,
             test_study.study_uid,
             status=RecordStatus.finished,
@@ -224,7 +224,7 @@ class TestRecordFlowIntegration:
 
         records = await clarinet_client.find_records(
             study_uid=test_study.study_uid,
-            record_type_name="expert_check",
+            record_type_name="expert-check",
         )
         assert len(records) == 0
 
@@ -238,16 +238,16 @@ class TestRecordFlowIntegration:
         test_study: Study,
     ):
         """Else branch executes when if_ condition is False."""
-        flow = FlowRecord("doctor_report")
+        flow = FlowRecord("doctor-report")
         flow.on_status("finished")
-        flow.if_(FlowResult("doctor_report", ["confidence"]) < 70).add_record("expert_check")
-        flow.else_().add_record("ai_analysis")
+        flow.if_(FlowResult("doctor-report", ["confidence"]) < 70).add_record("expert-check")
+        flow.else_().add_record("ai-analysis")
         flow_engine.register_flow(flow)
 
         # confidence=90 → if_ False → else_ executes
         trigger = await _create_record_via_client(
             clarinet_client,
-            "doctor_report",
+            "doctor-report",
             test_patient.id,
             test_study.study_uid,
             status=RecordStatus.finished,
@@ -259,14 +259,14 @@ class TestRecordFlowIntegration:
         # expert_check should NOT exist
         expert = await clarinet_client.find_records(
             study_uid=test_study.study_uid,
-            record_type_name="expert_check",
+            record_type_name="expert-check",
         )
         assert len(expert) == 0
 
         # ai_analysis SHOULD exist (else branch)
         ai = await clarinet_client.find_records(
             study_uid=test_study.study_uid,
-            record_type_name="ai_analysis",
+            record_type_name="ai-analysis",
         )
         assert len(ai) == 1
 
@@ -280,17 +280,17 @@ class TestRecordFlowIntegration:
         test_study: Study,
     ):
         """Flow compares data from two different record types."""
-        flow = FlowRecord("doctor_report")
+        flow = FlowRecord("doctor-report")
         flow.on_status("finished")
         flow.if_(
-            FlowResult("doctor_report", ["diagnosis"]) != FlowResult("ai_analysis", ["diagnosis"])
-        ).add_record("confirm_birads")
+            FlowResult("doctor-report", ["diagnosis"]) != FlowResult("ai-analysis", ["diagnosis"])
+        ).add_record("confirm-birads")
         flow_engine.register_flow(flow)
 
         # Create ai_analysis first (context record)
         await _create_record_via_client(
             clarinet_client,
-            "ai_analysis",
+            "ai-analysis",
             test_patient.id,
             test_study.study_uid,
             status=RecordStatus.finished,
@@ -300,7 +300,7 @@ class TestRecordFlowIntegration:
         # Create doctor_report with different diagnosis
         trigger = await _create_record_via_client(
             clarinet_client,
-            "doctor_report",
+            "doctor-report",
             test_patient.id,
             test_study.study_uid,
             status=RecordStatus.finished,
@@ -311,7 +311,7 @@ class TestRecordFlowIntegration:
 
         records = await clarinet_client.find_records(
             study_uid=test_study.study_uid,
-            record_type_name="confirm_birads",
+            record_type_name="confirm-birads",
         )
         assert len(records) == 1
 
@@ -325,14 +325,14 @@ class TestRecordFlowIntegration:
         test_study: Study,
     ):
         """update_record() changes status of an existing record in context."""
-        flow = FlowRecord("doctor_report")
-        flow.on_status("finished").update_record("ai_analysis", status="finished")
+        flow = FlowRecord("doctor-report")
+        flow.on_status("finished").update_record("ai-analysis", status="finished")
         flow_engine.register_flow(flow)
 
         # Create ai_analysis (pending)
         await _create_record_via_client(
             clarinet_client,
-            "ai_analysis",
+            "ai-analysis",
             test_patient.id,
             test_study.study_uid,
             status=RecordStatus.pending,
@@ -341,7 +341,7 @@ class TestRecordFlowIntegration:
         # Create trigger
         trigger = await _create_record_via_client(
             clarinet_client,
-            "doctor_report",
+            "doctor-report",
             test_patient.id,
             test_study.study_uid,
             status=RecordStatus.finished,
@@ -352,7 +352,7 @@ class TestRecordFlowIntegration:
         # Verify ai_analysis status changed
         records = await clarinet_client.find_records(
             study_uid=test_study.study_uid,
-            record_type_name="ai_analysis",
+            record_type_name="ai-analysis",
         )
         assert len(records) == 1
         assert records[0].status == RecordStatus.finished
@@ -367,14 +367,14 @@ class TestRecordFlowIntegration:
         test_study: Study,
     ):
         """Flow does not trigger when record status doesn't match trigger."""
-        flow = FlowRecord("doctor_report")
-        flow.on_status("finished").add_record("ai_analysis")
+        flow = FlowRecord("doctor-report")
+        flow.on_status("finished").add_record("ai-analysis")
         flow_engine.register_flow(flow)
 
         # Create record with status=pending (not "finished")
         trigger = await _create_record_via_client(
             clarinet_client,
-            "doctor_report",
+            "doctor-report",
             test_patient.id,
             test_study.study_uid,
             status=RecordStatus.pending,
@@ -384,7 +384,7 @@ class TestRecordFlowIntegration:
 
         records = await clarinet_client.find_records(
             study_uid=test_study.study_uid,
-            record_type_name="ai_analysis",
+            record_type_name="ai-analysis",
         )
         assert len(records) == 0
 
@@ -409,13 +409,13 @@ class TestRecordFlowIntegration:
                 }
             )
 
-        flow = FlowRecord("doctor_report")
+        flow = FlowRecord("doctor-report")
         flow.on_status("finished").call(custom_handler)
         flow_engine.register_flow(flow)
 
         trigger = await _create_record_via_client(
             clarinet_client,
-            "doctor_report",
+            "doctor-report",
             test_patient.id,
             test_study.study_uid,
             status=RecordStatus.finished,
@@ -424,7 +424,7 @@ class TestRecordFlowIntegration:
         await flow_engine.handle_record_status_change(trigger)
 
         assert len(call_log) == 1
-        assert call_log[0]["record_type"] == "doctor_report"
+        assert call_log[0]["record_type"] == "doctor-report"
         assert isinstance(call_log[0]["record_id"], int)
 
 
@@ -458,15 +458,15 @@ class TestRecordFlowRuntime:
     ):
         """PATCH /records/{id}/status triggers engine and creates a new record."""
         # Register flow: doctor_report finished → create ai_analysis
-        flow = FlowRecord("doctor_report")
-        flow.on_status("finished").add_record("ai_analysis")
+        flow = FlowRecord("doctor-report")
+        flow.on_status("finished").add_record("ai-analysis")
         app_with_engine.register_flow(flow)
 
         # Create a record via API (status=pending by default)
         create_resp = await client.post(
             "/api/records/",
             json={
-                "record_type_name": "doctor_report",
+                "record_type_name": "doctor-report",
                 "patient_id": test_patient.id,
                 "study_uid": test_study.study_uid,
             },
@@ -484,10 +484,10 @@ class TestRecordFlowRuntime:
         # Verify: ai_analysis was created by the engine via background task
         records = await clarinet_client.find_records(
             study_uid=test_study.study_uid,
-            record_type_name="ai_analysis",
+            record_type_name="ai-analysis",
         )
         assert len(records) == 1
-        assert records[0].record_type.name == "ai_analysis"
+        assert records[0].record_type.name == "ai-analysis"
 
     @pytest.mark.asyncio
     async def test_conditional_flow_via_api(
@@ -500,16 +500,16 @@ class TestRecordFlowRuntime:
         test_study: Study,
     ):
         """PATCH /status triggers conditional flow — condition True creates record."""
-        flow = FlowRecord("doctor_report")
+        flow = FlowRecord("doctor-report")
         flow.on_status("finished")
-        flow.if_(FlowResult("doctor_report", ["confidence"]) < 70).add_record("expert_check")
+        flow.if_(FlowResult("doctor-report", ["confidence"]) < 70).add_record("expert-check")
         app_with_engine.register_flow(flow)
 
         # Create record
         create_resp = await client.post(
             "/api/records/",
             json={
-                "record_type_name": "doctor_report",
+                "record_type_name": "doctor-report",
                 "patient_id": test_patient.id,
                 "study_uid": test_study.study_uid,
             },
@@ -531,7 +531,7 @@ class TestRecordFlowRuntime:
 
         records = await clarinet_client.find_records(
             study_uid=test_study.study_uid,
-            record_type_name="expert_check",
+            record_type_name="expert-check",
         )
         assert len(records) == 1
 
@@ -551,7 +551,7 @@ class TestRecordFlowRuntime:
         create_resp = await client.post(
             "/api/records/",
             json={
-                "record_type_name": "doctor_report",
+                "record_type_name": "doctor-report",
                 "patient_id": test_patient.id,
                 "study_uid": test_study.study_uid,
             },
@@ -567,7 +567,7 @@ class TestRecordFlowRuntime:
         # No flow engine → no ai_analysis created
         records = await clarinet_client.find_records(
             study_uid=test_study.study_uid,
-            record_type_name="ai_analysis",
+            record_type_name="ai-analysis",
         )
         assert len(records) == 0
 
@@ -586,14 +586,14 @@ class TestRecordFlowInvalidation:
     ):
         """Hard invalidation resets child record to pending status."""
         # Define flow: parent_model on_data_update → invalidate child_analysis (hard)
-        flow = FlowRecord("parent_model")
-        flow.on_data_update().invalidate_records("child_analysis", mode="hard")
+        flow = FlowRecord("parent-model")
+        flow.on_data_update().invalidate_records("child-analysis", mode="hard")
         flow_engine.register_flow(flow)
 
         # Create parent record (finished with data)
         parent_record = await _create_record_via_client(
             clarinet_client,
-            "parent_model",
+            "parent-model",
             test_patient.id,
             test_study.study_uid,
             status=RecordStatus.finished,
@@ -603,7 +603,7 @@ class TestRecordFlowInvalidation:
         # Create child record (finished)
         await _create_record_via_client(
             clarinet_client,
-            "child_analysis",
+            "child-analysis",
             test_patient.id,
             test_study.study_uid,
             status=RecordStatus.finished,
@@ -615,7 +615,7 @@ class TestRecordFlowInvalidation:
         # Verify child is now pending and has invalidation info
         records = await clarinet_client.find_records(
             study_uid=test_study.study_uid,
-            record_type_name="child_analysis",
+            record_type_name="child-analysis",
         )
         assert len(records) == 1
         assert records[0].status == RecordStatus.pending
@@ -633,14 +633,14 @@ class TestRecordFlowInvalidation:
     ):
         """Soft invalidation keeps status but updates context_info."""
         # Define flow: parent_model on_data_update → invalidate child_analysis (soft)
-        flow = FlowRecord("parent_model")
-        flow.on_data_update().invalidate_records("child_analysis", mode="soft")
+        flow = FlowRecord("parent-model")
+        flow.on_data_update().invalidate_records("child-analysis", mode="soft")
         flow_engine.register_flow(flow)
 
         # Create parent record (finished with data)
         parent_record = await _create_record_via_client(
             clarinet_client,
-            "parent_model",
+            "parent-model",
             test_patient.id,
             test_study.study_uid,
             status=RecordStatus.finished,
@@ -650,7 +650,7 @@ class TestRecordFlowInvalidation:
         # Create child record (finished)
         await _create_record_via_client(
             clarinet_client,
-            "child_analysis",
+            "child-analysis",
             test_patient.id,
             test_study.study_uid,
             status=RecordStatus.finished,
@@ -662,7 +662,7 @@ class TestRecordFlowInvalidation:
         # Verify child status unchanged but context_info updated
         records = await clarinet_client.find_records(
             study_uid=test_study.study_uid,
-            record_type_name="child_analysis",
+            record_type_name="child-analysis",
         )
         assert len(records) == 1
         assert records[0].status == RecordStatus.finished
@@ -680,14 +680,14 @@ class TestRecordFlowInvalidation:
     ):
         """Invalidation skips the source record when invalidating same type."""
         # Define flow: parent_model on_data_update → invalidate parent_model (self-invalidation)
-        flow = FlowRecord("parent_model")
-        flow.on_data_update().invalidate_records("parent_model", mode="hard")
+        flow = FlowRecord("parent-model")
+        flow.on_data_update().invalidate_records("parent-model", mode="hard")
         flow_engine.register_flow(flow)
 
         # Create two parent_model records
         first_record = await _create_record_via_client(
             clarinet_client,
-            "parent_model",
+            "parent-model",
             test_patient.id,
             test_study.study_uid,
             status=RecordStatus.finished,
@@ -696,7 +696,7 @@ class TestRecordFlowInvalidation:
 
         second_record = await _create_record_via_client(
             clarinet_client,
-            "parent_model",
+            "parent-model",
             test_patient.id,
             test_study.study_uid,
             status=RecordStatus.finished,
@@ -709,7 +709,7 @@ class TestRecordFlowInvalidation:
         # Verify: first record NOT invalidated, second record IS invalidated
         records = await clarinet_client.find_records(
             study_uid=test_study.study_uid,
-            record_type_name="parent_model",
+            record_type_name="parent-model",
         )
         assert len(records) == 2
 
@@ -744,16 +744,16 @@ class TestRecordFlowInvalidation:
             )
 
         # Define flow with callback
-        flow = FlowRecord("parent_model")
+        flow = FlowRecord("parent-model")
         flow.on_data_update().invalidate_records(
-            "child_analysis", mode="hard", callback=invalidation_callback
+            "child-analysis", mode="hard", callback=invalidation_callback
         )
         flow_engine.register_flow(flow)
 
         # Create parent and child
         parent_record = await _create_record_via_client(
             clarinet_client,
-            "parent_model",
+            "parent-model",
             test_patient.id,
             test_study.study_uid,
             status=RecordStatus.finished,
@@ -762,7 +762,7 @@ class TestRecordFlowInvalidation:
 
         await _create_record_via_client(
             clarinet_client,
-            "child_analysis",
+            "child-analysis",
             test_patient.id,
             test_study.study_uid,
             status=RecordStatus.finished,
@@ -773,7 +773,7 @@ class TestRecordFlowInvalidation:
 
         # Verify callback was called with the target (child) record
         assert len(call_log) == 1
-        assert call_log[0]["record_type"] == "child_analysis"
+        assert call_log[0]["record_type"] == "child-analysis"
         assert call_log[0]["source_record_id"] == parent_record.id
 
     @pytest.mark.asyncio
@@ -787,14 +787,14 @@ class TestRecordFlowInvalidation:
     ):
         """Invalidation can target multiple record types simultaneously."""
         # Define flow: parent_model on_data_update → invalidate child_analysis AND ai_analysis
-        flow = FlowRecord("parent_model")
-        flow.on_data_update().invalidate_records("child_analysis", "ai_analysis", mode="hard")
+        flow = FlowRecord("parent-model")
+        flow.on_data_update().invalidate_records("child-analysis", "ai-analysis", mode="hard")
         flow_engine.register_flow(flow)
 
         # Create parent
         parent_record = await _create_record_via_client(
             clarinet_client,
-            "parent_model",
+            "parent-model",
             test_patient.id,
             test_study.study_uid,
             status=RecordStatus.finished,
@@ -804,7 +804,7 @@ class TestRecordFlowInvalidation:
         # Create child_analysis (finished)
         await _create_record_via_client(
             clarinet_client,
-            "child_analysis",
+            "child-analysis",
             test_patient.id,
             test_study.study_uid,
             status=RecordStatus.finished,
@@ -813,7 +813,7 @@ class TestRecordFlowInvalidation:
         # Create ai_analysis (finished)
         await _create_record_via_client(
             clarinet_client,
-            "ai_analysis",
+            "ai-analysis",
             test_patient.id,
             test_study.study_uid,
             status=RecordStatus.finished,
@@ -825,14 +825,14 @@ class TestRecordFlowInvalidation:
         # Verify both child_analysis and ai_analysis are invalidated
         child_records = await clarinet_client.find_records(
             study_uid=test_study.study_uid,
-            record_type_name="child_analysis",
+            record_type_name="child-analysis",
         )
         assert len(child_records) == 1
         assert child_records[0].status == RecordStatus.pending
 
         ai_records = await clarinet_client.find_records(
             study_uid=test_study.study_uid,
-            record_type_name="ai_analysis",
+            record_type_name="ai-analysis",
         )
         assert len(ai_records) == 1
         assert ai_records[0].status == RecordStatus.pending
@@ -864,15 +864,15 @@ class TestRecordFlowInvalidationRuntime:
     ):
         """PATCH /records/{id}/data triggers invalidation through engine."""
         # Register flow: parent_model on_data_update → invalidate child_analysis
-        flow = FlowRecord("parent_model")
-        flow.on_data_update().invalidate_records("child_analysis", mode="hard")
+        flow = FlowRecord("parent-model")
+        flow.on_data_update().invalidate_records("child-analysis", mode="hard")
         app_with_engine.register_flow(flow)
 
         # Create parent_model via API
         create_resp = await client.post(
             "/api/records/",
             json={
-                "record_type_name": "parent_model",
+                "record_type_name": "parent-model",
                 "patient_id": test_patient.id,
                 "study_uid": test_study.study_uid,
             },
@@ -890,7 +890,7 @@ class TestRecordFlowInvalidationRuntime:
         child_create = await client.post(
             "/api/records/",
             json={
-                "record_type_name": "child_analysis",
+                "record_type_name": "child-analysis",
                 "patient_id": test_patient.id,
                 "study_uid": test_study.study_uid,
             },
@@ -913,7 +913,7 @@ class TestRecordFlowInvalidationRuntime:
         # Verify child_analysis is now pending (invalidated)
         child_records = await clarinet_client.find_records(
             study_uid=test_study.study_uid,
-            record_type_name="child_analysis",
+            record_type_name="child-analysis",
         )
         assert len(child_records) == 1
         assert child_records[0].status == RecordStatus.pending
@@ -936,7 +936,7 @@ class TestInvalidateEndpoint:
         # Create a finished record
         record = await _create_record_via_client(
             clarinet_client,
-            "parent_model",
+            "parent-model",
             test_patient.id,
             test_study.study_uid,
             status=RecordStatus.finished,
@@ -969,7 +969,7 @@ class TestInvalidateEndpoint:
         # Create a finished record with existing context_info
         record = await _create_record_via_client(
             clarinet_client,
-            "parent_model",
+            "parent-model",
             test_patient.id,
             test_study.study_uid,
             status=RecordStatus.finished,
@@ -1011,7 +1011,7 @@ class TestEntityFlowIntegration:
         engine = RecordFlowEngine(clarinet_client)
 
         fr = FlowRecord("series", entity_trigger="series")
-        fr.add_record("series_markup")
+        fr.add_record("series-markup")
         engine.register_flow(fr)
 
         await engine.handle_entity_created(
@@ -1023,10 +1023,10 @@ class TestEntityFlowIntegration:
 
         records = await clarinet_client.find_records(
             study_uid=test_study.study_uid,
-            record_type_name="series_markup",
+            record_type_name="series-markup",
         )
         assert len(records) == 1
-        assert records[0].record_type.name == "series_markup"
+        assert records[0].record_type.name == "series-markup"
         assert records[0].series_uid == "1.2.3.4.5.6.7.8.9.10"
 
 
@@ -1056,7 +1056,7 @@ class TestEntityFlowRuntime:
     ):
         """POST /series triggers entity flow and creates a record."""
         fr = FlowRecord("series", entity_trigger="series")
-        fr.add_record("series_markup")
+        fr.add_record("series-markup")
         app_with_engine.register_flow(fr)
 
         # Create series via API
@@ -1075,7 +1075,7 @@ class TestEntityFlowRuntime:
         for _ in range(40):
             records = await clarinet_client.find_records(
                 study_uid=test_study.study_uid,
-                record_type_name="series_markup",
+                record_type_name="series-markup",
             )
             if records:
                 break
@@ -1106,7 +1106,7 @@ class TestLazyAuthentication:
         engine = RecordFlowEngine(clarinet_client)
 
         fr = FlowRecord("series", entity_trigger="series")
-        fr.add_record("series_markup")
+        fr.add_record("series-markup")
         engine.register_flow(fr)
 
         # This should trigger _ensure_authenticated → login → create record
@@ -1123,7 +1123,7 @@ class TestLazyAuthentication:
         # Record should have been created
         records = await clarinet_client.find_records(
             study_uid=test_study.study_uid,
-            record_type_name="series_markup",
+            record_type_name="series-markup",
         )
         assert len(records) == 1
         assert records[0].series_uid == "1.2.3.99.88.77"
@@ -1147,13 +1147,13 @@ class TestFileFlowIntegration:
 
         # Register file flow: master_model change → invalidate child_analysis
         fr = FlowFileRecord("master_model")
-        fr.on_update().invalidate_all_records("child_analysis", mode="hard")
+        fr.on_update().invalidate_all_records("child-analysis", mode="hard")
         engine.register_flow(fr)
 
         # Create a finished child_analysis record
         await _create_record_via_client(
             clarinet_client,
-            "child_analysis",
+            "child-analysis",
             test_patient.id,
             test_study.study_uid,
             status=RecordStatus.finished,
@@ -1165,7 +1165,7 @@ class TestFileFlowIntegration:
         # Verify child_analysis is now pending (invalidated)
         records = await clarinet_client.find_records(
             study_uid=test_study.study_uid,
-            record_type_name="child_analysis",
+            record_type_name="child-analysis",
         )
         assert len(records) == 1
         assert records[0].status == RecordStatus.pending
@@ -1188,7 +1188,7 @@ class TestFileFlowIntegration:
 
         # Register file flow
         fr = FlowFileRecord("master_model")
-        fr.on_update().invalidate_all_records("child_analysis", mode="hard")
+        fr.on_update().invalidate_all_records("child-analysis", mode="hard")
         engine.register_flow(fr)
 
         # Install engine in app state
@@ -1197,7 +1197,7 @@ class TestFileFlowIntegration:
         # Create a finished child_analysis record
         await _create_record_via_client(
             clarinet_client,
-            "child_analysis",
+            "child-analysis",
             test_patient.id,
             test_study.study_uid,
             status=RecordStatus.finished,
@@ -1214,7 +1214,7 @@ class TestFileFlowIntegration:
         # Verify child_analysis was invalidated
         records = await clarinet_client.find_records(
             study_uid=test_study.study_uid,
-            record_type_name="child_analysis",
+            record_type_name="child-analysis",
         )
         assert len(records) == 1
         assert records[0].status == RecordStatus.pending

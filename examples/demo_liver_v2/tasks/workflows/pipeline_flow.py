@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
-from record_types import master_model, master_projection, segmentation_single
+from record_types import master_model, master_projection, segmentation
 from utils.seg_utils import master_label_converter, save_seg_nrrd
 
 from clarinet.models.base import RecordStatus
@@ -53,7 +53,7 @@ def init_master_model(_msg: PipelineMessage, ctx: SyncTaskContext) -> None:
     if ctx.files.exists(master_model):
         return
 
-    seg_path = ctx.files.resolve(segmentation_single)
+    seg_path = ctx.files.resolve(segmentation)
     if not seg_path.is_file():
         raise FileNotFoundError(
             f"Segmentation file not found: {seg_path} — file may not have been saved yet"
@@ -90,7 +90,7 @@ async def auto_project_ct(msg: PipelineMessage, ctx: TaskContext) -> None:
     assert msg.record_id is not None
 
     # Определяем тип исследования из first_check
-    first_checks = await ctx.records.find("first_check", study_uid=msg.study_uid)
+    first_checks = await ctx.records.find("first-check", study_uid=msg.study_uid)
     study_type = (first_checks[0].data or {}).get("study_type") if first_checks else None
     if study_type != "CT":
         return  # Не КТ → оставляем в pending для эксперта
@@ -115,7 +115,7 @@ def compare_w_projection(msg: PipelineMessage, ctx: SyncTaskContext) -> dict[str
     """
     assert msg.record_id is not None
 
-    seg_path = ctx.files.resolve(segmentation_single)
+    seg_path = ctx.files.resolve(segmentation)
     proj_path = ctx.files.resolve(master_projection)
 
     # Бинаризация сегментации врача перед labeling:
@@ -150,7 +150,7 @@ async def anonymize_study_pipeline(msg: PipelineMessage, ctx: TaskContext) -> No
     do_send = msg.payload.get("send_to_pacs", settings.anon_send_to_pacs)
 
     # Get study_type from first_check for downstream matching
-    first_checks = await ctx.records.find("first_check", study_uid=msg.study_uid)
+    first_checks = await ctx.records.find("first-check", study_uid=msg.study_uid)
     first_data = first_checks[0].data if first_checks else None
     study_type = first_data.get("study_type") if first_data else None
 
@@ -219,25 +219,25 @@ async def create_projection_record(
     _context: dict[str, Any],
     client: ClarinetClient,
 ) -> None:
-    """Create ``create_master_projection`` with series_uid from first_check."""
+    """Create ``create-master-projection`` with series_uid from first-check."""
     first_checks = await client.find_records(
-        record_type_name="first_check",
+        record_type_name="first-check",
         study_uid=record.study_uid,
     )
     if not first_checks:
-        logger.warning(f"No first_check for study {record.study_uid}, skipping projection")
+        logger.warning(f"No first-check for study {record.study_uid}, skipping projection")
         return
 
     best_series = (first_checks[0].data or {}).get("best_series")
     if not best_series:
-        logger.warning(f"No best_series in first_check for study {record.study_uid}")
+        logger.warning(f"No best_series in first-check for study {record.study_uid}")
         return
 
     from clarinet.models import RecordCreate
 
     await client.create_record(
         RecordCreate(
-            record_type_name="create_master_projection",
+            record_type_name="create-master-projection",
             patient_id=record.patient_id,
             study_uid=record.study_uid,
             series_uid=best_series,
@@ -253,21 +253,21 @@ async def create_comparison_record(
     _context: dict[str, Any],
     client: ClarinetClient,
 ) -> None:
-    """Create ``compare_with_projection`` linked to the segmentation as parent."""
+    """Create ``compare-with-projection`` linked to the segmentation as parent."""
     first_checks = await client.find_records(
-        record_type_name="first_check",
+        record_type_name="first-check",
         study_uid=record.study_uid,
     )
     best_series = (first_checks[0].data or {}).get("best_series") if first_checks else None
     if not best_series:
-        logger.warning(f"No best_series in first_check for study {record.study_uid}")
+        logger.warning(f"No best_series in first-check for study {record.study_uid}")
         return
 
     from clarinet.models import RecordCreate
 
     await client.create_record(
         RecordCreate(
-            record_type_name="compare_with_projection",
+            record_type_name="compare-with-projection",
             patient_id=record.patient_id,
             study_uid=record.study_uid,
             series_uid=best_series,
@@ -282,9 +282,8 @@ async def unblock_comparisons(
     _context: dict[str, Any],
     client: ClarinetClient,
 ) -> None:
-    """Check-files on all blocked ``compare_with_projection`` for this series."""
+    """Check-files on all blocked ``compare-with-projection`` for this series."""
     comparisons = await client.find_records(
-        record_type_name="compare_with_projection",
         series_uid=record.series_uid,
         record_status="blocked",
     )
@@ -292,38 +291,78 @@ async def unblock_comparisons(
         await client.check_record_files(comp.id)
 
 
+async def create_second_review_record(
+    record: RecordRead,
+    context: dict[str, Any],
+    client: ClarinetClient,
+) -> None:
+    """Create ``second-review`` linked to parent segmentation for ``{user_id}`` resolution.
+
+    The ``parent_record_id`` is set to the compare-with-projection's parent
+    (the segmentation record), which has ``user_id`` — enabling the
+    ``{user_id}`` pattern placeholder in second-review's file definitions.
+    """
+    from clarinet.models import RecordCreate
+
+    await client.create_record(
+        RecordCreate(
+            record_type_name="second-review",
+            patient_id=record.patient_id,
+            study_uid=record.study_uid,
+            series_uid=record.series_uid,
+            parent_record_id=record.parent_record_id,
+            context_info=f"Created from compare-with-projection (id={record.id})",
+        )
+    )
+
+
+async def unblock_second_reviews(
+    record: RecordRead,
+    context: dict[str, Any],
+    client: ClarinetClient,
+) -> None:
+    """Check-files on all blocked ``second-review`` for this series."""
+    reviews = await client.find_records(
+        record_type_name="second-review",
+        series_uid=record.series_uid,
+        record_status="blocked",
+    )
+    for review in reviews:
+        await client.check_record_files(review.id)
+
+
 # ---------------------------------------------------------------------------
-# Flow: создание записей по результатам first_check
+# Flow: создание записей по результатам first-check
 # ---------------------------------------------------------------------------
 
-# При поступлении нового исследования создаётся first_check
-(study().on_creation().create_record("first_check"))
+# При поступлении нового исследования создаётся first-check
+(study().on_creation().create_record("first-check"))
 
-# first_check → anonymize_study (instead of direct segmentation creation)
-(record("first_check").on_finished().if_record(F.is_good == True).create_record("anonymize_study"))
+# first-check → anonymize-study (instead of direct segmentation creation)
+(record("first-check").on_finished().if_record(F.is_good == True).create_record("anonymize-study"))
 
 # Run anonymization on creation
 (
-    record("anonymize_study")
+    record("anonymize-study")
     .on_status("pending")
     .do_task(anonymize_study_pipeline, send_to_pacs=True)
 )
 
 # After anonymization → create segmentations by study_type
 (
-    record("anonymize_study")
+    record("anonymize-study")
     .on_finished()
     .match(F.study_type)
     .case("CT")
-    .create_record("segment_CT_single", "segment_CT_with_archive")
+    .create_record("segment-ct-single", "segment-ct-with-archive")
     .case("MRI")
-    .create_record("segment_MRI_single")
+    .create_record("segment-mri-single")
     .case("CT-AG")
-    .create_record("segment_CTAG_single")
+    .create_record("segment-ctag-single")
     .case("MRI-AG")
-    .create_record("segment_MRIAG_single")
+    .create_record("segment-mriag-single")
     .case("PDCT-AG")
-    .create_record("segment_PDCTAG_single")
+    .create_record("segment-pdctag-single")
 )
 
 # ---------------------------------------------------------------------------
@@ -332,84 +371,85 @@ async def unblock_comparisons(
 
 # Список всех типов сегментации (single-варианты)
 SEGMENT_TYPES = [
-    "segment_CT_single",
-    "segment_MRI_single",
-    "segment_CTAG_single",
-    "segment_MRIAG_single",
-    "segment_PDCTAG_single",
+    "segment-ct-single",
+    "segment-mri-single",
+    "segment-ctag-single",
+    "segment-mriag-single",
+    "segment-pdctag-single",
 ]
 
 for seg_type in SEGMENT_TYPES:
     # Создание проекции мастер-модели на серию сегментации
     (record(seg_type).on_finished().call(create_projection_record))
-    # Каждая сегментация создаёт compare_with_projection, привязанный к себе как parent
+    # Каждая сегментация создаёт compare-with-projection, привязанный к себе как parent
     (record(seg_type).on_finished().call(create_comparison_record))
 
-# segment_CT_with_archive тоже запускает проекцию и сравнение
-(record("segment_CT_with_archive").on_finished().call(create_projection_record))
-(record("segment_CT_with_archive").on_finished().call(create_comparison_record))
+# segment-ct-with-archive тоже запускает проекцию и сравнение
+(record("segment-ct-with-archive").on_finished().call(create_projection_record))
+(record("segment-ct-with-archive").on_finished().call(create_comparison_record))
 
 # Создание мастер-модели по первой завершённой КТ-сегментации с архивом
-(record("segment_CT_with_archive").on_finished().do_task(init_master_model))
+(record("segment-ct-with-archive").on_finished().do_task(init_master_model))
 
 # ---------------------------------------------------------------------------
 # Flow: авто-проекция для КТ при создании записи
 # ---------------------------------------------------------------------------
 
-(record("create_master_projection").on_status("pending").do_task(auto_project_ct))
+(record("create-master-projection").on_status("pending").do_task(auto_project_ct))
 
 # ---------------------------------------------------------------------------
 # Flow: после завершения проекции -> разблокировка сравнений
 # ---------------------------------------------------------------------------
 
-(record("create_master_projection").on_finished().call(unblock_comparisons))
+(record("create-master-projection").on_finished().call(unblock_comparisons))
+(record("create-master-projection").on_finished().call(unblock_second_reviews))
 
-# Автозаполнение compare_with_projection при создании (role=auto)
-(record("compare_with_projection").on_status("pending").do_task(compare_w_projection))
+# Автозаполнение compare-with-projection при создании (role=auto)
+(record("compare-with-projection").on_status("pending").do_task(compare_w_projection))
 
 # ---------------------------------------------------------------------------
 # Flow: по результатам сравнения
 # ---------------------------------------------------------------------------
 
-# false_positive > 0 -> создать update_master_model
+# false_positive > 0 -> создать update-master-model
 (
-    record("compare_with_projection")
+    record("compare-with-projection")
     .on_finished()
     .if_record(F.false_positive_num > 0)
-    .create_record("update_master_model")
+    .create_record("update-master-model")
 )
 
-# Любые расхождения -> second_review для врача
+# Любые расхождения -> second-review для врача (callback for parent_record_id)
 (
-    record("compare_with_projection")
+    record("compare-with-projection")
     .on_finished()
     .if_record(F.false_negative_num > 0)
-    .create_record("second_review")
+    .call(create_second_review_record)
 )
 
 # ---------------------------------------------------------------------------
 # Flow: инвалидация проекций при обновлении мастер-модели
 # ---------------------------------------------------------------------------
 
-(file("master_model").on_update().invalidate_all_records("create_master_projection"))
+(file("master_model").on_update().invalidate_all_records("create-master-projection"))
 
 # ---------------------------------------------------------------------------
 # Flow: стадии 10-14 (MDK → хирургия → гистология)
 # ---------------------------------------------------------------------------
 
-# MDK conclusion → resection_model (expert creates 3D model)
-(record("mdk_conclusion").on_finished().create_record("resection_model"))
+# MDK conclusion → resection-model (expert creates 3D model)
+(record("mdk-conclusion").on_finished().create_record("resection-model"))
 
-# resection_model → resection_plan (expert plans resection zones)
-(record("resection_model").on_finished().create_record("resection_plan"))
+# resection-model → resection-plan (expert plans resection zones)
+(record("resection-model").on_finished().create_record("resection-plan"))
 
 # Intraop: if additional lesions found → update master model
 (
-    record("intraop_protocol")
+    record("intraop-protocol")
     .on_finished()
     .if_record(F.additionally_found > 0)
-    .create_record("update_master_model")
+    .create_record("update-master-model")
 )
 
-# Note: retrospective_semiotics (stage 8) — created manually by coordinator
+# Note: retrospective-semiotics (stage 8) — created manually by coordinator
 # after 4-7 week washout period (no automatic trigger)

@@ -1,5 +1,5 @@
 # Series Markup — series-level segmentation and annotation in 3D Slicer
-name = "series_markup"
+name = "series-markup"
 description = "Series-level segmentation and annotation in 3D Slicer"
 label = "Series Markup"
 level = "SERIES"

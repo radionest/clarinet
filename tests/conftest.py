@@ -492,7 +492,7 @@ async def test_record_type(test_session):
     from clarinet.models.record import RecordType
 
     record_type = RecordType(
-        name="test_record_type",
+        name="test-record-type",
         description="Test record type",
         label="Test Type",
         level="SERIES",

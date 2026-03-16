@@ -98,8 +98,8 @@ class TestRecordValidateParentRecord:
         test_session.add(series)
         await test_session.commit()
 
-        rt_parent = make_record_type("vr_parent_type")
-        rt_child = make_record_type("vr_child_type")
+        rt_parent = make_record_type("vr-parent-type")
+        rt_child = make_record_type("vr-child-type")
         test_session.add_all([rt_parent, rt_child])
         await test_session.commit()
 
@@ -108,7 +108,7 @@ class TestRecordValidateParentRecord:
             patient_id="VRPAT",
             study_uid="1.2.3.600",
             series_uid="1.2.3.600.1",
-            rt_name="vr_parent_type",
+            rt_name="vr-parent-type",
         )
 
         repo = RecordRepository(test_session)
@@ -153,8 +153,8 @@ class TestSearchByParentRecordId:
         test_session.add(series)
         await test_session.commit()
 
-        rt_parent = make_record_type("sr_parent_tp")
-        rt_child = make_record_type("sr__child_tp")
+        rt_parent = make_record_type("sr-parent-tp")
+        rt_child = make_record_type("sr-child-type")
         test_session.add_all([rt_parent, rt_child])
         await test_session.commit()
 
@@ -163,7 +163,7 @@ class TestSearchByParentRecordId:
             patient_id="SRPAT",
             study_uid="1.2.3.700",
             series_uid="1.2.3.700.1",
-            rt_name="sr_parent_tp",
+            rt_name="sr-parent-tp",
         )
 
         child_rec = await seed_record(
@@ -171,7 +171,7 @@ class TestSearchByParentRecordId:
             patient_id="SRPAT",
             study_uid="1.2.3.700",
             series_uid="1.2.3.700.1",
-            rt_name="sr__child_tp",
+            rt_name="sr-child-type",
             parent_record_id=parent_rec.id,
         )
 
@@ -181,7 +181,7 @@ class TestSearchByParentRecordId:
             patient_id="SRPAT",
             study_uid="1.2.3.700",
             series_uid="1.2.3.700.1",
-            rt_name="sr_parent_tp",
+            rt_name="sr-parent-tp",
         )
 
         repo = RecordRepository(test_session)
@@ -233,8 +233,8 @@ class TestApiRecordParent:
         test_session.add(series)
         await test_session.commit()
 
-        rt_parent = make_record_type("ar_parent_ty")
-        rt_child = make_record_type("ar__child_ty")
+        rt_parent = make_record_type("ar-parent-ty")
+        rt_child = make_record_type("ar-child-type")
         test_session.add_all([rt_parent, rt_child])
         await test_session.commit()
 
@@ -253,7 +253,7 @@ class TestApiRecordParent:
                 "patient_id": seed["patient_id"],
                 "study_uid": seed["study_uid"],
                 "series_uid": seed["series_uid"],
-                "record_type_name": "ar_parent_ty",
+                "record_type_name": "ar-parent-ty",
             },
         )
         assert resp.status_code == 201
@@ -266,7 +266,7 @@ class TestApiRecordParent:
                 "patient_id": seed["patient_id"],
                 "study_uid": seed["study_uid"],
                 "series_uid": seed["series_uid"],
-                "record_type_name": "ar__child_ty",
+                "record_type_name": "ar-child-type",
                 "parent_record_id": parent_id,
             },
         )
@@ -282,7 +282,7 @@ class TestApiRecordParent:
                 "patient_id": seed["patient_id"],
                 "study_uid": seed["study_uid"],
                 "series_uid": seed["series_uid"],
-                "record_type_name": "ar__child_ty",
+                "record_type_name": "ar-child-type",
                 "parent_record_id": 999999,
             },
         )
@@ -303,7 +303,7 @@ class TestApiRecordParent:
                 "patient_id": seed["patient_id"],
                 "study_uid": seed["study_uid"],
                 "series_uid": seed["series_uid"],
-                "record_type_name": "ar_parent_ty",
+                "record_type_name": "ar-parent-ty",
                 "user_id": str(user.id),
             },
         )
@@ -317,7 +317,7 @@ class TestApiRecordParent:
                 "patient_id": seed["patient_id"],
                 "study_uid": seed["study_uid"],
                 "series_uid": seed["series_uid"],
-                "record_type_name": "ar__child_ty",
+                "record_type_name": "ar-child-type",
                 "parent_record_id": parent_id,
             },
         )
@@ -342,7 +342,7 @@ class TestApiRecordParent:
                 "patient_id": seed["patient_id"],
                 "study_uid": seed["study_uid"],
                 "series_uid": seed["series_uid"],
-                "record_type_name": "ar_parent_ty",
+                "record_type_name": "ar-parent-ty",
                 "user_id": str(user_a.id),
             },
         )
@@ -356,7 +356,7 @@ class TestApiRecordParent:
                 "patient_id": seed["patient_id"],
                 "study_uid": seed["study_uid"],
                 "series_uid": seed["series_uid"],
-                "record_type_name": "ar__child_ty",
+                "record_type_name": "ar-child-type",
                 "parent_record_id": parent_id,
                 "user_id": str(user_b.id),
             },

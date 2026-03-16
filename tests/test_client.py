@@ -299,7 +299,7 @@ class TestRecordManagement:
         await clarinet_client.login(username=admin_user.email, password="adminpassword")
 
         # Create a test record type
-        record_type = RecordType(name="test_type", level="SERIES")
+        record_type = RecordType(name="test-type", level="SERIES")
         test_session.add(record_type)
         await test_session.commit()
 
@@ -308,7 +308,7 @@ class TestRecordManagement:
 
         assert len(types) >= 1
         type_names = [t.name for t in types]
-        assert "test_type" in type_names
+        assert "test-type" in type_names
 
     @pytest.mark.asyncio
     async def test_create_record_type(
@@ -323,7 +323,7 @@ class TestRecordManagement:
 
         # Create record type
         type_data = {
-            "name": "new_test_type",
+            "name": "new-test-type",
             "level": "STUDY",
             "description": "Test type created via client",
         }
@@ -331,11 +331,11 @@ class TestRecordManagement:
             type_data, constrain_unique_names=True
         )
 
-        assert record_type.name == "new_test_type"
+        assert record_type.name == "new-test-type"
         assert record_type.level == "STUDY"
 
         # Verify in database
-        db_type = await test_session.get(RecordType, "new_test_type")
+        db_type = await test_session.get(RecordType, "new-test-type")
         assert db_type is not None
         assert db_type.description == "Test type created via client"
 
@@ -353,9 +353,9 @@ class TestRecordManagement:
         await clarinet_client.login(username=admin_user.email, password="adminpassword")
 
         # Create record type if not exists
-        record_type = await test_session.get(RecordType, "test_record")
+        record_type = await test_session.get(RecordType, "test-record")
         if not record_type:
-            record_type = RecordType(name="test_record", level="STUDY")
+            record_type = RecordType(name="test-record", level="STUDY")
             test_session.add(record_type)
             await test_session.commit()
 

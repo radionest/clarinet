@@ -53,7 +53,7 @@ def _make_file_def(
 
 
 def _make_record_type_read(
-    name: str = "ct_segmentation",
+    name: str = "ct-segmentation",
     level: DicomQueryLevel = DicomQueryLevel.SERIES,
     file_registry: list[FileDefinitionRead] | None = None,
 ) -> MagicMock:
@@ -119,6 +119,7 @@ def _make_record_read(
     record.data = data or {}
     record.clarinet_storage_path = None
     record.file_links = file_links
+    record.parent_record_id = None
 
     record.patient = _make_patient(patient_id)
     record.study = _make_study(study_uid)
@@ -250,7 +251,13 @@ class TestBuildFields:
         record = _make_record_read()
         fields = FileResolver.build_fields(record)
 
-        assert fields["record_type"]["name"] == "ct_segmentation"
+        assert fields["record_type"]["name"] == "ct-segmentation"
+
+    def test_includes_origin_type(self):
+        record = _make_record_read()
+        fields = FileResolver.build_fields(record)
+
+        assert fields["origin_type"] == "ct-segmentation"
 
 
 # ── FileResolver.dir ────────────────────────────────────────────────────────
@@ -564,6 +571,41 @@ class TestBuildTaskContext:
         assert DicomQueryLevel.PATIENT in ctx.files._working_dirs
         assert DicomQueryLevel.STUDY in ctx.files._working_dirs
         assert DicomQueryLevel.SERIES not in ctx.files._working_dirs
+
+    @pytest.mark.asyncio
+    @patch("clarinet.services.pipeline.context.settings")
+    async def test_origin_type_from_parent(self, mock_settings: MagicMock):
+        """origin_type is overridden from parent when parent_record_id is set."""
+        mock_settings.storage_path = "/data"
+        record = _make_record_read(record_id=42, file_registry=[])
+        record.parent_record_id = 10
+
+        parent = _make_record_read(record_id=10)
+        parent.record_type = _make_record_type_read(name="parent-seg")
+
+        client = AsyncMock()
+        client.get_record = AsyncMock(side_effect=lambda rid: parent if rid == 10 else record)
+        msg = PipelineMessage(patient_id="PAT001", study_uid="1.2.3.4.5", record_id=42)
+
+        ctx = await build_task_context(msg, client)
+
+        assert ctx.files._fields["origin_type"] == "parent-seg"
+
+    @pytest.mark.asyncio
+    @patch("clarinet.services.pipeline.context.settings")
+    async def test_origin_type_no_parent(self, mock_settings: MagicMock):
+        """origin_type defaults to own type when no parent."""
+        mock_settings.storage_path = "/data"
+        record = _make_record_read(record_id=42, file_registry=[])
+        record.parent_record_id = None
+
+        client = AsyncMock()
+        client.get_record = AsyncMock(return_value=record)
+        msg = PipelineMessage(patient_id="PAT001", study_uid="1.2.3.4.5", record_id=42)
+
+        ctx = await build_task_context(msg, client)
+
+        assert ctx.files._fields["origin_type"] == "ct-segmentation"
 
     @pytest.mark.asyncio
     async def test_empty_context(self):

@@ -330,7 +330,7 @@ async def test_delete_patient_cascade_api(client: AsyncClient, test_session):
     await test_session.commit()
 
     record_type = RecordType(
-        name="del_test_type",
+        name="del-test-type",
         description="Delete test type",
         label="Delete Test",
         level="SERIES",
@@ -394,7 +394,7 @@ async def test_delete_study_cascade_api(client: AsyncClient, test_session):
     await test_session.commit()
 
     record_type = RecordType(
-        name="del_study_type",
+        name="del-study-type",
         description="Study delete test type",
         label="Study Delete",
         level="SERIES",

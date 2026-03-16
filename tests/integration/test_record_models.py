@@ -28,7 +28,7 @@ async def test_record_read_includes_started_at_on_inwork(
 ):
     """started_at is set when status transitions to inwork and exposed via RecordRead."""
     record_type = RecordType(
-        name="Timestamps Inwork",
+        name="timestamps-inwork",
         description="test",
         level=DicomQueryLevel.STUDY,
     )
@@ -66,7 +66,7 @@ async def test_record_read_includes_finished_at_on_finished(
 ):
     """finished_at is set when status transitions to finished and exposed via RecordRead."""
     record_type = RecordType(
-        name="Timestamps Finish",
+        name="timestamps-finish",
         description="test",
         level=DicomQueryLevel.STUDY,
     )
@@ -103,7 +103,7 @@ async def test_record_read_timestamps_none_for_pending(
 ):
     """started_at and finished_at are None for a freshly created pending record."""
     record_type = RecordType(
-        name="Timestamps Pending",
+        name="timestamps-pending",
         description="test",
         level=DicomQueryLevel.STUDY,
     )
@@ -181,12 +181,12 @@ async def _series_with_records(test_session, test_user):
     await test_session.commit()
 
     rt_alpha = RecordType(
-        name="rt_alpha_criteria",
+        name="rt-alpha-criteria",
         description="alpha",
         level=DicomQueryLevel.SERIES,
     )
     rt_beta = RecordType(
-        name="rt_beta_criteria",
+        name="rt-beta-criteria",
         description="beta",
         level=DicomQueryLevel.SERIES,
     )

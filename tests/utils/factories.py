@@ -44,7 +44,7 @@ def make_user(**kw: object) -> User:
     return User(**defaults)
 
 
-def make_record_type(name: str = "test_rt_00001", **kw: object) -> RecordType:
+def make_record_type(name: str = "test-rt-00001", **kw: object) -> RecordType:
     """Create a RecordType instance (not persisted)."""
     defaults: dict[str, object] = {"name": name, "level": DicomQueryLevel.SERIES}
     defaults.update(kw)

@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 from uuid import UUID
 
 from clarinet.models import Record, RecordRead, RecordStatus
+from clarinet.models.file_schema import FileRole
 from clarinet.services.file_validation import validate_record_files
+from clarinet.utils.file_checksums import checksums_changed, compute_checksums
+from clarinet.utils.logger import logger
 
 if TYPE_CHECKING:
     from clarinet.repositories.record_repository import RecordRepository
@@ -136,6 +140,11 @@ class RecordService:
 
         record, old_status = await self.repo.update_data(record_id, data, new_status=new_status)
         await self._fire_status_change(record, old_status)
+
+        # Detect output file changes and emit file events
+        if new_status == RecordStatus.finished:
+            await self._emit_output_file_events(record)
+
         return record, old_status
 
     async def update_data(self, record_id: int, data: RecordData) -> tuple[Record, RecordStatus]:
@@ -216,19 +225,76 @@ class RecordService:
 
         return record
 
-    async def notify_file_updates(self, patient_id: str, changed_files: list[str]) -> None:
+    async def notify_file_updates(
+        self,
+        patient_id: str,
+        changed_files: list[str],
+        source_record: RecordRead | None = None,
+    ) -> None:
         """Fire file-update triggers for project-level file changes.
 
         Args:
             patient_id: Patient whose files changed.
             changed_files: List of logical file names that changed.
+            source_record: Record that caused the file change (for skip logic).
         """
         if not self.engine:
             return
         for file_name in changed_files:
-            await self.engine.handle_file_update(file_name, patient_id)
+            await self.engine.handle_file_update(file_name, patient_id, source_record=source_record)
 
     # ── Private helpers ──────────────────────────────────────────────────
+
+    async def _emit_output_file_events(self, record: Record) -> None:
+        """Detect output file changes and emit project-level file events.
+
+        Computes checksums on disk for OUTPUT files and compares against
+        stored checksums in ``file_links``. Emits file-update events for
+        any changed files so that downstream file flows (e.g. invalidation)
+        are triggered.
+
+        Args:
+            record: Record with relations loaded (must have record_type, patient).
+        """
+        if not self.engine:
+            return
+
+        record_read = RecordRead.model_validate(record)
+        output_defs = [
+            fd for fd in (record_read.record_type.file_registry or []) if fd.role == FileRole.OUTPUT
+        ]
+        if not output_defs:
+            return
+
+        working_dir = Path(record_read.working_folder)
+        try:
+            new_checksums = await compute_checksums(output_defs, record_read, working_dir)
+        except Exception as e:
+            logger.warning(f"Failed to compute output checksums for record {record.id}: {e}")
+            return
+
+        old_checksums = {
+            link.name: link.checksum for link in (record_read.file_links or []) if link.checksum
+        }
+
+        changed = checksums_changed(old_checksums, new_checksums)
+        if not changed:
+            return
+
+        # Update stored checksums in DB
+        try:
+            await self.repo.update_checksums(record, new_checksums)
+        except Exception as e:
+            logger.warning(f"Failed to update checksums for record {record.id}: {e}")
+
+        # Extract logical file names (strip collection suffix "name:filename" → "name")
+        changed_file_names = {key.split(":")[0] for key in changed}
+
+        # Fire file events with source_record for downstream flows
+        for file_name in changed_file_names:
+            await self.engine.handle_file_update(
+                file_name, record_read.patient.id, source_record=record_read
+            )
 
     async def _fire_status_change(self, record: Record, old_status: RecordStatus | None) -> None:
         """Convert record to RecordRead and fire status-change trigger."""

@@ -82,7 +82,7 @@ class RecordFactory:
         default_schema = {"type": "object", "properties": {"label": {"type": "string"}}}
 
         record_type_obj = RecordType(
-            name=name or f"test_type_{unique_id}",
+            name=name or f"test-type-{unique_id}",
             title=title or f"Test Type {unique_id}",
             type=record_type,
             schema=json.dumps(schema or default_schema),

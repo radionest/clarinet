@@ -55,7 +55,7 @@ class TestPipelineMessage:
             study_uid="1.2.3.4",
             series_uid="1.2.3.4.5",
             record_id=42,
-            record_type_name="ct_scan",
+            record_type_name="ct-scan",
             payload={"threshold": 0.5},
             pipeline_id="seg_pipeline",
             step_index=2,
@@ -324,7 +324,7 @@ class TestPipelineActionDSL:
         from clarinet.services.recordflow.flow_record import RECORD_REGISTRY, record
 
         RECORD_REGISTRY.clear()
-        flow = record("ct_scan").on_status("finished").pipeline("ct_segmentation", threshold=0.5)
+        flow = record("ct-scan").on_status("finished").pipeline("ct_segmentation", threshold=0.5)
 
         assert len(flow.actions) == 1
         action = flow.actions[0]
@@ -340,7 +340,7 @@ class TestPipelineActionDSL:
 
         RECORD_REGISTRY.clear()
         flow = (
-            record("ct_scan")
+            record("ct-scan")
             .on_status("finished")
             .if_(ConstantFlowResult(True))
             .pipeline("ct_segmentation")
@@ -370,7 +370,7 @@ class TestPipelineActionDSL:
         mock_task = MagicMock()
         mock_task.task_name = "auto_pipeline_task"
 
-        fr = FlowRecord("ct_scan")
+        fr = FlowRecord("ct-scan")
         fr.on_status("finished").do_task(mock_task, threshold=0.5)
 
         # PipelineAction created with correct name

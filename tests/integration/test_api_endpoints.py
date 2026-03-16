@@ -100,7 +100,7 @@ async def test_create_record_type(client: AsyncClient, admin_user):
     )
 
     record_type_data = {
-        "name": "api_test_record",
+        "name": "api-test-record",
         "title": "API Test Record",
         "description": "Record created via API",
         "type": "classification",
@@ -132,7 +132,7 @@ async def test_create_record(client: AsyncClient, auth_headers, test_session):
     """Test creating record via API."""
     # First create record type in DB
 
-    record_type = RecordType(name="test_api_type", title="Test Type")
+    record_type = RecordType(name="test-api-type", title="Test Type")
     test_session.add(record_type)
     await test_session.commit()
 
@@ -180,7 +180,7 @@ async def test_update_record_status(client: AsyncClient, auth_headers, test_sess
     await test_session.commit()
 
     # Create record type and record
-    record_type = RecordType(name="update_test", title="Update Test")
+    record_type = RecordType(name="update-test", title="Update Test")
     test_session.add(record_type)
     await test_session.commit()
 

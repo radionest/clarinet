@@ -121,7 +121,7 @@ def working_dir(monkeypatch, tmp_path) -> Path:
 async def rt_with_files(client: AsyncClient) -> dict:
     """Create a record type with input and output file definitions via API."""
     payload = {
-        "name": "file_test",
+        "name": "file-test",
         "description": "Record type with file definitions",
         "label": "File Test",
         "level": "SERIES",
@@ -208,7 +208,7 @@ class TestRecordCreationWithFiles:
         working_dir: Path,
     ):
         """POST record with no files on disk -> status == 'blocked'."""
-        record = await _create_record(client, "file_test", test_hierarchy)
+        record = await _create_record(client, "file-test", test_hierarchy)
         assert record["status"] == "blocked"
 
     @pytest.mark.asyncio
@@ -222,7 +222,7 @@ class TestRecordCreationWithFiles:
         """Write scan.nii.gz first, POST record -> status == 'pending'."""
         (working_dir / "scan.nii.gz").write_bytes(b"\x00" * 128)
 
-        record = await _create_record(client, "file_test", test_hierarchy)
+        record = await _create_record(client, "file-test", test_hierarchy)
         assert record["status"] == "pending"
 
         # Verify via validate-files that the file is recognized
@@ -260,7 +260,7 @@ class TestFileValidation:
         working_dir: Path,
     ):
         """Blocked record -> validate-files -> valid=False, error for input_nifti."""
-        record = await _create_record(client, "file_test", test_hierarchy)
+        record = await _create_record(client, "file-test", test_hierarchy)
         assert record["status"] == "blocked"
 
         resp = await client.post(f"{RECORDS_BASE}/{record['id']}/validate-files")
@@ -281,7 +281,7 @@ class TestFileValidation:
         """File on disk -> validate-files -> valid=True, matched_files has input_nifti."""
         (working_dir / "scan.nii.gz").write_bytes(b"\x00" * 128)
 
-        record = await _create_record(client, "file_test", test_hierarchy)
+        record = await _create_record(client, "file-test", test_hierarchy)
         assert record["status"] == "pending"
 
         resp = await client.post(f"{RECORDS_BASE}/{record['id']}/validate-files")
@@ -324,7 +324,7 @@ class TestFileCheckAndUnblock:
         working_dir: Path,
     ):
         """Blocked record -> place file -> check-files -> transitions to pending."""
-        record = await _create_record(client, "file_test", test_hierarchy)
+        record = await _create_record(client, "file-test", test_hierarchy)
         assert record["status"] == "blocked"
 
         # Place the required file
@@ -352,7 +352,7 @@ class TestFileCheckAndUnblock:
         working_dir: Path,
     ):
         """Blocked record, no files -> check-files -> still blocked."""
-        record = await _create_record(client, "file_test", test_hierarchy)
+        record = await _create_record(client, "file-test", test_hierarchy)
         assert record["status"] == "blocked"
 
         resp = await client.post(f"{RECORDS_BASE}/{record['id']}/check-files")
@@ -376,7 +376,7 @@ class TestFileCheckAndUnblock:
         """Pending record -> modify file -> check-files -> changed_files lists the file."""
         (working_dir / "scan.nii.gz").write_bytes(b"\x00" * 128)
 
-        record = await _create_record(client, "file_test", test_hierarchy)
+        record = await _create_record(client, "file-test", test_hierarchy)
         assert record["status"] == "pending"
 
         # First check to establish baseline checksums
@@ -405,7 +405,7 @@ class TestFileCheckAndUnblock:
         """Two consecutive check-files without modification -> second returns no changes."""
         (working_dir / "scan.nii.gz").write_bytes(b"\x00" * 128)
 
-        record = await _create_record(client, "file_test", test_hierarchy)
+        record = await _create_record(client, "file-test", test_hierarchy)
         assert record["status"] == "pending"
 
         # First check establishes checksums
@@ -437,7 +437,7 @@ class TestDataSubmissionWithFiles:
         """File present, POST data -> 200, status == 'finished'."""
         (working_dir / "scan.nii.gz").write_bytes(b"\x00" * 128)
 
-        record = await _create_record(client, "file_test", test_hierarchy)
+        record = await _create_record(client, "file-test", test_hierarchy)
         assert record["status"] == "pending"
 
         resp = await client.post(
@@ -458,7 +458,7 @@ class TestDataSubmissionWithFiles:
         """Create with file (pending), remove file, POST data -> 422."""
         (working_dir / "scan.nii.gz").write_bytes(b"\x00" * 128)
 
-        record = await _create_record(client, "file_test", test_hierarchy)
+        record = await _create_record(client, "file-test", test_hierarchy)
         assert record["status"] == "pending"
 
         # Remove the file
@@ -479,7 +479,7 @@ class TestDataSubmissionWithFiles:
         working_dir: Path,
     ):
         """Blocked record, POST data -> 409 ('Record is blocked')."""
-        record = await _create_record(client, "file_test", test_hierarchy)
+        record = await _create_record(client, "file-test", test_hierarchy)
         assert record["status"] == "blocked"
 
         resp = await client.post(
@@ -636,7 +636,7 @@ class TestFullFileLifecycle:
     ):
         """Complete flow: create -> validate -> submit -> check changes."""
         # 1. Create record -> blocked (no files)
-        record = await _create_record(client, "file_test", test_hierarchy)
+        record = await _create_record(client, "file-test", test_hierarchy)
         record_id = record["id"]
         assert record["status"] == "blocked"
 

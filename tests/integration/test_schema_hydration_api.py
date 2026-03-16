@@ -58,7 +58,7 @@ async def study_with_series(test_session):
 async def record_type_with_schema(test_session):
     """Create a record type with x-options in its data_schema."""
     rt = RecordType(
-        name="hydration_test",
+        name="hydration-test",
         label="Hydration Test",
         level="STUDY",
         data_schema={
@@ -83,7 +83,7 @@ async def record_type_with_schema(test_session):
 async def record_type_no_schema(test_session):
     """Create a record type without data_schema."""
     rt = RecordType(
-        name="no_schema_type",
+        name="no-schema-type",
         label="No Schema",
         level="STUDY",
     )
@@ -97,7 +97,7 @@ async def record_type_no_schema(test_session):
 async def record_type_static_schema(test_session):
     """Create a record type with a static schema (no x-options)."""
     rt = RecordType(
-        name="static_schema_type",
+        name="static-schema-type",
         label="Static",
         level="STUDY",
         data_schema={
@@ -199,7 +199,7 @@ class TestGetHydratedSchema:
 
         # Override record type to patient level for this test
         rt = RecordType(
-            name="patient_hydration_test",
+            name="patient-hydration-test",
             label="Patient Hydration",
             level="PATIENT",
             data_schema={

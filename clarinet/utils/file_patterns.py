@@ -1,8 +1,16 @@
-"""
-Utility functions for file pattern processing.
+"""Utility functions for file pattern processing.
 
 This module provides functions for resolving file patterns with placeholders
 and finding files in directories.
+
+Virtual fields
+--------------
+``_VIRTUAL_FIELD_MAP`` defines aliases that map to real record fields but use
+**inverted** resolution priority.  Regular placeholders resolve primary record
+first, then fallbacks.  Virtual fields resolve fallbacks first (e.g. parent),
+then the primary record.  This is intentional: ``{origin_type}`` should
+resolve to the *parent's* record type when a file was produced by a different
+record type and the current record is consuming it.
 """
 
 import re
@@ -11,9 +19,35 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from clarinet.models.file_schema import FileDefinitionRead
-    from clarinet.models.record import RecordBase
+    from clarinet.models.record import RecordBase, RecordRead
 
 PLACEHOLDER_REGEX = re.compile(r"\{([^}]+)\}")
+
+# Virtual fields: short alias → real dotted path on the record.
+# Resolution priority is *inverted* (fallbacks first, then primary)
+# so that e.g. ``{origin_type}`` resolves to the *parent's* type when
+# a parent is available, falling back to the record's own type otherwise.
+_VIRTUAL_FIELD_MAP: dict[str, str] = {
+    "origin_type": "record_type.name",
+}
+
+
+def resolve_origin_type(record: RecordRead, parent: RecordRead | None = None) -> str:
+    """Resolve the ``origin_type`` virtual field for a record.
+
+    Returns the parent's record type name when a parent is available,
+    falling back to the record's own type name otherwise.
+
+    Args:
+        record: The current record.
+        parent: Optional parent record.
+
+    Returns:
+        Record type name to use as ``origin_type``.
+    """
+    if parent is not None:
+        return parent.record_type.name
+    return record.record_type.name
 
 
 def resolve_record_field(record: RecordBase, field_path: str) -> str:
@@ -85,6 +119,23 @@ def resolve_pattern(
 
     def replacer(match: re.Match[str]) -> str:
         field_path = match.group(1)
+
+        if field_path in _VIRTUAL_FIELD_MAP:
+            # Virtual fields use *inverted* priority: try fallbacks first,
+            # then the primary record.  This lets ``{origin_type}`` resolve
+            # to the parent record's type when consuming a file produced by
+            # a different record type.
+            real_path = _VIRTUAL_FIELD_MAP[field_path]
+            value = ""
+            for fb in fallbacks:
+                if fb is not None:
+                    value = resolve_record_field(fb, real_path)
+                    if value:
+                        break
+            if not value:
+                value = resolve_record_field(record, real_path)
+            return value
+
         value = resolve_record_field(record, field_path)
         if not value:
             for fb in fallbacks:

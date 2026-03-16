@@ -101,7 +101,7 @@ class TestFlowResult:
     def test_missing_record_raises(self):
         """ValueError when record name is not in context."""
         ctx = {"other": make_record_read("other", data={})}
-        result = FlowResult("missing_record", ["field"])
+        result = FlowResult("missing-record", ["field"])
         with pytest.raises(ValueError, match="not found in context"):
             result._get_value(ctx)
 
@@ -230,38 +230,38 @@ class TestFlowRecordDSL:
 
     def test_record_factory_creates_and_registers(self):
         """record() creates a new FlowRecord and adds it to RECORD_REGISTRY."""
-        fr = record("test_record_type")
+        fr = record("test-record-type")
         assert isinstance(fr, FlowRecord)
-        assert fr.record_name == "test_record_type"
+        assert fr.record_name == "test-record-type"
         assert fr in RECORD_REGISTRY
 
     def test_record_factory_creates_separate_instances(self):
         """record() always creates a new FlowRecord for independent flow definitions."""
-        fr1 = record("same_record_type")
-        fr2 = record("same_record_type")
+        fr1 = record("same-record-type")
+        fr2 = record("same-record-type")
         assert fr1 is not fr2
         assert fr1.record_name == fr2.record_name
         assert len(RECORD_REGISTRY) == 2
 
     def test_on_data_update_sets_trigger(self):
         """on_data_update() sets data_update_trigger flag."""
-        fr = FlowRecord("test_type")
+        fr = FlowRecord("test-type")
         result = fr.on_data_update()
         assert result is fr
         assert fr.data_update_trigger is True
 
     def test_invalidate_records_unconditional(self):
         """invalidate_records() without if_() adds to self.actions."""
-        fr = FlowRecord("test_type")
-        fr.invalidate_records("child_a", "child_b", mode="hard")
+        fr = FlowRecord("test-type")
+        fr.invalidate_records("child-a", "child-b", mode="hard")
         assert len(fr.actions) == 1
         assert isinstance(fr.actions[0], InvalidateRecordsAction)
-        assert fr.actions[0].record_type_names == ["child_a", "child_b"]
+        assert fr.actions[0].record_type_names == ["child-a", "child-b"]
         assert fr.actions[0].mode == "hard"
 
     def test_invalidate_records_conditional(self):
         """invalidate_records() after if_() adds to condition.actions."""
-        fr = FlowRecord("test_type")
+        fr = FlowRecord("test-type")
         fr.if_(FlowResult("r", ["x"]) == 1).invalidate_records("child", mode="soft")
         assert len(fr.actions) == 0
         assert len(fr.conditions) == 1
@@ -274,14 +274,14 @@ class TestFlowRecordDSL:
         def my_handler(**kwargs: object) -> None:
             pass
 
-        fr = FlowRecord("test_type")
+        fr = FlowRecord("test-type")
         fr.invalidate_records("child", callback=my_handler)
         assert isinstance(fr.actions[0], InvalidateRecordsAction)
         assert fr.actions[0].callback is my_handler
 
     def test_is_active_flow_with_trigger(self):
         """is_active_flow() returns True when flow has a trigger."""
-        fr = FlowRecord("test_type")
+        fr = FlowRecord("test-type")
         assert fr.is_active_flow() is False
 
         fr.on_status("finished")
@@ -289,38 +289,38 @@ class TestFlowRecordDSL:
 
     def test_is_active_flow_with_data_update(self):
         """is_active_flow() returns True for data_update_trigger."""
-        fr = FlowRecord("test_type")
+        fr = FlowRecord("test-type")
         fr.on_data_update()
         assert fr.is_active_flow() is True
 
     def test_is_active_flow_with_actions(self):
         """is_active_flow() returns True when flow has actions."""
-        fr = FlowRecord("test_type")
+        fr = FlowRecord("test-type")
         fr.add_record("other")
         assert fr.is_active_flow() is True
 
     def test_reference_only_flow_is_not_active(self):
         """FlowRecord used only for .data references is not active."""
-        fr = record("ref_type")
+        fr = record("ref-type")
         _ = fr.data.some_field  # Only used for data reference
         assert fr.is_active_flow() is False
 
     def test_on_status_sets_trigger(self):
         """on_status() sets status_trigger string."""
-        fr = FlowRecord("test_type")
+        fr = FlowRecord("test-type")
         result = fr.on_status("finished")
         assert result is fr  # returns self for chaining
         assert fr.status_trigger == "finished"
 
     def test_on_status_with_enum(self):
         """on_status() accepts RecordStatus enum."""
-        fr = FlowRecord("test_type")
+        fr = FlowRecord("test-type")
         fr.on_status(RecordStatus.finished)
         assert fr.status_trigger == "finished"
 
     def test_if_or_and_chaining(self):
         """if_().or_().and_() builds nested LogicalComparison."""
-        fr = FlowRecord("test_type")
+        fr = FlowRecord("test-type")
         a = FlowResult("r", ["a"]) == 1
         b = FlowResult("r", ["b"]) == 2
         c = FlowResult("r", ["c"]) == 3
@@ -335,51 +335,51 @@ class TestFlowRecordDSL:
 
     def test_or_without_if_raises(self):
         """or_() without preceding if_() raises ValueError."""
-        fr = FlowRecord("test_type")
+        fr = FlowRecord("test-type")
         with pytest.raises(ValueError, match=r"or_.*must be called after if_"):
             fr.or_(FlowResult("r", ["x"]) == 1)
 
     def test_and_without_if_raises(self):
         """and_() without preceding if_() raises ValueError."""
-        fr = FlowRecord("test_type")
+        fr = FlowRecord("test-type")
         with pytest.raises(ValueError, match=r"and_.*must be called after if_"):
             fr.and_(FlowResult("r", ["x"]) == 1)
 
     def test_else_without_if_raises(self):
         """else_() without preceding if_() raises ValueError."""
-        fr = FlowRecord("test_type")
+        fr = FlowRecord("test-type")
         with pytest.raises(ValueError, match=r"else_.*must be called after if_"):
             fr.else_()
 
     def test_add_record_unconditional(self):
         """add_record() without if_() adds to self.actions."""
-        fr = FlowRecord("test_type")
-        fr.add_record("new_type")
+        fr = FlowRecord("test-type")
+        fr.add_record("new-type")
         assert len(fr.actions) == 1
         assert isinstance(fr.actions[0], CreateRecordAction)
-        assert fr.actions[0].record_type_name == "new_type"
+        assert fr.actions[0].record_type_name == "new-type"
 
     def test_add_record_conditional(self):
         """add_record() after if_() adds to condition.actions."""
-        fr = FlowRecord("test_type")
-        fr.if_(FlowResult("r", ["x"]) == 1).add_record("new_type")
+        fr = FlowRecord("test-type")
+        fr.if_(FlowResult("r", ["x"]) == 1).add_record("new-type")
         assert len(fr.actions) == 0  # not in unconditional actions
         assert len(fr.conditions) == 1
         assert len(fr.conditions[0].actions) == 1
         assert isinstance(fr.conditions[0].actions[0], CreateRecordAction)
-        assert fr.conditions[0].actions[0].record_type_name == "new_type"
+        assert fr.conditions[0].actions[0].record_type_name == "new-type"
 
     def test_create_record_default_inherit_user_false(self):
         """CreateRecordAction.inherit_user defaults to False."""
-        fr = FlowRecord("test_type")
+        fr = FlowRecord("test-type")
         fr.add_record("child")
         assert isinstance(fr.actions[0], CreateRecordAction)
         assert fr.actions[0].inherit_user is False
 
     def test_create_record_explicit_inherit_user_true(self):
         """create_record() with inherit_user=True passes flag to actions."""
-        fr = FlowRecord("test_type")
-        fr.create_record("child_a", "child_b", inherit_user=True)
+        fr = FlowRecord("test-type")
+        fr.create_record("child-a", "child-b", inherit_user=True)
         assert len(fr.actions) == 2
         for action in fr.actions:
             assert isinstance(action, CreateRecordAction)
@@ -387,14 +387,14 @@ class TestFlowRecordDSL:
 
     def test_add_record_inherit_user_kwarg(self):
         """add_record() passes inherit_user kwarg to CreateRecordAction."""
-        fr = FlowRecord("test_type")
+        fr = FlowRecord("test-type")
         fr.add_record("child", inherit_user=True)
         assert isinstance(fr.actions[0], CreateRecordAction)
         assert fr.actions[0].inherit_user is True
 
     def test_validate_condition_without_actions_raises(self):
         """validate() raises when a non-else condition has no actions."""
-        fr = FlowRecord("test_type")
+        fr = FlowRecord("test-type")
         fr.if_(FlowResult("r", ["x"]) == 1)
         # Condition exists but has no actions
         with pytest.raises(ValueError, match="has no actions"):
@@ -402,7 +402,7 @@ class TestFlowRecordDSL:
 
     def test_validate_passes_for_complete_flow(self):
         """validate() returns True for a properly defined flow."""
-        fr = FlowRecord("test_type")
+        fr = FlowRecord("test-type")
         fr.on_status("finished")
         fr.if_(FlowResult("r", ["x"]) == 1).add_record("output")
         assert fr.validate() is True
@@ -413,7 +413,7 @@ class TestFlowRecordDSL:
         def my_handler(**kwargs):
             pass
 
-        fr = FlowRecord("test_type")
+        fr = FlowRecord("test-type")
         fr.call(my_handler)
         assert len(fr.actions) == 1
         assert isinstance(fr.actions[0], CallFunctionAction)
@@ -421,7 +421,7 @@ class TestFlowRecordDSL:
 
     def test_update_record_action(self):
         """update_record() adds an update_record action."""
-        fr = FlowRecord("test_type")
+        fr = FlowRecord("test-type")
         fr.update_record("target", status="finished")
         assert len(fr.actions) == 1
         assert isinstance(fr.actions[0], UpdateRecordAction)
@@ -437,7 +437,7 @@ class TestFlowRecordDSL:
         mock_task = MagicMock()
         mock_task.task_name = "do_task_test_fn"
 
-        fr = FlowRecord("test_type")
+        fr = FlowRecord("test-type")
         result = fr.do_task(mock_task)
 
         assert result is fr  # returns self for chaining
@@ -459,10 +459,10 @@ class TestFlowRecordDSL:
         mock_task = MagicMock()
         mock_task.task_name = "dedup_test_fn"
 
-        fr1 = FlowRecord("type_a")
+        fr1 = FlowRecord("type-a")
         fr1.do_task(mock_task)
 
-        fr2 = FlowRecord("type_b")
+        fr2 = FlowRecord("type-b")
         fr2.do_task(mock_task)
 
         # Only one Pipeline created
@@ -477,7 +477,7 @@ class TestFlowRecordDSL:
         mock_task = MagicMock()
         mock_task.task_name = "cond_do_task_fn"
 
-        fr = FlowRecord("test_type")
+        fr = FlowRecord("test-type")
         fr.if_(FlowResult("r", ["x"]) == 1).do_task(mock_task)
 
         assert len(fr.actions) == 0
@@ -493,7 +493,7 @@ class TestFlowRecordDSL:
         mock_task = MagicMock()
         mock_task.task_name = "payload_test_fn"
 
-        fr = FlowRecord("test_type")
+        fr = FlowRecord("test-type")
         fr.do_task(mock_task, threshold=0.5, mode="fast")
 
         action = fr.actions[0]
@@ -560,19 +560,19 @@ class TestRecordFlowEngineUnit:
         engine = RecordFlowEngine(mock_client)
 
         # Register two flows: one on_status, one on_data_update
-        flow_status = FlowRecord("test_type")
+        flow_status = FlowRecord("test-type")
         flow_status.on_status("finished")
-        flow_status.add_record("output_from_status")
+        flow_status.add_record("output-from-status")
 
-        flow_data_update = FlowRecord("test_type")
+        flow_data_update = FlowRecord("test-type")
         flow_data_update.on_data_update()
-        flow_data_update.add_record("output_from_data_update")
+        flow_data_update.add_record("output-from-data-update")
 
         engine.register_flow(flow_status)
         engine.register_flow(flow_data_update)
 
         # Create test record
-        test_record = make_record_read("test_type", record_id=100, status=RecordStatus.finished)
+        test_record = make_record_read("test-type", record_id=100, status=RecordStatus.finished)
 
         # Call handle_record_data_update
         await engine.handle_record_data_update(test_record)
@@ -580,7 +580,7 @@ class TestRecordFlowEngineUnit:
         # Verify only data_update flow executed (create_record should be called once)
         assert mock_client.create_record.call_count == 1
         call_args = mock_client.create_record.call_args[0][0]
-        assert call_args.record_type_name == "output_from_data_update"
+        assert call_args.record_type_name == "output-from-data-update"
 
     @pytest.mark.asyncio
     async def test_handle_status_change_skips_data_update_flows(self):
@@ -596,19 +596,19 @@ class TestRecordFlowEngineUnit:
         engine = RecordFlowEngine(mock_client)
 
         # Register two flows: one on_status, one on_data_update
-        flow_status = FlowRecord("test_type")
+        flow_status = FlowRecord("test-type")
         flow_status.on_status("finished")
-        flow_status.add_record("output_from_status")
+        flow_status.add_record("output-from-status")
 
-        flow_data_update = FlowRecord("test_type")
+        flow_data_update = FlowRecord("test-type")
         flow_data_update.on_data_update()
-        flow_data_update.add_record("output_from_data_update")
+        flow_data_update.add_record("output-from-data-update")
 
         engine.register_flow(flow_status)
         engine.register_flow(flow_data_update)
 
         # Create test record
-        test_record = make_record_read("test_type", record_id=100, status=RecordStatus.finished)
+        test_record = make_record_read("test-type", record_id=100, status=RecordStatus.finished)
 
         # Call handle_record_status_change
         await engine.handle_record_status_change(test_record)
@@ -616,7 +616,7 @@ class TestRecordFlowEngineUnit:
         # Verify only status flow executed
         assert mock_client.create_record.call_count == 1
         call_args = mock_client.create_record.call_args[0][0]
-        assert call_args.record_type_name == "output_from_status"
+        assert call_args.record_type_name == "output-from-status"
 
     @pytest.mark.asyncio
     async def test_invalidate_records_hard_mode(self):
@@ -629,10 +629,10 @@ class TestRecordFlowEngineUnit:
         mock_client = AsyncMock()
 
         # Source record
-        source_record = make_record_read("source_type", record_id=1, status=RecordStatus.finished)
+        source_record = make_record_read("source-type", record_id=1, status=RecordStatus.finished)
 
         # Target record to invalidate
-        target_record = make_record_read("child_type", record_id=2, status=RecordStatus.finished)
+        target_record = make_record_read("child-type", record_id=2, status=RecordStatus.finished)
 
         # Mock find_records to return the target
         mock_client.find_records = AsyncMock(return_value=[target_record])
@@ -641,9 +641,9 @@ class TestRecordFlowEngineUnit:
         engine = RecordFlowEngine(mock_client)
 
         # Register flow with invalidate_records
-        flow = FlowRecord("source_type")
+        flow = FlowRecord("source-type")
         flow.on_status("finished")
-        flow.invalidate_records("child_type", mode="hard")
+        flow.invalidate_records("child-type", mode="hard")
 
         engine.register_flow(flow)
 
@@ -668,7 +668,7 @@ class TestRecordFlowEngineUnit:
         mock_client = AsyncMock()
 
         # Source record
-        source_record = make_record_read("test_type", record_id=1, status=RecordStatus.finished)
+        source_record = make_record_read("test-type", record_id=1, status=RecordStatus.finished)
 
         # Mock find_records to return source record itself
         mock_client.find_records = AsyncMock(return_value=[source_record])
@@ -677,9 +677,9 @@ class TestRecordFlowEngineUnit:
         engine = RecordFlowEngine(mock_client)
 
         # Register flow that tries to invalidate same type
-        flow = FlowRecord("test_type")
+        flow = FlowRecord("test-type")
         flow.on_status("finished")
-        flow.invalidate_records("test_type", mode="hard")
+        flow.invalidate_records("test-type", mode="hard")
 
         engine.register_flow(flow)
 
@@ -700,8 +700,8 @@ class TestRecordFlowEngineUnit:
         mock_client = AsyncMock()
 
         # Source and target records
-        source_record = make_record_read("source_type", record_id=1, status=RecordStatus.finished)
-        target_record = make_record_read("child_type", record_id=2, status=RecordStatus.finished)
+        source_record = make_record_read("source-type", record_id=1, status=RecordStatus.finished)
+        target_record = make_record_read("child-type", record_id=2, status=RecordStatus.finished)
 
         # Mock find_records to return target
         mock_client.find_records = AsyncMock(return_value=[target_record])
@@ -713,9 +713,9 @@ class TestRecordFlowEngineUnit:
         engine = RecordFlowEngine(mock_client)
 
         # Register flow with callback
-        flow = FlowRecord("source_type")
+        flow = FlowRecord("source-type")
         flow.on_status("finished")
-        flow.invalidate_records("child_type", mode="hard", callback=callback_mock)
+        flow.invalidate_records("child-type", mode="hard", callback=callback_mock)
 
         engine.register_flow(flow)
 
@@ -740,8 +740,8 @@ class TestRecordFlowEngineUnit:
         mock_client = AsyncMock()
 
         # Source and target records
-        source_record = make_record_read("source_type", record_id=1, status=RecordStatus.finished)
-        target_record = make_record_read("child_type", record_id=2, status=RecordStatus.finished)
+        source_record = make_record_read("source-type", record_id=1, status=RecordStatus.finished)
+        target_record = make_record_read("child-type", record_id=2, status=RecordStatus.finished)
 
         # Mock find_records to return target
         mock_client.find_records = AsyncMock(return_value=[target_record])
@@ -750,9 +750,9 @@ class TestRecordFlowEngineUnit:
         engine = RecordFlowEngine(mock_client)
 
         # Register flow with soft mode
-        flow = FlowRecord("source_type")
+        flow = FlowRecord("source-type")
         flow.on_status("finished")
-        flow.invalidate_records("child_type", mode="soft")
+        flow.invalidate_records("child-type", mode="soft")
 
         engine.register_flow(flow)
 
@@ -775,17 +775,17 @@ class TestRecordFlowEngineUnit:
         mock_client = AsyncMock()
 
         # Source record
-        source_record = make_record_read("source_type", record_id=1, status=RecordStatus.finished)
+        source_record = make_record_read("source-type", record_id=1, status=RecordStatus.finished)
 
         # Multiple target records
-        target_a = make_record_read("child_a", record_id=2, status=RecordStatus.finished)
-        target_b = make_record_read("child_b", record_id=3, status=RecordStatus.finished)
+        target_a = make_record_read("child-a", record_id=2, status=RecordStatus.finished)
+        target_b = make_record_read("child-b", record_id=3, status=RecordStatus.finished)
 
         # Mock find_records to return different targets based on record_type_name
         async def mock_find_records(**kwargs):
-            if kwargs.get("record_type_name") == "child_a":
+            if kwargs.get("record_type_name") == "child-a":
                 return [target_a]
-            elif kwargs.get("record_type_name") == "child_b":
+            elif kwargs.get("record_type_name") == "child-b":
                 return [target_b]
             return []
 
@@ -795,9 +795,9 @@ class TestRecordFlowEngineUnit:
         engine = RecordFlowEngine(mock_client)
 
         # Register flow with multiple invalidation targets
-        flow = FlowRecord("source_type")
+        flow = FlowRecord("source-type")
         flow.on_status("finished")
-        flow.invalidate_records("child_a", "child_b", mode="hard")
+        flow.invalidate_records("child-a", "child-b", mode="hard")
 
         engine.register_flow(flow)
 
@@ -835,12 +835,12 @@ class TestEngineInheritUserAndParent:
 
         engine = RecordFlowEngine(mock_client)
 
-        flow = FlowRecord("trigger_type")
+        flow = FlowRecord("trigger-type")
         flow.on_status("finished")
         flow.add_record("output")  # inherit_user defaults to False
         engine.register_flow(flow)
 
-        test_record = make_record_read("trigger_type", record_id=10, status=RecordStatus.finished)
+        test_record = make_record_read("trigger-type", record_id=10, status=RecordStatus.finished)
         test_record.user_id = admin_uuid
 
         await engine.handle_record_status_change(test_record)
@@ -865,12 +865,12 @@ class TestEngineInheritUserAndParent:
 
         engine = RecordFlowEngine(mock_client)
 
-        flow = FlowRecord("trigger_type")
+        flow = FlowRecord("trigger-type")
         flow.on_status("finished")
         flow.add_record("output", inherit_user=True)
         engine.register_flow(flow)
 
-        test_record = make_record_read("trigger_type", record_id=10, status=RecordStatus.finished)
+        test_record = make_record_read("trigger-type", record_id=10, status=RecordStatus.finished)
         test_record.user_id = admin_uuid
 
         await engine.handle_record_status_change(test_record)
@@ -896,12 +896,12 @@ class TestEngineInheritUserAndParent:
 
         engine = RecordFlowEngine(mock_client)
 
-        flow = FlowRecord("trigger_type")
+        flow = FlowRecord("trigger-type")
         flow.on_status("finished")
         flow.add_record("output", user_id=explicit_uuid, inherit_user=True)
         engine.register_flow(flow)
 
-        test_record = make_record_read("trigger_type", record_id=10, status=RecordStatus.finished)
+        test_record = make_record_read("trigger-type", record_id=10, status=RecordStatus.finished)
         test_record.user_id = admin_uuid
 
         await engine.handle_record_status_change(test_record)
@@ -920,17 +920,17 @@ class TestEngineInheritUserAndParent:
         mock_client = AsyncMock()
         mock_client.find_records = AsyncMock(return_value=[])
         mock_client.create_record = AsyncMock(
-            return_value=make_record_read("child_type", record_id=99)
+            return_value=make_record_read("child-type", record_id=99)
         )
 
         engine = RecordFlowEngine(mock_client)
 
-        flow = FlowRecord("parent_type")
+        flow = FlowRecord("parent-type")
         flow.on_status("finished")
-        flow.add_record("child_type", parent_record_id=42)
+        flow.add_record("child-type", parent_record_id=42)
         engine.register_flow(flow)
 
-        test_record = make_record_read("parent_type", record_id=10, status=RecordStatus.finished)
+        test_record = make_record_read("parent-type", record_id=10, status=RecordStatus.finished)
 
         await engine.handle_record_status_change(test_record)
 
@@ -980,11 +980,11 @@ class TestEntityFlowDSL:
 
     def test_entity_flow_chaining(self):
         """series().on_created().add_record('X') creates correct flow."""
-        fr = series().on_created().add_record("series_markup")
+        fr = series().on_created().add_record("series-markup")
         assert fr.entity_trigger == "series"
         assert len(fr.actions) == 1
         assert isinstance(fr.actions[0], CreateRecordAction)
-        assert fr.actions[0].record_type_name == "series_markup"
+        assert fr.actions[0].record_type_name == "series-markup"
 
     def test_entity_flow_is_active(self):
         """Entity flow with entity_trigger is considered active."""
@@ -993,7 +993,7 @@ class TestEntityFlowDSL:
 
     def test_entity_flow_repr(self):
         """Entity flow __repr__ shows entity type."""
-        fr = series().on_created().add_record("series_markup")
+        fr = series().on_created().add_record("series-markup")
         assert repr(fr) == "series().on_created()"
 
     def test_entity_flow_call_action(self):
@@ -1021,7 +1021,7 @@ class TestEntityFlowEngine:
         engine = RecordFlowEngine(mock_client)
 
         fr = FlowRecord("series", entity_trigger="series")
-        fr.add_record("series_markup")
+        fr.add_record("series-markup")
         engine.register_flow(fr)
 
         assert "series" in engine.entity_flows
@@ -1037,13 +1037,13 @@ class TestEntityFlowEngine:
 
         mock_client = AsyncMock()
         mock_client.create_record = AsyncMock(
-            return_value=make_record_read("series_markup", record_id=99)
+            return_value=make_record_read("series-markup", record_id=99)
         )
 
         engine = RecordFlowEngine(mock_client)
 
         fr = FlowRecord("series", entity_trigger="series")
-        fr.add_record("series_markup")
+        fr.add_record("series-markup")
         engine.register_flow(fr)
 
         await engine.handle_entity_created(
@@ -1052,7 +1052,7 @@ class TestEntityFlowEngine:
 
         assert mock_client.create_record.call_count == 1
         call_args = mock_client.create_record.call_args[0][0]
-        assert call_args.record_type_name == "series_markup"
+        assert call_args.record_type_name == "series-markup"
         assert call_args.patient_id == "PAT001"
         assert call_args.study_uid == "1.2.3"
         assert call_args.series_uid == "1.2.3.4"
@@ -1069,7 +1069,7 @@ class TestEntityFlowEngine:
 
         # Register a series flow, but trigger for study
         fr = FlowRecord("series", entity_trigger="series")
-        fr.add_record("series_markup")
+        fr.add_record("series-markup")
         engine.register_flow(fr)
 
         await engine.handle_entity_created("study", patient_id="PAT001", study_uid="1.2.3")
@@ -1140,14 +1140,14 @@ class TestFieldProxy:
         """F-based comparison resolves __self__ key from context."""
         F = Field()
         cmp = F.score > 50
-        ctx = {"__self__": make_record_read("any_type", data={"score": 75})}
+        ctx = {"__self__": make_record_read("any-type", data={"score": 75})}
         assert cmp.evaluate(ctx) is True
 
     def test_field_evaluate_false(self):
         """F-based comparison returns False when not met."""
         F = Field()
         cmp = F.score > 50
-        ctx = {"__self__": make_record_read("any_type", data={"score": 30})}
+        ctx = {"__self__": make_record_read("any-type", data={"score": 30})}
         assert cmp.evaluate(ctx) is False
 
     def test_field_nested_evaluate(self):
@@ -1201,23 +1201,23 @@ class TestIfRecord:
     def test_if_record_evaluates_true(self):
         """if_record conditions pass when data matches."""
         F = Field()
-        fr = FlowRecord("first_check")
-        fr.if_record(F.is_good == True, F.study_type == "CT").add_record("seg_type")  # noqa: E712
+        fr = FlowRecord("first-check")
+        fr.if_record(F.is_good == True, F.study_type == "CT").add_record("seg")  # noqa: E712
 
         ctx = {
-            "__self__": make_record_read("first_check", data={"is_good": True, "study_type": "CT"}),
+            "__self__": make_record_read("first-check", data={"is_good": True, "study_type": "CT"}),
         }
         assert fr.conditions[0].evaluate(ctx) is True
 
     def test_if_record_evaluates_false_on_mismatch(self):
         """if_record AND fails when one field doesn't match."""
         F = Field()
-        fr = FlowRecord("first_check")
-        fr.if_record(F.is_good == True, F.study_type == "CT").add_record("seg_type")  # noqa: E712
+        fr = FlowRecord("first-check")
+        fr.if_record(F.is_good == True, F.study_type == "CT").add_record("seg")  # noqa: E712
 
         ctx = {
             "__self__": make_record_read(
-                "first_check", data={"is_good": True, "study_type": "MRI"}
+                "first-check", data={"is_good": True, "study_type": "MRI"}
             ),
         }
         assert fr.conditions[0].evaluate(ctx) is False
@@ -1292,14 +1292,14 @@ class TestFieldProxyEngineIntegration:
         engine = RecordFlowEngine(mock_client)
 
         F = Field()
-        flow_def = FlowRecord("first_check")
+        flow_def = FlowRecord("first-check")
         flow_def.on_status("finished")
         flow_def.if_record(F.is_good == True, F.study_type == "CT").add_record("seg_type")  # noqa: E712
 
         engine.register_flow(flow_def)
 
         test_record = make_record_read(
-            "first_check",
+            "first-check",
             record_id=100,
             status=RecordStatus.finished,
             data={"is_good": True, "study_type": "CT"},
@@ -1324,14 +1324,14 @@ class TestFieldProxyEngineIntegration:
         engine = RecordFlowEngine(mock_client)
 
         F = Field()
-        flow_def = FlowRecord("first_check")
+        flow_def = FlowRecord("first-check")
         flow_def.on_status("finished")
         flow_def.if_record(F.is_good == True, F.study_type == "CT").add_record("seg_type")  # noqa: E712
 
         engine.register_flow(flow_def)
 
         test_record = make_record_read(
-            "first_check",
+            "first-check",
             record_id=100,
             status=RecordStatus.finished,
             data={"is_good": True, "study_type": "MRI"},
@@ -1356,7 +1356,7 @@ class TestFieldProxyEngineIntegration:
         F = Field()
         flow_def = FlowRecord("compare")
         flow_def.on_status("finished")
-        flow_def.if_record(F.false_positive_num > 0).add_record("update_master")
+        flow_def.if_record(F.false_positive_num > 0).add_record("update-master")
 
         engine.register_flow(flow_def)
 
@@ -1382,7 +1382,7 @@ class TestFlowRecordConvenience:
 
     def test_on_finished_shortcut(self):
         """on_finished() sets status_trigger to 'finished'."""
-        fr = FlowRecord("test_type")
+        fr = FlowRecord("test-type")
         result = fr.on_finished()
         assert result is fr
         assert fr.status_trigger == "finished"
@@ -1395,26 +1395,26 @@ class TestFlowRecordConvenience:
 
     def test_create_record_single(self):
         """create_record() with one name creates one CreateRecordAction."""
-        fr = FlowRecord("test_type")
-        result = fr.create_record("child_type")
+        fr = FlowRecord("test-type")
+        result = fr.create_record("child-type")
         assert result is fr
         assert len(fr.actions) == 1
         assert isinstance(fr.actions[0], CreateRecordAction)
-        assert fr.actions[0].record_type_name == "child_type"
+        assert fr.actions[0].record_type_name == "child-type"
 
     def test_create_record_multiple(self):
         """create_record() with multiple names creates multiple CreateRecordActions."""
-        fr = FlowRecord("test_type")
-        fr.create_record("child_a", "child_b", "child_c")
+        fr = FlowRecord("test-type")
+        fr.create_record("child-a", "child-b", "child-c")
         assert len(fr.actions) == 3
         names = [a.record_type_name for a in fr.actions]
-        assert names == ["child_a", "child_b", "child_c"]
+        assert names == ["child-a", "child-b", "child-c"]
 
     def test_create_record_conditional(self):
         """create_record() works after if_record()."""
         F = Field()
-        fr = FlowRecord("test_type")
-        fr.if_record(F.active == True).create_record("output_a", "output_b")  # noqa: E712
+        fr = FlowRecord("test-type")
+        fr.if_record(F.active == True).create_record("output-a", "output-b")  # noqa: E712
         assert len(fr.actions) == 0  # unconditional list is empty
         assert len(fr.conditions) == 1
         assert len(fr.conditions[0].actions) == 2
@@ -1422,11 +1422,11 @@ class TestFlowRecordConvenience:
 
     def test_invalidate_all_records_alias(self):
         """invalidate_all_records() delegates to invalidate_records()."""
-        fr = FlowRecord("test_type")
-        fr.invalidate_all_records("child_a", "child_b", mode="soft")
+        fr = FlowRecord("test-type")
+        fr.invalidate_all_records("child-a", "child-b", mode="soft")
         assert len(fr.actions) == 1
         assert isinstance(fr.actions[0], InvalidateRecordsAction)
-        assert fr.actions[0].record_type_names == ["child_a", "child_b"]
+        assert fr.actions[0].record_type_names == ["child-a", "child-b"]
         assert fr.actions[0].mode == "soft"
 
 
@@ -1522,10 +1522,10 @@ class TestFileFlowDSL:
     def test_invalidate_all_records_creates_action(self):
         """invalidate_all_records() creates InvalidateRecordsAction."""
         fr = FlowFileRecord("test_file")
-        fr.invalidate_all_records("child_a", "child_b", mode="hard")
+        fr.invalidate_all_records("child-a", "child-b", mode="hard")
         assert len(fr.actions) == 1
         assert isinstance(fr.actions[0], InvalidateRecordsAction)
-        assert fr.actions[0].record_type_names == ["child_a", "child_b"]
+        assert fr.actions[0].record_type_names == ["child-a", "child-b"]
         assert fr.actions[0].mode == "hard"
 
     def test_call_creates_action(self):
@@ -1565,7 +1565,7 @@ class TestFileFlowDSL:
     def test_file_registry_is_separate(self):
         """FILE_REGISTRY is separate from RECORD_REGISTRY and ENTITY_REGISTRY."""
         file("test_file")
-        record("test_record")
+        record("test-record")
         series()
         assert len(FILE_REGISTRY) == 1
         assert len(RECORD_REGISTRY) == 1
@@ -1701,17 +1701,17 @@ class TestMatchCase:
         F = Field()
         fr = FlowRecord("test_type")
         fr.on_finished()
-        fr.match(F.study_type).case("CT").create_record("seg_CT").case("MRI").create_record(
-            "seg_MRI"
+        fr.match(F.study_type).case("CT").create_record("seg-ct").case("MRI").create_record(
+            "seg-mri"
         )
 
         assert len(fr.conditions) == 2
 
         # Each condition has one action
         assert len(fr.conditions[0].actions) == 1
-        assert fr.conditions[0].actions[0].record_type_name == "seg_CT"
+        assert fr.conditions[0].actions[0].record_type_name == "seg-ct"
         assert len(fr.conditions[1].actions) == 1
-        assert fr.conditions[1].actions[0].record_type_name == "seg_MRI"
+        assert fr.conditions[1].actions[0].record_type_name == "seg-mri"
 
         # Conditions are simple FieldComparison (no guard)
         assert isinstance(fr.conditions[0].condition, FieldComparison)
@@ -1724,15 +1724,15 @@ class TestMatchCase:
     def test_match_case_with_guard(self):
         """if_record().match().case() combines guard AND field == value."""
         F = Field()
-        fr = FlowRecord("first_check")
+        fr = FlowRecord("first-check")
         fr.on_finished()
         (
             fr.if_record(F.is_good == True)  # noqa: E712
             .match(F.study_type)
             .case("CT")
-            .create_record("seg_CT")
+            .create_record("seg-ct")
             .case("MRI")
-            .create_record("seg_MRI")
+            .create_record("seg-mri")
         )
 
         assert len(fr.conditions) == 2
@@ -1745,25 +1745,25 @@ class TestMatchCase:
     def test_match_case_evaluates_correct_branch(self):
         """Only the matching case evaluates to True."""
         F = Field()
-        fr = FlowRecord("first_check")
+        fr = FlowRecord("first-check")
         (
             fr.if_record(F.is_good == True)  # noqa: E712
             .match(F.study_type)
             .case("CT")
-            .create_record("seg_CT")
+            .create_record("seg-ct")
             .case("MRI")
-            .create_record("seg_MRI")
+            .create_record("seg-mri")
         )
 
         ctx_ct = {
-            "__self__": make_record_read("first_check", data={"is_good": True, "study_type": "CT"}),
+            "__self__": make_record_read("first-check", data={"is_good": True, "study_type": "CT"}),
         }
         assert fr.conditions[0].evaluate(ctx_ct) is True
         assert fr.conditions[1].evaluate(ctx_ct) is False
 
         ctx_mri = {
             "__self__": make_record_read(
-                "first_check", data={"is_good": True, "study_type": "MRI"}
+                "first-check", data={"is_good": True, "study_type": "MRI"}
             ),
         }
         assert fr.conditions[0].evaluate(ctx_mri) is False
@@ -1772,19 +1772,19 @@ class TestMatchCase:
     def test_match_case_guard_false(self):
         """When guard is False, no case matches."""
         F = Field()
-        fr = FlowRecord("first_check")
+        fr = FlowRecord("first-check")
         (
             fr.if_record(F.is_good == True)  # noqa: E712
             .match(F.study_type)
             .case("CT")
-            .create_record("seg_CT")
+            .create_record("seg-ct")
             .case("MRI")
-            .create_record("seg_MRI")
+            .create_record("seg-mri")
         )
 
         ctx = {
             "__self__": make_record_read(
-                "first_check", data={"is_good": False, "study_type": "CT"}
+                "first-check", data={"is_good": False, "study_type": "CT"}
             ),
         }
         assert fr.conditions[0].evaluate(ctx) is False
@@ -1807,13 +1807,13 @@ class TestMatchCase:
     def test_match_case_multiple_actions_per_case(self):
         """case().create_record('a', 'b') creates multiple actions in one case."""
         F = Field()
-        fr = FlowRecord("test_type")
-        fr.match(F.study_type).case("CT").create_record("seg_single", "seg_archive")
+        fr = FlowRecord("test-type")
+        fr.match(F.study_type).case("CT").create_record("seg-single", "seg-archive")
 
         assert len(fr.conditions) == 1
         assert len(fr.conditions[0].actions) == 2
         names = [a.record_type_name for a in fr.conditions[0].actions]
-        assert names == ["seg_single", "seg_archive"]
+        assert names == ["seg-single", "seg-archive"]
 
     def test_match_case_preserves_on_missing(self):
         """on_missing from if_record() propagates to case conditions."""
@@ -1823,7 +1823,7 @@ class TestMatchCase:
             fr.if_record(F.is_good == True, on_missing="raise")  # noqa: E712
             .match(F.study_type)
             .case("CT")
-            .create_record("seg_CT")
+            .create_record("seg-ct")
         )
 
         assert fr.conditions[0].on_missing == "raise"
@@ -1831,8 +1831,8 @@ class TestMatchCase:
     def test_match_case_default_on_missing_skip(self):
         """match() without if_record() uses default on_missing='skip'."""
         F = Field()
-        fr = FlowRecord("test_type")
-        fr.match(F.study_type).case("CT").create_record("seg_CT")
+        fr = FlowRecord("test-type")
+        fr.match(F.study_type).case("CT").create_record("seg-ct")
 
         assert fr.conditions[0].on_missing == "skip"
 
@@ -1844,11 +1844,11 @@ class TestMatchCase:
         (
             fr.match(F.study_type)
             .case("CT")
-            .create_record("seg_CT")
+            .create_record("seg-ct")
             .case("MRI")
-            .create_record("seg_MRI")
+            .create_record("seg-mri")
             .default()
-            .create_record("seg_unknown")
+            .create_record("seg-unknown")
         )
 
         assert len(fr.conditions) == 3
@@ -1864,9 +1864,9 @@ class TestMatchCase:
         (
             fr.match(F.study_type)
             .case("CT")
-            .create_record("seg_CT")
+            .create_record("seg-ct")
             .default()
-            .create_record("seg_default")
+            .create_record("seg-default")
         )
 
         # default without guard has condition=None
@@ -1881,9 +1881,9 @@ class TestMatchCase:
             fr.if_record(F.is_good == True)  # noqa: E712
             .match(F.study_type)
             .case("CT")
-            .create_record("seg_CT")
+            .create_record("seg-ct")
             .default()
-            .create_record("seg_default")
+            .create_record("seg-default")
         )
 
         # default condition carries the guard
@@ -1897,9 +1897,9 @@ class TestMatchCase:
         (
             fr.match(F.study_type)
             .case("CT")
-            .create_record("seg_CT")
+            .create_record("seg-ct")
             .default()
-            .create_record("seg_default")
+            .create_record("seg-default")
         )
 
         assert fr.conditions[1].condition is None
@@ -1918,9 +1918,9 @@ class TestMatchCase:
         (
             fr.match(F.study_type)
             .case("CT")
-            .create_record("seg_CT")
+            .create_record("seg-ct")
             .default()
-            .create_record("seg_default")
+            .create_record("seg-default")
         )
         assert fr.validate() is True
 
@@ -1934,30 +1934,30 @@ class TestMatchCase:
         mock_client = AsyncMock()
         mock_client.find_records = AsyncMock(return_value=[])
         mock_client.create_record = AsyncMock(
-            return_value=make_record_read("seg_MRI", record_id=99)
+            return_value=make_record_read("seg-mri", record_id=99)
         )
 
         engine = RecordFlowEngine(mock_client)
 
         F = Field()
-        flow_def = FlowRecord("first_check")
+        flow_def = FlowRecord("first-check")
         flow_def.on_status("finished")
         (
             flow_def.if_record(F.is_good == True)  # noqa: E712
             .match(F.study_type)
             .case("CT")
-            .create_record("seg_CT_single", "seg_CT_archive")
+            .create_record("seg-ct-single", "seg-ct-archive")
             .case("MRI")
-            .create_record("seg_MRI_single")
+            .create_record("seg-mri-single")
             .case("CT-AG")
-            .create_record("seg_CTAG_single")
+            .create_record("seg-ctag-single")
         )
 
         engine.register_flow(flow_def)
 
         # Trigger with study_type=MRI
         test_record = make_record_read(
-            "first_check",
+            "first-check",
             record_id=100,
             status=RecordStatus.finished,
             data={"is_good": True, "study_type": "MRI"},
@@ -1968,7 +1968,7 @@ class TestMatchCase:
         # Only MRI branch should fire (1 record)
         assert mock_client.create_record.call_count == 1
         call_args = mock_client.create_record.call_args[0][0]
-        assert call_args.record_type_name == "seg_MRI_single"
+        assert call_args.record_type_name == "seg-mri-single"
 
     @pytest.mark.asyncio
     async def test_engine_match_case_no_match(self):
@@ -1983,20 +1983,20 @@ class TestMatchCase:
         engine = RecordFlowEngine(mock_client)
 
         F = Field()
-        flow_def = FlowRecord("first_check")
+        flow_def = FlowRecord("first-check")
         flow_def.on_status("finished")
         (
             flow_def.if_record(F.is_good == True)  # noqa: E712
             .match(F.study_type)
             .case("CT")
-            .create_record("seg_CT")
+            .create_record("seg-ct")
         )
 
         engine.register_flow(flow_def)
 
         # Trigger with study_type=PET (no matching case)
         test_record = make_record_read(
-            "first_check",
+            "first-check",
             record_id=100,
             status=RecordStatus.finished,
             data={"is_good": True, "study_type": "PET"},
@@ -2016,29 +2016,29 @@ class TestMatchCase:
         mock_client = AsyncMock()
         mock_client.find_records = AsyncMock(return_value=[])
         mock_client.create_record = AsyncMock(
-            return_value=make_record_read("seg_default", record_id=99)
+            return_value=make_record_read("seg-default", record_id=99)
         )
 
         engine = RecordFlowEngine(mock_client)
 
         F = Field()
-        flow_def = FlowRecord("first_check")
+        flow_def = FlowRecord("first-check")
         flow_def.on_status("finished")
         (
             flow_def.match(F.study_type)
             .case("CT")
-            .create_record("seg_CT")
+            .create_record("seg-ct")
             .case("MRI")
-            .create_record("seg_MRI")
+            .create_record("seg-mri")
             .default()
-            .create_record("seg_default")
+            .create_record("seg-default")
         )
 
         engine.register_flow(flow_def)
 
         # Trigger with study_type=PET (no matching case → default fires)
         test_record = make_record_read(
-            "first_check",
+            "first-check",
             record_id=100,
             status=RecordStatus.finished,
             data={"study_type": "PET"},
@@ -2048,7 +2048,7 @@ class TestMatchCase:
 
         assert mock_client.create_record.call_count == 1
         call_args = mock_client.create_record.call_args[0][0]
-        assert call_args.record_type_name == "seg_default"
+        assert call_args.record_type_name == "seg-default"
 
     @pytest.mark.asyncio
     async def test_engine_default_skipped_when_case_matches(self):
@@ -2059,28 +2059,28 @@ class TestMatchCase:
 
         mock_client = AsyncMock()
         mock_client.find_records = AsyncMock(return_value=[])
-        mock_client.create_record = AsyncMock(return_value=make_record_read("seg_CT", record_id=99))
+        mock_client.create_record = AsyncMock(return_value=make_record_read("seg-ct", record_id=99))
 
         engine = RecordFlowEngine(mock_client)
 
         F = Field()
-        flow_def = FlowRecord("first_check")
+        flow_def = FlowRecord("first-check")
         flow_def.on_status("finished")
         (
             flow_def.match(F.study_type)
             .case("CT")
-            .create_record("seg_CT")
+            .create_record("seg-ct")
             .case("MRI")
-            .create_record("seg_MRI")
+            .create_record("seg-mri")
             .default()
-            .create_record("seg_default")
+            .create_record("seg-default")
         )
 
         engine.register_flow(flow_def)
 
         # Trigger with study_type=CT → CT branch fires, default skipped
         test_record = make_record_read(
-            "first_check",
+            "first-check",
             record_id=100,
             status=RecordStatus.finished,
             data={"study_type": "CT"},
@@ -2090,7 +2090,7 @@ class TestMatchCase:
 
         assert mock_client.create_record.call_count == 1
         call_args = mock_client.create_record.call_args[0][0]
-        assert call_args.record_type_name == "seg_CT"
+        assert call_args.record_type_name == "seg-ct"
 
     @pytest.mark.asyncio
     async def test_engine_default_guard_false_nothing_fires(self):
@@ -2105,22 +2105,22 @@ class TestMatchCase:
         engine = RecordFlowEngine(mock_client)
 
         F = Field()
-        flow_def = FlowRecord("first_check")
+        flow_def = FlowRecord("first-check")
         flow_def.on_status("finished")
         (
             flow_def.if_record(F.is_good == True)  # noqa: E712
             .match(F.study_type)
             .case("CT")
-            .create_record("seg_CT")
+            .create_record("seg-ct")
             .default()
-            .create_record("seg_default")
+            .create_record("seg-default")
         )
 
         engine.register_flow(flow_def)
 
         # Guard is False (is_good=False), study_type=PET → nothing fires
         test_record = make_record_read(
-            "first_check",
+            "first-check",
             record_id=100,
             status=RecordStatus.finished,
             data={"is_good": False, "study_type": "PET"},
@@ -2149,9 +2149,9 @@ class TestMatchCase:
         (
             flow_def.match(F.score)
             .case(10)
-            .create_record("first_match")
+            .create_record("first-match")
             .case(10)
-            .create_record("second_match")
+            .create_record("second-match")
         )
 
         engine.register_flow(flow_def)
@@ -2168,4 +2168,4 @@ class TestMatchCase:
         # Only the first matching case should fire
         assert mock_client.create_record.call_count == 1
         call_args = mock_client.create_record.call_args[0][0]
-        assert call_args.record_type_name == "first_match"
+        assert call_args.record_type_name == "first-match"

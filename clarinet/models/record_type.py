@@ -13,6 +13,7 @@ from pydantic import field_validator, model_validator
 from sqlmodel import JSON, Column, Field, Relationship, SQLModel
 
 from clarinet.types import RecordSchema, SlicerArgs, SlicerHydratorNames
+from clarinet.utils.validators import validate_slug
 
 from .base import DicomQueryLevel
 from .file_schema import FileDefinitionRead, RecordTypeFileLink
@@ -41,6 +42,13 @@ class RecordTypeBase(SQLModel):
     """
 
     name: str = Field(min_length=5, max_length=30)
+
+    @field_validator("name")
+    @classmethod
+    def validate_name_slug(cls, v: str) -> str:
+        """Enforce lowercase slug format: ``[a-z][a-z0-9]*(-[a-z0-9]+)*``."""
+        return validate_slug(v)
+
     description: str | None = Field(default=None, max_length=500)
     label: str | None = Field(default=None, max_length=100)
     slicer_script: str | None = None
@@ -171,6 +179,15 @@ class RecordTypeOptional(SQLModel):
     """Pydantic model for updating a record type with optional fields."""
 
     name: str | None = None
+
+    @field_validator("name")
+    @classmethod
+    def validate_name_slug(cls, v: str | None) -> str | None:
+        """Enforce lowercase slug format when name is provided."""
+        if v is not None:
+            validate_slug(v)
+        return v
+
     description: str | None = None
     label: str | None = None
     slicer_script: str | None = None

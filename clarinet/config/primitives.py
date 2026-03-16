@@ -10,6 +10,7 @@ from pydantic import BaseModel, field_validator
 
 from clarinet.models.base import DicomQueryLevel
 from clarinet.models.file_schema import FileDefinitionRead, FileRole
+from clarinet.utils.validators import validate_slug
 
 
 def _coerce_dicom_level(value: Any) -> Any:
@@ -84,7 +85,7 @@ class RecordDef(BaseModel):
     """RecordType definition — maps to RecordTypeCreate fields.
 
     Attributes:
-        name: Unique name for the record type (5-30 chars).
+        name: Unique name for the record type (5-30 chars, lowercase slug).
         level: DICOM query level.
         description: Human-readable description.
         label: Short display label.
@@ -101,6 +102,13 @@ class RecordDef(BaseModel):
     """
 
     name: str
+
+    @field_validator("name")
+    @classmethod
+    def validate_name_slug(cls, v: str) -> str:
+        """Enforce lowercase slug format: ``[a-z][a-z0-9]*(-[a-z0-9]+)*``."""
+        return validate_slug(v)
+
     level: DicomQueryLevel = DicomQueryLevel.SERIES
     description: str | None = None
     label: str | None = None

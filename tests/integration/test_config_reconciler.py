@@ -34,7 +34,7 @@ def _make_config(
 async def seed_record_type(test_session: AsyncSession) -> RecordType:
     """Insert a RecordType into the test DB."""
     rt = RecordType(
-        name="existing_type",
+        name="existing-type",
         description="Original description",
         level="SERIES",
         label="Original",
@@ -49,19 +49,19 @@ async def seed_record_type(test_session: AsyncSession) -> RecordType:
 async def test_create_new_record_types(test_session: AsyncSession) -> None:
     """Empty DB + config → all created."""
     config = [
-        _make_config("alpha_test"),
-        _make_config("bravo_test"),
+        _make_config("alpha-test"),
+        _make_config("bravo-test"),
     ]
     result = await reconcile_record_types(config, test_session)
 
-    assert result.created == ["alpha_test", "bravo_test"]
+    assert result.created == ["alpha-test", "bravo-test"]
     assert result.updated == []
     assert result.unchanged == []
     assert result.orphaned == []
     assert result.errors == []
 
     # Verify in DB
-    stmt = select(RecordType).where(RecordType.name == "alpha_test")
+    stmt = select(RecordType).where(RecordType.name == "alpha-test")
     row = (await test_session.execute(stmt)).scalar_one()
     assert row.description == "test"
 
@@ -74,14 +74,14 @@ async def test_update_changed_fields(
     """Existing RT + changed config → updated."""
     config = [
         _make_config(
-            "existing_type",
+            "existing-type",
             description="Updated description",
             label="Updated",
         ),
     ]
     result = await reconcile_record_types(config, test_session)
 
-    assert result.updated == ["existing_type"]
+    assert result.updated == ["existing-type"]
     assert result.created == []
 
     await test_session.refresh(seed_record_type)
@@ -97,14 +97,14 @@ async def test_unchanged_not_modified(
     """Matching RT → unchanged."""
     config = [
         _make_config(
-            "existing_type",
+            "existing-type",
             description="Original description",
             label="Original",
         ),
     ]
     result = await reconcile_record_types(config, test_session)
 
-    assert result.unchanged == ["existing_type"]
+    assert result.unchanged == ["existing-type"]
     assert result.updated == []
 
 
@@ -114,14 +114,14 @@ async def test_orphan_detection(
     seed_record_type: RecordType,
 ) -> None:
     """RT in DB not in config → orphaned list."""
-    config = [_make_config("new_config_type")]
+    config = [_make_config("new-config-type")]
     result = await reconcile_record_types(config, test_session, delete_orphans=False)
 
-    assert "existing_type" in result.orphaned
-    assert "new_config_type" in result.created
+    assert "existing-type" in result.orphaned
+    assert "new-config-type" in result.created
 
     # Orphan should still exist in DB
-    stmt = select(RecordType).where(RecordType.name == "existing_type")
+    stmt = select(RecordType).where(RecordType.name == "existing-type")
     row = (await test_session.execute(stmt)).scalar_one_or_none()
     assert row is not None
 
@@ -132,13 +132,13 @@ async def test_orphan_deletion(
     seed_record_type: RecordType,
 ) -> None:
     """delete_orphans=True → deleted."""
-    config = [_make_config("new_config_type")]
+    config = [_make_config("new-config-type")]
     result = await reconcile_record_types(config, test_session, delete_orphans=True)
 
-    assert "existing_type" in result.orphaned
+    assert "existing-type" in result.orphaned
 
     # Orphan should be deleted from DB
-    stmt = select(RecordType).where(RecordType.name == "existing_type")
+    stmt = select(RecordType).where(RecordType.name == "existing-type")
     row = (await test_session.execute(stmt)).scalar_one_or_none()
     assert row is None
 
@@ -158,7 +158,7 @@ async def test_file_registry_diff(
     }
     config = [
         _make_config(
-            "existing_type",
+            "existing-type",
             description="Original description",
             label="Original",
             file_registry=[file_def],
@@ -166,7 +166,7 @@ async def test_file_registry_diff(
     ]
     result = await reconcile_record_types(config, test_session)
 
-    assert result.updated == ["existing_type"]
+    assert result.updated == ["existing-type"]
 
 
 @pytest.mark.asyncio
@@ -178,7 +178,7 @@ async def test_data_schema_diff(
     schema = {"type": "object", "properties": {"score": {"type": "number"}}}
     config = [
         _make_config(
-            "existing_type",
+            "existing-type",
             description="Original description",
             label="Original",
             data_schema=schema,
@@ -186,22 +186,22 @@ async def test_data_schema_diff(
     ]
     result = await reconcile_record_types(config, test_session)
 
-    assert result.updated == ["existing_type"]
+    assert result.updated == ["existing-type"]
 
 
 @pytest.mark.asyncio
 async def test_reconcile_result_counts(test_session: AsyncSession) -> None:
     """Mixed create/update/unchanged."""
     # Seed two types
-    for name in ("type_alpha1", "type_bravo1"):
+    for name in ("type-alpha1", "type-bravo1"):
         rt = RecordType(name=name, description="original", level="SERIES")
         test_session.add(rt)
     await test_session.commit()
 
     config = [
-        _make_config("type_alpha1", description="original"),  # unchanged
-        _make_config("type_bravo1", description="modified"),  # updated
-        _make_config("type_delta1"),  # created
+        _make_config("type-alpha1", description="original"),  # unchanged
+        _make_config("type-bravo1", description="modified"),  # updated
+        _make_config("type-delta1"),  # created
     ]
     result = await reconcile_record_types(config, test_session)
 
@@ -219,7 +219,7 @@ async def test_none_config_matches_orm_default(
     """Config with min_records=None should match DB ORM default (1) → unchanged."""
     config = [
         _make_config(
-            "existing_type",
+            "existing-type",
             description="Original description",
             label="Original",
             min_records=None,
@@ -227,7 +227,7 @@ async def test_none_config_matches_orm_default(
     ]
     result = await reconcile_record_types(config, test_session)
 
-    assert result.unchanged == ["existing_type"]
+    assert result.unchanged == ["existing-type"]
     assert result.updated == []
 
 
@@ -239,7 +239,7 @@ async def test_explicit_value_differs_from_default(
     """Config with explicit min_records=3 should detect update vs DB default."""
     config = [
         _make_config(
-            "existing_type",
+            "existing-type",
             description="Original description",
             label="Original",
             min_records=3,
@@ -247,8 +247,8 @@ async def test_explicit_value_differs_from_default(
     ]
     result = await reconcile_record_types(config, test_session)
 
-    assert result.updated == ["existing_type"]
-    assert "min_records" in result.updated or result.updated == ["existing_type"]
+    assert result.updated == ["existing-type"]
+    assert "min_records" in result.updated or result.updated == ["existing-type"]
 
     await test_session.refresh(seed_record_type)
     assert seed_record_type.min_records == 3
@@ -262,7 +262,7 @@ async def test_file_level_change_triggers_update(
     # Create initial with no level
     config_v1 = [
         _make_config(
-            "level_test1",
+            "level-test1",
             file_registry=[
                 {
                     "name": "seg_file",
@@ -275,7 +275,7 @@ async def test_file_level_change_triggers_update(
         ),
     ]
     result = await reconcile_record_types(config_v1, test_session)
-    assert result.created == ["level_test1"]
+    assert result.created == ["level-test1"]
 
     # Clear identity map so eager loading re-fetches the FileDefinition
     test_session.expire_all()
@@ -283,7 +283,7 @@ async def test_file_level_change_triggers_update(
     # Update with level="PATIENT"
     config_v2 = [
         _make_config(
-            "level_test1",
+            "level-test1",
             file_registry=[
                 {
                     "name": "seg_file",
@@ -297,7 +297,7 @@ async def test_file_level_change_triggers_update(
         ),
     ]
     result = await reconcile_record_types(config_v2, test_session)
-    assert result.updated == ["level_test1"]
+    assert result.updated == ["level-test1"]
 
 
 @pytest.mark.asyncio
@@ -308,7 +308,7 @@ async def test_empty_collection_matches_factory_default(
     """Config with data_schema={} and file_registry=[] should match ORM defaults → unchanged."""
     config = [
         _make_config(
-            "existing_type",
+            "existing-type",
             description="Original description",
             label="Original",
             data_schema={},
@@ -317,5 +317,5 @@ async def test_empty_collection_matches_factory_default(
     ]
     result = await reconcile_record_types(config, test_session)
 
-    assert result.unchanged == ["existing_type"]
+    assert result.unchanged == ["existing-type"]
     assert result.updated == []

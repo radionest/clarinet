@@ -225,7 +225,7 @@ class TestTaskDispatch:
         original = PipelineMessage(
             patient_id="PAT003",
             study_uid="1.2.3",
-            record_type_name="ct_scan",
+            record_type_name="ct-scan",
             payload={"name": "Тест юникода", "emoji": "🧪", "nested": {"deep": True}},
         )
         await unicode_task.kiq(original.model_dump())

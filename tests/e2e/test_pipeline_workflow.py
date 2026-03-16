@@ -112,38 +112,38 @@ async def app_with_engine(
 async def record_types(test_session: AsyncSession) -> dict[str, RecordType]:
     """Create record types for testing."""
     types = {
-        "first_check": RecordType(
-            name="first_check",
+        "first-check": RecordType(
+            name="first-check",
             description="Initial check",
             level=DicomQueryLevel.STUDY,
         ),
-        "segment_CT_single": RecordType(
-            name="segment_CT_single",
+        "segment-ct-single": RecordType(
+            name="segment-ct-single",
             description="CT segmentation",
             level=DicomQueryLevel.STUDY,
         ),
-        "segment_MRI_single": RecordType(
-            name="segment_MRI_single",
+        "segment-mri-single": RecordType(
+            name="segment-mri-single",
             description="MRI segmentation",
             level=DicomQueryLevel.STUDY,
         ),
-        "create_master_projection": RecordType(
-            name="create_master_projection",
+        "create-master-projection": RecordType(
+            name="create-master-projection",
             description="Master projection",
             level=DicomQueryLevel.SERIES,
         ),
-        "compare_with_projection": RecordType(
-            name="compare_with_projection",
+        "compare-with-projection": RecordType(
+            name="compare-with-projection",
             description="Projection comparison",
             level=DicomQueryLevel.SERIES,
         ),
-        "update_master_model": RecordType(
-            name="update_master_model",
+        "update-master-model": RecordType(
+            name="update-master-model",
             description="Update master model",
             level=DicomQueryLevel.PATIENT,
         ),
-        "second_review": RecordType(
-            name="second_review",
+        "second-review": RecordType(
+            name="second-review",
             description="Second review",
             level=DicomQueryLevel.SERIES,
         ),
@@ -456,7 +456,7 @@ class TestPipelineWithRecordLifecycle:
         hierarchy = await _create_hierarchy(test_session)
         rec_data = await _create_record_via_api(
             client,
-            "first_check",
+            "first-check",
             hierarchy["patient_id"],
             study_uid=hierarchy["study_uid"],
             series_uid=hierarchy["series_uid"],
@@ -685,12 +685,13 @@ class TestPipelineTaskDecorator:
             mock_record.study_uid = "1.2.3"
             mock_record.series_uid = "1.2.3.1"
             mock_record.record_type = MagicMock()
-            mock_record.record_type.name = "test_type"
+            mock_record.record_type.name = "test-type"
             mock_record.record_type.level = DicomQueryLevel.SERIES
             mock_record.record_type.file_registry = []
             mock_record.clarinet_storage_path = None
             mock_record.data = {}
             mock_record.user_id = None
+            mock_record.parent_record_id = None
             mock_record.patient = MagicMock()
             mock_record.patient.anon_id = None
             mock_record.study = MagicMock()
@@ -725,7 +726,7 @@ class TestRecordFlowDrivenTaskDispatch:
         async def mock_task(msg: PipelineMessage, ctx: TaskContext) -> dict[str, Any]:
             return msg.model_dump()
 
-        record("first_check").on_status("finished").do_task(mock_task)
+        record("first-check").on_status("finished").do_task(mock_task)
 
         # do_task uses task_name (broker-registered name), not __name__
         pipeline_name = f"_task:{mock_task.task_name}"
@@ -735,10 +736,10 @@ class TestRecordFlowDrivenTaskDispatch:
 
     async def test_pipeline_action_registers_flow(self, flow_engine: RecordFlowEngine) -> None:
         """Test 20: .pipeline() action registers correctly in flow engine."""
-        flow = record("first_check").on_status("finished").pipeline("full_check_pipeline")
+        flow = record("first-check").on_status("finished").pipeline("full_check_pipeline")
         flow_engine.register_flow(flow)
 
-        assert len(flow_engine.flows.get("first_check", [])) >= 1
+        assert len(flow_engine.flows.get("first-check", [])) >= 1
 
     @pytest.mark.usefixtures("app_with_engine")
     async def test_status_change_triggers_create_record(
@@ -750,7 +751,7 @@ class TestRecordFlowDrivenTaskDispatch:
     ) -> None:
         """Test 21: Status change triggers .create_record() via RecordFlow."""
         # Register flow: on finished status, create segment_CT_single
-        flow = record("first_check").on_status("finished").create_record("segment_CT_single")
+        flow = record("first-check").on_status("finished").create_record("segment-ct-single")
         app_with_engine.register_flow(flow)
 
         hierarchy = await _create_hierarchy(test_session)
@@ -758,7 +759,7 @@ class TestRecordFlowDrivenTaskDispatch:
         # Create first_check record and submit data (auto-finishes)
         await _create_record_via_api(
             client,
-            "first_check",
+            "first-check",
             hierarchy["patient_id"],
             study_uid=hierarchy["study_uid"],
             series_uid=hierarchy["series_uid"],
@@ -767,7 +768,7 @@ class TestRecordFlowDrivenTaskDispatch:
 
         # Verify segment_CT_single was created by the flow
         records = await _find_records(
-            client, record_type_name="segment_CT_single", patient_id=hierarchy["patient_id"]
+            client, record_type_name="segment-ct-single", patient_id=hierarchy["patient_id"]
         )
         assert len(records) >= 1
 
@@ -781,17 +782,17 @@ class TestRecordFlowDrivenTaskDispatch:
     ) -> None:
         """Test 22: Multiple actions chained on single trigger."""
         flow = (
-            record("first_check")
+            record("first-check")
             .on_status("finished")
-            .create_record("segment_CT_single")
-            .create_record("segment_MRI_single")
+            .create_record("segment-ct-single")
+            .create_record("segment-mri-single")
         )
         app_with_engine.register_flow(flow)
 
         hierarchy = await _create_hierarchy(test_session)
         await _create_record_via_api(
             client,
-            "first_check",
+            "first-check",
             hierarchy["patient_id"],
             study_uid=hierarchy["study_uid"],
             series_uid=hierarchy["series_uid"],
@@ -799,10 +800,10 @@ class TestRecordFlowDrivenTaskDispatch:
         )
 
         ct_records = await _find_records(
-            client, record_type_name="segment_CT_single", patient_id=hierarchy["patient_id"]
+            client, record_type_name="segment-ct-single", patient_id=hierarchy["patient_id"]
         )
         mri_records = await _find_records(
-            client, record_type_name="segment_MRI_single", patient_id=hierarchy["patient_id"]
+            client, record_type_name="segment-mri-single", patient_id=hierarchy["patient_id"]
         )
         assert len(ct_records) >= 1
         assert len(mri_records) >= 1
@@ -816,13 +817,13 @@ class TestRecordFlowDrivenTaskDispatch:
         app_with_engine: RecordFlowEngine,
     ) -> None:
         """Test 23: Record created by flow has correct context."""
-        flow = record("first_check").on_status("finished").create_record("segment_CT_single")
+        flow = record("first-check").on_status("finished").create_record("segment-ct-single")
         app_with_engine.register_flow(flow)
 
         hierarchy = await _create_hierarchy(test_session)
         await _create_record_via_api(
             client,
-            "first_check",
+            "first-check",
             hierarchy["patient_id"],
             study_uid=hierarchy["study_uid"],
             series_uid=hierarchy["series_uid"],
@@ -830,7 +831,7 @@ class TestRecordFlowDrivenTaskDispatch:
         )
 
         records = await _find_records(
-            client, record_type_name="segment_CT_single", patient_id=hierarchy["patient_id"]
+            client, record_type_name="segment-ct-single", patient_id=hierarchy["patient_id"]
         )
         assert len(records) >= 1
         assert records[0]["patient_id"] == hierarchy["patient_id"]
@@ -857,7 +858,7 @@ class TestFileTriggersAndInvalidation:
         """Test 24: File update triggers record invalidation via .on_update()."""
         # Register file flow
         file_flow = (
-            file("master_model").on_update().invalidate_all_records("create_master_projection")
+            file("master_model").on_update().invalidate_all_records("create-master-projection")
         )
         app_with_engine.register_flow(file_flow)
 
@@ -866,7 +867,7 @@ class TestFileTriggersAndInvalidation:
         # Create records and finish them via data submission
         rec1 = await _create_record_via_api(
             client,
-            "create_master_projection",
+            "create-master-projection",
             hierarchy["patient_id"],
             study_uid=hierarchy["study_uid"],
             series_uid=hierarchy["series_uid"],
@@ -886,7 +887,7 @@ class TestFileTriggersAndInvalidation:
         # Hard invalidation resets to "pending" (not "invalid")
         records = await _find_records(
             client,
-            record_type_name="create_master_projection",
+            record_type_name="create-master-projection",
             patient_id=hierarchy["patient_id"],
         )
         for r in records:
@@ -902,7 +903,7 @@ class TestFileTriggersAndInvalidation:
     ) -> None:
         """Test 25: File update only invalidates targeted record types."""
         file_flow = (
-            file("master_model").on_update().invalidate_all_records("create_master_projection")
+            file("master_model").on_update().invalidate_all_records("create-master-projection")
         )
         app_with_engine.register_flow(file_flow)
 
@@ -911,7 +912,7 @@ class TestFileTriggersAndInvalidation:
         # Create a first_check (should NOT be affected)
         fc = await _create_record_via_api(
             client,
-            "first_check",
+            "first-check",
             hierarchy["patient_id"],
             study_uid=hierarchy["study_uid"],
             series_uid=hierarchy["series_uid"],
@@ -922,7 +923,7 @@ class TestFileTriggersAndInvalidation:
         # Create a projection record (SHOULD be affected)
         proj = await _create_record_via_api(
             client,
-            "create_master_projection",
+            "create-master-projection",
             hierarchy["patient_id"],
             study_uid=hierarchy["study_uid"],
             series_uid=hierarchy["series_uid"],
@@ -938,14 +939,14 @@ class TestFileTriggersAndInvalidation:
 
         # first_check should remain finished
         fc_records = await _find_records(
-            client, record_type_name="first_check", patient_id=hierarchy["patient_id"]
+            client, record_type_name="first-check", patient_id=hierarchy["patient_id"]
         )
         assert fc_records[0]["status"] == "finished"
 
         # projection should be reset to pending
         proj_records = await _find_records(
             client,
-            record_type_name="create_master_projection",
+            record_type_name="create-master-projection",
             patient_id=hierarchy["patient_id"],
         )
         assert proj_records[0]["status"] == "pending"
@@ -962,7 +963,7 @@ class TestFileTriggersAndInvalidation:
 
         rec_data = await _create_record_via_api(
             client,
-            "first_check",
+            "first-check",
             hierarchy["patient_id"],
             study_uid=hierarchy["study_uid"],
             series_uid=hierarchy["series_uid"],
@@ -994,7 +995,7 @@ class TestFileTriggersAndInvalidation:
     ) -> None:
         """Test 27: File event with no matching records is a no-op."""
         file_flow = (
-            file("master_model").on_update().invalidate_all_records("create_master_projection")
+            file("master_model").on_update().invalidate_all_records("create-master-projection")
         )
         app_with_engine.register_flow(file_flow)
 
@@ -1029,17 +1030,17 @@ class TestConditionalRecordCreation:
         F = Field()
 
         flow = (
-            record("first_check")
+            record("first-check")
             .on_status("finished")
             .if_record(F.study_type == "CT")
-            .create_record("segment_CT_single")
+            .create_record("segment-ct-single")
         )
         app_with_engine.register_flow(flow)
 
         hierarchy = await _create_hierarchy(test_session)
         await _create_record_via_api(
             client,
-            "first_check",
+            "first-check",
             hierarchy["patient_id"],
             study_uid=hierarchy["study_uid"],
             series_uid=hierarchy["series_uid"],
@@ -1047,7 +1048,7 @@ class TestConditionalRecordCreation:
         )
 
         records = await _find_records(
-            client, record_type_name="segment_CT_single", patient_id=hierarchy["patient_id"]
+            client, record_type_name="segment-ct-single", patient_id=hierarchy["patient_id"]
         )
         assert len(records) == 1
 
@@ -1063,17 +1064,17 @@ class TestConditionalRecordCreation:
         F = Field()
 
         flow = (
-            record("first_check")
+            record("first-check")
             .on_status("finished")
             .if_record(F.is_good == True)  # noqa: E712
-            .create_record("segment_CT_single")
+            .create_record("segment-ct-single")
         )
         app_with_engine.register_flow(flow)
 
         hierarchy = await _create_hierarchy(test_session)
         await _create_record_via_api(
             client,
-            "first_check",
+            "first-check",
             hierarchy["patient_id"],
             study_uid=hierarchy["study_uid"],
             series_uid=hierarchy["series_uid"],
@@ -1081,7 +1082,7 @@ class TestConditionalRecordCreation:
         )
 
         records = await _find_records(
-            client, record_type_name="segment_CT_single", patient_id=hierarchy["patient_id"]
+            client, record_type_name="segment-ct-single", patient_id=hierarchy["patient_id"]
         )
         assert len(records) == 1
 
@@ -1097,17 +1098,17 @@ class TestConditionalRecordCreation:
         F = Field()
 
         flow = (
-            record("first_check")
+            record("first-check")
             .on_status("finished")
             .if_record(F.is_good == True, F.study_type == "CT")  # noqa: E712
-            .create_record("segment_CT_single")
+            .create_record("segment-ct-single")
         )
         app_with_engine.register_flow(flow)
 
         hierarchy = await _create_hierarchy(test_session)
         await _create_record_via_api(
             client,
-            "first_check",
+            "first-check",
             hierarchy["patient_id"],
             study_uid=hierarchy["study_uid"],
             series_uid=hierarchy["series_uid"],
@@ -1115,7 +1116,7 @@ class TestConditionalRecordCreation:
         )
 
         records = await _find_records(
-            client, record_type_name="segment_CT_single", patient_id=hierarchy["patient_id"]
+            client, record_type_name="segment-ct-single", patient_id=hierarchy["patient_id"]
         )
         assert len(records) == 1
 
@@ -1131,10 +1132,10 @@ class TestConditionalRecordCreation:
         F = Field()
 
         flow = (
-            record("first_check")
+            record("first-check")
             .on_status("finished")
             .if_record(F.study_type == "CT")
-            .create_record("segment_CT_single")
+            .create_record("segment-ct-single")
         )
         app_with_engine.register_flow(flow)
 
@@ -1143,7 +1144,7 @@ class TestConditionalRecordCreation:
         # Create with MRI (condition fails)
         await _create_record_via_api(
             client,
-            "first_check",
+            "first-check",
             hierarchy["patient_id"],
             study_uid=hierarchy["study_uid"],
             series_uid=hierarchy["series_uid"],
@@ -1151,7 +1152,7 @@ class TestConditionalRecordCreation:
         )
 
         records = await _find_records(
-            client, record_type_name="segment_CT_single", patient_id=hierarchy["patient_id"]
+            client, record_type_name="segment-ct-single", patient_id=hierarchy["patient_id"]
         )
         assert len(records) == 0
 
@@ -1168,16 +1169,16 @@ class TestConditionalRecordCreation:
 
         # Register two separate flows for branching
         flow_ct = (
-            record("first_check")
+            record("first-check")
             .on_status("finished")
             .if_record(F.study_type == "CT")
-            .create_record("segment_CT_single")
+            .create_record("segment-ct-single")
         )
         flow_mri = (
-            record("first_check")
+            record("first-check")
             .on_status("finished")
             .if_record(F.study_type == "MRI")
-            .create_record("segment_MRI_single")
+            .create_record("segment-mri-single")
         )
         app_with_engine.register_flow(flow_ct)
         app_with_engine.register_flow(flow_mri)
@@ -1187,7 +1188,7 @@ class TestConditionalRecordCreation:
         # Create CT record
         await _create_record_via_api(
             client,
-            "first_check",
+            "first-check",
             hierarchy["patient_id"],
             study_uid=hierarchy["study_uid"],
             series_uid=hierarchy["series_uid"],
@@ -1196,13 +1197,13 @@ class TestConditionalRecordCreation:
 
         # CT segmentation should be created
         ct_records = await _find_records(
-            client, record_type_name="segment_CT_single", patient_id=hierarchy["patient_id"]
+            client, record_type_name="segment-ct-single", patient_id=hierarchy["patient_id"]
         )
         assert len(ct_records) == 1
 
         # MRI segmentation should NOT be created
         mri_records = await _find_records(
-            client, record_type_name="segment_MRI_single", patient_id=hierarchy["patient_id"]
+            client, record_type_name="segment-mri-single", patient_id=hierarchy["patient_id"]
         )
         assert len(mri_records) == 0
 
@@ -1224,7 +1225,7 @@ class TestEntityCreationTriggers:
         app_with_engine: RecordFlowEngine,
     ) -> None:
         """Test 33: study().on_created() creates record when study created."""
-        entity_flow = study().on_created().create_record("first_check")
+        entity_flow = study().on_created().create_record("first-check")
         app_with_engine.register_flow(entity_flow)
 
         # Create hierarchy
@@ -1247,7 +1248,7 @@ class TestEntityCreationTriggers:
 
         # Verify first_check record was created
         records = await _find_records(
-            client, record_type_name="first_check", patient_id="TEST_PAT001"
+            client, record_type_name="first-check", patient_id="TEST_PAT001"
         )
         assert len(records) >= 1
 
@@ -1260,7 +1261,7 @@ class TestEntityCreationTriggers:
         app_with_engine: RecordFlowEngine,
     ) -> None:
         """Test 34: Triggering same entity twice respects max_records."""
-        entity_flow = study().on_created().create_record("first_check")
+        entity_flow = study().on_created().create_record("first-check")
         app_with_engine.register_flow(entity_flow)
 
         patient = Patient(id="TEST_PAT001", name="Test Patient")
@@ -1284,7 +1285,7 @@ class TestEntityCreationTriggers:
         # first_check has max_records default (no limit) so 2 might be created,
         # but we verify it doesn't error
         records = await _find_records(
-            client, record_type_name="first_check", patient_id="TEST_PAT001"
+            client, record_type_name="first-check", patient_id="TEST_PAT001"
         )
         assert len(records) >= 1
 
@@ -1306,7 +1307,7 @@ class TestMultiStepWorkflow:
         app_with_engine: RecordFlowEngine,
     ) -> None:
         """Test 35: Study creation triggers first_check record."""
-        entity_flow = study().on_created().create_record("first_check")
+        entity_flow = study().on_created().create_record("first-check")
         app_with_engine.register_flow(entity_flow)
 
         hierarchy = await _create_hierarchy(test_session)
@@ -1315,7 +1316,7 @@ class TestMultiStepWorkflow:
         )
 
         records = await _find_records(
-            client, record_type_name="first_check", patient_id=hierarchy["patient_id"]
+            client, record_type_name="first-check", patient_id=hierarchy["patient_id"]
         )
         assert len(records) >= 1
 
@@ -1330,17 +1331,17 @@ class TestMultiStepWorkflow:
         """Test 36: first_check finished with CT → segment_CT_single."""
         F = Field()
         flow = (
-            record("first_check")
+            record("first-check")
             .on_status("finished")
             .if_record(F.is_good == True, F.study_type == "CT")  # noqa: E712
-            .create_record("segment_CT_single")
+            .create_record("segment-ct-single")
         )
         app_with_engine.register_flow(flow)
 
         hierarchy = await _create_hierarchy(test_session)
         await _create_record_via_api(
             client,
-            "first_check",
+            "first-check",
             hierarchy["patient_id"],
             study_uid=hierarchy["study_uid"],
             series_uid=hierarchy["series_uid"],
@@ -1348,7 +1349,7 @@ class TestMultiStepWorkflow:
         )
 
         records = await _find_records(
-            client, record_type_name="segment_CT_single", patient_id=hierarchy["patient_id"]
+            client, record_type_name="segment-ct-single", patient_id=hierarchy["patient_id"]
         )
         assert len(records) == 1
 
@@ -1363,17 +1364,17 @@ class TestMultiStepWorkflow:
         """Test 37: first_check finished with MRI → segment_MRI_single."""
         F = Field()
         flow = (
-            record("first_check")
+            record("first-check")
             .on_status("finished")
             .if_record(F.is_good == True, F.study_type == "MRI")  # noqa: E712
-            .create_record("segment_MRI_single")
+            .create_record("segment-mri-single")
         )
         app_with_engine.register_flow(flow)
 
         hierarchy = await _create_hierarchy(test_session)
         await _create_record_via_api(
             client,
-            "first_check",
+            "first-check",
             hierarchy["patient_id"],
             study_uid=hierarchy["study_uid"],
             series_uid=hierarchy["series_uid"],
@@ -1381,7 +1382,7 @@ class TestMultiStepWorkflow:
         )
 
         records = await _find_records(
-            client, record_type_name="segment_MRI_single", patient_id=hierarchy["patient_id"]
+            client, record_type_name="segment-mri-single", patient_id=hierarchy["patient_id"]
         )
         assert len(records) == 1
 
@@ -1395,7 +1396,7 @@ class TestMultiStepWorkflow:
     ) -> None:
         """Test 38: master_model file update invalidates projections."""
         file_flow = (
-            file("master_model").on_update().invalidate_all_records("create_master_projection")
+            file("master_model").on_update().invalidate_all_records("create-master-projection")
         )
         app_with_engine.register_flow(file_flow)
 
@@ -1404,7 +1405,7 @@ class TestMultiStepWorkflow:
         # Create and finish projection records
         rec1 = await _create_record_via_api(
             client,
-            "create_master_projection",
+            "create-master-projection",
             hierarchy["patient_id"],
             study_uid=hierarchy["study_uid"],
             series_uid=hierarchy["series_uid"],
@@ -1422,7 +1423,7 @@ class TestMultiStepWorkflow:
         # Verify invalidation (hard mode resets to pending)
         records = await _find_records(
             client,
-            record_type_name="create_master_projection",
+            record_type_name="create-master-projection",
             patient_id=hierarchy["patient_id"],
         )
         assert all(r["status"] == "pending" for r in records)
@@ -1439,12 +1440,12 @@ class TestMultiStepWorkflow:
         F = Field()
 
         # Register all flows
-        entity_flow = study().on_created().create_record("first_check")
+        entity_flow = study().on_created().create_record("first-check")
         ct_flow = (
-            record("first_check")
+            record("first-check")
             .on_status("finished")
             .if_record(F.is_good == True, F.study_type == "CT")  # noqa: E712
-            .create_record("segment_CT_single")
+            .create_record("segment-ct-single")
         )
         app_with_engine.register_flow(entity_flow)
         app_with_engine.register_flow(ct_flow)
@@ -1458,7 +1459,7 @@ class TestMultiStepWorkflow:
 
         # Verify first_check created
         first_checks = await _find_records(
-            client, record_type_name="first_check", patient_id=hierarchy["patient_id"]
+            client, record_type_name="first-check", patient_id=hierarchy["patient_id"]
         )
         assert len(first_checks) >= 1
         first_check_id = first_checks[0]["id"]
@@ -1472,7 +1473,7 @@ class TestMultiStepWorkflow:
 
         # Verify segment_CT_single created
         ct_records = await _find_records(
-            client, record_type_name="segment_CT_single", patient_id=hierarchy["patient_id"]
+            client, record_type_name="segment-ct-single", patient_id=hierarchy["patient_id"]
         )
         assert len(ct_records) >= 1
 
@@ -1487,12 +1488,12 @@ class TestMultiStepWorkflow:
         """Test 40: End-to-end flow for MRI path."""
         F = Field()
 
-        entity_flow = study().on_created().create_record("first_check")
+        entity_flow = study().on_created().create_record("first-check")
         mri_flow = (
-            record("first_check")
+            record("first-check")
             .on_status("finished")
             .if_record(F.is_good == True, F.study_type == "MRI")  # noqa: E712
-            .create_record("segment_MRI_single")
+            .create_record("segment-mri-single")
         )
         app_with_engine.register_flow(entity_flow)
         app_with_engine.register_flow(mri_flow)
@@ -1503,7 +1504,7 @@ class TestMultiStepWorkflow:
         )
 
         first_checks = await _find_records(
-            client, record_type_name="first_check", patient_id=hierarchy["patient_id"]
+            client, record_type_name="first-check", patient_id=hierarchy["patient_id"]
         )
         assert len(first_checks) >= 1
         first_check_id = first_checks[0]["id"]
@@ -1515,7 +1516,7 @@ class TestMultiStepWorkflow:
         assert resp.status_code == 200
 
         mri_records = await _find_records(
-            client, record_type_name="segment_MRI_single", patient_id=hierarchy["patient_id"]
+            client, record_type_name="segment-mri-single", patient_id=hierarchy["patient_id"]
         )
         assert len(mri_records) >= 1
 
@@ -1528,7 +1529,7 @@ class TestMultiStepWorkflow:
         app_with_engine: RecordFlowEngine,
     ) -> None:
         """Test 41: Flow handles multiple patients independently."""
-        entity_flow = study().on_created().create_record("first_check")
+        entity_flow = study().on_created().create_record("first-check")
         app_with_engine.register_flow(entity_flow)
 
         # Create two patients
@@ -1549,10 +1550,10 @@ class TestMultiStepWorkflow:
         await app_with_engine.handle_entity_created("study", h2["patient_id"], h2["study_uid"])
 
         pat1_checks = await _find_records(
-            client, record_type_name="first_check", patient_id="PAT001"
+            client, record_type_name="first-check", patient_id="PAT001"
         )
         pat2_checks = await _find_records(
-            client, record_type_name="first_check", patient_id="PAT002"
+            client, record_type_name="first-check", patient_id="PAT002"
         )
         assert len(pat1_checks) >= 1
         assert len(pat2_checks) >= 1
@@ -1568,10 +1569,10 @@ class TestMultiStepWorkflow:
         """Test 42: Non-matching status doesn't trigger downstream records."""
         F = Field()
         flow = (
-            record("first_check")
+            record("first-check")
             .on_status("finished")
             .if_record(F.study_type == "CT")
-            .create_record("segment_CT_single")
+            .create_record("segment-ct-single")
         )
         app_with_engine.register_flow(flow)
 
@@ -1580,7 +1581,7 @@ class TestMultiStepWorkflow:
         # Create first_check without finishing (no data submission)
         rec_data = await _create_record_via_api(
             client,
-            "first_check",
+            "first-check",
             hierarchy["patient_id"],
             study_uid=hierarchy["study_uid"],
             series_uid=hierarchy["series_uid"],
@@ -1590,7 +1591,7 @@ class TestMultiStepWorkflow:
         await _update_status(client, rec_data["id"], "inwork")
 
         ct_records = await _find_records(
-            client, record_type_name="segment_CT_single", patient_id=hierarchy["patient_id"]
+            client, record_type_name="segment-ct-single", patient_id=hierarchy["patient_id"]
         )
         assert len(ct_records) == 0
 
@@ -1616,7 +1617,7 @@ class TestTaskContextIntegration:
         mock_record.data = {}
         mock_record.clarinet_storage_path = None
         mock_record.record_type = MagicMock()
-        mock_record.record_type.name = "test_type"
+        mock_record.record_type.name = "test-type"
         mock_record.record_type.level = DicomQueryLevel.SERIES
         mock_record.record_type.file_registry = []
         mock_record.patient = MagicMock()
@@ -1660,7 +1661,7 @@ class TestTaskContextIntegration:
         mock_record.data = {}
         mock_record.clarinet_storage_path = None
         mock_record.record_type = MagicMock()
-        mock_record.record_type.name = "test_type"
+        mock_record.record_type.name = "test-type"
         mock_record.record_type.level = DicomQueryLevel.SERIES
         mock_record.record_type.file_registry = []
         mock_record.patient = MagicMock()

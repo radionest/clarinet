@@ -12,7 +12,7 @@ from clarinet.models.record import Record, RecordStatus, RecordType
 async def test_create_record_type(test_session):
     """Test creating record type."""
     record_type = RecordType(
-        name="Test Record Type",
+        name="test-record-type-crud",
         description="Test record description",
         data_schema={"type": "object", "properties": {"field1": {"type": "string"}}},
     )
@@ -20,7 +20,7 @@ async def test_create_record_type(test_session):
     await test_session.commit()
     await test_session.refresh(record_type)
 
-    assert record_type.name == "Test Record Type"
+    assert record_type.name == "test-record-type-crud"
     assert record_type.description == "Test record description"
     assert record_type.data_schema is not None
 
@@ -30,7 +30,7 @@ async def test_create_record(test_session, test_user, test_patient, test_study):
     """Test creating record."""
     # Create record type
     record_type = RecordType(
-        name="Simple Record", description="Simple record", data_schema={"type": "object"}
+        name="simple-record", description="Simple record", data_schema={"type": "object"}
     )
     test_session.add(record_type)
     await test_session.commit()
@@ -58,7 +58,7 @@ async def test_get_record_by_id(test_session, test_user, test_patient, test_stud
     """Test getting record by ID."""
     # Create record
     record_type = RecordType(
-        name="Get Record", description="Get record", data_schema={"type": "object"}
+        name="get-record", description="Get record", data_schema={"type": "object"}
     )
     test_session.add(record_type)
     await test_session.commit()
@@ -85,7 +85,7 @@ async def test_update_record_status(test_session, test_user, test_patient, test_
     """Test updating record status."""
     # Create record
     record_type = RecordType(
-        name="Update Record", description="Update record", data_schema={"type": "object"}
+        name="update-record", description="Update record", data_schema={"type": "object"}
     )
     test_session.add(record_type)
     await test_session.commit()
@@ -118,7 +118,7 @@ async def test_delete_record(test_session, test_user, test_patient, test_study):
     """Test deleting record."""
     # Create record
     record_type = RecordType(
-        name="Delete Record", description="Delete record", data_schema={"type": "object"}
+        name="delete-record", description="Delete record", data_schema={"type": "object"}
     )
     test_session.add(record_type)
     await test_session.commit()
@@ -148,7 +148,7 @@ async def test_get_user_records(test_session, test_user, test_patient, test_stud
     """Test getting user records."""
     # Create multiple records for user
     record_type = RecordType(
-        name="User Records", description="User records", data_schema={"type": "object"}
+        name="user-records", description="User records", data_schema={"type": "object"}
     )
     test_session.add(record_type)
     await test_session.commit()
@@ -180,7 +180,7 @@ async def test_filter_records_by_status(test_session, test_user, test_patient, t
     """Test filtering records by status."""
     # Create records with different statuses
     record_type = RecordType(
-        name="Filter Records", description="Filter records", data_schema={"type": "object"}
+        name="filter-records", description="Filter records", data_schema={"type": "object"}
     )
     test_session.add(record_type)
     await test_session.commit()
@@ -215,7 +215,7 @@ async def test_record_type_with_multiple_records(test_session, test_user, admin_
     """Test creating multiple records for one type."""
     # Create record type
     record_type = RecordType(
-        name="Shared Record Type",
+        name="shared-record-type",
         description="Shared record",
         data_schema={
             "type": "object",
@@ -280,7 +280,7 @@ async def test_record_data_json_field(test_session, test_user, test_patient, tes
     """Test working with JSON field data in record."""
     # Create record type with JSON schema
     record_type = RecordType(
-        name="JSON Record",
+        name="json-record",
         description="JSON record",
         data_schema={
             "type": "object",

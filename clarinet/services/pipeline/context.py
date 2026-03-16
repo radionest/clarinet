@@ -10,7 +10,7 @@ Example:
         if ctx.files.exists(master_model):
             return
         seg_path = await ctx.records.file_path(
-            "segment_CT_single", file="segmentation_single",
+            "segment-ct-single", file="segmentation",
             series_uid=msg.series_uid,
         )
         img.save(result, ctx.files.resolve(master_model))
@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING, Any
 from clarinet.exceptions.domain import PipelineStepError
 from clarinet.models.base import DicomQueryLevel
 from clarinet.settings import settings
-from clarinet.utils.file_patterns import PLACEHOLDER_REGEX, glob_file_paths
+from clarinet.utils.file_patterns import PLACEHOLDER_REGEX, glob_file_paths, resolve_origin_type
 from clarinet.utils.logger import logger
 
 if TYPE_CHECKING:
@@ -205,6 +205,7 @@ class FileResolver:
             "series_uid": record.series_uid,
             "record_type": {"name": record.record_type.name},
             "data": record.data or {},
+            "origin_type": record.record_type.name,
         }
         return fields
 
@@ -494,6 +495,15 @@ async def build_task_context(msg: PipelineMessage, client: ClarinetClient) -> Ta
         fields = FileResolver.build_fields(record)
         file_registry = record.record_type.file_registry or []
         record_type_level = record.record_type.level
+
+        # Override origin_type from parent record when available
+        if record.parent_record_id is not None:
+            try:
+                parent = await client.get_record(record.parent_record_id)
+                fields["origin_type"] = resolve_origin_type(record, parent)
+            except Exception:
+                logger.debug(f"Could not load parent {record.parent_record_id} for origin_type")
+
         logger.debug(f"TaskContext built from record_id={msg.record_id}")
 
     elif msg.series_uid is not None:

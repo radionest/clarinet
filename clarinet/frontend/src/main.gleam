@@ -658,25 +658,13 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     // Formosh form events
     store.FormSubmitSuccess(record_id) -> {
       logger.info("form", "submit success: record_id=" <> record_id)
-      // Check if this record type has a validator or slicer_script
+      // Clear Slicer scene if this record type uses Slicer
       let slicer_effect = case dict.get(model.records, record_id) {
-        Ok(models.Record(
-          record_type: Some(models.RecordType(
-            slicer_result_validator: Some(_),
-            ..,
-          )),
-          ..,
-        )) -> {
-          logger.info("slicer", "triggering validation after form submit")
-          // Has validator: validate first, scene will clear after validation succeeds
-          dispatch_msg(store.SlicerValidate(record_id))
-        }
         Ok(models.Record(
           record_type: Some(models.RecordType(slicer_script: Some(_), ..)),
           ..,
         )) -> {
           logger.info("slicer", "clearing scene after form submit")
-          // Has slicer_script but no validator: clear scene directly
           dispatch_msg(store.SlicerClearScene)
         }
         _ -> effect.none()
@@ -698,7 +686,7 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     store.CompleteRecord(record_id) -> {
       let eff = {
         use dispatch <- effect.from
-        records.submit_record_data(record_id)
+        records.submit_record(record_id)
         |> promise.tap(fn(result) {
           dispatch(store.CompleteRecordResult(record_id, result))
         })
@@ -709,13 +697,6 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
 
     store.CompleteRecordResult(record_id, Ok(record)) -> {
       let slicer_effect = case dict.get(model.records, record_id) {
-        Ok(models.Record(
-          record_type: Some(models.RecordType(
-            slicer_result_validator: Some(_),
-            ..,
-          )),
-          ..,
-        )) -> dispatch_msg(store.SlicerValidate(record_id))
         Ok(models.Record(
           record_type: Some(models.RecordType(slicer_script: Some(_), ..)),
           ..,
@@ -736,6 +717,42 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
 
     store.CompleteRecordResult(_record_id, Error(err)) ->
       handle_api_error(model, err, "Failed to complete record")
+
+    // Re-submit finished record (no form, PATCH)
+    store.ResubmitRecord(record_id) -> {
+      let eff = {
+        use dispatch <- effect.from
+        records.resubmit_record(record_id)
+        |> promise.tap(fn(result) {
+          dispatch(store.ResubmitRecordResult(record_id, result))
+        })
+        Nil
+      }
+      #(store.set_loading(model, True), eff)
+    }
+
+    store.ResubmitRecordResult(record_id, Ok(record)) -> {
+      let slicer_effect = case dict.get(model.records, record_id) {
+        Ok(models.Record(
+          record_type: Some(models.RecordType(slicer_script: Some(_), ..)),
+          ..,
+        )) -> dispatch_msg(store.SlicerClearScene)
+        _ -> effect.none()
+      }
+      #(
+        model
+          |> store.cache_record(record)
+          |> store.set_loading(False)
+          |> store.set_success("Record re-submitted successfully"),
+        effect.batch([
+          dispatch_msg(store.LoadRecordDetail(record_id)),
+          slicer_effect,
+        ]),
+      )
+    }
+
+    store.ResubmitRecordResult(_record_id, Error(err)) ->
+      handle_api_error(model, err, "Failed to re-submit record")
 
     // RecordType edit
     store.LoadRecordTypeForEdit(name) ->

@@ -29,7 +29,7 @@ async def record_env(test_session):
     test_session.add(series)
     await test_session.commit()
 
-    rt = make_record_type("admin_test_rt")
+    rt = make_record_type("admin-test-rt")
     test_session.add(rt)
     await test_session.commit()
 
@@ -43,7 +43,7 @@ async def record_env(test_session):
         patient_id="ADMIN_PAT",
         study_uid="1.2.3.900",
         series_uid="1.2.3.900.1",
-        rt_name="admin_test_rt",
+        rt_name="admin-test-rt",
         user_id=user.id,
     )
     return {"record": rec, "user": user}

@@ -68,7 +68,7 @@ def _make_record_read(
         )
 
     record_type = RecordTypeRead(
-        name="test_type",
+        name="test-type",
         description="Test",
         label="Test",
         level=level,
@@ -86,7 +86,7 @@ def _make_record_read(
         study=study,
         series_uid=series_uid,
         series=series,
-        record_type_name="test_type",
+        record_type_name="test-type",
         record_type=record_type,
         status="pending",
         user_id=user_id,
@@ -304,6 +304,41 @@ def test_no_output_file_when_no_outputs(mock_settings):
 # ---------------------------------------------------------------------------
 # Async context builder (no hydrators)
 # ---------------------------------------------------------------------------
+
+
+@patch("clarinet.services.slicer.context.settings")
+def test_origin_type_from_parent(mock_settings):
+    """origin_type in file patterns resolved from parent when provided."""
+    mock_settings.storage_path = "/storage"
+    mock_settings.pacs_host = "localhost"
+    mock_settings.pacs_port = 4242
+    mock_settings.pacs_aet = "ORTHANC"
+    mock_settings.pacs_calling_aet = "SLICER"
+    mock_settings.pacs_prefer_cget = True
+    mock_settings.pacs_move_aet = "SLICER"
+
+    seg_fd = FileDefinitionRead(
+        name="segmentation",
+        pattern="segmentation_{origin_type}_{user_id}.seg.nrrd",
+        role=FileRole.OUTPUT,
+    )
+    record = _make_record_read(
+        level=DicomQueryLevel.STUDY,
+        file_registry=[seg_fd],
+    )
+
+    parent = _make_record_read(level=DicomQueryLevel.STUDY)
+    parent_rt = RecordTypeRead(
+        name="parent-seg",
+        level=DicomQueryLevel.STUDY,
+        file_registry=[],
+    )
+    parent = parent.model_copy(update={"record_type": parent_rt, "record_type_name": "parent-seg"})
+
+    ctx = build_slicer_context(record, parent=parent)
+
+    expected = f"/storage/CLARINET_1/ANON_STUDY/segmentation_parent-seg_{TEST_USER_ID}.seg.nrrd"
+    assert ctx["segmentation"] == expected
 
 
 @pytest.mark.asyncio

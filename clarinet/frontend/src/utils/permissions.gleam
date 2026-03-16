@@ -30,8 +30,12 @@ pub fn can_edit_record(record: Record, user: Option(User)) -> Bool {
   }
 }
 
-/// Check if an admin can restart an auto task (Finished or Failed + auto role + superuser)
+/// Check if an admin can restart a record (Finished or Failed + auto/slicer + superuser)
 pub fn can_restart_record(record: Record, user: Option(User)) -> Bool {
+  let has_slicer = case record.record_type {
+    Some(models.RecordType(slicer_script: Some(_), ..)) -> True
+    _ -> False
+  }
   let is_auto = case record.record_type {
     Some(models.RecordType(role_name: Some("auto"), ..)) -> True
     _ -> False
@@ -44,5 +48,5 @@ pub fn can_restart_record(record: Record, user: Option(User)) -> Bool {
     Some(u) -> u.is_superuser
     None -> False
   }
-  is_auto && is_restartable && is_admin
+  { is_auto || has_slicer } && is_restartable && is_admin
 }

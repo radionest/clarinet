@@ -42,6 +42,7 @@ class FlowContext:
     study_uid: str | None = None
     series_uid: str | None = None
     file_name: str | None = None
+    source_record: RecordRead | None = None
 
     @staticmethod
     def for_record(record: RecordRead, context: dict[str, RecordRead]) -> "FlowContext":
@@ -64,9 +65,17 @@ class FlowContext:
         return FlowContext(patient_id=patient_id, study_uid=study_uid, series_uid=series_uid)
 
     @staticmethod
-    def for_file(file_name: str, patient_id: str) -> "FlowContext":
+    def for_file(
+        file_name: str,
+        patient_id: str,
+        source_record: "RecordRead | None" = None,
+    ) -> "FlowContext":
         """Build context for a file-update flow."""
-        return FlowContext(file_name=file_name, patient_id=patient_id)
+        return FlowContext(
+            file_name=file_name,
+            patient_id=patient_id,
+            source_record=source_record,
+        )
 
 
 class RecordFlowEngine:
@@ -280,16 +289,21 @@ class RecordFlowEngine:
             for action in flow.actions:
                 await self._execute_action(action, ctx)
 
-    async def handle_file_update(self, file_name: str, patient_id: str) -> None:
+    async def handle_file_update(
+        self,
+        file_name: str,
+        patient_id: str,
+        source_record: RecordRead | None = None,
+    ) -> None:
         """Handle a project-level file change and execute relevant flows.
 
-        Called when a pipeline task detects that a file's checksum changed.
-        Iterates file flows registered for the given file name and executes
-        their actions scoped to the patient.
+        Called when a pipeline task detects that a file's checksum changed,
+        or when ``RecordService.submit_data()`` detects output file changes.
 
         Args:
             file_name: The logical file name (from file definition).
             patient_id: The patient whose storage contains the changed file.
+            source_record: Record that produced the file change (for callbacks).
         """
         if file_name not in self.file_flows:
             logger.debug(f"No file flows registered for '{file_name}'")
@@ -297,7 +311,7 @@ class RecordFlowEngine:
 
         logger.debug(f"Processing file update flows for '{file_name}' (patient={patient_id})")
 
-        ctx = FlowContext.for_file(file_name, patient_id)
+        ctx = FlowContext.for_file(file_name, patient_id, source_record=source_record)
         for flow in self.file_flows[file_name]:
             if not flow.update_trigger:
                 continue
@@ -569,6 +583,7 @@ class RecordFlowEngine:
             kwargs = {
                 "file_name": ctx.file_name,
                 "patient_id": ctx.patient_id,
+                "source_record": ctx.source_record,
                 "client": self.clarinet_client,
             }
         else:
@@ -731,18 +746,20 @@ class RecordFlowEngine:
     ) -> None:
         """Invalidate a single target record triggered by a file change.
 
-        No self-skip (no source record). Passes a reason string.
+        Passes ``source_record_id`` when available (from ``submit_data`` path),
+        otherwise uses a reason string only (from pipeline wrapper path).
 
         Args:
             target: The record to invalidate.
-            ctx: The file flow context (must have file_name).
+            ctx: The file flow context (must have file_name, may have source_record).
             action: The InvalidateRecordsAction with mode and callback.
         """
+        source_record_id = ctx.source_record.id if ctx.source_record else None
         try:
             await self.clarinet_client.invalidate_record(
                 record_id=target.id,
                 mode=action.mode,
-                source_record_id=None,
+                source_record_id=source_record_id,
                 reason=f"Invalidated by file change: {ctx.file_name}",
             )
             logger.info(
@@ -761,6 +778,7 @@ class RecordFlowEngine:
             await self._maybe_await(
                 action.callback,
                 record=target,
+                source_record=ctx.source_record,
                 file_name=ctx.file_name,
                 client=self.clarinet_client,
             )
