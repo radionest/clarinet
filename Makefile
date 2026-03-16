@@ -126,9 +126,9 @@ test-cov: ## Run tests with coverage
 test-all: test frontend-test ## Run all tests (backend + frontend)
 
 .PHONY: test-fast
-test-fast: ## Run all tests in parallel (auto workers, all service groups)
+test-fast: ## Run all tests in parallel (auto workers, excludes schema tests)
 	@echo "Running all tests in parallel..."
-	@./scripts/run_tests.sh -n auto --dist loadgroup
+	@./scripts/run_tests.sh -n auto --dist loadgroup -m "not schema"
 
 .PHONY: test-unit
 test-unit: ## Run DB-only tests in parallel (no external services, no schema)

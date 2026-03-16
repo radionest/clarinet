@@ -36,7 +36,7 @@ make typecheck                  # mypy
 make pre-commit                 # All pre-commit hooks
 
 # Testing
-make test-fast                  # All tests in parallel (default, auto workers)
+make test-fast                  # All tests in parallel, excludes schema (default)
 make test-unit                  # DB-only tests in parallel (no external services)
 make test                       # All tests sequential
 make test-cov                   # With coverage

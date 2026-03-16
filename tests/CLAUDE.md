@@ -210,7 +210,7 @@ separate process with its own in-memory SQLite database.
 
 | Command | What runs | Parallel | Use when |
 |---|---|---|---|
-| `make test-fast` | All tests (default) | `-n auto` | Default — includes all service groups |
+| `make test-fast` | All tests except schema (default) | `-n auto` | Default — includes all service groups |
 | `make test-unit` | DB-only tests | `-n auto` | No RabbitMQ/DICOM/Slicer available |
 | `make test` | All tests | sequential | Debugging test order issues |
 | `make test-integration` | `tests/integration/` | sequential | Integration subset only |
