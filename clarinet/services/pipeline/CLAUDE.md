@@ -19,7 +19,8 @@ TaskIQ-based distributed task pipeline for long-running operations (GPU processi
 | `chain.py` | Pipeline chain builder DSL (step-by-step, queue routing) |
 | `middleware.py` | DLQPublisher, PipelineChainMiddleware, PipelineLoggingMiddleware, DeadLetterMiddleware |
 | `context.py` | TaskContext system: FileResolver (sync), RecordQuery (async), build_task_context() |
-| `task.py` | `pipeline_task()` decorator factory — auto client lifecycle + TaskContext |
+| `sync_wrappers.py` | SyncRecordQuery, SyncPipelineClient, SyncTaskContext — sync wrappers for thread-based tasks |
+| `task.py` | `pipeline_task()` decorator factory — auto client lifecycle + TaskContext, sync/async auto-detect |
 | `worker.py` | get_worker_queues() auto-detect, run_worker() entry point |
 | `rabbitmq_cleanup.py` | Test resource cleanup via Management HTTP API (queues/exchanges) |
 
@@ -56,6 +57,29 @@ async def fetch_dicom(msg: PipelineMessage, ctx: TaskContext):
 The decorator also auto-registers the task in `_TASK_REGISTRY` (no manual `register_task()` needed).
 Retries are enabled by default (3x, exponential backoff + jitter). Extra kwargs are forwarded
 to `broker.task()`.
+
+**Sync task support**: `pipeline_task()` auto-detects sync handlers via `inspect.iscoroutinefunction`.
+Sync handlers run in a thread (`asyncio.to_thread()`) and receive `SyncTaskContext` with
+sync wrappers (`SyncRecordQuery`, `SyncPipelineClient`) instead of async originals.
+
+```python
+from clarinet.services.pipeline import pipeline_task, PipelineMessage, SyncTaskContext
+
+@pipeline_task()
+def my_cpu_bound_task(msg: PipelineMessage, ctx: SyncTaskContext) -> None:
+    records = ctx.records.find("ct_seg", series_uid=msg.series_uid)
+    ctx.client.submit_record_data(msg.record_id, {"done": True})
+```
+
+**`auto_submit` parameter**: When `auto_submit=True` and handler returns a `dict`, the decorator
+automatically calls `client.submit_record_data(msg.record_id, result)`. Runs before file
+change detection. Skipped for non-dict results or when `record_id` is None.
+
+```python
+@pipeline_task(auto_submit=True)
+def compare_task(msg: PipelineMessage, ctx: SyncTaskContext) -> dict:
+    return {"score": 0.95}  # auto-submitted
+```
 
 **Automatic file change detection**: After successful task execution, the wrapper computes
 checksums for all files accessed via `ctx.files` (resolve/exists/glob) and compares them
@@ -162,6 +186,9 @@ async def run_segmentation(msg: PipelineMessage, ctx: TaskContext):
 | `FileResolver` | sync | `resolve()`, `exists()`, `glob()`, `dir()` — file path operations |
 | `RecordQuery` | async | `find()`, `file_path()` — record lookup via HTTP client |
 | `TaskContext` | dataclass | Container: `files`, `records`, `client`, `msg` |
+| `SyncRecordQuery` | sync | Sync wrapper for `RecordQuery` — bridges to event loop via `run_coroutine_threadsafe` |
+| `SyncPipelineClient` | sync | Sync wrapper for `ClarinetClient` (12 methods) |
+| `SyncTaskContext` | dataclass | Container: `files`, `records` (sync), `client` (sync), `msg` |
 
 ### Context Building Fallback
 

@@ -131,9 +131,19 @@ test-fast: ## Run all tests in parallel (auto workers, all service groups)
 	@./scripts/run_tests.sh -n auto --dist loadgroup
 
 .PHONY: test-unit
-test-unit: ## Run DB-only tests in parallel (no external services)
+test-unit: ## Run DB-only tests in parallel (no external services, no schema)
 	@echo "Running DB-only tests in parallel..."
-	@./scripts/run_tests.sh -n auto --dist loadgroup -m "not pipeline and not dicom and not slicer"
+	@./scripts/run_tests.sh -n auto --dist loadgroup -m "not pipeline and not dicom and not slicer and not schema"
+
+.PHONY: test-schema
+test-schema: ## Run API schema tests (Schemathesis property-based)
+	@echo "Running API schema tests..."
+	@./scripts/run_tests.sh tests/schema/ -m schema --no-header -q
+
+.PHONY: test-schema-verbose
+test-schema-verbose: ## Run schema tests with verbose output
+	@echo "Running API schema tests (verbose)..."
+	@./scripts/run_tests.sh tests/schema/ -m schema -v --tb=long
 
 .PHONY: test-debug
 test-debug: ## Run tests with full JSON diagnostics (test report + app logs)

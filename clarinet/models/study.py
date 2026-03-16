@@ -24,8 +24,8 @@ class StudyBase(BaseModel):
     study_uid: DicomUID = Field()
     date: date
     anon_uid: str | None = None
-    study_description: str | None = None
-    modalities_in_study: str | None = None
+    study_description: str | None = Field(default=None, max_length=256)
+    modalities_in_study: str | None = Field(default=None, max_length=64)
     patient_id: str
 
 
@@ -37,7 +37,7 @@ class Study(StudyBase, table=True):
     anon_uid: str | None = None
 
     patient: Patient = Relationship(back_populates="studies")
-    series: list[Series] = Relationship(back_populates="study", cascade_delete=True)
+    series: list[Series] = Relationship(back_populates="study", cascade_delete=True)  # noqa: F821
     records: list[Record] = Relationship(back_populates="study", cascade_delete=True)
 
 
@@ -52,7 +52,7 @@ class StudyRead(StudyBase):
     """Pydantic model for reading study data with related entities."""
 
     patient: PatientBase
-    series: list[SeriesBase] = Field()
+    series: list[SeriesBase] = Field()  # noqa: F821
 
 
 class SeriesBase(BaseModel):

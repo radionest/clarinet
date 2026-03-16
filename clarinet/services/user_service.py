@@ -1,7 +1,7 @@
 """Service layer for user business logic."""
 
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from clarinet.exceptions.domain import (
     InvalidCredentialsError,
@@ -65,6 +65,10 @@ class UserService:
         Raises:
             UserAlreadyExistsError: If user already exists
         """
+        # Generate ID if not provided (e.g. when using UserCreate schema)
+        if "id" not in user_data:
+            user_data["id"] = uuid4()
+
         # Check if user exists
         if await self.user_repo.exists(id=user_data["id"]):
             raise UserAlreadyExistsError(user_data["id"])

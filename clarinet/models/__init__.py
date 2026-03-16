@@ -66,7 +66,7 @@ from .study import (
 )
 
 # User models
-from .user import User, UserRead, UserRole, UserRolesLink
+from .user import User, UserCreate, UserRead, UserRole, UserRoleCreate, UserRolesLink, UserUpdate
 
 __all__ = [
     "AccessToken",
@@ -115,6 +115,7 @@ __all__ = [
     "User",
     "UserRead",
     "UserRole",
+    "UserRoleCreate",
     "UserRoleInfo",
     "UserRolesLink",
 ]

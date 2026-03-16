@@ -1,12 +1,14 @@
 """Unit tests for Pipeline TaskContext system.
 
-Tests FileResolver, RecordQuery, TaskContext, build_task_context, and pipeline_task
-decorator — no RabbitMQ, no DB.
+Tests FileResolver, RecordQuery, TaskContext, build_task_context, pipeline_task
+decorator, sync wrappers, and auto_submit — no RabbitMQ, no DB.
 """
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -22,6 +24,11 @@ from clarinet.services.pipeline.context import (
     build_task_context,
 )
 from clarinet.services.pipeline.message import PipelineMessage
+from clarinet.services.pipeline.sync_wrappers import (
+    SyncPipelineClient,
+    SyncRecordQuery,
+    _call_async,
+)
 
 # ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -918,3 +925,432 @@ class TestPipelineTaskIntegration:
                 assert "auth" in str(route.path).lower() or hasattr(route, "routes")
                 break
         assert matched, "POST /api/auth/login should match a route in the app"
+
+
+# ── Sync Wrappers ─────────────────────────────────────────────────────────
+
+
+class TestCallAsync:
+    """Tests for _call_async helper."""
+
+    @pytest.mark.asyncio
+    async def test_returns_result(self):
+        """_call_async bridges an async coroutine from a sync thread."""
+
+        async def coro() -> int:
+            return 42
+
+        loop = asyncio.get_running_loop()
+        result = await asyncio.to_thread(_call_async, coro(), loop)
+        assert result == 42
+
+    @pytest.mark.asyncio
+    async def test_propagates_exception(self):
+        """_call_async re-raises exceptions from the coroutine."""
+
+        async def failing_coro() -> None:
+            raise ValueError("boom")
+
+        loop = asyncio.get_running_loop()
+        with pytest.raises(ValueError, match="boom"):
+            await asyncio.to_thread(_call_async, failing_coro(), loop)
+
+
+class TestSyncRecordQuery:
+    """Tests for SyncRecordQuery delegation."""
+
+    @pytest.mark.asyncio
+    async def test_find_delegates(self):
+        mock_query = MagicMock(spec=RecordQuery)
+        mock_query.find = AsyncMock(return_value=[])
+        loop = asyncio.get_running_loop()
+        sync_rq = SyncRecordQuery(mock_query, loop)
+
+        result = await asyncio.to_thread(sync_rq.find, "ct_seg", series_uid="1.2.3")
+
+        assert result == []
+        mock_query.find.assert_awaited_once_with(
+            "ct_seg",
+            series_uid="1.2.3",
+            study_uid=None,
+            patient_id=None,
+            status=None,
+            limit=100,
+        )
+
+    @pytest.mark.asyncio
+    @patch("clarinet.services.pipeline.context.settings")
+    async def test_file_path_delegates(self, mock_settings: MagicMock):
+        mock_settings.storage_path = "/data"
+
+        mock_query = MagicMock(spec=RecordQuery)
+        mock_query.file_path = AsyncMock(
+            return_value=Path("/data/CLARINET_1/9.8.7.6.5/9.8.7.6.5.4/seg.nrrd")
+        )
+        loop = asyncio.get_running_loop()
+        sync_rq = SyncRecordQuery(mock_query, loop)
+
+        result = await asyncio.to_thread(
+            sync_rq.file_path, "ct_seg", file="segmentation", series_uid="1.2.3"
+        )
+
+        assert result == Path("/data/CLARINET_1/9.8.7.6.5/9.8.7.6.5.4/seg.nrrd")
+
+
+class TestSyncPipelineClient:
+    """Tests for SyncPipelineClient delegation."""
+
+    @pytest.mark.asyncio
+    async def test_submit_record_data_delegates(self):
+        mock_client = AsyncMock()
+        mock_record = MagicMock()
+        mock_client.submit_record_data = AsyncMock(return_value=mock_record)
+        loop = asyncio.get_running_loop()
+        sync_client = SyncPipelineClient(mock_client, loop)
+
+        result = await asyncio.to_thread(sync_client.submit_record_data, 42, {"key": "val"})
+
+        assert result is mock_record
+        mock_client.submit_record_data.assert_awaited_once_with(42, {"key": "val"})
+
+    @pytest.mark.asyncio
+    async def test_get_record_delegates(self):
+        mock_client = AsyncMock()
+        mock_record = MagicMock()
+        mock_client.get_record = AsyncMock(return_value=mock_record)
+        loop = asyncio.get_running_loop()
+        sync_client = SyncPipelineClient(mock_client, loop)
+
+        result = await asyncio.to_thread(sync_client.get_record, 42)
+
+        assert result is mock_record
+        mock_client.get_record.assert_awaited_once_with(42)
+
+    @pytest.mark.asyncio
+    async def test_find_records_advanced_delegates(self):
+        mock_client = AsyncMock()
+        mock_client.find_records_advanced = AsyncMock(return_value=[])
+        loop = asyncio.get_running_loop()
+        sync_client = SyncPipelineClient(mock_client, loop)
+
+        result = await asyncio.to_thread(
+            sync_client.find_records_advanced, record_type_name="ct_seg"
+        )
+
+        assert result == []
+        mock_client.find_records_advanced.assert_awaited_once()
+
+
+# ── Sync Handler Detection ────────────────────────────────────────────────
+
+
+class TestSyncHandlerDetection:
+    """Tests for automatic sync/async handler detection in pipeline_task."""
+
+    @pytest.mark.asyncio
+    @patch("clarinet.services.pipeline.task.get_broker")
+    @patch("clarinet.services.pipeline.task.register_task")
+    @patch("clarinet.services.pipeline.task.build_task_context")
+    @patch("clarinet.services.pipeline.task.ClarinetClient")
+    @patch("clarinet.services.pipeline.task.settings")
+    async def test_sync_handler_receives_sync_context(
+        self,
+        mock_settings: MagicMock,
+        mock_client_cls: MagicMock,
+        mock_build_ctx: MagicMock,
+        mock_register: MagicMock,
+        mock_get_broker: MagicMock,
+    ):
+        """Sync function is detected and receives SyncTaskContext."""
+        mock_settings.api_base_url = "http://localhost:8000/api"
+        mock_settings.admin_email = "admin@test.com"
+        mock_settings.admin_password = "pass"
+
+        mock_broker = MagicMock()
+        mock_broker.task = MagicMock(return_value=MagicMock(side_effect=lambda fn: fn))
+        mock_get_broker.return_value = mock_broker
+
+        mock_client = AsyncMock()
+        mock_client_cls.return_value = mock_client
+        mock_files = MagicMock()
+        mock_files.snapshot_checksums = AsyncMock(return_value={})
+        mock_files.accessed_files = {}
+        mock_ctx = MagicMock()
+        mock_ctx.files = mock_files
+        mock_build_ctx.return_value = mock_ctx
+
+        from clarinet.services.pipeline.task import pipeline_task
+
+        received: dict[str, Any] = {}
+
+        @pipeline_task()
+        def sync_task(msg: MagicMock, ctx: MagicMock) -> None:
+            received["ctx_type"] = type(ctx).__name__
+
+        await sync_task({"patient_id": "PAT001", "study_uid": "1.2.3"})
+
+        assert received["ctx_type"] == "SyncTaskContext"
+
+    @pytest.mark.asyncio
+    @patch("clarinet.services.pipeline.task.get_broker")
+    @patch("clarinet.services.pipeline.task.register_task")
+    @patch("clarinet.services.pipeline.task.build_task_context")
+    @patch("clarinet.services.pipeline.task.ClarinetClient")
+    @patch("clarinet.services.pipeline.task.settings")
+    async def test_async_handler_unchanged(
+        self,
+        mock_settings: MagicMock,
+        mock_client_cls: MagicMock,
+        mock_build_ctx: MagicMock,
+        mock_register: MagicMock,
+        mock_get_broker: MagicMock,
+    ):
+        """Async function still works as before with TaskContext."""
+        mock_settings.api_base_url = "http://localhost:8000/api"
+        mock_settings.admin_email = "admin@test.com"
+        mock_settings.admin_password = "pass"
+
+        mock_broker = MagicMock()
+        mock_broker.task = MagicMock(return_value=MagicMock(side_effect=lambda fn: fn))
+        mock_get_broker.return_value = mock_broker
+
+        mock_client = AsyncMock()
+        mock_client_cls.return_value = mock_client
+        mock_files = MagicMock()
+        mock_files.snapshot_checksums = AsyncMock(return_value={})
+        mock_files.accessed_files = {}
+        mock_ctx = MagicMock()
+        mock_ctx.files = mock_files
+        mock_build_ctx.return_value = mock_ctx
+
+        from clarinet.services.pipeline.task import pipeline_task
+
+        received: dict[str, Any] = {}
+
+        @pipeline_task()
+        async def async_task(msg: MagicMock, ctx: MagicMock) -> None:
+            received["ctx"] = ctx
+
+        await async_task({"patient_id": "PAT001", "study_uid": "1.2.3"})
+
+        # Async handler receives the original TaskContext mock, not SyncTaskContext
+        assert received["ctx"] is mock_ctx
+
+
+# ── auto_submit ───────────────────────────────────────────────────────────
+
+
+class TestAutoSubmit:
+    """Tests for the auto_submit parameter of pipeline_task."""
+
+    @pytest.mark.asyncio
+    @patch("clarinet.services.pipeline.task.get_broker")
+    @patch("clarinet.services.pipeline.task.register_task")
+    @patch("clarinet.services.pipeline.task.build_task_context")
+    @patch("clarinet.services.pipeline.task.ClarinetClient")
+    @patch("clarinet.services.pipeline.task.settings")
+    async def test_auto_submit_dict_result(
+        self,
+        mock_settings: MagicMock,
+        mock_client_cls: MagicMock,
+        mock_build_ctx: MagicMock,
+        mock_register: MagicMock,
+        mock_get_broker: MagicMock,
+    ):
+        """Dict result with auto_submit=True calls submit_record_data."""
+        mock_settings.api_base_url = "http://localhost:8000/api"
+        mock_settings.admin_email = "admin@test.com"
+        mock_settings.admin_password = "pass"
+
+        mock_broker = MagicMock()
+        mock_broker.task = MagicMock(return_value=MagicMock(side_effect=lambda fn: fn))
+        mock_get_broker.return_value = mock_broker
+
+        mock_client = AsyncMock()
+        mock_client_cls.return_value = mock_client
+        mock_files = MagicMock()
+        mock_files.snapshot_checksums = AsyncMock(return_value={})
+        mock_files.accessed_files = {}
+        mock_ctx = MagicMock()
+        mock_ctx.files = mock_files
+        mock_build_ctx.return_value = mock_ctx
+
+        from clarinet.services.pipeline.task import pipeline_task
+
+        @pipeline_task(auto_submit=True)
+        async def submit_task(msg: MagicMock, ctx: MagicMock) -> dict:
+            return {"result": "ok"}
+
+        await submit_task({"patient_id": "PAT001", "study_uid": "1.2.3", "record_id": 42})
+
+        mock_client.submit_record_data.assert_awaited_once_with(42, {"result": "ok"})
+
+    @pytest.mark.asyncio
+    @patch("clarinet.services.pipeline.task.get_broker")
+    @patch("clarinet.services.pipeline.task.register_task")
+    @patch("clarinet.services.pipeline.task.build_task_context")
+    @patch("clarinet.services.pipeline.task.ClarinetClient")
+    @patch("clarinet.services.pipeline.task.settings")
+    async def test_auto_submit_none_result(
+        self,
+        mock_settings: MagicMock,
+        mock_client_cls: MagicMock,
+        mock_build_ctx: MagicMock,
+        mock_register: MagicMock,
+        mock_get_broker: MagicMock,
+    ):
+        """None result with auto_submit=True does not call submit."""
+        mock_settings.api_base_url = "http://localhost:8000/api"
+        mock_settings.admin_email = "admin@test.com"
+        mock_settings.admin_password = "pass"
+
+        mock_broker = MagicMock()
+        mock_broker.task = MagicMock(return_value=MagicMock(side_effect=lambda fn: fn))
+        mock_get_broker.return_value = mock_broker
+
+        mock_client = AsyncMock()
+        mock_client_cls.return_value = mock_client
+        mock_files = MagicMock()
+        mock_files.snapshot_checksums = AsyncMock(return_value={})
+        mock_files.accessed_files = {}
+        mock_ctx = MagicMock()
+        mock_ctx.files = mock_files
+        mock_build_ctx.return_value = mock_ctx
+
+        from clarinet.services.pipeline.task import pipeline_task
+
+        @pipeline_task(auto_submit=True)
+        async def noop_task(msg: MagicMock, ctx: MagicMock) -> None:
+            pass
+
+        await noop_task({"patient_id": "PAT001", "study_uid": "1.2.3", "record_id": 42})
+
+        mock_client.submit_record_data.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    @patch("clarinet.services.pipeline.task.get_broker")
+    @patch("clarinet.services.pipeline.task.register_task")
+    @patch("clarinet.services.pipeline.task.build_task_context")
+    @patch("clarinet.services.pipeline.task.ClarinetClient")
+    @patch("clarinet.services.pipeline.task.settings")
+    async def test_auto_submit_no_record_id_warns(
+        self,
+        mock_settings: MagicMock,
+        mock_client_cls: MagicMock,
+        mock_build_ctx: MagicMock,
+        mock_register: MagicMock,
+        mock_get_broker: MagicMock,
+        caplog: pytest.LogCaptureFixture,
+    ):
+        """Dict result without record_id logs warning, no submit."""
+        mock_settings.api_base_url = "http://localhost:8000/api"
+        mock_settings.admin_email = "admin@test.com"
+        mock_settings.admin_password = "pass"
+
+        mock_broker = MagicMock()
+        mock_broker.task = MagicMock(return_value=MagicMock(side_effect=lambda fn: fn))
+        mock_get_broker.return_value = mock_broker
+
+        mock_client = AsyncMock()
+        mock_client_cls.return_value = mock_client
+        mock_files = MagicMock()
+        mock_files.snapshot_checksums = AsyncMock(return_value={})
+        mock_files.accessed_files = {}
+        mock_ctx = MagicMock()
+        mock_ctx.files = mock_files
+        mock_build_ctx.return_value = mock_ctx
+
+        from clarinet.services.pipeline.task import pipeline_task
+
+        @pipeline_task(auto_submit=True)
+        async def dict_task(msg: MagicMock, ctx: MagicMock) -> dict:
+            return {"data": "value"}
+
+        await dict_task({"patient_id": "PAT001", "study_uid": "1.2.3"})
+
+        mock_client.submit_record_data.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    @patch("clarinet.services.pipeline.task.get_broker")
+    @patch("clarinet.services.pipeline.task.register_task")
+    @patch("clarinet.services.pipeline.task.build_task_context")
+    @patch("clarinet.services.pipeline.task.ClarinetClient")
+    @patch("clarinet.services.pipeline.task.settings")
+    async def test_auto_submit_pipeline_message_skipped(
+        self,
+        mock_settings: MagicMock,
+        mock_client_cls: MagicMock,
+        mock_build_ctx: MagicMock,
+        mock_register: MagicMock,
+        mock_get_broker: MagicMock,
+    ):
+        """PipelineMessage result with auto_submit=True is not submitted."""
+        mock_settings.api_base_url = "http://localhost:8000/api"
+        mock_settings.admin_email = "admin@test.com"
+        mock_settings.admin_password = "pass"
+
+        mock_broker = MagicMock()
+        mock_broker.task = MagicMock(return_value=MagicMock(side_effect=lambda fn: fn))
+        mock_get_broker.return_value = mock_broker
+
+        mock_client = AsyncMock()
+        mock_client_cls.return_value = mock_client
+        mock_files = MagicMock()
+        mock_files.snapshot_checksums = AsyncMock(return_value={})
+        mock_files.accessed_files = {}
+        mock_ctx = MagicMock()
+        mock_ctx.files = mock_files
+        mock_build_ctx.return_value = mock_ctx
+
+        from clarinet.services.pipeline.task import pipeline_task
+
+        @pipeline_task(auto_submit=True)
+        async def msg_task(msg: PipelineMessage, ctx: MagicMock) -> PipelineMessage:
+            return msg.model_copy(update={"payload": {"result": "ok"}})
+
+        result = await msg_task({"patient_id": "PAT001", "study_uid": "1.2.3", "record_id": 42})
+
+        mock_client.submit_record_data.assert_not_awaited()
+        assert result["payload"] == {"result": "ok"}
+
+    @pytest.mark.asyncio
+    @patch("clarinet.services.pipeline.task.get_broker")
+    @patch("clarinet.services.pipeline.task.register_task")
+    @patch("clarinet.services.pipeline.task.build_task_context")
+    @patch("clarinet.services.pipeline.task.ClarinetClient")
+    @patch("clarinet.services.pipeline.task.settings")
+    async def test_auto_submit_false_by_default(
+        self,
+        mock_settings: MagicMock,
+        mock_client_cls: MagicMock,
+        mock_build_ctx: MagicMock,
+        mock_register: MagicMock,
+        mock_get_broker: MagicMock,
+    ):
+        """Dict result without auto_submit=True does not call submit."""
+        mock_settings.api_base_url = "http://localhost:8000/api"
+        mock_settings.admin_email = "admin@test.com"
+        mock_settings.admin_password = "pass"
+
+        mock_broker = MagicMock()
+        mock_broker.task = MagicMock(return_value=MagicMock(side_effect=lambda fn: fn))
+        mock_get_broker.return_value = mock_broker
+
+        mock_client = AsyncMock()
+        mock_client_cls.return_value = mock_client
+        mock_files = MagicMock()
+        mock_files.snapshot_checksums = AsyncMock(return_value={})
+        mock_files.accessed_files = {}
+        mock_ctx = MagicMock()
+        mock_ctx.files = mock_files
+        mock_build_ctx.return_value = mock_ctx
+
+        from clarinet.services.pipeline.task import pipeline_task
+
+        @pipeline_task()
+        async def no_submit_task(msg: MagicMock, ctx: MagicMock) -> dict:
+            return {"data": "value"}
+
+        await no_submit_task({"patient_id": "PAT001", "study_uid": "1.2.3", "record_id": 42})
+
+        mock_client.submit_record_data.assert_not_awaited()

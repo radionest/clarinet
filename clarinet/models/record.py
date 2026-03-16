@@ -21,7 +21,7 @@ from clarinet.utils.logger import logger
 
 from ..exceptions import ConfigurationError, ValidationError
 from ..settings import settings
-from .base import BaseModel, RecordStatus
+from .base import BaseModel, DicomUID, RecordStatus
 from .file_schema import RecordFileLink, RecordFileLinkRead
 from .patient import Patient, PatientBase
 from .record_type import (
@@ -68,7 +68,7 @@ class RecordFindResultComparisonOperator(str, Enum):
 class RecordFindResult(SQLModel):
     """Model for specifying search criteria for record data."""
 
-    result_name: str
+    result_name: str = Field(min_length=1, max_length=255)
     result_value: str | bool | int | float
     comparison_operator: RecordFindResultComparisonOperator | None = Field(
         default=RecordFindResultComparisonOperator.eq
@@ -102,11 +102,11 @@ class RecordBase(BaseModel):
     status: RecordStatus = RecordStatus.pending
 
     # Foreign key fields
-    study_uid: str | None
-    series_uid: str | None = None
-    record_type_name: str
+    study_uid: DicomUID | None
+    series_uid: DicomUID | None = None
+    record_type_name: str = Field(min_length=5, max_length=30)
     user_id: UUID | None = None
-    patient_id: str
+    patient_id: str = Field(min_length=1, max_length=64)
 
     # Parent record link
     parent_record_id: int | None = None
@@ -150,11 +150,11 @@ class Record(RecordBase, table=True):
         foreign_key="record.id",
         ondelete="SET NULL",
     )
-    parent_record: Optional["Record"] = Relationship(  # noqa: UP045, UP037
+    parent_record: Optional["Record"] = Relationship(
         back_populates="child_records",
         sa_relationship_kwargs={"remote_side": "Record.id"},
     )
-    child_records: list["Record"] = Relationship(back_populates="parent_record")  # noqa: UP037
+    child_records: list["Record"] = Relationship(back_populates="parent_record")
 
     record_type_name: str = Field(foreign_key="recordtype.name")
     record_type: RecordType = Relationship(back_populates="records")
@@ -188,7 +188,7 @@ class Record(RecordBase, table=True):
     finished_at: datetime | None = None
 
     @model_validator(mode="after")
-    def validate_record_level(self) -> Record:
+    def validate_record_level(self) -> "Record":
         match (self.record_type.level, self.patient_id, self.study_uid, self.series_uid):
             case ("PATIENT", _, None, None) | ("STUDY", _, _, None) | ("SERIES", _, str(), str()):
                 return self

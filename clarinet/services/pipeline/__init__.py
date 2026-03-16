@@ -46,6 +46,7 @@ from .chain import (
 from .context import FileResolver, RecordQuery, TaskContext, build_task_context
 from .message import PipelineMessage
 from .middleware import DeadLetterMiddleware, DLQPublisher
+from .sync_wrappers import SyncPipelineClient, SyncRecordQuery, SyncTaskContext
 from .task import pipeline_task
 from .worker import get_worker_queues, run_worker
 
@@ -63,6 +64,9 @@ __all__ = [
     "PipelineMessage",
     "PipelineStepError",
     "RecordQuery",
+    "SyncPipelineClient",
+    "SyncRecordQuery",
+    "SyncTaskContext",
     "TaskContext",
     "build_task_context",
     "create_broker",

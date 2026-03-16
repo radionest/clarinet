@@ -9,7 +9,11 @@ from fastapi import APIRouter
 from clarinet.api.dependencies import PipelineDefinitionRepositoryDep
 from clarinet.models.pipeline_definition import PipelineDefinition, PipelineDefinitionRead
 
-router = APIRouter()
+router = APIRouter(
+    responses={
+        404: {"description": "Not found"},
+    },
+)
 
 
 @router.get("/{name}/definition", response_model=PipelineDefinitionRead)

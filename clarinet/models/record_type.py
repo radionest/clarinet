@@ -40,17 +40,17 @@ class RecordTypeBase(SQLModel):
     - ``RecordTypeCreate`` / ``RecordTypeOptional``: defines it as a regular field
     """
 
-    name: str
-    description: str | None = None
-    label: str | None = None
+    name: str = Field(min_length=5, max_length=30)
+    description: str | None = Field(default=None, max_length=500)
+    label: str | None = Field(default=None, max_length=100)
     slicer_script: str | None = None
     slicer_script_args: SlicerArgs | None = None
     slicer_result_validator: str | None = None
     slicer_result_validator_args: SlicerArgs | None = None
 
     role_name: str | None = Field(default=None)
-    max_records: int | None = Field(default=None)
-    min_records: int | None = Field(default=1)
+    max_records: int | None = Field(default=None, ge=0, le=10000)
+    min_records: int | None = Field(default=1, ge=0, le=10000)
     level: DicomQueryLevel = Field(default=DicomQueryLevel.SERIES)
 
     data_schema: RecordSchema | None = None
@@ -211,4 +211,3 @@ class RecordTypeFind(SQLModel):
 
     name: str | None = Field(default=None)
     constraint_role: str | None = Field(default=None)
-    constraint_user_num: int | None = Field(default=None)

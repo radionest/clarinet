@@ -72,8 +72,11 @@ class FileCheckResult(SQLModel):
 router = APIRouter(
     tags=["Records"],
     responses={
+        401: {"description": "Not authenticated"},
+        403: {"description": "Forbidden"},
         404: {"description": "Not found"},
         409: {"description": "Conflict"},
+        422: {"description": "Validation error"},
     },
     dependencies=[Depends(current_active_user)],
 )

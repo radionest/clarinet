@@ -36,7 +36,7 @@ line-length = 100
 indent-width = 4
 
 # Assume Python 3.14
-target-version = "py314"
+target-version = "py312"
 
 [lint]
 # Enable pycodestyle (`E`) and Pyflakes (`F`) codes by default.

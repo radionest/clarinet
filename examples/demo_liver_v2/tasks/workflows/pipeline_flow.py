@@ -11,7 +11,6 @@ This version uses the implemented RecordFlow/Pipeline DSL
 
 from __future__ import annotations
 
-import asyncio
 import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -22,7 +21,12 @@ from utils.seg_utils import master_label_converter, save_seg_nrrd
 
 from clarinet.models.base import RecordStatus
 from clarinet.services.image import Segmentation
-from clarinet.services.pipeline import PipelineMessage, TaskContext, pipeline_task
+from clarinet.services.pipeline import (
+    PipelineMessage,
+    SyncTaskContext,
+    TaskContext,
+    pipeline_task,
+)
 from clarinet.services.recordflow import Field, file, record, study
 from clarinet.settings import settings
 from clarinet.utils.logger import logger
@@ -39,7 +43,7 @@ F = Field()
 
 
 @pipeline_task()
-async def init_master_model(_msg: PipelineMessage, ctx: TaskContext) -> None:
+def init_master_model(_msg: PipelineMessage, ctx: SyncTaskContext) -> None:
     """Создание мастер-модели по первой завершённой КТ-сегментации.
 
     Берёт сегментацию врача, бинаризует все ненулевые вокселы,
@@ -56,27 +60,24 @@ async def init_master_model(_msg: PipelineMessage, ctx: TaskContext) -> None:
         )
     master_path = ctx.files.resolve(master_model)
 
-    def _create_master() -> None:
-        from skimage.measure import label
+    from skimage.measure import label
 
-        seg = Segmentation(autolabel=False)
-        seg.read(seg_path)
-        # Бинаризация: все категории (mts/unclear/benign) → единый foreground
-        labeled = label(seg.img > 0).astype(np.uint8)
-        unique = sorted(int(lbl) for lbl in np.unique(labeled) if lbl != 0)
-        names = [str(lbl) for lbl in unique]
-        Path(master_path).parent.mkdir(parents=True, exist_ok=True)
-        save_seg_nrrd(
-            labeled,
-            master_path,
-            names,
-            master_label_converter,
-            spacing=seg.spacing,
-            origin=seg._origin,
-            direction=seg._direction,
-        )
-
-    await asyncio.to_thread(_create_master)
+    seg = Segmentation(autolabel=False)
+    seg.read(seg_path)
+    # Бинаризация: все категории (mts/unclear/benign) → единый foreground
+    labeled = label(seg.img > 0).astype(np.uint8)
+    unique = sorted(int(lbl) for lbl in np.unique(labeled) if lbl != 0)
+    names = [str(lbl) for lbl in unique]
+    Path(master_path).parent.mkdir(parents=True, exist_ok=True)
+    save_seg_nrrd(
+        labeled,
+        master_path,
+        names,
+        master_label_converter,
+        spacing=seg.spacing,
+        origin=seg._origin,
+        direction=seg._direction,
+    )
 
 
 @pipeline_task()
@@ -102,51 +103,43 @@ async def auto_project_ct(msg: PipelineMessage, ctx: TaskContext) -> None:
     await ctx.client.submit_record_data(msg.record_id, {})
 
 
-@pipeline_task()
-async def compare_w_projection(msg: PipelineMessage, ctx: TaskContext) -> None:
+@pipeline_task(auto_submit=True)
+def compare_w_projection(msg: PipelineMessage, ctx: SyncTaskContext) -> dict[str, Any]:
     """Автоматическое сравнение сегментации врача с проекцией мастер-модели.
 
     Для каждого ROI проверяет пересечение:
     - пересечение есть → один и тот же очаг
     - пересечения нет → false negative или false positive
 
-    Результат записывается в data записи compare_with_projection.
+    Returns dict with comparison results — auto-submitted via ``auto_submit``.
     """
     assert msg.record_id is not None
 
     seg_path = ctx.files.resolve(segmentation_single)
     proj_path = ctx.files.resolve(master_projection)
 
-    def _compare() -> tuple[list[dict[str, int]], int]:
-        # Бинаризация сегментации врача перед labeling:
-        # mts/unclear/benign → единый foreground → connected components
-        raw = Segmentation(autolabel=False)
-        raw.read(seg_path)
-        seg = Segmentation(autolabel=True)
-        seg.img = (raw.img > 0).astype(np.uint8)
+    # Бинаризация сегментации врача перед labeling:
+    # mts/unclear/benign → единый foreground → connected components
+    raw = Segmentation(autolabel=False)
+    raw.read(seg_path)
+    seg = Segmentation(autolabel=True)
+    seg.img = (raw.img > 0).astype(np.uint8)
 
-        proj = Segmentation(autolabel=False)  # preserve master model labels
-        proj.read(proj_path)
+    proj = Segmentation(autolabel=False)  # preserve master model labels
+    proj.read(proj_path)
 
-        # Очаги на проекции, не найденные врачом
-        fn = proj.difference(seg)
-        false_neg = [{"lesion_num": int(lbl)} for lbl in np.unique(fn.img) if lbl != 0]
+    # Очаги на проекции, не найденные врачом
+    fn = proj.difference(seg)
+    false_negative = [{"lesion_num": int(lbl)} for lbl in np.unique(fn.img) if lbl != 0]
 
-        # Очаги врача, отсутствующие на проекции
-        fp = seg.difference(proj)
+    # Очаги врача, отсутствующие на проекции
+    fp = seg.difference(proj)
 
-        return false_neg, fp.count
-
-    false_negative, false_positive_num = await asyncio.to_thread(_compare)
-
-    await ctx.client.submit_record_data(
-        msg.record_id,
-        {
-            "false_negative": false_negative,
-            "false_negative_num": len(false_negative),
-            "false_positive_num": false_positive_num,
-        },
-    )
+    return {
+        "false_negative": false_negative,
+        "false_negative_num": len(false_negative),
+        "false_positive_num": fp.count,
+    }
 
 
 @pipeline_task(queue="clarinet.dicom")
@@ -223,7 +216,7 @@ async def anonymize_study_pipeline(msg: PipelineMessage, ctx: TaskContext) -> No
 
 async def create_projection_record(
     record: RecordRead,
-    context: dict[str, Any],
+    _context: dict[str, Any],
     client: ClarinetClient,
 ) -> None:
     """Create ``create_master_projection`` with series_uid from first_check."""
@@ -257,7 +250,7 @@ async def create_projection_record(
 
 async def create_comparison_record(
     record: RecordRead,
-    context: dict[str, Any],
+    _context: dict[str, Any],
     client: ClarinetClient,
 ) -> None:
     """Create ``compare_with_projection`` linked to the segmentation as parent."""
@@ -286,7 +279,7 @@ async def create_comparison_record(
 
 async def unblock_comparisons(
     record: RecordRead,
-    context: dict[str, Any],
+    _context: dict[str, Any],
     client: ClarinetClient,
 ) -> None:
     """Check-files on all blocked ``compare_with_projection`` for this series."""
