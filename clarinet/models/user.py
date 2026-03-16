@@ -57,7 +57,7 @@ class User(SQLModelBaseUserDB, SQLModel, table=True):
     )
 
     # Relationships with existing models
-    roles: list[UserRole] = Relationship(back_populates="users", link_model=UserRolesLink)
+    roles: list["UserRole"] = Relationship(back_populates="users", link_model=UserRolesLink)
     records: list[Record] = Relationship(back_populates="user")
 
 
@@ -86,9 +86,15 @@ class UserUpdate(schemas.BaseUserUpdate):
     pass
 
 
+class UserRoleCreate(SQLModel):
+    """Schema for creating a new role."""
+
+    name: str = Field(min_length=1, max_length=50)
+
+
 class UserRole(BaseModel, table=True):
     """Model representing a role that can be assigned to users."""
 
-    name: str = Field(primary_key=True)
+    name: str = Field(primary_key=True, min_length=1, max_length=50)
     users: list[User] = Relationship(back_populates="roles", link_model=UserRolesLink)
     allowed_record_types: list[RecordType] = Relationship(back_populates="constraint_role")
