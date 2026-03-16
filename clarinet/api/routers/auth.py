@@ -45,7 +45,13 @@ class SessionRefreshResponse(BaseModel):
 
 
 # Use ready-made routers from fastapi-users
-router = APIRouter(tags=["auth"])
+router = APIRouter(
+    tags=["auth"],
+    responses={
+        401: {"description": "Not authenticated"},
+        422: {"description": "Validation error"},
+    },
+)
 
 # Add standard endpoints (login, logout)
 router.include_router(

@@ -21,7 +21,16 @@ from clarinet.models import (
 from clarinet.models.patient import PatientRead
 from clarinet.models.study import SeriesFind, StudyRead
 
-router = APIRouter(dependencies=[Depends(current_superuser)])
+router = APIRouter(
+    responses={
+        401: {"description": "Not authenticated"},
+        403: {"description": "Forbidden"},
+        404: {"description": "Not found"},
+        409: {"description": "Conflict"},
+        422: {"description": "Validation error"},
+    },
+    dependencies=[Depends(current_superuser)],
+)
 
 
 # Patient endpoints

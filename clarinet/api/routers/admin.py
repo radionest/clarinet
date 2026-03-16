@@ -9,7 +9,14 @@ from clarinet.models import Record, RecordRead
 from clarinet.models.admin import AdminStats, RecordTypeStats, RoleMatrixResponse
 from clarinet.models.base import RecordStatus
 
-router = APIRouter()
+router = APIRouter(
+    responses={
+        401: {"description": "Not authenticated"},
+        403: {"description": "Forbidden"},
+        404: {"description": "Not found"},
+        422: {"description": "Validation error"},
+    },
+)
 
 
 @router.get("/stats", response_model=AdminStats)

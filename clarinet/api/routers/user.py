@@ -15,9 +15,19 @@ from clarinet.api.dependencies import (
     SuperUserDep,
     UserServiceDep,
 )
-from clarinet.models import User, UserRead, UserRole
+from clarinet.models import User, UserCreate, UserRead, UserRole, UserRoleCreate, UserUpdate
 
-router = APIRouter(tags=["users"], dependencies=[Depends(current_active_user)])
+router = APIRouter(
+    tags=["users"],
+    responses={
+        401: {"description": "Not authenticated"},
+        403: {"description": "Forbidden"},
+        404: {"description": "Not found"},
+        409: {"description": "Conflict"},
+        422: {"description": "Validation error"},
+    },
+    dependencies=[Depends(current_active_user)],
+)
 
 
 # Authentication endpoints
@@ -60,7 +70,7 @@ async def get_role_details(
 
 @router.post("/roles", response_model=UserRole, status_code=status.HTTP_201_CREATED)
 async def create_role(
-    new_role: UserRole,
+    new_role: UserRoleCreate,
     service: UserServiceDep,
     _current_user: SuperUserDep,
 ) -> UserRole:
@@ -91,7 +101,7 @@ async def get_user(
 
 @router.post("/", response_model=UserRead, status_code=status.HTTP_201_CREATED)
 async def create_user(
-    user: User,
+    user: UserCreate,
     service: UserServiceDep,
     _current_user: SuperUserDep,
 ) -> User:
@@ -103,7 +113,7 @@ async def create_user(
 @router.put("/{user_id}", response_model=UserRead)
 async def update_user(
     user_id: UUID,
-    user_update: User,
+    user_update: UserUpdate,
     service: UserServiceDep,
     _current_user: SuperUserDep,
 ) -> User:

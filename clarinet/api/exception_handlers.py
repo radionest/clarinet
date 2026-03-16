@@ -176,6 +176,60 @@ def setup_exception_handlers(app: FastAPI) -> None:
             content={"detail": str(exc) if str(exc) else "Resource not found"},
         )
 
+    from sqlalchemy.exc import ArgumentError, IntegrityError, InvalidRequestError, StatementError
+
+    @app.exception_handler(IntegrityError)
+    async def handle_integrity_error(_: Request, exc: IntegrityError) -> JSONResponse:
+        """Convert SQLAlchemy IntegrityError to 409 response."""
+        logger.warning("Database integrity error: {}", exc.orig)
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content={"detail": "Resource conflict"},
+        )
+
+    @app.exception_handler(ArgumentError)
+    async def handle_argument_error(_: Request, exc: ArgumentError) -> JSONResponse:
+        """Convert SQLAlchemy ArgumentError (ambiguous joins, etc.) to 422."""
+        logger.warning("Database argument error: {}", exc)
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            content={"detail": "Invalid query parameters"},
+        )
+
+    @app.exception_handler(InvalidRequestError)
+    async def handle_invalid_request_error(_: Request, exc: InvalidRequestError) -> JSONResponse:
+        """Convert SQLAlchemy InvalidRequestError to 422 response."""
+        logger.warning("Database request error: {}", exc)
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            content={"detail": "Invalid query parameters"},
+        )
+
+    @app.exception_handler(StatementError)
+    async def handle_statement_error(_: Request, exc: StatementError) -> JSONResponse:
+        """Convert SQLAlchemy StatementError (null bytes, type mismatches) to 422."""
+        logger.warning("Database statement error: {}", exc.orig)
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            content={"detail": "Invalid data for database operation"},
+        )
+
+    @app.exception_handler(OverflowError)
+    async def handle_overflow_error(_: Request, _exc: OverflowError) -> JSONResponse:
+        """Convert OverflowError to 422 response."""
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            content={"detail": "Numeric value out of range"},
+        )
+
+    @app.exception_handler(ValueError)
+    async def handle_value_error(_: Request, exc: ValueError) -> JSONResponse:
+        """Convert ValueError (embedded null byte, etc.) to 422."""
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            content={"detail": str(exc)},
+        )
+
     @app.exception_handler(Exception)
     async def handle_unhandled_exception(_: Request, exc: Exception) -> JSONResponse:
         """Catch-all for unhandled exceptions — log full traceback, return generic 500."""
