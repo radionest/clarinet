@@ -40,13 +40,14 @@ frontend-build: ## Build frontend for production
 		gleam deps download && \
 		gleam build --target javascript && \
 		cd ../.. && \
-		rm -rf dist && \
-		mkdir -p dist/js dist/css dist/assets && \
-		cp -r clarinet/frontend/build/dev/javascript/* dist/js/ && \
+		rm -rf clarinet/static && \
+		mkdir -p clarinet/static/js clarinet/static/css clarinet/static/assets && \
+		cp -r clarinet/frontend/build/dev/javascript/* clarinet/static/js/ && \
+		find clarinet/static/js -type d -name "_gleam_artefacts" -exec rm -rf {} + 2>/dev/null; \
 		if [ -d "clarinet/frontend/public" ]; then \
-			cp -r clarinet/frontend/public/* dist/; \
+			cp -r clarinet/frontend/public/* clarinet/static/; \
 		fi && \
-		echo "Frontend build complete! Output in dist/"; \
+		echo "Frontend build complete! Output in clarinet/static/"; \
 	fi
 
 .PHONY: frontend-deps
@@ -63,7 +64,7 @@ frontend-test: ## Run frontend tests
 frontend-clean: ## Clean frontend build artifacts
 	@echo "Cleaning frontend artifacts..."
 	@rm -rf clarinet/frontend/build
-	@rm -rf dist
+	@rm -rf clarinet/static
 
 .PHONY: ohif-build
 ohif-build: ## Download and install OHIF Viewer

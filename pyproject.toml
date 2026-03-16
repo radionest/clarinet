@@ -73,14 +73,10 @@ Issues = "https://github.com/radionest/clarinet/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["clarinet"]
-include = [
-    "dist/**/*"
-]
 
 [tool.hatch.build]
-include = [
-    "clarinet/**/*",
-    "dist/**/*"
+artifacts = [
+    "clarinet/static/**/*",
 ]
 
 [dependency-groups]

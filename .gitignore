@@ -18,6 +18,7 @@ pdm.lock
 # Build artifacts
 **/build/**
 dist/
+clarinet/static/
 
 # Gleam (generated)
 clarinet/frontend/manifest.toml

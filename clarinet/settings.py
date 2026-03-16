@@ -331,7 +331,7 @@ class Settings(BaseSettings):
     @property
     def static_path(self) -> Path:
         """Path to built frontend static files."""
-        return Path(__file__).parent.parent / "dist"
+        return Path(__file__).parent / "static"
 
     @property
     def custom_static_path(self) -> Path | None:
