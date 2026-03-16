@@ -55,10 +55,10 @@ class FileDefinition(SQLModel, table=True):
     multiple: bool = Field(default=False)
     level: DicomQueryLevel | None = None
 
-    record_type_links: list[RecordTypeFileLink] = Relationship(
+    record_type_links: list["RecordTypeFileLink"] = Relationship(
         back_populates="file_definition",
     )
-    record_file_links: list[RecordFileLink] = Relationship(
+    record_file_links: list["RecordFileLink"] = Relationship(
         back_populates="file_definition",
     )
 
