@@ -79,7 +79,7 @@ class RecordType(RecordTypeBase, table=True):
     role_name: str | None = Field(foreign_key="userrole.name", default=None)
     constraint_role: UserRole | None = Relationship(back_populates="allowed_record_types")
 
-    records: list[Record] = Relationship(back_populates="record_type")
+    records: list["Record"] = Relationship(back_populates="record_type")
 
     # M2M relationship to FileDefinition via link table
     file_links: list[RecordTypeFileLink] = Relationship(

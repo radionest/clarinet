@@ -47,13 +47,13 @@ class SQLModelUserDatabaseAsync(BaseUserDatabase[UP, ID]):
 
     session: AsyncSession
     user_model: type[UP]
-    oauth_account_model: type[SQLModelBaseOAuthAccount] | None
+    oauth_account_model: "type[SQLModelBaseOAuthAccount] | None"
 
     def __init__(
         self,
         session: AsyncSession,
         user_model: type[UP],
-        oauth_account_model: type[SQLModelBaseOAuthAccount] | None = None,
+        oauth_account_model: "type[SQLModelBaseOAuthAccount] | None" = None,
     ) -> None:
         self.session = session
         self.user_model = user_model

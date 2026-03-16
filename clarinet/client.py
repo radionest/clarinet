@@ -128,7 +128,7 @@ class ClarinetClient:
             # User can also call login() manually
             pass
 
-    async def __aenter__(self) -> ClarinetClient:
+    async def __aenter__(self) -> "ClarinetClient":
         """Async context manager entry."""
         if self.username and not self._authenticated:
             await self.login()
