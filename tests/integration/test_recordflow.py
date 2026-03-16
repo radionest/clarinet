@@ -1114,7 +1114,7 @@ class TestLazyAuthentication:
             "series",
             patient_id=test_patient.id,
             study_uid=test_study.study_uid,
-            series_uid="1.2.3.lazy.auth.test",
+            series_uid="1.2.3.99.88.77",
         )
 
         # Client should now be authenticated
@@ -1126,7 +1126,7 @@ class TestLazyAuthentication:
             record_type_name="series_markup",
         )
         assert len(records) == 1
-        assert records[0].series_uid == "1.2.3.lazy.auth.test"
+        assert records[0].series_uid == "1.2.3.99.88.77"
 
 
 class TestFileFlowIntegration:

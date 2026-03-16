@@ -40,11 +40,13 @@ def make_record_read(
     status: RecordStatus = RecordStatus.pending,
 ) -> RecordRead:
     """Create a RecordRead instance without DB for use as expression context."""
+    # Pad short names to satisfy RecordTypeBase min_length=5
+    type_name = name if len(name) >= 5 else f"{name}_type"
     return RecordRead(
         id=record_id,
         data=data,
         status=status,
-        record_type_name=name,
+        record_type_name=type_name,
         patient_id="PAT001",
         study_uid="1.2.3.4.5",
         created_at=datetime.now(UTC),
@@ -56,7 +58,7 @@ def make_record_read(
             patient_id="PAT001",
         ),
         series=None,
-        record_type=RecordTypeBase(name=name, level=DicomQueryLevel.STUDY),
+        record_type=RecordTypeBase(name=type_name, level=DicomQueryLevel.STUDY),
     )
 
 
@@ -532,7 +534,7 @@ class TestFlowCondition:
     def test_add_action(self):
         """add_action() appends to the actions list."""
         condition = FlowCondition(None)
-        action = CreateRecordAction(record_type_name="test")
+        action = CreateRecordAction(record_type_name="test_type")
         condition.add_action(action)
         assert len(condition.actions) == 1
         assert condition.actions[0] is action
@@ -1174,7 +1176,7 @@ class TestIfRecord:
     def test_if_record_single_condition(self):
         """if_record() with one condition creates a single FlowCondition."""
         F = Field()
-        fr = FlowRecord("test")
+        fr = FlowRecord("test_type")
         fr.if_record(F.active == True).add_record("output")  # noqa: E712
         assert len(fr.conditions) == 1
         assert len(fr.conditions[0].actions) == 1
@@ -1182,7 +1184,7 @@ class TestIfRecord:
     def test_if_record_multiple_conditions_and_semantics(self):
         """if_record(A, B) combines with AND logic."""
         F = Field()
-        fr = FlowRecord("test")
+        fr = FlowRecord("test_type")
         fr.if_record(F.is_good == True, F.study_type == "CT").add_record("output")  # noqa: E712
 
         assert len(fr.conditions) == 1
@@ -1192,7 +1194,7 @@ class TestIfRecord:
 
     def test_if_record_empty_raises(self):
         """if_record() without conditions raises ValueError."""
-        fr = FlowRecord("test")
+        fr = FlowRecord("test_type")
         with pytest.raises(ValueError, match="requires at least one"):
             fr.if_record()
 
@@ -1200,7 +1202,7 @@ class TestIfRecord:
         """if_record conditions pass when data matches."""
         F = Field()
         fr = FlowRecord("first_check")
-        fr.if_record(F.is_good == True, F.study_type == "CT").add_record("seg")  # noqa: E712
+        fr.if_record(F.is_good == True, F.study_type == "CT").add_record("seg_type")  # noqa: E712
 
         ctx = {
             "__self__": make_record_read("first_check", data={"is_good": True, "study_type": "CT"}),
@@ -1211,7 +1213,7 @@ class TestIfRecord:
         """if_record AND fails when one field doesn't match."""
         F = Field()
         fr = FlowRecord("first_check")
-        fr.if_record(F.is_good == True, F.study_type == "CT").add_record("seg")  # noqa: E712
+        fr.if_record(F.is_good == True, F.study_type == "CT").add_record("seg_type")  # noqa: E712
 
         ctx = {
             "__self__": make_record_read(
@@ -1223,7 +1225,7 @@ class TestIfRecord:
     def test_if_record_on_missing_skip_returns_false(self):
         """Missing field with on_missing='skip' evaluates to False."""
         F = Field()
-        fr = FlowRecord("test")
+        fr = FlowRecord("test_type")
         fr.if_record(F.nonexistent_field > 0).add_record("output")
 
         ctx = {"__self__": make_record_read("test", data={"other": 42})}
@@ -1233,7 +1235,7 @@ class TestIfRecord:
     def test_if_record_on_missing_skip_nested(self):
         """Missing nested field with on_missing='skip' evaluates to False."""
         F = Field()
-        fr = FlowRecord("test")
+        fr = FlowRecord("test_type")
         fr.if_record(F.deep.nested.field == "x").add_record("output")
 
         ctx = {"__self__": make_record_read("test", data={"unrelated": 1})}
@@ -1243,7 +1245,7 @@ class TestIfRecord:
     def test_if_record_on_missing_raise_propagates(self):
         """Missing field with on_missing='raise' raises TypeError."""
         F = Field()
-        fr = FlowRecord("test")
+        fr = FlowRecord("test_type")
         fr.if_record(F.missing > 0, on_missing="raise").add_record("output")
 
         ctx = {"__self__": make_record_read("test", data={})}
@@ -1253,20 +1255,20 @@ class TestIfRecord:
     def test_if_record_on_missing_skip_is_default(self):
         """on_missing defaults to 'skip' for if_record."""
         F = Field()
-        fr = FlowRecord("test")
+        fr = FlowRecord("test_type")
         fr.if_record(F.x > 0).add_record("output")
         assert fr.conditions[0].on_missing == "skip"
 
     def test_if_on_missing_raise_is_default(self):
         """on_missing defaults to 'raise' for regular if_."""
-        fr = FlowRecord("test")
+        fr = FlowRecord("test_type")
         fr.if_(FlowResult("r", ["x"]) == 1).add_record("output")
         assert fr.conditions[0].on_missing == "raise"
 
     def test_if_record_none_data_skip(self):
         """Record with None data and on_missing='skip' evaluates to False."""
         F = Field()
-        fr = FlowRecord("test")
+        fr = FlowRecord("test_type")
         fr.if_record(F.anything == True).add_record("output")  # noqa: E712
 
         ctx = {"__self__": make_record_read("test", data=None)}
@@ -1292,7 +1294,7 @@ class TestFieldProxyEngineIntegration:
         F = Field()
         flow_def = FlowRecord("first_check")
         flow_def.on_status("finished")
-        flow_def.if_record(F.is_good == True, F.study_type == "CT").add_record("seg")  # noqa: E712
+        flow_def.if_record(F.is_good == True, F.study_type == "CT").add_record("seg_type")  # noqa: E712
 
         engine.register_flow(flow_def)
 
@@ -1307,7 +1309,7 @@ class TestFieldProxyEngineIntegration:
 
         assert mock_client.create_record.call_count == 1
         call_args = mock_client.create_record.call_args[0][0]
-        assert call_args.record_type_name == "seg"
+        assert call_args.record_type_name == "seg_type"
 
     @pytest.mark.asyncio
     async def test_engine_field_condition_not_met_skips_action(self):
@@ -1324,7 +1326,7 @@ class TestFieldProxyEngineIntegration:
         F = Field()
         flow_def = FlowRecord("first_check")
         flow_def.on_status("finished")
-        flow_def.if_record(F.is_good == True, F.study_type == "CT").add_record("seg")  # noqa: E712
+        flow_def.if_record(F.is_good == True, F.study_type == "CT").add_record("seg_type")  # noqa: E712
 
         engine.register_flow(flow_def)
 
@@ -1697,7 +1699,7 @@ class TestMatchCase:
     def test_match_case_basic(self):
         """match().case() sets match_group on conditions."""
         F = Field()
-        fr = FlowRecord("test")
+        fr = FlowRecord("test_type")
         fr.on_finished()
         fr.match(F.study_type).case("CT").create_record("seg_CT").case("MRI").create_record(
             "seg_MRI"
@@ -1790,14 +1792,14 @@ class TestMatchCase:
 
     def test_case_without_match_raises(self):
         """case() without preceding match() raises ValueError."""
-        fr = FlowRecord("test")
+        fr = FlowRecord("test_type")
         with pytest.raises(ValueError, match=r"case.*must be called after match"):
             fr.case("CT")
 
     def test_match_without_case_validates_error(self):
         """validate() fails when match() has no case() branches."""
         F = Field()
-        fr = FlowRecord("test")
+        fr = FlowRecord("test_type")
         fr.match(F.study_type)
         with pytest.raises(ValueError, match="has no case"):
             fr.validate()
@@ -1805,7 +1807,7 @@ class TestMatchCase:
     def test_match_case_multiple_actions_per_case(self):
         """case().create_record('a', 'b') creates multiple actions in one case."""
         F = Field()
-        fr = FlowRecord("test")
+        fr = FlowRecord("test_type")
         fr.match(F.study_type).case("CT").create_record("seg_single", "seg_archive")
 
         assert len(fr.conditions) == 1
@@ -1816,7 +1818,7 @@ class TestMatchCase:
     def test_match_case_preserves_on_missing(self):
         """on_missing from if_record() propagates to case conditions."""
         F = Field()
-        fr = FlowRecord("test")
+        fr = FlowRecord("test_type")
         (
             fr.if_record(F.is_good == True, on_missing="raise")  # noqa: E712
             .match(F.study_type)
@@ -1829,7 +1831,7 @@ class TestMatchCase:
     def test_match_case_default_on_missing_skip(self):
         """match() without if_record() uses default on_missing='skip'."""
         F = Field()
-        fr = FlowRecord("test")
+        fr = FlowRecord("test_type")
         fr.match(F.study_type).case("CT").create_record("seg_CT")
 
         assert fr.conditions[0].on_missing == "skip"
@@ -1837,7 +1839,7 @@ class TestMatchCase:
     def test_default_fires_when_no_case_matches(self):
         """default() fires when no case in the match group matched."""
         F = Field()
-        fr = FlowRecord("test")
+        fr = FlowRecord("test_type")
         fr.on_finished()
         (
             fr.match(F.study_type)
@@ -1858,7 +1860,7 @@ class TestMatchCase:
     def test_default_skipped_when_case_matches(self):
         """default() condition structure: no condition when no guard."""
         F = Field()
-        fr = FlowRecord("test")
+        fr = FlowRecord("test_type")
         (
             fr.match(F.study_type)
             .case("CT")
@@ -1874,7 +1876,7 @@ class TestMatchCase:
     def test_default_guard_false_nothing_fires(self):
         """default() carries guard from if_record() so it doesn't fire when guard is False."""
         F = Field()
-        fr = FlowRecord("test")
+        fr = FlowRecord("test_type")
         (
             fr.if_record(F.is_good == True)  # noqa: E712
             .match(F.study_type)
@@ -1891,7 +1893,7 @@ class TestMatchCase:
     def test_default_no_guard_fires(self):
         """default() without guard has condition=None (always fires when no case matched)."""
         F = Field()
-        fr = FlowRecord("test")
+        fr = FlowRecord("test_type")
         (
             fr.match(F.study_type)
             .case("CT")
@@ -1904,14 +1906,14 @@ class TestMatchCase:
 
     def test_default_without_match_raises(self):
         """default() without preceding match() raises ValueError."""
-        fr = FlowRecord("test")
+        fr = FlowRecord("test_type")
         with pytest.raises(ValueError, match=r"default.*must be called after match"):
             fr.default()
 
     def test_default_validates_ok(self):
         """validate() passes for default() with actions (is_else is exempt)."""
         F = Field()
-        fr = FlowRecord("test")
+        fr = FlowRecord("test_type")
         fr.on_finished()
         (
             fr.match(F.study_type)
@@ -2142,7 +2144,7 @@ class TestMatchCase:
         engine = RecordFlowEngine(mock_client)
 
         F = Field()
-        flow_def = FlowRecord("test")
+        flow_def = FlowRecord("test_type")
         flow_def.on_status("finished")
         (
             flow_def.match(F.score)
