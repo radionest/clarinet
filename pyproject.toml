@@ -10,7 +10,7 @@ readme = "README.md"
 authors = [
     {name = "Denis Nesterov"}
 ]
-requires-python = ">=3.14"
+requires-python = ">=3.12"
 license = {text = "MIT"}
 classifiers = [
     "Programming Language :: Python :: 3",
@@ -102,14 +102,14 @@ dev = [
 
 [tool.black]
 line-length = 100
-target-version = ["py314"]
+target-version = ["py312"]
 
 [tool.isort]
 profile = "black"
 line_length = 100
 
 [tool.mypy]
-python_version = "3.14"
+python_version = "3.12"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
@@ -151,6 +151,7 @@ markers = [
     "dicom: tests requiring a live DICOM PACS server",
     "slicer: tests requiring a running 3D Slicer instance (deselect with '-m \"not slicer\"')",
     "pipeline: tests for pipeline task queue service",
+    "schema: API schema testing with Schemathesis (property-based)",
 ]
 filterwarnings = [
     # FastAPI + aiormq: asyncio.iscoroutinefunction deprecated in Python 3.14
