@@ -216,7 +216,7 @@ async def anonymize_study_pipeline(msg: PipelineMessage, ctx: TaskContext) -> No
 
 async def create_projection_record(
     record: RecordRead,
-    _context: dict[str, Any],
+    context: dict[str, Any],  # noqa: ARG001
     client: ClarinetClient,
 ) -> None:
     """Create ``create-master-projection`` with series_uid from first-check."""
@@ -250,7 +250,7 @@ async def create_projection_record(
 
 async def create_comparison_record(
     record: RecordRead,
-    _context: dict[str, Any],
+    context: dict[str, Any],  # noqa: ARG001
     client: ClarinetClient,
 ) -> None:
     """Create ``compare-with-projection`` linked to the segmentation as parent."""
@@ -279,7 +279,7 @@ async def create_comparison_record(
 
 async def unblock_comparisons(
     record: RecordRead,
-    _context: dict[str, Any],
+    context: dict[str, Any],  # noqa: ARG001
     client: ClarinetClient,
 ) -> None:
     """Check-files on all blocked ``compare-with-projection`` for this series."""
@@ -293,7 +293,7 @@ async def unblock_comparisons(
 
 async def create_second_review_record(
     record: RecordRead,
-    context: dict[str, Any],
+    context: dict[str, Any],  # noqa: ARG001
     client: ClarinetClient,
 ) -> None:
     """Create ``second-review`` linked to parent segmentation for ``{user_id}`` resolution.
@@ -318,7 +318,7 @@ async def create_second_review_record(
 
 async def unblock_second_reviews(
     record: RecordRead,
-    context: dict[str, Any],
+    context: dict[str, Any],  # noqa: ARG001
     client: ClarinetClient,
 ) -> None:
     """Check-files on all blocked ``second-review`` for this series."""
