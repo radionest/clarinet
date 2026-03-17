@@ -426,7 +426,9 @@ async def _process_submission(
         and record_read.record_type.slicer_result_validator
     ):
         context = await build_slicer_context_async(
-            record_read, session, parent=parent_read,
+            record_read,
+            session,
+            parent=parent_read,
         )
         slicer_url = f"http://{client_ip}:{settings.slicer_port}"
         await slicer_service.execute(
@@ -441,13 +443,18 @@ async def _process_submission(
     else:
         # Validate input files (raise on missing required files)
         file_result = await validate_record_files(
-            record_read, raise_on_invalid=True, parent=parent_read,
+            record_read,
+            raise_on_invalid=True,
+            parent=parent_read,
         )
         if file_result and file_result.matched_files:
             await repo.set_files(record, file_result.matched_files)
 
         updated, _ = await service.submit_data(
-            record_id, validated_data, RecordStatus.finished, user_id=user.id,
+            record_id,
+            validated_data,
+            RecordStatus.finished,
+            user_id=user.id,
         )
 
     return mask_record_patient_data(RecordRead.model_validate(updated), user)
@@ -473,8 +480,14 @@ async def submit_record_data(
         raise CONFLICT.with_context("Record already finished. Use PATCH to update the record data.")
 
     return await _process_submission(
-        record_id=record_id, record=record, data=data, user=user,
-        repo=repo, service=service, rt_service=rt_service, is_update=False,
+        record_id=record_id,
+        record=record,
+        data=data,
+        user=user,
+        repo=repo,
+        service=service,
+        rt_service=rt_service,
+        is_update=False,
     )
 
 
@@ -495,8 +508,14 @@ async def update_record_data(
         raise CONFLICT.with_context("Record is not finished yet. Use POST to submit record data.")
 
     return await _process_submission(
-        record_id=record_id, record=record, data=data, user=user,
-        repo=repo, service=service, rt_service=rt_service, is_update=True,
+        record_id=record_id,
+        record=record,
+        data=data,
+        user=user,
+        repo=repo,
+        service=service,
+        rt_service=rt_service,
+        is_update=True,
     )
 
 
@@ -539,9 +558,17 @@ async def submit_record_with_validation(
         raise CONFLICT.with_context("Record already finished. Use PATCH to update the record data.")
 
     return await _process_submission(
-        record_id=record_id, record=record, data=data, user=user,
-        repo=repo, service=service, rt_service=rt_service, is_update=False,
-        slicer_service=slicer_service, session=session, client_ip=client_ip,
+        record_id=record_id,
+        record=record,
+        data=data,
+        user=user,
+        repo=repo,
+        service=service,
+        rt_service=rt_service,
+        is_update=False,
+        slicer_service=slicer_service,
+        session=session,
+        client_ip=client_ip,
     )
 
 
@@ -577,9 +604,17 @@ async def resubmit_record_with_validation(
         raise CONFLICT.with_context("Record is not finished yet. Use POST to submit record data.")
 
     return await _process_submission(
-        record_id=record_id, record=record, data=data, user=user,
-        repo=repo, service=service, rt_service=rt_service, is_update=True,
-        slicer_service=slicer_service, session=session, client_ip=client_ip,
+        record_id=record_id,
+        record=record,
+        data=data,
+        user=user,
+        repo=repo,
+        service=service,
+        rt_service=rt_service,
+        is_update=True,
+        slicer_service=slicer_service,
+        session=session,
+        client_ip=client_ip,
     )
 
 
