@@ -65,6 +65,15 @@ make dev-setup                  # Set up dev environment
 Avoid: god objects, callback hell, global variables, magic numbers, code duplication,
 ignoring errors, hardcoded config, direct loguru import, sync ops in async functions, bare except.
 
+## Worktree Workflow
+
+- Feature development: always enter a worktree via `EnterWorktree` before making changes
+- Quick fixes, typos, config changes — work directly in main, no worktree needed
+- The Stop hook blocks session end in a worktree — ask the user to choose:
+  1. **Push + PR**: commit all, `git push -u origin <branch>`, `gh pr create`, then `ExitWorktree(remove)`
+  2. **Keep**: `ExitWorktree(keep)` — worktree stays for later
+  3. **Discard**: `ExitWorktree(remove, discard_changes=true)`
+
 ## Pre-commit Checklist
 
 - `make format` + `make lint` pass
