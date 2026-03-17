@@ -6,7 +6,7 @@ max-examples = 50
 mode = "all"
 
 [phases.stateful]
-enabled = false
+enabled = true
 
 [output.sanitization]
 enabled = false

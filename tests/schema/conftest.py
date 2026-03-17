@@ -5,6 +5,7 @@ Auth is bypassed via dependency overrides — same pattern as tests/conftest.py.
 Lifespan is replaced with a no-op to avoid db_manager/reconcile_config conflicts.
 """
 
+import copy
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from uuid import uuid4
@@ -24,6 +25,87 @@ from clarinet.models import *  # noqa: F403
 from clarinet.models.user import User
 from clarinet.settings import Settings
 from clarinet.utils.database import get_async_session
+
+# ---------------------------------------------------------------------------
+# OpenAPI link injection for stateful testing
+# ---------------------------------------------------------------------------
+
+# CRUD patterns: POST on collection → links to GET/PATCH/DELETE on item.
+# Schemathesis uses these links to build state-machine transitions.
+_CRUD_LINKS: list[dict] = [
+    {
+        "post_path": "/api/records/types",
+        "post_status": "201",
+        "id_field": "id",
+        "targets": [
+            ("GetRecordType", "get", "/api/records/types/{record_type_id}", "record_type_id"),
+            ("UpdateRecordType", "patch", "/api/records/types/{record_type_id}", "record_type_id"),
+            ("DeleteRecordType", "delete", "/api/records/types/{record_type_id}", "record_type_id"),
+        ],
+    },
+    {
+        "post_path": "/api/patients",
+        "post_status": "201",
+        "id_field": "patient_id",
+        "targets": [
+            ("GetPatient", "get", "/api/patients/{patient_id}", "patient_id"),
+            ("DeletePatient", "delete", "/api/patients/{patient_id}", "patient_id"),
+        ],
+    },
+    {
+        "post_path": "/api/user/",
+        "post_status": "201",
+        "id_field": "id",
+        "targets": [
+            ("DeleteUser", "delete", "/api/user/{user_id}", "user_id"),
+        ],
+    },
+    {
+        "post_path": "/api/user/roles",
+        "post_status": "201",
+        "id_field": "name",
+        "targets": [
+            ("GetRole", "get", "/api/user/roles/{role_name}", "role_name"),
+        ],
+    },
+]
+
+
+def _inject_crud_links(schema_dict: dict) -> dict:
+    """Inject OpenAPI links into POST-201 responses for stateful testing.
+
+    Returns a deep-copied schema with links added. Does not mutate the original.
+    """
+    schema = copy.deepcopy(schema_dict)
+    paths = schema.get("paths", {})
+
+    for crud in _CRUD_LINKS:
+        post_path = crud["post_path"]
+        post_status = crud["post_status"]
+        id_field = crud["id_field"]
+
+        path_item = paths.get(post_path)
+        if not path_item or "post" not in path_item:
+            continue
+
+        response = path_item["post"].get("responses", {}).get(post_status)
+        if not response:
+            continue
+
+        links = response.setdefault("links", {})
+        for link_name, target_method, target_path, param_name in crud["targets"]:
+            target_item = paths.get(target_path, {})
+            target_op = target_item.get(target_method, {})
+            operation_id = target_op.get("operationId")
+            if not operation_id:
+                continue
+
+            links[link_name] = {
+                "operationId": operation_id,
+                "parameters": {param_name: f"$response.body#/{id_field}"},
+            }
+
+    return schema
 
 
 @asynccontextmanager
@@ -127,13 +209,23 @@ def schema_app(mock_superuser, _session_factory, test_settings):
 
 @pytest.fixture(scope="session")
 def api_schema(schema_app):
-    """Load OpenAPI schema from ASGI app for Schemathesis.
+    """Load OpenAPI schema from ASGI app via ASGI transport.
 
-    Uses app.openapi() directly instead of from_asgi() to avoid
-    triggering the lifespan on schema fetch.
+    Lifespan is already replaced with _noop_lifespan in schema_app,
+    so from_asgi() is safe — no db_manager/reconcile_config conflicts.
     """
-    schema_dict = schema_app.openapi()
+    return schemathesis.openapi.from_asgi("/openapi.json", app=schema_app)
+
+
+@pytest.fixture(scope="session")
+def stateful_api_schema(schema_app):
+    """OpenAPI schema enriched with CRUD links for stateful testing.
+
+    Injects OpenAPI links into POST-201 responses so Schemathesis can
+    build state-machine transitions (POST → GET → PATCH → DELETE chains).
+    Uses from_dict() because link injection requires modifying the schema dict.
+    """
+    schema_dict = _inject_crud_links(schema_app.openapi())
     loaded = schemathesis.openapi.from_dict(schema_dict)
-    loaded.app = schema_app  # Enables ASGI transport for test calls
-    loaded.location = "/openapi.json"
+    loaded.app = schema_app
     return loaded
