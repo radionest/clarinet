@@ -893,10 +893,10 @@ class TestComparisonResults:
             {"false_negative": [], "false_negative_num": 0, "false_positive_num": 2},
         )
 
-        # WORKAROUND: omit patient_id — find_by_criteria JOIN bug for PATIENT-level records
         updates = await _find_records(
             client,
             record_type_name="update-master-model",
+            patient_id=hierarchy["patient_id"],
         )
         assert len(updates) == 1
 
@@ -953,10 +953,10 @@ class TestComparisonResults:
             },
         )
 
-        # WORKAROUND: omit patient_id — find_by_criteria JOIN bug for PATIENT-level records
         updates = await _find_records(
             client,
             record_type_name="update-master-model",
+            patient_id=hierarchy["patient_id"],
         )
         reviews = await _find_records(
             client,
@@ -982,10 +982,10 @@ class TestComparisonResults:
             {"false_negative": [], "false_negative_num": 0, "false_positive_num": 0},
         )
 
-        # WORKAROUND: omit patient_id — find_by_criteria JOIN bug for PATIENT-level records
         updates = await _find_records(
             client,
             record_type_name="update-master-model",
+            patient_id=hierarchy["patient_id"],
         )
         reviews = await _find_records(
             client,
@@ -1101,10 +1101,11 @@ class TestLateStageChain:
         mdk = await _create_record(client, "mdk-conclusion", hierarchy["patient_id"])
         await _submit_data(client, mdk["id"], {"treatment_plan": "cluster_removal"})
 
-        # WORKAROUND: find_by_criteria joins Record→Study→Patient for patient_id filter,
-        # which returns 0 rows for PATIENT-level records (study_uid=NULL).
-        # Use record_type_name only until RecordRepository is fixed to use Record.patient_id directly.
-        resection = await _find_records(client, record_type_name="resection-model")
+        resection = await _find_records(
+            client,
+            record_type_name="resection-model",
+            patient_id=hierarchy["patient_id"],
+        )
         assert len(resection) == 1
 
     async def test_resection_model_creates_plan(
@@ -1119,8 +1120,11 @@ class TestLateStageChain:
         rm = await _create_record(client, "resection-model", hierarchy["patient_id"])
         await _submit_data(client, rm["id"], {})
 
-        # WORKAROUND: omit patient_id — find_by_criteria JOIN bug for PATIENT-level records
-        plans = await _find_records(client, record_type_name="resection-plan")
+        plans = await _find_records(
+            client,
+            record_type_name="resection-plan",
+            patient_id=hierarchy["patient_id"],
+        )
         assert len(plans) == 1
 
     async def test_mdk_to_resection_plan_full_chain(
@@ -1135,13 +1139,19 @@ class TestLateStageChain:
         mdk = await _create_record(client, "mdk-conclusion", hierarchy["patient_id"])
         await _submit_data(client, mdk["id"], {})
 
-        # WORKAROUND: omit patient_id — find_by_criteria JOIN bug for PATIENT-level records
-        resection = await _find_records(client, record_type_name="resection-model")
+        resection = await _find_records(
+            client,
+            record_type_name="resection-model",
+            patient_id=hierarchy["patient_id"],
+        )
         assert len(resection) == 1
         await _submit_data(client, resection[0]["id"], {})
 
-        # WORKAROUND: omit patient_id — find_by_criteria JOIN bug for PATIENT-level records
-        plans = await _find_records(client, record_type_name="resection-plan")
+        plans = await _find_records(
+            client,
+            record_type_name="resection-plan",
+            patient_id=hierarchy["patient_id"],
+        )
         assert len(plans) == 1
 
     async def test_intraop_additional_lesions_creates_update(
@@ -1156,8 +1166,11 @@ class TestLateStageChain:
         intraop = await _create_record(client, "intraop-protocol", hierarchy["patient_id"])
         await _submit_data(client, intraop["id"], {"additionally_found": 2})
 
-        # WORKAROUND: omit patient_id — find_by_criteria JOIN bug for PATIENT-level records
-        updates = await _find_records(client, record_type_name="update-master-model")
+        updates = await _find_records(
+            client,
+            record_type_name="update-master-model",
+            patient_id=hierarchy["patient_id"],
+        )
         assert len(updates) == 1
 
     async def test_intraop_no_additional_no_update(
@@ -1172,8 +1185,11 @@ class TestLateStageChain:
         intraop = await _create_record(client, "intraop-protocol", hierarchy["patient_id"])
         await _submit_data(client, intraop["id"], {"additionally_found": 0})
 
-        # WORKAROUND: omit patient_id — find_by_criteria JOIN bug for PATIENT-level records
-        updates = await _find_records(client, record_type_name="update-master-model")
+        updates = await _find_records(
+            client,
+            record_type_name="update-master-model",
+            patient_id=hierarchy["patient_id"],
+        )
         assert len(updates) == 0
 
 
@@ -1786,10 +1802,10 @@ class TestFullCTHappyPath:
             },
         )
 
-        # WORKAROUND: omit patient_id — find_by_criteria JOIN bug for PATIENT-level records
         updates = await _find_records(
             client,
             record_type_name="update-master-model",
+            patient_id=h["patient_id"],
         )
         assert len(updates) == 1
 

@@ -560,6 +560,41 @@ class TestRecordRepository:
         assert len(records) >= 1
 
     @pytest.mark.asyncio
+    async def test_find_by_criteria_patient_level_record(self, env):
+        """PATIENT-level records (study_uid=NULL) must be found by patient_id."""
+        from clarinet.models.base import DicomQueryLevel
+
+        rt = make_record_type("patient-level-rt", level=DicomQueryLevel.PATIENT)
+        env["session"].add(rt)
+        await env["session"].commit()
+
+        rec = await seed_record(
+            env["session"],
+            patient_id="RPAT",
+            study_uid=None,
+            series_uid=None,
+            rt_name="patient-level-rt",
+        )
+
+        # patient_id filter must return PATIENT-level record
+        criteria = RecordSearchCriteria(
+            record_type_name="patient-level-rt", patient_id="RPAT"
+        )
+        records = await env["repo"].find_by_criteria(criteria)
+        assert len(records) == 1
+        assert records[0].id == rec.id
+
+        # anon_study_uid="Null" (un-anonymized study) must NOT return PATIENT-level record
+        # because PATIENT-level records have no study — INNER JOIN is correct here
+        criteria_anon = RecordSearchCriteria(
+            record_type_name="patient-level-rt",
+            patient_id="RPAT",
+            anon_study_uid="Null",
+        )
+        records_anon = await env["repo"].find_by_criteria(criteria_anon)
+        assert len(records_anon) == 0
+
+    @pytest.mark.asyncio
     async def test_get_status_counts(self, env):
         counts = await env["repo"].get_status_counts()
         assert isinstance(counts, dict)

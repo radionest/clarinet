@@ -728,11 +728,11 @@ class RecordRepository(BaseRepository[Record]):
 
         # Patient filters
         if criteria.patient_id:
-            statement = statement.join(Study).join(Patient).where(Patient.id == criteria.patient_id)
+            statement = statement.where(Record.patient_id == criteria.patient_id)
 
         if criteria.patient_anon_id and "_" in criteria.patient_anon_id:
             auto_id = int(criteria.patient_anon_id.split("_")[1])
-            statement = statement.join(Study).join(Patient).where(Patient.auto_id == auto_id)
+            statement = statement.join(Patient, col(Record.patient_id) == col(Patient.id)).where(Patient.auto_id == auto_id)
 
         # Series filters
         if criteria.series_uid:
