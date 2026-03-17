@@ -57,3 +57,4 @@ REFACTOR.md
 
 # Dev notes (centralized storage via symlink)
 dev-notes
+.claude/
