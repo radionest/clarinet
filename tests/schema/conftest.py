@@ -127,6 +127,7 @@ def test_settings() -> Settings:
         recordflow_enabled=False,
         dicomweb_enabled=False,
         frontend_enabled=False,
+        ohif_enabled=False,
     )
 
 

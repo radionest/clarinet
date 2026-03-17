@@ -90,6 +90,7 @@ def startup_settings(monkeypatch, tmp_path):
     monkeypatch.setattr(settings, "session_cleanup_enabled", False)
     monkeypatch.setattr(settings, "dicomweb_enabled", False)
     monkeypatch.setattr(settings, "frontend_enabled", False)
+    monkeypatch.setattr(settings, "ohif_enabled", False)
     monkeypatch.setattr(settings, "admin_password", "TestStartup123!")
 
 
@@ -160,11 +161,13 @@ async def test_startup_pipeline_enabled(
 
 @pytest.mark.asyncio
 async def test_startup_pipeline_rabbitmq_unavailable(startup_settings, capture_logs, monkeypatch):
-    """App survives when ``pipeline_enabled=True`` but RabbitMQ is unreachable.
+    """App crashes with ``StartupError`` when ``pipeline_enabled=True`` but RabbitMQ is unreachable.
 
-    Lifespan must NOT crash.  Logs should contain a broker-related error,
-    but NOT a "client" / "login" error (that would indicate the old bug).
+    Strict startup: enabled components must be available or the app refuses to start.
+    The error message must mention Pipeline and provide a fix hint.
     """
+    from clarinet.api.app import StartupError
+
     monkeypatch.setattr(settings, "pipeline_enabled", True)
 
     mock_broker = AsyncMock()
@@ -176,15 +179,42 @@ async def test_startup_pipeline_rabbitmq_unavailable(startup_settings, capture_l
     with patch("clarinet.services.pipeline.get_broker", return_value=mock_broker):
         app = FastAPI(lifespan=lifespan)
 
+        with pytest.raises(StartupError, match="Pipeline"):
+            async with lifespan(app):
+                pass  # should not reach here
+
+
+# ── Test 4: frontend enabled but static files missing ────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_startup_frontend_missing(startup_settings, monkeypatch):
+    """App crashes with ``StartupError`` when frontend is enabled but not built."""
+    from clarinet.api.app import StartupError
+
+    monkeypatch.setattr(settings, "frontend_enabled", True)
+
+    app = FastAPI(lifespan=lifespan)
+
+    with pytest.raises(StartupError, match="Frontend"):
         async with lifespan(app):
-            assert not hasattr(app.state, "pipeline_broker") or app.state.pipeline_broker is None
+            pass
 
-    # Should log a broker startup failure
-    broker_errors = [m for m in capture_logs if "pipeline broker" in m.lower()]
-    assert broker_errors, "Expected a 'Failed to start pipeline broker' log message"
 
-    # Must NOT contain client/login errors (that's the old bug)
-    login_errors = [m for m in capture_logs if "client" in m.lower() or "login" in m.lower()]
-    assert login_errors == [], (
-        f"Regression: client/login error appeared instead of broker error: {login_errors}"
-    )
+# ── Test 5: OHIF enabled but not installed ───────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_startup_ohif_missing(startup_settings, monkeypatch, tmp_path):
+    """App crashes with ``StartupError`` when OHIF is enabled but not installed."""
+    from clarinet.api.app import StartupError
+
+    monkeypatch.setattr(settings, "ohif_enabled", True)
+    # Point to empty dir so index.html doesn't exist
+    monkeypatch.setattr(settings, "storage_path", str(tmp_path))
+
+    app = FastAPI(lifespan=lifespan)
+
+    with pytest.raises(StartupError, match="OHIF"):
+        async with lifespan(app):
+            pass

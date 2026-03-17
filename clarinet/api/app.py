@@ -48,6 +48,50 @@ from clarinet.utils.fs import shutdown_fs_executor
 from clarinet.utils.logger import logger
 
 
+class StartupError(SystemExit):
+    """Raised when an enabled component fails to initialize at startup."""
+
+    def __init__(self, component: str, reason: str, hint: str) -> None:
+        message = (
+            f"\n{'=' * 60}\n"
+            f"STARTUP FAILED: {component}\n"
+            f"{'=' * 60}\n"
+            f"Reason: {reason}\n\n"
+            f"To fix, either:\n"
+            f"  1. {hint}\n"
+            f"  2. Disable the component: set CLARINET_{component.upper().replace(' ', '_')}_ENABLED=false\n"
+            f"{'=' * 60}\n"
+        )
+        super().__init__(message)
+
+
+def _check_frontend() -> None:
+    """Verify frontend static files exist when frontend is enabled."""
+    if not settings.frontend_enabled:
+        return
+    for dir_path in settings.static_directories:
+        if dir_path.exists():
+            return
+    raise StartupError(
+        component="Frontend",
+        reason="No static directories found.",
+        hint="Build the frontend: make frontend-build",
+    )
+
+
+def _check_ohif() -> None:
+    """Verify OHIF Viewer files exist when OHIF is enabled."""
+    if not settings.ohif_enabled:
+        return
+    ohif_index = settings.ohif_path / "index.html"
+    if not ohif_index.exists():
+        raise StartupError(
+            component="OHIF",
+            reason=f"index.html not found at {settings.ohif_path}",
+            hint="Install OHIF Viewer: clarinet ohif install",
+        )
+
+
 async def _init_recordflow(app: FastAPI) -> None:
     """Initialize RecordFlow engine and attach to app state."""
     from clarinet.client import ClarinetClient
@@ -126,12 +170,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         if not settings.debug:
             raise
 
+    # Fail-fast: verify enabled components are available
+    _check_frontend()
+    _check_ohif()
+
     if settings.recordflow_enabled:
         try:
             await _init_recordflow(app)
         except Exception as e:
-            logger.error(f"Failed to initialize RecordFlow engine: {e}")
-            app.state.recordflow_engine = None
+            raise StartupError(
+                component="RecordFlow",
+                reason=str(e),
+                hint="Check RecordFlow configuration and flow paths",
+            ) from e
 
     if settings.pipeline_enabled:
         try:
@@ -145,8 +196,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
             count = await sync_pipeline_definitions()
             logger.info(f"Synced {count} pipeline definition(s) to database")
         except Exception as e:
-            logger.error(f"Failed to start pipeline broker: {e}")
-            app.state.pipeline_broker = None
+            raise StartupError(
+                component="Pipeline",
+                reason=str(e),
+                hint="Start RabbitMQ or check CLARINET_BROKER_URL",
+            ) from e
 
     if settings.session_cleanup_enabled:
         await session_cleanup_service.start()
@@ -271,14 +325,7 @@ def create_app(root_path: str = "/") -> FastAPI:
     # OHIF Viewer directory (checked at request time for SPA routing)
     ohif_dir = settings.ohif_path
     if settings.ohif_enabled:
-        ohif_index = ohif_dir / "index.html"
-        if ohif_index.exists():
-            logger.info(f"OHIF Viewer enabled at /ohif (serving from {ohif_dir})")
-        else:
-            logger.warning(
-                "OHIF enabled but index.html not found. "
-                "Run 'clarinet ohif install' to download OHIF Viewer."
-            )
+        logger.info(f"OHIF Viewer enabled at /ohif (serving from {ohif_dir})")
 
     # Serve frontend if enabled
     if settings.frontend_enabled:
@@ -293,9 +340,9 @@ def create_app(root_path: str = "/") -> FastAPI:
                 logger.debug(f"Static directory {dir_path} does not exist")
 
         if not static_dir:
-            logger.warning(
-                "No static directories found. Run 'make frontend-build' to build the frontend."
-            )
+            # Should not happen: _check_frontend() in lifespan catches this.
+            # Defensive fallback for edge cases (e.g. dir deleted after startup).
+            logger.error("Static directory disappeared after startup")
 
         # Serve index.html for all non-API routes (SPA support)
         @app.get("/{full_path:path}")
