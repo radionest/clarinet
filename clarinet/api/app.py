@@ -14,6 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 
 try:
+    import orjson  # noqa: F401
     from fastapi.responses import ORJSONResponse
 
     _default_response_class: type[ORJSONResponse] | None = ORJSONResponse
