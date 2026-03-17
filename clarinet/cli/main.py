@@ -319,10 +319,31 @@ async def _install_gleam() -> None:
 
 
 async def _ensure_frontend_built(frontend_path: Path) -> None:
-    """Build frontend if not already built, installing Gleam if needed."""
+    """Build frontend if not already built, installing Gleam if needed.
+
+    When running from a wheel install, pre-built static files already exist
+    in ``clarinet/static/`` — Gleam is NOT required.  The build-from-source
+    path is only taken when working from a git checkout.
+    """
+    # 1. Pre-built frontend in package (wheel / make frontend-build)
+    static_path = Path(__file__).parent.parent / "static"
+    if static_path.exists():
+        logger.debug("Using pre-built frontend from package")
+        return
+
+    # 2. Already compiled from source (dev workflow)
     build_file = frontend_path / "build" / "dev" / "javascript" / "clarinet.mjs"
     if build_file.exists():
         return
+
+    # 3. Source available — compile with Gleam
+    if not frontend_path.exists():
+        logger.error(
+            "Frontend not available. Either:\n"
+            "  1. Install from wheel (includes pre-built frontend)\n"
+            "  2. Build from source: make frontend-build"
+        )
+        sys.exit(1)
 
     logger.info("Frontend not built. Building now...")
     if not await _check_command_exists("gleam"):
