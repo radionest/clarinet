@@ -62,6 +62,9 @@ ignore = [
     "B008",   # do not perform function calls in argument defaults
     "B905",   # zip() without an explicit strict= parameter
     "W191",   # indentation contains tabs
+    "ASYNC210",  # pathlib in async — assumes trio/anyio, not relevant for pure asyncio
+    "ASYNC220",  # subprocess in async — same reason
+    "ASYNC230",  # open() in async — same reason
 ]
 
 # Allow fix for all enabled rules (when `--fix`) is provided.
