@@ -186,6 +186,24 @@ class TestSlicerHelperMethodsExist:
         assert hasattr(SlicerHelper, "auto_number_segment")
         assert callable(SlicerHelper.auto_number_segment)
 
+    def test_load_study_from_pacs_raise_on_empty_param(self) -> None:
+        """load_study_from_pacs has raise_on_empty param defaulting to True."""
+        import inspect
+
+        sig = inspect.signature(SlicerHelper.load_study_from_pacs)
+        param = sig.parameters["raise_on_empty"]
+        assert param.default is True
+        assert param.kind == inspect.Parameter.KEYWORD_ONLY
+
+    def test_load_series_from_pacs_raise_on_empty_param(self) -> None:
+        """load_series_from_pacs has raise_on_empty param defaulting to True."""
+        import inspect
+
+        sig = inspect.signature(SlicerHelper.load_series_from_pacs)
+        param = sig.parameters["raise_on_empty"]
+        assert param.default is True
+        assert param.kind == inspect.Parameter.KEYWORD_ONLY
+
     def test_subtract_segmentations_exists(self) -> None:
         """SlicerHelper exposes subtract_segmentations method."""
         assert hasattr(SlicerHelper, "subtract_segmentations")

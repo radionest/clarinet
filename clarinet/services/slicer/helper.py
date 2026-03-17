@@ -193,6 +193,11 @@ class PacsHelper:
                 "Add one in Edit > Application Settings > DICOM."
             )
 
+        print(
+            f"[PacsHelper] Using PACS server: {server.connectionName} "
+            f"({server.host}:{server.port}, AET={server.calledAETitle})"
+        )
+
         return cls(
             host=server.host,
             port=server.port,
@@ -563,7 +568,11 @@ class SlicerHelper:
             self._shortcuts.append(shortcut)
 
     def load_study_from_pacs(
-        self, study_instance_uid: str, server_name: str | None = None
+        self,
+        study_instance_uid: str,
+        *,
+        server_name: str | None = None,
+        raise_on_empty: bool = True,
     ) -> list[str]:
         """Load a DICOM study from PACS into the current scene.
 
@@ -572,9 +581,14 @@ class SlicerHelper:
         Args:
             study_instance_uid: DICOM Study Instance UID to retrieve.
             server_name: Optional PACS server name configured in Slicer.
+            raise_on_empty: If True (default), raise SlicerHelperError when no
+                DICOM nodes are loaded. Set to False for optional/fallback loads.
 
         Returns:
             List of loaded MRML node IDs.
+
+        Raises:
+            SlicerHelperError: If no nodes were loaded and raise_on_empty is True.
         """
         pacs = PacsHelper.from_slicer(server_name)
         node_ids = pacs.retrieve_study(study_instance_uid)
@@ -586,13 +600,21 @@ class SlicerHelper:
                 self._image_node = node
                 break
 
-        return node_ids or []
+        node_ids = node_ids or []
+        if raise_on_empty and not node_ids:
+            raise SlicerHelperError(
+                f"No DICOM nodes loaded for study '{study_instance_uid}'. "
+                f"Check PACS configuration in Edit > Application Settings > DICOM."
+            )
+        return node_ids
 
     def load_series_from_pacs(
         self,
         study_instance_uid: str,
         series_instance_uid: str,
+        *,
         server_name: str | None = None,
+        raise_on_empty: bool = True,
     ) -> list[str]:
         """Load a single DICOM series from PACS into the current scene.
 
@@ -602,9 +624,14 @@ class SlicerHelper:
             study_instance_uid: DICOM Study Instance UID.
             series_instance_uid: DICOM Series Instance UID to retrieve.
             server_name: Optional PACS server name configured in Slicer.
+            raise_on_empty: If True (default), raise SlicerHelperError when no
+                DICOM nodes are loaded. Set to False for optional/fallback loads.
 
         Returns:
             List of loaded MRML node IDs.
+
+        Raises:
+            SlicerHelperError: If no nodes were loaded and raise_on_empty is True.
         """
         pacs = PacsHelper.from_slicer(server_name)
         node_ids = pacs.retrieve_series(study_instance_uid, series_instance_uid)
@@ -616,7 +643,14 @@ class SlicerHelper:
                 self._image_node = node
                 break
 
-        return node_ids or []
+        node_ids = node_ids or []
+        if raise_on_empty and not node_ids:
+            raise SlicerHelperError(
+                f"No DICOM nodes loaded for series '{series_instance_uid}' "
+                f"(study '{study_instance_uid}'). "
+                f"Check PACS configuration in Edit > Application Settings > DICOM."
+            )
+        return node_ids
 
     def get_segment_names(self, segmentation: SegmentationBuilder | Any) -> list[str]:
         """Get ordered list of segment names from a segmentation node.

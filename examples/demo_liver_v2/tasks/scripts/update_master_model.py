@@ -56,7 +56,7 @@ if has_projection:
         model_vol = slicer.mrmlScene.GetNodeByID(model_node_ids[0])  # type: ignore[name-defined]
     except NameError:
         # Fallback to best_study_uid if model series not available
-        s.load_study_from_pacs(best_study_uid)  # type: ignore[name-defined]  # noqa: F821
+        s.load_study_from_pacs(best_study_uid, raise_on_empty=False)  # type: ignore[name-defined]  # noqa: F821
         model_vol = s._image_node
 
     # 2. Load or create master model segmentation (ref geometry from model_vol)
@@ -118,10 +118,12 @@ else:
 
     # Load CT volume
     try:
-        model_node_ids = s.load_series_from_pacs(model_study_uid, model_series_uid)  # type: ignore[name-defined]
+        model_node_ids = s.load_series_from_pacs(
+            model_study_uid, model_series_uid, raise_on_empty=False
+        )  # type: ignore[name-defined]
     except NameError:
         try:
-            s.load_study_from_pacs(best_study_uid)  # type: ignore[name-defined]
+            s.load_study_from_pacs(best_study_uid, raise_on_empty=False)  # type: ignore[name-defined]
         except NameError:
             pass
 

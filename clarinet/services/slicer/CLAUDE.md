@@ -123,8 +123,8 @@ Runs inside Slicer Python environment. Has `_Dummy` fallback for testing outside
 - `annotate(text)`, `configure_slab(thickness=)`, `setup_edit_mask(path)`
 - `add_view_shortcuts()` — a/s/c keys for view switching
 - `add_shortcuts(shortcuts: list[tuple[str, str]])` — custom keyboard shortcuts (key→layout or key→exec code); tracked for `cleanup()`
-- `load_study_from_pacs(study_instance_uid)` → list of loaded MRML node IDs; **auto-sets first scalar volume as `_image_node`**
-- `load_series_from_pacs(study_instance_uid, series_instance_uid)` → list of loaded MRML node IDs; **loads only the specified series; auto-sets first scalar volume as `_image_node`**
+- `load_study_from_pacs(study_instance_uid, *, server_name=, raise_on_empty=True)` → list of loaded MRML node IDs; **auto-sets first scalar volume as `_image_node`**; raises `SlicerHelperError` if no nodes loaded and `raise_on_empty=True` (default). Use `raise_on_empty=False` for optional/fallback loads
+- `load_series_from_pacs(study_instance_uid, series_instance_uid, *, server_name=, raise_on_empty=True)` → list of loaded MRML node IDs; **loads only the specified series; auto-sets first scalar volume as `_image_node`**; raises `SlicerHelperError` if no nodes loaded and `raise_on_empty=True` (default). Use `raise_on_empty=False` for optional/fallback loads
 - `get_segment_names(segmentation)` → `list[str]` — ordered segment names from a segmentation node
 - `get_segment_centroid(segmentation, segment_name)` → `tuple[float,float,float] | None` — extracts per-segment labelmap via `node.GetBinaryLabelmapRepresentation()` and computes tight non-zero voxel center with numpy; handles shared labelmaps and missing extent metadata; observer-safe (no event processing); None if empty
 - `copy_segments(source_seg, target_seg, segment_names=None, empty=False)` — copy segments between segmentations; `empty=True` copies only metadata (name + color)
@@ -163,7 +163,7 @@ Runs inside Slicer Python environment. Has `_Dummy` fallback for testing outside
 DIMSE (C-FIND + C-GET/C-MOVE) integration via `ctkDICOMQuery` / `ctkDICOMRetrieve`.
 
 - `PacsHelper(host, port, called_aet, calling_aet, prefer_cget, move_aet)` — explicit connection params (for testing)
-- `PacsHelper.from_slicer(server_name=None)` — reads PACS config from Slicer's DICOM module (`ctkDICOMVisualBrowser`); picks first query/retrieve-enabled server or falls back to first server. Each user configures PACS once in `Edit > Application Settings > DICOM`
+- `PacsHelper.from_slicer(server_name=None)` — reads PACS config from Slicer's DICOM module (`ctkDICOMVisualBrowser`); picks first query/retrieve-enabled server or falls back to first server. Each user configures PACS once in `Edit > Application Settings > DICOM`. Prints diagnostic `[PacsHelper] Using PACS server: ...` line to Slicer console
 - `retrieve_study(study_instance_uid)` → **local-first**: checks `slicer.dicomDatabase` for existing series, falls back to C-FIND + C-GET/C-MOVE from PACS
 - `retrieve_series(study_instance_uid, series_instance_uid)` → **local-first**: checks `slicer.dicomDatabase.filesForSeries()`, falls back to C-GET/C-MOVE (no C-FIND)
 - Called internally by `SlicerHelper.load_study_from_pacs()` and `load_series_from_pacs()` — not used directly by scripts
