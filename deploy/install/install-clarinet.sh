@@ -29,7 +29,7 @@ setup_user() {
         useradd --system --home-dir "$INSTALL_DIR" --create-home --shell /bin/bash clarinet
         log "Created system user 'clarinet'"
     fi
-    mkdir -p "$DATA_DIR" "$LOG_DIR"
+    mkdir -p "$INSTALL_DIR" "$DATA_DIR" "$LOG_DIR"
     chown -R clarinet:clarinet "$INSTALL_DIR" "$DATA_DIR" "$LOG_DIR"
 }
 
@@ -37,42 +37,36 @@ setup_user() {
 install_python() {
     if python3.12 --version &>/dev/null; then
         log "Python 3.12 already installed"
-        return
+    else
+        log "Installing Python 3.12 via deadsnakes PPA..."
+        apt-get update -qq
+        apt-get install -y -qq software-properties-common > /dev/null
+        add-apt-repository -y ppa:deadsnakes/ppa > /dev/null 2>&1
+        apt-get update -qq
+        apt-get install -y -qq python3.12 > /dev/null
+        log "Python 3.12 installed"
     fi
-    log "Installing Python 3.12 via deadsnakes PPA..."
-    apt-get update -qq
-    apt-get install -y -qq software-properties-common > /dev/null
-    add-apt-repository -y ppa:deadsnakes/ppa > /dev/null 2>&1
-    apt-get update -qq
-    apt-get install -y -qq python3.12 python3.12-venv python3.12-dev > /dev/null
-    log "Python 3.12 installed"
+
+    # Ensure venv and dev packages are present (cloud images often ship
+    # python3.12 without python3.12-venv or python3.12-dev)
+    local missing=()
+    dpkg -s python3.12-venv &>/dev/null || missing+=(python3.12-venv)
+    dpkg -s python3.12-dev  &>/dev/null || missing+=(python3.12-dev)
+    if [[ ${#missing[@]} -gt 0 ]]; then
+        log "Installing ${missing[*]}..."
+        apt-get update -qq
+        apt-get install -y -qq "${missing[@]}" > /dev/null
+    fi
 }
 
-# --- Step 3: uv ---
-install_uv() {
-    if command -v uv &>/dev/null; then
-        log "uv already installed"
-        return
-    fi
-    log "Installing uv..."
-    curl -LsSf https://astral.sh/uv/install.sh | sh
-    export PATH="${HOME}/.local/bin:${PATH}"
-    log "uv installed"
-}
-
-# --- Step 4: venv + wheel ---
+# --- Step 3: venv + wheel ---
 install_wheel() {
     log "Creating venv and installing Clarinet..."
 
-    # Ensure uv is in PATH
-    export PATH="${HOME}/.local/bin:${PATH}"
+    python3.12 -m venv --clear "$VENV_DIR"
 
-    if [[ ! -d "$VENV_DIR" ]]; then
-        uv venv --python python3.12 "$VENV_DIR"
-    fi
-
-    uv pip install --python "$VENV_DIR/bin/python" \
-        "${WHEEL_PATH}[pipeline,performance,dicom]"
+    "$VENV_DIR/bin/pip" install --upgrade pip
+    "$VENV_DIR/bin/pip" install "${WHEEL_PATH}[pipeline,performance,dicom]"
 
     chown -R clarinet:clarinet "$INSTALL_DIR"
     log "Clarinet installed to $VENV_DIR"
@@ -84,7 +78,10 @@ setup_services() {
         warn "Skipping external services setup"
         return
     fi
-    bash "${DEPLOY_DIR}/install/setup-services.sh"
+    source "${DEPLOY_DIR}/install/setup-services.sh"
+    # Restore log/warn overwritten by sourced script
+    log()  { echo -e "${GREEN}[install]${NC} $*"; }
+    warn() { echo -e "${YELLOW}[install]${NC} $*"; }
 }
 
 # --- Step 6: Settings ---
@@ -176,7 +173,6 @@ log "Deploy dir: $DEPLOY_DIR"
 
 setup_user
 install_python
-install_uv
 install_wheel
 setup_services
 generate_settings
