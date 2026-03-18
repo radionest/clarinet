@@ -27,7 +27,7 @@ deploy/
 
 ```bash
 make vm-create    # Boot VM from cloud image
-make vm-deploy    # Build wheel + deploy to VM
+make vm-deploy    # Download latest GitHub release wheel + deploy to VM
 make vm-smoke     # Run smoke tests
 make vm-test      # Full E2E cycle
 make vm-destroy   # Tear down VM

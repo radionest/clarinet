@@ -33,19 +33,19 @@ setup_user() {
     chown -R clarinet:clarinet "$INSTALL_DIR" "$DATA_DIR" "$LOG_DIR"
 }
 
-# --- Step 2: Python 3.14 ---
+# --- Step 2: Python 3.12 ---
 install_python() {
-    if python3.14 --version &>/dev/null; then
-        log "Python 3.14 already installed"
+    if python3.12 --version &>/dev/null; then
+        log "Python 3.12 already installed"
         return
     fi
-    log "Installing Python 3.14 via deadsnakes PPA..."
+    log "Installing Python 3.12 via deadsnakes PPA..."
     apt-get update -qq
     apt-get install -y -qq software-properties-common > /dev/null
     add-apt-repository -y ppa:deadsnakes/ppa > /dev/null 2>&1
     apt-get update -qq
-    apt-get install -y -qq python3.14 python3.14-venv python3.14-dev > /dev/null
-    log "Python 3.14 installed"
+    apt-get install -y -qq python3.12 python3.12-venv python3.12-dev > /dev/null
+    log "Python 3.12 installed"
 }
 
 # --- Step 3: uv ---
@@ -68,7 +68,7 @@ install_wheel() {
     export PATH="${HOME}/.local/bin:${PATH}"
 
     if [[ ! -d "$VENV_DIR" ]]; then
-        uv venv --python python3.14 "$VENV_DIR"
+        uv venv --python python3.12 "$VENV_DIR"
     fi
 
     uv pip install --python "$VENV_DIR/bin/python" \

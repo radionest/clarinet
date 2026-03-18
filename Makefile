@@ -245,7 +245,7 @@ vm-status: ## Show test VM status
 	@bash $(VM_SH) status
 
 .PHONY: vm-deploy
-vm-deploy: build ## Build wheel and deploy to VM
+vm-deploy: ## Download latest release wheel and deploy to VM
 	@bash $(VM_SH) deploy
 
 .PHONY: vm-smoke

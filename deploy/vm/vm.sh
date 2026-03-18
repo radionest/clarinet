@@ -198,6 +198,37 @@ cmd_status() {
     virsh domstate "$VM_NAME"
 }
 
+_download_latest_wheel() {
+    # Download the latest release wheel from GitHub
+    local repo="radionest/clarinet"
+    local download_dir="$PROJECT_DIR/dist"
+    mkdir -p "$download_dir"
+
+    log "Fetching latest release from github.com/${repo}..."
+    local wheel_url
+    wheel_url=$(curl -fsSL "https://api.github.com/repos/${repo}/releases/latest" \
+        | grep -oP '"browser_download_url":\s*"\K[^"]+\.whl')
+
+    if [[ -z "$wheel_url" ]]; then
+        err "No .whl asset found in latest GitHub release for ${repo}"
+        err "Make sure a release exists with a wheel attached"
+        exit 1
+    fi
+
+    local wheel_name
+    wheel_name="$(basename "$wheel_url")"
+    local wheel_path="${download_dir}/${wheel_name}"
+
+    if [[ -f "$wheel_path" ]]; then
+        log "Wheel already cached: $wheel_name"
+    else
+        log "Downloading $wheel_name..."
+        curl -fSL --progress-bar -o "$wheel_path" "$wheel_url"
+    fi
+
+    echo "$wheel_path"
+}
+
 cmd_deploy() {
     local ip
     ip="$(_get_ip)"
@@ -209,17 +240,10 @@ cmd_deploy() {
     local scp_opts="-o StrictHostKeyChecking=no -i $SSH_KEY_PATH"
     local ssh_target="${VM_USER}@${ip}"
 
-    # Build wheel
-    log "Building Clarinet wheel..."
-    (cd "$PROJECT_DIR" && uv build --wheel --quiet)
-
+    # Download latest wheel from GitHub releases
     local wheel
-    wheel=$(ls -t "$PROJECT_DIR"/dist/*.whl 2>/dev/null | head -1)
-    if [[ -z "$wheel" ]]; then
-        err "No wheel found in dist/. Build failed?"
-        exit 1
-    fi
-    log "Built: $(basename "$wheel")"
+    wheel="$(_download_latest_wheel)"
+    log "Using wheel: $(basename "$wheel")"
 
     # Create remote staging directory
     _ssh_cmd "mkdir -p /tmp/clarinet-deploy"
@@ -267,7 +291,7 @@ case "${1:-help}" in
         echo "  ssh      SSH into the VM (extra args passed to ssh)"
         echo "  ip       Print VM IP address"
         echo "  status   Show VM status (running/shut off/not found)"
-        echo "  deploy   Build wheel and deploy to VM"
+        echo "  deploy   Download latest release wheel and deploy to VM"
         echo "  reimage  Destroy + recreate VM (clean slate)"
         ;;
 esac
