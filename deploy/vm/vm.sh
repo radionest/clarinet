@@ -27,7 +27,7 @@ err()  { echo -e "${RED}[vm]${NC} $*" >&2; }
 
 check_deps() {
     local missing=()
-    for cmd in virsh virt-install cloud-localds qemu-img; do
+    for cmd in virsh virt-install cloud-localds qemu-img jq; do
         if ! command -v "$cmd" &>/dev/null; then
             missing+=("$cmd")
         fi
@@ -234,31 +234,47 @@ cmd_status() {
 }
 
 _download_latest_wheel() {
-    # Download the latest release wheel from GitHub
-    local repo="radionest/clarinet"
+    local repo="${CLARINET_RELEASE_REPO:-radionest/clarinet}"
     local download_dir="$PROJECT_DIR/dist"
     mkdir -p "$download_dir"
 
     log "Fetching latest release from github.com/${repo}..."
-    local wheel_url
-    wheel_url=$(curl -fsSL "https://api.github.com/repos/${repo}/releases/latest" \
-        | grep -oP '"browser_download_url":\s*"\K[^"]+\.whl')
 
-    if [[ -z "$wheel_url" ]]; then
+    local auth_header=""
+    if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+        auth_header="Authorization: Bearer ${GITHUB_TOKEN}"
+    fi
+
+    local wheel_urls
+    wheel_urls=$(curl -fsSL ${auth_header:+-H "$auth_header"} \
+        "https://api.github.com/repos/${repo}/releases/latest" \
+        | jq -r '.assets[]?.browser_download_url // empty | select(endswith(".whl"))')
+
+    if [[ -z "$wheel_urls" ]]; then
         err "No .whl asset found in latest GitHub release for ${repo}"
         err "Make sure a release exists with a wheel attached"
         exit 1
     fi
 
-    local wheel_name
+    local wheel_url
+    wheel_url=$(head -1 <<< "$wheel_urls")
+
+    local count
+    count=$(wc -l <<< "$wheel_urls")
+    if [[ "$count" -gt 1 ]]; then
+        warn "Multiple .whl assets found ($count), using: $(basename "$wheel_url")"
+    fi
+
+    local wheel_name wheel_path
     wheel_name="$(basename "$wheel_url")"
-    local wheel_path="${download_dir}/${wheel_name}"
+    wheel_path="${download_dir}/${wheel_name}"
 
     if [[ -f "$wheel_path" ]]; then
         log "Wheel already cached: $wheel_name"
     else
         log "Downloading $wheel_name..."
-        curl -fSL --progress-bar -o "$wheel_path" "$wheel_url"
+        curl -fSL --progress-bar ${auth_header:+-H "$auth_header"} \
+            -o "$wheel_path" "$wheel_url"
     fi
 
     echo "$wheel_path"
