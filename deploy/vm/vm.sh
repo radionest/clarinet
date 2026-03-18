@@ -108,6 +108,10 @@ cmd_create() {
 
     download_image
 
+    # Clean up stale files from a previous failed create (libvirt's
+    # dynamic_ownership may have chowned them to libvirt-qemu:kvm)
+    rm -f "$DISK_PATH" "$SEED_ISO"
+
     # Create disk overlay
     mkdir -p "$DISKS_DIR"
     local base_image="${IMAGES_DIR}/${IMAGE_NAME}"
@@ -126,7 +130,19 @@ cmd_create() {
         "$RENDERED_USER_DATA" \
         "$SCRIPT_DIR/cloud-init/meta-data.yaml"
 
-    # Launch VM
+    # Grant libvirt-qemu access to disk files (backing image needs read,
+    # overlay needs read-write). Prefer ACL; fall back to chmod.
+    if command -v setfacl &>/dev/null; then
+        setfacl -m u:libvirt-qemu:rw "$DISK_PATH" 2>/dev/null || true
+        setfacl -m u:libvirt-qemu:r "${IMAGES_DIR}/${IMAGE_NAME}" 2>/dev/null || true
+        setfacl -m u:libvirt-qemu:r "$SEED_ISO" 2>/dev/null || true
+    else
+        chmod o+rw "$DISK_PATH"
+        chmod o+r "${IMAGES_DIR}/${IMAGE_NAME}" "$SEED_ISO"
+    fi
+
+    # Launch VM (seclabel=none disables AppArmor confinement — its profile
+    # generator doesn't include qcow2 backing files in non-standard paths)
     log "Creating VM: $VM_NAME (${VM_RAM}MB RAM, ${VM_VCPUS} vCPUs)..."
     virt-install \
         --name "$VM_NAME" \
@@ -140,6 +156,7 @@ cmd_create() {
         --console pty,target_type=serial \
         --import \
         --noautoconsole \
+        --seclabel type=none \
         --channel unix,target.type=virtio,target.name=org.qemu.guest_agent.0
 
     log "VM '$VM_NAME' created. Waiting for cloud-init..."
@@ -148,16 +165,15 @@ cmd_create() {
 }
 
 cmd_destroy() {
-    if ! virsh domstate "$VM_NAME" &>/dev/null; then
+    if virsh domstate "$VM_NAME" &>/dev/null; then
+        log "Destroying VM '$VM_NAME'..."
+        virsh destroy "$VM_NAME" 2>/dev/null || true
+        virsh undefine "$VM_NAME" --remove-all-storage 2>/dev/null || true
+    else
         warn "VM '$VM_NAME' does not exist."
-        return
     fi
 
-    log "Destroying VM '$VM_NAME'..."
-    virsh destroy "$VM_NAME" 2>/dev/null || true
-    virsh undefine "$VM_NAME" --remove-all-storage 2>/dev/null || true
-
-    # Clean up seed ISO and rendered cloud-init
+    # Always clean up files, even if VM was already gone
     rm -f "$SEED_ISO" "$RENDERED_USER_DATA"
     log "VM destroyed."
 }
