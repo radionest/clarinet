@@ -37,7 +37,10 @@ else:
         .add_segment("invisible", (0.5, 0.5, 0.5))
     )
 
-s.setup_editor(classification, effect="Islands", brush_size=5.0)
+# Merge missed lesions into Classification as _pool for cross-segmentation Islands
+s.merge_as_pool(missed, classification)
+
+s.setup_editor(classification, effect="Islands")
 s.set_layout("axial")
 s.add_view_shortcuts()
 s.annotate("Classify missed lesions")

@@ -527,6 +527,8 @@ class SlicerHelper:
                 active_effect.setParameter("MinimumThreshold", threshold[0])
                 active_effect.setParameter("MaximumThreshold", threshold[1])
                 active_effect.self().onUseForPaint()
+            elif effect == "Islands":
+                active_effect.setParameter("Operation", "ADD_SELECTED_ISLAND")
 
     def set_layout(self, layout: str) -> None:
         """Set view layout.
@@ -1140,6 +1142,61 @@ class SlicerHelper:
         widget.deleteLater()
 
         return output_node
+
+    def merge_as_pool(
+        self,
+        source_seg: SegmentationBuilder | Any,
+        target_seg: SegmentationBuilder | Any,
+        pool_name: str = "_pool",
+        color: tuple[float, float, float] = (0.5, 0.5, 0.5),
+    ) -> None:
+        """Merge all source segments into a single binary segment in the target.
+
+        Exports all source segments to a labelmap, binarizes (any label > 0),
+        and imports the result into the target segmentation as a single segment.
+        Useful for cross-segmentation Islands workflow: the pool segment becomes
+        visible in the target's merged labelmap, allowing ADD_SELECTED_ISLAND
+        to pick islands from it.
+
+        Args:
+            source_seg: Source segmentation (SegmentationBuilder or node).
+            target_seg: Target segmentation (SegmentationBuilder or node).
+            pool_name: Name for the pool segment in the target.
+            color: RGB color tuple (0-1 range) for the pool segment.
+        """
+        import numpy as np  # type: ignore[import-not-found]
+
+        source_node = source_seg.node if isinstance(source_seg, SegmentationBuilder) else source_seg
+        target_node = target_seg.node if isinstance(target_seg, SegmentationBuilder) else target_seg
+
+        if self._image_node is not None:
+            source_node.SetReferenceImageGeometryParameterFromVolumeNode(self._image_node)
+            target_node.SetReferenceImageGeometryParameterFromVolumeNode(self._image_node)
+
+        seg_logic = slicer.modules.segmentations.logic()
+
+        # Export source → binarize
+        labelmap = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLLabelMapVolumeNode", "_pool_tmp")
+        seg_logic.ExportAllSegmentsToLabelmapNode(source_node, labelmap, 0)
+        arr = slicer.util.arrayFromVolume(labelmap)
+        arr_binary = (arr > 0).astype(np.uint8)
+        slicer.util.updateVolumeFromArray(labelmap, arr_binary)
+
+        # Import into target as a single segment
+        n_before = target_node.GetSegmentation().GetNumberOfSegments()
+        seg_logic.ImportLabelmapToSegmentationNode(labelmap, target_node)
+        slicer.mrmlScene.RemoveNode(labelmap)
+
+        # If source was empty, no segment was imported — nothing to rename
+        vtk_seg = target_node.GetSegmentation()
+        if vtk_seg.GetNumberOfSegments() <= n_before:
+            return
+
+        # Rename the imported segment to pool_name and set color
+        pool_seg_id = vtk_seg.GetNthSegmentID(vtk_seg.GetNumberOfSegments() - 1)
+        pool_segment = vtk_seg.GetSegment(pool_seg_id)
+        pool_segment.SetName(pool_name)
+        pool_segment.SetColor(*color)
 
     def _detect_acquisition_orientation(self, volume_node: Any) -> str:
         """Determine natural acquisition plane from volume's direction matrix.
