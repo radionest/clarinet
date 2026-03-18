@@ -191,6 +191,10 @@ class Settings(BaseSettings):
     anon_send_to_pacs: bool = False
     anon_failure_threshold: float = 0.5  # Max allowed failure ratio (0.0-1.0)
 
+    # C-GET retry settings
+    dicom_cget_max_retries: int = 3
+    dicom_cget_retry_backoff: float = 2.0
+
     # Series filter settings
     series_filter_excluded_modalities: list[str] = [
         "SR",

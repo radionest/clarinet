@@ -1,10 +1,17 @@
 """Anonymization service: fetch from PACS → anonymize in-memory → distribute."""
 
+from __future__ import annotations
+
 import asyncio
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from pydicom import Dataset
+
+if TYPE_CHECKING:
+    from clarinet.models.study import Series
+    from clarinet.services.dicom.models import RetrieveResult
 
 from clarinet.exceptions.domain import AnonymizationFailedError
 from clarinet.repositories.patient_repository import PatientRepository
@@ -49,6 +56,62 @@ class AnonymizationService:
         self.series_repo = series_repo
         self.dicom_client = dicom_client
         self.pacs = pacs
+
+    async def _retrieve_series(
+        self,
+        study_uid: str,
+        series: Series,
+        max_retries: int | None = None,
+    ) -> RetrieveResult | None:
+        """Retrieve series from PACS with retry on incomplete results.
+
+        Retries when PACS returns fewer instances than expected (transient
+        failures under concurrent load). Uses exponential backoff.
+
+        Args:
+            study_uid: Study Instance UID
+            series: Series to retrieve
+            max_retries: Maximum number of attempts (default: settings.dicom_cget_max_retries)
+
+        Returns:
+            RetrieveResult with instances, or None if all attempts failed
+        """
+        retries = max_retries if max_retries is not None else settings.dicom_cget_max_retries
+        expected = series.instance_count  # may be None
+
+        for attempt in range(1, retries + 1):
+            try:
+                result = await self.dicom_client.get_series_to_memory(
+                    study_uid=study_uid,
+                    series_uid=series.series_uid,
+                    peer=self.pacs,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception(
+                    f"C-GET failed for series {series.series_uid} (attempt {attempt}/{retries})"
+                )
+                if attempt < retries:
+                    await asyncio.sleep(settings.dicom_cget_retry_backoff**attempt)
+                continue
+
+            received = len(result.instances)
+
+            # Validate: got instances and count matches expected (if known)
+            if received > 0 and (expected is None or received >= expected):
+                return result
+
+            logger.warning(
+                f"Incomplete C-GET for series {series.series_uid}: "
+                f"got {received}/{expected or '?'} instances "
+                f"(attempt {attempt}/{retries})"
+            )
+            if attempt < retries:
+                await asyncio.sleep(settings.dicom_cget_retry_backoff**attempt)
+
+        logger.error(f"All {retries} C-GET attempts failed for series {series.series_uid}")
+        return None
 
     async def anonymize_study(
         self,
@@ -130,15 +193,9 @@ class AnonymizationService:
         pending_tasks: list[asyncio.Task[_DistributionResult]] = []
 
         for series in filter_result.included:
-            # 1. C-GET — strictly sequential (one PACS association at a time)
-            try:
-                result = await self.dicom_client.get_series_to_memory(
-                    study_uid=study_uid,
-                    series_uid=series.series_uid,
-                    peer=self.pacs,
-                )
-            except Exception:
-                logger.exception(f"Failed to retrieve series {series.series_uid} from PACS")
+            # 1. C-GET with retry — strictly sequential (one PACS association at a time)
+            result = await self._retrieve_series(study_uid, series)
+            if result is None:
                 total_failed += 1
                 continue
 
