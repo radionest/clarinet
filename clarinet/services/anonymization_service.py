@@ -61,7 +61,7 @@ class AnonymizationService:
         self,
         study_uid: str,
         series: Series,
-        max_retries: int = 3,
+        max_retries: int | None = None,
     ) -> RetrieveResult | None:
         """Retrieve series from PACS with retry on incomplete results.
 
@@ -71,26 +71,29 @@ class AnonymizationService:
         Args:
             study_uid: Study Instance UID
             series: Series to retrieve
-            max_retries: Maximum number of attempts
+            max_retries: Maximum number of attempts (default: settings.dicom_cget_max_retries)
 
         Returns:
             RetrieveResult with instances, or None if all attempts failed
         """
+        retries = max_retries if max_retries is not None else settings.dicom_cget_max_retries
         expected = series.instance_count  # may be None
 
-        for attempt in range(1, max_retries + 1):
+        for attempt in range(1, retries + 1):
             try:
                 result = await self.dicom_client.get_series_to_memory(
                     study_uid=study_uid,
                     series_uid=series.series_uid,
                     peer=self.pacs,
                 )
+            except asyncio.CancelledError:
+                raise
             except Exception:
                 logger.exception(
-                    f"C-GET failed for series {series.series_uid} (attempt {attempt}/{max_retries})"
+                    f"C-GET failed for series {series.series_uid} (attempt {attempt}/{retries})"
                 )
-                if attempt < max_retries:
-                    await asyncio.sleep(2**attempt)
+                if attempt < retries:
+                    await asyncio.sleep(settings.dicom_cget_retry_backoff**attempt)
                 continue
 
             received = len(result.instances)
@@ -102,12 +105,12 @@ class AnonymizationService:
             logger.warning(
                 f"Incomplete C-GET for series {series.series_uid}: "
                 f"got {received}/{expected or '?'} instances "
-                f"(attempt {attempt}/{max_retries})"
+                f"(attempt {attempt}/{retries})"
             )
-            if attempt < max_retries:
-                await asyncio.sleep(2**attempt)
+            if attempt < retries:
+                await asyncio.sleep(settings.dicom_cget_retry_backoff**attempt)
 
-        logger.error(f"All {max_retries} C-GET attempts failed for series {series.series_uid}")
+        logger.error(f"All {retries} C-GET attempts failed for series {series.series_uid}")
         return None
 
     async def anonymize_study(
