@@ -41,6 +41,21 @@ check_deps() {
     fi
 }
 
+ensure_storage_access() {
+    # libvirt-qemu needs +x (traverse) on every directory in the path to disk files.
+    # On Ubuntu, ~/.local and ~/.local/share default to 0700, blocking the hypervisor.
+    local dirs=("$HOME" "$HOME/.local" "$HOME/.local/share" "$DATA_DIR" "$DISKS_DIR" "$IMAGES_DIR")
+    for dir in "${dirs[@]}"; do
+        [[ -d "$dir" ]] || continue
+        local perms
+        perms=$(stat -c %a "$dir")
+        if (( (8#$perms & 8#005) == 0 )); then
+            log "Fixing permissions on $dir ($perms -> adding o+x)..."
+            chmod o+x "$dir"
+        fi
+    done
+}
+
 get_ssh_pubkey() {
     local pub_key="${SSH_KEY_PATH}.pub"
     if [[ ! -f "$pub_key" ]]; then
@@ -65,6 +80,7 @@ download_image() {
 
 cmd_create() {
     check_deps
+    ensure_storage_access
 
     if virsh domstate "$VM_NAME" &>/dev/null; then
         warn "VM '$VM_NAME' already exists. Use 'reimage' to recreate."
@@ -249,10 +265,28 @@ cmd_reimage() {
     cmd_create
 }
 
+cmd_setup() {
+    check_deps
+    mkdir -p "$IMAGES_DIR" "$DISKS_DIR"
+    ensure_storage_access
+
+    if virsh nodeinfo &>/dev/null; then
+        log "libvirt connection: OK"
+    else
+        warn "Cannot connect to libvirt. Check that you are in the 'libvirt' group:"
+        echo "  groups"
+        echo "  sudo usermod -aG libvirt \$USER  # then re-login"
+        exit 1
+    fi
+
+    log "Setup complete. Run 'make vm-create' to create a VM."
+}
+
 # --- Main ---
 case "${1:-help}" in
     create)  cmd_create ;;
     destroy) cmd_destroy ;;
+    setup)   cmd_setup ;;
     ssh)     shift; cmd_ssh "$@" ;;
     ip)      cmd_ip ;;
     status)  cmd_status ;;
@@ -264,6 +298,7 @@ case "${1:-help}" in
         echo "Commands:"
         echo "  create   Create and boot VM from cloud image"
         echo "  destroy  Stop and remove VM with all storage"
+        echo "  setup    One-time host setup (permissions + libvirt check)"
         echo "  ssh      SSH into the VM (extra args passed to ssh)"
         echo "  ip       Print VM IP address"
         echo "  status   Show VM status (running/shut off/not found)"
