@@ -91,6 +91,23 @@ def export_segmentation(name: str, output_path: str) -> str:
     return output_path
 
 
+def _find_segment_id(vtk_seg: Any, name: str) -> str | None:
+    """Find segment ID by display name.
+
+    Args:
+        vtk_seg: A vtkSegmentation object.
+        name: Segment display name to search for.
+
+    Returns:
+        Segment ID string, or None if not found.
+    """
+    for i in range(vtk_seg.GetNumberOfSegments()):
+        sid = vtk_seg.GetNthSegmentID(i)
+        if vtk_seg.GetSegment(sid).GetName() == name:
+            return str(sid)
+    return None
+
+
 def clear_scene() -> None:
     """Clear the current Slicer MRML scene."""
     slicer.mrmlScene.Clear(0)
@@ -483,6 +500,62 @@ class SlicerHelper:
         """
         self._image_node = node
 
+    def set_segmentation_visibility(
+        self,
+        segmentation: SegmentationBuilder | Any,
+        visible: bool,
+    ) -> None:
+        """Show or hide a segmentation in all views.
+
+        Args:
+            segmentation: SegmentationBuilder or raw segmentation node.
+            visible: Whether the segmentation should be visible.
+        """
+        node = segmentation.node if isinstance(segmentation, SegmentationBuilder) else segmentation
+        display = node.GetDisplayNode()
+        if display is not None:
+            display.SetVisibility(int(visible))
+
+    def configure_segment_display(
+        self,
+        segmentation: SegmentationBuilder | Any,
+        segment_name: str,
+        *,
+        color: tuple[float, float, float] | None = None,
+        fill_opacity: float | None = None,
+        outline_opacity: float | None = None,
+        outline_thickness: int | None = None,
+    ) -> None:
+        """Configure display properties for a single segment.
+
+        Args:
+            segmentation: SegmentationBuilder or raw segmentation node.
+            segment_name: Name of the segment to configure.
+            color: RGB color tuple (0-1 range). None to keep current.
+            fill_opacity: 2D fill opacity (0.0 = transparent, 1.0 = opaque).
+            outline_opacity: 2D outline opacity (0.0 = hidden, 1.0 = opaque).
+            outline_thickness: Slice intersection line thickness in pixels
+                (applies to the whole segmentation display node).
+        """
+        node = segmentation.node if isinstance(segmentation, SegmentationBuilder) else segmentation
+        vtk_seg = node.GetSegmentation()
+        display = node.GetDisplayNode()
+
+        seg_id = _find_segment_id(vtk_seg, segment_name)
+        if seg_id is None:
+            return
+
+        if color is not None:
+            vtk_seg.GetSegment(seg_id).SetColor(*color)
+
+        if display is not None:
+            if fill_opacity is not None:
+                display.SetSegmentOpacity2DFill(seg_id, fill_opacity)
+            if outline_opacity is not None:
+                display.SetSegmentOpacity2DOutline(seg_id, outline_opacity)
+            if outline_thickness is not None:
+                display.SetSliceIntersectionThickness(outline_thickness)
+
     def setup_editor(
         self,
         segmentation: SegmentationBuilder | Any,
@@ -527,6 +600,8 @@ class SlicerHelper:
                 active_effect.setParameter("MinimumThreshold", threshold[0])
                 active_effect.setParameter("MaximumThreshold", threshold[1])
                 active_effect.self().onUseForPaint()
+            elif effect == "Islands":
+                active_effect.setParameter("Operation", "ADD_SELECTED_ISLAND")
 
     def set_layout(self, layout: str) -> None:
         """Set view layout.
@@ -787,14 +862,7 @@ class SlicerHelper:
         node = segmentation.node if isinstance(segmentation, SegmentationBuilder) else segmentation
         vtk_seg = node.GetSegmentation()
 
-        # Find segment by name (no GetSegmentIdByName in the VTK-level API).
-        seg_id = None
-        for i in range(vtk_seg.GetNumberOfSegments()):
-            sid = vtk_seg.GetNthSegmentID(i)
-            if vtk_seg.GetSegment(sid).GetName() == segment_name:
-                seg_id = sid
-                break
-
+        seg_id = _find_segment_id(vtk_seg, segment_name)
         if seg_id is None:
             return None
 
@@ -1140,6 +1208,63 @@ class SlicerHelper:
         widget.deleteLater()
 
         return output_node
+
+    def merge_as_pool(
+        self,
+        source_seg: SegmentationBuilder | Any,
+        target_seg: SegmentationBuilder | Any,
+        pool_name: str = "_pool",
+        color: tuple[float, float, float] = (0.5, 0.5, 0.5),
+    ) -> None:
+        """Merge all source segments into a single binary segment in the target.
+
+        Exports all source segments to a labelmap, binarizes (any label > 0),
+        and imports the result into the target segmentation as a single segment.
+        Useful for cross-segmentation Islands workflow: the pool segment becomes
+        visible in the target's merged labelmap, allowing ADD_SELECTED_ISLAND
+        to pick islands from it.
+
+        Args:
+            source_seg: Source segmentation (SegmentationBuilder or node).
+            target_seg: Target segmentation (SegmentationBuilder or node).
+            pool_name: Name for the pool segment in the target.
+            color: RGB color tuple (0-1 range) for the pool segment.
+        """
+        import numpy as np  # type: ignore[import-not-found]
+
+        source_node = source_seg.node if isinstance(source_seg, SegmentationBuilder) else source_seg
+        target_node = target_seg.node if isinstance(target_seg, SegmentationBuilder) else target_seg
+
+        if self._image_node is not None:
+            source_node.SetReferenceImageGeometryParameterFromVolumeNode(self._image_node)
+            target_node.SetReferenceImageGeometryParameterFromVolumeNode(self._image_node)
+
+        seg_logic = slicer.modules.segmentations.logic()
+
+        # Export source → binarize
+        labelmap = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLLabelMapVolumeNode", "_pool_tmp")
+        seg_logic.ExportAllSegmentsToLabelmapNode(source_node, labelmap, 0)
+        arr = slicer.util.arrayFromVolume(labelmap)
+        arr_binary = (arr > 0).astype(np.uint8)
+        slicer.util.updateVolumeFromArray(labelmap, arr_binary)
+
+        # Import into target as a single segment
+        vtk_seg = target_node.GetSegmentation()
+        ids_before = {vtk_seg.GetNthSegmentID(i) for i in range(vtk_seg.GetNumberOfSegments())}
+        seg_logic.ImportLabelmapToSegmentationNode(labelmap, target_node)
+        slicer.mrmlScene.RemoveNode(labelmap)
+
+        # Derive the new segment ID from set difference
+        ids_after = {vtk_seg.GetNthSegmentID(i) for i in range(vtk_seg.GetNumberOfSegments())}
+        new_ids = ids_after - ids_before
+        if not new_ids:
+            return  # Source was empty — nothing imported
+
+        # Rename the imported segment to pool_name and set color
+        pool_seg_id = new_ids.pop()
+        pool_segment = vtk_seg.GetSegment(pool_seg_id)
+        pool_segment.SetName(pool_name)
+        pool_segment.SetColor(*color)
 
     def _detect_acquisition_orientation(self, volume_node: Any) -> str:
         """Determine natural acquisition plane from volume's direction matrix.

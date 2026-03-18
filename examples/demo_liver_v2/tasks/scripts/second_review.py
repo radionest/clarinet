@@ -37,7 +37,24 @@ else:
         .add_segment("invisible", (0.5, 0.5, 0.5))
     )
 
-s.setup_editor(classification, effect="Islands", brush_size=5.0)
+# Merge missed lesions into Classification as _pool for cross-segmentation Islands
+s.merge_as_pool(missed, classification)
+
+# Hide auxiliary segmentations, keep Classification and DoctorSeg visible
+s.set_segmentation_visibility(projection, False)
+s.set_segmentation_visibility(missed, False)
+
+# _pool: yellow outline only, no fill, 2px line
+s.configure_segment_display(
+    classification,
+    "_pool",
+    color=(1.0, 1.0, 0.0),
+    fill_opacity=0.0,
+    outline_opacity=1.0,
+    outline_thickness=2,
+)
+
+s.setup_editor(classification, effect="Islands")
 s.set_layout("axial")
 s.add_view_shortcuts()
 s.annotate("Classify missed lesions")

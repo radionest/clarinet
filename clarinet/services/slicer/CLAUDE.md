@@ -118,6 +118,8 @@ Runs inside Slicer Python environment. Has `_Dummy` fallback for testing outside
 - `set_source_volume(node)` — explicitly set the source volume node for segmentation editing
 - `create_segmentation(name)` → `SegmentationBuilder` (fluent `.add_segment()`, `.select_segment(name)`)
 - `load_segmentation(path, name=None)` → loads existing segmentation from file, sets reference geometry
+- `set_segmentation_visibility(segmentation, visible)` — show/hide a segmentation in all views via `SetVisibility()`
+- `configure_segment_display(segmentation, segment_name, *, color=, fill_opacity=, outline_opacity=, outline_thickness=)` — per-segment 2D display: color, fill/outline opacity, line thickness. `outline_thickness` is global per segmentation display node
 - `setup_editor(seg, effect=, brush_size=, threshold=, source_volume=)` — configures SegmentEditor; `source_volume` overrides `_image_node`
 - `set_layout("axial"|"sagittal"|"coronal"|"four_up")`
 - `annotate(text)`, `configure_slab(thickness=)`, `setup_edit_mask(path)`
@@ -132,6 +134,7 @@ Runs inside Slicer Python environment. Has `_Dummy` fallback for testing outside
 - `auto_number_segment(segmentation, prefix="ROI", start_from=None)` → `int` — adds `{prefix}_{N+1}` segment, returns assigned number
 - `subtract_segmentations(seg_a, seg_b, output_name=None, max_overlap=0, max_overlap_ratio=None)` — ROI-level subtraction: removes seg_a segments overlapping with seg_b. In-place or new node if `output_name` set
 - `binarize_and_split_islands(segmentation, output_name="_BinarizedIslands", min_island_size=1)` — merges all segments into a single binary mask (any label > 0), then splits connected components into individual segments via Islands effect. Returns new segmentation node. Used to convert multi-category segmentations (e.g. mts/unclear/benign) into per-island segments for ROI-level comparison
+- `merge_as_pool(source_seg, target_seg, pool_name="_pool", color=(0.5, 0.5, 0.5))` — merges all source segments into a single binary segment in target segmentation. Used for cross-segmentation Islands workflow: the pool segment appears in the target's merged labelmap, enabling ADD_SELECTED_ISLAND to pick islands from it
 - `set_dual_layout(volume_a, volume_b, seg_a=None, seg_b=None, linked=True, orientation_a=None, orientation_b=None)` — side-by-side view with Red/Yellow composites, per-view segmentation visibility, and auto-detected orientation per volume (reads IJK-to-RAS direction matrix); pass `orientation_a`/`orientation_b` ("Axial", "Sagittal", "Coronal") to override auto-detection
 - `align_by_center(moving_volume, reference_volume, moving_segmentation=None, transform_name="AlignTransform")` → `vtkMRMLLinearTransformNode` — pure translation aligning image centers; applies transform to moving volume (and optional segmentation)
 - `refine_alignment_by_centroids(moving_seg, reference_seg, transform_node, min_landmarks=1)` → `int` — computes rigid-body transform (vtkLandmarkTransform / Horn method) from matching segment centroids in LOCAL RAS; replaces matrix on existing transform node; returns number of landmark pairs used (0 = no change). Edge cases: 1 pt = translation, 2 pts = translation + partial rotation, 3+ = full rigid
