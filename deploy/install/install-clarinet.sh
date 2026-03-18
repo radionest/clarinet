@@ -48,11 +48,14 @@ install_python() {
     fi
 
     # Ensure venv and dev packages are present (cloud images often ship
-    # python3.12 without python3.12-venv)
-    if ! dpkg -s python3.12-venv &>/dev/null; then
-        log "Installing python3.12-venv..."
+    # python3.12 without python3.12-venv or python3.12-dev)
+    local missing=()
+    dpkg -s python3.12-venv &>/dev/null || missing+=(python3.12-venv)
+    dpkg -s python3.12-dev  &>/dev/null || missing+=(python3.12-dev)
+    if [[ ${#missing[@]} -gt 0 ]]; then
+        log "Installing ${missing[*]}..."
         apt-get update -qq
-        apt-get install -y -qq python3.12-venv python3.12-dev > /dev/null
+        apt-get install -y -qq "${missing[@]}" > /dev/null
     fi
 }
 

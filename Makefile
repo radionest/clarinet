@@ -253,7 +253,9 @@ vm-deploy: ## Download latest release wheel and deploy to VM
 	@bash $(VM_SH) deploy
 
 .PHONY: vm-deploy-local
-vm-deploy-local: build ## Build local wheel and deploy to VM
+vm-deploy-local: ## Build local wheel and deploy to VM
+	@rm -rf dist/
+	@$(MAKE) build
 	@bash $(VM_SH) deploy dist/*.whl
 
 .PHONY: vm-smoke
