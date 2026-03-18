@@ -483,6 +483,69 @@ class SlicerHelper:
         """
         self._image_node = node
 
+    def set_segmentation_visibility(
+        self,
+        segmentation: SegmentationBuilder | Any,
+        visible: bool,
+    ) -> None:
+        """Show or hide a segmentation in all views.
+
+        Args:
+            segmentation: SegmentationBuilder or raw segmentation node.
+            visible: Whether the segmentation should be visible.
+        """
+        node = segmentation.node if isinstance(segmentation, SegmentationBuilder) else segmentation
+        display = node.GetDisplayNode()
+        if display is not None:
+            display.SetVisibility(int(visible))
+
+    def configure_segment_display(
+        self,
+        segmentation: SegmentationBuilder | Any,
+        segment_name: str,
+        *,
+        color: tuple[float, float, float] | None = None,
+        fill_opacity: float | None = None,
+        outline_opacity: float | None = None,
+        outline_thickness: int | None = None,
+    ) -> None:
+        """Configure display properties for a single segment.
+
+        Args:
+            segmentation: SegmentationBuilder or raw segmentation node.
+            segment_name: Name of the segment to configure.
+            color: RGB color tuple (0-1 range). None to keep current.
+            fill_opacity: 2D fill opacity (0.0 = transparent, 1.0 = opaque).
+            outline_opacity: 2D outline opacity (0.0 = hidden, 1.0 = opaque).
+            outline_thickness: Slice intersection line thickness in pixels
+                (applies to the whole segmentation display node).
+        """
+        node = segmentation.node if isinstance(segmentation, SegmentationBuilder) else segmentation
+        vtk_seg = node.GetSegmentation()
+        display = node.GetDisplayNode()
+
+        # Find segment ID by name
+        seg_id = None
+        for i in range(vtk_seg.GetNumberOfSegments()):
+            sid = vtk_seg.GetNthSegmentID(i)
+            if vtk_seg.GetSegment(sid).GetName() == segment_name:
+                seg_id = sid
+                break
+
+        if seg_id is None:
+            return
+
+        if color is not None:
+            vtk_seg.GetSegment(seg_id).SetColor(*color)
+
+        if display is not None:
+            if fill_opacity is not None:
+                display.SetSegmentOpacity2DFill(seg_id, fill_opacity)
+            if outline_opacity is not None:
+                display.SetSegmentOpacity2DOutline(seg_id, outline_opacity)
+            if outline_thickness is not None:
+                display.SetSliceIntersectionThickness(outline_thickness)
+
     def setup_editor(
         self,
         segmentation: SegmentationBuilder | Any,

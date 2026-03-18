@@ -118,6 +118,8 @@ Runs inside Slicer Python environment. Has `_Dummy` fallback for testing outside
 - `set_source_volume(node)` — explicitly set the source volume node for segmentation editing
 - `create_segmentation(name)` → `SegmentationBuilder` (fluent `.add_segment()`, `.select_segment(name)`)
 - `load_segmentation(path, name=None)` → loads existing segmentation from file, sets reference geometry
+- `set_segmentation_visibility(segmentation, visible)` — show/hide a segmentation in all views via `SetVisibility()`
+- `configure_segment_display(segmentation, segment_name, *, color=, fill_opacity=, outline_opacity=, outline_thickness=)` — per-segment 2D display: color, fill/outline opacity, line thickness. `outline_thickness` is global per segmentation display node
 - `setup_editor(seg, effect=, brush_size=, threshold=, source_volume=)` — configures SegmentEditor; `source_volume` overrides `_image_node`
 - `set_layout("axial"|"sagittal"|"coronal"|"four_up")`
 - `annotate(text)`, `configure_slab(thickness=)`, `setup_edit_mask(path)`
