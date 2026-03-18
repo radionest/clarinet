@@ -305,7 +305,7 @@ class Settings(BaseSettings):
     def database_url(self) -> str:
         """Get the database URL for SQLAlchemy."""
         if self.database_driver == DatabaseDriver.SQLITE:
-            return f"sqlite:///{self.database_name}.db"
+            return f"sqlite:///{self.database_name.value}.db"
         else:
             return f"{self.database_driver}://{self.database_username}:{self.database_password}@{self.database_host}:{self.database_port}/{self.database_name}"
 
