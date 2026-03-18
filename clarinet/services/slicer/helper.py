@@ -191,8 +191,16 @@ class PacsHelper:
             raw = settings.value(f"DICOM/ServerNodes/{i}")
             if raw is None:
                 continue
-            data = json.loads(raw.data())
+            try:
+                text = raw.data() if hasattr(raw, "data") else str(raw)
+                data = json.loads(text)
+            except (json.JSONDecodeError, AttributeError, TypeError):
+                _pacs_log.warning("Skipping malformed DICOM/ServerNodes/%d", i)
+                continue
             servers.append(data)
+
+        # Qt checkbox tri-state: 0 = Unchecked, 1 = PartiallyChecked, 2 = Checked
+        _QT_CHECKED = 2
 
         server: dict[str, Any] | None = None
         if server_name:
@@ -207,7 +215,7 @@ class PacsHelper:
                 )
         else:
             for s in servers:
-                if s.get("QueryRetrieveCheckState") == 2:
+                if int(s.get("QueryRetrieveCheckState", 0)) == _QT_CHECKED:
                     server = s
                     break
             if server is None and servers:
