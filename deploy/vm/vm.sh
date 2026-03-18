@@ -44,12 +44,31 @@ check_deps() {
 ensure_storage_access() {
     # libvirt-qemu needs +x (traverse) on every directory in the path to disk files.
     # On Ubuntu, ~/.local and ~/.local/share default to 0700, blocking the hypervisor.
-    local dirs=("$HOME" "$HOME/.local" "$HOME/.local/share" "$DATA_DIR" "$DISKS_DIR" "$IMAGES_DIR")
-    for dir in "${dirs[@]}"; do
+    local home_dirs=("$HOME" "$HOME/.local" "$HOME/.local/share")
+    local storage_dirs=("$DATA_DIR" "$DISKS_DIR" "$IMAGES_DIR")
+
+    # For home directories: prefer ACL (only grants access to libvirt-qemu),
+    # fall back to chmod o+x with a warning about privacy implications.
+    for dir in "${home_dirs[@]}"; do
         [[ -d "$dir" ]] || continue
         local perms
         perms=$(stat -c %a "$dir")
-        if (( (8#$perms & 8#005) == 0 )); then
+        (( 8#$perms & 8#001 )) && continue  # o+x already set — skip
+
+        if command -v setfacl &>/dev/null && setfacl -m u:libvirt-qemu:--x "$dir" 2>/dev/null; then
+            log "Granted libvirt-qemu traverse on $dir via ACL"
+        else
+            warn "Adding o+x to $dir (exposes directory listing to local users)"
+            chmod o+x "$dir"
+        fi
+    done
+
+    # For storage directories we manage: chmod o+x is fine.
+    for dir in "${storage_dirs[@]}"; do
+        [[ -d "$dir" ]] || continue
+        local perms
+        perms=$(stat -c %a "$dir")
+        if (( (8#$perms & 8#001) == 0 )); then
             log "Fixing permissions on $dir ($perms -> adding o+x)..."
             chmod o+x "$dir"
         fi
