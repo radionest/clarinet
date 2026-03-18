@@ -1,7 +1,6 @@
 project_name="НИР Печень"
 project_description="Большое исследование артериографии для выявления метастазов колректального рака в печень"
 extra_roles = ["doctor_CT", "doctor_MRI", "doctor_PDCT", "doctor_CT-AG", "mdk", "surgeon", "pathologist"]
-admin_password = "admin123"
 debug = true
 log_level = "DEBUG"
 log_console_level = "INFO"
