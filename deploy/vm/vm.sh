@@ -254,7 +254,7 @@ _download_latest_wheel() {
     local download_dir="$PROJECT_DIR/dist"
     mkdir -p "$download_dir"
 
-    log "Fetching latest release from github.com/${repo}..."
+    log "Fetching latest release from github.com/${repo}..." >&2
 
     local auth_header=""
     if [[ -n "${GITHUB_TOKEN:-}" ]]; then
@@ -278,7 +278,7 @@ _download_latest_wheel() {
     local count
     count=$(wc -l <<< "$wheel_urls")
     if [[ "$count" -gt 1 ]]; then
-        warn "Multiple .whl assets found ($count), using: $(basename "$wheel_url")"
+        warn "Multiple .whl assets found ($count), using: $(basename "$wheel_url")" >&2
     fi
 
     local wheel_name wheel_path
@@ -286,9 +286,9 @@ _download_latest_wheel() {
     wheel_path="${download_dir}/${wheel_name}"
 
     if [[ -f "$wheel_path" ]]; then
-        log "Wheel already cached: $wheel_name"
+        log "Wheel already cached: $wheel_name" >&2
     else
-        log "Downloading $wheel_name..."
+        log "Downloading $wheel_name..." >&2
         curl -fSL --progress-bar ${auth_header:+-H "$auth_header"} \
             -o "$wheel_path" "$wheel_url"
     fi
@@ -297,6 +297,8 @@ _download_latest_wheel() {
 }
 
 cmd_deploy() {
+    local wheel="${1:-}"
+
     local ip
     ip="$(_get_ip)"
     if [[ -z "$ip" ]]; then
@@ -307,10 +309,19 @@ cmd_deploy() {
     local scp_opts="-o StrictHostKeyChecking=no -i $SSH_KEY_PATH"
     local ssh_target="${VM_USER}@${ip}"
 
-    # Download latest wheel from GitHub releases
-    local wheel
-    wheel="$(_download_latest_wheel)"
-    log "Using wheel: $(basename "$wheel")"
+    if [[ -n "$wheel" ]]; then
+        # Use provided local wheel
+        if [[ ! -f "$wheel" ]]; then
+            err "Wheel not found: $wheel"
+            exit 1
+        fi
+        wheel="$(realpath "$wheel")"
+        log "Using local wheel: $(basename "$wheel")"
+    else
+        # Download latest wheel from GitHub releases
+        wheel="$(_download_latest_wheel)"
+        log "Using wheel: $(basename "$wheel")"
+    fi
 
     # Create remote staging directory
     _ssh_cmd "mkdir -p /tmp/clarinet-deploy"
@@ -365,7 +376,7 @@ case "${1:-help}" in
     ssh)     shift; cmd_ssh "$@" ;;
     ip)      cmd_ip ;;
     status)  cmd_status ;;
-    deploy)  cmd_deploy ;;
+    deploy)  shift; cmd_deploy "$@" ;;
     reimage) cmd_reimage ;;
     help|*)
         echo "Usage: $(basename "$0") <command>"
@@ -377,7 +388,7 @@ case "${1:-help}" in
         echo "  ssh      SSH into the VM (extra args passed to ssh)"
         echo "  ip       Print VM IP address"
         echo "  status   Show VM status (running/shut off/not found)"
-        echo "  deploy   Download latest release wheel and deploy to VM"
+        echo "  deploy   Deploy to VM (optional: path to .whl, else downloads latest release)"
         echo "  reimage  Destroy + recreate VM (clean slate)"
         ;;
 esac

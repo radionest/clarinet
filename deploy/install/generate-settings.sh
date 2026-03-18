@@ -46,7 +46,11 @@ project_name = "Clarinet"
 
 # Database
 database_driver = "postgresql+asyncpg"
-database_url = "postgresql+asyncpg://${DB_USER}:${DB_PASS}@localhost:5432/${DB_NAME}"
+database_host = "localhost"
+database_port = 5432
+database_name = "${DB_NAME}"
+database_username = "${DB_USER}"
+database_password = "${DB_PASS}"
 
 # Security
 secret_key = "${SECRET_KEY}"
@@ -55,7 +59,10 @@ anon_uid_salt = "${ANON_SALT}"
 
 # Pipeline (TaskIQ + RabbitMQ)
 pipeline_enabled = true
-pipeline_broker_url = "amqp://${RABBIT_USER}:${RABBIT_PASS}@localhost:5672/"
+rabbitmq_host = "localhost"
+rabbitmq_port = 5672
+rabbitmq_login = "${RABBIT_USER}"
+rabbitmq_password = "${RABBIT_PASS}"
 
 # PACS
 pacs_host = "localhost"

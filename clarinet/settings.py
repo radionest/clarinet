@@ -307,7 +307,7 @@ class Settings(BaseSettings):
         if self.database_driver == DatabaseDriver.SQLITE:
             return f"sqlite:///{self.database_name}.db"
         else:
-            return f"{self.database_driver}://{self.database_username}:{self.database_password}@{self.database_host}:{self.database_port}/{self.database_name}"
+            return f"{self.database_driver.value}://{self.database_username}:{self.database_password}@{self.database_host}:{self.database_port}/{self.database_name}"
 
     def get_template_dir(self) -> str:
         """Get the template directory path."""
