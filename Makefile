@@ -252,6 +252,10 @@ vm-status: ## Show test VM status
 vm-deploy: ## Download latest release wheel and deploy to VM
 	@bash $(VM_SH) deploy
 
+.PHONY: vm-deploy-local
+vm-deploy-local: build ## Build local wheel and deploy to VM
+	@bash $(VM_SH) deploy dist/*.whl
+
 .PHONY: vm-smoke
 vm-smoke: ## Run smoke tests against running VM
 	@bash deploy/test/smoke-test.sh
