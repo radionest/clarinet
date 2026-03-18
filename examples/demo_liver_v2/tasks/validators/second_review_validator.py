@@ -6,13 +6,8 @@ from vtk.util.numpy_support import vtk_to_numpy  # type: ignore[import-not-found
 node = slicer.util.getNode("Classification")  # type: ignore[name-defined]  # noqa: F821
 seg = node.GetSegmentation()
 
-# Find _pool segment by name
-pool_seg_id = None
-for i in range(seg.GetNumberOfSegments()):
-    sid = seg.GetNthSegmentID(i)
-    if seg.GetSegment(sid).GetName() == "_pool":
-        pool_seg_id = sid
-        break
+# Find _pool segment by name (_find_segment_id is provided by helper.py)
+pool_seg_id = _find_segment_id(seg, "_pool")  # type: ignore[name-defined]  # noqa: F821
 
 # Check that _pool is empty (all islands classified), then remove it
 if pool_seg_id is not None:

@@ -91,6 +91,23 @@ def export_segmentation(name: str, output_path: str) -> str:
     return output_path
 
 
+def _find_segment_id(vtk_seg: Any, name: str) -> str | None:
+    """Find segment ID by display name.
+
+    Args:
+        vtk_seg: A vtkSegmentation object.
+        name: Segment display name to search for.
+
+    Returns:
+        Segment ID string, or None if not found.
+    """
+    for i in range(vtk_seg.GetNumberOfSegments()):
+        sid = vtk_seg.GetNthSegmentID(i)
+        if vtk_seg.GetSegment(sid).GetName() == name:
+            return str(sid)
+    return None
+
+
 def clear_scene() -> None:
     """Clear the current Slicer MRML scene."""
     slicer.mrmlScene.Clear(0)
@@ -524,14 +541,7 @@ class SlicerHelper:
         vtk_seg = node.GetSegmentation()
         display = node.GetDisplayNode()
 
-        # Find segment ID by name
-        seg_id = None
-        for i in range(vtk_seg.GetNumberOfSegments()):
-            sid = vtk_seg.GetNthSegmentID(i)
-            if vtk_seg.GetSegment(sid).GetName() == segment_name:
-                seg_id = sid
-                break
-
+        seg_id = _find_segment_id(vtk_seg, segment_name)
         if seg_id is None:
             return
 
@@ -852,14 +862,7 @@ class SlicerHelper:
         node = segmentation.node if isinstance(segmentation, SegmentationBuilder) else segmentation
         vtk_seg = node.GetSegmentation()
 
-        # Find segment by name (no GetSegmentIdByName in the VTK-level API).
-        seg_id = None
-        for i in range(vtk_seg.GetNumberOfSegments()):
-            sid = vtk_seg.GetNthSegmentID(i)
-            if vtk_seg.GetSegment(sid).GetName() == segment_name:
-                seg_id = sid
-                break
-
+        seg_id = _find_segment_id(vtk_seg, segment_name)
         if seg_id is None:
             return None
 
@@ -1246,17 +1249,19 @@ class SlicerHelper:
         slicer.util.updateVolumeFromArray(labelmap, arr_binary)
 
         # Import into target as a single segment
-        n_before = target_node.GetSegmentation().GetNumberOfSegments()
+        vtk_seg = target_node.GetSegmentation()
+        ids_before = {vtk_seg.GetNthSegmentID(i) for i in range(vtk_seg.GetNumberOfSegments())}
         seg_logic.ImportLabelmapToSegmentationNode(labelmap, target_node)
         slicer.mrmlScene.RemoveNode(labelmap)
 
-        # If source was empty, no segment was imported — nothing to rename
-        vtk_seg = target_node.GetSegmentation()
-        if vtk_seg.GetNumberOfSegments() <= n_before:
-            return
+        # Derive the new segment ID from set difference
+        ids_after = {vtk_seg.GetNthSegmentID(i) for i in range(vtk_seg.GetNumberOfSegments())}
+        new_ids = ids_after - ids_before
+        if not new_ids:
+            return  # Source was empty — nothing imported
 
         # Rename the imported segment to pool_name and set color
-        pool_seg_id = vtk_seg.GetNthSegmentID(vtk_seg.GetNumberOfSegments() - 1)
+        pool_seg_id = new_ids.pop()
         pool_segment = vtk_seg.GetSegment(pool_seg_id)
         pool_segment.SetName(pool_name)
         pool_segment.SetColor(*color)
