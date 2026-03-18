@@ -457,13 +457,21 @@ async def run_with_frontend(host: str, port: int) -> None:
     logger.info(f"Starting Clarinet with frontend at http://{host}:{port}")
     logger.info("Press Ctrl+C to stop both servers")
 
-    watch_fn = (
-        _run_frontend_with_entr if await _check_command_exists("entr") else _run_frontend_periodic
-    )
+    # Skip frontend watch when running from pre-built static (wheel install)
+    static_path = library_path / "static"
+    use_prebuilt = static_path.exists() and not frontend_path.exists()
+
+    if not use_prebuilt:
+        watch_fn = (
+            _run_frontend_with_entr
+            if await _check_command_exists("entr")
+            else _run_frontend_periodic
+        )
 
     try:
         backend_task = asyncio.create_task(run_backend())
-        frontend_task = asyncio.create_task(watch_fn(frontend_path))
+        if not use_prebuilt:
+            frontend_task = asyncio.create_task(watch_fn(frontend_path))
         await backend_task
     except Exception as e:
         logger.error(f"Error running servers: {e}")

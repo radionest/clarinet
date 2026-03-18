@@ -5,15 +5,10 @@ This module maps domain exceptions to appropriate HTTP status codes
 and response formats for the API layer using FastAPI decorators.
 """
 
-from typing import TYPE_CHECKING
-
-from fastapi import Request, status
+from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 
 from clarinet.utils.logger import logger
-
-if TYPE_CHECKING:
-    from fastapi import FastAPI
 
 
 def setup_exception_handlers(app: FastAPI) -> None:
