@@ -22,6 +22,8 @@ Usage inside Slicer (what the user writes)::
 from __future__ import annotations
 
 import contextlib
+import json
+import logging
 import os
 import re
 from typing import TYPE_CHECKING, Any, Literal
@@ -124,6 +126,9 @@ class SegmentationBuilder:
         editor.setCurrentSegmentID(name)
 
 
+_pacs_log = logging.getLogger("clarinet.slicer.pacs")
+
+
 class PacsHelper:
     """DSL for PACS query/retrieve inside 3D Slicer via DIMSE.
 
@@ -162,15 +167,45 @@ class PacsHelper:
         Raises:
             SlicerHelperError: If no PACS server is configured in Slicer.
         """
-        browser = (
-            slicer.modules.dicom.widgetRepresentation().self().browserWidget.dicomVisualBrowser
-        )
+        # WORKAROUND: Read PACS servers from QSettings instead of
+        # ctkDICOMVisualBrowser API.
+        #
+        # Slicer has two separate server lists that are NOT synchronized:
+        #   1. ctkDICOMVisualBrowser — the new visual DICOM browser widget
+        #   2. QSettings (DICOM/ServerNodes/*) — persistent storage used by
+        #      the "DICOM Query/Retrieve" dialog and Application Settings
+        #
+        # Users typically configure PACS servers via Edit > Application Settings
+        # > DICOM (the Query/Retrieve dialog), but those changes are only
+        # persisted to QSettings. The ctkDICOMVisualBrowser loads its own
+        # hard-coded defaults (ExampleHost, MedicalConnections) and does NOT
+        # reflect servers added through the settings dialog.
+        #
+        # Reading from QSettings directly ensures we see the servers that the
+        # user actually configured.
+        settings = qt.QSettings()
+        count = int(settings.value("DICOM/ServerNodeCount", "0"))
 
-        server = None
+        servers: list[dict[str, Any]] = []
+        for i in range(count):
+            raw = settings.value(f"DICOM/ServerNodes/{i}")
+            if raw is None:
+                continue
+            try:
+                text = raw.data() if hasattr(raw, "data") else str(raw)
+                data = json.loads(text)
+            except (json.JSONDecodeError, AttributeError, TypeError):
+                _pacs_log.warning("Skipping malformed DICOM/ServerNodes/%d", i)
+                continue
+            servers.append(data)
+
+        # Qt checkbox tri-state: 0 = Unchecked, 1 = PartiallyChecked, 2 = Checked
+        _QT_CHECKED = 2
+
+        server: dict[str, Any] | None = None
         if server_name:
-            for i in range(browser.serversCount()):
-                s = browser.server(i)
-                if s.connectionName == server_name:
+            for s in servers:
+                if s.get("Name") == server_name:
                     server = s
                     break
             if server is None:
@@ -179,13 +214,12 @@ class PacsHelper:
                     f"Configure it in Edit > Application Settings > DICOM."
                 )
         else:
-            for i in range(browser.serversCount()):
-                s = browser.server(i)
-                if s.queryRetrieveEnabled:
+            for s in servers:
+                if int(s.get("QueryRetrieveCheckState", 0)) == _QT_CHECKED:
                     server = s
                     break
-            if server is None and browser.serversCount() > 0:
-                server = browser.server(0)
+            if server is None and servers:
+                server = servers[0]
 
         if server is None:
             raise SlicerHelperError(
@@ -193,25 +227,35 @@ class PacsHelper:
                 "Add one in Edit > Application Settings > DICOM."
             )
 
-        print(
-            f"[PacsHelper] Using PACS server: {server.connectionName} "
-            f"({server.host}:{server.port}, AET={server.calledAETitle})"
+        host = server["Address"]
+        port = int(server["Port"])
+        called_aet = server["Called AETitle"]
+        calling_aet = server["Calling AETitle"]
+        prefer_cget = server.get("Retrieve Protocol", "CGET") == "CGET"
+
+        _pacs_log.info(
+            "Using PACS server: %s (%s:%s, AET=%s)",
+            server.get("Name", "unknown"),
+            host,
+            port,
+            called_aet,
         )
 
         return cls(
-            host=server.host,
-            port=server.port,
-            called_aet=server.calledAETitle,
-            calling_aet=server.callingAETitle,
-            prefer_cget=(server.retrieveProtocol == ctk.ctkDICOMServer.CGET),
-            move_aet=server.callingAETitle,
+            host=host,
+            port=port,
+            called_aet=called_aet,
+            calling_aet=calling_aet,
+            prefer_cget=prefer_cget,
+            move_aet=calling_aet,
         )
 
     def retrieve_study(self, study_instance_uid: str) -> list[str]:
         """Load a DICOM study into the MRML scene (local-first).
 
         Checks Slicer's local DICOM database first and loads from there if the
-        study already exists. Falls back to C-FIND + C-GET/C-MOVE from PACS.
+        study already exists. Falls back to C-FIND + C-GET from PACS, then
+        C-MOVE if C-GET fails.
 
         Args:
             study_instance_uid: DICOM Study Instance UID to retrieve.
@@ -225,6 +269,7 @@ class PacsHelper:
         if local_series:
             from DICOMLib import DICOMUtils  # type: ignore[import-not-found]
 
+            _pacs_log.info("Study %s found in local DICOM database", study_instance_uid)
             # list() required: db.seriesForStudy() returns QStringList (tuple in PythonQt),
             # but DICOMUtils.loadSeriesByUID() checks isinstance(x, list)
             loaded: list[str] = DICOMUtils.loadSeriesByUID(list(local_series))
@@ -232,6 +277,7 @@ class PacsHelper:
                 return loaded
 
         # 2. C-FIND: query PACS for the study
+        _pacs_log.info("C-FIND study %s ...", study_instance_uid)
         query = ctk.ctkDICOMQuery()
         query.callingAETitle = self.calling_aet
         query.calledAETitle = self.called_aet
@@ -243,7 +289,14 @@ class PacsHelper:
         temp_db.openDatabase("")
         query.query(temp_db)
 
-        # 3. C-GET/C-MOVE: retrieve series into Slicer DICOM database
+        series_to_retrieve: list[str] = [
+            series_uid
+            for study_uid, series_uid in query.studyAndSeriesInstanceUIDQueried
+            if study_uid == study_instance_uid
+        ]
+        _pacs_log.info("C-FIND returned %d series", len(series_to_retrieve))
+
+        # 3. C-GET/C-MOVE with fallback: retrieve series into Slicer DICOM database
         retrieve = ctk.ctkDICOMRetrieve()
         retrieve.callingAETitle = self.calling_aet
         retrieve.calledAETitle = self.called_aet
@@ -251,17 +304,19 @@ class PacsHelper:
         retrieve.port = self.port
         retrieve.setDatabase(slicer.dicomDatabase)
 
-        if not self.prefer_cget:
-            retrieve.setMoveDestinationAETitle(self.move_aet)
-
         retrieved_series_uids: list[str] = []
-        for study_uid, series_uid in query.studyAndSeriesInstanceUIDQueried:
-            if study_uid != study_instance_uid:
-                continue
+        for series_uid in series_to_retrieve:
             if self.prefer_cget:
-                retrieve.getSeries(study_uid, series_uid)
+                ok = retrieve.getSeries(study_instance_uid, series_uid)
+                if not ok or not (db and db.filesForSeries(series_uid)):
+                    _pacs_log.warning(
+                        "C-GET failed for series %s, falling back to C-MOVE", series_uid
+                    )
+                    retrieve.setMoveDestinationAETitle(self.move_aet)
+                    retrieve.moveSeries(study_instance_uid, series_uid)
             else:
-                retrieve.moveSeries(study_uid, series_uid)
+                retrieve.setMoveDestinationAETitle(self.move_aet)
+                retrieve.moveSeries(study_instance_uid, series_uid)
             retrieved_series_uids.append(series_uid)
 
         # 4. Load ONLY the retrieved series into the MRML scene
@@ -276,8 +331,8 @@ class PacsHelper:
         """Load a single DICOM series into the MRML scene (local-first).
 
         Checks Slicer's local DICOM database first and loads from there if the
-        series already exists. Falls back to C-GET/C-MOVE from PACS (no C-FIND
-        needed since the series UID is already known).
+        series already exists. Falls back to C-GET from PACS, then C-MOVE if
+        C-GET fails (common with Orthanc without the CGet plugin).
 
         Args:
             study_instance_uid: DICOM Study Instance UID.
@@ -291,11 +346,12 @@ class PacsHelper:
         if db and db.filesForSeries(series_instance_uid):
             from DICOMLib import DICOMUtils  # type: ignore[import-not-found]
 
+            _pacs_log.info("Series %s found in local DICOM database", series_instance_uid)
             loaded: list[str] = DICOMUtils.loadSeriesByUID([series_instance_uid])
             if loaded:
                 return loaded
 
-        # 2. Fallback: C-GET/C-MOVE from PACS
+        # 2. Retrieve from PACS with C-GET → C-MOVE fallback
         retrieve = ctk.ctkDICOMRetrieve()
         retrieve.callingAETitle = self.calling_aet
         retrieve.calledAETitle = self.called_aet
@@ -303,12 +359,16 @@ class PacsHelper:
         retrieve.port = self.port
         retrieve.setDatabase(slicer.dicomDatabase)
 
-        if not self.prefer_cget:
-            retrieve.setMoveDestinationAETitle(self.move_aet)
-
         if self.prefer_cget:
-            retrieve.getSeries(study_instance_uid, series_instance_uid)
+            _pacs_log.info("C-GET series %s ...", series_instance_uid)
+            ok = retrieve.getSeries(study_instance_uid, series_instance_uid)
+            if not ok or not (db and db.filesForSeries(series_instance_uid)):
+                _pacs_log.warning("C-GET failed, falling back to C-MOVE")
+                retrieve.setMoveDestinationAETitle(self.move_aet)
+                retrieve.moveSeries(study_instance_uid, series_instance_uid)
         else:
+            _pacs_log.info("C-MOVE series %s ...", series_instance_uid)
+            retrieve.setMoveDestinationAETitle(self.move_aet)
             retrieve.moveSeries(study_instance_uid, series_instance_uid)
 
         from DICOMLib import DICOMUtils  # type: ignore[import-not-found]
