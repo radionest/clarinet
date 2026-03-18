@@ -11,20 +11,18 @@ Layers (later overrides earlier):
 5. Custom slicer_result_validator_args (same)
 """
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from clarinet.models.base import DicomQueryLevel
 from clarinet.models.file_schema import FileRole
+from clarinet.models.record import RecordRead
 from clarinet.services.pipeline.context import FileResolver
 from clarinet.services.slicer.context_hydration import hydrate_slicer_context
 from clarinet.settings import settings
 from clarinet.utils.file_patterns import resolve_origin_type
 from clarinet.utils.logger import logger
-
-if TYPE_CHECKING:
-    from clarinet.models.record import RecordRead
 
 
 def build_template_vars(record: RecordRead) -> dict[str, Any]:
