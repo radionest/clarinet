@@ -228,6 +228,10 @@ clean-all: clean ## Deep clean including virtual environment
 
 VM_SH := deploy/vm/vm.sh
 
+.PHONY: vm-setup
+vm-setup: ## One-time host setup for VM creation (permissions + libvirt check)
+	@bash $(VM_SH) setup
+
 .PHONY: vm-create
 vm-create: ## Create test VM from cloud image
 	@bash $(VM_SH) create

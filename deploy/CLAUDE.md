@@ -26,6 +26,7 @@ deploy/
 ## Commands
 
 ```bash
+make vm-setup     # One-time: fix permissions + verify libvirt
 make vm-create    # Boot VM from cloud image
 make vm-deploy    # Build wheel + deploy to VM
 make vm-smoke     # Run smoke tests
@@ -37,3 +38,5 @@ make vm-reimage   # Destroy + recreate
 ## Host Dependencies
 
 `sudo apt install libvirt-daemon-system virtinst cloud-image-utils qemu-utils`
+
+**Permissions:** libvirt-qemu needs `+x` (traverse) on every directory in the path to disk storage (`~/.local/share/clarinet-deploy/`). `make vm-setup` fixes this automatically, and `make vm-create` also auto-fixes on each run.
