@@ -73,6 +73,13 @@ Issues = "https://github.com/radionest/clarinet/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["clarinet"]
+exclude = [
+    "clarinet/frontend/src",
+    "clarinet/frontend/test",
+    "clarinet/frontend/scripts",
+    "clarinet/frontend/gleam.toml",
+    "clarinet/frontend/manifest.toml",
+]
 
 [tool.hatch.build]
 artifacts = [

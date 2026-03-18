@@ -457,9 +457,12 @@ async def run_with_frontend(host: str, port: int) -> None:
     logger.info(f"Starting Clarinet with frontend at http://{host}:{port}")
     logger.info("Press Ctrl+C to stop both servers")
 
-    # Skip frontend watch when running from pre-built static (wheel install)
+    # Skip frontend watch when running from wheel install.
+    # Wheel has clarinet/static/ but NOT clarinet/frontend/gleam.toml (excluded from build).
+    # Dev checkout has gleam.toml — so its presence means "watch mode available".
     static_path = library_path / "static"
-    use_prebuilt = static_path.exists() and not frontend_path.exists()
+    has_gleam_source = (frontend_path / "gleam.toml").exists()
+    use_prebuilt = static_path.exists() and not has_gleam_source
 
     if not use_prebuilt:
         watch_fn = (
