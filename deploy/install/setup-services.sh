@@ -26,7 +26,8 @@ setup_postgresql() {
         sudo -u postgres psql -c "CREATE USER ${DB_USER} WITH PASSWORD '${DB_PASS}';"
         log "PostgreSQL user '${DB_USER}' created"
     else
-        log "PostgreSQL user '${DB_USER}' already exists"
+        sudo -u postgres psql -c "ALTER USER ${DB_USER} WITH PASSWORD '${DB_PASS}';"
+        log "PostgreSQL user '${DB_USER}' password updated"
     fi
 
     # Create database if not exists
@@ -58,7 +59,8 @@ setup_rabbitmq() {
         rabbitmqctl set_user_tags "$RABBIT_USER" administrator
         log "RabbitMQ user '${RABBIT_USER}' created"
     else
-        log "RabbitMQ user '${RABBIT_USER}' already exists"
+        rabbitmqctl change_password "$RABBIT_USER" "$RABBIT_PASS"
+        log "RabbitMQ user '${RABBIT_USER}' password updated"
     fi
 
     # Export for generate-settings.sh

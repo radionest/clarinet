@@ -75,7 +75,10 @@ setup_services() {
         warn "Skipping external services setup"
         return
     fi
-    bash "${DEPLOY_DIR}/install/setup-services.sh"
+    source "${DEPLOY_DIR}/install/setup-services.sh"
+    # Restore log/warn overwritten by sourced script
+    log()  { echo -e "${GREEN}[install]${NC} $*"; }
+    warn() { echo -e "${YELLOW}[install]${NC} $*"; }
 }
 
 # --- Step 6: Settings ---
