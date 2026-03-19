@@ -19,7 +19,7 @@ async def test_app_startup(client: AsyncClient):
 @pytest.mark.asyncio
 async def test_health_check(client: AsyncClient):
     """Check health check endpoint if available."""
-    response = await client.get("/health")
+    response = await client.get("/api/health")
     # Health endpoint is now available in the application
     assert response.status_code == 200
 
