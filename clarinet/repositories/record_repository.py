@@ -676,6 +676,8 @@ class RecordRepository(BaseRepository[Record]):
                 query = query.where(Record.study_uid == study_uid)
             case "SERIES":
                 query = query.where(Record.series_uid == series_uid)
+            case _:
+                raise ValueError(f"Unsupported level for unique_per_user context: {level}")
         result = await self.session.execute(query)
         return result.scalar_one()
 

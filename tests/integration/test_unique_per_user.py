@@ -3,19 +3,28 @@
 Covers:
 - RecordRepository.count_user_records_for_context (all levels, all statuses)
 - RecordRepository.find_by_user with exclude_unique_violations
+- RecordRepository.find_pending_by_user with exclude_unique_violations
+- RecordRepository.get_available_type_counts with exclude_unique_violations
 - RecordService.assign_user constraint check
+- RecordService.claim_record constraint check
+- RecordService.submit_data auto-assign constraint check
 - POST /api/records/ constraint check (409 when user_id set and violated)
 - GET /api/records/my violation filtering (non-superuser vs superuser)
 """
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import pytest
 import pytest_asyncio
 
 from clarinet.exceptions.domain import RecordConstraintViolationError
 from clarinet.models.base import DicomQueryLevel, RecordStatus
+from clarinet.models.patient import Patient
 from clarinet.models.record import Record, RecordType
+from clarinet.models.study import Study
+from clarinet.models.user import UserRole, UserRolesLink
 from clarinet.repositories.record_repository import RecordRepository
 from clarinet.services.record_service import RecordService
 from tests.utils.factories import make_series, make_user
@@ -92,6 +101,30 @@ async def second_series(test_session, test_study):
     await test_session.commit()
     await test_session.refresh(series)
     return series
+
+
+@pytest_asyncio.fixture
+async def second_study(test_session, test_patient):
+    """A second study under test_patient for context-isolation tests."""
+    study = Study(
+        patient_id=test_patient.id,
+        study_uid="1.2.3.4.5.6.7.8.9.SECOND",
+        date=datetime.now(UTC).date(),
+    )
+    test_session.add(study)
+    await test_session.commit()
+    await test_session.refresh(study)
+    return study
+
+
+@pytest_asyncio.fixture
+async def second_patient(test_session):
+    """A second patient for context-isolation tests."""
+    patient = Patient(id="TEST_PAT002", name="Second Patient")
+    test_session.add(patient)
+    await test_session.commit()
+    await test_session.refresh(patient)
+    return patient
 
 
 # ── Section 1: count_user_records_for_context ─────────────────────────────────
@@ -296,6 +329,70 @@ class TestCountUserRecordsForContext:
         )
         assert count == 0
 
+    @pytest.mark.asyncio
+    async def test_study_level_does_not_count_different_study(
+        self,
+        test_session,
+        test_user,
+        test_patient,
+        test_study,
+        second_study,
+        unique_study_type,
+    ):
+        """STUDY level: does not count records for a different study_uid."""
+        record = Record(
+            patient_id=test_patient.id,
+            study_uid=test_study.study_uid,
+            user_id=test_user.id,
+            record_type_name=unique_study_type.name,
+            status=RecordStatus.pending,
+        )
+        test_session.add(record)
+        await test_session.commit()
+
+        repo = RecordRepository(test_session)
+        count = await repo.count_user_records_for_context(
+            user_id=test_user.id,
+            record_type_name=unique_study_type.name,
+            patient_id=test_patient.id,
+            study_uid=second_study.study_uid,
+            series_uid=None,
+            level="STUDY",
+        )
+        assert count == 0
+
+    @pytest.mark.asyncio
+    async def test_patient_level_does_not_count_different_patient(
+        self,
+        test_session,
+        test_user,
+        test_patient,
+        test_study,
+        second_patient,
+        unique_patient_type,
+    ):
+        """PATIENT level: does not count records for a different patient_id."""
+        record = Record(
+            patient_id=test_patient.id,
+            study_uid=test_study.study_uid,
+            user_id=test_user.id,
+            record_type_name=unique_patient_type.name,
+            status=RecordStatus.pending,
+        )
+        test_session.add(record)
+        await test_session.commit()
+
+        repo = RecordRepository(test_session)
+        count = await repo.count_user_records_for_context(
+            user_id=test_user.id,
+            record_type_name=unique_patient_type.name,
+            patient_id=second_patient.id,
+            study_uid=None,
+            series_uid=None,
+            level="PATIENT",
+        )
+        assert count == 0
+
 
 # ── Section 2: RecordService.assign_user constraint ───────────────────────────
 
@@ -422,6 +519,225 @@ class TestAssignUserUniqueConstraint:
         assert record.user_id == test_user.id
 
 
+# ── Section 2b: RecordService.claim_record constraint ─────────────────────────
+
+
+class TestClaimRecordUniqueConstraint:
+    """Tests for RecordService.claim_record unique_per_user enforcement."""
+
+    @pytest.mark.asyncio
+    async def test_claim_record_raises_when_unique_per_user_violated(
+        self, test_session, test_user, test_patient, test_study, test_series, unique_series_type
+    ):
+        """claim_record raises RecordConstraintViolationError when user already
+        has a record of unique_per_user type for the same series context."""
+        existing = Record(
+            patient_id=test_patient.id,
+            study_uid=test_study.study_uid,
+            series_uid=test_series.series_uid,
+            user_id=test_user.id,
+            record_type_name=unique_series_type.name,
+            status=RecordStatus.inwork,
+        )
+        test_session.add(existing)
+        await test_session.commit()
+
+        new_record = Record(
+            patient_id=test_patient.id,
+            study_uid=test_study.study_uid,
+            series_uid=test_series.series_uid,
+            user_id=None,
+            record_type_name=unique_series_type.name,
+            status=RecordStatus.pending,
+        )
+        test_session.add(new_record)
+        await test_session.commit()
+        await test_session.refresh(new_record)
+
+        repo = RecordRepository(test_session)
+        service = RecordService(repo)
+
+        with pytest.raises(RecordConstraintViolationError):
+            await service.claim_record(new_record.id, test_user.id)  # type: ignore[arg-type]
+
+    @pytest.mark.asyncio
+    async def test_claim_record_succeeds_for_different_context(
+        self,
+        test_session,
+        test_user,
+        test_patient,
+        test_study,
+        test_series,
+        second_series,
+        unique_series_type,
+    ):
+        """claim_record succeeds when user has a record for the same type
+        but in a different series context."""
+        existing = Record(
+            patient_id=test_patient.id,
+            study_uid=test_study.study_uid,
+            series_uid=test_series.series_uid,
+            user_id=test_user.id,
+            record_type_name=unique_series_type.name,
+            status=RecordStatus.inwork,
+        )
+        test_session.add(existing)
+        await test_session.commit()
+
+        new_record = Record(
+            patient_id=test_patient.id,
+            study_uid=test_study.study_uid,
+            series_uid=second_series.series_uid,
+            user_id=None,
+            record_type_name=unique_series_type.name,
+            status=RecordStatus.pending,
+        )
+        test_session.add(new_record)
+        await test_session.commit()
+        await test_session.refresh(new_record)
+
+        repo = RecordRepository(test_session)
+        service = RecordService(repo)
+
+        record = await service.claim_record(new_record.id, test_user.id)  # type: ignore[arg-type]
+        assert record.user_id == test_user.id
+
+
+# ── Section 2c: RecordService.submit_data constraint ─────────────────────────
+
+
+class TestSubmitDataUniqueConstraint:
+    """Tests for RecordService.submit_data unique_per_user enforcement on auto-assign."""
+
+    @pytest.mark.asyncio
+    async def test_submit_data_auto_assign_raises_when_unique_violated(
+        self, test_session, test_user, test_patient, test_study, test_series, unique_series_type
+    ):
+        """submit_data raises RecordConstraintViolationError when auto-assigning
+        user_id to an unassigned record and user already has one for the same context."""
+        existing = Record(
+            patient_id=test_patient.id,
+            study_uid=test_study.study_uid,
+            series_uid=test_series.series_uid,
+            user_id=test_user.id,
+            record_type_name=unique_series_type.name,
+            status=RecordStatus.inwork,
+        )
+        test_session.add(existing)
+        await test_session.commit()
+
+        new_record = Record(
+            patient_id=test_patient.id,
+            study_uid=test_study.study_uid,
+            series_uid=test_series.series_uid,
+            user_id=None,
+            record_type_name=unique_series_type.name,
+            status=RecordStatus.pending,
+        )
+        test_session.add(new_record)
+        await test_session.commit()
+        await test_session.refresh(new_record)
+
+        repo = RecordRepository(test_session)
+        service = RecordService(repo)
+
+        with pytest.raises(RecordConstraintViolationError):
+            await service.submit_data(
+                new_record.id,
+                data={},
+                new_status=RecordStatus.finished,
+                user_id=test_user.id,  # type: ignore[arg-type]
+            )
+
+    @pytest.mark.asyncio
+    async def test_submit_data_auto_assign_succeeds_non_conflicting(
+        self,
+        test_session,
+        test_user,
+        test_patient,
+        test_study,
+        test_series,
+        second_series,
+        unique_series_type,
+    ):
+        """submit_data succeeds when auto-assigning user_id and no uniqueness
+        conflict exists (record is in a different series context)."""
+        existing = Record(
+            patient_id=test_patient.id,
+            study_uid=test_study.study_uid,
+            series_uid=test_series.series_uid,
+            user_id=test_user.id,
+            record_type_name=unique_series_type.name,
+            status=RecordStatus.inwork,
+        )
+        test_session.add(existing)
+        await test_session.commit()
+
+        new_record = Record(
+            patient_id=test_patient.id,
+            study_uid=test_study.study_uid,
+            series_uid=second_series.series_uid,
+            user_id=None,
+            record_type_name=unique_series_type.name,
+            status=RecordStatus.pending,
+        )
+        test_session.add(new_record)
+        await test_session.commit()
+        await test_session.refresh(new_record)
+
+        repo = RecordRepository(test_session)
+        service = RecordService(repo)
+
+        record, _ = await service.submit_data(
+            new_record.id,
+            data={},
+            new_status=RecordStatus.finished,
+            user_id=test_user.id,  # type: ignore[arg-type]
+        )
+        assert record.user_id == test_user.id
+
+    @pytest.mark.asyncio
+    async def test_submit_data_skips_check_when_already_assigned(
+        self, test_session, test_user, test_patient, test_study, test_series, unique_series_type
+    ):
+        """submit_data does not check unique_per_user when the record already
+        has user_id set (the guard at record_check.user_id is None skips it)."""
+        existing = Record(
+            patient_id=test_patient.id,
+            study_uid=test_study.study_uid,
+            series_uid=test_series.series_uid,
+            user_id=test_user.id,
+            record_type_name=unique_series_type.name,
+            status=RecordStatus.inwork,
+        )
+        # Second record already assigned to same user (same context) — would
+        # violate uniqueness if checked, but the guard skips the check.
+        pre_assigned = Record(
+            patient_id=test_patient.id,
+            study_uid=test_study.study_uid,
+            series_uid=test_series.series_uid,
+            user_id=test_user.id,
+            record_type_name=unique_series_type.name,
+            status=RecordStatus.inwork,
+        )
+        test_session.add(existing)
+        test_session.add(pre_assigned)
+        await test_session.commit()
+        await test_session.refresh(pre_assigned)
+
+        repo = RecordRepository(test_session)
+        service = RecordService(repo)
+
+        # Should not raise — user_id is already set, so no uniqueness check
+        record, _ = await service.submit_data(
+            pre_assigned.id,
+            data={},
+            new_status=RecordStatus.finished,
+            user_id=test_user.id,  # type: ignore[arg-type]
+        )
+        assert record.user_id == test_user.id
+
+
 # ── Section 3: API constraint on POST /api/records/ ──────────────────────────
 
 
@@ -543,7 +859,177 @@ class TestCreateRecordApiConstraint:
         assert resp.status_code == 201
 
 
-# ── Section 4: find_by_user exclude_unique_violations ────────────────────────
+# ── Section 4a: get_available_type_counts exclude_unique_violations ───────────
+
+
+class TestGetAvailableTypeCountsUniqueViolationFilter:
+    """Tests for RecordRepository.get_available_type_counts(exclude_unique_violations)."""
+
+    @pytest.mark.asyncio
+    async def test_exclude_violations_ignores_violating_unassigned_records_in_counts(
+        self, test_session, test_user, test_patient, test_study, test_series
+    ):
+        """get_available_type_counts with exclude_unique_violations=True returns
+        count 0 for a unique_per_user type where the user already has a record,
+        while non-unique type counts are unaffected."""
+        # Create role and assign to test_user
+        role = UserRole(name="annotator")
+        test_session.add(role)
+        link = UserRolesLink(user_id=test_user.id, role_name="annotator")
+        test_session.add(link)
+
+        # Create record types with role_name="annotator"
+        unique_rt = RecordType(
+            name="unique-role-type",
+            description="Unique per user with role",
+            unique_per_user=True,
+            level=DicomQueryLevel.SERIES,
+            role_name="annotator",
+        )
+        non_unique_rt = RecordType(
+            name="non-unique-role-type",
+            description="Non-unique with role",
+            unique_per_user=False,
+            level=DicomQueryLevel.SERIES,
+            role_name="annotator",
+        )
+        test_session.add(unique_rt)
+        test_session.add(non_unique_rt)
+        await test_session.commit()
+
+        # User already has a record for the unique type in this series
+        assigned = Record(
+            patient_id=test_patient.id,
+            study_uid=test_study.study_uid,
+            series_uid=test_series.series_uid,
+            user_id=test_user.id,
+            record_type_name=unique_rt.name,
+            status=RecordStatus.inwork,
+        )
+        # Unassigned pending records — one for each type
+        unassigned_unique = Record(
+            patient_id=test_patient.id,
+            study_uid=test_study.study_uid,
+            series_uid=test_series.series_uid,
+            user_id=None,
+            record_type_name=unique_rt.name,
+            status=RecordStatus.pending,
+        )
+        unassigned_non_unique = Record(
+            patient_id=test_patient.id,
+            study_uid=test_study.study_uid,
+            series_uid=test_series.series_uid,
+            user_id=None,
+            record_type_name=non_unique_rt.name,
+            status=RecordStatus.pending,
+        )
+        test_session.add_all([assigned, unassigned_unique, unassigned_non_unique])
+        await test_session.commit()
+
+        repo = RecordRepository(test_session)
+        type_counts = await repo.get_available_type_counts(
+            test_user.id,
+            exclude_unique_violations=True,
+        )
+        counts_by_name = {rt.name: count for rt, count in type_counts.items()}
+
+        assert counts_by_name.get("unique-role-type", 0) == 0
+        assert counts_by_name.get("non-unique-role-type", 0) == 1
+
+
+# ── Section 4b: find_pending_by_user exclude_unique_violations ───────────────
+
+
+class TestFindPendingByUserUniqueViolationFilter:
+    """Tests for RecordRepository.find_pending_by_user(exclude_unique_violations)."""
+
+    @pytest.mark.asyncio
+    async def test_exclude_violations_hides_unassigned_violating_pending_records(
+        self,
+        test_session,
+        test_user,
+        test_patient,
+        test_study,
+        test_series,
+        unique_series_type,
+    ):
+        """find_pending_by_user with exclude_unique_violations=True hides an
+        unassigned pending record when the user already has an inwork record
+        of the same unique_per_user type for the same series."""
+        assigned = Record(
+            patient_id=test_patient.id,
+            study_uid=test_study.study_uid,
+            series_uid=test_series.series_uid,
+            user_id=test_user.id,
+            record_type_name=unique_series_type.name,
+            status=RecordStatus.inwork,
+        )
+        unassigned = Record(
+            patient_id=test_patient.id,
+            study_uid=test_study.study_uid,
+            series_uid=test_series.series_uid,
+            user_id=None,
+            record_type_name=unique_series_type.name,
+            status=RecordStatus.pending,
+        )
+        test_session.add(assigned)
+        test_session.add(unassigned)
+        await test_session.commit()
+
+        repo = RecordRepository(test_session)
+        records = await repo.find_pending_by_user(
+            test_user.id,
+            include_unassigned=True,
+            exclude_unique_violations=True,
+        )
+        record_ids = [r.id for r in records]
+        assert assigned.id in record_ids
+        assert unassigned.id not in record_ids
+
+    @pytest.mark.asyncio
+    async def test_include_violations_keeps_unassigned_violating_pending_records(
+        self,
+        test_session,
+        test_user,
+        test_patient,
+        test_study,
+        test_series,
+        unique_series_type,
+    ):
+        """find_pending_by_user with exclude_unique_violations=False keeps
+        unassigned pending records even when they violate unique_per_user."""
+        assigned = Record(
+            patient_id=test_patient.id,
+            study_uid=test_study.study_uid,
+            series_uid=test_series.series_uid,
+            user_id=test_user.id,
+            record_type_name=unique_series_type.name,
+            status=RecordStatus.inwork,
+        )
+        unassigned = Record(
+            patient_id=test_patient.id,
+            study_uid=test_study.study_uid,
+            series_uid=test_series.series_uid,
+            user_id=None,
+            record_type_name=unique_series_type.name,
+            status=RecordStatus.pending,
+        )
+        test_session.add(assigned)
+        test_session.add(unassigned)
+        await test_session.commit()
+
+        repo = RecordRepository(test_session)
+        records = await repo.find_pending_by_user(
+            test_user.id,
+            include_unassigned=True,
+            exclude_unique_violations=False,
+        )
+        record_ids = [r.id for r in records]
+        assert assigned.id in record_ids
+        assert unassigned.id in record_ids
+
+
+# ── Section 4c: find_by_user exclude_unique_violations ───────────────────────
 
 
 class TestFindByUserUniqueViolationFilter:
