@@ -5,6 +5,8 @@ This module provides the FlowCondition class that represents a condition block
 with associated actions in a flow definition.
 """
 
+from __future__ import annotations
+
 from typing import TYPE_CHECKING
 
 from .flow_action import FlowAction

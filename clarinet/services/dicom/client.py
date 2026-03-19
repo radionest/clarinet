@@ -1,5 +1,7 @@
 """Async DICOM client for query-retrieve operations."""
 
+from __future__ import annotations
+
 import asyncio
 from pathlib import Path
 from typing import TYPE_CHECKING

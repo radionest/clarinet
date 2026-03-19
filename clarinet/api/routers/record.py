@@ -5,6 +5,8 @@ This module provides async API endpoints for managing records, record types, and
 Formerly known as task router.
 """
 
+from __future__ import annotations
+
 from pathlib import Path
 from typing import TYPE_CHECKING
 from uuid import UUID

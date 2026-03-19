@@ -5,6 +5,8 @@ This module provides file validation functionality for Records,
 checking that required files exist and match defined patterns.
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING

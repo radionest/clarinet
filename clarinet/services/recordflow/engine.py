@@ -5,6 +5,8 @@ This module provides the RecordFlowEngine class that monitors record status
 changes and executes registered flows when their conditions are met.
 """
 
+from __future__ import annotations
+
 import asyncio
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -45,7 +47,7 @@ class FlowContext:
     source_record: RecordRead | None = None
 
     @staticmethod
-    def for_record(record: RecordRead, context: dict[str, RecordRead]) -> "FlowContext":
+    def for_record(record: RecordRead, context: dict[str, RecordRead]) -> FlowContext:
         """Build context for a record-triggered flow."""
         return FlowContext(
             record=record,
@@ -60,7 +62,7 @@ class FlowContext:
         patient_id: str,
         study_uid: str | None = None,
         series_uid: str | None = None,
-    ) -> "FlowContext":
+    ) -> FlowContext:
         """Build context for an entity-creation flow."""
         return FlowContext(patient_id=patient_id, study_uid=study_uid, series_uid=series_uid)
 
@@ -68,8 +70,8 @@ class FlowContext:
     def for_file(
         file_name: str,
         patient_id: str,
-        source_record: "RecordRead | None" = None,
-    ) -> "FlowContext":
+        source_record: RecordRead | None = None,
+    ) -> FlowContext:
         """Build context for a file-update flow."""
         return FlowContext(
             file_name=file_name,

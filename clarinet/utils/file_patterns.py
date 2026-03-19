@@ -13,6 +13,8 @@ resolve to the *parent's* record type when a file was produced by a different
 record type and the current record is consuming it.
 """
 
+from __future__ import annotations
+
 import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
