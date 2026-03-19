@@ -5,6 +5,8 @@ Provides async-compatible SHA256 checksum computation for files
 defined in a record type's file registry.
 """
 
+from __future__ import annotations
+
 import hashlib
 from pathlib import Path
 from typing import TYPE_CHECKING
