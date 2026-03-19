@@ -71,6 +71,7 @@ pub type RecordType {
     role_name: Option(String),
     max_records: Option(Int),
     min_records: Option(Int),
+    unique_per_user: Bool,
     level: DicomQueryLevel,
     file_registry: Option(List(FileDefinition)),
     constraint_role: Option(String),
@@ -217,6 +218,7 @@ pub type RecordTypeCreate {
     role_name: Option(String),
     max_records: Option(Int),
     min_records: Option(Int),
+    unique_per_user: Bool,
     level: DicomQueryLevel,
     file_registry: Option(List(FileDefinition)),
   )
