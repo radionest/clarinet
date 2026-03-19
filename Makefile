@@ -156,6 +156,11 @@ test-integration: ## Run integration tests only
 	@echo "Running integration tests..."
 	@./scripts/run_tests.sh tests/integration/
 
+.PHONY: test-py312
+test-py312: ## Run unit tests on Python 3.12 (requires python3.12)
+	@echo "Running unit tests on Python 3.12..."
+	@uv run --python 3.12 pytest tests/ -n auto --dist loadgroup -m "not pipeline and not dicom and not slicer and not schema" -q
+
 # =============================================================================
 # Build and Install Commands
 # =============================================================================
