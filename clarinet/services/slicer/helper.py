@@ -983,6 +983,29 @@ class SlicerHelper:
             else:
                 target_vtk_seg.CopySegmentFromSegmentation(source_vtk_seg, seg_id)
 
+    def sync_segments(
+        self,
+        source_seg: SegmentationBuilder | Any,
+        target_seg: SegmentationBuilder | Any,
+        empty: bool = False,
+    ) -> list[str]:
+        """Copy segments from source that are missing in target (by name).
+
+        Args:
+            source_seg: Source segmentation with reference segments.
+            target_seg: Target segmentation to sync into.
+            empty: If True, copy only metadata (name + color) without data.
+
+        Returns:
+            List of segment names that were added.
+        """
+        source_names = set(self.get_segment_names(source_seg))
+        existing = set(self.get_segment_names(target_seg))
+        missing = list(source_names - existing)
+        if missing:
+            self.copy_segments(source_seg, target_seg, segment_names=missing, empty=empty)
+        return missing
+
     def rename_segments(
         self,
         segmentation: SegmentationBuilder | Any,

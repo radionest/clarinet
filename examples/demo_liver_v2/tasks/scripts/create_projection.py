@@ -42,11 +42,7 @@ target_vol = slicer.mrmlScene.GetNodeByID(target_node_ids[0])  # type: ignore[na
 # 4. Create or load projection (reference geometry from target_vol)
 if os.path.isfile(master_projection):  # type: ignore[name-defined]  # noqa: F821
     projection = s.load_segmentation(master_projection, "Projection")  # type: ignore[name-defined]  # noqa: F821
-    # Add segments that exist in master but not yet in projection
-    existing = set(s.get_segment_names(projection))
-    missing = [n for n in s.get_segment_names(master_seg) if n not in existing]
-    if missing:
-        s.copy_segments(master_seg, projection, segment_names=missing, empty=True)
+    s.sync_segments(master_seg, projection, empty=True)
 else:
     projection = s.create_segmentation("Projection")
     s.copy_segments(master_seg, projection, empty=True)
