@@ -6,6 +6,7 @@ from sqlmodel import select
 
 from clarinet.models.record import RecordType
 from clarinet.models.user import User
+from tests.utils.urls import HEALTH
 
 
 @pytest.mark.asyncio
@@ -19,7 +20,7 @@ async def test_app_startup(client: AsyncClient):
 @pytest.mark.asyncio
 async def test_health_check(client: AsyncClient):
     """Check health check endpoint if available."""
-    response = await client.get("/health")
+    response = await client.get(HEALTH)
     # Health endpoint is now available in the application
     assert response.status_code == 200
 

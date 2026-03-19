@@ -57,6 +57,9 @@ SLICER_PING = "/api/slicer/ping"
 # --- DICOM ---
 DICOM_BASE = "/api/dicom"
 
+# --- Health ---
+HEALTH = "/api/health"
+
 # --- Pipelines ---
 PIPELINES_BASE = "/api/pipelines"
 PIPELINES_SYNC = "/api/pipelines/sync"
