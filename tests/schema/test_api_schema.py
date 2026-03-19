@@ -35,14 +35,10 @@ _SUPPRESS = [HealthCheck.too_slow, HealthCheck.filter_too_much]
 # - ignored_auth: false positive — auth is overridden (mock superuser) in conftest
 # - negative_data_rejection: custom validators not reflected in schema
 # - unsupported_method: fastapi-users auto-generated endpoints
-# - positive_data_acceptance: schemathesis 4.x generates boundary values for path
-#   parameters (e.g. study_uid='0' vs minLength=5) and misclassifies them as positive
-#   data, causing false RejectedPositiveData failures
 load_all_checks()
 _EXCLUDED_CHECKS = [
     CHECKS.get_one("ignored_auth"),
     CHECKS.get_one("negative_data_rejection"),
-    CHECKS.get_one("positive_data_acceptance"),
     CHECKS.get_one("unsupported_method"),
 ]
 
