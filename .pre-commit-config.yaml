@@ -41,7 +41,7 @@ repos:
     hooks:
       - id: test-py312
         name: Quick test on Python 3.12
-        entry: bash -c 'command -v uv >/dev/null || exit 0; uv run --python 3.12 pytest tests/ -x -q --no-header -m "not pipeline and not dicom and not slicer and not schema"'
+        entry: bash -c 'command -v uv >/dev/null || exit 0; make test-py312'
         language: system
         pass_filenames: false
         stages: [pre-push]

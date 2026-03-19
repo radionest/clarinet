@@ -156,10 +156,14 @@ test-integration: ## Run integration tests only
 	@echo "Running integration tests..."
 	@./scripts/run_tests.sh tests/integration/
 
+# Marker expression for tests that don't require external services
+PYTEST_UNIT_MARKERS := not pipeline and not dicom and not slicer and not schema
+
 .PHONY: test-py312
-test-py312: ## Run unit tests on Python 3.12 (requires python3.12)
+test-py312: ## Run unit tests on Python 3.12 (requires uv + python3.12)
+	@command -v uv >/dev/null 2>&1 || { echo "Error: uv is required but not installed"; exit 1; }
 	@echo "Running unit tests on Python 3.12..."
-	@uv run --python 3.12 pytest tests/ -n auto --dist loadgroup -m "not pipeline and not dicom and not slicer and not schema" -q
+	@uv run --python 3.12 pytest tests/ -n auto --dist loadgroup -m "$(PYTEST_UNIT_MARKERS)" -q
 
 # =============================================================================
 # Build and Install Commands
