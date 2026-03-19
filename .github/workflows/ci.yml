@@ -9,12 +9,18 @@ on:
 jobs:
   test-unit:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.12']
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - uses: astral-sh/setup-uv@v4
         with:
           enable-cache: true
           cache-dependency-path: |
@@ -25,17 +31,15 @@ jobs:
         run: uv sync --frozen
 
       - name: Run unit tests
-        run: make test-unit
+        run: make test-py312
 
   test-schema:
     runs-on: ubuntu-latest
-    continue-on-error: true
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v4
+      - uses: astral-sh/setup-uv@v4
         with:
           enable-cache: true
           cache-dependency-path: |
