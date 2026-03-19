@@ -233,8 +233,10 @@ class RecordFlowEngine:
         await self._dispatch_flows(
             record,
             "status change",
-            lambda f: not (f.data_update_trigger or f.file_change_trigger)
-            and (f.status_trigger is None or f.status_trigger == current_status),
+            lambda f: (
+                not (f.data_update_trigger or f.file_change_trigger)
+                and (f.status_trigger is None or f.status_trigger == current_status)
+            ),
         )
 
     async def handle_record_data_update(self, record: RecordRead) -> None:
