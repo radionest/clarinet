@@ -21,9 +21,14 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          cache-dependency-path: |
+            pyproject.toml
+            uv.lock
 
       - name: Install dependencies
         run: uv sync --dev
 
       - name: Run unit tests
-        run: uv run pytest -n auto --dist loadgroup -m "not pipeline and not dicom and not slicer and not schema" -q
+        run: make test-py312
