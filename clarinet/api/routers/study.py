@@ -23,6 +23,7 @@ from clarinet.models.study import SeriesFind, StudyRead
 
 router = APIRouter(
     responses={
+        400: {"description": "Bad request (malformed body)"},
         401: {"description": "Not authenticated"},
         403: {"description": "Forbidden"},
         404: {"description": "Not found"},

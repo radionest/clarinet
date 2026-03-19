@@ -12,9 +12,9 @@ FileDefinitionRead is a flat DTO merging identity + binding for API responses.
 
 import re
 from enum import Enum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated
 
-from pydantic import field_validator
+from pydantic import StringConstraints, field_validator
 from sqlmodel import Field, Relationship, SQLModel, UniqueConstraint
 
 from clarinet.models.base import DicomQueryLevel
@@ -49,7 +49,7 @@ class FileDefinition(SQLModel, table=True):
     __table_args__ = (UniqueConstraint("name"),)
 
     id: int | None = Field(default=None, primary_key=True)
-    name: str = Field(index=True, max_length=100)
+    name: str = Field(index=True, min_length=1, max_length=100)
     pattern: str = Field(max_length=500)
     description: str | None = None
     multiple: bool = Field(default=False)
@@ -142,7 +142,10 @@ class FileDefinitionRead(SQLModel):
         role: File role in the processing pipeline (from binding).
     """
 
-    name: str
+    name: Annotated[
+        str,
+        StringConstraints(min_length=1, max_length=100, pattern=r"^[a-zA-Z_][a-zA-Z0-9_]*$"),
+    ]
     pattern: str
     description: str | None = None
     required: bool = True

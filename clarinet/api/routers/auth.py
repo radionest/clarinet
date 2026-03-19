@@ -186,7 +186,10 @@ async def get_active_sessions(
     ]
 
 
-@router.delete("/sessions/{token_preview}")
+@router.delete(
+    "/sessions/{token_preview}",
+    responses={400: {"description": "Invalid token preview format"}},
+)
 async def revoke_session(
     token_preview: str,
     user: User = Depends(current_active_user),
