@@ -577,9 +577,7 @@ class TestRecordRepository:
         )
 
         # patient_id filter must return PATIENT-level record
-        criteria = RecordSearchCriteria(
-            record_type_name="patient-level-rt", patient_id="RPAT"
-        )
+        criteria = RecordSearchCriteria(record_type_name="patient-level-rt", patient_id="RPAT")
         records = await env["repo"].find_by_criteria(criteria)
         assert len(records) == 1
         assert records[0].id == rec.id

@@ -87,7 +87,11 @@ class TestRecordServiceTriggers:
         old_status = RecordStatus.pending
         record_read_mock = MagicMock()
 
+        prefetch_mock = MagicMock()
+        prefetch_mock.record_type.unique_per_user = False
+
         repo_mock = AsyncMock()
+        repo_mock.get_with_record_type.return_value = prefetch_mock
         repo_mock.assign_user.return_value = (record_mock, old_status)
 
         engine_mock = AsyncMock()
@@ -98,6 +102,7 @@ class TestRecordServiceTriggers:
             patched.model_validate.return_value = record_read_mock
             result, result_old_status = await service.assign_user(1, user_id)
 
+            repo_mock.get_with_record_type.assert_awaited_once_with(1)
             repo_mock.assign_user.assert_awaited_once_with(1, user_id)
             patched.model_validate.assert_called_once_with(record_mock)
             engine_mock.handle_record_status_change.assert_awaited_once_with(
@@ -114,7 +119,11 @@ class TestRecordServiceTriggers:
         record_mock.status = RecordStatus.pending
         old_status = RecordStatus.pending
 
+        prefetch_mock = MagicMock()
+        prefetch_mock.record_type.unique_per_user = False
+
         repo_mock = AsyncMock()
+        repo_mock.get_with_record_type.return_value = prefetch_mock
         repo_mock.assign_user.return_value = (record_mock, old_status)
 
         engine_mock = AsyncMock()

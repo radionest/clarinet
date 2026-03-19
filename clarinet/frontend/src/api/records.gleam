@@ -84,6 +84,11 @@ fn record_type_base_decoder() -> decode.Decoder(RecordType) {
     None,
     decode.optional(decode.string),
   )
+  use unique_per_user <- decode.optional_field(
+    "unique_per_user",
+    False,
+    decode.bool,
+  )
 
   let level = case level_str {
     None -> types.Series
@@ -110,6 +115,7 @@ fn record_type_base_decoder() -> decode.Decoder(RecordType) {
     role_name: role_name,
     max_records: None,
     min_records: None,
+    unique_per_user: unique_per_user,
     level: level,
     file_registry: None,
     constraint_role: None,
@@ -411,6 +417,11 @@ pub fn record_type_full_decoder() -> decode.Decoder(RecordType) {
     None,
     decode.optional(decode.int),
   )
+  use unique_per_user <- decode.optional_field(
+    "unique_per_user",
+    False,
+    decode.bool,
+  )
   use file_registry <- decode.optional_field(
     "file_registry",
     None,
@@ -446,6 +457,7 @@ pub fn record_type_full_decoder() -> decode.Decoder(RecordType) {
     role_name: role_name,
     max_records: max_records,
     min_records: min_records,
+    unique_per_user: unique_per_user,
     level: level,
     file_registry: file_registry,
     constraint_role: constraint_role_name,
