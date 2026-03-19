@@ -997,11 +997,11 @@ class SlicerHelper:
             empty: If True, copy only metadata (name + color) without data.
 
         Returns:
-            List of segment names that were added.
+            List of segment names that were added, in source order.
         """
-        source_names = set(self.get_segment_names(source_seg))
+        source_names = self.get_segment_names(source_seg)
         existing = set(self.get_segment_names(target_seg))
-        missing = list(source_names - existing)
+        missing = [name for name in source_names if name not in existing]
         if missing:
             self.copy_segments(source_seg, target_seg, segment_names=missing, empty=empty)
         return missing
