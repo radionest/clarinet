@@ -8,7 +8,7 @@ Formerly known as task router.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated
 from uuid import UUID
 
 from fastapi import (
@@ -367,6 +367,25 @@ async def add_record(
 
     record = Record(**new_record.model_dump())
     return await service.create_record(record)
+
+
+@router.patch("/bulk/status", status_code=status.HTTP_204_NO_CONTENT)
+async def bulk_update_record_status(
+    record_ids: list[Annotated[int, Body(ge=1, le=2147483647)]],
+    new_status: RecordStatus,
+    service: RecordServiceDep,
+    user: CurrentUserDep,
+    repo: RecordRepositoryDep,
+) -> None:
+    """Update status for multiple records at once."""
+    if not user.is_superuser:
+        user_roles = get_user_role_names(user)
+        for rid in record_ids:
+            record = await repo.get_with_relations(rid)
+            role_name = record.record_type.role_name
+            if role_name is None or role_name not in user_roles:
+                raise AuthorizationError(f"Insufficient permissions to access record {rid}")
+    await service.bulk_update_status(record_ids, new_status)
 
 
 @router.patch("/{record_id}/status", response_model=RecordRead)
@@ -809,25 +828,6 @@ async def find_records(
     )
     records = await repo.find_by_criteria(criteria, skip=pagination.skip, limit=pagination.limit)
     return mask_records(records, user)
-
-
-@router.patch("/bulk/status", status_code=status.HTTP_204_NO_CONTENT)
-async def bulk_update_record_status(
-    record_ids: list[int],
-    new_status: RecordStatus,
-    service: RecordServiceDep,
-    user: CurrentUserDep,
-    repo: RecordRepositoryDep,
-) -> None:
-    """Update status for multiple records at once."""
-    if not user.is_superuser:
-        user_roles = get_user_role_names(user)
-        for rid in record_ids:
-            record = await repo.get_with_relations(rid)
-            role_name = record.record_type.role_name
-            if role_name is None or role_name not in user_roles:
-                raise AuthorizationError(f"Insufficient permissions to access record {rid}")
-    await service.bulk_update_status(record_ids, new_status)
 
 
 # Dependency functions (used by other parts of the application)

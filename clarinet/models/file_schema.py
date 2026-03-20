@@ -49,7 +49,12 @@ class FileDefinition(SQLModel, table=True):
     __table_args__ = (UniqueConstraint("name"),)
 
     id: int | None = Field(default=None, primary_key=True)
-    name: str = Field(index=True, min_length=1, max_length=100)
+    name: str = Field(
+        index=True,
+        min_length=1,
+        max_length=100,
+        schema_extra={"pattern": r"^[a-zA-Z_][a-zA-Z0-9_]*$"},
+    )
     pattern: str = Field(max_length=500)
     description: str | None = None
     multiple: bool = Field(default=False)

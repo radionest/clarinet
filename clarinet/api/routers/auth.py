@@ -4,7 +4,7 @@ Simplified authentication router using fastapi-users.
 
 from datetime import UTC, datetime, timedelta
 
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Request
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Path, Request
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -48,6 +48,7 @@ class SessionRefreshResponse(BaseModel):
 router = APIRouter(
     tags=["auth"],
     responses={
+        400: {"description": "Bad request"},
         401: {"description": "Not authenticated"},
         422: {"description": "Validation error"},
     },
@@ -188,10 +189,13 @@ async def get_active_sessions(
 
 @router.delete(
     "/sessions/{token_preview}",
-    responses={400: {"description": "Invalid token preview format"}},
+    responses={
+        404: {"description": "Session not found"},
+        409: {"description": "Multiple sessions match this preview"},
+    },
 )
 async def revoke_session(
-    token_preview: str,
+    token_preview: str = Path(..., pattern=r"^.+\.\.\.$", min_length=4),
     user: User = Depends(current_active_user),
     session: AsyncSession = Depends(get_async_session),
 ) -> dict:
@@ -199,10 +203,6 @@ async def revoke_session(
 
     Allows users to manage their active sessions for security.
     """
-    # Find the session by preview (first 8 chars)
-    if not token_preview.endswith("..."):
-        raise HTTPException(status_code=400, detail="Invalid token preview format")
-
     token_start = token_preview[:-3]  # Remove "..."
 
     # Find matching tokens

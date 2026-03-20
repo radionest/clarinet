@@ -4,7 +4,7 @@ Dependencies for FastAPI application with enhanced dependency injection.
 
 from typing import Annotated
 
-from fastapi import Depends, Query, Request
+from fastapi import Depends, Path, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from clarinet.api.auth_config import (
@@ -311,7 +311,7 @@ def get_user_role_names(user: User) -> set[str]:
 
 
 async def authorize_record_access(
-    record_id: int,
+    record_id: Annotated[int, Path(ge=1, le=2147483647)],
     user: CurrentUserDep,
     repo: RecordRepositoryDep,
 ) -> Record:
