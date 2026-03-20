@@ -331,6 +331,35 @@ async def unblock_second_reviews(
         await client.check_record_files(review.id)
 
 
+async def create_resection_report(
+    record: RecordRead,
+    context: dict[str, Any],  # noqa: ARG001
+    client: ClarinetClient,
+) -> None:
+    """Create ``resection-report`` prefilled with lesions from resection-plan."""
+    from clarinet.models import RecordCreate
+
+    plan_data = record.data or {}
+    lesions = plan_data.get("lesions", [])
+
+    prefill: dict[str, Any] = {
+        "lesions": [
+            {"lesion_num": lesion["lesion_num"], "cluster": lesion.get("cluster")}
+            for lesion in lesions
+        ],
+        "additional_lesions": [],
+    }
+
+    await client.create_record(
+        RecordCreate(
+            record_type_name="resection-report",
+            patient_id=record.patient_id,
+            data=prefill,
+            context_info=f"Created by flow from resection-plan (id={record.id})",
+        )
+    )
+
+
 # ---------------------------------------------------------------------------
 # Flow: создание записей по результатам first-check
 # ---------------------------------------------------------------------------
@@ -442,6 +471,9 @@ for seg_type in SEGMENT_TYPES:
 
 # resection-model → resection-plan (expert plans resection zones)
 (record("resection-model").on_finished().create_record("resection-plan"))
+
+# resection-plan → resection-report (prefilled with lesion list for surgeon)
+(record("resection-plan").on_finished().call(create_resection_report))
 
 # Intraop: if additional lesions found → update master model
 (

@@ -220,7 +220,7 @@ def set_record_timestamps(target: Record, value: Any, oldvalue: Any, _initiator:
 class RecordCreate(RecordBase):
     """Pydantic model for creating a new record."""
 
-    pass
+    data: RecordData | None = None
 
 
 class RecordOptional(SQLModel):
