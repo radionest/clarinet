@@ -13,6 +13,7 @@ from pydantic import field_validator, model_validator
 from sqlmodel import JSON, Column, Field, Relationship, SQLModel
 
 from clarinet.types import RecordSchema, SlicerArgs, SlicerHydratorNames
+from clarinet.utils.validators import validate_slug
 
 from .base import DicomQueryLevel
 from .file_schema import FileDefinitionRead, RecordTypeFileLink
@@ -40,11 +41,20 @@ class RecordTypeBase(SQLModel):
     - ``RecordTypeCreate`` / ``RecordTypeOptional``: defines it as a regular field
     """
 
+    # min_length/max_length enforce total length; schema_extra.pattern is
+    # OpenAPI-only metadata for schemathesis; field_validator is the actual
+    # format check (stable across SQLModel/Pydantic versions).
     name: str = Field(
         min_length=3,
         max_length=30,
         schema_extra={"pattern": r"^[a-z][a-z0-9]*(-[a-z0-9]+)*$"},
     )
+
+    @field_validator("name")
+    @classmethod
+    def validate_name_slug(cls, v: str) -> str:
+        """Enforce lowercase slug format: ``[a-z][a-z0-9]*(-[a-z0-9]+)*``."""
+        return validate_slug(v)
 
     description: str | None = Field(default=None, max_length=500)
     label: str | None = Field(default=None, max_length=100)
@@ -182,6 +192,14 @@ class RecordTypeOptional(SQLModel):
         max_length=30,
         schema_extra={"pattern": r"^[a-z][a-z0-9]*(-[a-z0-9]+)*$"},
     )
+
+    @field_validator("name")
+    @classmethod
+    def validate_name_slug(cls, v: str | None) -> str | None:
+        """Enforce lowercase slug format when name is provided."""
+        if v is not None:
+            validate_slug(v)
+        return v
 
     description: str | None = None
     label: str | None = None
