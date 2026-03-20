@@ -7,7 +7,7 @@ on:
     branches: [main]
 
 jobs:
-  test:
+  test-unit:
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -26,7 +26,26 @@ jobs:
           cache-dependency-glob: "**/pyproject.toml"
 
       - name: Install dependencies
-        run: uv sync --dev
+        run: uv sync --frozen
 
       - name: Run unit tests
         run: make test-py312
+
+  test-schema:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          cache-dependency-path: |
+            pyproject.toml
+            uv.lock
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Run schema tests
+        run: make test-schema

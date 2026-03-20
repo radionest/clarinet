@@ -41,7 +41,11 @@ class RecordTypeBase(SQLModel):
     - ``RecordTypeCreate`` / ``RecordTypeOptional``: defines it as a regular field
     """
 
-    name: str = Field(min_length=5, max_length=30)
+    name: str = Field(
+        min_length=5,
+        max_length=30,
+        schema_extra={"pattern": r"^[a-z][a-z0-9]{4,29}(-[a-z0-9]+)*$"},
+    )
 
     @field_validator("name")
     @classmethod
@@ -179,7 +183,12 @@ class RecordTypeCreate(RecordTypeBase):
 class RecordTypeOptional(SQLModel):
     """Pydantic model for updating a record type with optional fields."""
 
-    name: str | None = None
+    name: str | None = Field(
+        default=None,
+        min_length=5,
+        max_length=30,
+        schema_extra={"pattern": r"^[a-z][a-z0-9]{4,29}(-[a-z0-9]+)*$"},
+    )
 
     @field_validator("name")
     @classmethod

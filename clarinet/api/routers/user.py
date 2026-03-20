@@ -20,6 +20,7 @@ from clarinet.models import User, UserCreate, UserRead, UserRole, UserRoleCreate
 router = APIRouter(
     tags=["users"],
     responses={
+        400: {"description": "Bad request"},
         401: {"description": "Not authenticated"},
         403: {"description": "Forbidden"},
         404: {"description": "Not found"},

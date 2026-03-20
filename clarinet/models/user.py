@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 from fastapi_users import schemas
-from pydantic import field_validator
 from sqlalchemy import Column, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlmodel import Field, Relationship, SQLModel
@@ -70,14 +69,7 @@ class UserRead(schemas.BaseUser[UUID]):
 class UserCreate(schemas.BaseUserCreate):
     """Pydantic model for creating a new user with password validation."""
 
-    @field_validator("password")
-    @classmethod
-    def validate_password(cls, v: str) -> str:
-        """Validate password strength."""
-        if len(v) < 8:
-            raise ValueError("Password must be at least 8 characters long")
-        # Additional validation could be added here (e.g., complexity requirements)
-        return v
+    password: str = Field(min_length=8)
 
 
 class UserUpdate(schemas.BaseUserUpdate):
