@@ -171,7 +171,7 @@ async def _create_hierarchy(
     series_uid: str = "1.2.3.4.5.1",
 ) -> dict[str, str]:
     """Create patient -> study -> series via ORM."""
-    patient = Patient(id=patient_id, name="Test Patient")
+    patient = Patient(id=patient_id, name="Test Patient", auto_id=1)
     session.add(patient)
     await session.commit()
 
@@ -1229,7 +1229,7 @@ class TestEntityCreationTriggers:
         app_with_engine.register_flow(entity_flow)
 
         # Create hierarchy
-        patient = Patient(id="TEST_PAT001", name="Test Patient")
+        patient = Patient(id="TEST_PAT001", name="Test Patient", auto_id=1)
         test_session.add(patient)
         await test_session.commit()
 
@@ -1264,7 +1264,7 @@ class TestEntityCreationTriggers:
         entity_flow = study().on_created().create_record("first-check")
         app_with_engine.register_flow(entity_flow)
 
-        patient = Patient(id="TEST_PAT001", name="Test Patient")
+        patient = Patient(id="TEST_PAT001", name="Test Patient", auto_id=1)
         test_session.add(patient)
         await test_session.commit()
 

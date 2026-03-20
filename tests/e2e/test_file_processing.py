@@ -74,7 +74,7 @@ async def client(test_session, test_settings) -> AsyncGenerator[AsyncClient]:
 @pytest_asyncio.fixture
 async def test_hierarchy(test_session: AsyncSession) -> dict[str, str]:
     """Create Patient -> Study -> Series via ORM with fixed IDs."""
-    patient = Patient(id=_PATIENT_ID, name="File Test Patient")
+    patient = Patient(id=_PATIENT_ID, name="File Test Patient", auto_id=1)
     test_session.add(patient)
     await test_session.commit()
 

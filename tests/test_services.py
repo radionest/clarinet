@@ -197,7 +197,7 @@ class TestAdminService:
     @pytest.mark.asyncio
     async def test_get_stats_with_data(self, env):
         session = env["session"]
-        pat = Patient(id="ADMIN_PAT", name="Admin Patient")
+        pat = Patient(id="ADMIN_PAT", name="Admin Patient", auto_id=1)
         session.add(pat)
         await session.commit()
         study = Study(patient_id="ADMIN_PAT", study_uid="1.2.3.600", date=datetime.now(UTC).date())

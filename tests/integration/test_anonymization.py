@@ -27,40 +27,22 @@ async def test_anonymize_study_not_found(client) -> None:
 
 
 @pytest.mark.asyncio
-async def test_anonymize_study_no_anon_id(client, test_session) -> None:
-    """Returns 500 when patient has no anon_id (auto_id is None).
+async def test_patient_without_auto_id_rejected_by_db(test_session) -> None:
+    """DB rejects patient without auto_id (NOT NULL constraint).
 
-    Note: patient is created via session.add() (bypassing PatientRepository),
-    so auto_id remains None — this tests the defensive path in anonymization.
+    Patient.auto_id has nullable=False. All production code goes through
+    PatientRepository.create() which auto-assigns auto_id. This test verifies
+    the DB-level safety net prevents persisting a patient without auto_id.
     """
-    from datetime import UTC, datetime
+    from sqlalchemy.exc import IntegrityError
 
     from clarinet.models.patient import Patient
-    from clarinet.models.study import Series, Study
 
-    # Create patient without auto_id
     patient = Patient(id="NO_ANON_PAT", name="No Anon")
     test_session.add(patient)
-    await test_session.commit()
-
-    study = Study(
-        patient_id="NO_ANON_PAT",
-        study_uid="1.2.999.1",
-        date=datetime.now(UTC).date(),
-    )
-    test_session.add(study)
-    await test_session.commit()
-
-    series = Series(
-        study_uid="1.2.999.1",
-        series_uid="1.2.999.1.1",
-        series_number=1,
-    )
-    test_session.add(series)
-    await test_session.commit()
-
-    response = await client.post("/api/dicom/studies/1.2.999.1/anonymize")
-    assert response.status_code == 500
+    with pytest.raises(IntegrityError):
+        await test_session.flush()
+    await test_session.rollback()
 
 
 @pytest.mark.asyncio

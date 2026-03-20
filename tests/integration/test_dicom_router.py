@@ -128,7 +128,7 @@ async def admin_logged_in(client: AsyncClient, admin_user: object) -> AsyncClien
 @pytest_asyncio.fixture
 async def db_patient(test_session: AsyncSession, pacs_patient_id: str) -> Patient:
     """Create a Patient record in the test DB matching the PACS patient_id."""
-    patient = Patient(id=pacs_patient_id, name="SHIPILOV TEST")
+    patient = Patient(id=pacs_patient_id, name="SHIPILOV TEST", auto_id=1)
     test_session.add(patient)
     await test_session.commit()
     await test_session.refresh(patient)

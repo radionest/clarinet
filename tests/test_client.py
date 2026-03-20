@@ -142,7 +142,7 @@ class TestPatientManagement:
         await clarinet_client.login(username=admin_user.email, password="adminpassword")
 
         # Create patient without anon_name
-        new_patient = Patient(id="TEST_PAT_ANON", name="Patient To Anonymize")
+        new_patient = Patient(id="TEST_PAT_ANON", name="Patient To Anonymize", auto_id=1)
         test_session.add(new_patient)
         await test_session.commit()
 

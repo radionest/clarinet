@@ -443,7 +443,7 @@ async def test_patient(test_session):
     """Create test patient."""
     from clarinet.models.patient import Patient
 
-    patient = Patient(id="TEST_PAT001", name="Test Patient", anon_name="ANON_001")
+    patient = Patient(id="TEST_PAT001", name="Test Patient", anon_name="ANON_001", auto_id=1)
     test_session.add(patient)
     await test_session.commit()
     await test_session.refresh(patient)

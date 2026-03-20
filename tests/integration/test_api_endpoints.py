@@ -175,7 +175,7 @@ async def test_update_record_status(client: AsyncClient, auth_headers, test_sess
     user = result.scalar_one()
 
     # Create patient
-    patient = Patient(id="UPDATE_PAT001", name="Update Test Patient")
+    patient = Patient(id="UPDATE_PAT001", name="Update Test Patient", auto_id=1)
     test_session.add(patient)
     await test_session.commit()
 
@@ -241,7 +241,7 @@ async def test_create_study(client: AsyncClient, auth_headers, test_session):
     # Create patient in DB
     from clarinet.models.patient import Patient
 
-    patient = Patient(id="API_PAT002", name="Study Test Patient")
+    patient = Patient(id="API_PAT002", name="Study Test Patient", auto_id=1)
     test_session.add(patient)
     await test_session.commit()
 

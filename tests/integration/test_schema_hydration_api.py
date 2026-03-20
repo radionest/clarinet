@@ -20,7 +20,7 @@ async def _auth_override(client):
 @pytest_asyncio.fixture
 async def study_with_series(test_session):
     """Create a patient, study, and two series for hydration tests."""
-    patient = Patient(id="HYDR_PAT001", name="Hydration Patient")
+    patient = Patient(id="HYDR_PAT001", name="Hydration Patient", auto_id=1)
     test_session.add(patient)
     await test_session.flush()
 
@@ -193,7 +193,7 @@ class TestGetHydratedSchema:
         self, client, test_session, record_type_with_schema
     ):
         """Patient-level record (no study_uid) → hydrator returns [], field unchanged."""
-        patient = Patient(id="HYDR_PAT_ONLY", name="Patient Only")
+        patient = Patient(id="HYDR_PAT_ONLY", name="Patient Only", auto_id=1)
         test_session.add(patient)
         await test_session.flush()
 
