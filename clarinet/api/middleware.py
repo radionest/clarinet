@@ -31,7 +31,9 @@ class NullQueryParamMiddleware:
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] == "http" and scope.get("query_string"):
             raw_qs: bytes = scope["query_string"]
-            filtered = [(k, v) for k, v in parse_qsl(raw_qs.decode("latin-1")) if v != "null"]
-            scope["query_string"] = urlencode(filtered).encode("latin-1")
+            if b"null" in raw_qs:
+                parsed = parse_qsl(raw_qs.decode("latin-1"), keep_blank_values=True)
+                filtered = [(k, v) for k, v in parsed if v != "null"]
+                scope["query_string"] = urlencode(filtered, doseq=True).encode("latin-1")
 
         await self._app(scope, receive, send)
