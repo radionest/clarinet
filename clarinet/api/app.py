@@ -300,6 +300,12 @@ def create_app(root_path: str = "/") -> FastAPI:
         allow_headers=["*"],
     )
 
+    # Strip literal "null" query-param values so FastAPI treats them as absent
+    if settings.coerce_null_query_params:
+        from clarinet.api.middleware import NullQueryParamMiddleware
+
+        app.add_middleware(NullQueryParamMiddleware)
+
     # Mount static files only if frontend is enabled
     # No static files when frontend is disabled
 

@@ -77,6 +77,7 @@ class Settings(BaseSettings):
     host: str = "127.0.0.1"
     root_url: str = "/"
     debug: bool = False
+    coerce_null_query_params: bool = True
 
     # Storage settings
     storage_path: str = str(Path.home() / "clarinet/data")

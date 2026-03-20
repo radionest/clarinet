@@ -80,6 +80,10 @@ Startup sequence:
 
 Shutdown (reverse order): stop DICOMweb cleanup → flush DICOMweb cache → stop session cleanup → shutdown pipeline broker → close RecordFlow client → close DB.
 
+## Middleware (middleware.py)
+
+- `NullQueryParamMiddleware` — strips query params with literal value `"null"` so FastAPI treats them as absent (uses `None` default). Controlled by `settings.coerce_null_query_params` (default `True`). Added after CORS in `create_app()`.
+
 ## Exception Handlers (exception_handlers.py)
 
 `setup_exception_handlers(app)` maps domain exceptions → HTTP:
