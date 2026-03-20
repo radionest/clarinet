@@ -9,19 +9,13 @@ Run: make test-schema
 import pytest
 import schemathesis
 from hypothesis import HealthCheck, settings
-from schemathesis.checks import CHECKS, load_all_checks
 
-load_all_checks()
+from tests.schema.conftest import SCHEMA_EXCLUDED_CHECKS as _EXCLUDED_CHECKS
 
 schema = schemathesis.pytest.from_fixture("api_schema")
 
 # Suppress common health checks for ASGI transport
 _SUPPRESS = [HealthCheck.too_slow, HealthCheck.filter_too_much]
-
-# Sub-path action endpoints (/{id}/data, /{id}/invalidate) are method-specific.
-# Starlette returns 404 (not 405) for unsupported methods on these paths because
-# the path only exists for specific methods. Exclude this check for affected tests.
-_EXCLUDED_CHECKS = [CHECKS.get_one("unsupported_method")]
 
 
 # ---------------------------------------------------------------------------
@@ -42,7 +36,7 @@ def test_create_record(case):
     Targets: level-UID consistency validator, record_type_name slug,
     DicomUID constraints, empty_to_none coercion, parent_record_id validation.
     """
-    case.call_and_validate()
+    case.call_and_validate(excluded_checks=_EXCLUDED_CHECKS)
 
 
 @(schema.include(path="/api/records/{record_id}/data", method="POST").parametrize())
@@ -96,7 +90,7 @@ def test_create_record_type(case):
     file_registry with identifier validation, slicer_script_args,
     parse_json_strings validator, require_mutable_config guard.
     """
-    case.call_and_validate()
+    case.call_and_validate(excluded_checks=_EXCLUDED_CHECKS)
 
 
 @(schema.include(path="/api/records/types/{record_type_id}", method="PATCH").parametrize())
@@ -112,7 +106,7 @@ def test_update_record_type(case):
     Targets: all-optional fields, parse_json_strings dual-mode parsing,
     model_fields_set vs exclude_unset logic, data_schema re-validation.
     """
-    case.call_and_validate()
+    case.call_and_validate(excluded_checks=_EXCLUDED_CHECKS)
 
 
 # ---------------------------------------------------------------------------
@@ -134,7 +128,7 @@ def test_find_records(case):
     comparison_operator enum, sentinel values ("Null", "*"),
     pagination edge cases (skip=-1, limit=0).
     """
-    case.call_and_validate()
+    case.call_and_validate(excluded_checks=_EXCLUDED_CHECKS)
 
 
 # ---------------------------------------------------------------------------
@@ -176,4 +170,4 @@ def test_create_series(case):
     Targets: DicomUID pattern constraints, series_number boundaries (gt=0, lt=100000),
     study_uid FK validation, anon_uid constraints, empty_to_none coercion.
     """
-    case.call_and_validate()
+    case.call_and_validate(excluded_checks=_EXCLUDED_CHECKS)

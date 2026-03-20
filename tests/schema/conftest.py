@@ -14,6 +14,7 @@ import pytest
 import pytest_asyncio
 import schemathesis
 from fastapi import FastAPI
+from schemathesis.checks import CHECKS, load_all_checks
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -25,6 +26,23 @@ from clarinet.models import *  # noqa: F403
 from clarinet.models.user import User
 from clarinet.settings import Settings
 from clarinet.utils.database import get_async_session
+
+# ---------------------------------------------------------------------------
+# Shared Schemathesis check exclusions
+# ---------------------------------------------------------------------------
+# Both test_api_schema.py and test_critical_endpoints.py import this constant
+# so exclusion policy doesn't diverge between modules.
+#
+# - ignored_auth: false positive — auth is overridden (mock superuser) in conftest
+# - negative_data_rejection: custom validators not reflected in schema
+# - unsupported_method: Starlette returns 404 (not 405) for sub-path action
+#   endpoints and fastapi-users auto-generated endpoints
+load_all_checks()
+SCHEMA_EXCLUDED_CHECKS = [
+    CHECKS.get_one("ignored_auth"),
+    CHECKS.get_one("negative_data_rejection"),
+    CHECKS.get_one("unsupported_method"),
+]
 
 # ---------------------------------------------------------------------------
 # OpenAPI link injection for stateful testing
