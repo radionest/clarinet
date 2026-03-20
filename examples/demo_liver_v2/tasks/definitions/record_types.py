@@ -220,9 +220,9 @@ update_master_model = RecordDef(
     slicer_result_validator="validators/master_model_validator.py",
     files=[FileRef(master_model, "output")],
     slicer_context_hydrators=[
-        "patient_first_study",            # best_study_uid (fallback for intraop trigger)
-        "model_series_for_projection",    # model_study_uid, model_series_uid (CT ref)
-        "projection_for_update",          # target_study_uid, target_series_uid, projection_path, doctor_segmentation_path
+        "patient_first_study",  # best_study_uid (fallback for intraop trigger)
+        "model_series_for_projection",  # model_study_uid, model_series_uid (CT ref)
+        "projection_for_update",  # target_study_uid, target_series_uid, projection_path, doctor_segmentation_path
     ],
     # master_model, output_file, working_folder, best_study_uid — auto-injected
 )
@@ -302,11 +302,30 @@ resection_plan = RecordDef(
     min_records=1,
     max_records=1,
     slicer_script="scripts/resection_plan.py",
+    data_schema="schemas/resection-plan.schema.json",
     files=[
         FileRef(resection_model_file, "input"),
         FileRef(master_model, "input"),
     ],
-    # Data: per-lesion cluster assignment, resection zones, residual volume
+)
+
+# ---------------------------------------------------------------------------
+# Stage 11b: Resection report (intraoperative)
+# ---------------------------------------------------------------------------
+
+resection_report = RecordDef(
+    name="resection-report",
+    description=(
+        "Intraoperative resection report — actual cluster assignments for each "
+        "lesion, plus additional lesions found during surgery"
+    ),
+    label="Resection report",
+    level="PATIENT",
+    role="surgeon",
+    min_records=1,
+    max_records=1,
+    data_schema="schemas/resection-report.schema.json",
+    files=[FileRef(master_model, "input")],
 )
 
 # ---------------------------------------------------------------------------

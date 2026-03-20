@@ -26,6 +26,7 @@ anon_send_to_pacs = true
 config_mode = "python"
 config_record_types_file = "definitions/record_types.py"
 config_context_hydrators_file = "hydrators/context_hydrators.py"
+config_schema_hydrators_file = "hydrators/schema_hydrators.py"
 recordflow_paths = ["./tasks/workflows"]
 frontend_enabled = true
 

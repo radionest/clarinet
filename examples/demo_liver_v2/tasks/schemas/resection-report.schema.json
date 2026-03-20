@@ -1,0 +1,50 @@
+{
+    "type": "object",
+    "properties": {
+        "lesions": {
+            "type": "array",
+            "description": "All lesions from master model — each must have a cluster assignment or be marked as not removed",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "lesion_num": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "ROI number from master model",
+                        "x-options": {"source": "resection_plan_lesions"}
+                    },
+                    "cluster": {
+                        "type": ["integer", "null"],
+                        "minimum": 1,
+                        "description": "Cluster number the lesion was removed in (null if not removed)"
+                    }
+                },
+                "required": ["lesion_num", "cluster"],
+                "unevaluatedProperties": false
+            },
+            "minItems": 1
+        },
+        "additional_lesions": {
+            "type": "array",
+            "description": "Lesions found during surgery but absent in master model",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "description": {
+                        "type": "string",
+                        "description": "Location and description of the lesion"
+                    },
+                    "cluster": {
+                        "type": ["integer", "null"],
+                        "minimum": 1,
+                        "description": "Cluster number (null if not removed)"
+                    }
+                },
+                "required": ["description", "cluster"],
+                "unevaluatedProperties": false
+            }
+        }
+    },
+    "required": ["lesions", "additional_lesions"],
+    "unevaluatedProperties": false
+}

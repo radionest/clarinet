@@ -1,0 +1,29 @@
+{
+    "type": "object",
+    "properties": {
+        "lesions": {
+            "type": "array",
+            "description": "All lesions from master model with planned cluster assignment",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "lesion_num": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "ROI number from master model"
+                    },
+                    "cluster": {
+                        "type": ["integer", "null"],
+                        "minimum": 1,
+                        "description": "Planned cluster number (null if removal not planned)"
+                    }
+                },
+                "required": ["lesion_num", "cluster"],
+                "unevaluatedProperties": false
+            },
+            "minItems": 1
+        }
+    },
+    "required": ["lesions"],
+    "unevaluatedProperties": false
+}
