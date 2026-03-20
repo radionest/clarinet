@@ -370,7 +370,11 @@ async def add_record(
     return await service.create_record(record)
 
 
-@router.patch("/bulk/status", status_code=status.HTTP_204_NO_CONTENT)
+@router.patch(
+    "/bulk/status",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_model=None,  # Required: PEP 563 makes -> None a truthy ForwardRef, triggering FastAPI 204 body assertion
+)
 async def bulk_update_record_status(
     record_ids: list[Annotated[int, Body(ge=1, le=2147483647)]],
     new_status: RecordStatus,
