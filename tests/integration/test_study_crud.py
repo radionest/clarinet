@@ -15,7 +15,7 @@ from clarinet.models.study import Series, Study
 @pytest.mark.asyncio
 async def test_create_patient(test_session):
     """Test patient creation."""
-    patient = Patient(id="PAT001", name="John Doe", anon_name="ANON_001")
+    patient = Patient(id="PAT001", name="John Doe", anon_name="ANON_001", auto_id=1)
     test_session.add(patient)
     await test_session.commit()
     await test_session.refresh(patient)
@@ -28,7 +28,7 @@ async def test_create_patient(test_session):
 @pytest.mark.asyncio
 async def test_get_patient_by_id(test_session):
     """Test getting patient by ID."""
-    patient = Patient(id="PAT002", name="Jane Smith", anon_name="ANON_002")
+    patient = Patient(id="PAT002", name="Jane Smith", anon_name="ANON_002", auto_id=1)
     test_session.add(patient)
     await test_session.commit()
 
@@ -42,7 +42,7 @@ async def test_get_patient_by_id(test_session):
 async def test_create_study(test_session):
     """Test study creation."""
     # Create patient
-    patient = Patient(id="PAT003", name="Bob Johnson", anon_name="ANON_003")
+    patient = Patient(id="PAT003", name="Bob Johnson", anon_name="ANON_003", auto_id=1)
     test_session.add(patient)
     await test_session.commit()
 
@@ -67,7 +67,7 @@ async def test_create_study(test_session):
 async def test_create_series(test_session):
     """Test series creation."""
     # Create patient and study
-    patient = Patient(id="PAT004", name="Alice Brown", anon_name="ANON_004")
+    patient = Patient(id="PAT004", name="Alice Brown", anon_name="ANON_004", auto_id=1)
     test_session.add(patient)
     await test_session.commit()
 
@@ -101,7 +101,7 @@ async def test_create_series(test_session):
 @pytest.mark.asyncio
 async def test_update_patient(test_session):
     """Test patient update."""
-    patient = Patient(id="PAT005", name="Original Name", anon_name="ANON_005")
+    patient = Patient(id="PAT005", name="Original Name", anon_name="ANON_005", auto_id=1)
     test_session.add(patient)
     await test_session.commit()
 
@@ -122,7 +122,7 @@ async def test_update_patient(test_session):
 async def test_delete_patient_cascade(test_session):
     """Test cascade deletion of patient with studies."""
     # Create patient with study
-    patient = Patient(id="PAT006", name="Delete Test", anon_name="ANON_006")
+    patient = Patient(id="PAT006", name="Delete Test", anon_name="ANON_006", auto_id=1)
     test_session.add(patient)
     await test_session.commit()
 
@@ -155,7 +155,7 @@ async def test_delete_patient_cascade(test_session):
 async def test_get_patient_studies(test_session):
     """Test getting all patient studies."""
     # Create patient
-    patient = Patient(id="PAT007", name="Multi Study", anon_name="ANON_007")
+    patient = Patient(id="PAT007", name="Multi Study", anon_name="ANON_007", auto_id=1)
     test_session.add(patient)
     await test_session.commit()
 
@@ -185,7 +185,7 @@ async def test_get_patient_studies(test_session):
 async def test_get_study_series(test_session):
     """Test getting all study series."""
     # Create data structure
-    patient = Patient(id="PAT008", name="Series Test", anon_name="ANON_008")
+    patient = Patient(id="PAT008", name="Series Test", anon_name="ANON_008", auto_id=1)
     test_session.add(patient)
     await test_session.commit()
 
@@ -224,7 +224,7 @@ async def test_get_study_series(test_session):
 @pytest.mark.asyncio
 async def test_filter_studies_by_modality(test_session):
     """Test filtering studies by modality."""
-    patient = Patient(id="PAT009", name="Modality Test", anon_name="ANON_009")
+    patient = Patient(id="PAT009", name="Modality Test", anon_name="ANON_009", auto_id=1)
     test_session.add(patient)
     await test_session.commit()
 
@@ -252,7 +252,7 @@ async def test_filter_studies_by_modality(test_session):
 async def test_patient_with_full_hierarchy(test_session):
     """Test creating full hierarchy: patient -> study -> series."""
     # Create patient
-    patient = Patient(id="PAT010", name="Full Hierarchy", anon_name="ANON_010")
+    patient = Patient(id="PAT010", name="Full Hierarchy", anon_name="ANON_010", auto_id=1)
     test_session.add(patient)
     await test_session.commit()
 
@@ -308,7 +308,7 @@ async def test_patient_with_full_hierarchy(test_session):
 async def test_delete_patient_cascade_api(client: AsyncClient, test_session):
     """Test DELETE /patients/{patient_id} cascades to studies, series, and records."""
     # Create patient → study → series → record
-    patient = Patient(id="DEL_PAT001", name="Delete Cascade")
+    patient = Patient(id="DEL_PAT001", name="Delete Cascade", auto_id=1)
     test_session.add(patient)
     await test_session.commit()
 
@@ -372,7 +372,7 @@ async def test_delete_patient_not_found(client: AsyncClient):
 async def test_delete_study_cascade_api(client: AsyncClient, test_session):
     """Test DELETE /studies/{study_uid} cascades to series and records, patient remains."""
     # Create patient → study → series → record
-    patient = Patient(id="DEL_PAT002", name="Study Delete Test")
+    patient = Patient(id="DEL_PAT002", name="Study Delete Test", auto_id=1)
     test_session.add(patient)
     await test_session.commit()
 
@@ -467,7 +467,7 @@ async def test_create_study_no_lazy_load(fresh_client, test_session, admin_user)
     MissingGreenlet errors from lazy-loading in async context.
     """
     # Pre-create patient in test_session
-    patient = Patient(id="LAZY_PAT002", name="Study Lazy Test")
+    patient = Patient(id="LAZY_PAT002", name="Study Lazy Test", auto_id=1)
     test_session.add(patient)
     await test_session.commit()
 
@@ -497,7 +497,7 @@ async def test_create_series_no_lazy_load(fresh_client, test_session, admin_user
     MissingGreenlet errors from lazy-loading in async context.
     """
     # Pre-create patient and study in test_session
-    patient = Patient(id="LAZY_PAT003", name="Series Lazy Test")
+    patient = Patient(id="LAZY_PAT003", name="Series Lazy Test", auto_id=1)
     test_session.add(patient)
     await test_session.commit()
 

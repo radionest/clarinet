@@ -213,7 +213,7 @@ async def _create_hierarchy(
     study_uid = f"1.2.826.0.1.{uuid4().int % 10**10}"
     series_uid = f"{study_uid}.1"
 
-    patient = Patient(id=patient_id, name="E2E Patient")
+    patient = Patient(id=patient_id, name="E2E Patient", auto_id=1)
     session.add(patient)
     await session.commit()
 

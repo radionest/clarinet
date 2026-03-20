@@ -52,7 +52,7 @@ class Patient(PatientBase, table=True):
         default=None,
         sa_column=Column(
             Integer,
-            nullable=True,
+            nullable=False,
             unique=True,
         ),
     )

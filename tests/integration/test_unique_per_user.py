@@ -120,7 +120,7 @@ async def second_study(test_session, test_patient):
 @pytest_asyncio.fixture
 async def second_patient(test_session):
     """A second patient for context-isolation tests."""
-    patient = Patient(id="TEST_PAT002", name="Second Patient")
+    patient = Patient(id="TEST_PAT002", name="Second Patient", auto_id=1)
     test_session.add(patient)
     await test_session.commit()
     await test_session.refresh(patient)

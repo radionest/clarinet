@@ -298,7 +298,7 @@ async def client(test_session, test_settings) -> AsyncGenerator[AsyncClient]:
 @pytest_asyncio.fixture
 async def hierarchy(test_session: AsyncSession) -> dict[str, str]:
     """Create patient -> study -> series hierarchy."""
-    patient = Patient(id="LIVER_PAT_001", name="Test Patient")
+    patient = Patient(id="LIVER_PAT_001", name="Test Patient", auto_id=1)
     test_session.add(patient)
     await test_session.commit()
 

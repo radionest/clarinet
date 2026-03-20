@@ -146,7 +146,9 @@ def test_record_type_optional_has_no_id_field():
 @pytest_asyncio.fixture
 async def _series_with_records(test_session, test_user):
     """Create test data: 3 series with varying records for criteria tests."""
-    patient = Patient(id="CRIT_PAT001", name="Criteria Patient", anon_name="ANON_CRIT_001")
+    patient = Patient(
+        id="CRIT_PAT001", name="Criteria Patient", anon_name="ANON_CRIT_001", auto_id=1
+    )
     test_session.add(patient)
     await test_session.commit()
 

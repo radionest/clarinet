@@ -87,9 +87,15 @@ f"{settings.anon_id_prefix}_{auto_id}"  # Returns None if auto_id is None
 **Do NOT remove `@property`** — without it mypy sees the return type as
 `Callable[[], str | None]` instead of `str | None` (upstream mypy bug, pydantic#11687).
 
-`Patient.auto_id` — unique non-PK integer. Auto-assigned by `PatientRepository.create()`
-via `MAX(auto_id) + 1`. The `sa_column` has `unique=True` but **no** `autoincrement`
+`Patient.auto_id` — unique non-PK integer, **NOT NULL** at the DB level.
+Auto-assigned by `PatientRepository.create()` via `MAX(auto_id) + 1`.
+The `sa_column` has `nullable=False, unique=True` but **no** `autoincrement`
 (SQLite ignores autoincrement on non-PK columns).
+
+The Python type is `int | None` (default `None`) so that `PatientRepository.create()`
+can accept a `Patient` with `auto_id=None` and assign it before flush.
+Direct `session.add(Patient(...))` without `auto_id` will raise `IntegrityError` at flush.
+Test code creating patients directly must always provide an explicit `auto_id`.
 
 ## File Registry System
 
