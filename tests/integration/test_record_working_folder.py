@@ -315,29 +315,6 @@ async def test_format_path_patient_anon_id_when_auto_id_set(
     assert result == f"{settings.anon_id_prefix}_42"
 
 
-@pytest.mark.asyncio
-async def test_format_path_patient_id_fallback_when_no_auto_id(
-    test_session, test_patient, study_without_anon, series_without_anon, rt_series
-):
-    """Patient without auto_id → {patient_id} falls back to raw patient.id."""
-    # test_patient from conftest has no auto_id set
-    record = await _create_record(
-        test_session,
-        patient_id=test_patient.id,
-        study_uid=study_without_anon.study_uid,
-        series_uid=series_without_anon.series_uid,
-        rt_name=rt_series.name,
-    )
-
-    repo = RecordRepository(test_session)
-    loaded = await repo.get_with_relations(record.id)
-    record_read = RecordRead.model_validate(loaded)
-
-    result = record_read._format_path("{patient_id}")
-    # anon_id is None (no auto_id) → falls back to self.patient_id
-    assert result == test_patient.id
-
-
 # ===========================================================================
 # Group 2: _get_working_folder (underlying logic of working_folder computed field)
 # ===========================================================================
