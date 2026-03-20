@@ -41,10 +41,13 @@ class RecordTypeBase(SQLModel):
     - ``RecordTypeCreate`` / ``RecordTypeOptional``: defines it as a regular field
     """
 
+    # min_length/max_length enforce total length; schema_extra.pattern is
+    # OpenAPI-only metadata for schemathesis; field_validator is the actual
+    # format check (stable across SQLModel/Pydantic versions).
     name: str = Field(
-        min_length=5,
+        min_length=3,
         max_length=30,
-        schema_extra={"pattern": r"^[a-z][a-z0-9]{4,29}(-[a-z0-9]+)*$"},
+        schema_extra={"pattern": r"^[a-z][a-z0-9]*(-[a-z0-9]+)*$"},
     )
 
     @field_validator("name")
@@ -185,9 +188,9 @@ class RecordTypeOptional(SQLModel):
 
     name: str | None = Field(
         default=None,
-        min_length=5,
+        min_length=3,
         max_length=30,
-        schema_extra={"pattern": r"^[a-z][a-z0-9]{4,29}(-[a-z0-9]+)*$"},
+        schema_extra={"pattern": r"^[a-z][a-z0-9]*(-[a-z0-9]+)*$"},
     )
 
     @field_validator("name")
