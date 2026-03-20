@@ -188,6 +188,7 @@ async def get_record_type(
 @router.delete(
     "/types/{record_type_id}",
     status_code=status.HTTP_204_NO_CONTENT,
+    response_model=None,
     dependencies=[Depends(require_mutable_config)],
 )
 async def delete_record_type(
