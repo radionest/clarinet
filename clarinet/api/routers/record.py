@@ -187,6 +187,7 @@ async def get_record_type(
 @router.delete(
     "/types/{record_type_id}",
     status_code=status.HTTP_204_NO_CONTENT,
+    response_model=None,
     dependencies=[Depends(require_mutable_config)],
 )
 async def delete_record_type(
@@ -810,7 +811,7 @@ async def find_records(
     return mask_records(records, user)
 
 
-@router.patch("/bulk/status", status_code=status.HTTP_204_NO_CONTENT)
+@router.patch("/bulk/status", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
 async def bulk_update_record_status(
     record_ids: list[int],
     new_status: RecordStatus,

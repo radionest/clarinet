@@ -173,6 +173,7 @@ async def test_anonymize_study_succeeds_below_threshold() -> None:
     mock_series.series_uid = "1.2.3.4.5.6"
     mock_series.modality = "CT"
     mock_series.series_description = "Axial"
+    mock_series.instance_count = None  # unknown count — skip >= comparison
 
     mock_study = MagicMock()
     mock_study.patient_id = 1
@@ -222,6 +223,7 @@ async def test_anonymize_study_succeeds_below_threshold() -> None:
         mock_settings.anon_send_to_pacs = False
         mock_settings.anon_uid_salt = "test-salt"
         mock_settings.anon_failure_threshold = 0.5
+        mock_settings.dicom_cget_max_retries = 1
         mock_settings.series_filter_excluded_modalities = []
         mock_settings.series_filter_min_instance_count = 0
         mock_settings.series_filter_unknown_modality_policy = "include"
