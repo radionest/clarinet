@@ -130,6 +130,7 @@ Runs inside Slicer Python environment. Has `_Dummy` fallback for testing outside
 - `get_segment_names(segmentation)` → `list[str]` — ordered segment names from a segmentation node
 - `get_segment_centroid(segmentation, segment_name)` → `tuple[float,float,float] | None` — extracts per-segment labelmap via `node.GetBinaryLabelmapRepresentation()` and computes tight non-zero voxel center with numpy; handles shared labelmaps and missing extent metadata; observer-safe (no event processing); None if empty
 - `copy_segments(source_seg, target_seg, segment_names=None, empty=False)` — copy segments between segmentations; `empty=True` copies only metadata (name + color)
+- `sync_segments(source_seg, target_seg, empty=False)` → `list[str]` — copy segments from source missing in target (by name); returns list of added names
 - `rename_segments(segmentation, prefix="NEW", color=None, start_from=1)` → `int` — rename all segments to `{prefix}_{N}` with optional color; returns count
 - `auto_number_segment(segmentation, prefix="ROI", start_from=None)` → `int` — adds `{prefix}_{N+1}` segment, returns assigned number
 - `subtract_segmentations(seg_a, seg_b, output_name=None, max_overlap=0, max_overlap_ratio=None)` — ROI-level subtraction: removes seg_a segments overlapping with seg_b. In-place or new node if `output_name` set

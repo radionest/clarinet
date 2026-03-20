@@ -47,6 +47,11 @@ const record_type_edit_schema = "{
       \"title\": \"Max Records\",
       \"minimum\": 1
     },
+    \"unique_per_user\": {
+      \"type\": \"boolean\",
+      \"title\": \"Unique Per User\",
+      \"default\": false
+    },
     \"slicer_script\": {
       \"type\": \"string\",
       \"title\": \"Slicer Script\"
@@ -98,6 +103,7 @@ fn build_initial_values(rt: RecordType) -> String {
     #("role_name", json.nullable(rt.role_name, json.string)),
     #("min_records", json.nullable(rt.min_records, json.int)),
     #("max_records", json.nullable(rt.max_records, json.int)),
+    #("unique_per_user", json.bool(rt.unique_per_user)),
     #("slicer_script", json.nullable(rt.slicer_script, json.string)),
     #("slicer_result_validator", json.nullable(rt.slicer_result_validator, json.string)),
     #("slicer_script_args", dict_to_json_string(rt.slicer_script_args)),

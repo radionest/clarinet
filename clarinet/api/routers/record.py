@@ -241,10 +241,12 @@ async def get_my_records(
     Non-superusers see their assigned records plus unassigned records matching their roles.
     """
     role_names = None if user.is_superuser else get_user_role_names(user)
+    is_regular_user = not user.is_superuser
     records = await repo.find_by_user(
         user.id,
         role_names=role_names,
-        include_unassigned=not user.is_superuser,
+        include_unassigned=is_regular_user,
+        exclude_unique_violations=is_regular_user,
     )
     return mask_records(records, user)
 
@@ -260,10 +262,12 @@ async def get_my_pending_records(
     Non-superusers see their pending records plus unassigned pending records matching their roles.
     """
     role_names = None if user.is_superuser else get_user_role_names(user)
+    is_regular_user = not user.is_superuser
     records = await repo.find_pending_by_user(
         user.id,
         role_names=role_names,
-        include_unassigned=not user.is_superuser,
+        include_unassigned=is_regular_user,
+        exclude_unique_violations=is_regular_user,
     )
     return mask_records(records, user)
 
@@ -274,7 +278,7 @@ async def get_my_available_record_types(
     user: User = Depends(current_active_user),
 ) -> dict[str, int]:
     """Get all record types available to the current user with record counts."""
-    type_counts = await repo.get_available_type_counts(user.id)
+    type_counts = await repo.get_available_type_counts(user.id, exclude_unique_violations=True)
     return {rt.name: count for rt, count in type_counts.items()}
 
 
@@ -318,9 +322,22 @@ async def check_record_constraints(
     new_record: RecordCreate,
     repo: RecordRepositoryDep,
 ) -> None:
-    """Check if a record can be added based on constraints."""
+    """Check if a record can be created based on max_records and unique_per_user constraints.
+
+    Args:
+        new_record: Record creation payload.
+        repo: Record repository.
+
+    Raises:
+        RecordConstraintViolationError: If max_records or unique_per_user is violated.
+        RecordTypeNotFoundError: If the record type does not exist.
+    """
     await repo.check_constraints(
-        new_record.record_type_name, new_record.series_uid, new_record.study_uid
+        new_record.record_type_name,
+        new_record.series_uid,
+        new_record.study_uid,
+        patient_id=new_record.patient_id,
+        user_id=new_record.user_id,
     )
 
 
@@ -818,11 +835,11 @@ async def bulk_update_record_status(
 
 async def assign_user_to_record(
     record_id: int,
-    repo: RecordRepositoryDep,
+    service: RecordServiceDep,
     user: User = Depends(current_active_user),
 ) -> Record:
-    """Assign the current user to a record."""
-    return await repo.claim_record(record_id, user.id)
+    """Assign the current user to a record with uniqueness constraint check."""
+    return await service.claim_record(record_id, user.id)
 
 
 async def add_demo_records_for_user(

@@ -6,9 +6,9 @@ from dataclasses import dataclass, field
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import distinct, func, or_
+from sqlalchemy import and_, distinct, exists, func, literal, or_
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import aliased, selectinload
 from sqlmodel import col, select
 
 from clarinet.exceptions.domain import (
@@ -71,6 +71,44 @@ def _record_file_links_eager_load() -> Any:
     """Return selectinload chain for record → file_links → file_definition."""
     return (
         selectinload(Record.file_links).selectinload(RecordFileLink.file_definition)  # type: ignore[arg-type]  # type: ignore[arg-type]
+    )
+
+
+def _unique_per_user_violation_filter(user_id: UUID) -> Any:
+    """Build NOT(...) filter excluding unassigned records violating unique_per_user.
+
+    Returns a condition that, when applied to a query containing Record joined
+    with RecordType, excludes unassigned records of unique_per_user types where
+    the given user already has a record in the same DICOM context.
+    """
+    inner_r = aliased(Record, flat=True)
+    inner_subq = (
+        select(literal(1))
+        .select_from(inner_r)
+        .where(
+            col(inner_r.user_id) == user_id,  # type: ignore[arg-type]
+            inner_r.record_type_name == Record.record_type_name,  # type: ignore[arg-type]
+            or_(
+                and_(
+                    col(RecordType.level) == "SERIES",  # type: ignore[arg-type]
+                    inner_r.series_uid == Record.series_uid,  # type: ignore[arg-type]
+                ),
+                and_(
+                    col(RecordType.level) == "STUDY",  # type: ignore[arg-type]
+                    inner_r.study_uid == Record.study_uid,  # type: ignore[arg-type]
+                ),
+                and_(
+                    col(RecordType.level) == "PATIENT",  # type: ignore[arg-type]
+                    inner_r.patient_id == Record.patient_id,  # type: ignore[arg-type]
+                ),
+            ),
+        )
+        .correlate(Record, RecordType)
+    )
+    return ~and_(
+        col(Record.user_id).is_(None),
+        col(RecordType.unique_per_user).is_(True),  # type: ignore[arg-type]
+        exists(inner_subq),
     )
 
 
@@ -214,6 +252,7 @@ class RecordRepository(BaseRepository[Record]):
         limit: int = 100,
         role_names: set[str] | None = None,
         include_unassigned: bool = False,
+        exclude_unique_violations: bool = False,
     ) -> Sequence[Record]:
         """Find records assigned to a specific user with relations loaded.
 
@@ -223,6 +262,8 @@ class RecordRepository(BaseRepository[Record]):
             limit: Maximum number of records to return
             role_names: Optional set of role names to filter by
             include_unassigned: If True, also include records with user_id=NULL
+            exclude_unique_violations: If True, hide unassigned records that
+                violate unique_per_user for this user
 
         Returns:
             List of records with patient, study, series, and record_type loaded
@@ -232,10 +273,13 @@ class RecordRepository(BaseRepository[Record]):
             if include_unassigned
             else col(Record.user_id) == user_id
         )
+        # Join RecordType unconditionally when filtering by role or unique_per_user
+        needs_join = role_names is not None or exclude_unique_violations
+        statement = select(Record).where(user_filter)
+        if needs_join:
+            statement = statement.join(RecordType)
         statement = (
-            select(Record)
-            .where(user_filter)
-            .options(
+            statement.options(
                 selectinload(Record.patient),  # type: ignore
                 selectinload(Record.study),  # type: ignore
                 selectinload(Record.series),  # type: ignore
@@ -246,9 +290,9 @@ class RecordRepository(BaseRepository[Record]):
             .limit(limit)
         )
         if role_names is not None:
-            statement = statement.join(RecordType).where(
-                col(RecordType.role_name).in_(list(role_names))
-            )
+            statement = statement.where(col(RecordType.role_name).in_(list(role_names)))
+        if exclude_unique_violations:
+            statement = statement.where(_unique_per_user_violation_filter(user_id))
         result = await self.session.execute(statement)
         return result.scalars().all()
 
@@ -257,6 +301,7 @@ class RecordRepository(BaseRepository[Record]):
         user_id: UUID,
         role_names: set[str] | None = None,
         include_unassigned: bool = False,
+        exclude_unique_violations: bool = False,
     ) -> Sequence[Record]:
         """Find active (non-terminal) records assigned to a user with relations loaded.
 
@@ -266,6 +311,8 @@ class RecordRepository(BaseRepository[Record]):
             user_id: User UUID to filter by
             role_names: Optional set of role names to filter by
             include_unassigned: If True, also include records with user_id=NULL
+            exclude_unique_violations: If True, hide unassigned records that
+                violate unique_per_user for this user
 
         Returns:
             List of active records with patient, study, series, and record_type loaded
@@ -275,27 +322,27 @@ class RecordRepository(BaseRepository[Record]):
             if include_unassigned
             else col(Record.user_id) == user_id
         )
-        statement = (
-            select(Record)
-            .where(
-                user_filter,
-                Record.status != RecordStatus.blocked,
-                Record.status != RecordStatus.finished,
-                Record.status != RecordStatus.failed,
-                Record.status != RecordStatus.pause,
-            )
-            .options(
-                selectinload(Record.patient),  # type: ignore
-                selectinload(Record.study),  # type: ignore
-                selectinload(Record.series),  # type: ignore
-                _record_type_with_files(),
-                _record_file_links_eager_load(),
-            )
+        needs_join = role_names is not None or exclude_unique_violations
+        statement = select(Record).where(
+            user_filter,
+            Record.status != RecordStatus.blocked,
+            Record.status != RecordStatus.finished,
+            Record.status != RecordStatus.failed,
+            Record.status != RecordStatus.pause,
+        )
+        if needs_join:
+            statement = statement.join(RecordType)
+        statement = statement.options(
+            selectinload(Record.patient),  # type: ignore
+            selectinload(Record.study),  # type: ignore
+            selectinload(Record.series),  # type: ignore
+            _record_type_with_files(),
+            _record_file_links_eager_load(),
         )
         if role_names is not None:
-            statement = statement.join(RecordType).where(
-                col(RecordType.role_name).in_(list(role_names))
-            )
+            statement = statement.where(col(RecordType.role_name).in_(list(role_names)))
+        if exclude_unique_violations:
+            statement = statement.where(_unique_per_user_violation_filter(user_id))
         result = await self.session.execute(statement)
         return result.scalars().all()
 
@@ -591,6 +638,49 @@ class RecordRepository(BaseRepository[Record]):
         result = await self.session.execute(query)
         return result.scalar_one()
 
+    async def count_user_records_for_context(
+        self,
+        user_id: UUID,
+        record_type_name: str,
+        patient_id: str,
+        study_uid: str | None,
+        series_uid: str | None,
+        level: str,
+    ) -> int:
+        """Count records assigned to a user for a given type and DICOM context.
+
+        Context key depends on level:
+          - PATIENT: (user_id, record_type_name, patient_id)
+          - STUDY:   (user_id, record_type_name, study_uid)
+          - SERIES:  (user_id, record_type_name, series_uid)
+
+        Args:
+            user_id: User UUID to check.
+            record_type_name: RecordType name.
+            patient_id: Patient identifier.
+            study_uid: Study UID (used for STUDY/SERIES level).
+            series_uid: Series UID (used for SERIES level).
+            level: DicomQueryLevel value as string.
+
+        Returns:
+            Count of matching records regardless of status.
+        """
+        query = select(func.count(col(Record.id))).where(
+            Record.record_type_name == record_type_name,
+            col(Record.user_id) == user_id,
+        )
+        match level:
+            case "PATIENT":
+                query = query.where(Record.patient_id == patient_id)
+            case "STUDY":
+                query = query.where(Record.study_uid == study_uid)
+            case "SERIES":
+                query = query.where(Record.series_uid == series_uid)
+            case _:
+                raise ValueError(f"Unsupported level for unique_per_user context: {level}")
+        result = await self.session.execute(query)
+        return result.scalar_one()
+
     async def get_record_type(self, name: str) -> RecordType:
         """Get a RecordType by name with file_links eagerly loaded.
 
@@ -635,17 +725,23 @@ class RecordRepository(BaseRepository[Record]):
         record_type_name: str,
         series_uid: str | None,
         study_uid: str | None,
+        patient_id: str | None = None,
+        user_id: UUID | None = None,
     ) -> None:
-        """Check if a new record can be created based on max_records constraint.
+        """Check if a new record can be created based on constraints.
+
+        Validates max_records and unique_per_user constraints.
 
         Args:
-            record_type_name: Record type name
-            series_uid: Series UID
-            study_uid: Study UID
+            record_type_name: Record type name.
+            series_uid: Series UID.
+            study_uid: Study UID.
+            patient_id: Patient ID (required for unique_per_user check).
+            user_id: User UUID (triggers unique_per_user check when set).
 
         Raises:
-            RecordTypeNotFoundError: If record type doesn't exist
-            RecordConstraintViolationError: If constraint is violated
+            RecordTypeNotFoundError: If record type doesn't exist.
+            RecordConstraintViolationError: If any constraint is violated.
         """
         count = await self.count_by_type_and_context(record_type_name, series_uid, study_uid)
         record_type = await self.get_record_type(record_type_name)
@@ -661,6 +757,22 @@ class RecordRepository(BaseRepository[Record]):
             raise RecordConstraintViolationError(f"Records of level {level} require study_uid")
         if level == "SERIES" and not series_uid:
             raise RecordConstraintViolationError("Records of level SERIES require series_uid")
+
+        # Check unique_per_user constraint
+        if user_id is not None and patient_id is not None and record_type.unique_per_user:
+            user_count = await self.count_user_records_for_context(
+                user_id=user_id,
+                record_type_name=record_type_name,
+                patient_id=patient_id,
+                study_uid=study_uid,
+                series_uid=series_uid,
+                level=level,
+            )
+            if user_count > 0:
+                raise RecordConstraintViolationError(
+                    f"User already has a record of type '{record_type.name}' "
+                    f"for this {level.lower()} context"
+                )
 
     @staticmethod
     def _apply_anon_uid_filter(
@@ -732,7 +844,9 @@ class RecordRepository(BaseRepository[Record]):
 
         if criteria.patient_anon_id and "_" in criteria.patient_anon_id:
             auto_id = int(criteria.patient_anon_id.split("_")[1])
-            statement = statement.join(Patient, col(Record.patient_id) == col(Patient.id)).where(Patient.auto_id == auto_id)
+            statement = statement.join(Patient, col(Record.patient_id) == col(Patient.id)).where(
+                Patient.auto_id == auto_id
+            )
 
         # Series filters
         if criteria.series_uid:
@@ -835,11 +949,17 @@ class RecordRepository(BaseRepository[Record]):
         rows = result.all()
         return {type_name: count for type_name, count in rows}  # noqa: C416
 
-    async def get_available_type_counts(self, user_id: UUID) -> dict[RecordType, int]:
+    async def get_available_type_counts(
+        self,
+        user_id: UUID,
+        exclude_unique_violations: bool = False,
+    ) -> dict[RecordType, int]:
         """Get record types with pending record counts available to a user.
 
         Args:
             user_id: User UUID
+            exclude_unique_violations: If True, exclude unassigned records that
+                violate unique_per_user for this user
 
         Returns:
             Dict mapping RecordType to count of pending records
@@ -850,8 +970,10 @@ class RecordRepository(BaseRepository[Record]):
             .join(UserRole)
             .where(UserRole.users.any(User.id == user_id))  # type: ignore[attr-defined]
             .where(Record.status == RecordStatus.pending)
-            .group_by(col(RecordType.name))
         )
+        if exclude_unique_violations:
+            statement = statement.where(_unique_per_user_violation_filter(user_id))
+        statement = statement.group_by(col(RecordType.name))
         result = await self.session.execute(statement)
         rows = result.all()
 
