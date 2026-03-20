@@ -340,12 +340,15 @@ async def create_resection_report(
     from clarinet.models import RecordCreate
 
     plan_data = record.data or {}
-    lesions = plan_data.get("lesions", [])
+    raw_lesions = plan_data.get("lesions")
+    if not isinstance(raw_lesions, list):
+        raw_lesions = []
 
     prefill: dict[str, Any] = {
         "lesions": [
             {"lesion_num": lesion["lesion_num"], "cluster": lesion.get("cluster")}
-            for lesion in lesions
+            for lesion in raw_lesions
+            if isinstance(lesion, dict) and "lesion_num" in lesion
         ],
         "additional_lesions": [],
     }
