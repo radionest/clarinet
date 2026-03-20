@@ -13,8 +13,9 @@ Run: make test-schema
 import pytest
 import schemathesis
 from hypothesis import HealthCheck, settings
-from schemathesis.checks import CHECKS, load_all_checks
 from schemathesis.generation.stateful import run_state_machine_as_test
+
+from tests.schema.conftest import SCHEMA_EXCLUDED_CHECKS as _EXCLUDED_CHECKS
 
 schema = schemathesis.pytest.from_fixture("api_schema")
 stateful_schema = schemathesis.pytest.from_fixture("stateful_api_schema")
@@ -30,17 +31,6 @@ EXCLUDED_PATTERN = (
 
 # Suppress common health checks for ASGI transport
 _SUPPRESS = [HealthCheck.too_slow, HealthCheck.filter_too_much]
-
-# Checks excluded from conformance validation:
-# - ignored_auth: false positive — auth is overridden (mock superuser) in conftest
-# - negative_data_rejection: custom validators not reflected in schema
-# - unsupported_method: fastapi-users auto-generated endpoints
-load_all_checks()
-_EXCLUDED_CHECKS = [
-    CHECKS.get_one("ignored_auth"),
-    CHECKS.get_one("negative_data_rejection"),
-    CHECKS.get_one("unsupported_method"),
-]
 
 
 # ---------------------------------------------------------------------------

@@ -9,25 +9,13 @@ Run: make test-schema
 import pytest
 import schemathesis
 from hypothesis import HealthCheck, settings
-from schemathesis.checks import CHECKS, load_all_checks
 
-load_all_checks()
+from tests.schema.conftest import SCHEMA_EXCLUDED_CHECKS as _EXCLUDED_CHECKS
 
 schema = schemathesis.pytest.from_fixture("api_schema")
 
 # Suppress common health checks for ASGI transport
 _SUPPRESS = [HealthCheck.too_slow, HealthCheck.filter_too_much]
-
-# Checks excluded from all critical-endpoint tests:
-# - ignored_auth: false positive — auth is overridden (mock superuser) in conftest
-# - negative_data_rejection: custom validators not reflected in schema
-# - unsupported_method: Starlette returns 404 (not 405) for sub-path action endpoints
-#   (/{id}/data, /{id}/invalidate) because the path only exists for specific methods
-_EXCLUDED_CHECKS = [
-    CHECKS.get_one("ignored_auth"),
-    CHECKS.get_one("negative_data_rejection"),
-    CHECKS.get_one("unsupported_method"),
-]
 
 
 # ---------------------------------------------------------------------------
