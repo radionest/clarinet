@@ -23,7 +23,6 @@ from clarinet.api.app import app
 from clarinet.client import ClarinetClient
 from clarinet.models.base import DicomQueryLevel
 from clarinet.models.file_schema import FileDefinition, FileRole, RecordTypeFileLink
-from clarinet.models.patient import Patient
 from clarinet.models.record import RecordType
 from clarinet.models.study import Series, Study
 from clarinet.models.user import UserRole
@@ -33,6 +32,7 @@ from clarinet.services.recordflow.flow_loader import load_flows_from_file
 from clarinet.services.recordflow.flow_record import ENTITY_REGISTRY, RECORD_REGISTRY
 from clarinet.utils.config_loader import discover_config_files, load_record_config
 from clarinet.utils.file_registry_resolver import FileRegistryEntry, resolve_task_files
+from tests.utils.factories import make_patient
 
 DEMO_DIR = Path(__file__).resolve().parent.parent.parent / "examples" / "demo"
 TASKS_DIR = DEMO_DIR / "tasks"
@@ -213,7 +213,7 @@ async def _create_hierarchy(
     study_uid = f"1.2.826.0.1.{uuid4().int % 10**10}"
     series_uid = f"{study_uid}.1"
 
-    patient = Patient(id=patient_id, name="E2E Patient", auto_id=1)
+    patient = make_patient(patient_id, "E2E Patient")
     session.add(patient)
     await session.commit()
 

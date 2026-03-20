@@ -19,10 +19,10 @@ from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from clarinet.api.app import app
-from clarinet.models.patient import Patient
 from clarinet.models.study import Series, Study
 from clarinet.services.recordflow.flow_file import FILE_REGISTRY
 from clarinet.services.recordflow.flow_record import ENTITY_REGISTRY, RECORD_REGISTRY
+from tests.utils.factories import make_patient
 from tests.utils.urls import (
     PATIENTS_BASE,
     RECORD_TYPES,
@@ -74,7 +74,7 @@ async def client(test_session, test_settings) -> AsyncGenerator[AsyncClient]:
 @pytest_asyncio.fixture
 async def test_hierarchy(test_session: AsyncSession) -> dict[str, str]:
     """Create Patient -> Study -> Series via ORM with fixed IDs."""
-    patient = Patient(id=_PATIENT_ID, name="File Test Patient", auto_id=1)
+    patient = make_patient(_PATIENT_ID, "File Test Patient")
     test_session.add(patient)
     await test_session.commit()
 

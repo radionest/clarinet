@@ -18,6 +18,7 @@ from clarinet.models.patient import Patient
 from clarinet.models.record import Record
 from clarinet.models.study import Series, Study
 from clarinet.models.user import User
+from tests.utils.factories import make_patient
 
 
 class TestAuthentication:
@@ -142,7 +143,7 @@ class TestPatientManagement:
         await clarinet_client.login(username=admin_user.email, password="adminpassword")
 
         # Create patient without anon_name
-        new_patient = Patient(id="TEST_PAT_ANON", name="Patient To Anonymize", auto_id=1)
+        new_patient = make_patient("TEST_PAT_ANON", "Patient To Anonymize")
         test_session.add(new_patient)
         await test_session.commit()
 

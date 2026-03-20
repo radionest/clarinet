@@ -34,7 +34,6 @@ from clarinet.api.app import app
 from clarinet.client import ClarinetClient
 from clarinet.models.base import DicomQueryLevel
 from clarinet.models.file_schema import FileDefinition, FileRole, RecordTypeFileLink
-from clarinet.models.patient import Patient
 from clarinet.models.record import RecordType
 from clarinet.models.study import Series, Study
 from clarinet.services.pipeline import PipelineMessage, pipeline_task
@@ -48,6 +47,7 @@ from clarinet.services.recordflow.flow_record import (
     study,
 )
 from clarinet.services.recordflow.flow_result import Field
+from tests.utils.factories import make_patient
 from tests.utils.urls import RECORDS_BASE, RECORDS_FIND
 
 pytestmark = pytest.mark.asyncio
@@ -298,7 +298,7 @@ async def client(test_session, test_settings) -> AsyncGenerator[AsyncClient]:
 @pytest_asyncio.fixture
 async def hierarchy(test_session: AsyncSession) -> dict[str, str]:
     """Create patient -> study -> series hierarchy."""
-    patient = Patient(id="LIVER_PAT_001", name="Test Patient", auto_id=1)
+    patient = make_patient("LIVER_PAT_001", "Test Patient")
     test_session.add(patient)
     await test_session.commit()
 

@@ -10,6 +10,7 @@ from clarinet.services.dicom.models import (
     BatchStoreResult,
     RetrieveResult,
 )
+from tests.utils.factories import make_patient
 
 
 @pytest.mark.asyncio
@@ -50,11 +51,10 @@ async def test_anonymize_study_success(client, test_session) -> None:
     """Full anonymization flow with mocked PACS retrieval."""
     from datetime import UTC, datetime
 
-    from clarinet.models.patient import Patient
     from clarinet.models.study import Series, Study
 
     # Create patient with auto_id
-    patient = Patient(id="ANON_PAT_001", name="Test Patient", auto_id=42)
+    patient = make_patient("ANON_PAT_001", "Test Patient", auto_id=42)
     test_session.add(patient)
     await test_session.commit()
 
@@ -135,10 +135,9 @@ async def test_anonymize_study_background(client, test_session) -> None:
     """Background mode returns immediately with status."""
     from datetime import UTC, datetime
 
-    from clarinet.models.patient import Patient
     from clarinet.models.study import Series, Study
 
-    patient = Patient(id="BG_PAT_001", name="BG Patient", auto_id=99)
+    patient = make_patient("BG_PAT_001", "BG Patient", auto_id=99)
     test_session.add(patient)
     await test_session.commit()
 
@@ -176,10 +175,9 @@ async def test_anonymize_study_filters_sr_series(client, test_session) -> None:
     """SR series is excluded from anonymization and reported in skipped_series."""
     from datetime import UTC, datetime
 
-    from clarinet.models.patient import Patient
     from clarinet.models.study import Series, Study
 
-    patient = Patient(id="FILTER_PAT_001", name="Filter Patient", auto_id=50)
+    patient = make_patient("FILTER_PAT_001", "Filter Patient", auto_id=50)
     test_session.add(patient)
     await test_session.commit()
 
@@ -274,10 +272,9 @@ async def test_anonymize_pacs_retrieval_failure(client, test_session) -> None:
     """PACS retrieval failure on one series does not block other series."""
     from datetime import UTC, datetime
 
-    from clarinet.models.patient import Patient
     from clarinet.models.study import Series, Study
 
-    patient = Patient(id="PACS_FAIL_PAT", name="PacsFail Patient", auto_id=60)
+    patient = make_patient("PACS_FAIL_PAT", "PacsFail Patient", auto_id=60)
     test_session.add(patient)
     await test_session.commit()
 
@@ -356,10 +353,9 @@ async def test_anonymize_instance_failure(client, test_session) -> None:
     """anonymize_dataset failure on one instance does not block others."""
     from datetime import UTC, datetime
 
-    from clarinet.models.patient import Patient
     from clarinet.models.study import Series, Study
 
-    patient = Patient(id="INST_FAIL_PAT", name="InstFail Patient", auto_id=61)
+    patient = make_patient("INST_FAIL_PAT", "InstFail Patient", auto_id=61)
     test_session.add(patient)
     await test_session.commit()
 
@@ -446,10 +442,9 @@ async def test_anonymize_send_to_pacs_failure_resilient(client, test_session) ->
     """C-STORE failure in _send_to_pacs does not crash the workflow."""
     from datetime import UTC, datetime
 
-    from clarinet.models.patient import Patient
     from clarinet.models.study import Series, Study
 
-    patient = Patient(id="SEND_FAIL_PAT", name="SendFail Patient", auto_id=62)
+    patient = make_patient("SEND_FAIL_PAT", "SendFail Patient", auto_id=62)
     test_session.add(patient)
     await test_session.commit()
 
@@ -523,10 +518,9 @@ async def test_anonymize_save_to_disk_error_graceful(client, test_session) -> No
     """Disk save error is caught by gather(return_exceptions=True) — response is still 200."""
     from datetime import UTC, datetime
 
-    from clarinet.models.patient import Patient
     from clarinet.models.study import Series, Study
 
-    patient = Patient(id="DISK_FAIL_PAT", name="DiskFail Patient", auto_id=63)
+    patient = make_patient("DISK_FAIL_PAT", "DiskFail Patient", auto_id=63)
     test_session.add(patient)
     await test_session.commit()
 
@@ -600,10 +594,9 @@ async def test_anonymize_study_no_series(client, test_session) -> None:
     """Study with no series returns valid result with zeros."""
     from datetime import UTC, datetime
 
-    from clarinet.models.patient import Patient
     from clarinet.models.study import Study
 
-    patient = Patient(id="NOSERIES_PAT", name="NoSeries Patient", auto_id=64)
+    patient = make_patient("NOSERIES_PAT", "NoSeries Patient", auto_id=64)
     test_session.add(patient)
     await test_session.commit()
 
@@ -644,10 +637,9 @@ async def test_anonymize_all_series_filtered(client, test_session) -> None:
     """All series filtered out (SR/KO) results in zero anonymized."""
     from datetime import UTC, datetime
 
-    from clarinet.models.patient import Patient
     from clarinet.models.study import Series, Study
 
-    patient = Patient(id="ALLFILT_PAT", name="AllFilt Patient", auto_id=65)
+    patient = make_patient("ALLFILT_PAT", "AllFilt Patient", auto_id=65)
     test_session.add(patient)
     await test_session.commit()
 
@@ -742,10 +734,9 @@ async def test_anonymize_batch_cstore_partial_failure(client, test_session) -> N
     """Batch C-STORE with partial failure reports correct send_failed count."""
     from datetime import UTC, datetime
 
-    from clarinet.models.patient import Patient
     from clarinet.models.study import Series, Study
 
-    patient = Patient(id="BATCH_FAIL_PAT", name="BatchFail Patient", auto_id=66)
+    patient = make_patient("BATCH_FAIL_PAT", "BatchFail Patient", auto_id=66)
     test_session.add(patient)
     await test_session.commit()
 

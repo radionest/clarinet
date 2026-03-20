@@ -168,18 +168,23 @@ Two modules serve different purposes:
 | `tests/utils/test_helpers.py` | Async Factory classes (`PatientFactory.create_patient()`) | Yes — adds + commits | Need a fully persisted entity with DB-generated fields |
 
 ```python
-# Lightweight instance (not persisted)
+# Lightweight instance (not persisted) — auto_id auto-assigned
 from tests.utils.factories import make_patient, make_user, seed_record
 
-pat = make_patient("PAT_001", "Alice")
+pat = make_patient("PAT_001", "Alice")                    # auto_id from shared counter
+pat = make_patient("PAT_002", "Bob", anon_name="ANON_B")  # with anon_name
+pat = make_patient("PAT_003", "Carol", auto_id=42)        # explicit auto_id
 session.add(pat)
 await session.commit()
 
-# Async factory (persisted automatically)
+# Async factory (persisted automatically) — same shared counter
 from tests.utils.test_helpers import PatientFactory
 
 pat = await PatientFactory.create_patient(session, patient_id="PAT_001")
 ```
+
+Both factories share a single `next_auto_id()` counter from `factories.py` — never
+create `Patient(...)` directly in tests (except when specifically testing auto_id behavior).
 
 ### Fixture Hierarchy
 

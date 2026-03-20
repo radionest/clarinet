@@ -36,7 +36,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from clarinet.api.app import app
 from clarinet.client import ClarinetClient
 from clarinet.models.base import DicomQueryLevel
-from clarinet.models.patient import Patient
 from clarinet.models.record import RecordType
 from clarinet.models.study import Series, Study
 from clarinet.services.pipeline import Pipeline, PipelineMessage, get_pipeline
@@ -52,6 +51,7 @@ from clarinet.services.recordflow.flow_record import (
     study,
 )
 from clarinet.services.recordflow.flow_result import Field
+from tests.utils.factories import make_patient
 from tests.utils.urls import PIPELINES_BASE, PIPELINES_SYNC, RECORDS_BASE, RECORDS_FIND
 
 pytestmark = pytest.mark.asyncio
@@ -171,7 +171,7 @@ async def _create_hierarchy(
     series_uid: str = "1.2.3.4.5.1",
 ) -> dict[str, str]:
     """Create patient -> study -> series via ORM."""
-    patient = Patient(id=patient_id, name="Test Patient", auto_id=1)
+    patient = make_patient(patient_id, "Test Patient")
     session.add(patient)
     await session.commit()
 
@@ -1229,7 +1229,7 @@ class TestEntityCreationTriggers:
         app_with_engine.register_flow(entity_flow)
 
         # Create hierarchy
-        patient = Patient(id="TEST_PAT001", name="Test Patient", auto_id=1)
+        patient = make_patient("TEST_PAT001", "Test Patient")
         test_session.add(patient)
         await test_session.commit()
 
@@ -1264,7 +1264,7 @@ class TestEntityCreationTriggers:
         entity_flow = study().on_created().create_record("first-check")
         app_with_engine.register_flow(entity_flow)
 
-        patient = Patient(id="TEST_PAT001", name="Test Patient", auto_id=1)
+        patient = make_patient("TEST_PAT001", "Test Patient")
         test_session.add(patient)
         await test_session.commit()
 

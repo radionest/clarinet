@@ -18,13 +18,30 @@ from clarinet.utils.auth import get_password_hash
 _auto_id_seq = count(1)
 
 
-def make_patient(pid: str = "PAT_001", name: str = "Alice", auto_id: int | None = None) -> Patient:
+def next_auto_id() -> int:
+    """Return the next unique auto_id for test patients.
+
+    Shared counter used by both :func:`make_patient` and
+    :class:`~tests.utils.test_helpers.PatientFactory` to avoid duplicates.
+    """
+    return next(_auto_id_seq)
+
+
+def make_patient(
+    pid: str = "PAT_001",
+    name: str = "Alice",
+    auto_id: int | None = None,
+    anon_name: str | None = None,
+) -> Patient:
     """Create a Patient instance (not persisted).
 
     Auto-assigns a unique ``auto_id`` when not provided (Patient.auto_id is NOT NULL).
     """
     return Patient(
-        id=pid, name=name, auto_id=auto_id if auto_id is not None else next(_auto_id_seq)
+        id=pid,
+        name=name,
+        auto_id=auto_id if auto_id is not None else next_auto_id(),
+        anon_name=anon_name,
     )
 
 
