@@ -81,7 +81,7 @@ class RecordType(RecordTypeBase, table=True):
     Requires eager loading of ``file_links``; returns ``[]`` otherwise.
     """
 
-    name: str = Field(min_length=5, max_length=30, primary_key=True)
+    name: str = Field(primary_key=True)
     data_schema: RecordSchema | None = Field(default_factory=dict, sa_column=Column(JSON))
 
     slicer_script_args: SlicerArgs | None = Field(default_factory=dict, sa_column=Column(JSON))
