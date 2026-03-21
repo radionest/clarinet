@@ -8,10 +8,10 @@ for backward compatibility.
 
 from datetime import UTC, datetime
 from enum import Enum
-from typing import Any, Optional
+from typing import Annotated, Any, Literal, Optional
 from uuid import UUID
 
-from pydantic import computed_field, model_validator
+from pydantic import Discriminator, Tag, computed_field, model_validator
 from sqlalchemy import Boolean, Float, ForeignKey, Integer, String, event, func
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlmodel import JSON, Column, Field, Relationship, SQLModel
@@ -65,19 +65,14 @@ class RecordFindResultComparisonOperator(str, Enum):
     contains = "contains"
 
 
-class RecordFindResult(SQLModel):
-    """Model for specifying search criteria for record data."""
+class _SqlTypeMixin:
+    """Mixin providing ``sql_type`` computed field for RecordFindResult variants."""
 
-    result_name: str = Field(min_length=1, max_length=255)
     result_value: str | bool | int | float
-    comparison_operator: RecordFindResultComparisonOperator | None = Field(
-        default=RecordFindResultComparisonOperator.eq
-    )
 
     @computed_field
     def sql_type(self) -> type[String] | type[Boolean] | type[Integer] | type[Float]:  # type: ignore[type-arg]
         """Determine the appropriate SQL type based on the result value."""
-
         match self.result_value:
             case str():
                 return String
@@ -89,6 +84,46 @@ class RecordFindResult(SQLModel):
                 return Float
             case _:
                 raise NotImplementedError("Unsupported result type")
+
+
+class EqFindResult(_SqlTypeMixin, SQLModel):
+    """Equality search criterion — accepts any value type."""
+
+    result_name: str = Field(min_length=1, max_length=255)
+    result_value: str | bool | int | float
+    comparison_operator: Literal["eq"] = "eq"
+
+
+class ContainsFindResult(_SqlTypeMixin, SQLModel):
+    """Substring search criterion — string values only."""
+
+    result_name: str = Field(min_length=1, max_length=255)
+    result_value: str
+    comparison_operator: Literal["contains"] = "contains"
+
+
+class OrderFindResult(_SqlTypeMixin, SQLModel):
+    """Ordering comparison criterion — no booleans."""
+
+    result_name: str = Field(min_length=1, max_length=255)
+    result_value: str | int | float
+    comparison_operator: Literal["lt", "gt"]
+
+
+def _find_result_discriminator(v: Any) -> str:
+    """Extract discriminator tag, defaulting to 'eq' when absent."""
+    if isinstance(v, dict):
+        return v.get("comparison_operator", "eq")
+    return getattr(v, "comparison_operator", "eq")
+
+
+RecordFindResult = Annotated[
+    Annotated[EqFindResult, Tag("eq")]
+    | Annotated[ContainsFindResult, Tag("contains")]
+    | Annotated[OrderFindResult, Tag("lt")]
+    | Annotated[OrderFindResult, Tag("gt")],
+    Discriminator(_find_result_discriminator),
+]
 
 
 class RecordBase(BaseModel):

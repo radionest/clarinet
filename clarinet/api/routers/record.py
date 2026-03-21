@@ -19,6 +19,9 @@ from fastapi import (
     Request,
     status,
 )
+from fastapi import (
+    Path as FastAPIPath,
+)
 from fastapi.responses import JSONResponse
 from sqlmodel import SQLModel
 from starlette.responses import Response
@@ -664,7 +667,7 @@ async def resubmit_record_with_validation(
 
 @router.patch("/{record_id}", response_model=RecordRead)
 async def update_record(
-    record_id: int,
+    record_id: Annotated[int, FastAPIPath(ge=1, le=2147483647)],
     record_update: RecordOptional,
     repo: RecordRepositoryDep,
 ) -> Record:

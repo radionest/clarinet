@@ -15,8 +15,6 @@ import schemathesis
 from hypothesis import HealthCheck, settings
 from schemathesis.generation.stateful import run_state_machine_as_test
 
-from tests.schema.conftest import SCHEMA_EXCLUDED_CHECKS as _EXCLUDED_CHECKS
-
 schema = schemathesis.pytest.from_fixture("api_schema")
 stateful_schema = schemathesis.pytest.from_fixture("stateful_api_schema")
 
@@ -53,7 +51,7 @@ _SUPPRESS = [HealthCheck.too_slow, HealthCheck.filter_too_much]
 @pytest.mark.schema
 def test_api_conformance(case):
     """Validate API endpoints conform to their OpenAPI schema."""
-    case.call_and_validate(excluded_checks=_EXCLUDED_CHECKS)
+    case.call_and_validate()
 
 
 @(

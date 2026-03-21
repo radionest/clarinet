@@ -798,10 +798,13 @@ class RecordRepository(BaseRepository[Record]):
         queries: list[RecordFindResult],
     ) -> Any:
         """Apply JSON data field comparison filters."""
+        if not queries:
+            return statement
+        statement = statement.where(Record.data.is_not(None))  # type: ignore[union-attr]
         for query in queries:
             if query.comparison_operator is None:
                 continue
-            data_field = Record.data.op("->")(query.result_name).as_string()  # type: ignore[union-attr]
+            data_field = Record.data[query.result_name].as_string()  # type: ignore[union-attr]
             op_fn = _COMPARISON_OPS.get(query.comparison_operator)
             if op_fn is None:
                 raise ValidationError(

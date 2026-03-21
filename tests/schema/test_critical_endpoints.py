@@ -10,8 +10,6 @@ import pytest
 import schemathesis
 from hypothesis import HealthCheck, settings
 
-from tests.schema.conftest import SCHEMA_EXCLUDED_CHECKS as _EXCLUDED_CHECKS
-
 schema = schemathesis.pytest.from_fixture("api_schema")
 
 # Suppress common health checks for ASGI transport
@@ -36,7 +34,7 @@ def test_create_record(case):
     Targets: level-UID consistency validator, record_type_name slug,
     DicomUID constraints, empty_to_none coercion, parent_record_id validation.
     """
-    case.call_and_validate(excluded_checks=_EXCLUDED_CHECKS)
+    case.call_and_validate()
 
 
 @(schema.include(path="/api/records/{record_id}/data", method="POST").parametrize())
@@ -52,7 +50,7 @@ def test_submit_record_data(case):
     Targets: free-form JSON body, state machine guards (blocked/finished → 409),
     JSON Schema Draft 2020-12 validation, file validation.
     """
-    case.call_and_validate(excluded_checks=_EXCLUDED_CHECKS)
+    case.call_and_validate()
 
 
 @(schema.include(path="/api/records/{record_id}/data", method="PATCH").parametrize())
@@ -68,7 +66,7 @@ def test_update_record_data(case):
     Targets: inverse state machine guard (must be finished), JSON Schema
     validation, data-update RecordFlow trigger.
     """
-    case.call_and_validate(excluded_checks=_EXCLUDED_CHECKS)
+    case.call_and_validate()
 
 
 # ---------------------------------------------------------------------------
@@ -90,7 +88,7 @@ def test_create_record_type(case):
     file_registry with identifier validation, slicer_script_args,
     parse_json_strings validator, require_mutable_config guard.
     """
-    case.call_and_validate(excluded_checks=_EXCLUDED_CHECKS)
+    case.call_and_validate()
 
 
 @(schema.include(path="/api/records/types/{record_type_id}", method="PATCH").parametrize())
@@ -106,7 +104,7 @@ def test_update_record_type(case):
     Targets: all-optional fields, parse_json_strings dual-mode parsing,
     model_fields_set vs exclude_unset logic, data_schema re-validation.
     """
-    case.call_and_validate(excluded_checks=_EXCLUDED_CHECKS)
+    case.call_and_validate()
 
 
 # ---------------------------------------------------------------------------
@@ -128,7 +126,7 @@ def test_find_records(case):
     comparison_operator enum, sentinel values ("Null", "*"),
     pagination edge cases (skip=-1, limit=0).
     """
-    case.call_and_validate(excluded_checks=_EXCLUDED_CHECKS)
+    case.call_and_validate()
 
 
 # ---------------------------------------------------------------------------
@@ -149,7 +147,7 @@ def test_invalidate_record(case):
     Targets: unvalidated mode string (only "hard"/"soft" handled),
     reason appended to context_info (max 3000 chars), optional body fields.
     """
-    case.call_and_validate(excluded_checks=_EXCLUDED_CHECKS)
+    case.call_and_validate()
 
 
 # ---------------------------------------------------------------------------
@@ -170,4 +168,4 @@ def test_create_series(case):
     Targets: DicomUID pattern constraints, series_number boundaries (gt=0, lt=100000),
     study_uid FK validation, anon_uid constraints, empty_to_none coercion.
     """
-    case.call_and_validate(excluded_checks=_EXCLUDED_CHECKS)
+    case.call_and_validate()
