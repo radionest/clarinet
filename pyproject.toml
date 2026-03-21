@@ -140,6 +140,8 @@ module = [
     "schemathesis.*",
     "pydantic_settings.*",
     "alembic.*",
+    "orjson",
+    "orjson.*",
 ]
 ignore_missing_imports = true
 
