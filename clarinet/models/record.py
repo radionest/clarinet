@@ -111,10 +111,10 @@ class OrderFindResult(_SqlTypeMixin, SQLModel):
     comparison_operator: Literal["lt", "gt"]
 
 
-def _find_result_discriminator(v: Any) -> str:
+def _find_result_discriminator(v: dict[str, Any] | Any) -> str:
     """Extract discriminator tag, defaulting to 'eq' when absent."""
     if isinstance(v, dict):
-        return str(v.get("comparison_operator", "eq"))
+        return v.get("comparison_operator") or "eq"
     return getattr(v, "comparison_operator", "eq")
 
 
