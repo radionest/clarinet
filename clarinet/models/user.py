@@ -71,7 +71,7 @@ class UserRead(schemas.BaseUser[UUID]):
         try:
             local, domain = v.rsplit("@", 1)
             return f"{local}@{domain.encode('idna').decode('ascii')}"
-        except (UnicodeError, UnicodeDecodeError):
+        except UnicodeError:
             return v
 
 
