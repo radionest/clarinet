@@ -1,342 +1,158 @@
 # Clarinet
 
-A comprehensive framework for conducting clinical-radiological studies, built on FastAPI, SQLModel, and asynchronous architecture.
+A framework for organizing clinical-radiological studies. You describe record types, data schemas, and workflow logic — run `clarinet run` — and get a web application with an admin panel, auto-generated forms, task management, and PACS integration.
 
-## Overview
+## Why
 
-Clarinet is a powerful framework designed to streamline the development of clinical-radiological research applications. It provides a robust foundation with built-in support for DICOM processing, image analysis, and integration with medical imaging tools like 3D Slicer.
+Running a medical imaging study means coordinating dozens of participants, modalities, processing steps, and files. Typically this looks like: images on PACS, annotations in shared folders, protocols in spreadsheets, and tracking "who did what" in the coordinator's head.
 
-## Features
+Clarinet replaces all of this with a single system where:
 
-- **Async-First Architecture**: Built entirely on async/await for optimal performance
-- **FastAPI-based API**: Modern, fast, and fully documented REST API
-- **SQLModel ORM**: Type-safe database operations with async support
-- **Repository Pattern**: Clean data access layer with repository pattern implementation
-- **DICOM Support**: Built-in DICOM processing and management
-- **3D Slicer Integration**: Seamless integration with 3D Slicer for advanced image processing
-- **Authentication & Authorization**: Secure session-based authentication with FastAPI-users using httpOnly cookies
-- **Modular Design**: Clean separation of concerns with services, repositories, and models
-- **Modern Frontend**: Gleam/Lustre-based SPA with type-safe functional programming
-- **MVU Architecture**: Predictable state management with Model-View-Update pattern
+- Data is organized into a hierarchy: **Patient → Study → Series → Record**
+- Each record is typed, with a data schema, file registry, and access control
+- Transitions between steps happen automatically via workflow rules
+- Heavy computation (segmentation, anonymization, comparison) runs on remote workers
 
-## Project Structure
+## How It Works
 
-```
-clarinet/
-├── clarinet/              # Backend source code (Python package)
-│   ├── api/               # FastAPI application
-│   │   ├── routers/       # API endpoints
-│   │   ├── auth_config.py # Authentication configuration
-│   │   └── app.py         # Main application
-│   ├── models/            # SQLModel database models
-│   ├── repositories/      # Data access layer
-│   ├── services/          # Business logic
-│   │   ├── dicom/         # DICOM processing
-│   │   ├── image/         # Image processing
-│   │   └── slicer/        # 3D Slicer integration
-│   ├── exceptions/        # Custom exceptions
-│   ├── utils/             # Utility functions
-│   ├── cli/               # Command-line interface
-│   └── frontend/          # Gleam/Lustre frontend (embedded)
-│       ├── src/           # Gleam source code
-│       │   ├── api/       # HTTP client with cookie support
-│       │   ├── components/# UI components
-│       │   ├── pages/     # Application pages
-│       │   └── utils/     # Utilities (DOM, routing)
-│       ├── public/        # Public assets
-│       ├── static/        # Static files (HTML, CSS)
-│       ├── build/         # Build artifacts (generated)
-│       └── gleam.toml     # Gleam configuration
-├── frontend/              # Standalone frontend (if separated)
-│   ├── src/              # Gleam source code
-│   ├── public/           # Static assets
-│   └── gleam.toml        # Gleam configuration
-├── dist/                  # Built frontend distribution
-│   ├── index.html        # SPA entry point
-│   ├── js/               # Compiled JavaScript
-│   └── css/              # Stylesheets
-├── scripts/               # Build and utility scripts
-│   └── build_frontend.sh # Frontend build script
-├── tests/                 # Test suite
-├── examples/              # Usage examples and templates
-│   ├── .env.example      # Environment configuration template
-│   ├── test/             # Test examples
-│   └── test_front/       # Frontend test examples
-├── data/                  # Data storage (gitignored)
-├── .github/               # GitHub Actions workflows
-├── Makefile              # Build automation
-└── pyproject.toml        # Package configuration
+### 1. Define Your Study Structure
+
+Record types, files, and data schemas are described in Python or TOML:
+
+```python
+from clarinet.flow import FileDef, FileRef, RecordDef
+
+segmentation = FileDef(
+    pattern="segmentation_{user_id}.seg.nrrd",
+    level="STUDY",
+)
+
+segment_ct = RecordDef(
+    name="segment-ct",
+    label="CT Segmentation",
+    level="STUDY",
+    role="doctor_CT",
+    min_records=2, max_records=4,
+    slicer_script="scripts/segment.py",
+    slicer_result_validator="validators/segment_validator.py",
+    files=[FileRef(segmentation, "output")],
+    data_schema="schemas/segment.schema.json",
+)
 ```
 
-## Installation
+Data schemas are JSON Schema. Clarinet auto-generates forms in the web UI:
 
-### Prerequisites
+```json
+{
+    "properties": {
+        "is_good": {"type": "boolean"},
+        "study_type": {"type": "string", "enum": ["CT", "MRI", "CT-AG"]},
+        "best_series": {"type": "string", "x-options": {"source": "study_series"}}
+    }
+}
+```
+
+### 2. Define Your Workflow
+
+A Python DSL describes what happens when a record's status changes, data is submitted, or files are modified:
+
+```python
+from clarinet.services.recordflow import Field, record, study, file
+
+F = Field()
+
+# New study arrives → create initial assessment
+study().on_creation().create_record("first-check")
+
+# Assessment done → create segmentation tasks by modality
+(
+    record("first-check")
+    .on_finished()
+    .if_record(F.is_good == True)
+    .match(F.study_type)
+    .case("CT").create_record("segment-ct", "segment-ct-archive")
+    .case("MRI").create_record("segment-mri")
+)
+
+# Segmentation finished → run automatic comparison
+record("segment-ct").on_finished().do_task(compare_with_model)
+
+# Master model file changed → invalidate all projections
+file("master_model").on_update().invalidate_all_records("create-projection")
+```
+
+### 3. Write Processing Tasks
+
+Tasks requiring computation (GPU segmentation, DICOM anonymization, annotation comparison) are defined as pipeline tasks and executed on remote workers via RabbitMQ:
+
+```python
+from clarinet.services.pipeline import pipeline_task, PipelineMessage, SyncTaskContext
+
+@pipeline_task(queue="clarinet.gpu")
+def run_segmentation(msg: PipelineMessage, ctx: SyncTaskContext) -> None:
+    image = ctx.files.resolve("ct_image")
+    output = ctx.files.resolve("segmentation")
+    model.predict(image, output)
+
+@pipeline_task(auto_submit=True)
+def compare_with_model(msg: PipelineMessage, ctx: SyncTaskContext) -> dict:
+    seg = Segmentation(ctx.files.resolve("segmentation"))
+    proj = Segmentation(ctx.files.resolve("projection"))
+    return {"false_negative": seg.difference(proj).count}
+```
+
+### 4. Run
+
+```bash
+clarinet run                    # API + web UI
+clarinet worker                 # start a worker for pipeline tasks
+clarinet worker --queues gpu    # worker for GPU tasks only
+```
+
+## What You Get
+
+- **Web UI** with auto-generated forms from data schemas, user/role management, task assignment, and progress tracking
+- **REST API** with Swagger docs, httpOnly cookie authentication, and role-based access control
+- **DICOM integration**: connect to PACS (C-FIND/C-GET/C-STORE), anonymize patients and studies
+- **OHIF Viewer** for viewing DICOM images in the browser — a DICOMweb proxy with caching translates requests to a traditional PACS
+- **3D Slicer integration**: automatic workspace setup per task, file loading, annotation validation, context hydrators for passing additional data to the Slicer environment
+- **Distributed processing**: pipeline tasks on remote machines with queue routing (GPU, DICOM, default), automatic retries, and dead letter queues
+- **RecordFlow**: event-driven workflow engine — automatic task creation, invalidation on data/file changes, pattern matching on fields, cascading reactions
+
+## Example: Liver Metastasis Study
+
+A real-world example in `examples/demo_liver_v2/` — a multi-modality study with 15+ record types:
+
+1. Patient undergoes CT, MRI, CT angiography
+2. Each study gets an initial assessment (`first-check`)
+3. Segmentation tasks are automatically created for multiple doctors based on modality
+4. The first completed CT segmentation becomes the master model
+5. The master model is projected onto other modalities, results are compared automatically
+6. Discrepancies trigger a second review for the specific doctor
+7. MDK council classifies lesions → 3D modeling → resection planning → histology
+
+This entire pipeline is described in ~100 lines of workflow and ~300 lines of record type definitions.
+
+## Requirements
 
 - Python 3.12+
-- PostgreSQL or SQLite (for development)
-- 3D Slicer (optional, for advanced image processing)
-- Gleam 1.5+ (for frontend development)
+- PostgreSQL or SQLite
+- RabbitMQ (for pipeline workers, optional)
+- 3D Slicer (for image annotation, optional)
 
-### Install from PyPI (when published)
-
-```bash
-pip install clarinet
-```
-
-### Install from source
+## Getting Started
 
 ```bash
-git clone https://github.com/yourusername/clarinet.git
-cd clarinet
-pip install -e .
+git clone https://github.com/radionest/clarinet.git && cd clarinet
+make dev-setup
+uv run clarinet db init
+make run-dev
 ```
 
-## Quick Start
+## Status
 
-### 1. Configure the Application
-
-Copy the example configuration:
-
-```bash
-cp settings.toml.example settings.toml
-```
-
-Edit `settings.toml` with your database and application settings.
-
-### 2. Initialize the Database
-
-If using Alembic in your project:
-
-```bash
-alembic init alembic
-alembic upgrade head
-```
-
-### 3. Build the Frontend (Optional)
-
-The frontend needs to be built before running:
-
-```bash
-# Install Gleam (if not already installed)
-curl -fsSL https://gleam.run/install.sh | sh
-
-# Build the frontend
-make frontend-build
-
-# Or directly:
-./scripts/build_frontend.sh
-```
-
-### 4. Run the Application
-
-```bash
-# Development mode with frontend
-clarinet run --with-frontend
-
-# Backend only (API mode)
-uvicorn clarinet.api.app:app --reload
-
-# Or using the CLI
-python -m clarinet
-```
-
-The application will be available at `http://localhost:8000` with:
-- Frontend: `/` (if built)
-- API documentation: `/docs`
-- Admin interface: `/admin` (if configured)
-
-## Development
-
-### Frontend Development
-
-**Note**: The frontend is currently located at `clarinet/frontend/`.
-
-#### Key Dependencies
-
-The frontend uses native Gleam libraries for better type safety:
-
-- **lustre** (~5.3): Web framework with MVU architecture
-- **gleam_fetch** (~1.3): HTTP client with automatic cookie support
-- **plinth** (~0.7): Browser API bindings for DOM manipulation
-- **modem** (~2.1): Client-side routing
-- **formosh**: Dynamic form generation from JSON Schema (Note: Currently references private repository)
-- **gleam_json** (~3.0): JSON encoding/decoding
-- **gleam_http** (~4.2): HTTP types and utilities
-
-```bash
-# For embedded frontend (current structure)
-cd clarinet/frontend
-gleam deps download  # Installs all Gleam dependencies
-gleam build --target javascript
-
-# For standalone frontend (after separation)
-cd frontend
-gleam deps download
-gleam build --target javascript
-
-# Production build (automatically detects location)
-make frontend-build
-
-# Clean build artifacts
-make frontend-clean
-
-# Run frontend tests
-make frontend-test
-```
-
-### Makefile Commands
-
-The project includes a Makefile for common development tasks:
-
-```bash
-make help              # Show all available commands
-make frontend-build    # Build production frontend
-make frontend-clean    # Clean frontend artifacts
-make frontend-test     # Run frontend tests
-make run-dev          # Run full stack development
-make build            # Build entire package
-make test             # Run all tests
-make lint             # Run linting
-make format           # Format code
-```
-
-## Usage Examples
-
-### Creating a Study
-
-```python
-from clarinet.repositories.study_repository import StudyRepository
-from clarinet.models.study import Study
-from sqlalchemy.ext.asyncio import AsyncSession
-
-async def create_study(session: AsyncSession):
-    repo = StudyRepository(session)
-    study = Study(
-        name="Clinical Trial 2024",
-        description="Phase II clinical trial"
-    )
-    return await repo.add(study)
-```
-
-### Processing DICOM Files
-
-```python
-from clarinet.services.dicom import DicomProcessor
-
-async def process_dicom(file_path: str):
-    processor = DicomProcessor()
-    metadata = await processor.extract_metadata(file_path)
-    return metadata
-```
-
-## Development
-
-### Setting up Development Environment
-
-```bash
-# Install development dependencies
-pip install -e ".[dev]"
-
-# Install pre-commit hooks
-pre-commit install
-
-# Run tests
-pytest
-
-# Format code
-ruff format clarinet/ tests/
-
-# Lint code
-ruff check clarinet/ tests/ --fix
-
-# Type checking
-mypy clarinet/
-```
-
-### Repository Pattern
-
-Clarinet uses the repository pattern for data access:
-
-```python
-from clarinet.repositories.user_repository import UserRepository
-from sqlalchemy.ext.asyncio import AsyncSession
-
-async def get_user(user_id: int, session: AsyncSession):
-    repo = UserRepository(session)
-    return await repo.get(user_id)
-```
-
-### Service Layer
-
-Business logic is encapsulated in service classes:
-
-```python
-from clarinet.services.study_service import StudyService
-
-async def analyze_study(study_id: int):
-    service = StudyService()
-    results = await service.analyze(study_id)
-    return results
-```
-
-## API Documentation
-
-Once the application is running, visit:
-- Interactive API docs: `http://localhost:8000/docs`
-- Alternative API docs: `http://localhost:8000/redoc`
-
-## Configuration
-
-Clarinet uses a hierarchical configuration system:
-
-1. Default settings in `clarinet/settings.py`
-2. TOML configuration files (`settings.toml`)
-3. Environment variables (prefixed with `CLARINET_`)
-
-### Key Configuration Options
-
-- `database_url`: Database connection string
-- `storage_path`: Path for file storage
-- `slicer_path`: Path to 3D Slicer executable
-- `secret_key`: Secret key for session encryption
-
-## Database Migrations
-
-Clarinet provides utilities to simplify Alembic integration in your projects:
-
-```python
-from clarinet.utils.migrations import initialize_database
-
-# Initialize database with migrations
-await initialize_database()
-```
-
-## Testing
-
-```bash
-# Run all tests
-pytest
-
-# Run with coverage
-pytest --cov=clarinet tests/
-
-# Run specific test file
-pytest tests/integration/test_api.py
-```
-
-## Contributing
-
-Contributions are welcome! Please follow the code style guide in CLAUDE.md when submitting pull requests.
-
-## Documentation
-
-- [Code Style Guide](CLAUDE.md) - Detailed development guidelines
-- [Examples](examples/) - Sample implementations
+Clarinet is in **alpha**. The API, DSL, and configuration format are still evolving and **will** change. Use it for exploration and pilot studies, but expect breaking changes.
 
 ## License
 
-This project is licensed under the MIT License.
-
-## Support
-
-For issues, questions, or contributions, please visit our [GitHub repository](https://github.com/yourusername/clarinet).
+MIT
