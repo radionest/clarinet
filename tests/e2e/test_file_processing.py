@@ -19,10 +19,10 @@ from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from clarinet.api.app import app
-from clarinet.models.patient import Patient
 from clarinet.models.study import Series, Study
 from clarinet.services.recordflow.flow_file import FILE_REGISTRY
 from clarinet.services.recordflow.flow_record import ENTITY_REGISTRY, RECORD_REGISTRY
+from tests.utils.factories import make_patient
 from tests.utils.urls import (
     PATIENTS_BASE,
     RECORD_TYPES,
@@ -31,6 +31,7 @@ from tests.utils.urls import (
 
 # Fixed hierarchy IDs
 _PATIENT_ID = "FILE_PAT_001"
+_AUTO_ID = 100
 _STUDY_UID = "1.2.826.0.1.1234567890"
 _SERIES_UID = "1.2.826.0.1.1234567890.1"
 
@@ -74,7 +75,7 @@ async def client(test_session, test_settings) -> AsyncGenerator[AsyncClient]:
 @pytest_asyncio.fixture
 async def test_hierarchy(test_session: AsyncSession) -> dict[str, str]:
     """Create Patient -> Study -> Series via ORM with fixed IDs."""
-    patient = Patient(id=_PATIENT_ID, name="File Test Patient", auto_id=1)
+    patient = make_patient(_PATIENT_ID, "File Test Patient", auto_id=_AUTO_ID)
     test_session.add(patient)
     await test_session.commit()
 
@@ -105,14 +106,15 @@ async def test_hierarchy(test_session: AsyncSession) -> dict[str, str]:
 def working_dir(monkeypatch, tmp_path) -> Path:
     """Set storage_path to tmp_path and create the working directory tree.
 
-    In SQLite tests, anon_uid fields are None, so _format_path_strict
-    falls back to the raw UIDs (study_uid, series_uid).
-    The resulting working folder is: {storage_path}/{patient_id}/{study_uid}/{series_uid}/
+    Patient dir uses anon_id (derived from _AUTO_ID) because Patient.auto_id
+    is NOT NULL — anon_id is always computed.  anon_uid fields for study/series
+    are None in SQLite tests, so _format_path_strict falls back to raw UIDs.
     """
     from clarinet.settings import settings
 
     monkeypatch.setattr(settings, "storage_path", str(tmp_path))
-    leaf = tmp_path / _PATIENT_ID / _STUDY_UID / _SERIES_UID
+    patient_dir = f"{settings.anon_id_prefix}_{_AUTO_ID}"
+    leaf = tmp_path / patient_dir / _STUDY_UID / _SERIES_UID
     leaf.mkdir(parents=True, exist_ok=True)
     return leaf
 

@@ -155,7 +155,7 @@ Key methods:
 |---|---|
 | `create_record(RecordCreate)` | Create a record |
 | `get_record(record_id)` | Get record by ID |
-| `find_records(**filters)` | Search records (query params: `record_type_name`, `study_uid`, `series_uid`, `record_status`, etc.) |
+| `find_records(**filters)` | Search records (JSON body: `record_type_name`, `study_uid`, `series_uid`, `record_status`, etc.) |
 | `submit_record_data(record_id, data)` | Submit data + set finished |
 | `update_record_data(record_id, data)` | Update data on finished record |
 | `update_record_status(record_id, status)` | Change record status |

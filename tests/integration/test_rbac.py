@@ -322,8 +322,7 @@ async def test_find_records_role_filtering(
     """POST /api/records/find should only return records matching user's role."""
     response = await role_a_client.post(
         "/api/records/find",
-        params={"patient_id": "TEST_PAT001"},
-        json=[],  # find_queries body
+        json={"patient_id": "TEST_PAT001"},
     )
     assert response.status_code == 200
     data = response.json()

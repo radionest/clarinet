@@ -441,9 +441,9 @@ async def admin_headers(client, admin_user):
 @pytest_asyncio.fixture
 async def test_patient(test_session):
     """Create test patient."""
-    from clarinet.models.patient import Patient
+    from tests.utils.factories import make_patient
 
-    patient = Patient(id="TEST_PAT001", name="Test Patient", anon_name="ANON_001", auto_id=1)
+    patient = make_patient("TEST_PAT001", "Test Patient", anon_name="ANON_001")
     test_session.add(patient)
     await test_session.commit()
     await test_session.refresh(patient)

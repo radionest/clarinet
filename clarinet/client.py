@@ -847,9 +847,9 @@ class ClarinetClient:
             List of matching records
         """
         params = {"skip": skip, "limit": limit}
-        params.update(filters)
+        body = {k: v for k, v in filters.items() if v is not None}
 
-        response = await self._request("POST", "/records/find", params=params)
+        response = await self._request("POST", "/records/find", params=params, json=body)
         return [RecordRead.model_validate(t) for t in response.json()]
 
     # ==================== High-Level Convenience Methods ====================
@@ -1028,21 +1028,18 @@ class ClarinetClient:
         Returns:
             List of matching records
         """
-        filters = {
-            "patient_id": patient_id,
-            "patient_anon_id": patient_anon_id,
-            "series_uid": series_uid,
-            "study_uid": study_uid,
-            "user_id": str(user_id) if user_id else None,
-            "record_type_name": record_type_name,
-            "record_status": record_status.value if record_status else None,
-            "wo_user": wo_user,
-        }
-
-        # Remove None values
-        filters = {k: v for k, v in filters.items() if v is not None}
-
-        return await self.find_records(skip=skip, limit=limit, **filters)
+        return await self.find_records(
+            skip=skip,
+            limit=limit,
+            patient_id=patient_id,
+            patient_anon_id=patient_anon_id,
+            series_uid=series_uid,
+            study_uid=study_uid,
+            user_id=str(user_id) if user_id else None,
+            record_type_name=record_type_name,
+            record_status=record_status.value if record_status else None,
+            wo_user=wo_user,
+        )
 
     async def get_pipeline_definition(self, name: str) -> list[dict[str, str]]:
         """Get pipeline definition steps by name.

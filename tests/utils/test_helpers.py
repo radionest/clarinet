@@ -2,7 +2,6 @@
 
 import json
 from datetime import UTC, datetime
-from itertools import count
 from typing import Any
 
 from sqlmodel import Session
@@ -118,9 +117,6 @@ class RecordFactory:
         return record
 
 
-_patient_auto_id_seq = count(1)
-
-
 class PatientFactory:
     """Factory for creating test patients and studies."""
 
@@ -134,15 +130,18 @@ class PatientFactory:
         """Creates a patient.
 
         Auto-assigns a unique ``auto_id`` when not provided (Patient.auto_id is NOT NULL).
+        Uses the shared counter from :func:`tests.utils.factories.next_auto_id`.
         """
         import uuid
+
+        from tests.utils.factories import next_auto_id
 
         unique_id = str(uuid.uuid4())[:8]
 
         patient = Patient(
             id=patient_id or f"PAT_{unique_id}",
             name=patient_name or f"Test Patient {unique_id}",
-            auto_id=auto_id if auto_id is not None else next(_patient_auto_id_seq),
+            auto_id=auto_id if auto_id is not None else next_auto_id(),
         )
         session.add(patient)
         await session.commit()

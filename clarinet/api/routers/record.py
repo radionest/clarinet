@@ -19,6 +19,9 @@ from fastapi import (
     Request,
     status,
 )
+from fastapi import (
+    Path as FastAPIPath,
+)
 from fastapi.responses import JSONResponse
 from sqlmodel import SQLModel
 from starlette.responses import Response
@@ -50,9 +53,9 @@ from clarinet.exceptions.domain import AuthorizationError
 from clarinet.models import (
     Record,
     RecordCreate,
-    RecordFindResult,
     RecordOptional,
     RecordRead,
+    RecordSearchQuery,
     RecordStatus,
     RecordTypeCreate,
     RecordTypeFind,
@@ -664,7 +667,7 @@ async def resubmit_record_with_validation(
 
 @router.patch("/{record_id}", response_model=RecordRead)
 async def update_record(
-    record_id: int,
+    record_id: Annotated[int, FastAPIPath(ge=1, le=2147483647)],
     record_update: RecordOptional,
     repo: RecordRepositoryDep,
 ) -> Record:
@@ -801,35 +804,14 @@ async def find_records(
     pagination: PaginationDep,
     repo: RecordRepositoryDep,
     user: CurrentUserDep,
-    find_queries: list[RecordFindResult] = Body(default=[]),
-    patient_id: str | None = None,
-    patient_anon_id: str | None = None,
-    series_uid: str | None = None,
-    anon_series_uid: str | None = None,
-    study_uid: str | None = None,
-    anon_study_uid: str | None = None,
-    user_id: UUID | None = None,
-    record_type_name: str | None = None,
-    record_status: RecordStatus | None = None,
-    wo_user: bool | None = None,
-    random_one: bool = False,
+    query: RecordSearchQuery,
 ) -> list[RecordRead]:
     """Find records by various criteria."""
     role_names = None if user.is_superuser else get_user_role_names(user)
     criteria = RecordSearchCriteria(
-        patient_id=patient_id,
-        patient_anon_id=patient_anon_id,
-        series_uid=series_uid,
-        anon_series_uid=anon_series_uid,
-        study_uid=study_uid,
-        anon_study_uid=anon_study_uid,
-        user_id=user_id,
-        record_type_name=record_type_name,
-        record_status=record_status,
-        wo_user=wo_user,
-        random_one=random_one,
+        **query.model_dump(exclude={"data_queries"}),
+        data_queries=query.data_queries,
         role_names=role_names,
-        data_queries=find_queries,
     )
     records = await repo.find_by_criteria(criteria, skip=pagination.skip, limit=pagination.limit)
     return mask_records(records, user)

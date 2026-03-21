@@ -226,12 +226,10 @@ async def test_record_type_with_multiple_records(test_session, test_user, admin_
     await test_session.commit()
 
     # Create necessary objects
-    from clarinet.models.patient import Patient
     from clarinet.models.study import Study
+    from tests.utils.factories import make_patient
 
-    patient = Patient(
-        id="RECORD_PAT007", name="Multiple Records Patient", anon_name="ANON_REC_007", auto_id=1
-    )
+    patient = make_patient("RECORD_PAT007", "Multiple Records Patient", anon_name="ANON_REC_007")
     test_session.add(patient)
     await test_session.commit()
 

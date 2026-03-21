@@ -14,7 +14,6 @@ from clarinet.exceptions.domain import (
     ValidationError,
 )
 from clarinet.models.base import RecordStatus
-from clarinet.models.patient import Patient
 from clarinet.models.record import RecordTypeCreate, RecordTypeOptional
 from clarinet.models.study import Study
 from clarinet.models.user import User, UserRole
@@ -28,6 +27,7 @@ from clarinet.services.admin_service import AdminService
 from clarinet.services.record_type_service import RecordTypeService
 from clarinet.services.user_service import UserService
 from clarinet.utils.auth import get_password_hash, verify_password
+from tests.utils.factories import make_patient
 
 # ===================================================================
 # UserService
@@ -197,7 +197,7 @@ class TestAdminService:
     @pytest.mark.asyncio
     async def test_get_stats_with_data(self, env):
         session = env["session"]
-        pat = Patient(id="ADMIN_PAT", name="Admin Patient", auto_id=1)
+        pat = make_patient("ADMIN_PAT", "Admin Patient")
         session.add(pat)
         await session.commit()
         study = Study(patient_id="ADMIN_PAT", study_uid="1.2.3.600", date=datetime.now(UTC).date())
