@@ -122,7 +122,7 @@ def test_update_record_type(case):
 def test_find_records(case):
     """Thorough testing of record search.
 
-    Targets: mixed body + query params, RecordFindResult computed sql_type,
+    Targets: RecordSearchQuery body, RecordFindResult computed sql_type,
     comparison_operator enum, sentinel values ("Null", "*"),
     pagination edge cases (skip=-1, limit=0).
     """

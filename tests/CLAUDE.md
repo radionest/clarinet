@@ -338,7 +338,7 @@ make test-schema-verbose      # Verbose with tracebacks
 | `test_update_record_data` | PATCH /api/records/{id}/data — inverse state guard | Phase 3 |
 | `test_create_record_type` | POST /api/records/types — nested schema, file registry | Phase 3 |
 | `test_update_record_type` | PATCH /api/records/types/{id} — optional fields, JSON parsing | Phase 3 |
-| `test_find_records` | POST /api/records/find — mixed body + query params | Phase 3 |
+| `test_find_records` | POST /api/records/find — RecordSearchQuery body | Phase 3 |
 | `test_invalidate_record` | POST /api/records/{id}/invalidate — unvalidated mode | Phase 3 |
 | `test_create_series` | POST /api/series — DicomUID, series_number boundaries | Phase 3 |
 

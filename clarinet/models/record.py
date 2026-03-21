@@ -46,6 +46,7 @@ __all__ = [
     "RecordFindResultComparisonOperator",
     "RecordOptional",
     "RecordRead",
+    "RecordSearchQuery",
     "RecordType",
     "RecordTypeBase",
     "RecordTypeCreate",
@@ -457,6 +458,24 @@ class RecordFind(SQLModel):
     status: RecordStatus | None = None
     user_id: UUID | None = None
     is_absent: bool = False
+
+
+class RecordSearchQuery(SQLModel):
+    """Search query for finding records."""
+
+    patient_id: str | None = Field(default=None, min_length=1)
+    patient_anon_id: str | None = Field(default=None, min_length=1)
+    series_uid: str | None = Field(default=None, min_length=1)
+    anon_series_uid: str | None = Field(default=None, min_length=1)
+    study_uid: str | None = Field(default=None, min_length=1)
+    anon_study_uid: str | None = Field(default=None, min_length=1)
+    user_id: UUID | None = None
+    record_type_name: str | None = Field(default=None, min_length=1)
+    record_status: RecordStatus | None = None
+    parent_record_id: int | None = Field(default=None, gt=0)
+    wo_user: bool | None = None
+    random_one: bool = False
+    data_queries: list[RecordFindResult] = Field(default_factory=list)
 
 
 SeriesFind.model_rebuild()

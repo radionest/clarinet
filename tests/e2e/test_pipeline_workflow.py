@@ -237,19 +237,19 @@ async def _find_records(
     status: str | None = None,
 ) -> list[dict[str, Any]]:
     """Find records via API."""
-    params: dict[str, str] = {}
+    body: dict[str, str] = {}
     if record_type_name:
-        params["record_type_name"] = record_type_name
+        body["record_type_name"] = record_type_name
     if patient_id:
-        params["patient_id"] = patient_id
+        body["patient_id"] = patient_id
     if study_uid:
-        params["study_uid"] = study_uid
+        body["study_uid"] = study_uid
     if series_uid:
-        params["series_uid"] = series_uid
+        body["series_uid"] = series_uid
     if status:
-        params["status"] = status
+        body["record_status"] = status
 
-    response = await client.post(RECORDS_FIND, params=params)
+    response = await client.post(RECORDS_FIND, json=body)
     assert response.status_code == 200, response.text
     return response.json()
 

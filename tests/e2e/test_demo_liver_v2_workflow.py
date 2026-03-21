@@ -448,7 +448,7 @@ async def _submit_data(
 
 async def _find_records(client: AsyncClient, **params: Any) -> list[dict[str, Any]]:
     """Find records by criteria."""
-    resp = await client.post(RECORDS_FIND, params=params)
+    resp = await client.post(RECORDS_FIND, json=params)
     assert resp.status_code == 200, f"Find records failed: {resp.text}"
     return resp.json()
 
