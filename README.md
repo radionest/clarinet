@@ -1,6 +1,6 @@
 # Clarinet
 
-A framework for organizing clinical-radiological studies. You describe record types, data schemas, and workflow logic — run `clarinet run` — and get a web application with an admin panel, auto-generated forms, task management, and PACS integration.
+A framework for organizing clinical-radiological trials. You describe record types, data schemas, and workflow logic — run `clarinet run` — and get a web application with an admin panel, auto-generated forms, task management, and PACS integration.
 
 ## Why
 
