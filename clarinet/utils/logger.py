@@ -30,7 +30,7 @@ try:
 
     def _json_dumps(data: dict) -> str:
         """Serialize dict to compact JSON string using orjson."""
-        return orjson.dumps(data, default=str).decode()
+        return str(orjson.dumps(data, default=str).decode())
 
 except ImportError:
 

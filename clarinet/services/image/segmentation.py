@@ -49,7 +49,7 @@ class Segmentation(Image):
         self._region_props: list[_RegionProperties] | None = None
         super().__init__(template=template, copy_data=copy_data, dtype=np.uint8)
 
-    @Image.img.setter  # type: ignore[misc, attr-defined]
+    @Image.img.setter  # type: ignore[misc, attr-defined, untyped-decorator]
     def img(self, vol: np.ndarray) -> None:
         if self.autolabel:
             self._img = label(vol).astype(np.uint8)

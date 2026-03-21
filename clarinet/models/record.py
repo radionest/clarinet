@@ -114,7 +114,7 @@ class OrderFindResult(_SqlTypeMixin, SQLModel):
 def _find_result_discriminator(v: Any) -> str:
     """Extract discriminator tag, defaulting to 'eq' when absent."""
     if isinstance(v, dict):
-        return v.get("comparison_operator", "eq")
+        return str(v.get("comparison_operator", "eq"))
     return getattr(v, "comparison_operator", "eq")
 
 

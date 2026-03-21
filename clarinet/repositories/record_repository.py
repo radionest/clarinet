@@ -804,8 +804,10 @@ class RecordRepository(BaseRepository[Record]):
         for query in queries:
             if query.comparison_operator is None:
                 continue
-            data_field = Record.data[query.result_name].as_string()  # type: ignore[union-attr]
-            op_fn = _COMPARISON_OPS.get(query.comparison_operator)
+            data_field = Record.data[query.result_name].as_string()  # type: ignore[union-attr, index]
+            op_fn = _COMPARISON_OPS.get(
+                RecordFindResultComparisonOperator(query.comparison_operator)
+            )
             if op_fn is None:
                 raise ValidationError(
                     f"Unsupported comparison operator: {query.comparison_operator}"
