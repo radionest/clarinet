@@ -72,8 +72,7 @@ async def get_application_url(request: Request) -> str:
         Base URL string including protocol, host, and port
     """
     host = request.url.scheme + "://" + request.url.netloc
-    root_path = settings.root_url if settings.root_url != "/" else ""
-    return f"{host}{root_path}"
+    return f"{host}{settings.root_url}"
 
 
 class PaginationParams:

@@ -11,7 +11,6 @@ from enum import Enum
 from typing import Annotated, Any, Literal, Optional
 from uuid import UUID
 
-from annotated_types import Ge, Le
 from pydantic import (
     ConfigDict,
     Discriminator,
@@ -24,7 +23,7 @@ from sqlalchemy import Boolean, Float, ForeignKey, Integer, String, event, func
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlmodel import JSON, Column, Field, Relationship, SQLModel
 
-from clarinet.types import RecordData, SlicerArgs
+from clarinet.types import DbInt64, DbPositiveInt32, RecordData, SlicerArgs
 from clarinet.utils.logger import logger
 
 from ..exceptions import ConfigurationError, ValidationError
@@ -74,13 +73,10 @@ class RecordFindResultComparisonOperator(str, Enum):
     contains = "contains"
 
 
-_DbInt = Annotated[int, Ge(-(2**63)), Le(2**63 - 1)]
-
-
 class _SqlTypeMixin:
     """Mixin providing ``sql_type`` computed field for RecordFindResult variants."""
 
-    result_value: str | bool | _DbInt | float  # TODO: why this is im mixin?
+    result_value: str | bool | DbInt64 | float
 
     @computed_field
     def sql_type(self) -> type[String] | type[Boolean] | type[Integer] | type[Float]:  # type: ignore[type-arg]
@@ -104,7 +100,7 @@ class EqFindResult(_SqlTypeMixin, SQLModel):
     model_config = ConfigDict(extra="forbid")  # type: ignore[assignment]
 
     result_name: str = Field(min_length=1, max_length=255)
-    result_value: str | bool | _DbInt | float
+    result_value: str | bool | DbInt64 | float
     comparison_operator: Literal["eq"] = "eq"
 
 
@@ -124,7 +120,7 @@ class OrderFindResult(_SqlTypeMixin, SQLModel):
     model_config = ConfigDict(extra="forbid")  # type: ignore[assignment]
 
     result_name: str = Field(min_length=1, max_length=255)
-    result_value: str | _DbInt | float
+    result_value: str | DbInt64 | float
     comparison_operator: Literal["lt", "gt"]
 
 
@@ -491,9 +487,7 @@ class RecordSearchQuery(SQLModel):
     user_id: UUID | None = None
     record_type_name: str | None = Field(default=None, min_length=1)
     record_status: RecordStatus | None = None
-    parent_record_id: int | None = Field(
-        default=None, gt=0, le=2**31 - 1
-    )  # TODO: this shoud be in some type constant
+    parent_record_id: DbPositiveInt32 | None = Field(default=None)
     wo_user: bool | None = None
     random_one: bool = False
     data_queries: list[RecordFindResult] = Field(default_factory=list)

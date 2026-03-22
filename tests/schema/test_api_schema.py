@@ -110,7 +110,6 @@ def test_api_stateful(stateful_api_schema, stateful_db_engine):
     class CleanDBStateMachine(base_state_machine):
         """State machine with DB cleanup between Hypothesis examples."""
 
-        # TODO: check is it bug in schemathesis
         def teardown(self):
             """Reset DB after each example to prevent cross-example state leakage."""
 
@@ -137,7 +136,7 @@ def test_api_stateful(stateful_api_schema, stateful_db_engine):
                     session.add(user)
                     await session.commit()
 
-            asyncio.get_event_loop().run_until_complete(_reset_db())
+            asyncio.run(_reset_db())
 
     run_state_machine_as_test(
         CleanDBStateMachine,
