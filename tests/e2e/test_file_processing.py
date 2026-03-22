@@ -60,9 +60,6 @@ async def client(test_session, test_settings) -> AsyncGenerator[AsyncClient]:
 
     mock_user = await create_mock_superuser(test_session, email="e2e_file@test.com")
 
-    # Prevent TOML exports when creating record types via API
-    app.state.config_mode = "test"
-
     async for ac in create_authenticated_client(mock_user, test_session, test_settings):
         yield ac
 

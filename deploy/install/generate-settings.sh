@@ -19,7 +19,7 @@ SECRET_KEY="${CLARINET_SECRET_KEY:-$(openssl rand -hex 32)}"
 ADMIN_PASSWORD="${CLARINET_ADMIN_PASSWORD:-$(openssl rand -base64 12)}"
 ANON_SALT="${CLARINET_ANON_SALT:-$(openssl rand -hex 16)}"
 
-ROOT_URL="${CLARINET_ROOT_URL:-/}"
+ROOT_URL="${CLARINET_ROOT_URL:-}"
 
 GREEN='\033[0;32m'
 NC='\033[0m'

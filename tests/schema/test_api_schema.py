@@ -10,10 +10,13 @@ Automatically generates requests from OpenAPI schema and validates:
 Run: make test-schema
 """
 
+import asyncio
+
 import pytest
 import schemathesis
 from hypothesis import HealthCheck, settings
 from schemathesis.generation.stateful import run_state_machine_as_test
+from sqlmodel import SQLModel
 
 schema = schemathesis.pytest.from_fixture("api_schema")
 stateful_schema = schemathesis.pytest.from_fixture("stateful_api_schema")
@@ -81,14 +84,20 @@ def test_no_server_errors(case):
 
 
 @pytest.mark.schema
-def test_api_stateful(stateful_api_schema):
+def test_api_stateful(stateful_api_schema, stateful_db_engine):
     """Test CRUD operation chains via stateful state machine.
 
     Uses OpenAPI links injected in conftest to chain operations:
     POST /records/types → GET /records/types/{id} → DELETE, etc.
     Verifies that create → read → update → delete sequences work correctly.
+
+    Each Hypothesis example gets a clean DB (drop + recreate all tables)
+    to prevent UNIQUE constraint violations from leaking between examples,
+    which causes FlakyStrategyDefinition errors during shrinking.
     """
-    state_machine = (
+    engine, superuser = stateful_db_engine
+
+    base_state_machine = (
         stateful_api_schema.include(
             path_regex=CORE_API_PATTERN,
         )
@@ -98,8 +107,39 @@ def test_api_stateful(stateful_api_schema):
         .as_state_machine()
     )
 
+    class CleanDBStateMachine(base_state_machine):
+        """State machine with DB cleanup between Hypothesis examples."""
+
+        def teardown(self):
+            """Reset DB after each example to prevent cross-example state leakage."""
+
+            async def _reset_db():
+                async with engine.begin() as conn:
+                    await conn.run_sync(SQLModel.metadata.drop_all)
+                    await conn.run_sync(SQLModel.metadata.create_all)
+                # Re-create the superuser (needed for auth overrides)
+                from sqlalchemy.ext.asyncio import AsyncSession
+                from sqlalchemy.orm import sessionmaker
+
+                factory = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+                async with factory() as session:
+                    from clarinet.models.user import User
+
+                    user = User(
+                        id=superuser.id,
+                        email=superuser.email,
+                        hashed_password=superuser.hashed_password,
+                        is_active=True,
+                        is_verified=True,
+                        is_superuser=True,
+                    )
+                    session.add(user)
+                    await session.commit()
+
+            asyncio.run(_reset_db())
+
     run_state_machine_as_test(
-        state_machine,
+        CleanDBStateMachine,
         settings=settings(
             max_examples=50,
             stateful_step_count=3,

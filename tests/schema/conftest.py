@@ -235,3 +235,13 @@ def stateful_api_schema(schema_app):
     loaded = schemathesis.openapi.from_dict(schema_dict)
     loaded.app = schema_app
     return loaded
+
+
+@pytest.fixture(scope="session")
+def stateful_db_engine(test_engine, mock_superuser):
+    """Expose engine + superuser for stateful test DB cleanup.
+
+    The mock_superuser dependency ensures the user is created before
+    the stateful test starts (it will be re-created on each teardown).
+    """
+    return test_engine, mock_superuser

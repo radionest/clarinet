@@ -39,6 +39,17 @@ def _suppress_pynetdicom_logging():
     yield
 
 
+@pytest.fixture(autouse=True, scope="session")
+def _disable_toml_export():
+    """Prevent API endpoints from writing .toml config files during tests.
+
+    Without this, record type create/update endpoints export .toml files
+    to ``./tasks/``, leaving garbage files (especially from schemathesis fuzz).
+    """
+    app.state.config_mode = "test"
+    yield
+
+
 @pytest.fixture(scope="session")
 def event_loop() -> Generator:
     """Create event loop for the entire test session."""
