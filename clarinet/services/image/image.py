@@ -114,7 +114,7 @@ class Image:
     @property
     def shape(self) -> tuple[int, ...]:
         """Shape of the voxel array."""
-        return self.img.shape
+        return tuple(self.img.shape)
 
     def read(self, file_path: Path) -> None:
         """Read an image file, dispatching by extension.
