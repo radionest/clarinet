@@ -247,10 +247,10 @@ fn render_editable_form(
     event.on("formosh-submit", decode_form_submit(record_id)),
   ]
 
-  let attrs = case is_finished, record.data {
-    True, Some(data) ->
+  let attrs = case record.data {
+    Some(data) ->
       list.append(base_attrs, [formosh_component.initial_values_string(data)])
-    _, _ -> base_attrs
+    None -> base_attrs
   }
 
   formosh_component.element(attrs)

@@ -309,6 +309,20 @@ resection_plan = RecordDef(
     # Data: per-lesion cluster assignment, resection zones, residual volume
 )
 
+resection_report = RecordDef(
+    name="resection-report",
+    description=("Intraoperative resection report — per-lesion cluster assignment by surgeon"),
+    label="Resection report",
+    level="PATIENT",
+    role="surgeon",
+    min_records=1,
+    max_records=1,
+    data_schema="schemas/resection-report.schema.json",
+    files=[FileRef(master_model, "input")],
+    # Data: lesions[].lesion_num (readonly, prefilled), lesions[].cluster (editable)
+    # additional_lesions[].description, additional_lesions[].cluster
+)
+
 # ---------------------------------------------------------------------------
 # Stage 12: Intraoperative protocol
 # ---------------------------------------------------------------------------

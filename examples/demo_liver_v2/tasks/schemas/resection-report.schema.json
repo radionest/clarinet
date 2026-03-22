@@ -1,0 +1,45 @@
+{
+  "type": "object",
+  "title": "Протокол резекции",
+  "properties": {
+    "lesions": {
+      "type": "array",
+      "title": "Очаги из мастер-модели",
+      "items": {
+        "type": "object",
+        "properties": {
+          "lesion_num": {
+            "type": "integer",
+            "title": "Очаг №",
+            "readOnly": true
+          },
+          "cluster": {
+            "type": "integer",
+            "title": "Кластер",
+            "description": "Номер кластера удаления (пусто = не удалён)"
+          }
+        },
+        "required": ["lesion_num"]
+      }
+    },
+    "additional_lesions": {
+      "type": "array",
+      "title": "Дополнительные очаги",
+      "description": "Очаги, обнаруженные на операции, отсутствующие в мастер-модели",
+      "items": {
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string",
+            "title": "Описание"
+          },
+          "cluster": {
+            "type": "integer",
+            "title": "Кластер"
+          }
+        }
+      }
+    }
+  },
+  "required": ["lesions"]
+}
