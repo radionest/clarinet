@@ -11,7 +11,15 @@ from enum import Enum
 from typing import Annotated, Any, Literal, Optional
 from uuid import UUID
 
-from pydantic import Discriminator, Tag, computed_field, model_validator
+from annotated_types import Ge, Le
+from pydantic import (
+    ConfigDict,
+    Discriminator,
+    StringConstraints,
+    Tag,
+    computed_field,
+    model_validator,
+)
 from sqlalchemy import Boolean, Float, ForeignKey, Integer, String, event, func
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlmodel import JSON, Column, Field, Relationship, SQLModel
@@ -66,10 +74,13 @@ class RecordFindResultComparisonOperator(str, Enum):
     contains = "contains"
 
 
+_DbInt = Annotated[int, Ge(-(2**63)), Le(2**63 - 1)]
+
+
 class _SqlTypeMixin:
     """Mixin providing ``sql_type`` computed field for RecordFindResult variants."""
 
-    result_value: str | bool | int | float
+    result_value: str | bool | _DbInt | float  # TODO: why this is im mixin?
 
     @computed_field
     def sql_type(self) -> type[String] | type[Boolean] | type[Integer] | type[Float]:  # type: ignore[type-arg]
@@ -90,13 +101,17 @@ class _SqlTypeMixin:
 class EqFindResult(_SqlTypeMixin, SQLModel):
     """Equality search criterion — accepts any value type."""
 
+    model_config = ConfigDict(extra="forbid")  # type: ignore[assignment]
+
     result_name: str = Field(min_length=1, max_length=255)
-    result_value: str | bool | int | float
+    result_value: str | bool | _DbInt | float
     comparison_operator: Literal["eq"] = "eq"
 
 
 class ContainsFindResult(_SqlTypeMixin, SQLModel):
     """Substring search criterion — string values only."""
+
+    model_config = ConfigDict(extra="forbid")  # type: ignore[assignment]
 
     result_name: str = Field(min_length=1, max_length=255)
     result_value: str
@@ -106,8 +121,10 @@ class ContainsFindResult(_SqlTypeMixin, SQLModel):
 class OrderFindResult(_SqlTypeMixin, SQLModel):
     """Ordering comparison criterion — no booleans."""
 
+    model_config = ConfigDict(extra="forbid")  # type: ignore[assignment]
+
     result_name: str = Field(min_length=1, max_length=255)
-    result_value: str | int | float
+    result_value: str | _DbInt | float
     comparison_operator: Literal["lt", "gt"]
 
 
@@ -463,8 +480,10 @@ class RecordFind(SQLModel):
 class RecordSearchQuery(SQLModel):
     """Search query for finding records."""
 
+    model_config = ConfigDict(extra="forbid")  # type: ignore[assignment]
+
     patient_id: str | None = Field(default=None, min_length=1)
-    patient_anon_id: str | None = Field(default=None, min_length=1)
+    patient_anon_id: Annotated[str, StringConstraints(pattern=r"^.+_\d+$")] | None = None
     series_uid: str | None = Field(default=None, min_length=1)
     anon_series_uid: str | None = Field(default=None, min_length=1)
     study_uid: str | None = Field(default=None, min_length=1)
@@ -472,7 +491,9 @@ class RecordSearchQuery(SQLModel):
     user_id: UUID | None = None
     record_type_name: str | None = Field(default=None, min_length=1)
     record_status: RecordStatus | None = None
-    parent_record_id: int | None = Field(default=None, gt=0)
+    parent_record_id: int | None = Field(
+        default=None, gt=0, le=2**31 - 1
+    )  # TODO: this shoud be in some type constant
     wo_user: bool | None = None
     random_one: bool = False
     data_queries: list[RecordFindResult] = Field(default_factory=list)
