@@ -34,10 +34,11 @@ def _build_amqp_url() -> str:
     Returns:
         AMQP URL string.
     """
-    return (
-        f"amqp://{settings.rabbitmq_login}:{settings.rabbitmq_password}"
-        f"@{settings.rabbitmq_host}:{settings.rabbitmq_port}/"
-    )
+    from urllib.parse import quote
+
+    login = quote(settings.rabbitmq_login, safe="")
+    password = quote(settings.rabbitmq_password, safe="")
+    return f"amqp://{login}:{password}@{settings.rabbitmq_host}:{settings.rabbitmq_port}/"
 
 
 def extract_routing_key(queue_name: str) -> str:

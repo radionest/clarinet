@@ -64,7 +64,7 @@ project_name = "My Project"
 port = 8000
 host = "127.0.0.1"
 debug = true
-# root_url = "/"
+# root_url = ""
 
 # ── Database ─────────────────────────────────────────
 database_driver = "sqlite"

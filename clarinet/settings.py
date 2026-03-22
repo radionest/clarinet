@@ -75,7 +75,7 @@ class Settings(BaseSettings):
     # Server settings
     port: int = 8000
     host: str = "127.0.0.1"
-    root_url: str = "/"
+    root_url: str = ""
     debug: bool = False
     coerce_null_query_params: bool = True
 
