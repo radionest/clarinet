@@ -1,6 +1,17 @@
-# See https://pre-commit.com for more information
+# See https://prek.j178.dev/ for more information
 # See https://pre-commit.com/hooks.html for more hooks
 repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: ['--maxkb=500']
+
   - repo: https://github.com/astral-sh/ruff-pre-commit
     # Ruff version.
     rev: v0.12.12
@@ -15,7 +26,7 @@ repos:
     rev: v1.17.0
     hooks:
       - id: mypy
-        files: ^src/
+        files: ^clarinet/
         additional_dependencies:
           - fastapi
           - sqlmodel
@@ -36,6 +47,12 @@ repos:
           - taskiq-aio-pika>=0.6.0
           - taskiq-redis>=1.0.0
         exclude: ^tests/
+
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.11.0.1
+    hooks:
+      - id: shellcheck
+        args: ['-e', 'SC1090,SC1091']
 
   - repo: local
     hooks:

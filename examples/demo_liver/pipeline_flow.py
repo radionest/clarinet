@@ -6,9 +6,10 @@ projection comparison, and second review.
 See README.md for full business logic description.
 """
 
+from files_catalog import master_model, master_projection, segmentation_single
+
 from clarinet.flow import Field as F
 from clarinet.flow import file, record, study, task
-from files_catalog import master_model, master_projection, segmentation_single
 
 # ---------------------------------------------------------------------------
 # Pipeline tasks (выполняются в воркерах)

@@ -100,14 +100,14 @@ typecheck: ## Type check with mypy
 	@uv run mypy clarinet/
 
 .PHONY: pre-commit
-pre-commit: ## Run pre-commit hooks
+pre-commit: ## Run pre-commit hooks (via prek)
 	@echo "Running pre-commit hooks..."
-	@uv run pre-commit run --all-files
+	@uv run prek run --all-files
 
 .PHONY: pre-commit-install
-pre-commit-install: ## Install pre-commit hooks
+pre-commit-install: ## Install pre-commit hooks (via prek)
 	@echo "Installing pre-commit hooks..."
-	@uv run pre-commit install
+	@uv run prek install
 
 # =============================================================================
 # Testing Commands
@@ -181,7 +181,7 @@ dev-setup: ## Set up development environment
 	@echo "Installing frontend dependencies..."
 	@cd clarinet/frontend && gleam deps download
 	@echo "Installing pre-commit hooks..."
-	@uv run pre-commit install
+	@uv run prek install
 	@echo "Development environment ready!"
 
 # =============================================================================

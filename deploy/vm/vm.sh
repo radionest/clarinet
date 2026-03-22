@@ -328,9 +328,13 @@ cmd_deploy() {
 
     # Copy wheel + deploy scripts
     log "Uploading deployment files..."
+    # shellcheck disable=SC2086  # scp_opts intentionally word-split
     scp $scp_opts "$wheel" "${ssh_target}:/tmp/clarinet-deploy/"
+    # shellcheck disable=SC2086
     scp $scp_opts -r "$DEPLOY_DIR/install" "${ssh_target}:/tmp/clarinet-deploy/"
+    # shellcheck disable=SC2086
     scp $scp_opts -r "$DEPLOY_DIR/systemd" "${ssh_target}:/tmp/clarinet-deploy/"
+    # shellcheck disable=SC2086
     scp $scp_opts -r "$DEPLOY_DIR/nginx"   "${ssh_target}:/tmp/clarinet-deploy/"
 
     # Run install script
