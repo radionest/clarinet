@@ -798,11 +798,16 @@ class RecordRepository(BaseRepository[Record]):
         queries: list[RecordFindResult],
     ) -> Any:
         """Apply JSON data field comparison filters."""
+        if not queries:
+            return statement
+        statement = statement.where(Record.data.is_not(None))  # type: ignore[union-attr]
         for query in queries:
             if query.comparison_operator is None:
                 continue
-            data_field = Record.data.op("->")(query.result_name).as_string()  # type: ignore[union-attr]
-            op_fn = _COMPARISON_OPS.get(query.comparison_operator)
+            data_field = Record.data[query.result_name].as_string()  # type: ignore[union-attr, index]
+            op_fn = _COMPARISON_OPS.get(
+                RecordFindResultComparisonOperator(query.comparison_operator)
+            )
             if op_fn is None:
                 raise ValidationError(
                     f"Unsupported comparison operator: {query.comparison_operator}"
@@ -842,8 +847,12 @@ class RecordRepository(BaseRepository[Record]):
         if criteria.patient_id:
             statement = statement.where(Record.patient_id == criteria.patient_id)
 
-        if criteria.patient_anon_id and "_" in criteria.patient_anon_id:
-            auto_id = int(criteria.patient_anon_id.split("_")[1])
+        if criteria.patient_anon_id:
+            _, _, suffix = criteria.patient_anon_id.rpartition("_")
+            try:
+                auto_id = int(suffix)
+            except ValueError:
+                auto_id = -1  # invalid format — no results will match
             statement = statement.join(Patient, col(Record.patient_id) == col(Patient.id)).where(
                 Patient.auto_id == auto_id
             )

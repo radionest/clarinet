@@ -87,10 +87,8 @@ setup_services() {
 # --- Step 6: Settings ---
 generate_settings() {
     # Compute root_url from PATH_PREFIX (strip trailing slash for FastAPI root_path)
-    local root_url="$PATH_PREFIX"
-    if [[ "$root_url" != "/" ]]; then
-        root_url="${root_url%/}"  # strip trailing slash
-    fi
+    # "/" → "" (root deployment), "/nir_liver/" → "/nir_liver"
+    local root_url="${PATH_PREFIX%/}"
     export CLARINET_ROOT_URL="$root_url"
     bash "${DEPLOY_DIR}/install/generate-settings.sh"
 }

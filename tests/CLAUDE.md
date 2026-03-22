@@ -168,18 +168,23 @@ Two modules serve different purposes:
 | `tests/utils/test_helpers.py` | Async Factory classes (`PatientFactory.create_patient()`) | Yes — adds + commits | Need a fully persisted entity with DB-generated fields |
 
 ```python
-# Lightweight instance (not persisted)
+# Lightweight instance (not persisted) — auto_id auto-assigned
 from tests.utils.factories import make_patient, make_user, seed_record
 
-pat = make_patient("PAT_001", "Alice")
+pat = make_patient("PAT_001", "Alice")                    # auto_id from shared counter
+pat = make_patient("PAT_002", "Bob", anon_name="ANON_B")  # with anon_name
+pat = make_patient("PAT_003", "Carol", auto_id=42)        # explicit auto_id
 session.add(pat)
 await session.commit()
 
-# Async factory (persisted automatically)
+# Async factory (persisted automatically) — same shared counter
 from tests.utils.test_helpers import PatientFactory
 
 pat = await PatientFactory.create_patient(session, patient_id="PAT_001")
 ```
+
+Both factories share a single `next_auto_id()` counter from `factories.py` — never
+create `Patient(...)` directly in tests (except when specifically testing auto_id behavior).
 
 ### Fixture Hierarchy
 
@@ -316,7 +321,8 @@ make test-schema-verbose      # Verbose with tracebacks
 ### Architecture
 
 - `tests/schema/conftest.py` — session-scoped fixtures: in-memory SQLite, auth overrides, no-op lifespan
-- `tests/schema/test_api_schema.py` — parametrized tests over all API endpoints
+- `tests/schema/test_api_schema.py` — parametrized tests over all API endpoints (Phase 1 + 2)
+- `tests/schema/test_critical_endpoints.py` — per-endpoint tests for 8 critical endpoints (Phase 3, max_examples=200)
 - `schemathesis.toml` — Schemathesis configuration (project root)
 - Marker: `@pytest.mark.schema` — excluded from `make test-unit` and `make test-fast`
 
@@ -327,6 +333,14 @@ make test-schema-verbose      # Verbose with tracebacks
 | `test_api_conformance` | Full schema conformance: response schema, status codes, content-type | Phase 1 |
 | `test_no_server_errors` | No 500 errors on any generated input (positive + negative) | Phase 1 |
 | `test_api_stateful` | CRUD chains via state machine (POST → GET → PATCH → DELETE) | Phase 2 |
+| `test_create_record` | POST /api/records/ — level-UID validation, slug, DicomUID | Phase 3 |
+| `test_submit_record_data` | POST /api/records/{id}/data — free-form JSON, state machine | Phase 3 |
+| `test_update_record_data` | PATCH /api/records/{id}/data — inverse state guard | Phase 3 |
+| `test_create_record_type` | POST /api/records/types — nested schema, file registry | Phase 3 |
+| `test_update_record_type` | PATCH /api/records/types/{id} — optional fields, JSON parsing | Phase 3 |
+| `test_find_records` | POST /api/records/find — RecordSearchQuery body | Phase 3 |
+| `test_invalidate_record` | POST /api/records/{id}/invalidate — unvalidated mode | Phase 3 |
+| `test_create_series` | POST /api/series — DicomUID, series_number boundaries | Phase 3 |
 
 ### Key design decisions
 

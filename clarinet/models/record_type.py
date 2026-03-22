@@ -41,7 +41,14 @@ class RecordTypeBase(SQLModel):
     - ``RecordTypeCreate`` / ``RecordTypeOptional``: defines it as a regular field
     """
 
-    name: str = Field(min_length=5, max_length=30)
+    # min_length/max_length enforce total length; schema_extra.pattern is
+    # OpenAPI-only metadata for schemathesis; field_validator is the actual
+    # format check (stable across SQLModel/Pydantic versions).
+    name: str = Field(
+        min_length=1,
+        max_length=30,
+        schema_extra={"pattern": r"^[a-z][-a-z0-9]{0,29}$"},
+    )
 
     @field_validator("name")
     @classmethod
@@ -74,7 +81,7 @@ class RecordType(RecordTypeBase, table=True):
     Requires eager loading of ``file_links``; returns ``[]`` otherwise.
     """
 
-    name: str = Field(min_length=5, max_length=30, primary_key=True)
+    name: str = Field(primary_key=True)
     data_schema: RecordSchema | None = Field(default_factory=dict, sa_column=Column(JSON))
 
     slicer_script_args: SlicerArgs | None = Field(default_factory=dict, sa_column=Column(JSON))
@@ -179,7 +186,12 @@ class RecordTypeCreate(RecordTypeBase):
 class RecordTypeOptional(SQLModel):
     """Pydantic model for updating a record type with optional fields."""
 
-    name: str | None = None
+    name: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=30,
+        schema_extra={"pattern": r"^[a-z][-a-z0-9]{0,29}$"},
+    )
 
     @field_validator("name")
     @classmethod

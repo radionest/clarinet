@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 from fastapi_users import schemas
-from pydantic import field_validator
+from pydantic import field_serializer
 from sqlalchemy import Column, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlmodel import Field, Relationship, SQLModel
@@ -64,20 +64,21 @@ class User(SQLModelBaseUserDB, SQLModel, table=True):
 class UserRead(schemas.BaseUser[UUID]):
     """Pydantic model for reading user data without sensitive fields."""
 
-    pass
+    @field_serializer("email")
+    @classmethod
+    def serialize_email_ascii(cls, v: str) -> str:
+        """Encode IDN Unicode domains back to ASCII punycode for RFC 5321 compliance."""
+        try:
+            local, domain = v.rsplit("@", 1)
+            return f"{local}@{domain.encode('idna').decode('ascii')}"
+        except UnicodeError:
+            return v
 
 
-class UserCreate(schemas.BaseUserCreate):
+class UserCreate(schemas.BaseUserCreate, extra="forbid"):
     """Pydantic model for creating a new user with password validation."""
 
-    @field_validator("password")
-    @classmethod
-    def validate_password(cls, v: str) -> str:
-        """Validate password strength."""
-        if len(v) < 8:
-            raise ValueError("Password must be at least 8 characters long")
-        # Additional validation could be added here (e.g., complexity requirements)
-        return v
+    password: str = Field(min_length=8, max_length=18)
 
 
 class UserUpdate(schemas.BaseUserUpdate):

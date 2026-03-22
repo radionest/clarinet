@@ -5,9 +5,9 @@ from datetime import UTC, datetime
 import pytest
 import pytest_asyncio
 
-from clarinet.models.patient import Patient
 from clarinet.models.record import Record, RecordStatus, RecordType
 from clarinet.models.study import Series, Study
+from tests.utils.factories import make_patient
 from tests.utils.urls import RECORDS_BASE
 
 
@@ -20,7 +20,7 @@ async def _auth_override(client):
 @pytest_asyncio.fixture
 async def study_with_series(test_session):
     """Create a patient, study, and two series for hydration tests."""
-    patient = Patient(id="HYDR_PAT001", name="Hydration Patient")
+    patient = make_patient("HYDR_PAT001", "Hydration Patient")
     test_session.add(patient)
     await test_session.flush()
 
@@ -193,7 +193,7 @@ class TestGetHydratedSchema:
         self, client, test_session, record_type_with_schema
     ):
         """Patient-level record (no study_uid) → hydrator returns [], field unchanged."""
-        patient = Patient(id="HYDR_PAT_ONLY", name="Patient Only")
+        patient = make_patient("HYDR_PAT_ONLY", "Patient Only")
         test_session.add(patient)
         await test_session.flush()
 

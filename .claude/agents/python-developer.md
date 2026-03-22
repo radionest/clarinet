@@ -50,7 +50,7 @@ You are a Python expert specializing in clean, performant, and idiomatic Python 
   class Statistics(BaseModel):
       mean: float
       std: float
-  
+
   # BAD
   return DataFrame({"mean": value})
   ```
@@ -84,7 +84,7 @@ You are a Python expert specializing in clean, performant, and idiomatic Python 
   ```python
   # GOOD
   threshold = threshold or self.default_threshold
-  
+
   # BAD
   if threshold is None:
       threshold = self.default_threshold
@@ -181,7 +181,7 @@ class Settings(BaseSettings):
     api_key: str
     db_url: str
     cache_ttl: int = 3600
-    
+
     class Config:
         env_file = ".env"
 ```
@@ -192,7 +192,7 @@ class Settings(BaseSettings):
 class UserRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
-    
+
     async def get_by_id(self, user_id: int) -> User | None:
         stmt = select(User).where(User.id == user_id)
         result = await self.session.execute(stmt)

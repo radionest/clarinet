@@ -6,7 +6,7 @@ and database-level models to enforce consistent naming conventions.
 
 import re
 
-SLUG_RE = re.compile(r"^[a-z][a-z0-9]*(-[a-z0-9]+)*$")
+SLUG_RE = re.compile(r"^[a-z][-a-z0-9]{0,29}$")
 
 _SLUG_ERROR_MSG = (
     "RecordType name must be a lowercase slug (letters, digits, hyphens; no underscores): got '{}'"

@@ -12,10 +12,10 @@ import pytest
 import pytest_asyncio
 
 from clarinet.models.base import DicomQueryLevel, RecordStatus
-from clarinet.models.patient import Patient
 from clarinet.models.record import Record, RecordFind, RecordRead, RecordType, RecordTypeOptional
 from clarinet.models.study import Series, SeriesFind, Study
 from clarinet.repositories.series_repository import SeriesRepository
+from tests.utils.factories import make_patient
 
 # ---------------------------------------------------------------------------
 # Group 1: RecordRead timestamps (started_at / finished_at)
@@ -146,7 +146,7 @@ def test_record_type_optional_has_no_id_field():
 @pytest_asyncio.fixture
 async def _series_with_records(test_session, test_user):
     """Create test data: 3 series with varying records for criteria tests."""
-    patient = Patient(id="CRIT_PAT001", name="Criteria Patient", anon_name="ANON_CRIT_001")
+    patient = make_patient("CRIT_PAT001", "Criteria Patient", anon_name="ANON_CRIT_001")
     test_session.add(patient)
     await test_session.commit()
 

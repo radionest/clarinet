@@ -39,6 +39,17 @@ def _suppress_pynetdicom_logging():
     yield
 
 
+@pytest.fixture(autouse=True, scope="session")
+def _disable_toml_export():
+    """Prevent API endpoints from writing .toml config files during tests.
+
+    Without this, record type create/update endpoints export .toml files
+    to ``./tasks/``, leaving garbage files (especially from schemathesis fuzz).
+    """
+    app.state.config_mode = "test"
+    yield
+
+
 @pytest.fixture(scope="session")
 def event_loop() -> Generator:
     """Create event loop for the entire test session."""
@@ -441,9 +452,9 @@ async def admin_headers(client, admin_user):
 @pytest_asyncio.fixture
 async def test_patient(test_session):
     """Create test patient."""
-    from clarinet.models.patient import Patient
+    from tests.utils.factories import make_patient
 
-    patient = Patient(id="TEST_PAT001", name="Test Patient", anon_name="ANON_001")
+    patient = make_patient("TEST_PAT001", "Test Patient", anon_name="ANON_001")
     test_session.add(patient)
     await test_session.commit()
     await test_session.refresh(patient)

@@ -426,4 +426,3 @@ pub fn set_pacs_studies(model: Model, studies: List(PacsStudyWithSeries)) -> Mod
 pub fn clear_pacs(model: Model) -> Model {
   Model(..model, pacs_studies: [], pacs_loading: False, pacs_importing: None)
 }
-

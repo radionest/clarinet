@@ -39,6 +39,7 @@ from .record import (
     RecordFindResultComparisonOperator,
     RecordOptional,
     RecordRead,
+    RecordSearchQuery,
 )
 
 # Record type models
@@ -92,6 +93,7 @@ __all__ = [
     "RecordFindResultComparisonOperator",
     "RecordOptional",
     "RecordRead",
+    "RecordSearchQuery",
     "RecordStatus",
     "RecordType",
     "RecordTypeBase",

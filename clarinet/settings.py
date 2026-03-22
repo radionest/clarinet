@@ -75,8 +75,9 @@ class Settings(BaseSettings):
     # Server settings
     port: int = 8000
     host: str = "127.0.0.1"
-    root_url: str = "/"
+    root_url: str = ""
     debug: bool = False
+    coerce_null_query_params: bool = True
 
     # Storage settings
     storage_path: str = str(Path.home() / "clarinet/data")
@@ -305,7 +306,7 @@ class Settings(BaseSettings):
     def database_url(self) -> str:
         """Get the database URL for SQLAlchemy."""
         if self.database_driver == DatabaseDriver.SQLITE:
-            return f"sqlite:///{self.database_name.value}.db"
+            return f"sqlite:///{self.database_name}.db"
         else:
             return f"{self.database_driver.value}://{self.database_username}:{self.database_password}@{self.database_host}:{self.database_port}/{self.database_name}"
 

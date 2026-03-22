@@ -5,6 +5,7 @@ For async factories that create + commit, see ``test_helpers.py``.
 """
 
 from datetime import UTC, datetime
+from itertools import count
 from uuid import uuid4
 
 from clarinet.models.base import DicomQueryLevel
@@ -14,10 +15,34 @@ from clarinet.models.study import Series, Study
 from clarinet.models.user import User
 from clarinet.utils.auth import get_password_hash
 
+_auto_id_seq = count(1)
 
-def make_patient(pid: str = "PAT_001", name: str = "Alice") -> Patient:
-    """Create a Patient instance (not persisted)."""
-    return Patient(id=pid, name=name)
+
+def next_auto_id() -> int:
+    """Return the next unique auto_id for test patients.
+
+    Shared counter used by both :func:`make_patient` and
+    :class:`~tests.utils.test_helpers.PatientFactory` to avoid duplicates.
+    """
+    return next(_auto_id_seq)
+
+
+def make_patient(
+    pid: str = "PAT_001",
+    name: str = "Alice",
+    auto_id: int | None = None,
+    anon_name: str | None = None,
+) -> Patient:
+    """Create a Patient instance (not persisted).
+
+    Auto-assigns a unique ``auto_id`` when not provided (Patient.auto_id is NOT NULL).
+    """
+    return Patient(
+        id=pid,
+        name=name,
+        auto_id=auto_id if auto_id is not None else next_auto_id(),
+        anon_name=anon_name,
+    )
 
 
 def make_study(patient_id: str, uid: str = "1.2.3.100") -> Study:

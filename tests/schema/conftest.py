@@ -14,6 +14,7 @@ import pytest
 import pytest_asyncio
 import schemathesis
 from fastapi import FastAPI
+from schemathesis.checks import load_all_checks
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -25,6 +26,10 @@ from clarinet.models import *  # noqa: F403
 from clarinet.models.user import User
 from clarinet.settings import Settings
 from clarinet.utils.database import get_async_session
+
+# Check exclusions are configured in schemathesis.toml [checks.*] section.
+# They apply globally (including stateful tests) via ProjectConfig.
+load_all_checks()
 
 # ---------------------------------------------------------------------------
 # OpenAPI link injection for stateful testing
@@ -230,3 +235,13 @@ def stateful_api_schema(schema_app):
     loaded = schemathesis.openapi.from_dict(schema_dict)
     loaded.app = schema_app
     return loaded
+
+
+@pytest.fixture(scope="session")
+def stateful_db_engine(test_engine, mock_superuser):
+    """Expose engine + superuser for stateful test DB cleanup.
+
+    The mock_superuser dependency ensures the user is created before
+    the stateful test starts (it will be re-created on each teardown).
+    """
+    return test_engine, mock_superuser

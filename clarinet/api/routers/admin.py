@@ -1,8 +1,10 @@
 """Admin router with system-wide statistics and record management endpoints."""
 
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter
+from fastapi import Path as PathParam
 
 from clarinet.api.dependencies import AdminServiceDep, RecordServiceDep, SuperUserDep
 from clarinet.models import Record, RecordRead
@@ -11,6 +13,7 @@ from clarinet.models.base import RecordStatus
 
 router = APIRouter(
     responses={
+        400: {"description": "Bad request"},
         401: {"description": "Not authenticated"},
         403: {"description": "Forbidden"},
         404: {"description": "Not found"},
@@ -38,7 +41,7 @@ async def get_admin_stats(
 
 @router.patch("/records/{record_id}/assign", response_model=RecordRead)
 async def admin_assign_record_user(
-    record_id: int,
+    record_id: Annotated[int, PathParam(ge=1, le=2147483647)],
     user_id: UUID,
     _current_user: SuperUserDep,
     service: RecordServiceDep,
@@ -60,7 +63,7 @@ async def admin_assign_record_user(
 
 @router.patch("/records/{record_id}/status", response_model=RecordRead)
 async def admin_update_record_status(
-    record_id: int,
+    record_id: Annotated[int, PathParam(ge=1, le=2147483647)],
     record_status: RecordStatus,
     _current_user: SuperUserDep,
     service: RecordServiceDep,
@@ -82,7 +85,7 @@ async def admin_update_record_status(
 
 @router.delete("/records/{record_id}/user", response_model=RecordRead)
 async def admin_unassign_record_user(
-    record_id: int,
+    record_id: Annotated[int, PathParam(ge=1, le=2147483647)],
     _current_user: SuperUserDep,
     service: RecordServiceDep,
 ) -> Record:

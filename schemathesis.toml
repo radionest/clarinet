@@ -10,3 +10,19 @@ enabled = true
 
 [output.sanitization]
 enabled = false
+
+# Check exclusions (apply to all tests, including stateful)
+# - ignored_auth: false positive — auth is overridden (mock superuser) in conftest
+# - negative_data_rejection: FastAPI by design ignores unknown query params;
+#   the check flags every endpoint for accepting ?x-schemathesis-unknown-property=42.
+#   Body-level validation is enforced via extra="forbid" on Pydantic models instead.
+# - unsupported_method: Starlette returns 404 (not 405) for sub-path action
+#   endpoints and fastapi-users auto-generated endpoints
+[checks.ignored_auth]
+enabled = false
+
+[checks.negative_data_rejection]
+enabled = false
+
+[checks.unsupported_method]
+enabled = false

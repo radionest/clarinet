@@ -21,13 +21,12 @@ import pytest_asyncio
 
 from clarinet.exceptions.domain import RecordConstraintViolationError
 from clarinet.models.base import DicomQueryLevel, RecordStatus
-from clarinet.models.patient import Patient
 from clarinet.models.record import Record, RecordType
 from clarinet.models.study import Study
 from clarinet.models.user import UserRole, UserRolesLink
 from clarinet.repositories.record_repository import RecordRepository
 from clarinet.services.record_service import RecordService
-from tests.utils.factories import make_series, make_user
+from tests.utils.factories import make_patient, make_series, make_user
 from tests.utils.urls import RECORDS_BASE, RECORDS_MY
 
 # ── Shared fixture helpers ────────────────────────────────────────────────────
@@ -120,7 +119,7 @@ async def second_study(test_session, test_patient):
 @pytest_asyncio.fixture
 async def second_patient(test_session):
     """A second patient for context-isolation tests."""
-    patient = Patient(id="TEST_PAT002", name="Second Patient")
+    patient = make_patient("TEST_PAT002", "Second Patient")
     test_session.add(patient)
     await test_session.commit()
     await test_session.refresh(patient)

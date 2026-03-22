@@ -96,11 +96,11 @@ dev = [
     "isort>=5.12.0",
     "mypy>=1.15.0",
     "ruff",
-    "schemathesis>=3.19.0",
+    "schemathesis>=4.12.2",
     "pytest-cov>=4.1.0",
     "types-jsonschema>=4.23.0.20241208",
     "types-aiofiles>=24.1.0.20250822",
-    "pre-commit>=4.3.0",
+    "prek>=0.3.6",
     "pytest-xdist>=3.5.0",
     "pytest-json-report>=1.5.0",
 ]
@@ -140,6 +140,8 @@ module = [
     "schemathesis.*",
     "pydantic_settings.*",
     "alembic.*",
+    "orjson",
+    "orjson.*",
 ]
 ignore_missing_imports = true
 
@@ -150,6 +152,7 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 addopts = "--json-report --json-report-file=/tmp/clarinet-test-report.json -q"
+log_level = "WARNING"
 testpaths = ["tests"]
 python_files = "test_*.py"
 markers = [

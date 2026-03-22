@@ -28,6 +28,7 @@ from clarinet.models.study import Series, Study
 from clarinet.services.dicom import DicomClient, DicomNode, SeriesQuery, StudyQuery
 from clarinet.services.dicom.models import StudyResult
 from clarinet.settings import settings
+from tests.utils.factories import make_patient
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -128,7 +129,7 @@ async def admin_logged_in(client: AsyncClient, admin_user: object) -> AsyncClien
 @pytest_asyncio.fixture
 async def db_patient(test_session: AsyncSession, pacs_patient_id: str) -> Patient:
     """Create a Patient record in the test DB matching the PACS patient_id."""
-    patient = Patient(id=pacs_patient_id, name="SHIPILOV TEST")
+    patient = make_patient(pacs_patient_id, "SHIPILOV TEST")
     test_session.add(patient)
     await test_session.commit()
     await test_session.refresh(patient)
@@ -493,7 +494,7 @@ async def test_import_series_descriptions_stored(
 @pytest_asyncio.fixture
 async def db_patient_with_anon_id(test_session: AsyncSession, pacs_patient_id: str) -> Patient:
     """Create a Patient record with auto_id set (so anon_id is available)."""
-    patient = Patient(id=pacs_patient_id, name="SHIPILOV TEST", auto_id=42)
+    patient = make_patient(pacs_patient_id, "SHIPILOV TEST", auto_id=42)
     test_session.add(patient)
     await test_session.commit()
     await test_session.refresh(patient)

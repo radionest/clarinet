@@ -8,7 +8,7 @@ Formerly known as task router.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated
 from uuid import UUID
 
 from fastapi import (
@@ -18,6 +18,9 @@ from fastapi import (
     Depends,
     Request,
     status,
+)
+from fastapi import (
+    Path as FastAPIPath,
 )
 from fastapi.responses import JSONResponse
 from sqlmodel import SQLModel
@@ -50,9 +53,9 @@ from clarinet.exceptions.domain import AuthorizationError
 from clarinet.models import (
     Record,
     RecordCreate,
-    RecordFindResult,
     RecordOptional,
     RecordRead,
+    RecordSearchQuery,
     RecordStatus,
     RecordTypeCreate,
     RecordTypeFind,
@@ -87,6 +90,7 @@ class FileCheckResult(SQLModel):
 router = APIRouter(
     tags=["Records"],
     responses={
+        400: {"description": "Bad request (malformed body)"},
         401: {"description": "Not authenticated"},
         403: {"description": "Forbidden"},
         404: {"description": "Not found"},
@@ -369,6 +373,29 @@ async def add_record(
     return await service.create_record(record)
 
 
+@router.patch(
+    "/bulk/status",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_model=None,  # Required: PEP 563 makes -> None a truthy ForwardRef, triggering FastAPI 204 body assertion
+)
+async def bulk_update_record_status(
+    record_ids: list[Annotated[int, Body(ge=1, le=2147483647)]],
+    new_status: RecordStatus,
+    service: RecordServiceDep,
+    user: CurrentUserDep,
+    repo: RecordRepositoryDep,
+) -> None:
+    """Update status for multiple records at once."""
+    if not user.is_superuser:
+        user_roles = get_user_role_names(user)
+        for rid in record_ids:
+            record = await repo.get_with_relations(rid)
+            role_name = record.record_type.role_name
+            if role_name is None or role_name not in user_roles:
+                raise AuthorizationError(f"Insufficient permissions to access record {rid}")
+    await service.bulk_update_status(record_ids, new_status)
+
+
 @router.patch("/{record_id}/status", response_model=RecordRead)
 async def update_record_status(
     record_id: int,
@@ -640,7 +667,7 @@ async def resubmit_record_with_validation(
 
 @router.patch("/{record_id}", response_model=RecordRead)
 async def update_record(
-    record_id: int,
+    record_id: Annotated[int, FastAPIPath(ge=1, le=2147483647)],
     record_update: RecordOptional,
     repo: RecordRepositoryDep,
 ) -> Record:
@@ -777,57 +804,17 @@ async def find_records(
     pagination: PaginationDep,
     repo: RecordRepositoryDep,
     user: CurrentUserDep,
-    find_queries: list[RecordFindResult] = Body(default=[]),
-    patient_id: str | None = None,
-    patient_anon_id: str | None = None,
-    series_uid: str | None = None,
-    anon_series_uid: str | None = None,
-    study_uid: str | None = None,
-    anon_study_uid: str | None = None,
-    user_id: UUID | None = None,
-    record_type_name: str | None = None,
-    record_status: RecordStatus | None = None,
-    wo_user: bool | None = None,
-    random_one: bool = False,
+    query: RecordSearchQuery,
 ) -> list[RecordRead]:
     """Find records by various criteria."""
     role_names = None if user.is_superuser else get_user_role_names(user)
     criteria = RecordSearchCriteria(
-        patient_id=patient_id,
-        patient_anon_id=patient_anon_id,
-        series_uid=series_uid,
-        anon_series_uid=anon_series_uid,
-        study_uid=study_uid,
-        anon_study_uid=anon_study_uid,
-        user_id=user_id,
-        record_type_name=record_type_name,
-        record_status=record_status,
-        wo_user=wo_user,
-        random_one=random_one,
+        **query.model_dump(exclude={"data_queries"}),
+        data_queries=query.data_queries,
         role_names=role_names,
-        data_queries=find_queries,
     )
     records = await repo.find_by_criteria(criteria, skip=pagination.skip, limit=pagination.limit)
     return mask_records(records, user)
-
-
-@router.patch("/bulk/status", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
-async def bulk_update_record_status(
-    record_ids: list[int],
-    new_status: RecordStatus,
-    service: RecordServiceDep,
-    user: CurrentUserDep,
-    repo: RecordRepositoryDep,
-) -> None:
-    """Update status for multiple records at once."""
-    if not user.is_superuser:
-        user_roles = get_user_role_names(user)
-        for rid in record_ids:
-            record = await repo.get_with_relations(rid)
-            role_name = record.record_type.role_name
-            if role_name is None or role_name not in user_roles:
-                raise AuthorizationError(f"Insufficient permissions to access record {rid}")
-    await service.bulk_update_status(record_ids, new_status)
 
 
 # Dependency functions (used by other parts of the application)

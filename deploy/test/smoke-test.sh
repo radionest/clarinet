@@ -77,12 +77,12 @@ check "Pipeline status is ok" "$pipeline_status" "ok"
 
 # Test 4: Auth endpoint exists
 echo "[4] Auth endpoint"
-status=$(curl -sk --max-time 10 -o /dev/null -w '%{http_code}' "${BASE_URL}api/auth/login" || echo "000")
-check "GET /api/auth/login (405 = exists)" "$status" "405"
+status=$(curl -sk --max-time 10 -o /dev/null -w '%{http_code}' -X POST "${BASE_URL}api/auth/login" || echo "000")
+check "POST /api/auth/login (422 = exists)" "$status" "422"
 
 # Test 5: Frontend SPA
 echo "[5] Frontend SPA"
-content_type=$($CURL -sI "${BASE_URL}" 2>/dev/null | grep -i "content-type" | head -1 || echo "")
+content_type=$($CURL -s -o /dev/null -D - "${BASE_URL}" 2>/dev/null | grep -i "content-type" | head -1 || echo "")
 has_html=$(echo "$content_type" | grep -ci "text/html" || echo "0")
 check "SPA serves HTML" "$has_html" "1"
 
