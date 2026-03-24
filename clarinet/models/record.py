@@ -19,7 +19,7 @@ from pydantic import (
     computed_field,
     model_validator,
 )
-from sqlalchemy import Boolean, Float, ForeignKey, Integer, String, event, func
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, event, func
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlmodel import JSON, Column, Field, Relationship, SQLModel
 
@@ -228,13 +228,23 @@ class Record(RecordBase, table=True):
         cascade_delete=True,
     )
 
-    created_at: datetime | None = Field(default_factory=lambda: datetime.now(UTC))
+    created_at: datetime | None = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_type=DateTime(timezone=True),  # type: ignore[call-overload]
+    )
     changed_at: datetime | None = Field(
-        sa_column_kwargs={"onupdate": func.now(), "server_default": func.now()}
+        sa_type=DateTime(timezone=True),  # type: ignore[call-overload]
+        sa_column_kwargs={"onupdate": func.now(), "server_default": func.now()},
     )
 
-    started_at: datetime | None = None
-    finished_at: datetime | None = None
+    started_at: datetime | None = Field(
+        default=None,
+        sa_type=DateTime(timezone=True),  # type: ignore[call-overload]
+    )
+    finished_at: datetime | None = Field(
+        default=None,
+        sa_type=DateTime(timezone=True),  # type: ignore[call-overload]
+    )
 
     @model_validator(mode="after")
     def validate_record_level(self) -> "Record":
