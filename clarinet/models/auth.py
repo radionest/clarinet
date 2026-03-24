@@ -5,7 +5,7 @@ Session storage model for cookie authentication with lifecycle management.
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
-from sqlalchemy import Column, ForeignKey, Index
+from sqlalchemy import Column, DateTime, ForeignKey, Index
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlmodel import Field, SQLModel
 
@@ -29,9 +29,17 @@ class AccessToken(SQLModel, table=True):
             nullable=False,
         ),
     )
-    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
-    expires_at: datetime = Field()  # When session expires
-    last_accessed: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_type=DateTime(timezone=True),  # type: ignore[call-overload]
+    )
+    expires_at: datetime = Field(
+        sa_type=DateTime(timezone=True),  # type: ignore[call-overload]
+    )
+    last_accessed: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_type=DateTime(timezone=True),  # type: ignore[call-overload]
+    )
 
     # Optional metadata fields
     user_agent: str | None = Field(default=None, max_length=512)

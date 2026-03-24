@@ -112,6 +112,12 @@ def pipeline_broker_factory(
 
         broker = AioPikaBroker(
             url=rabbitmq_url,
+            dead_letter_queue=RmqQueue(
+                name=test_queues["dlq"],
+                declare=True,
+                durable=True,
+                type=QueueType.CLASSIC,
+            ),
             exchange=Exchange(
                 name=test_exchange,
                 type=ExchangeType.DIRECT,

@@ -4,6 +4,7 @@
 /// Uses gleam_fetch for networking with automatic cookie handling for session-based authentication.
 /// All requests automatically include JSON content-type headers and prefix paths with "/api".
 import api/types.{type ApiError}
+import config
 import gleam/dynamic.{type Dynamic}
 import gleam/dynamic/decode
 import gleam/fetch
@@ -27,7 +28,7 @@ fn base_request(method: http.Method, path: String) -> request.Request(String) {
   }
   |> result.unwrap(request.new())
   |> request.set_method(method)
-  |> request.set_path("/api" <> path)
+  |> request.set_path(config.base_path() <> "/api" <> path)
   |> request.set_header("accept", "application/json")
 }
 

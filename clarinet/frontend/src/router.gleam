@@ -1,4 +1,5 @@
 // Client-side routing with Modem
+import config
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/string
@@ -29,9 +30,10 @@ pub type Route {
   NotFound
 }
 
-// Convert Route to URL path
+// Convert Route to URL path (includes base path prefix for sub-path deployments)
 pub fn route_to_path(route: Route) -> String {
-  case route {
+  let base = config.base_path()
+  let path = case route {
     Home -> "/"
     Login -> "/login"
     Register -> "/register"
@@ -55,12 +57,19 @@ pub fn route_to_path(route: Route) -> String {
     AdminRecordTypeEdit(name) -> "/admin/record-types/" <> name <> "/edit"
     NotFound -> "/404"
   }
+  base <> path
 }
 
-// Parse URL path to Route
+// Parse URL path to Route (strips base path prefix for sub-path deployments)
 pub fn parse_route(uri: Uri) -> Route {
+  let base = config.base_path()
+  let raw_path = case base, string.starts_with(uri.path, base <> "/") {
+    "", _ -> uri.path
+    _, True -> string.drop_start(uri.path, up_to: string.length(base))
+    _, False -> uri.path
+  }
   let path =
-    uri.path
+    raw_path
     |> string.split("/")
     |> list.filter(fn(s) { string.length(s) > 0 })
 

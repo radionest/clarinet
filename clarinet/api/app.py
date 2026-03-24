@@ -8,10 +8,11 @@ middleware, and static files.
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
+from string import Template
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
 try:
     import orjson  # noqa: F401
@@ -354,9 +355,20 @@ def create_app(root_path: str = "") -> FastAPI:
             # Defensive fallback for edge cases (e.g. dir deleted after startup).
             logger.error("Static directory disappeared after startup")
 
+        # Cache rendered index.html with $BASE_PATH substituted
+        _index_html_cache: dict[str, str] = {}
+
+        def _render_index(index_path: Path) -> str:
+            """Read index.html, substitute $BASE_PATH template variable, cache result."""
+            key = str(index_path)
+            if key not in _index_html_cache:
+                tmpl = Template(index_path.read_text(encoding="utf-8"))
+                _index_html_cache[key] = tmpl.safe_substitute(BASE_PATH=root_path)
+            return _index_html_cache[key]
+
         # Serve index.html for all non-API routes (SPA support)
-        @app.get("/{full_path:path}")
-        async def serve_spa(full_path: str) -> FileResponse:
+        @app.get("/{full_path:path}", response_model=None)
+        async def serve_spa(full_path: str) -> FileResponse | HTMLResponse:
             """Serve SPA for all non-API routes."""
             # Skip API and DICOMweb routes
             if full_path.startswith(("api/", "dicom-web/")):
@@ -399,7 +411,7 @@ def create_app(root_path: str = "") -> FastAPI:
             # Serve index.html for all other routes (SPA routing)
             index_path = static_dir / "index.html"
             if index_path.exists():
-                return FileResponse(index_path)
+                return HTMLResponse(_render_index(index_path))
 
             # Fallback error if index.html not found
             from fastapi import HTTPException
