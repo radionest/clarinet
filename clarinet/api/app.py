@@ -367,7 +367,7 @@ def create_app(root_path: str = "") -> FastAPI:
             return _index_html_cache[key]
 
         # Serve index.html for all non-API routes (SPA support)
-        @app.get("/{full_path:path}")
+        @app.get("/{full_path:path}", response_model=None)
         async def serve_spa(full_path: str) -> FileResponse | HTMLResponse:
             """Serve SPA for all non-API routes."""
             # Skip API and DICOMweb routes

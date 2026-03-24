@@ -15,6 +15,9 @@ async def test_app_startup(client: AsyncClient):
     response = await client.get("/")
     # Root path may serve SPA (200), redirect to /docs (307), or 404
     assert response.status_code in [200, 307, 404]
+    if response.status_code == 200:
+        assert "text/html" in response.headers.get("content-type", "")
+        assert "<title>" in response.text
 
 
 @pytest.mark.asyncio
