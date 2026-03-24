@@ -63,7 +63,7 @@ pub fn route_to_path(route: Route) -> String {
 // Parse URL path to Route (strips base path prefix for sub-path deployments)
 pub fn parse_route(uri: Uri) -> Route {
   let base = config.base_path()
-  let raw_path = case base, string.starts_with(uri.path, base) {
+  let raw_path = case base, string.starts_with(uri.path, base <> "/") {
     "", _ -> uri.path
     _, True -> string.drop_start(uri.path, up_to: string.length(base))
     _, False -> uri.path

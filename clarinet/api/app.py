@@ -362,7 +362,7 @@ def create_app(root_path: str = "") -> FastAPI:
             """Read index.html, substitute $BASE_PATH template variable, cache result."""
             key = str(index_path)
             if key not in _index_html_cache:
-                tmpl = Template(index_path.read_text())
+                tmpl = Template(index_path.read_text(encoding="utf-8"))
                 _index_html_cache[key] = tmpl.safe_substitute(BASE_PATH=root_path)
             return _index_html_cache[key]
 

@@ -19,7 +19,9 @@ pub fn base_path() -> String {
     element.get_attribute(el, "href")
   }
   // Strip trailing slash: "/liver_nir/" → "/liver_nir", "/" → ""
-  path
-  |> result.unwrap("/")
-  |> string.drop_end(up_to: 1)
+  let p = result.unwrap(path, "/")
+  case string.ends_with(p, "/") {
+    True -> string.drop_end(p, up_to: 1)
+    False -> p
+  }
 }
