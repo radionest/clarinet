@@ -185,7 +185,7 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
                 ),
                 effect.batch([
                   stop_timer_effect,
-                  modem.push("/login", option.None, option.None),
+                  modem.push(router.route_to_path(router.Login), option.None, option.None),
                 ]),
               )
             }
@@ -199,7 +199,7 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
                 ),
                 effect.batch([
                   stop_timer_effect,
-                  modem.push("/", option.None, option.None),
+                  modem.push(router.route_to_path(router.Home), option.None, option.None),
                 ]),
               )
             }
@@ -213,7 +213,7 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
                   ),
                   effect.batch([
                     stop_timer_effect,
-                    modem.push("/", option.None, option.None),
+                    modem.push(router.route_to_path(router.Home), option.None, option.None),
                   ]),
                 )
                 _, _ -> #(
@@ -251,13 +251,13 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           case router.requires_auth(route), new_model.user, is_auth_page {
             False, Some(_), True -> #(
               store.set_route(new_model, router.Home),
-              modem.push("/", option.None, option.None),
+              modem.push(router.route_to_path(router.Home), option.None, option.None),
             )
             _, _, _ ->
               case router.requires_admin_role(route), new_model.user {
                 True, Some(models.User(is_superuser: False, ..)) -> #(
                   store.set_route(new_model, router.Home),
-                  modem.push("/", option.None, option.None),
+                  modem.push(router.route_to_path(router.Home), option.None, option.None),
                 )
                 _, _ -> #(new_model, load_route_data(new_model, route))
               }
@@ -269,7 +269,7 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           case router.requires_auth(model.route) {
             True -> #(
               store.set_route(new_model, router.Login),
-              modem.push("/login", option.None, option.None),
+              modem.push(router.route_to_path(router.Login), option.None, option.None),
             )
             False -> #(new_model, effect.none())
           }
@@ -325,7 +325,7 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         |> store.clear_auth_forms()
         |> store.set_route(router.Home)
 
-      #(new_model, modem.push("/", option.None, option.None))
+      #(new_model, modem.push(router.route_to_path(router.Home), option.None, option.None))
     }
 
     store.LoginError(error) -> {
@@ -376,7 +376,7 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         )
         |> store.set_route(router.Home)
 
-      #(new_model, modem.push("/", option.None, option.None))
+      #(new_model, modem.push(router.route_to_path(router.Home), option.None, option.None))
     }
 
     store.RegisterError(error) -> {
@@ -410,7 +410,7 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     store.LogoutComplete -> {
       #(
         store.set_route(model, router.Login),
-        modem.push("/login", option.None, option.None),
+        modem.push(router.route_to_path(router.Login), option.None, option.None),
       )
     }
 
@@ -1097,7 +1097,7 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       #(
         new_model,
         effect.batch([
-          modem.push("/patients", option.None, option.None),
+          modem.push(router.route_to_path(router.Patients), option.None, option.None),
           dispatch_msg(store.LoadPatients),
         ]),
       )
@@ -1417,7 +1417,7 @@ fn handle_api_error(
         |> store.set_loading(False)
         |> store.set_error(Some("Session expired. Please log in again."))
         |> store.set_route(router.Login)
-      #(new_model, modem.push("/login", option.None, option.None))
+      #(new_model, modem.push(router.route_to_path(router.Login), option.None, option.None))
     }
     _ -> {
       let new_model =

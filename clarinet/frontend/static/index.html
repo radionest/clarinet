@@ -3,16 +3,17 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <base href="$BASE_PATH/">
     <title>Clarinet - Medical Imaging Framework</title>
 
     <!-- Base styles -->
-    <link rel="stylesheet" href="/static/base.css">
+    <link rel="stylesheet" href="static/base.css">
 
     <!-- Custom styles (if exists) - with error handling -->
-    <link rel="stylesheet" href="/static/custom/custom.css" onerror="this.onerror=null">
+    <link rel="stylesheet" href="static/custom/custom.css" onerror="this.onerror=null">
 
     <!-- Favicon -->
-    <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
+    <link rel="icon" type="image/x-icon" href="static/favicon.ico">
 
     <style>
         /* Initial loading styles */
@@ -79,7 +80,7 @@
     <!-- Gleam/Lustre application -->
     <script type="module">
         // Import the compiled Gleam application
-        import { main } from '/js/clarinet.mjs';
+        import { main } from './js/clarinet.mjs';
 
         // Start the application when DOM is ready
         if (document.readyState === 'loading') {

@@ -188,11 +188,16 @@ async def test_startup_pipeline_rabbitmq_unavailable(startup_settings, capture_l
 
 
 @pytest.mark.asyncio
-async def test_startup_frontend_missing(startup_settings, monkeypatch):
+async def test_startup_frontend_missing(startup_settings, monkeypatch, tmp_path):
     """App crashes with ``StartupError`` when frontend is enabled but not built."""
     from clarinet.api.app import StartupError
 
     monkeypatch.setattr(settings, "frontend_enabled", True)
+    monkeypatch.setattr(
+        type(settings),
+        "static_path",
+        property(lambda self: tmp_path / "nonexistent_static"),
+    )
 
     app = FastAPI(lifespan=lifespan)
 
