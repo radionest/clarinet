@@ -10,6 +10,7 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import Any
 
+from sqlalchemy import event
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -72,6 +73,13 @@ class DatabaseManager:
                 echo=False,
                 json_serializer=_pydantic_json_serializer,
             )
+
+            @event.listens_for(engine.sync_engine, "connect")
+            def _set_sqlite_pragmas(dbapi_connection: Any, _connection_record: Any) -> None:
+                cursor = dbapi_connection.cursor()
+                cursor.execute("PRAGMA journal_mode=WAL")
+                cursor.execute("PRAGMA busy_timeout=5000")
+                cursor.close()
         else:
             engine = create_async_engine(
                 async_url,
