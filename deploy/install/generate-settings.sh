@@ -74,7 +74,7 @@ log_dir = "${LOG_DIR}"
 
 # Frontend
 frontend_enabled = true
-ohif_enabled = false
+ohif_enabled = true
 TOML
 
 chmod 640 "$SETTINGS_FILE"
