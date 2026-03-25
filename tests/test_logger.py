@@ -33,7 +33,7 @@ class TestJsonDumps:
 
         result = _json_dumps({"path": Path("/tmp/test")})
         parsed = json.loads(result)
-        assert parsed["path"] == "/tmp/test"
+        assert parsed["path"] == str(Path("/tmp/test"))
 
 
 class TestJsonFormat:
