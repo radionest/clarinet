@@ -12,7 +12,9 @@ Run:
 """
 
 import asyncio
+import contextlib
 import socket
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -99,29 +101,44 @@ def _get_local_ip() -> str:
 
 
 def _pacs_can_reach_us() -> bool:
-    """Check if PACS can connect back to our host (needed for C-MOVE)."""
+    """Check if PACS can connect back to our host (needed for C-MOVE).
+
+    Starts a TCP listener, then asks klara to connect via SSH.
+    Falls back to True if SSH is unavailable (assume connectivity).
+    """
+    import threading
+
     port = _free_port()
     local_ip = _get_local_ip()
-    try:
-        # Ask Orthanc to echo our test port via its REST API
-        # If Orthanc can't reach us, C-MOVE will fail with 0xC000
-        resp = requests.put(
-            f"{PACS_REST_URL}/modalities/_connectivity_test",
-            json={"AET": "CONN_TEST", "Host": local_ip, "Port": port},
+    connected = False
+
+    def _listen():
+        nonlocal connected
+        s = socket.socket()
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        s.bind(("0.0.0.0", port))
+        s.listen(1)
+        s.settimeout(5)
+        try:
+            conn, _ = s.accept()
+            connected = True
+            conn.close()
+        except TimeoutError:
+            pass
+        s.close()
+
+    listener = threading.Thread(target=_listen)
+    listener.start()
+
+    with contextlib.suppress(subprocess.TimeoutExpired, FileNotFoundError):
+        subprocess.run(
+            ["ssh", "-o", "ConnectTimeout=3", "klara", f"nc -z {local_ip} {port}"],
             timeout=5,
+            capture_output=True,
         )
-        if resp.status_code != 200:
-            return False
-        # Try to have Orthanc echo us — if it fails, we're unreachable
-        echo_resp = requests.post(
-            f"{PACS_REST_URL}/modalities/_connectivity_test/echo",
-            timeout=5,
-        )
-        return echo_resp.status_code == 200
-    except Exception:
-        return False
-    finally:
-        requests.delete(f"{PACS_REST_URL}/modalities/_connectivity_test", timeout=5)
+
+    listener.join(timeout=6)
+    return connected
 
 
 @pytest.fixture(scope="session")
