@@ -32,6 +32,9 @@ jobs:
           restore-keys: |
             gleam-deps-${{ runner.os }}-
 
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
       - name: Build frontend
         run: bash scripts/build_frontend.sh
 
