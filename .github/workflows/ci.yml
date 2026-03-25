@@ -31,6 +31,35 @@ jobs:
       - name: Run unit tests
         run: make test-py312
 
+  test-windows:
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        python-version: ['3.12']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          cache-dependency-glob: "**/pyproject.toml"
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Run unit tests
+        run: >-
+          uv run pytest tests/
+          -n auto --dist loadgroup
+          -m "not pipeline and not dicom and not slicer and not schema"
+          --json-report-file=test-report.json
+          -q
+
   test-schema:
     runs-on: ubuntu-latest
 
