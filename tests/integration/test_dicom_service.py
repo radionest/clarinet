@@ -111,10 +111,15 @@ def all_studies(dicom_client: DicomClient, orthanc_node: DicomNode) -> list[Stud
 
 @pytest.fixture(scope="session")
 def mr_study(all_studies: list[StudyResult]) -> StudyResult:
-    """First MR study found on the PACS — used for C-GET tests."""
+    """Smallest MR study on the PACS — used for C-GET tests.
+
+    Selects the study with fewest instances to avoid C-GET timeouts
+    on large studies (2000+ instances).
+    """
     matches = [s for s in all_studies if s.modalities_in_study and "MR" in s.modalities_in_study]
     assert matches, "No MR study found on test PACS"
-    return matches[0]
+    # Pick smallest study to keep tests fast and reliable
+    return min(matches, key=lambda s: s.number_of_study_related_instances or float("inf"))
 
 
 @pytest.fixture(scope="session")

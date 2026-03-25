@@ -511,7 +511,7 @@ class DicomOperations:
         request: RetrieveRequest,
         storage: StorageConfig,
         local_aet: str,
-        scp: StorageSCP,
+        scp: "StorageSCP",
         timeout: float = 300.0,
     ) -> RetrieveResult:
         """Retrieve DICOM instances via C-MOVE with local Storage SCP.
