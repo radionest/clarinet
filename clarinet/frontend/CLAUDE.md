@@ -30,21 +30,25 @@ clarinet/frontend/clarinet/
 
 ## Building
 
+Uses `lustre_dev_tools` (bun bundler) to produce a single minified JS bundle.
+Entry point: `clarinet_frontend.gleam`. Output: `clarinet/static/clarinet_frontend.js`.
+
 **Dev build:**
 ```bash
 cd clarinet/frontend
-gleam deps download
-gleam build --target javascript
+gleam run -m lustre/dev build --outdir=../../clarinet/static
 ```
 
-**Production build:**
+**Production build (minified):**
 ```bash
 make frontend-build
 # Or: ./scripts/build_frontend.sh
 ```
 
-Output goes to `dist/`; FastAPI serves when `frontend_enabled=True` (default).
+Output goes to `clarinet/static/`; FastAPI serves when `frontend_enabled=True` (default).
 Set `frontend_enabled=False` in settings for API-only mode.
+
+**Requires:** `bun` installed system-wide (`curl -fsSL https://bun.sh/install | bash`).
 
 **Note:** `formosh` requires access to a private Git repository. You may need repo access or an alternative form handling solution.
 

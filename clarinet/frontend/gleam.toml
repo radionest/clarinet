@@ -18,7 +18,15 @@ lazy_const = "~> 1.0"
 multipart_form = "~> 1.0"
 [dev-dependencies]
 gleeunit = "~> 1.4"
+lustre_dev_tools = "~> 2.3"
 
 [javascript]
-entry_point = "clarinet.gleam"
-output = "build/dev/javascript/clarinet.mjs"
+entry_point = "clarinet_frontend.gleam"
+output = "build/dev/javascript/clarinet_frontend.mjs"
+
+[tools.lustre.bin]
+bun = "system"
+
+[tools.lustre.build]
+minify = true
+outdir = "../../clarinet/static"

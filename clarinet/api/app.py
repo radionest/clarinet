@@ -304,6 +304,11 @@ def create_app(root_path: str = "") -> FastAPI:
         allow_headers=["*"],
     )
 
+    # Compress responses (JS bundles, JSON, HTML) for faster delivery
+    from starlette.middleware.gzip import GZipMiddleware
+
+    app.add_middleware(GZipMiddleware, minimum_size=1000)
+
     # Strip literal "null" query-param values so FastAPI treats them as absent
     if settings.coerce_null_query_params:
         from clarinet.api.middleware import NullQueryParamMiddleware
