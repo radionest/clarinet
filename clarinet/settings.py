@@ -69,7 +69,10 @@ class Settings(BaseSettings):
     """
 
     model_config = SettingsConfigDict(
-        toml_file=["settings.toml", "settings.custom.toml"], env_prefix="CLARINET_", extra="ignore"
+        toml_file=["settings.toml", "settings.custom.toml"],
+        env_file=".env",
+        env_prefix="CLARINET_",
+        extra="ignore",
     )
 
     # Server settings
