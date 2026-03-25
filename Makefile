@@ -38,7 +38,7 @@ frontend-build: ## Build frontend for production
 		cd clarinet/frontend && \
 		rm -rf build/ && \
 		gleam deps download && \
-		gleam run -m lustre/dev build --minify --outdir=../../clarinet/static && \
+		gleam run -m lustre/dev build --minify && \
 		if [ -d "public" ]; then \
 			cp -r public/* ../../clarinet/static/; \
 		fi && \

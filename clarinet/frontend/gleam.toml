@@ -27,6 +27,7 @@ output = "build/dev/javascript/clarinet_frontend.mjs"
 [tools.lustre.bin]
 bun = "system"
 
+# Default build config. outdir is the single source of truth for output path.
+# Minification is NOT set here — pass --minify explicitly in production builds only.
 [tools.lustre.build]
-minify = true
 outdir = "../../clarinet/static"

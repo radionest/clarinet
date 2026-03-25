@@ -1,6 +1,8 @@
 #!/bin/bash
 
-# Dev build script for Clarinet frontend (no minification for faster rebuilds)
+# Dev build script for Clarinet frontend (no minification for faster rebuilds).
+# outdir is read from gleam.toml [tools.lustre.build]; --minify is intentionally
+# omitted here so dev builds stay fast and readable.
 
 set -e
 
@@ -12,9 +14,9 @@ if [ ! -d "build/packages" ]; then
     gleam deps download
 fi
 
-# Build bundled JS (without minification for speed)
+# Build bundled JS without minification
 echo "Bundling JavaScript..."
-gleam run -m lustre/dev build --outdir=../../clarinet/static
+gleam run -m lustre/dev build
 
 # Copy static assets from public/
 if [ -d "public" ]; then

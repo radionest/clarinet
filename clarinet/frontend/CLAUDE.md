@@ -14,11 +14,11 @@
 
 ## Directory Structure
 
-Frontend is embedded at `clarinet/frontend/`. Entry point: `clarinet.gleam`.
+Frontend is embedded at `clarinet/frontend/`. Entry point: `clarinet_frontend.gleam`.
 
 ```
 clarinet/frontend/clarinet/
-├── clarinet.gleam        # Entry point
+├── clarinet_frontend.gleam # Entry point (must match package name for lustre_dev_tools)
 ├── main.gleam            # App initialization
 ├── router.gleam          # Client-side routing
 ├── store.gleam           # Global state
@@ -36,7 +36,7 @@ Entry point: `clarinet_frontend.gleam`. Output: `clarinet/static/clarinet_fronte
 **Dev build:**
 ```bash
 cd clarinet/frontend
-gleam run -m lustre/dev build --outdir=../../clarinet/static
+gleam run -m lustre/dev build
 ```
 
 **Production build (minified):**

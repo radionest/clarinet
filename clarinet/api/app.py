@@ -13,6 +13,7 @@ from string import Template
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from starlette.middleware.gzip import GZipMiddleware
 
 try:
     import orjson  # noqa: F401
@@ -305,8 +306,6 @@ def create_app(root_path: str = "") -> FastAPI:
     )
 
     # Compress responses (JS bundles, JSON, HTML) for faster delivery
-    from starlette.middleware.gzip import GZipMiddleware
-
     app.add_middleware(GZipMiddleware, minimum_size=1000)
 
     # Strip literal "null" query-param values so FastAPI treats them as absent

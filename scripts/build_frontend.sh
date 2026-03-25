@@ -3,21 +3,21 @@ set -e
 
 echo "Building Clarinet frontend..."
 
-# Переход в директорию фронтенда
 cd clarinet/frontend
 
-# Очистка старых артефактов сборки
+# Clean old build artifacts
 rm -rf build/
 
 STATIC_DIR="../../clarinet/static"
 rm -rf "$STATIC_DIR"
 mkdir -p "$STATIC_DIR"/{css,assets}
 
-# Загрузка зависимостей и сборка бандла (lustre_dev_tools + bun)
+# Download deps and build minified bundle (lustre_dev_tools + bun).
+# outdir is read from gleam.toml [tools.lustre.build]; --minify is prod-only.
 gleam deps download
-gleam run -m lustre/dev build --minify --outdir="$STATIC_DIR"
+gleam run -m lustre/dev build --minify
 
-# Копирование HTML/CSS из public/ (перезаписывает сгенерированный index.html)
+# Copy HTML/CSS from public/ (overwrites lustre-generated index.html)
 if [ -d "public" ]; then
     cp -r public/* "$STATIC_DIR/"
 fi
