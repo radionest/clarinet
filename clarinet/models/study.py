@@ -139,7 +139,7 @@ class SeriesFind(SeriesBase):
 
     series_uid: str | None = None
     series_description: str | None = None
-    series_number: int | None = None  # type: ignore
+    series_number: int | None = Field(default=None, gt=0, lt=100000)  # type: ignore
     modality: str | None = None  # type: ignore
     instance_count: int | None = None  # type: ignore
     anon_uid: str | None = None
