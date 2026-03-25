@@ -64,8 +64,8 @@ rabbitmq_port = 5672
 rabbitmq_login = "${RABBIT_USER}"
 rabbitmq_password = "${RABBIT_PASS}"
 
-# PACS
-pacs_host = "localhost"
+# PACS (Orthanc on klara)
+pacs_host = "192.168.122.151"
 pacs_port = 4242
 
 # Storage
