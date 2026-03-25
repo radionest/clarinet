@@ -1,6 +1,6 @@
 // Record API endpoints
 import api/http_client
-import api/models.{type FileDefinition, type Record, type RecordType}
+import api/models.{type FileDefinition, type Record, type RecordCreate, type RecordType}
 import api/types.{type ApiError}
 import api/users
 import utils/status
@@ -10,7 +10,7 @@ import gleam/dynamic/decode
 import gleam/int
 import gleam/javascript/promise.{type Promise}
 import gleam/json
-import gleam/option.{None, Some}
+import gleam/option.{type Option, None, Some}
 import gleam/result
 import utils/json_utils
 
@@ -575,6 +575,55 @@ pub fn get_hydrated_schema(
       Error(err) -> Error(err)
     }
   })
+}
+
+/// Get all record types
+pub fn get_record_types() -> Promise(Result(List(RecordType), ApiError)) {
+  http_client.get("/records/types")
+  |> promise.map(fn(res) {
+    result.try(res, http_client.decode_response(
+      _,
+      decode.list(record_type_base_decoder()),
+      "Invalid record types data",
+    ))
+  })
+}
+
+/// Create a new record
+pub fn create_record(
+  data: RecordCreate,
+) -> Promise(Result(Record, ApiError)) {
+  let body =
+    json.object([
+      #("record_type_name", json.string(data.record_type_name)),
+      #("patient_id", json.string(data.patient_id)),
+      #("status", json.string(status.to_backend_string(data.status))),
+      #("study_uid", json_nullable_string(data.study_uid)),
+      #("series_uid", json_nullable_string(data.series_uid)),
+      #("user_id", json_nullable_string(data.user_id)),
+      #("parent_record_id", case data.parent_record_id {
+        Some(id) -> json.int(id)
+        None -> json.null()
+      }),
+      #("context_info", json_nullable_string(data.context_info)),
+    ])
+    |> json.to_string
+
+  http_client.post("/records/", body)
+  |> promise.map(fn(res) {
+    result.try(res, http_client.decode_response(
+      _,
+      record_decoder(),
+      "Invalid record data",
+    ))
+  })
+}
+
+fn json_nullable_string(value: Option(String)) -> json.Json {
+  case value {
+    Some(v) -> json.string(v)
+    None -> json.null()
+  }
 }
 
 /// Get a single record type by name

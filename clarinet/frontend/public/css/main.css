@@ -827,6 +827,17 @@ h6 { font-size: 1rem; }
     margin-bottom: var(--spacing-xl);
 }
 
+.section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: var(--spacing-md);
+}
+
+.section-header h3 {
+    margin: 0;
+}
+
 .welcome {
     font-size: 1.1rem;
     color: var(--text-secondary);

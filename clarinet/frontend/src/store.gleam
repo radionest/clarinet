@@ -47,6 +47,16 @@ pub type Model {
     record_type_form: Option(dynamic.Dynamic),
     patient_form_id: String,
     patient_form_name: String,
+    // Record creation form
+    record_form_record_type_name: String,
+    record_form_patient_id: String,
+    record_form_study_uid: String,
+    record_form_series_uid: String,
+    record_form_user_id: String,
+    record_form_parent_record_id: String,
+    record_form_context_info: String,
+    record_form_studies: List(Study),
+    record_form_series: List(Series),
     form_errors: Dict(String, String),
     // Pagination
     current_page: Int,
@@ -168,6 +178,21 @@ pub type Msg {
   SubmitPatientForm
   PatientFormSubmitted(Result(Patient, ApiError))
 
+  // Record creation form
+  UpdateRecordFormRecordType(String)
+  UpdateRecordFormPatient(String)
+  UpdateRecordFormStudy(String)
+  UpdateRecordFormSeries(String)
+  UpdateRecordFormUser(String)
+  UpdateRecordFormParentRecordId(String)
+  UpdateRecordFormContextInfo(String)
+  RecordFormStudiesLoaded(Result(List(Study), ApiError))
+  RecordFormSeriesLoaded(Result(List(Series), ApiError))
+  LoadRecordTypes
+  RecordTypesLoaded(Result(List(RecordType), ApiError))
+  SubmitRecordForm
+  RecordFormSubmitted(Result(Record, ApiError))
+
   // Slicer record completion (no form)
   CompleteRecord(record_id: String)
   CompleteRecordResult(record_id: String, result: Result(Record, ApiError))
@@ -278,6 +303,15 @@ pub fn init() -> Model {
     record_type_form: None,
     patient_form_id: "",
     patient_form_name: "",
+    record_form_record_type_name: "",
+    record_form_patient_id: "",
+    record_form_study_uid: "",
+    record_form_series_uid: "",
+    record_form_user_id: "",
+    record_form_parent_record_id: "",
+    record_form_context_info: "",
+    record_form_studies: [],
+    record_form_series: [],
     form_errors: dict.new(),
     current_page: 1,
     items_per_page: 20,
@@ -387,6 +421,21 @@ pub fn cache_patient(model: Model, patient: Patient) -> Model {
 
 pub fn clear_patient_form(model: Model) -> Model {
   Model(..model, patient_form_id: "", patient_form_name: "")
+}
+
+pub fn clear_record_form(model: Model) -> Model {
+  Model(
+    ..model,
+    record_form_record_type_name: "",
+    record_form_patient_id: "",
+    record_form_study_uid: "",
+    record_form_series_uid: "",
+    record_form_user_id: "",
+    record_form_parent_record_id: "",
+    record_form_context_info: "",
+    record_form_studies: [],
+    record_form_series: [],
+  )
 }
 
 // Form helpers
