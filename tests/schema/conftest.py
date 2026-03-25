@@ -55,6 +55,7 @@ _CRUD_LINKS: list[dict] = [
         "targets": [
             ("GetPatient", "get", "/api/patients/{patient_id}", "patient_id"),
             ("DeletePatient", "delete", "/api/patients/{patient_id}", "patient_id"),
+            ("AnonymizePatient", "post", "/api/patients/{patient_id}/anonymize", "patient_id"),
         ],
     },
     {
@@ -62,7 +63,10 @@ _CRUD_LINKS: list[dict] = [
         "post_status": "201",
         "id_field": "id",
         "targets": [
+            ("GetUser", "get", "/api/user/{user_id}", "user_id"),
+            ("UpdateUser", "put", "/api/user/{user_id}", "user_id"),
             ("DeleteUser", "delete", "/api/user/{user_id}", "user_id"),
+            ("GetUserRoles", "get", "/api/user/{user_id}/roles", "user_id"),
         ],
     },
     {
@@ -71,6 +75,36 @@ _CRUD_LINKS: list[dict] = [
         "id_field": "name",
         "targets": [
             ("GetRole", "get", "/api/user/roles/{role_name}", "role_name"),
+        ],
+    },
+    {
+        "post_path": "/api/studies",
+        "post_status": "201",
+        "id_field": "study_uid",
+        "targets": [
+            ("GetStudy", "get", "/api/studies/{study_uid}", "study_uid"),
+            ("GetStudySeries", "get", "/api/studies/{study_uid}/series", "study_uid"),
+            ("DeleteStudy", "delete", "/api/studies/{study_uid}", "study_uid"),
+        ],
+    },
+    {
+        "post_path": "/api/series",
+        "post_status": "201",
+        "id_field": "series_uid",
+        "targets": [
+            ("GetSeries", "get", "/api/series/{series_uid}", "series_uid"),
+        ],
+    },
+    {
+        "post_path": "/api/records/",
+        "post_status": "201",
+        "id_field": "id",
+        "targets": [
+            ("GetRecord", "get", "/api/records/{record_id}", "record_id"),
+            ("UpdateRecordStatus", "patch", "/api/records/{record_id}/status", "record_id"),
+            ("UpdateRecord", "patch", "/api/records/{record_id}", "record_id"),
+            ("InvalidateRecord", "post", "/api/records/{record_id}/invalidate", "record_id"),
+            ("CheckFiles", "post", "/api/records/{record_id}/check-files", "record_id"),
         ],
     },
 ]
