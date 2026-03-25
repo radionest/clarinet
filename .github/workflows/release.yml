@@ -41,7 +41,7 @@ jobs:
       - name: Verify frontend output
         run: |
           test -f clarinet/static/index.html || { echo "ERROR: Frontend build failed — no index.html"; exit 1; }
-          test -d clarinet/static/js || { echo "ERROR: Frontend build failed — no js dir"; exit 1; }
+          test -f clarinet/static/clarinet_frontend.js || { echo "ERROR: Frontend build failed — no JS bundle"; exit 1; }
           echo "Frontend build verified:"
           find clarinet/static -type f | head -20
 
