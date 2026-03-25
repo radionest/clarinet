@@ -117,6 +117,7 @@ pub fn requires_admin_role(route: Route) -> Bool {
     | Patients
     | PatientDetail(_)
     | PatientNew
+    | RecordNew
     | Users
     | UserProfile(_)
     | AdminDashboard

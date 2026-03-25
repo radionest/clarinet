@@ -11,6 +11,7 @@ import lustre/attribute
 import lustre/element.{type Element}
 import lustre/element/html
 import lustre/event
+import router
 import store.{type Model, type Msg}
 
 pub fn view(model: Model) -> Element(Msg) {
@@ -142,7 +143,17 @@ fn role_matrix_row(
 
 fn records_section(model: Model) -> Element(Msg) {
   html.div([attribute.class("dashboard-section")], [
-    html.h3([], [html.text("Records")]),
+    html.div([attribute.class("section-header")], [
+      html.h3([], [html.text("Records")]),
+      html.a(
+        [
+          attribute.class("btn btn-primary"),
+          attribute.href(router.route_to_path(router.RecordNew)),
+          event.on_click(store.Navigate(router.RecordNew)),
+        ],
+        [html.text("Create Record")],
+      ),
+    ]),
     case
       dict.values(model.records)
       |> list.sort(fn(a, b) {

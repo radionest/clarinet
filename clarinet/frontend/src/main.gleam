@@ -12,6 +12,7 @@ import api/studies
 import api/types
 import api/users
 import components/forms/patient_form
+import components/forms/record_form
 import components/layout
 import formosh/component as formosh_component
 import gleam/dict
@@ -41,6 +42,7 @@ import pages/record_types/edit as record_type_edit
 import pages/record_types/list as record_types_list
 import pages/records/execute as record_execute
 import pages/records/list as records_list
+import pages/records/new as record_new
 import pages/register
 import pages/series/detail as series_detail
 import pages/studies/detail as study_detail
@@ -216,13 +218,23 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
                     modem.push(router.route_to_path(router.Home), option.None, option.None),
                   ]),
                 )
-                _, _ -> #(
-                  new_model,
-                  effect.batch([
-                    stop_timer_effect,
-                    load_route_data(new_model, route),
-                  ]),
-                )
+                _, _ -> {
+                  // Clear form state when entering form pages
+                  let new_model = case route {
+                    router.RecordNew ->
+                      new_model
+                      |> store.clear_record_form()
+                      |> store.clear_form_errors()
+                    _ -> new_model
+                  }
+                  #(
+                    new_model,
+                    effect.batch([
+                      stop_timer_effect,
+                      load_route_data(new_model, route),
+                    ]),
+                  )
+                }
               }
           }
         }
@@ -1057,6 +1069,218 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     store.PatientFormSubmitted(Error(err)) ->
       handle_api_error(model, err, "Failed to create patient")
 
+    // Record creation form
+    store.LoadRecordTypes ->
+      load_with_effect(model, records.get_record_types, store.RecordTypesLoaded)
+
+    store.RecordTypesLoaded(Ok(rt_list)) -> {
+      let rt_dict =
+        list.fold(rt_list, model.record_types, fn(acc, rt) {
+          dict.insert(acc, rt.name, rt)
+        })
+      #(store.Model(..model, record_types: rt_dict, loading: False), effect.none())
+    }
+
+    store.RecordTypesLoaded(Error(err)) ->
+      handle_api_error(model, err, "Failed to load record types")
+
+    store.UpdateRecordFormRecordType(value) -> {
+      let new_model =
+        store.Model(
+          ..model,
+          record_form_record_type_name: value,
+          // Reset study/series when type changes
+          record_form_study_uid: "",
+          record_form_series_uid: "",
+          record_form_studies: [],
+          record_form_series: [],
+        )
+      // Re-load studies if a patient is already selected
+      case model.record_form_patient_id {
+        "" -> #(new_model, effect.none())
+        patient_id -> #(new_model, load_record_form_studies(patient_id))
+      }
+    }
+
+    store.UpdateRecordFormPatient(value) -> {
+      let new_model =
+        store.Model(
+          ..model,
+          record_form_patient_id: value,
+          // Reset study/series when patient changes
+          record_form_study_uid: "",
+          record_form_series_uid: "",
+          record_form_studies: [],
+          record_form_series: [],
+        )
+      case value {
+        "" -> #(new_model, effect.none())
+        patient_id -> {
+          #(new_model, load_record_form_studies(patient_id))
+        }
+      }
+    }
+
+    store.RecordFormStudiesLoaded(Ok(studies_list)) -> {
+      #(
+        store.Model(..model, record_form_studies: studies_list),
+        effect.none(),
+      )
+    }
+
+    store.RecordFormStudiesLoaded(Error(_)) -> {
+      #(
+        store.Model(..model, record_form_studies: []),
+        effect.none(),
+      )
+    }
+
+    store.UpdateRecordFormStudy(value) -> {
+      let new_model =
+        store.Model(
+          ..model,
+          record_form_study_uid: value,
+          // Reset series when study changes
+          record_form_series_uid: "",
+          record_form_series: [],
+        )
+      case value {
+        "" -> #(new_model, effect.none())
+        study_uid -> {
+          // Load series for the selected study
+          let eff = {
+            use dispatch <- effect.from
+            studies.get_study(study_uid)
+            |> promise.tap(fn(result) {
+              let series_result = case result {
+                Ok(study) ->
+                  case study.series {
+                    Some(series_list) -> Ok(series_list)
+                    None -> Ok([])
+                  }
+                Error(err) -> Error(err)
+              }
+              dispatch(store.RecordFormSeriesLoaded(series_result))
+            })
+            Nil
+          }
+          #(new_model, eff)
+        }
+      }
+    }
+
+    store.RecordFormSeriesLoaded(Ok(series_list)) -> {
+      #(
+        store.Model(..model, record_form_series: series_list),
+        effect.none(),
+      )
+    }
+
+    store.RecordFormSeriesLoaded(Error(_)) -> {
+      #(
+        store.Model(..model, record_form_series: []),
+        effect.none(),
+      )
+    }
+
+    store.UpdateRecordFormSeries(value) -> {
+      #(store.Model(..model, record_form_series_uid: value), effect.none())
+    }
+
+    store.UpdateRecordFormUser(value) -> {
+      #(store.Model(..model, record_form_user_id: value), effect.none())
+    }
+
+    store.UpdateRecordFormParentRecordId(value) -> {
+      #(store.Model(..model, record_form_parent_record_id: value), effect.none())
+    }
+
+    store.UpdateRecordFormContextInfo(value) -> {
+      #(store.Model(..model, record_form_context_info: value), effect.none())
+    }
+
+    store.SubmitRecordForm -> {
+      case record_form.validate(model) {
+        Ok(_) -> {
+          let record_create = models.RecordCreate(
+            record_type_name: model.record_form_record_type_name,
+            patient_id: model.record_form_patient_id,
+            status: types.Pending,
+            study_uid: case model.record_form_study_uid {
+              "" -> None
+              v -> Some(v)
+            },
+            series_uid: case model.record_form_series_uid {
+              "" -> None
+              v -> Some(v)
+            },
+            user_id: case model.record_form_user_id {
+              "" -> None
+              v -> Some(v)
+            },
+            parent_record_id: case model.record_form_parent_record_id {
+              "" -> None
+              v -> case int.parse(v) {
+                Ok(id) -> Some(id)
+                Error(_) -> None
+              }
+            },
+            context_info: case model.record_form_context_info {
+              "" -> None
+              v -> Some(v)
+            },
+          )
+          let submit_effect = {
+            use dispatch <- effect.from
+            records.create_record(record_create)
+            |> promise.tap(fn(result) {
+              dispatch(store.RecordFormSubmitted(result))
+            })
+            Nil
+          }
+          #(
+            model |> store.set_loading(True) |> store.clear_form_errors(),
+            submit_effect,
+          )
+        }
+        Error(errors) -> {
+          #(store.Model(..model, form_errors: errors), effect.none())
+        }
+      }
+    }
+
+    store.RecordFormSubmitted(Ok(record)) -> {
+      let new_model =
+        model
+        |> store.cache_record(record)
+        |> store.set_loading(False)
+        |> store.clear_record_form()
+        |> store.clear_form_errors()
+        |> store.set_success("Record created successfully")
+      case record.id {
+        Some(id) -> {
+          let rid = int.to_string(id)
+          let new_model = store.set_route(new_model, router.RecordDetail(rid))
+          #(new_model, modem.push(
+            router.route_to_path(router.RecordDetail(rid)),
+            option.None,
+            option.None,
+          ))
+        }
+        None -> {
+          let new_model = store.set_route(new_model, router.Records)
+          #(new_model, modem.push(
+            router.route_to_path(router.Records),
+            option.None,
+            option.None,
+          ))
+        }
+      }
+    }
+
+    store.RecordFormSubmitted(Error(err)) ->
+      handle_api_error(model, err, "Failed to create record")
+
     // Patient anonymize
     store.AnonymizePatient(id) ->
       load_with_effect(
@@ -1367,6 +1591,24 @@ fn load_with_effect(
   #(store.set_loading(model, True), eff)
 }
 
+// Helper: load studies for a patient into record form state
+fn load_record_form_studies(patient_id: String) -> Effect(Msg) {
+  use dispatch <- effect.from
+  patients.get_patient(patient_id)
+  |> promise.tap(fn(result) {
+    let studies_result = case result {
+      Ok(patient) ->
+        case patient.studies {
+          Some(s) -> Ok(s)
+          None -> Ok([])
+        }
+      Error(err) -> Error(err)
+    }
+    dispatch(store.RecordFormStudiesLoaded(studies_result))
+  })
+  Nil
+}
+
 // Helper: dispatch a message as an effect
 fn dispatch_msg(msg: Msg) -> Effect(Msg) {
   use dispatch <- effect.from
@@ -1449,7 +1691,7 @@ fn view_content(model: Model) -> Element(Msg) {
     router.SeriesDetail(id) -> series_detail.view(model, id)
     router.Records -> records_list.view(model)
     router.RecordDetail(id) -> record_execute.view(model, id)
-    router.RecordNew -> html.div([], [html.text("New record page")])
+    router.RecordNew -> record_new.view(model)
     router.RecordTypeDesign(_id) ->
       html.div([], [html.text("Record type design page")])
     router.Patients -> patients_list.view(model)
@@ -1552,6 +1794,13 @@ fn load_route_data(model: Model, route: Route) -> Effect(Msg) {
     router.PatientDetail(id), Some(models.User(is_superuser: True, ..)) ->
       effect.batch([
         dispatch_msg(store.LoadPatientDetail(id)),
+        dispatch_msg(store.LoadRecords),
+      ])
+    router.RecordNew, Some(models.User(is_superuser: True, ..)) ->
+      effect.batch([
+        dispatch_msg(store.LoadPatients),
+        dispatch_msg(store.LoadRecordTypes),
+        dispatch_msg(store.LoadUsers),
         dispatch_msg(store.LoadRecords),
       ])
     router.PatientNew, _ -> effect.none()
