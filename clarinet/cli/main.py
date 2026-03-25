@@ -625,6 +625,8 @@ def _patch_ohif_paths(ohif_dir: Path, base_path: str = "") -> None:
         ohif_dir: Directory containing OHIF Viewer files.
         base_path: Root URL prefix (e.g. "/liver_nir" or "").
     """
+    # Normalize: ensure leading slash, no trailing slash
+    base_path = ("/" + base_path.strip("/")).rstrip("/") if base_path else ""
     ohif_prefix = f"{base_path}/ohif/"
     ohif_base = f"{base_path}/ohif"
 
@@ -651,9 +653,13 @@ def _patch_ohif_paths(ohif_dir: Path, base_path: str = "") -> None:
     css_file = ohif_dir / "app.bundle.css"
     if css_file.exists():
         css = css_file.read_text(encoding="utf-8")
-        # Rewrite url(/...) to url(<ohif_prefix>...)
-        escaped = re.escape(ohif_prefix)
-        css = re.sub(rf"url\(/(?!{escaped})([^)])", rf"url({ohif_prefix}\1", css)
+        # Rewrite url(/X) to url(<ohif_prefix>X), skip already-prefixed URLs
+        escaped_prefix = re.escape(ohif_prefix)
+        css = re.sub(
+            rf"url\(/(?!{escaped_prefix[1:]})([^)])",
+            rf"url({ohif_prefix}\1",
+            css,
+        )
         css_file.write_text(css, encoding="utf-8")
 
     # --- manifest.json: icon paths ---

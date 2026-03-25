@@ -64,9 +64,9 @@ rabbitmq_port = 5672
 rabbitmq_login = "${RABBIT_USER}"
 rabbitmq_password = "${RABBIT_PASS}"
 
-# PACS (Orthanc on klara)
-pacs_host = "192.168.122.151"
-pacs_port = 4242
+# PACS
+pacs_host = "${CLARINET_PACS_HOST:-localhost}"
+pacs_port = ${CLARINET_PACS_PORT:-4242}
 
 # Storage
 storage_path = "${DATA_DIR}"
@@ -74,7 +74,7 @@ log_dir = "${LOG_DIR}"
 
 # Frontend
 frontend_enabled = true
-ohif_enabled = true
+ohif_enabled = ${CLARINET_OHIF_ENABLED:-true}
 TOML
 
 chmod 640 "$SETTINGS_FILE"
