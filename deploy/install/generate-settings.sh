@@ -65,8 +65,8 @@ rabbitmq_login = "${RABBIT_USER}"
 rabbitmq_password = "${RABBIT_PASS}"
 
 # PACS
-pacs_host = "localhost"
-pacs_port = 4242
+pacs_host = "${CLARINET_PACS_HOST:-localhost}"
+pacs_port = ${CLARINET_PACS_PORT:-4242}
 
 # Storage
 storage_path = "${DATA_DIR}"
@@ -74,7 +74,7 @@ log_dir = "${LOG_DIR}"
 
 # Frontend
 frontend_enabled = true
-ohif_enabled = false
+ohif_enabled = ${CLARINET_OHIF_ENABLED:-true}
 TOML
 
 chmod 640 "$SETTINGS_FILE"

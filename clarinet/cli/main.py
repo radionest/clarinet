@@ -618,41 +618,65 @@ def clean_frontend() -> None:
         logger.info("No build artifacts to clean")
 
 
-def _patch_ohif_paths(ohif_dir: Path) -> None:
-    """Rewrite asset paths in OHIF files for /ohif/ base path.
+def _patch_ohif_paths(ohif_dir: Path, base_path: str = "") -> None:
+    """Rewrite asset paths in OHIF files for sub-path deployment.
 
-    Ports the path-patching logic from the former build_ohif.sh into pure Python.
+    Args:
+        ohif_dir: Directory containing OHIF Viewer files.
+        base_path: Root URL prefix (e.g. "/liver_nir" or "").
     """
+    # Normalize: ensure leading slash, no trailing slash
+    base_path = ("/" + base_path.strip("/")).rstrip("/") if base_path else ""
+    ohif_prefix = f"{base_path}/ohif/"
+    ohif_base = f"{base_path}/ohif"
+
     # --- index.html ---
     index_html = ohif_dir / "index.html"
     if index_html.exists():
-        html = index_html.read_text()
-        html = html.replace("window.PUBLIC_URL = '/';", "window.PUBLIC_URL = '/ohif/';")
-        html = re.sub(r'href="/(?!ohif/)(?!/)', 'href="/ohif/', html)
-        html = re.sub(r'src="/(?!ohif/)(?!/)', 'src="/ohif/', html)
-        html = re.sub(r'content="/(?!ohif/)(?!/)', 'content="/ohif/', html)
-        index_html.write_text(html)
+        html = index_html.read_text(encoding="utf-8")
+        html = html.replace("window.PUBLIC_URL = '/';", f"window.PUBLIC_URL = '{ohif_prefix}';")
+        html = re.sub(r'href="/(?!ohif/)(?!/)', f'href="{ohif_prefix}', html)
+        html = re.sub(r'src="/(?!ohif/)(?!/)', f'src="{ohif_prefix}', html)
+        html = re.sub(r'content="/(?!ohif/)(?!/)', f'content="{ohif_prefix}', html)
+        index_html.write_text(html, encoding="utf-8")
 
     # --- JS bundles: webpack public path ---
     for js_file in ohif_dir.glob("*.bundle.*.js"):
-        content = js_file.read_text()
-        patched = content.replace('__webpack_require__.p = "/"', '__webpack_require__.p = "/ohif/"')
+        content = js_file.read_text(encoding="utf-8")
+        patched = content.replace(
+            '__webpack_require__.p = "/"', f'__webpack_require__.p = "{ohif_prefix}"'
+        )
         if patched != content:
-            js_file.write_text(patched)
+            js_file.write_text(patched, encoding="utf-8")
 
     # --- CSS bundle: root-relative url() references ---
     css_file = ohif_dir / "app.bundle.css"
     if css_file.exists():
-        css = css_file.read_text()
-        css = re.sub(r"url\(/([^o)])", r"url(/ohif/\1", css)
-        css_file.write_text(css)
+        css = css_file.read_text(encoding="utf-8")
+        # Rewrite url(/X) to url(<ohif_prefix>X), skip already-prefixed URLs
+        escaped_prefix = re.escape(ohif_prefix)
+        css = re.sub(
+            rf"url\(/(?!{escaped_prefix[1:]})([^)])",
+            rf"url({ohif_prefix}\1",
+            css,
+        )
+        css_file.write_text(css, encoding="utf-8")
 
     # --- manifest.json: icon paths ---
     manifest = ohif_dir / "manifest.json"
     if manifest.exists():
-        content = manifest.read_text()
-        content = content.replace('"/assets/', '"/ohif/assets/')
-        manifest.write_text(content)
+        content = manifest.read_text(encoding="utf-8")
+        content = content.replace('"/assets/', f'"{ohif_prefix}assets/')
+        manifest.write_text(content, encoding="utf-8")
+
+    # --- app-config.js: routerBasename and DICOMweb paths ---
+    config_file = ohif_dir / "app-config.js"
+    if config_file.exists():
+        config = config_file.read_text(encoding="utf-8")
+        config = config.replace("routerBasename: '/ohif'", f"routerBasename: '{ohif_base}'")
+        dicomweb_path = f"{base_path}/dicom-web"
+        config = config.replace("'/dicom-web'", f"'{dicomweb_path}'")
+        config_file.write_text(config, encoding="utf-8")
 
 
 def _clean_ohif_dir(ohif_dir: Path, preserve_config: bool) -> None:
@@ -732,9 +756,10 @@ def install_ohif(version: str | None = None, force_config: bool = False) -> None
         if not preserve_config:
             _install_config_template(ohif_dir)
 
-    # Patch paths for /ohif/ base
-    logger.info("Patching asset paths for /ohif/ base path...")
-    _patch_ohif_paths(ohif_dir)
+    # Patch paths for sub-path deployment
+    base_path = settings.root_url
+    logger.info(f"Patching asset paths for {base_path}/ohif/ base path...")
+    _patch_ohif_paths(ohif_dir, base_path=base_path)
 
     # Write version marker
     version_file.write_text(version)

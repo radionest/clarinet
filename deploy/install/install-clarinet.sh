@@ -107,7 +107,15 @@ init_database() {
     log "Database initialized"
 }
 
-# --- Step 8: Systemd units ---
+# --- Step 8: OHIF Viewer ---
+install_ohif() {
+    log "Installing OHIF Viewer..."
+    cd "$INSTALL_DIR"
+    sudo -u clarinet "$VENV_DIR/bin/clarinet" ohif install --force-config || warn "OHIF install failed (non-critical)"
+    log "OHIF Viewer installed"
+}
+
+# --- Step 9: Systemd units ---
 install_systemd() {
     log "Installing systemd units..."
     cp "${DEPLOY_DIR}/systemd/clarinet-api.service" /etc/systemd/system/
@@ -175,6 +183,7 @@ install_wheel
 setup_services
 generate_settings
 init_database
+install_ohif
 install_systemd
 install_nginx
 print_summary

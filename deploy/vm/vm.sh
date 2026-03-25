@@ -342,6 +342,7 @@ cmd_deploy() {
     wheel_name="$(basename "$wheel")"
     log "Running installer on VM..."
     _ssh_cmd "sudo CLARINET_PATH_PREFIX='${PATH_PREFIX}' \
+        CLARINET_PACS_HOST='${PACS_HOST:-localhost}' \
         bash /tmp/clarinet-deploy/install/install-clarinet.sh \
         /tmp/clarinet-deploy/${wheel_name} \
         /tmp/clarinet-deploy"

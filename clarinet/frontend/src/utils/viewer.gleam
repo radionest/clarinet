@@ -1,6 +1,7 @@
 // OHIF Viewer URL helpers for study/series viewer buttons
 
 import api/types
+import config
 import gleam/option.{type Option, None, Some}
 import gleam/string
 import lustre/attribute
@@ -9,7 +10,8 @@ import lustre/element/html
 
 /// Build an OHIF viewer URL for a study, optionally scoped to a series.
 pub fn viewer_url(study_uid: String, series_uid: Option(String)) -> String {
-  let base = "/ohif/viewer?StudyInstanceUIDs=" <> study_uid
+  let base =
+    config.base_path() <> "/ohif/viewer?StudyInstanceUIDs=" <> study_uid
   case series_uid {
     Some(uid) -> base <> "&SeriesInstanceUIDs=" <> uid
     None -> base
@@ -60,7 +62,10 @@ pub fn record_viewer_button(
         Some(uid_list) -> {
           let study_part =
             string.join(uid_list, "&StudyInstanceUIDs=")
-          let url = "/ohif/viewer?StudyInstanceUIDs=" <> study_part
+          let url =
+            config.base_path()
+            <> "/ohif/viewer?StudyInstanceUIDs="
+            <> study_part
           // Determine series UIDs to include
           let series_part = case viewer_series_uids {
             Some(sids) if sids != [] ->
