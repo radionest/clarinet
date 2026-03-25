@@ -5,7 +5,12 @@ import pytest
 from clarinet.exceptions import SlicerError
 from clarinet.services.slicer.client import SlicerClient
 
-pytestmark = [pytest.mark.slicer, pytest.mark.asyncio, pytest.mark.usefixtures("_check_slicer")]
+pytestmark = [
+    pytest.mark.slicer,
+    pytest.mark.asyncio,
+    pytest.mark.usefixtures("_check_slicer"),
+    pytest.mark.xdist_group("slicer"),
+]
 
 
 async def test_ping(slicer_client: SlicerClient) -> None:

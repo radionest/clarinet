@@ -4,7 +4,12 @@ import pytest
 
 from clarinet.services.slicer.service import SlicerService
 
-pytestmark = [pytest.mark.slicer, pytest.mark.asyncio, pytest.mark.usefixtures("_check_slicer")]
+pytestmark = [
+    pytest.mark.slicer,
+    pytest.mark.asyncio,
+    pytest.mark.usefixtures("_check_slicer"),
+    pytest.mark.xdist_group("slicer"),
+]
 
 
 async def test_execute_with_helper(slicer_service: SlicerService, slicer_url: str) -> None:
