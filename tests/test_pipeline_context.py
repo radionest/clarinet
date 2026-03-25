@@ -221,7 +221,7 @@ class TestBuildWorkingDirs:
 
         dirs = FileResolver.build_working_dirs(record)
 
-        assert str(dirs[DicomQueryLevel.PATIENT]).startswith("/custom")
+        assert str(dirs[DicomQueryLevel.PATIENT]).startswith(str(Path("/custom")))
 
 
 # ── FileResolver.build_fields ───────────────────────────────────────────────
