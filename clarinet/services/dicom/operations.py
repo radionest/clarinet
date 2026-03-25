@@ -608,6 +608,15 @@ class DicomOperations:
             result.instances = finished.instances
             result.num_completed = finished.received_count
 
+            # Detect timeout: SCP didn't receive all expected instances
+            if not finished.done.is_set():
+                expected = finished.expected_count or "unknown"
+                logger.warning(
+                    f"C-MOVE timed out: received {finished.received_count}/{expected} "
+                    f"instances in {timeout}s"
+                )
+                result.status = "timeout"
+
             # Write to disk if DISK mode requested
             if storage.mode == StorageMode.DISK and storage.output_dir:
                 storage.output_dir.mkdir(parents=True, exist_ok=True)

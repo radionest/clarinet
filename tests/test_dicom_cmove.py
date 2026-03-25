@@ -103,6 +103,14 @@ class TestStorageSCPSessions:
         assert elapsed < 1.0  # Didn't hang
         scp.finish_session("s/")
 
+    def test_wait_for_completion_unknown_session(self):
+        scp = StorageSCP()
+        start = time.monotonic()
+        result = scp.wait_for_completion("unknown", timeout=0.1)
+        elapsed = time.monotonic() - start
+        assert result is None
+        assert elapsed < 1.0
+
     def test_is_running_false_initially(self):
         scp = StorageSCP()
         assert not scp.is_running

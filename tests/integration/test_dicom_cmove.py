@@ -103,10 +103,17 @@ def _get_local_ip() -> str:
 def _pacs_can_reach_us() -> bool:
     """Check if PACS can connect back to our host (needed for C-MOVE).
 
-    Starts a TCP listener, then asks klara to connect via SSH.
-    Falls back to True if SSH is unavailable (assume connectivity).
+    Uses SSH to ask the PACS host to ``nc`` our listener port.
+    The SSH host is configurable via ``CLARINET_TEST_PACS_SSH``
+    (default: ``klara``).  Set to empty string to skip the check
+    and assume connectivity.
     """
+    import os
     import threading
+
+    ssh_host = os.environ.get("CLARINET_TEST_PACS_SSH", "klara")
+    if not ssh_host:
+        return True  # Assume reachable when env var is explicitly empty
 
     port = _free_port()
     local_ip = _get_local_ip()
@@ -132,7 +139,7 @@ def _pacs_can_reach_us() -> bool:
 
     with contextlib.suppress(subprocess.TimeoutExpired, FileNotFoundError):
         subprocess.run(
-            ["ssh", "-o", "ConnectTimeout=3", "klara", f"nc -z {local_ip} {port}"],
+            ["ssh", "-o", "ConnectTimeout=3", ssh_host, f"nc -z {local_ip} {port}"],
             timeout=5,
             capture_output=True,
         )
