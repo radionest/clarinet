@@ -133,6 +133,8 @@ class Settings(BaseSettings):
     dicom_ip: str | None = None
     dicom_max_pdu: int = 16384
     dicom_max_concurrent_associations: int = 8
+    dicom_retrieve_mode: str = "c-get"  # "c-get" or "c-move"
+    dicom_cmove_timeout: float = 300.0  # seconds to wait for SCP to receive instances
     dicom_log_identifiers: bool = False
 
     # DICOMweb proxy settings

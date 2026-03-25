@@ -26,6 +26,7 @@ from clarinet.services.dicom.models import (
     StudyResult,
 )
 from clarinet.services.dicom.operations import DicomOperations
+from clarinet.settings import settings
 from clarinet.utils.logger import logger
 
 
@@ -236,12 +237,26 @@ class DicomClient:
 
         storage = StorageConfig(mode=mode, output_dir=output_dir)
 
-        result = await asyncio.to_thread(
-            self._operations.get_study,
-            config,
-            request,
-            storage,
-        )
+        if settings.dicom_retrieve_mode == "c-move":
+            from clarinet.services.dicom.scp import get_storage_scp
+
+            scp = get_storage_scp()
+            result = await asyncio.to_thread(
+                self._operations.retrieve_via_move,
+                config,
+                request,
+                storage,
+                settings.dicom_aet,
+                scp,
+                settings.dicom_cmove_timeout,
+            )
+        else:
+            result = await asyncio.to_thread(
+                self._operations.get_study,
+                config,
+                request,
+                storage,
+            )
 
         logger.info(
             f"Retrieved {label}: {result.num_completed} completed, {result.num_failed} failed"

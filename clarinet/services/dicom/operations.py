@@ -1,9 +1,10 @@
 """Synchronous DICOM operations using pynetdicom."""
 
 import threading
+import time
 from collections.abc import Generator
 from contextlib import contextmanager
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydicom import Dataset
 from pynetdicom import AE, StoragePresentationContexts, build_role  # type: ignore[import-not-found]
@@ -18,6 +19,9 @@ from pynetdicom.sop_class import (  # type: ignore[import-not-found,attr-defined
     StudyRootQueryRetrieveInformationModelGet,
     StudyRootQueryRetrieveInformationModelMove,
 )
+
+if TYPE_CHECKING:
+    from clarinet.services.dicom.scp import StorageSCP
 
 from clarinet.exceptions.http import CONFLICT
 from clarinet.services.dicom.handlers import create_store_handler
@@ -500,6 +504,124 @@ class DicomOperations:
                         logger.warning(f"C-MOVE status: 0x{status.Status:04x}")
 
             return result
+
+    def retrieve_via_move(
+        self,
+        config: AssociationConfig,
+        request: RetrieveRequest,
+        storage: StorageConfig,
+        local_aet: str,
+        scp: StorageSCP,
+        timeout: float = 300.0,
+    ) -> RetrieveResult:
+        """Retrieve DICOM instances via C-MOVE with local Storage SCP.
+
+        Sends a C-MOVE request to the PACS, which connects back to our
+        Storage SCP and delivers instances via C-STORE.
+
+        Args:
+            config: Association configuration for the PACS.
+            request: Retrieve request (study/series level).
+            storage: Storage configuration (mode used after reception).
+            local_aet: Our AE title (C-MOVE destination).
+            scp: Running StorageSCP instance to receive C-STORE.
+            timeout: Seconds to wait for all instances to arrive.
+
+        Returns:
+            RetrieveResult with received instances.
+
+        Raises:
+            CONFLICT: If association fails.
+            RuntimeError: If SCP is not running.
+        """
+        if not scp.is_running:
+            raise RuntimeError(
+                "Storage SCP not running — C-MOVE requires a running SCP. "
+                "Set dicom_retrieve_mode='c-get' or start the API server."
+            )
+
+        # Derive session key
+        series_uid = request.series_instance_uid or ""
+        key = f"{request.study_instance_uid}/{series_uid}"
+
+        scp.register_session(key)
+        start_time = time.monotonic()
+
+        try:
+            ae = self._create_ae()
+            ds = self._build_retrieve_dataset(request)
+
+            with self._association(ae, config) as assoc:
+                result = RetrieveResult(status="pending")
+                responses = assoc.send_c_move(
+                    ds, local_aet, PatientRootQueryRetrieveInformationModelMove
+                )
+
+                total_expected = None
+                for status, _identifier in responses:
+                    if not status:
+                        continue
+
+                    if hasattr(status, "NumberOfRemainingSuboperations"):
+                        result.num_remaining = status.NumberOfRemainingSuboperations or 0
+                    if hasattr(status, "NumberOfCompletedSuboperations"):
+                        result.num_completed = status.NumberOfCompletedSuboperations or 0
+                    if hasattr(status, "NumberOfFailedSuboperations"):
+                        result.num_failed = status.NumberOfFailedSuboperations or 0
+                    if hasattr(status, "NumberOfWarningSuboperations"):
+                        result.num_warning = status.NumberOfWarningSuboperations or 0
+
+                    # Compute expected count from first pending response
+                    if total_expected is None and status.Status == 0xFF00:
+                        total_expected = (
+                            result.num_remaining
+                            + result.num_completed
+                            + result.num_failed
+                            + result.num_warning
+                        )
+                        if total_expected > 0:
+                            scp.set_expected(key, total_expected)
+
+                    match status.Status:
+                        case 0x0000:
+                            result.status = "success"
+                            logger.info(
+                                f"C-MOVE completed: {result.num_completed} completed, "
+                                f"{result.num_failed} failed"
+                            )
+                        case 0xFF00:
+                            result.status = "pending"
+                        case _:
+                            result.status = f"warning_0x{status.Status:04x}"
+                            logger.warning(f"C-MOVE status: 0x{status.Status:04x}")
+
+            # Wait for SCP to receive all instances
+            elapsed = time.monotonic() - start_time
+            remaining = max(timeout - elapsed, 1.0)
+            scp.wait_for_completion(key, timeout=remaining)
+
+            # Collect results
+            finished = scp.finish_session(key)
+            if finished is None:
+                return result
+
+            result.instances = finished.instances
+            result.num_completed = finished.received_count
+
+            # Write to disk if DISK mode requested
+            if storage.mode == StorageMode.DISK and storage.output_dir:
+                storage.output_dir.mkdir(parents=True, exist_ok=True)
+                for sop_uid, instance_ds in finished.instances.items():
+                    filepath = storage.output_dir / f"{sop_uid}.dcm"
+                    instance_ds.save_as(filepath, enforce_file_format=True)
+
+            logger.info(f"C-MOVE retrieve complete: {finished.received_count} instances received")
+            return result
+
+        except Exception:
+            # Clean up session on any error
+            scp.finish_session(key)
+            raise
 
     def store_instance(self, config: AssociationConfig, dataset: Dataset) -> bool:
         """Send a single DICOM instance to a peer via C-STORE.
