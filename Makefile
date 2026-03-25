@@ -38,14 +38,9 @@ frontend-build: ## Build frontend for production
 		cd clarinet/frontend && \
 		rm -rf build/ && \
 		gleam deps download && \
-		gleam build --target javascript && \
-		cd ../.. && \
-		rm -rf clarinet/static && \
-		mkdir -p clarinet/static/js clarinet/static/css clarinet/static/assets && \
-		cp -r clarinet/frontend/build/dev/javascript/* clarinet/static/js/ && \
-		find clarinet/static/js -type d -name "_gleam_artefacts" -exec rm -rf {} + 2>/dev/null; \
-		if [ -d "clarinet/frontend/public" ]; then \
-			cp -r clarinet/frontend/public/* clarinet/static/; \
+		gleam run -m lustre/dev build --minify && \
+		if [ -d "public" ]; then \
+			cp -r public/* ../../clarinet/static/; \
 		fi && \
 		echo "Frontend build complete! Output in clarinet/static/"; \
 	fi

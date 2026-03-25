@@ -18,7 +18,16 @@ lazy_const = "~> 1.0"
 multipart_form = "~> 1.0"
 [dev-dependencies]
 gleeunit = "~> 1.4"
+lustre_dev_tools = "~> 2.3"
 
 [javascript]
-entry_point = "clarinet.gleam"
-output = "build/dev/javascript/clarinet.mjs"
+entry_point = "clarinet_frontend.gleam"
+output = "build/dev/javascript/clarinet_frontend.mjs"
+
+[tools.lustre.bin]
+bun = "system"
+
+# Default build config. outdir is the single source of truth for output path.
+# Minification is NOT set here — pass --minify explicitly in production builds only.
+[tools.lustre.build]
+outdir = "../../clarinet/static"
