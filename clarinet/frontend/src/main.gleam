@@ -1098,25 +1098,7 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       // Re-load studies if a patient is already selected
       case model.record_form_patient_id {
         "" -> #(new_model, effect.none())
-        patient_id -> {
-          let eff = {
-            use dispatch <- effect.from
-            patients.get_patient(patient_id)
-            |> promise.tap(fn(result) {
-              let studies_result = case result {
-                Ok(patient) ->
-                  case patient.studies {
-                    Some(s) -> Ok(s)
-                    None -> Ok([])
-                  }
-                Error(err) -> Error(err)
-              }
-              dispatch(store.RecordFormStudiesLoaded(studies_result))
-            })
-            Nil
-          }
-          #(new_model, eff)
-        }
+        patient_id -> #(new_model, load_record_form_studies(patient_id))
       }
     }
 
@@ -1134,24 +1116,7 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       case value {
         "" -> #(new_model, effect.none())
         patient_id -> {
-          // Load studies for the selected patient
-          let eff = {
-            use dispatch <- effect.from
-            patients.get_patient(patient_id)
-            |> promise.tap(fn(result) {
-              let studies_result = case result {
-                Ok(patient) ->
-                  case patient.studies {
-                    Some(studies) -> Ok(studies)
-                    None -> Ok([])
-                  }
-                Error(err) -> Error(err)
-              }
-              dispatch(store.RecordFormStudiesLoaded(studies_result))
-            })
-            Nil
-          }
-          #(new_model, eff)
+          #(new_model, load_record_form_studies(patient_id))
         }
       }
     }
@@ -1285,10 +1250,6 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     }
 
     store.RecordFormSubmitted(Ok(record)) -> {
-      let record_id = case record.id {
-        Some(id) -> int.to_string(id)
-        None -> "0"
-      }
       let new_model =
         model
         |> store.cache_record(record)
@@ -1296,14 +1257,25 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         |> store.clear_record_form()
         |> store.clear_form_errors()
         |> store.set_success("Record created successfully")
-        |> store.set_route(router.RecordDetail(record_id))
-      let nav_effect =
-        modem.push(
-          router.route_to_path(router.RecordDetail(record_id)),
-          option.None,
-          option.None,
-        )
-      #(new_model, nav_effect)
+      case record.id {
+        Some(id) -> {
+          let rid = int.to_string(id)
+          let new_model = store.set_route(new_model, router.RecordDetail(rid))
+          #(new_model, modem.push(
+            router.route_to_path(router.RecordDetail(rid)),
+            option.None,
+            option.None,
+          ))
+        }
+        None -> {
+          let new_model = store.set_route(new_model, router.Records)
+          #(new_model, modem.push(
+            router.route_to_path(router.Records),
+            option.None,
+            option.None,
+          ))
+        }
+      }
     }
 
     store.RecordFormSubmitted(Error(err)) ->
@@ -1617,6 +1589,24 @@ fn load_with_effect(
     Nil
   }
   #(store.set_loading(model, True), eff)
+}
+
+// Helper: load studies for a patient into record form state
+fn load_record_form_studies(patient_id: String) -> Effect(Msg) {
+  use dispatch <- effect.from
+  patients.get_patient(patient_id)
+  |> promise.tap(fn(result) {
+    let studies_result = case result {
+      Ok(patient) ->
+        case patient.studies {
+          Some(s) -> Ok(s)
+          None -> Ok([])
+        }
+      Error(err) -> Error(err)
+    }
+    dispatch(store.RecordFormStudiesLoaded(studies_result))
+  })
+  Nil
 }
 
 // Helper: dispatch a message as an effect
