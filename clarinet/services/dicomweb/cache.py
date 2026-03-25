@@ -328,7 +328,9 @@ class DicomWebCache:
                 )
 
             # 3. Cache miss — retrieve from PACS to memory
-            logger.debug(f"Cache miss — retrieving series {series_uid} via C-GET (memory mode)")
+            logger.debug(
+                f"Cache miss — retrieving series {series_uid} via DICOM retrieve (memory mode)"
+            )
             result = await client.get_series_to_memory(
                 study_uid=study_uid,
                 series_uid=series_uid,
@@ -448,7 +450,7 @@ class DicomWebCache:
             # Single study-level C-GET
             logger.info(
                 f"Cache miss for {len(still_missing)} series — "
-                f"retrieving study {study_uid} via single C-GET"
+                f"retrieving study {study_uid} via single DICOM retrieve"
             )
             cget_result = await client.get_study_to_memory(study_uid=study_uid, peer=pacs)
 
