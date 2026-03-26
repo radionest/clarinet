@@ -183,17 +183,16 @@ async def reconcile_record_types(
                 config_defs = config_item.file_registry or []
 
             if name not in db_types:
-                # CREATE — new RecordType (savepoint isolates FK errors)
+                # CREATE — savepoint isolates the entire item (RT + file links)
                 async with session.begin_nested():
                     create_data = config_item.model_dump(exclude={"file_registry"})
                     new_rt = RecordType.model_validate(create_data)
-                    new_rt.file_links = []  # Initialize empty, will be populated below
+                    new_rt.file_links = []
                     session.add(new_rt)
                     await session.flush()
 
-                # Sync file links (outside savepoint — RT already persisted)
-                if config_defs:
-                    await sync_file_links(new_rt, config_defs, fd_repo, session)
+                    if config_defs:
+                        await sync_file_links(new_rt, config_defs, fd_repo, session)
 
                 result.created.append(name)
                 logger.info(f"Config reconcile: created '{name}'")
