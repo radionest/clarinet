@@ -24,6 +24,9 @@ clarinet/static/
 
 # Database
 *.db
+*.db-shm
+*.db-wal
+*.db-journal
 
 # Logs
 *.log
