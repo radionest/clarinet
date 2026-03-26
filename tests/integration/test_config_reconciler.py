@@ -9,7 +9,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 
 from clarinet.config.reconciler import reconcile_record_types
+from clarinet.exceptions.domain import ConfigurationError
 from clarinet.models.record import RecordType, RecordTypeCreate
+from clarinet.models.user import UserRole
 
 
 def _make_config(
@@ -319,3 +321,180 @@ async def test_empty_collection_matches_factory_default(
 
     assert result.unchanged == ["existing-type"]
     assert result.updated == []
+
+
+# --- Regression tests: savepoint isolation and role validation ---
+
+
+@pytest.mark.asyncio
+async def test_savepoint_isolates_create_error(
+    test_session: AsyncSession,
+) -> None:
+    """A failing CREATE should be recorded in errors without breaking other items.
+
+    Regression: before savepoints, one FK/integrity error poisoned the whole session.
+    """
+    from unittest.mock import patch
+
+    good_items = [
+        _make_config("iso-alpha"),
+        _make_config("iso-gamma"),
+    ]
+    bad_item = _make_config("iso-beta")
+
+    original_flush = test_session.flush
+    call_count = 0
+
+    async def patched_flush(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 2:  # iso-beta is second item
+            raise Exception("simulated integrity error")
+        return await original_flush(*args, **kwargs)
+
+    config = [good_items[0], bad_item, good_items[1]]
+
+    with patch.object(test_session, "flush", side_effect=patched_flush):
+        result = await reconcile_record_types(config, test_session)
+
+    assert "iso-alpha" in result.created
+    assert "iso-gamma" in result.created
+    assert len(result.errors) == 1
+    assert result.errors[0][0] == "iso-beta"
+    assert "simulated integrity error" in result.errors[0][1]
+
+
+@pytest.mark.asyncio
+async def test_reconcile_config_validates_missing_roles(
+    test_session: AsyncSession,
+) -> None:
+    """reconcile_config raises ConfigurationError for undefined role_name.
+
+    Regression: before validation, undefined roles caused cryptic FK violations
+    with cascading session poisoning.
+    """
+    from unittest.mock import AsyncMock, patch
+
+    from clarinet.utils.bootstrap import reconcile_config
+
+    role = UserRole(name="doctor-test")
+    test_session.add(role)
+    await test_session.commit()
+
+    items = [
+        _make_config("valid-role-type", role_name="doctor-test"),
+        _make_config("bad-role-type", role_name="nonexistent-role"),
+    ]
+
+    with (
+        patch(
+            "clarinet.config.python_loader.load_python_config",
+            new_callable=AsyncMock,
+            return_value=items,
+        ),
+        patch(
+            "clarinet.utils.bootstrap.db_manager.get_async_session_context",
+        ) as mock_ctx,
+        patch("clarinet.settings.settings") as mock_settings,
+    ):
+        mock_settings.config_mode = "python"
+        mock_settings.config_tasks_path = "/fake/path"
+        mock_settings.config_delete_orphans = False
+
+        ctx = AsyncMock()
+        ctx.__aenter__ = AsyncMock(return_value=test_session)
+        ctx.__aexit__ = AsyncMock(return_value=False)
+        mock_ctx.return_value = ctx
+
+        with pytest.raises(ConfigurationError, match="nonexistent-role"):
+            await reconcile_config(folder="/fake/path")
+
+
+@pytest.mark.asyncio
+async def test_reconcile_config_passes_with_valid_roles(
+    test_session: AsyncSession,
+) -> None:
+    """reconcile_config succeeds when all role_names exist."""
+    from unittest.mock import AsyncMock, patch
+
+    from clarinet.utils.bootstrap import reconcile_config
+
+    role = UserRole(name="valid-role-test")
+    test_session.add(role)
+    await test_session.commit()
+
+    items = [
+        _make_config("role-ok-type", role_name="valid-role-test"),
+        _make_config("no-role-type"),  # role_name=None — should be fine
+    ]
+
+    with (
+        patch(
+            "clarinet.config.python_loader.load_python_config",
+            new_callable=AsyncMock,
+            return_value=items,
+        ),
+        patch(
+            "clarinet.utils.bootstrap.db_manager.get_async_session_context",
+        ) as mock_ctx,
+        patch("clarinet.settings.settings") as mock_settings,
+    ):
+        mock_settings.config_mode = "python"
+        mock_settings.config_tasks_path = "/fake/path"
+        mock_settings.config_delete_orphans = False
+
+        ctx = AsyncMock()
+        ctx.__aenter__ = AsyncMock(return_value=test_session)
+        ctx.__aexit__ = AsyncMock(return_value=False)
+        mock_ctx.return_value = ctx
+
+        result = await reconcile_config(folder="/fake/path")
+
+    assert result.errors == []
+    assert "role-ok-type" in result.created
+    assert "no-role-type" in result.created
+
+
+@pytest.mark.asyncio
+async def test_error_message_lists_all_db_roles(
+    test_session: AsyncSession,
+) -> None:
+    """ConfigurationError should list ALL DB roles, not just referenced ones."""
+    from unittest.mock import AsyncMock, patch
+
+    from clarinet.utils.bootstrap import reconcile_config
+
+    for name in ("alpha-role", "beta-role"):
+        test_session.add(UserRole(name=name))
+    await test_session.commit()
+
+    items = [_make_config("bad-type", role_name="missing-role")]
+
+    with (
+        patch(
+            "clarinet.config.python_loader.load_python_config",
+            new_callable=AsyncMock,
+            return_value=items,
+        ),
+        patch(
+            "clarinet.utils.bootstrap.db_manager.get_async_session_context",
+        ) as mock_ctx,
+        patch("clarinet.settings.settings") as mock_settings,
+    ):
+        mock_settings.config_mode = "python"
+        mock_settings.config_tasks_path = "/fake/path"
+        mock_settings.config_delete_orphans = False
+
+        ctx = AsyncMock()
+        ctx.__aenter__ = AsyncMock(return_value=test_session)
+        ctx.__aexit__ = AsyncMock(return_value=False)
+        mock_ctx.return_value = ctx
+
+        with pytest.raises(ConfigurationError, match="alpha-role") as exc_info:
+            await reconcile_config(folder="/fake/path")
+
+    # Both unreferenced roles should appear in the message
+    msg = str(exc_info.value)
+    assert "alpha-role" in msg
+    assert "beta-role" in msg
+    assert "missing-role" in msg

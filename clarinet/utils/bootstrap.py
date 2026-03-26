@@ -317,11 +317,9 @@ async def reconcile_config(
         # Validate that all referenced role_names exist in the DB
         referenced_roles = {item.role_name for item in all_items if item.role_name is not None}
         if referenced_roles:
-            role_result = await session.execute(
-                select(UserRole.name).where(UserRole.name.in_(referenced_roles))  # type: ignore[attr-defined]
-            )
-            existing_roles = set(role_result.scalars().all())
-            missing = referenced_roles - existing_roles
+            all_roles_result = await session.execute(select(UserRole.name))  # type: ignore[arg-type]
+            all_db_roles = set(all_roles_result.scalars().all())
+            missing = referenced_roles - all_db_roles
             if missing:
                 bad_items = [
                     f"  - '{item.name}' references role '{item.role_name}'"
@@ -332,7 +330,7 @@ async def reconcile_config(
                     f"RecordType config references undefined role(s): "
                     f"{', '.join(sorted(missing))}.\n"
                     + "\n".join(bad_items)
-                    + f"\nAvailable roles: {sorted(existing_roles)}.\n"
+                    + f"\nAvailable roles: {sorted(all_db_roles)}.\n"
                     f"Add missing roles to CLARINET_EXTRA_ROLES or fix the config."
                 )
 
