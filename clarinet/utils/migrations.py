@@ -179,7 +179,7 @@ def generate_alembic_env(
 
     # Import all models from the framework
     from clarinet.models import *  # noqa: F403, F401
-    from clarinet.models.base import Base
+    from sqlmodel import SQLModel
 
     # this is the Alembic Config object, which provides
     # access to the values within the .ini file in use.
@@ -192,7 +192,7 @@ def generate_alembic_env(
 
     # add your model's MetaData object here
     # for 'autogenerate' support
-    target_metadata = Base.metadata
+    target_metadata = SQLModel.metadata
 
     # other values from the config, defined by the needs of env.py,
     # can be acquired:

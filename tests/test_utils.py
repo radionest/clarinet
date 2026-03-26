@@ -253,3 +253,20 @@ class TestAdminUtils:
         admins = await list_admin_users(env["session"])
         assert any(u.email == "admin_util@test.com" for u in admins)
         assert not any(u.email == "regular_util@test.com" for u in admins)
+
+
+# ===================================================================
+# Migration template
+# ===================================================================
+
+
+class TestMigrationTemplate:
+    """Tests for Alembic env.py template generation."""
+
+    def test_env_py_uses_sqlmodel_metadata(self):
+        from clarinet.utils.migrations import generate_alembic_env
+
+        content = generate_alembic_env()
+        assert "from clarinet.models.base import Base" not in content
+        assert "from sqlmodel import SQLModel" in content
+        assert "target_metadata = SQLModel.metadata" in content
