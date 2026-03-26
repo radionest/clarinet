@@ -161,47 +161,11 @@ After each step, `PipelineChainMiddleware.post_execute()` fetches the definition
 
 ## TaskContext System
 
-`pipeline_task()` decorator + `TaskContext` eliminate boilerplate in pipeline tasks.
+`pipeline_task()` decorator provides `TaskContext` with: `files` (FileResolver), `records` (RecordQuery), `client` (ClarinetClient), `msg` (PipelineMessage). Sync tasks get `SyncTaskContext` with sync wrappers.
 
-### Usage
+`build_task_context(msg, client)` fallback: record_id → series_uid → study_uid → empty context.
 
-```python
-from clarinet.services.pipeline import pipeline_task, PipelineMessage, TaskContext
-
-@pipeline_task(queue="clarinet.gpu")
-async def run_segmentation(msg: PipelineMessage, ctx: TaskContext):
-    if ctx.files.exists("segmentation"):
-        return
-    seg_path = await ctx.records.file_path(
-        "segment_CT_single", file="segmentation_single", series_uid=msg.series_uid,
-    )
-    img.save(result, ctx.files.resolve("master_model"))
-    await ctx.client.update_record_data(msg.record_id, {"status": "done"})
-```
-
-### Components
-
-| Class | Sync/Async | Purpose |
-|-------|-----------|---------|
-| `FileResolver` | sync | `resolve()`, `exists()`, `glob()`, `dir()` — file path operations |
-| `RecordQuery` | async | `find()`, `file_path()` — record lookup via HTTP client |
-| `TaskContext` | dataclass | Container: `files`, `records`, `client`, `msg` |
-| `SyncRecordQuery` | sync | Sync wrapper for `RecordQuery` — bridges to event loop via `run_coroutine_threadsafe` |
-| `SyncPipelineClient` | sync | Sync wrapper for `ClarinetClient` (12 methods) |
-| `SyncTaskContext` | dataclass | Container: `files`, `records` (sync), `client` (sync), `msg` |
-
-### Context Building Fallback
-
-`build_task_context(msg, client)` makes one HTTP call:
-1. `msg.record_id` → `get_record()` → full context (working dirs, file registry, fields)
-2. `msg.series_uid` → `get_series()` → working dirs only (no file registry)
-3. `msg.study_uid` → `get_study()` → patient + study dirs only
-4. Nothing → empty context
-
-### Backward Compatibility
-
-`@broker.task()` still works unchanged. Both old and new tasks return `dict` (serialized
-PipelineMessage) — chain middleware compatible. No changes to middleware, chain, or broker.
+`@broker.task()` still works for simple tasks without TaskContext.
 
 ## RecordFlow Integration
 

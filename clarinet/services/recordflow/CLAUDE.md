@@ -117,36 +117,13 @@ record("parent_type").on_finished().add_record("child_type", parent_record_id=42
 record("trigger").on_finished().add_record("unlinked_output", inherit_user=True)
 ```
 
-## record() Factory
+## Registries
 
-Each `record()` call creates a **new** FlowRecord and adds it to `RECORD_REGISTRY`.
-Instances used only for data references (e.g. `record('type').data.field` in comparisons)
-are filtered out by the loader via `is_active_flow()`.
+- `record()` → `RECORD_REGISTRY` (data-reference-only instances filtered by `is_active_flow()`)
+- `series()`/`study()`/`patient()` → `ENTITY_REGISTRY`
+- `file(file_obj)` → `FILE_REGISTRY` (accepts `.name` attr or string)
 
-## Entity Factories
-
-`series()`, `study()`, `patient()` create FlowRecord instances with `entity_trigger` set
-and add them to `ENTITY_REGISTRY`. These are loaded alongside record flows by `load_flows_from_file()`.
-
-Engine methods:
-- `engine.handle_entity_created(entity_type, patient_id, study_uid?, series_uid?)` — main entry point
-- `engine._execute_entity_action()` — handles `create_record` and `call_function` actions
-
-## File Flows (`flow_file.py`)
-
-`file(file_obj)` creates a `FlowFileRecord` and adds it to `FILE_REGISTRY`. Accepts any object with `.name` attribute or a plain string.
-
-DSL methods:
-- `.on_update()` — trigger when file changes (checksum comparison)
-- `.invalidate_all_records('type1', 'type2', mode='hard'|'soft', callback=fn)` → `InvalidateRecordsAction`
-- `.call(func)` → `CallFunctionAction` (receives `file_name`, `patient_id`, `client` kwargs)
-
-Engine methods:
-- `engine.handle_file_update(file_name, patient_id)` — main entry point
-- File flows are stored in `engine.file_flows` dict (keyed by file name)
-- `_invalidate_by_file()` — like `_invalidate_records` but without source record (no self-skip)
-
-Event source: `@pipeline_task` wrapper computes pre/post checksums, notifies API via `POST /patients/{id}/file-events`.
+File flows: `.on_update()` + `.invalidate_all_records()` / `.call()`. Event source: `@pipeline_task` wrapper checksums → `POST /patients/{id}/file-events`.
 
 ## Data Access
 
@@ -172,33 +149,22 @@ record("first_check")
 
 Comparison operators: `==`, `!=`, `<`, `<=`, `>`, `>=`
 
-## Match/Case — Pattern Matching (Python-style semantics)
+## Match/Case — Pattern Matching
 
-When multiple conditions share the same trigger and guard but differ only by one field value, use `match()/case()/default()` for Python-like pattern matching:
+`.match(F.field).case(value).action()` — Python-like pattern matching with stop-on-first-match.
 
 ```python
-(
-    record("first_check")
-    .on_finished()
-    .if_record(F.is_good == True)
+record("first_check").on_finished().if_record(F.is_good == True)
     .match(F.study_type)
     .case("CT").create_record("seg_CT_single", "seg_CT_archive")
     .case("MRI").create_record("seg_MRI_single")
-    .case("CT-AG").create_record("seg_CTAG_single")
     .default().create_record("seg_unknown")
-)
 ```
 
-**How it works:** Each `.case(value)` generates a `FlowCondition` with `match_group` set. The engine uses `match_group` for stop-on-first-match: once a case matches, remaining cases in the same group are skipped. `default()` fires only when no case in the group matched.
-
-- `.match(field)` — saves the match field and assigns a unique `match_group` id; absorbs a preceding `if_record()` (without actions) as guard
-- `.case(value)` — creates `FlowCondition(guard AND field == value, match_group=id)`
-- `.default()` — creates `FlowCondition(guard, is_else=True, match_group=id)`; fires only when no case in the group matched and the guard (if any) is True
-- **Stop-on-first-match**: the engine skips remaining cases after the first match in a group
-- Guard is optional: `match(F.x).case("a")` works without `if_record()`
-- When guard is False, neither cases nor default fire
-- `on_missing` from `if_record()` propagates to all case and default conditions
-- `validate()` fails if `match()` has no `case()` branches
+- `.match(field)` absorbs preceding `if_record()` as guard; assigns `match_group` id
+- `.case(value)` — stop-on-first-match within group
+- `.default()` — fires only when no case matched (and guard is True)
+- `on_missing` from `if_record()` propagates to all cases
 
 ## Engine Setup
 
@@ -222,20 +188,11 @@ await engine.handle_file_update("master_model", patient_id)  # For file change t
 
 ## API Integration
 
-Triggers are dispatched via the **service layer** (awaited directly during the request):
-
-- `RecordService` (in `clarinet/services/record_service.py`) fires record-level triggers:
-  - `update_status()` → `handle_record_status_change` (if status changed)
-  - `assign_user()` → `handle_record_status_change` (if status changed)
-  - `submit_data()` → `handle_record_status_change` (always)
-  - `update_data()` → `handle_record_data_update` (always)
-  - `notify_file_change()` → `handle_record_file_change`
-  - `bulk_update_status()` → `handle_record_status_change` (per changed record)
-  - `notify_file_updates()` → `handle_file_update` (per file)
-- `StudyService` fires entity triggers via `engine.fire()` (fire-and-forget) in `create_patient()`, `create_study()`, `create_series()`
-- `invalidate_record()` → `handle_record_status_change` (hard mode, if status changed)
-- `POST /records/{id}/invalidate` — invalidation endpoint (mode, source_record_id, reason); routes through RecordService, fires RecordFlow on hard mode
-- `POST /patients/{id}/file-events` → `RecordService.notify_file_updates()` (called by pipeline task wrapper)
+Triggers are dispatched via the **service layer** (awaited during request), not from routers:
+- `RecordService` fires record-level triggers on `update_status`, `submit_data`, `update_data`, `notify_file_change`, `bulk_update_status`, `notify_file_updates`
+- `StudyService` fires entity triggers via `engine.fire()` (fire-and-forget) on entity creation
+- `POST /records/{id}/invalidate` → hard mode fires RecordFlow triggers
+- `POST /patients/{id}/file-events` → `notify_file_updates()` (called by pipeline task wrapper)
 
 ## Configuration
 

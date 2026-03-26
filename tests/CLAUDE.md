@@ -16,22 +16,8 @@
 
 ## Key Test Files
 
-- `tests/test_recordflow_dsl.py` — unit tests for RecordFlow DSL (FlowResult, comparisons, FlowRecord builder, engine unit tests with mocked client)
-- `tests/integration/test_recordflow.py` — integration tests for RecordFlow (engine with real DB, API-triggered flows, invalidation, direct invalidate endpoint)
-- `tests/test_client.py` — ClarinetClient unit tests with mocked HTTP
-- `tests/test_pipeline.py` — unit tests for Pipeline service (message models, chain DSL, worker queues, exceptions)
-- `tests/integration/test_pipeline_integration.py` — integration tests for Pipeline service (real RabbitMQ: broker connectivity, task dispatch/routing/execution, multi-step chains, middleware)
-- `tests/integration/test_app_startup.py` — regression tests for app startup with different pipeline settings (lifespan + lazy client login)
-- `tests/test_dicomweb_cache.py` — unit tests for DICOMweb two-tier cache (memory + disk)
-- `tests/test_dicomweb_cleanup.py` — unit tests for DICOMweb cache cleanup service
-- `tests/test_dicomweb_converter.py` — unit tests for DICOMweb data converters
-- `tests/test_config_loader.py` — unit tests for config loader (TOML/JSON discovery, file references, schema resolution)
-- `tests/integration/test_config_reconciler.py` — integration tests for config reconciler (create/update/unchanged/orphan/delete, file_registry + data_schema diffs)
-- `tests/integration/test_config_toml_sync.py` — integration tests for TOML bidirectional sync (bootstrap from TOML, export, round-trip)
-- `tests/integration/test_config_python_mode.py` — integration tests for Python config mode (loader, FileRef resolution, schema sidecars)
-- `tests/integration/test_parent_child.py` — integration tests for parent-child relationships (DAG validation, parent record type matching, API endpoints, config reconciler, search criteria, user_id inheritance)
-- `tests/test_schema_hydration.py` — unit tests for schema hydration (registry, walker, built-in study_series hydrator, edge cases)
-- `tests/integration/test_schema_hydration_api.py` — integration tests for schema hydration API (GET /records/{id}/schema, POST data validation against hydrated oneOf)
+Test files follow naming convention: `test_{feature}.py` (unit), `integration/test_{feature}.py` (integration).
+Major groups: recordflow DSL, pipeline (+ real RabbitMQ), dicomweb cache, config loader/reconciler/TOML sync, parent-child, schema hydration, app startup regression.
 
 ## Guidelines
 
@@ -121,90 +107,31 @@ production behavior and catching `MissingGreenlet` errors that `test_session` ma
 
 ### Module-level Singletons in Tests
 
-Calling `shutdown()` on module-level singletons (thread pools, brokers, DB engines)
-breaks subsequent `lifespan()` invocations in the same test process.
-
-Two solutions:
-1. **`_reset_singletons` fixture** — save and restore originals around each test
-   (see `tests/integration/test_app_startup.py:62`):
-   ```python
-   @pytest.fixture(autouse=True)
-   def _reset_singletons():
-       import clarinet.some_module as mod
-       orig = mod._singleton
-       yield
-       mod._singleton = orig
-   ```
-2. **Re-create in shutdown** — the shutdown function itself replaces the resource
-   (see `clarinet/utils/fs.py:shutdown_fs_executor`):
-   ```python
-   def shutdown_resource():
-       global _resource
-       _resource.shutdown()
-       _resource = _make_resource()  # ready for next lifespan
-   ```
+`shutdown()` on singletons breaks subsequent `lifespan()` calls. Two fixes:
+1. `_reset_singletons` fixture — save/restore originals (see `test_app_startup.py:62`)
+2. Re-create in shutdown — `_resource = _make_resource()` after shutdown (see `fs.py:shutdown_fs_executor`)
 
 ## API Test Patterns
 
 ### URL Constants
 
-Use `tests/utils/urls.py` instead of hardcoded URL strings. Full reference in `clarinet/api/CLAUDE.md`.
-
-```python
-from tests.utils.urls import RECORDS_BASE, RECORD_TYPES
-
-resp = await client.post(RECORD_TYPES, json={...})
-resp = await client.get(f"{RECORDS_BASE}/{record_id}")
-resp = await client.patch(f"{RECORD_TYPES}/{name}", json={...})
-```
+Use `tests/utils/urls.py` instead of hardcoded URL strings. Full endpoint table in `.claude/rules/api-urls.md`.
 
 ### Model Factories
 
-Two modules serve different purposes:
+- `tests/utils/factories.py` — sync, no DB: `make_patient()`, `make_user()`, `seed_record()`
+- `tests/utils/test_helpers.py` — async, persisted: `PatientFactory.create_patient()`, etc.
 
-| Module | Style | DB? | Use when |
-|---|---|---|---|
-| `tests/utils/factories.py` | Sync functions (`make_patient()`) | No — returns instance | Building model objects for repo-level tests, seeding fixtures |
-| `tests/utils/test_helpers.py` | Async Factory classes (`PatientFactory.create_patient()`) | Yes — adds + commits | Need a fully persisted entity with DB-generated fields |
-
-```python
-# Lightweight instance (not persisted) — auto_id auto-assigned
-from tests.utils.factories import make_patient, make_user, seed_record
-
-pat = make_patient("PAT_001", "Alice")                    # auto_id from shared counter
-pat = make_patient("PAT_002", "Bob", anon_name="ANON_B")  # with anon_name
-pat = make_patient("PAT_003", "Carol", auto_id=42)        # explicit auto_id
-session.add(pat)
-await session.commit()
-
-# Async factory (persisted automatically) — same shared counter
-from tests.utils.test_helpers import PatientFactory
-
-pat = await PatientFactory.create_patient(session, patient_id="PAT_001")
-```
-
-Both factories share a single `next_auto_id()` counter from `factories.py` — never
-create `Patient(...)` directly in tests (except when specifically testing auto_id behavior).
+Both share `next_auto_id()` counter — never create `Patient(...)` directly in tests.
 
 ### Fixture Hierarchy
 
-| Fixture | Scope | Source | Purpose |
-|---|---|---|---|
-| `test_engine` | session | `conftest.py` | Async SQLAlchemy engine (one per worker, StaticPool) |
-| `test_session` | function | `conftest.py` | Async SQLAlchemy session (DELETE cleanup per test) |
-| `fresh_session` | function | `conftest.py` | Clean identity map — simulates production |
-| `client` | function | `conftest.py` | `httpx.AsyncClient` bound to test app |
+`test_engine` (session) → `test_session` (function, DELETE cleanup) → `client` (function, httpx).
+`fresh_session` — clean identity map, simulates production (catches MissingGreenlet).
 
 ### Expected Status Codes
 
-| Pattern | Status |
-|---|---|
-| `POST` create (records, types, patients, studies, series, users, roles) | 201 |
-| `DELETE` entity / bulk operations | 204 |
-| `GET`, `PATCH`, `PUT`, other `POST` | 200 |
-| Entity not found | 404 |
-| Duplicate / conflict | 409 |
-| Validation error / business rule | 422 |
+POST create → 201, DELETE → 204, everything else → 200. Not found → 404, conflict → 409, validation → 422.
 
 ## Parallel Test Execution
 
@@ -253,130 +180,12 @@ line with pass/fail/skip counts parsed from the JSON report via `jq`.
 
 ## Debugging Test Failures
 
-Always capture output on the first run — never re-run tests just to see logs.
+Detailed jq commands and log analysis: `.claude/rules/test-debugging.md` (auto-loaded for tests/).
 
-### Run tests (JSON output is automatic via addopts)
-
-```bash
-make test-fast                    # JSON report → /tmp/clarinet-test-report.json
-CLARINET_LOG_DIR=/tmp make test-fast  # + app logs → /tmp/clarinet.log
-make test-debug                   # both at once
-```
-
-### Analyze test failures (jq)
-
-```bash
-# Failed tests — names + error messages
-jq '.tests[] | select(.outcome == "failed") | {nodeid, message: .call.longrepr}' /tmp/clarinet-test-report.json
-
-# Just the names of failed tests
-jq -r '.tests[] | select(.outcome == "failed") .nodeid' /tmp/clarinet-test-report.json
-
-# Test durations (slowest first)
-jq '[.tests[] | {nodeid, duration}] | sort_by(-.duration) | .[:10]' /tmp/clarinet-test-report.json
-
-# Summary
-jq '.summary' /tmp/clarinet-test-report.json
-```
-
-### Analyze app logs (jq)
-
-App logs are written to `/tmp/clarinet.log` in JSON-lines format when `CLARINET_LOG_DIR=/tmp`.
-
-```bash
-# App errors
-jq 'select(.l == "ERROR")' /tmp/clarinet.log
-
-# Errors with tracebacks
-jq 'select(.exc != null)' /tmp/clarinet.log
-
-# Filter by module
-jq 'select(.mod | startswith("clarinet.services.pipeline"))' /tmp/clarinet.log
-```
-
-### JSON log keys (app logger)
-
-| Key | Content |
-|-----|---------|
-| `t` | ISO timestamp |
-| `l` | Level (INFO, ERROR, ...) |
-| `mod` | Module name |
-| `fn` | Function name |
-| `line` | Line number |
-| `msg` | Log message |
-| `exc` | Traceback (only on exceptions) |
+Quick reference: `make test-debug` runs tests with JSON report + app logs. Analyze with `jq` on `/tmp/clarinet-test-report.json` and `/tmp/clarinet.log`.
 
 ## Schema Tests (Schemathesis)
 
-Property-based API testing using Schemathesis. Generates requests from OpenAPI schema
-and validates response conformance, status codes, and absence of 500 errors.
+Detailed guide: `.claude/rules/schemathesis.md` (auto-loaded for tests/schema/).
 
-### Running
-
-```bash
-make test-schema              # Quick run (max_examples=10)
-make test-schema-verbose      # Verbose with tracebacks
-```
-
-### Architecture
-
-- `tests/schema/conftest.py` — session-scoped fixtures: in-memory SQLite, auth overrides, no-op lifespan
-- `tests/schema/test_api_schema.py` — parametrized tests over all API endpoints (Phase 1 + 2)
-- `tests/schema/test_critical_endpoints.py` — per-endpoint tests for 8 critical endpoints (Phase 3, max_examples=200)
-- `schemathesis.toml` — Schemathesis configuration (project root)
-- Marker: `@pytest.mark.schema` — excluded from `make test-unit` and `make test-fast`
-
-### Test structure
-
-| Test | What it checks | Phase |
-|---|---|---|
-| `test_api_conformance` | Full schema conformance: response schema, status codes, content-type | Phase 1 |
-| `test_no_server_errors` | No 500 errors on any generated input (positive + negative) | Phase 1 |
-| `test_api_stateful` | CRUD chains via state machine (POST → GET → PATCH → DELETE) | Phase 2 |
-| `test_create_record` | POST /api/records/ — level-UID validation, slug, DicomUID | Phase 3 |
-| `test_submit_record_data` | POST /api/records/{id}/data — free-form JSON, state machine | Phase 3 |
-| `test_update_record_data` | PATCH /api/records/{id}/data — inverse state guard | Phase 3 |
-| `test_create_record_type` | POST /api/records/types — nested schema, file registry | Phase 3 |
-| `test_update_record_type` | PATCH /api/records/types/{id} — optional fields, JSON parsing | Phase 3 |
-| `test_find_records` | POST /api/records/find — RecordSearchQuery body | Phase 3 |
-| `test_invalidate_record` | POST /api/records/{id}/invalidate — unvalidated mode | Phase 3 |
-| `test_create_series` | POST /api/series — DicomUID, series_number boundaries | Phase 3 |
-
-### Key design decisions
-
-- **ASGI mode** (no running server): `schemathesis.openapi.from_asgi("/openapi.json", app=schema_app)`
-- **No-op lifespan**: real lifespan uses `db_manager` directly (not DI), which conflicts with test DB.
-  Schema tests replace it with `_noop_lifespan` and manage their own DB via `test_engine`.
-- **Per-request sessions**: `override_get_session` creates a fresh session per request from a shared
-  session factory. Prevents `PendingRollbackError` cascading across schemathesis requests.
-- **Stateful testing via link injection**: API doesn't define OpenAPI `links`, so `conftest.py`
-  injects CRUD links (POST-201 → GET/PATCH/DELETE) into the schema dict for the state machine.
-  `stateful_api_schema` fixture uses `from_dict()` because link injection requires schema modification.
-- **fastapi-users endpoints excluded**: `/api/auth/login`, `/logout`, `/register` — auto-generated, not under our control.
-
-### Interpreting results
-
-Schemathesis subtests show as `,` (pass) or `F` (fail) within a single parametrized test.
-Common failure categories:
-- **500 errors**: real bugs — fix the endpoint handler
-- **Undocumented status codes**: add `responses=` to the router
-- **Response schema violations**: fix `response_model` or serialization
-
-### Schemathesis 4.x API quick reference
-
-Schema loading:
-- `schemathesis.openapi.from_asgi("/openapi.json", app)` — ASGI (no server), preferred for FastAPI
-- `schemathesis.openapi.from_dict(schema_dict)` — from dict (set `.app = app` for ASGI transport)
-- `schemathesis.pytest.from_fixture("fixture_name")` — lazy load in pytest
-
-Stateful testing:
-- `schema.as_state_machine()` → `APIStateMachine` subclass — requires OpenAPI `links` in responses
-- `run_state_machine_as_test(sm, settings=)` from `schemathesis.generation.stateful`
-- Does NOT infer transitions from URL patterns — only explicit `links`
-- Pytest `parametrize()` covers phases: examples, coverage, fuzzing (NOT stateful — separate test)
-
-Generation modes (via `schemathesis.toml`):
-- `[generation] mode = "all"` — both valid + invalid data (default in our config)
-- `schemathesis.GenerationMode.POSITIVE / NEGATIVE` — enum at `schemathesis.generation.modes`
-
-Config hierarchy: `schemathesis.toml` → `SchemathesisConfig` → `ProjectConfig` with `phases`, `generation`
+Quick reference: `make test-schema` (quick), `make test-schema-verbose` (verbose). Marker: `@pytest.mark.schema` — excluded from `make test-unit` and `make test-fast`.

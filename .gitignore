@@ -56,4 +56,7 @@ REFACTOR.md
 
 # Dev notes (centralized storage via symlink)
 dev-notes
-.claude/
+# Claude Code local config (settings, worktrees, etc.)
+# Exception: rules/ are project documentation shared via git
+.claude/*
+!.claude/rules/
