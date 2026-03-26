@@ -16,11 +16,10 @@ Clarinet is a framework for clinical-radiological studies, built on FastAPI, SQL
 ## Code Style
 
 - All Python tools run through **uv**: `uv run <command>`
-- Type hints on all functions; `Optional[T]` not `Union[T, None]`
+- Type hints on all functions
 - Google-style docstrings for public functions
 - Custom exceptions from `clarinet.exceptions.http` (NOT_FOUND, CONFLICT, etc.)
 - Async/await for all I/O; `asyncio.gather()` for parallel independent tasks
-- No bare except — always specify exception type
 
 ## Essential Commands
 
@@ -62,8 +61,7 @@ make dev-setup                  # Set up dev environment
 
 ## Anti-patterns
 
-Avoid: god objects, callback hell, global variables, magic numbers, code duplication,
-ignoring errors, hardcoded config, direct loguru import, sync ops in async functions, bare except.
+Avoid: direct loguru import (use `from clarinet.utils.logger import logger`), sync blocking ops in async functions.
 
 ## Worktree Workflow
 
@@ -93,5 +91,6 @@ ignoring errors, hardcoded config, direct loguru import, sync ops in async funct
   - `file-registry.md` — file definition M2M system (for file_schema.py)
   - `slicer-helper-api.md` — SlicerHelper full API + VTK pitfalls (for helper.py)
   - `test-debugging.md` — jq recipes for test/log analysis (for tests/)
+  - `recordflow-dsl.md` — full DSL API reference (for recordflow/ and *_flow.py)
 
 Update the most specific file. Keep CLAUDE.md files minimal — move detailed reference to `.claude/rules/`.
