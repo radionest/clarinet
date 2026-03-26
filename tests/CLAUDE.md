@@ -136,57 +136,16 @@ POST create → 201, DELETE → 204, everything else → 200. Not found → 404,
 
 ## Parallel Test Execution
 
-Tests support parallel execution via pytest-xdist. Each worker runs in a
-separate process with its own in-memory SQLite database.
+pytest-xdist: each worker gets its own in-memory SQLite DB (`StaticPool`). Session-scoped engine, data cleaned via `DELETE FROM` after each test.
 
-### Test Commands
+Commands: `make test-fast` (default, `-n auto`), `make test-unit` (DB-only), `make test` (sequential), `make test-integration`.
 
-| Command | What runs | Parallel | Use when |
-|---|---|---|---|
-| `make test-fast` | All tests except schema (default) | `-n auto` | Default — includes all service groups |
-| `make test-unit` | DB-only tests | `-n auto` | No RabbitMQ/DICOM/Slicer available |
-| `make test` | All tests | sequential | Debugging test order issues |
-| `make test-integration` | `tests/integration/` | sequential | Integration subset only |
+Service markers: `pipeline` (RabbitMQ, `xdist_group`), `dicom` (PACS, read-only), `slicer` (`xdist_group`). Unreachable services auto-skip.
 
-### Service Groups & Isolation
+## Background and CI
 
-Tests are safe to run in parallel across all groups:
+JSON report: `/tmp/clarinet-test-report.json` (atomically at session end — stale during run). pynetdicom loguru errors at end of output are noise.
 
-| Group | Marker | External service | Why parallel-safe |
-|---|---|---|---|
-| DB-only | _(none)_ | SQLite in-memory | Each xdist worker gets its own DB (StaticPool) |
-| Pipeline | `pipeline` | RabbitMQ | Unique exchange/queue names per session (`uuid4`) + `xdist_group("pipeline")` |
-| DICOM | `dicom` | PACS server | Read-only queries |
-| Slicer | `slicer` | 3D Slicer | `xdist_group("slicer")` — all slicer tests serialized on one worker (shared Slicer process) |
+## Debugging / Schema Tests
 
-Unreachable services auto-skip via `_check_rabbitmq` / `_check_slicer` fixtures.
-
-### Session-Scoped Engine
-
-The test engine is session-scoped: schema is created once per worker, data is
-cleaned via `DELETE FROM` after each test (autouse `clear_database` fixture).
-
-Important: `StaticPool` is required for in-memory SQLite with session-scoped
-engine — without it, each new connection creates a new empty database.
-
-## Background and CI Test Runs
-
-All `make test-*` targets use `scripts/run_tests.sh` which prints a `=== Test Summary ===`
-line with pass/fail/skip counts parsed from the JSON report via `jq`.
-
-- JSON report: `/tmp/clarinet-test-report.json` — written **atomically at session end**
-- During a background run the file contains **stale data from the previous run**
-- To get results from a background run: wait for completion, then read the summary
-- pynetdicom loguru errors ("I/O operation on closed file") at end of output are **noise**, not test failures — suppressed via `_suppress_pynetdicom_logging` fixture in `conftest.py`
-
-## Debugging Test Failures
-
-Detailed jq commands and log analysis: `.claude/rules/test-debugging.md` (auto-loaded for tests/).
-
-Quick reference: `make test-debug` runs tests with JSON report + app logs. Analyze with `jq` on `/tmp/clarinet-test-report.json` and `/tmp/clarinet.log`.
-
-## Schema Tests (Schemathesis)
-
-Detailed guide: `.claude/rules/schemathesis.md` (auto-loaded for tests/schema/).
-
-Quick reference: `make test-schema` (quick), `make test-schema-verbose` (verbose). Marker: `@pytest.mark.schema` — excluded from `make test-unit` and `make test-fast`.
+See `.claude/rules/test-debugging.md` and `.claude/rules/schemathesis.md` (auto-loaded for tests/).

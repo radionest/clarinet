@@ -58,11 +58,9 @@ class DicomAnonymizer:
         # Clear global UID dictionary to avoid cross-dataset state leaks
         simpledicomanonymizer.dictionary.clear()
 
-        # Build extra rules for tags we control
         anon_patient_id = self.anon_patient_id
         anon_patient_name = self.anon_patient_name
 
-        # Pre-compute anonymized UIDs from original values
         original_study_uid = str(getattr(dataset, "StudyInstanceUID", ""))
         original_series_uid = str(getattr(dataset, "SeriesInstanceUID", ""))
         original_sop_uid = str(getattr(dataset, "SOPInstanceUID", ""))

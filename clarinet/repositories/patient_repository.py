@@ -1,4 +1,8 @@
-"""Repository for Patient-specific database operations."""
+"""Repository for Patient-specific database operations.
+
+NOTE: selectinload() calls use ``# type: ignore`` — mypy cannot resolve
+SQLAlchemy InstrumentedAttribute on SQLModel classes (known limitation).
+"""
 
 from collections.abc import Sequence
 

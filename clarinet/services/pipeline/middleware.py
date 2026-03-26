@@ -125,14 +125,6 @@ class PipelineLoggingMiddleware(TaskiqMiddleware):
         return f"[pipeline={pipeline_id} step={step_index}] " if pipeline_id else ""
 
     async def pre_send(self, message: TaskiqMessage) -> TaskiqMessage:
-        """Log before a task message is sent to the broker.
-
-        Args:
-            message: The outgoing task message.
-
-        Returns:
-            The message unchanged.
-        """
         prefix = self._log_prefix(message)
         logger.debug(f"{prefix}Sending task '{message.task_name}' (id={message.task_id})")
         return message
@@ -180,11 +172,9 @@ class DeadLetterMiddleware(TaskiqMiddleware):
         self._dlq = dlq
 
     async def startup(self) -> None:
-        """Start the shared DLQ publisher."""
         await self._dlq.startup()
 
     async def shutdown(self) -> None:
-        """Shut down the shared DLQ publisher."""
         await self._dlq.shutdown()
 
     async def post_execute(self, message: TaskiqMessage, result: TaskiqResult[Any]) -> None:
@@ -284,7 +274,6 @@ class PipelineChainMiddleware(TaskiqMiddleware):
         return self._client
 
     async def shutdown(self) -> None:
-        """Close the ClarinetClient (DLQ is managed by DeadLetterMiddleware)."""
         if self._owns_client and self._client is not None:
             await self._client.close()
             self._client = None

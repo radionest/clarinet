@@ -17,7 +17,7 @@ Clarinet is a framework for clinical-radiological studies, built on FastAPI, SQL
 
 - All Python tools run through **uv**: `uv run <command>`
 - Type hints on all functions
-- Google-style docstrings for public functions
+- Docstrings: required on public functions with non-obvious behavior. Skip on trivial CRUD where name + types suffice. Focus on "why", gotchas, raises
 - Custom exceptions from `clarinet.exceptions.http` (NOT_FOUND, CONFLICT, etc.)
 - Async/await for all I/O; `asyncio.gather()` for parallel independent tasks
 
@@ -80,7 +80,7 @@ Avoid: direct loguru import (use `from clarinet.utils.logger import logger`), sy
 - `make format` + `make lint` pass
 - `make typecheck` passes
 - Tests written and passing
-- Docstrings on public functions
+- Docstrings on non-trivial public functions
 - No secrets in code
 - Conventional commit messages
 - DB migrations created for schema changes
@@ -90,9 +90,13 @@ Avoid: direct loguru import (use `from clarinet.utils.logger import logger`), sy
 - **Scoped CLAUDE.md** in subdirectories — always-loaded when entering that directory
 - **Path-scoped rules** in `.claude/rules/` — auto-loaded only when editing matching files:
   - `api-urls.md` — full endpoint URL table (for tests/ and routers/)
+  - `api-deps.md` — DI aliases, RBAC, factory patterns, DICOMweb endpoints (for dependencies.py and routers/)
+  - `pipeline-ops.md` — settings, testing, dependencies (for pipeline/)
+  - `record-repo.md` — specialized methods, invalidation, auto_id (for record repos)
+  - `slicer-context.md` — context builder & hydration (for context*.py and hydrators)
+  - `slicer-helper-api.md` — SlicerHelper full API + VTK pitfalls (for helper.py)
   - `schemathesis.md` — property-based testing guide (for tests/schema/)
   - `file-registry.md` — file definition M2M system (for file_schema.py)
-  - `slicer-helper-api.md` — SlicerHelper full API + VTK pitfalls (for helper.py)
   - `test-debugging.md` — jq recipes for test/log analysis (for tests/)
   - `recordflow-dsl.md` — full DSL API reference (for recordflow/ and *_flow.py)
 

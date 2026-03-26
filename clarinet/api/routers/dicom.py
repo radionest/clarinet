@@ -62,7 +62,6 @@ async def search_patient_studies(
     if not studies:
         return []
 
-    # Query series for all studies in parallel
     series_tasks = [
         client.find_series(
             query=SeriesQuery(study_instance_uid=s.study_instance_uid),
@@ -72,7 +71,6 @@ async def search_patient_studies(
     ]
     all_series = await asyncio.gather(*series_tasks)
 
-    # Check local DB existence for each study
     results: list[PacsStudyWithSeries] = []
     for study, series_list in zip(studies, all_series):
         exists = await study_repo.get_optional(study.study_instance_uid) is not None
@@ -108,7 +106,6 @@ async def import_study_from_pacs(
     Returns:
         Created study with all series
     """
-    # Fetch study metadata from PACS
     studies = await client.find_studies(
         query=StudyQuery(
             study_instance_uid=request.study_instance_uid,
@@ -126,7 +123,6 @@ async def import_study_from_pacs(
 
     study_date = parse_dicom_date(pacs_study.study_date)
 
-    # Create study in local DB (triggers entity flow automatically via StudyService)
     await service.create_study(
         {
             "study_uid": request.study_instance_uid,
@@ -137,13 +133,11 @@ async def import_study_from_pacs(
         }
     )
 
-    # Fetch series from PACS
     pacs_series = await client.find_series(
         query=SeriesQuery(study_instance_uid=request.study_instance_uid),
         peer=pacs,
     )
 
-    # Optionally filter series at import time
     if settings.series_filter_on_import:
         series_filter = SeriesFilter()
         filter_result = series_filter.filter(
@@ -156,7 +150,6 @@ async def import_study_from_pacs(
             )
         pacs_series = filter_result.included
 
-    # Create each series in local DB (triggers entity flow automatically via StudyService)
     for idx, s in enumerate(pacs_series):
         await service.create_series(
             {
@@ -169,7 +162,6 @@ async def import_study_from_pacs(
             }
         )
 
-    # Return full study with relations
     logger.info(f"Imported study {request.study_instance_uid} with {len(pacs_series)} series")
     return await service.get_study(request.study_instance_uid)
 

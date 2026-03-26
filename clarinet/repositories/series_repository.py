@@ -1,4 +1,8 @@
-"""Repository for Series-specific database operations."""
+"""Repository for Series-specific database operations.
+
+NOTE: selectinload() calls use ``# type: ignore`` — mypy cannot resolve
+SQLAlchemy InstrumentedAttribute on SQLModel classes (known limitation).
+"""
 
 from collections.abc import Sequence
 
