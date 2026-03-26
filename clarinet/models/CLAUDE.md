@@ -99,101 +99,13 @@ Test code creating patients directly must always provide an explicit `auto_id`.
 
 ## File Registry System
 
-File definitions are stored in a normalized schema with M2M relationship:
+Detailed reference: `.claude/rules/file-registry.md` (auto-loaded when editing `file_schema.py`).
 
-**`FileDefinition`** (`file_schema.py`, table) — globally unique file definitions:
-
-| Field | Type | Notes |
-|-------|------|-------|
-| `name` | `str` | Unique, valid Python identifier |
-| `pattern` | `str` | Placeholders: `{id}`, `{patient_id}`, `{data.FIELD}`, etc. |
-| `description` | `str \| None` | Purpose description |
-| `multiple` | `bool` | `True` = glob collection, `False` = singular |
-| `level` | `DicomQueryLevel \| None` | Cross-level file access; `None` = same as RecordType |
-
-**`RecordTypeFileLink`** (`file_schema.py`, table) — M2M: RecordType ↔ FileDefinition:
-
-| Field | Type | Notes |
-|-------|------|-------|
-| `role` | `FileRole` | `INPUT` / `OUTPUT` / `INTERMEDIATE` |
-| `required` | `bool` | Whether file must exist |
-
-**`FileDefinitionRead`** (`file_schema.py`, DTO) — flat merge of identity + binding for API:
-
-| Field | Source | Type |
-|-------|--------|------|
-| `name`, `pattern`, `description`, `multiple`, `level` | FileDefinition | identity |
-| `role`, `required` | RecordTypeFileLink | binding |
-
-`RecordType` has a `file_links` relationship (M2M) and a `file_registry` property
-that builds `list[FileDefinitionRead]` from the links. `RecordTypeRead` has `file_registry`
-as a regular field, populated via `model_validator(mode="before")` from the ORM property.
-
-- **`RecordFileLink`** (`file_schema.py`, table): M2M link between `Record` and `FileDefinition` with `filename` and optional `checksum`
-- `FileRole`: `INPUT`, `OUTPUT`, `INTERMEDIATE`
-- `multiple=True`: collection (glob), `multiple=False`: singular file
-- Callers filter `file_registry` by role directly (no `input_files`/`output_files` computed properties)
-- **Note:** `FileDefinition` and `FileDefinitionRead` both define an identical
-  `validate_name_is_identifier` field validator. When changing validation logic,
-  update both classes in `file_schema.py`.
-- **`RecordFileLinkRead`** (`file_schema.py`, DTO): per-file link with `name`, `filename`, `checksum`
-- `RecordRead.file_links`: `list[RecordFileLinkRead]` — structured M2M data, preferred over dict fields
-- `RecordRead.files` / `RecordRead.file_checksums`: **deprecated** dict fields (use `file_links` instead), computed from `Record.file_links` via `model_validator(mode="before")`
-- `clarinet/utils/file_patterns.py`: `resolve_pattern()`, `glob_file_paths()` for pattern resolution
-- `clarinet/utils/file_checksums.py`: async SHA256 computation and change detection
-
-### Eager Loading for File Links
-
-All queries fetching `RecordType` must use eager loading for file_links:
-```python
-selectinload(RecordType.file_links).selectinload(RecordTypeFileLink.file_definition)
-```
-This is handled by `_file_links_eager_load()` in `RecordTypeRepository` and
-`_record_type_with_files()` in `RecordRepository`.
-
-All queries fetching `Record` for API responses must also eager-load record file links:
-```python
-selectinload(Record.file_links).selectinload(RecordFileLink.file_definition)
-```
-This is handled by `_record_file_links_eager_load()` in `RecordRepository`.
-
-### ORM vs DTO: file_links vs file_registry
-
-Two representations of file definitions serve different architectural layers:
-
-- **`file_links`** (ORM, on `RecordType`/`Record`): SQLAlchemy relationships to
-  `RecordTypeFileLink`/`RecordFileLink`. Require eager loading (`selectinload`).
-  Used internally for DB writes that need `FileDefinition.id` as FK
-  (e.g. `set_files()` creating `RecordFileLink` rows).
-
-- **`file_registry`** (property on `RecordType`, field on `RecordTypeRead`):
-  `list[FileDefinitionRead]` — flat merge of FileDefinition identity + binding metadata.
-  On ORM: `@property` on `RecordType`. On DTO: regular field populated via `model_validator`.
-  Used for API responses, file validation (`FileValidator`), file path resolution
-  (`resolve_pattern`, `glob_file_paths`), and config export.
-
-**Rule of thumb:**
-- Writing to DB (creating/deleting links) → use `file_links` (ORM layer)
-- Reading file metadata for logic/API → use `file_registry` (DTO layer via `RecordTypeRead`)
-
-### Project-level File Registry
-
-A `file_registry.toml` (preferred) or `file_registry.json` in the tasks folder defines shared file definitions.
-TOML takes precedence when both exist.
-```toml
-[segmentation]
-pattern = "seg.nrrd"
-description = "Segmentation mask"
-```
-
-Task configs use `"files"` references instead of inline `"file_registry"`:
-```json
-{"files": [{"name": "segmentation", "role": "input", "required": true}]}
-```
-
-Resolution happens at **bootstrap time** via `clarinet/utils/file_registry_resolver.py`.
-The reconciler creates `FileDefinition` rows and `RecordTypeFileLink` rows from the resolved definitions.
-Backward-compatible: inline `"file_registry"` in task JSONs still works.
+Key points:
+- M2M: `FileDefinition` ↔ `RecordType` via `RecordTypeFileLink`, and `FileDefinition` ↔ `Record` via `RecordFileLink`
+- **ORM** (`file_links`): for DB writes. **DTO** (`file_registry`): for API/logic reads
+- All `RecordType`/`Record` queries must use `selectinload` for file links
+- `RecordRead.files`/`file_checksums` are **deprecated** — use `file_links` instead
 
 ## Record Status: `blocked`
 

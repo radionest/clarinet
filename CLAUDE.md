@@ -84,14 +84,14 @@ ignoring errors, hardcoded config, direct loguru import, sync ops in async funct
 - Conventional commit messages
 - DB migrations created for schema changes
 
-## CLAUDE.md Maintenance
+## Documentation Structure
 
-After completing any task, review and update CLAUDE.md files if your changes:
-- Introduced new architectural patterns or conventions
-- Added/changed CLI commands or build steps
-- Modified project structure (new directories, moved files)
-- Changed technology stack or dependencies
-- Fixed bugs caused by outdated documentation
+- **Scoped CLAUDE.md** in subdirectories — always-loaded when entering that directory
+- **Path-scoped rules** in `.claude/rules/` — auto-loaded only when editing matching files:
+  - `api-urls.md` — full endpoint URL table (for tests/ and routers/)
+  - `schemathesis.md` — property-based testing guide (for tests/schema/)
+  - `file-registry.md` — file definition M2M system (for file_schema.py)
+  - `slicer-helper-api.md` — SlicerHelper full API + VTK pitfalls (for helper.py)
+  - `test-debugging.md` — jq recipes for test/log analysis (for tests/)
 
-Scoped CLAUDE.md files exist in: `clarinet/`, `clarinet/models/`, `clarinet/repositories/`, `clarinet/api/`, `clarinet/frontend/`, `clarinet/frontend/build/packages/formosh/`, `clarinet/services/recordflow/`, `clarinet/services/pipeline/`, `clarinet/services/dicom/`, `clarinet/services/slicer/`, `clarinet/services/dicomweb/`, `tests/`.
-Update the most specific file. Keep root CLAUDE.md minimal — move details to subdirectory files.
+Update the most specific file. Keep CLAUDE.md files minimal — move detailed reference to `.claude/rules/`.

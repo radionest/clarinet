@@ -91,21 +91,7 @@ File logs default to JSON-lines (`log_serialize=True`). Each line has short keys
 
 Set `CLARINET_LOG_SERIALIZE=false` for plain-text file logs.
 
-### Searching JSON Logs
-
-```bash
-# All errors
-jq 'select(.l == "ERROR")' clarinet.log
-
-# Errors with tracebacks
-jq 'select(.exc != null)' clarinet.log
-
-# Filter by module
-jq 'select(.mod | startswith("clarinet.services"))' clarinet.log
-
-# Plain grep still works
-grep '"l":"ERROR"' clarinet.log
-```
+Searching logs: `jq 'select(.l == "ERROR")' clarinet.log` — see `.claude/rules/test-debugging.md` for more jq recipes.
 
 ## Configuration
 
@@ -132,36 +118,18 @@ Bootstrap uses `reconcile_config()` from `clarinet/utils/bootstrap.py` — dispa
 
 ## Service Layer Overview
 
-| Directory | Purpose |
-|---|---|
-| `services/recordflow/` | Record processing DSL engine; reacts to Record status/data changes |
-| `services/pipeline/` | Distributed task queue (TaskIQ + RabbitMQ); long ops (GPU, DICOM chains) |
-| `services/dicomweb/` | DICOMweb proxy with two-tier cache (memory + disk) for OHIF |
-| `services/dicom/` | DICOM client (pynetdicom): C-FIND/C-GET/C-STORE; anonymization (`anonymizer.py`) |
-| `services/slicer/` | 3D Slicer integration via HTTP API; DSL helper and PacsHelper |
-| `services/image/` | Image processing utilities (numpy) |
-| `services/admin_service.py` | Aggregated admin logic |
-| `services/user_service.py` | User and role management |
-| `services/study_service.py` | Study management (+ entity-creation RecordFlow triggers) |
-| `services/record_service.py` | Record mutations with automatic RecordFlow triggers |
-| `services/record_type_service.py` | RecordType CRUD and record data validation against schema |
-| `services/session_cleanup.py` | Background stale session cleanup service |
+Each service has its own CLAUDE.md — see `services/*/CLAUDE.md` for details.
 
-`clarinet/client.py` — `ClarinetClient`: HTTP client to own API (used by RecordFlow engine and pipeline tasks).
+- `services/recordflow/` — Record workflow DSL engine
+- `services/pipeline/` — Distributed task queue (TaskIQ + RabbitMQ)
+- `services/dicomweb/` — DICOMweb proxy for OHIF
+- `services/dicom/` — DICOM client (pynetdicom)
+- `services/slicer/` — 3D Slicer integration
+- `services/image/` — Image processing (numpy)
+- `services/record_service.py` — Record mutations with RecordFlow triggers
+- `services/study_service.py` — Study management with entity-creation triggers
 
-Key methods:
-
-| Method | Description |
-|---|---|
-| `create_record(RecordCreate)` | Create a record |
-| `get_record(record_id)` | Get record by ID |
-| `find_records(**filters)` | Search records (JSON body: `record_type_name`, `study_uid`, `series_uid`, `record_status`, etc.) |
-| `submit_record_data(record_id, data)` | Submit data + set finished |
-| `update_record_data(record_id, data)` | Update data on finished record |
-| `update_record_status(record_id, status)` | Change record status |
-| `check_record_files(record_id)` | Compute checksums, auto-unblock if blocked |
-| `get_study(study_uid)` | Get study |
-| `anonymize_patient(patient_id)` | Trigger patient anonymization |
+`clarinet/client.py` — `ClarinetClient`: HTTP client to own API (used by RecordFlow and pipeline tasks). See file for full method list.
 
 ## Admin Management
 
