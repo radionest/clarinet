@@ -1,7 +1,7 @@
 ---
 paths:
   - "clarinet/services/pipeline/**"
-  - "tests/*pipeline*"
+  - "tests/**/*pipeline*"
 ---
 
 # Pipeline — Settings & Testing Reference

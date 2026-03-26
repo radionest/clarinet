@@ -29,7 +29,7 @@ class BaseRepository[ModelT: SQLModel]:
         self.model_class = model_class
 
     async def get(self, id: Any) -> ModelT:
-        """Raises EntityNotFoundError if not found."""
+        """Return entity by ID, or raise EntityNotFoundError."""
         entity = await self.session.get(self.model_class, id)
         if not entity:
             raise EntityNotFoundError(f"{self.model_class.__name__} with ID {id} not found")
@@ -91,7 +91,7 @@ class BaseRepository[ModelT: SQLModel]:
         return result.scalar() or 0
 
     async def create(self, entity: ModelT) -> ModelT:
-        """Flush + refresh, no commit."""
+        """Add entity, flush and refresh. Does not commit — caller controls transaction."""
         self.session.add(entity)
         await self.session.flush()
         await self.session.refresh(entity)
