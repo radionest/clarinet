@@ -18,11 +18,20 @@ if TYPE_CHECKING:
 
 
 class PatientBase(BaseModel):
-    """Base model for patient data."""
+    """Core patient fields — no auto_id (used by PatientSave)."""
 
     id: str = Field(min_length=1, max_length=64)
     name: str = Field(default=None, min_length=1, max_length=64)
     anon_name: str | None = Field(default=None, min_length=5, max_length=50, unique=True)
+
+
+class PatientInfo(PatientBase):
+    """Patient fields with auto_id and computed anon_id.
+
+    Used as the embedded patient type in StudyRead/RecordRead responses,
+    and as the base for Patient (ORM) and PatientRead.
+    """
+
     auto_id: int | None = Field(default=None)
 
     @computed_field  # type: ignore[prop-decorator]
@@ -39,7 +48,7 @@ class PatientBase(BaseModel):
         return f"{settings.anon_id_prefix}_{self.auto_id}"
 
 
-class Patient(PatientBase, table=True):
+class Patient(PatientInfo, table=True):
     """Model representing a patient in the system."""
 
     id: str = Field(
@@ -66,7 +75,7 @@ class PatientSave(PatientBase):
     name: str = Field(min_length=1, max_length=64, alias="patient_name")
 
 
-class PatientRead(PatientBase):
+class PatientRead(PatientInfo):
     """Pydantic model for reading patient data with related studies."""
 
     studies: list["StudyRead"] = Field()

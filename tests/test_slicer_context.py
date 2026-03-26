@@ -18,7 +18,7 @@ import pytest
 
 from clarinet.models.base import DicomQueryLevel
 from clarinet.models.file_schema import FileDefinitionRead, FileRole
-from clarinet.models.patient import PatientBase
+from clarinet.models.patient import PatientInfo
 from clarinet.models.record import RecordRead
 from clarinet.models.record_type import RecordTypeRead
 from clarinet.models.study import SeriesBase, StudyBase
@@ -43,7 +43,7 @@ def _make_record_read(
     user_id: UUID | None = TEST_USER_ID,
 ) -> RecordRead:
     """Build a minimal RecordRead for testing."""
-    patient = PatientBase(
+    patient = PatientInfo(
         id=patient_id,
         name="Test Patient",
         anon_name=patient_anon_name,

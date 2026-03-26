@@ -5,7 +5,7 @@ from uuid import uuid4
 
 from clarinet.api.masking import mask_record_patient_data, mask_records
 from clarinet.models.base import DicomQueryLevel
-from clarinet.models.patient import PatientBase
+from clarinet.models.patient import PatientInfo
 from clarinet.models.record import RecordRead
 from clarinet.models.record_type import RecordTypeRead
 from clarinet.models.study import SeriesBase, StudyBase
@@ -57,7 +57,7 @@ def _make_record_read(
     Returns:
         RecordRead instance with all relationships populated.
     """
-    patient = PatientBase(
+    patient = PatientInfo(
         id=patient_id,
         name=patient_name,
         anon_name=anon_name,
@@ -272,7 +272,7 @@ class TestMaskRecordPatientData:
         user = _make_user(is_superuser=False)
 
         # Create a patient-level record (no study/series)
-        patient = PatientBase(
+        patient = PatientInfo(
             id="REAL_PAT_001",
             name="Real Patient Name",
             anon_name="Anon Patient Name",
@@ -339,13 +339,13 @@ class TestMaskRecords:
 
         # Create Record ORM objects (not RecordRead)
         # These would normally be fetched from DB, but we construct them directly
-        patient1 = PatientBase(
+        patient1 = PatientInfo(
             id="PAT_001",
             name="Patient One",
             anon_name="Anon One",
             auto_id=1,
         )
-        patient2 = PatientBase(
+        patient2 = PatientInfo(
             id="PAT_002",
             name="Patient Two",
             anon_name="Anon Two",
@@ -423,7 +423,7 @@ class TestMaskRecords:
         """mask_records with superuser returns unmasked data."""
         superuser = _make_user(is_superuser=True)
 
-        patient = PatientBase(
+        patient = PatientInfo(
             id="PAT_001",
             name="Patient One",
             anon_name="Anon One",

@@ -30,7 +30,7 @@ from ..exceptions import ConfigurationError, ValidationError
 from ..settings import settings
 from .base import BaseModel, DicomUID, RecordStatus
 from .file_schema import RecordFileLink, RecordFileLinkRead
-from .patient import Patient, PatientBase
+from .patient import Patient, PatientInfo
 from .record_type import (
     RecordType,
     RecordTypeBase,
@@ -304,7 +304,7 @@ class RecordRead(RecordBase):
     changed_at: datetime | None = None
     started_at: datetime | None = None
     finished_at: datetime | None = None
-    patient: PatientBase
+    patient: PatientInfo
     study: StudyBase | None = None
     series: SeriesBase | None = None
     record_type: RecordTypeRead

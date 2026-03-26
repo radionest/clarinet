@@ -11,8 +11,8 @@ from pydantic import computed_field
 from sqlmodel import Field, Relationship
 
 from ..settings import settings
-from .base import BaseModel, DicomUID
-from .patient import Patient, PatientBase
+from .base import BaseModel, DicomUID, InstanceCount
+from .patient import Patient, PatientInfo
 
 if TYPE_CHECKING:
     from .record import Record, RecordFind
@@ -51,7 +51,7 @@ class StudyCreate(StudyBase):
 class StudyRead(StudyBase):
     """Pydantic model for reading study data with related entities."""
 
-    patient: PatientBase
+    patient: PatientInfo
     series: list["SeriesBase"] = Field()
 
 
@@ -62,7 +62,7 @@ class SeriesBase(BaseModel):
     series_description: str | None = Field(min_length=0, max_length=64, default=None)
     series_number: int = Field(gt=0, lt=100000)
     modality: str | None = Field(default=None, max_length=16)
-    instance_count: int | None = Field(default=None, ge=0)
+    instance_count: InstanceCount | None = Field(default=None)
     anon_uid: str | None = Field(default=None)
     study_uid: DicomUID | None = Field(default=None)
 
@@ -141,7 +141,7 @@ class SeriesFind(SeriesBase):
     series_description: str | None = None
     series_number: int | None = Field(default=None, gt=0, lt=100000)  # type: ignore
     modality: str | None = None  # type: ignore
-    instance_count: int | None = None  # type: ignore
+    instance_count: InstanceCount | None = None  # type: ignore
     anon_uid: str | None = None
     study_uid: str | None = None
     records: list["RecordFind"] = Field(default_factory=list)  # Will contain RecordFind objects
