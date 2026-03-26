@@ -67,8 +67,11 @@ Avoid: direct loguru import (use `from clarinet.utils.logger import logger`), sy
 
 - Feature development: always enter a worktree via `EnterWorktree` before making changes
 - Quick fixes, typos, config changes — work directly in main, no worktree needed
+- To resume work in an existing worktree — use `EnterWorktree` with the same name. Never `cd` into worktree path directly
+- Worktrees contain only git-tracked files. `hooks/`, `settings.json`, `settings.local.json` live in `$CLAUDE_PROJECT_DIR/.claude/` and are shared — edit them by the main project path. Build artifacts (formosh) are not copied
+- `ExitWorktree(remove)` requires `discard_changes=true` if there are commits not in main (even if already pushed)
 - The Stop hook blocks session end in a worktree — ask the user to choose:
-  1. **Push + PR**: commit all, `git push -u origin <branch>`, `gh pr create`, then `ExitWorktree(remove)`
+  1. **Push + PR**: commit all, `git push -u origin <branch>`, `gh pr create`, then `ExitWorktree(remove, discard_changes=true)`
   2. **Keep**: `ExitWorktree(keep)` — worktree stays for later
   3. **Discard**: `ExitWorktree(remove, discard_changes=true)`
 
