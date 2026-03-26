@@ -183,16 +183,16 @@ async def reconcile_record_types(
                 config_defs = config_item.file_registry or []
 
             if name not in db_types:
-                # CREATE — new RecordType
-                create_data = config_item.model_dump(exclude={"file_registry"})
-                new_rt = RecordType.model_validate(create_data)
-                new_rt.file_links = []  # Initialize empty, will be populated below
-                session.add(new_rt)
-                await session.flush()
+                # CREATE — savepoint isolates the entire item (RT + file links)
+                async with session.begin_nested():
+                    create_data = config_item.model_dump(exclude={"file_registry"})
+                    new_rt = RecordType.model_validate(create_data)
+                    new_rt.file_links = []
+                    session.add(new_rt)
+                    await session.flush()
 
-                # Sync file links
-                if config_defs:
-                    await sync_file_links(new_rt, config_defs, fd_repo, session)
+                    if config_defs:
+                        await sync_file_links(new_rt, config_defs, fd_repo, session)
 
                 result.created.append(name)
                 logger.info(f"Config reconcile: created '{name}'")
@@ -206,15 +206,16 @@ async def reconcile_record_types(
                     files_changed = _file_links_differ(existing.file_links or [], config_defs)
 
                 if changed_fields or files_changed:
-                    # Update scalar fields
-                    for field_name in changed_fields:
-                        setattr(existing, field_name, getattr(config_item, field_name))
+                    async with session.begin_nested():
+                        # Update scalar fields
+                        for field_name in changed_fields:
+                            setattr(existing, field_name, getattr(config_item, field_name))
 
-                    # Sync file links if they changed
-                    if files_changed and config_defs is not None:
-                        await sync_file_links(
-                            existing, config_defs, fd_repo, session, clear_existing=True
-                        )
+                        # Sync file links if they changed
+                        if files_changed and config_defs is not None:
+                            await sync_file_links(
+                                existing, config_defs, fd_repo, session, clear_existing=True
+                            )
 
                     all_changed = list(changed_fields)
                     if files_changed:

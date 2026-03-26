@@ -13,6 +13,7 @@ from sqlalchemy.orm import selectinload
 from sqlmodel import select
 
 from clarinet.config.reconciler import ReconcileResult, reconcile_record_types
+from clarinet.exceptions.domain import ConfigurationError
 from clarinet.models import RecordType, RecordTypeCreate, User, UserRole
 from clarinet.repositories.file_definition_repository import FileDefinitionRepository
 from clarinet.utils.auth import get_password_hash
@@ -313,6 +314,26 @@ async def reconcile_config(
                 logger.error(f"Error processing record type {config_path.name}: {e}")
 
     async with db_manager.get_async_session_context() as session:
+        # Validate that all referenced role_names exist in the DB
+        referenced_roles = {item.role_name for item in all_items if item.role_name is not None}
+        if referenced_roles:
+            all_roles_result = await session.execute(select(UserRole.name))  # type: ignore[arg-type]
+            all_db_roles = set(all_roles_result.scalars().all())
+            missing = referenced_roles - all_db_roles
+            if missing:
+                bad_items = [
+                    f"  - '{item.name}' references role '{item.role_name}'"
+                    for item in all_items
+                    if item.role_name in missing
+                ]
+                raise ConfigurationError(
+                    f"RecordType config references undefined role(s): "
+                    f"{', '.join(sorted(missing))}.\n"
+                    + "\n".join(bad_items)
+                    + f"\nAvailable roles: {sorted(all_db_roles)}.\n"
+                    f"Add missing roles to CLARINET_EXTRA_ROLES or fix the config."
+                )
+
         result = await reconcile_record_types(
             all_items,
             session,
