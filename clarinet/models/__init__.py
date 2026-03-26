@@ -24,7 +24,7 @@ from .file_schema import (
 )
 
 # Patient models
-from .patient import Patient, PatientBase, PatientRead, PatientSave
+from .patient import Patient, PatientBase, PatientInfo, PatientRead, PatientSave
 
 # Pipeline definition models
 from .pipeline_definition import PipelineDefinition, PipelineDefinitionRead
@@ -80,6 +80,7 @@ __all__ = [
     "FileRole",
     "Patient",
     "PatientBase",
+    "PatientInfo",
     "PatientRead",
     "PatientSave",
     "PipelineDefinition",

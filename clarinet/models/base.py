@@ -8,11 +8,13 @@ used throughout the Clarinet models.
 import enum
 from typing import Annotated, Any
 
+from annotated_types import Ge, Le
 from pydantic import StringConstraints, field_validator
 from sqlmodel import SQLModel
 
 # Define common type constraints
 DicomUID = Annotated[str, StringConstraints(pattern=r"^[0-9\.]*$", min_length=5, max_length=64)]
+InstanceCount = Annotated[int, Ge(0), Le(1_000_000)]
 
 type T = Any
 
