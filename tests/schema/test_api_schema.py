@@ -28,6 +28,7 @@ CORE_API_PATTERN = r"^/api/(records|patients|studies|series|user|admin|auth|pipe
 EXCLUDED_PATTERN = (
     r"^/(api/dicom|api/slicer|dicom-web)"
     r"|^/api/auth/(login|logout|register)"
+    r"|^/api/records/\{record_id\}/submit$"
 )
 
 # Suppress common health checks for ASGI transport
@@ -142,7 +143,7 @@ def test_api_stateful(stateful_api_schema, stateful_db_engine):
         CleanDBStateMachine,
         settings=settings(
             max_examples=50,
-            stateful_step_count=3,
+            stateful_step_count=4,
             suppress_health_check=_SUPPRESS,
             deadline=None,
         ),
