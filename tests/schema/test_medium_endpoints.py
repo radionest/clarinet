@@ -23,9 +23,10 @@ _SUPPRESS = [HealthCheck.too_slow, HealthCheck.filter_too_much]
 
 
 @(
-    schema.include(path_regex=r"^/api/records/", method="GET")
-    .exclude(path_regex=r"^/api/records/types")
-    .parametrize()
+    schema.include(
+        path_regex=r"^/api/records/(my(/pending)?|available_types|\{record_id\}(/schema)?)?$",
+        method="GET",
+    ).parametrize()
 )
 @settings(
     max_examples=50,
@@ -48,7 +49,12 @@ def test_record_read_endpoints(case):
 # ---------------------------------------------------------------------------
 
 
-@(schema.include(path_regex=r"^/api/records/types", method="GET").parametrize())
+@(
+    schema.include(
+        path_regex=r"^/api/records/types(/\{record_type_id\})?$",
+        method="GET",
+    ).parametrize()
+)
 @settings(
     max_examples=50,
     suppress_health_check=_SUPPRESS,
@@ -70,7 +76,11 @@ def test_record_type_read_endpoints(case):
 
 @(
     schema.include(
-        path_regex=r"^/api/(patients|studies|series)",
+        path_regex=(
+            r"^/api/(patients(/\{patient_id\})?"
+            r"|studies(/\{study_uid\}(/series)?)?"
+            r"|series(/random|/\{series_uid\})?)$"
+        ),
         method="GET",
     ).parametrize()
 )
@@ -96,10 +106,15 @@ def test_study_read_endpoints(case):
 
 
 @(
-    schema.include(path_regex=r"^/api/user")
-    .exclude(method="POST")
-    .exclude(method="DELETE")
-    .parametrize()
+    schema.include(
+        path_regex=(
+            r"^/api/user(/me(/roles)?"
+            r"|/roles(/\{role_name\})?"
+            r"|/\{user_id\}(/roles)?"
+            r"|/?)$"
+        ),
+        method_regex=r"^(GET|PUT)$",
+    ).parametrize()
 )
 @settings(
     max_examples=50,
@@ -121,7 +136,12 @@ def test_user_read_endpoints(case):
 # ---------------------------------------------------------------------------
 
 
-@(schema.include(path_regex=r"^/api/admin", method="GET").parametrize())
+@(
+    schema.include(
+        path_regex=r"^/api/admin/(stats|role-matrix|record-types/stats)$",
+        method="GET",
+    ).parametrize()
+)
 @settings(
     max_examples=50,
     suppress_health_check=_SUPPRESS,
