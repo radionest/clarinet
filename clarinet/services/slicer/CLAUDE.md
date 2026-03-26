@@ -153,4 +153,6 @@ No PACS context variables needed — `PacsHelper.from_slicer()` reads config dir
 - Unit tests: `tests/test_slicer_context.py` — `build_slicer_context()` and `build_slicer_context_async()` with mocked settings
 - Unit tests: `tests/test_slicer_context_hydration.py` — registry, decorator, loader, error handling
 - Integration tests: `tests/integration/test_slicer_*.py`, `tests/integration/test_record_working_folder.py`
+- E2E tests: `tests/e2e/test_slicer_pacs_workflow.py` — Slicer ↔ PACS (C-GET/C-MOVE) without mocks: PacsHelper retrieval, load_study/series_from_pacs, record-open API, backend C-MOVE → Slicer load
 - Helper has `_Dummy` stubs so `helper.py` is importable without Slicer
+- All slicer tests use `xdist_group("slicer")` for parallel safety — single Slicer instance shared across tests

@@ -11,7 +11,12 @@ import pytest
 from clarinet.services.slicer.helper import PacsHelper, SlicerHelper
 from clarinet.services.slicer.service import SlicerService
 
-pytestmark = [pytest.mark.slicer, pytest.mark.asyncio, pytest.mark.usefixtures("_check_slicer")]
+pytestmark = [
+    pytest.mark.slicer,
+    pytest.mark.asyncio,
+    pytest.mark.usefixtures("_check_slicer"),
+    pytest.mark.xdist_group("slicer"),
+]
 
 
 async def test_load_volume(
@@ -124,6 +129,7 @@ class TestPacsHelperConstruction:
     pytestmark: ClassVar[list[pytest.MarkDecorator]] = [
         pytest.mark.slicer,
         pytest.mark.usefixtures("_check_slicer"),
+        pytest.mark.xdist_group("slicer"),
     ]
 
     def test_constructor_stores_params(self) -> None:

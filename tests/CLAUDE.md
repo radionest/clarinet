@@ -18,6 +18,7 @@
 
 Test files follow naming convention: `test_{feature}.py` (unit), `integration/test_{feature}.py` (integration).
 Major groups: recordflow DSL, pipeline (+ real RabbitMQ), dicomweb cache, config loader/reconciler/TOML sync, parent-child, schema hydration, app startup regression.
+E2E: `tests/e2e/test_slicer_pacs_workflow.py` — Slicer ↔ PACS (C-GET/C-MOVE) without mocks. Requires running 3D Slicer + Orthanc PACS. Uses `xdist_group("slicer")`.
 
 ## Guidelines
 
@@ -154,9 +155,9 @@ Tests are safe to run in parallel across all groups:
 | Group | Marker | External service | Why parallel-safe |
 |---|---|---|---|
 | DB-only | _(none)_ | SQLite in-memory | Each xdist worker gets its own DB (StaticPool) |
-| Pipeline | `pipeline` | RabbitMQ | Unique exchange/queue names per session (`uuid4`) |
+| Pipeline | `pipeline` | RabbitMQ | Unique exchange/queue names per session (`uuid4`) + `xdist_group("pipeline")` |
 | DICOM | `dicom` | PACS server | Read-only queries |
-| Slicer | `slicer` | 3D Slicer | Auto-skipped if unreachable |
+| Slicer | `slicer` | 3D Slicer | `xdist_group("slicer")` — all slicer tests serialized on one worker (shared Slicer process) |
 
 Unreachable services auto-skip via `_check_rabbitmq` / `_check_slicer` fixtures.
 
