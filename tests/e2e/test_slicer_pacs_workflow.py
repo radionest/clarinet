@@ -264,13 +264,14 @@ class TestSlicerHelperPacsIntegration:
         slicer_service: SlicerService,
         slicer_url: str,
         pacs_study_uid: str,
+        tmp_path: Path,
     ) -> None:
         """load_study_from_pacs loads nodes and auto-sets _image_node."""
         script = (
             _monkey_patch_from_slicer_block()
             + f"""
 import json
-s = SlicerHelper('/tmp/slicer_e2e_test')
+s = SlicerHelper('{tmp_path}')
 loaded = s.load_study_from_pacs('{pacs_study_uid}')
 assert len(loaded) > 0, f"No nodes loaded, got {{loaded}}"
 print(json.dumps({{
@@ -288,13 +289,14 @@ print(json.dumps({{
         slicer_url: str,
         pacs_study_uid: str,
         pacs_series_uid: str,
+        tmp_path: Path,
     ) -> None:
         """load_series_from_pacs loads a single series and sets _image_node."""
         script = (
             _monkey_patch_from_slicer_block()
             + f"""
 import json
-s = SlicerHelper('/tmp/slicer_e2e_test')
+s = SlicerHelper('{tmp_path}')
 loaded = s.load_series_from_pacs('{pacs_study_uid}', '{pacs_series_uid}')
 assert len(loaded) > 0, f"No nodes loaded, got {{loaded}}"
 print(json.dumps({{
@@ -310,6 +312,7 @@ print(json.dumps({{
         self,
         slicer_service: SlicerService,
         slicer_url: str,
+        tmp_path: Path,
     ) -> None:
         """load_study_from_pacs with fake UID + raise_on_empty=True raises."""
         from clarinet.exceptions import SlicerError
@@ -318,7 +321,7 @@ print(json.dumps({{
         script = (
             _monkey_patch_from_slicer_block()
             + f"""
-s = SlicerHelper('/tmp/slicer_e2e_test')
+s = SlicerHelper('{tmp_path}')
 s.load_study_from_pacs('{fake_uid}', raise_on_empty=True)
 """
         )
@@ -329,6 +332,7 @@ s.load_study_from_pacs('{fake_uid}', raise_on_empty=True)
         self,
         slicer_service: SlicerService,
         slicer_url: str,
+        tmp_path: Path,
     ) -> None:
         """load_study_from_pacs with fake UID + raise_on_empty=False returns empty list.
 
@@ -341,7 +345,7 @@ s.load_study_from_pacs('{fake_uid}', raise_on_empty=True)
             _monkey_patch_from_slicer_block()
             + f"""
 import json
-s = SlicerHelper('/tmp/slicer_e2e_test')
+s = SlicerHelper('{tmp_path}')
 try:
     loaded = s.load_study_from_pacs('{fake_uid}', raise_on_empty=False)
 except Exception as e:
