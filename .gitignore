@@ -60,3 +60,4 @@ dev-notes
 # Exception: rules/ are project documentation shared via git
 .claude/*
 !.claude/rules/
+!.claude/agents/
