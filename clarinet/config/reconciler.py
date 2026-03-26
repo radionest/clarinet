@@ -226,6 +226,7 @@ async def reconcile_record_types(
                 else:
                     result.unchanged.append(name)
         except Exception as e:
+            await session.rollback()
             result.errors.append((name, str(e)))
             logger.error(f"Config reconcile error for '{name}': {e}")
 
