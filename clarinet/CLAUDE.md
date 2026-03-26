@@ -75,23 +75,7 @@ logger.info(f"User {user_id} created new record")
 logger.error(f"Failed to connect to database: {error}")
 ```
 
-### Log File Format
-
-File logs default to JSON-lines (`log_serialize=True`). Each line has short keys:
-
-| Key | Content |
-|-----|---------|
-| `t` | ISO timestamp |
-| `l` | Level (INFO, ERROR, …) |
-| `mod` | Module name |
-| `fn` | Function name |
-| `line` | Line number |
-| `msg` | Log message |
-| `exc` | Traceback (only on exceptions) |
-
-Set `CLARINET_LOG_SERIALIZE=false` for plain-text file logs.
-
-Searching logs: `jq 'select(.l == "ERROR")' clarinet.log` — see `.claude/rules/test-debugging.md` for more jq recipes.
+Log file format and jq recipes: `.claude/rules/test-debugging.md` (auto-loaded for tests/).
 
 ## Configuration
 
@@ -133,23 +117,12 @@ Each service has its own CLAUDE.md — see `services/*/CLAUDE.md` for details.
 
 ## Admin Management
 
-- Auto-created on `clarinet db init` (idempotent)
-- `create_admin_user()` from `clarinet.utils.bootstrap`
-- Utilities in `clarinet.utils.admin`: `reset_admin_password`, `list_admin_users`, `ensure_admin_exists`
-- CLI: `uv run clarinet admin create`, `uv run clarinet admin reset-password`
-- See `clarinet/settings.py` for admin config (username, email, password, auto_create, strong_password)
+CLI: `uv run clarinet admin create`, `uv run clarinet admin reset-password`. Auto-created on `clarinet db init`.
 
 ## Session Management
 
-- Session-based auth via fastapi-users; `AccessToken` model (UUID4)
-- Cookies: httpOnly, secure (production), SameSite=lax; name: `clarinet_session`
-- Auto cleanup service in `clarinet/services/session_cleanup.py`
-- CLI: `uv run clarinet session stats`, `cleanup`, `revoke-user`, `list-user`
-- See `clarinet/settings.py` for session config (expiry, sliding refresh, timeouts, cleanup)
+Session-based auth (fastapi-users, `AccessToken`). CLI: `uv run clarinet session stats/cleanup/revoke-user/list-user`.
 
 ## Alembic Migrations
 
-- `uv run clarinet init-migrations` to set up Alembic
-- `uv run alembic revision --autogenerate -m "Description"` to create
-- `uv run alembic upgrade head` / `downgrade -1` to apply/rollback
-- Or use: `make db-upgrade`, `make db-downgrade`, `make db-migration`
+`make db-upgrade`, `make db-downgrade`, `make db-migration`. Or: `uv run alembic revision --autogenerate -m "msg"`.

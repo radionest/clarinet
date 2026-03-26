@@ -15,15 +15,6 @@ from clarinet.utils.logger import logger
 
 
 def _tag_value(vr: str, value: Any) -> dict[str, Any]:
-    """Build a single DICOM JSON tag entry.
-
-    Args:
-        vr: Value Representation (e.g. "LO", "DA")
-        value: The value(s) to include
-
-    Returns:
-        Dict with "vr" and optionally "Value" keys
-    """
     entry: dict[str, Any] = {"vr": vr}
     if value is not None:
         entry["Value"] = value if isinstance(value, list) else [value]
@@ -31,26 +22,10 @@ def _tag_value(vr: str, value: Any) -> dict[str, Any]:
 
 
 def _fields_to_dicom_json(fields: list[tuple[str, str, Any]]) -> dict[str, Any]:
-    """Convert a list of (tag, VR, value) tuples to DICOM JSON format.
-
-    Args:
-        fields: List of (DICOM tag, VR, value) tuples; None values are skipped
-
-    Returns:
-        DICOM JSON dict keyed by tag
-    """
     return {tag: _tag_value(vr, val) for tag, vr, val in fields if val is not None}
 
 
 def study_result_to_dicom_json(result: StudyResult) -> dict[str, Any]:
-    """Convert a StudyResult to DICOM JSON format.
-
-    Args:
-        result: Study-level C-FIND result
-
-    Returns:
-        DICOM JSON dict keyed by tag
-    """
     return _fields_to_dicom_json(
         [
             ("0020000D", "UI", result.study_instance_uid),
@@ -72,14 +47,6 @@ def study_result_to_dicom_json(result: StudyResult) -> dict[str, Any]:
 
 
 def series_result_to_dicom_json(result: SeriesResult) -> dict[str, Any]:
-    """Convert a SeriesResult to DICOM JSON format.
-
-    Args:
-        result: Series-level C-FIND result
-
-    Returns:
-        DICOM JSON dict keyed by tag
-    """
     return _fields_to_dicom_json(
         [
             ("0020000D", "UI", result.study_instance_uid),
@@ -93,14 +60,6 @@ def series_result_to_dicom_json(result: SeriesResult) -> dict[str, Any]:
 
 
 def image_result_to_dicom_json(result: ImageResult) -> dict[str, Any]:
-    """Convert an ImageResult to DICOM JSON format.
-
-    Args:
-        result: Image-level C-FIND result
-
-    Returns:
-        DICOM JSON dict keyed by tag
-    """
     return _fields_to_dicom_json(
         [
             ("0020000D", "UI", result.study_instance_uid),
@@ -170,15 +129,6 @@ def dataset_to_dicom_json(ds: Dataset, base_url: str) -> dict[str, Any]:
 def convert_datasets_to_dicom_json(
     datasets: Iterable[Dataset], base_url: str
 ) -> list[dict[str, Any]]:
-    """Convert multiple pydicom Datasets to DICOM JSON, skipping unreadable instances.
-
-    Args:
-        datasets: Iterable of pydicom Datasets
-        base_url: Base URL for constructing BulkDataURIs
-
-    Returns:
-        List of DICOM JSON dicts (unreadable instances are logged and skipped)
-    """
     metadata: list[dict[str, Any]] = []
     for ds in datasets:
         try:

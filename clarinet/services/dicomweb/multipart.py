@@ -6,15 +6,6 @@ from pydicom import Dataset
 
 
 def extract_frames_from_dataset(ds: Dataset, frame_numbers: list[int]) -> list[bytes]:
-    """Extract pixel data frames from a pydicom Dataset.
-
-    Args:
-        ds: pydicom Dataset with pixel data loaded
-        frame_numbers: 1-based frame numbers to extract
-
-    Returns:
-        List of raw pixel data bytes for each requested frame
-    """
     if not hasattr(ds, "PixelData"):
         return []
 
@@ -38,14 +29,6 @@ def extract_frames_from_dataset(ds: Dataset, frame_numbers: list[int]) -> list[b
 
 
 def build_multipart_response(frames: list[bytes]) -> tuple[bytes, str]:
-    """Build a multipart/related response body for WADO-RS frames.
-
-    Args:
-        frames: List of raw pixel data bytes
-
-    Returns:
-        Tuple of (response body bytes, Content-Type header value)
-    """
     boundary = uuid.uuid4().hex
     content_type = f'multipart/related; type="application/octet-stream"; boundary={boundary}'
 

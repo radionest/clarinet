@@ -29,42 +29,16 @@ class BaseRepository[ModelT: SQLModel]:
         self.model_class = model_class
 
     async def get(self, id: Any) -> ModelT:
-        """Get entity by ID or raise EntityNotFoundError.
-
-        Args:
-            id: Entity ID
-
-        Returns:
-            Found entity
-
-        Raises:
-            EntityNotFoundError: If entity doesn't exist
-        """
+        """Raises EntityNotFoundError if not found."""
         entity = await self.session.get(self.model_class, id)
         if not entity:
             raise EntityNotFoundError(f"{self.model_class.__name__} with ID {id} not found")
         return entity
 
     async def get_optional(self, id: Any) -> ModelT | None:
-        """Get entity by ID or return None.
-
-        Args:
-            id: Entity ID
-
-        Returns:
-            Found entity or None
-        """
         return await self.session.get(self.model_class, id)
 
     async def get_by(self, **filters: FilterValueT) -> ModelT | None:
-        """Get single entity by filters.
-
-        Args:
-            **filters: Field-value pairs to filter by
-
-        Returns:
-            Found entity or None
-        """
         statement = select(self.model_class)
         for field, value in filters.items():
             if hasattr(self.model_class, field):
@@ -74,14 +48,6 @@ class BaseRepository[ModelT: SQLModel]:
         return result.scalars().first()
 
     async def exists(self, **filters: FilterValueT) -> bool:
-        """Check if entity exists with given filters.
-
-        Args:
-            **filters: Field-value pairs to filter by
-
-        Returns:
-            True if entity exists
-        """
         statement = select(func.count()).select_from(self.model_class)
         for field, value in filters.items():
             if hasattr(self.model_class, field):
@@ -94,16 +60,6 @@ class BaseRepository[ModelT: SQLModel]:
     async def get_all(
         self, skip: int = 0, limit: int = 100, **filters: FilterValueT
     ) -> Sequence[ModelT]:
-        """List entities with pagination and filters.
-
-        Args:
-            skip: Number of records to skip
-            limit: Maximum number of records to return
-            **filters: Field-value pairs to filter by
-
-        Returns:
-            List of entities
-        """
         statement = select(self.model_class)
 
         for field, value in filters.items():
@@ -115,14 +71,6 @@ class BaseRepository[ModelT: SQLModel]:
         return result.scalars().all()
 
     async def list_all(self, **filters: FilterValueT) -> Sequence[ModelT]:
-        """List all entities matching filters.
-
-        Args:
-            **filters: Field-value pairs to filter by
-
-        Returns:
-            List of all matching entities
-        """
         statement = select(self.model_class)
 
         for field, value in filters.items():
@@ -133,14 +81,6 @@ class BaseRepository[ModelT: SQLModel]:
         return result.scalars().all()
 
     async def count(self, **filters: FilterValueT) -> int:
-        """Count entities matching filters.
-
-        Args:
-            **filters: Field-value pairs to filter by
-
-        Returns:
-            Number of matching entities
-        """
         statement = select(func.count()).select_from(self.model_class)
 
         for field, value in filters.items():
@@ -151,28 +91,13 @@ class BaseRepository[ModelT: SQLModel]:
         return result.scalar() or 0
 
     async def create(self, entity: ModelT) -> ModelT:
-        """Create new entity.
-
-        Args:
-            entity: Entity to create
-
-        Returns:
-            Created entity with refreshed data
-        """
+        """Flush + refresh, no commit."""
         self.session.add(entity)
         await self.session.flush()
         await self.session.refresh(entity)
         return entity
 
     async def create_many(self, entities: list[ModelT]) -> list[ModelT]:
-        """Create multiple entities.
-
-        Args:
-            entities: List of entities to create
-
-        Returns:
-            List of created entities
-        """
         self.session.add_all(entities)
         await self.session.flush()
         for entity in entities:
@@ -230,23 +155,10 @@ class BaseRepository[ModelT: SQLModel]:
         return entity
 
     async def delete(self, entity: ModelT) -> None:
-        """Delete entity.
-
-        Args:
-            entity: Entity to delete
-        """
         await self.session.delete(entity)
         await self.session.commit()
 
     async def delete_by_id(self, id: Any) -> bool:
-        """Delete entity by ID.
-
-        Args:
-            id: Entity ID
-
-        Returns:
-            True if entity was deleted, False if not found
-        """
         entity = await self.get_optional(id)
         if entity:
             await self.delete(entity)
@@ -254,39 +166,14 @@ class BaseRepository[ModelT: SQLModel]:
         return False
 
     def build_query(self, base_query: Select | None = None) -> Select:
-        """Build base query for the model.
-
-        Args:
-            base_query: Optional base query to extend
-
-        Returns:
-            SQLAlchemy Select statement
-        """
         if base_query is None:
             return select(self.model_class)
         return base_query
 
     async def execute_query(self, query: Select) -> Sequence[ModelT]:
-        """Execute a custom query.
-
-        Args:
-            query: SQLAlchemy Select statement
-
-        Returns:
-            Query results
-        """
         result = await self.session.execute(query)
         return result.scalars().all()
 
     async def refresh(self, entity: ModelT, attribute_names: list[str] | None = None) -> ModelT:
-        """Refresh entity from database.
-
-        Args:
-            entity: Entity to refresh
-            attribute_names: Optional list of attributes to refresh
-
-        Returns:
-            Refreshed entity
-        """
         await self.session.refresh(entity, attribute_names)
         return entity

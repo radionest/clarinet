@@ -1,4 +1,8 @@
-"""Repository for Record-specific database operations."""
+"""Repository for Record-specific database operations.
+
+NOTE: selectinload() calls use ``# type: ignore`` — mypy cannot resolve
+SQLAlchemy InstrumentedAttribute on SQLModel classes (known limitation).
+"""
 
 import random
 from collections.abc import Callable, Sequence

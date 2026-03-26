@@ -115,29 +115,9 @@ Key points:
 - Blocked records cannot be assigned to users or accept data submissions
 - `find_pending_by_user()` excludes blocked records
 
-## JSON Columns
-
-Use `sa_column=Column(JSON)` for dict/list fields:
-- `Record.data` — dynamic data per RecordType.data_schema
-- `RecordType.slicer_script_args`, `data_schema`
-
-Note: `Record.files` and `Record.file_checksums` are no longer JSON columns — they are
-stored in the `record_file_link` M2M table via `RecordFileLink`.
-
-## Custom Types
-
-- `DicomUID` = `Annotated[str, StringConstraints(pattern=r"^[0-9\.]*$", min_length=5, max_length=64)]`
-
 ## Frontend Consistency
 
-Backend models (`clarinet/models/`) and frontend models (`clarinet/frontend/clarinet/api/`) must stay in sync.
-When changing `{Model}Read`, `{Model}Create`, or `{Model}Optional` schemas — update the
-corresponding Gleam types in:
-- `clarinet/frontend/clarinet/api/models.gleam` — shared data models
-- `clarinet/frontend/clarinet/api/types.gleam` — type definitions
-- `clarinet/frontend/clarinet/api/records.gleam`, `series.gleam`, `studies.gleam`, `users.gleam`, `admin.gleam` — API-specific types
-
-Check field names, types, and optionality match between Python schemas and Gleam types.
+When changing `*Read`, `*Create`, or `*Optional` schemas — update corresponding Gleam types in `clarinet/frontend/clarinet/api/`.
 
 ## Pitfalls
 
@@ -161,8 +141,3 @@ SQLModel DTO classes (`table=False`, no `table=True`) still inherit from `SQLMod
 JSON Schema metadata, while Pydantic's `Field()` uses `json_schema_extra`. Using the wrong
 one silently does nothing. Rule: if the class inherits `SQLModel` → use `schema_extra`;
 if it inherits `pydantic.BaseModel` → use `json_schema_extra`.
-
-## Forward References
-
-Models use `TYPE_CHECKING` to avoid circular imports. Schemas with forward refs
-need `model_rebuild()` — called in `app.py` lifespan (e.g. `SeriesFind.model_rebuild()`).
