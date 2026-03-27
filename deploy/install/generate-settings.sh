@@ -41,6 +41,8 @@ port = 8000
 debug = false
 root_url = "${ROOT_URL}"
 api_base_url = "https://127.0.0.1${ROOT_URL}/api"
+# Internal loopback to nginx with self-signed certificate — safe to skip verification.
+# For production with a real CA certificate, remove this line or set to true.
 api_verify_ssl = false
 
 # Project

@@ -56,11 +56,11 @@ def _is_ssl_error(exc: BaseException) -> bool:
     """Check if an exception chain contains an SSL certificate error."""
     import ssl
 
-    cause = exc.__cause__
-    while cause is not None:
-        if isinstance(cause, ssl.SSLCertVerificationError):
+    current: BaseException | None = exc
+    while current is not None:
+        if isinstance(current, ssl.SSLCertVerificationError):
             return True
-        cause = cause.__cause__
+        current = current.__cause__ or current.__context__
     return False
 
 
