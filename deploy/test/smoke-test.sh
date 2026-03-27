@@ -86,6 +86,30 @@ content_type=$($CURL -s -o /dev/null -D - "${BASE_URL}" 2>/dev/null | grep -i "c
 has_html=$(echo "$content_type" | grep -ci "text/html" || echo "0")
 check "SPA serves HTML" "$has_html" "1"
 
+# Test 6: Auth cookie flow (login → cookie → /auth/me)
+echo "[6] Auth cookie flow"
+COOKIE_FILE=$(mktemp)
+trap 'rm -f "$COOKIE_FILE"' EXIT
+
+# Read admin password from VM settings
+ADMIN_PASS=$(ssh -o StrictHostKeyChecking=no clarinet@"${IP}" \
+    "grep '^admin_password' /opt/clarinet/settings.toml | head -1 | sed 's/.*= *\"//;s/\".*//'" 2>/dev/null || echo "")
+
+if [[ -n "$ADMIN_PASS" ]]; then
+    login_status=$(curl -sk --max-time 10 -o /dev/null -w '%{http_code}' \
+        -c "$COOKIE_FILE" \
+        -X POST "${BASE_URL}api/auth/login" \
+        -d "username=admin@clarinet.ru&password=${ADMIN_PASS}" || echo "000")
+    check "Login returns 204" "$login_status" "204"
+
+    me_status=$(curl -sk --max-time 10 -o /dev/null -w '%{http_code}' \
+        -b "$COOKIE_FILE" \
+        "${BASE_URL}api/auth/me" || echo "000")
+    check "GET /auth/me with cookie (200)" "$me_status" "200"
+else
+    echo "  SKIP  Cannot read admin_password from VM"
+fi
+
 echo "-------------------------------------------"
 echo "Results: ${passed}/${total} passed, ${failed} failed"
 

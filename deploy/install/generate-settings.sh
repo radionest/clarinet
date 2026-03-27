@@ -40,6 +40,8 @@ host = "127.0.0.1"
 port = 8000
 debug = false
 root_url = "${ROOT_URL}"
+api_base_url = "https://127.0.0.1${ROOT_URL}/api"
+api_verify_ssl = false
 
 # Project
 project_name = "Clarinet"

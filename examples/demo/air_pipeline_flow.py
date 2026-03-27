@@ -24,9 +24,10 @@ async def _get_client() -> ClarinetClient:
     from clarinet.settings import settings
 
     client = ClarinetClient(
-        settings.api_base_url,
+        settings.effective_api_base_url,
         username=settings.admin_email,
         password=settings.admin_password,
+        verify_ssl=settings.api_verify_ssl,
     )
     await client.login()
     return client
