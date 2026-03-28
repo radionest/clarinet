@@ -7,15 +7,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VM_SH="${SCRIPT_DIR}/../vm/vm.sh"
 
-KEEP_VM="${KEEP_VM:-false}"
+source "${SCRIPT_DIR}/../lib/logging.sh"
+init_logging "e2e"
 
-GREEN='\033[0;32m'
-RED='\033[0;31m'
-YELLOW='\033[1;33m'
-NC='\033[0m'
-log()  { echo -e "${GREEN}[e2e]${NC} $*"; }
-warn() { echo -e "${YELLOW}[e2e]${NC} $*"; }
-err()  { echo -e "${RED}[e2e]${NC} $*" >&2; }
+KEEP_VM="${KEEP_VM:-false}"
 
 cleanup() {
     if [[ "$KEEP_VM" == "true" ]]; then
