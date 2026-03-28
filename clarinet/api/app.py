@@ -10,6 +10,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from string import Template
 
+import httpx
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
@@ -49,6 +50,18 @@ from clarinet.utils.db_manager import db_manager
 from clarinet.utils.file_registry_resolver import load_project_file_registry
 from clarinet.utils.fs import shutdown_fs_executor
 from clarinet.utils.logger import logger
+
+
+def _is_ssl_error(exc: BaseException) -> bool:
+    """Check if an exception chain contains an SSL certificate error."""
+    import ssl
+
+    current: BaseException | None = exc
+    while current is not None:
+        if isinstance(current, ssl.SSLCertVerificationError):
+            return True
+        current = current.__cause__ or current.__context__
+    return False
 
 
 class StartupError(SystemExit):
@@ -101,11 +114,39 @@ async def _init_recordflow(app: FastAPI) -> None:
     from clarinet.services.recordflow import RecordFlowEngine, discover_and_load_flows
 
     client = ClarinetClient(
-        base_url=settings.api_base_url,
+        base_url=settings.effective_api_base_url,
         username=settings.admin_email,
         password=settings.admin_password,
         auto_login=False,
+        verify_ssl=settings.api_verify_ssl,
     )
+
+    # Verify API connectivity when using external base URL (e.g. nginx with TLS)
+    if settings.api_base_url:
+        try:
+            response = await client.client.get("/health")
+            response.raise_for_status()
+        except httpx.ConnectError as e:
+            await client.close()
+            # SSL errors surface as ConnectError with an ssl cause
+            if _is_ssl_error(e):
+                raise StartupError(
+                    component="RecordFlow",
+                    reason=f"SSL certificate verification failed for {settings.effective_api_base_url}",
+                    hint="For self-signed certificates, set api_verify_ssl = false in settings",
+                ) from e
+            raise StartupError(
+                component="RecordFlow",
+                reason=f"Cannot connect to API at {settings.effective_api_base_url}: {e}",
+                hint="Check that api_base_url points to a reachable server",
+            ) from e
+        except httpx.HTTPError as e:
+            await client.close()
+            raise StartupError(
+                component="RecordFlow",
+                reason=f"API connectivity check failed for {settings.effective_api_base_url}: {e}",
+                hint="Verify the API server is running and accessible",
+            ) from e
 
     engine = RecordFlowEngine(client)
 

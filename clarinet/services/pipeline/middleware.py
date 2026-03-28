@@ -258,10 +258,11 @@ class PipelineChainMiddleware(TaskiqMiddleware):
             return self._client
 
         client = ClarinetClient(
-            base_url=settings.api_base_url,
+            base_url=settings.effective_api_base_url,
             username=settings.admin_email,
             password=settings.admin_password,
             auto_login=False,
+            verify_ssl=settings.api_verify_ssl,
         )
         try:
             await client.login()

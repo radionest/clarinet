@@ -79,6 +79,8 @@ class Settings(BaseSettings):
     port: int = 8000
     host: str = "127.0.0.1"
     root_url: str = ""
+    api_base_url: str = ""
+    api_verify_ssl: bool = True
     debug: bool = False
     coerce_null_query_params: bool = True
 
@@ -275,9 +277,14 @@ class Settings(BaseSettings):
     project_static_path: Path | None = None
 
     @property
-    def api_base_url(self) -> str:
-        """Base URL for internal API client connections."""
-        return f"http://{self.host}:{self.port}/api"
+    def effective_api_base_url(self) -> str:
+        """Base URL for internal API client connections.
+
+        When behind a reverse proxy (e.g. nginx with TLS termination),
+        set ``api_base_url`` to the external URL so that the internal
+        HTTP client receives valid Secure cookies.
+        """
+        return self.api_base_url or f"http://{self.host}:{self.port}/api"
 
     @property
     def session_expire_seconds(self) -> int:

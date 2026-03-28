@@ -836,7 +836,7 @@ class TestPipelineTaskDecorator:
         mock_get_broker: MagicMock,
     ):
         """ClarinetClient must be created with base_url containing /api."""
-        mock_settings.api_base_url = "http://localhost:8000/api"
+        mock_settings.effective_api_base_url = "http://localhost:8000/api"
         mock_settings.admin_email = "admin@test.com"
         mock_settings.admin_password = "pass"
 
@@ -1104,7 +1104,7 @@ class TestSyncHandlerDetection:
         mock_get_broker: MagicMock,
     ):
         """Sync function is detected and receives SyncTaskContext."""
-        mock_settings.api_base_url = "http://localhost:8000/api"
+        mock_settings.effective_api_base_url = "http://localhost:8000/api"
         mock_settings.admin_email = "admin@test.com"
         mock_settings.admin_password = "pass"
 
@@ -1148,7 +1148,7 @@ class TestSyncHandlerDetection:
         mock_get_broker: MagicMock,
     ):
         """Async function still works as before with TaskContext."""
-        mock_settings.api_base_url = "http://localhost:8000/api"
+        mock_settings.effective_api_base_url = "http://localhost:8000/api"
         mock_settings.admin_email = "admin@test.com"
         mock_settings.admin_password = "pass"
 
@@ -1200,7 +1200,7 @@ class TestAutoSubmit:
         mock_get_broker: MagicMock,
     ):
         """Dict result with auto_submit=True calls submit_record_data."""
-        mock_settings.api_base_url = "http://localhost:8000/api"
+        mock_settings.effective_api_base_url = "http://localhost:8000/api"
         mock_settings.admin_email = "admin@test.com"
         mock_settings.admin_password = "pass"
 
@@ -1242,7 +1242,7 @@ class TestAutoSubmit:
         mock_get_broker: MagicMock,
     ):
         """None result with auto_submit=True does not call submit."""
-        mock_settings.api_base_url = "http://localhost:8000/api"
+        mock_settings.effective_api_base_url = "http://localhost:8000/api"
         mock_settings.admin_email = "admin@test.com"
         mock_settings.admin_password = "pass"
 
@@ -1285,7 +1285,7 @@ class TestAutoSubmit:
         caplog: pytest.LogCaptureFixture,
     ):
         """Dict result without record_id logs warning, no submit."""
-        mock_settings.api_base_url = "http://localhost:8000/api"
+        mock_settings.effective_api_base_url = "http://localhost:8000/api"
         mock_settings.admin_email = "admin@test.com"
         mock_settings.admin_password = "pass"
 
@@ -1327,7 +1327,7 @@ class TestAutoSubmit:
         mock_get_broker: MagicMock,
     ):
         """PipelineMessage result with auto_submit=True is not submitted."""
-        mock_settings.api_base_url = "http://localhost:8000/api"
+        mock_settings.effective_api_base_url = "http://localhost:8000/api"
         mock_settings.admin_email = "admin@test.com"
         mock_settings.admin_password = "pass"
 
@@ -1370,7 +1370,7 @@ class TestAutoSubmit:
         mock_get_broker: MagicMock,
     ):
         """Dict result without auto_submit=True does not call submit."""
-        mock_settings.api_base_url = "http://localhost:8000/api"
+        mock_settings.effective_api_base_url = "http://localhost:8000/api"
         mock_settings.admin_email = "admin@test.com"
         mock_settings.admin_password = "pass"
 

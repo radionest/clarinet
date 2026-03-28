@@ -102,6 +102,7 @@ class ClarinetClient:
         password: str | None = None,
         auto_login: bool = True,
         log_requests: bool = False,
+        verify_ssl: bool = True,
     ) -> None:
         """Initialize Clarinet client.
 
@@ -112,6 +113,8 @@ class ClarinetClient:
                      will prompt for password interactively
             auto_login: Automatically login on initialization (default: True)
             log_requests: Enable request/response logging (default: False)
+            verify_ssl: Verify SSL certificates (default: True). Set to False
+                       for self-signed certificates.
         """
         self.base_url = base_url.rstrip("/")
         self.username = username
@@ -119,7 +122,9 @@ class ClarinetClient:
         self.log_requests = log_requests
 
         # Create async HTTP client with cookie jar for session management
-        self.client = httpx.AsyncClient(base_url=self.base_url, follow_redirects=True)
+        self.client = httpx.AsyncClient(
+            base_url=self.base_url, follow_redirects=True, verify=verify_ssl
+        )
         self._authenticated = False
 
         # Auto-login if credentials provided
