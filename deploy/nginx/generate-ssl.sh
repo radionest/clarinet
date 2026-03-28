@@ -6,9 +6,9 @@ set -euo pipefail
 CERT_PATH="/etc/ssl/certs/clarinet-selfsigned.crt"
 KEY_PATH="/etc/ssl/private/clarinet-selfsigned.key"
 
-GREEN='\033[0;32m'
-NC='\033[0m'
-log() { echo -e "${GREEN}[ssl]${NC} $*"; }
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../lib/logging.sh"
+init_logging "ssl"
 
 if [[ -f "$CERT_PATH" && -f "$KEY_PATH" ]]; then
     log "TLS certificate already exists, skipping"

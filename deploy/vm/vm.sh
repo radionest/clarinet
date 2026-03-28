@@ -9,37 +9,13 @@ PROJECT_DIR="$(cd "$DEPLOY_DIR/.." && pwd)"
 
 # Load configuration
 source "$SCRIPT_DIR/vm.conf"
+source "$DEPLOY_DIR/lib/common.sh"
+init_logging "vm"
 
 # Derived paths
 DISK_PATH="${DISKS_DIR}/${VM_NAME}.qcow2"
 SEED_ISO="${DISKS_DIR}/${VM_NAME}-seed.iso"
 RENDERED_USER_DATA="${SCRIPT_DIR}/cloud-init/user-data-rendered.yaml"
-
-# Colors
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
-
-log()  { echo -e "${GREEN}[vm]${NC} $*"; }
-warn() { echo -e "${YELLOW}[vm]${NC} $*"; }
-err()  { echo -e "${RED}[vm]${NC} $*" >&2; }
-
-check_deps() {
-    local missing=()
-    for cmd in virsh virt-install cloud-localds qemu-img jq; do
-        if ! command -v "$cmd" &>/dev/null; then
-            missing+=("$cmd")
-        fi
-    done
-    if [[ ${#missing[@]} -gt 0 ]]; then
-        err "Missing dependencies: ${missing[*]}"
-        echo ""
-        echo "Install with:"
-        echo "  sudo apt install libvirt-daemon-system virtinst cloud-image-utils qemu-utils"
-        exit 1
-    fi
-}
 
 ensure_storage_access() {
     # libvirt-qemu needs +x (traverse) on every directory in the path to disk files.
@@ -98,7 +74,7 @@ download_image() {
 }
 
 cmd_create() {
-    check_deps
+    require_commands virsh virt-install cloud-localds qemu-img jq
     ensure_storage_access
 
     if virsh domstate "$VM_NAME" &>/dev/null; then
@@ -227,18 +203,8 @@ _wait_for_ssh() {
     exit 1
 }
 
-_ssh_cmd() {
-    local ip
-    ip="$(_get_ip)"
-    if [[ -z "$ip" ]]; then
-        err "Could not determine VM IP."
-        exit 1
-    fi
-    ssh -o StrictHostKeyChecking=no -i "$SSH_KEY_PATH" "${VM_USER}@${ip}" "$@"
-}
-
 cmd_ssh() {
-    _ssh_cmd "${@}"
+    ssh_vm "$@"
 }
 
 cmd_status() {
@@ -306,7 +272,7 @@ cmd_deploy() {
         exit 1
     fi
 
-    local scp_opts="-o StrictHostKeyChecking=no -i $SSH_KEY_PATH"
+    local scp_opts=(-o StrictHostKeyChecking=no -i "$SSH_KEY_PATH")
     local ssh_target="${VM_USER}@${ip}"
 
     if [[ -n "$wheel" ]]; then
@@ -324,24 +290,21 @@ cmd_deploy() {
     fi
 
     # Create remote staging directory
-    _ssh_cmd "mkdir -p /tmp/clarinet-deploy"
+    ssh_vm "mkdir -p /tmp/clarinet-deploy"
 
     # Copy wheel + deploy scripts
     log "Uploading deployment files..."
-    # shellcheck disable=SC2086  # scp_opts intentionally word-split
-    scp $scp_opts "$wheel" "${ssh_target}:/tmp/clarinet-deploy/"
-    # shellcheck disable=SC2086
-    scp $scp_opts -r "$DEPLOY_DIR/install" "${ssh_target}:/tmp/clarinet-deploy/"
-    # shellcheck disable=SC2086
-    scp $scp_opts -r "$DEPLOY_DIR/systemd" "${ssh_target}:/tmp/clarinet-deploy/"
-    # shellcheck disable=SC2086
-    scp $scp_opts -r "$DEPLOY_DIR/nginx"   "${ssh_target}:/tmp/clarinet-deploy/"
+    scp "${scp_opts[@]}" "$wheel" "${ssh_target}:/tmp/clarinet-deploy/"
+    scp "${scp_opts[@]}" -r "$DEPLOY_DIR/lib"     "${ssh_target}:/tmp/clarinet-deploy/"
+    scp "${scp_opts[@]}" -r "$DEPLOY_DIR/install" "${ssh_target}:/tmp/clarinet-deploy/"
+    scp "${scp_opts[@]}" -r "$DEPLOY_DIR/systemd" "${ssh_target}:/tmp/clarinet-deploy/"
+    scp "${scp_opts[@]}" -r "$DEPLOY_DIR/nginx"   "${ssh_target}:/tmp/clarinet-deploy/"
 
     # Run install script
     local wheel_name
     wheel_name="$(basename "$wheel")"
     log "Running installer on VM..."
-    _ssh_cmd "sudo CLARINET_PATH_PREFIX='${PATH_PREFIX}' \
+    ssh_vm "sudo CLARINET_PATH_PREFIX='${PATH_PREFIX}' \
         CLARINET_PACS_HOST='${PACS_HOST:-localhost}' \
         bash /tmp/clarinet-deploy/install/install-clarinet.sh \
         /tmp/clarinet-deploy/${wheel_name} \
@@ -357,7 +320,7 @@ cmd_reimage() {
 }
 
 cmd_setup() {
-    check_deps
+    require_commands virsh virt-install cloud-localds qemu-img jq
     mkdir -p "$IMAGES_DIR" "$DISKS_DIR"
     ensure_storage_access
 
