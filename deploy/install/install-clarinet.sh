@@ -15,11 +15,8 @@ LOG_DIR="/var/log/clarinet"
 
 PATH_PREFIX="${CLARINET_PATH_PREFIX:-/}"
 
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m'
-log()  { echo -e "${GREEN}[install]${NC} $*"; }
-warn() { echo -e "${YELLOW}[install]${NC} $*"; }
+source "${DEPLOY_DIR}/lib/logging.sh"
+init_logging "install"
 
 # --- Step 1: System user ---
 setup_user() {
@@ -79,9 +76,8 @@ setup_services() {
         return
     fi
     source "${DEPLOY_DIR}/install/setup-services.sh"
-    # Restore log/warn overwritten by sourced script
-    log()  { echo -e "${GREEN}[install]${NC} $*"; }
-    warn() { echo -e "${YELLOW}[install]${NC} $*"; }
+    # Restore logging tag overwritten by sourced script
+    init_logging "install"
 }
 
 # --- Step 6: Settings ---

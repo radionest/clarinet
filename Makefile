@@ -276,6 +276,10 @@ vm-acceptance: ## Run acceptance tests (pytest) against running VM
 	CLARINET_TEST_ADMIN_PASSWORD="$$ADMIN_PASS" \
 	uv run pytest deploy/test/acceptance/ -v
 
+.PHONY: vm-test-lib
+vm-test-lib: ## Test deploy/lib/ scripts (logging, common)
+	@uv run pytest deploy/test/test_deploy_lib.py -v
+
 .PHONY: vm-test
 vm-test: ## Full E2E: create VM -> deploy -> test -> cleanup
 	@bash deploy/test/deploy-test.sh

@@ -10,9 +10,8 @@ DB_PASS="${CLARINET_DB_PASS:-$(openssl rand -base64 16)}"
 RABBIT_USER="${CLARINET_RABBIT_USER:-clarinet}"
 RABBIT_PASS="${CLARINET_RABBIT_PASS:-$(openssl rand -base64 16)}"
 
-GREEN='\033[0;32m'
-NC='\033[0m'
-log() { echo -e "${GREEN}[services]${NC} $*"; }
+# logging.sh already sourced by caller (install-clarinet.sh)
+init_logging "services"
 
 # --- PostgreSQL ---
 setup_postgresql() {

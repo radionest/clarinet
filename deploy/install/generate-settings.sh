@@ -21,9 +21,9 @@ ANON_SALT="${CLARINET_ANON_SALT:-$(openssl rand -hex 16)}"
 
 ROOT_URL="${CLARINET_ROOT_URL:-}"
 
-GREEN='\033[0;32m'
-NC='\033[0m'
-log() { echo -e "${GREEN}[settings]${NC} $*"; }
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../lib/logging.sh"
+init_logging "settings"
 
 # Create directories
 mkdir -p "$DATA_DIR" "$LOG_DIR" "$SETTINGS_DIR"
