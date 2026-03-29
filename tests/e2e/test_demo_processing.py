@@ -1,8 +1,8 @@
 """E2E tests: full demo research processing cycle.
 
-Loads actual RecordType definitions from ``examples/demo/tasks/``
+Loads actual RecordType definitions from ``tests/e2e/demo_data/tasks/``
 (TOML preferred, JSON fallback) and RecordFlow rules from
-``examples/demo/record_flow.py``, then exercises the complete processing
+``tests/e2e/demo_data/record_flow.py``, then exercises the complete processing
 chain through the API.
 """
 
@@ -34,7 +34,7 @@ from clarinet.utils.config_loader import discover_config_files, load_record_conf
 from clarinet.utils.file_registry_resolver import FileRegistryEntry, resolve_task_files
 from tests.utils.factories import make_patient
 
-DEMO_DIR = Path(__file__).resolve().parent.parent.parent / "examples" / "demo"
+DEMO_DIR = Path(__file__).resolve().parent / "demo_data"
 TASKS_DIR = DEMO_DIR / "tasks"
 FLOW_FILE = DEMO_DIR / "record_flow.py"
 

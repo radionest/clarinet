@@ -453,4 +453,3 @@ result = await client.get_study(
 
 - [pynetdicom документация](https://pydicom.github.io/pynetdicom/)
 - [DICOM Standard](https://www.dicomstandard.org/)
-- [Examples](../examples/dicom_client_example.py)
