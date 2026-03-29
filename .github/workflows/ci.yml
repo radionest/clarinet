@@ -68,6 +68,23 @@ jobs:
           --json-report-file=test-report.json
           -q
 
+  test-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          cache-dependency-glob: "**/pyproject.toml"
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Test deploy scripts
+        run: uv run pytest deploy/test/test_deploy_lib.py -v
+
   test-schema:
     runs-on: ubuntu-latest
 
