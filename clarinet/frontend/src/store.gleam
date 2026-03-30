@@ -1,11 +1,14 @@
 // Global state management
 import api/info.{type ProjectInfo}
 import api/models.{
-  type PacsStudyWithSeries, type Patient, type RecordTypeStats,
+  type Patient, type RecordTypeStats,
   type Series, type Study, type Record, type RecordType, type User,
 }
 import pages/admin as admin_page
 import pages/login as login_page
+import pages/patients/detail as patient_detail_page
+import pages/patients/list as patients_list_page
+import pages/patients/new as patient_new_page
 import pages/register as register_page
 import api/types.{type ApiError}
 import gleam/dict.{type Dict}
@@ -42,8 +45,6 @@ pub type Model {
     study_form: Option(dynamic.Dynamic),
     // Will hold form data dynamically
     record_type_form: Option(dynamic.Dynamic),
-    patient_form_id: String,
-    patient_form_name: String,
     // Record creation form
     record_form_record_type_name: String,
     record_form_patient_id: String,
@@ -67,10 +68,6 @@ pub type Model {
     // Modal state
     modal_open: Bool,
     modal_content: ModalContent,
-    // PACS state
-    pacs_studies: List(PacsStudyWithSeries),
-    pacs_loading: Bool,
-    pacs_importing: Option(String),
     // Slicer state
     slicer_loading: Bool,
     slicer_available: Option(Bool),
@@ -88,6 +85,9 @@ pub type PageModel {
   AdminPage(admin_page.Model)
   LoginPage(login_page.Model)
   RegisterPage(register_page.Model)
+  PatientsListPage(patients_list_page.Model)
+  PatientDetailPage(patient_detail_page.Model)
+  PatientNewPage(patient_new_page.Model)
 }
 
 // Modal content types
@@ -113,6 +113,11 @@ pub type Msg {
   LoginMsg(login_page.Msg)
   RegisterMsg(register_page.Msg)
 
+  // Patient page delegation
+  PatientsListMsg(patients_list_page.Msg)
+  PatientDetailMsg(patient_detail_page.Msg)
+  PatientNewMsg(patient_new_page.Msg)
+
   // Data loading
   LoadStudies
   StudiesLoaded(Result(List(Study), ApiError))
@@ -134,10 +139,6 @@ pub type Msg {
   PatientsLoaded(Result(List(Patient), ApiError))
   LoadPatientDetail(id: String)
   PatientDetailLoaded(Result(Patient, ApiError))
-  AnonymizePatient(id: String)
-  PatientAnonymized(Result(Patient, ApiError))
-  DeletePatient(id: String)
-  PatientDeleted(Result(Nil, ApiError))
   DeleteStudy(study_uid: String)
   StudyDeleted(Result(Nil, ApiError))
 
@@ -156,11 +157,6 @@ pub type Msg {
   UpdateRecordTypeSchema(Json)
   SubmitRecordTypeForm
   RecordTypeFormSubmitted(Result(RecordType, ApiError))
-
-  UpdatePatientFormId(String)
-  UpdatePatientFormName(String)
-  SubmitPatientForm
-  PatientFormSubmitted(Result(Patient, ApiError))
 
   // Record creation form
   UpdateRecordFormRecordType(String)
@@ -216,13 +212,6 @@ pub type Msg {
   SetPage(Int)
   SetItemsPerPage(Int)
 
-  // PACS operations
-  SearchPacsStudies(patient_id: String)
-  PacsStudiesLoaded(Result(List(PacsStudyWithSeries), ApiError))
-  ImportPacsStudy(study_uid: String, patient_id: String)
-  PacsStudyImported(Result(Study, ApiError))
-  ClearPacsResults
-
   // Slicer operations
   OpenInSlicer(record_id: String)
   SlicerOpenResult(Result(dynamic.Dynamic, ApiError))
@@ -274,8 +263,6 @@ pub fn init() -> Model {
     users: dict.new(),
     study_form: None,
     record_type_form: None,
-    patient_form_id: "",
-    patient_form_name: "",
     record_form_record_type_name: "",
     record_form_patient_id: "",
     record_form_study_uid: "",
@@ -294,9 +281,6 @@ pub fn init() -> Model {
     record_type_stats: None,
     modal_open: False,
     modal_content: NoModal,
-    pacs_studies: [],
-    pacs_loading: False,
-    pacs_importing: None,
     slicer_loading: False,
     slicer_available: None,
     slicer_ping_timer: None,
@@ -378,10 +362,6 @@ pub fn cache_patient(model: Model, patient: Patient) -> Model {
   Model(..model, patients: patients)
 }
 
-pub fn clear_patient_form(model: Model) -> Model {
-  Model(..model, patient_form_id: "", patient_form_name: "")
-}
-
 pub fn clear_record_form(model: Model) -> Model {
   Model(
     ..model,
@@ -420,17 +400,4 @@ pub fn remove_filter(model: Model, key: String) -> Model {
 
 pub fn clear_filters(model: Model) -> Model {
   Model(..model, active_filters: dict.new(), search_query: "")
-}
-
-// PACS helpers
-pub fn set_pacs_loading(model: Model, loading: Bool) -> Model {
-  Model(..model, pacs_loading: loading)
-}
-
-pub fn set_pacs_studies(model: Model, studies: List(PacsStudyWithSeries)) -> Model {
-  Model(..model, pacs_studies: studies, pacs_loading: False)
-}
-
-pub fn clear_pacs(model: Model) -> Model {
-  Model(..model, pacs_studies: [], pacs_loading: False, pacs_importing: None)
 }

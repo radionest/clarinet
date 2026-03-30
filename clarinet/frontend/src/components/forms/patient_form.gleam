@@ -5,8 +5,6 @@ import gleam/option.{None, Some}
 import lustre/attribute
 import lustre/element.{type Element}
 import lustre/element/html
-import router
-import store.{type Msg}
 
 // Patient form data type for managing form state
 pub type PatientFormData {
@@ -29,9 +27,10 @@ pub fn view(
   data data: PatientFormData,
   errors errors: Dict(String, String),
   loading loading: Bool,
-  on_update on_update: fn(PatientFormMsg) -> Msg,
-  on_submit on_submit: fn() -> Msg,
-) -> Element(Msg) {
+  on_update on_update: fn(PatientFormMsg) -> msg,
+  on_submit on_submit: fn() -> msg,
+  on_cancel on_cancel: msg,
+) -> Element(msg) {
   form.form(on_submit, [
     html.h3([attribute.class("form-title")], [html.text("Patient Information")]),
 
@@ -66,7 +65,7 @@ pub fn view(
     // Form actions
     html.div([attribute.class("form-actions")], [
       form.submit_button(text: "Create Patient", disabled: loading, on_click: None),
-      form.cancel_button(text: "Cancel", on_click: store.Navigate(router.Patients)),
+      form.cancel_button(text: "Cancel", on_click: on_cancel),
     ]),
 
     // Loading overlay

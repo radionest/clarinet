@@ -42,6 +42,8 @@ pub type OutMsg {
   ReloadUsers
   ReloadPatients
   ReloadRecordTypes
+  ReloadPatient(String)
+  OpenDeleteConfirm(resource: String, id: String)
   SetUser(User)
   Logout
 }
