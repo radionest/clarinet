@@ -49,6 +49,7 @@ import pages/studies/detail as study_detail
 import pages/studies/list as studies_list
 import plinth/javascript/global
 import router.{type Route}
+import shared.{type OutMsg}
 import store.{type Model, type Msg}
 
 // Initialize the application
@@ -1613,6 +1614,65 @@ fn load_record_form_studies(patient_id: String) -> Effect(Msg) {
 fn dispatch_msg(msg: Msg) -> Effect(Msg) {
   use dispatch <- effect.from
   dispatch(msg)
+}
+
+fn build_shared(model: Model) -> shared.Shared {
+  shared.Shared(
+    user: model.user,
+    route: model.route,
+    project_name: model.project_name,
+    project_description: model.project_description,
+    studies: model.studies,
+    series: model.series,
+    records: model.records,
+    record_types: model.record_types,
+    patients: model.patients,
+    users: model.users,
+    hydrated_schemas: model.hydrated_schemas,
+  )
+}
+
+fn apply_out_msgs(
+  model: Model,
+  msgs: List(OutMsg),
+) -> #(Model, Effect(Msg)) {
+  let #(final_model, effs) =
+    list.fold(msgs, #(model, []), fn(acc, out_msg) {
+      let #(m, eff_list) = acc
+      case out_msg {
+        shared.ShowSuccess(text) ->
+          #(store.set_success(m, text), eff_list)
+        shared.ShowError(text) ->
+          #(store.set_error(m, option.Some(text)), eff_list)
+        shared.Navigate(route) ->
+          #(m, [modem.push(router.route_to_path(route), option.None, option.None), ..eff_list])
+        shared.SetLoading(loading) ->
+          #(store.set_loading(m, loading), eff_list)
+        shared.CacheRecord(record) ->
+          #(store.cache_record(m, record), eff_list)
+        shared.CacheStudy(study) ->
+          #(store.cache_study(m, study), eff_list)
+        shared.CachePatient(patient) ->
+          #(store.cache_patient(m, patient), eff_list)
+        shared.CacheRecordType(rt) ->
+          #(store.cache_record_type(m, rt), eff_list)
+        shared.CacheSeries(s) ->
+          #(store.cache_series(m, s), eff_list)
+        shared.ReloadRecords ->
+          #(m, [dispatch_msg(store.LoadRecords), ..eff_list])
+        shared.ReloadStudies ->
+          #(m, [dispatch_msg(store.LoadStudies), ..eff_list])
+        shared.ReloadUsers ->
+          #(m, [dispatch_msg(store.LoadUsers), ..eff_list])
+        shared.ReloadPatients ->
+          #(m, [dispatch_msg(store.LoadPatients), ..eff_list])
+        shared.ReloadRecordTypes ->
+          #(m, [dispatch_msg(store.LoadRecordTypes), ..eff_list])
+        shared.Logout ->
+          #(store.reset_for_logout(m), [dispatch_msg(store.LogoutComplete), ..eff_list])
+      }
+    })
+  #(final_model, effect.batch(list.reverse(effs)))
 }
 
 // Helper: start periodic slicer ping timer (immediate ping + 10s interval)
