@@ -5,6 +5,8 @@ import api/models.{
   type Series, type Study, type Record, type RecordType, type User,
 }
 import pages/admin as admin_page
+import pages/login as login_page
+import pages/register as register_page
 import api/types.{type ApiError}
 import gleam/dict.{type Dict}
 import gleam/dynamic
@@ -36,12 +38,6 @@ pub type Model {
     record_types: Dict(String, RecordType),
     patients: Dict(String, Patient),
     users: Dict(String, User),
-    // Auth form states (controlled inputs)
-    login_email: String,
-    login_password: String,
-    register_email: String,
-    register_password: String,
-    register_password_confirm: String,
     // Form states
     study_form: Option(dynamic.Dynamic),
     // Will hold form data dynamically
@@ -95,6 +91,8 @@ pub type Model {
 pub type PageModel {
   NoPage
   AdminPage(admin_page.Model)
+  LoginPage(login_page.Model)
+  RegisterPage(register_page.Model)
 }
 
 // Modal content types
@@ -121,19 +119,12 @@ pub type Msg {
 
   // Authentication
   CheckSessionResult(Result(User, ApiError))
-  LoginSubmit(email: String, password: String)
-  LoginSuccess(user: User)
-  LoginError(ApiError)
-  LoginUpdateEmail(String)
-  LoginUpdatePassword(String)
-  RegisterSubmit(email: String, password: String)
-  RegisterSuccess(user: User)
-  RegisterError(ApiError)
-  RegisterUpdateEmail(String)
-  RegisterUpdatePassword(String)
-  RegisterUpdatePasswordConfirm(String)
   Logout
   LogoutComplete
+
+  // Auth page delegation
+  LoginMsg(login_page.Msg)
+  RegisterMsg(register_page.Msg)
 
   // Data loading
   LoadStudies
@@ -307,11 +298,6 @@ pub fn init() -> Model {
     loading: False,
     error: None,
     success_message: None,
-    login_email: "",
-    login_password: "",
-    register_email: "",
-    register_password: "",
-    register_password_confirm: "",
     studies: dict.new(),
     series: dict.new(),
     records: dict.new(),
@@ -392,17 +378,6 @@ pub fn set_success(model: Model, message: String) -> Model {
 
 pub fn clear_messages(model: Model) -> Model {
   Model(..model, error: None, success_message: None)
-}
-
-pub fn clear_auth_forms(model: Model) -> Model {
-  Model(
-    ..model,
-    login_email: "",
-    login_password: "",
-    register_email: "",
-    register_password: "",
-    register_password_confirm: "",
-  )
 }
 
 // Cache helpers

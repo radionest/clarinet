@@ -42,5 +42,6 @@ pub type OutMsg {
   ReloadUsers
   ReloadPatients
   ReloadRecordTypes
+  SetUser(User)
   Logout
 }
