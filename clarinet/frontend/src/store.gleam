@@ -1,9 +1,10 @@
 // Global state management
 import api/info.{type ProjectInfo}
 import api/models.{
-  type AdminStats, type PacsStudyWithSeries, type Patient, type RecordTypeStats,
-  type RoleMatrix, type Series, type Study, type Record, type RecordType, type User,
+  type PacsStudyWithSeries, type Patient, type RecordTypeStats, type RoleMatrix,
+  type Series, type Study, type Record, type RecordType, type User,
 }
+import pages/admin as admin_page
 import api/types.{type ApiError}
 import gleam/dict.{type Dict}
 import gleam/dynamic
@@ -66,10 +67,7 @@ pub type Model {
     search_query: String,
     active_filters: Dict(String, String),
     // Admin
-    admin_stats: Option(AdminStats),
     record_type_stats: Option(List(RecordTypeStats)),
-    admin_editing_record_id: Option(Int),
-    admin_editing_status_record_id: Option(Int),
     // Modal state
     modal_open: Bool,
     modal_content: ModalContent,
@@ -96,6 +94,7 @@ pub type Model {
 // Active page model (for modular pages)
 pub type PageModel {
   NoPage
+  AdminPage(admin_page.Model)
 }
 
 // Modal content types
@@ -164,21 +163,11 @@ pub type Msg {
   DeleteStudy(study_uid: String)
   StudyDeleted(Result(Nil, ApiError))
 
-  LoadAdminStats
-  AdminStatsLoaded(Result(AdminStats, ApiError))
-
   LoadRecordTypeStats
   RecordTypeStatsLoaded(Result(List(RecordTypeStats), ApiError))
 
-  // Admin record assignment
-  AdminToggleAssignDropdown(record_id: Option(Int))
-  AdminAssignUser(record_id: Int, user_id: String)
-  AdminAssignUserResult(Result(Record, ApiError))
-
-  // Admin status change
-  AdminToggleStatusDropdown(record_id: Option(Int))
-  AdminChangeStatus(record_id: Int, status: String)
-  AdminChangeStatusResult(Result(Record, ApiError))
+  // Admin page delegation
+  AdminMsg(admin_page.Msg)
 
   // Form handling
   UpdateStudyForm(dynamic.Dynamic)
@@ -348,10 +337,7 @@ pub fn init() -> Model {
     total_items: 0,
     search_query: "",
     active_filters: dict.new(),
-    admin_stats: None,
     record_type_stats: None,
-    admin_editing_record_id: None,
-    admin_editing_status_record_id: None,
     modal_open: False,
     modal_content: NoModal,
     pacs_studies: [],

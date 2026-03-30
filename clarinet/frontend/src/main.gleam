@@ -242,11 +242,15 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
                       |> store.clear_form_errors()
                     _ -> new_model
                   }
+                  // Initialize page model for modular pages
+                  let #(new_model, page_init_eff) =
+                    init_page_for_route(new_model, route)
                   #(
                     new_model,
                     effect.batch([
                       stop_timer_effect,
                       load_route_data(new_model, route),
+                      page_init_eff,
                     ]),
                   )
                 }
@@ -286,7 +290,17 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
                   store.set_route(new_model, router.Home),
                   modem.push(router.route_to_path(router.Home), option.None, option.None),
                 )
-                _, _ -> #(new_model, load_route_data(new_model, route))
+                _, _ -> {
+                  let #(new_model, page_init_eff) =
+                    init_page_for_route(new_model, route)
+                  #(
+                    new_model,
+                    effect.batch([
+                      load_route_data(new_model, route),
+                      page_init_eff,
+                    ]),
+                  )
+                }
               }
           }
         }
@@ -508,19 +522,6 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     store.UsersLoaded(Error(err)) ->
       handle_api_error(model, err, "Failed to load users")
 
-    // Data loading - Admin Stats
-    store.LoadAdminStats ->
-      load_with_effect(model, admin.get_admin_stats, store.AdminStatsLoaded)
-
-    store.AdminStatsLoaded(Ok(stats)) -> {
-      let new_model =
-        store.Model(..model, admin_stats: Some(stats), loading: False)
-      #(new_model, effect.none())
-    }
-
-    store.AdminStatsLoaded(Error(err)) ->
-      handle_api_error(model, err, "Failed to load admin statistics")
-
     // Data loading - Record Type Stats
     store.LoadRecordTypeStats ->
       load_with_effect(
@@ -537,77 +538,6 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
 
     store.RecordTypeStatsLoaded(Error(err)) ->
       handle_api_error(model, err, "Failed to load record type statistics")
-
-    // Admin record assignment
-    store.AdminToggleAssignDropdown(record_id) -> {
-      #(store.Model(..model, admin_editing_record_id: record_id), effect.none())
-    }
-
-    store.AdminAssignUser(record_id, user_id) -> {
-      let assign_effect = {
-        use dispatch <- effect.from
-        admin.assign_record_user(record_id, user_id)
-        |> promise.tap(fn(result) {
-          dispatch(store.AdminAssignUserResult(result))
-        })
-        Nil
-      }
-      #(
-        store.Model(..model, admin_editing_record_id: None, loading: True),
-        assign_effect,
-      )
-    }
-
-    store.AdminAssignUserResult(Ok(record)) -> {
-      let new_model =
-        model
-        |> store.cache_record(record)
-        |> store.set_loading(False)
-        |> store.set_success("User assigned successfully")
-      #(new_model, effect.none())
-    }
-
-    store.AdminAssignUserResult(Error(err)) ->
-      handle_api_error(model, err, "Failed to assign user to record")
-
-    // Admin status change
-    store.AdminToggleStatusDropdown(record_id) -> {
-      #(
-        store.Model(..model, admin_editing_status_record_id: record_id),
-        effect.none(),
-      )
-    }
-
-    store.AdminChangeStatus(record_id, status) -> {
-      let change_effect = {
-        use dispatch <- effect.from
-        admin.update_record_status(record_id, status)
-        |> promise.tap(fn(result) {
-          dispatch(store.AdminChangeStatusResult(result))
-        })
-        Nil
-      }
-      #(
-        store.Model(
-          ..model,
-          admin_editing_status_record_id: None,
-          loading: True,
-        ),
-        change_effect,
-      )
-    }
-
-    store.AdminChangeStatusResult(Ok(record)) -> {
-      let new_model =
-        model
-        |> store.cache_record(record)
-        |> store.set_loading(False)
-        |> store.set_success("Status updated successfully")
-      #(new_model, effect.none())
-    }
-
-    store.AdminChangeStatusResult(Error(err)) ->
-      handle_api_error(model, err, "Failed to update record status")
 
     // Data loading - Record Detail
     store.LoadRecordDetail(id) ->
@@ -1541,47 +1471,25 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       #(model, effect.none())
     }
 
-    // Role matrix
-    store.LoadRoleMatrix ->
-      load_with_effect(model, admin.get_role_matrix, store.RoleMatrixLoaded)
-
-    store.RoleMatrixLoaded(Ok(matrix)) -> {
-      let new_model =
-        store.Model(..model, role_matrix: Some(matrix), loading: False)
-      #(new_model, effect.none())
-    }
-
-    store.RoleMatrixLoaded(Error(err)) ->
-      handle_api_error(model, err, "Failed to load role matrix")
-
-    store.ToggleUserRole(user_id, role_name, add) -> {
-      let toggle_effect = {
-        use dispatch <- effect.from
-        let api_call = case add {
-          True -> admin.add_user_role(user_id, role_name)
-          False -> admin.remove_user_role(user_id, role_name)
+    // Admin page delegation
+    store.AdminMsg(page_msg) ->
+      case model.page {
+        store.AdminPage(page_model) -> {
+          let #(new_page, eff, out_msgs) =
+            admin_page.update(page_model, page_msg, build_shared(model))
+          let model =
+            store.Model(..model, page: store.AdminPage(new_page))
+          let #(model, out_effects) = apply_out_msgs(model, out_msgs)
+          #(
+            model,
+            effect.batch([
+              effect.map(eff, store.AdminMsg),
+              out_effects,
+            ]),
+          )
         }
-        api_call
-        |> promise.tap(fn(result) { dispatch(store.UserRoleToggled(result)) })
-        Nil
+        _ -> #(model, effect.none())
       }
-      #(
-        store.Model(..model, role_toggling: Some(#(user_id, role_name))),
-        toggle_effect,
-      )
-    }
-
-    store.UserRoleToggled(Ok(_)) -> {
-      let new_model =
-        store.Model(..model, role_toggling: None)
-        |> store.set_success("Role updated successfully")
-      #(new_model, dispatch_msg(store.LoadRoleMatrix))
-    }
-
-    store.UserRoleToggled(Error(err)) -> {
-      let new_model = store.Model(..model, role_toggling: None)
-      handle_api_error(new_model, err, "Failed to update role")
-    }
 
     store.SetError(error) -> {
       #(store.set_error(model, error), effect.none())
@@ -1833,6 +1741,20 @@ fn build_shared(model: Model) -> shared.Shared {
   )
 }
 
+fn init_page_for_route(model: Model, route: Route) -> #(Model, Effect(Msg)) {
+  case route {
+    router.AdminDashboard -> {
+      let #(page_model, page_eff) =
+        admin_page.init(build_shared(model))
+      #(
+        store.Model(..model, page: store.AdminPage(page_model)),
+        effect.map(page_eff, store.AdminMsg),
+      )
+    }
+    _ -> #(store.Model(..model, page: store.NoPage), effect.none())
+  }
+}
+
 fn apply_out_msgs(
   model: Model,
   msgs: List(OutMsg),
@@ -1960,7 +1882,18 @@ fn view_content(model: Model) -> Element(Msg) {
     router.PatientDetail(id) -> patient_detail.view(model, id)
     router.Users -> html.div([], [html.text("Users page")])
     router.UserProfile(_id) -> html.div([], [html.text("User profile page")])
-    router.AdminDashboard -> admin_page.view(model)
+    router.AdminDashboard ->
+      case model.page {
+        store.AdminPage(page_model) ->
+          element.map(
+            admin_page.view(page_model, build_shared(model)),
+            store.AdminMsg,
+          )
+        _ ->
+          html.div([attribute.class("loading")], [
+            html.p([], [html.text("Loading...")]),
+          ])
+      }
     router.AdminRecordTypes -> record_types_list.view(model)
     router.AdminRecordTypeDetail(name) -> record_type_detail.view(model, name)
     router.AdminRecordTypeEdit(name) -> record_type_edit.view(model, name)
@@ -2137,10 +2070,8 @@ fn load_route_data(model: Model, route: Route) -> Effect(Msg) {
       dispatch_msg(store.LoadUsers)
     router.AdminDashboard, Some(_) ->
       effect.batch([
-        dispatch_msg(store.LoadAdminStats),
         dispatch_msg(store.LoadRecords),
         dispatch_msg(store.LoadUsers),
-        dispatch_msg(store.LoadRoleMatrix),
       ])
     router.AdminRecordTypes, Some(_) -> dispatch_msg(store.LoadRecordTypeStats)
     router.AdminRecordTypeDetail(_), Some(_) ->
