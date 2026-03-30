@@ -88,7 +88,14 @@ pub type Model {
     role_toggling: Option(#(String, String)),
     // Preload state
     preload_timer: Option(global.TimerID),
+    // Active page model (for modular pages)
+    page: PageModel,
   )
+}
+
+// Active page model (for modular pages)
+pub type PageModel {
+  NoPage
 }
 
 // Modal content types
@@ -357,6 +364,7 @@ pub fn init() -> Model {
     role_matrix: None,
     role_toggling: None,
     preload_timer: None,
+    page: NoPage,
   )
 }
 
@@ -380,6 +388,7 @@ pub fn reset_for_logout(model: Model) -> Model {
     project_name: model.project_name,
     project_description: model.project_description,
     checking_session: False,
+    page: NoPage,
   )
 }
 
