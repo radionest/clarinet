@@ -1,9 +1,10 @@
 // Global state management
 import api/info.{type ProjectInfo}
 import api/models.{
-  type AdminStats, type PacsStudyWithSeries, type Patient, type RecordTypeStats,
-  type RoleMatrix, type Series, type Study, type Record, type RecordType, type User,
+  type PacsStudyWithSeries, type Patient, type RecordTypeStats,
+  type Series, type Study, type Record, type RecordType, type User,
 }
+import pages/admin as admin_page
 import api/types.{type ApiError}
 import gleam/dict.{type Dict}
 import gleam/dynamic
@@ -66,10 +67,7 @@ pub type Model {
     search_query: String,
     active_filters: Dict(String, String),
     // Admin
-    admin_stats: Option(AdminStats),
     record_type_stats: Option(List(RecordTypeStats)),
-    admin_editing_record_id: Option(Int),
-    admin_editing_status_record_id: Option(Int),
     // Modal state
     modal_open: Bool,
     modal_content: ModalContent,
@@ -83,9 +81,6 @@ pub type Model {
     slicer_ping_timer: Option(global.TimerID),
     // Hydrated schemas cache (record_id -> schema JSON string)
     hydrated_schemas: Dict(String, String),
-    // Role matrix
-    role_matrix: Option(RoleMatrix),
-    role_toggling: Option(#(String, String)),
     // Active page model (for modular pages)
     page: PageModel,
   )
@@ -94,6 +89,7 @@ pub type Model {
 // Active page model (for modular pages)
 pub type PageModel {
   NoPage
+  AdminPage(admin_page.Model)
 }
 
 // Modal content types
@@ -154,21 +150,11 @@ pub type Msg {
   DeleteStudy(study_uid: String)
   StudyDeleted(Result(Nil, ApiError))
 
-  LoadAdminStats
-  AdminStatsLoaded(Result(AdminStats, ApiError))
-
   LoadRecordTypeStats
   RecordTypeStatsLoaded(Result(List(RecordTypeStats), ApiError))
 
-  // Admin record assignment
-  AdminToggleAssignDropdown(record_id: Option(Int))
-  AdminAssignUser(record_id: Int, user_id: String)
-  AdminAssignUserResult(Result(Record, ApiError))
-
-  // Admin status change
-  AdminToggleStatusDropdown(record_id: Option(Int))
-  AdminChangeStatus(record_id: Int, status: String)
-  AdminChangeStatusResult(Result(Record, ApiError))
+  // Admin page delegation
+  AdminMsg(admin_page.Msg)
 
   // Form handling
   UpdateStudyForm(dynamic.Dynamic)
@@ -272,12 +258,6 @@ pub type Msg {
   RestartRecord(record_id: String)
   RestartRecordResult(Result(Record, ApiError))
 
-  // Role matrix
-  LoadRoleMatrix
-  RoleMatrixLoaded(Result(RoleMatrix, ApiError))
-  ToggleUserRole(user_id: String, role_name: String, add: Bool)
-  UserRoleToggled(Result(Nil, ApiError))
-
   // Misc
   NoOp
   RefreshData
@@ -325,10 +305,7 @@ pub fn init() -> Model {
     total_items: 0,
     search_query: "",
     active_filters: dict.new(),
-    admin_stats: None,
     record_type_stats: None,
-    admin_editing_record_id: None,
-    admin_editing_status_record_id: None,
     modal_open: False,
     modal_content: NoModal,
     pacs_studies: [],
@@ -338,8 +315,6 @@ pub fn init() -> Model {
     slicer_available: None,
     slicer_ping_timer: None,
     hydrated_schemas: dict.new(),
-    role_matrix: None,
-    role_toggling: None,
     page: NoPage,
   )
 }
