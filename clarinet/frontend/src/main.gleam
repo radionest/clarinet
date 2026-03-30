@@ -1636,41 +1636,43 @@ fn apply_out_msgs(
   model: Model,
   msgs: List(OutMsg),
 ) -> #(Model, Effect(Msg)) {
-  list.fold(msgs, #(model, effect.none()), fn(acc, out_msg) {
-    let #(m, effs) = acc
-    case out_msg {
-      shared.ShowSuccess(text) ->
-        #(store.set_success(m, text), effs)
-      shared.ShowError(text) ->
-        #(store.set_error(m, option.Some(text)), effs)
-      shared.Navigate(route) ->
-        #(m, effect.batch([effs, modem.push(router.route_to_path(route), option.None, option.None)]))
-      shared.SetLoading(loading) ->
-        #(store.set_loading(m, loading), effs)
-      shared.CacheRecord(record) ->
-        #(store.cache_record(m, record), effs)
-      shared.CacheStudy(study) ->
-        #(store.cache_study(m, study), effs)
-      shared.CachePatient(patient) ->
-        #(store.cache_patient(m, patient), effs)
-      shared.CacheRecordType(rt) ->
-        #(store.cache_record_type(m, rt), effs)
-      shared.CacheSeries(s) ->
-        #(store.cache_series(m, s), effs)
-      shared.ReloadRecords ->
-        #(m, effect.batch([effs, dispatch_msg(store.LoadRecords)]))
-      shared.ReloadStudies ->
-        #(m, effect.batch([effs, dispatch_msg(store.LoadStudies)]))
-      shared.ReloadUsers ->
-        #(m, effect.batch([effs, dispatch_msg(store.LoadUsers)]))
-      shared.ReloadPatients ->
-        #(m, effect.batch([effs, dispatch_msg(store.LoadPatients)]))
-      shared.ReloadRecordTypes ->
-        #(m, effect.batch([effs, dispatch_msg(store.LoadRecordTypes)]))
-      shared.Logout ->
-        #(store.reset_for_logout(m), effect.batch([effs, dispatch_msg(store.LogoutComplete)]))
-    }
-  })
+  let #(final_model, effs) =
+    list.fold(msgs, #(model, []), fn(acc, out_msg) {
+      let #(m, eff_list) = acc
+      case out_msg {
+        shared.ShowSuccess(text) ->
+          #(store.set_success(m, text), eff_list)
+        shared.ShowError(text) ->
+          #(store.set_error(m, option.Some(text)), eff_list)
+        shared.Navigate(route) ->
+          #(m, [modem.push(router.route_to_path(route), option.None, option.None), ..eff_list])
+        shared.SetLoading(loading) ->
+          #(store.set_loading(m, loading), eff_list)
+        shared.CacheRecord(record) ->
+          #(store.cache_record(m, record), eff_list)
+        shared.CacheStudy(study) ->
+          #(store.cache_study(m, study), eff_list)
+        shared.CachePatient(patient) ->
+          #(store.cache_patient(m, patient), eff_list)
+        shared.CacheRecordType(rt) ->
+          #(store.cache_record_type(m, rt), eff_list)
+        shared.CacheSeries(s) ->
+          #(store.cache_series(m, s), eff_list)
+        shared.ReloadRecords ->
+          #(m, [dispatch_msg(store.LoadRecords), ..eff_list])
+        shared.ReloadStudies ->
+          #(m, [dispatch_msg(store.LoadStudies), ..eff_list])
+        shared.ReloadUsers ->
+          #(m, [dispatch_msg(store.LoadUsers), ..eff_list])
+        shared.ReloadPatients ->
+          #(m, [dispatch_msg(store.LoadPatients), ..eff_list])
+        shared.ReloadRecordTypes ->
+          #(m, [dispatch_msg(store.LoadRecordTypes), ..eff_list])
+        shared.Logout ->
+          #(store.reset_for_logout(m), [dispatch_msg(store.LogoutComplete), ..eff_list])
+      }
+    })
+  #(final_model, effect.batch(list.reverse(effs)))
 }
 
 // Helper: start periodic slicer ping timer (immediate ping + 10s interval)
