@@ -298,131 +298,54 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
               store.set_route(new_model, router.Login),
               modem.push(router.route_to_path(router.Login), option.None, option.None),
             )
-            False -> #(new_model, effect.none())
+            False -> {
+              let #(new_model, page_init_eff) =
+                init_page_for_route(new_model, model.route)
+              #(new_model, page_init_eff)
+            }
           }
         }
       }
     }
 
-    // Auth form updates
-    store.LoginUpdateEmail(value) -> {
-      #(store.Model(..model, login_email: value), effect.none())
-    }
-
-    store.LoginUpdatePassword(value) -> {
-      #(store.Model(..model, login_password: value), effect.none())
-    }
-
-    store.RegisterUpdateEmail(value) -> {
-      #(store.Model(..model, register_email: value), effect.none())
-    }
-
-    store.RegisterUpdatePassword(value) -> {
-      #(store.Model(..model, register_password: value), effect.none())
-    }
-
-    store.RegisterUpdatePasswordConfirm(value) -> {
-      #(store.Model(..model, register_password_confirm: value), effect.none())
-    }
-
-    // Authentication
-    store.LoginSubmit(email, password) -> {
-      let login_effect = {
-        use dispatch <- effect.from
-        auth.login(email, password)
-        |> promise.tap(fn(result) {
-          case result {
-            Ok(response) -> dispatch(store.LoginSuccess(response.user))
-            Error(error) -> dispatch(store.LoginError(error))
-          }
-        })
-        Nil
-      }
-      #(store.set_loading(model, True), login_effect)
-    }
-
-    store.LoginSuccess(user) -> {
-      // Cookie authentication is handled automatically
-      // Just update the model with the user
-      let new_model =
-        model
-        |> store.set_user(user)
-        |> store.set_loading(False)
-        |> store.clear_messages()
-        |> store.clear_auth_forms()
-        |> store.set_route(router.Home)
-
-      #(new_model, modem.push(router.route_to_path(router.Home), option.None, option.None))
-    }
-
-    store.LoginError(error) -> {
-      let error_msg = case error {
-        types.AuthError(msg) -> msg
-        types.NetworkError(msg) -> "Network error: " <> msg
-        _ -> "Login failed. Please try again."
+    // Auth page delegation
+    store.LoginMsg(page_msg) ->
+      case model.page {
+        store.LoginPage(page_model) -> {
+          let #(new_page, eff, out_msgs) =
+            login.update(page_model, page_msg, build_shared(model))
+          let model =
+            store.Model(..model, page: store.LoginPage(new_page))
+          let #(model, out_effects) = apply_out_msgs(model, out_msgs)
+          #(
+            model,
+            effect.batch([
+              effect.map(eff, store.LoginMsg),
+              out_effects,
+            ]),
+          )
+        }
+        _ -> #(model, effect.none())
       }
 
-      let new_model =
-        model
-        |> store.set_loading(False)
-        |> store.set_error(Some(error_msg))
-
-      #(new_model, effect.none())
-    }
-
-    store.RegisterSubmit(email, password) -> {
-      let register_request =
-        models.RegisterRequest(email: email, password: password)
-      let register_effect = {
-        use dispatch <- effect.from
-        auth.register(register_request)
-        |> promise.tap(fn(result) {
-          case result {
-            Ok(user) -> dispatch(store.RegisterSuccess(user))
-            Error(error) -> dispatch(store.RegisterError(error))
-          }
-        })
-        Nil
+    store.RegisterMsg(page_msg) ->
+      case model.page {
+        store.RegisterPage(page_model) -> {
+          let #(new_page, eff, out_msgs) =
+            register.update(page_model, page_msg, build_shared(model))
+          let model =
+            store.Model(..model, page: store.RegisterPage(new_page))
+          let #(model, out_effects) = apply_out_msgs(model, out_msgs)
+          #(
+            model,
+            effect.batch([
+              effect.map(eff, store.RegisterMsg),
+              out_effects,
+            ]),
+          )
+        }
+        _ -> #(model, effect.none())
       }
-      #(
-        store.set_loading(model, True) |> store.clear_messages(),
-        register_effect,
-      )
-    }
-
-    store.RegisterSuccess(user) -> {
-      // Registration successful - user is logged in via cookie
-      let new_model =
-        model
-        |> store.set_user(user)
-        |> store.set_loading(False)
-        |> store.clear_messages()
-        |> store.clear_auth_forms()
-        |> store.set_success(
-          "Registration successful! Welcome to " <> model.project_name <> ".",
-        )
-        |> store.set_route(router.Home)
-
-      #(new_model, modem.push(router.route_to_path(router.Home), option.None, option.None))
-    }
-
-    store.RegisterError(error) -> {
-      let error_msg = case error {
-        types.ValidationError(_) ->
-          "Invalid registration data. Please check your inputs."
-        types.AuthError(msg) -> msg
-        types.ServerError(409, _) -> "Username or email already exists."
-        types.NetworkError(msg) -> "Network error: " <> msg
-        _ -> "Registration failed. Please try again."
-      }
-
-      let new_model =
-        model
-        |> store.set_loading(False)
-        |> store.set_error(Some(error_msg))
-
-      #(new_model, effect.none())
-    }
 
     store.Logout -> {
       let logout_effect = {
@@ -1541,13 +1464,27 @@ fn build_shared(model: Model) -> shared.Shared {
 }
 
 fn init_page_for_route(model: Model, route: Route) -> #(Model, Effect(Msg)) {
+  let shared = build_shared(model)
   case route {
     router.AdminDashboard -> {
-      let #(page_model, page_eff) =
-        admin_page.init(build_shared(model))
+      let #(page_model, page_eff) = admin_page.init(shared)
       #(
         store.Model(..model, page: store.AdminPage(page_model)),
         effect.map(page_eff, store.AdminMsg),
+      )
+    }
+    router.Login -> {
+      let #(page_model, page_eff) = login.init(shared)
+      #(
+        store.Model(..model, page: store.LoginPage(page_model)),
+        effect.map(page_eff, store.LoginMsg),
+      )
+    }
+    router.Register -> {
+      let #(page_model, page_eff) = register.init(shared)
+      #(
+        store.Model(..model, page: store.RegisterPage(page_model)),
+        effect.map(page_eff, store.RegisterMsg),
       )
     }
     _ -> #(store.Model(..model, page: store.NoPage), effect.none())
@@ -1590,6 +1527,8 @@ fn apply_out_msgs(
           #(m, [dispatch_msg(store.LoadPatients), ..eff_list])
         shared.ReloadRecordTypes ->
           #(m, [dispatch_msg(store.LoadRecordTypes), ..eff_list])
+        shared.SetUser(user) ->
+          #(store.set_user(m, user), eff_list)
         shared.Logout ->
           #(store.reset_for_logout(m), [dispatch_msg(store.LogoutComplete), ..eff_list])
       }
@@ -1665,8 +1604,30 @@ pub fn view(model: Model) -> Element(Msg) {
 fn view_content(model: Model) -> Element(Msg) {
   let content = case model.route {
     router.Home -> home.view(model)
-    router.Login -> login.view(model)
-    router.Register -> register.view(model)
+    router.Login ->
+      case model.page {
+        store.LoginPage(page_model) ->
+          element.map(
+            login.view(page_model, build_shared(model)),
+            store.LoginMsg,
+          )
+        _ ->
+          html.div([attribute.class("loading")], [
+            html.p([], [html.text("Loading...")]),
+          ])
+      }
+    router.Register ->
+      case model.page {
+        store.RegisterPage(page_model) ->
+          element.map(
+            register.view(page_model, build_shared(model)),
+            store.RegisterMsg,
+          )
+        _ ->
+          html.div([attribute.class("loading")], [
+            html.p([], [html.text("Loading...")]),
+          ])
+      }
     router.Studies -> studies_list.view(model)
     router.StudyDetail(id) -> study_detail.view(model, id)
     router.StudyViewer(id) -> study_detail.view(model, id)
