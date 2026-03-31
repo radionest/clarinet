@@ -5,7 +5,7 @@ import api/models.{
   type Study,
 }
 import api/patients
-import api/types.{type ApiError}
+import api/types.{type ApiError, AuthError}
 import gleam/dict
 import gleam/int
 import gleam/list
@@ -190,7 +190,7 @@ pub fn update(
 
 fn handle_error(err: ApiError, fallback_msg: String) -> List(OutMsg) {
   case err {
-    types.AuthError(_) -> [shared.Logout]
+    AuthError(_) -> [shared.Logout]
     _ -> [shared.SetLoading(False), shared.ShowError(fallback_msg)]
   }
 }
