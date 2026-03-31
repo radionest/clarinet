@@ -42,7 +42,7 @@ except ImportError:
         return json.dumps(data, separators=(",", ":"), default=str)
 
 
-_SENSITIVE_KEY = r"(?:password|token|secret|api_key)"
+_SENSITIVE_KEY = r"(?:password|token|secret|api[_-]?key|auth|credentials?|private[_-]?key)"
 _SCRUB_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     # "key": "value" or "key": value (JSON-style)
     (re.compile(rf'("{_SENSITIVE_KEY}":\s*)"([^"]+)"', re.IGNORECASE), r'\1"***"'),
