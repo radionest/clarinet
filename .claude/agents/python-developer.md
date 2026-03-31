@@ -8,7 +8,7 @@ examples:
     context: "User wants to add field to database model"
   - query: "Создай тесты для репозитория пациентов"
     context: "User needs test creation"
-model: sonnet
+model: opus
 color: red
 ---
 
