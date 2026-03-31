@@ -62,7 +62,7 @@ class SeriesRepository(BaseRepository[Series]):
         series = result.scalars().first()
 
         if not series:
-            raise SeriesNotFoundError(series_id)
+            raise SeriesNotFoundError(series_uid=series_id)
 
         return series
 
@@ -265,7 +265,7 @@ class SeriesRepository(BaseRepository[Series]):
         series = result.scalars().first()
 
         if not series:
-            raise EntityNotFoundError("No series found")
+            raise EntityNotFoundError(message="No series found")
 
         return series
 

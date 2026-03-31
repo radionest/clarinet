@@ -31,8 +31,8 @@ def validate_json_by_schema(json_data: Any, json_schema: dict[str, Any]) -> bool
         validate(instance=json_data, schema=json_schema)
     except JsonSchemaValidationError as e:
         logger.error(f"JSON validation error: {e}")
-        raise ValidationError(f"JSON validation failed: {e!s}") from e
+        raise ValidationError(message=f"JSON validation failed: {e!s}") from e
     except SchemaError as e:
         logger.error(f"JSON schema error: {e}")
-        raise ValidationError(f"Invalid JSON schema: {e!s}") from e
+        raise ValidationError(message=f"Invalid JSON schema: {e!s}") from e
     return True

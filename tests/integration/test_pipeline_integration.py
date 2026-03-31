@@ -453,7 +453,7 @@ class TestTaskExecution:
             async def failing_task(data: dict[str, Any]) -> dict[str, Any]:
                 error_captured.append(True)
                 done_event.set()
-                raise PipelineStepError("test_step", "Something went wrong")
+                raise PipelineStepError(step_name="test_step", reason="Something went wrong")
 
             receiver = asyncio.create_task(run_receiver_task(broker))
 
@@ -673,7 +673,7 @@ class TestPipelineChain:
             async def step2(data: dict[str, Any]) -> dict[str, Any]:
                 execution_log.append("step2")
                 step2_done.set()
-                raise PipelineStepError("err_step2", "Intentional failure")
+                raise PipelineStepError(step_name="err_step2", reason="Intentional failure")
 
             @broker.task(task_name="err_step3")
             async def step3(data: dict[str, Any]) -> dict[str, Any]:
@@ -981,7 +981,9 @@ class TestDeadLetterQueue:
             @broker.task(task_name="test_dlq_fail")
             async def always_failing_task(data: dict[str, Any]) -> dict[str, Any]:
                 call_count[0] += 1
-                raise PipelineStepError("test_dlq_fail", "Intentional failure for DLQ test")
+                raise PipelineStepError(
+                    step_name="test_dlq_fail", reason="Intentional failure for DLQ test"
+                )
 
             receiver = asyncio.create_task(run_receiver_task(broker))
 

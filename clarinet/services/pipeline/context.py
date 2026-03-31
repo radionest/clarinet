@@ -415,8 +415,8 @@ class RecordQuery:
         )
         if not records:
             raise PipelineStepError(
-                type_name,
-                f"No record found (series_uid={series_uid}, study_uid={study_uid}, "
+                step_name=type_name,
+                reason=f"No record found (series_uid={series_uid}, study_uid={study_uid}, "
                 f"patient_id={patient_id})",
             )
         record = records[0]
@@ -439,8 +439,8 @@ class RecordQuery:
         fd_map = {fd.name: fd for fd in file_registry}
         if file not in fd_map:
             raise PipelineStepError(
-                type_name,
-                f"File definition '{file}' not found in record type '{record.record_type.name}'",
+                step_name=type_name,
+                reason=f"File definition '{file}' not found in record type '{record.record_type.name}'",
             )
         fd = fd_map[file]
         level = fd.level or record.record_type.level

@@ -327,7 +327,7 @@ async def reconcile_config(
                     if item.role_name in missing
                 ]
                 raise ConfigurationError(
-                    f"RecordType config references undefined role(s): "
+                    message=f"RecordType config references undefined role(s): "
                     f"{', '.join(sorted(missing))}.\n"
                     + "\n".join(bad_items)
                     + f"\nAvailable roles: {sorted(all_db_roles)}.\n"

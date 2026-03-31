@@ -56,7 +56,7 @@ async def get_client_ip(request: Request) -> str:
         Client IP address as string
     """
     if request.client is None:
-        raise ClarinetError("Cant get client IP, because request.client is None!")
+        raise ClarinetError(message="Cant get client IP, because request.client is None!")
     client_host = request.client.host
     return client_host
 
@@ -339,11 +339,11 @@ async def authorize_record_access(
 
     role_name = record.record_type.role_name
     if role_name is None:
-        raise AuthorizationError("Insufficient permissions to access this record")
+        raise AuthorizationError(message="Insufficient permissions to access this record")
 
     user_roles = get_user_role_names(user)
     if role_name not in user_roles:
-        raise AuthorizationError("Insufficient permissions to access this record")
+        raise AuthorizationError(message="Insufficient permissions to access this record")
 
     return record
 
@@ -364,4 +364,4 @@ def require_mutable_config(request: Request) -> None:
         AuthorizationError: If config_mode is 'python'.
     """
     if getattr(request.app.state, "config_mode", "toml") == "python":
-        raise AuthorizationError("RecordType mutations disabled in Python config mode")
+        raise AuthorizationError(message="RecordType mutations disabled in Python config mode")

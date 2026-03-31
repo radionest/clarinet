@@ -301,7 +301,7 @@ class RecordService:
         )
         if count > 0:
             raise RecordConstraintViolationError(
-                f"User already has a record of type '{record_type.name}' "
+                message=f"User already has a record of type '{record_type.name}' "
                 f"for this {record_type.level.lower()} context"
             )
 

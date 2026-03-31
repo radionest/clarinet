@@ -403,7 +403,7 @@ class TestPipelineExceptions:
         """PipelineStepError formats message correctly."""
         from clarinet.exceptions.domain import PipelineStepError
 
-        err = PipelineStepError("segmentation", "GPU memory exhausted")
+        err = PipelineStepError(step_name="segmentation", reason="GPU memory exhausted")
         assert "segmentation" in str(err)
         assert "GPU memory exhausted" in str(err)
 
@@ -546,7 +546,7 @@ class TestDeadLetterMiddleware:
             is_err=True,
             return_value=None,
             execution_time=0.1,
-            error=PipelineStepError("step", "GPU OOM"),
+            error=PipelineStepError(step_name="step", reason="GPU OOM"),
         )
 
         with patch.object(middleware, "_publish_to_dlq", new_callable=AsyncMock) as mock_dlq:

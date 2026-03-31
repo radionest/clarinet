@@ -38,7 +38,7 @@ def parse_frame_numbers(frames: str) -> list[int]:
     try:
         frame_numbers = [int(f.strip()) for f in frames.split(",") if f.strip()]
     except ValueError:
-        raise ValidationError(f"Invalid frame numbers: {frames}") from None
+        raise ValidationError(message=f"Invalid frame numbers: {frames}") from None
     if not frame_numbers:
-        raise ValidationError("No frame numbers specified")
+        raise ValidationError(message="No frame numbers specified")
     return frame_numbers

@@ -159,4 +159,4 @@ def _validate_json_schema(schema: dict) -> None:
     try:
         Draft202012Validator.check_schema(schema)
     except SchemaError as e:
-        raise ValidationError(f"Data schema is invalid: {e}") from e
+        raise ValidationError(message=f"Data schema is invalid: {e}") from e

@@ -46,12 +46,12 @@ class PatientRepository(BaseRepository[Patient]):
                 await self.session.rollback()
                 if attempt == _MAX_AUTO_ID_RETRIES:
                     raise DatabaseIntegrityError(
-                        f"Failed to assign unique auto_id after {_MAX_AUTO_ID_RETRIES} attempts"
+                        message=f"Failed to assign unique auto_id after {_MAX_AUTO_ID_RETRIES} attempts"
                     ) from exc
                 if entity in self.session:
                     self.session.expunge(entity)
 
-        raise DatabaseIntegrityError("Failed to assign unique auto_id")  # unreachable
+        raise DatabaseIntegrityError(message="Failed to assign unique auto_id")  # unreachable
 
     async def _next_auto_id(self) -> int:
         """Return MAX(auto_id) + 1, or 1 if no patients exist."""
@@ -103,7 +103,7 @@ class PatientRepository(BaseRepository[Patient]):
         patient = result.scalars().first()
 
         if not patient:
-            raise PatientNotFoundError(patient_id)
+            raise PatientNotFoundError(patient_id=patient_id)
 
         return patient
 

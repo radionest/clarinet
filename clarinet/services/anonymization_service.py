@@ -145,7 +145,7 @@ class AnonymizationService:
 
         anon_id: str | None = patient.anon_id
         if anon_id is None:
-            raise AnonymizationFailedError("Patient has no anon_id (auto_id not set)")
+            raise AnonymizationFailedError(reason="Patient has no anon_id (auto_id not set)")
 
         anon_patient_name = patient.anon_name or anon_id
         anonymizer = DicomAnonymizer(
@@ -239,7 +239,7 @@ class AnonymizationService:
             failure_ratio = total_failed / total_instances
             if failure_ratio >= settings.anon_failure_threshold:
                 raise AnonymizationFailedError(
-                    f"{total_failed}/{total_instances} instances failed "
+                    reason=f"{total_failed}/{total_instances} instances failed "
                     f"(threshold: {settings.anon_failure_threshold:.0%})"
                 )
 

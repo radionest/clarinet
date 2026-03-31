@@ -128,7 +128,7 @@ class Pipeline:
             PipelineConfigError: If the pipeline has no steps.
         """
         if not self.steps:
-            raise PipelineConfigError(f"Pipeline '{self.name}' has no steps")
+            raise PipelineConfigError(message=f"Pipeline '{self.name}' has no steps")
 
         first_step = self.steps[0]
         routing_key = extract_routing_key(first_step.queue)

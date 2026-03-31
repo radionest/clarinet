@@ -67,7 +67,7 @@ class Image:
     def img(self) -> np.ndarray:
         """Voxel data as a numpy array."""
         if self._img is None:
-            raise ImageError("Image data is not loaded")
+            raise ImageError(message="Image data is not loaded")
         return self._img
 
     @img.setter
@@ -136,7 +136,7 @@ class Image:
             self.read_nrrd(file_path)
         else:
             raise ImageError(
-                f"Unsupported file extension: {''.join(suffixes)}. "
+                message=f"Unsupported file extension: {''.join(suffixes)}. "
                 "Supported formats: .nii, .nii.gz, .nrrd"
             )
 
@@ -153,7 +153,7 @@ class Image:
         try:
             self._nifti_image = nibabel.loadsave.load(str(file_path))
         except Exception as e:
-            raise ImageReadError(f"Failed to read NIfTI file: {file_path}") from e
+            raise ImageReadError(message=f"Failed to read NIfTI file: {file_path}") from e
 
         self._source_path = file_path
         affine = self._nifti_image.affine
@@ -179,7 +179,7 @@ class Image:
         try:
             data, header = nrrd.read(str(file_path))
         except Exception as e:
-            raise ImageReadError(f"Failed to read NRRD file: {file_path}") from e
+            raise ImageReadError(message=f"Failed to read NRRD file: {file_path}") from e
 
         self._nrrd_header = header
         self._source_path = file_path
@@ -242,7 +242,7 @@ class Image:
         """
         if directory is None:
             if self._source_path is None:
-                raise ImageError("No source path and no directory specified")
+                raise ImageError(message="No source path and no directory specified")
             directory = (
                 self._source_path if self._source_path.is_dir() else self._source_path.parent
             )
@@ -257,10 +257,10 @@ class Image:
                 self._save_nrrd(output_path)
             case FileType.DICOM:
                 raise ImageError(
-                    "DICOM writing is not supported. Use save_as() to convert to NIfTI or NRRD."
+                    message="DICOM writing is not supported. Use save_as() to convert to NIfTI or NRRD."
                 )
             case _:
-                raise ImageError("Cannot save: unknown file type")
+                raise ImageError(message="Cannot save: unknown file type")
 
         logger.debug(f"Saved image to {output_path}")
         return output_path
@@ -287,11 +287,11 @@ class Image:
                 self._save_nrrd(path)
             case FileType.DICOM:
                 raise ImageError(
-                    "DICOM writing is not supported. "
+                    message="DICOM writing is not supported. "
                     "Writing DICOM requires UID generation and IOD specification."
                 )
             case _:
-                raise ImageError(f"Cannot save as {filetype.value}: unsupported format")
+                raise ImageError(message=f"Cannot save as {filetype.value}: unsupported format")
         logger.debug(f"Saved image as {filetype.value} to {path}")
         return path
 
@@ -304,7 +304,7 @@ class Image:
             new_image = nibabel.Nifti1Image(self.img, affine, dtype=self.img.dtype)
             nibabel.save(new_image, str(path))
         except Exception as e:
-            raise ImageWriteError(f"Failed to write NIfTI file: {path}") from e
+            raise ImageWriteError(message=f"Failed to write NIfTI file: {path}") from e
 
     def _save_nrrd(self, path: Path) -> None:
         """Write voxel data to an NRRD file."""
@@ -321,4 +321,4 @@ class Image:
                 header["space"] = "left-posterior-superior"
             nrrd.write(str(path), self.img, header)
         except Exception as e:
-            raise ImageWriteError(f"Failed to write NRRD file: {path}") from e
+            raise ImageWriteError(message=f"Failed to write NRRD file: {path}") from e

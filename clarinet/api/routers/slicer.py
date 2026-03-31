@@ -165,7 +165,9 @@ async def open_record_in_slicer(
     record_read = RecordRead.model_validate(record)
 
     if not record_read.record_type.slicer_script:
-        raise NoScriptError(f"Record type has no slicer_script configured for record {record_id}")
+        raise NoScriptError(
+            message=f"Record type has no slicer_script configured for record {record_id}"
+        )
 
     context = await build_slicer_context_async(record_read, record_repo.session)
 
@@ -229,7 +231,7 @@ async def validate_record_in_slicer(
 
     if not record_read.record_type.slicer_result_validator:
         raise NoScriptError(
-            f"Record type has no slicer_result_validator configured for record {record_id}"
+            message=f"Record type has no slicer_result_validator configured for record {record_id}"
         )
 
     context = await build_slicer_context_async(record_read, record_repo.session)

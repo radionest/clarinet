@@ -55,6 +55,9 @@ class StartupError(SystemExit):
     """Raised when an enabled component fails to initialize at startup."""
 
     def __init__(self, component: str, reason: str, hint: str) -> None:
+        self.component = component
+        self.reason = reason
+        self.hint = hint
         message = (
             f"\n{'=' * 60}\n"
             f"STARTUP FAILED: {component}\n"
@@ -124,7 +127,7 @@ async def _shutdown_recordflow(app: FastAPI) -> None:
         await app.state.recordflow_engine.clarinet_client.close()
         logger.info("RecordFlow client closed")
     except AttributeError as e:
-        raise RecordFlowError("Cant find clarinet web client in recordflow engine.") from e
+        raise RecordFlowError(message="Cant find clarinet web client in recordflow engine.") from e
 
 
 @asynccontextmanager

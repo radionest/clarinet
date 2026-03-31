@@ -48,7 +48,7 @@ class StudyRepository(BaseRepository[Study]):
         study = result.scalars().first()
 
         if not study:
-            raise StudyNotFoundError(study_id)
+            raise StudyNotFoundError(study_uid=study_id)
 
         return study
 
@@ -143,7 +143,7 @@ class StudyRepository(BaseRepository[Study]):
         result = await self.session.execute(statement)
         study = result.scalars().first()
         if not study:
-            raise StudyNotFoundError(study_uid)
+            raise StudyNotFoundError(study_uid=study_uid)
         return study
 
     async def get_records(self, study_id: str) -> list[Record]:

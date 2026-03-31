@@ -30,7 +30,7 @@ def read_dicom_series(
     """
     directory = Path(directory)
     if not directory.is_dir():
-        raise ImageReadError(f"Not a directory: {directory}")
+        raise ImageReadError(message=f"Not a directory: {directory}")
 
     dcm_files = sorted(directory.glob("*.dcm"))
     if not dcm_files:
@@ -40,7 +40,7 @@ def read_dicom_series(
         ]
 
     if not dcm_files:
-        raise ImageReadError(f"No DICOM files found in {directory}")
+        raise ImageReadError(message=f"No DICOM files found in {directory}")
 
     datasets = []
     for f in dcm_files:
@@ -52,7 +52,7 @@ def read_dicom_series(
             logger.debug(f"Skipping non-DICOM file: {f.name}")
 
     if not datasets:
-        raise ImageReadError(f"No valid DICOM files with pixel data in {directory}")
+        raise ImageReadError(message=f"No valid DICOM files with pixel data in {directory}")
 
     sorted_datasets: Sequence[pydicom.Dataset] = _sort_slices(datasets)
     spacing = _extract_spacing(sorted_datasets)
@@ -61,7 +61,7 @@ def read_dicom_series(
     try:
         volume = np.stack([ds.pixel_array for ds in sorted_datasets], axis=-1)
     except ValueError as e:
-        raise ImageReadError(f"Inconsistent slice dimensions in {directory}") from e
+        raise ImageReadError(message=f"Inconsistent slice dimensions in {directory}") from e
 
     logger.debug(
         f"Read {len(sorted_datasets)} DICOM slices from {directory.name}: "

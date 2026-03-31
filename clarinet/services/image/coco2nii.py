@@ -100,7 +100,7 @@ def coco_to_segmentation(
         with open(coco_json_path, encoding="utf-8") as f:
             data = json.load(f)
     except (OSError, json.JSONDecodeError) as e:
-        raise ImageReadError(f"Failed to read COCO JSON: {coco_json_path}") from e
+        raise ImageReadError(message=f"Failed to read COCO JSON: {coco_json_path}") from e
 
     dataset = COCODataset(**data)
 

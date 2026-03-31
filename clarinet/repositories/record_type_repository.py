@@ -49,7 +49,7 @@ class RecordTypeRepository(BaseRepository[RecordType]):
         result = await self.session.execute(statement)
         entity = result.scalars().first()
         if not entity:
-            raise RecordTypeNotFoundError(id)
+            raise RecordTypeNotFoundError(type_id=id)
         return entity
 
     async def get_all(
@@ -127,4 +127,4 @@ class RecordTypeRepository(BaseRepository[RecordType]):
         """
         existing = await self.get_by(name=name)
         if existing:
-            raise RecordTypeAlreadyExistsError(name)
+            raise RecordTypeAlreadyExistsError(name=name)

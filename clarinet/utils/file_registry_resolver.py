@@ -110,7 +110,7 @@ def resolve_file_references(
         entry = registry.get(ref.name)
         if entry is None:
             raise ValidationError(
-                f"File reference '{ref.name}' not found in project file registry. "
+                message=f"File reference '{ref.name}' not found in project file registry. "
                 f"Available: {', '.join(registry.keys())}"
             )
         resolved.append(
@@ -152,14 +152,16 @@ def resolve_task_files(
     has_file_registry = "file_registry" in props
 
     if has_files and has_file_registry:
-        raise ValidationError("Task definition must not have both 'files' and 'file_registry' keys")
+        raise ValidationError(
+            message="Task definition must not have both 'files' and 'file_registry' keys"
+        )
 
     if not has_files:
         return props
 
     if registry is None:
         raise ValidationError(
-            "Task uses 'files' references but no project file_registry.toml/.json was found"
+            message="Task uses 'files' references but no project file_registry.toml/.json was found"
         )
 
     files_refs = props.pop("files")

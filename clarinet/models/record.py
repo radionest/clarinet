@@ -252,9 +252,11 @@ class Record(RecordBase, table=True):
             case ("PATIENT", _, None, None) | ("STUDY", _, _, None) | ("SERIES", _, str(), str()):
                 return self
             case ("STUDY" | "SERIES", _, None, _):
-                raise ValidationError("Records of level STUDY or SERIES should have Study UID.")
+                raise ValidationError(
+                    message="Records of level STUDY or SERIES should have Study UID."
+                )
             case ("SERIES", _, _, None):
-                raise ValidationError("Records of level SERIES should have Series UID.")
+                raise ValidationError(message="Records of level SERIES should have Series UID.")
             case _:
                 raise NotImplementedError(
                     "Something unexpected happened during validation of record."
@@ -446,7 +448,7 @@ class RecordRead(RecordBase):
                 return self._format_path_strict(f"{settings.storage_path}/{{patient_id}}")
             case _:
                 raise ConfigurationError(
-                    f"Unknown record type level '{self.record_type.level}' — "
+                    message=f"Unknown record type level '{self.record_type.level}' — "
                     "expected SERIES, STUDY, or PATIENT."
                 )
 

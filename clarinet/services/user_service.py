@@ -71,7 +71,7 @@ class UserService:
 
         # Check if user exists
         if await self.user_repo.exists(id=user_data["id"]):
-            raise UserAlreadyExistsError(user_data["id"])
+            raise UserAlreadyExistsError(user_id=user_data["id"])
 
         # Hash password if provided
         if "password" in user_data:
@@ -199,7 +199,7 @@ class UserService:
 
         # Check if already has role
         if await self.user_repo.has_role(user, role_name):
-            raise UserAlreadyHasRoleError(user_id, role_name)
+            raise UserAlreadyHasRoleError(user_id=user_id, role_name=role_name)
 
         return await self.user_repo.add_role(user, role)
 
@@ -235,7 +235,7 @@ class UserService:
         """
         # Check if role exists
         if await self.user_repo.role_exists(name):
-            raise RoleAlreadyExistsError(name)
+            raise RoleAlreadyExistsError(role_name=name)
 
         role = UserRole(name=name)
         return await self.user_repo.create_role(role)

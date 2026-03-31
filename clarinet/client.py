@@ -12,6 +12,7 @@ from uuid import UUID
 
 import httpx
 
+from clarinet.exceptions.base import _ExceptionMeta
 from clarinet.models import (
     Patient,
     PatientRead,
@@ -41,14 +42,12 @@ SeriesRead.model_rebuild()
 RecordRead.model_rebuild()
 
 
-class ClarinetAPIError(Exception):
+class ClarinetAPIError(Exception, metaclass=_ExceptionMeta):
     """Base exception for Clarinet API errors."""
 
-    def __init__(self, message: str, status_code: int | None = None, detail: Any = None) -> None:
-        self.message = message
-        self.status_code = status_code
-        self.detail = detail
-        super().__init__(message)
+    message: str
+    status_code: int | None = None
+    detail: Any = None
 
     def __str__(self) -> str:
         parts: list[str] = []
@@ -62,8 +61,6 @@ class ClarinetAPIError(Exception):
 
 class ClarinetAuthError(ClarinetAPIError):
     """Authentication-related errors."""
-
-    pass
 
 
 class ClarinetClient:
@@ -210,13 +207,13 @@ class ClarinetClient:
                             **kwargs,
                         )
                     raise ClarinetAuthError(
-                        "Authentication required or session expired",
+                        message="Authentication required or session expired",
                         status_code=401,
                         detail=response.text,
                     )
                 elif response.status_code == 403:
                     raise ClarinetAuthError(
-                        "Access forbidden",
+                        message="Access forbidden",
                         status_code=403,
                         detail=response.text,
                     )
@@ -230,13 +227,13 @@ class ClarinetClient:
                     # For auth endpoints 400 means invalid credentials
                     if "/auth/" in endpoint:
                         raise ClarinetAuthError(
-                            "Invalid credentials",
+                            message="Invalid credentials",
                             status_code=400,
                             detail=detail,
                         )
                     else:
                         raise ClarinetAPIError(
-                            f"Bad request: {response.status_code}",
+                            message=f"Bad request: {response.status_code}",
                             status_code=response.status_code,
                             detail=detail,
                         )
@@ -248,7 +245,7 @@ class ClarinetClient:
                         detail = response.text
 
                     raise ClarinetAPIError(
-                        f"API error: {response.status_code}",
+                        message=f"API error: {response.status_code}",
                         status_code=response.status_code,
                         detail=detail,
                     )
@@ -257,7 +254,7 @@ class ClarinetClient:
 
         except httpx.HTTPError as e:
             logger.error(f"HTTP error during request: {e}")
-            raise ClarinetAPIError(f"HTTP error: {e!s}") from e
+            raise ClarinetAPIError(message=f"HTTP error: {e!s}") from e
 
     async def login(self, username: str | None = None, password: str | None = None) -> UserRead:
         """Authenticate with the API.
@@ -277,7 +274,7 @@ class ClarinetClient:
         password = password or self.password
 
         if not username:
-            raise ClarinetAuthError("Username is required for login")
+            raise ClarinetAuthError(message="Username is required for login")
 
         if not password:
             password = getpass.getpass(f"Password for {username}: ")
@@ -297,7 +294,7 @@ class ClarinetClient:
                 return await self.get_me()
             else:
                 raise ClarinetAuthError(
-                    "Login failed",
+                    message="Login failed",
                     status_code=response.status_code,
                     detail=response.text,
                 )
@@ -306,7 +303,7 @@ class ClarinetClient:
             raise
         except Exception as e:
             logger.error(f"Login error: {e}")
-            raise ClarinetAuthError(f"Login failed: {e!s}") from e
+            raise ClarinetAuthError(message=f"Login failed: {e!s}") from e
 
     async def logout(self) -> None:
         """Logout and clear session."""

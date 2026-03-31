@@ -208,5 +208,5 @@ async def validate_record_files(
     result = await run_in_fs_thread(validator.validate, record, directory, working_dirs, parent)
     if not result.valid and raise_on_invalid:
         errors = "; ".join(f"{e.file_name}: {e.message}" for e in result.errors)
-        raise ValidationError(f"File validation failed: {errors}")
+        raise ValidationError(message=f"File validation failed: {errors}")
     return result

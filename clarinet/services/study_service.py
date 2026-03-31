@@ -93,7 +93,7 @@ class StudyService:
         """
         # Check if patient exists
         if await self.patient_repo.exists(id=patient_data["id"]):
-            raise PatientAlreadyExistsError(patient_data["id"])
+            raise PatientAlreadyExistsError(patient_id=patient_data["id"])
 
         patient = Patient(**patient_data)
         result = await self.patient_repo.create(patient)
@@ -120,13 +120,13 @@ class StudyService:
 
         # Check if already anonymized
         if patient.anon_name is not None:
-            raise AlreadyAnonymizedError("Patient")
+            raise AlreadyAnonymizedError(entity_type="Patient")
 
         # Generate anonymous name
         anon_name = await self._generate_anonymous_name(patient)
 
         if anon_name is None:
-            raise AnonymizationFailedError("Cannot find available name")
+            raise AnonymizationFailedError(reason="Cannot find available name")
 
         # Update patient with anonymous name
         return await self.patient_repo.update_anon_name(patient, anon_name)
@@ -216,7 +216,7 @@ class StudyService:
 
         # Check if study already exists
         if await self.study_repo.exists(study_uid=study_data["study_uid"]):
-            raise StudyAlreadyExistsError(study_data["study_uid"])
+            raise StudyAlreadyExistsError(study_uid=study_data["study_uid"])
 
         study = Study(**study_data)
         study.patient = patient
@@ -303,7 +303,7 @@ class StudyService:
 
         # Check if series already exists
         if await self.series_repo.exists(series_uid=series_data["series_uid"]):
-            raise SeriesAlreadyExistsError(series_data["series_uid"])
+            raise SeriesAlreadyExistsError(series_uid=series_data["series_uid"])
 
         series = Series(**series_data)
         series.study = study

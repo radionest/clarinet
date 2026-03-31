@@ -38,13 +38,15 @@ class SlicerClient:
         try:
             response = await self._client.post(f"{self.url}/slicer/exec", content=script)
         except httpx.ConnectError as e:
-            raise SlicerConnectionError(f"Cannot connect to Slicer at {self.url}") from e
+            raise SlicerConnectionError(message=f"Cannot connect to Slicer at {self.url}") from e
         except httpx.TimeoutException as e:
-            raise SlicerConnectionError(f"Connection to Slicer at {self.url} timed out") from e
+            raise SlicerConnectionError(
+                message=f"Connection to Slicer at {self.url} timed out"
+            ) from e
 
         if response.status_code != 200:
             logger.error(f"Slicer error: {response.status_code} - {response.text}")
-            raise SlicerError(f"Slicer execution failed: {response.text}")
+            raise SlicerError(message=f"Slicer execution failed: {response.text}")
 
         return cast("dict[str, Any]", response.json())
 

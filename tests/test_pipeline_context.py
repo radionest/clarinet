@@ -815,7 +815,7 @@ class TestPipelineTaskDecorator:
 
         @pipeline_task()
         async def error_task(msg: MagicMock, ctx: MagicMock) -> None:
-            raise PipelineStepError("error_task", "boom")
+            raise PipelineStepError(step_name="error_task", reason="boom")
 
         msg_dict = {"patient_id": "PAT001", "study_uid": "1.2.3"}
         with pytest.raises(PipelineStepError, match="boom"):

@@ -143,7 +143,7 @@ def build_slicer_context(
             from clarinet.exceptions.domain import ScriptArgumentError
 
             raise ScriptArgumentError(
-                f"Cannot build Slicer context: unresolved files {unresolved}. "
+                message=f"Cannot build Slicer context: unresolved files {unresolved}. "
                 f"Record may be missing required UIDs for its level."
             )
 

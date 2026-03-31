@@ -32,7 +32,7 @@ class BaseRepository[ModelT: SQLModel]:
         """Return entity by ID, or raise EntityNotFoundError."""
         entity = await self.session.get(self.model_class, id)
         if not entity:
-            raise EntityNotFoundError(f"{self.model_class.__name__} with ID {id} not found")
+            raise EntityNotFoundError(message=f"{self.model_class.__name__} with ID {id} not found")
         return entity
 
     async def get_optional(self, id: Any) -> ModelT | None:
@@ -148,7 +148,9 @@ class BaseRepository[ModelT: SQLModel]:
             result = await self.session.execute(stmt)
             refreshed = result.scalars().first()
             if refreshed is None:
-                raise EntityNotFoundError(f"{self.model_class.__name__} not found after update")
+                raise EntityNotFoundError(
+                    message=f"{self.model_class.__name__} not found after update"
+                )
             return refreshed
 
         await self.session.refresh(entity)

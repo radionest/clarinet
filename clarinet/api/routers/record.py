@@ -392,7 +392,7 @@ async def bulk_update_record_status(
             record = await repo.get_with_relations(rid)
             role_name = record.record_type.role_name
             if role_name is None or role_name not in user_roles:
-                raise AuthorizationError(f"Insufficient permissions to access record {rid}")
+                raise AuthorizationError(message=f"Insufficient permissions to access record {rid}")
     await service.bulk_update_status(record_ids, new_status)
 
 

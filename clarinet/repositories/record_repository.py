@@ -137,7 +137,7 @@ class RecordRepository(BaseRepository[Record]):
         """
         record = await self.session.get(Record, record_id)
         if not record:
-            raise RecordNotFoundError(record_id)
+            raise RecordNotFoundError(record_id=record_id)
         return record
 
     async def get_with_record_type(self, record_id: int) -> Record:
@@ -160,7 +160,7 @@ class RecordRepository(BaseRepository[Record]):
         result = await self.session.execute(statement)
         record = result.scalars().first()
         if not record:
-            raise RecordNotFoundError(record_id)
+            raise RecordNotFoundError(record_id=record_id)
         return record
 
     async def get_with_relations(self, record_id: int) -> Record:
@@ -189,7 +189,7 @@ class RecordRepository(BaseRepository[Record]):
         result = await self.session.execute(statement)
         record = result.scalars().first()
         if not record:
-            raise RecordNotFoundError(record_id)
+            raise RecordNotFoundError(record_id=record_id)
         return record
 
     async def get_all_with_relations(self, skip: int = 0, limit: int = 100) -> Sequence[Record]:
@@ -496,10 +496,10 @@ class RecordRepository(BaseRepository[Record]):
         """
         record = await self.get(record_id)
         if record.status == RecordStatus.blocked:
-            raise ValidationError("Cannot assign user to a blocked record")
+            raise ValidationError(message="Cannot assign user to a blocked record")
         user = await self.session.get(User, user_id)
         if not user:
-            raise UserNotFoundError(user_id)
+            raise UserNotFoundError(user_id=user_id)
         old_status = record.status
         record.user_id = user_id
         record.status = RecordStatus.inwork
@@ -707,7 +707,7 @@ class RecordRepository(BaseRepository[Record]):
         result = await self.session.execute(stmt)
         record_type = result.scalars().first()
         if not record_type:
-            raise RecordTypeNotFoundError(name)
+            raise RecordTypeNotFoundError(type_id=name)
         return record_type
 
     async def validate_parent_record(self, parent_record_id: int) -> Record:
@@ -752,15 +752,19 @@ class RecordRepository(BaseRepository[Record]):
 
         if record_type.max_records and count >= record_type.max_records:
             raise RecordConstraintViolationError(
-                f"The maximum records limit ({count} of {record_type.max_records}) is reached"
+                message=f"The maximum records limit ({count} of {record_type.max_records}) is reached"
             )
 
         # Validate level-UID consistency
         level = record_type.level
         if level in ("STUDY", "SERIES") and not study_uid:
-            raise RecordConstraintViolationError(f"Records of level {level} require study_uid")
+            raise RecordConstraintViolationError(
+                message=f"Records of level {level} require study_uid"
+            )
         if level == "SERIES" and not series_uid:
-            raise RecordConstraintViolationError("Records of level SERIES require series_uid")
+            raise RecordConstraintViolationError(
+                message="Records of level SERIES require series_uid"
+            )
 
         # Check unique_per_user constraint
         if user_id is not None and patient_id is not None and record_type.unique_per_user:
@@ -774,7 +778,7 @@ class RecordRepository(BaseRepository[Record]):
             )
             if user_count > 0:
                 raise RecordConstraintViolationError(
-                    f"User already has a record of type '{record_type.name}' "
+                    message=f"User already has a record of type '{record_type.name}' "
                     f"for this {level.lower()} context"
                 )
 
@@ -814,7 +818,7 @@ class RecordRepository(BaseRepository[Record]):
             )
             if op_fn is None:
                 raise ValidationError(
-                    f"Unsupported comparison operator: {query.comparison_operator}"
+                    message=f"Unsupported comparison operator: {query.comparison_operator}"
                 )
             statement = statement.where(op_fn(data_field.cast(query.sql_type), query.result_value))
         return statement
