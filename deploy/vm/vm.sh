@@ -12,6 +12,16 @@ source "$SCRIPT_DIR/vm.conf"
 source "$DEPLOY_DIR/lib/common.sh"
 init_logging "vm"
 
+# Per-worktree VM name: explicit env > auto-detect from worktree path > vm.conf default
+if [[ -n "${CLARINET_VM_NAME:-}" ]]; then
+    VM_NAME="$CLARINET_VM_NAME"
+elif [[ "$PROJECT_DIR" == */.claude/worktrees/* ]]; then
+    _wt_suffix="${PROJECT_DIR##*/.claude/worktrees/}"
+    _wt_suffix="${_wt_suffix%%/*}"
+    VM_NAME="clarinet-test-${_wt_suffix}"
+    log "Worktree detected — using VM name: $VM_NAME"
+fi
+
 # Derived paths
 DISK_PATH="${DISKS_DIR}/${VM_NAME}.qcow2"
 SEED_ISO="${DISKS_DIR}/${VM_NAME}-seed.iso"
@@ -343,6 +353,7 @@ case "${1:-help}" in
     setup)   cmd_setup ;;
     ssh)     shift; cmd_ssh "$@" ;;
     ip)      cmd_ip ;;
+    name)    echo "$VM_NAME" ;;
     status)  cmd_status ;;
     deploy)  shift; cmd_deploy "$@" ;;
     reimage) cmd_reimage ;;
@@ -355,6 +366,7 @@ case "${1:-help}" in
         echo "  setup    One-time host setup (permissions + libvirt check)"
         echo "  ssh      SSH into the VM (extra args passed to ssh)"
         echo "  ip       Print VM IP address"
+        echo "  name     Print resolved VM name"
         echo "  status   Show VM status (running/shut off/not found)"
         echo "  deploy   Deploy to VM (optional: path to .whl, else downloads latest release)"
         echo "  reimage  Destroy + recreate VM (clean slate)"
