@@ -3,8 +3,9 @@
 import json
 import sys
 from io import StringIO
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
 from loguru import logger as _logger
 
@@ -171,3 +172,211 @@ class TestSetupLogging:
         output = buf.getvalue()
         assert "INFO" in output
         assert "custom format test" in output
+
+
+class TestScrubSensitive:
+    """Tests for scrub_sensitive function."""
+
+    def test_scrubs_password_assignment(self) -> None:
+        from clarinet.utils.logger import scrub_sensitive
+
+        assert "***" in scrub_sensitive("password=secret123")
+        assert "secret123" not in scrub_sensitive("password=secret123")
+
+    def test_scrubs_quoted_password(self) -> None:
+        from clarinet.utils.logger import scrub_sensitive
+
+        result = scrub_sensitive('"password": "mypass"')
+        assert "mypass" not in result
+        assert "***" in result
+
+    def test_scrubs_bearer_token(self) -> None:
+        from clarinet.utils.logger import scrub_sensitive
+
+        result = scrub_sensitive("Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.payload.sig")
+        assert "eyJhbGc" not in result
+        assert "Bearer ***" in result
+
+    def test_scrubs_basic_auth(self) -> None:
+        from clarinet.utils.logger import scrub_sensitive
+
+        result = scrub_sensitive("Basic dXNlcjpwYXNz")
+        assert "dXNlcjpwYXNz" not in result
+
+    def test_scrubs_db_url(self) -> None:
+        from clarinet.utils.logger import scrub_sensitive
+
+        result = scrub_sensitive("postgresql://user:s3cret@localhost/db")
+        assert "s3cret" not in result
+        assert "://user:***@localhost" in result
+
+    def test_scrubs_token_field(self) -> None:
+        from clarinet.utils.logger import scrub_sensitive
+
+        result = scrub_sensitive("token=abc123def")
+        assert "abc123def" not in result
+
+    def test_scrubs_secret_field(self) -> None:
+        from clarinet.utils.logger import scrub_sensitive
+
+        result = scrub_sensitive("secret=mysecretvalue")
+        assert "mysecretvalue" not in result
+
+    def test_preserves_normal_text(self) -> None:
+        from clarinet.utils.logger import scrub_sensitive
+
+        text = "Patient uploaded study successfully"
+        assert scrub_sensitive(text) == text
+
+    def test_scrubs_single_quoted_python_dict(self) -> None:
+        from clarinet.utils.logger import scrub_sensitive
+
+        result = scrub_sensitive("{'password':'x'}")
+        assert "x" not in result or result == "{'password':'***'}"
+        assert "***" in result
+
+    def test_scrubs_numeric_json_value(self) -> None:
+        from clarinet.utils.logger import scrub_sensitive
+
+        result = scrub_sensitive('{"password":123}')
+        assert "123" not in result
+        assert "***" in result
+
+    def test_scrubs_compound_key_single_quoted(self) -> None:
+        from clarinet.utils.logger import scrub_sensitive
+
+        result = scrub_sensitive("access_token='abc'")
+        assert "abc" not in result
+        assert "***" in result
+
+    def test_scrubs_hyphenated_key_assignment(self) -> None:
+        from clarinet.utils.logger import scrub_sensitive
+
+        result = scrub_sensitive("api-key=secret")
+        assert "secret" not in result
+
+    def test_scrubs_multiline_traceback(self) -> None:
+        from clarinet.utils.logger import scrub_sensitive
+
+        tb = "Traceback:\n  File app.py\n  password=hunter2\n  token=abc"
+        result = scrub_sensitive(tb)
+        assert "hunter2" not in result
+        assert "abc" not in result
+
+
+class TestLokiSink:
+    """Tests for _LokiSink class."""
+
+    def test_sends_post_to_url(self) -> None:
+        from clarinet.utils.logger import _LokiSink
+
+        sink = _LokiSink(url="http://localhost:3100/loki/api/v1/push")
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.raise_for_status = MagicMock()
+
+        buf = StringIO()
+        _logger.remove()
+        _logger.add(buf, format="{message}", level="DEBUG")
+
+        with patch.object(sink._client, "post", return_value=mock_response) as mock_post:
+            _logger.remove()
+            _logger.add(sink, format="{message}", level="DEBUG", enqueue=False)
+            _logger.info("test loki message")
+            _logger.remove()
+
+            mock_post.assert_called_once()
+            call_kwargs = mock_post.call_args
+            payload = json.loads(call_kwargs.kwargs["content"])
+            assert "streams" in payload
+            stream = payload["streams"][0]
+            assert stream["stream"]["app"] == "clarinet"
+            assert stream["stream"]["level"] == "info"
+            # The log line is JSON inside the value
+            log_line = json.loads(stream["values"][0][1])
+            assert log_line["msg"] == "test loki message"
+
+    def test_includes_custom_labels(self) -> None:
+        from clarinet.utils.logger import _LokiSink
+
+        sink = _LokiSink(
+            url="http://localhost:3100/loki/api/v1/push",
+            labels={"env": "test", "host": "server1"},
+        )
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.raise_for_status = MagicMock()
+
+        with patch.object(sink._client, "post", return_value=mock_response) as mock_post:
+            _logger.remove()
+            _logger.add(sink, format="{message}", level="DEBUG", enqueue=False)
+            _logger.info("labels test")
+            _logger.remove()
+
+            payload = json.loads(mock_post.call_args.kwargs["content"])
+            labels = payload["streams"][0]["stream"]
+            assert labels["env"] == "test"
+            assert labels["host"] == "server1"
+            assert labels["app"] == "clarinet"
+
+    def test_scrubs_sensitive_in_message(self) -> None:
+        from clarinet.utils.logger import _LokiSink
+
+        sink = _LokiSink(url="http://localhost:3100/loki/api/v1/push")
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.raise_for_status = MagicMock()
+
+        with patch.object(sink._client, "post", return_value=mock_response) as mock_post:
+            _logger.remove()
+            _logger.add(sink, format="{message}", level="DEBUG", enqueue=False)
+            _logger.info("connecting with password=hunter2")
+            _logger.remove()
+
+            payload = json.loads(mock_post.call_args.kwargs["content"])
+            log_line = json.loads(payload["streams"][0]["values"][0][1])
+            assert "hunter2" not in log_line["msg"]
+            assert "***" in log_line["msg"]
+
+    def test_error_does_not_raise(self) -> None:
+        from clarinet.utils.logger import _LokiSink
+
+        sink = _LokiSink(url="http://localhost:3100/loki/api/v1/push")
+
+        with patch.object(sink._client, "post", side_effect=httpx.ConnectError("refused")):
+            _logger.remove()
+            _logger.add(sink, format="{message}", level="DEBUG", enqueue=False)
+            # Should not raise
+            _logger.info("this should not crash")
+            _logger.remove()
+
+    def test_auth_header_set(self) -> None:
+        from clarinet.utils.logger import _LokiSink
+
+        sink = _LokiSink(
+            url="http://localhost:3100/loki/api/v1/push",
+            auth="Basic dXNlcjprZXk=",
+        )
+        assert sink._client.headers["Authorization"] == "Basic dXNlcjprZXk="
+
+
+class TestSetupRemoteSink:
+    """Tests for remote sink integration in setup_logging."""
+
+    def test_no_sink_when_url_none(self) -> None:
+        from clarinet.utils.logger import setup_logging
+
+        _logger.remove()
+        setup_logging(level="DEBUG", remote_url=None)
+        # Only console handler — count handlers
+        handlers = _logger._core.handlers
+        # Should have exactly 1 handler (console)
+        assert len(handlers) == 1
+        _logger.remove()
+
+    def test_sink_added_when_url_set(self) -> None:
+        from clarinet.utils.logger import setup_logging
+
+        _logger.remove()
+        setup_logging(level="DEBUG", remote_url="http://localhost:3100/loki/api/v1/push")
+        handlers = _logger._core.handlers
+        # Console + remote = 2 handlers
+        assert len(handlers) == 2
+        _logger.remove()
