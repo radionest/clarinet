@@ -44,10 +44,19 @@ except ImportError:
 
 _SENSITIVE_KEY = r"(?:password|token|secret|api[_-]?key|auth|credentials?|private[_-]?key)"
 _SCRUB_PATTERNS: list[tuple[re.Pattern[str], str]] = [
-    # "key": "value" or "key": value (JSON-style)
-    (re.compile(rf'("{_SENSITIVE_KEY}":\s*)"([^"]+)"', re.IGNORECASE), r'\1"***"'),
-    # key=value, key: value (plain text, unquoted)
-    (re.compile(rf"({_SENSITIVE_KEY}\s*[:=]\s*)[^\s,}}\"']+", re.IGNORECASE), r"\1***"),
+    # "key": "value" or 'key': 'value' (JSON / Python repr with quoted keys)
+    (re.compile(rf"""(['"]?{_SENSITIVE_KEY}['"]?\s*:\s*)'([^']+)'""", re.IGNORECASE), r"\1'***'"),
+    (re.compile(rf"""(['"]?{_SENSITIVE_KEY}['"]?\s*:\s*)"([^"]+)\"""", re.IGNORECASE), r'\1"***"'),
+    # "key": 123 or 'key': 123 (unquoted / numeric values after colon)
+    (
+        re.compile(rf"""(['"]?{_SENSITIVE_KEY}['"]?\s*:\s*)([^\s,}}'\"]+)""", re.IGNORECASE),
+        r"\1***",
+    ),
+    # key='value' or key="value" (assignment with quotes)
+    (re.compile(rf"({_SENSITIVE_KEY}\s*=\s*)'([^']+)'", re.IGNORECASE), r"\1'***'"),
+    (re.compile(rf'({_SENSITIVE_KEY}\s*=\s*)"([^"]+)"', re.IGNORECASE), r'\1"***"'),
+    # key=value (plain text, unquoted)
+    (re.compile(rf"({_SENSITIVE_KEY}\s*=\s*)[^\s,}}\"']+", re.IGNORECASE), r"\1***"),
     # Bearer/Basic tokens
     (re.compile(r"((?:Bearer|Basic)\s+)\S+", re.IGNORECASE), r"\1***"),
     # DB URLs: driver://user:password@host
