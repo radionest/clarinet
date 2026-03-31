@@ -244,7 +244,7 @@ class TestLokiSink:
         from clarinet.utils.logger import _LokiSink
 
         sink = _LokiSink(url="http://localhost:3100/loki/api/v1/push")
-        mock_response = MagicMock()
+        mock_response = MagicMock(spec=httpx.Response)
         mock_response.raise_for_status = MagicMock()
 
         buf = StringIO()
@@ -275,7 +275,7 @@ class TestLokiSink:
             url="http://localhost:3100/loki/api/v1/push",
             labels={"env": "test", "host": "server1"},
         )
-        mock_response = MagicMock()
+        mock_response = MagicMock(spec=httpx.Response)
         mock_response.raise_for_status = MagicMock()
 
         with patch.object(sink._client, "post", return_value=mock_response) as mock_post:
@@ -294,7 +294,7 @@ class TestLokiSink:
         from clarinet.utils.logger import _LokiSink
 
         sink = _LokiSink(url="http://localhost:3100/loki/api/v1/push")
-        mock_response = MagicMock()
+        mock_response = MagicMock(spec=httpx.Response)
         mock_response.raise_for_status = MagicMock()
 
         with patch.object(sink._client, "post", return_value=mock_response) as mock_post:
