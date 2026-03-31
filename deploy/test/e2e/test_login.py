@@ -7,7 +7,7 @@ def test_login_redirects_to_home(
 ):
     """Login → redirect preserves sub-path."""
     page.goto(f"{base_url}/login")
-    page.fill('input[name="username"]', admin_email)
+    page.fill('input[name="email"]', admin_email)
     page.fill('input[name="password"]', admin_password)
     page.click('button[type="submit"]')
     page.wait_for_url(f"**{path_prefix}/**")
