@@ -34,6 +34,18 @@ if TYPE_CHECKING:
     from clarinet.services.pipeline import PipelineMessage
 
 
+def _is_ssl_error(exc: BaseException) -> bool:
+    """Check if an exception chain contains an SSL certificate error."""
+    import ssl
+
+    current: BaseException | None = exc
+    while current is not None:
+        if isinstance(current, ssl.SSLCertVerificationError):
+            return True
+        current = current.__cause__ or current.__context__
+    return False
+
+
 @dataclass(frozen=True, slots=True)
 class FlowContext:
     """Unified execution context for all flow trigger types."""
@@ -105,9 +117,41 @@ class RecordFlowEngine:
         self.entity_flows: dict[str, list[FlowRecord]] = {}
         self.file_flows: dict[str, list[FlowFileRecord]] = {}
         self._background_tasks: set[asyncio.Task[None]] = set()
+        self._api_verified: bool = False
+
+    async def _ensure_api_reachable(self) -> None:
+        """One-time API connectivity check on first use (when api_base_url is set)."""
+        if self._api_verified:
+            return
+        self._api_verified = True  # fire-once: don't retry on failure
+
+        from clarinet.settings import settings
+
+        if not settings.api_base_url:
+            return
+
+        import httpx
+
+        try:
+            response = await self.clarinet_client.client.get("/health")
+            response.raise_for_status()
+        except httpx.ConnectError as e:
+            if _is_ssl_error(e):
+                logger.error(
+                    f"RecordFlow: SSL verification failed for "
+                    f"{settings.effective_api_base_url}. "
+                    f"Set api_verify_ssl = false for self-signed certificates"
+                )
+            else:
+                logger.error(
+                    f"RecordFlow: cannot connect to API at {settings.effective_api_base_url}: {e}"
+                )
+        except httpx.HTTPError as e:
+            logger.error(f"RecordFlow: API check failed for {settings.effective_api_base_url}: {e}")
 
     async def _ensure_authenticated(self) -> None:
         """Lazily authenticate the ClarinetClient on first use."""
+        await self._ensure_api_reachable()
         if self.clarinet_client._authenticated:
             return
         if self.clarinet_client.username and self.clarinet_client.password:

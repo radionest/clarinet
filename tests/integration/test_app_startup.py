@@ -223,3 +223,31 @@ async def test_startup_ohif_missing(startup_settings, monkeypatch, tmp_path):
     with pytest.raises(StartupError, match="OHIF"):
         async with lifespan(app):
             pass
+
+
+# ── Test 6: RecordFlow must not perform eager health check ───────────────────
+
+
+@pytest.mark.asyncio
+async def test_startup_recordflow_no_eager_healthcheck(startup_settings, capture_logs, monkeypatch):
+    """RecordFlow startup must NOT perform eager API health check.
+
+    Regression: _init_recordflow() used to call /health during lifespan,
+    before uvicorn accepted connections — failing behind nginx.
+    """
+    monkeypatch.setattr(settings, "recordflow_enabled", True)
+    monkeypatch.setattr(settings, "api_base_url", "https://unreachable.example.com/api")
+
+    app = FastAPI(lifespan=lifespan)
+
+    async with lifespan(app):
+        assert app.state.recordflow_engine is not None
+
+    connectivity_errors = [
+        m
+        for m in capture_logs
+        if "cannot connect" in m.lower() or "ssl" in m.lower() or "health" in m.lower()
+    ]
+    assert connectivity_errors == [], (
+        f"Regression: eager health check during startup: {connectivity_errors}"
+    )
