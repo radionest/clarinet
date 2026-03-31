@@ -1,7 +1,6 @@
 // Main Lustre application
 import api/admin
 import api/auth
-import api/dicom
 import api/info
 import api/models
 import api/patients
@@ -11,7 +10,6 @@ import api/slicer
 import api/studies
 import api/types
 import api/users
-import components/forms/patient_form
 import components/forms/record_form
 import components/layout
 import formosh/component as formosh_component
@@ -866,63 +864,6 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     store.PatientDetailLoaded(Error(err)) ->
       handle_api_error(model, err, "Failed to load patient")
 
-    // Patient form handling
-    store.UpdatePatientFormId(value) -> {
-      #(store.Model(..model, patient_form_id: value), effect.none())
-    }
-
-    store.UpdatePatientFormName(value) -> {
-      #(store.Model(..model, patient_form_name: value), effect.none())
-    }
-
-    store.SubmitPatientForm -> {
-      let form_data =
-        patient_form.PatientFormData(
-          id: model.patient_form_id,
-          name: model.patient_form_name,
-        )
-      case patient_form.validate(form_data) {
-        Ok(data) -> {
-          let submit_effect = {
-            use dispatch <- effect.from
-            patients.create_patient(data.id, data.name)
-            |> promise.tap(fn(result) {
-              dispatch(store.PatientFormSubmitted(result))
-            })
-            Nil
-          }
-          #(
-            model |> store.set_loading(True) |> store.clear_form_errors(),
-            submit_effect,
-          )
-        }
-        Error(errors) -> {
-          #(store.Model(..model, form_errors: errors), effect.none())
-        }
-      }
-    }
-
-    store.PatientFormSubmitted(Ok(patient)) -> {
-      let new_model =
-        model
-        |> store.cache_patient(patient)
-        |> store.set_loading(False)
-        |> store.clear_patient_form()
-        |> store.clear_form_errors()
-        |> store.set_success("Patient created successfully")
-        |> store.set_route(router.PatientDetail(patient.id))
-      let nav_effect =
-        modem.push(
-          router.route_to_path(router.PatientDetail(patient.id)),
-          option.None,
-          option.None,
-        )
-      #(new_model, nav_effect)
-    }
-
-    store.PatientFormSubmitted(Error(err)) ->
-      handle_api_error(model, err, "Failed to create patient")
-
     // Record creation form
     store.LoadRecordTypes ->
       load_with_effect(model, records.get_record_types, store.RecordTypesLoaded)
@@ -1135,55 +1076,6 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     store.RecordFormSubmitted(Error(err)) ->
       handle_api_error(model, err, "Failed to create record")
 
-    // Patient anonymize
-    store.AnonymizePatient(id) ->
-      load_with_effect(
-        model,
-        fn() { patients.anonymize_patient(id) },
-        store.PatientAnonymized,
-      )
-
-    store.PatientAnonymized(Ok(patient)) -> {
-      let new_model =
-        model
-        |> store.cache_patient(patient)
-        |> store.set_loading(False)
-        |> store.set_success("Patient anonymized successfully")
-      #(new_model, effect.none())
-    }
-
-    store.PatientAnonymized(Error(err)) ->
-      handle_api_error(model, err, "Failed to anonymize patient")
-
-    // Delete patient
-    store.DeletePatient(id) -> {
-      let delete_effect = {
-        use dispatch <- effect.from
-        patients.delete_patient(id)
-        |> promise.tap(fn(result) { dispatch(store.PatientDeleted(result)) })
-        Nil
-      }
-      #(store.set_loading(model, True), delete_effect)
-    }
-
-    store.PatientDeleted(Ok(_)) -> {
-      let new_model =
-        model
-        |> store.set_loading(False)
-        |> store.set_success("Patient deleted successfully")
-        |> store.set_route(router.Patients)
-      #(
-        new_model,
-        effect.batch([
-          modem.push(router.route_to_path(router.Patients), option.None, option.None),
-          dispatch_msg(store.LoadPatients),
-        ]),
-      )
-    }
-
-    store.PatientDeleted(Error(err)) ->
-      handle_api_error(model, err, "Failed to delete patient")
-
     // Delete study
     store.DeleteStudy(study_uid) -> {
       let delete_effect = {
@@ -1225,9 +1117,9 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       let close_model =
         store.Model(..model, modal_open: False, modal_content: store.NoModal)
       case model.modal_content {
-        store.ConfirmDelete("patient", id) -> #(
+        store.ConfirmDelete("patient", _id) -> #(
           close_model,
-          dispatch_msg(store.DeletePatient(id)),
+          dispatch_msg(store.PatientDetailMsg(patient_detail.Delete)),
         )
         store.ConfirmDelete("study", uid) -> #(
           close_model,
@@ -1274,71 +1166,6 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
 
     store.SeriesDetailLoaded(Error(err)) ->
       handle_api_error(model, err, "Failed to load series")
-
-    // PACS operations
-    store.SearchPacsStudies(patient_id) -> {
-      let search_effect = {
-        use dispatch <- effect.from
-        dicom.search_patient_studies(patient_id)
-        |> promise.tap(fn(result) { dispatch(store.PacsStudiesLoaded(result)) })
-        Nil
-      }
-      #(store.set_pacs_loading(model, True), search_effect)
-    }
-
-    store.PacsStudiesLoaded(Ok(pacs_studies)) -> {
-      #(store.set_pacs_studies(model, pacs_studies), effect.none())
-    }
-
-    store.PacsStudiesLoaded(Error(err)) ->
-      handle_api_error(
-        store.set_pacs_loading(model, False),
-        err,
-        "Failed to search PACS",
-      )
-
-    store.ImportPacsStudy(study_uid, patient_id) -> {
-      let import_effect = {
-        use dispatch <- effect.from
-        dicom.import_study(study_uid, patient_id)
-        |> promise.tap(fn(result) { dispatch(store.PacsStudyImported(result)) })
-        Nil
-      }
-      #(store.Model(..model, pacs_importing: Some(study_uid)), import_effect)
-    }
-
-    store.PacsStudyImported(Ok(study)) -> {
-      // Mark study as existing in PACS results
-      let updated_pacs =
-        list.map(model.pacs_studies, fn(ps) {
-          case ps.study.study_instance_uid == study.study_uid {
-            True -> models.PacsStudyWithSeries(..ps, already_exists: True)
-            False -> ps
-          }
-        })
-      let new_model =
-        model
-        |> store.cache_study(study)
-        |> fn(m) {
-          store.Model(..m, pacs_importing: None, pacs_studies: updated_pacs)
-        }
-        |> store.set_success("Study imported from PACS successfully")
-      // Reload patient detail to show new study
-      let reload_effect =
-        dispatch_msg(store.LoadPatientDetail(study.patient_id))
-      #(new_model, reload_effect)
-    }
-
-    store.PacsStudyImported(Error(err)) ->
-      handle_api_error(
-        store.Model(..model, pacs_importing: None),
-        err,
-        "Failed to import study from PACS",
-      )
-
-    store.ClearPacsResults -> {
-      #(store.clear_pacs(model), effect.none())
-    }
 
     // Schema hydration
     store.LoadHydratedSchema(record_id) -> {
@@ -1393,6 +1220,64 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
             model,
             effect.batch([
               effect.map(eff, store.AdminMsg),
+              out_effects,
+            ]),
+          )
+        }
+        _ -> #(model, effect.none())
+      }
+
+    // Patient page delegation
+    store.PatientsListMsg(page_msg) ->
+      case model.page {
+        store.PatientsListPage(page_model) -> {
+          let #(new_page, eff, out_msgs) =
+            patients_list.update(page_model, page_msg, build_shared(model))
+          let model =
+            store.Model(..model, page: store.PatientsListPage(new_page))
+          let #(model, out_effects) = apply_out_msgs(model, out_msgs)
+          #(
+            model,
+            effect.batch([
+              effect.map(eff, store.PatientsListMsg),
+              out_effects,
+            ]),
+          )
+        }
+        _ -> #(model, effect.none())
+      }
+
+    store.PatientDetailMsg(page_msg) ->
+      case model.page {
+        store.PatientDetailPage(page_model) -> {
+          let #(new_page, eff, out_msgs) =
+            patient_detail.update(page_model, page_msg, build_shared(model))
+          let model =
+            store.Model(..model, page: store.PatientDetailPage(new_page))
+          let #(model, out_effects) = apply_out_msgs(model, out_msgs)
+          #(
+            model,
+            effect.batch([
+              effect.map(eff, store.PatientDetailMsg),
+              out_effects,
+            ]),
+          )
+        }
+        _ -> #(model, effect.none())
+      }
+
+    store.PatientNewMsg(page_msg) ->
+      case model.page {
+        store.PatientNewPage(page_model) -> {
+          let #(new_page, eff, out_msgs) =
+            patient_new.update(page_model, page_msg, build_shared(model))
+          let model =
+            store.Model(..model, page: store.PatientNewPage(new_page))
+          let #(model, out_effects) = apply_out_msgs(model, out_msgs)
+          #(
+            model,
+            effect.batch([
+              effect.map(eff, store.PatientNewMsg),
               out_effects,
             ]),
           )
@@ -1487,6 +1372,27 @@ fn init_page_for_route(model: Model, route: Route) -> #(Model, Effect(Msg)) {
         effect.map(page_eff, store.RegisterMsg),
       )
     }
+    router.Patients -> {
+      let #(page_model, page_eff) = patients_list.init(shared)
+      #(
+        store.Model(..model, page: store.PatientsListPage(page_model)),
+        effect.map(page_eff, store.PatientsListMsg),
+      )
+    }
+    router.PatientDetail(id) -> {
+      let #(page_model, page_eff) = patient_detail.init(id, shared)
+      #(
+        store.Model(..model, page: store.PatientDetailPage(page_model)),
+        effect.map(page_eff, store.PatientDetailMsg),
+      )
+    }
+    router.PatientNew -> {
+      let #(page_model, page_eff) = patient_new.init(shared)
+      #(
+        store.Model(..model, page: store.PatientNewPage(page_model)),
+        effect.map(page_eff, store.PatientNewMsg),
+      )
+    }
     _ -> #(store.Model(..model, page: store.NoPage), effect.none())
   }
 }
@@ -1527,6 +1433,13 @@ fn apply_out_msgs(
           #(m, [dispatch_msg(store.LoadPatients), ..eff_list])
         shared.ReloadRecordTypes ->
           #(m, [dispatch_msg(store.LoadRecordTypes), ..eff_list])
+        shared.ReloadPatient(id) ->
+          #(m, [dispatch_msg(store.LoadPatientDetail(id)), ..eff_list])
+        shared.OpenDeleteConfirm(resource, id) ->
+          #(
+            store.Model(..m, modal_open: True, modal_content: store.ConfirmDelete(resource, id)),
+            eff_list,
+          )
         shared.SetUser(user) ->
           #(store.set_user(m, user), eff_list)
         shared.Logout ->
@@ -1637,9 +1550,42 @@ fn view_content(model: Model) -> Element(Msg) {
     router.RecordNew -> record_new.view(model)
     router.RecordTypeDesign(_id) ->
       html.div([], [html.text("Record type design page")])
-    router.Patients -> patients_list.view(model)
-    router.PatientNew -> patient_new.view(model)
-    router.PatientDetail(id) -> patient_detail.view(model, id)
+    router.Patients ->
+      case model.page {
+        store.PatientsListPage(page_model) ->
+          element.map(
+            patients_list.view(page_model, build_shared(model)),
+            store.PatientsListMsg,
+          )
+        _ ->
+          html.div([attribute.class("loading")], [
+            html.p([], [html.text("Loading...")]),
+          ])
+      }
+    router.PatientNew ->
+      case model.page {
+        store.PatientNewPage(page_model) ->
+          element.map(
+            patient_new.view(page_model, build_shared(model)),
+            store.PatientNewMsg,
+          )
+        _ ->
+          html.div([attribute.class("loading")], [
+            html.p([], [html.text("Loading...")]),
+          ])
+      }
+    router.PatientDetail(_) ->
+      case model.page {
+        store.PatientDetailPage(page_model) ->
+          element.map(
+            patient_detail.view(page_model, build_shared(model)),
+            store.PatientDetailMsg,
+          )
+        _ ->
+          html.div([attribute.class("loading")], [
+            html.p([], [html.text("Loading...")]),
+          ])
+      }
     router.Users -> html.div([], [html.text("Users page")])
     router.UserProfile(_id) -> html.div([], [html.text("User profile page")])
     router.AdminDashboard ->

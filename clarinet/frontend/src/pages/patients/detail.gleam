@@ -1,31 +1,212 @@
-// Patient detail page (admin only)
+// Patient detail page — self-contained MVU module
+import api/dicom
 import api/models.{
   type PacsSeriesResult, type PacsStudyWithSeries, type Patient, type Record,
   type Study,
 }
-import utils/status
+import api/patients
+import api/types.{type ApiError, AuthError}
 import gleam/dict
 import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/string
+import gleam/javascript/promise
 import lustre/attribute
+import lustre/effect.{type Effect}
 import lustre/element.{type Element}
 import lustre/element/html
 import lustre/event
 import router
-import store.{type Model, type Msg}
+import shared.{type OutMsg, type Shared}
+import utils/status
 
-pub fn view(model: Model, patient_id: String) -> Element(Msg) {
-  case dict.get(model.patients, patient_id) {
-    Ok(patient) -> render_detail(model, patient)
-    Error(_) -> loading_view(patient_id)
+// --- Model ---
+
+pub type Model {
+  Model(
+    patient_id: String,
+    pacs_studies: List(PacsStudyWithSeries),
+    pacs_loading: Bool,
+    pacs_importing: Option(String),
+  )
+}
+
+// --- Msg ---
+
+pub type Msg {
+  // Patient actions
+  Anonymize
+  AnonymizeResult(Result(Patient, ApiError))
+  Delete
+  DeleteResult(Result(Nil, ApiError))
+  // PACS operations
+  SearchPacs
+  PacsLoaded(Result(List(PacsStudyWithSeries), ApiError))
+  ImportPacs(study_uid: String)
+  PacsImported(Result(Study, ApiError))
+  ClearPacs
+  // Navigation
+  NavigateBack
+  RequestDelete
+}
+
+// --- Init ---
+
+pub fn init(patient_id: String, _shared: Shared) -> #(Model, Effect(Msg)) {
+  let model =
+    Model(
+      patient_id: patient_id,
+      pacs_studies: [],
+      pacs_loading: False,
+      pacs_importing: None,
+    )
+  #(model, effect.none())
+}
+
+// --- Update ---
+
+pub fn update(
+  model: Model,
+  msg: Msg,
+  _shared: Shared,
+) -> #(Model, Effect(Msg), List(OutMsg)) {
+  case msg {
+    Anonymize -> {
+      let eff = {
+        use dispatch <- effect.from
+        patients.anonymize_patient(model.patient_id)
+        |> promise.tap(fn(result) { dispatch(AnonymizeResult(result)) })
+        Nil
+      }
+      #(model, eff, [shared.SetLoading(True)])
+    }
+
+    AnonymizeResult(Ok(patient)) ->
+      #(model, effect.none(), [
+        shared.SetLoading(False),
+        shared.CachePatient(patient),
+        shared.ShowSuccess("Patient anonymized successfully"),
+      ])
+
+    AnonymizeResult(Error(err)) ->
+      #(model, effect.none(), handle_error(err, "Failed to anonymize patient"))
+
+    Delete -> {
+      let eff = {
+        use dispatch <- effect.from
+        patients.delete_patient(model.patient_id)
+        |> promise.tap(fn(result) { dispatch(DeleteResult(result)) })
+        Nil
+      }
+      #(model, eff, [shared.SetLoading(True)])
+    }
+
+    DeleteResult(Ok(_)) ->
+      #(model, effect.none(), [
+        shared.SetLoading(False),
+        shared.ReloadPatients,
+        shared.ShowSuccess("Patient deleted successfully"),
+        shared.Navigate(router.Patients),
+      ])
+
+    DeleteResult(Error(err)) ->
+      #(model, effect.none(), handle_error(err, "Failed to delete patient"))
+
+    SearchPacs -> {
+      let eff = {
+        use dispatch <- effect.from
+        dicom.search_patient_studies(model.patient_id)
+        |> promise.tap(fn(result) { dispatch(PacsLoaded(result)) })
+        Nil
+      }
+      #(Model(..model, pacs_loading: True), eff, [])
+    }
+
+    PacsLoaded(Ok(studies)) ->
+      #(Model(..model, pacs_studies: studies, pacs_loading: False), effect.none(), [])
+
+    PacsLoaded(Error(err)) ->
+      #(
+        Model(..model, pacs_loading: False),
+        effect.none(),
+        handle_error(err, "Failed to search PACS"),
+      )
+
+    ImportPacs(study_uid) -> {
+      let eff = {
+        use dispatch <- effect.from
+        dicom.import_study(study_uid, model.patient_id)
+        |> promise.tap(fn(result) { dispatch(PacsImported(result)) })
+        Nil
+      }
+      #(Model(..model, pacs_importing: Some(study_uid)), eff, [])
+    }
+
+    PacsImported(Ok(study)) -> {
+      let updated_pacs =
+        list.map(model.pacs_studies, fn(ps) {
+          case ps.study.study_instance_uid == study.study_uid {
+            True -> models.PacsStudyWithSeries(..ps, already_exists: True)
+            False -> ps
+          }
+        })
+      #(
+        Model(..model, pacs_importing: None, pacs_studies: updated_pacs),
+        effect.none(),
+        [
+          shared.CacheStudy(study),
+          shared.ShowSuccess("Study imported from PACS successfully"),
+          shared.ReloadPatient(model.patient_id),
+        ],
+      )
+    }
+
+    PacsImported(Error(err)) ->
+      #(
+        Model(..model, pacs_importing: None),
+        effect.none(),
+        handle_error(err, "Failed to import study from PACS"),
+      )
+
+    ClearPacs ->
+      #(
+        Model(..model, pacs_studies: [], pacs_loading: False, pacs_importing: None),
+        effect.none(),
+        [],
+      )
+
+    NavigateBack ->
+      #(model, effect.none(), [shared.Navigate(router.Patients)])
+
+    RequestDelete ->
+      #(model, effect.none(), [
+        shared.OpenDeleteConfirm("patient", model.patient_id),
+      ])
   }
 }
 
-fn render_detail(model: Model, patient: Patient) -> Element(Msg) {
+// --- Helpers ---
+
+fn handle_error(err: ApiError, fallback_msg: String) -> List(OutMsg) {
+  case err {
+    AuthError(_) -> [shared.Logout]
+    _ -> [shared.SetLoading(False), shared.ShowError(fallback_msg)]
+  }
+}
+
+// --- View ---
+
+pub fn view(model: Model, shared: Shared) -> Element(Msg) {
+  case dict.get(shared.patients, model.patient_id) {
+    Ok(patient) -> render_detail(model, shared, patient)
+    Error(_) -> loading_view(model.patient_id)
+  }
+}
+
+fn render_detail(model: Model, shared: Shared, patient: Patient) -> Element(Msg) {
   let patient_records =
-    dict.values(model.records)
+    dict.values(shared.records)
     |> list.filter(fn(r) { r.patient_id == patient.id })
     |> list.sort(fn(a, b) {
       int.compare(option.unwrap(a.id, 0), option.unwrap(b.id, 0))
@@ -38,17 +219,14 @@ fn render_detail(model: Model, patient: Patient) -> Element(Msg) {
         html.button(
           [
             attribute.class("btn btn-secondary"),
-            event.on_click(store.Navigate(router.Patients)),
+            event.on_click(NavigateBack),
           ],
           [html.text("Back to Patients")],
         ),
         html.button(
           [
             attribute.class("btn btn-danger"),
-            event.on_click(store.OpenModal(store.ConfirmDelete(
-              "patient",
-              patient.id,
-            ))),
+            event.on_click(RequestDelete),
           ],
           [html.text("Delete Patient")],
         ),
@@ -85,7 +263,7 @@ fn anonymize_button(patient: Patient) -> Element(Msg) {
         html.button(
           [
             attribute.class("btn btn-primary"),
-            event.on_click(store.AnonymizePatient(patient.id)),
+            event.on_click(Anonymize),
           ],
           [html.text("Anonymize Patient")],
         ),
@@ -227,7 +405,7 @@ fn pacs_section(model: Model, patient: Patient) -> Element(Msg) {
         [
           attribute.class("btn btn-primary"),
           attribute.disabled(model.pacs_loading),
-          event.on_click(store.SearchPacsStudies(patient.id)),
+          event.on_click(SearchPacs),
         ],
         [
           case model.pacs_loading {
@@ -242,7 +420,7 @@ fn pacs_section(model: Model, patient: Patient) -> Element(Msg) {
           html.button(
             [
               attribute.class("btn btn-secondary"),
-              event.on_click(store.ClearPacsResults),
+              event.on_click(ClearPacs),
             ],
             [html.text("Clear Results")],
           )
@@ -292,7 +470,7 @@ fn pacs_results_table(
 fn pacs_study_rows(
   model: Model,
   ps: PacsStudyWithSeries,
-  patient_id: String,
+  _patient_id: String,
 ) -> List(Element(Msg)) {
   let study_date = format_dicom_date(ps.study.study_date)
   let modalities = option.unwrap(ps.study.modalities_in_study, "-")
@@ -322,10 +500,7 @@ fn pacs_study_rows(
                 html.button(
                   [
                     attribute.class("btn btn-sm btn-primary"),
-                    event.on_click(store.ImportPacsStudy(
-                      ps.study.study_instance_uid,
-                      patient_id,
-                    )),
+                    event.on_click(ImportPacs(ps.study.study_instance_uid)),
                   ],
                   [html.text("Add")],
                 )

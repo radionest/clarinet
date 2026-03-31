@@ -6,16 +6,15 @@ import lustre/attribute
 import lustre/element.{type Element}
 import lustre/element/html
 import lustre/event
-import store.{type Msg}
 
 // Form field wrapper with label and error display
 pub fn field(
   label label: String,
   name name: String,
-  input input: Element(Msg),
+  input input: Element(msg),
   errors errors: Dict(String, String),
   required required: Bool,
-) -> Element(Msg) {
+) -> Element(msg) {
   let class = case required {
     True -> "form-field required"
     False -> "form-field"
@@ -40,8 +39,8 @@ pub fn input(
   name name: String,
   value value: String,
   placeholder placeholder: Option(String),
-  on_input on_input: fn(String) -> Msg,
-) -> Element(Msg) {
+  on_input on_input: fn(String) -> msg,
+) -> Element(msg) {
   list.flatten([
     [
       attribute.type_(input_type),
@@ -64,8 +63,8 @@ pub fn text_input(
   name name: String,
   value value: String,
   placeholder placeholder: Option(String),
-  on_input on_input: fn(String) -> Msg,
-) -> Element(Msg) {
+  on_input on_input: fn(String) -> msg,
+) -> Element(msg) {
   input(input_type: "text", name:, value:, placeholder:, on_input:)
 }
 
@@ -74,8 +73,8 @@ pub fn email_input(
   name name: String,
   value value: String,
   placeholder placeholder: Option(String),
-  on_input on_input: fn(String) -> Msg,
-) -> Element(Msg) {
+  on_input on_input: fn(String) -> msg,
+) -> Element(msg) {
   input(input_type: "email", name:, value:, placeholder:, on_input:)
 }
 
@@ -84,8 +83,8 @@ pub fn password_input(
   name name: String,
   value value: String,
   placeholder placeholder: Option(String),
-  on_input on_input: fn(String) -> Msg,
-) -> Element(Msg) {
+  on_input on_input: fn(String) -> msg,
+) -> Element(msg) {
   input(input_type: "password", name:, value:, placeholder:, on_input:)
 }
 
@@ -95,8 +94,8 @@ pub fn number_input(
   value value: Int,
   min min: Option(Int),
   max max: Option(Int),
-  on_input on_input: fn(String) -> Msg,
-) -> Element(Msg) {
+  on_input on_input: fn(String) -> msg,
+) -> Element(msg) {
   list.flatten([
     [
       attribute.type_("number"),
@@ -122,8 +121,8 @@ pub fn number_input(
 pub fn date_input(
   name name: String,
   value value: String,
-  on_input on_input: fn(String) -> Msg,
-) -> Element(Msg) {
+  on_input on_input: fn(String) -> msg,
+) -> Element(msg) {
   html.input([
     attribute.type_("date"),
     attribute.id(name),
@@ -140,8 +139,8 @@ pub fn textarea(
   value value: String,
   rows rows: Int,
   placeholder placeholder: Option(String),
-  on_input on_input: fn(String) -> Msg,
-) -> Element(Msg) {
+  on_input on_input: fn(String) -> msg,
+) -> Element(msg) {
   list.flatten([
     [
       attribute.id(name),
@@ -163,8 +162,8 @@ pub fn select(
   name name: String,
   value value: String,
   options options: List(#(String, String)),
-  on_change on_change: fn(String) -> Msg,
-) -> Element(Msg) {
+  on_change on_change: fn(String) -> msg,
+) -> Element(msg) {
   html.select(
     [
       attribute.id(name),
@@ -184,8 +183,8 @@ pub fn radio_group(
   name name: String,
   value value: String,
   options options: List(#(String, String)),
-  on_change on_change: fn(String) -> Msg,
-) -> Element(Msg) {
+  on_change on_change: fn(String) -> msg,
+) -> Element(msg) {
   html.div(
     [attribute.class("form-radio-group")],
     list.map(options, fn(opt) {
@@ -212,8 +211,8 @@ pub fn checkbox(
   name name: String,
   checked checked: Bool,
   label label: String,
-  on_change on_change: fn(Bool) -> Msg,
-) -> Element(Msg) {
+  on_change on_change: fn(Bool) -> msg,
+) -> Element(msg) {
   html.label([attribute.for(name), attribute.class("checkbox-label")], [
     html.input([
       attribute.type_("checkbox"),
@@ -231,8 +230,8 @@ pub fn checkbox(
 pub fn submit_button(
   text text: String,
   disabled disabled: Bool,
-  on_click on_click: Option(Msg),
-) -> Element(Msg) {
+  on_click on_click: Option(msg),
+) -> Element(msg) {
   list.flatten([
     [
       attribute.type_("submit"),
@@ -248,7 +247,7 @@ pub fn submit_button(
 }
 
 // Cancel button
-pub fn cancel_button(text text: String, on_click on_click: Msg) -> Element(Msg) {
+pub fn cancel_button(text text: String, on_click on_click: msg) -> Element(msg) {
   html.button(
     [
       attribute.type_("button"),
@@ -263,7 +262,7 @@ pub fn cancel_button(text text: String, on_click on_click: Msg) -> Element(Msg) 
 pub fn error_message(
   errors: Dict(String, String),
   field: String,
-) -> Element(Msg) {
+) -> Element(msg) {
   case dict.get(errors, field) {
     Ok(error) -> html.span([attribute.class("form-error")], [html.text(error)])
     Error(_) -> html.text("")
@@ -272,9 +271,9 @@ pub fn error_message(
 
 // Form wrapper with prevent default
 pub fn form(
-  on_submit: fn() -> Msg,
-  children: List(Element(Msg)),
-) -> Element(Msg) {
+  on_submit: fn() -> msg,
+  children: List(Element(msg)),
+) -> Element(msg) {
   html.form(
     [
       attribute.class("form"),
@@ -285,12 +284,12 @@ pub fn form(
 }
 
 // Form row for horizontal layout
-pub fn form_row(children: List(Element(Msg))) -> Element(Msg) {
+pub fn form_row(children: List(Element(msg))) -> Element(msg) {
   html.div([attribute.class("form-row")], children)
 }
 
 // Form group for related fields
-pub fn form_group(title: String, children: List(Element(Msg))) -> Element(Msg) {
+pub fn form_group(title: String, children: List(Element(msg))) -> Element(msg) {
   html.fieldset([attribute.class("form-group")], [
     html.legend([attribute.class("form-group-title")], [html.text(title)]),
     ..children
@@ -298,7 +297,7 @@ pub fn form_group(title: String, children: List(Element(Msg))) -> Element(Msg) {
 }
 
 // Loading indicator for forms
-pub fn loading_overlay(loading: Bool) -> Element(Msg) {
+pub fn loading_overlay(loading: Bool) -> Element(msg) {
   case loading {
     True ->
       html.div([attribute.class("form-loading-overlay")], [
@@ -309,7 +308,7 @@ pub fn loading_overlay(loading: Bool) -> Element(Msg) {
 }
 
 // Success message
-pub fn success_message(message: Option(String)) -> Element(Msg) {
+pub fn success_message(message: Option(String)) -> Element(msg) {
   case message {
     Some(msg) -> html.div([attribute.class("form-success")], [html.text(msg)])
     None -> html.text("")
