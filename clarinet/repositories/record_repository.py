@@ -905,7 +905,7 @@ class RecordRepository(BaseRepository[Record]):
         statement = self._apply_data_query_filters(statement, criteria.data_queries)
 
         # Pagination
-        statement = statement.distinct().offset(skip).limit(limit)
+        statement = statement.offset(skip).limit(limit)
 
         result = await self.session.execute(statement)
         results = list(result.scalars().all())
