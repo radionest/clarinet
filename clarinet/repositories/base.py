@@ -28,6 +28,16 @@ class BaseRepository[ModelT: SQLModel]:
         self.session = session
         self.model_class = model_class
 
+    def _paginate[S: Select](self, statement: S, skip: int, limit: int) -> S:
+        """Apply deterministic ordering and pagination to a query.
+
+        Orders by primary key columns to guarantee stable results
+        across requests, then applies offset/limit.
+        """
+        mapper: Any = sa_inspect(self.model_class)
+        pk_columns = mapper.primary_key
+        return statement.order_by(*pk_columns).offset(skip).limit(limit)  # type: ignore[return-value]
+
     async def get(self, id: Any) -> ModelT:
         """Return entity by ID, or raise EntityNotFoundError."""
         entity = await self.session.get(self.model_class, id)
@@ -66,7 +76,7 @@ class BaseRepository[ModelT: SQLModel]:
             if hasattr(self.model_class, field):
                 statement = statement.where(getattr(self.model_class, field) == value)
 
-        statement = statement.offset(skip).limit(limit)
+        statement = self._paginate(statement, skip, limit)
         result = await self.session.execute(statement)
         return result.scalars().all()
 

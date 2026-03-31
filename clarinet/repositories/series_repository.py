@@ -79,7 +79,8 @@ class SeriesRepository(BaseRepository[Series]):
         Returns:
             List of series
         """
-        statement = select(Series).where(Series.study_uid == study_uid).offset(skip).limit(limit)
+        statement = select(Series).where(Series.study_uid == study_uid)
+        statement = self._paginate(statement, skip, limit)
         result = await self.session.execute(statement)
         return result.scalars().all()
 
@@ -135,7 +136,7 @@ class SeriesRepository(BaseRepository[Series]):
         if study_uid:
             statement = statement.where(Series.study_uid == study_uid)
 
-        statement = statement.offset(skip).limit(limit)
+        statement = self._paginate(statement, skip, limit)
         result = await self.session.execute(statement)
         return result.scalars().all()
 
@@ -209,7 +210,7 @@ class SeriesRepository(BaseRepository[Series]):
         if series_description:
             statement = statement.where(Series.series_description.ilike(f"%{series_description}%"))  # type: ignore
 
-        statement = statement.offset(skip).limit(limit)
+        statement = self._paginate(statement, skip, limit)
         result = await self.session.execute(statement)
         return result.scalars().all()
 
