@@ -11,11 +11,13 @@ from __future__ import annotations
 import inspect
 import json
 import logging
+import re
 import sys
 import traceback
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
+import httpx
 from loguru import logger as _logger
 
 from ..settings import settings
@@ -38,6 +40,82 @@ except ImportError:
     def _json_dumps(data: dict) -> str:
         """Serialize dict to compact JSON string using stdlib json."""
         return json.dumps(data, separators=(",", ":"), default=str)
+
+
+_SENSITIVE_KEY = r"(?:password|token|secret|api_key)"
+_SCRUB_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    # "key": "value" or "key": value (JSON-style)
+    (re.compile(rf'("{_SENSITIVE_KEY}":\s*)"([^"]+)"', re.IGNORECASE), r'\1"***"'),
+    # key=value, key: value (plain text, unquoted)
+    (re.compile(rf"({_SENSITIVE_KEY}\s*[:=]\s*)[^\s,}}\"']+", re.IGNORECASE), r"\1***"),
+    # Bearer/Basic tokens
+    (re.compile(r"((?:Bearer|Basic)\s+)\S+", re.IGNORECASE), r"\1***"),
+    # DB URLs: driver://user:password@host
+    (re.compile(r"(://[^:]+:)[^@]+(@)"), r"\1***\2"),
+]
+
+
+def scrub_sensitive(text: str) -> str:
+    """Remove passwords, tokens, and credentials from a log string."""
+    for pattern, replacement in _SCRUB_PATTERNS:
+        text = pattern.sub(replacement, text)
+    return text
+
+
+class _LokiSink:
+    """Loguru sink that POSTs JSON logs to a Loki-compatible endpoint."""
+
+    def __init__(
+        self,
+        url: str,
+        auth: str | None = None,
+        labels: dict[str, str] | None = None,
+    ) -> None:
+        headers: dict[str, str] = {"Content-Type": "application/json"}
+        if auth:
+            headers["Authorization"] = auth
+        self._client = httpx.Client(timeout=5.0, headers=headers)
+        self._url = url
+        self._labels = {"app": "clarinet", **(labels or {})}
+
+    def __call__(self, message: Any) -> None:
+        record: Record = message.record
+        subset: dict[str, Any] = {
+            "t": record["time"].strftime("%Y-%m-%dT%H:%M:%S.%f%z"),
+            "l": record["level"].name,
+            "mod": record["name"],
+            "fn": record["function"],
+            "line": record["line"],
+            "msg": scrub_sensitive(record["message"]),
+        }
+
+        if record["exception"] is not None:
+            exc = record["exception"]
+            if exc.type is not None:
+                subset["exc"] = scrub_sensitive(
+                    "".join(traceback.format_exception(exc.type, exc.value, exc.traceback))
+                )
+
+        log_line = _json_dumps(subset)
+        ts_ns = str(int(record["time"].timestamp() * 1_000_000_000))
+
+        payload = _json_dumps(
+            {
+                "streams": [
+                    {
+                        "stream": {**self._labels, "level": record["level"].name.lower()},
+                        "values": [[ts_ns, log_line]],
+                    }
+                ]
+            }
+        )
+
+        try:
+            resp = self._client.post(self._url, content=payload)
+            resp.raise_for_status()
+        except Exception:
+            # Avoid recursion — write to stderr, not logger
+            print(f"[clarinet] remote log sink error: {self._url}", file=sys.stderr)
 
 
 def _json_format(record: Record) -> str:
@@ -133,6 +211,10 @@ def setup_logging(
     retention: str = "1 week",
     serialize: bool = False,
     noisy_libraries: list[str] | None = None,
+    remote_url: str | None = None,
+    remote_auth: str | None = None,
+    remote_level: str | None = None,
+    remote_labels: dict[str, str] | None = None,
 ) -> None:
     """
     Configure logging for the application.
@@ -148,6 +230,10 @@ def setup_logging(
         serialize: Whether to format file logs as JSON lines
         noisy_libraries: Library name prefixes to suppress on console (DEBUG/INFO hidden,
             WARNING+ still shown). Pass empty list to disable filtering.
+        remote_url: Loki-compatible push endpoint URL. None disables remote logging.
+        remote_auth: Authorization header value for the remote endpoint.
+        remote_level: Minimum level for remote sink (defaults to level).
+        remote_labels: Extra Loki stream labels (e.g. {"env": "prod"}).
     """
     console_format = format or _CONSOLE_FORMAT
     console_filter = _make_noisy_library_filter(noisy_libraries) if noisy_libraries else None
@@ -187,6 +273,18 @@ def setup_logging(
             enqueue=True,
         )
 
+    # Add remote Loki sink if configured
+    if remote_url:
+        sink = _LokiSink(url=remote_url, auth=remote_auth, labels=remote_labels)
+        _logger.add(
+            sink,
+            level=remote_level or level,
+            format="{message}",
+            backtrace=True,
+            diagnose=False,
+            enqueue=True,
+        )
+
     # Intercept standard library logging
     logging.basicConfig(handlers=[InterceptHandler()], level=0, force=True)
 
@@ -209,6 +307,10 @@ def reconfigure_for_worker() -> None:
         retention=settings.log_retention,
         serialize=settings.log_serialize,
         noisy_libraries=settings.log_noisy_libraries,
+        remote_url=settings.log_remote_url,
+        remote_auth=settings.log_remote_auth,
+        remote_level=settings.log_remote_level,
+        remote_labels=settings.log_remote_labels,
     )
 
 
@@ -223,6 +325,10 @@ setup_logging(
     retention=settings.log_retention,
     serialize=settings.log_serialize,
     noisy_libraries=settings.log_noisy_libraries,
+    remote_url=settings.log_remote_url,
+    remote_auth=settings.log_remote_auth,
+    remote_level=settings.log_remote_level,
+    remote_labels=settings.log_remote_labels,
 )
 
 # Export loguru's logger as the module's logger

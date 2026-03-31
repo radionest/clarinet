@@ -260,6 +260,14 @@ class Settings(BaseSettings):
     log_serialize: bool = True  # JSON format for file logs
     log_noisy_libraries: list[str] = ["pynetdicom"]  # Suppress console INFO/DEBUG from these
 
+    # Remote logging (Loki-compatible push API)
+    log_remote_url: str | None = (
+        None  # e.g. https://logs-prod-us-central1.grafana.net/loki/api/v1/push
+    )
+    log_remote_auth: str | None = None  # Authorization header, e.g. "Basic dXNlcjprZXk="
+    log_remote_level: str | None = None  # Min level for remote sink (defaults to log_level)
+    log_remote_labels: dict[str, str] = {}  # Extra Loki stream labels
+
     def model_post_init(self, __context: Any) -> None:
         """Link debug flag to log_level when log_level is not explicitly set."""
         if self.debug and self.log_level == "INFO":
