@@ -904,8 +904,9 @@ class RecordRepository(BaseRepository[Record]):
         # Data filters
         statement = self._apply_data_query_filters(statement, criteria.data_queries)
 
-        # Pagination
-        statement = statement.offset(skip).limit(limit)
+        # Pagination — all joins are N:1 (RecordType, Patient, Series, Study),
+        # so no duplicates; order_by(id) ensures stable paging
+        statement = statement.order_by(Record.id).offset(skip).limit(limit)
 
         result = await self.session.execute(statement)
         results = list(result.scalars().all())
