@@ -228,6 +228,33 @@ class TestScrubSensitive:
         text = "Patient uploaded study successfully"
         assert scrub_sensitive(text) == text
 
+    def test_scrubs_single_quoted_python_dict(self) -> None:
+        from clarinet.utils.logger import scrub_sensitive
+
+        result = scrub_sensitive("{'password':'x'}")
+        assert "x" not in result or result == "{'password':'***'}"
+        assert "***" in result
+
+    def test_scrubs_numeric_json_value(self) -> None:
+        from clarinet.utils.logger import scrub_sensitive
+
+        result = scrub_sensitive('{"password":123}')
+        assert "123" not in result
+        assert "***" in result
+
+    def test_scrubs_compound_key_single_quoted(self) -> None:
+        from clarinet.utils.logger import scrub_sensitive
+
+        result = scrub_sensitive("access_token='abc'")
+        assert "abc" not in result
+        assert "***" in result
+
+    def test_scrubs_hyphenated_key_assignment(self) -> None:
+        from clarinet.utils.logger import scrub_sensitive
+
+        result = scrub_sensitive("api-key=secret")
+        assert "secret" not in result
+
     def test_scrubs_multiline_traceback(self) -> None:
         from clarinet.utils.logger import scrub_sensitive
 
