@@ -593,6 +593,42 @@ class TestRecordRepository:
         assert len(records_anon) == 0
 
     @pytest.mark.asyncio
+    async def test_find_by_criteria_json_data_pagination(self, env):
+        """Pagination works on records with JSON data (no .distinct() needed).
+
+        Regression: .distinct() on tables with JSON columns fails on PostgreSQL
+        because json type has no equality operator. All joins in find_by_criteria
+        are N:1, so duplicates cannot occur — _paginate() with ORDER BY is sufficient.
+        """
+        # Create records with populated JSON data fields
+        for i in range(3):
+            await seed_record(
+                env["session"],
+                patient_id="RPAT",
+                study_uid="1.2.3.300",
+                series_uid="1.2.3.300.1",
+                rt_name="rec-rt-00001",
+                data={"score": str(i), "note": f"entry-{i}"},
+            )
+
+        criteria = RecordSearchCriteria(record_type_name="rec-rt-00001")
+
+        # Fetch all (env fixture already seeds 1 record + 3 above = 4 total)
+        all_records = await env["repo"].find_by_criteria(criteria, skip=0, limit=100)
+        assert len(all_records) == 4
+
+        # Paginate and verify no duplicates / gaps
+        page1 = await env["repo"].find_by_criteria(criteria, skip=0, limit=2)
+        page2 = await env["repo"].find_by_criteria(criteria, skip=2, limit=2)
+        assert len(page1) == 2
+        assert len(page2) == 2
+
+        page1_ids = {r.id for r in page1}
+        page2_ids = {r.id for r in page2}
+        assert page1_ids.isdisjoint(page2_ids), "Pages must not overlap"
+        assert page1_ids | page2_ids == {r.id for r in all_records}
+
+    @pytest.mark.asyncio
     async def test_get_status_counts(self, env):
         counts = await env["repo"].get_status_counts()
         assert isinstance(counts, dict)
