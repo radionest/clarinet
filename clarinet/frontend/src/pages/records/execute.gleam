@@ -1,35 +1,383 @@
-// Record execution page with dynamic Formosh forms
+// Record execution page — self-contained MVU module
 import api/models.{type Record, type RecordType}
-import api/types.{type RecordStatus}
+import api/records
+import api/slicer
+import api/types.{type ApiError, type RecordStatus, AuthError}
 import config
 import formosh/component as formosh_component
 import gleam/dict
+import gleam/dynamic.{type Dynamic}
 import gleam/dynamic/decode
-import gleam/list
 import gleam/int
-import gleam/option.{None, Some}
+import gleam/list
+import gleam/option.{type Option, None, Some}
+import gleam/javascript/promise
 import lustre/attribute
+import lustre/effect.{type Effect}
 import lustre/element.{type Element}
 import lustre/element/html
 import lustre/event
+import plinth/javascript/global
 import router
-import store.{type Model, type Msg}
+import shared.{type OutMsg, type Shared}
+import utils/logger
 import utils/permissions
 import utils/viewer
 
-/// View function for record execution page
-pub fn view(model: Model, record_id: String) -> Element(Msg) {
-  case dict.get(model.records, record_id) {
-    Ok(record) -> render_record_execution(model, record, record_id)
-    Error(_) -> loading_view(record_id)
+// --- Model ---
+
+pub type Model {
+  Model(
+    record_id: String,
+    slicer_loading: Bool,
+    slicer_available: Option(Bool),
+    slicer_ping_timer: Option(global.TimerID),
+    hydrated_schema: Option(String),
+  )
+}
+
+// --- Msg ---
+
+pub type Msg {
+  // Formosh form events
+  FormSubmitSuccess
+  FormSubmitError(String)
+  // Record completion
+  CompleteRecord
+  CompleteRecordResult(Result(Record, ApiError))
+  ResubmitRecord
+  ResubmitRecordResult(Result(Record, ApiError))
+  // Slicer operations
+  OpenInSlicer
+  SlicerOpenResult(Result(Dynamic, ApiError))
+  SlicerValidate
+  SlicerValidateResult(Result(Dynamic, ApiError))
+  SlicerClearScene
+  SlicerClearSceneResult(Result(Dynamic, ApiError))
+  SlicerPing
+  SlicerPingResult(Result(Dynamic, ApiError))
+  SlicerPingTimerStarted(global.TimerID)
+  // Schema hydration
+  SchemaLoaded(Result(String, ApiError))
+  // Navigation & actions
+  NavigateBack
+  Restart
+  RestartResult(Result(Record, ApiError))
+  RequestPreload(viewer_url: String, study_uid: String)
+}
+
+// --- Init ---
+
+pub fn init(record_id: String, _shared: Shared) -> #(Model, Effect(Msg)) {
+  let model =
+    Model(
+      record_id: record_id,
+      slicer_loading: False,
+      slicer_available: None,
+      slicer_ping_timer: None,
+      hydrated_schema: None,
+    )
+
+  // Start slicer ping timer + load hydrated schema
+  let ping_eff = start_slicer_ping_timer()
+  let schema_eff = {
+    use dispatch <- effect.from
+    records.get_hydrated_schema(record_id)
+    |> promise.tap(fn(result) { dispatch(SchemaLoaded(result)) })
+    Nil
+  }
+
+  #(model, effect.batch([ping_eff, schema_eff]))
+}
+
+/// Cleanup slicer ping timer — called from main.gleam on route change
+pub fn cleanup(model: Model) -> Effect(Msg) {
+  case model.slicer_ping_timer {
+    Some(timer_id) ->
+      effect.from(fn(_dispatch) { global.clear_interval(timer_id) })
+    None -> effect.none()
   }
 }
 
-/// Render the record execution interface
+// --- Update ---
+
+pub fn update(
+  model: Model,
+  msg: Msg,
+  shared: Shared,
+) -> #(Model, Effect(Msg), List(OutMsg)) {
+  case msg {
+    // Schema hydration
+    SchemaLoaded(Ok(schema_json)) ->
+      #(Model(..model, hydrated_schema: Some(schema_json)), effect.none(), [])
+
+    SchemaLoaded(Error(_)) ->
+      // Silently fall back to static schema
+      #(model, effect.none(), [])
+
+    // Formosh form events
+    FormSubmitSuccess -> {
+      logger.info("form", "submit success: record_id=" <> model.record_id)
+      let slicer_effect = case has_slicer_script(model.record_id, shared) {
+        True -> {
+          logger.info("slicer", "clearing scene after form submit")
+          dispatch_local(SlicerClearScene)
+        }
+        False -> effect.none()
+      }
+      #(
+        model,
+        slicer_effect,
+        [
+          shared.ShowSuccess("Record data submitted successfully"),
+          shared.ReloadRecord(model.record_id),
+        ],
+      )
+    }
+
+    FormSubmitError(error) ->
+      #(model, effect.none(), [shared.ShowError(error)])
+
+    // Record completion (no form)
+    CompleteRecord -> {
+      let eff = {
+        use dispatch <- effect.from
+        records.submit_record(model.record_id)
+        |> promise.tap(fn(result) { dispatch(CompleteRecordResult(result)) })
+        Nil
+      }
+      #(model, eff, [shared.SetLoading(True)])
+    }
+
+    CompleteRecordResult(Ok(record)) -> {
+      let slicer_eff = case has_slicer_script(model.record_id, shared) {
+        True -> dispatch_local(SlicerClearScene)
+        False -> effect.none()
+      }
+      #(model, slicer_eff, [
+        shared.SetLoading(False),
+        shared.CacheRecord(record),
+        shared.ShowSuccess("Record completed successfully"),
+        shared.ReloadRecord(model.record_id),
+      ])
+    }
+
+    CompleteRecordResult(Error(err)) ->
+      #(model, effect.none(), handle_error(err, "Failed to complete record"))
+
+    // Re-submit finished record
+    ResubmitRecord -> {
+      let eff = {
+        use dispatch <- effect.from
+        records.resubmit_record(model.record_id)
+        |> promise.tap(fn(result) { dispatch(ResubmitRecordResult(result)) })
+        Nil
+      }
+      #(model, eff, [shared.SetLoading(True)])
+    }
+
+    ResubmitRecordResult(Ok(record)) -> {
+      let slicer_eff = case has_slicer_script(model.record_id, shared) {
+        True -> dispatch_local(SlicerClearScene)
+        False -> effect.none()
+      }
+      #(model, slicer_eff, [
+        shared.SetLoading(False),
+        shared.CacheRecord(record),
+        shared.ShowSuccess("Record re-submitted successfully"),
+        shared.ReloadRecord(model.record_id),
+      ])
+    }
+
+    ResubmitRecordResult(Error(err)) ->
+      #(model, effect.none(), handle_error(err, "Failed to re-submit record"))
+
+    // Slicer operations
+    OpenInSlicer -> {
+      logger.info("slicer", "opening: record_id=" <> model.record_id)
+      let eff = {
+        use dispatch <- effect.from
+        slicer.open_record(model.record_id)
+        |> promise.tap(fn(result) { dispatch(SlicerOpenResult(result)) })
+        Nil
+      }
+      #(Model(..model, slicer_loading: True), eff, [])
+    }
+
+    SlicerOpenResult(Ok(_)) -> {
+      logger.info("slicer", "open completed")
+      #(
+        Model(..model, slicer_loading: False),
+        effect.none(),
+        [shared.ShowSuccess("Workspace opened in 3D Slicer")],
+      )
+    }
+
+    SlicerOpenResult(Error(err)) -> {
+      let error_msg = slicer_error_msg(err, "Failed to open record in Slicer")
+      #(
+        Model(..model, slicer_loading: False),
+        effect.none(),
+        [shared.ShowError(error_msg)],
+      )
+    }
+
+    SlicerValidate -> {
+      logger.info("slicer", "validating: record_id=" <> model.record_id)
+      let eff = {
+        use dispatch <- effect.from
+        slicer.validate_record(model.record_id)
+        |> promise.tap(fn(result) { dispatch(SlicerValidateResult(result)) })
+        Nil
+      }
+      #(Model(..model, slicer_loading: True), eff, [])
+    }
+
+    SlicerValidateResult(Ok(_)) -> {
+      logger.info("slicer", "validation completed")
+      #(
+        Model(..model, slicer_loading: False),
+        dispatch_local(SlicerClearScene),
+        [shared.ShowSuccess("Slicer validation completed")],
+      )
+    }
+
+    SlicerValidateResult(Error(err)) -> {
+      let error_msg = slicer_error_msg(err, "Slicer validation failed")
+      #(
+        Model(..model, slicer_loading: False),
+        effect.none(),
+        [shared.ShowError(error_msg)],
+      )
+    }
+
+    SlicerClearScene -> {
+      let eff = {
+        use dispatch <- effect.from
+        slicer.clear_scene()
+        |> promise.tap(fn(result) { dispatch(SlicerClearSceneResult(result)) })
+        Nil
+      }
+      #(model, eff, [])
+    }
+
+    SlicerClearSceneResult(_) ->
+      // Silently ignore — data is already saved
+      #(model, effect.none(), [])
+
+    SlicerPing -> {
+      let eff = {
+        use dispatch <- effect.from
+        slicer.ping()
+        |> promise.tap(fn(result) { dispatch(SlicerPingResult(result)) })
+        Nil
+      }
+      #(model, eff, [])
+    }
+
+    SlicerPingResult(Ok(data)) -> {
+      let ok_decoder = decode.at(["ok"], decode.bool)
+      let available = case decode.run(data, ok_decoder) {
+        Ok(True) -> True
+        _ -> False
+      }
+      #(Model(..model, slicer_available: Some(available)), effect.none(), [])
+    }
+
+    SlicerPingResult(Error(_)) ->
+      #(Model(..model, slicer_available: Some(False)), effect.none(), [])
+
+    SlicerPingTimerStarted(timer_id) ->
+      #(Model(..model, slicer_ping_timer: Some(timer_id)), effect.none(), [])
+
+    // Navigation
+    NavigateBack ->
+      #(model, effect.none(), [shared.Navigate(router.Records)])
+
+    // Restart
+    Restart -> {
+      let eff = {
+        use dispatch <- effect.from
+        records.restart_record(model.record_id)
+        |> promise.tap(fn(result) { dispatch(RestartResult(result)) })
+        Nil
+      }
+      #(model, eff, [shared.SetLoading(True)])
+    }
+
+    RestartResult(Ok(record)) ->
+      #(model, effect.none(), [
+        shared.SetLoading(False),
+        shared.CacheRecord(record),
+        shared.ShowSuccess("Record restarted successfully"),
+        shared.ReloadRecords,
+      ])
+
+    RestartResult(Error(err)) ->
+      #(model, effect.none(), handle_error(err, "Failed to restart record"))
+
+    RequestPreload(viewer_url, study_uid) ->
+      #(model, effect.none(), [shared.StartPreload(viewer_url, study_uid)])
+  }
+}
+
+// --- Helpers ---
+
+fn handle_error(err: ApiError, fallback_msg: String) -> List(OutMsg) {
+  case err {
+    AuthError(_) -> [shared.Logout]
+    _ -> [shared.SetLoading(False), shared.ShowError(fallback_msg)]
+  }
+}
+
+fn has_slicer_script(record_id: String, shared: Shared) -> Bool {
+  case dict.get(shared.records, record_id) {
+    Ok(models.Record(
+      record_type: Some(models.RecordType(slicer_script: Some(_), ..)),
+      ..,
+    )) -> True
+    _ -> False
+  }
+}
+
+fn slicer_error_msg(err: ApiError, fallback: String) -> String {
+  case err {
+    types.ServerError(502, _) ->
+      "3D Slicer is not reachable. Is it running?"
+    types.ServerError(_, msg) -> "Slicer error: " <> msg
+    types.NetworkError(msg) -> "Network error: " <> msg
+    _ -> fallback
+  }
+}
+
+fn dispatch_local(msg: Msg) -> Effect(Msg) {
+  use dispatch <- effect.from
+  dispatch(msg)
+}
+
+fn start_slicer_ping_timer() -> Effect(Msg) {
+  use dispatch <- effect.from
+  // Immediate first ping
+  dispatch(SlicerPing)
+  // Set up periodic pings every 10 seconds
+  let timer_id =
+    global.set_interval(10_000, fn() { dispatch(SlicerPing) })
+  dispatch(SlicerPingTimerStarted(timer_id))
+}
+
+// --- View ---
+
+pub fn view(model: Model, shared: Shared) -> Element(Msg) {
+  case dict.get(shared.records, model.record_id) {
+    Ok(record) -> render_record_execution(model, record, shared)
+    Error(_) -> loading_view(model.record_id)
+  }
+}
+
 fn render_record_execution(
   model: Model,
   record: Record,
-  record_id: String,
+  shared: Shared,
 ) -> Element(Msg) {
   html.div([attribute.class("record-execution-page")], [
     // Header
@@ -61,16 +409,16 @@ fn render_record_execution(
         record.viewer_series_uids,
         option.map(record.record_type, fn(rt) { rt.level }),
         "btn btn-primary",
-        fn(url, study_uid) { store.StartPreload(url, study_uid) },
+        fn(url, study_uid) { RequestPreload(url, study_uid) },
       ),
     ]),
     // Slicer toolbar (only if record type has slicer_script)
-    render_slicer_toolbar(model, record, record_id),
+    render_slicer_toolbar(model, record),
     // Dynamic form based on record type's data_schema
     html.div([attribute.class("record-form-container card")], [
       case record.record_type {
         Some(record_type) ->
-          render_dynamic_form(model, record, record_type, record_id)
+          render_dynamic_form(model, record, record_type, shared.user)
         None -> error_view("Record type not found")
       },
     ]),
@@ -79,16 +427,16 @@ fn render_record_execution(
       html.button(
         [
           attribute.class("btn btn-secondary"),
-          event.on_click(store.Navigate(router.Records)),
+          event.on_click(NavigateBack),
         ],
         [html.text("Back to Records")],
       ),
-      case permissions.can_restart_record(record, model.user) {
+      case permissions.can_restart_record(record, shared.user) {
         True ->
           html.button(
             [
               attribute.class("btn btn-warning"),
-              event.on_click(store.RestartRecord(record_id)),
+              event.on_click(Restart),
             ],
             [html.text("Restart")],
           )
@@ -98,18 +446,16 @@ fn render_record_execution(
   ])
 }
 
-/// Render the Slicer toolbar (only when record type has slicer_script)
 fn render_slicer_toolbar(
   model: Model,
   record: Record,
-  record_id: String,
 ) -> Element(Msg) {
-  let has_slicer_script = case record.record_type {
+  let has_script = case record.record_type {
     Some(models.RecordType(slicer_script: Some(_), ..)) -> True
     _ -> False
   }
 
-  case has_slicer_script {
+  case has_script {
     False -> element.none()
     True -> {
       let status_badge = case model.slicer_available {
@@ -140,7 +486,7 @@ fn render_slicer_toolbar(
             [
               attribute.class("btn btn-primary"),
               attribute.disabled(btn_disabled),
-              event.on_click(store.OpenInSlicer(record_id)),
+              event.on_click(OpenInSlicer),
             ],
             [
               case model.slicer_loading {
@@ -155,32 +501,31 @@ fn render_slicer_toolbar(
   }
 }
 
-/// Render the dynamic form using Formosh web component
 fn render_dynamic_form(
   model: Model,
   record: Record,
   record_type: RecordType,
-  record_id: String,
+  user: Option(models.User),
 ) -> Element(Msg) {
-  // Prefer hydrated schema (with oneOf) over static schema
-  let effective_schema = case dict.get(model.hydrated_schemas, record_id) {
-    Ok(hydrated) -> Some(hydrated)
-    Error(_) -> record_type.data_schema
+  // Prefer hydrated schema over static schema
+  let effective_schema = case model.hydrated_schema {
+    Some(hydrated) -> Some(hydrated)
+    None -> record_type.data_schema
   }
 
   case effective_schema {
     Some(schema_json) -> {
       let can_edit =
-        permissions.can_fill_record(record, model.user)
-        || permissions.can_edit_record(record, model.user)
+        permissions.can_fill_record(record, user)
+        || permissions.can_edit_record(record, user)
       case can_edit {
-        True -> render_editable_form(schema_json, record_id, record)
+        True -> render_editable_form(schema_json, model.record_id, record)
         False -> render_readonly_data(record)
       }
     }
     None -> {
-      let can_complete = permissions.can_fill_record(record, model.user)
-      let can_resubmit = permissions.can_edit_record(record, model.user)
+      let can_complete = permissions.can_fill_record(record, user)
+      let can_resubmit = permissions.can_edit_record(record, user)
       html.div([attribute.class("no-schema")], [
         case can_complete, can_resubmit {
           True, _ ->
@@ -191,7 +536,7 @@ fn render_dynamic_form(
               html.button(
                 [
                   attribute.class("btn btn-success"),
-                  event.on_click(store.CompleteRecord(record_id)),
+                  event.on_click(CompleteRecord),
                 ],
                 [html.text("Complete Record")],
               ),
@@ -204,7 +549,7 @@ fn render_dynamic_form(
               html.button(
                 [
                   attribute.class("btn btn-success"),
-                  event.on_click(store.ResubmitRecord(record_id)),
+                  event.on_click(ResubmitRecord),
                 ],
                 [html.text("Re-submit")],
               ),
@@ -225,7 +570,6 @@ fn render_dynamic_form(
   }
 }
 
-/// Render an editable form using the formosh web component
 fn render_editable_form(
   schema_json: String,
   record_id: String,
@@ -246,7 +590,7 @@ fn render_editable_form(
     formosh_component.schema_string(schema_json),
     formosh_component.submit_url(submit_url),
     formosh_component.submit_method(method),
-    event.on("formosh-submit", decode_form_submit(record_id)),
+    event.on("formosh-submit", decode_form_submit()),
   ]
 
   let attrs = case record.data {
@@ -258,12 +602,11 @@ fn render_editable_form(
   formosh_component.element(attrs)
 }
 
-/// Decode the formosh-submit custom event
-fn decode_form_submit(record_id: String) -> decode.Decoder(Msg) {
+fn decode_form_submit() -> decode.Decoder(Msg) {
   use status <- decode.then(decode.at(["detail", "status"], decode.string))
 
   case status {
-    "success" -> decode.success(store.FormSubmitSuccess(record_id))
+    "success" -> decode.success(FormSubmitSuccess)
     _ -> {
       use error <- decode.then(
         decode.one_of(
@@ -271,12 +614,11 @@ fn decode_form_submit(record_id: String) -> decode.Decoder(Msg) {
           [decode.success("Submission failed")],
         ),
       )
-      decode.success(store.FormSubmitError(error))
+      decode.success(FormSubmitError(error))
     }
   }
 }
 
-/// Render read-only data for non-editable records
 fn render_readonly_data(record: Record) -> Element(Msg) {
   case record.data {
     Some(data) -> render_raw_data(data)
@@ -287,7 +629,6 @@ fn render_readonly_data(record: Record) -> Element(Msg) {
   }
 }
 
-/// Render record status badge
 fn render_record_status(status: RecordStatus) -> Element(Msg) {
   let #(class, text) = case status {
     types.Blocked -> #("badge-blocked", "Blocked")
@@ -301,7 +642,6 @@ fn render_record_status(status: RecordStatus) -> Element(Msg) {
   html.span([attribute.class("badge " <> class)], [html.text(text)])
 }
 
-/// Format series label from modality and description
 fn format_series_label(
   modality: option.Option(String),
   description: option.Option(String),
@@ -314,7 +654,6 @@ fn format_series_label(
   }
 }
 
-/// Render record metadata
 fn render_record_metadata(record: Record) -> Element(Msg) {
   html.div([attribute.class("record-metadata")], [
     html.dl([], [
@@ -388,7 +727,6 @@ fn render_record_metadata(record: Record) -> Element(Msg) {
   ])
 }
 
-/// Render raw data as JSON string (fallback)
 fn render_raw_data(data: String) -> Element(Msg) {
   html.div([attribute.class("raw-data")], [
     html.h4([], [html.text("Record Data:")]),
@@ -398,7 +736,6 @@ fn render_raw_data(data: String) -> Element(Msg) {
   ])
 }
 
-/// Loading view
 fn loading_view(record_id: String) -> Element(Msg) {
   html.div([attribute.class("loading-container")], [
     html.div([attribute.class("spinner")], []),
@@ -406,7 +743,6 @@ fn loading_view(record_id: String) -> Element(Msg) {
   ])
 }
 
-/// Error view
 fn error_view(message: String) -> Element(Msg) {
   html.div([attribute.class("error-container")], [
     html.p([attribute.class("error-message")], [html.text(message)]),
