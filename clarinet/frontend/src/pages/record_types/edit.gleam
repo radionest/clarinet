@@ -1,6 +1,7 @@
 // Record type edit page (admin only) using Formosh web component
 import api/models.{type FileDefinition, type RecordType}
 import api/types
+import config
 import formosh/component as formosh_component
 import gleam/dict
 import gleam/dynamic/decode
@@ -189,7 +190,7 @@ fn render_edit(_model: Model, rt: RecordType, name: String) -> Element(Msg) {
     html.div([attribute.class("card")], [
       formosh_component.element([
         formosh_component.schema_string(record_type_edit_schema),
-        formosh_component.submit_url("/api/records/types/" <> name),
+        formosh_component.submit_url(config.base_path() <> "/api/records/types/" <> name),
         formosh_component.submit_method("PATCH"),
         formosh_component.initial_values_string(build_initial_values(rt)),
         event.on("formosh-submit", decode_edit_submit(name)),

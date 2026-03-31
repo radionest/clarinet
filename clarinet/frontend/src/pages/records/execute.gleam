@@ -1,6 +1,7 @@
 // Record execution page with dynamic Formosh forms
 import api/models.{type Record, type RecordType}
 import api/types.{type RecordStatus}
+import config
 import formosh/component as formosh_component
 import gleam/dict
 import gleam/dynamic/decode
@@ -231,8 +232,8 @@ fn render_editable_form(
 ) -> Element(Msg) {
   let submit_url = case record.record_type {
     Some(models.RecordType(slicer_result_validator: Some(_), ..)) ->
-      "/api/records/" <> record_id <> "/submit"
-    _ -> "/api/records/" <> record_id <> "/data"
+      config.base_path() <> "/api/records/" <> record_id <> "/submit"
+    _ -> config.base_path() <> "/api/records/" <> record_id <> "/data"
   }
   let is_finished = record.status == types.Finished
   let method = case is_finished {
