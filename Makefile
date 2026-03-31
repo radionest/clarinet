@@ -269,7 +269,7 @@ vm-smoke: ## Run smoke tests against running VM
 .PHONY: vm-acceptance
 vm-acceptance: ## Run acceptance tests (pytest) against running VM
 	@VM_IP=$$(bash $(VM_SH) ip 2>/dev/null); \
-	source deploy/vm/vm.conf; \
+	. deploy/vm/vm.conf; \
 	ADMIN_PASS=$$(ssh -o StrictHostKeyChecking=no clarinet@$$VM_IP \
 		"grep '^admin_password' /opt/clarinet/settings.toml | head -1 | sed 's/.*= *\"//;s/\".*//'"); \
 	CLARINET_TEST_URL="https://$$VM_IP$${PATH_PREFIX}" \
@@ -279,7 +279,7 @@ vm-acceptance: ## Run acceptance tests (pytest) against running VM
 .PHONY: vm-e2e
 vm-e2e: ## Run Playwright E2E tests against running VM
 	@VM_IP=$$(bash $(VM_SH) ip 2>/dev/null); \
-	source deploy/vm/vm.conf; \
+	. deploy/vm/vm.conf; \
 	ADMIN_PASS=$$(ssh -o StrictHostKeyChecking=no clarinet@"$$VM_IP" \
 		"grep '^admin_password' /opt/clarinet/settings.toml | head -1 | sed 's/.*= *\"//;s/\".*//'" 2>/dev/null); \
 	CLARINET_TEST_URL="https://$$VM_IP$${PATH_PREFIX}" \

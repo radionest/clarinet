@@ -51,7 +51,7 @@ def browser_context_args() -> dict:
 def auth_page(page: Page, base_url: str, admin_email: str, admin_password: str) -> Page:
     """Page with active admin session."""
     page.goto(f"{base_url}/login")
-    page.fill('input[name="username"]', admin_email)
+    page.fill('input[name="email"]', admin_email)
     page.fill('input[name="password"]', admin_password)
     page.click('button[type="submit"]')
     page.wait_for_url(f"**{urlparse(base_url).path}/**")
