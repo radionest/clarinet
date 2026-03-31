@@ -1,8 +1,7 @@
 """Global configuration for integration tests."""
 
-import asyncio
 import os
-from collections.abc import AsyncGenerator, Generator
+from collections.abc import AsyncGenerator
 from pathlib import Path
 from uuid import uuid4
 
@@ -52,14 +51,6 @@ def _disable_toml_export():
 
 
 @pytest.fixture(scope="session")
-def event_loop() -> Generator:
-    """Create event loop for the entire test session."""
-    loop = asyncio.get_event_loop_policy().new_event_loop()
-    yield loop
-    loop.close()
-
-
-@pytest.fixture(scope="session")
 def test_settings() -> Settings:
     """Test settings with in-memory SQLite."""
     return Settings(
@@ -75,7 +66,7 @@ def test_settings() -> Settings:
     )
 
 
-@pytest_asyncio.fixture(scope="session")
+@pytest_asyncio.fixture(scope="session", loop_scope="session")
 async def test_engine(test_settings):
     """Create test database engine (one per session).
 

@@ -152,6 +152,7 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 addopts = "--json-report --json-report-file=/tmp/clarinet-test-report.json -q"
+asyncio_mode = "auto"
 log_level = "WARNING"
 testpaths = ["tests"]
 python_files = "test_*.py"
