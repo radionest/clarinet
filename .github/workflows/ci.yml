@@ -68,6 +68,43 @@ jobs:
           --json-report-file=test-report.json
           -q
 
+  test-postgres:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: clarinet_test
+          POSTGRES_PASSWORD: clarinet_test
+          POSTGRES_DB: clarinet_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          cache-dependency-glob: "**/pyproject.toml"
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Run tests on PostgreSQL
+        env:
+          CLARINET_TEST_DATABASE_URL: postgresql+asyncpg://clarinet_test:clarinet_test@localhost:5432/clarinet_test
+        run: >-
+          uv run pytest tests/
+          -m "${{ env.PYTEST_UNIT_MARKERS }}"
+          -q
+
   test-deploy:
     runs-on: ubuntu-latest
 

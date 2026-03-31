@@ -1,6 +1,5 @@
 # Python / UV
 .venv/
-uv.lock
 __pycache__
 
 # PDM (removed - backup in .backup-pdm)

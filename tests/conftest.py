@@ -1,6 +1,7 @@
 """Global configuration for integration tests."""
 
 import asyncio
+import os
 from collections.abc import AsyncGenerator, Generator
 from pathlib import Path
 from uuid import uuid4
@@ -78,22 +79,30 @@ def test_settings() -> Settings:
 async def test_engine(test_settings):
     """Create test database engine (one per session).
 
-    Uses StaticPool to ensure all connections share the same in-memory
-    SQLite database. Without StaticPool, each new connection would create
-    a separate empty database.
+    If CLARINET_TEST_DATABASE_URL is set, connects to that database (PostgreSQL).
+    Otherwise falls back to SQLite in-memory with StaticPool.
     """
-    database_url = "sqlite+aiosqlite:///:memory:"
-    engine = create_async_engine(
-        database_url,
-        echo=False,
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
+    database_url = os.environ.get("CLARINET_TEST_DATABASE_URL", "")
+
+    if database_url:
+        engine = create_async_engine(database_url, echo=False, pool_pre_ping=True)
+    else:
+        database_url = "sqlite+aiosqlite:///:memory:"
+        engine = create_async_engine(
+            database_url,
+            echo=False,
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
 
     async with engine.begin() as conn:
         await conn.run_sync(SQLModel.metadata.create_all)
 
     yield engine
+
+    if not database_url.startswith("sqlite"):
+        async with engine.begin() as conn:
+            await conn.run_sync(SQLModel.metadata.drop_all)
 
     await engine.dispose()
 

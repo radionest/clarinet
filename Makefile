@@ -284,6 +284,10 @@ vm-test-lib: ## Test deploy/lib/ scripts (logging, common)
 vm-test: ## Full E2E: create VM -> deploy -> test -> cleanup
 	@bash deploy/test/deploy-test.sh
 
+.PHONY: vm-test-all
+vm-test-all: ## Run full test suite against VM PostgreSQL
+	@bash scripts/vm-test-all.sh
+
 .PHONY: vm-reimage
 vm-reimage: ## Destroy + recreate VM (clean slate)
 	@bash $(VM_SH) reimage
