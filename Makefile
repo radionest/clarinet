@@ -276,6 +276,16 @@ vm-acceptance: ## Run acceptance tests (pytest) against running VM
 	CLARINET_TEST_ADMIN_PASSWORD="$$ADMIN_PASS" \
 	uv run pytest deploy/test/acceptance/ -v
 
+.PHONY: vm-e2e
+vm-e2e: ## Run Playwright E2E tests against running VM
+	@VM_IP=$$(bash $(VM_SH) ip 2>/dev/null); \
+	source deploy/vm/vm.conf; \
+	ADMIN_PASS=$$(ssh -o StrictHostKeyChecking=no clarinet@"$$VM_IP" \
+		"grep '^admin_password' /opt/clarinet/settings.toml | head -1 | sed 's/.*= *\"//;s/\".*//'" 2>/dev/null); \
+	CLARINET_TEST_URL="https://$$VM_IP$${PATH_PREFIX}" \
+	CLARINET_TEST_ADMIN_PASSWORD="$$ADMIN_PASS" \
+	uv run --group e2e pytest deploy/test/e2e/ -v --browser chromium
+
 .PHONY: vm-test-lib
 vm-test-lib: ## Test deploy/lib/ scripts (logging, common)
 	@uv run pytest deploy/test/test_deploy_lib.py -v
