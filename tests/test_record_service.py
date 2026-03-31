@@ -477,7 +477,7 @@ class TestStudyServiceEntityTriggers:
 
     @pytest.mark.asyncio
     async def test_create_patient_fires_entity_created_trigger(self) -> None:
-        """Test create_patient fires entity-created trigger via engine.fire()."""
+        """Test create_patient commits and fires entity-created trigger."""
         patient_data = {"id": "PAT_001", "name": "Test Patient"}
         patient_mock = MagicMock()
         patient_mock.id = "PAT_001"
@@ -501,6 +501,7 @@ class TestStudyServiceEntityTriggers:
 
         patient_repo_mock.exists.assert_awaited_once_with(id="PAT_001")
         patient_repo_mock.create.assert_awaited_once()
+        study_repo_mock.session.commit.assert_awaited_once()
         engine_mock.handle_entity_created.assert_called_once_with("patient", "PAT_001")
         engine_mock.fire.assert_called_once()
         assert result == patient_mock
@@ -529,7 +530,7 @@ class TestStudyServiceEntityTriggers:
 
     @pytest.mark.asyncio
     async def test_create_study_fires_entity_created_trigger(self) -> None:
-        """Test create_study fires entity-created trigger via engine.fire()."""
+        """Test create_study commits and fires entity-created trigger."""
         study_data = {
             "study_uid": "1.2.3.4",
             "patient_id": "PAT_001",
@@ -564,6 +565,7 @@ class TestStudyServiceEntityTriggers:
         patient_repo_mock.get.assert_awaited_once_with("PAT_001")
         study_repo_mock.exists.assert_awaited_once_with(study_uid="1.2.3.4")
         study_repo_mock.create.assert_awaited_once()
+        study_repo_mock.session.commit.assert_awaited_once()
         engine_mock.handle_entity_created.assert_called_once_with("study", "PAT_001", "1.2.3.4")
         engine_mock.fire.assert_called_once()
         assert result == study_mock
@@ -603,7 +605,7 @@ class TestStudyServiceEntityTriggers:
 
     @pytest.mark.asyncio
     async def test_create_series_fires_entity_created_trigger(self) -> None:
-        """Test create_series fires entity-created trigger via engine.fire()."""
+        """Test create_series commits and fires entity-created trigger."""
         series_data = {
             "series_uid": "1.2.3.4.5",
             "study_uid": "1.2.3.4",
@@ -639,11 +641,62 @@ class TestStudyServiceEntityTriggers:
         study_repo_mock.get.assert_awaited_once_with("1.2.3.4")
         series_repo_mock.exists.assert_awaited_once_with(series_uid="1.2.3.4.5")
         series_repo_mock.create_with_relations.assert_awaited_once()
+        study_repo_mock.session.commit.assert_awaited_once()
         engine_mock.handle_entity_created.assert_called_once_with(
             "series", "PAT_001", "1.2.3.4", "1.2.3.4.5"
         )
         engine_mock.fire.assert_called_once()
         assert result == series_mock
+
+    @pytest.mark.asyncio
+    async def test_entity_trigger_commits_before_fire(self) -> None:
+        """Entity triggers must commit session before firing background task.
+
+        Regression: engine.fire() ran before commit, causing FK violation
+        when the background task tried to create a record referencing
+        an uncommitted entity.
+        """
+        study_data = {
+            "study_uid": "1.2.3.4",
+            "patient_id": "PAT_001",
+            "study_date": "20240101",
+        }
+        patient_mock = MagicMock()
+        patient_mock.id = "PAT_001"
+
+        study_mock = MagicMock()
+        study_mock.study_uid = "1.2.3.4"
+        study_mock.patient_id = "PAT_001"
+
+        patient_repo_mock = AsyncMock()
+        patient_repo_mock.get.return_value = patient_mock
+
+        study_repo_mock = AsyncMock()
+        study_repo_mock.exists.return_value = False
+        study_repo_mock.create.return_value = study_mock
+
+        series_repo_mock = AsyncMock()
+
+        engine_mock = MagicMock()
+        engine_mock.handle_entity_created = MagicMock()
+
+        call_order: list[str] = []
+        original_commit = study_repo_mock.session.commit
+
+        async def tracking_commit() -> None:
+            call_order.append("commit")
+            await original_commit()
+
+        engine_mock.fire = lambda coro: call_order.append("fire")
+        study_repo_mock.session.commit = tracking_commit
+
+        service = StudyService(
+            study_repo_mock, patient_repo_mock, series_repo_mock, engine=engine_mock
+        )
+
+        await service.create_study(study_data)
+
+        assert call_order == ["commit", "fire"]
 
     @pytest.mark.asyncio
     async def test_create_series_no_trigger_when_engine_none(self) -> None:

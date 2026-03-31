@@ -50,6 +50,18 @@ class StudyService:
         self.name_provider = name_provider or AnonymousNameProvider(settings.anon_names_list)
         self.engine = engine
 
+    async def _commit_and_fire_entity(self, entity_type: str, *args: Any) -> None:
+        """Commit current transaction and fire entity trigger in background.
+
+        Entity triggers create records via HTTP (new DB session), so the
+        entity must be committed before the trigger fires.
+
+        Only called when ``self.engine`` is not None (guarded by callers).
+        """
+        assert self.engine is not None
+        await self.study_repo.session.commit()
+        self.engine.fire(self.engine.handle_entity_created(entity_type, *args))
+
     # Patient operations
 
     async def get_all_patients(self, skip: int = 0, limit: int = 100) -> list[Patient]:
@@ -99,7 +111,7 @@ class StudyService:
         result = await self.patient_repo.create(patient)
 
         if self.engine:
-            self.engine.fire(self.engine.handle_entity_created("patient", result.id))
+            await self._commit_and_fire_entity("patient", result.id)
 
         return result
 
@@ -223,9 +235,7 @@ class StudyService:
         result = await self.study_repo.create(study)
 
         if self.engine:
-            self.engine.fire(
-                self.engine.handle_entity_created("study", result.patient_id, result.study_uid)
-            )
+            await self._commit_and_fire_entity("study", result.patient_id, result.study_uid)
 
         return result
 
@@ -310,10 +320,8 @@ class StudyService:
         result = await self.series_repo.create_with_relations(series)
 
         if self.engine:
-            self.engine.fire(
-                self.engine.handle_entity_created(
-                    "series", study.patient_id, result.study_uid, result.series_uid
-                )
+            await self._commit_and_fire_entity(
+                "series", study.patient_id, result.study_uid, result.series_uid
             )
 
         return result

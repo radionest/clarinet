@@ -74,6 +74,7 @@ async def record_types(test_session: AsyncSession) -> dict[str, RecordType]:
         "confirm-birads",
         "parent-model",
         "child-analysis",
+        "first-check",
     ]
     series_level_types = ["series-markup"]
     for name in study_level_types:
@@ -1082,6 +1083,45 @@ class TestEntityFlowRuntime:
             await asyncio.sleep(0.05)
         assert len(records) == 1
         assert records[0].series_uid == "9.8.7.6.5.4.3.2.1"
+
+    @pytest.mark.asyncio
+    async def test_study_entity_flow_creates_record(
+        self,
+        client: AsyncClient,
+        clarinet_client: ClarinetClient,
+        app_with_engine: RecordFlowEngine,
+        record_types: dict[str, RecordType],
+        test_patient: Patient,
+    ):
+        """study().on_created() creates record after commit — no FK violation.
+
+        Regression: engine.fire() ran before commit, causing FK violation
+        when background task tried to create a record referencing uncommitted study.
+        """
+        fr = FlowRecord("study", entity_trigger="study")
+        fr.add_record("first-check")
+        app_with_engine.register_flow(fr)
+
+        resp = await client.post(
+            "/api/studies",
+            json={
+                "study_uid": "1.2.3.99.88.77.66",
+                "date": "2026-01-01",
+                "patient_id": test_patient.id,
+            },
+        )
+        assert resp.status_code == 201
+
+        records = []
+        for _ in range(40):
+            records = await clarinet_client.find_records(
+                study_uid="1.2.3.99.88.77.66",
+                record_type_name="first-check",
+            )
+            if records:
+                break
+            await asyncio.sleep(0.05)
+        assert len(records) == 1
 
 
 class TestLazyAuthentication:
