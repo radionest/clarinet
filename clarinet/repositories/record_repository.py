@@ -904,8 +904,8 @@ class RecordRepository(BaseRepository[Record]):
         # Data filters
         statement = self._apply_data_query_filters(statement, criteria.data_queries)
 
-        # Pagination
-        statement = statement.distinct().offset(skip).limit(limit)
+        # Pagination (all joins are N:1, no duplicates possible)
+        statement = statement.offset(skip).limit(limit)
 
         result = await self.session.execute(statement)
         results = list(result.scalars().all())
