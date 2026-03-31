@@ -20,7 +20,6 @@ pub type Shared {
     record_types: Dict(String, RecordType),
     patients: Dict(String, Patient),
     users: Dict(String, User),
-    hydrated_schemas: Dict(String, String),
   )
 }
 
@@ -43,6 +42,7 @@ pub type OutMsg {
   ReloadPatients
   ReloadRecordTypes
   ReloadPatient(String)
+  ReloadRecord(String)
   OpenDeleteConfirm(resource: String, id: String)
   SetUser(User)
   Logout

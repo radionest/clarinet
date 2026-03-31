@@ -9,6 +9,9 @@ import pages/login as login_page
 import pages/patients/detail as patient_detail_page
 import pages/patients/list as patients_list_page
 import pages/patients/new as patient_new_page
+import pages/records/execute as record_execute_page
+import pages/records/list as records_list_page
+import pages/records/new as record_new_page
 import pages/register as register_page
 import api/types.{type ApiError}
 import gleam/dict.{type Dict}
@@ -16,7 +19,6 @@ import gleam/dynamic
 import gleam/int
 import gleam/json.{type Json}
 import gleam/option.{type Option, None, Some}
-import plinth/javascript/global
 import router.{type Route}
 
 // Application state model
@@ -43,37 +45,18 @@ pub type Model {
     users: Dict(String, User),
     // Form states
     study_form: Option(dynamic.Dynamic),
-    // Will hold form data dynamically
     record_type_form: Option(dynamic.Dynamic),
-    // Record creation form
-    record_form_record_type_name: String,
-    record_form_patient_id: String,
-    record_form_study_uid: String,
-    record_form_series_uid: String,
-    record_form_user_id: String,
-    record_form_parent_record_id: String,
-    record_form_context_info: String,
-    record_form_studies: List(Study),
-    record_form_series: List(Series),
-    form_errors: Dict(String, String),
     // Pagination
     current_page: Int,
     items_per_page: Int,
     total_items: Int,
-    // Filters
+    // Search
     search_query: String,
-    active_filters: Dict(String, String),
     // Admin
     record_type_stats: Option(List(RecordTypeStats)),
     // Modal state
     modal_open: Bool,
     modal_content: ModalContent,
-    // Slicer state
-    slicer_loading: Bool,
-    slicer_available: Option(Bool),
-    slicer_ping_timer: Option(global.TimerID),
-    // Hydrated schemas cache (record_id -> schema JSON string)
-    hydrated_schemas: Dict(String, String),
     // Active page model (for modular pages)
     page: PageModel,
   )
@@ -88,6 +71,9 @@ pub type PageModel {
   PatientsListPage(patients_list_page.Model)
   PatientDetailPage(patient_detail_page.Model)
   PatientNewPage(patient_new_page.Model)
+  RecordsListPage(records_list_page.Model)
+  RecordExecutePage(record_execute_page.Model)
+  RecordNewPage(record_new_page.Model)
 }
 
 // Modal content types
@@ -117,6 +103,11 @@ pub type Msg {
   PatientsListMsg(patients_list_page.Msg)
   PatientDetailMsg(patient_detail_page.Msg)
   PatientNewMsg(patient_new_page.Msg)
+
+  // Record page delegation
+  RecordsListMsg(records_list_page.Msg)
+  RecordExecuteMsg(record_execute_page.Msg)
+  RecordNewMsg(record_new_page.Msg)
 
   // Data loading
   LoadStudies
@@ -158,32 +149,9 @@ pub type Msg {
   SubmitRecordTypeForm
   RecordTypeFormSubmitted(Result(RecordType, ApiError))
 
-  // Record creation form
-  UpdateRecordFormRecordType(String)
-  UpdateRecordFormPatient(String)
-  UpdateRecordFormStudy(String)
-  UpdateRecordFormSeries(String)
-  UpdateRecordFormUser(String)
-  UpdateRecordFormParentRecordId(String)
-  UpdateRecordFormContextInfo(String)
-  RecordFormStudiesLoaded(Result(List(Study), ApiError))
-  RecordFormSeriesLoaded(Result(List(Series), ApiError))
+  // Record types loading (used by record_new page init + admin)
   LoadRecordTypes
   RecordTypesLoaded(Result(List(RecordType), ApiError))
-  SubmitRecordForm
-  RecordFormSubmitted(Result(Record, ApiError))
-
-  // Slicer record completion (no form)
-  CompleteRecord(record_id: String)
-  CompleteRecordResult(record_id: String, result: Result(Record, ApiError))
-
-  // Re-submit finished record (no form, PATCH)
-  ResubmitRecord(record_id: String)
-  ResubmitRecordResult(record_id: String, result: Result(Record, ApiError))
-
-  // Formosh form events
-  FormSubmitSuccess(record_id: String)
-  FormSubmitError(error: String)
 
   // RecordType edit
   LoadRecordTypeForEdit(name: String)
@@ -202,41 +170,18 @@ pub type Msg {
   CloseModal
   ConfirmModalAction
 
-  // Search and filters
+  // Search
   UpdateSearchQuery(String)
-  AddFilter(key: String, value: String)
-  RemoveFilter(key: String)
-  ClearFilters
 
   // Pagination
   SetPage(Int)
   SetItemsPerPage(Int)
-
-  // Slicer operations
-  OpenInSlicer(record_id: String)
-  SlicerOpenResult(Result(dynamic.Dynamic, ApiError))
-  SlicerValidate(record_id: String)
-  SlicerValidateResult(Result(dynamic.Dynamic, ApiError))
-  SlicerClearScene
-  SlicerClearSceneResult(Result(dynamic.Dynamic, ApiError))
-  SlicerPing
-  SlicerPingResult(Result(dynamic.Dynamic, ApiError))
-  SlicerPingTimerStarted(global.TimerID)
-  StopSlicerPingTimer
-
-  // Schema hydration
-  LoadHydratedSchema(record_id: String)
-  HydratedSchemaLoaded(record_id: String, result: Result(String, ApiError))
 
   // Project info
   ProjectInfoLoaded(Result(ProjectInfo, ApiError))
 
   // Auto-assign
   AutoAssignResult(Result(Record, ApiError))
-
-  // Restart auto task
-  RestartRecord(record_id: String)
-  RestartRecordResult(Result(Record, ApiError))
 
   // Misc
   NoOp
@@ -263,28 +208,13 @@ pub fn init() -> Model {
     users: dict.new(),
     study_form: None,
     record_type_form: None,
-    record_form_record_type_name: "",
-    record_form_patient_id: "",
-    record_form_study_uid: "",
-    record_form_series_uid: "",
-    record_form_user_id: "",
-    record_form_parent_record_id: "",
-    record_form_context_info: "",
-    record_form_studies: [],
-    record_form_series: [],
-    form_errors: dict.new(),
     current_page: 1,
     items_per_page: 20,
     total_items: 0,
     search_query: "",
-    active_filters: dict.new(),
     record_type_stats: None,
     modal_open: False,
     modal_content: NoModal,
-    slicer_loading: False,
-    slicer_available: None,
-    slicer_ping_timer: None,
-    hydrated_schemas: dict.new(),
     page: NoPage,
   )
 }
@@ -331,7 +261,6 @@ pub fn clear_messages(model: Model) -> Model {
 
 // Cache helpers
 pub fn cache_study(model: Model, study: Study) -> Model {
-  // Use study_uid as the key
   let studies = dict.insert(model.studies, study.study_uid, study)
   Model(..model, studies: studies)
 }
@@ -352,7 +281,6 @@ pub fn cache_record(model: Model, record: Record) -> Model {
 }
 
 pub fn cache_record_type(model: Model, record_type: RecordType) -> Model {
-  // Use name as the key for RecordType
   let record_types = dict.insert(model.record_types, record_type.name, record_type)
   Model(..model, record_types: record_types)
 }
@@ -360,44 +288,4 @@ pub fn cache_record_type(model: Model, record_type: RecordType) -> Model {
 pub fn cache_patient(model: Model, patient: Patient) -> Model {
   let patients = dict.insert(model.patients, patient.id, patient)
   Model(..model, patients: patients)
-}
-
-pub fn clear_record_form(model: Model) -> Model {
-  Model(
-    ..model,
-    record_form_record_type_name: "",
-    record_form_patient_id: "",
-    record_form_study_uid: "",
-    record_form_series_uid: "",
-    record_form_user_id: "",
-    record_form_parent_record_id: "",
-    record_form_context_info: "",
-    record_form_studies: [],
-    record_form_series: [],
-  )
-}
-
-// Form helpers
-pub fn set_form_error(model: Model, field: String, error: String) -> Model {
-  let errors = dict.insert(model.form_errors, field, error)
-  Model(..model, form_errors: errors)
-}
-
-pub fn clear_form_errors(model: Model) -> Model {
-  Model(..model, form_errors: dict.new())
-}
-
-// Filter helpers
-pub fn apply_filter(model: Model, key: String, value: String) -> Model {
-  let filters = dict.insert(model.active_filters, key, value)
-  Model(..model, active_filters: filters)
-}
-
-pub fn remove_filter(model: Model, key: String) -> Model {
-  let filters = dict.delete(model.active_filters, key)
-  Model(..model, active_filters: filters)
-}
-
-pub fn clear_filters(model: Model) -> Model {
-  Model(..model, active_filters: dict.new(), search_query: "")
 }
