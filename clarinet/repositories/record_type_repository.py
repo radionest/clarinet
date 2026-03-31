@@ -71,7 +71,7 @@ class RecordTypeRepository(BaseRepository[RecordType]):
             if hasattr(RecordType, field):
                 statement = statement.where(getattr(RecordType, field) == value)
 
-        statement = statement.offset(skip).limit(limit)
+        statement = self._paginate(statement, skip, limit)
         result = await self.session.execute(statement)
         return result.scalars().all()
 

@@ -69,14 +69,10 @@ class PatientRepository(BaseRepository[Patient]):
         Returns:
             List of patients with studies loaded
         """
-        statement = (
-            select(Patient)
-            .options(
-                selectinload(Patient.studies).selectinload(Study.series),  # type: ignore[arg-type]
-            )
-            .offset(skip)
-            .limit(limit)
+        statement = select(Patient).options(
+            selectinload(Patient.studies).selectinload(Study.series),  # type: ignore[arg-type]
         )
+        statement = self._paginate(statement, skip, limit)
         result = await self.session.execute(statement)
         return result.scalars().all()
 
@@ -119,11 +115,9 @@ class PatientRepository(BaseRepository[Patient]):
             List of patients
         """
         statement = (
-            select(Patient)
-            .where(Patient.name.ilike(f"%{name}%"))  # type: ignore
-            .offset(skip)
-            .limit(limit)
+            select(Patient).where(Patient.name.ilike(f"%{name}%"))  # type: ignore
         )
+        statement = self._paginate(statement, skip, limit)
         result = await self.session.execute(statement)
         return result.scalars().all()
 
@@ -230,6 +224,6 @@ class PatientRepository(BaseRepository[Patient]):
                 | (Patient.anon_name.ilike(f"%{query}%"))  # type: ignore
             )
 
-        statement = statement.offset(skip).limit(limit)
+        statement = self._paginate(statement, skip, limit)
         result = await self.session.execute(statement)
         return result.scalars().all()

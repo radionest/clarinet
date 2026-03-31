@@ -202,18 +202,14 @@ class RecordRepository(BaseRepository[Record]):
         Returns:
             List of records with patient, study, series, and record_type loaded
         """
-        statement = (
-            select(Record)
-            .options(
-                selectinload(Record.patient),  # type: ignore
-                selectinload(Record.study),  # type: ignore
-                selectinload(Record.series),  # type: ignore
-                _record_type_with_files(),
-                _record_file_links_eager_load(),
-            )
-            .offset(skip)
-            .limit(limit)
+        statement = select(Record).options(
+            selectinload(Record.patient),  # type: ignore
+            selectinload(Record.study),  # type: ignore
+            selectinload(Record.series),  # type: ignore
+            _record_type_with_files(),
+            _record_file_links_eager_load(),
         )
+        statement = self._paginate(statement, skip, limit)
         result = await self.session.execute(statement)
         return result.scalars().all()
 
@@ -243,9 +239,8 @@ class RecordRepository(BaseRepository[Record]):
                 _record_type_with_files(),
                 _record_file_links_eager_load(),
             )
-            .offset(skip)
-            .limit(limit)
         )
+        statement = self._paginate(statement, skip, limit)
         result = await self.session.execute(statement)
         return result.scalars().all()
 
@@ -282,17 +277,14 @@ class RecordRepository(BaseRepository[Record]):
         statement = select(Record).where(user_filter)
         if needs_join:
             statement = statement.join(RecordType)
-        statement = (
-            statement.options(
-                selectinload(Record.patient),  # type: ignore
-                selectinload(Record.study),  # type: ignore
-                selectinload(Record.series),  # type: ignore
-                _record_type_with_files(),
-                _record_file_links_eager_load(),
-            )
-            .offset(skip)
-            .limit(limit)
+        statement = statement.options(
+            selectinload(Record.patient),  # type: ignore
+            selectinload(Record.study),  # type: ignore
+            selectinload(Record.series),  # type: ignore
+            _record_type_with_files(),
+            _record_file_links_eager_load(),
         )
+        statement = self._paginate(statement, skip, limit)
         if role_names is not None:
             statement = statement.where(col(RecordType.role_name).in_(list(role_names)))
         if exclude_unique_violations:
@@ -904,9 +896,9 @@ class RecordRepository(BaseRepository[Record]):
         # Data filters
         statement = self._apply_data_query_filters(statement, criteria.data_queries)
 
-        # Pagination — all joins are N:1 (RecordType, Patient, Series, Study),
-        # so no duplicates; order_by(id) ensures stable paging
-        statement = statement.order_by(Record.id).offset(skip).limit(limit)
+        # Pagination — all joins are N:1, so no duplicates possible (.distinct() removed
+        # because PostgreSQL cannot compare JSON columns needed by Record.data).
+        statement = self._paginate(statement, skip, limit)
 
         result = await self.session.execute(statement)
         results = list(result.scalars().all())
