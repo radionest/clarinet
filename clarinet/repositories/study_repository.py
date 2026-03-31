@@ -62,15 +62,11 @@ class StudyRepository(BaseRepository[Study]):
         Returns:
             List of studies with relations loaded
         """
-        statement = (
-            select(Study)
-            .options(
-                selectinload(Study.patient),  # type: ignore
-                selectinload(Study.series),  # type: ignore
-            )
-            .offset(skip)
-            .limit(limit)
+        statement = select(Study).options(
+            selectinload(Study.patient),  # type: ignore
+            selectinload(Study.series),  # type: ignore
         )
+        statement = self._paginate(statement, skip, limit)
         result = await self.session.execute(statement)
         return result.scalars().all()
 
@@ -87,7 +83,8 @@ class StudyRepository(BaseRepository[Study]):
         Returns:
             List of studies for the patient
         """
-        statement = select(Study).where(Study.patient_id == patient_id).offset(skip).limit(limit)
+        statement = select(Study).where(Study.patient_id == patient_id)
+        statement = self._paginate(statement, skip, limit)
         result = await self.session.execute(statement)
         return result.scalars().all()
 
@@ -185,7 +182,7 @@ class StudyRepository(BaseRepository[Study]):
         if study_uid:
             statement = statement.where(Study.study_uid == study_uid)
 
-        statement = statement.offset(skip).limit(limit)
+        statement = self._paginate(statement, skip, limit)
         result = await self.session.execute(statement)
         return result.scalars().all()
 
