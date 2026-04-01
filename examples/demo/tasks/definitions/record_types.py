@@ -239,7 +239,7 @@ retrospective_semiotics = RecordDef(
     ),
     label="Semiotics",
     level="SERIES",
-    role="generic",
+    role="auto",
     min_records=2,
     max_records=4,
     files=[FileRef(master_projection, "input")],
