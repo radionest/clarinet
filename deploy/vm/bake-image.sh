@@ -8,11 +8,9 @@ set -euo pipefail
 DEPLOY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$DEPLOY_DIR/lib/logging.sh"
 init_logging "bake"
+source "$DEPLOY_DIR/lib/provision.sh"
 
-INSTALL_DIR="/opt/clarinet"
 VENV_DIR="${INSTALL_DIR}/venv"
-DATA_DIR="/var/lib/clarinet/data"
-LOG_DIR="/var/log/clarinet"
 
 DICOM_DIR=""
 while [[ $# -gt 0 ]]; do
@@ -28,22 +26,14 @@ install_system_packages() {
     apt-get update -qq
 
     log "Installing system packages..."
-    apt-get install -y -qq \
+    install_packages_if_missing \
         curl git jq qemu-guest-agent cloud-guest-utils \
-        software-properties-common \
         nginx \
         postgresql postgresql-contrib \
         rabbitmq-server \
-        orthanc \
-        > /dev/null
+        orthanc
 
-    # Python 3.12 via deadsnakes PPA
-    if ! python3.12 --version &>/dev/null; then
-        log "Adding deadsnakes PPA and installing Python 3.12..."
-        add-apt-repository -y ppa:deadsnakes/ppa > /dev/null 2>&1
-        apt-get update -qq
-    fi
-    apt-get install -y -qq python3.12 python3.12-venv python3.12-dev > /dev/null
+    install_python312
 
     log "All system packages installed"
 }
@@ -60,17 +50,8 @@ enable_services() {
     log "Services enabled"
 }
 
-# --- System user + directories ---
-setup_user() {
-    if id clarinet &>/dev/null; then
-        log "System user 'clarinet' already exists"
-    else
-        useradd --system --home-dir "$INSTALL_DIR" --create-home --shell /bin/bash clarinet
-        log "Created system user 'clarinet'"
-    fi
-    mkdir -p "$INSTALL_DIR" "$DATA_DIR" "$LOG_DIR"
-    chown -R clarinet:clarinet "$INSTALL_DIR" "$DATA_DIR" "$LOG_DIR"
-}
+# --- System user + directories (delegated to provision.sh) ---
+setup_user() { setup_clarinet_user; }
 
 # --- Python venv (no wheel — version-specific, installed at deploy time) ---
 setup_venv() {
