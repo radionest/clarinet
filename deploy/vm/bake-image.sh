@@ -5,8 +5,8 @@
 # Usage: bake-image.sh [--dicom-dir /path/to/dicoms]
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/../lib/logging.sh"
+DEPLOY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$DEPLOY_DIR/lib/logging.sh"
 init_logging "bake"
 
 INSTALL_DIR="/opt/clarinet"
