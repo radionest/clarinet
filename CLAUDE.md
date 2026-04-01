@@ -34,7 +34,9 @@ make lint                       # ruff check --fix
 make typecheck                  # mypy
 make pre-commit                 # All pre-commit hooks
 
-# Testing
+# Testing — always redirect output, never pipe (buffers stdout in background)
+# Use unique filenames when multiple worktrees may run in parallel:
+#   timeout 120 make test-unit > /tmp/test-{worktree}.txt 2>&1
 make test-fast                  # All tests in parallel, excludes schema (default)
 make test-unit                  # DB-only tests in parallel (no external services)
 make test                       # All tests sequential
