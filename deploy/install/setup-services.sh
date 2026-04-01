@@ -16,7 +16,9 @@ init_logging "services"
 # --- PostgreSQL ---
 setup_postgresql() {
     log "Setting up PostgreSQL..."
-    apt-get install -y -qq postgresql postgresql-contrib > /dev/null
+    if ! dpkg -s postgresql &>/dev/null; then
+        apt-get install -y -qq postgresql postgresql-contrib > /dev/null
+    fi
 
     systemctl enable --now postgresql
 
@@ -44,7 +46,9 @@ setup_postgresql() {
 # --- RabbitMQ ---
 setup_rabbitmq() {
     log "Setting up RabbitMQ..."
-    apt-get install -y -qq rabbitmq-server > /dev/null
+    if ! dpkg -s rabbitmq-server &>/dev/null; then
+        apt-get install -y -qq rabbitmq-server > /dev/null
+    fi
 
     systemctl enable --now rabbitmq-server
 
@@ -69,7 +73,9 @@ setup_rabbitmq() {
 # --- Orthanc PACS ---
 setup_orthanc() {
     log "Setting up Orthanc PACS..."
-    apt-get install -y -qq orthanc > /dev/null
+    if ! dpkg -s orthanc &>/dev/null; then
+        apt-get install -y -qq orthanc > /dev/null
+    fi
 
     systemctl enable --now orthanc
     log "Orthanc running (DICOM: 4242, REST: 8042)"

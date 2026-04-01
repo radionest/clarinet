@@ -236,8 +236,12 @@ VM_SH := deploy/vm/vm.sh
 vm-setup: ## One-time host setup for VM creation (permissions + libvirt check)
 	@bash $(VM_SH) setup
 
+.PHONY: vm-bake
+vm-bake: ## Create golden image (one-time, ~10 min). Usage: make vm-bake [DICOM=/path/to/dicoms]
+	@bash $(VM_SH) bake $(DICOM)
+
 .PHONY: vm-create
-vm-create: ## Create test VM from cloud image
+vm-create: ## Create test VM (uses golden image if available, otherwise plain cloud image)
 	@bash $(VM_SH) create
 
 .PHONY: vm-destroy

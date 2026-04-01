@@ -30,7 +30,8 @@ deploy/
 
 ```bash
 make vm-setup     # One-time: fix permissions + verify libvirt
-make vm-create    # Boot VM from cloud image
+make vm-bake      # One-time: create golden image (~10 min, pre-installs all services)
+make vm-create    # Boot VM (uses golden image if available — ~30s vs ~6min)
 make vm-deploy    # Download latest GitHub release wheel + deploy to VM
 make vm-smoke     # Run smoke tests
 make vm-test      # Full E2E cycle

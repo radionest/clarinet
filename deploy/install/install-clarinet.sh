@@ -128,7 +128,9 @@ install_systemd() {
 # --- Step 9: Nginx ---
 install_nginx() {
     log "Setting up nginx..."
-    apt-get install -y -qq nginx > /dev/null
+    if ! dpkg -s nginx &>/dev/null; then
+        apt-get install -y -qq nginx > /dev/null
+    fi
 
     # Generate SSL cert
     bash "${DEPLOY_DIR}/nginx/generate-ssl.sh"

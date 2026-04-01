@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Clarinet VM lifecycle manager
-# Usage: vm.sh <create|destroy|ssh|ip|status|deploy|reimage>
+# Usage: vm.sh <create|destroy|ssh|ip|status|deploy|reimage|bake>
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -26,6 +26,7 @@ fi
 DISK_PATH="${DISKS_DIR}/${VM_NAME}.qcow2"
 SEED_ISO="${DISKS_DIR}/${VM_NAME}-seed.iso"
 RENDERED_USER_DATA="${SCRIPT_DIR}/cloud-init/user-data-rendered.yaml"
+GOLDEN_IMAGE="${IMAGES_DIR}/clarinet-golden.qcow2"
 
 ensure_storage_access() {
     # libvirt-qemu needs +x (traverse) on every directory in the path to disk files.
@@ -92,15 +93,25 @@ cmd_create() {
         exit 1
     fi
 
-    download_image
-
     # Clean up stale files from a previous failed create (libvirt's
     # dynamic_ownership may have chowned them to libvirt-qemu:kvm)
     rm -f "$DISK_PATH" "$SEED_ISO"
 
+    # Select backing image: golden (pre-baked) or plain cloud image
+    local base_image user_data_template
+    if [[ -f "$GOLDEN_IMAGE" ]]; then
+        base_image="$GOLDEN_IMAGE"
+        user_data_template="$SCRIPT_DIR/cloud-init/user-data-golden.yaml"
+        log "Using golden image (services pre-installed)"
+    else
+        download_image
+        base_image="${IMAGES_DIR}/${IMAGE_NAME}"
+        user_data_template="$SCRIPT_DIR/cloud-init/user-data.yaml"
+        log "Golden image not found — using plain cloud image"
+    fi
+
     # Create disk overlay
     mkdir -p "$DISKS_DIR"
-    local base_image="${IMAGES_DIR}/${IMAGE_NAME}"
     log "Creating ${VM_DISK_SIZE}G disk overlay..."
     qemu-img create -f qcow2 -b "$base_image" -F qcow2 "$DISK_PATH" "${VM_DISK_SIZE}G"
 
@@ -108,7 +119,7 @@ cmd_create() {
     local ssh_key
     ssh_key="$(get_ssh_pubkey)"
     sed "s|__SSH_PUBLIC_KEY__|${ssh_key}|g" \
-        "$SCRIPT_DIR/cloud-init/user-data.yaml" > "$RENDERED_USER_DATA"
+        "$user_data_template" > "$RENDERED_USER_DATA"
 
     # Create cloud-init ISO
     log "Creating cloud-init seed ISO..."
@@ -120,11 +131,11 @@ cmd_create() {
     # overlay needs read-write). Prefer ACL; fall back to chmod.
     if command -v setfacl &>/dev/null; then
         setfacl -m u:libvirt-qemu:rw "$DISK_PATH" 2>/dev/null || true
-        setfacl -m u:libvirt-qemu:r "${IMAGES_DIR}/${IMAGE_NAME}" 2>/dev/null || true
+        setfacl -m u:libvirt-qemu:r "$base_image" 2>/dev/null || true
         setfacl -m u:libvirt-qemu:r "$SEED_ISO" 2>/dev/null || true
     else
         chmod o+rw "$DISK_PATH"
-        chmod o+r "${IMAGES_DIR}/${IMAGE_NAME}" "$SEED_ISO"
+        chmod o+r "$base_image" "$SEED_ISO"
     fi
 
     # Launch VM (seclabel=none disables AppArmor confinement — its profile
@@ -324,6 +335,138 @@ cmd_deploy() {
     log "Access at: https://${ip}${PATH_PREFIX}"
 }
 
+cmd_bake() {
+    local dicom_dir="${1:-}"
+    if [[ -n "$dicom_dir" ]]; then
+        dicom_dir="$(realpath "$dicom_dir")"
+        if [[ ! -d "$dicom_dir" ]]; then
+            err "DICOM directory not found: $dicom_dir"
+            exit 1
+        fi
+        log "DICOM test images: $dicom_dir"
+    fi
+
+    require_commands virsh virt-install cloud-localds qemu-img
+    ensure_storage_access
+
+    local bake_name="clarinet-golden-bake-$$"
+    local bake_disk="${DISKS_DIR}/${bake_name}.qcow2"
+    local bake_seed="${DISKS_DIR}/${bake_name}-seed.iso"
+
+    download_image
+
+    log "Baking golden image..."
+
+    # Create disk overlay for baking VM
+    mkdir -p "$DISKS_DIR"
+    local base_image="${IMAGES_DIR}/${IMAGE_NAME}"
+    qemu-img create -f qcow2 -b "$base_image" -F qcow2 "$bake_disk" "${VM_DISK_SIZE}G"
+
+    # Minimal cloud-init: just enough for SSH access
+    local bake_user_data
+    bake_user_data=$(mktemp)
+    local ssh_key
+    ssh_key="$(get_ssh_pubkey)"
+    sed "s|__SSH_PUBLIC_KEY__|${ssh_key}|g" \
+        "$SCRIPT_DIR/cloud-init/user-data.yaml" > "$bake_user_data"
+
+    cloud-localds "$bake_seed" "$bake_user_data" "$SCRIPT_DIR/cloud-init/meta-data.yaml"
+    rm -f "$bake_user_data"
+
+    # Grant libvirt access
+    if command -v setfacl &>/dev/null; then
+        setfacl -m u:libvirt-qemu:rw "$bake_disk" 2>/dev/null || true
+        setfacl -m u:libvirt-qemu:r "$base_image" 2>/dev/null || true
+        setfacl -m u:libvirt-qemu:r "$bake_seed" 2>/dev/null || true
+    else
+        chmod o+rw "$bake_disk"
+        chmod o+r "$base_image" "$bake_seed"
+    fi
+
+    # Launch temporary baking VM
+    log "Launching baking VM: $bake_name"
+    virt-install \
+        --name "$bake_name" \
+        --ram "$VM_RAM" \
+        --vcpus "$VM_VCPUS" \
+        --disk "path=$bake_disk,format=qcow2" \
+        --disk "path=$bake_seed,device=cdrom" \
+        --os-variant ubuntu24.04 \
+        --network default \
+        --graphics none \
+        --console pty,target_type=serial \
+        --import \
+        --noautoconsole \
+        --seclabel type=none \
+        --channel unix,target.type=virtio,target.name=org.qemu.guest_agent.0
+
+    # Wait for SSH (reuse existing logic with overridden VM_NAME)
+    local orig_vm_name="$VM_NAME"
+    VM_NAME="$bake_name"
+    _wait_for_ssh
+    VM_NAME="$orig_vm_name"
+
+    # Copy and run bake script
+    local bake_ip
+    bake_ip=$(virsh domifaddr "$bake_name" --source agent 2>/dev/null \
+        | grep -oP '\d+\.\d+\.\d+\.\d+' | head -1)
+    local scp_opts=(-o StrictHostKeyChecking=no -i "$SSH_KEY_PATH")
+    local ssh_target="${VM_USER}@${bake_ip}"
+
+    log "Uploading bake script..."
+    ssh "${scp_opts[@]}" "$ssh_target" "mkdir -p /tmp/clarinet-deploy"
+    scp "${scp_opts[@]}" -r "$DEPLOY_DIR/lib" "${ssh_target}:/tmp/clarinet-deploy/"
+    scp "${scp_opts[@]}" "$SCRIPT_DIR/bake-image.sh" "${ssh_target}:/tmp/clarinet-deploy/"
+
+    # Upload DICOM test images if provided
+    local bake_dicom_args=""
+    if [[ -n "$dicom_dir" ]]; then
+        log "Uploading DICOM test images..."
+        scp "${scp_opts[@]}" -r "$dicom_dir" "${ssh_target}:/tmp/clarinet-deploy/dicom"
+        bake_dicom_args="--dicom-dir /tmp/clarinet-deploy/dicom"
+    fi
+
+    log "Running bake script (this takes several minutes)..."
+    # shellcheck disable=SC2029
+    ssh "${scp_opts[@]}" "$ssh_target" \
+        "sudo bash /tmp/clarinet-deploy/bake-image.sh ${bake_dicom_args}"
+
+    # Shut down baking VM
+    log "Shutting down baking VM..."
+    virsh shutdown "$bake_name"
+    local wait=0
+    while virsh domstate "$bake_name" 2>/dev/null | grep -q "running"; do
+        sleep 2
+        wait=$((wait + 2))
+        if [[ $wait -ge 60 ]]; then
+            warn "Graceful shutdown timed out, forcing..."
+            virsh destroy "$bake_name" 2>/dev/null || true
+            break
+        fi
+    done
+
+    # Export: flatten overlay into standalone golden qcow2
+    log "Exporting golden image (this may take a minute)..."
+    mkdir -p "$IMAGES_DIR"
+    qemu-img convert -c -O qcow2 "$bake_disk" "$GOLDEN_IMAGE"
+
+    # Grant libvirt read access to golden image
+    if command -v setfacl &>/dev/null; then
+        setfacl -m u:libvirt-qemu:r "$GOLDEN_IMAGE" 2>/dev/null || true
+    else
+        chmod o+r "$GOLDEN_IMAGE"
+    fi
+
+    # Cleanup baking VM
+    virsh undefine "$bake_name" --remove-all-storage 2>/dev/null || true
+    rm -f "$bake_disk" "$bake_seed"
+
+    local size
+    size=$(du -h "$GOLDEN_IMAGE" | cut -f1)
+    log "Golden image created: $GOLDEN_IMAGE ($size)"
+    log "Future 'vm create' will use this image automatically."
+}
+
 cmd_reimage() {
     cmd_destroy
     cmd_create
@@ -357,11 +500,12 @@ case "${1:-help}" in
     status)  cmd_status ;;
     deploy)  shift; cmd_deploy "$@" ;;
     reimage) cmd_reimage ;;
+    bake)    shift; cmd_bake "$@" ;;
     help|*)
         echo "Usage: $(basename "$0") <command>"
         echo ""
         echo "Commands:"
-        echo "  create   Create and boot VM from cloud image"
+        echo "  create   Create and boot VM (uses golden image if available)"
         echo "  destroy  Stop and remove VM with all storage"
         echo "  setup    One-time host setup (permissions + libvirt check)"
         echo "  ssh      SSH into the VM (extra args passed to ssh)"
@@ -370,5 +514,7 @@ case "${1:-help}" in
         echo "  status   Show VM status (running/shut off/not found)"
         echo "  deploy   Deploy to VM (optional: path to .whl, else downloads latest release)"
         echo "  reimage  Destroy + recreate VM (clean slate)"
+        echo "  bake     Create golden image with pre-installed packages and services"
+        echo "           Optional: bake /path/to/dicoms — pre-load test DICOM images into Orthanc"
         ;;
 esac
