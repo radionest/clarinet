@@ -19,7 +19,7 @@ Clarinet is a framework for clinical-radiological studies, built on FastAPI, SQL
 - Type hints on all functions
 - Docstrings: required on public functions with non-obvious behavior. Skip on trivial CRUD where name + types suffice. Focus on "why", gotchas, raises
 - Custom exceptions from `clarinet.exceptions.http` (NOT_FOUND, CONFLICT, etc.)
-- Async/await for all I/O; `asyncio.gather()` for parallel independent tasks
+- Async/await for all I/O; `asyncio.gather()` for parallel independent tasks (except on shared `AsyncSession` — see `clarinet/CLAUDE.md`)
 
 ## Essential Commands
 

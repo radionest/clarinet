@@ -10,6 +10,7 @@ VM_SH="$PROJECT_DIR/deploy/vm/vm.sh"
 LOCAL_PORT=15432
 TEST_DB="clarinet_test"
 TUNNEL_PID=""
+VM_IP=""
 
 cleanup() {
     echo "Cleaning up..."
@@ -19,8 +20,10 @@ cleanup() {
         echo "SSH tunnel closed."
     fi
     # Drop test database (ignore errors if it doesn't exist)
-    ssh -o StrictHostKeyChecking=no "clarinet@$VM_IP" \
-        "sudo -u postgres dropdb --if-exists $TEST_DB" 2>/dev/null || true
+    if [ -n "$VM_IP" ]; then
+        ssh -o StrictHostKeyChecking=no "clarinet@$VM_IP" \
+            "sudo -u postgres dropdb --if-exists $TEST_DB" 2>/dev/null || true
+    fi
     echo "Test database dropped."
 }
 

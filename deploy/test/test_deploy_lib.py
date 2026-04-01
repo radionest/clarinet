@@ -44,8 +44,8 @@ class TestLogging:
             init_logging "mytag"
             log "hello world"
         """)
-        assert "[mytag]" in r.stdout
-        assert "hello world" in r.stdout
+        assert "[mytag]" in r.stderr
+        assert "hello world" in r.stderr
 
     def test_warn_contains_tag(self):
         r = bash(f"""
@@ -53,8 +53,8 @@ class TestLogging:
             init_logging "mytag"
             warn "caution"
         """)
-        assert "[mytag]" in r.stdout
-        assert "caution" in r.stdout
+        assert "[mytag]" in r.stderr
+        assert "caution" in r.stderr
 
     def test_err_goes_to_stderr(self):
         r = bash(f"""
@@ -73,8 +73,8 @@ class TestLogging:
             init_logging "second"
             log "msg"
         """)
-        assert "[second]" in r.stdout
-        assert "[first]" not in r.stdout
+        assert "[second]" in r.stderr
+        assert "[first]" not in r.stderr
 
     def test_init_logging_requires_argument(self):
         r = bash(
@@ -187,8 +187,8 @@ class TestSourceChain:
                 init_logging "settings"
                 log "vm-side test"
             """)
-            assert "[settings]" in r.stdout
-            assert "vm-side test" in r.stdout
+            assert "[settings]" in r.stderr
+            assert "vm-side test" in r.stderr
 
             # generate-ssl.sh resolves ../lib/logging.sh from nginx/
             r = bash(f"""
@@ -197,6 +197,6 @@ class TestSourceChain:
                 init_logging "ssl"
                 log "ssl test"
             """)
-            assert "[ssl]" in r.stdout
+            assert "[ssl]" in r.stderr
         finally:
             shutil.rmtree(tmpdir)
