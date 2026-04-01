@@ -36,7 +36,7 @@ jobs:
           uv run pytest tests/
           -n auto --dist loadgroup
           -m "${{ env.PYTEST_UNIT_MARKERS }}"
-          -q
+          -x -q
 
   test-windows:
     runs-on: windows-latest
@@ -65,7 +65,7 @@ jobs:
           uv run pytest tests/
           -n auto --dist loadgroup
           -m "${{ env.PYTEST_UNIT_MARKERS }}"
-          --json-report-file=test-report.json
+          -x --json-report-file=test-report.json
           -q
 
   test-postgres:
