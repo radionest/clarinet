@@ -2,7 +2,7 @@
 
 import threading
 import time
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 
@@ -382,7 +382,11 @@ class DicomOperations:
             return results
 
     def get_study(
-        self, config: AssociationConfig, request: RetrieveRequest, storage: StorageConfig
+        self,
+        config: AssociationConfig,
+        request: RetrieveRequest,
+        storage: StorageConfig,
+        on_progress: Callable[[int, int | None], None] | None = None,
     ) -> RetrieveResult:
         """Execute C-GET to retrieve study.
 
@@ -431,6 +435,14 @@ class DicomOperations:
                     result.num_failed = status.NumberOfFailedSuboperations or 0
                 if hasattr(status, "NumberOfWarningSuboperations"):
                     result.num_warning = status.NumberOfWarningSuboperations or 0
+
+                if on_progress and result.num_completed > 0 and result.num_completed % 50 == 0:
+                    total = (
+                        result.num_completed + result.num_remaining
+                        if result.num_remaining
+                        else None
+                    )
+                    on_progress(result.num_completed, total)
 
                 match status.Status:
                     case 0x0000:
@@ -513,6 +525,7 @@ class DicomOperations:
         local_aet: str,
         scp: "StorageSCP",
         timeout: float = 300.0,
+        on_progress: Callable[[int, int | None], None] | None = None,
     ) -> RetrieveResult:
         """Retrieve DICOM instances via C-MOVE with local Storage SCP.
 
@@ -570,6 +583,14 @@ class DicomOperations:
                         result.num_failed = status.NumberOfFailedSuboperations or 0
                     if hasattr(status, "NumberOfWarningSuboperations"):
                         result.num_warning = status.NumberOfWarningSuboperations or 0
+
+                    if on_progress and result.num_completed > 0 and result.num_completed % 50 == 0:
+                        total = (
+                            result.num_completed + result.num_remaining
+                            if result.num_remaining
+                            else None
+                        )
+                        on_progress(result.num_completed, total)
 
                     # Compute expected count from first pending response
                     if total_expected is None and status.Status == 0xFF00:

@@ -86,6 +86,8 @@ pub type Model {
     // Role matrix
     role_matrix: Option(RoleMatrix),
     role_toggling: Option(#(String, String)),
+    // Preload state
+    preload_timer: Option(global.TimerID),
   )
 }
 
@@ -95,6 +97,14 @@ pub type ModalContent {
   ConfirmDelete(resource: String, id: String)
   ViewDetails(resource: String, data: Json)
   EditForm(resource: String, id: Option(String))
+  PreloadProgress(
+    viewer_url: String,
+    task_id: String,
+    study_uid: String,
+    received: Int,
+    total: Option(Int),
+    status: String,
+  )
 }
 
 // Application messages
@@ -271,6 +281,19 @@ pub type Msg {
   ToggleUserRole(user_id: String, role_name: String, add: Bool)
   UserRoleToggled(Result(Nil, ApiError))
 
+  // Preload
+  StartPreload(viewer_url: String, study_uid: String)
+  PreloadStarted(viewer_url: String, task_id: String, study_uid: String)
+  PreloadPollTick(task_id: String, viewer_url: String, study_uid: String)
+  PreloadProgressUpdate(
+    task_id: String,
+    viewer_url: String,
+    study_uid: String,
+    result: Result(dynamic.Dynamic, ApiError),
+  )
+  CancelPreload
+  SetPreloadTimer(global.TimerID)
+
   // Misc
   NoOp
   RefreshData
@@ -333,6 +356,7 @@ pub fn init() -> Model {
     hydrated_schemas: dict.new(),
     role_matrix: None,
     role_toggling: None,
+    preload_timer: None,
   )
 }
 

@@ -173,3 +173,31 @@ async def retrieve_frames(
     )
 
     return Response(content=body, media_type=content_type)
+
+
+@router.post("/preload/{study_uid}")
+async def preload_study(
+    study_uid: str,
+    _user: CurrentUserDep,
+    service: DicomWebProxyServiceDep,
+) -> JSONResponse:
+    """Start background preloading of a study into the DICOMweb cache.
+
+    Returns a task_id for polling progress via GET /preload/{study_uid}/progress/{task_id}.
+    """
+    task_id = await service.start_preload(study_uid)
+    return JSONResponse({"task_id": task_id})
+
+
+@router.get("/preload/{study_uid}/progress/{task_id}")
+async def preload_progress(
+    study_uid: str,  # noqa: ARG001 — path param required by URL pattern
+    task_id: str,
+    _user: CurrentUserDep,
+    service: DicomWebProxyServiceDep,
+) -> JSONResponse:
+    """Poll preload progress for a study."""
+    progress = service.get_preload_progress(task_id)
+    if progress is None:
+        return JSONResponse({"status": "not_found"})
+    return JSONResponse(progress)

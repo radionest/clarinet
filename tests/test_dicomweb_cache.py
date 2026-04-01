@@ -12,11 +12,13 @@ Tests cover:
 
 import asyncio
 import time
+from collections.abc import AsyncGenerator
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+import pytest_asyncio
 from cachetools import TTLCache
 
 from clarinet.services.dicomweb.cache import DicomWebCache
@@ -40,16 +42,18 @@ def tmp_cache_dir(tmp_path: Path) -> Path:
     return tmp_path / "dicomweb_cache"
 
 
-@pytest.fixture
-def cache(tmp_cache_dir: Path) -> DicomWebCache:
+@pytest_asyncio.fixture
+async def cache(tmp_cache_dir: Path) -> AsyncGenerator[DicomWebCache, None]:
     """Create a DicomWebCache with short TTL for testing."""
-    return DicomWebCache(
+    c = DicomWebCache(
         base_dir=tmp_cache_dir,
         ttl_hours=24,
         max_size_gb=1.0,
         memory_ttl_minutes=30,
         memory_max_entries=50,
     )
+    yield c
+    await c.shutdown()
 
 
 class TestMemoryHit:
@@ -504,7 +508,9 @@ class TestStudyLevelCache:
         assert len(result["series_c"].instances) == 1
 
         # Study C-GET should have been called exactly once
-        mock_client.get_study_to_memory.assert_called_once_with(study_uid="study1", peer=mock_pacs)
+        mock_client.get_study_to_memory.assert_called_once_with(
+            study_uid="study1", peer=mock_pacs, on_progress=None
+        )
 
     @pytest.mark.asyncio
     async def test_unexpected_series_cached(self, cache: DicomWebCache) -> None:
@@ -591,7 +597,7 @@ class TestStudyLevelCache:
         first_call_started = asyncio.Event()
         first_call_proceed = asyncio.Event()
 
-        async def mock_get_study(study_uid: str, peer: Any) -> Any:
+        async def mock_get_study(study_uid: str, peer: Any, **_kwargs: Any) -> Any:
             """Mock that allows us to control timing."""
             first_call_started.set()
             await first_call_proceed.wait()

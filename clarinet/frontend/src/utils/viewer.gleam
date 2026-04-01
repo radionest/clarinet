@@ -2,11 +2,13 @@
 
 import api/types
 import config
+import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/string
 import lustre/attribute
 import lustre/element.{type Element}
 import lustre/element/html
+import lustre/event
 
 /// Build an OHIF viewer URL for a study, optionally scoped to a series.
 pub fn viewer_url(study_uid: String, series_uid: Option(String)) -> String {
@@ -39,9 +41,7 @@ pub fn viewer_button(
 }
 
 /// Render a viewer button for a record based on its DicomQueryLevel.
-/// If viewer_study_uids is set, opens all listed studies in OHIF.
-/// Otherwise falls back to single study_uid.
-/// Series filtering: viewer_series_uids > series_uid (for SERIES-level records).
+/// Clicking triggers on_view(viewer_url, first_study_uid) for preloading.
 /// PATIENT or unknown level -> no button; STUDY -> study URL; SERIES -> study+series URL.
 pub fn record_viewer_button(
   study_uid: Option(String),
@@ -50,6 +50,7 @@ pub fn record_viewer_button(
   viewer_series_uids: Option(List(String)),
   level: Option(types.DicomQueryLevel),
   class: String,
+  on_view: fn(String, String) -> msg,
 ) -> Element(msg) {
   case level {
     Some(types.Study) | Some(types.Series) -> {
@@ -78,20 +79,41 @@ pub fn record_viewer_button(
               }
           }
           let url = url <> series_part
-          html.a(
+          // First study UID for preload
+          let first_uid = list.first(uid_list) |> option.from_result
+          let primary_uid = case first_uid {
+            Some(u) -> u
+            None -> ""
+          }
+          html.button(
             [
-              attribute.href(url),
-              attribute.target("_blank"),
               attribute.class(class),
+              event.on_click(on_view(url, primary_uid)),
             ],
             [html.text("Open in Viewer")],
           )
         }
-        None ->
-          case level {
-            Some(types.Series) -> viewer_button(study_uid, series_uid, class)
-            _ -> viewer_button(study_uid, None, class)
+        None -> {
+          let #(url, primary_uid) = case level, study_uid {
+            Some(types.Series), Some(suid) -> #(
+              viewer_url(suid, series_uid),
+              suid,
+            )
+            _, Some(suid) -> #(viewer_url(suid, None), suid)
+            _, None -> #("", "")
           }
+          case primary_uid {
+            "" -> element.none()
+            _ ->
+              html.button(
+                [
+                  attribute.class(class),
+                  event.on_click(on_view(url, primary_uid)),
+                ],
+                [html.text("Open in Viewer")],
+              )
+          }
+        }
       }
     }
     Some(types.Patient) | None -> element.none()

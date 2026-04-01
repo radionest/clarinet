@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -200,6 +201,7 @@ class DicomClient:
         output_dir: Path | None = None,
         patient_id: str | None = None,
         timeout: float = 300.0,  # noqa: ASYNC109 — DICOM association timeout, not asyncio
+        on_progress: Callable[[int, int | None], None] | None = None,
     ) -> RetrieveResult:
         """Core retrieval logic shared by all get_* methods.
 
@@ -249,6 +251,7 @@ class DicomClient:
                 settings.dicom_aet,
                 scp,
                 settings.dicom_cmove_timeout,
+                on_progress=on_progress,
             )
         else:
             result = await asyncio.to_thread(
@@ -256,6 +259,7 @@ class DicomClient:
                 config,
                 request,
                 storage,
+                on_progress=on_progress,
             )
 
         logger.info(
@@ -338,6 +342,7 @@ class DicomClient:
         peer: DicomNode,
         patient_id: str | None = None,
         timeout: float = 300.0,  # noqa: ASYNC109 — DICOM association timeout, not asyncio
+        on_progress: Callable[[int, int | None], None] | None = None,
     ) -> RetrieveResult:
         """Retrieve study to memory.
 
@@ -346,6 +351,7 @@ class DicomClient:
             peer: DICOM peer node
             patient_id: Optional patient ID for query
             timeout: Operation timeout
+            on_progress: Optional callback(received, total) for progress reporting
 
         Returns:
             Retrieve result with instances in memory
@@ -360,6 +366,7 @@ class DicomClient:
             StorageMode.MEMORY,
             patient_id=patient_id,
             timeout=timeout,
+            on_progress=on_progress,
         )
 
     async def get_series_to_memory(
