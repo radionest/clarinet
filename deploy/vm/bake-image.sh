@@ -15,7 +15,9 @@ VENV_DIR="${INSTALL_DIR}/venv"
 DICOM_DIR=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --dicom-dir) DICOM_DIR="$2"; shift 2 ;;
+        --dicom-dir)
+            if [[ $# -lt 2 ]]; then err "--dicom-dir requires a path"; exit 1; fi
+            DICOM_DIR="$2"; shift 2 ;;
         *) shift ;;
     esac
 done

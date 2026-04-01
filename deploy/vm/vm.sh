@@ -414,10 +414,11 @@ cmd_bake() {
     _wait_for_ssh
     VM_NAME="$orig_vm_name"
 
-    # Copy and run bake script
+    # Copy and run bake script (reuse _get_ip with overridden VM_NAME for fallback)
+    VM_NAME="$bake_name"
     local bake_ip
-    bake_ip=$(virsh domifaddr "$bake_name" --source agent 2>/dev/null \
-        | grep -oP '\d+\.\d+\.\d+\.\d+' | head -1)
+    bake_ip="$(_get_ip)"
+    VM_NAME="$orig_vm_name"
     local scp_opts=(-o StrictHostKeyChecking=no -i "$SSH_KEY_PATH")
     local ssh_target="${VM_USER}@${bake_ip}"
 
