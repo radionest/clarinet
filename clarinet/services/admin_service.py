@@ -1,7 +1,5 @@
 """Service layer for admin dashboard statistics."""
 
-import asyncio
-
 from clarinet.models.admin import (
     AdminStats,
     RecordTypeStats,
@@ -48,14 +46,15 @@ class AdminService:
 
         Returns:
             AdminStats with total counts and per-status record breakdown.
+
+        Note:
+            Queries run sequentially because all repos share one AsyncSession.
+            asyncpg connections handle one query at a time — asyncio.gather()
+            on a shared session deadlocks on PostgreSQL (works on SQLite only
+            due to aiosqlite's thread-based serialization).
         """
-        (
-            (total_studies, total_records, total_users, total_patients),
-            records_by_status,
-        ) = await asyncio.gather(
-            self._get_total_counts(),
-            self._get_records_by_status(),
-        )
+        total_studies, total_records, total_users, total_patients = await self._get_total_counts()
+        records_by_status = await self._get_records_by_status()
         return AdminStats(
             total_studies=total_studies,
             total_records=total_records,
@@ -70,11 +69,9 @@ class AdminService:
         Returns:
             List of RecordTypeStats with per-type counts and unique users.
         """
-        record_types, status_map, user_map = await asyncio.gather(
-            self.record_type_repo.list_all(),
-            self.record_repo.get_per_type_status_counts(),
-            self.record_repo.get_per_type_unique_users(),
-        )
+        record_types = await self.record_type_repo.list_all()
+        status_map = await self.record_repo.get_per_type_status_counts()
+        user_map = await self.record_repo.get_per_type_unique_users()
 
         result = []
         for rt in record_types:
@@ -102,10 +99,8 @@ class AdminService:
         Returns:
             RoleMatrixResponse with sorted role names and user info.
         """
-        roles, users = await asyncio.gather(
-            self.user_repo.get_all_roles(),
-            self.user_repo.get_all_with_roles(),
-        )
+        roles = await self.user_repo.get_all_roles()
+        users = await self.user_repo.get_all_with_roles()
 
         role_names = sorted(role.name for role in roles)
         user_infos = [
@@ -121,16 +116,16 @@ class AdminService:
         return RoleMatrixResponse(roles=role_names, users=user_infos)
 
     async def _get_total_counts(self) -> tuple[int, int, int, int]:
-        """Get total counts for studies, records, users, and patients in parallel.
+        """Get total counts for studies, records, users, and patients.
 
         Returns:
             Tuple of (total_studies, total_records, total_users, total_patients)
         """
-        return await asyncio.gather(
-            self.study_repo.count(),
-            self.record_repo.count(),
-            self.user_repo.count(),
-            self.patient_repo.count(),
+        return (
+            await self.study_repo.count(),
+            await self.record_repo.count(),
+            await self.user_repo.count(),
+            await self.patient_repo.count(),
         )
 
     async def _get_records_by_status(self) -> dict[str, int]:
