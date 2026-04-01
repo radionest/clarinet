@@ -353,6 +353,14 @@ cmd_bake() {
     local bake_disk="${DISKS_DIR}/${bake_name}.qcow2"
     local bake_seed="${DISKS_DIR}/${bake_name}-seed.iso"
 
+    _cleanup_bake() {
+        warn "Cleaning up failed bake..."
+        virsh destroy "$bake_name" 2>/dev/null || true
+        virsh undefine "$bake_name" --remove-all-storage 2>/dev/null || true
+        rm -f "$bake_disk" "$bake_seed"
+    }
+    trap _cleanup_bake ERR
+
     download_image
 
     log "Baking golden image..."
@@ -460,6 +468,8 @@ cmd_bake() {
     # Cleanup baking VM
     virsh undefine "$bake_name" --remove-all-storage 2>/dev/null || true
     rm -f "$bake_disk" "$bake_seed"
+
+    trap - ERR
 
     local size
     size=$(du -h "$GOLDEN_IMAGE" | cut -f1)
