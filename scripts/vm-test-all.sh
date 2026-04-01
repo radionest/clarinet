@@ -32,9 +32,9 @@ if [ -z "$VM_IP" ]; then
 fi
 echo "VM IP: $VM_IP"
 
-# Read DB password from VM settings
+# Read DB password from VM settings and URL-encode it (may contain /, =, etc.)
 DB_PASS=$(ssh -o StrictHostKeyChecking=no "clarinet@$VM_IP" \
-    "grep '^database_password' /opt/clarinet/settings.toml | head -1 | sed 's/.*= *\"//;s/\".*//'")
+    "python3 -c \"import tomllib, urllib.parse; print(urllib.parse.quote(tomllib.load(open('/opt/clarinet/settings.toml','rb'))['database_password'], safe=''))\"")
 if [ -z "$DB_PASS" ]; then
     echo "Error: cannot read database_password from VM settings.toml" >&2
     exit 1
