@@ -1677,7 +1677,7 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       #(model, poll_effect)
     }
 
-    store.PreloadProgressUpdate(_task_id, viewer_url, _study_uid, Ok(data)) -> {
+    store.PreloadProgressUpdate(task_id, viewer_url, study_uid, Ok(data)) -> {
       let status =
         decode.run(data, decode.at(["status"], decode.string))
         |> option.from_result
@@ -1732,14 +1732,8 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
               ..model,
               modal_content: store.PreloadProgress(
                 viewer_url: viewer_url,
-                task_id: case model.modal_content {
-                  store.PreloadProgress(task_id: tid, ..) -> tid
-                  _ -> ""
-                },
-                study_uid: case model.modal_content {
-                  store.PreloadProgress(study_uid: suid, ..) -> suid
-                  _ -> ""
-                },
+                task_id: task_id,
+                study_uid: study_uid,
                 received: received,
                 total: total,
                 status: status,
@@ -1750,7 +1744,11 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       }
     }
 
-    store.PreloadProgressUpdate(_, _, _, Error(_)) -> {
+    store.PreloadProgressUpdate(_, _, _, Error(err)) -> {
+      logger.warn(
+        "preload",
+        "Progress poll failed: " <> string.inspect(err),
+      )
       #(model, effect.none())
     }
 

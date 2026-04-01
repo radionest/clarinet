@@ -34,6 +34,7 @@ from clarinet.services.dicom import DicomClient, DicomNode
 from clarinet.services.dicomweb.cache import DicomWebCache
 from clarinet.services.dicomweb.service import DicomWebProxyService
 from tests.conftest import create_authenticated_client, create_mock_superuser
+from tests.utils.factories import make_patient
 from tests.utils.urls import DICOM_BASE, DICOMWEB_BASE
 
 pytestmark = [pytest.mark.dicom]
@@ -112,7 +113,7 @@ async def client(test_session, test_settings) -> AsyncGenerator[AsyncClient]:
 @pytest_asyncio.fixture
 async def db_patient(test_session: AsyncSession, pacs_patient_id: str) -> Patient:
     """Create a Patient record in the test DB matching the PACS patient_id."""
-    patient = Patient(id=pacs_patient_id, name="SHIPILOV TEST", auto_id=42)
+    patient = make_patient(pid=pacs_patient_id, name="SHIPILOV TEST")
     test_session.add(patient)
     await test_session.commit()
     await test_session.refresh(patient)

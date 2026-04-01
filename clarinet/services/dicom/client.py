@@ -214,6 +214,7 @@ class DicomClient:
             output_dir: Directory to save DICOM files (required for DISK mode)
             patient_id: Optional patient ID for query
             timeout: Operation timeout
+            on_progress: Optional callback(completed, total) invoked every 50 instances
 
         Returns:
             Retrieve result with statistics

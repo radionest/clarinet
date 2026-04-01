@@ -394,6 +394,7 @@ class DicomOperations:
             config: Association configuration
             request: Retrieve request
             storage: Storage configuration
+            on_progress: Optional callback(completed, total) invoked every 50 instances
 
         Returns:
             Retrieve result
@@ -437,11 +438,7 @@ class DicomOperations:
                     result.num_warning = status.NumberOfWarningSuboperations or 0
 
                 if on_progress and result.num_completed > 0 and result.num_completed % 50 == 0:
-                    total = (
-                        result.num_completed + result.num_remaining
-                        if result.num_remaining
-                        else None
-                    )
+                    total = result.num_completed + result.num_remaining
                     on_progress(result.num_completed, total)
 
                 match status.Status:
@@ -539,6 +536,7 @@ class DicomOperations:
             local_aet: Our AE title (C-MOVE destination).
             scp: Running StorageSCP instance to receive C-STORE.
             timeout: Seconds to wait for all instances to arrive.
+            on_progress: Optional callback(completed, total) invoked every 50 instances.
 
         Returns:
             RetrieveResult with received instances.
@@ -585,11 +583,7 @@ class DicomOperations:
                         result.num_warning = status.NumberOfWarningSuboperations or 0
 
                     if on_progress and result.num_completed > 0 and result.num_completed % 50 == 0:
-                        total = (
-                            result.num_completed + result.num_remaining
-                            if result.num_remaining
-                            else None
-                        )
+                        total = result.num_completed + result.num_remaining
                         on_progress(result.num_completed, total)
 
                     # Compute expected count from first pending response
