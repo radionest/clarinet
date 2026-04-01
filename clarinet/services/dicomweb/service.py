@@ -2,6 +2,7 @@
 
 import asyncio
 from typing import Any
+from uuid import uuid4
 
 from pydicom import Dataset
 
@@ -76,6 +77,7 @@ class DicomWebProxyService:
         self._client = client
         self._pacs = pacs
         self._cache = cache
+        self._preload_tasks: set[asyncio.Task[None]] = set()
 
     async def search_studies(self, params: dict[str, str]) -> list[dict[str, Any]]:
         """QIDO-RS: Search for studies via C-FIND.
@@ -280,6 +282,45 @@ class DicomWebProxyService:
 
         logger.debug(f"WADO-RS frames: {len(frames)} frames for instance {instance_uid}")
         return body, content_type
+
+    async def start_preload(self, study_uid: str) -> str:
+        """Start background preloading of a study into cache.
+
+        Returns a task_id that can be used to poll progress.
+        """
+        task_id = f"preload_{study_uid}_{uuid4().hex[:8]}"
+        self._cache.set_preload_progress(task_id, {"status": "starting", "received": 0})
+        task = asyncio.create_task(self._preload_worker(study_uid, task_id))
+        self._preload_tasks.add(task)
+        task.add_done_callback(self._preload_tasks.discard)
+        return task_id
+
+    async def _preload_worker(self, study_uid: str, task_id: str) -> None:
+        try:
+            progress = self._cache.get_preload_progress(task_id)
+            if progress is None:
+                return
+
+            results = await self._client.find_series(
+                query=SeriesQuery(study_instance_uid=study_uid), peer=self._pacs
+            )
+            series_uids = [r.series_instance_uid for r in results if r.series_instance_uid]
+
+            if not series_uids:
+                self._cache.set_preload_progress(
+                    task_id, {"status": "ready", "received": 0, "total": 0}
+                )
+                return
+
+            await self._cache.ensure_study_cached(
+                study_uid, series_uids, self._client, self._pacs, progress=progress
+            )
+        except Exception as e:
+            logger.error(f"Preload failed for study {study_uid}: {e}")
+            self._cache.set_preload_progress(task_id, {"status": "error", "error": str(e)})
+
+    def get_preload_progress(self, task_id: str) -> dict[str, Any] | None:
+        return self._cache.get_preload_progress(task_id)
 
     async def _read_instance_from_disk(
         self, study_uid: str, series_uid: str, instance_uid: str
