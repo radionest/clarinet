@@ -1,0 +1,17 @@
+#cloud-config
+# Minimal cloud-init for golden image VMs.
+# System packages and services are already baked in — only inject SSH key.
+
+users:
+  - name: clarinet
+    groups: sudo
+    shell: /bin/bash
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    ssh_authorized_keys:
+      - __SSH_PUBLIC_KEY__
+
+# Packages already installed in golden image
+package_update: false
+
+runcmd:
+  - systemctl enable --now qemu-guest-agent

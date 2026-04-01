@@ -10,13 +10,13 @@ DB_PASS="${CLARINET_DB_PASS:-$(openssl rand -base64 16)}"
 RABBIT_USER="${CLARINET_RABBIT_USER:-clarinet}"
 RABBIT_PASS="${CLARINET_RABBIT_PASS:-$(openssl rand -base64 16)}"
 
-# logging.sh already sourced by caller (install-clarinet.sh)
+# logging.sh and provision.sh already sourced by caller (install-clarinet.sh)
 init_logging "services"
 
 # --- PostgreSQL ---
 setup_postgresql() {
     log "Setting up PostgreSQL..."
-    apt-get install -y -qq postgresql postgresql-contrib > /dev/null
+    install_packages_if_missing postgresql postgresql-contrib
 
     systemctl enable --now postgresql
 
@@ -44,7 +44,7 @@ setup_postgresql() {
 # --- RabbitMQ ---
 setup_rabbitmq() {
     log "Setting up RabbitMQ..."
-    apt-get install -y -qq rabbitmq-server > /dev/null
+    install_packages_if_missing rabbitmq-server
 
     systemctl enable --now rabbitmq-server
 
@@ -69,7 +69,7 @@ setup_rabbitmq() {
 # --- Orthanc PACS ---
 setup_orthanc() {
     log "Setting up Orthanc PACS..."
-    apt-get install -y -qq orthanc > /dev/null
+    install_packages_if_missing orthanc
 
     systemctl enable --now orthanc
     log "Orthanc running (DICOM: 4242, REST: 8042)"
