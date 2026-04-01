@@ -156,7 +156,7 @@ ignore_missing_imports = true
 
 
 [tool.pytest.ini_options]
-addopts = "--json-report --json-report-file=/tmp/clarinet-test-report.json -q"
+addopts = "--json-report --json-report-file=/tmp/clarinet-test-report.json"
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "session"
 asyncio_default_test_loop_scope = "session"

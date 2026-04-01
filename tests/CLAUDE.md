@@ -142,6 +142,23 @@ Commands: `make test-fast` (default, `-n auto`), `make test-unit` (DB-only), `ma
 
 Service markers: `pipeline` (RabbitMQ, `xdist_group`), `dicom` (PACS, read-only), `slicer` (`xdist_group`). Unreachable services auto-skip.
 
+## Verbosity
+
+Makefile targets use `-q` (quiet) by default. To debug hangs or failures, pass `-v` directly:
+
+```bash
+# Verbose — shows each test name (identifies hanging tests)
+uv run pytest tests/ -v
+
+# Specific file on PostgreSQL
+make vm-test-pg FILE="tests/test_services.py -v"
+
+# Override quiet in any make target via PYTEST_ADDOPTS
+PYTEST_ADDOPTS="-v" make test-fast
+```
+
+`-q` is NOT in `pyproject.toml` addopts — it lives in Makefile targets and scripts. So `pytest -v` works directly without fighting config.
+
 ## Background and CI
 
 JSON report: `/tmp/clarinet-test-report.json` (atomically at session end — stale during run). pynetdicom loguru errors at end of output are noise.

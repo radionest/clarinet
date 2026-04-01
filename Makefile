@@ -124,12 +124,12 @@ test-all: test frontend-test ## Run all tests (backend + frontend)
 .PHONY: test-fast
 test-fast: ## Run all tests in parallel (auto workers, excludes schema tests)
 	@echo "Running all tests in parallel..."
-	@./scripts/run_tests.sh -n auto --dist loadgroup -m "not schema"
+	@./scripts/run_tests.sh -n auto --dist loadgroup -m "not schema" -q
 
 .PHONY: test-unit
 test-unit: ## Run DB-only tests in parallel (no external services, no schema)
 	@echo "Running DB-only tests in parallel..."
-	@./scripts/run_tests.sh -n auto --dist loadgroup -m "not pipeline and not dicom and not slicer and not schema"
+	@./scripts/run_tests.sh -n auto --dist loadgroup -m "not pipeline and not dicom and not slicer and not schema" -q
 
 .PHONY: test-schema
 test-schema: ## Run API schema tests (Schemathesis property-based)
