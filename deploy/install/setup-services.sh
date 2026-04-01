@@ -5,10 +5,10 @@ set -euo pipefail
 
 DB_USER="${CLARINET_DB_USER:-clarinet}"
 DB_NAME="${CLARINET_DB_NAME:-clarinet}"
-DB_PASS="${CLARINET_DB_PASS:-$(openssl rand -base64 16)}"
+DB_PASS="${CLARINET_DB_PASS:-$(openssl rand -hex 12)}"
 
 RABBIT_USER="${CLARINET_RABBIT_USER:-clarinet}"
-RABBIT_PASS="${CLARINET_RABBIT_PASS:-$(openssl rand -base64 16)}"
+RABBIT_PASS="${CLARINET_RABBIT_PASS:-$(openssl rand -hex 12)}"
 
 # logging.sh already sourced by caller (install-clarinet.sh)
 init_logging "services"

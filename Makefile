@@ -298,6 +298,20 @@ vm-test: ## Full E2E: create VM -> deploy -> test -> cleanup
 vm-test-all: ## Run full test suite against VM PostgreSQL
 	@bash scripts/vm-test-all.sh
 
+.PHONY: vm-test-pg
+vm-test-pg: ## Run specific tests against VM PostgreSQL (FILE=tests/... or empty for all)
+	@bash scripts/vm-test-all.sh $(FILE)
+
+.PHONY: vm-reset-testdb
+vm-reset-testdb: ## Drop and recreate clarinet_test database on VM
+	@VM_IP=$$(bash $(VM_SH) ip 2>/dev/null); \
+	echo "Resetting clarinet_test on $$VM_IP..."; \
+	ssh -o StrictHostKeyChecking=no "clarinet@$$VM_IP" "\
+		sudo -u postgres psql -c \"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='clarinet_test' AND pid <> pg_backend_pid();\" 2>/dev/null; \
+		sudo -u postgres dropdb --if-exists clarinet_test; \
+		sudo -u postgres createdb --owner=clarinet clarinet_test" && \
+	echo "Done."
+
 .PHONY: vm-reimage
 vm-reimage: ## Destroy + recreate VM (clean slate)
 	@bash $(VM_SH) reimage
