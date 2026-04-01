@@ -103,6 +103,7 @@ dev = [
     "prek>=0.3.6",
     "pytest-xdist>=3.5.0",
     "pytest-json-report>=1.5.0",
+    "pytest-timeout>=2.4.0",
 ]
 
 e2e = [
@@ -159,6 +160,7 @@ addopts = "--json-report --json-report-file=/tmp/clarinet-test-report.json -q"
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "session"
 asyncio_default_test_loop_scope = "session"
+timeout = 30
 log_level = "WARNING"
 testpaths = ["tests"]
 python_files = "test_*.py"
