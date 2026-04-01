@@ -263,6 +263,12 @@ async def test_role_alias(
     tmp_path,
 ) -> None:
     """RecordDef(role='doctor_CT') maps to role_name."""
+    from clarinet.models.user import UserRole
+
+    # Role must exist before RecordType can reference it (FK constraint)
+    test_session.add(UserRole(name="doctor_CT"))
+    await test_session.commit()
+
     _write_record_types(
         tmp_path,
         """\

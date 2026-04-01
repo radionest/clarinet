@@ -10,6 +10,7 @@ import pytest
 import pytest_asyncio
 from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -22,6 +23,7 @@ from clarinet.models import *  # noqa: F403
 from clarinet.models.user import User
 from clarinet.settings import Settings
 from clarinet.utils.database import get_async_session
+from clarinet.utils.logger import logger
 
 
 @pytest.fixture(autouse=True, scope="session")
@@ -86,6 +88,14 @@ async def test_engine(test_settings):
             connect_args={"check_same_thread": False},
             poolclass=StaticPool,
         )
+
+    if database_url.startswith("sqlite"):
+
+        @event.listens_for(engine.sync_engine, "connect")
+        def _set_sqlite_fk_pragma(dbapi_conn, _connection_record):
+            cursor = dbapi_conn.cursor()
+            cursor.execute("PRAGMA foreign_keys=ON")
+            cursor.close()
 
     async with engine.begin() as conn:
         await conn.run_sync(SQLModel.metadata.create_all)
@@ -516,13 +526,27 @@ async def test_record_type(test_session):
 
 
 @pytest_asyncio.fixture(autouse=True)
-async def clear_database(test_session):
+async def clear_database(test_session, test_engine, request):
     """Clear all table data after each test for isolation."""
     yield
-    await test_session.rollback()
-    for table in reversed(SQLModel.metadata.sorted_tables):
-        await test_session.execute(table.delete())
-    await test_session.commit()
+    test_name = request.node.nodeid
+    try:
+        await test_session.rollback()
+    except Exception as exc:
+        logger.warning(f"[clear_database] rollback failed for {test_name}: {exc}")
+    try:
+        if test_engine.dialect.name == "postgresql":
+            # Use a fresh connection — test_session may be in a broken state
+            # after FK violations from background tasks (entity flow).
+            async with test_engine.begin() as conn:
+                tables = ", ".join(f'"{t.name}"' for t in SQLModel.metadata.sorted_tables)
+                await conn.execute(text(f"TRUNCATE TABLE {tables} CASCADE"))
+        else:
+            for table in reversed(SQLModel.metadata.sorted_tables):
+                await test_session.execute(table.delete())
+            await test_session.commit()
+    except Exception as exc:
+        logger.error(f"[clear_database] cleanup failed for {test_name}: {exc}")
 
 
 @pytest_asyncio.fixture
