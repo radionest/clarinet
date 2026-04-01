@@ -3,7 +3,7 @@
 import asyncio
 import shutil
 import time
-from collections.abc import Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -57,6 +57,7 @@ class DicomWebCache:
         self._disk_write_tasks: set[asyncio.Task[None]] = set()
         self._dcm_anon_path_cache: dict[str, Path | None] = {}
         self._disk_write_semaphore = asyncio.Semaphore(disk_write_concurrency)
+        self._preload_progress: dict[str, dict[str, Any]] = {}
 
     def _series_dir(self, study_uid: str, series_uid: str) -> Path:
         return self._base_dir / study_uid / series_uid
@@ -365,6 +366,7 @@ class DicomWebCache:
         series_uids: list[str],
         client: DicomClient,
         pacs: DicomNode,
+        progress: dict[str, Any] | None = None,
     ) -> dict[str, MemoryCachedSeries]:
         """Ensure all series of a study are cached, using a single study-level C-GET.
 
@@ -377,6 +379,7 @@ class DicomWebCache:
             series_uids: List of Series Instance UIDs to cache
             client: DICOM client for C-GET operations
             pacs: Target PACS node
+            progress: Optional mutable dict for reporting progress phases
 
         Returns:
             Dict mapping series_uid → MemoryCachedSeries for all requested series
@@ -389,6 +392,12 @@ class DicomWebCache:
 
         # Check all tiers for each series
         for series_uid in series_uids:
+            if progress is not None:
+                progress.update(
+                    status="checking_cache",
+                    cached_series=len(result),
+                    total_series=len(series_uids),
+                )
             # 1. Memory hit
             cached = self._get_from_memory(study_uid, series_uid)
             if cached is not None:
@@ -425,6 +434,8 @@ class DicomWebCache:
 
         if not missing_series:
             logger.debug(f"All {len(series_uids)} series for study {study_uid} found in cache")
+            if progress is not None:
+                progress["status"] = "ready"
             return result
 
         # Study-level lock to prevent duplicate study C-GETs
@@ -445,6 +456,8 @@ class DicomWebCache:
 
             if not still_missing:
                 logger.debug(f"All missing series for study {study_uid} resolved after lock")
+                if progress is not None:
+                    progress["status"] = "ready"
                 return result
 
             # Single study-level C-GET
@@ -452,7 +465,17 @@ class DicomWebCache:
                 f"Cache miss for {len(still_missing)} series — "
                 f"retrieving study {study_uid} via single DICOM retrieve"
             )
-            cget_result = await client.get_study_to_memory(study_uid=study_uid, peer=pacs)
+
+            on_progress: Callable[[int, int | None], None] | None = None
+            if progress is not None:
+                progress.update(status="fetching", received=0, total=None)
+
+                def on_progress(received: int, total: int | None) -> None:
+                    progress.update(status="fetching", received=received, total=total)  # type: ignore[union-attr]
+
+            cget_result = await client.get_study_to_memory(
+                study_uid=study_uid, peer=pacs, on_progress=on_progress
+            )
 
             if cget_result.num_completed == 0:
                 raise RuntimeError(
@@ -494,7 +517,21 @@ class DicomWebCache:
                 self._disk_write_tasks.add(task)
                 task.add_done_callback(self._disk_write_tasks.discard)
 
+            if progress is not None:
+                progress.update(status="ready", received=cget_result.num_completed)
+
         return result
+
+    # --- Preload progress store ---
+
+    def get_preload_progress(self, key: str) -> dict[str, Any] | None:
+        return self._preload_progress.get(key)
+
+    def set_preload_progress(self, key: str, data: dict[str, Any]) -> None:
+        self._preload_progress[key] = data
+
+    def clear_preload_progress(self, key: str) -> None:
+        self._preload_progress.pop(key, None)
 
     def read_instance_from_disk(
         self, study_uid: str, series_uid: str, instance_uid: str
@@ -628,12 +665,13 @@ class DicomWebCache:
 
     async def shutdown(self) -> None:
         """Cancel pending background disk-write tasks and clear memory cache."""
-        for task in self._disk_write_tasks:
+        tasks = list(self._disk_write_tasks)
+        for task in tasks:
             task.cancel()
 
-        if self._disk_write_tasks:
-            await asyncio.gather(*self._disk_write_tasks, return_exceptions=True)
-            logger.info(f"Cancelled {len(self._disk_write_tasks)} pending disk-write tasks")
+        if tasks:
+            await asyncio.wait(tasks, timeout=5.0)
+            logger.info(f"Cancelled {len(tasks)} pending disk-write tasks")
 
         self._disk_write_tasks.clear()
         self._memory_cache.clear()

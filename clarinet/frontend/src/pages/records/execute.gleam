@@ -61,6 +61,7 @@ fn render_record_execution(
         record.viewer_series_uids,
         option.map(record.record_type, fn(rt) { rt.level }),
         "btn btn-primary",
+        fn(url, study_uid) { store.StartPreload(url, study_uid) },
       ),
     ]),
     // Slicer toolbar (only if record type has slicer_script)
