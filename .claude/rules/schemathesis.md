@@ -73,6 +73,16 @@ make test-schema-verbose      # Verbose with tracebacks
 - **Excluded endpoints**: `/api/auth/login`, `/logout`, `/register` (fastapi-users auto-generated);
   `/api/records/{id}/submit` (Slicer-dependent); `/api/dicom/*`, `/api/slicer/*`, `/dicom-web/*` (external services).
 
+## Runtime and timeouts
+
+Schema tests take **~6-7 minutes** locally. Use `timeout 600` when running from scripts.
+
+Individual schema tests have `@pytest.mark.timeout(300)` to override the global 30s pytest-timeout default. Without this, hypothesis is killed before completing even a single test.
+
+**Distinguishing timeout types:**
+- **pytest-timeout** (this PR): `Timeout (>30.0s) from pytest-timeout` in stack trace — means the per-test timeout is too low, increase via `@pytest.mark.timeout(N)`
+- **Schemathesis boundary bug** (known, external): `_WrappedBaseException` / `FlakyFailure` after hypothesis generates extreme boundary values — not fixable, exclude `positive_data_acceptance` or increase `max_examples`
+
 ## Interpreting results
 
 Schemathesis subtests show as `,` (pass) or `F` (fail) within a single parametrized test.
