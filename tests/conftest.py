@@ -1,8 +1,7 @@
 """Global configuration for integration tests."""
 
-import asyncio
 import os
-from collections.abc import AsyncGenerator, Generator
+from collections.abc import AsyncGenerator
 from pathlib import Path
 from uuid import uuid4
 
