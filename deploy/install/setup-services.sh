@@ -71,8 +71,12 @@ setup_orthanc() {
     log "Setting up Orthanc PACS..."
     install_packages_if_missing orthanc
 
+    # Enable remote REST API access (needed for test fixtures that query Orthanc from host)
+    sed -i 's/"RemoteAccessAllowed"\s*:\s*false/"RemoteAccessAllowed" : true/' /etc/orthanc/orthanc.json
+
     systemctl enable --now orthanc
-    log "Orthanc running (DICOM: 4242, REST: 8042)"
+    systemctl restart orthanc
+    log "Orthanc running (DICOM: 4242, REST: 8042, remote API enabled)"
 }
 
 # --- Main ---

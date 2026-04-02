@@ -24,12 +24,22 @@ install_python() { install_python312; }
 
 # --- Step 3: venv + wheel ---
 install_wheel() {
-    log "Creating venv and installing Clarinet..."
+    log "Installing Clarinet..."
 
-    python3.12 -m venv --clear "$VENV_DIR"
+    if [[ ! -d "$VENV_DIR" ]]; then
+        python3.12 -m venv "$VENV_DIR"
+    fi
 
-    "$VENV_DIR/bin/pip" install --upgrade pip
-    "$VENV_DIR/bin/pip" install "${WHEEL_PATH}[pipeline,performance,dicom]"
+    # Offline install if dependency wheels were shipped, otherwise fallback to PyPI
+    local pip_extra_args=()
+    if [[ -d "${DEPLOY_DIR}/deps" ]]; then
+        log "Using offline dependency wheels from ${DEPLOY_DIR}/deps"
+        pip_extra_args=(--no-index --find-links "${DEPLOY_DIR}/deps")
+    else
+        "$VENV_DIR/bin/pip" install --upgrade pip
+    fi
+
+    "$VENV_DIR/bin/pip" install "${pip_extra_args[@]}" "${WHEEL_PATH}[performance]"
 
     chown -R clarinet:clarinet "$INSTALL_DIR"
     log "Clarinet installed to $VENV_DIR"
@@ -73,7 +83,14 @@ init_database() {
 install_ohif() {
     log "Installing OHIF Viewer..."
     cd "$INSTALL_DIR"
-    sudo -u clarinet "$VENV_DIR/bin/clarinet" ohif install --force-config || warn "OHIF install failed (non-critical)"
+    local ohif_args=(--force-config)
+    # Use local tarball if shipped (VM may lack internet)
+    local tarball
+    tarball=$(find "${DEPLOY_DIR}" -maxdepth 1 -name 'ohif-app-*.tgz' -print -quit 2>/dev/null)
+    if [[ -n "$tarball" ]]; then
+        ohif_args+=(--from-file "$tarball")
+    fi
+    sudo -u clarinet "$VENV_DIR/bin/clarinet" ohif install "${ohif_args[@]}" || warn "OHIF install failed (non-critical)"
     log "OHIF Viewer installed"
 }
 

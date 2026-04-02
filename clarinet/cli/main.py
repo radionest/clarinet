@@ -707,12 +707,17 @@ def _install_config_template(ohif_dir: Path) -> None:
         logger.warning("app-config.js template not found in package")
 
 
-def install_ohif(version: str | None = None, force_config: bool = False) -> None:
+def install_ohif(
+    version: str | None = None,
+    force_config: bool = False,
+    from_file: str | None = None,
+) -> None:
     """Download OHIF Viewer from npm and install into runtime directory.
 
     Args:
         version: OHIF version to install (default from settings).
         force_config: Overwrite existing app-config.js with package template.
+        from_file: Path to a local .tgz tarball (skip download).
     """
     version = version or settings.ohif_default_version
     ohif_dir = settings.ohif_path
@@ -723,18 +728,24 @@ def install_ohif(version: str | None = None, force_config: bool = False) -> None
         logger.info(f"OHIF Viewer v{version} already installed at {ohif_dir}")
         return
 
-    npm_url = f"https://registry.npmjs.org/@ohif/app/-/app-{version}.tgz"
-    logger.info(f"Downloading OHIF Viewer v{version} from npm...")
-
     with tempfile.TemporaryDirectory() as tmp:
         tmp_path = Path(tmp)
-        tarball = tmp_path / "ohif.tgz"
 
-        try:
-            urllib.request.urlretrieve(npm_url, tarball)
-        except Exception as e:
-            logger.error(f"Failed to download OHIF v{version}: {e}")
-            sys.exit(1)
+        if from_file:
+            tarball = Path(from_file)
+            if not tarball.exists():
+                logger.error(f"OHIF tarball not found: {from_file}")
+                sys.exit(1)
+            logger.info(f"Installing OHIF Viewer v{version} from {from_file}")
+        else:
+            npm_url = f"https://registry.npmjs.org/@ohif/app/-/app-{version}.tgz"
+            logger.info(f"Downloading OHIF Viewer v{version} from npm...")
+            tarball = tmp_path / "ohif.tgz"
+            try:
+                urllib.request.urlretrieve(npm_url, tarball)
+            except Exception as e:
+                logger.error(f"Failed to download OHIF v{version}: {e}")
+                sys.exit(1)
 
         with tarfile.open(tarball, "r:gz") as tf:
             tf.extractall(tmp_path)
@@ -803,7 +814,11 @@ def uninstall_ohif() -> None:
 def handle_ohif_command(args: argparse.Namespace) -> None:
     """Handle OHIF-related commands."""
     if args.ohif_command == "install":
-        install_ohif(version=args.version, force_config=args.force_config)
+        install_ohif(
+            version=args.version,
+            force_config=args.force_config,
+            from_file=getattr(args, "from_file", None),
+        )
     elif args.ohif_command == "status":
         ohif_status()
     elif args.ohif_command == "uninstall":
@@ -960,6 +975,12 @@ def main() -> None:
         "--force-config",
         action="store_true",
         help="Overwrite existing app-config.js with package template",
+    )
+    ohif_install_parser.add_argument(
+        "--from-file",
+        type=str,
+        default=None,
+        help="Path to local .tgz tarball (skip download)",
     )
 
     # ohif status
