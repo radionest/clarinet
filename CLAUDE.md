@@ -19,7 +19,7 @@ Clarinet is a framework for clinical-radiological studies, built on FastAPI, SQL
 - Type hints on all functions
 - Docstrings: required on public functions with non-obvious behavior. Skip on trivial CRUD where name + types suffice. Focus on "why", gotchas, raises
 - Custom exceptions from `clarinet.exceptions.http` (NOT_FOUND, CONFLICT, etc.)
-- Async/await for all I/O; `asyncio.gather()` for parallel independent tasks
+- Async/await for all I/O; `asyncio.gather()` for parallel independent tasks (except on shared `AsyncSession` — see `clarinet/CLAUDE.md`)
 
 ## Essential Commands
 
@@ -42,6 +42,8 @@ make test-unit                  # DB-only tests in parallel (no external service
 make test                       # All tests sequential
 make test-cov                   # With coverage
 make test-integration           # Integration tests only
+make test-all-stages            # Full pipeline (40min timeout): lint → unit → schema‖VM → fast → PG → E2E
+                                # SKIP_VM=1 / SKIP_SCHEMA=1 to skip heavy stages, KEEP_VM=1 to keep VM
 
 # Database
 make db-upgrade                 # Apply migrations

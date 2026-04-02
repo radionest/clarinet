@@ -13,6 +13,7 @@ Run:
 
 import asyncio
 import contextlib
+import os
 import socket
 import subprocess
 from pathlib import Path
@@ -28,10 +29,10 @@ from clarinet.services.dicom.scp import StorageSCP
 # Constants (same Orthanc as test_dicom_service.py)
 # ---------------------------------------------------------------------------
 
-PACS_HOST = "192.168.122.151"
-PACS_PORT = 4242
+PACS_HOST = os.environ.get("CLARINET_TEST_PACS_HOST", "192.168.122.151")
+PACS_PORT = int(os.environ.get("CLARINET_TEST_PACS_PORT", "4242"))
 PACS_AET = "ORTHANC"
-PACS_REST_URL = "http://192.168.122.151:8042"
+PACS_REST_URL = f"http://{PACS_HOST}:{os.environ.get('CLARINET_TEST_PACS_REST_PORT', '8042')}"
 CALLING_AET = "CMOVE_TEST"
 
 

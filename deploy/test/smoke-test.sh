@@ -92,7 +92,7 @@ COOKIE_FILE=$(mktemp)
 trap 'rm -f "$COOKIE_FILE"' EXIT
 
 # Read admin password from VM settings
-ADMIN_PASS=$(ssh -o StrictHostKeyChecking=no clarinet@"${IP}" \
+ADMIN_PASS=$(ssh -o StrictHostKeyChecking=no -i "$SSH_KEY_PATH" clarinet@"${IP}" \
     "grep '^admin_password' /opt/clarinet/settings.toml | head -1 | sed 's/.*= *\"//;s/\".*//'" 2>/dev/null || echo "")
 
 if [[ -n "$ADMIN_PASS" ]]; then

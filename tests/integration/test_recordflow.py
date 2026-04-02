@@ -3,7 +3,6 @@
 Uses clarinet_client fixture (real HTTP client → FastAPI app → in-memory SQLite).
 """
 
-import asyncio
 from collections.abc import AsyncGenerator
 
 import pytest
@@ -16,10 +15,11 @@ from clarinet.client import ClarinetClient
 from clarinet.models.base import DicomQueryLevel, RecordStatus
 from clarinet.models.patient import Patient
 from clarinet.models.record import RecordCreate, RecordRead, RecordType
-from clarinet.models.study import Study
+from clarinet.models.study import Series, Study
 from clarinet.services.recordflow import FlowRecord, FlowResult, RecordFlowEngine
 from clarinet.services.recordflow.flow_file import FILE_REGISTRY
 from clarinet.services.recordflow.flow_record import ENTITY_REGISTRY, RECORD_REGISTRY
+from clarinet.utils.logger import logger
 
 
 @pytest.fixture(autouse=True)
@@ -445,6 +445,8 @@ class TestRecordFlowRuntime:
         engine = RecordFlowEngine(clarinet_client)
         app.state.recordflow_engine = engine
         yield engine
+        for task in engine._background_tasks:
+            task.cancel()
         app.state.recordflow_engine = None
 
     @pytest.mark.asyncio
@@ -851,6 +853,8 @@ class TestRecordFlowInvalidationRuntime:
         engine = RecordFlowEngine(clarinet_client)
         app.state.recordflow_engine = engine
         yield engine
+        for task in engine._background_tasks:
+            task.cancel()
         app.state.recordflow_engine = None
 
     @pytest.mark.asyncio
@@ -1007,8 +1011,18 @@ class TestEntityFlowIntegration:
         record_types: dict[str, RecordType],
         test_patient: Patient,
         test_study: Study,
+        test_session: AsyncSession,
     ):
         """Engine entity flow creates a record when triggered for a series."""
+        # Series must exist in DB before engine creates a Record referencing it
+        series = Series(
+            series_uid="1.2.3.4.5.6.7.8.9.10",
+            study_uid=test_study.study_uid,
+            series_number=1,
+        )
+        test_session.add(series)
+        await test_session.commit()
+
         engine = RecordFlowEngine(clarinet_client)
 
         fr = FlowRecord("series", entity_trigger="series")
@@ -1043,6 +1057,8 @@ class TestEntityFlowRuntime:
         engine = RecordFlowEngine(clarinet_client)
         app.state.recordflow_engine = engine
         yield engine
+        for task in engine._background_tasks:
+            task.cancel()
         app.state.recordflow_engine = None
 
     @pytest.mark.asyncio
@@ -1071,16 +1087,18 @@ class TestEntityFlowRuntime:
         )
         assert resp.status_code == 201
 
-        # Verify: series_markup was created by the entity flow (fire-and-forget)
-        records = []
-        for _ in range(40):
-            records = await clarinet_client.find_records(
-                study_uid=test_study.study_uid,
-                record_type_name="series-markup",
-            )
-            if records:
-                break
-            await asyncio.sleep(0.05)
+        # Wait for fire-and-forget background tasks to finish before querying,
+        # because test_session is shared and doesn't support concurrent access.
+        for task in list(app_with_engine._background_tasks):
+            try:
+                await task
+            except Exception:
+                logger.opt(exception=True).warning("Background entity flow task failed")
+
+        records = await clarinet_client.find_records(
+            study_uid=test_study.study_uid,
+            record_type_name="series-markup",
+        )
         assert len(records) == 1
         assert records[0].series_uid == "9.8.7.6.5.4.3.2.1"
 
@@ -1112,15 +1130,18 @@ class TestEntityFlowRuntime:
         )
         assert resp.status_code == 201
 
-        records = []
-        for _ in range(40):
-            records = await clarinet_client.find_records(
-                study_uid="1.2.3.99.88.77.66",
-                record_type_name="first-check",
-            )
-            if records:
-                break
-            await asyncio.sleep(0.05)
+        # Wait for fire-and-forget background tasks to finish before querying,
+        # because test_session is shared and doesn't support concurrent access.
+        for task in list(app_with_engine._background_tasks):
+            try:
+                await task
+            except Exception:
+                logger.opt(exception=True).warning("Background entity flow task failed")
+
+        records = await clarinet_client.find_records(
+            study_uid="1.2.3.99.88.77.66",
+            record_type_name="first-check",
+        )
         assert len(records) == 1
 
 
@@ -1134,8 +1155,18 @@ class TestLazyAuthentication:
         record_types: dict[str, RecordType],
         test_patient: Patient,
         test_study: Study,
+        test_session: AsyncSession,
     ):
         """Engine calls _ensure_authenticated() and creates record without prior login."""
+        # Series must exist in DB before engine creates a Record referencing it
+        series = Series(
+            series_uid="1.2.3.99.88.77",
+            study_uid=test_study.study_uid,
+            series_number=1,
+        )
+        test_session.add(series)
+        await test_session.commit()
+
         # Client is NOT authenticated (auto_login=False, no login() called)
         assert clarinet_client._authenticated is False
 

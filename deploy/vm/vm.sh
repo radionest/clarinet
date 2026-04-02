@@ -310,12 +310,38 @@ cmd_deploy() {
         log "Using wheel: $(basename "$wheel")"
     fi
 
+    # Download dependency wheels on host (fast internet) for offline install on VM
+    local deps_dir="$PROJECT_DIR/dist/deps"
+    if [[ ! -d "$deps_dir" ]] || [[ -z "$(ls -A "$deps_dir" 2>/dev/null)" ]]; then
+        log "Downloading dependency wheels..."
+        mkdir -p "$deps_dir"
+        uv tool run --python 3.12 pip download \
+            -d "$deps_dir" \
+            "${wheel}[performance]"
+    else
+        log "Using cached dependency wheels from $deps_dir"
+    fi
+
+    # Download OHIF tarball on host (VM has no internet)
+    local ohif_version="3.12.0"
+    local ohif_tarball="$PROJECT_DIR/dist/ohif-app-${ohif_version}.tgz"
+    if [[ ! -f "$ohif_tarball" ]]; then
+        log "Downloading OHIF Viewer v${ohif_version}..."
+        mkdir -p "$PROJECT_DIR/dist"
+        curl -fsSL "https://registry.npmjs.org/@ohif/app/-/app-${ohif_version}.tgz" \
+            -o "$ohif_tarball"
+    else
+        log "Using cached OHIF tarball: $ohif_tarball"
+    fi
+
     # Create remote staging directory
     ssh_vm "mkdir -p /tmp/clarinet-deploy"
 
-    # Copy wheel + deploy scripts
+    # Copy wheel + deps + OHIF + deploy scripts
     log "Uploading deployment files..."
     scp "${scp_opts[@]}" "$wheel" "${ssh_target}:/tmp/clarinet-deploy/"
+    scp "${scp_opts[@]}" -r "$deps_dir" "${ssh_target}:/tmp/clarinet-deploy/"
+    scp "${scp_opts[@]}" "$ohif_tarball" "${ssh_target}:/tmp/clarinet-deploy/"
     scp "${scp_opts[@]}" -r "$DEPLOY_DIR/lib"     "${ssh_target}:/tmp/clarinet-deploy/"
     scp "${scp_opts[@]}" -r "$DEPLOY_DIR/install" "${ssh_target}:/tmp/clarinet-deploy/"
     scp "${scp_opts[@]}" -r "$DEPLOY_DIR/systemd" "${ssh_target}:/tmp/clarinet-deploy/"

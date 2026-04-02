@@ -53,6 +53,7 @@ _SUPPRESS = [HealthCheck.too_slow, HealthCheck.filter_too_much]
     deadline=None,
 )
 @pytest.mark.schema
+@pytest.mark.timeout(300)
 def test_api_conformance(case):
     """Validate API endpoints conform to their OpenAPI schema."""
     case.call_and_validate()
@@ -71,6 +72,7 @@ def test_api_conformance(case):
     deadline=None,
 )
 @pytest.mark.schema
+@pytest.mark.timeout(300)
 def test_no_server_errors(case):
     """Verify API never returns 500 on any generated input."""
     response = case.call()
@@ -85,6 +87,7 @@ def test_no_server_errors(case):
 
 
 @pytest.mark.schema
+@pytest.mark.timeout(300)
 def test_api_stateful(stateful_api_schema, stateful_db_engine):
     """Test CRUD operation chains via stateful state machine.
 

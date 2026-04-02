@@ -5,10 +5,10 @@ set -euo pipefail
 
 DB_USER="${CLARINET_DB_USER:-clarinet}"
 DB_NAME="${CLARINET_DB_NAME:-clarinet}"
-DB_PASS="${CLARINET_DB_PASS:-$(openssl rand -base64 16)}"
+DB_PASS="${CLARINET_DB_PASS:-$(openssl rand -hex 12)}"
 
 RABBIT_USER="${CLARINET_RABBIT_USER:-clarinet}"
-RABBIT_PASS="${CLARINET_RABBIT_PASS:-$(openssl rand -base64 16)}"
+RABBIT_PASS="${CLARINET_RABBIT_PASS:-$(openssl rand -hex 12)}"
 
 # logging.sh and provision.sh already sourced by caller (install-clarinet.sh)
 init_logging "services"
@@ -22,10 +22,10 @@ setup_postgresql() {
 
     # Create user if not exists
     if ! sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='${DB_USER}'" | grep -q 1; then
-        sudo -u postgres psql -c "CREATE USER ${DB_USER} WITH PASSWORD '${DB_PASS}';"
+        sudo -u postgres psql -c "CREATE USER ${DB_USER} WITH PASSWORD '${DB_PASS}' CREATEDB;"
         log "PostgreSQL user '${DB_USER}' created"
     else
-        sudo -u postgres psql -c "ALTER USER ${DB_USER} WITH PASSWORD '${DB_PASS}';"
+        sudo -u postgres psql -c "ALTER USER ${DB_USER} WITH PASSWORD '${DB_PASS}' CREATEDB;"
         log "PostgreSQL user '${DB_USER}' password updated"
     fi
 
@@ -71,8 +71,14 @@ setup_orthanc() {
     log "Setting up Orthanc PACS..."
     install_packages_if_missing orthanc
 
+    # Enable remote REST API access (needed for test fixtures that query Orthanc from host)
+    sed -i 's/"RemoteAccessAllowed"\s*:\s*false/"RemoteAccessAllowed" : true/' /etc/orthanc/orthanc.json
+    # Accept any called AET — tests use WRONG_AET to verify permissive behavior
+    sed -i 's/"DicomCheckCalledAet"\s*:\s*true/"DicomCheckCalledAet" : false/' /etc/orthanc/orthanc.json
+
     systemctl enable --now orthanc
-    log "Orthanc running (DICOM: 4242, REST: 8042)"
+    systemctl restart orthanc
+    log "Orthanc running (DICOM: 4242, REST: 8042, remote API enabled)"
 }
 
 # --- Main ---

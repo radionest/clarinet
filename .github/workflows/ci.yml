@@ -74,6 +74,64 @@ jobs:
           -x --json-report-file=test-report.json
           -q
 
+  test-postgres:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: clarinet_test
+          POSTGRES_PASSWORD: clarinet_test
+          POSTGRES_DB: clarinet_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U clarinet_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      rabbitmq:
+        image: rabbitmq:3-management
+        env:
+          RABBITMQ_DEFAULT_USER: clarinet_test
+          RABBITMQ_DEFAULT_PASS: clarinet_test
+        ports:
+          - 5672:5672
+          - 15672:15672
+        options: >-
+          --health-cmd "rabbitmq-diagnostics -q ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          cache-dependency-glob: "**/pyproject.toml"
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Run tests on PostgreSQL
+        env:
+          CLARINET_TEST_DATABASE_URL: postgresql+asyncpg://clarinet_test:clarinet_test@localhost:5432/clarinet_test
+          CLARINET_TEST_RABBITMQ_HOST: localhost
+          CLARINET_TEST_RABBITMQ_MANAGEMENT_USER: clarinet_test
+          CLARINET_TEST_RABBITMQ_MANAGEMENT_PASS: clarinet_test
+        run: >-
+          uv run pytest tests/
+          -m "not dicom and not slicer and not schema"
+          -q
+
   test-deploy:
     runs-on: ubuntu-latest
 

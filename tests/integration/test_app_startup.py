@@ -23,18 +23,26 @@ from clarinet.settings import settings
 from clarinet.utils.db_manager import db_manager
 
 
-@pytest_asyncio.fixture(autouse=True)
-async def _cleanup_startup_test_queues():
-    """Delete RabbitMQ queues created by startup tests."""
+@pytest_asyncio.fixture
+async def cleanup_startup_test_queues():
+    """Delete RabbitMQ queues created by startup tests.
+
+    Applied only to tests that actually create queues (pipeline enabled + real broker).
+    """
     yield
 
     import aio_pika
 
-    from tests.integration.conftest import RABBITMQ_HOST, RABBITMQ_PORT
+    from tests.integration.conftest import (
+        RABBITMQ_HOST,
+        RABBITMQ_PASS,
+        RABBITMQ_PORT,
+        RABBITMQ_USER,
+    )
 
     try:
-        url = f"amqp://clarinet_test:clarinet_test@{RABBITMQ_HOST}:{RABBITMQ_PORT}/"
-        connection = await aio_pika.connect_robust(url)
+        url = f"amqp://{RABBITMQ_USER}:{RABBITMQ_PASS}@{RABBITMQ_HOST}:{RABBITMQ_PORT}/"
+        connection = await aio_pika.connect(url, timeout=5)
         async with connection:
             channel = await connection.channel()
             for name in [
@@ -119,20 +127,25 @@ async def test_startup_pipeline_disabled(startup_settings, capture_logs):
 @pytest.mark.pipeline
 @pytest.mark.xdist_group("pipeline")
 async def test_startup_pipeline_enabled(
-    startup_settings, capture_logs, _check_rabbitmq, monkeypatch
+    startup_settings, capture_logs, _check_rabbitmq, cleanup_startup_test_queues, monkeypatch
 ):
     """App starts with ``pipeline_enabled=True`` and a real RabbitMQ broker.
 
     **Main regression test**: no "client login" or "All connection attempts
     failed" errors must appear.  The pipeline broker must be created.
     """
-    from tests.integration.conftest import RABBITMQ_HOST, RABBITMQ_PORT
+    from tests.integration.conftest import (
+        RABBITMQ_HOST,
+        RABBITMQ_PASS,
+        RABBITMQ_PORT,
+        RABBITMQ_USER,
+    )
 
     monkeypatch.setattr(settings, "pipeline_enabled", True)
     monkeypatch.setattr(settings, "rabbitmq_host", RABBITMQ_HOST)
     monkeypatch.setattr(settings, "rabbitmq_port", RABBITMQ_PORT)
-    monkeypatch.setattr(settings, "rabbitmq_login", "clarinet_test")
-    monkeypatch.setattr(settings, "rabbitmq_password", "clarinet_test")
+    monkeypatch.setattr(settings, "rabbitmq_login", RABBITMQ_USER)
+    monkeypatch.setattr(settings, "rabbitmq_password", RABBITMQ_PASS)
     monkeypatch.setattr(settings, "rabbitmq_exchange", "clarinet_startup_test")
 
     import clarinet.services.pipeline.broker as broker_mod

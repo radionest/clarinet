@@ -10,6 +10,7 @@ Run:
     uv run pytest -m "not dicom"   # exclude from CI
 """
 
+import os
 from pathlib import Path
 
 import pydicom
@@ -30,10 +31,10 @@ from clarinet.services.dicom.models import SeriesResult
 # Constants
 # ---------------------------------------------------------------------------
 
-PACS_HOST = "192.168.122.151"
-PACS_PORT = 4242
+PACS_HOST = os.environ.get("CLARINET_TEST_PACS_HOST", "192.168.122.151")
+PACS_PORT = int(os.environ.get("CLARINET_TEST_PACS_PORT", "4242"))
 PACS_AET = "ORTHANC"
-PACS_REST_URL = "http://192.168.122.151:8042"
+PACS_REST_URL = f"http://{PACS_HOST}:{os.environ.get('CLARINET_TEST_PACS_REST_PORT', '8042')}"
 CALLING_AET = "CLARINET_TEST"
 
 
@@ -823,19 +824,16 @@ async def test_move_series_unreachable_peer(tmp_path: Path) -> None:
 
 @pytest.mark.dicom
 @pytest.mark.asyncio
-async def test_find_studies_wrong_aet() -> None:
+async def test_find_studies_wrong_aet(pacs_available: None) -> None:
     """C-FIND with the wrong called AET against a real host.
 
-    Orthanc accepts any called AET, so the association succeeds and
-    returns results. This test documents that behaviour rather than
-    asserting a specific failure.
+    Orthanc is provisioned with DicomCheckCalledAet=false, so the
+    association succeeds regardless of called AET.
     """
     client = DicomClient(calling_aet=CALLING_AET)
     node = DicomNode(aet="WRONG_AET", host=PACS_HOST, port=PACS_PORT)
 
-    # Orthanc is permissive — it still answers; verify no crash.
     results = await client.find_studies(StudyQuery(), node, timeout=5)
-    # We only assert it didn't raise — Orthanc returns data regardless of AET.
     assert isinstance(results, list)
 
 

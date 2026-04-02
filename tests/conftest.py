@@ -1,7 +1,7 @@
 """Global configuration for integration tests."""
 
-import asyncio
-from collections.abc import AsyncGenerator, Generator
+import os
+from collections.abc import AsyncGenerator
 from pathlib import Path
 from uuid import uuid4
 
@@ -9,6 +9,7 @@ import pytest
 import pytest_asyncio
 from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -21,6 +22,7 @@ from clarinet.models import *  # noqa: F403
 from clarinet.models.user import User
 from clarinet.settings import Settings
 from clarinet.utils.database import get_async_session
+from clarinet.utils.logger import logger
 
 
 @pytest.fixture(autouse=True, scope="session")
@@ -51,14 +53,6 @@ def _disable_toml_export():
 
 
 @pytest.fixture(scope="session")
-def event_loop() -> Generator:
-    """Create event loop for the entire test session."""
-    loop = asyncio.get_event_loop_policy().new_event_loop()
-    yield loop
-    loop.close()
-
-
-@pytest.fixture(scope="session")
 def test_settings() -> Settings:
     """Test settings with in-memory SQLite."""
     return Settings(
@@ -75,20 +69,45 @@ def test_settings() -> Settings:
 
 
 @pytest_asyncio.fixture(scope="session")
-async def test_engine(test_settings):
-    """Create test database engine (one per session).
+async def test_engine(test_settings, worker_id):
+    """Create test database engine (one per xdist worker).
 
-    Uses StaticPool to ensure all connections share the same in-memory
-    SQLite database. Without StaticPool, each new connection would create
-    a separate empty database.
+    If CLARINET_TEST_DATABASE_URL is set, connects to PostgreSQL.
+    With xdist, each worker gets its own database (``<base>_gw0``, etc.)
+    to avoid race conditions on enum/table creation.
+    Otherwise falls back to SQLite in-memory with StaticPool.
     """
-    database_url = "sqlite+aiosqlite:///:memory:"
-    engine = create_async_engine(
-        database_url,
-        echo=False,
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
+    database_url = os.environ.get("CLARINET_TEST_DATABASE_URL", "")
+    worker_db = ""
+
+    if database_url:
+        base_url, base_db = database_url.rsplit("/", 1)
+        worker_db = f"{base_db}_{worker_id}" if worker_id != "master" else base_db
+
+        # CREATE/DROP DATABASE must run outside a transaction
+        admin_engine = create_async_engine(f"{base_url}/postgres", isolation_level="AUTOCOMMIT")
+        async with admin_engine.connect() as conn:
+            await conn.execute(text(f'DROP DATABASE IF EXISTS "{worker_db}"'))
+            await conn.execute(text(f'CREATE DATABASE "{worker_db}"'))
+        await admin_engine.dispose()
+
+        engine = create_async_engine(f"{base_url}/{worker_db}", echo=False, pool_pre_ping=True)
+    else:
+        database_url = "sqlite+aiosqlite:///:memory:"
+        engine = create_async_engine(
+            database_url,
+            echo=False,
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+
+    if database_url.startswith("sqlite"):
+
+        @event.listens_for(engine.sync_engine, "connect")
+        def _set_sqlite_fk_pragma(dbapi_conn, _connection_record):
+            cursor = dbapi_conn.cursor()
+            cursor.execute("PRAGMA foreign_keys=ON")
+            cursor.close()
 
     async with engine.begin() as conn:
         await conn.run_sync(SQLModel.metadata.create_all)
@@ -96,6 +115,12 @@ async def test_engine(test_settings):
     yield engine
 
     await engine.dispose()
+
+    if worker_db:
+        admin_engine = create_async_engine(f"{base_url}/postgres", isolation_level="AUTOCOMMIT")
+        async with admin_engine.connect() as conn:
+            await conn.execute(text(f'DROP DATABASE IF EXISTS "{worker_db}"'))
+        await admin_engine.dispose()
 
 
 @pytest_asyncio.fixture
@@ -515,13 +540,27 @@ async def test_record_type(test_session):
 
 
 @pytest_asyncio.fixture(autouse=True)
-async def clear_database(test_session):
+async def clear_database(test_session, test_engine, request):
     """Clear all table data after each test for isolation."""
     yield
-    await test_session.rollback()
-    for table in reversed(SQLModel.metadata.sorted_tables):
-        await test_session.execute(table.delete())
-    await test_session.commit()
+    test_name = request.node.nodeid
+    try:
+        await test_session.rollback()
+    except Exception as exc:
+        logger.warning(f"[clear_database] rollback failed for {test_name}: {exc}")
+    try:
+        if test_engine.dialect.name == "postgresql":
+            # Use a fresh connection — test_session may be in a broken state
+            # after FK violations from background tasks (entity flow).
+            async with test_engine.begin() as conn:
+                tables = ", ".join(f'"{t.name}"' for t in SQLModel.metadata.sorted_tables)
+                await conn.execute(text(f"TRUNCATE TABLE {tables} CASCADE"))
+        else:
+            for table in reversed(SQLModel.metadata.sorted_tables):
+                await test_session.execute(table.delete())
+            await test_session.commit()
+    except Exception as exc:
+        logger.error(f"[clear_database] cleanup failed for {test_name}: {exc}")
 
 
 @pytest_asyncio.fixture

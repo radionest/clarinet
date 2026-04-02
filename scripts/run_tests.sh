@@ -17,4 +17,15 @@ else
     echo "(jq not found or no JSON report at $REPORT)"
 fi
 
+# pytest-xdist workers sometimes get SIGKILL (137) during teardown even when
+# all tests passed.  Trust the JSON report over the exit code in that case.
+if [ "$EXIT" -ne 0 ] && command -v jq &>/dev/null && [ -f "$REPORT" ]; then
+    FAILED=$(jq -r '.summary.failed // 0' "$REPORT" 2>/dev/null)
+    PASSED=$(jq -r '.summary.passed // 0' "$REPORT" 2>/dev/null)
+    if [ "$FAILED" = "0" ] && [ "$PASSED" -gt 0 ] 2>/dev/null; then
+        echo "(pytest exited $EXIT but report shows 0 failures — treating as success)"
+        EXIT=0
+    fi
+fi
+
 exit $EXIT

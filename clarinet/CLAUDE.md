@@ -6,13 +6,11 @@
 
 ### `asyncio.gather` + AsyncSession
 
-`AsyncSession` is **not concurrency-safe**. All repositories in a single request share one session via FastAPI DI.
+`AsyncSession` is **not concurrency-safe**. All repositories in a single request share one session (and one DB connection) via FastAPI DI.
 
-`asyncio.gather` with **read-only SELECT queries** (count, list, scalar aggregates) is safe because:
-- Connection is pre-provisioned in `get_async_session` (`await session.connection()`)
-- No identity map mutations, no flush, no state transitions
+**Do NOT use `asyncio.gather()` with multiple queries on a shared session.** Even read-only queries deadlock on PostgreSQL: `asyncpg` connections handle one query at a time, so concurrent coroutines block each other. This appears to work on SQLite only because `aiosqlite` serializes operations through a dedicated thread.
 
-`asyncio.gather` with **write operations** (add, flush, delete, update) on the same session is **NOT safe** — will cause `InvalidRequestError` or `IllegalStateChangeError`. Use sequential `await` for writes.
+Use sequential `await` for all queries on a shared session. If true parallelism is needed, each coroutine must create its own session (via session factory) to get a separate connection from the pool.
 
 ## Lifespan Shutdown Pattern
 

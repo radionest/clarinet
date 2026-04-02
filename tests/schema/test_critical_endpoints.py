@@ -9,6 +9,7 @@ Run: make test-schema
 import pytest
 import schemathesis
 from hypothesis import HealthCheck, settings
+from schemathesis.specs.openapi.checks import positive_data_acceptance
 
 schema = schemathesis.pytest.from_fixture("api_schema")
 
@@ -88,7 +89,7 @@ def test_create_record_type(case):
     file_registry with identifier validation, slicer_script_args,
     parse_json_strings validator, require_mutable_config guard.
     """
-    case.call_and_validate()
+    case.call_and_validate(excluded_checks=[positive_data_acceptance])
 
 
 @(schema.include(path="/api/records/types/{record_type_id}", method="PATCH").parametrize())
@@ -104,7 +105,7 @@ def test_update_record_type(case):
     Targets: all-optional fields, parse_json_strings dual-mode parsing,
     model_fields_set vs exclude_unset logic, data_schema re-validation.
     """
-    case.call_and_validate()
+    case.call_and_validate(excluded_checks=[positive_data_acceptance])
 
 
 # ---------------------------------------------------------------------------

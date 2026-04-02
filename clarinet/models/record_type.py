@@ -13,7 +13,7 @@ from pydantic import field_validator, model_validator
 from sqlmodel import JSON, Column, Field, Relationship, SQLModel
 
 from clarinet.types import RecordSchema, SlicerArgs, SlicerHydratorNames
-from clarinet.utils.validators import validate_slug
+from clarinet.utils.validators import validate_json_safe, validate_slug
 
 from .base import DicomQueryLevel
 from .file_schema import FileDefinitionRead, RecordTypeFileLink
@@ -71,6 +71,13 @@ class RecordTypeBase(SQLModel):
 
     data_schema: RecordSchema | None = None
     slicer_context_hydrators: SlicerHydratorNames | None = None
+
+    @field_validator("data_schema", mode="after")
+    @classmethod
+    def validate_data_schema_safe(cls, v: RecordSchema | None) -> RecordSchema | None:
+        if v is not None:
+            validate_json_safe(v)
+        return v
 
 
 class RecordType(RecordTypeBase, table=True):
@@ -234,6 +241,13 @@ class RecordTypeOptional(SQLModel):
                 return json_lib.loads(v)
             except json_lib.JSONDecodeError as e:
                 raise ValueError(f"Invalid JSON: {e}") from e
+        return v
+
+    @field_validator("data_schema", mode="after")
+    @classmethod
+    def validate_data_schema_safe(cls, v: RecordSchema | None) -> RecordSchema | None:
+        if v is not None:
+            validate_json_safe(v)
         return v
 
 

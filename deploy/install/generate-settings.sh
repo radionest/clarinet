@@ -16,8 +16,18 @@ RABBIT_USER="${CLARINET_RABBIT_USER:-clarinet}"
 RABBIT_PASS="${CLARINET_RABBIT_PASS:-changeme}"
 
 SECRET_KEY="${CLARINET_SECRET_KEY:-$(openssl rand -hex 32)}"
-ADMIN_PASSWORD="${CLARINET_ADMIN_PASSWORD:-$(openssl rand -base64 12)}"
 ANON_SALT="${CLARINET_ANON_SALT:-$(openssl rand -hex 16)}"
+
+# Preserve existing admin_password on reruns (idempotent)
+EXISTING_ADMIN_PASSWORD=""
+if [[ -f "$SETTINGS_FILE" ]] && [[ -z "${CLARINET_ADMIN_PASSWORD:-}" ]]; then
+    EXISTING_ADMIN_PASSWORD=$(python3 -c "
+import tomllib, sys
+with open(sys.argv[1], 'rb') as f:
+    print(tomllib.load(f).get('admin_password', ''))
+" "$SETTINGS_FILE" 2>/dev/null) || EXISTING_ADMIN_PASSWORD=""
+fi
+ADMIN_PASSWORD="${CLARINET_ADMIN_PASSWORD:-${EXISTING_ADMIN_PASSWORD:-$(openssl rand -hex 8)}}"
 
 ROOT_URL="${CLARINET_ROOT_URL:-}"
 

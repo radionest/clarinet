@@ -644,24 +644,31 @@ async def test_anonymize_all_series_filtered(client, test_session, mock_anon_set
 
 @pytest.mark.asyncio
 async def test_anonymize_patient_not_found(client, test_session, mock_anon_settings) -> None:
-    """Study exists but patient does not → 404."""
+    """PatientNotFoundError during anonymization → 404.
+
+    FK constraints prevent orphan studies, so we create valid data and mock
+    the patient lookup to raise PatientNotFoundError.
+    """
     from datetime import UTC, datetime
 
+    from clarinet.exceptions.domain import PatientNotFoundError
     from clarinet.models.study import Study
+    from clarinet.repositories.patient_repository import PatientRepository
 
-    # Create study with a patient_id that doesn't exist as a Patient record
+    patient = make_patient("GHOST_PAT", "Ghost")
     study = Study(
         patient_id="GHOST_PAT",
         study_uid="1.2.606.1",
         date=datetime.now(UTC).date(),
     )
-    test_session.add(study)
+    test_session.add_all([patient, study])
     await test_session.commit()
 
-    response = await client.post(
-        "/api/dicom/studies/1.2.606.1/anonymize",
-        json={"save_to_disk": False, "send_to_pacs": False},
-    )
+    with patch.object(PatientRepository, "get", side_effect=PatientNotFoundError("GHOST_PAT")):
+        response = await client.post(
+            "/api/dicom/studies/1.2.606.1/anonymize",
+            json={"save_to_disk": False, "send_to_pacs": False},
+        )
 
     assert response.status_code == 404
 
