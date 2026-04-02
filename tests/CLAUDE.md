@@ -142,6 +142,8 @@ Commands: `make test-fast` (default, `-n auto`), `make test-unit` (DB-only), `ma
 
 Service markers: `pipeline` (RabbitMQ, `xdist_group`), `dicom` (PACS, read-only), `slicer` (`xdist_group`). Unreachable services auto-skip.
 
+**Do NOT run multiple `make test-*` targets in parallel.** Different test suites may conflict on DB schema creation, service ports, or shared fixtures. Always run them sequentially (one at a time).
+
 ## Verbosity
 
 Makefile targets use `-q` (quiet) by default. To debug hangs or failures, pass `-v` directly:
