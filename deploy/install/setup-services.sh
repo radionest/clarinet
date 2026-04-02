@@ -73,6 +73,8 @@ setup_orthanc() {
 
     # Enable remote REST API access (needed for test fixtures that query Orthanc from host)
     sed -i 's/"RemoteAccessAllowed"\s*:\s*false/"RemoteAccessAllowed" : true/' /etc/orthanc/orthanc.json
+    # Accept any called AET — tests use WRONG_AET to verify permissive behavior
+    sed -i 's/"DicomCheckCalledAet"\s*:\s*true/"DicomCheckCalledAet" : false/' /etc/orthanc/orthanc.json
 
     systemctl enable --now orthanc
     systemctl restart orthanc
