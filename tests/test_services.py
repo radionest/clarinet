@@ -16,7 +16,7 @@ from clarinet.exceptions.domain import (
 from clarinet.models.base import RecordStatus
 from clarinet.models.record import RecordTypeCreate, RecordTypeOptional
 from clarinet.models.study import Study
-from clarinet.models.user import User, UserRole
+from clarinet.models.user import User, UserCreate, UserRole, UserUpdate
 from clarinet.repositories.file_definition_repository import FileDefinitionRepository
 from clarinet.repositories.patient_repository import PatientRepository
 from clarinet.repositories.record_repository import RecordRepository
@@ -49,79 +49,66 @@ class TestUserService:
 
     @pytest.mark.asyncio
     async def test_create_user(self, env):
-        uid = uuid4()
         user = await env["service"].create_user(
-            {"id": uid, "email": "new@test.com", "password": "securepass"}
+            UserCreate(email="new@test.com", password="securepass")
         )
         assert user.email == "new@test.com"
         assert verify_password("securepass", user.hashed_password)
 
     @pytest.mark.asyncio
-    async def test_create_user_duplicate(self, env):
-        uid = uuid4()
-        await env["service"].create_user(
-            {"id": uid, "email": "dup@test.com", "password": "securepass"}
-        )
+    async def test_create_user_duplicate_email(self, env):
+        await env["service"].create_user(UserCreate(email="dup@test.com", password="securepass"))
         with pytest.raises(UserAlreadyExistsError):
             await env["service"].create_user(
-                {"id": uid, "email": "dup2@test.com", "password": "securepass"}
+                UserCreate(email="dup@test.com", password="securepass")
             )
 
     @pytest.mark.asyncio
     async def test_authenticate(self, env):
-        uid = uuid4()
-        await env["service"].create_user(
-            {"id": uid, "email": "auth@test.com", "password": "securepass"}
-        )
+        await env["service"].create_user(UserCreate(email="auth@test.com", password="securepass"))
         user = await env["service"].authenticate("auth@test.com", "securepass")
         assert user.email == "auth@test.com"
 
     @pytest.mark.asyncio
     async def test_authenticate_invalid_password(self, env):
-        uid = uuid4()
         await env["service"].create_user(
-            {"id": uid, "email": "authfail@test.com", "password": "securepass"}
+            UserCreate(email="authfail@test.com", password="securepass")
         )
         with pytest.raises(InvalidCredentialsError):
             await env["service"].authenticate("authfail@test.com", "wrongpassword")
 
     @pytest.mark.asyncio
     async def test_update_user_with_password(self, env):
-        uid = uuid4()
-        await env["service"].create_user(
-            {"id": uid, "email": "upd@test.com", "password": "oldpass"}
+        user = await env["service"].create_user(
+            UserCreate(email="upd@test.com", password="oldpassw")
         )
-        updated = await env["service"].update_user(uid, {"password": "newpass"})
-        assert verify_password("newpass", updated.hashed_password)
+        updated = await env["service"].update_user(user.id, UserUpdate(password="newpasswd"))
+        assert verify_password("newpasswd", updated.hashed_password)
 
     @pytest.mark.asyncio
     async def test_assign_role(self, env):
-        uid = uuid4()
-        await env["service"].create_user(
-            {"id": uid, "email": "role@test.com", "password": "pass1234"}
+        user = await env["service"].create_user(
+            UserCreate(email="role@test.com", password="pass1234")
         )
-        updated = await env["service"].assign_role(uid, "reviewer")
-        # Verify role was assigned via has_role
+        updated = await env["service"].assign_role(user.id, "reviewer")
         assert await env["service"].user_repo.has_role(updated, "reviewer")
 
     @pytest.mark.asyncio
     async def test_assign_role_already_has(self, env):
-        uid = uuid4()
-        await env["service"].create_user(
-            {"id": uid, "email": "role2@test.com", "password": "pass1234"}
+        user = await env["service"].create_user(
+            UserCreate(email="role2@test.com", password="pass1234")
         )
-        await env["service"].assign_role(uid, "reviewer")
+        await env["service"].assign_role(user.id, "reviewer")
         with pytest.raises(UserAlreadyHasRoleError):
-            await env["service"].assign_role(uid, "reviewer")
+            await env["service"].assign_role(user.id, "reviewer")
 
     @pytest.mark.asyncio
     async def test_remove_role(self, env):
-        uid = uuid4()
-        await env["service"].create_user(
-            {"id": uid, "email": "rmrole@test.com", "password": "pass1234"}
+        user = await env["service"].create_user(
+            UserCreate(email="rmrole@test.com", password="pass1234")
         )
-        await env["service"].assign_role(uid, "reviewer")
-        updated = await env["service"].remove_role(uid, "reviewer")
+        await env["service"].assign_role(user.id, "reviewer")
+        updated = await env["service"].remove_role(user.id, "reviewer")
         assert not await env["service"].user_repo.has_role(updated, "reviewer")
 
     @pytest.mark.asyncio
@@ -137,30 +124,25 @@ class TestUserService:
 
     @pytest.mark.asyncio
     async def test_activate_user(self, env):
-        uid = uuid4()
         user = await env["service"].create_user(
-            {"id": uid, "email": "act@test.com", "password": "pass1234"}
+            UserCreate(email="act@test.com", password="pass1234")
         )
         user.is_active = False
         await env["session"].commit()
-        activated = await env["service"].activate_user(uid)
+        activated = await env["service"].activate_user(user.id)
         assert activated.is_active is True
 
     @pytest.mark.asyncio
     async def test_deactivate_user(self, env):
-        uid = uuid4()
-        await env["service"].create_user(
-            {"id": uid, "email": "deact@test.com", "password": "pass1234"}
+        user = await env["service"].create_user(
+            UserCreate(email="deact@test.com", password="pass1234")
         )
-        deactivated = await env["service"].deactivate_user(uid)
+        deactivated = await env["service"].deactivate_user(user.id)
         assert deactivated.is_active is False
 
     @pytest.mark.asyncio
     async def test_list_users(self, env):
-        uid = uuid4()
-        await env["service"].create_user(
-            {"id": uid, "email": "list@test.com", "password": "pass1234"}
-        )
+        await env["service"].create_user(UserCreate(email="list@test.com", password="pass1234"))
         users = await env["service"].list_users()
         assert len(users) >= 1
 

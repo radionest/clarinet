@@ -58,9 +58,9 @@ class UserNotFoundError(EntityNotFoundError):
 class UserAlreadyExistsError(EntityAlreadyExistsError):
     """Raised when trying to create a user that already exists."""
 
-    def __init__(self, user_id: UUID):
-        self.user_id = user_id
-        super().__init__(f"User with ID '{user_id}' already exists")
+    def __init__(self, email: str):
+        self.email = email
+        super().__init__(f"User with email '{email}' already exists")
 
 
 class InvalidCredentialsError(AuthenticationError):

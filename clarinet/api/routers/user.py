@@ -107,8 +107,7 @@ async def create_user(
     _current_user: SuperUserDep,
 ) -> User:
     """Create a new user."""
-    user_data = user.model_dump()
-    return await service.create_user(user_data)
+    return await service.create_user(user)
 
 
 @router.put("/{user_id}", response_model=UserRead)
@@ -119,8 +118,7 @@ async def update_user(
     _current_user: SuperUserDep,
 ) -> User:
     """Update a user's information."""
-    update_data = user_update.model_dump(exclude_unset=True)
-    return await service.update_user(user_id, update_data)
+    return await service.update_user(user_id, user_update)
 
 
 @router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
