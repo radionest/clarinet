@@ -55,7 +55,7 @@ BAD_REQUEST = CustomHTTPException(
 )
 
 UNPROCESSABLE_ENTITY = CustomHTTPException(
-    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
     detail="The request data is invalid",
 )
 

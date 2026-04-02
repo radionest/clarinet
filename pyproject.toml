@@ -184,6 +184,6 @@ filterwarnings = [
     "ignore:.*datetime.datetime.utcnow.*:DeprecationWarning:nrrd",
     # sqlmodel._compat: pydantic validator "deprecated" warning
     "ignore:deprecated:DeprecationWarning:sqlmodel._compat",
-    # starlette: HTTP_422_UNPROCESSABLE_ENTITY renamed (fixed in our code, remains in starlette internals)
-    "ignore:.*HTTP_422_UNPROCESSABLE_ENTITY.*:DeprecationWarning:starlette",
+    # starlette: HTTP_422_UNPROCESSABLE_ENTITY renamed to HTTP_422_UNPROCESSABLE_CONTENT
+    "ignore:.*HTTP_422_UNPROCESSABLE_ENTITY.*:DeprecationWarning",
 ]
