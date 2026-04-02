@@ -54,6 +54,9 @@ class TestUserService:
         )
         assert user.email == "new@test.com"
         assert verify_password("securepass", user.hashed_password)
+        assert user.is_active is True
+        assert user.is_superuser is False
+        assert user.is_verified is False
 
     @pytest.mark.asyncio
     async def test_create_user_duplicate_email(self, env):
@@ -84,6 +87,23 @@ class TestUserService:
         )
         updated = await env["service"].update_user(user.id, UserUpdate(password="newpasswd"))
         assert verify_password("newpasswd", updated.hashed_password)
+
+    @pytest.mark.asyncio
+    async def test_update_user_password_none_keeps_old(self, env):
+        user = await env["service"].create_user(
+            UserCreate(email="nullpw@test.com", password="oldpassw")
+        )
+        updated = await env["service"].update_user(user.id, UserUpdate(password=None))
+        assert verify_password("oldpassw", updated.hashed_password)
+
+    @pytest.mark.asyncio
+    async def test_update_user_without_password(self, env):
+        user = await env["service"].create_user(
+            UserCreate(email="nopw@test.com", password="keepthis")
+        )
+        updated = await env["service"].update_user(user.id, UserUpdate(is_active=False))
+        assert updated.is_active is False
+        assert verify_password("keepthis", updated.hashed_password)
 
     @pytest.mark.asyncio
     async def test_assign_role(self, env):
