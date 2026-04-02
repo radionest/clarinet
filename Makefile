@@ -160,14 +160,137 @@ test-py312: ## Run unit tests on Python 3.12 (requires uv + python3.12)
 	@echo "Running unit tests on Python 3.12..."
 	@uv run --python 3.12 pytest tests/ -n auto --dist loadgroup -m "$(PYTEST_UNIT_MARKERS)" -q
 
+.PHONY: test-all-stages
+test-all-stages: ## Full pipeline: lint → unit → schema‖VM → fast → PG → E2E (40min timeout)
+	@timeout 2400 $(MAKE) _test-all-stages-impl
+
+.PHONY: _test-all-stages-impl
+_test-all-stages-impl:
+	@echo ""
+	@echo "=========================================="
+	@echo "  Stage 1/8: lint + typecheck + frontend  "
+	@echo "=========================================="
+	@$(MAKE) lint & LINT_PID=$$!; \
+	$(MAKE) typecheck & TC_PID=$$!; \
+	$(MAKE) frontend-test & FE_PID=$$!; \
+	FAIL=0; \
+	wait $$LINT_PID || FAIL=1; \
+	wait $$TC_PID || FAIL=1; \
+	wait $$FE_PID || FAIL=1; \
+	if [ $$FAIL -ne 0 ]; then echo "Stage 1 FAILED"; exit 1; fi
+	@echo ""
+	@echo "=========================================="
+	@echo "  Stage 2/8: test-unit (DB-only, xdist)   "
+	@echo "=========================================="
+	@./scripts/run_tests.sh -n auto --dist loadgroup -m "not pipeline and not dicom and not slicer and not schema" -q
+	@echo ""
+	@echo "=========================================="
+	@echo "  Stage 3/8: schema tests ‖ VM provision  "
+	@echo "=========================================="
+	@if [ "$${SKIP_VM}" != "1" ]; then \
+		echo "Starting VM provision in background..."; \
+		( bash $(VM_SH) reimage && \
+		  rm -rf dist/ && \
+		  $(MAKE) build && \
+		  bash $(VM_SH) deploy dist/*.whl && \
+		  echo "VM provisioned and deployed." >&2 \
+		) > /tmp/clarinet-vm-provision.log 2>&1 & \
+		VM_PID=$$!; \
+	else \
+		echo "SKIP_VM=1 — VM provision skipped"; \
+		VM_PID=""; \
+	fi; \
+	SCHEMA_EXIT=0; \
+	if [ "$${SKIP_SCHEMA}" = "1" ]; then \
+		echo "SKIP_SCHEMA=1 — schema tests skipped"; \
+	else \
+		./scripts/run_tests.sh tests/schema/ -m schema --no-header -q || SCHEMA_EXIT=$$?; \
+	fi; \
+	if [ -n "$$VM_PID" ]; then \
+		echo "Waiting for VM provision to finish..."; \
+		wait $$VM_PID || { echo "VM provision FAILED (see /tmp/clarinet-vm-provision.log)"; exit 1; }; \
+		echo "Waiting for services to start (15s)..."; \
+		sleep 15; \
+	fi; \
+	if [ $$SCHEMA_EXIT -ne 0 ]; then echo "Schema tests FAILED"; exit 1; fi
+	@echo ""
+	@echo "=========================================="
+	@echo "  Stage 4/8: vm-test-lib (deploy scripts)  "
+	@echo "=========================================="
+	@uv run pytest deploy/test/test_deploy_lib.py -v
+	@if [ "$${SKIP_VM}" = "1" ]; then \
+		echo ""; \
+		echo "=========================================="; \
+		echo "  Stage 5/8: test-fast — no VM, skip ext  "; \
+		echo "=========================================="; \
+		./scripts/run_tests.sh -n auto --dist loadgroup -m "not pipeline and not dicom and not slicer and not schema" -q; \
+	else \
+		echo ""; \
+		echo "=========================================="; \
+		echo "  Stage 5/8: test-fast (all, xdist + VM)  "; \
+		echo "=========================================="; \
+		VM_IP=$$(bash $(VM_SH) ip 2>/dev/null); \
+		CLARINET_TEST_PACS_HOST="$$VM_IP" ./scripts/run_tests.sh -n auto --dist loadgroup -m "not schema" -q; \
+	fi
+	@if [ "$${SKIP_VM}" = "1" ]; then \
+		echo ""; \
+		echo "=========================================="; \
+		echo "  Stages 6-8: VM — SKIPPED                "; \
+		echo "=========================================="; \
+	else \
+		echo ""; \
+		echo "=========================================="; \
+		echo "  Stage 6/8: VM tests (PostgreSQL)         "; \
+		echo "=========================================="; \
+		bash scripts/vm-run-tests.sh; \
+		echo ""; \
+		echo "=========================================="; \
+		echo "  Stage 7/8: VM smoke + acceptance + e2e   "; \
+		echo "=========================================="; \
+		bash deploy/test/smoke-test.sh; \
+		VM_IP=$$(bash $(VM_SH) ip 2>/dev/null); \
+		. deploy/vm/vm.conf; \
+		ADMIN_PASS=$$(ssh -o StrictHostKeyChecking=no -i "$$SSH_KEY_PATH" clarinet@$$VM_IP \
+			"python3 -c \"import tomllib; print(tomllib.load(open('/opt/clarinet/settings.toml','rb'))['admin_password'])\""); \
+		CLARINET_TEST_URL="https://$$VM_IP$${PATH_PREFIX}" \
+		CLARINET_TEST_ADMIN_PASSWORD="$$ADMIN_PASS" \
+		uv run pytest deploy/test/acceptance/ -v; \
+		CLARINET_TEST_URL="https://$$VM_IP$${PATH_PREFIX}" \
+		CLARINET_TEST_ADMIN_PASSWORD="$$ADMIN_PASS" \
+		uv run --group e2e pytest deploy/test/e2e/ -v --browser chromium; \
+		echo ""; \
+		echo "=========================================="; \
+		echo "  Stage 8/8: VM cleanup                    "; \
+		echo "=========================================="; \
+		if [ "$${KEEP_VM}" = "1" ]; then \
+			echo "KEEP_VM=1 — VM will not be destroyed"; \
+		else \
+			bash $(VM_SH) destroy; \
+		fi; \
+	fi
+	@echo ""
+	@echo "=========================================="
+	@echo "  All stages passed!                      "
+	@echo "=========================================="
+
 # =============================================================================
 # Build and Install Commands
 # =============================================================================
 
 .PHONY: build
-build: frontend-build ## Build complete package (backend + frontend)
+build: frontend-build ## Build complete package (backend + frontend + deps)
 	@echo "Building Clarinet package..."
 	@uv build
+	@$(MAKE) build-deps
+
+.PHONY: build-deps
+build-deps: ## Download dependency wheels for offline VM install
+	@WHEEL=$$(ls -t dist/*.whl 2>/dev/null | head -1); \
+	if [ -z "$$WHEEL" ]; then echo "No wheel found in dist/ — run 'make build' first"; exit 1; fi; \
+	echo "Downloading dependency wheels for $$WHEEL..."; \
+	mkdir -p dist/deps; \
+	uv tool run --python 3.12 pip download \
+		-d dist/deps "$$WHEEL[performance]"
 
 .PHONY: dev-setup
 dev-setup: ## Set up development environment
