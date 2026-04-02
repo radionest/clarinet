@@ -141,21 +141,17 @@ pub fn json_edge_cases_test() {
   |> should.be_ok
 }
 
-// Test the contract of public HTTP methods
+// Test the contract of public HTTP methods (compile-time check only —
+// actual calls require browser `window` which is unavailable in Node.js)
 pub fn request_building_contract_test() {
-  // Test GET request creates a promise
-  let _get_promise = http_client.get("/test")
+  let _ = http_client.get
+  let _ = http_client.post
+  let _ = http_client.put
+  let _ = http_client.delete
+  let _ = http_client.patch
+  let _ = http_client.post_multipart
+  let _ = http_client.decode_response
 
-  // Test POST request creates a promise
-  let _post_promise = http_client.post("/test", "{\"data\":\"test\"}")
-
-  // Test PUT request creates a promise
-  let _put_promise = http_client.put("/test", "{\"data\":\"test\"}")
-
-  // Test DELETE request creates a promise
-  let _delete_promise = http_client.delete("/test")
-
-  // If these compile without errors, the contract is satisfied
   should.equal(True, True)
 }
 
