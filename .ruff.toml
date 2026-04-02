@@ -65,6 +65,7 @@ ignore = [
     "ASYNC210",  # pathlib in async — assumes trio/anyio, not relevant for pure asyncio
     "ASYNC220",  # subprocess in async — same reason
     "ASYNC230",  # open() in async — same reason
+    "ASYNC240",  # os.path / pathlib in async — same reason
     "UP042",     # str+Enum -> StrEnum — requires careful migration (serialize compat)
 ]
 
