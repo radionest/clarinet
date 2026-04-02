@@ -23,9 +23,12 @@ from clarinet.settings import settings
 from clarinet.utils.db_manager import db_manager
 
 
-@pytest_asyncio.fixture(autouse=True)
-async def _cleanup_startup_test_queues():
-    """Delete RabbitMQ queues created by startup tests."""
+@pytest_asyncio.fixture
+async def cleanup_startup_test_queues():
+    """Delete RabbitMQ queues created by startup tests.
+
+    Applied only to tests that actually create queues (pipeline enabled + real broker).
+    """
     yield
 
     import aio_pika
@@ -119,7 +122,7 @@ async def test_startup_pipeline_disabled(startup_settings, capture_logs):
 @pytest.mark.pipeline
 @pytest.mark.xdist_group("pipeline")
 async def test_startup_pipeline_enabled(
-    startup_settings, capture_logs, _check_rabbitmq, monkeypatch
+    startup_settings, capture_logs, _check_rabbitmq, cleanup_startup_test_queues, monkeypatch
 ):
     """App starts with ``pipeline_enabled=True`` and a real RabbitMQ broker.
 
