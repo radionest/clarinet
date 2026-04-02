@@ -180,4 +180,10 @@ filterwarnings = [
     "ignore::ResourceWarning:pynetdicom",
     # SQLAlchemy async cleanup race condition in e2e tests
     "ignore:.*coroutine.*was never awaited.*:RuntimeWarning",
+    # nrrd: datetime.utcnow() deprecated in Python 3.12+
+    "ignore:.*datetime.datetime.utcnow.*:DeprecationWarning:nrrd",
+    # sqlmodel: pydantic validator deprecation
+    "ignore::DeprecationWarning:sqlmodel",
+    # starlette: HTTP_422_UNPROCESSABLE_ENTITY renamed (fixed in our code, remains in starlette internals)
+    "ignore:.*HTTP_422_UNPROCESSABLE_ENTITY.*:DeprecationWarning:starlette",
 ]
