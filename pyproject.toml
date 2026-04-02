@@ -185,4 +185,10 @@ filterwarnings = [
     "ignore::ResourceWarning:pynetdicom",
     # SQLAlchemy async cleanup race condition in e2e tests
     "ignore:.*coroutine.*was never awaited.*:RuntimeWarning",
+    # nrrd: datetime.utcnow() deprecated in Python 3.12+
+    "ignore:.*datetime.datetime.utcnow.*:DeprecationWarning:nrrd",
+    # sqlmodel._compat: pydantic validator "deprecated" warning
+    "ignore:deprecated:DeprecationWarning:sqlmodel._compat",
+    # starlette: HTTP_422_UNPROCESSABLE_ENTITY renamed to HTTP_422_UNPROCESSABLE_CONTENT
+    "ignore:.*HTTP_422_UNPROCESSABLE_ENTITY.*:DeprecationWarning",
 ]
