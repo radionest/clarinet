@@ -42,6 +42,8 @@ make test-unit                  # DB-only tests in parallel (no external service
 make test                       # All tests sequential
 make test-cov                   # With coverage
 make test-integration           # Integration tests only
+make test-all-stages            # Full pipeline (40min timeout): lint → unit → schema‖VM → fast → PG → E2E
+                                # SKIP_VM=1 / SKIP_SCHEMA=1 to skip heavy stages, KEEP_VM=1 to keep VM
 
 # Database
 make db-upgrade                 # Apply migrations
