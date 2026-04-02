@@ -34,7 +34,7 @@ async def _cleanup_startup_test_queues():
 
     try:
         url = f"amqp://clarinet_test:clarinet_test@{RABBITMQ_HOST}:{RABBITMQ_PORT}/"
-        connection = await aio_pika.connect_robust(url)
+        connection = await aio_pika.connect(url, timeout=5)
         async with connection:
             channel = await connection.channel()
             for name in [
