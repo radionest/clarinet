@@ -8,53 +8,19 @@ WHEEL_PATH="${1:?Usage: install-clarinet.sh <wheel_path> <deploy_dir> [--skip-se
 DEPLOY_DIR="${2:?Usage: install-clarinet.sh <wheel_path> <deploy_dir>}"
 SKIP_SERVICES="${3:-}"
 
-INSTALL_DIR="/opt/clarinet"
-VENV_DIR="${INSTALL_DIR}/venv"
-DATA_DIR="/var/lib/clarinet/data"
-LOG_DIR="/var/log/clarinet"
-
 PATH_PREFIX="${CLARINET_PATH_PREFIX:-/}"
 
 source "${DEPLOY_DIR}/lib/logging.sh"
 init_logging "install"
+source "${DEPLOY_DIR}/lib/provision.sh"
 
-# --- Step 1: System user ---
-setup_user() {
-    if id clarinet &>/dev/null; then
-        log "System user 'clarinet' already exists"
-    else
-        useradd --system --home-dir "$INSTALL_DIR" --create-home --shell /bin/bash clarinet
-        log "Created system user 'clarinet'"
-    fi
-    mkdir -p "$INSTALL_DIR" "$DATA_DIR" "$LOG_DIR"
-    chown -R clarinet:clarinet "$INSTALL_DIR" "$DATA_DIR" "$LOG_DIR"
-}
+VENV_DIR="${INSTALL_DIR}/venv"
 
-# --- Step 2: Python 3.12 ---
-install_python() {
-    if python3.12 --version &>/dev/null; then
-        log "Python 3.12 already installed"
-    else
-        log "Installing Python 3.12 via deadsnakes PPA..."
-        apt-get update -qq
-        apt-get install -y -qq software-properties-common > /dev/null
-        add-apt-repository -y ppa:deadsnakes/ppa > /dev/null 2>&1
-        apt-get update -qq
-        apt-get install -y -qq python3.12 > /dev/null
-        log "Python 3.12 installed"
-    fi
+# --- Step 1: System user (delegated to provision.sh) ---
+setup_user() { setup_clarinet_user; }
 
-    # Ensure venv and dev packages are present (cloud images often ship
-    # python3.12 without python3.12-venv or python3.12-dev)
-    local missing=()
-    dpkg -s python3.12-venv &>/dev/null || missing+=(python3.12-venv)
-    dpkg -s python3.12-dev  &>/dev/null || missing+=(python3.12-dev)
-    if [[ ${#missing[@]} -gt 0 ]]; then
-        log "Installing ${missing[*]}..."
-        apt-get update -qq
-        apt-get install -y -qq "${missing[@]}" > /dev/null
-    fi
-}
+# --- Step 2: Python 3.12 (delegated to provision.sh) ---
+install_python() { install_python312; }
 
 # --- Step 3: venv + wheel ---
 install_wheel() {
@@ -128,7 +94,7 @@ install_systemd() {
 # --- Step 9: Nginx ---
 install_nginx() {
     log "Setting up nginx..."
-    apt-get install -y -qq nginx > /dev/null
+    install_packages_if_missing nginx
 
     # Generate SSL cert
     bash "${DEPLOY_DIR}/nginx/generate-ssl.sh"

@@ -1,6 +1,5 @@
 """Service layer for user business logic."""
 
-from typing import Any
 from uuid import UUID, uuid4
 
 from clarinet.exceptions.domain import (
@@ -9,7 +8,7 @@ from clarinet.exceptions.domain import (
     UserAlreadyExistsError,
     UserAlreadyHasRoleError,
 )
-from clarinet.models import User, UserRole
+from clarinet.models import User, UserCreate, UserRole, UserUpdate
 from clarinet.repositories.user_repository import UserRepository
 from clarinet.utils.auth import get_password_hash, verify_password
 
@@ -53,58 +52,39 @@ class UserService:
         """
         return await self.user_repo.get_with_roles(user_id)
 
-    async def create_user(self, user_data: dict[str, Any]) -> User:
+    async def create_user(self, data: UserCreate) -> User:
         """Create new user with hashed password.
 
-        Args:
-            user_data: User data dictionary
-
-        Returns:
-            Created user
-
         Raises:
-            UserAlreadyExistsError: If user already exists
+            UserAlreadyExistsError: If user with this email already exists
         """
-        # Generate ID if not provided (e.g. when using UserCreate schema)
-        if "id" not in user_data:
-            user_data["id"] = uuid4()
+        if await self.user_repo.find_by_email(data.email) is not None:
+            raise UserAlreadyExistsError(data.email)
 
-        # Check if user exists
-        if await self.user_repo.exists(id=user_data["id"]):
-            raise UserAlreadyExistsError(user_data["id"])
-
-        # Hash password if provided
-        if "password" in user_data:
-            user_data["hashed_password"] = get_password_hash(user_data.pop("password"))
-        elif "hashed_password" in user_data:
-            user_data["hashed_password"] = get_password_hash(user_data["hashed_password"])
-
-        # Create user
-        user = User(**user_data)
+        user = User(
+            id=uuid4(),
+            email=data.email,
+            hashed_password=get_password_hash(data.password),
+            is_active=data.is_active if data.is_active is not None else True,
+            is_superuser=data.is_superuser if data.is_superuser is not None else False,
+            is_verified=data.is_verified if data.is_verified is not None else False,
+        )
         return await self.user_repo.create(user)
 
-    async def update_user(self, user_id: UUID, update_data: dict[str, Any]) -> User:
+    async def update_user(self, user_id: UUID, data: UserUpdate) -> User:
         """Update user information.
-
-        Args:
-            user_id: User ID
-            update_data: Dictionary with fields to update
-
-        Returns:
-            Updated user
 
         Raises:
             EntityNotFoundError: If user doesn't exist
         """
         user = await self.user_repo.get(user_id)
 
-        # Hash password if being updated
-        if "password" in update_data:
-            update_data["hashed_password"] = get_password_hash(update_data.pop("password"))
-        elif "hashed_password" in update_data:
-            update_data["hashed_password"] = get_password_hash(update_data["hashed_password"])
+        update_fields = data.model_dump(exclude_unset=True, exclude={"password"})
 
-        return await self.user_repo.update(user, update_data)
+        if data.password is not None:
+            update_fields["hashed_password"] = get_password_hash(data.password)
+
+        return await self.user_repo.update(user, update_fields)
 
     async def delete_user(self, user_id: UUID) -> None:
         """Delete user.
