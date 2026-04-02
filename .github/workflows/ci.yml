@@ -92,6 +92,20 @@ jobs:
           --health-timeout 5s
           --health-retries 5
 
+      rabbitmq:
+        image: rabbitmq:3-management
+        env:
+          RABBITMQ_DEFAULT_USER: clarinet_test
+          RABBITMQ_DEFAULT_PASS: clarinet_test
+        ports:
+          - 5672:5672
+          - 15672:15672
+        options: >-
+          --health-cmd "rabbitmq-diagnostics -q ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - uses: actions/checkout@v4
 
@@ -110,9 +124,12 @@ jobs:
       - name: Run tests on PostgreSQL
         env:
           CLARINET_TEST_DATABASE_URL: postgresql+asyncpg://clarinet_test:clarinet_test@localhost:5432/clarinet_test
+          CLARINET_TEST_RABBITMQ_HOST: localhost
+          CLARINET_TEST_RABBITMQ_MANAGEMENT_USER: clarinet_test
+          CLARINET_TEST_RABBITMQ_MANAGEMENT_PASS: clarinet_test
         run: >-
           uv run pytest tests/
-          -m "${{ env.PYTEST_UNIT_MARKERS }}"
+          -m "not dicom and not slicer and not schema"
           -q
 
   test-deploy:

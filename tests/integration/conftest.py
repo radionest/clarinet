@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import os
 import socket
 from collections.abc import AsyncGenerator, Generator
 from pathlib import Path
@@ -19,21 +20,26 @@ from clarinet.services.slicer.service import SlicerService
 
 # ─── Pipeline / RabbitMQ fixtures ────────────────────────────────────────────
 
-RABBITMQ_HOST = "192.168.122.151"  # klara VM
-RABBITMQ_PORT = 5672
-RABBITMQ_MANAGEMENT_PORT = 15672
-RABBITMQ_MANAGEMENT_AUTH = ("clarinet", "clarinet")
+RABBITMQ_HOST = os.environ.get("CLARINET_TEST_RABBITMQ_HOST", "192.168.122.151")
+RABBITMQ_PORT = int(os.environ.get("CLARINET_TEST_RABBITMQ_PORT", "5672"))
+RABBITMQ_MANAGEMENT_PORT = int(os.environ.get("CLARINET_TEST_RABBITMQ_MANAGEMENT_PORT", "15672"))
+RABBITMQ_USER = os.environ.get("CLARINET_TEST_RABBITMQ_USER", "clarinet_test")
+RABBITMQ_PASS = os.environ.get("CLARINET_TEST_RABBITMQ_PASS", "clarinet_test")
+RABBITMQ_MANAGEMENT_AUTH = (
+    os.environ.get("CLARINET_TEST_RABBITMQ_MANAGEMENT_USER", "clarinet"),
+    os.environ.get("CLARINET_TEST_RABBITMQ_MANAGEMENT_PASS", "clarinet"),
+)
 
 
 @pytest.fixture(scope="session")
 def rabbitmq_url() -> str:
-    """AMQP connection URL for RabbitMQ on klara."""
-    return f"amqp://clarinet_test:clarinet_test@{RABBITMQ_HOST}:{RABBITMQ_PORT}/"
+    """AMQP connection URL for RabbitMQ."""
+    return f"amqp://{RABBITMQ_USER}:{RABBITMQ_PASS}@{RABBITMQ_HOST}:{RABBITMQ_PORT}/"
 
 
 @pytest.fixture(scope="session")
 def _check_rabbitmq() -> None:
-    """Skip all pipeline tests if RabbitMQ on klara is unreachable."""
+    """Skip all pipeline tests if RabbitMQ is unreachable."""
     try:
         sock = socket.create_connection((RABBITMQ_HOST, RABBITMQ_PORT), timeout=3)
         sock.close()

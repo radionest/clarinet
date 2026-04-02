@@ -33,10 +33,15 @@ async def cleanup_startup_test_queues():
 
     import aio_pika
 
-    from tests.integration.conftest import RABBITMQ_HOST, RABBITMQ_PORT
+    from tests.integration.conftest import (
+        RABBITMQ_HOST,
+        RABBITMQ_PASS,
+        RABBITMQ_PORT,
+        RABBITMQ_USER,
+    )
 
     try:
-        url = f"amqp://clarinet_test:clarinet_test@{RABBITMQ_HOST}:{RABBITMQ_PORT}/"
+        url = f"amqp://{RABBITMQ_USER}:{RABBITMQ_PASS}@{RABBITMQ_HOST}:{RABBITMQ_PORT}/"
         connection = await aio_pika.connect(url, timeout=5)
         async with connection:
             channel = await connection.channel()
@@ -129,13 +134,18 @@ async def test_startup_pipeline_enabled(
     **Main regression test**: no "client login" or "All connection attempts
     failed" errors must appear.  The pipeline broker must be created.
     """
-    from tests.integration.conftest import RABBITMQ_HOST, RABBITMQ_PORT
+    from tests.integration.conftest import (
+        RABBITMQ_HOST,
+        RABBITMQ_PASS,
+        RABBITMQ_PORT,
+        RABBITMQ_USER,
+    )
 
     monkeypatch.setattr(settings, "pipeline_enabled", True)
     monkeypatch.setattr(settings, "rabbitmq_host", RABBITMQ_HOST)
     monkeypatch.setattr(settings, "rabbitmq_port", RABBITMQ_PORT)
-    monkeypatch.setattr(settings, "rabbitmq_login", "clarinet_test")
-    monkeypatch.setattr(settings, "rabbitmq_password", "clarinet_test")
+    monkeypatch.setattr(settings, "rabbitmq_login", RABBITMQ_USER)
+    monkeypatch.setattr(settings, "rabbitmq_password", RABBITMQ_PASS)
     monkeypatch.setattr(settings, "rabbitmq_exchange", "clarinet_startup_test")
 
     import clarinet.services.pipeline.broker as broker_mod
