@@ -69,16 +69,29 @@ def test_settings() -> Settings:
 
 
 @pytest_asyncio.fixture(scope="session")
-async def test_engine(test_settings):
-    """Create test database engine (one per session).
+async def test_engine(test_settings, worker_id):
+    """Create test database engine (one per xdist worker).
 
-    If CLARINET_TEST_DATABASE_URL is set, connects to that database (PostgreSQL).
+    If CLARINET_TEST_DATABASE_URL is set, connects to PostgreSQL.
+    With xdist, each worker gets its own database (``<base>_gw0``, etc.)
+    to avoid race conditions on enum/table creation.
     Otherwise falls back to SQLite in-memory with StaticPool.
     """
     database_url = os.environ.get("CLARINET_TEST_DATABASE_URL", "")
+    worker_db = ""
 
     if database_url:
-        engine = create_async_engine(database_url, echo=False, pool_pre_ping=True)
+        base_url, base_db = database_url.rsplit("/", 1)
+        worker_db = f"{base_db}_{worker_id}" if worker_id != "master" else base_db
+
+        # CREATE/DROP DATABASE must run outside a transaction
+        admin_engine = create_async_engine(f"{base_url}/postgres", isolation_level="AUTOCOMMIT")
+        async with admin_engine.connect() as conn:
+            await conn.execute(text(f'DROP DATABASE IF EXISTS "{worker_db}"'))
+            await conn.execute(text(f'CREATE DATABASE "{worker_db}"'))
+        await admin_engine.dispose()
+
+        engine = create_async_engine(f"{base_url}/{worker_db}", echo=False, pool_pre_ping=True)
     else:
         database_url = "sqlite+aiosqlite:///:memory:"
         engine = create_async_engine(
@@ -101,11 +114,13 @@ async def test_engine(test_settings):
 
     yield engine
 
-    if not database_url.startswith("sqlite"):
-        async with engine.begin() as conn:
-            await conn.run_sync(SQLModel.metadata.drop_all)
-
     await engine.dispose()
+
+    if worker_db:
+        admin_engine = create_async_engine(f"{base_url}/postgres", isolation_level="AUTOCOMMIT")
+        async with admin_engine.connect() as conn:
+            await conn.execute(text(f'DROP DATABASE IF EXISTS "{worker_db}"'))
+        await admin_engine.dispose()
 
 
 @pytest_asyncio.fixture
