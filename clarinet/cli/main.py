@@ -487,14 +487,44 @@ async def run_with_frontend(host: str, port: int) -> None:
         logger.info("Servers stopped")
 
 
-async def _run_pipeline_worker(queues: list[str] | None, workers: int) -> None:
+def _parse_dicom_scp_arg(value: str) -> tuple[str, int]:
+    """Parse ``--dicom AET:PORT`` argument.
+
+    Returns:
+        Tuple of (AE title, port number).
+    """
+    parts = value.rsplit(":", 1)
+    if len(parts) != 2 or not parts[0] or not parts[1]:
+        logger.error(f"Invalid --dicom format: '{value}'. Expected AET:PORT (e.g. WORKER:4006)")
+        sys.exit(1)
+    try:
+        port = int(parts[1])
+    except ValueError:
+        logger.error(f"Invalid port in --dicom: '{parts[1]}'. Must be an integer")
+        sys.exit(1)
+    return parts[0], port
+
+
+async def _run_pipeline_worker(
+    queues: list[str] | None,
+    workers: int,
+    dicom_scp: tuple[str, int] | None = None,
+) -> None:
     """Run the pipeline task worker.
 
     Args:
         queues: Queue names to listen on (auto-detected if None).
         workers: Number of concurrent worker tasks.
+        dicom_scp: Optional (AET, port) to start a Storage SCP for C-MOVE.
     """
     from clarinet.services.pipeline import run_worker
+
+    if dicom_scp:
+        aet, port = dicom_scp
+        settings.dicom_aet = aet
+        settings.dicom_port = port
+        settings.dicom_retrieve_mode = "c-move"
+        settings.have_dicom = True
 
     if not settings.pipeline_enabled:
         logger.warning(
@@ -502,7 +532,7 @@ async def _run_pipeline_worker(queues: list[str] | None, workers: int) -> None:
             "Set CLARINET_PIPELINE_ENABLED=true to enable."
         )
 
-    await run_worker(queues=queues, workers=workers)
+    await run_worker(queues=queues, workers=workers, start_scp=dicom_scp is not None)
 
 
 async def init_database() -> None:
@@ -1000,6 +1030,13 @@ def main() -> None:
     worker_parser.add_argument(
         "--workers", type=int, default=2, help="Number of concurrent worker tasks (default: 2)"
     )
+    worker_parser.add_argument(
+        "--dicom",
+        type=str,
+        default=None,
+        metavar="AET:PORT",
+        help="Start Storage SCP for C-MOVE retrieval (e.g. WORKER:4006)",
+    )
 
     # rabbitmq command
     rabbitmq_parser = subparsers.add_parser("rabbitmq", help="RabbitMQ management commands")
@@ -1116,8 +1153,9 @@ def main() -> None:
         if queues:
             # Normalize queue names: "gpu" -> "clarinet.gpu"
             queues = [q if "." in q else f"clarinet.{q}" for q in queues]
+        dicom_scp = _parse_dicom_scp_arg(args.dicom) if args.dicom else None
         with contextlib.suppress(KeyboardInterrupt):
-            asyncio.run(_run_pipeline_worker(queues, args.workers))
+            asyncio.run(_run_pipeline_worker(queues, args.workers, dicom_scp=dicom_scp))
     elif args.command == "init-migrations":
         from clarinet.utils.migrations import init_alembic_in_project
 

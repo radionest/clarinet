@@ -97,6 +97,7 @@ def _load_task_modules() -> None:
 async def run_worker(
     queues: list[str] | None = None,
     workers: int = 2,
+    start_scp: bool = False,
 ) -> None:
     """Start a TaskIQ worker process for the given queues.
 
@@ -106,6 +107,7 @@ async def run_worker(
     Args:
         queues: Queue names to listen on (auto-detected if None).
         workers: Number of concurrent worker tasks per queue.
+        start_scp: Start a Storage SCP for C-MOVE retrieval.
     """
     import asyncio
     import signal
@@ -115,6 +117,14 @@ async def run_worker(
 
     # Reconfigure logging so the worker writes to clarinet_worker.log
     reconfigure_for_worker()
+
+    # Start Storage SCP before loading tasks (they may use C-MOVE immediately)
+    scp = None
+    if start_scp:
+        from clarinet.services.dicom.scp import get_storage_scp
+
+        scp = get_storage_scp()
+        scp.start(aet=settings.dicom_aet, port=settings.dicom_port, ip=settings.dicom_ip)
 
     _load_task_modules()
 
@@ -181,4 +191,8 @@ async def run_worker(
             receiver_task.cancel()
         for broker in brokers:
             await broker.shutdown()
+        if scp is not None:
+            from clarinet.services.dicom.scp import shutdown_storage_scp
+
+            shutdown_storage_scp()
         logger.info("Pipeline worker stopped")
