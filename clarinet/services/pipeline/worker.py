@@ -109,6 +109,7 @@ async def run_worker(
     """
     import asyncio
     import signal
+    import sys
 
     from .broker import create_broker, get_broker
 
@@ -164,10 +165,14 @@ async def run_worker(
     logger.info(f"Registered tasks: {list(singleton.get_all_tasks().keys())}")
 
     shutdown_event = asyncio.Event()
-    loop = asyncio.get_running_loop()
 
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, shutdown_event.set)
+    if sys.platform == "win32":
+        loop = asyncio.get_running_loop()
+        signal.signal(signal.SIGINT, lambda *_: loop.call_soon_threadsafe(shutdown_event.set))
+    else:
+        loop = asyncio.get_running_loop()
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            loop.add_signal_handler(sig, shutdown_event.set)
 
     try:
         await shutdown_event.wait()
