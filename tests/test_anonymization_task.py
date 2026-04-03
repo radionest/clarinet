@@ -12,34 +12,54 @@ from clarinet.services.dicom.models import BackgroundAnonymizationStatus
 
 @pytest.mark.asyncio
 async def test_create_anonymization_service_yields_service() -> None:
-    """_create_anonymization_service yields a properly constructed AnonymizationService."""
-    mock_session = AsyncMock()
+    """_create_anonymization_service yields an AnonymizationService with HTTP-backed repos."""
+    mock_client = AsyncMock()
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
 
-    with (
-        patch("clarinet.utils.db_manager.db_manager") as mock_db,
-        patch("clarinet.settings.settings") as mock_settings,
-    ):
-        # Set up the async context manager to yield mock session
-        mock_ctx = AsyncMock()
-        mock_ctx.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_ctx.__aexit__ = AsyncMock(return_value=False)
-        mock_db.get_async_session_context.return_value = mock_ctx
-
+    with patch("clarinet.settings.settings") as mock_settings:
+        mock_settings.effective_api_base_url = "http://test:8000/api"
+        mock_settings.admin_email = "admin@test.com"
+        mock_settings.admin_password = "secret"
+        mock_settings.api_verify_ssl = False
         mock_settings.dicom_aet = "TEST_AET"
         mock_settings.dicom_max_pdu = 16384
         mock_settings.pacs_aet = "PACS_AET"
         mock_settings.pacs_host = "localhost"
         mock_settings.pacs_port = 11112
 
-        from clarinet.services.dicom.tasks import _create_anonymization_service
+        with patch(
+            "clarinet.client.ClarinetClient",
+            return_value=mock_client,
+        ) as mock_client_cls:
+            from clarinet.services.dicom.tasks import _create_anonymization_service
 
-        async with _create_anonymization_service() as service:
-            from clarinet.services.anonymization_service import AnonymizationService
+            async with _create_anonymization_service() as service:
+                from clarinet.services.anonymization_service import AnonymizationService
+                from clarinet.services.dicom.repo_adapters import (
+                    PatientRepoAdapter,
+                    SeriesRepoAdapter,
+                    StudyRepoAdapter,
+                )
 
-            assert isinstance(service, AnonymizationService)
-            assert service.study_repo.session is mock_session
-            assert service.patient_repo.session is mock_session
-            assert service.series_repo.session is mock_session
+                # Verify ClarinetClient constructed with correct settings
+                mock_client_cls.assert_called_once_with(
+                    base_url="http://test:8000/api",
+                    username="admin@test.com",
+                    password="secret",
+                    auto_login=False,
+                    verify_ssl=False,
+                )
+
+                assert isinstance(service, AnonymizationService)
+                assert isinstance(service.study_repo, StudyRepoAdapter)
+                assert isinstance(service.patient_repo, PatientRepoAdapter)
+                assert isinstance(service.series_repo, SeriesRepoAdapter)
+
+                # Verify adapters are wired to the same client
+                assert service.study_repo._client is mock_client
+                assert service.patient_repo._client is mock_client
+                assert service.series_repo._client is mock_client
 
 
 @pytest.mark.asyncio

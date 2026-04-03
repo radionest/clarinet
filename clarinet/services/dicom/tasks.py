@@ -4,8 +4,8 @@ Provides two execution paths for background anonymization:
 - ``anonymize_study_task``: TaskIQ task dispatched via RabbitMQ (pipeline enabled).
 - ``anonymize_study_background``: In-process ``asyncio.create_task`` target (pipeline disabled).
 
-Both construct an ``AnonymizationService`` with a fresh DB session, avoiding the
-closed-session bug that occurs when DI-scoped services are used in background tasks.
+Both construct an ``AnonymizationService`` backed by HTTP API calls via
+``ClarinetClient``, so workers don't need direct database access.
 """
 
 from __future__ import annotations
@@ -19,25 +19,32 @@ from clarinet.utils.logger import logger
 
 @asynccontextmanager
 async def _create_anonymization_service() -> AsyncGenerator:
-    """Create an AnonymizationService with a fresh DB session.
+    """Create an AnonymizationService backed by HTTP API.
+
+    Uses ``ClarinetClient`` with repo adapters instead of direct DB access,
+    so workers only need API credentials (no database connection).
 
     Yields:
-        Configured AnonymizationService with its own session lifecycle.
+        Configured AnonymizationService with HTTP-backed repositories.
     """
-    from clarinet.repositories.patient_repository import PatientRepository
-    from clarinet.repositories.series_repository import SeriesRepository
-    from clarinet.repositories.study_repository import StudyRepository
+    from clarinet.client import ClarinetClient
     from clarinet.services.anonymization_service import AnonymizationService
     from clarinet.services.dicom.client import DicomClient
     from clarinet.services.dicom.models import DicomNode
+    from clarinet.services.dicom.repo_adapters import (
+        PatientRepoAdapter,
+        SeriesRepoAdapter,
+        StudyRepoAdapter,
+    )
     from clarinet.settings import settings
-    from clarinet.utils.db_manager import db_manager
 
-    async with db_manager.get_async_session_context() as session:
-        study_repo = StudyRepository(session)
-        patient_repo = PatientRepository(session)
-        series_repo = SeriesRepository(session)
-
+    async with ClarinetClient(
+        base_url=settings.effective_api_base_url,
+        username=settings.admin_email,
+        password=settings.admin_password,
+        auto_login=False,
+        verify_ssl=settings.api_verify_ssl,
+    ) as api_client:
         dicom_client = DicomClient(
             calling_aet=settings.dicom_aet,
             max_pdu=settings.dicom_max_pdu,
@@ -49,9 +56,9 @@ async def _create_anonymization_service() -> AsyncGenerator:
         )
 
         yield AnonymizationService(
-            study_repo=study_repo,
-            patient_repo=patient_repo,
-            series_repo=series_repo,
+            study_repo=StudyRepoAdapter(api_client),  # type: ignore[arg-type]
+            patient_repo=PatientRepoAdapter(api_client),  # type: ignore[arg-type]
+            series_repo=SeriesRepoAdapter(api_client),  # type: ignore[arg-type]
             dicom_client=dicom_client,
             pacs=pacs,
         )
@@ -120,7 +127,7 @@ async def anonymize_study_background(
     """In-process fallback for background anonymization.
 
     Used as an ``asyncio.create_task`` target when the pipeline is disabled.
-    Creates a fresh DB session internally and catches all exceptions.
+    Catches all exceptions so the calling coroutine is never disrupted.
 
     Args:
         study_uid: Study Instance UID to anonymize.
