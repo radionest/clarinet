@@ -5,6 +5,8 @@ Pure logic tests, no RabbitMQ. Uses InMemoryBroker for task execution tests.
 
 from __future__ import annotations
 
+import asyncio
+import signal
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -589,3 +591,102 @@ class TestRetryDefaults:
 
             assert smart_retry is not None, "SmartRetryMiddleware not found in broker middlewares"
             assert smart_retry.default_retry_label is True
+
+
+# ─── Worker signal handling (Windows regression) ─────────────────────────────
+
+
+class TestWorkerSignalHandling:
+    """Regression tests for signal handling in run_worker().
+
+    On Windows, loop.add_signal_handler() raises NotImplementedError,
+    causing the worker to exit immediately. Verify platform-appropriate
+    signal registration is used.
+    """
+
+    @pytest.fixture()
+    def _mock_worker_deps(self):
+        """Mock all run_worker dependencies so only signal logic executes."""
+        mock_broker = MagicMock()
+        mock_broker.get_all_tasks.return_value = {}
+        mock_broker.startup = AsyncMock()
+        mock_broker.shutdown = AsyncMock()
+        with (
+            patch("clarinet.services.pipeline.worker.reconfigure_for_worker"),
+            patch("clarinet.services.pipeline.worker._load_task_modules"),
+            patch(
+                "clarinet.services.pipeline.worker.get_worker_queues",
+                return_value=["clarinet.default"],
+            ),
+            patch("clarinet.services.pipeline.broker.get_broker", return_value=mock_broker),
+            patch("taskiq.api.receiver.run_receiver_task", new_callable=AsyncMock),
+        ):
+            yield
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("_mock_worker_deps")
+    async def test_unix_uses_loop_add_signal_handler(self):
+        """On Unix, run_worker registers SIGINT and SIGTERM via loop.add_signal_handler."""
+        from clarinet.services.pipeline.worker import run_worker
+
+        with patch("sys.platform", "linux"):
+            loop = asyncio.get_running_loop()
+
+            registered_signals = []
+
+            def spy_add_signal_handler(sig, callback):
+                registered_signals.append(sig)
+                # Set the event immediately so run_worker exits
+                callback()
+
+            with patch.object(loop, "add_signal_handler", side_effect=spy_add_signal_handler):
+                await run_worker(queues=["clarinet.default"])
+
+            assert signal.SIGINT in registered_signals
+            assert signal.SIGTERM in registered_signals
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("_mock_worker_deps")
+    async def test_windows_uses_signal_signal(self):
+        """On Windows, run_worker registers SIGINT via signal.signal() (not loop-based)."""
+        from clarinet.services.pipeline.worker import run_worker
+
+        with patch("sys.platform", "win32"):
+            original_signal = signal.signal
+            registered = {}
+
+            def spy_signal(sig, handler):
+                registered[sig] = handler
+                # Trigger handler immediately so run_worker exits
+                handler(sig, None)
+                return original_signal
+
+            with patch("signal.signal", side_effect=spy_signal):
+                await run_worker(queues=["clarinet.default"])
+
+            assert signal.SIGINT in registered
+            assert signal.SIGTERM not in registered
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("_mock_worker_deps")
+    async def test_windows_no_add_signal_handler_called(self):
+        """On Windows, loop.add_signal_handler is never called (would raise NotImplementedError)."""
+        from clarinet.services.pipeline.worker import run_worker
+
+        with patch("sys.platform", "win32"):
+            loop = asyncio.get_running_loop()
+
+            def fail_add_signal_handler(*args, **kwargs):
+                raise AssertionError("add_signal_handler must not be called on Windows")
+
+            original_signal = signal.signal
+
+            def trigger_shutdown(sig, handler):
+                handler(sig, None)
+                return original_signal
+
+            with (
+                patch.object(loop, "add_signal_handler", side_effect=fail_add_signal_handler),
+                patch("signal.signal", side_effect=trigger_shutdown),
+            ):
+                await run_worker(queues=["clarinet.default"])
