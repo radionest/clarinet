@@ -31,7 +31,7 @@ async def test_create_anonymization_service_yields_service() -> None:
         with patch(
             "clarinet.client.ClarinetClient",
             return_value=mock_client,
-        ):
+        ) as mock_client_cls:
             from clarinet.services.dicom.tasks import _create_anonymization_service
 
             async with _create_anonymization_service() as service:
@@ -42,10 +42,24 @@ async def test_create_anonymization_service_yields_service() -> None:
                     StudyRepoAdapter,
                 )
 
+                # Verify ClarinetClient constructed with correct settings
+                mock_client_cls.assert_called_once_with(
+                    base_url="http://test:8000/api",
+                    username="admin@test.com",
+                    password="secret",
+                    auto_login=False,
+                    verify_ssl=False,
+                )
+
                 assert isinstance(service, AnonymizationService)
                 assert isinstance(service.study_repo, StudyRepoAdapter)
                 assert isinstance(service.patient_repo, PatientRepoAdapter)
                 assert isinstance(service.series_repo, SeriesRepoAdapter)
+
+                # Verify adapters are wired to the same client
+                assert service.study_repo._client is mock_client
+                assert service.patient_repo._client is mock_client
+                assert service.series_repo._client is mock_client
 
 
 @pytest.mark.asyncio
