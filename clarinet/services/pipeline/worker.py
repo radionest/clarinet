@@ -167,7 +167,8 @@ async def run_worker(
     shutdown_event = asyncio.Event()
 
     if sys.platform == "win32":
-        signal.signal(signal.SIGINT, lambda *_: shutdown_event.set())
+        loop = asyncio.get_running_loop()
+        signal.signal(signal.SIGINT, lambda *_: loop.call_soon_threadsafe(shutdown_event.set))
     else:
         loop = asyncio.get_running_loop()
         for sig in (signal.SIGINT, signal.SIGTERM):

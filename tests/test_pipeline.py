@@ -607,7 +607,9 @@ class TestWorkerSignalHandling:
     @pytest.fixture()
     def _mock_worker_deps(self):
         """Mock all run_worker dependencies so only signal logic executes."""
-        mock_broker = MagicMock()
+        from taskiq import AsyncBroker
+
+        mock_broker = MagicMock(spec=AsyncBroker)
         mock_broker.get_all_tasks.return_value = {}
         mock_broker.startup = AsyncMock()
         mock_broker.shutdown = AsyncMock()
@@ -629,7 +631,7 @@ class TestWorkerSignalHandling:
         """On Unix, run_worker registers SIGINT and SIGTERM via loop.add_signal_handler."""
         from clarinet.services.pipeline.worker import run_worker
 
-        with patch("sys.platform", "linux"):
+        with patch("sys.platform", "linux"), patch("signal.signal") as mock_signal:
             loop = asyncio.get_running_loop()
 
             registered_signals = []
@@ -644,6 +646,7 @@ class TestWorkerSignalHandling:
 
             assert signal.SIGINT in registered_signals
             assert signal.SIGTERM in registered_signals
+            mock_signal.assert_not_called()
 
     @pytest.mark.asyncio
     @pytest.mark.usefixtures("_mock_worker_deps")
