@@ -329,10 +329,10 @@ class PacsHelper:
                     _pacs_log.warning(
                         "C-GET failed for series %s, falling back to C-MOVE", series_uid
                     )
-                    retrieve.setMoveDestinationAETitle(self.move_aet)
+                    retrieve.moveDestinationAETitle = self.move_aet
                     retrieve.moveSeries(study_instance_uid, series_uid)
             else:
-                retrieve.setMoveDestinationAETitle(self.move_aet)
+                retrieve.moveDestinationAETitle = self.move_aet
                 retrieve.moveSeries(study_instance_uid, series_uid)
             retrieved_series_uids.append(series_uid)
 
@@ -381,11 +381,11 @@ class PacsHelper:
             ok = retrieve.getSeries(study_instance_uid, series_instance_uid)
             if not ok or not (db and db.filesForSeries(series_instance_uid)):
                 _pacs_log.warning("C-GET failed, falling back to C-MOVE")
-                retrieve.setMoveDestinationAETitle(self.move_aet)
+                retrieve.moveDestinationAETitle = self.move_aet
                 retrieve.moveSeries(study_instance_uid, series_instance_uid)
         else:
             _pacs_log.info("C-MOVE series %s ...", series_instance_uid)
-            retrieve.setMoveDestinationAETitle(self.move_aet)
+            retrieve.moveDestinationAETitle = self.move_aet
             retrieve.moveSeries(study_instance_uid, series_instance_uid)
 
         from DICOMLib import DICOMUtils  # type: ignore[import-not-found]
