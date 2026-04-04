@@ -265,6 +265,15 @@ class TestAnonymizeDatasetEdgeCases:
         anonymizer.anonymize_dataset(sample_dataset)
         assert sample_dataset.SeriesDescription == "T1w FLAIR 3D"
 
+    def test_series_description_absent_remains_absent(
+        self, anonymizer: DicomAnonymizer, sample_dataset: Dataset
+    ) -> None:
+        """SeriesDescription absent in original stays absent after anonymization."""
+        if hasattr(sample_dataset, "SeriesDescription"):
+            del sample_dataset.SeriesDescription
+        anonymizer.anonymize_dataset(sample_dataset)
+        assert not hasattr(sample_dataset, "SeriesDescription")
+
     def test_sensitive_tags_handled(
         self, anonymizer: DicomAnonymizer, sample_dataset: Dataset
     ) -> None:

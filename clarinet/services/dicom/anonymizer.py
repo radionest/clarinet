@@ -84,6 +84,9 @@ class DicomAnonymizer:
         def _set_sop_uid(dataset: Dataset, tag: tuple[int, int]) -> None:
             dataset[tag].value = anon_sop_uid
 
+        def _preserve_value(dataset: Dataset, tag: tuple[int, int]) -> None:
+            pass
+
         extra_rules: dict[tuple[int, int], object] = {
             (0x0010, 0x0020): _set_patient_id,  # PatientID
             (0x0010, 0x0010): _set_patient_name,  # PatientName
@@ -91,7 +94,7 @@ class DicomAnonymizer:
             (0x0020, 0x000E): _set_series_uid,  # SeriesInstanceUID
             (0x0008, 0x0018): _set_sop_uid,  # SOPInstanceUID
             (0x0002, 0x0003): _set_sop_uid,  # MediaStorageSOPInstanceUID
-            (0x0008, 0x103E): lambda _ds, _tag: None,  # SeriesDescription — preserve original
+            (0x0008, 0x103E): _preserve_value,  # SeriesDescription — not PHI
         }
 
         # Remove private tags before walk() to avoid BytesLengthException
