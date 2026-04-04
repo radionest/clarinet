@@ -84,17 +84,8 @@ class DicomAnonymizer:
         def _set_sop_uid(dataset: Dataset, tag: tuple[int, int]) -> None:
             dataset[tag].value = anon_sop_uid
 
-        def _set_series_description(dataset: Dataset, tag: tuple[int, int]) -> None:
-            modality = str(getattr(dataset, "Modality", ""))
-            series_number = getattr(dataset, "SeriesNumber", None)
-            parts = [
-                p for p in [modality, str(series_number) if series_number is not None else ""] if p
-            ]
-            value = " ".join(parts) if parts else "Series"
-            if tag in dataset:
-                dataset[tag].value = value
-            else:
-                dataset.add_new(tag, "LO", value)
+        def _preserve_value(dataset: Dataset, tag: tuple[int, int]) -> None:
+            pass
 
         extra_rules: dict[tuple[int, int], object] = {
             (0x0010, 0x0020): _set_patient_id,  # PatientID
@@ -103,7 +94,7 @@ class DicomAnonymizer:
             (0x0020, 0x000E): _set_series_uid,  # SeriesInstanceUID
             (0x0008, 0x0018): _set_sop_uid,  # SOPInstanceUID
             (0x0002, 0x0003): _set_sop_uid,  # MediaStorageSOPInstanceUID
-            (0x0008, 0x103E): _set_series_description,  # SeriesDescription
+            (0x0008, 0x103E): _preserve_value,  # SeriesDescription — not PHI
         }
 
         # Remove private tags before walk() to avoid BytesLengthException

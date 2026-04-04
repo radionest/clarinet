@@ -257,38 +257,22 @@ class TestAnonymizeDatasetEdgeCases:
         private_tags = [t for t in ds if t.is_private]
         assert private_tags == []
 
-    def test_series_description_replaced_with_modality_and_number(
+    def test_series_description_preserved(
         self, anonymizer: DicomAnonymizer, sample_dataset: Dataset
     ) -> None:
-        """SeriesDescription is replaced with 'Modality SeriesNumber'."""
-        sample_dataset.SeriesNumber = 3
+        """SeriesDescription is preserved during anonymization (contains MRI sequence info, not PHI)."""
+        sample_dataset.SeriesDescription = "T1w FLAIR 3D"
         anonymizer.anonymize_dataset(sample_dataset)
-        assert sample_dataset.SeriesDescription == "CT 3"
+        assert sample_dataset.SeriesDescription == "T1w FLAIR 3D"
 
-    def test_series_description_without_series_number(
+    def test_series_description_absent_remains_absent(
         self, anonymizer: DicomAnonymizer, sample_dataset: Dataset
     ) -> None:
-        """SeriesDescription falls back to Modality when SeriesNumber is missing."""
-        if hasattr(sample_dataset, "SeriesNumber"):
-            del sample_dataset.SeriesNumber
+        """SeriesDescription absent in original stays absent after anonymization."""
+        if hasattr(sample_dataset, "SeriesDescription"):
+            del sample_dataset.SeriesDescription
         anonymizer.anonymize_dataset(sample_dataset)
-        assert sample_dataset.SeriesDescription == "CT"
-
-    def test_series_description_without_modality_or_number(
-        self, anonymizer: DicomAnonymizer
-    ) -> None:
-        """SeriesDescription falls back to 'Series' when both are missing."""
-        ds = Dataset()
-        ds.PatientID = "REAL_PAT"
-        ds.PatientName = "Real^Name"
-        ds.StudyInstanceUID = "1.2.3.4.5"
-        ds.SeriesInstanceUID = "1.2.3.4.5.6"
-        ds.SOPInstanceUID = "1.2.3.100"
-        ds.SOPClassUID = "1.2.840.10008.5.1.4.1.1.2"
-        ds.SeriesDescription = "Original"
-
-        anonymizer.anonymize_dataset(ds)
-        assert ds.SeriesDescription == "Series"
+        assert not hasattr(sample_dataset, "SeriesDescription")
 
     def test_sensitive_tags_handled(
         self, anonymizer: DicomAnonymizer, sample_dataset: Dataset
