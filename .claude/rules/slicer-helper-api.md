@@ -57,3 +57,14 @@ paths:
    seg.SetReferenceImageGeometryParameterFromVolumeNode(volume)
    seg_logic.ExportAllSegmentsToLabelmapNode(seg, labelmap, 0)
    ```
+
+## Slicer exec protocol
+
+Scripts sent via `POST /slicer/exec` return JSON through `__execResult`, NOT stdout.
+
+- `__execResult = {"key": "value"}` → HTTP 200, response body = `{"key": "value"}`
+- `print(...)` → visible in Slicer console only, NOT in HTTP response
+- Script error → HTTP 500, `{"success": false, "message": "..."}`
+- No `__execResult` set → HTTP 200, response body = `{}`
+
+In e2e tests, always use `__execResult = {...}` and assert on response keys.

@@ -158,7 +158,7 @@ class TestPacsHelperConstruction:
             calling_aet="MYSCU",
         )
         assert pacs.prefer_cget is True
-        assert pacs.move_aet == "SLICER"
+        assert pacs.move_aet == "MYSCU"
 
     def test_slicer_helper_has_load_study_from_pacs(self) -> None:
         """SlicerHelper exposes load_study_from_pacs method."""

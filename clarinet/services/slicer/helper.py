@@ -197,14 +197,14 @@ class PacsHelper:
         called_aet: str,
         calling_aet: str,
         prefer_cget: bool = True,
-        move_aet: str = "SLICER",
+        move_aet: str | None = None,
     ) -> None:
         self.host = host
         self.port = port
         self.called_aet = called_aet
         self.calling_aet = calling_aet
         self.prefer_cget = prefer_cget
-        self.move_aet = move_aet
+        self.move_aet = move_aet or calling_aet
 
     @classmethod
     def from_slicer(cls, server_name: str | None = None) -> PacsHelper:
