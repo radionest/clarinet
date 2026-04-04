@@ -28,19 +28,25 @@ if [ -n "$(git status --porcelain)" ]; then
   exit 1
 fi
 
-CURRENT=$(grep -oP '^version\s*=\s*"\K[^"]+' "$PYPROJECT")
-if [ -z "$CURRENT" ]; then
-  echo "Error: could not read version from $PYPROJECT" >&2
-  exit 1
-fi
+CURRENT=$(python3 -c "
+import re, sys
+m = re.search(r'^version\s*=\s*\"([^\"]+)\"', open('$PYPROJECT').read(), re.M)
+if not m: sys.exit(1)
+print(m.group(1))
+") || { echo "Error: could not read version from $PYPROJECT" >&2; exit 1; }
 
 if [ $# -ge 1 ]; then
   NEW="$1"
 else
-  # Auto-increment: 0.0a.19 → 0.0a.20
-  PREFIX=$(echo "$CURRENT" | grep -oP '^.*\.')
-  NUM=$(echo "$CURRENT" | grep -oP '\d+$')
-  NEW="${PREFIX}$((NUM + 1))"
+  NEW=$(python3 -c "
+import re, sys
+v = '$CURRENT'
+m = re.match(r'^(.+\.)(\d+)$', v)
+if not m:
+    print(f'Error: cannot auto-increment version \"{v}\"', file=sys.stderr)
+    sys.exit(1)
+print(f'{m.group(1)}{int(m.group(2)) + 1}')
+") || exit 1
 fi
 
 if [ "$NEW" = "$CURRENT" ]; then
@@ -48,14 +54,30 @@ if [ "$NEW" = "$CURRENT" ]; then
   exit 1
 fi
 
+if git rev-parse -q --verify "refs/tags/v$NEW" >/dev/null 2>&1; then
+  echo "Error: tag v$NEW already exists" >&2
+  exit 1
+fi
+
 echo "$CURRENT → $NEW"
 
-sed -i "s/^version = \"$CURRENT\"/version = \"$NEW\"/" "$PYPROJECT"
+python3 -c "
+import re
+path = '$PYPROJECT'
+text = open(path).read()
+text = re.sub(
+    r'^(version\s*=\s*\")([^\"]+)(\")',
+    r'\g<1>$NEW\3',
+    text,
+    count=1,
+    flags=re.M,
+)
+open(path, 'w').write(text)
+"
 
 git add "$PYPROJECT"
 git commit -m "chore: version bump to $NEW"
 git tag "v$NEW"
-git push
-git push --tags
+git push --atomic origin HEAD "v$NEW"
 
 echo "Done: v$NEW pushed"
