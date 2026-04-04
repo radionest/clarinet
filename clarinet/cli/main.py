@@ -502,6 +502,9 @@ def _parse_dicom_scp_arg(value: str) -> tuple[str, int]:
     except ValueError:
         logger.error(f"Invalid port in --dicom: '{parts[1]}'. Must be an integer")
         sys.exit(1)
+    if not (1 <= port <= 65535):
+        logger.error(f"Invalid port in --dicom: {port}. Must be between 1 and 65535")
+        sys.exit(1)
     return parts[0], port
 
 
