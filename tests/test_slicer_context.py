@@ -120,6 +120,56 @@ def test_pacs_settings_in_context(mock_settings):
     assert ctx["dicom_retrieve_mode"] == "c-move"
 
 
+@pytest.mark.parametrize(
+    ("mode", "expected_prefer_cget"),
+    [("c-get", True), ("c-move", False)],
+)
+def test_get_pacs_helper_prefer_cget(mode, expected_prefer_cget):
+    """_get_pacs_helper sets prefer_cget based on dicom_retrieve_mode context variable."""
+    import clarinet.services.slicer.helper as helper_mod
+    from clarinet.services.slicer.helper import _get_pacs_helper
+
+    injected = {
+        "pacs_host": "pacs.local",
+        "pacs_port": "4242",
+        "pacs_aet": "ORTHANC",
+        "dicom_aet": "CLARINET",
+        "dicom_retrieve_mode": mode,
+    }
+
+    try:
+        helper_mod.__dict__.update(injected)
+        pacs = _get_pacs_helper()
+    finally:
+        for key in injected:
+            helper_mod.__dict__.pop(key, None)
+
+    assert pacs.prefer_cget is expected_prefer_cget
+    assert pacs.host == "pacs.local"
+    assert pacs.port == 4242
+
+
+def test_get_pacs_helper_defaults_to_cget():
+    """_get_pacs_helper defaults to prefer_cget=True when dicom_retrieve_mode is absent."""
+    import clarinet.services.slicer.helper as helper_mod
+    from clarinet.services.slicer.helper import _get_pacs_helper
+
+    injected = {
+        "pacs_host": "pacs.local",
+        "pacs_port": "4242",
+        "pacs_aet": "ORTHANC",
+    }
+
+    try:
+        helper_mod.__dict__.update(injected)
+        pacs = _get_pacs_helper()
+    finally:
+        for key in injected:
+            helper_mod.__dict__.pop(key, None)
+
+    assert pacs.prefer_cget is True
+
+
 @patch("clarinet.services.slicer.context.settings")
 def test_standard_vars_study_level(mock_settings):
     """STUDY level → working_folder + study_uid present."""
