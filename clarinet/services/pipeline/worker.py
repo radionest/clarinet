@@ -133,65 +133,66 @@ async def run_worker(
             )
             raise
 
-    _load_task_modules()
-
-    if queues is None:
-        queues = get_worker_queues()
-
-    logger.info(f"Starting pipeline worker on queues: {queues} (workers={workers})")
-
-    # Singleton broker has all tasks registered via @broker.task() decorators
-    singleton = get_broker()
-
-    brokers = []
-    for queue_name in queues:
-        if queue_name == DEFAULT_QUEUE:
-            brokers.append(singleton)
-        else:
-            # Create per-queue broker and re-register all tasks using public API.
-            # register_task() creates a new AsyncTaskiqDecoratedTask bound to qbroker,
-            # preserving the original task name and labels.
-            qbroker = create_broker(queue_name)
-            for task in singleton.get_all_tasks().values():
-                qbroker.register_task(
-                    task.original_func,
-                    task_name=task.task_name,
-                    **task.labels,
-                )
-            brokers.append(qbroker)
-
-    # Start all brokers and begin consuming via TaskIQ receiver
-    from taskiq.api.receiver import run_receiver_task
-
     receiver_tasks: list[asyncio.Task[None]] = []
-    for broker in brokers:
-        broker.is_worker_process = True
-        await broker.startup()
-        receiver_tasks.append(
-            asyncio.create_task(
-                run_receiver_task(
-                    broker,
-                    max_async_tasks=workers,
-                    run_startup=False,
-                    ack_time=settings.pipeline_ack_type,
+    brokers: list = []
+    try:
+        _load_task_modules()
+
+        if queues is None:
+            queues = get_worker_queues()
+
+        logger.info(f"Starting pipeline worker on queues: {queues} (workers={workers})")
+
+        # Singleton broker has all tasks registered via @broker.task() decorators
+        singleton = get_broker()
+
+        brokers = []
+        for queue_name in queues:
+            if queue_name == DEFAULT_QUEUE:
+                brokers.append(singleton)
+            else:
+                # Create per-queue broker and re-register all tasks using public API.
+                # register_task() creates a new AsyncTaskiqDecoratedTask bound to qbroker,
+                # preserving the original task name and labels.
+                qbroker = create_broker(queue_name)
+                for task in singleton.get_all_tasks().values():
+                    qbroker.register_task(
+                        task.original_func,
+                        task_name=task.task_name,
+                        **task.labels,
+                    )
+                brokers.append(qbroker)
+
+        # Start all brokers and begin consuming via TaskIQ receiver
+        from taskiq.api.receiver import run_receiver_task
+
+        for broker in brokers:
+            broker.is_worker_process = True
+            await broker.startup()
+            receiver_tasks.append(
+                asyncio.create_task(
+                    run_receiver_task(
+                        broker,
+                        max_async_tasks=workers,
+                        run_startup=False,
+                        ack_time=settings.pipeline_ack_type,
+                    )
                 )
             )
-        )
 
-    logger.info(f"Pipeline worker started, listening on {len(brokers)} queue(s)")
-    logger.info(f"Registered tasks: {list(singleton.get_all_tasks().keys())}")
+        logger.info(f"Pipeline worker started, listening on {len(brokers)} queue(s)")
+        logger.info(f"Registered tasks: {list(singleton.get_all_tasks().keys())}")
 
-    shutdown_event = asyncio.Event()
+        shutdown_event = asyncio.Event()
 
-    if sys.platform == "win32":
-        loop = asyncio.get_running_loop()
-        signal.signal(signal.SIGINT, lambda *_: loop.call_soon_threadsafe(shutdown_event.set))
-    else:
-        loop = asyncio.get_running_loop()
-        for sig in (signal.SIGINT, signal.SIGTERM):
-            loop.add_signal_handler(sig, shutdown_event.set)
+        if sys.platform == "win32":
+            loop = asyncio.get_running_loop()
+            signal.signal(signal.SIGINT, lambda *_: loop.call_soon_threadsafe(shutdown_event.set))
+        else:
+            loop = asyncio.get_running_loop()
+            for sig in (signal.SIGINT, signal.SIGTERM):
+                loop.add_signal_handler(sig, shutdown_event.set)
 
-    try:
         await shutdown_event.wait()
     finally:
         for receiver_task in receiver_tasks:
