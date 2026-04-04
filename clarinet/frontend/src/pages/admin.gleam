@@ -46,8 +46,6 @@ pub type Msg {
   RoleMatrixLoaded(Result(models.RoleMatrix, types.ApiError))
   ToggleUserRole(user_id: String, role_name: String, add: Bool)
   UserRoleToggled(Result(Nil, types.ApiError))
-  // Navigation
-  NavigateTo(router.Route)
 }
 
 // --- Init ---
@@ -179,8 +177,6 @@ pub fn update(
         handle_error(err, "Failed to update role"),
       )
 
-    NavigateTo(route) ->
-      #(model, effect.none(), [shared.Navigate(route)])
   }
 }
 
@@ -353,7 +349,6 @@ fn records_section(model: Model, shared: Shared) -> Element(Msg) {
         [
           attribute.class("btn btn-primary"),
           attribute.href(router.route_to_path(router.RecordNew)),
-          event.on_click(NavigateTo(router.RecordNew)),
         ],
         [html.text("Create Record")],
       ),
