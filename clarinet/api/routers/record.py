@@ -16,6 +16,7 @@ from fastapi import (
     BackgroundTasks,
     Body,
     Depends,
+    Query,
     Request,
     status,
 )
@@ -432,6 +433,7 @@ async def _process_submission(
     service: RecordService,
     rt_service: RecordTypeService,
     is_update: bool,
+    new_status: RecordStatus = RecordStatus.finished,
     slicer_service: SlicerService | None = None,
     session: AsyncSession | None = None,
     client_ip: str | None = None,
@@ -456,7 +458,13 @@ async def _process_submission(
     Returns:
         Masked ``RecordRead``.
     """
-    validated_data = await rt_service.validate_record_data(record, data)
+    # Skip validation when submitting with a non-finished status (e.g. failed) —
+    # error data won't match the record type schema and files may not exist.
+    skip_validation = not is_update and new_status != RecordStatus.finished
+
+    validated_data = (
+        data if skip_validation else await rt_service.validate_record_data(record, data)
+    )
     record_read = RecordRead.model_validate(record)
 
     # Load parent once — reused by slicer context and file validation
@@ -467,7 +475,8 @@ async def _process_submission(
 
     # Run Slicer validation if configured
     if (
-        slicer_service is not None
+        not skip_validation
+        and slicer_service is not None
         and session is not None
         and client_ip is not None
         and record_read.record_type.slicer_result_validator
@@ -488,23 +497,27 @@ async def _process_submission(
     if is_update:
         updated, _ = await service.update_data(record_id, validated_data)
     else:
-        # Validate input files (raise on missing required files)
-        file_result = await validate_record_files(
-            record_read,
-            raise_on_invalid=True,
-            parent=parent_read,
-        )
-        if file_result and file_result.matched_files:
-            await repo.set_files(record, file_result.matched_files)
+        if not skip_validation:
+            # Validate input files (raise on missing required files)
+            file_result = await validate_record_files(
+                record_read,
+                raise_on_invalid=True,
+                parent=parent_read,
+            )
+            if file_result and file_result.matched_files:
+                await repo.set_files(record, file_result.matched_files)
 
         updated, _ = await service.submit_data(
             record_id,
             validated_data,
-            RecordStatus.finished,
+            new_status,
             user_id=user.id,
         )
 
     return mask_record_patient_data(RecordRead.model_validate(updated), user)
+
+
+_SUBMIT_STATUSES = frozenset({RecordStatus.finished, RecordStatus.failed})
 
 
 @router.post("/{record_id}/data", response_model=RecordRead)
@@ -516,9 +529,20 @@ async def submit_record_data(
     rt_service: RecordTypeServiceDep,
     user: CurrentUserDep,
     data: RecordData = Body(),
+    submit_status: RecordStatus | None = Query(default=None, alias="status"),
 ) -> RecordRead:
-    """Submit data for a record."""
+    """Submit data for a record.
+
+    Pass ``?status=failed`` to mark the record as failed (skips validation).
+    """
     record = authorized_record
+    target_status = submit_status or RecordStatus.finished
+
+    if target_status not in _SUBMIT_STATUSES:
+        raise CONFLICT.with_context(
+            f"Invalid submit status '{target_status.value}'. "
+            f"Allowed: {', '.join(s.value for s in _SUBMIT_STATUSES)}."
+        )
 
     if record.status == RecordStatus.blocked:
         raise CONFLICT.with_context("Record is blocked — required input files are missing.")
@@ -535,6 +559,7 @@ async def submit_record_data(
         service=service,
         rt_service=rt_service,
         is_update=False,
+        new_status=target_status,
     )
 
 
