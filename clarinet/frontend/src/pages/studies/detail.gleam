@@ -35,7 +35,7 @@ pub type Msg {
 
 // --- Init ---
 
-pub fn init(study_uid: String, _shared: Shared) -> #(Model, Effect(Msg)) {
+pub fn init(study_uid: String, _shared: Shared) -> #(Model, Effect(Msg), List(OutMsg)) {
   let model = Model(study_uid: study_uid)
   let eff = {
     use dispatch <- effect.from
@@ -43,7 +43,7 @@ pub fn init(study_uid: String, _shared: Shared) -> #(Model, Effect(Msg)) {
     |> promise.tap(fn(result) { dispatch(StudyLoaded(result)) })
     Nil
   }
-  #(model, eff)
+  #(model, eff, [shared.ReloadRecords])
 }
 
 // --- Update ---

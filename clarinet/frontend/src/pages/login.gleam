@@ -29,8 +29,8 @@ pub type Msg {
 
 // --- Init ---
 
-pub fn init(_shared: Shared) -> #(Model, Effect(Msg)) {
-  #(Model(email: "", password: "", loading: False, error: None), effect.none())
+pub fn init(_shared: Shared) -> #(Model, Effect(Msg), List(OutMsg)) {
+  #(Model(email: "", password: "", loading: False, error: None), effect.none(), [])
 }
 
 // --- Update ---

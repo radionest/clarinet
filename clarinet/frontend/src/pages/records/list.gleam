@@ -36,8 +36,8 @@ pub type Msg {
 
 // --- Init ---
 
-pub fn init(_shared: Shared) -> #(Model, Effect(Msg)) {
-  #(Model(active_filters: dict.new()), effect.none())
+pub fn init(_shared: Shared) -> #(Model, Effect(Msg), List(OutMsg)) {
+  #(Model(active_filters: dict.new()), effect.none(), [shared.ReloadRecords])
 }
 
 // --- Update ---

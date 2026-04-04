@@ -8,7 +8,6 @@ import components/forms/record_form
 import gleam/dict.{type Dict}
 import gleam/int
 import gleam/javascript/promise
-import gleam/list
 import gleam/option.{None, Some}
 import lustre/attribute
 import lustre/effect.{type Effect}
@@ -37,13 +36,12 @@ pub type Msg {
   SubmitResult(Result(Record, ApiError))
   StudiesLoaded(Result(List(Study), ApiError))
   SeriesLoaded(Result(List(Series), ApiError))
-  RecordTypesLoaded(Result(List(models.RecordType), ApiError))
   Cancel
 }
 
 // --- Init ---
 
-pub fn init(shared: Shared) -> #(Model, Effect(Msg)) {
+pub fn init(shared: Shared) -> #(Model, Effect(Msg), List(OutMsg)) {
   let model =
     Model(
       form_data: record_form.init(),
@@ -52,17 +50,13 @@ pub fn init(shared: Shared) -> #(Model, Effect(Msg)) {
       form_series: [],
       loading: False,
     )
-  // Load record types if not yet cached
-  let load_rt_eff = case dict.is_empty(shared.record_types) {
-    True -> {
-      use dispatch <- effect.from
-      records.get_record_types()
-      |> promise.tap(fn(result) { dispatch(RecordTypesLoaded(result)) })
-      Nil
-    }
-    False -> effect.none()
+  let out_msgs = case shared.user {
+    Some(models.User(is_superuser: True, ..)) ->
+      [shared.ReloadPatients, shared.ReloadRecordTypes, shared.ReloadUsers, shared.ReloadRecords]
+    _ ->
+      [shared.ReloadRecordTypes, shared.ReloadRecords]
   }
-  #(model, load_rt_eff)
+  #(model, effect.none(), out_msgs)
 }
 
 // --- Update ---
@@ -131,18 +125,6 @@ pub fn update(
 
     SeriesLoaded(Error(_)) ->
       #(Model(..model, form_series: []), effect.none(), [])
-
-    RecordTypesLoaded(Ok(rt_list)) -> {
-      let rt_dict =
-        dict.from_list(
-          rt_list
-          |> list.map(fn(rt) { #(rt.name, rt) }),
-        )
-      #(model, effect.none(), list.map(dict.values(rt_dict), shared.CacheRecordType))
-    }
-
-    RecordTypesLoaded(Error(err)) ->
-      #(model, effect.none(), handle_error(err, "Failed to load record types"))
 
     Submit -> {
       case record_form.validate(model.form_data, shared.record_types) {

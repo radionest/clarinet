@@ -25,8 +25,15 @@ pub type Msg {
 
 // --- Init ---
 
-pub fn init(_shared: Shared) -> #(Model, Effect(Msg)) {
-  #(Model, effect.none())
+pub fn init(shared: Shared) -> #(Model, Effect(Msg), List(OutMsg)) {
+  let out_msgs = case shared.user {
+    Some(models.User(is_superuser: True, ..)) ->
+      [shared.ReloadStudies, shared.ReloadRecords, shared.ReloadUsers]
+    Some(_) ->
+      [shared.ReloadRecords]
+    None -> []
+  }
+  #(Model, effect.none(), out_msgs)
 }
 
 // --- Update ---

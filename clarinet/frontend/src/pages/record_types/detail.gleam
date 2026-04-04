@@ -27,8 +27,8 @@ pub type Msg {
 
 // --- Init ---
 
-pub fn init(name: String, _shared: Shared) -> #(Model, Effect(Msg)) {
-  #(Model(name: name), effect.none())
+pub fn init(name: String, _shared: Shared) -> #(Model, Effect(Msg), List(OutMsg)) {
+  #(Model(name: name), effect.none(), [shared.ReloadRecordTypeStats, shared.ReloadRecords])
 }
 
 // --- Update ---

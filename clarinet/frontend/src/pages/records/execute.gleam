@@ -68,7 +68,7 @@ pub type Msg {
 
 // --- Init ---
 
-pub fn init(record_id: String, _shared: Shared) -> #(Model, Effect(Msg)) {
+pub fn init(record_id: String, _shared: Shared) -> #(Model, Effect(Msg), List(OutMsg)) {
   let model =
     Model(
       record_id: record_id,
@@ -87,7 +87,7 @@ pub fn init(record_id: String, _shared: Shared) -> #(Model, Effect(Msg)) {
     Nil
   }
 
-  #(model, effect.batch([ping_eff, schema_eff]))
+  #(model, effect.batch([ping_eff, schema_eff]), [shared.ReloadRecord(record_id)])
 }
 
 /// Cleanup slicer ping timer — called from main.gleam on route change

@@ -32,7 +32,7 @@ pub type Msg {
 
 // --- Init ---
 
-pub fn init(series_uid: String, _shared: Shared) -> #(Model, Effect(Msg)) {
+pub fn init(series_uid: String, _shared: Shared) -> #(Model, Effect(Msg), List(OutMsg)) {
   let model = Model(series_uid: series_uid)
   let eff = {
     use dispatch <- effect.from
@@ -40,7 +40,7 @@ pub fn init(series_uid: String, _shared: Shared) -> #(Model, Effect(Msg)) {
     |> promise.tap(fn(result) { dispatch(SeriesLoaded(result)) })
     Nil
   }
-  #(model, eff)
+  #(model, eff, [])
 }
 
 // --- Update ---

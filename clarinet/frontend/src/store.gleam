@@ -162,9 +162,6 @@ pub type Msg {
   LoadRecordTypes
   RecordTypesLoaded(Result(List(RecordType), ApiError))
 
-  // RecordType edit
-  LoadRecordTypeForEdit(name: String)
-  RecordTypeForEditLoaded(Result(RecordType, ApiError))
   // UI Actions
   SetError(Option(String))
   ClearError

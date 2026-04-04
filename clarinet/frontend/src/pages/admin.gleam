@@ -50,7 +50,7 @@ pub type Msg {
 
 // --- Init ---
 
-pub fn init(_shared: Shared) -> #(Model, Effect(Msg)) {
+pub fn init(_shared: Shared) -> #(Model, Effect(Msg), List(OutMsg)) {
   let model =
     Model(
       admin_stats: None,
@@ -64,7 +64,7 @@ pub fn init(_shared: Shared) -> #(Model, Effect(Msg)) {
       load_effect(admin_api.get_admin_stats, AdminStatsLoaded),
       load_effect(admin_api.get_role_matrix, RoleMatrixLoaded),
     ])
-  #(model, effects)
+  #(model, effects, [shared.ReloadRecords, shared.ReloadUsers])
 }
 
 // --- Update ---

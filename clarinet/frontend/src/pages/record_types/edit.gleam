@@ -1,7 +1,9 @@
 // Record type edit page (admin only) — self-contained MVU module using Formosh
 import api/models.{type FileDefinition, type RecordType}
+import api/records
 import api/types
 import config
+import gleam/javascript/promise
 import formosh/component as formosh_component
 import gleam/dict
 import gleam/dynamic/decode
@@ -25,14 +27,21 @@ pub type Model {
 // --- Msg ---
 
 pub type Msg {
+  RecordTypeLoaded(Result(RecordType, types.ApiError))
   FormSubmitSuccess(name: String)
   FormSubmitError(error: String)
 }
 
 // --- Init ---
 
-pub fn init(name: String, _shared: Shared) -> #(Model, Effect(Msg)) {
-  #(Model(name: name), effect.none())
+pub fn init(name: String, _shared: Shared) -> #(Model, Effect(Msg), List(OutMsg)) {
+  let eff = {
+    use dispatch <- effect.from
+    records.get_record_type(name)
+    |> promise.tap(fn(result) { dispatch(RecordTypeLoaded(result)) })
+    Nil
+  }
+  #(Model(name: name), eff, [])
 }
 
 // --- Update ---
@@ -43,6 +52,10 @@ pub fn update(
   _shared: Shared,
 ) -> #(Model, Effect(Msg), List(OutMsg)) {
   case msg {
+    RecordTypeLoaded(Ok(rt)) ->
+      #(model, effect.none(), [shared.CacheRecordType(rt)])
+    RecordTypeLoaded(Error(_)) ->
+      #(model, effect.none(), [shared.ShowError("Failed to load record type")])
     FormSubmitSuccess(name) ->
       #(model, effect.none(), [
         shared.ShowSuccess("Record type updated successfully"),

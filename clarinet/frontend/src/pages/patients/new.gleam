@@ -34,7 +34,7 @@ pub type Msg {
 
 // --- Init ---
 
-pub fn init(_shared: Shared) -> #(Model, Effect(Msg)) {
+pub fn init(_shared: Shared) -> #(Model, Effect(Msg), List(OutMsg)) {
   let model =
     Model(
       form_id: "",
@@ -42,7 +42,7 @@ pub fn init(_shared: Shared) -> #(Model, Effect(Msg)) {
       form_errors: dict.new(),
       loading: False,
     )
-  #(model, effect.none())
+  #(model, effect.none(), [])
 }
 
 // --- Update ---

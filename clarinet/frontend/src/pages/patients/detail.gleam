@@ -53,7 +53,7 @@ pub type Msg {
 
 // --- Init ---
 
-pub fn init(patient_id: String, _shared: Shared) -> #(Model, Effect(Msg)) {
+pub fn init(patient_id: String, _shared: Shared) -> #(Model, Effect(Msg), List(OutMsg)) {
   let model =
     Model(
       patient_id: patient_id,
@@ -61,7 +61,7 @@ pub fn init(patient_id: String, _shared: Shared) -> #(Model, Effect(Msg)) {
       pacs_loading: False,
       pacs_importing: None,
     )
-  #(model, effect.none())
+  #(model, effect.none(), [shared.ReloadPatient(patient_id), shared.ReloadRecords])
 }
 
 // --- Update ---

@@ -37,7 +37,7 @@ pub type Msg {
 
 // --- Init ---
 
-pub fn init(_shared: Shared) -> #(Model, Effect(Msg)) {
+pub fn init(_shared: Shared) -> #(Model, Effect(Msg), List(OutMsg)) {
   let model =
     Model(
       email: "",
@@ -46,7 +46,7 @@ pub fn init(_shared: Shared) -> #(Model, Effect(Msg)) {
       loading: False,
       error: None,
     )
-  #(model, effect.none())
+  #(model, effect.none(), [])
 }
 
 // --- Update ---
