@@ -75,6 +75,16 @@ _test_pacs = PacsHelper(
 """
 
 
+def _context_injection_block(retrieve_mode: str = "c-move") -> str:
+    """Return a script block that injects Clarinet PACS context variables."""
+    return f"""
+pacs_host = "{PACS_HOST}"
+pacs_port = {PACS_PORT}
+pacs_aet = "{PACS_AET}"
+dicom_retrieve_mode = "{retrieve_mode}"
+"""
+
+
 def _monkey_patch_from_slicer_block() -> str:
     """Return a script block that monkey-patches PacsHelper.from_slicer.
 

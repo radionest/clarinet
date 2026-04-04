@@ -96,3 +96,10 @@ Fallback: if context variables are absent (standalone/manual usage), `PacsHelper
 - E2E tests: `tests/e2e/test_slicer_pacs_workflow.py` — Slicer ↔ PACS (C-GET/C-MOVE) without mocks: PacsHelper retrieval, load_study/series_from_pacs, record-open API, backend C-MOVE → Slicer load
 - Helper has `_Dummy` stubs so `helper.py` is importable without Slicer
 - All slicer tests use `xdist_group("slicer")` for parallel safety — single Slicer instance shared across tests
+
+### E2E test patterns
+
+- Scripts return results via `__execResult = {...}`, NOT `print(json.dumps(...))`
+- Use `_pacs_helper_script_block()` for explicit PacsHelper params
+- Use `_monkey_patch_from_slicer_block()` for overriding `from_slicer()`
+- Use `_context_injection_block()` for Clarinet PACS context variables
