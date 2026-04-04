@@ -139,14 +139,14 @@ class TestPacsHelperConstruction:
             port=4242,
             called_aet="PACS",
             calling_aet="SLICER",
-            prefer_cget=True,
+            retrieve_mode="c-get",
             move_aet="SLICER",
         )
         assert pacs.host == "192.168.1.10"
         assert pacs.port == 4242
         assert pacs.called_aet == "PACS"
         assert pacs.calling_aet == "SLICER"
-        assert pacs.prefer_cget is True
+        assert pacs.retrieve_mode == "c-get"
         assert pacs.move_aet == "SLICER"
 
     def test_constructor_defaults(self) -> None:
@@ -157,7 +157,7 @@ class TestPacsHelperConstruction:
             called_aet="ORTHANC",
             calling_aet="MYSCU",
         )
-        assert pacs.prefer_cget is True
+        assert pacs.retrieve_mode == "c-get"
         assert pacs.move_aet == "MYSCU"
 
     def test_slicer_helper_has_load_study_from_pacs(self) -> None:

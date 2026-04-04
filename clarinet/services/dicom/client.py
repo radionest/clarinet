@@ -240,7 +240,7 @@ class DicomClient:
 
         storage = StorageConfig(mode=mode, output_dir=output_dir)
 
-        if settings.dicom_retrieve_mode == "c-move":
+        if settings.dicom_retrieve_mode in ("c-move", "c-move-study"):
             from clarinet.services.dicom.scp import get_storage_scp
 
             scp = get_storage_scp()
