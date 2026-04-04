@@ -165,11 +165,8 @@ def _get_pacs_helper(server_name: str | None = None) -> PacsHelper:
         retrieve_mode = g.get("dicom_retrieve_mode", "c-get")
         prefer_cget = retrieve_mode != "c-move"
         _pacs_log.info(
-            "Using PACS from Clarinet settings: %s:%s (AET=%s, mode=%s)",
-            host,
-            port,
-            called_aet,
-            retrieve_mode,
+            f"Using PACS from Clarinet settings: {host}:{port} "
+            f"(AET={called_aet}, mode={retrieve_mode})"
         )
         return PacsHelper(
             host=host,
@@ -248,7 +245,7 @@ class PacsHelper:
                 text = raw.data() if hasattr(raw, "data") else str(raw)
                 data = json.loads(text)
             except (json.JSONDecodeError, AttributeError, TypeError):
-                _pacs_log.warning("Skipping malformed DICOM/ServerNodes/%d", i)
+                _pacs_log.warning(f"Skipping malformed DICOM/ServerNodes/{i}")
                 continue
             servers.append(data)
 
@@ -287,11 +284,7 @@ class PacsHelper:
         prefer_cget = server.get("Retrieve Protocol", "CGET") == "CGET"
 
         _pacs_log.info(
-            "Using PACS server: %s (%s:%s, AET=%s)",
-            server.get("Name", "unknown"),
-            host,
-            port,
-            called_aet,
+            f"Using PACS server: {server.get('Name', 'unknown')} ({host}:{port}, AET={called_aet})"
         )
 
         return cls(
@@ -322,7 +315,7 @@ class PacsHelper:
         if local_series:
             from DICOMLib import DICOMUtils  # type: ignore[import-not-found]
 
-            _pacs_log.info("Study %s found in local DICOM database", study_instance_uid)
+            _pacs_log.info(f"Study {study_instance_uid} found in local DICOM database")
             # list() required: db.seriesForStudy() returns QStringList (tuple in PythonQt),
             # but DICOMUtils.loadSeriesByUID() checks isinstance(x, list)
             loaded: list[str] = DICOMUtils.loadSeriesByUID(list(local_series))
@@ -330,7 +323,7 @@ class PacsHelper:
                 return loaded
 
         # 2. C-FIND: query PACS for the study
-        _pacs_log.info("C-FIND study %s ...", study_instance_uid)
+        _pacs_log.info(f"C-FIND study {study_instance_uid} ...")
         query = ctk.ctkDICOMQuery()
         query.callingAETitle = self.calling_aet
         query.calledAETitle = self.called_aet
@@ -347,7 +340,7 @@ class PacsHelper:
             for study_uid, series_uid in query.studyAndSeriesInstanceUIDQueried
             if study_uid == study_instance_uid
         ]
-        _pacs_log.info("C-FIND returned %d series", len(series_to_retrieve))
+        _pacs_log.info(f"C-FIND returned {len(series_to_retrieve)} series")
 
         # 3. C-GET/C-MOVE with fallback: retrieve series into Slicer DICOM database
         retrieve = ctk.ctkDICOMRetrieve()
@@ -357,20 +350,32 @@ class PacsHelper:
         retrieve.port = self.port
         retrieve.setDatabase(slicer.dicomDatabase)
 
+        _pacs_log.info(
+            f"DIMSE retrieve: {self.calling_aet} → {self.host}:{self.port} "
+            f"(called={self.called_aet}, move_dest={self.move_aet})"
+        )
+
         retrieved_series_uids: list[str] = []
         for series_uid in series_to_retrieve:
             if self.prefer_cget:
                 ok = retrieve.getSeries(study_instance_uid, series_uid)
                 if not ok or not (db and db.filesForSeries(series_uid)):
                     _pacs_log.warning(
-                        "C-GET failed for series %s, falling back to C-MOVE", series_uid
+                        f"C-GET failed for series {series_uid} (ok={ok}), falling back to C-MOVE"
                     )
                     retrieve.moveDestinationAETitle = self.move_aet
                     retrieve.moveSeries(study_instance_uid, series_uid)
             else:
+                _pacs_log.info(f"C-MOVE series {series_uid} ...")
                 retrieve.moveDestinationAETitle = self.move_aet
                 retrieve.moveSeries(study_instance_uid, series_uid)
-            retrieved_series_uids.append(series_uid)
+
+            files = db.filesForSeries(series_uid) if db else ()
+            if files:
+                _pacs_log.info(f"Retrieved {len(files)} files for series {series_uid}")
+                retrieved_series_uids.append(series_uid)
+            else:
+                _pacs_log.error(f"Retrieve failed: 0 files for series {series_uid}")
 
         # 4. Load ONLY the retrieved series into the MRML scene
         from DICOMLib import DICOMUtils  # type: ignore[import-not-found]
@@ -399,7 +404,7 @@ class PacsHelper:
         if db and db.filesForSeries(series_instance_uid):
             from DICOMLib import DICOMUtils  # type: ignore[import-not-found]
 
-            _pacs_log.info("Series %s found in local DICOM database", series_instance_uid)
+            _pacs_log.info(f"Series {series_instance_uid} found in local DICOM database")
             loaded: list[str] = DICOMUtils.loadSeriesByUID([series_instance_uid])
             if loaded:
                 return loaded
@@ -412,17 +417,34 @@ class PacsHelper:
         retrieve.port = self.port
         retrieve.setDatabase(slicer.dicomDatabase)
 
+        _pacs_log.info(
+            f"DIMSE retrieve: {self.calling_aet} → {self.host}:{self.port} "
+            f"(called={self.called_aet}, move_dest={self.move_aet})"
+        )
+
         if self.prefer_cget:
-            _pacs_log.info("C-GET series %s ...", series_instance_uid)
+            _pacs_log.info(f"C-GET series {series_instance_uid} ...")
             ok = retrieve.getSeries(study_instance_uid, series_instance_uid)
             if not ok or not (db and db.filesForSeries(series_instance_uid)):
-                _pacs_log.warning("C-GET failed, falling back to C-MOVE")
+                _pacs_log.warning(f"C-GET failed (ok={ok}), falling back to C-MOVE")
                 retrieve.moveDestinationAETitle = self.move_aet
                 retrieve.moveSeries(study_instance_uid, series_instance_uid)
         else:
-            _pacs_log.info("C-MOVE series %s ...", series_instance_uid)
+            _pacs_log.info(f"C-MOVE series {series_instance_uid} ...")
             retrieve.moveDestinationAETitle = self.move_aet
             retrieve.moveSeries(study_instance_uid, series_instance_uid)
+
+        # Verify files arrived in the database
+        files_after = db.filesForSeries(series_instance_uid) if db else ()
+        if not files_after:
+            _pacs_log.error(
+                f"Retrieve failed: 0 files for series {series_instance_uid} "
+                f"(calling={self.calling_aet}, called={self.called_aet}, "
+                f"host={self.host}:{self.port}, move_dest={self.move_aet})"
+            )
+            return []
+
+        _pacs_log.info(f"Retrieved {len(files_after)} files for series {series_instance_uid}")
 
         from DICOMLib import DICOMUtils  # type: ignore[import-not-found]
 
