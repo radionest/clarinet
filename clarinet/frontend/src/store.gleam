@@ -1,7 +1,7 @@
 // Global state management
 import api/info.{type ProjectInfo}
 import api/models.{
-  type Patient, type RecordTypeStats, type RoleMatrix,
+  type Patient, type RecordTypeStats,
   type Series, type Study, type Record, type RecordType, type User,
 }
 import pages/admin as admin_page
@@ -11,16 +11,19 @@ import pages/patients/list as patients_list_page
 import pages/patients/new as patient_new_page
 import pages/records/execute as record_execute_page
 import pages/records/list as records_list_page
+import pages/record_types/detail as record_type_detail_page
+import pages/record_types/edit as record_type_edit_page
+import pages/record_types/list as record_types_list_page
 import pages/records/new as record_new_page
 import pages/register as register_page
 import pages/series/detail as series_detail_page
+import pages/home as home_page
 import pages/studies/detail as study_detail_page
 import pages/studies/list as studies_list_page
 import api/types.{type ApiError}
 import gleam/dict.{type Dict}
 import gleam/dynamic
 import gleam/int
-import gleam/json.{type Json}
 import gleam/option.{type Option, None, Some}
 import plinth/javascript/global
 import router.{type Route}
@@ -47,16 +50,11 @@ pub type Model {
     record_types: Dict(String, RecordType),
     patients: Dict(String, Patient),
     users: Dict(String, User),
-    // Form states
-    record_type_form: Option(dynamic.Dynamic),
     // Admin
     record_type_stats: Option(List(RecordTypeStats)),
     // Modal state
     modal_open: Bool,
     modal_content: ModalContent,
-    // Role matrix
-    role_matrix: Option(RoleMatrix),
-    role_toggling: Option(#(String, String)),
     // Preload state
     preload_timer: Option(global.TimerID),
     // Active page model (for modular pages)
@@ -79,14 +77,16 @@ pub type PageModel {
   StudiesListPage(studies_list_page.Model)
   StudyDetailPage(study_detail_page.Model)
   SeriesDetailPage(series_detail_page.Model)
+  RecordTypesListPage(record_types_list_page.Model)
+  RecordTypeDetailPage(record_type_detail_page.Model)
+  RecordTypeEditPage(record_type_edit_page.Model)
+  HomePage(home_page.Model)
 }
 
 // Modal content types
 pub type ModalContent {
   NoModal
   ConfirmDelete(resource: String, id: String)
-  ViewDetails(resource: String, data: Json)
-  EditForm(resource: String, id: Option(String))
   PreloadProgress(
     viewer_url: String,
     task_id: String,
@@ -127,6 +127,14 @@ pub type Msg {
   StudyDetailMsg(study_detail_page.Msg)
   SeriesDetailMsg(series_detail_page.Msg)
 
+  // Record type page delegation
+  RecordTypesListMsg(record_types_list_page.Msg)
+  RecordTypeDetailMsg(record_type_detail_page.Msg)
+  RecordTypeEditMsg(record_type_edit_page.Msg)
+
+  // Home page delegation
+  HomeMsg(home_page.Msg)
+
   // Data loading
   LoadStudies
   StudiesLoaded(Result(List(Study), ApiError))
@@ -150,12 +158,6 @@ pub type Msg {
   // Admin page delegation
   AdminMsg(admin_page.Msg)
 
-  // Form handling
-  UpdateRecordTypeForm(dynamic.Dynamic)
-  UpdateRecordTypeSchema(Json)
-  SubmitRecordTypeForm
-  RecordTypeFormSubmitted(Result(RecordType, ApiError))
-
   // Record types loading (used by record_new page init + admin)
   LoadRecordTypes
   RecordTypesLoaded(Result(List(RecordType), ApiError))
@@ -163,14 +165,9 @@ pub type Msg {
   // RecordType edit
   LoadRecordTypeForEdit(name: String)
   RecordTypeForEditLoaded(Result(RecordType, ApiError))
-  RecordTypeEditSuccess(name: String)
-  RecordTypeEditError(error: String)
-
   // UI Actions
-  SetLoading(Bool)
   SetError(Option(String))
   ClearError
-  SetSuccessMessage(String)
   ClearSuccessMessage
 
   OpenModal(ModalContent)
@@ -182,16 +179,6 @@ pub type Msg {
 
   // Auto-assign
   AutoAssignResult(Result(Record, ApiError))
-
-  // Restart auto task
-  RestartRecord(record_id: String)
-  RestartRecordResult(Result(Record, ApiError))
-
-  // Role matrix
-  LoadRoleMatrix
-  RoleMatrixLoaded(Result(RoleMatrix, ApiError))
-  ToggleUserRole(user_id: String, role_name: String, add: Bool)
-  UserRoleToggled(Result(Nil, ApiError))
 
   // Preload
   StartPreload(viewer_url: String, study_uid: String)
@@ -225,12 +212,9 @@ pub fn init() -> Model {
     record_types: dict.new(),
     patients: dict.new(),
     users: dict.new(),
-    record_type_form: None,
     record_type_stats: None,
     modal_open: False,
     modal_content: NoModal,
-    role_matrix: None,
-    role_toggling: None,
     preload_timer: None,
     page: NoPage,
   )
@@ -243,10 +227,6 @@ pub fn set_route(model: Model, route: Route) -> Model {
 
 pub fn set_user(model: Model, user: User) -> Model {
   Model(..model, user: Some(user))
-}
-
-pub fn clear_user(model: Model) -> Model {
-  Model(..model, user: None)
 }
 
 pub fn reset_for_logout(model: Model) -> Model {
@@ -270,10 +250,6 @@ pub fn set_error(model: Model, error: Option(String)) -> Model {
 
 pub fn set_success(model: Model, message: String) -> Model {
   Model(..model, success_message: Some(message))
-}
-
-pub fn clear_messages(model: Model) -> Model {
-  Model(..model, error: None, success_message: None)
 }
 
 // Cache helpers

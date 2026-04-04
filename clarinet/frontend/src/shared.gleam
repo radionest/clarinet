@@ -1,5 +1,6 @@
 import api/models.{
-  type Patient, type Record, type RecordType, type Series, type Study, type User,
+  type Patient, type Record, type RecordType, type RecordTypeStats, type Series,
+  type Study, type User,
 }
 import gleam/dict.{type Dict}
 import gleam/option.{type Option}
@@ -20,6 +21,7 @@ pub type Shared {
     record_types: Dict(String, RecordType),
     patients: Dict(String, Patient),
     users: Dict(String, User),
+    record_type_stats: Option(List(RecordTypeStats)),
   )
 }
 
@@ -41,6 +43,7 @@ pub type OutMsg {
   ReloadUsers
   ReloadPatients
   ReloadRecordTypes
+  ReloadRecordTypeStats
   ReloadPatient(String)
   ReloadRecord(String)
   OpenDeleteConfirm(resource: String, id: String)

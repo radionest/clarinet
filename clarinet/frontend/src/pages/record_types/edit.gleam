@@ -1,4 +1,4 @@
-// Record type edit page (admin only) using Formosh web component
+// Record type edit page (admin only) — self-contained MVU module using Formosh
 import api/models.{type FileDefinition, type RecordType}
 import api/types
 import config
@@ -9,11 +9,59 @@ import gleam/json
 import gleam/list
 import gleam/option.{None, Some}
 import lustre/attribute
+import lustre/effect.{type Effect}
 import lustre/element.{type Element}
 import lustre/element/html
 import lustre/event
 import router
-import store.{type Model, type Msg}
+import shared.{type OutMsg, type Shared}
+
+// --- Model ---
+
+pub type Model {
+  Model(name: String)
+}
+
+// --- Msg ---
+
+pub type Msg {
+  FormSubmitSuccess(name: String)
+  FormSubmitError(error: String)
+}
+
+// --- Init ---
+
+pub fn init(name: String, _shared: Shared) -> #(Model, Effect(Msg)) {
+  #(Model(name: name), effect.none())
+}
+
+// --- Update ---
+
+pub fn update(
+  model: Model,
+  msg: Msg,
+  _shared: Shared,
+) -> #(Model, Effect(Msg), List(OutMsg)) {
+  case msg {
+    FormSubmitSuccess(name) ->
+      #(model, effect.none(), [
+        shared.ShowSuccess("Record type updated successfully"),
+        shared.Navigate(router.AdminRecordTypeDetail(name)),
+        shared.ReloadRecordTypeStats,
+      ])
+    FormSubmitError(error) ->
+      #(model, effect.none(), [shared.ShowError(error)])
+  }
+}
+
+// --- View ---
+
+pub fn view(model: Model, shared: Shared) -> Element(Msg) {
+  case dict.get(shared.record_types, model.name) {
+    Ok(rt) -> render_edit(rt, model.name)
+    Error(_) -> loading_view(model.name)
+  }
+}
 
 /// JSON Schema for the RecordType edit form
 const record_type_edit_schema = "{
@@ -95,7 +143,44 @@ const record_type_edit_schema = "{
   }
 }"
 
-/// Build initial values JSON string from a RecordType
+fn render_edit(rt: RecordType, name: String) -> Element(Msg) {
+  html.div([attribute.class("container")], [
+    html.div([attribute.class("page-header")], [
+      html.h1([], [
+        html.text("Edit Record Type: " <> option.unwrap(rt.label, rt.name)),
+      ]),
+      html.a(
+        [
+          attribute.href(
+            router.route_to_path(router.AdminRecordTypeDetail(name)),
+          ),
+          attribute.class("btn btn-secondary"),
+        ],
+        [html.text("Back to Details")],
+      ),
+    ]),
+    html.div([attribute.class("card")], [
+      formosh_component.element([
+        formosh_component.schema_string(record_type_edit_schema),
+        formosh_component.submit_url(
+          config.base_path() <> "/api/records/types/" <> name,
+        ),
+        formosh_component.submit_method("PATCH"),
+        formosh_component.initial_values_string(build_initial_values(rt)),
+        event.on("formosh-submit", decode_edit_submit(name)),
+      ]),
+    ]),
+  ])
+}
+
+fn decode_edit_submit(name: String) -> decode.Decoder(Msg) {
+  use status <- decode.then(decode.at(["detail", "status"], decode.string))
+  case status {
+    "success" -> decode.success(FormSubmitSuccess(name))
+    _ -> decode.success(FormSubmitError("Update failed"))
+  }
+}
+
 fn build_initial_values(rt: RecordType) -> String {
   let fields = [
     #("description", json.nullable(rt.description, json.string)),
@@ -106,9 +191,15 @@ fn build_initial_values(rt: RecordType) -> String {
     #("max_records", json.nullable(rt.max_records, json.int)),
     #("unique_per_user", json.bool(rt.unique_per_user)),
     #("slicer_script", json.nullable(rt.slicer_script, json.string)),
-    #("slicer_result_validator", json.nullable(rt.slicer_result_validator, json.string)),
+    #(
+      "slicer_result_validator",
+      json.nullable(rt.slicer_result_validator, json.string),
+    ),
     #("slicer_script_args", dict_to_json_string(rt.slicer_script_args)),
-    #("slicer_result_validator_args", dict_to_json_string(rt.slicer_result_validator_args)),
+    #(
+      "slicer_result_validator_args",
+      dict_to_json_string(rt.slicer_result_validator_args),
+    ),
     #("data_schema", json.nullable(rt.data_schema, json.string)),
     #("file_registry", file_definitions_to_json(rt.file_registry)),
   ]
@@ -123,7 +214,6 @@ fn level_to_json(level: types.DicomQueryLevel) -> json.Json {
   }
 }
 
-/// Convert an optional dict to a JSON string value (for textarea fields)
 fn dict_to_json_string(
   d: option.Option(dict.Dict(String, String)),
 ) -> json.Json {
@@ -133,14 +223,12 @@ fn dict_to_json_string(
         dict.to_list(dict_val)
         |> list.map(fn(pair) { #(pair.0, json.string(pair.1)) })
         |> json.object
-      // Stringify the dict to a JSON string for the textarea
       json.string(json.to_string(entries))
     }
     None -> json.null()
   }
 }
 
-/// Convert optional list of FileDefinitions to JSON array
 fn file_definitions_to_json(
   files: option.Option(List(FileDefinition)),
 ) -> json.Json {
@@ -162,49 +250,6 @@ fn file_definitions_to_json(
         ])
       })
     None -> json.preprocessed_array([])
-  }
-}
-
-/// View for the edit page
-pub fn view(model: Model, name: String) -> Element(Msg) {
-  case dict.get(model.record_types, name) {
-    Ok(rt) -> render_edit(model, rt, name)
-    Error(_) -> loading_view(name)
-  }
-}
-
-fn render_edit(_model: Model, rt: RecordType, name: String) -> Element(Msg) {
-  html.div([attribute.class("container")], [
-    html.div([attribute.class("page-header")], [
-      html.h1([], [
-        html.text("Edit Record Type: " <> option.unwrap(rt.label, rt.name)),
-      ]),
-      html.button(
-        [
-          attribute.class("btn btn-secondary"),
-          event.on_click(store.Navigate(router.AdminRecordTypeDetail(name))),
-        ],
-        [html.text("Back to Details")],
-      ),
-    ]),
-    html.div([attribute.class("card")], [
-      formosh_component.element([
-        formosh_component.schema_string(record_type_edit_schema),
-        formosh_component.submit_url(config.base_path() <> "/api/records/types/" <> name),
-        formosh_component.submit_method("PATCH"),
-        formosh_component.initial_values_string(build_initial_values(rt)),
-        event.on("formosh-submit", decode_edit_submit(name)),
-      ]),
-    ]),
-  ])
-}
-
-/// Decode formosh-submit custom event for the edit form
-fn decode_edit_submit(name: String) -> decode.Decoder(Msg) {
-  use status <- decode.then(decode.at(["detail", "status"], decode.string))
-  case status {
-    "success" -> decode.success(store.RecordTypeEditSuccess(name))
-    _ -> decode.success(store.RecordTypeEditError("Update failed"))
   }
 }
 

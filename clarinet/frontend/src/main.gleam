@@ -480,28 +480,6 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       #(new_model, effect.none())
     }
 
-    store.RecordTypeEditSuccess(name) -> {
-      let new_model =
-        model
-        |> store.set_success("Record type updated successfully")
-        |> store.set_route(router.AdminRecordTypeDetail(name))
-      #(
-        new_model,
-        effect.batch([
-          modem.push(
-            router.route_to_path(router.AdminRecordTypeDetail(name)),
-            option.None,
-            option.None,
-          ),
-          dispatch_msg(store.LoadRecordTypeStats),
-        ]),
-      )
-    }
-
-    store.RecordTypeEditError(error) -> {
-      #(store.set_error(model, Some(error)), effect.none())
-    }
-
     // Patient data loading
     store.LoadPatients ->
       load_with_effect(model, patients.get_patients, store.PatientsLoaded)
@@ -694,6 +672,44 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         store.SeriesDetailMsg,
       )
 
+    // Record type page delegation
+    store.RecordTypesListMsg(page_msg) ->
+      delegate_page_update(
+        model,
+        fn(p) { case p { store.RecordTypesListPage(m) -> Ok(m) _ -> Error(Nil) } },
+        fn(m, s) { record_types_list.update(m, page_msg, s) },
+        store.RecordTypesListPage,
+        store.RecordTypesListMsg,
+      )
+
+    store.RecordTypeDetailMsg(page_msg) ->
+      delegate_page_update(
+        model,
+        fn(p) { case p { store.RecordTypeDetailPage(m) -> Ok(m) _ -> Error(Nil) } },
+        fn(m, s) { record_type_detail.update(m, page_msg, s) },
+        store.RecordTypeDetailPage,
+        store.RecordTypeDetailMsg,
+      )
+
+    store.RecordTypeEditMsg(page_msg) ->
+      delegate_page_update(
+        model,
+        fn(p) { case p { store.RecordTypeEditPage(m) -> Ok(m) _ -> Error(Nil) } },
+        fn(m, s) { record_type_edit.update(m, page_msg, s) },
+        store.RecordTypeEditPage,
+        store.RecordTypeEditMsg,
+      )
+
+    // Home page delegation
+    store.HomeMsg(page_msg) ->
+      delegate_page_update(
+        model,
+        fn(p) { case p { store.HomePage(m) -> Ok(m) _ -> Error(Nil) } },
+        fn(m, s) { home.update(m, page_msg, s) },
+        store.HomePage,
+        store.HomeMsg,
+      )
+
     store.SetError(error) -> {
       #(store.set_error(model, error), effect.none())
     }
@@ -876,9 +892,6 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         stop_effect,
       )
     }
-
-    // Default case
-    _ -> #(model, effect.none())
   }
 }
 
@@ -949,6 +962,7 @@ fn build_shared(model: Model) -> shared.Shared {
     record_types: model.record_types,
     patients: model.patients,
     users: model.users,
+    record_type_stats: model.record_type_stats,
   )
 }
 
@@ -1048,6 +1062,34 @@ fn init_page_for_route(model: Model, route: Route) -> #(Model, Effect(Msg)) {
         effect.map(page_eff, store.SeriesDetailMsg),
       )
     }
+    router.AdminRecordTypes -> {
+      let #(page_model, page_eff) = record_types_list.init(shared)
+      #(
+        store.Model(..model, page: store.RecordTypesListPage(page_model)),
+        effect.map(page_eff, store.RecordTypesListMsg),
+      )
+    }
+    router.AdminRecordTypeDetail(name) -> {
+      let #(page_model, page_eff) = record_type_detail.init(name, shared)
+      #(
+        store.Model(..model, page: store.RecordTypeDetailPage(page_model)),
+        effect.map(page_eff, store.RecordTypeDetailMsg),
+      )
+    }
+    router.AdminRecordTypeEdit(name) -> {
+      let #(page_model, page_eff) = record_type_edit.init(name, shared)
+      #(
+        store.Model(..model, page: store.RecordTypeEditPage(page_model)),
+        effect.map(page_eff, store.RecordTypeEditMsg),
+      )
+    }
+    router.Home -> {
+      let #(page_model, page_eff) = home.init(shared)
+      #(
+        store.Model(..model, page: store.HomePage(page_model)),
+        effect.map(page_eff, store.HomeMsg),
+      )
+    }
     _ -> #(store.Model(..model, page: store.NoPage), effect.none())
   }
 }
@@ -1088,6 +1130,8 @@ fn apply_out_msgs(
           #(m, [dispatch_msg(store.LoadPatients), ..eff_list])
         shared.ReloadRecordTypes ->
           #(m, [dispatch_msg(store.LoadRecordTypes), ..eff_list])
+        shared.ReloadRecordTypeStats ->
+          #(m, [dispatch_msg(store.LoadRecordTypeStats), ..eff_list])
         shared.ReloadPatient(id) ->
           #(m, [dispatch_msg(store.LoadPatientDetail(id)), ..eff_list])
         shared.ReloadRecord(id) ->
@@ -1100,7 +1144,7 @@ fn apply_out_msgs(
         shared.SetUser(user) ->
           #(store.set_user(m, user), eff_list)
         shared.Logout ->
-          #(store.reset_for_logout(m), [dispatch_msg(store.LogoutComplete), ..eff_list])
+          #(m, [dispatch_msg(store.Logout), ..eff_list])
         shared.StartPreload(viewer_url, study_uid) ->
           #(m, [dispatch_msg(store.StartPreload(viewer_url, study_uid)), ..eff_list])
       }
@@ -1159,7 +1203,15 @@ pub fn view(model: Model) -> Element(Msg) {
 
 fn view_content(model: Model) -> Element(Msg) {
   let content = case model.route {
-    router.Home -> home.view(model)
+    router.Home ->
+      case model.page {
+        store.HomePage(page_model) ->
+          element.map(
+            home.view(page_model, build_shared(model)),
+            store.HomeMsg,
+          )
+        _ -> loading_placeholder()
+      }
     router.Login ->
       case model.page {
         store.LoginPage(page_model) ->
@@ -1272,9 +1324,33 @@ fn view_content(model: Model) -> Element(Msg) {
           )
         _ -> loading_placeholder()
       }
-    router.AdminRecordTypes -> record_types_list.view(model)
-    router.AdminRecordTypeDetail(name) -> record_type_detail.view(model, name)
-    router.AdminRecordTypeEdit(name) -> record_type_edit.view(model, name)
+    router.AdminRecordTypes ->
+      case model.page {
+        store.RecordTypesListPage(page_model) ->
+          element.map(
+            record_types_list.view(page_model, build_shared(model)),
+            store.RecordTypesListMsg,
+          )
+        _ -> loading_placeholder()
+      }
+    router.AdminRecordTypeDetail(_) ->
+      case model.page {
+        store.RecordTypeDetailPage(page_model) ->
+          element.map(
+            record_type_detail.view(page_model, build_shared(model)),
+            store.RecordTypeDetailMsg,
+          )
+        _ -> loading_placeholder()
+      }
+    router.AdminRecordTypeEdit(_) ->
+      case model.page {
+        store.RecordTypeEditPage(page_model) ->
+          element.map(
+            record_type_edit.view(page_model, build_shared(model)),
+            store.RecordTypeEditMsg,
+          )
+        _ -> loading_placeholder()
+      }
     router.NotFound -> html.div([], [html.text("404 - Page not found")])
   }
 

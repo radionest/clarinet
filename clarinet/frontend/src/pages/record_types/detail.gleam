@@ -1,4 +1,4 @@
-// Record type detail page (admin only)
+// Record type detail page (admin only) — self-contained MVU module
 import api/models.{type Record, type RecordTypeStats}
 import utils/status
 import gleam/dict
@@ -6,32 +6,71 @@ import gleam/int
 import gleam/list
 import gleam/option.{None, Some}
 import lustre/attribute
+import lustre/effect.{type Effect}
 import lustre/element.{type Element}
 import lustre/element/html
-import lustre/event
 import router
-import store.{type Model, type Msg}
+import shared.{type OutMsg, type Shared}
 
-pub fn view(model: Model, name: String) -> Element(Msg) {
-  case find_stats(model, name) {
-    Some(stat) -> render_detail(model, stat)
-    None -> loading_view(name)
+// --- Model ---
+
+pub type Model {
+  Model(name: String)
+}
+
+// --- Msg ---
+
+pub type Msg {
+  NavigateBack
+  NavigateEdit
+}
+
+// --- Init ---
+
+pub fn init(name: String, _shared: Shared) -> #(Model, Effect(Msg)) {
+  #(Model(name: name), effect.none())
+}
+
+// --- Update ---
+
+pub fn update(
+  model: Model,
+  msg: Msg,
+  _shared: Shared,
+) -> #(Model, Effect(Msg), List(OutMsg)) {
+  case msg {
+    NavigateBack ->
+      #(model, effect.none(), [shared.Navigate(router.AdminRecordTypes)])
+    NavigateEdit ->
+      #(model, effect.none(), [
+        shared.Navigate(router.AdminRecordTypeEdit(model.name)),
+      ])
+  }
+}
+
+// --- View ---
+
+pub fn view(model: Model, shared: Shared) -> Element(Msg) {
+  case find_stats(shared, model.name) {
+    Some(stat) -> render_detail(shared, stat)
+    None -> loading_view(model.name)
   }
 }
 
 fn find_stats(
-  model: Model,
+  shared: Shared,
   name: String,
 ) -> option.Option(RecordTypeStats) {
-  case model.record_type_stats {
-    Some(stats) -> list.find(stats, fn(s) { s.name == name }) |> option.from_result
+  case shared.record_type_stats {
+    Some(stats) ->
+      list.find(stats, fn(s) { s.name == name }) |> option.from_result
     None -> None
   }
 }
 
-fn render_detail(model: Model, stat: RecordTypeStats) -> Element(Msg) {
+fn render_detail(shared: Shared, stat: RecordTypeStats) -> Element(Msg) {
   let type_records =
-    dict.values(model.records)
+    dict.values(shared.records)
     |> list.filter(fn(r) { r.record_type_name == stat.name })
     |> list.sort(fn(a, b) {
       int.compare(option.unwrap(a.id, 0), option.unwrap(b.id, 0))
@@ -42,17 +81,19 @@ fn render_detail(model: Model, stat: RecordTypeStats) -> Element(Msg) {
       html.h1([], [
         html.text("Record Type: " <> option.unwrap(stat.label, stat.name)),
       ]),
-      html.button(
+      html.a(
         [
+          attribute.href(router.route_to_path(router.AdminRecordTypes)),
           attribute.class("btn btn-secondary"),
-          event.on_click(store.Navigate(router.AdminRecordTypes)),
         ],
         [html.text("Back to Record Types")],
       ),
-      html.button(
+      html.a(
         [
+          attribute.href(
+            router.route_to_path(router.AdminRecordTypeEdit(stat.name)),
+          ),
           attribute.class("btn btn-primary"),
-          event.on_click(store.Navigate(router.AdminRecordTypeEdit(stat.name))),
         ],
         [html.text("Edit")],
       ),

@@ -1,29 +1,56 @@
-// Record types list page (admin only)
+// Record types list page (admin only) — self-contained MVU module
 import api/models
 import gleam/int
 import gleam/list
 import gleam/option.{None, Some}
 import lustre/attribute
+import lustre/effect.{type Effect}
 import lustre/element.{type Element}
 import lustre/element/html
 import router
-import store.{type Model, type Msg}
+import shared.{type OutMsg, type Shared}
 
-pub fn view(model: Model) -> Element(Msg) {
+// --- Model ---
+
+pub type Model {
+  Model
+}
+
+// --- Msg ---
+
+pub type Msg {
+  NoOp
+}
+
+// --- Init ---
+
+pub fn init(_shared: Shared) -> #(Model, Effect(Msg)) {
+  #(Model, effect.none())
+}
+
+// --- Update ---
+
+pub fn update(
+  model: Model,
+  _msg: Msg,
+  _shared: Shared,
+) -> #(Model, Effect(Msg), List(OutMsg)) {
+  #(model, effect.none(), [])
+}
+
+// --- View ---
+
+pub fn view(_model: Model, shared: Shared) -> Element(Msg) {
   html.div([attribute.class("container")], [
     html.div([attribute.class("page-header")], [
       html.h1([], [html.text("Record Types")]),
     ]),
-    case model.loading, model.record_type_stats {
-      True, _ ->
-        html.div([attribute.class("loading")], [
-          html.p([], [html.text("Loading record types...")]),
-        ])
-      False, None ->
+    case shared.record_type_stats {
+      None ->
         html.p([attribute.class("text-muted")], [
           html.text("No record type data available."),
         ])
-      False, Some(stats) -> record_types_table(stats)
+      Some(stats) -> record_types_table(stats)
     },
   ])
 }
