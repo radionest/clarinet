@@ -120,11 +120,16 @@ def test_pacs_settings_in_context(mock_settings):
 
 
 @pytest.mark.parametrize(
-    ("mode", "expected_prefer_cget"),
-    [("c-get", True), ("c-move", False)],
+    ("mode", "expected_mode"),
+    [
+        ("c-get", "c-get"),
+        ("c-get-study", "c-get-study"),
+        ("c-move", "c-move"),
+        ("c-move-study", "c-move-study"),
+    ],
 )
-def test_get_pacs_helper_prefer_cget(mode, expected_prefer_cget):
-    """_get_pacs_helper sets prefer_cget based on dicom_retrieve_mode context variable."""
+def test_get_pacs_helper_retrieve_mode(mode, expected_mode):
+    """_get_pacs_helper passes dicom_retrieve_mode to PacsHelper."""
     import clarinet.services.slicer.helper as helper_mod
     from clarinet.services.slicer.helper import PacsHelper, _get_pacs_helper
 
@@ -147,7 +152,7 @@ def test_get_pacs_helper_prefer_cget(mode, expected_prefer_cget):
         for key in injected:
             helper_mod.__dict__.pop(key, None)
 
-    assert pacs.prefer_cget is expected_prefer_cget
+    assert pacs.retrieve_mode == expected_mode
     assert pacs.host == "pacs.local"
     assert pacs.port == 4242
     assert pacs.calling_aet == "MY_SLICER"
@@ -155,7 +160,7 @@ def test_get_pacs_helper_prefer_cget(mode, expected_prefer_cget):
 
 
 def test_get_pacs_helper_defaults_to_cget():
-    """_get_pacs_helper defaults to prefer_cget=True when dicom_retrieve_mode is absent."""
+    """_get_pacs_helper defaults to retrieve_mode='c-get' when dicom_retrieve_mode is absent."""
     import clarinet.services.slicer.helper as helper_mod
     from clarinet.services.slicer.helper import PacsHelper, _get_pacs_helper
 
@@ -175,7 +180,7 @@ def test_get_pacs_helper_defaults_to_cget():
         for key in injected:
             helper_mod.__dict__.pop(key, None)
 
-    assert pacs.prefer_cget is True
+    assert pacs.retrieve_mode == "c-get"
 
 
 @patch("clarinet.services.slicer.context.settings")

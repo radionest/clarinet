@@ -69,7 +69,7 @@ _test_pacs = PacsHelper(
     port={PACS_PORT},
     called_aet='{PACS_AET}',
     calling_aet='{CALLING_AET}',
-    prefer_cget=True,
+    retrieve_mode='c-get',
     move_aet='{CALLING_AET}',
 )
 """
@@ -95,7 +95,7 @@ def _monkey_patch_from_slicer_block() -> str:
 PacsHelper.from_slicer = classmethod(lambda cls, server_name=None: PacsHelper(
     host='{PACS_HOST}', port={PACS_PORT},
     called_aet='{PACS_AET}', calling_aet='{CALLING_AET}',
-    prefer_cget=True, move_aet='{CALLING_AET}',
+    retrieve_mode='c-get', move_aet='{CALLING_AET}',
 ))
 """
 
@@ -776,7 +776,7 @@ slicer_pacs = PacsHelper.from_slicer()
 __execResult = {
     "host": pacs.host, "port": pacs.port,
     "called_aet": pacs.called_aet, "calling_aet": pacs.calling_aet,
-    "move_aet": pacs.move_aet, "prefer_cget": pacs.prefer_cget,
+    "move_aet": pacs.move_aet, "retrieve_mode": pacs.retrieve_mode,
     "slicer_aet": slicer_pacs.calling_aet,
 }
 """
@@ -785,7 +785,7 @@ __execResult = {
         assert result["host"] == "10.99.99.99"
         assert result["port"] == 9999
         assert result["called_aet"] == "FAKE_PACS"
-        assert result["prefer_cget"] is False
+        assert result["retrieve_mode"] == "c-move"
         assert result["calling_aet"] == result["slicer_aet"]
         assert result["move_aet"] == result["slicer_aet"]
 
@@ -930,7 +930,7 @@ dicom_retrieve_mode = "c-move"
 PacsHelper.from_slicer = classmethod(lambda cls, server_name=None: PacsHelper(
     host='{PACS_HOST}', port={PACS_PORT},
     called_aet='{PACS_AET}', calling_aet='NONEXISTENT_AET',
-    prefer_cget=False, move_aet='NONEXISTENT_AET',
+    retrieve_mode='c-move', move_aet='NONEXISTENT_AET',
 ))
 
 pacs = _get_pacs_helper()
