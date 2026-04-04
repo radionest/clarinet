@@ -162,12 +162,21 @@ def _get_pacs_helper(server_name: str | None = None) -> PacsHelper:
         port = int(g["pacs_port"])
         called_aet = g["pacs_aet"]
         calling_aet = g.get("dicom_aet", "SLICER")
-        _pacs_log.info("Using PACS from Clarinet settings: %s:%s (AET=%s)", host, port, called_aet)
+        retrieve_mode = g.get("dicom_retrieve_mode", "c-get")
+        prefer_cget = retrieve_mode != "c-move"
+        _pacs_log.info(
+            "Using PACS from Clarinet settings: %s:%s (AET=%s, mode=%s)",
+            host,
+            port,
+            called_aet,
+            retrieve_mode,
+        )
         return PacsHelper(
             host=host,
             port=port,
             called_aet=called_aet,
             calling_aet=calling_aet,
+            prefer_cget=prefer_cget,
             move_aet=calling_aet,
         )
     return PacsHelper.from_slicer(server_name)
