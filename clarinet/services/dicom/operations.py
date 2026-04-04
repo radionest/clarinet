@@ -548,7 +548,8 @@ class DicomOperations:
         if not scp.is_running:
             raise RuntimeError(
                 "Storage SCP not running — C-MOVE requires a running SCP. "
-                "Set dicom_retrieve_mode='c-get' or start the API server."
+                "Set dicom_retrieve_mode='c-get', start the worker with "
+                "--dicom AET:PORT, or start the API server."
             )
 
         # Derive session key

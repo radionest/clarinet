@@ -113,6 +113,7 @@ record('ct_scan').on_status('finished').pipeline('ct_segmentation')
 uv run clarinet worker                        # auto-detect queues
 uv run clarinet worker --queues default gpu   # explicit queues
 uv run clarinet worker --workers 4            # parallel workers
+uv run clarinet worker --dicom WORKER:4006    # with Storage SCP for C-MOVE
 ```
 
 ## Queue Routing
