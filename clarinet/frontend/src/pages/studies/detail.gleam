@@ -1,28 +1,117 @@
-// Study detail page (admin only)
+// Study detail page — self-contained MVU module
 import api/models.{type Patient, type Record, type Series, type Study}
-import utils/status
+import api/studies
+import api/types.{type ApiError, AuthError}
 import gleam/dict
 import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
+import gleam/javascript/promise
 import lustre/attribute
+import lustre/effect.{type Effect}
 import lustre/element.{type Element}
 import lustre/element/html
 import lustre/event
 import router
-import store.{type Model, type Msg}
+import shared.{type OutMsg, type Shared}
+import utils/status
 import utils/viewer
 
-pub fn view(model: Model, study_uid: String) -> Element(Msg) {
-  case dict.get(model.studies, study_uid) {
-    Ok(study) -> render_detail(model, study)
-    Error(_) -> loading_view(study_uid)
+// --- Model ---
+
+pub type Model {
+  Model(study_uid: String)
+}
+
+// --- Msg ---
+
+pub type Msg {
+  StudyLoaded(Result(Study, ApiError))
+  Delete
+  DeleteResult(Result(Nil, ApiError))
+  NavigateBack
+  RequestDelete
+}
+
+// --- Init ---
+
+pub fn init(study_uid: String, _shared: Shared) -> #(Model, Effect(Msg)) {
+  let model = Model(study_uid: study_uid)
+  let eff = {
+    use dispatch <- effect.from
+    studies.get_study(study_uid)
+    |> promise.tap(fn(result) { dispatch(StudyLoaded(result)) })
+    Nil
+  }
+  #(model, eff)
+}
+
+// --- Update ---
+
+pub fn update(
+  model: Model,
+  msg: Msg,
+  _shared: Shared,
+) -> #(Model, Effect(Msg), List(OutMsg)) {
+  case msg {
+    StudyLoaded(Ok(study)) ->
+      #(model, effect.none(), [shared.CacheStudy(study)])
+
+    StudyLoaded(Error(err)) ->
+      #(model, effect.none(), handle_error(err, "Failed to load study"))
+
+    Delete -> {
+      let eff = {
+        use dispatch <- effect.from
+        studies.delete_study(model.study_uid)
+        |> promise.tap(fn(result) { dispatch(DeleteResult(result)) })
+        Nil
+      }
+      #(model, eff, [shared.SetLoading(True)])
+    }
+
+    DeleteResult(Ok(_)) ->
+      #(model, effect.none(), [
+        shared.SetLoading(False),
+        shared.ReloadStudies,
+        shared.ShowSuccess("Study deleted successfully"),
+        shared.Navigate(router.Studies),
+      ])
+
+    DeleteResult(Error(err)) ->
+      #(model, effect.none(), handle_error(err, "Failed to delete study"))
+
+    NavigateBack ->
+      #(model, effect.none(), [shared.Navigate(router.Studies)])
+
+    RequestDelete ->
+      #(model, effect.none(), [
+        shared.OpenDeleteConfirm("study", model.study_uid),
+      ])
   }
 }
 
-fn render_detail(model: Model, study: Study) -> Element(Msg) {
+// --- Helpers ---
+
+fn handle_error(err: ApiError, fallback_msg: String) -> List(OutMsg) {
+  case err {
+    AuthError(_) -> [shared.Logout]
+    _ -> [shared.SetLoading(False), shared.ShowError(fallback_msg)]
+  }
+}
+
+// --- View ---
+
+pub fn view(model: Model, shared: Shared) -> Element(Msg) {
+  case dict.get(shared.studies, model.study_uid) {
+    Ok(study) -> render_detail(shared, study)
+    Error(_) -> loading_view(model.study_uid)
+  }
+}
+
+fn render_detail(shared: Shared, study: Study) -> Element(Msg) {
   let study_records =
-    dict.values(model.records)
+    dict.values(shared.records)
     |> list.filter(fn(r) { r.study_uid == Some(study.study_uid) })
     |> list.sort(fn(a, b) {
       int.compare(option.unwrap(a.id, 0), option.unwrap(b.id, 0))
@@ -35,17 +124,14 @@ fn render_detail(model: Model, study: Study) -> Element(Msg) {
         html.button(
           [
             attribute.class("btn btn-secondary"),
-            event.on_click(store.Navigate(router.Studies)),
+            event.on_click(NavigateBack),
           ],
           [html.text("Back to Studies")],
         ),
         html.button(
           [
             attribute.class("btn btn-danger"),
-            event.on_click(store.OpenModal(store.ConfirmDelete(
-              "study",
-              study.study_uid,
-            ))),
+            event.on_click(RequestDelete),
           ],
           [html.text("Delete Study")],
         ),

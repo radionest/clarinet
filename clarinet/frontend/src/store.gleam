@@ -13,6 +13,9 @@ import pages/records/execute as record_execute_page
 import pages/records/list as records_list_page
 import pages/records/new as record_new_page
 import pages/register as register_page
+import pages/series/detail as series_detail_page
+import pages/studies/detail as study_detail_page
+import pages/studies/list as studies_list_page
 import api/types.{type ApiError}
 import gleam/dict.{type Dict}
 import gleam/dynamic
@@ -45,14 +48,7 @@ pub type Model {
     patients: Dict(String, Patient),
     users: Dict(String, User),
     // Form states
-    study_form: Option(dynamic.Dynamic),
     record_type_form: Option(dynamic.Dynamic),
-    // Pagination
-    current_page: Int,
-    items_per_page: Int,
-    total_items: Int,
-    // Search
-    search_query: String,
     // Admin
     record_type_stats: Option(List(RecordTypeStats)),
     // Modal state
@@ -80,6 +76,9 @@ pub type PageModel {
   RecordsListPage(records_list_page.Model)
   RecordExecutePage(record_execute_page.Model)
   RecordNewPage(record_new_page.Model)
+  StudiesListPage(studies_list_page.Model)
+  StudyDetailPage(study_detail_page.Model)
+  SeriesDetailPage(series_detail_page.Model)
 }
 
 // Modal content types
@@ -123,14 +122,14 @@ pub type Msg {
   RecordExecuteMsg(record_execute_page.Msg)
   RecordNewMsg(record_new_page.Msg)
 
+  // Study/Series page delegation
+  StudiesListMsg(studies_list_page.Msg)
+  StudyDetailMsg(study_detail_page.Msg)
+  SeriesDetailMsg(series_detail_page.Msg)
+
   // Data loading
   LoadStudies
   StudiesLoaded(Result(List(Study), ApiError))
-  LoadStudyDetail(id: String)
-  StudyDetailLoaded(Result(Study, ApiError))
-
-  LoadSeriesDetail(id: String)
-  SeriesDetailLoaded(Result(Series, ApiError))
 
   LoadRecords
   RecordsLoaded(Result(List(Record), ApiError))
@@ -144,8 +143,6 @@ pub type Msg {
   PatientsLoaded(Result(List(Patient), ApiError))
   LoadPatientDetail(id: String)
   PatientDetailLoaded(Result(Patient, ApiError))
-  DeleteStudy(study_uid: String)
-  StudyDeleted(Result(Nil, ApiError))
 
   LoadRecordTypeStats
   RecordTypeStatsLoaded(Result(List(RecordTypeStats), ApiError))
@@ -154,10 +151,6 @@ pub type Msg {
   AdminMsg(admin_page.Msg)
 
   // Form handling
-  UpdateStudyForm(dynamic.Dynamic)
-  SubmitStudyForm
-  StudyFormSubmitted(Result(Study, ApiError))
-
   UpdateRecordTypeForm(dynamic.Dynamic)
   UpdateRecordTypeSchema(Json)
   SubmitRecordTypeForm
@@ -183,13 +176,6 @@ pub type Msg {
   OpenModal(ModalContent)
   CloseModal
   ConfirmModalAction
-
-  // Search
-  UpdateSearchQuery(String)
-
-  // Pagination
-  SetPage(Int)
-  SetItemsPerPage(Int)
 
   // Project info
   ProjectInfoLoaded(Result(ProjectInfo, ApiError))
@@ -220,10 +206,6 @@ pub type Msg {
   CancelPreload
   SetPreloadTimer(global.TimerID)
 
-  // Misc
-  NoOp
-  RefreshData
-  ShowSchemaError(String)
 }
 
 // Initialize application state
@@ -243,12 +225,7 @@ pub fn init() -> Model {
     record_types: dict.new(),
     patients: dict.new(),
     users: dict.new(),
-    study_form: None,
     record_type_form: None,
-    current_page: 1,
-    items_per_page: 20,
-    total_items: 0,
-    search_query: "",
     record_type_stats: None,
     modal_open: False,
     modal_content: NoModal,

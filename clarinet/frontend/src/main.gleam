@@ -6,7 +6,6 @@ import api/info
 import api/models
 import api/patients
 import api/records
-import api/series
 import api/studies
 import api/types
 import api/users
@@ -553,28 +552,6 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     store.RecordTypesLoaded(Error(err)) ->
       handle_api_error(model, err, "Failed to load record types")
 
-    // Delete study
-    store.DeleteStudy(study_uid) -> {
-      let delete_effect = {
-        use dispatch <- effect.from
-        studies.delete_study(study_uid)
-        |> promise.tap(fn(result) { dispatch(store.StudyDeleted(result)) })
-        Nil
-      }
-      #(store.set_loading(model, True), delete_effect)
-    }
-
-    store.StudyDeleted(Ok(_)) -> {
-      let new_model =
-        model
-        |> store.set_loading(False)
-        |> store.set_success("Study deleted successfully")
-      #(new_model, modem.back(1))
-    }
-
-    store.StudyDeleted(Error(err)) ->
-      handle_api_error(model, err, "Failed to delete study")
-
     // Modal actions
     store.OpenModal(content) -> {
       #(
@@ -598,51 +575,13 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           close_model,
           dispatch_msg(store.PatientDetailMsg(patient_detail.Delete)),
         )
-        store.ConfirmDelete("study", uid) -> #(
+        store.ConfirmDelete("study", _uid) -> #(
           close_model,
-          dispatch_msg(store.DeleteStudy(uid)),
+          dispatch_msg(store.StudyDetailMsg(study_detail.Delete)),
         )
         _ -> #(close_model, effect.none())
       }
     }
-
-    // Data loading - Study Detail
-    store.LoadStudyDetail(id) ->
-      load_with_effect(
-        model,
-        fn() { studies.get_study(id) },
-        store.StudyDetailLoaded,
-      )
-
-    store.StudyDetailLoaded(Ok(study)) -> {
-      let new_model =
-        model
-        |> store.cache_study(study)
-        |> store.set_loading(False)
-      #(new_model, effect.none())
-    }
-
-    store.StudyDetailLoaded(Error(err)) ->
-      handle_api_error(model, err, "Failed to load study")
-
-    // Data loading - Series Detail
-    store.LoadSeriesDetail(id) ->
-      load_with_effect(
-        model,
-        fn() { series.get_series(id) },
-        store.SeriesDetailLoaded,
-      )
-
-    store.SeriesDetailLoaded(Ok(s)) -> {
-      let new_model =
-        model
-        |> store.cache_series(s)
-        |> store.set_loading(False)
-      #(new_model, effect.none())
-    }
-
-    store.SeriesDetailLoaded(Error(err)) ->
-      handle_api_error(model, err, "Failed to load series")
 
     // Project info
     store.ProjectInfoLoaded(Ok(project_info)) -> {
@@ -725,6 +664,34 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         fn(m, s) { record_new.update(m, page_msg, s) },
         store.RecordNewPage,
         store.RecordNewMsg,
+      )
+
+    // Study/Series page delegation
+    store.StudiesListMsg(page_msg) ->
+      delegate_page_update(
+        model,
+        fn(p) { case p { store.StudiesListPage(m) -> Ok(m) _ -> Error(Nil) } },
+        fn(m, s) { studies_list.update(m, page_msg, s) },
+        store.StudiesListPage,
+        store.StudiesListMsg,
+      )
+
+    store.StudyDetailMsg(page_msg) ->
+      delegate_page_update(
+        model,
+        fn(p) { case p { store.StudyDetailPage(m) -> Ok(m) _ -> Error(Nil) } },
+        fn(m, s) { study_detail.update(m, page_msg, s) },
+        store.StudyDetailPage,
+        store.StudyDetailMsg,
+      )
+
+    store.SeriesDetailMsg(page_msg) ->
+      delegate_page_update(
+        model,
+        fn(p) { case p { store.SeriesDetailPage(m) -> Ok(m) _ -> Error(Nil) } },
+        fn(m, s) { series_detail.update(m, page_msg, s) },
+        store.SeriesDetailPage,
+        store.SeriesDetailMsg,
       )
 
     store.SetError(error) -> {
@@ -1060,6 +1027,27 @@ fn init_page_for_route(model: Model, route: Route) -> #(Model, Effect(Msg)) {
         effect.map(page_eff, store.RecordNewMsg),
       )
     }
+    router.Studies -> {
+      let #(page_model, page_eff) = studies_list.init(shared)
+      #(
+        store.Model(..model, page: store.StudiesListPage(page_model)),
+        effect.map(page_eff, store.StudiesListMsg),
+      )
+    }
+    router.StudyDetail(id) | router.StudyViewer(id) -> {
+      let #(page_model, page_eff) = study_detail.init(id, shared)
+      #(
+        store.Model(..model, page: store.StudyDetailPage(page_model)),
+        effect.map(page_eff, store.StudyDetailMsg),
+      )
+    }
+    router.SeriesDetail(id) -> {
+      let #(page_model, page_eff) = series_detail.init(id, shared)
+      #(
+        store.Model(..model, page: store.SeriesDetailPage(page_model)),
+        effect.map(page_eff, store.SeriesDetailMsg),
+      )
+    }
     _ -> #(store.Model(..model, page: store.NoPage), effect.none())
   }
 }
@@ -1190,10 +1178,33 @@ fn view_content(model: Model) -> Element(Msg) {
           )
         _ -> loading_placeholder()
       }
-    router.Studies -> studies_list.view(model)
-    router.StudyDetail(id) -> study_detail.view(model, id)
-    router.StudyViewer(id) -> study_detail.view(model, id)
-    router.SeriesDetail(id) -> series_detail.view(model, id)
+    router.Studies ->
+      case model.page {
+        store.StudiesListPage(page_model) ->
+          element.map(
+            studies_list.view(page_model, build_shared(model)),
+            store.StudiesListMsg,
+          )
+        _ -> loading_placeholder()
+      }
+    router.StudyDetail(_) | router.StudyViewer(_) ->
+      case model.page {
+        store.StudyDetailPage(page_model) ->
+          element.map(
+            study_detail.view(page_model, build_shared(model)),
+            store.StudyDetailMsg,
+          )
+        _ -> loading_placeholder()
+      }
+    router.SeriesDetail(_) ->
+      case model.page {
+        store.SeriesDetailPage(page_model) ->
+          element.map(
+            series_detail.view(page_model, build_shared(model)),
+            store.SeriesDetailMsg,
+          )
+        _ -> loading_placeholder()
+      }
     router.Records ->
       case model.page {
         store.RecordsListPage(page_model) ->
@@ -1408,15 +1419,12 @@ fn load_route_data(model: Model, route: Route) -> Effect(Msg) {
     router.Home, None -> effect.none()
     router.Studies, Some(models.User(is_superuser: True, ..)) ->
       dispatch_msg(store.LoadStudies)
-    router.StudyDetail(id), Some(models.User(is_superuser: True, ..)) ->
-      effect.batch([
-        dispatch_msg(store.LoadStudyDetail(id)),
-        dispatch_msg(store.LoadRecords),
-      ])
-    router.StudyViewer(id), Some(models.User(is_superuser: True, ..)) ->
-      dispatch_msg(store.LoadStudyDetail(id))
-    router.SeriesDetail(id), Some(models.User(is_superuser: True, ..)) ->
-      dispatch_msg(store.LoadSeriesDetail(id))
+    router.StudyDetail(_), Some(models.User(is_superuser: True, ..)) ->
+      dispatch_msg(store.LoadRecords)
+    router.StudyViewer(_), Some(models.User(is_superuser: True, ..)) ->
+      effect.none()
+    router.SeriesDetail(_), Some(models.User(is_superuser: True, ..)) ->
+      effect.none()
     router.Records, _ -> dispatch_msg(store.LoadRecords)
     router.RecordDetail(id), Some(_) ->
       // Schema loading + slicer ping handled by page init

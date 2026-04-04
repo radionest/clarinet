@@ -1,22 +1,82 @@
-// Series detail page (admin only)
+// Series detail page — self-contained MVU module
 import api/models.{type Record, type Series}
-import utils/status
+import api/series
+import api/types.{type ApiError, AuthError}
 import gleam/dict
 import gleam/int
 import gleam/list
-import gleam/option.{None, Some}
+import gleam/option.{type Option, None, Some}
+import gleam/javascript/promise
 import lustre/attribute
+import lustre/effect.{type Effect}
 import lustre/element.{type Element}
 import lustre/element/html
 import lustre/event
 import router
-import store.{type Model, type Msg}
+import shared.{type OutMsg, type Shared}
+import utils/status
 import utils/viewer
 
-pub fn view(model: Model, series_uid: String) -> Element(Msg) {
-  case dict.get(model.series, series_uid) {
+// --- Model ---
+
+pub type Model {
+  Model(series_uid: String)
+}
+
+// --- Msg ---
+
+pub type Msg {
+  SeriesLoaded(Result(Series, ApiError))
+  NavigateBack(study_uid: String)
+}
+
+// --- Init ---
+
+pub fn init(series_uid: String, _shared: Shared) -> #(Model, Effect(Msg)) {
+  let model = Model(series_uid: series_uid)
+  let eff = {
+    use dispatch <- effect.from
+    series.get_series(series_uid)
+    |> promise.tap(fn(result) { dispatch(SeriesLoaded(result)) })
+    Nil
+  }
+  #(model, eff)
+}
+
+// --- Update ---
+
+pub fn update(
+  model: Model,
+  msg: Msg,
+  _shared: Shared,
+) -> #(Model, Effect(Msg), List(OutMsg)) {
+  case msg {
+    SeriesLoaded(Ok(s)) ->
+      #(model, effect.none(), [shared.CacheSeries(s)])
+
+    SeriesLoaded(Error(err)) ->
+      #(model, effect.none(), handle_error(err, "Failed to load series"))
+
+    NavigateBack(study_uid) ->
+      #(model, effect.none(), [shared.Navigate(router.StudyDetail(study_uid))])
+  }
+}
+
+// --- Helpers ---
+
+fn handle_error(err: ApiError, fallback_msg: String) -> List(OutMsg) {
+  case err {
+    AuthError(_) -> [shared.Logout]
+    _ -> [shared.SetLoading(False), shared.ShowError(fallback_msg)]
+  }
+}
+
+// --- View ---
+
+pub fn view(model: Model, shared: Shared) -> Element(Msg) {
+  case dict.get(shared.series, model.series_uid) {
     Ok(s) -> render_detail(s)
-    Error(_) -> loading_view(series_uid)
+    Error(_) -> loading_view(model.series_uid)
   }
 }
 
@@ -27,7 +87,7 @@ fn render_detail(s: Series) -> Element(Msg) {
       html.button(
         [
           attribute.class("btn btn-secondary"),
-          event.on_click(store.Navigate(router.StudyDetail(s.study_uid))),
+          event.on_click(NavigateBack(s.study_uid)),
         ],
         [html.text("Back to Study")],
       ),
@@ -113,7 +173,7 @@ fn parent_study_section(s: Series) -> Element(Msg) {
   }
 }
 
-fn records_section(records: option.Option(List(Record))) -> Element(Msg) {
+fn records_section(records: Option(List(Record))) -> Element(Msg) {
   html.div([attribute.class("card")], [
     html.h3([], [html.text("Records")]),
     case records {
