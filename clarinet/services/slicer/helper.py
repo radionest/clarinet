@@ -291,7 +291,7 @@ class PacsHelper:
         host = server["Address"]
         port = int(server["Port"])
         called_aet = server["Called AETitle"]
-        calling_aet = settings.value("CallingAETitle", server.get("Calling AETitle", "SLICER"))
+        calling_aet = str(settings.value("CallingAETitle", server.get("Calling AETitle", "SLICER")))
         prefer_cget = server.get("Retrieve Protocol", "CGET") == "CGET"
 
         _pacs_log.info(
