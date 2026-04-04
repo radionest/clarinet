@@ -110,6 +110,12 @@ def build_slicer_context(
     record_level = DicomQueryLevel(level) if isinstance(level, str) else level
     context["working_folder"] = str(working_dirs.get(record_level, ""))
 
+    # PACS connection params — used by PacsHelper inside Slicer
+    context["pacs_host"] = settings.pacs_host
+    context["pacs_port"] = settings.pacs_port
+    context["pacs_aet"] = settings.pacs_aet
+    context["dicom_aet"] = settings.dicom_aet
+
     if record_level in (DicomQueryLevel.STUDY, DicomQueryLevel.SERIES):
         context["study_uid"] = (
             record.study.anon_uid if record.study else record.study_anon_uid

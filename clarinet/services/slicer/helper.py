@@ -146,6 +146,29 @@ class SegmentationBuilder:
 _pacs_log = logging.getLogger("clarinet.slicer.pacs")
 
 
+def _get_pacs_helper(server_name: str | None = None) -> PacsHelper:
+    """Create PacsHelper from context variables (injected by Clarinet) or Slicer config.
+
+    Priority:
+    1. Context variables (pacs_host, pacs_port, pacs_aet) — set by build_slicer_context()
+    2. Slicer QSettings — fallback for standalone/manual usage
+    """
+    g = globals()
+    if "pacs_host" in g and "pacs_port" in g and "pacs_aet" in g:
+        host = g["pacs_host"]
+        port = int(g["pacs_port"])
+        called_aet = g["pacs_aet"]
+        calling_aet = g.get("dicom_aet", "SLICER")
+        _pacs_log.info("Using PACS from Clarinet settings: %s:%s (AET=%s)", host, port, called_aet)
+        return PacsHelper(
+            host=host,
+            port=port,
+            called_aet=called_aet,
+            calling_aet=calling_aet,
+        )
+    return PacsHelper.from_slicer(server_name)
+
+
 class PacsHelper:
     """DSL for PACS query/retrieve inside 3D Slicer via DIMSE.
 
@@ -711,11 +734,13 @@ class SlicerHelper:
     ) -> list[str]:
         """Load a DICOM study from PACS into the current scene.
 
-        Reads PACS connection params from Slicer's DICOM module configuration.
+        Uses PACS connection params from Clarinet settings (injected via context
+        variables). Falls back to Slicer's DICOM module config if context is absent.
 
         Args:
             study_instance_uid: DICOM Study Instance UID to retrieve.
-            server_name: Optional PACS server name configured in Slicer.
+            server_name: Optional PACS server name configured in Slicer
+                (only used in fallback mode).
             raise_on_empty: If True (default), raise SlicerHelperError when no
                 DICOM nodes are loaded. Set to False for optional/fallback loads.
 
@@ -725,7 +750,7 @@ class SlicerHelper:
         Raises:
             SlicerHelperError: If no nodes were loaded and raise_on_empty is True.
         """
-        pacs = PacsHelper.from_slicer(server_name)
+        pacs = _get_pacs_helper(server_name)
         node_ids = pacs.retrieve_study(study_instance_uid)
 
         # Auto-set first scalar volume as source for Segment Editor
@@ -753,12 +778,14 @@ class SlicerHelper:
     ) -> list[str]:
         """Load a single DICOM series from PACS into the current scene.
 
-        Reads PACS connection params from Slicer's DICOM module configuration.
+        Uses PACS connection params from Clarinet settings (injected via context
+        variables). Falls back to Slicer's DICOM module config if context is absent.
 
         Args:
             study_instance_uid: DICOM Study Instance UID.
             series_instance_uid: DICOM Series Instance UID to retrieve.
-            server_name: Optional PACS server name configured in Slicer.
+            server_name: Optional PACS server name configured in Slicer
+                (only used in fallback mode).
             raise_on_empty: If True (default), raise SlicerHelperError when no
                 DICOM nodes are loaded. Set to False for optional/fallback loads.
 
@@ -768,7 +795,7 @@ class SlicerHelper:
         Raises:
             SlicerHelperError: If no nodes were loaded and raise_on_empty is True.
         """
-        pacs = PacsHelper.from_slicer(server_name)
+        pacs = _get_pacs_helper(server_name)
         node_ids = pacs.retrieve_series(study_instance_uid, series_instance_uid)
 
         # Auto-set first scalar volume as source for Segment Editor

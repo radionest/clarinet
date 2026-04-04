@@ -101,6 +101,24 @@ def _make_record_read(
 
 
 @patch("clarinet.services.slicer.context.settings")
+def test_pacs_settings_in_context(mock_settings):
+    """PACS connection params from settings are injected into context."""
+    mock_settings.storage_path = "/storage"
+    mock_settings.pacs_host = "pacs.local"
+    mock_settings.pacs_port = 4242
+    mock_settings.pacs_aet = "ORTHANC"
+    mock_settings.dicom_aet = "CLARINET"
+
+    record = _make_record_read(level=DicomQueryLevel.STUDY)
+    ctx = build_slicer_context(record)
+
+    assert ctx["pacs_host"] == "pacs.local"
+    assert ctx["pacs_port"] == 4242
+    assert ctx["pacs_aet"] == "ORTHANC"
+    assert ctx["dicom_aet"] == "CLARINET"
+
+
+@patch("clarinet.services.slicer.context.settings")
 def test_standard_vars_study_level(mock_settings):
     """STUDY level → working_folder + study_uid present."""
     mock_settings.storage_path = "/storage"
@@ -318,9 +336,7 @@ def test_origin_type_from_parent(mock_settings):
     mock_settings.pacs_host = "localhost"
     mock_settings.pacs_port = 4242
     mock_settings.pacs_aet = "ORTHANC"
-    mock_settings.pacs_calling_aet = "SLICER"
-    mock_settings.pacs_prefer_cget = True
-    mock_settings.pacs_move_aet = "SLICER"
+    mock_settings.dicom_aet = "CLARINET"
 
     seg_fd = FileDefinitionRead(
         name="segmentation",
