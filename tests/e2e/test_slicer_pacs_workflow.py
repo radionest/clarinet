@@ -803,6 +803,20 @@ __execResult = {"move_aet": pacs.move_aet}
             f"REGRESSION: move_aet={result['move_aet']} should not be backend AET"
         )
 
+    async def test_from_slicer_calling_aet(
+        self,
+        slicer_service: SlicerService,
+        slicer_url: str,
+    ) -> None:
+        """from_slicer() must return CALLING_AET configured in Slicer."""
+        script = """
+pacs = PacsHelper.from_slicer()
+__execResult = {"calling_aet": pacs.calling_aet, "move_aet": pacs.move_aet}
+"""
+        result = await slicer_service.execute(slicer_url, script, request_timeout=10.0)
+        assert result["calling_aet"] == CALLING_AET
+        assert result["move_aet"] == CALLING_AET
+
 
 class TestCmoveWithContextVars:
     """Full C-MOVE retrieval using _get_pacs_helper() with injected context.
@@ -847,6 +861,13 @@ __execResult = {"calling_aet": pacs.calling_aet}
         resp.raise_for_status()
         yield
         requests.delete(modality_url, timeout=5)
+
+    async def test_slicer_aet_registered_in_orthanc(self, slicer_aet: str) -> None:
+        """Orthanc must register CALLING_AET for C-MOVE delivery."""
+        assert slicer_aet == CALLING_AET, (
+            f"slicer_aet={slicer_aet!r}, expected {CALLING_AET!r} — "
+            f"Orthanc will register the wrong AET for C-MOVE"
+        )
 
     async def test_cmove_retrieval_with_context_vars(
         self,

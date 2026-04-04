@@ -234,6 +234,14 @@ class PacsHelper:
         # hard-coded defaults (ExampleHost, MedicalConnections) and does NOT
         # reflect servers added through the settings dialog.
         #
+        # Additionally, the Calling AET is stored in TWO places that are NOT
+        # synchronized:
+        #   - Global: QSettings key "CallingAETitle" (no DICOM/ prefix) —
+        #     this is what the user sets in Application Settings > DICOM
+        #   - Per-server: DICOM/ServerNodes/{i}["Calling AETitle"] — defaults
+        #     to "CTK" and is rarely changed by users
+        # We read from the global key first, falling back to per-server.
+        #
         # Reading from QSettings directly ensures we see the servers that the
         # user actually configured.
         settings = qt.QSettings()
@@ -283,7 +291,7 @@ class PacsHelper:
         host = server["Address"]
         port = int(server["Port"])
         called_aet = server["Called AETitle"]
-        calling_aet = server["Calling AETitle"]
+        calling_aet = settings.value("CallingAETitle", server.get("Calling AETitle", "SLICER"))
         prefer_cget = server.get("Retrieve Protocol", "CGET") == "CGET"
 
         _pacs_log.info(
