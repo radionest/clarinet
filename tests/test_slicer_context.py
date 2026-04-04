@@ -108,6 +108,7 @@ def test_pacs_settings_in_context(mock_settings):
     mock_settings.pacs_port = 4242
     mock_settings.pacs_aet = "ORTHANC"
     mock_settings.dicom_aet = "CLARINET"
+    mock_settings.dicom_retrieve_mode = "c-move"
 
     record = _make_record_read(level=DicomQueryLevel.STUDY)
     ctx = build_slicer_context(record)
@@ -116,6 +117,7 @@ def test_pacs_settings_in_context(mock_settings):
     assert ctx["pacs_port"] == 4242
     assert ctx["pacs_aet"] == "ORTHANC"
     assert ctx["dicom_aet"] == "CLARINET"
+    assert ctx["dicom_retrieve_mode"] == "c-move"
 
 
 @patch("clarinet.services.slicer.context.settings")
@@ -337,6 +339,7 @@ def test_origin_type_from_parent(mock_settings):
     mock_settings.pacs_port = 4242
     mock_settings.pacs_aet = "ORTHANC"
     mock_settings.dicom_aet = "CLARINET"
+    mock_settings.dicom_retrieve_mode = "c-get"
 
     seg_fd = FileDefinitionRead(
         name="segmentation",

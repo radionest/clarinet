@@ -115,6 +115,7 @@ def build_slicer_context(
     context["pacs_port"] = settings.pacs_port
     context["pacs_aet"] = settings.pacs_aet
     context["dicom_aet"] = settings.dicom_aet
+    context["dicom_retrieve_mode"] = settings.dicom_retrieve_mode
 
     if record_level in (DicomQueryLevel.STUDY, DicomQueryLevel.SERIES):
         context["study_uid"] = (
