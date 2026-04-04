@@ -152,6 +152,9 @@ def _get_pacs_helper(server_name: str | None = None) -> PacsHelper:
     Priority:
     1. Context variables (pacs_host, pacs_port, pacs_aet) — set by build_slicer_context()
     2. Slicer QSettings — fallback for standalone/manual usage
+
+    Uses globals() because this module is executed as injected script text inside
+    Slicer — context variables are set as module-level globals by SlicerService.
     """
     g = globals()
     if "pacs_host" in g and "pacs_port" in g and "pacs_aet" in g:
@@ -165,6 +168,7 @@ def _get_pacs_helper(server_name: str | None = None) -> PacsHelper:
             port=port,
             called_aet=called_aet,
             calling_aet=calling_aet,
+            move_aet=calling_aet,
         )
     return PacsHelper.from_slicer(server_name)
 
