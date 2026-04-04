@@ -194,8 +194,8 @@ async def anonymize_study_pipeline(msg: PipelineMessage, ctx: TaskContext) -> No
         await ctx.client.submit_record_data(
             msg.record_id,
             {"study_type": study_type, "error": str(exc)},
+            status=RecordStatus.failed,
         )
-        await ctx.client.update_record_status(msg.record_id, RecordStatus.failed)
         return
 
     await ctx.client.submit_record_data(

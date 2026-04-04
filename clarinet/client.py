@@ -782,20 +782,31 @@ class ClarinetClient:
         )
         return RecordRead.model_validate(response.json())
 
-    async def submit_record_data(self, record_id: int, data: RecordData) -> RecordRead:
+    async def submit_record_data(
+        self,
+        record_id: int,
+        data: RecordData,
+        *,
+        status: RecordStatus | None = None,
+    ) -> RecordRead:
         """Submit data for a record.
 
         Args:
             record_id: Record ID
             data: Record data
+            status: Target status (default ``finished``).
+                Pass ``RecordStatus.failed`` to mark the record as failed
+                without triggering downstream flows.
 
         Returns:
             Updated record
         """
+        params = {"status": status.value} if status is not None else None
         response = await self._request(
             "POST",
             f"/records/{record_id}/data",
             json=data,
+            params=params,
         )
         return RecordRead.model_validate(response.json())
 
