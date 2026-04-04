@@ -22,10 +22,9 @@ import pages/studies/detail as study_detail_page
 import pages/studies/list as studies_list_page
 import api/types.{type ApiError}
 import gleam/dict.{type Dict}
-import gleam/dynamic
 import gleam/int
 import gleam/option.{type Option, None, Some}
-import plinth/javascript/global
+import preload
 import router.{type Route}
 
 // Application state model
@@ -55,8 +54,8 @@ pub type Model {
     // Modal state
     modal_open: Bool,
     modal_content: ModalContent,
-    // Preload state
-    preload_timer: Option(global.TimerID),
+    // Preload
+    preload: preload.Model,
     // Active page model (for modular pages)
     page: PageModel,
   )
@@ -87,14 +86,6 @@ pub type PageModel {
 pub type ModalContent {
   NoModal
   ConfirmDelete(resource: String, id: String)
-  PreloadProgress(
-    viewer_url: String,
-    task_id: String,
-    study_uid: String,
-    received: Int,
-    total: Option(Int),
-    status: String,
-  )
 }
 
 // Application messages
@@ -177,19 +168,8 @@ pub type Msg {
   // Auto-assign
   AutoAssignResult(Result(Record, ApiError))
 
-  // Preload
-  StartPreload(viewer_url: String, study_uid: String)
-  PreloadStarted(viewer_url: String, task_id: String, study_uid: String)
-  PreloadPollTick(task_id: String, viewer_url: String, study_uid: String)
-  PreloadProgressUpdate(
-    task_id: String,
-    viewer_url: String,
-    study_uid: String,
-    result: Result(dynamic.Dynamic, ApiError),
-  )
-  CancelPreload
-  SetPreloadTimer(global.TimerID)
-
+  // Preload delegation
+  PreloadMsg(preload.Msg)
 }
 
 // Initialize application state
@@ -212,7 +192,7 @@ pub fn init() -> Model {
     record_type_stats: None,
     modal_open: False,
     modal_content: NoModal,
-    preload_timer: None,
+    preload: preload.init(),
     page: NoPage,
   )
 }

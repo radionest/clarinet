@@ -1,7 +1,6 @@
 // Main Lustre application
 import api/admin
 import api/auth
-import api/dicomweb
 import api/info
 import api/models
 import api/patients
@@ -12,7 +11,6 @@ import api/users
 import components/layout
 import formosh/component as formosh_component
 import gleam/dict
-import gleam/dynamic/decode
 import gleam/int
 import gleam/javascript/promise
 import gleam/list
@@ -27,6 +25,7 @@ import lustre/element.{type Element}
 import lustre/element/html
 import lustre/event
 import modem
+import preload
 import pages/admin as admin_page
 import pages/home
 import pages/login
@@ -154,21 +153,23 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         <> ", user: "
         <> string.inspect(model.user),
       )
-      // Cleanup current page (e.g. slicer ping timer) + stop preload timer
+      // Cleanup current page (e.g. slicer ping timer) + stop preload
       let page_cleanup = cleanup_current_page(model)
-      let preload_cleanup = stop_preload_timer(model)
+      let preload_cleanup =
+        effect.map(preload.stop_timer(model.preload), store.PreloadMsg)
       let cleanup_effect = effect.batch([page_cleanup, preload_cleanup])
+      let was_preloading = preload.is_active(model.preload)
       let new_model =
         store.Model(
           ..store.set_route(model, route),
-          preload_timer: None,
-          modal_open: case model.preload_timer {
-            Some(_) -> False
-            None -> model.modal_open
+          preload: preload.init(),
+          modal_open: case was_preloading {
+            True -> False
+            False -> model.modal_open
           },
-          modal_content: case model.preload_timer {
-            Some(_) -> store.NoModal
-            None -> model.modal_content
+          modal_content: case was_preloading {
+            True -> store.NoModal
+            False -> model.modal_content
           },
         )
 
@@ -680,184 +681,8 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       #(store.set_error(model, error), effect.none())
     }
 
-    // Preload
-    store.StartPreload(viewer_url, study_uid) -> {
-      let preload_effect = {
-        use dispatch <- effect.from
-        dicomweb.preload_study(study_uid)
-        |> promise.tap(fn(result) {
-          dispatch(store.PreloadStarted(viewer_url, case result {
-            Ok(data) ->
-              case decode.run(data, decode.at(["task_id"], decode.string)) {
-                Ok(tid) -> tid
-                Error(_) -> ""
-              }
-            Error(_) -> ""
-          }, study_uid))
-        })
-        Nil
-      }
-      #(
-        store.Model(
-          ..model,
-          modal_open: True,
-          modal_content: store.PreloadProgress(
-            viewer_url: viewer_url,
-            task_id: "",
-            study_uid: study_uid,
-            received: 0,
-            total: None,
-            status: "starting",
-          ),
-        ),
-        preload_effect,
-      )
-    }
-
-    store.PreloadStarted(viewer_url, task_id, study_uid) -> {
-      case task_id {
-        "" ->
-          // Failed to start — just open viewer directly
-          #(
-            store.Model(..model, modal_open: False, modal_content: store.NoModal),
-            effect.from(fn(_dispatch) {
-              window.open(viewer_url, "_blank", "")
-              Nil
-            }),
-          )
-        _ -> {
-          let timer_effect = {
-            use dispatch <- effect.from
-            let timer_id =
-              global.set_interval(2000, fn() {
-                dispatch(store.PreloadPollTick(task_id, viewer_url, study_uid))
-              })
-            dispatch(store.PreloadPollTick(task_id, viewer_url, study_uid))
-            dispatch(store.SetPreloadTimer(timer_id))
-          }
-          #(
-            store.Model(
-              ..model,
-              modal_content: store.PreloadProgress(
-                viewer_url: viewer_url,
-                task_id: task_id,
-                study_uid: study_uid,
-                received: 0,
-                total: None,
-                status: "starting",
-              ),
-            ),
-            timer_effect,
-          )
-        }
-      }
-    }
-
-    store.SetPreloadTimer(timer_id) -> {
-      #(store.Model(..model, preload_timer: Some(timer_id)), effect.none())
-    }
-
-    store.PreloadPollTick(task_id, viewer_url, study_uid) -> {
-      let poll_effect = {
-        use dispatch <- effect.from
-        dicomweb.preload_progress(study_uid, task_id)
-        |> promise.tap(fn(result) {
-          dispatch(store.PreloadProgressUpdate(
-            task_id, viewer_url, study_uid, result,
-          ))
-        })
-        Nil
-      }
-      #(model, poll_effect)
-    }
-
-    store.PreloadProgressUpdate(task_id, viewer_url, study_uid, Ok(data)) -> {
-      let status =
-        decode.run(data, decode.at(["status"], decode.string))
-        |> option.from_result
-        |> option.unwrap("unknown")
-      let received =
-        decode.run(data, decode.at(["received"], decode.int))
-        |> option.from_result
-        |> option.unwrap(0)
-      let total =
-        decode.run(data, decode.at(["total"], decode.int))
-        |> option.from_result
-
-      case status {
-        "ready" -> {
-          // Stop timer, open viewer, close modal
-          let stop_effect = stop_preload_timer(model)
-          let open_effect =
-            effect.from(fn(_dispatch) {
-              window.open(viewer_url, "_blank", "")
-              Nil
-            })
-          #(
-            store.Model(
-              ..model,
-              modal_open: False,
-              modal_content: store.NoModal,
-              preload_timer: None,
-            ),
-            effect.batch([stop_effect, open_effect]),
-          )
-        }
-        "error" -> {
-          let stop_effect = stop_preload_timer(model)
-          let error_msg =
-            decode.run(data, decode.at(["error"], decode.string))
-            |> option.from_result
-            |> option.unwrap("Preload failed")
-          #(
-            store.Model(
-              ..model,
-              modal_open: False,
-              modal_content: store.NoModal,
-              preload_timer: None,
-            )
-              |> store.set_error(Some(error_msg)),
-            stop_effect,
-          )
-        }
-        _ ->
-          #(
-            store.Model(
-              ..model,
-              modal_content: store.PreloadProgress(
-                viewer_url: viewer_url,
-                task_id: task_id,
-                study_uid: study_uid,
-                received: received,
-                total: total,
-                status: status,
-              ),
-            ),
-            effect.none(),
-          )
-      }
-    }
-
-    store.PreloadProgressUpdate(_, _, _, Error(err)) -> {
-      logger.warn(
-        "preload",
-        "Progress poll failed: " <> string.inspect(err),
-      )
-      #(model, effect.none())
-    }
-
-    store.CancelPreload -> {
-      let stop_effect = stop_preload_timer(model)
-      #(
-        store.Model(
-          ..model,
-          modal_open: False,
-          modal_content: store.NoModal,
-          preload_timer: None,
-        ),
-        stop_effect,
-      )
-    }
+    // Preload delegation
+    store.PreloadMsg(pmsg) -> delegate_preload(model, pmsg)
   }
 }
 
@@ -908,12 +733,29 @@ fn dispatch_msg(msg: Msg) -> Effect(Msg) {
   dispatch(msg)
 }
 
-fn stop_preload_timer(model: Model) -> Effect(Msg) {
-  case model.preload_timer {
-    Some(timer_id) ->
-      effect.from(fn(_dispatch) { global.clear_interval(timer_id) })
-    None -> effect.none()
-  }
+fn delegate_preload(model: Model, pmsg: preload.Msg) -> #(Model, Effect(Msg)) {
+  let #(preload_model, eff, out_msgs) = preload.update(model.preload, pmsg)
+  let model = store.Model(
+    ..model,
+    preload: preload_model,
+    modal_open: preload.is_active(preload_model) || model.modal_open,
+  )
+  let out_effects =
+    list.fold(out_msgs, [], fn(acc, out_msg) {
+      case out_msg {
+        preload.OpenViewer(url) -> [
+          effect.from(fn(_dispatch) {
+            let _ = window.open(url, "_blank", "")
+            Nil
+          }),
+          ..acc
+        ]
+        preload.ShowError(msg) -> {
+          [dispatch_msg(store.SetError(Some(msg))), ..acc]
+        }
+      }
+    })
+  #(model, effect.batch([effect.map(eff, store.PreloadMsg), ..out_effects]))
 }
 
 fn build_shared(model: Model) -> shared.Shared {
@@ -1096,7 +938,7 @@ fn apply_out_msgs(
         shared.Logout ->
           #(m, [dispatch_msg(store.Logout), ..eff_list])
         shared.StartPreload(viewer_url, study_uid) ->
-          #(m, [dispatch_msg(store.StartPreload(viewer_url, study_uid)), ..eff_list])
+          #(m, [dispatch_msg(store.PreloadMsg(preload.Start(viewer_url, study_uid))), ..eff_list])
       }
     })
   #(final_model, effect.batch(list.reverse(effs)))
@@ -1309,9 +1151,21 @@ fn view_content(model: Model) -> Element(Msg) {
     _ -> layout.view(model, content)
   }
 
-  case model.modal_open {
-    True -> html.div([], [page, render_modal(model)])
-    False -> page
+  case preload.is_active(model.preload) {
+    True ->
+      case model.preload.progress {
+        Some(state) ->
+          html.div([], [
+            page,
+            element.map(preload.view_modal(state), store.PreloadMsg),
+          ])
+        None -> page
+      }
+    False ->
+      case model.modal_open {
+        True -> html.div([], [page, render_modal(model)])
+        False -> page
+      }
   }
 }
 
@@ -1322,71 +1176,7 @@ fn loading_placeholder() -> Element(Msg) {
 }
 
 fn render_modal(model: Model) -> Element(Msg) {
-  case model.modal_content {
-    store.PreloadProgress(_, _, _, received, total, status) ->
-      render_preload_modal(received, total, status)
-    _ -> render_confirm_modal(model)
-  }
-}
-
-fn render_preload_modal(
-  received: Int,
-  total: option.Option(Int),
-  status: String,
-) -> Element(Msg) {
-  let progress_text = case status {
-    "checking_cache" -> "Checking cache..."
-    "starting" -> "Starting preload..."
-    "fetching" ->
-      case total {
-        Some(t) ->
-          "Received " <> int.to_string(received) <> " of ~" <> int.to_string(t)
-        None -> "Received " <> int.to_string(received) <> " images..."
-      }
-    "ready" -> "Ready!"
-    _ -> "Loading..."
-  }
-
-  let progress_bar = case total {
-    Some(t) if t > 0 -> {
-      let pct = { received * 100 } / t
-      let width = int.to_string(int.min(pct, 100)) <> "%"
-      html.div([attribute.class("progress-bar-container")], [
-        html.div(
-          [
-            attribute.class("progress-bar"),
-            attribute.style("width", width),
-          ],
-          [],
-        ),
-      ])
-    }
-    _ ->
-      html.div([attribute.class("progress-bar-container")], [
-        html.div([attribute.class("progress-bar progress-bar-indeterminate")], []),
-      ])
-  }
-
-  html.div([attribute.class("modal-backdrop")], [
-    html.div([attribute.class("modal")], [
-      html.div([attribute.class("modal-header")], [
-        html.h3([attribute.class("modal-title")], [
-          html.text("Loading images..."),
-        ]),
-      ]),
-      html.p([], [html.text(progress_text)]),
-      progress_bar,
-      html.div([attribute.class("modal-footer")], [
-        html.button(
-          [
-            attribute.class("btn btn-secondary"),
-            event.on_click(store.CancelPreload),
-          ],
-          [html.text("Cancel")],
-        ),
-      ]),
-    ]),
-  ])
+  render_confirm_modal(model)
 }
 
 fn render_confirm_modal(model: Model) -> Element(Msg) {
