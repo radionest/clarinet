@@ -204,7 +204,7 @@ class PacsHelper:
         self.called_aet = called_aet
         self.calling_aet = calling_aet
         self.prefer_cget = prefer_cget
-        self.move_aet = move_aet or calling_aet
+        self.move_aet = calling_aet if move_aet is None else move_aet
 
     @classmethod
     def from_slicer(cls, server_name: str | None = None) -> PacsHelper:
