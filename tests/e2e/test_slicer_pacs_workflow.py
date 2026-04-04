@@ -49,6 +49,7 @@ PACS_PORT = 4242
 PACS_AET = "ORTHANC"
 PACS_REST_URL = f"http://{PACS_HOST}:8042"
 CALLING_AET = "SLICER_TEST"
+SLICER_SCP_PORT = 4006  # Slicer's internal C-STORE SCP port for receiving C-MOVE data
 
 
 # ---------------------------------------------------------------------------
@@ -226,14 +227,14 @@ class TestPacsHelperRetrieval:
         script = (
             _pacs_helper_script_block()
             + f"""
-import json
+
 node_ids = _test_pacs.retrieve_study('{pacs_study_uid}')
 assert len(node_ids) > 0, f"No nodes loaded for study, got {{node_ids}}"
-print(json.dumps({{"loaded": len(node_ids)}}))
+__execResult = {{"loaded": len(node_ids)}}
 """
         )
         result = await slicer_service.execute(slicer_url, script, request_timeout=60.0)
-        assert isinstance(result, dict)
+        assert result.get("loaded", 0) > 0, f"Expected loaded data, got: {result}"
 
     async def test_pacs_retrieve_series(
         self,
@@ -246,14 +247,14 @@ print(json.dumps({{"loaded": len(node_ids)}}))
         script = (
             _pacs_helper_script_block()
             + f"""
-import json
+
 node_ids = _test_pacs.retrieve_series('{pacs_study_uid}', '{pacs_series_uid}')
 assert len(node_ids) > 0, f"No nodes loaded for series, got {{node_ids}}"
-print(json.dumps({{"loaded": len(node_ids)}}))
+__execResult = {{"loaded": len(node_ids)}}
 """
         )
         result = await slicer_service.execute(slicer_url, script, request_timeout=60.0)
-        assert isinstance(result, dict)
+        assert result.get("loaded", 0) > 0, f"Expected loaded data, got: {result}"
 
 
 class TestSlicerHelperPacsIntegration:
@@ -270,18 +271,18 @@ class TestSlicerHelperPacsIntegration:
         script = (
             _monkey_patch_from_slicer_block()
             + f"""
-import json
+
 s = SlicerHelper('{tmp_path}')
 loaded = s.load_study_from_pacs('{pacs_study_uid}')
 assert len(loaded) > 0, f"No nodes loaded, got {{loaded}}"
-print(json.dumps({{
+__execResult = {{
     "loaded": len(loaded),
     "has_image": s._image_node is not None,
-}}))
+}}
 """
         )
         result = await slicer_service.execute(slicer_url, script, request_timeout=60.0)
-        assert isinstance(result, dict)
+        assert result.get("loaded", 0) > 0, f"Expected loaded data, got: {result}"
 
     async def test_load_series_from_pacs_via_helper(
         self,
@@ -295,18 +296,18 @@ print(json.dumps({{
         script = (
             _monkey_patch_from_slicer_block()
             + f"""
-import json
+
 s = SlicerHelper('{tmp_path}')
 loaded = s.load_series_from_pacs('{pacs_study_uid}', '{pacs_series_uid}')
 assert len(loaded) > 0, f"No nodes loaded, got {{loaded}}"
-print(json.dumps({{
+__execResult = {{
     "loaded": len(loaded),
     "has_image": s._image_node is not None,
-}}))
+}}
 """
         )
         result = await slicer_service.execute(slicer_url, script, request_timeout=60.0)
-        assert isinstance(result, dict)
+        assert result.get("loaded", 0) > 0, f"Expected loaded data, got: {result}"
 
     async def test_load_nonexistent_study_raises(
         self,
@@ -344,7 +345,7 @@ s.load_study_from_pacs('{fake_uid}', raise_on_empty=True)
         script = (
             _monkey_patch_from_slicer_block()
             + f"""
-import json
+
 s = SlicerHelper('{tmp_path}')
 try:
     loaded = s.load_study_from_pacs('{fake_uid}', raise_on_empty=False)
@@ -353,11 +354,11 @@ except Exception as e:
     loaded = []
 result = loaded == [] or loaded == None
 assert result, f"Expected empty list, got {{loaded}}"
-print(json.dumps({{"loaded": 0, "graceful": True}}))
+__execResult = {{"loaded": 0, "graceful": True}}
 """
         )
         result = await slicer_service.execute(slicer_url, script, request_timeout=30.0)
-        assert isinstance(result, dict)
+        assert result.get("graceful") is True, f"Expected graceful empty result, got: {result}"
 
 
 # ===========================================================================
@@ -455,10 +456,10 @@ class TestRecordOpenWorkflow:
         slicer_script = (
             _monkey_patch_from_slicer_block()
             + """
-import json
+
 s = SlicerHelper(working_folder)
 loaded = s.load_study_from_pacs(study_uid)
-print(json.dumps({"loaded": len(loaded), "study_uid": study_uid}))
+__execResult = {"loaded": len(loaded), "study_uid": study_uid}
 """
         )
         record_type = RecordType(
@@ -706,7 +707,7 @@ class TestBackendCmoveThenSlicer:
         # 2. Slicer: load the .dcm files from disk
         dcm_dir = str(output_dir)
         script = f"""
-import json, os, glob
+import os, glob
 
 dcm_dir = '{dcm_dir}'
 dcm_files = glob.glob(os.path.join(dcm_dir, '*.dcm'))
@@ -723,7 +724,195 @@ series_uid = str(ds.SeriesInstanceUID)
 
 loaded = DICOMUtils.loadSeriesByUID([series_uid])
 assert len(loaded) > 0, f"No nodes loaded from {{len(dcm_files)}} files"
-print(json.dumps({{"files": len(dcm_files), "loaded": len(loaded)}}))
+__execResult = {{"files": len(dcm_files), "loaded": len(loaded)}}
 """
         slicer_result = await slicer_service.execute(slicer_url, script, request_timeout=60.0)
-        assert isinstance(slicer_result, dict)
+        assert slicer_result.get("loaded", 0) > 0, f"Expected loaded data, got: {slicer_result}"
+
+
+# ===========================================================================
+# D. _get_pacs_helper() with injected context variables (hybrid PACS config)
+# ===========================================================================
+
+
+class TestGetPacsHelperContextVars:
+    """Verify _get_pacs_helper() merges Clarinet context vars + Slicer QSettings.
+
+    The fix ensures that PACS server params (host/port/aet) come from Clarinet
+    settings, while calling_aet/move_aet always come from Slicer's local config.
+
+    Context vars are set as module-level globals in the script (same as
+    build_slicer_context injects them via SlicerService._build_context_block).
+    """
+
+    async def test_context_vars_override_server_not_aet(
+        self,
+        slicer_service: SlicerService,
+        slicer_url: str,
+    ) -> None:
+        """Injected pacs_host/port/aet used for server; calling_aet/move_aet from QSettings."""
+        script = """
+
+
+# Simulate Clarinet context injection (fake server — only check params)
+pacs_host = "10.99.99.99"
+pacs_port = "9999"
+pacs_aet = "FAKE_PACS"
+dicom_retrieve_mode = "c-move"
+
+pacs = _get_pacs_helper()
+slicer_pacs = PacsHelper.from_slicer()
+
+__execResult = {
+    "host": pacs.host, "port": pacs.port,
+    "called_aet": pacs.called_aet, "calling_aet": pacs.calling_aet,
+    "move_aet": pacs.move_aet, "prefer_cget": pacs.prefer_cget,
+    "slicer_aet": slicer_pacs.calling_aet,
+}
+"""
+        result = await slicer_service.execute(slicer_url, script, request_timeout=10.0)
+        assert "host" in result, f"Unexpected result from Slicer: {result}"
+        assert result["host"] == "10.99.99.99"
+        assert result["port"] == 9999
+        assert result["called_aet"] == "FAKE_PACS"
+        assert result["prefer_cget"] is False
+        assert result["calling_aet"] == result["slicer_aet"]
+        assert result["move_aet"] == result["slicer_aet"]
+
+    async def test_move_aet_not_backend_aet_regression(
+        self,
+        slicer_service: SlicerService,
+        slicer_url: str,
+    ) -> None:
+        """Regression: move_aet must NOT be backend's dicom_aet (the original bug)."""
+        script = """
+
+
+pacs_host = "10.99.99.99"
+pacs_port = "9999"
+pacs_aet = "FAKE_PACS"
+dicom_retrieve_mode = "c-move"
+
+pacs = _get_pacs_helper()
+
+__execResult = {"move_aet": pacs.move_aet}
+"""
+        result = await slicer_service.execute(slicer_url, script, request_timeout=10.0)
+        assert "move_aet" in result, f"Unexpected result from Slicer: {result}"
+        assert result["move_aet"] != "CLARINET", (
+            f"REGRESSION: move_aet={result['move_aet']} should not be backend AET"
+        )
+
+
+class TestCmoveWithContextVars:
+    """Full C-MOVE retrieval using _get_pacs_helper() with injected context.
+
+    Requires bidirectional connectivity (PACS can reach Slicer on port 4006).
+    Slicer's AET is registered in Orthanc before the test and cleaned up after.
+    """
+
+    @pytest.fixture(scope="session")
+    def _cmove_available(self, _check_pacs: None) -> None:
+        """Skip if PACS cannot connect back to us."""
+        if not _pacs_can_reach_us():
+            pytest.skip("PACS cannot reach test host — C-MOVE requires bidirectional connectivity")
+
+    @pytest.fixture(scope="session")
+    def slicer_aet(self, _check_slicer: None) -> str:
+        """Read Slicer's own AET from QSettings."""
+        svc = SlicerService()
+        script = """
+
+pacs = PacsHelper.from_slicer()
+__execResult = {"calling_aet": pacs.calling_aet}
+"""
+        result = asyncio.get_event_loop().run_until_complete(
+            svc.execute(f"http://{SLICER_HOST}:{SLICER_PORT}", script, request_timeout=10.0)
+        )
+        return result["calling_aet"]
+
+    @pytest.fixture(autouse=True)
+    def _register_slicer_modality(
+        self,
+        _cmove_available: None,
+        slicer_aet: str,
+    ) -> Any:
+        """Register Slicer's AET in Orthanc so C-MOVE can deliver data."""
+        modality_url = f"{PACS_REST_URL}/modalities/{slicer_aet}"
+        resp = requests.put(
+            modality_url,
+            json={"AET": slicer_aet, "Host": SLICER_HOST, "Port": SLICER_SCP_PORT},
+            timeout=5,
+        )
+        resp.raise_for_status()
+        yield
+        requests.delete(modality_url, timeout=5)
+
+    async def test_cmove_retrieval_with_context_vars(
+        self,
+        slicer_service: SlicerService,
+        slicer_url: str,
+        pacs_study_uid: str,
+        pacs_series_uid: str,
+    ) -> None:
+        """C-MOVE via _get_pacs_helper() with injected PACS context loads real data."""
+        script = f"""
+
+
+# Inject Clarinet context — PACS server from settings, AET from Slicer QSettings
+pacs_host = "{PACS_HOST}"
+pacs_port = "{PACS_PORT}"
+pacs_aet = "{PACS_AET}"
+dicom_retrieve_mode = "c-move"
+
+s = SlicerHelper('/tmp/e2e_cmove_ctx')
+loaded = s.load_series_from_pacs('{pacs_study_uid}', '{pacs_series_uid}')
+assert len(loaded) > 0, f"No nodes loaded, got {{loaded}}"
+__execResult = {{"loaded": len(loaded)}}
+"""
+        result = await slicer_service.execute(slicer_url, script, request_timeout=60.0)
+        assert "loaded" in result, f"Unexpected result from Slicer: {result}"
+        assert result["loaded"] > 0
+
+    async def test_wrong_move_aet_fails(
+        self,
+        slicer_service: SlicerService,
+        slicer_url: str,
+        pacs_study_uid: str,
+        pacs_series_uid: str,
+    ) -> None:
+        """C-MOVE with unregistered move_aet fails — PACS can't deliver to unknown AET."""
+        script = f"""
+
+
+# Ensure series is NOT in local DB — force PACS retrieval path
+db = slicer.dicomDatabase
+if db and db.filesForSeries('{pacs_series_uid}'):
+    db.removeSeries('{pacs_series_uid}')
+
+# Override from_slicer to return an AET not registered in Orthanc
+pacs_host = "{PACS_HOST}"
+pacs_port = "{PACS_PORT}"
+pacs_aet = "{PACS_AET}"
+dicom_retrieve_mode = "c-move"
+
+PacsHelper.from_slicer = classmethod(lambda cls, server_name=None: PacsHelper(
+    host='{PACS_HOST}', port={PACS_PORT},
+    called_aet='{PACS_AET}', calling_aet='NONEXISTENT_AET',
+    prefer_cget=False, move_aet='NONEXISTENT_AET',
+))
+
+pacs = _get_pacs_helper()
+assert pacs.move_aet == "NONEXISTENT_AET"
+
+try:
+    files = pacs.retrieve_series('{pacs_study_uid}', '{pacs_series_uid}')
+    loaded = len(files) if files else 0
+except Exception:
+    loaded = 0
+
+assert loaded == 0, f"Expected 0 loaded with wrong AET, got {{loaded}}"
+__execResult = {{"loaded": loaded, "move_aet": pacs.move_aet}}
+"""
+        result = await slicer_service.execute(slicer_url, script, request_timeout=30.0)
+        assert result["loaded"] == 0

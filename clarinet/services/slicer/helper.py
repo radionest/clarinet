@@ -161,20 +161,23 @@ def _get_pacs_helper(server_name: str | None = None) -> PacsHelper:
         host = g["pacs_host"]
         port = int(g["pacs_port"])
         called_aet = g["pacs_aet"]
-        calling_aet = g.get("dicom_aet", "SLICER")
         retrieve_mode = g.get("dicom_retrieve_mode", "c-get")
         prefer_cget = retrieve_mode != "c-move"
+        # calling_aet and move_aet must come from Slicer's own config —
+        # each user's Slicer has its own AE title for C-MOVE destination
+        slicer_pacs = PacsHelper.from_slicer(server_name)
         _pacs_log.info(
             f"Using PACS from Clarinet settings: {host}:{port} "
-            f"(AET={called_aet}, mode={retrieve_mode})"
+            f"(AET={called_aet}, mode={retrieve_mode}, "
+            f"move_dest={slicer_pacs.calling_aet})"
         )
         return PacsHelper(
             host=host,
             port=port,
             called_aet=called_aet,
-            calling_aet=calling_aet,
+            calling_aet=slicer_pacs.calling_aet,
             prefer_cget=prefer_cget,
-            move_aet=calling_aet,
+            move_aet=slicer_pacs.move_aet,
         )
     return PacsHelper.from_slicer(server_name)
 

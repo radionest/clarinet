@@ -111,10 +111,10 @@ def build_slicer_context(
     context["working_folder"] = str(working_dirs.get(record_level, ""))
 
     # PACS connection params — used by PacsHelper inside Slicer
+    # calling_aet/move_aet intentionally omitted — read from Slicer's QSettings
     context["pacs_host"] = settings.pacs_host
     context["pacs_port"] = settings.pacs_port
     context["pacs_aet"] = settings.pacs_aet
-    context["dicom_aet"] = settings.dicom_aet
     context["dicom_retrieve_mode"] = settings.dicom_retrieve_mode
 
     if record_level in (DicomQueryLevel.STUDY, DicomQueryLevel.SERIES):
