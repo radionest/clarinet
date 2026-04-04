@@ -63,3 +63,4 @@ dev-notes
 .claude/*
 !.claude/rules/
 !.claude/agents/
+!.claude/commands/
