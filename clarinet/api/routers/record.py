@@ -517,7 +517,7 @@ async def _process_submission(
     return mask_record_patient_data(RecordRead.model_validate(updated), user)
 
 
-_SUBMIT_STATUSES = frozenset({RecordStatus.finished, RecordStatus.failed})
+_SUBMIT_STATUSES = (RecordStatus.finished, RecordStatus.failed)
 
 
 @router.post("/{record_id}/data", response_model=RecordRead)
