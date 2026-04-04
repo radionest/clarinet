@@ -68,9 +68,9 @@ Both `retrieve_study()` and `retrieve_series()` check Slicer's local DICOM datab
 
 ### PACS configuration
 
-PACS connection params for Slicer are **not** in `settings.py`. Each user configures their PACS server in Slicer's GUI (`Edit > Application Settings > DICOM`), including their own calling AE title. `PacsHelper.from_slicer()` reads this configuration at runtime.
+PACS connection params are injected from Clarinet `settings.py` (`pacs_host`, `pacs_port`, `pacs_aet`, `dicom_aet`) into context variables by `build_slicer_context()`. The `_get_pacs_helper()` function reads these globals at runtime and creates `PacsHelper` directly — no dependency on Slicer's internal DICOM settings.
 
-Backend DICOM service (`clarinet/services/dicom/`) still uses `settings.pacs_host`, `settings.pacs_port`, `settings.pacs_aet` for server-side operations.
+Fallback: if context variables are absent (standalone/manual usage), `PacsHelper.from_slicer()` reads from Slicer's QSettings.
 
 **Usage via POST /exec:**
 ```json
@@ -78,8 +78,6 @@ Backend DICOM service (`clarinet/services/dicom/`) still uses `settings.pacs_hos
   "script": "s = SlicerHelper('/tmp')\nloaded = s.load_study_from_pacs('1.2.840...')"
 }
 ```
-
-No PACS context variables needed — `PacsHelper.from_slicer()` reads config directly from Slicer.
 
 ## Router Endpoints (`clarinet/api/routers/slicer.py`)
 
