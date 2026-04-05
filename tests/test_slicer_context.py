@@ -9,6 +9,7 @@ Covers:
 - Unresolved template warning
 """
 
+import sys
 from datetime import date
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
@@ -476,8 +477,13 @@ async def test_build_slicer_context_async_no_hydrators(mock_settings):
 # ---------------------------------------------------------------------------
 
 
+_skip_windows = pytest.mark.skipif(sys.platform == "win32", reason="server-only path translation")
+
+
+@_skip_windows
+@pytest.mark.asyncio
 @patch("clarinet.services.slicer.context.settings")
-def test_client_path_translation_unc(mock_settings):
+async def test_client_path_translation_unc(mock_settings):
     """storage_path_client replaces server paths with UNC paths."""
     mock_settings.storage_path = "/mnt/vol_storage"
     mock_settings.storage_path_client = "//server/vol_storage"
@@ -495,7 +501,7 @@ def test_client_path_translation_unc(mock_settings):
     )
     record = record.model_copy(update={"clarinet_storage_path": "/mnt/vol_storage"})
 
-    ctx = build_slicer_context(record)
+    ctx = await build_slicer_context_async(record, AsyncMock())
 
     assert ctx["working_folder"] == "//server/vol_storage/CLARINET_1/ANON_STUDY/ANON_SERIES"
     assert ctx["volume_nifti"] == (
@@ -503,8 +509,10 @@ def test_client_path_translation_unc(mock_settings):
     )
 
 
+@_skip_windows
+@pytest.mark.asyncio
 @patch("clarinet.services.slicer.context.settings")
-def test_client_path_translation_drive_letter(mock_settings):
+async def test_client_path_translation_drive_letter(mock_settings):
     """storage_path_client with Windows drive letter."""
     mock_settings.storage_path = "/mnt/vol_storage"
     mock_settings.storage_path_client = "Z:"
@@ -512,26 +520,29 @@ def test_client_path_translation_drive_letter(mock_settings):
     record = _make_record_read(level=DicomQueryLevel.STUDY)
     record = record.model_copy(update={"clarinet_storage_path": "/mnt/vol_storage"})
 
-    ctx = build_slicer_context(record)
+    ctx = await build_slicer_context_async(record, AsyncMock())
 
     assert ctx["working_folder"] == "Z:/CLARINET_1/ANON_STUDY"
 
 
+@_skip_windows
+@pytest.mark.asyncio
 @patch("clarinet.services.slicer.context.settings")
-def test_client_path_translation_disabled(mock_settings):
+async def test_client_path_translation_disabled(mock_settings):
     """No translation when storage_path_client is None."""
     mock_settings.storage_path = "/storage"
     mock_settings.storage_path_client = None
-    mock_settings.storage_path_client = None
 
     record = _make_record_read(level=DicomQueryLevel.STUDY)
-    ctx = build_slicer_context(record)
+    ctx = await build_slicer_context_async(record, AsyncMock())
 
     assert ctx["working_folder"] == str(Path("/storage/CLARINET_1/ANON_STUDY"))
 
 
+@_skip_windows
+@pytest.mark.asyncio
 @patch("clarinet.services.slicer.context.settings")
-def test_client_path_translation_non_path_values_unchanged(mock_settings):
+async def test_client_path_translation_non_path_values_unchanged(mock_settings):
     """Non-path context values (study_uid, pacs_host) are not affected."""
     mock_settings.storage_path = "/mnt/vol_storage"
     mock_settings.storage_path_client = "//server/vol_storage"
@@ -543,15 +554,17 @@ def test_client_path_translation_non_path_values_unchanged(mock_settings):
     record = _make_record_read(level=DicomQueryLevel.STUDY)
     record = record.model_copy(update={"clarinet_storage_path": "/mnt/vol_storage"})
 
-    ctx = build_slicer_context(record)
+    ctx = await build_slicer_context_async(record, AsyncMock())
 
     assert ctx["study_uid"] == "ANON_STUDY"
     assert ctx["pacs_host"] == "pacs.local"
     assert ctx["pacs_port"] == 4242
 
 
+@_skip_windows
+@pytest.mark.asyncio
 @patch("clarinet.services.slicer.context.settings")
-def test_client_path_translation_output_file(mock_settings):
+async def test_client_path_translation_output_file(mock_settings):
     """output_file alias is also translated."""
     mock_settings.storage_path = "/mnt/vol_storage"
     mock_settings.storage_path_client = "//server/vol_storage"
@@ -567,7 +580,7 @@ def test_client_path_translation_output_file(mock_settings):
     )
     record = record.model_copy(update={"clarinet_storage_path": "/mnt/vol_storage"})
 
-    ctx = build_slicer_context(record)
+    ctx = await build_slicer_context_async(record, AsyncMock())
 
     assert ctx["output_file"].startswith("//server/vol_storage/")
     assert ctx["segmentation"] == ctx["output_file"]
