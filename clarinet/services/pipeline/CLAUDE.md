@@ -138,6 +138,17 @@ After each step, `PipelineChainMiddleware.post_execute()` fetches the definition
 (`GET /api/pipelines/{name}/definition`) and dispatches the next step. Chain stops on error.
 
 
+## Built-in Tasks
+
+Located in `tasks/` — auto-imported when broker starts:
+- `convert_series_to_nifti` (queue `clarinet.dicom`) — downloads DICOM via C-GET, converts to NIfTI with correct affine/spacing. Requires `msg.series_uid`. Idempotent (skips if output exists). Output: `VOLUME_NIFTI` FileDef, level=SERIES.
+
+Task name collision: `register_task()` in `chain.py` prevents project tasks from shadowing built-in tasks (identity check `existing is not task` → `PipelineConfigError`).
+
+### auto_submit
+
+`@pipeline_task(auto_submit=True)` — if handler returns a `dict`, automatically calls `client.submit_record_data(msg.record_id, result)` before file-change detection. Skipped when `record_id` is None.
+
 ## Retry & DLQ
 
 - **Retries enabled by default** via `SmartRetryMiddleware` with `default_retry_label=True`

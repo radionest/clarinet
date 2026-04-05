@@ -57,6 +57,10 @@ Key methods: `SlicerHelper(working_folder)`, `load_volume()`, `create_segmentati
 DIMSE (C-FIND + C-GET/C-MOVE) integration via `ctkDICOMQuery` / `ctkDICOMRetrieve`.
 
 - `PacsHelper(host, port, called_aet, calling_aet, retrieve_mode, move_aet)` — explicit connection params (for testing)
+- `PacsHelper.verify() -> bool` — C-ECHO connectivity test; logs diagnostics on failure
+- **Retrieve modes** (`dicom_retrieve_mode` setting / `CLARINET_DICOM_RETRIEVE_MODE`):
+  - `c-get` (default) / `c-move` — per-series retrieve
+  - `c-get-study` / `c-move-study` — study-level retrieve (for PACS rejecting series-level associations)
 - `PacsHelper.from_slicer(server_name=None)` — reads PACS config from `QSettings` (`DICOM/ServerNodes/*`) as a **workaround** for `ctkDICOMVisualBrowser` not reflecting user-configured servers; picks first query/retrieve-enabled server or falls back to first server. Each user configures PACS once in `Edit > Application Settings > DICOM`. Logs via `_pacs_log` (`logging.getLogger("clarinet.slicer.pacs")`)
 - `retrieve_study(study_instance_uid)` → **local-first**: checks `slicer.dicomDatabase` for existing series, falls back to C-FIND + retrieve from PACS using `retrieve_mode` strategy
 - `retrieve_series(study_instance_uid, series_instance_uid)` → **local-first**: checks `slicer.dicomDatabase.filesForSeries()`, falls back to retrieve from PACS using `retrieve_mode` strategy

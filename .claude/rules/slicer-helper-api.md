@@ -42,6 +42,10 @@ paths:
 - `refine_alignment_by_centroids(moving_seg, reference_seg, transform_node, min_landmarks=1)` → `int` — rigid-body from matched centroids
 - `setup_segment_focus_observer(editable_seg, reference_seg, reference_views=, editable_views=, only_empty=, on_refine=)` — auto-navigate to centroid on selection
 
+## PacsHelper methods
+
+- `PacsHelper.verify() -> bool` — test PACS connectivity via C-ECHO (`ctkDICOMEcho`). Returns True on success, False on failure. Logs diagnostics (ACL, AE title, IP). Graceful fallback if `ctkDICOMEcho` unavailable.
+
 ## VTK / Slicer pitfalls
 
 1. **Shared labelmaps (Slicer 5.0+):** `segment.GetRepresentation("Binary labelmap")` returns the *shared* labelmap — same for all segments. Use `node.GetBinaryLabelmapRepresentation(seg_id, output)` instead.

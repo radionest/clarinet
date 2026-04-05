@@ -141,3 +141,7 @@ SQLModel DTO classes (`table=False`, no `table=True`) still inherit from `SQLMod
 JSON Schema metadata, while Pydantic's `Field()` uses `json_schema_extra`. Using the wrong
 one silently does nothing. Rule: if the class inherits `SQLModel` → use `schema_extra`;
 if it inherits `pydantic.BaseModel` → use `json_schema_extra`.
+
+## Type Aliases (`clarinet/types.py`)
+
+`PortableJSON = JSON().with_variant(JSONB(), "postgresql")` — JSONB on PostgreSQL (supports GROUP BY / DISTINCT / equality), JSON on SQLite. Use for all JSON columns.

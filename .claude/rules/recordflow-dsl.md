@@ -28,7 +28,7 @@ paths:
 - `.invalidate_all_records(...)` — alias for `.invalidate_records()`
 - `.pipeline('name', **extra_payload)` → `PipelineAction` (dispatches to pipeline service)
 - `.do_task(task_func, **extra_payload)` → `PipelineAction` (auto-creates a single-step Pipeline named `_task:{task_name}` from a `@pipeline_task()`-decorated function; deduplicates across calls)
-- `.call(func)` → `CallFunctionAction`
+- `.call(func)` → `CallFunctionAction` — invoke arbitrary callable; model fields: `function` (Callable), `args` (tuple), `extra_kwargs` (dict). Engine invokes `function(*args, **extra_kwargs)`
 - `.else_()` — else branch
 - `.is_active_flow()` — check if flow has triggers/actions (vs data-reference only)
 

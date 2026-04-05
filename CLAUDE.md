@@ -103,6 +103,7 @@ Avoid: direct loguru import (use `from clarinet.utils.logger import logger`), sy
   - `file-registry.md` — file definition M2M system (for file_schema.py)
   - `test-debugging.md` — jq recipes for test/log analysis (for tests/)
   - `recordflow-dsl.md` — full DSL API reference (for recordflow/ and *_flow.py)
+  - `project-setup.md` — project init, settings, plan/ structure (for settings.toml and plan/)
   - `e2e-tests.md` — frontend stack, VM sub-path, selectors (for deploy/test/e2e/)
 
 Update the most specific file. Keep CLAUDE.md files minimal — move detailed reference to `.claude/rules/`.

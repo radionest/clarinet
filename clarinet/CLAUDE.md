@@ -108,7 +108,7 @@ Each service has its own CLAUDE.md — see `services/*/CLAUDE.md` for details.
 - `services/dicom/` — DICOM client (pynetdicom)
 - `services/slicer/` — 3D Slicer integration
 - `services/image/` — Image processing (numpy)
-- `services/record_service.py` — Record mutations with RecordFlow triggers
+- `services/record_service.py` — Record mutations with RecordFlow triggers + `check_files()` (auto-unblock, checksum comparison, file-change notifications)
 - `services/study_service.py` — Study management with entity-creation triggers
 
 `clarinet/client.py` — `ClarinetClient`: HTTP client to own API (used by RecordFlow and pipeline tasks). See file for full method list.
