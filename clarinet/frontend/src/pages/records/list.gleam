@@ -13,6 +13,7 @@ import lustre/attribute
 import lustre/element.{type Element}
 import lustre/element/html
 import lustre/event
+import router
 import store.{type Model, type Msg}
 
 pub fn view(model: Model) -> Element(Msg) {
@@ -241,7 +242,7 @@ fn record_row(model: Model, record: Record) -> Element(Msg) {
         True, _ ->
           html.a(
             [
-              attribute.href("/records/" <> record_id_str),
+              attribute.href(router.route_to_path(router.RecordDetail(record_id_str))),
               attribute.class("btn btn-sm btn-primary"),
             ],
             [html.text("Fill")],
@@ -249,7 +250,7 @@ fn record_row(model: Model, record: Record) -> Element(Msg) {
         _, True ->
           html.a(
             [
-              attribute.href("/records/" <> record_id_str),
+              attribute.href(router.route_to_path(router.RecordDetail(record_id_str))),
               attribute.class("btn btn-sm btn-secondary"),
             ],
             [html.text("Edit")],
@@ -257,7 +258,7 @@ fn record_row(model: Model, record: Record) -> Element(Msg) {
         _, _ ->
           html.a(
             [
-              attribute.href("/records/" <> record_id_str),
+              attribute.href(router.route_to_path(router.RecordDetail(record_id_str))),
               attribute.class("btn btn-sm btn-outline"),
             ],
             [html.text("View")],
