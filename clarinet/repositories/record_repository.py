@@ -622,10 +622,11 @@ class RecordRepository(BaseRepository[Record]):
         record = await self.get(record_id)
         old_status = record.status
 
+        prefixed = f"Manually failed: {reason}"
         if record.context_info:
-            record.context_info = f"{record.context_info}\n{reason}"
+            record.context_info = f"{record.context_info}\n{prefixed}"
         else:
-            record.context_info = reason
+            record.context_info = prefixed
 
         record.status = RecordStatus.failed
         await self.session.commit()

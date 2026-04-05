@@ -684,7 +684,7 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     }
 
     store.ConfirmFailRecord(record_id) -> {
-      let reason = model.fail_reason
+      let reason = string.trim(model.fail_reason)
       let eff = {
         use dispatch <- effect.from
         records.fail_record(record_id, reason)

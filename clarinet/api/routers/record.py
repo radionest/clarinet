@@ -758,12 +758,16 @@ async def fail_record(
     authorized_record: AuthorizedRecordDep,
     service: RecordServiceDep,
     user: CurrentUserDep,
-    reason: str = Body(embed=True),
+    reason: str = Body(embed=True, min_length=1),
 ) -> RecordRead:
     """Manually mark a record as failed with a reason.
 
     Only records in ``pending`` or ``inwork`` status can be failed manually.
     """
+    reason = reason.strip()
+    if not reason:
+        raise CONFLICT.with_context("Reason cannot be empty or whitespace-only.")
+
     if authorized_record.status not in _MANUALLY_FAILABLE_STATUSES:
         raise CONFLICT.with_context(
             f"Cannot fail record in '{authorized_record.status.value}' status. "

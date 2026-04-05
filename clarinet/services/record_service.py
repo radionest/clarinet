@@ -265,7 +265,7 @@ class RecordService:
             Updated record with relations.
         """
         record, old_status = await self.repo.fail_record(record_id, reason)
-        logger.info(f"Record {record_id} manually failed: {reason}")
+        logger.info(f"Record {record_id} manually failed")
 
         if old_status != record.status:
             await self._fire_status_change(record, old_status)
