@@ -317,14 +317,21 @@ async def test_set_dual_layout(
     """Set dual layout — verify it runs without error."""
     context = {"working_folder": "/tmp"}
     script = """
+import numpy as np
 s = SlicerHelper(working_folder)
 seg_a = s.create_segmentation('DualA')
 seg_b = s.create_segmentation('DualB')
-# Dual layout needs volume nodes; create minimal ones
+# Create volumes with actual image data to avoid VTK "Input port 0 has 0 connections"
+# warnings that flood the event loop and block subsequent HTTP requests
 vol_a = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLScalarVolumeNode', 'VolA')
 vol_b = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLScalarVolumeNode', 'VolB')
+dummy = np.zeros((2, 2, 2), dtype=np.int16)
+slicer.util.updateVolumeFromArray(vol_a, dummy)
+slicer.util.updateVolumeFromArray(vol_b, dummy)
 s.set_dual_layout(vol_a, vol_b, seg_a=seg_a, seg_b=seg_b, linked=True)
 print('dual_layout_ok')
+# Clear scene to stop VTK rendering on empty views between tests
+slicer.mrmlScene.Clear(0)
 """
     result = await slicer_service.execute(slicer_url, script, context=context)
     assert isinstance(result, dict)
