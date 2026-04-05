@@ -106,6 +106,7 @@ async def _convert_series_impl(msg: PipelineMessage, ctx: TaskContext) -> None:
         try:
             await to_thread(img.read_dicom_series, Path(tmpdir))
         except ImageReadError as exc:
+            logger.error(f"DICOM read failed: {exc}")
             raise PipelineStepError("convert_series_to_nifti", f"DICOM read failed: {exc}") from exc
 
         # 3. Save as NIfTI
@@ -113,6 +114,7 @@ async def _convert_series_impl(msg: PipelineMessage, ctx: TaskContext) -> None:
         try:
             await to_thread(img.save_as, output_path, FileType.NIFTI)
         except ImageWriteError as exc:
+            logger.error(f"NIfTI save failed: {exc}")
             raise PipelineStepError("convert_series_to_nifti", f"NIfTI save failed: {exc}") from exc
 
     logger.info(f"Saved NIfTI volume to {output_path}")

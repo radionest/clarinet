@@ -9,8 +9,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEPLOY_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-source "$DEPLOY_DIR/lib/logging.sh"
+source "$DEPLOY_DIR/lib/common.sh"
 init_logging "fetch-dicom"
+require_commands jq curl unzip
 
 # Defaults from vm.conf (may be overridden by CLI args)
 source "$SCRIPT_DIR/vm.conf"
@@ -35,6 +36,10 @@ if [[ -z "$ORTHANC_URL" ]]; then
 fi
 
 if [[ -z "$PATIENT_NAME" ]]; then
+    if [[ ! -t 0 ]]; then
+        err "Patient name is required. Set DICOM_SOURCE_PATIENT in vm.conf or pass --patient"
+        exit 1
+    fi
     read -rp "Patient name to fetch (e.g. 'mishin'): " PATIENT_NAME
     if [[ -z "$PATIENT_NAME" ]]; then
         err "Patient name is required"
