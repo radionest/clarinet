@@ -21,8 +21,7 @@ pub type Model {
 // --- Msg ---
 
 pub type Msg {
-  NavigateBack
-  NavigateEdit
+  NoOp
 }
 
 // --- Init ---
@@ -35,17 +34,10 @@ pub fn init(name: String, _shared: Shared) -> #(Model, Effect(Msg), List(OutMsg)
 
 pub fn update(
   model: Model,
-  msg: Msg,
+  _msg: Msg,
   _shared: Shared,
 ) -> #(Model, Effect(Msg), List(OutMsg)) {
-  case msg {
-    NavigateBack ->
-      #(model, effect.none(), [shared.Navigate(router.AdminRecordTypes)])
-    NavigateEdit ->
-      #(model, effect.none(), [
-        shared.Navigate(router.AdminRecordTypeEdit(model.name)),
-      ])
-  }
+  #(model, effect.none(), [])
 }
 
 // --- View ---
