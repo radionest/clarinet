@@ -376,8 +376,11 @@ cmd_bake() {
         # Auto-fetch from source Orthanc
         log "No DICOM dir specified — fetching from ${DICOM_SOURCE_URL}..."
         auto_fetched_dicom="$(mktemp -d -t bake-dicom-XXXXXX)"
-        dicom_dir=$("$SCRIPT_DIR/fetch-test-dicom.sh" --output "$auto_fetched_dicom" \
-            | tail -1)
+        if ! dicom_dir=$("$SCRIPT_DIR/fetch-test-dicom.sh" --output "$auto_fetched_dicom" \
+            | tail -1) || [[ ! -d "$dicom_dir" ]]; then
+            err "Failed to fetch DICOM test data"
+            exit 1
+        fi
     fi
 
     require_commands virsh virt-install cloud-localds qemu-img

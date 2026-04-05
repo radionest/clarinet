@@ -425,7 +425,8 @@ async def create_view_nifti_record(
 # first-check → DICOM→NIfTI conversion for the best series
 (record("first-check").on_finished().if_record(F.is_good == True).call(dispatch_nifti_conversion))
 
-# first-check → create view-nifti record (blocked until volume.nii.gz appears)
+# first-check → create view-nifti record
+# (blocking on volume.nii.gz happens later when the task resolves FileRef)
 (record("first-check").on_finished().if_record(F.is_good == True).call(create_view_nifti_record))
 
 # Run anonymization on creation
