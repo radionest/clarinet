@@ -5,11 +5,21 @@ DicomWebProxyService, enabling OHIF Viewer to display images from
 a traditional PACS that only supports C-FIND/C-GET.
 """
 
-from fastapi import APIRouter, Request
-from fastapi.responses import JSONResponse, Response
+import asyncio
+import tempfile
 
-from clarinet.api.dependencies import CurrentUserDep, DicomWebProxyServiceDep
+from fastapi import APIRouter, Request
+from fastapi.responses import JSONResponse, Response, StreamingResponse
+
+from clarinet.api.dependencies import (
+    CurrentUserDep,
+    DicomClientDep,
+    DicomWebCacheDep,
+    DicomWebProxyServiceDep,
+    PacsNodeDep,
+)
 from clarinet.utils.dicom import parse_frame_numbers
+from clarinet.utils.logger import logger
 
 router = APIRouter()
 
@@ -173,6 +183,35 @@ async def retrieve_frames(
     )
 
     return Response(content=body, media_type=content_type)
+
+
+@router.get("/studies/{study_uid}/series/{series_uid}/archive")
+async def download_series_archive(
+    study_uid: str,
+    series_uid: str,
+    _user: CurrentUserDep,
+    cache: DicomWebCacheDep,
+    client: DicomClientDep,
+    pacs: PacsNodeDep,
+) -> StreamingResponse:
+    """Download a DICOM series as a ZIP archive.
+
+    Ensures the series is cached in memory (fetching from PACS if needed),
+    then builds a ZIP from in-memory datasets.
+    """
+    cached = await cache.ensure_series_cached(study_uid, series_uid, client, pacs)
+
+    spooled = tempfile.SpooledTemporaryFile(max_size=50 * 1024 * 1024)  # noqa: SIM115
+    count = await asyncio.to_thread(cache.build_series_zip, cached, spooled)
+    spooled.seek(0)
+
+    logger.info(f"Serving ZIP archive for series {series_uid} ({count} instances)")
+
+    return StreamingResponse(
+        spooled,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{series_uid}.zip"'},
+    )
 
 
 @router.post("/preload/{study_uid}")
