@@ -80,6 +80,25 @@ def _resolve_custom_args(
     return resolved
 
 
+def _translate_paths_for_client(context: dict[str, Any], server_base: str) -> None:
+    """Replace server storage paths with client-accessible paths in-place.
+
+    When Slicer runs on a remote client (e.g. Windows), server-local paths like
+    ``/mnt/vol_storage/...`` are inaccessible. If ``storage_path_client`` is set,
+    replaces the server prefix with the client-side equivalent (UNC or drive path).
+    """
+    client_base = settings.storage_path_client
+    if not client_base:
+        return
+
+    client_base = client_base.rstrip("/\\")
+    server_base = server_base.rstrip("/\\")
+
+    for key, value in context.items():
+        if isinstance(value, str) and value.startswith(server_base):
+            context[key] = client_base + value[len(server_base) :]
+
+
 def build_slicer_context(
     record: RecordRead,
     *,
@@ -172,6 +191,10 @@ def build_slicer_context(
         context.update(
             _resolve_custom_args(record.record_type.slicer_result_validator_args, format_vars)
         )
+
+    # -- Path translation for remote Slicer clients --
+    server_base = record.clarinet_storage_path or settings.storage_path
+    _translate_paths_for_client(context, server_base)
 
     return context
 
