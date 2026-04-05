@@ -938,7 +938,9 @@ class SlicerHelper:
         extract_dir = os.path.join(self.working_folder, "_dicom_download", series_uid)
         os.makedirs(extract_dir, exist_ok=True)
 
-        tmp_path = tempfile.mktemp(suffix=".zip")
+        tmp = tempfile.NamedTemporaryFile(suffix=".zip", delete=False)  # noqa: SIM115
+        tmp_path = tmp.name
+        tmp.close()
         try:
             with urllib.request.urlopen(req) as resp, open(tmp_path, "wb") as f:
                 shutil.copyfileobj(resp, f)
