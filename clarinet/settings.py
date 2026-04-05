@@ -86,6 +86,7 @@ class Settings(BaseSettings):
 
     # Storage settings
     storage_path: str = str(Path.home() / "clarinet/data")
+    storage_path_client: str | None = None
     anon_id_prefix: str = "CLARINET"
 
     @field_validator("storage_path")

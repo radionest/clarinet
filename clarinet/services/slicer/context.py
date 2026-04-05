@@ -11,6 +11,7 @@ Layers (later overrides earlier):
 5. Custom slicer_result_validator_args (same)
 """
 
+from pathlib import PurePosixPath
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -78,6 +79,37 @@ def _resolve_custom_args(
         except (KeyError, AttributeError) as exc:
             logger.warning(f"Slicer arg '{key}': unresolved template '{template}' — {exc}")
     return resolved
+
+
+def _translate_paths_for_client(
+    context: dict[str, Any],
+    server_base: str,
+) -> dict[str, Any]:
+    """Replace server storage path prefix with client-accessible prefix.
+
+    Uses PurePosixPath.relative_to() for safe boundary matching —
+    prevents partial prefix hits (e.g. /mnt/vol vs /mnt/vol2).
+    Non-path values raise ValueError on relative_to() and pass through unchanged.
+    """
+    client_base = settings.storage_path_client
+    if not client_base:
+        return context
+
+    server = PurePosixPath(server_base)
+    client_base = client_base.rstrip("/\\")
+
+    translated = {}
+    for key, value in context.items():
+        if not isinstance(value, str):
+            translated[key] = value
+            continue
+        try:
+            rel = PurePosixPath(value).relative_to(server)
+            suffix = f"/{rel}" if str(rel) != "." else ""
+            translated[key] = client_base + suffix
+        except ValueError:
+            translated[key] = value
+    return translated
 
 
 def build_slicer_context(
@@ -211,5 +243,9 @@ async def build_slicer_context_async(
     hydrator_names = record.record_type.slicer_context_hydrators
     if hydrator_names:
         context = await hydrate_slicer_context(context, record, session, hydrator_names)
+
+    # Path translation — after all layers including hydrators
+    server_base = record.clarinet_storage_path or settings.storage_path
+    context = _translate_paths_for_client(context, server_base)
 
     return context
