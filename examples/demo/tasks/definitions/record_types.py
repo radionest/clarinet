@@ -33,6 +33,12 @@ second_review_output = FileDef(
     description="Second review classification: metastasis/unclear/benign/invisible",
 )
 
+volume_nifti = FileDef(
+    pattern="volume.nii.gz",
+    level="SERIES",
+    description="NIfTI volume converted from DICOM series",
+)
+
 resection_model_file = FileDef(
     pattern="resection_model.seg.nrrd",
     level="PATIENT",
@@ -378,4 +384,20 @@ histology = RecordDef(
     files=[FileRef(master_model, "input")],
     # Data per lesion: macro_visible (bool), micro_visible (bool),
     #   tumor_cells (yes/no/no_data), tumor_fibrotic_ratio (float, nullable)
+)
+
+# ---------------------------------------------------------------------------
+# NIfTI volume viewing
+# ---------------------------------------------------------------------------
+
+view_nifti = RecordDef(
+    name="view-nifti",
+    description="View pre-converted NIfTI volume in 3D Slicer",
+    label="View NIfTI",
+    level="SERIES",
+    role="doctor",
+    min_records=1,
+    max_records=1,
+    slicer_script="scripts/view_nifti.py",
+    files=[FileRef(volume_nifti, "input")],
 )
