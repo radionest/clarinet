@@ -217,6 +217,50 @@ class PacsHelper:
         self.retrieve_mode = retrieve_mode
         self.move_aet = calling_aet if move_aet is None else move_aet
 
+    def verify(self) -> bool:
+        """Test PACS connectivity via C-ECHO (DICOM Verification SOP Class).
+
+        Returns True if PACS responds to C-ECHO, False otherwise.
+        Logs the result at INFO/ERROR level for diagnostics.
+        """
+        try:
+            echo = ctk.ctkDICOMEcho()
+        except AttributeError:
+            _pacs_log.warning("C-ECHO not available (ctkDICOMEcho missing in this Slicer version)")
+            return True  # assume OK if we can't test
+
+        echo.callingAETitle = self.calling_aet
+        echo.calledAETitle = self.called_aet
+        echo.host = self.host
+        echo.port = self.port
+
+        try:
+            ok = bool(echo.echo())
+        except Exception as e:
+            _pacs_log.error(
+                f"C-ECHO exception: {e} "
+                f"(calling={self.calling_aet}, called={self.called_aet}, "
+                f"host={self.host}:{self.port})"
+            )
+            return False
+
+        if ok:
+            _pacs_log.info(
+                f"C-ECHO OK: {self.calling_aet} → {self.host}:{self.port} "
+                f"(called={self.called_aet})"
+            )
+        else:
+            _pacs_log.error(
+                f"C-ECHO failed: PACS not reachable or rejected association "
+                f"(calling={self.calling_aet}, called={self.called_aet}, "
+                f"host={self.host}:{self.port}). "
+                f"Check: (1) AE title '{self.calling_aet}' is allowed by the PACS ACL "
+                f"with the correct IP of this machine; "
+                f"(2) PACS AE title '{self.called_aet}' and address "
+                f"{self.host}:{self.port} are correct."
+            )
+        return ok
+
     @classmethod
     def from_slicer(cls, server_name: str | None = None) -> PacsHelper:
         """Create PacsHelper from Slicer's configured PACS servers.
@@ -302,11 +346,25 @@ class PacsHelper:
         host = server["Address"]
         port = int(server["Port"])
         called_aet = server["Called AETitle"]
-        calling_aet = str(settings.value("CallingAETitle", server.get("Calling AETitle", "SLICER")))
+
+        global_aet = settings.value("CallingAETitle")
+        if global_aet:
+            calling_aet = str(global_aet)
+        else:
+            per_server_aet = server.get("Calling AETitle", "SLICER")
+            calling_aet = str(per_server_aet)
+            _pacs_log.warning(
+                f"CallingAETitle not set in Slicer global settings, "
+                f"using {'per-server' if per_server_aet != 'SLICER' else 'default'} "
+                f"value: {calling_aet}. "
+                f"Set it in Edit > Application Settings > DICOM > Calling AE Title."
+            )
+
         retrieve_mode = "c-get" if server.get("Retrieve Protocol", "CGET") == "CGET" else "c-move"
 
         _pacs_log.info(
-            f"Using PACS server: {server.get('Name', 'unknown')} ({host}:{port}, AET={called_aet})"
+            f"Using PACS server: {server.get('Name', 'unknown')} "
+            f"({host}:{port}, AET={called_aet}, calling={calling_aet})"
         )
 
         return cls(
@@ -327,11 +385,23 @@ class PacsHelper:
             if not ok:
                 _pacs_log.warning(f"C-GET study failed (ok={ok}), falling back to C-MOVE study")
                 retrieve.moveDestinationAETitle = self.move_aet
-                retrieve.moveStudy(study_instance_uid)
+                ok = retrieve.moveStudy(study_instance_uid)
+                if not ok:
+                    _pacs_log.error(
+                        f"C-MOVE study failed (ok={ok}) for {study_instance_uid} "
+                        f"(calling={self.calling_aet}, called={self.called_aet}, "
+                        f"host={self.host}:{self.port}, move_dest={self.move_aet})"
+                    )
         else:
             _pacs_log.info(f"C-MOVE study {study_instance_uid} ...")
             retrieve.moveDestinationAETitle = self.move_aet
-            retrieve.moveStudy(study_instance_uid)
+            ok = retrieve.moveStudy(study_instance_uid)
+            if not ok:
+                _pacs_log.error(
+                    f"C-MOVE study failed (ok={ok}) for {study_instance_uid} "
+                    f"(calling={self.calling_aet}, called={self.called_aet}, "
+                    f"host={self.host}:{self.port}, move_dest={self.move_aet})"
+                )
 
     def _retrieve_series_level(
         self, retrieve: Any, study_instance_uid: str, series_instance_uid: str
@@ -349,11 +419,23 @@ class PacsHelper:
                     f"falling back to C-MOVE"
                 )
                 retrieve.moveDestinationAETitle = self.move_aet
-                retrieve.moveSeries(study_instance_uid, series_instance_uid)
+                ok = retrieve.moveSeries(study_instance_uid, series_instance_uid)
+                if not ok:
+                    _pacs_log.error(
+                        f"C-MOVE series failed (ok={ok}) for {series_instance_uid} "
+                        f"(calling={self.calling_aet}, called={self.called_aet}, "
+                        f"host={self.host}:{self.port}, move_dest={self.move_aet})"
+                    )
         else:
             _pacs_log.info(f"C-MOVE series {series_instance_uid} ...")
             retrieve.moveDestinationAETitle = self.move_aet
-            retrieve.moveSeries(study_instance_uid, series_instance_uid)
+            ok = retrieve.moveSeries(study_instance_uid, series_instance_uid)
+            if not ok:
+                _pacs_log.error(
+                    f"C-MOVE series failed (ok={ok}) for {series_instance_uid} "
+                    f"(calling={self.calling_aet}, called={self.called_aet}, "
+                    f"host={self.host}:{self.port}, move_dest={self.move_aet})"
+                )
 
     def retrieve_study(self, study_instance_uid: str) -> list[str]:
         """Load a DICOM study into the MRML scene (local-first).
@@ -381,7 +463,12 @@ class PacsHelper:
             if loaded:
                 return loaded
 
-        # 2. C-FIND: query PACS for the study
+        # 2. Verify PACS connectivity
+        if not self.verify():
+            _pacs_log.error("Aborting retrieve — PACS connectivity check failed")
+            return []
+
+        # 3. C-FIND: query PACS for the study
         _pacs_log.info(f"C-FIND study {study_instance_uid} ...")
         query = ctk.ctkDICOMQuery()
         query.callingAETitle = self.calling_aet
@@ -392,7 +479,16 @@ class PacsHelper:
 
         temp_db = ctk.ctkDICOMDatabase()
         temp_db.openDatabase("")
-        query.query(temp_db)
+        try:
+            query.query(temp_db)
+        except Exception as e:
+            _pacs_log.error(
+                f"C-FIND failed for study {study_instance_uid}: {e} "
+                f"(calling={self.calling_aet}, called={self.called_aet}, "
+                f"host={self.host}:{self.port})"
+            )
+            temp_db.closeDatabase()
+            return []
 
         series_to_retrieve: list[str] = [
             series_uid
@@ -400,8 +496,15 @@ class PacsHelper:
             if study_uid == study_instance_uid
         ]
         _pacs_log.info(f"C-FIND returned {len(series_to_retrieve)} series")
+        if not series_to_retrieve:
+            _pacs_log.warning(
+                f"C-FIND returned 0 series for study {study_instance_uid} — "
+                f"study may not exist on PACS or association was rejected"
+            )
+            temp_db.closeDatabase()
+            return []
 
-        # 3. Retrieve into Slicer DICOM database using configured strategy
+        # 4. Retrieve into Slicer DICOM database using configured strategy
         retrieve = ctk.ctkDICOMRetrieve()
         retrieve.callingAETitle = self.calling_aet
         retrieve.calledAETitle = self.called_aet
@@ -426,7 +529,11 @@ class PacsHelper:
                     _pacs_log.info(f"Retrieved {len(files)} files for series {series_uid}")
                     retrieved_series_uids.append(series_uid)
                 else:
-                    _pacs_log.error(f"Retrieve failed: 0 files for series {series_uid}")
+                    _pacs_log.error(
+                        f"Retrieve failed: 0 files for series {series_uid} "
+                        f"(calling={self.calling_aet}, called={self.called_aet}, "
+                        f"host={self.host}:{self.port}, move_dest={self.move_aet})"
+                    )
         else:
             # Series-level: retrieve each series individually
             for series_uid in series_to_retrieve:
@@ -436,9 +543,13 @@ class PacsHelper:
                     _pacs_log.info(f"Retrieved {len(files)} files for series {series_uid}")
                     retrieved_series_uids.append(series_uid)
                 else:
-                    _pacs_log.error(f"Retrieve failed: 0 files for series {series_uid}")
+                    _pacs_log.error(
+                        f"Retrieve failed: 0 files for series {series_uid} "
+                        f"(calling={self.calling_aet}, called={self.called_aet}, "
+                        f"host={self.host}:{self.port}, move_dest={self.move_aet})"
+                    )
 
-        # 4. Load ONLY the retrieved series into the MRML scene
+        # 5. Load ONLY the retrieved series into the MRML scene
         from DICOMLib import DICOMUtils  # type: ignore[import-not-found]
 
         loaded_node_ids: list[str] = DICOMUtils.loadSeriesByUID(retrieved_series_uids)
@@ -471,7 +582,12 @@ class PacsHelper:
             if loaded:
                 return loaded
 
-        # 2. Retrieve from PACS using configured strategy
+        # 2. Verify PACS connectivity
+        if not self.verify():
+            _pacs_log.error("Aborting retrieve — PACS connectivity check failed")
+            return []
+
+        # 3. Retrieve from PACS using configured strategy
         retrieve = ctk.ctkDICOMRetrieve()
         retrieve.callingAETitle = self.calling_aet
         retrieve.calledAETitle = self.called_aet
