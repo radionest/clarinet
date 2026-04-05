@@ -32,9 +32,11 @@ make run-api                    # API only
 make format                     # ruff format
 make lint                       # ruff check --fix
 make typecheck                  # mypy
+make check                      # format + lint + typecheck in one pass
 make pre-commit                 # All pre-commit hooks
 
-# Testing — always redirect output, never pipe (buffers stdout in background)
+# Running make/uv commands — never pipe (| tail, | tee) — truncates or buffers output
+# For long-running commands, redirect to file:
 # Use unique filenames when multiple worktrees may run in parallel:
 #   timeout 120 make test-unit > /tmp/test-{worktree}.txt 2>&1
 make test-fast                  # All tests in parallel, excludes schema (default)
@@ -67,6 +69,14 @@ make dev-setup                  # Set up dev environment
 
 Avoid: direct loguru import (use `from clarinet.utils.logger import logger`), sync blocking ops in async functions.
 
+### Token efficiency
+
+- If a task requires code changes — `EnterWorktree` first, then explore. Don't read files on main only to re-read them in worktree
+- Don't re-run a test without an `Edit` between runs. Flaky test — tell the user, don't retry silently
+- `make check` instead of separate format/lint/typecheck calls
+- Read related files in parallel (up to 5 Read calls in one message), not sequentially
+- Don't use TaskCreate/TaskUpdate to break work into phases — only when the user explicitly asks for progress tracking
+
 ## Worktree Workflow
 
 - Feature development: always enter a worktree via `EnterWorktree` before making changes
@@ -81,8 +91,7 @@ Avoid: direct loguru import (use `from clarinet.utils.logger import logger`), sy
 
 ## Pre-commit Checklist
 
-- `make format` + `make lint` pass
-- `make typecheck` passes
+- `make check` passes (format + lint + typecheck)
 - Tests written and passing
 - Docstrings on non-trivial public functions
 - No secrets in code

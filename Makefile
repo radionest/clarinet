@@ -11,7 +11,7 @@ help: ## Show this help message
 	@grep -E '^(frontend|run-dev)[^:]*:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-20s %s\n", $$1, $$2}'
 	@echo ""
 	@echo "Code quality commands:"
-	@grep -E '^(format|lint|typecheck|pre-commit)[^:]*:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-20s %s\n", $$1, $$2}'
+	@grep -E '^(format|lint|typecheck|check|pre-commit)[^:]*:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-20s %s\n", $$1, $$2}'
 	@echo ""
 	@echo "Testing commands:"
 	@grep -E '^test[^:]*:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-20s %s\n", $$1, $$2}'
@@ -98,6 +98,9 @@ typecheck: ## Type check with mypy
 pre-commit: ## Run pre-commit hooks (via prek)
 	@echo "Running pre-commit hooks..."
 	@uv run prek run --all-files
+
+.PHONY: check
+check: format lint typecheck ## Format + lint + typecheck in one pass
 
 .PHONY: pre-commit-install
 pre-commit-install: ## Install pre-commit hooks (via prek)
