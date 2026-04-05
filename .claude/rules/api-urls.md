@@ -140,3 +140,4 @@ URL constants live in `tests/utils/urls.py`. Status codes: 201 = POST create, 20
 | `/dicom-web/studies/{uid}/series/{uid}/instances` | GET | 200 | QIDO-RS instances |
 | `/dicom-web/studies/{uid}/series/{uid}/metadata` | GET | 200 | WADO-RS series metadata |
 | `/dicom-web/.../instances/{uid}/frames/{f}` | GET | 200 | WADO-RS pixel data |
+| `/dicom-web/studies/{uid}/series/{uid}/archive` | GET | 200 | Download series as ZIP |
