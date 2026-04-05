@@ -209,7 +209,12 @@ class PacsHelper:
         self.port = port
         self.called_aet = called_aet
         self.calling_aet = calling_aet
-        self.retrieve_mode = retrieve_mode if retrieve_mode in self.VALID_MODES else "c-get"
+        if retrieve_mode not in self.VALID_MODES:
+            raise ValueError(
+                f"Unsupported retrieve_mode {retrieve_mode!r}. "
+                f"Expected one of: {', '.join(self.VALID_MODES)}"
+            )
+        self.retrieve_mode = retrieve_mode
         self.move_aet = calling_aet if move_aet is None else move_aet
 
     @classmethod

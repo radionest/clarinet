@@ -183,6 +183,20 @@ def test_get_pacs_helper_defaults_to_cget():
     assert pacs.retrieve_mode == "c-get"
 
 
+def test_pacs_helper_rejects_invalid_retrieve_mode():
+    """PacsHelper raises ValueError for unsupported retrieve_mode."""
+    from clarinet.services.slicer.helper import PacsHelper
+
+    with pytest.raises(ValueError, match="Unsupported retrieve_mode"):
+        PacsHelper(
+            host="localhost",
+            port=4242,
+            called_aet="ORTHANC",
+            calling_aet="SLICER",
+            retrieve_mode="invalid-mode",
+        )
+
+
 @patch("clarinet.services.slicer.context.settings")
 def test_standard_vars_study_level(mock_settings):
     """STUDY level → working_folder + study_uid present."""
