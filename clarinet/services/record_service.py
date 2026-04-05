@@ -267,14 +267,14 @@ class RecordService:
         record = await self.repo.get_with_relations(record_id)
         record_read = RecordRead.model_validate(record)
 
-        # Fetch parent for fallback pattern resolution
-        parent_read = None
-        if record.parent_record_id is not None:
-            parent = await self.repo.get_with_relations(record.parent_record_id)
-            parent_read = RecordRead.model_validate(parent)
-
         # Auto-unblock: if record is blocked, check whether input files are now present
         if record.status == RecordStatus.blocked:
+            # Fetch parent for fallback pattern resolution only when needed
+            parent_read = None
+            if record.parent_record_id is not None:
+                parent = await self.repo.get_with_relations(record.parent_record_id)
+                parent_read = RecordRead.model_validate(parent)
+
             file_result = await validate_record_files(record_read, parent=parent_read)
             if file_result is not None and file_result.valid:
                 if file_result.matched_files:
