@@ -254,6 +254,53 @@ class RecordService:
 
         return record
 
+    async def check_files(self, record_id: int) -> tuple[list[str], dict[str, str]]:
+        """Check file status, auto-unblock if ready, compute & compare checksums.
+
+        For blocked records: validates input files, transitions to pending if valid.
+        For non-blocked: computes checksums, updates DB, notifies on change.
+
+        Returns:
+            Tuple of (changed file keys, current checksums).
+            Empty tuple ([], {}) if record stays blocked.
+        """
+        record = await self.repo.get_with_relations(record_id)
+        record_read = RecordRead.model_validate(record)
+
+        # Fetch parent for fallback pattern resolution
+        parent_read = None
+        if record.parent_record_id is not None:
+            parent = await self.repo.get_with_relations(record.parent_record_id)
+            parent_read = RecordRead.model_validate(parent)
+
+        # Auto-unblock: if record is blocked, check whether input files are now present
+        if record.status == RecordStatus.blocked:
+            file_result = await validate_record_files(record_read, parent=parent_read)
+            if file_result is not None and file_result.valid:
+                if file_result.matched_files:
+                    await self.repo.set_files(record, file_result.matched_files)
+                record, _ = await self.update_status(record_id, RecordStatus.pending)
+                record_read = RecordRead.model_validate(record)
+            else:
+                return [], {}
+
+        new_checksums = await compute_checksums(
+            record_read.record_type.file_registry or [],
+            record_read,
+            Path(record_read.working_folder),
+        )
+        old_checksums = {
+            link.name: link.checksum for link in (record_read.file_links or []) if link.checksum
+        }
+        changed = checksums_changed(old_checksums, new_checksums)
+
+        await self.repo.update_checksums(record, new_checksums)
+
+        if changed:
+            await self.notify_file_change(record)
+
+        return list(changed), new_checksums
+
     async def notify_file_updates(
         self,
         patient_id: str,

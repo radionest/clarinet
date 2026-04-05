@@ -70,7 +70,6 @@ from clarinet.services.schema_hydration import hydrate_schema
 from clarinet.services.slicer.context import build_slicer_context_async
 from clarinet.settings import settings
 from clarinet.types import RecordData
-from clarinet.utils.file_checksums import checksums_changed, compute_checksums
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -738,58 +737,16 @@ async def validate_files_endpoint(
 @router.post("/{record_id}/check-files", response_model=FileCheckResult)
 async def check_record_files(
     record_id: int,
-    authorized_record: AuthorizedRecordDep,
-    repo: RecordRepositoryDep,
+    _authorized_record: AuthorizedRecordDep,
     service: RecordServiceDep,
 ) -> FileCheckResult:
     """Compute current file checksums, compare with stored, trigger invalidation if changed.
 
     For ``blocked`` records, this endpoint also checks whether the required
     input files have appeared and auto-transitions to ``pending`` if so.
-
-    Args:
-        record_id: ID of the record to check files for
-
-    Returns:
-        FileCheckResult with changed files and current checksums
     """
-    record = authorized_record
-    record_read = RecordRead.model_validate(record)
-
-    # Fetch parent for fallback pattern resolution
-    parent_read = None
-    if record.parent_record_id is not None:
-        parent = await repo.get_with_relations(record.parent_record_id)
-        parent_read = RecordRead.model_validate(parent)
-
-    # Auto-unblock: if record is blocked, check whether input files are now present
-    if record.status == RecordStatus.blocked:
-        file_result = await validate_record_files(record_read, parent=parent_read)
-        if file_result is not None and file_result.valid:
-            if file_result.matched_files:
-                await repo.set_files(record, file_result.matched_files)
-            record, _ = await service.update_status(record_id, RecordStatus.pending)
-            record_read = RecordRead.model_validate(record)
-        else:
-            # Still blocked — return early with empty result
-            return FileCheckResult(changed_files=[], checksums={})
-
-    new_checksums = await compute_checksums(
-        record_read.record_type.file_registry or [],
-        record_read,
-        Path(record_read.working_folder),
-    )
-    old_checksums = {
-        link.name: link.checksum for link in (record_read.file_links or []) if link.checksum
-    }
-    changed = checksums_changed(old_checksums, new_checksums)
-
-    await repo.update_checksums(record, new_checksums)
-
-    if changed:
-        await service.notify_file_change(record)
-
-    return FileCheckResult(changed_files=list(changed), checksums=new_checksums)
+    changed_files, checksums = await service.check_files(record_id)
+    return FileCheckResult(changed_files=changed_files, checksums=checksums)
 
 
 @router.post("/{record_id}/invalidate", response_model=RecordRead)
