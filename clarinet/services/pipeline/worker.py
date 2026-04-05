@@ -93,6 +93,14 @@ def _load_task_modules() -> None:
         except ImportError as e:
             logger.warning(f"Could not load DICOM tasks: {e}")
 
+        # Built-in DICOM pipeline tasks (convert_series uses C-GET)
+        try:
+            from clarinet.services.pipeline.tasks import convert_series as _cs  # noqa: F401
+
+            logger.info("Loaded built-in pipeline tasks (convert_series)")
+        except ImportError as e:
+            logger.warning(f"Could not load built-in pipeline tasks: {e}")
+
 
 async def run_worker(
     queues: list[str] | None = None,

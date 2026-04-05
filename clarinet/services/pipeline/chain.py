@@ -106,8 +106,7 @@ class Pipeline:
         self.steps.append(pipeline_step)
 
         # Register the task in the global task registry
-        if task.task_name not in _TASK_REGISTRY:
-            _TASK_REGISTRY[task.task_name] = task
+        register_task(task)
 
         return self
 
@@ -161,9 +160,19 @@ def register_task(task: AsyncTaskiqDecoratedTask[..., Any]) -> None:
     Called automatically when tasks are added to pipelines via ``.step()``.
     Can also be called explicitly for standalone tasks.
 
+    Raises:
+        PipelineConfigError: If a different task with the same name is already
+            registered (prevents project tasks from shadowing built-in tasks).
+
     Args:
         task: The TaskIQ decorated task function.
     """
+    existing = _TASK_REGISTRY.get(task.task_name)
+    if existing is not None and existing is not task:
+        raise PipelineConfigError(
+            f"Task name collision: '{task.task_name}' is already registered "
+            f"by a different task object. Each task must have a unique name."
+        )
     _TASK_REGISTRY[task.task_name] = task
 
 
