@@ -1614,7 +1614,7 @@ class TestBlockingMechanism:
         from clarinet.services.file_validation import FileValidationResult
 
         with patch(
-            "clarinet.api.routers.record.validate_record_files",
+            "clarinet.services.record_service.validate_record_files",
             new_callable=AsyncMock,
         ) as mock_validate:
             mock_validate.return_value = FileValidationResult(
@@ -1649,7 +1649,7 @@ class TestBlockingMechanism:
         from clarinet.services.file_validation import FileValidationResult
 
         with patch(
-            "clarinet.api.routers.record.validate_record_files",
+            "clarinet.services.record_service.validate_record_files",
             new_callable=AsyncMock,
         ) as mock_validate:
             mock_validate.return_value = FileValidationResult(
