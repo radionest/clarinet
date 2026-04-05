@@ -30,6 +30,14 @@ pub fn can_edit_record(record: Record, user: Option(User)) -> Bool {
   }
 }
 
+/// Check if a user can manually fail a record (Pending or InWork + permission)
+pub fn can_fail_record(record: Record, user: Option(User)) -> Bool {
+  case record.status {
+    types.Pending | types.InWork -> has_record_permission(user, record)
+    _ -> False
+  }
+}
+
 /// Check if an admin can restart a record (Finished or Failed + auto/slicer + superuser)
 pub fn can_restart_record(record: Record, user: Option(User)) -> Bool {
   let has_slicer = case record.record_type {

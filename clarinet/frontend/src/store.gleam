@@ -73,6 +73,7 @@ pub type Model {
     // Modal state
     modal_open: Bool,
     modal_content: ModalContent,
+    fail_reason: String,
     // PACS state
     pacs_studies: List(PacsStudyWithSeries),
     pacs_loading: Bool,
@@ -97,6 +98,7 @@ pub type ModalContent {
   ConfirmDelete(resource: String, id: String)
   ViewDetails(resource: String, data: Json)
   EditForm(resource: String, id: Option(String))
+  FailRecordPrompt(record_id: String)
   PreloadProgress(
     viewer_url: String,
     task_id: String,
@@ -275,6 +277,11 @@ pub type Msg {
   RestartRecord(record_id: String)
   RestartRecordResult(Result(Record, ApiError))
 
+  // Manual fail
+  UpdateFailReason(String)
+  ConfirmFailRecord(record_id: String)
+  FailRecordResult(Result(Record, ApiError))
+
   // Role matrix
   LoadRoleMatrix
   RoleMatrixLoaded(Result(RoleMatrix, ApiError))
@@ -347,6 +354,7 @@ pub fn init() -> Model {
     admin_editing_status_record_id: None,
     modal_open: False,
     modal_content: NoModal,
+    fail_reason: "",
     pacs_studies: [],
     pacs_loading: False,
     pacs_importing: None,

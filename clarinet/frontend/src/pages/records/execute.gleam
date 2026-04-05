@@ -83,6 +83,17 @@ fn render_record_execution(
         ],
         [html.text("Back to Records")],
       ),
+      case permissions.can_fail_record(record, model.user) {
+        True ->
+          html.button(
+            [
+              attribute.class("btn btn-danger"),
+              event.on_click(store.OpenModal(store.FailRecordPrompt(record_id))),
+            ],
+            [html.text("Fail")],
+          )
+        False -> element.none()
+      },
       case permissions.can_restart_record(record, model.user) {
         True ->
           html.button(

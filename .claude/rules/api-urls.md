@@ -59,6 +59,7 @@ URL constants live in `tests/utils/urls.py`. Status codes: 201 = POST create, 20
 | `/api/records/{id}/data` | PATCH | 200 | Update data |
 | `/api/records/{id}/validate-files` | POST | 200 | Validate files |
 | `/api/records/{id}/check-files` | POST | 200 | Check files |
+| `/api/records/{id}/fail` | POST | 200 | Manually fail record |
 | `/api/records/{id}/invalidate` | POST | 200 | Invalidate record |
 
 ### Record Types (`/api/records/types`)

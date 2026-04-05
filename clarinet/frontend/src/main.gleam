@@ -678,6 +678,46 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     store.RestartRecordResult(Error(err)) ->
       handle_api_error(model, err, "Failed to restart record")
 
+    // Manual fail
+    store.UpdateFailReason(reason) -> {
+      #(store.Model(..model, fail_reason: reason), effect.none())
+    }
+
+    store.ConfirmFailRecord(record_id) -> {
+      let reason = model.fail_reason
+      let eff = {
+        use dispatch <- effect.from
+        records.fail_record(record_id, reason)
+        |> promise.tap(fn(result) {
+          dispatch(store.FailRecordResult(result))
+        })
+        Nil
+      }
+      #(
+        store.Model(
+          ..model,
+          modal_open: False,
+          modal_content: store.NoModal,
+          fail_reason: "",
+          loading: True,
+        ),
+        eff,
+      )
+    }
+
+    store.FailRecordResult(Ok(record)) -> {
+      #(
+        model
+          |> store.cache_record(record)
+          |> store.set_loading(False)
+          |> store.set_success("Record marked as failed"),
+        dispatch_msg(store.LoadRecords),
+      )
+    }
+
+    store.FailRecordResult(Error(err)) ->
+      handle_api_error(model, err, "Failed to mark record as failed")
+
     store.RecordDetailLoaded(Error(err)) ->
       handle_api_error(model, err, "Failed to load record")
 
@@ -1376,7 +1416,7 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
 
     store.CloseModal -> {
       #(
-        store.Model(..model, modal_open: False, modal_content: store.NoModal),
+        store.Model(..model, modal_open: False, modal_content: store.NoModal, fail_reason: ""),
         effect.none(),
       )
     }
@@ -1920,10 +1960,53 @@ fn view_content(model: Model) -> Element(Msg) {
 
 fn render_modal(model: Model) -> Element(Msg) {
   case model.modal_content {
+    store.FailRecordPrompt(record_id) ->
+      render_fail_modal(model, record_id)
     store.PreloadProgress(_, _, _, received, total, status) ->
       render_preload_modal(received, total, status)
     _ -> render_confirm_modal(model)
   }
+}
+
+fn render_fail_modal(model: Model, record_id: String) -> Element(Msg) {
+  let is_empty = string.trim(model.fail_reason) == ""
+  html.div([attribute.class("modal-backdrop")], [
+    html.div([attribute.class("modal")], [
+      html.div([attribute.class("modal-header")], [
+        html.h3([attribute.class("modal-title")], [html.text("Mark as Failed")]),
+      ]),
+      html.div([attribute.class("form-group")], [
+        html.label([], [html.text("Reason:")]),
+        html.textarea(
+          [
+            attribute.class("form-control"),
+            attribute.attribute("rows", "3"),
+            attribute.value(model.fail_reason),
+            event.on_input(store.UpdateFailReason),
+            attribute.placeholder("Describe why this record is being failed..."),
+          ],
+          "",
+        ),
+      ]),
+      html.div([attribute.class("modal-footer")], [
+        html.button(
+          [
+            attribute.class("btn btn-secondary"),
+            event.on_click(store.CloseModal),
+          ],
+          [html.text("Cancel")],
+        ),
+        html.button(
+          [
+            attribute.class("btn btn-danger"),
+            attribute.disabled(is_empty),
+            event.on_click(store.ConfirmFailRecord(record_id)),
+          ],
+          [html.text("Fail")],
+        ),
+      ]),
+    ]),
+  ])
 }
 
 fn render_preload_modal(

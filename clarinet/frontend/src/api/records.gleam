@@ -561,6 +561,22 @@ pub fn restart_record(
   })
 }
 
+/// Manually fail a record with a reason
+pub fn fail_record(
+  record_id: String,
+  reason: String,
+) -> Promise(Result(Record, ApiError)) {
+  let body = json.object([#("reason", json.string(reason))])
+  http_client.post("/records/" <> record_id <> "/fail", json.to_string(body))
+  |> promise.map(fn(res) {
+    result.try(res, http_client.decode_response(
+      _,
+      record_decoder(),
+      "Invalid record data",
+    ))
+  })
+}
+
 /// Get hydrated schema for a record (x-options resolved to oneOf)
 pub fn get_hydrated_schema(
   record_id: String,

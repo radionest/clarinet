@@ -749,6 +749,31 @@ async def check_record_files(
     return FileCheckResult(changed_files=changed_files, checksums=checksums)
 
 
+_MANUALLY_FAILABLE_STATUSES = (RecordStatus.pending, RecordStatus.inwork)
+
+
+@router.post("/{record_id}/fail", response_model=RecordRead)
+async def fail_record(
+    record_id: int,
+    authorized_record: AuthorizedRecordDep,
+    service: RecordServiceDep,
+    user: CurrentUserDep,
+    reason: str = Body(embed=True),
+) -> RecordRead:
+    """Manually mark a record as failed with a reason.
+
+    Only records in ``pending`` or ``inwork`` status can be failed manually.
+    """
+    if authorized_record.status not in _MANUALLY_FAILABLE_STATUSES:
+        raise CONFLICT.with_context(
+            f"Cannot fail record in '{authorized_record.status.value}' status. "
+            f"Allowed: {', '.join(s.value for s in _MANUALLY_FAILABLE_STATUSES)}."
+        )
+
+    updated = await service.fail_record(record_id, reason)
+    return mask_record_patient_data(RecordRead.model_validate(updated), user)
+
+
 @router.post("/{record_id}/invalidate", response_model=RecordRead)
 async def invalidate_record(
     record_id: int,
