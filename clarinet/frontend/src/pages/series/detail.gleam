@@ -152,7 +152,7 @@ fn record_row(record: Record) -> Element(Msg) {
     html.td([], [
       html.a(
         [
-          attribute.href("/records/" <> record_id_str),
+          attribute.href(router.route_to_path(router.RecordDetail(record_id_str))),
           attribute.class("btn btn-sm btn-outline"),
         ],
         [html.text("View")],
