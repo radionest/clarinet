@@ -124,12 +124,12 @@ test-all: test frontend-test ## Run all tests (backend + frontend)
 .PHONY: test-fast
 test-fast: ## Run all tests in parallel (auto workers, excludes schema tests)
 	@echo "Running all tests in parallel..."
-	@./scripts/run_tests.sh -n auto --dist loadgroup -m "not schema" -q
+	@./scripts/run_tests.sh -n $(PYTEST_WORKERS) --dist loadgroup -m "not schema" -q
 
 .PHONY: test-unit
 test-unit: ## Run DB-only tests in parallel (no external services, no schema)
 	@echo "Running DB-only tests in parallel..."
-	@./scripts/run_tests.sh -n auto --dist loadgroup -m "not pipeline and not dicom and not slicer and not schema" -q
+	@./scripts/run_tests.sh -n $(PYTEST_WORKERS) --dist loadgroup -m "not pipeline and not dicom and not slicer and not schema" -q
 
 .PHONY: test-schema
 test-schema: ## Run API schema tests (Schemathesis property-based)
@@ -144,7 +144,7 @@ test-schema-verbose: ## Run schema tests with verbose output
 .PHONY: test-debug
 test-debug: ## Run tests with full JSON diagnostics (test report + app logs)
 	@echo "Running tests with full diagnostics..."
-	@CLARINET_LOG_DIR=/tmp ./scripts/run_tests.sh -n auto --dist loadgroup
+	@CLARINET_LOG_DIR=/tmp ./scripts/run_tests.sh -n $(PYTEST_WORKERS) --dist loadgroup
 
 .PHONY: test-integration
 test-integration: ## Run integration tests only
@@ -154,11 +154,14 @@ test-integration: ## Run integration tests only
 # Marker expression for tests that don't require external services
 PYTEST_UNIT_MARKERS := not pipeline and not dicom and not slicer and not schema
 
+# Max xdist workers (override: PYTEST_WORKERS=4 make test-fast)
+PYTEST_WORKERS ?= 10
+
 .PHONY: test-py312
 test-py312: ## Run unit tests on Python 3.12 (requires uv + python3.12)
 	@command -v uv >/dev/null 2>&1 || { echo "Error: uv is required but not installed"; exit 1; }
 	@echo "Running unit tests on Python 3.12..."
-	@uv run --python 3.12 pytest tests/ -n auto --dist loadgroup -m "$(PYTEST_UNIT_MARKERS)" -q
+	@uv run --python 3.12 pytest tests/ -n $(PYTEST_WORKERS) --dist loadgroup -m "$(PYTEST_UNIT_MARKERS)" -q
 
 .PHONY: test-all-stages
 test-all-stages: ## Full pipeline: lint → unit → schema‖VM → fast → PG → E2E (40min timeout)
@@ -182,7 +185,7 @@ _test-all-stages-impl:
 	@echo "=========================================="
 	@echo "  Stage 2/8: test-unit (DB-only, xdist)   "
 	@echo "=========================================="
-	@./scripts/run_tests.sh -n auto --dist loadgroup -m "not pipeline and not dicom and not slicer and not schema" -q
+	@./scripts/run_tests.sh -n $(PYTEST_WORKERS) --dist loadgroup -m "not pipeline and not dicom and not slicer and not schema" -q
 	@echo ""
 	@echo "=========================================="
 	@echo "  Stage 3/8: schema tests ‖ VM provision  "
@@ -223,14 +226,14 @@ _test-all-stages-impl:
 		echo "=========================================="; \
 		echo "  Stage 5/8: test-fast — no VM, skip ext  "; \
 		echo "=========================================="; \
-		./scripts/run_tests.sh -n auto --dist loadgroup -m "not pipeline and not dicom and not slicer and not schema" -q; \
+		./scripts/run_tests.sh -n $(PYTEST_WORKERS) --dist loadgroup -m "not pipeline and not dicom and not slicer and not schema" -q; \
 	else \
 		echo ""; \
 		echo "=========================================="; \
 		echo "  Stage 5/8: test-fast (all, xdist + VM)  "; \
 		echo "=========================================="; \
 		VM_IP=$$(bash $(VM_SH) ip 2>/dev/null); \
-		CLARINET_TEST_PACS_HOST="$$VM_IP" ./scripts/run_tests.sh -n auto --dist loadgroup -m "not schema" -q; \
+		CLARINET_TEST_PACS_HOST="$$VM_IP" ./scripts/run_tests.sh -n $(PYTEST_WORKERS) --dist loadgroup -m "not schema" -q; \
 	fi
 	@if [ "$${SKIP_VM}" = "1" ]; then \
 		echo ""; \
