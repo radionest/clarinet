@@ -1,11 +1,13 @@
 """Two-tier cache for DICOMweb proxy — memory-first with background disk persistence."""
 
 import asyncio
+import io
 import shutil
 import time
+import zipfile
 from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
-from typing import Any
+from typing import IO, Any
 
 import pydicom
 from cachetools import TTLCache
@@ -521,6 +523,27 @@ class DicomWebCache:
                 progress.update(status="ready", received=cget_result.num_completed)
 
         return result
+
+    def build_series_zip(self, cached: MemoryCachedSeries, output: IO[bytes]) -> int:
+        """Write cached series as ZIP archive (sync, call via to_thread).
+
+        Each instance is stored as {SOPInstanceUID}.dcm inside the ZIP.
+
+        Args:
+            cached: In-memory cached series with instances dict.
+            output: Writable binary stream for the ZIP archive.
+
+        Returns:
+            Number of instances written.
+        """
+        count = 0
+        with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            for sop_uid, ds in cached.instances.items():
+                buf = io.BytesIO()
+                pydicom.dcmwrite(buf, ds, enforce_file_format=True)
+                zf.writestr(f"{sop_uid}.dcm", buf.getvalue())
+                count += 1
+        return count
 
     # --- Preload progress store ---
 
