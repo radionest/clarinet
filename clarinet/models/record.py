@@ -21,9 +21,9 @@ from pydantic import (
 )
 from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, event, func
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
-from sqlmodel import JSON, Column, Field, Relationship, SQLModel
+from sqlmodel import Column, Field, Relationship, SQLModel
 
-from clarinet.types import DbInt64, DbPositiveInt32, RecordData, SlicerArgs
+from clarinet.types import DbInt64, DbPositiveInt32, PortableJSON, RecordData, SlicerArgs
 from clarinet.utils.logger import logger
 
 from ..exceptions import ConfigurationError, ValidationError
@@ -218,9 +218,9 @@ class Record(RecordBase, table=True):
     )
     user: User | None = Relationship(back_populates="records")
 
-    data: RecordData | None = Field(default_factory=dict, sa_column=Column(JSON))
-    viewer_study_uids: list[str] | None = Field(default=None, sa_column=Column(JSON))
-    viewer_series_uids: list[str] | None = Field(default=None, sa_column=Column(JSON))
+    data: RecordData | None = Field(default_factory=dict, sa_column=Column(PortableJSON))
+    viewer_study_uids: list[str] | None = Field(default=None, sa_column=Column(PortableJSON))
+    viewer_series_uids: list[str] | None = Field(default=None, sa_column=Column(PortableJSON))
 
     # M2M relationship to FileDefinition via link table
     file_links: list[RecordFileLink] = Relationship(
