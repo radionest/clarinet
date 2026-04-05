@@ -905,6 +905,59 @@ class SlicerHelper:
             )
         return node_ids
 
+    def download_series_zip(
+        self,
+        study_uid: str,
+        series_uid: str,
+        server_url: str,
+        auth_cookie: str,
+    ) -> str:
+        """Download DICOM series ZIP from Clarinet, extract, import into Slicer DB.
+
+        Alternative to DIMSE retrieval — downloads via HTTP from Clarinet's
+        DICOMweb cache endpoint.
+
+        Args:
+            study_uid: DICOM Study Instance UID.
+            series_uid: DICOM Series Instance UID.
+            server_url: Clarinet API base URL (e.g. "http://host:8000").
+            auth_cookie: Cookie header value (e.g. "clarinet_session=token").
+
+        Returns:
+            Path to the directory containing extracted DICOM files.
+        """
+        import shutil
+        import tempfile
+        import urllib.request
+        import zipfile
+
+        url = f"{server_url}/dicom-web/studies/{study_uid}/series/{series_uid}/archive"
+        req = urllib.request.Request(url)
+        req.add_header("Cookie", auth_cookie)
+
+        extract_dir = os.path.join(self.working_folder, "_dicom_download", series_uid)
+        os.makedirs(extract_dir, exist_ok=True)
+
+        tmp_path = tempfile.mktemp(suffix=".zip")
+        try:
+            with urllib.request.urlopen(req) as resp, open(tmp_path, "wb") as f:
+                shutil.copyfileobj(resp, f)
+            with zipfile.ZipFile(tmp_path) as zf:
+                zf.extractall(extract_dir)
+        finally:
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+
+        # Import into Slicer DICOM database (if running inside Slicer)
+        try:
+            from DICOMLib import DICOMUtils  # type: ignore[import-not-found]
+
+            DICOMUtils.importDicom(extract_dir)
+        except ImportError:
+            pass
+
+        return extract_dir
+
     def get_segment_names(self, segmentation: SegmentationBuilder | Any) -> list[str]:
         """Get ordered list of segment names from a segmentation node.
 

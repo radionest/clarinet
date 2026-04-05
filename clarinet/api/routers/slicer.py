@@ -6,7 +6,7 @@ via the SlicerService DSL layer.
 
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 
 from clarinet.api.dependencies import (
@@ -128,6 +128,7 @@ async def clear_slicer_scene(
 @router.post("/records/{record_id}/open")
 async def open_record_in_slicer(
     record_id: int,
+    request: Request,
     record_repo: RecordRepositoryDep,
     service: SlicerServiceDep,
     _current_user: CurrentUserDep,
@@ -168,6 +169,10 @@ async def open_record_in_slicer(
         raise NoScriptError(f"Record type has no slicer_script configured for record {record_id}")
 
     context = await build_slicer_context_async(record_read, record_repo.session)
+    context["clarinet_api_url"] = str(request.base_url).rstrip("/")
+    context["clarinet_auth_cookie"] = (
+        f"{settings.cookie_name}={request.cookies.get(settings.cookie_name, '')}"
+    )
 
     slicer_url = f"http://{client_ip}:{settings.slicer_port}"
     logger.info(f"Opening record {record_id} in Slicer at {slicer_url}")
@@ -191,6 +196,7 @@ async def open_record_in_slicer(
 @router.post("/records/{record_id}/validate")
 async def validate_record_in_slicer(
     record_id: int,
+    request: Request,
     record_repo: RecordRepositoryDep,
     service: SlicerServiceDep,
     _current_user: CurrentUserDep,
@@ -233,6 +239,10 @@ async def validate_record_in_slicer(
         )
 
     context = await build_slicer_context_async(record_read, record_repo.session)
+    context["clarinet_api_url"] = str(request.base_url).rstrip("/")
+    context["clarinet_auth_cookie"] = (
+        f"{settings.cookie_name}={request.cookies.get(settings.cookie_name, '')}"
+    )
 
     slicer_url = f"http://{client_ip}:{settings.slicer_port}"
     logger.info(f"Validating record {record_id} in Slicer at {slicer_url}")
