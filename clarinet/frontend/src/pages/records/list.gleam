@@ -215,6 +215,7 @@ fn record_row(model: Model, record: Record) -> Element(Msg) {
 
   let can_fill = permissions.can_fill_record(record, model.user)
   let can_edit = permissions.can_edit_record(record, model.user)
+  let can_fail = permissions.can_fail_record(record, model.user)
   let can_restart = permissions.can_restart_record(record, model.user)
 
   html.tr([], [
@@ -263,6 +264,17 @@ fn record_row(model: Model, record: Record) -> Element(Msg) {
             ],
             [html.text("View")],
           )
+      },
+      case can_fail {
+        True ->
+          html.button(
+            [
+              attribute.class("btn btn-sm btn-danger"),
+              event.on_click(store.OpenModal(store.FailRecordPrompt(record_id_str))),
+            ],
+            [html.text("Fail")],
+          )
+        False -> element.none()
       },
       case can_restart {
         True ->

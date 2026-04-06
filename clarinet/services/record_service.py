@@ -254,6 +254,24 @@ class RecordService:
 
         return record
 
+    async def fail_record(self, record_id: int, reason: str) -> Record:
+        """Mark a record as failed with a reason and fire RecordFlow triggers.
+
+        Args:
+            record_id: ID of the record to fail.
+            reason: Human-readable reason for failure.
+
+        Returns:
+            Updated record with relations.
+        """
+        record, old_status = await self.repo.fail_record(record_id, reason)
+        logger.info(f"Record {record_id} manually failed")
+
+        if old_status != record.status:
+            await self._fire_status_change(record, old_status)
+
+        return record
+
     async def check_files(self, record_id: int) -> tuple[list[str], dict[str, str]]:
         """Check file status, auto-unblock if ready, compute & compare checksums.
 
