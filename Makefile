@@ -280,12 +280,12 @@ _test-all-stages-impl:
 		if [ "$${KEEP_VM}" = "1" ]; then \
 			echo "KEEP_VM=1 — VM will not be destroyed"; \
 		else \
-			bash $(VM_SH) destroy || echo "VM destroy failed (non-blocking)"; \
+			bash $(VM_SH) destroy || { rc=$$?; echo "VM destroy failed (exit $$rc)"; if [ $$EXIT_CODE -eq 0 ]; then EXIT_CODE=$$rc; fi; }; \
 		fi; \
 		if [ $$EXIT_CODE -ne 0 ]; then \
 			echo ""; \
 			echo "=========================================="; \
-			echo "  Pipeline FAILED at Stage 6 or 7         "; \
+			echo "  Pipeline FAILED                         "; \
 			echo "=========================================="; \
 			exit $$EXIT_CODE; \
 		fi; \
