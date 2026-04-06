@@ -616,7 +616,7 @@ class DicomOperations:
             # `total_expected` is still None and SCP cannot detect completion.
             # Use the final response's completed count so the SCP can signal
             # `done` once all expected C-STOREs have arrived.
-            if total_expected is None and result.num_completed > 0:
+            if total_expected is None:
                 scp.set_expected(key, result.num_completed)
 
             elapsed = time.monotonic() - start_time

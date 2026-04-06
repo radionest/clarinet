@@ -140,7 +140,7 @@ class StorageSCP:
             if session is None:
                 return
             session.expected_count = count
-            if count > 0 and session.received_count >= count:
+            if session.received_count >= count:
                 session.done.set()
 
     def wait_for_completion(self, key: str, timeout: float) -> MoveSession | None:
