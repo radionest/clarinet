@@ -32,7 +32,7 @@ EXCLUDED_PATTERN = (
     # Starlette routing bug: negative data with control chars (e.g. %0A) in UUID
     # path params causes route fallthrough (/{user_id} → /), returning list instead
     # of object. Covered by test_medium_endpoints::test_user_read_endpoints.
-    r"|^/api/user/\{user_id\}"
+    r"|^/api/user/\{user_id\}$"
 )
 
 # Suppress common health checks for ASGI transport
