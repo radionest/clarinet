@@ -8,6 +8,9 @@ Note: CLI functions (cli_*) use Path.cwd() internally, so tests that call them
 must chdir to the project directory.
 """
 
+import os
+from pathlib import Path
+
 import pytest
 
 from clarinet.exceptions import MigrationError
@@ -27,7 +30,13 @@ from clarinet.utils.migrations import (
     run_migrations,
 )
 
-from .conftest import init_and_apply
+from .conftest import (
+    create_pg_database,
+    drop_pg_database,
+    fix_migration_imports,
+    init_and_apply,
+    override_database_url,
+)
 
 pytestmark = pytest.mark.migration
 
@@ -216,3 +225,56 @@ class TestRollbackMultipleSteps:
         rollback_migration(2, project_path)
         rev = get_current_revision(project_path)
         assert rev is None, "After rolling back all migrations, revision should be None (base)"
+
+
+class TestAsyncDriverRegression:
+    """Regression tests for async-driver URL handling in sync Alembic operations."""
+
+    @pytest.mark.skipif(
+        not os.environ.get("CLARINET_TEST_DATABASE_URL"),
+        reason="requires real PostgreSQL via CLARINET_TEST_DATABASE_URL",
+    )
+    def test_init_migrations_with_async_pg_url(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """init-migrations must work when database_url has the asyncpg driver.
+
+        Production code path: user sets database_driver=postgresql+asyncpg
+        and runs ``clarinet init-migrations``. Without
+        ``Settings.sync_database_url``, Alembic's autogenerate hits
+        ``greenlet_spawn has not been called`` because asyncpg is funneled
+        through synchronous SQLAlchemy. The fixture-driven migration tests
+        miss this because they pre-convert the URL to psycopg2.
+        """
+        async_template = os.environ["CLARINET_TEST_DATABASE_URL"]
+        assert "asyncpg" in async_template, "test requires an async URL"
+
+        # Create an empty PG DB via the sync admin connection.
+        test_db_name = "clarinet_mig_async_regression"
+        sync_db_url, base_url = create_pg_database(test_db_name)
+
+        # Build the matching async URL — this is exactly what an end user would
+        # have in settings. We deliberately do NOT pre-convert it.
+        async_db_url = sync_db_url.replace("postgresql+psycopg2://", "postgresql+asyncpg://")
+
+        try:
+            with override_database_url(async_db_url):
+                monkeypatch.chdir(tmp_path)
+
+                # Before the fix this swallowed a greenlet error from autogenerate
+                # and left versions/ empty. After the fix the migration file exists.
+                init_alembic_in_project()
+
+                versions = list((tmp_path / "alembic" / "versions").glob("*.py"))
+                assert versions, (
+                    "init_alembic_in_project did not autogenerate a migration file "
+                    "— Alembic likely failed on the async driver URL"
+                )
+
+                # End-to-end: apply the migration through run_migrations, which
+                # also reads sync_database_url via get_alembic_config.
+                fix_migration_imports(tmp_path)
+                run_migrations("head", tmp_path)
+                assert get_current_revision(tmp_path) is not None
+        finally:
+            drop_pg_database(test_db_name, base_url)

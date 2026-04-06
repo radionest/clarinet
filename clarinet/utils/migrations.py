@@ -28,8 +28,8 @@ def generate_alembic_ini(project_path: Path | None = None) -> str:
     if project_path is None:
         project_path = Path.cwd()
 
-    # Get database URL from settings
-    db_url = settings.database_url
+    # Get database URL from settings (sync — Alembic uses synchronous SQLAlchemy)
+    db_url = settings.sync_database_url
 
     # Generate alembic.ini content
     content = dedent(f"""
@@ -278,8 +278,8 @@ def get_alembic_config(project_path: Path | None = None) -> Config:
     config = Config(str(alembic_ini))
     # Set the script location to absolute path
     config.set_main_option("script_location", str(project_path / "alembic"))
-    # Set the database URL from settings
-    config.set_main_option("sqlalchemy.url", settings.database_url)
+    # Set the database URL from settings (sync — Alembic uses synchronous SQLAlchemy)
+    config.set_main_option("sqlalchemy.url", settings.sync_database_url)
 
     return config
 
@@ -344,8 +344,8 @@ def get_current_revision(project_path: Path | None = None) -> str | None:
     """
     get_alembic_config(project_path)
 
-    # Create engine to check current revision
-    engine = create_engine(settings.database_url)
+    # Create engine to check current revision (sync — needs sync driver URL)
+    engine = create_engine(settings.sync_database_url)
 
     with engine.connect() as connection:
         context = MigrationContext.configure(connection)
