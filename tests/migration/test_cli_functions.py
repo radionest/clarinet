@@ -235,7 +235,7 @@ class TestAsyncDriverRegression:
         reason="requires real PostgreSQL via CLARINET_TEST_DATABASE_URL",
     )
     def test_init_migrations_with_async_pg_url(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, worker_id: str
     ) -> None:
         """init-migrations must work when database_url has the asyncpg driver.
 
@@ -249,8 +249,11 @@ class TestAsyncDriverRegression:
         async_template = os.environ["CLARINET_TEST_DATABASE_URL"]
         assert "asyncpg" in async_template, "test requires an async URL"
 
-        # Create an empty PG DB via the sync admin connection.
-        test_db_name = "clarinet_mig_async_regression"
+        # Create an empty PG DB via the sync admin connection. The DB name is
+        # scoped per xdist worker so parallel runs don't collide; create_pg_database
+        # also DROP IF EXISTS so a crashed prior run leaves no stale state.
+        suffix = worker_id if worker_id != "master" else "single"
+        test_db_name = f"clarinet_mig_async_regression_{suffix}"
         sync_db_url, base_url = create_pg_database(test_db_name)
 
         # Build the matching async URL — this is exactly what an end user would
