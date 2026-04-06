@@ -1,5 +1,7 @@
 """Async HTTP client for 3D Slicer web server."""
 
+import time
+import uuid
 from typing import Any, cast
 
 import httpx
@@ -37,17 +39,44 @@ class SlicerClient:
             SlicerConnectionError: If the connection fails or times out.
             SlicerError: If Slicer returns a non-200 status.
         """
+        # Observability: correlate request across client, Slicer console,
+        # and test logs. Measure wall-clock to diagnose flaky timeouts.
+        req_id = uuid.uuid4().hex[:8]
+        script_size = len(script)
+        logger.info(f"slicer.exec start req_id={req_id} url={self.url} size={script_size}B")
+        t0 = time.perf_counter()
         try:
-            response = await self._client.post(f"{self.url}/slicer/exec", content=script)
+            response = await self._client.post(
+                f"{self.url}/slicer/exec",
+                content=script,
+                headers={"X-Request-Id": req_id},
+            )
         except httpx.ConnectError as e:
+            elapsed = time.perf_counter() - t0
+            logger.error(
+                f"slicer.exec connect_error req_id={req_id} elapsed={elapsed:.2f}s url={self.url}"
+            )
             raise SlicerConnectionError(f"Cannot connect to Slicer at {self.url}") from e
         except httpx.TimeoutException as e:
+            elapsed = time.perf_counter() - t0
+            logger.error(
+                f"slicer.exec timeout req_id={req_id} elapsed={elapsed:.2f}s "
+                f"size={script_size}B timeout={self._client.timeout}"
+            )
             raise SlicerConnectionError(f"Connection to Slicer at {self.url} timed out") from e
 
+        elapsed = time.perf_counter() - t0
         if response.status_code != 200:
-            logger.error(f"Slicer error: {response.status_code} - {response.text}")
+            logger.error(
+                f"slicer.exec http_error req_id={req_id} elapsed={elapsed:.2f}s "
+                f"status={response.status_code} body={response.text[:200]!r}"
+            )
             raise SlicerError(f"Slicer execution failed: {response.text}")
 
+        logger.info(
+            f"slicer.exec done req_id={req_id} elapsed={elapsed:.2f}s "
+            f"status=200 resp_size={len(response.content)}B"
+        )
         return cast("dict[str, Any]", response.json())
 
     async def ping(self) -> bool:

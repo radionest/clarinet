@@ -22,6 +22,10 @@ class SlicerService:
     def __init__(self) -> None:
         """Read and cache ``helper.py`` source code."""
         self._helper_source: str = _HELPER_PATH.read_text(encoding="utf-8")
+        logger.info(
+            f"SlicerService init: helper.py loaded, "
+            f"size={len(self._helper_source)}B lines={self._helper_source.count(chr(10))}"
+        )
 
     async def execute(
         self,
