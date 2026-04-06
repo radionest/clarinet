@@ -75,7 +75,8 @@ text = re.sub(
 open(path, 'w').write(text)
 "
 
-git add "$PYPROJECT"
+uv lock >/dev/null
+git add "$PYPROJECT" uv.lock
 git commit -m "chore: version bump to $NEW"
 git tag "v$NEW"
 git push --atomic origin HEAD "v$NEW"
