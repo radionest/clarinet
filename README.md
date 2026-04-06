@@ -151,8 +151,4 @@ make run-dev
 
 ## Status
 
-Clarinet is in **alpha**. The API, DSL, and configuration format are still evolving and **will** change. Use it for exploration and pilot studies, but expect breaking changes.
-
-## License
-
-MIT
+Clarinet is in **alpha**. The API, DSL, and configuration format are still evolving and **will** change. Use it for exploration and pilot studies, but expect breaking changes
