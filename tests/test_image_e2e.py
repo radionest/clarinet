@@ -617,6 +617,10 @@ class TestSpatialPreservation:
         out = tmp_path / "oblique_out.nii.gz"
         img.save_as(out, FileType.NIFTI)
 
+        # Verify the on-disk NIfTI has the original RAS affine (what Slicer sees)
+        written_affine = nibabel.loadsave.load(str(out)).affine
+        np.testing.assert_array_almost_equal(written_affine, affine, decimal=4)
+
         img2 = Image(dtype=np.int16)
         img2.read(out)
         assert pytest.approx(img2.spacing, abs=1e-4) == spacing
