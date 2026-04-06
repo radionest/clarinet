@@ -124,12 +124,12 @@ test-all: test frontend-test ## Run all tests (backend + frontend)
 .PHONY: test-fast
 test-fast: ## Run all tests in parallel (excludes schema tests)
 	@echo "Running all tests in parallel..."
-	@./scripts/run_tests.sh -n "$(PYTEST_WORKERS)" --dist loadgroup -m "not schema" -q
+	@./scripts/run_tests.sh -n "$(PYTEST_WORKERS)" --dist loadgroup -m "not schema and not migration" -q
 
 .PHONY: test-unit
 test-unit: ## Run DB-only tests in parallel (no external services)
 	@echo "Running DB-only tests in parallel..."
-	@./scripts/run_tests.sh -n "$(PYTEST_WORKERS)" --dist loadgroup -m "not pipeline and not dicom and not slicer and not schema" -q
+	@./scripts/run_tests.sh -n "$(PYTEST_WORKERS)" --dist loadgroup -m "not pipeline and not dicom and not slicer and not schema and not migration" -q
 
 .PHONY: test-schema
 test-schema: ## Run API schema tests (Schemathesis property-based)
@@ -152,10 +152,15 @@ test-integration: ## Run integration tests only
 	@./scripts/run_tests.sh tests/integration/
 
 # Marker expression for tests that don't require external services
-PYTEST_UNIT_MARKERS := not pipeline and not dicom and not slicer and not schema
+PYTEST_UNIT_MARKERS := not pipeline and not dicom and not slicer and not schema and not migration
 
 # Max xdist workers (override: PYTEST_WORKERS=4 make test-fast)
 PYTEST_WORKERS ?= 10
+
+.PHONY: test-migration
+test-migration: ## Run migration tests (SQLite; set CLARINET_TEST_DATABASE_URL for PG)
+	@echo "Running migration tests..."
+	@./scripts/run_tests.sh tests/migration/ -m migration -v
 
 .PHONY: test-py312
 test-py312: ## Run unit tests on Python 3.12 (requires uv + python3.12)

@@ -1,0 +1,447 @@
+"""Layer 2: Data preservation tests.
+
+Verifies that data survives upgrade/downgrade cycles using bare Alembic
+(no clarinet model imports) with hand-written migration scripts.
+Uses batch_alter_table for SQLite compatibility.
+"""
+
+import pytest
+from alembic import command
+from alembic.config import Config
+from sqlalchemy import create_engine, text
+
+from .conftest import get_table_names, init_bare_alembic, write_migration_script
+
+pytestmark = pytest.mark.migration
+
+
+def _alembic_cfg(project_path, db_url):
+    """Get Alembic config pointing at the bare setup."""
+    cfg = Config(str(project_path / "alembic.ini"))
+    cfg.set_main_option("script_location", str(project_path / "alembic"))
+    cfg.set_main_option("sqlalchemy.url", db_url)
+    return cfg
+
+
+class TestAddNullableColumn:
+    """Scenario 1: Add a nullable column — existing rows get NULL."""
+
+    def test_data_preserved(self, tmp_path, db_backend):
+        db_url = _setup_db_url(tmp_path, db_backend)
+        project = tmp_path / "project"
+        project.mkdir()
+        versions = init_bare_alembic(project, db_url)
+        cfg = _alembic_cfg(project, db_url)
+
+        # Migration 1: create base table
+        write_migration_script(
+            versions,
+            "aaa1",
+            None,
+            upgrade_ops='op.create_table("users",\n'
+            '    sa.Column("id", sa.Integer, primary_key=True),\n'
+            '    sa.Column("name", sa.String(100), nullable=False),\n'
+            ")",
+            downgrade_ops='op.drop_table("users")',
+            message="create users",
+        )
+
+        command.upgrade(cfg, "head")
+
+        # Seed data
+        engine = create_engine(db_url)
+        with engine.begin() as conn:
+            conn.execute(text("INSERT INTO users (id, name) VALUES (1, 'Alice')"))
+            conn.execute(text("INSERT INTO users (id, name) VALUES (2, 'Bob')"))
+
+        # Migration 2: add nullable column
+        write_migration_script(
+            versions,
+            "aaa2",
+            "aaa1",
+            upgrade_ops='op.add_column("users", sa.Column("phone", sa.String(50), nullable=True))',
+            downgrade_ops='with op.batch_alter_table("users") as batch_op:\n'
+            '    batch_op.drop_column("phone")',
+            message="add phone",
+        )
+
+        command.upgrade(cfg, "head")
+
+        # Verify data preserved, phone is NULL
+        with engine.connect() as conn:
+            rows = conn.execute(text("SELECT id, name, phone FROM users ORDER BY id")).fetchall()
+        assert len(rows) == 2
+        assert rows[0] == (1, "Alice", None)
+        assert rows[1] == (2, "Bob", None)
+
+        # Downgrade — data still intact (phone column gone)
+        command.downgrade(cfg, "aaa1")
+        with engine.connect() as conn:
+            rows = conn.execute(text("SELECT id, name FROM users ORDER BY id")).fetchall()
+        assert len(rows) == 2
+        assert rows[0] == (1, "Alice")
+        engine.dispose()
+
+
+class TestAddColumnWithDefault:
+    """Scenario 2: Add column with server_default — existing rows get the default."""
+
+    def test_data_preserved(self, tmp_path, db_backend):
+        db_url = _setup_db_url(tmp_path, db_backend)
+        project = tmp_path / "project"
+        project.mkdir()
+        versions = init_bare_alembic(project, db_url)
+        cfg = _alembic_cfg(project, db_url)
+
+        write_migration_script(
+            versions,
+            "bbb1",
+            None,
+            upgrade_ops='op.create_table("users",\n'
+            '    sa.Column("id", sa.Integer, primary_key=True),\n'
+            '    sa.Column("name", sa.String(100), nullable=False),\n'
+            ")",
+            downgrade_ops='op.drop_table("users")',
+            message="create users",
+        )
+        command.upgrade(cfg, "head")
+
+        engine = create_engine(db_url)
+        with engine.begin() as conn:
+            conn.execute(text("INSERT INTO users (id, name) VALUES (1, 'Alice')"))
+
+        write_migration_script(
+            versions,
+            "bbb2",
+            "bbb1",
+            upgrade_ops='op.add_column("users",\n'
+            '    sa.Column("active", sa.Boolean, server_default="1", nullable=False))',
+            downgrade_ops='with op.batch_alter_table("users") as batch_op:\n'
+            '    batch_op.drop_column("active")',
+            message="add active",
+        )
+        command.upgrade(cfg, "head")
+
+        with engine.connect() as conn:
+            rows = conn.execute(text("SELECT id, name, active FROM users")).fetchall()
+        assert len(rows) == 1
+        # server_default="1" → True/1
+        assert rows[0][2] in (True, 1)
+
+        command.downgrade(cfg, "bbb1")
+        with engine.connect() as conn:
+            rows = conn.execute(text("SELECT id, name FROM users")).fetchall()
+        assert len(rows) == 1
+        assert rows[0] == (1, "Alice")
+        engine.dispose()
+
+
+class TestCreateTableWithFK:
+    """Scenario 3: Create new table with FK to parent."""
+
+    def test_data_preserved(self, tmp_path, db_backend):
+        db_url = _setup_db_url(tmp_path, db_backend)
+        project = tmp_path / "project"
+        project.mkdir()
+        versions = init_bare_alembic(project, db_url)
+        cfg = _alembic_cfg(project, db_url)
+
+        write_migration_script(
+            versions,
+            "ccc1",
+            None,
+            upgrade_ops='op.create_table("parent",\n'
+            '    sa.Column("id", sa.Integer, primary_key=True),\n'
+            '    sa.Column("name", sa.String(100)),\n'
+            ")",
+            downgrade_ops='op.drop_table("parent")',
+            message="create parent",
+        )
+        command.upgrade(cfg, "head")
+
+        engine = create_engine(db_url)
+        with engine.begin() as conn:
+            conn.execute(text("INSERT INTO parent (id, name) VALUES (1, 'P1')"))
+
+        write_migration_script(
+            versions,
+            "ccc2",
+            "ccc1",
+            upgrade_ops='op.create_table("child",\n'
+            '    sa.Column("id", sa.Integer, primary_key=True),\n'
+            '    sa.Column("parent_id", sa.Integer, sa.ForeignKey("parent.id"), nullable=False),\n'
+            '    sa.Column("value", sa.String(100)),\n'
+            ")",
+            downgrade_ops='op.drop_table("child")',
+            message="create child",
+        )
+        command.upgrade(cfg, "head")
+
+        with engine.begin() as conn:
+            conn.execute(text("INSERT INTO child (id, parent_id, value) VALUES (10, 1, 'C1')"))
+
+        # Verify parent data intact
+        with engine.connect() as conn:
+            parents = conn.execute(text("SELECT * FROM parent")).fetchall()
+            children = conn.execute(text("SELECT * FROM child")).fetchall()
+        assert len(parents) == 1
+        assert len(children) == 1
+        assert children[0][1] == 1  # parent_id
+
+        # Downgrade drops child table, parent data preserved
+        command.downgrade(cfg, "ccc1")
+        tables = get_table_names(engine)
+        assert "child" not in tables
+        with engine.connect() as conn:
+            parents = conn.execute(text("SELECT * FROM parent")).fetchall()
+        assert len(parents) == 1
+        engine.dispose()
+
+
+class TestDropTable:
+    """Scenario 4: Drop table (with data) and recreate on downgrade."""
+
+    def test_data_preserved(self, tmp_path, db_backend):
+        db_url = _setup_db_url(tmp_path, db_backend)
+        project = tmp_path / "project"
+        project.mkdir()
+        versions = init_bare_alembic(project, db_url)
+        cfg = _alembic_cfg(project, db_url)
+
+        write_migration_script(
+            versions,
+            "ddd1",
+            None,
+            upgrade_ops='op.create_table("old_data",\n'
+            '    sa.Column("id", sa.Integer, primary_key=True),\n'
+            '    sa.Column("value", sa.String(100)),\n'
+            ")",
+            downgrade_ops='op.drop_table("old_data")',
+            message="create old data",
+        )
+        command.upgrade(cfg, "head")
+
+        engine = create_engine(db_url)
+        with engine.begin() as conn:
+            conn.execute(text("INSERT INTO old_data (id, value) VALUES (1, 'keep')"))
+
+        write_migration_script(
+            versions,
+            "ddd2",
+            "ddd1",
+            upgrade_ops='op.drop_table("old_data")',
+            downgrade_ops='op.create_table("old_data",\n'
+            '    sa.Column("id", sa.Integer, primary_key=True),\n'
+            '    sa.Column("value", sa.String(100)),\n'
+            ")",
+            message="drop old data",
+        )
+        command.upgrade(cfg, "head")
+
+        assert "old_data" not in get_table_names(engine)
+
+        # Downgrade recreates the table (data is lost, but structure is back)
+        command.downgrade(cfg, "ddd1")
+        assert "old_data" in get_table_names(engine)
+        engine.dispose()
+
+
+class TestAddIndex:
+    """Scenario 5: Add index — data unchanged."""
+
+    def test_data_preserved(self, tmp_path, db_backend):
+        db_url = _setup_db_url(tmp_path, db_backend)
+        project = tmp_path / "project"
+        project.mkdir()
+        versions = init_bare_alembic(project, db_url)
+        cfg = _alembic_cfg(project, db_url)
+
+        write_migration_script(
+            versions,
+            "eee1",
+            None,
+            upgrade_ops='op.create_table("items",\n'
+            '    sa.Column("id", sa.Integer, primary_key=True),\n'
+            '    sa.Column("name", sa.String(100)),\n'
+            ")",
+            downgrade_ops='op.drop_table("items")',
+            message="create items",
+        )
+        command.upgrade(cfg, "head")
+
+        engine = create_engine(db_url)
+        with engine.begin() as conn:
+            conn.execute(text("INSERT INTO items (id, name) VALUES (1, 'A')"))
+            conn.execute(text("INSERT INTO items (id, name) VALUES (2, 'B')"))
+
+        write_migration_script(
+            versions,
+            "eee2",
+            "eee1",
+            upgrade_ops='op.create_index("ix_items_name", "items", ["name"])',
+            downgrade_ops='op.drop_index("ix_items_name", table_name="items")',
+            message="add index",
+        )
+        command.upgrade(cfg, "head")
+
+        with engine.connect() as conn:
+            rows = conn.execute(text("SELECT id, name FROM items ORDER BY id")).fetchall()
+        assert len(rows) == 2
+        assert rows[0] == (1, "A")
+
+        command.downgrade(cfg, "eee1")
+        with engine.connect() as conn:
+            rows = conn.execute(text("SELECT id, name FROM items ORDER BY id")).fetchall()
+        assert len(rows) == 2
+        engine.dispose()
+
+
+class TestRenameColumn:
+    """Scenario 6: Rename column via batch_alter_table (SQLite-compatible)."""
+
+    def test_data_preserved(self, tmp_path, db_backend):
+        db_url = _setup_db_url(tmp_path, db_backend)
+        project = tmp_path / "project"
+        project.mkdir()
+        versions = init_bare_alembic(project, db_url)
+        cfg = _alembic_cfg(project, db_url)
+
+        write_migration_script(
+            versions,
+            "fff1",
+            None,
+            upgrade_ops='op.create_table("contacts",\n'
+            '    sa.Column("id", sa.Integer, primary_key=True),\n'
+            '    sa.Column("fullname", sa.String(200)),\n'
+            ")",
+            downgrade_ops='op.drop_table("contacts")',
+            message="create contacts",
+        )
+        command.upgrade(cfg, "head")
+
+        engine = create_engine(db_url)
+        with engine.begin() as conn:
+            conn.execute(text("INSERT INTO contacts (id, fullname) VALUES (1, 'John Doe')"))
+
+        write_migration_script(
+            versions,
+            "fff2",
+            "fff1",
+            upgrade_ops='with op.batch_alter_table("contacts") as batch_op:\n'
+            '    batch_op.alter_column("fullname", new_column_name="display_name")',
+            downgrade_ops='with op.batch_alter_table("contacts") as batch_op:\n'
+            '    batch_op.alter_column("display_name", new_column_name="fullname")',
+            message="rename column",
+        )
+        command.upgrade(cfg, "head")
+
+        with engine.connect() as conn:
+            rows = conn.execute(text("SELECT id, display_name FROM contacts")).fetchall()
+        assert len(rows) == 1
+        assert rows[0] == (1, "John Doe")
+
+        command.downgrade(cfg, "fff1")
+        with engine.connect() as conn:
+            rows = conn.execute(text("SELECT id, fullname FROM contacts")).fetchall()
+        assert len(rows) == 1
+        assert rows[0] == (1, "John Doe")
+        engine.dispose()
+
+
+class TestAddNotNullWithDefault:
+    """Scenario 7: Add NOT NULL column with backfill via batch_alter_table."""
+
+    def test_data_preserved(self, tmp_path, db_backend):
+        db_url = _setup_db_url(tmp_path, db_backend)
+        project = tmp_path / "project"
+        project.mkdir()
+        versions = init_bare_alembic(project, db_url)
+        cfg = _alembic_cfg(project, db_url)
+
+        write_migration_script(
+            versions,
+            "ggg1",
+            None,
+            upgrade_ops='op.create_table("accounts",\n'
+            '    sa.Column("id", sa.Integer, primary_key=True),\n'
+            '    sa.Column("email", sa.String(200)),\n'
+            ")",
+            downgrade_ops='op.drop_table("accounts")',
+            message="create accounts",
+        )
+        command.upgrade(cfg, "head")
+
+        engine = create_engine(db_url)
+        with engine.begin() as conn:
+            conn.execute(text("INSERT INTO accounts (id, email) VALUES (1, 'a@b.com')"))
+
+        # Add nullable column, backfill, then make NOT NULL via batch
+        write_migration_script(
+            versions,
+            "ggg2",
+            "ggg1",
+            upgrade_ops=(
+                'op.add_column("accounts", sa.Column("status", sa.String(20), nullable=True))\n'
+                "op.execute(\"UPDATE accounts SET status = 'active' WHERE status IS NULL\")\n"
+                'with op.batch_alter_table("accounts") as batch_op:\n'
+                '    batch_op.alter_column("status", nullable=False)'
+            ),
+            downgrade_ops='with op.batch_alter_table("accounts") as batch_op:\n'
+            '    batch_op.drop_column("status")',
+            message="add status",
+        )
+        command.upgrade(cfg, "head")
+
+        with engine.connect() as conn:
+            rows = conn.execute(text("SELECT id, email, status FROM accounts")).fetchall()
+        assert len(rows) == 1
+        assert rows[0] == (1, "a@b.com", "active")
+
+        command.downgrade(cfg, "ggg1")
+        with engine.connect() as conn:
+            rows = conn.execute(text("SELECT id, email FROM accounts")).fetchall()
+        assert len(rows) == 1
+        assert rows[0] == (1, "a@b.com")
+        engine.dispose()
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _setup_db_url(tmp_path, db_backend):
+    """Return a DB URL for the given backend."""
+    if db_backend == "sqlite":
+        return f"sqlite:///{tmp_path}/test.db"
+    elif db_backend == "postgresql":
+        import os
+
+        async_url = os.environ["CLARINET_TEST_DATABASE_URL"]
+        # Convert asyncpg → psycopg2
+        sync_url = async_url.replace("postgresql+asyncpg://", "postgresql+psycopg2://")
+        # Use a unique DB name based on tmp_path hash
+        base_url, _base_db = sync_url.rsplit("/", 1)
+        worker_db = f"mig_data_{abs(hash(str(tmp_path))) % 100000}"
+        from sqlalchemy import create_engine, text
+
+        admin_engine = create_engine(f"{base_url}/postgres", isolation_level="AUTOCOMMIT")
+        with admin_engine.connect() as conn:
+            conn.execute(text(f'DROP DATABASE IF EXISTS "{worker_db}"'))
+            conn.execute(text(f'CREATE DATABASE "{worker_db}"'))
+        admin_engine.dispose()
+
+        # Register cleanup
+        import atexit
+
+        def _cleanup():
+            admin = create_engine(f"{base_url}/postgres", isolation_level="AUTOCOMMIT")
+            with admin.connect() as conn:
+                conn.execute(text(f'DROP DATABASE IF EXISTS "{worker_db}"'))
+            admin.dispose()
+
+        atexit.register(_cleanup)
+
+        return f"{base_url}/{worker_db}"
+    else:
+        pytest.fail(f"Unknown db_backend: {db_backend}")
