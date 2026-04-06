@@ -583,7 +583,7 @@ class TestSpatialPreservation:
     def test_oblique_nifti_roundtrip(self, tmp_path: Path) -> None:
         """Rotated affine survives NIfTI → save → read roundtrip."""
         angle = np.radians(15)
-        rotation = np.array(
+        rotation_ras = np.array(
             [
                 [np.cos(angle), -np.sin(angle), 0],
                 [np.sin(angle), np.cos(angle), 0],
@@ -591,37 +591,46 @@ class TestSpatialPreservation:
             ]
         )
         spacing = VOLUME_SPACING
-        origin = (5.0, -10.0, 25.0)
+        origin_ras = (5.0, -10.0, 25.0)
 
         affine = np.eye(4)
-        affine[:3, :3] = rotation * np.array(spacing)
-        affine[:3, 3] = origin
+        affine[:3, :3] = rotation_ras * np.array(spacing)
+        affine[:3, 3] = origin_ras
 
         data = np.zeros(VOLUME_SHAPE, dtype=np.int16)
         nib_img = nibabel.Nifti1Image(data, affine, dtype=np.int16)
         src = tmp_path / "oblique.nii.gz"
         nibabel.save(nib_img, str(src))
 
+        # Internal representation is LPS (negate X and Y from RAS)
+        ras_to_lps = np.diag([-1.0, -1.0, 1.0])
+        expected_direction = ras_to_lps @ rotation_ras
+        expected_origin = (-5.0, 10.0, 25.0)
+
         img = Image(dtype=np.int16)
         img.read(src)
         assert pytest.approx(img.spacing, abs=1e-4) == spacing
-        assert pytest.approx(img.origin, abs=1e-4) == origin
-        np.testing.assert_array_almost_equal(img.direction, rotation, decimal=4)
+        assert pytest.approx(img.origin, abs=1e-4) == expected_origin
+        np.testing.assert_array_almost_equal(img.direction, expected_direction, decimal=4)
 
         # Save and read back
         out = tmp_path / "oblique_out.nii.gz"
         img.save_as(out, FileType.NIFTI)
 
+        # Verify the on-disk NIfTI has the original RAS affine (what Slicer sees)
+        written_affine = nibabel.loadsave.load(str(out)).affine
+        np.testing.assert_array_almost_equal(written_affine, affine, decimal=4)
+
         img2 = Image(dtype=np.int16)
         img2.read(out)
         assert pytest.approx(img2.spacing, abs=1e-4) == spacing
-        assert pytest.approx(img2.origin, abs=1e-4) == origin
-        np.testing.assert_array_almost_equal(img2.direction, rotation, decimal=4)
+        assert pytest.approx(img2.origin, abs=1e-4) == expected_origin
+        np.testing.assert_array_almost_equal(img2.direction, expected_direction, decimal=4)
 
     def test_oblique_nifti_to_nrrd_roundtrip(self, tmp_path: Path) -> None:
         """Rotated affine survives NIfTI → NRRD → NIfTI."""
         angle = np.radians(20)
-        rotation = np.array(
+        rotation_ras = np.array(
             [
                 [np.cos(angle), -np.sin(angle), 0],
                 [np.sin(angle), np.cos(angle), 0],
@@ -629,16 +638,21 @@ class TestSpatialPreservation:
             ]
         )
         spacing = VOLUME_SPACING
-        origin = (1.0, 2.0, 3.0)
+        origin_ras = (1.0, 2.0, 3.0)
 
         affine = np.eye(4)
-        affine[:3, :3] = rotation * np.array(spacing)
-        affine[:3, 3] = origin
+        affine[:3, :3] = rotation_ras * np.array(spacing)
+        affine[:3, 3] = origin_ras
 
         data = np.zeros(VOLUME_SHAPE, dtype=np.int16)
         nib_img = nibabel.Nifti1Image(data, affine, dtype=np.int16)
         src = tmp_path / "oblique_src.nii.gz"
         nibabel.save(nib_img, str(src))
+
+        # Internal representation is LPS
+        ras_to_lps = np.diag([-1.0, -1.0, 1.0])
+        expected_direction = ras_to_lps @ rotation_ras
+        expected_origin = (-1.0, -2.0, 3.0)
 
         # NIfTI → NRRD
         img = Image(dtype=np.int16)
@@ -655,8 +669,8 @@ class TestSpatialPreservation:
         img3 = Image(dtype=np.int16)
         img3.read(nifti_out)
         assert pytest.approx(img3.spacing, abs=1e-4) == spacing
-        assert pytest.approx(img3.origin, abs=1e-4) == origin
-        np.testing.assert_array_almost_equal(img3.direction, rotation, decimal=4)
+        assert pytest.approx(img3.origin, abs=1e-4) == expected_origin
+        np.testing.assert_array_almost_equal(img3.direction, expected_direction, decimal=4)
 
     def test_template_preserves_spatial(self, dicom_series_dir: Path, tmp_path: Path) -> None:
         """Origin and direction propagate through template creation."""
