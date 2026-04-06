@@ -248,26 +248,31 @@ _test-all-stages-impl:
 		echo "  Stages 6-8: VM — SKIPPED                "; \
 		echo "=========================================="; \
 	else \
+		EXIT_CODE=0; \
 		echo ""; \
 		echo "=========================================="; \
 		echo "  Stage 6/8: VM tests (PostgreSQL)         "; \
 		echo "=========================================="; \
-		bash scripts/vm-run-tests.sh; \
-		echo ""; \
-		echo "=========================================="; \
-		echo "  Stage 7/8: VM smoke + acceptance + e2e   "; \
-		echo "=========================================="; \
-		bash deploy/test/smoke-test.sh; \
-		VM_IP=$$(bash $(VM_SH) ip 2>/dev/null); \
-		. deploy/vm/vm.conf; \
-		ADMIN_PASS=$$(ssh -o StrictHostKeyChecking=no -i "$$SSH_KEY_PATH" clarinet@$$VM_IP \
-			"python3 -c \"import tomllib; print(tomllib.load(open('/opt/clarinet/settings.toml','rb'))['admin_password'])\""); \
-		CLARINET_TEST_URL="https://$$VM_IP$${PATH_PREFIX}" \
-		CLARINET_TEST_ADMIN_PASSWORD="$$ADMIN_PASS" \
-		uv run pytest deploy/test/acceptance/ -v; \
-		CLARINET_TEST_URL="https://$$VM_IP$${PATH_PREFIX}" \
-		CLARINET_TEST_ADMIN_PASSWORD="$$ADMIN_PASS" \
-		uv run --group e2e pytest deploy/test/e2e/ -v --browser chromium; \
+		bash scripts/vm-run-tests.sh || { rc=$$?; echo "Stage 6 FAILED (exit $$rc)"; EXIT_CODE=$$rc; }; \
+		if [ $$EXIT_CODE -eq 0 ]; then \
+			echo ""; \
+			echo "=========================================="; \
+			echo "  Stage 7/8: VM smoke + acceptance + e2e   "; \
+			echo "=========================================="; \
+			bash deploy/test/smoke-test.sh || { rc=$$?; echo "Stage 7 smoke FAILED (exit $$rc)"; EXIT_CODE=$$rc; }; \
+			VM_IP=$$(bash $(VM_SH) ip 2>/dev/null); \
+			. deploy/vm/vm.conf; \
+			ADMIN_PASS=$$(ssh -o StrictHostKeyChecking=no -i "$$SSH_KEY_PATH" clarinet@$$VM_IP \
+				"python3 -c \"import tomllib; print(tomllib.load(open('/opt/clarinet/settings.toml','rb'))['admin_password'])\""); \
+			CLARINET_TEST_URL="https://$$VM_IP$${PATH_PREFIX}" \
+			CLARINET_TEST_ADMIN_PASSWORD="$$ADMIN_PASS" \
+			uv run pytest deploy/test/acceptance/ -v \
+				|| { rc=$$?; echo "Stage 7 acceptance FAILED (exit $$rc)"; EXIT_CODE=$$rc; }; \
+			CLARINET_TEST_URL="https://$$VM_IP$${PATH_PREFIX}" \
+			CLARINET_TEST_ADMIN_PASSWORD="$$ADMIN_PASS" \
+			uv run --group e2e pytest deploy/test/e2e/ -v --browser chromium \
+				|| { rc=$$?; echo "Stage 7 e2e FAILED (exit $$rc)"; EXIT_CODE=$$rc; }; \
+		fi; \
 		echo ""; \
 		echo "=========================================="; \
 		echo "  Stage 8/8: VM cleanup                    "; \
@@ -275,7 +280,14 @@ _test-all-stages-impl:
 		if [ "$${KEEP_VM}" = "1" ]; then \
 			echo "KEEP_VM=1 — VM will not be destroyed"; \
 		else \
-			bash $(VM_SH) destroy; \
+			bash $(VM_SH) destroy || echo "VM destroy failed (non-blocking)"; \
+		fi; \
+		if [ $$EXIT_CODE -ne 0 ]; then \
+			echo ""; \
+			echo "=========================================="; \
+			echo "  Pipeline FAILED at Stage 6 or 7         "; \
+			echo "=========================================="; \
+			exit $$EXIT_CODE; \
 		fi; \
 	fi
 	@echo ""
