@@ -31,6 +31,7 @@ from clarinet.api.auth_config import current_active_user
 from clarinet.api.dependencies import (
     AuthorizedRecordDep,
     CurrentUserDep,
+    MutableRecordDep,
     PaginationDep,
     RecordRepositoryDep,
     RecordServiceDep,
@@ -401,7 +402,7 @@ async def update_record_status(
     record_id: int,
     record_status: RecordStatus,
     service: RecordServiceDep,
-    _authorized_record: AuthorizedRecordDep,
+    _authorized_record: MutableRecordDep,
     user: CurrentUserDep,
 ) -> RecordRead:
     """Update a record's status."""
@@ -522,7 +523,7 @@ _SUBMIT_STATUSES = (RecordStatus.finished, RecordStatus.failed)
 @router.post("/{record_id}/data", response_model=RecordRead)
 async def submit_record_data(
     record_id: int,
-    authorized_record: AuthorizedRecordDep,
+    authorized_record: MutableRecordDep,
     repo: RecordRepositoryDep,
     service: RecordServiceDep,
     rt_service: RecordTypeServiceDep,
@@ -565,7 +566,7 @@ async def submit_record_data(
 @router.patch("/{record_id}/data", response_model=RecordRead)
 async def update_record_data(
     record_id: int,
-    authorized_record: AuthorizedRecordDep,
+    authorized_record: MutableRecordDep,
     repo: RecordRepositoryDep,
     service: RecordServiceDep,
     rt_service: RecordTypeServiceDep,
@@ -593,7 +594,7 @@ async def update_record_data(
 @router.post("/{record_id}/submit", response_model=RecordRead)
 async def submit_record_with_validation(
     record_id: int,
-    authorized_record: AuthorizedRecordDep,
+    authorized_record: MutableRecordDep,
     repo: RecordRepositoryDep,
     service: RecordServiceDep,
     rt_service: RecordTypeServiceDep,
@@ -646,7 +647,7 @@ async def submit_record_with_validation(
 @router.patch("/{record_id}/submit", response_model=RecordRead)
 async def resubmit_record_with_validation(
     record_id: int,
-    authorized_record: AuthorizedRecordDep,
+    authorized_record: MutableRecordDep,
     repo: RecordRepositoryDep,
     service: RecordServiceDep,
     rt_service: RecordTypeServiceDep,
