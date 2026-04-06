@@ -3,12 +3,33 @@
 from pathlib import Path
 from typing import Any
 
+from clarinet.exceptions import SlicerError
 from clarinet.services.slicer.client import SlicerClient
 from clarinet.settings import settings
 from clarinet.utils.logger import logger
 
 # Path to the helper module that gets prepended to user scripts
 _HELPER_PATH = Path(__file__).parent / "helper.py"
+
+# Standalone Slicer cleanup script — mirrors SlicerHelper.__init__ cleanup
+# but without requiring SlicerHelper to be defined on the Slicer side.
+# No processEvents(): the composite-node detach removes stale volume refs
+# before Clear(0), so no VTK warnings are queued and a re-entrant Qt drain
+# (this script runs inside Slicer's HTTP handler) is unnecessary.
+_RESET_SCENE_SCRIPT = """
+import slicer
+lm = slicer.app.layoutManager()
+for name in ("Red", "Yellow", "Green"):
+    widget = lm.sliceWidget(name)
+    if widget is None:
+        continue
+    composite = widget.mrmlSliceCompositeNode()
+    composite.SetBackgroundVolumeID(None)
+    composite.SetForegroundVolumeID(None)
+    composite.SetLabelVolumeID(None)
+slicer.mrmlScene.Clear(0)
+__execResult = {"cleaned": True}
+"""
 
 
 class SlicerService:
@@ -22,7 +43,9 @@ class SlicerService:
     def __init__(self) -> None:
         """Read and cache ``helper.py`` source code."""
         self._helper_source: str = _HELPER_PATH.read_text(encoding="utf-8")
-        logger.info(
+        # DEBUG, not INFO: SlicerService is created per-request via Depends,
+        # so an INFO line on every instantiation would flood the log.
+        logger.debug(
             f"SlicerService init: helper.py loaded, "
             f"size={len(self._helper_source)}B lines={self._helper_source.count(chr(10))}"
         )
@@ -68,6 +91,32 @@ class SlicerService:
             JSON response from Slicer.
         """
         return await self._send(slicer_url, script, request_timeout)
+
+    async def reset_scene(
+        self,
+        slicer_url: str,
+        request_timeout: float = 5.0,
+    ) -> None:
+        """Reset Slicer scene state — detach views and clear scene.
+
+        Fails silently with a warning log on **any** Slicer error — pre-cleanup
+        should never block the primary request. Intended to be called before
+        a fresh workflow (e.g. user switching to a different record).
+
+        Catches the full ``SlicerError`` hierarchy (connection, HTTP 500,
+        script execution): a fresh Slicer instance whose ``layoutManager``
+        is not yet initialised, for example, returns 500 — but failure here
+        must still be non-blocking.
+
+        Args:
+            slicer_url: Base URL of the target Slicer instance.
+            request_timeout: HTTP timeout override (default 5s — cleanup
+                should be fast; if it hangs, something is already very wrong).
+        """
+        try:
+            await self.execute_raw(slicer_url, _RESET_SCENE_SCRIPT, request_timeout)
+        except SlicerError as e:
+            logger.warning(f"Slicer scene reset failed (non-blocking): {e}")
 
     async def ping(self, slicer_url: str) -> bool:
         """Check if a Slicer web server is reachable.

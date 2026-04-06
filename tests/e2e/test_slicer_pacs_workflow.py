@@ -26,10 +26,10 @@ import pytest
 import pytest_asyncio
 import requests
 from httpx import ASGITransport, AsyncClient
-from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from clarinet.services.slicer.service import SlicerService
+from clarinet.utils.logger import logger
 
 pytestmark = [
     pytest.mark.slicer,
