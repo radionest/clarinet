@@ -568,6 +568,8 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy import Text
+import sqlmodel
 ${imports if imports else ""}
 
 # revision identifiers, used by Alembic.

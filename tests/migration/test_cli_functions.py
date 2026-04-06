@@ -33,7 +33,6 @@ from clarinet.utils.migrations import (
 from .conftest import (
     create_pg_database,
     drop_pg_database,
-    fix_migration_imports,
     init_and_apply,
     override_database_url,
 )
@@ -276,7 +275,6 @@ class TestAsyncDriverRegression:
 
                 # End-to-end: apply the migration through run_migrations, which
                 # also reads sync_database_url via get_alembic_config.
-                fix_migration_imports(tmp_path)
                 run_migrations("head", tmp_path)
                 assert get_current_revision(tmp_path) is not None
         finally:
