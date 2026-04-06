@@ -89,6 +89,7 @@ class TestStaticPoolSelection:
             mock_settings.debug = True
             mock_settings.database_driver = "sqlite"
             mock_settings.database_name = "test_db"
+            mock_settings.database_url = "sqlite:///test_db.db"
             dm = DatabaseManager()
             engine = dm._create_async_engine()
             assert not isinstance(engine.pool, StaticPool)
@@ -98,6 +99,7 @@ class TestStaticPoolSelection:
             mock_settings.debug = True
             mock_settings.database_driver = "sqlite"
             mock_settings.database_name = ":memory:"
+            mock_settings.database_url = "sqlite:///:memory:"
             dm = DatabaseManager()
             engine = dm._create_async_engine()
             assert isinstance(engine.pool, StaticPool)
@@ -107,6 +109,7 @@ class TestStaticPoolSelection:
             mock_settings.debug = False
             mock_settings.database_driver = "sqlite"
             mock_settings.database_name = "production_db"
+            mock_settings.database_url = "sqlite:///production_db.db"
             dm = DatabaseManager()
             engine = dm._create_async_engine()
             assert not isinstance(engine.pool, StaticPool)

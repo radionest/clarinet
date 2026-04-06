@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy.pool import StaticPool
 from sqlmodel import SQLModel
 
-from ..settings import settings
+from ..settings import DatabaseDriver, settings
 from ..utils.logger import logger
 
 
@@ -34,6 +34,27 @@ def _pydantic_json_serializer(obj: Any) -> str:
         raise TypeError(f"Object of type {type(o).__name__} is not JSON serializable")
 
     return json.dumps(obj, default=default)
+
+
+def get_async_database_url() -> str:
+    """Return the configured database URL using an async-capable driver.
+
+    Centralizes sync→async driver conversion so callers never have to parse
+    URL strings themselves (historically a source of bugs when the URL carries
+    a ``+driver`` suffix).
+
+    Raises:
+        ValueError: if the configured driver has no async counterpart.
+    """
+    match settings.database_driver:
+        case DatabaseDriver.SQLITE:
+            return settings.database_url.replace("sqlite:", "sqlite+aiosqlite:", 1)
+        case DatabaseDriver.POSTGRESQL:
+            return settings.database_url.replace("postgresql+psycopg2", "postgresql+asyncpg", 1)
+        case DatabaseDriver.POSTGRESQL_ASYNC:
+            return settings.database_url
+        case _:
+            raise ValueError(f"Async not supported for {settings.database_driver}")
 
 
 class DatabaseManager:
@@ -50,20 +71,9 @@ class DatabaseManager:
         self._async_session_factory: async_sessionmaker[AsyncSession] | None = None
         self._is_initialized = False
 
-    def _get_async_database_url(self) -> str:
-        """Convert database URL to async version."""
-        if settings.database_driver == "sqlite":
-            return f"sqlite+aiosqlite:///{settings.database_name}.db"
-        elif settings.database_driver == "postgresql+psycopg2":
-            return settings.database_url.replace("postgresql+psycopg2", "postgresql+asyncpg")
-        elif settings.database_driver == "postgresql+asyncpg":
-            return settings.database_url
-        else:
-            raise ValueError(f"Async not supported for {settings.database_driver}")
-
     def _create_async_engine(self) -> AsyncEngine:
         """Create and configure the asynchronous database engine."""
-        async_url = self._get_async_database_url()
+        async_url = get_async_database_url()
 
         if settings.database_driver == "sqlite":
             engine = create_async_engine(
