@@ -16,6 +16,7 @@ from clarinet.utils.migrations import (
 )
 
 from .conftest import (
+    drop_pg_enums,
     get_columns,
     get_foreign_keys,
     get_indexes,
@@ -156,6 +157,8 @@ class TestMigrationOperations:
 
         # Downgrade
         run_migrations("-1", project_path)
+        # PG leaves orphaned ENUM types after downgrade — drop them
+        drop_pg_enums(engine)
 
         # Upgrade back
         run_migrations("head", project_path)

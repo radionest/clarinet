@@ -79,7 +79,9 @@ class TestCliUpgradeDowngrade:
         cli_upgrade("head")
 
     def test_cli_downgrade_then_upgrade(self, migration_project, monkeypatch):
-        project_path, _db_url, _engine = migration_project
+        from .conftest import drop_pg_enums
+
+        project_path, _db_url, engine = migration_project
         init_and_apply(project_path)
         monkeypatch.chdir(project_path)
 
@@ -89,6 +91,9 @@ class TestCliUpgradeDowngrade:
         cli_downgrade(1)
         rev_after_down = get_current_revision(project_path)
         assert rev_after_down is None
+
+        # PG leaves orphaned ENUM types after downgrade
+        drop_pg_enums(engine)
 
         cli_upgrade("head")
         rev_after_up = get_current_revision(project_path)

@@ -410,38 +410,20 @@ class TestAddNotNullWithDefault:
 # ---------------------------------------------------------------------------
 
 
-def _setup_db_url(tmp_path, db_backend):
+def _setup_db_url(tmp_path, db_backend) -> str:
     """Return a DB URL for the given backend."""
     if db_backend == "sqlite":
         return f"sqlite:///{tmp_path}/test.db"
     elif db_backend == "postgresql":
-        import os
-
-        async_url = os.environ["CLARINET_TEST_DATABASE_URL"]
-        # Convert asyncpg → psycopg2
-        sync_url = async_url.replace("postgresql+asyncpg://", "postgresql+psycopg2://")
-        # Use a unique DB name based on tmp_path hash
-        base_url, _base_db = sync_url.rsplit("/", 1)
-        worker_db = f"mig_data_{abs(hash(str(tmp_path))) % 100000}"
-        from sqlalchemy import create_engine, text
-
-        admin_engine = create_engine(f"{base_url}/postgres", isolation_level="AUTOCOMMIT")
-        with admin_engine.connect() as conn:
-            conn.execute(text(f'DROP DATABASE IF EXISTS "{worker_db}"'))
-            conn.execute(text(f'CREATE DATABASE "{worker_db}"'))
-        admin_engine.dispose()
-
-        # Register cleanup
         import atexit
 
-        def _cleanup():
-            admin = create_engine(f"{base_url}/postgres", isolation_level="AUTOCOMMIT")
-            with admin.connect() as conn:
-                conn.execute(text(f'DROP DATABASE IF EXISTS "{worker_db}"'))
-            admin.dispose()
+        from .conftest import create_pg_database, drop_pg_database
 
-        atexit.register(_cleanup)
+        worker_db = f"mig_data_{abs(hash(str(tmp_path))) % 100000}"
+        db_url, base_url = create_pg_database(worker_db)
 
-        return f"{base_url}/{worker_db}"
+        atexit.register(drop_pg_database, worker_db, base_url)
+
+        return db_url
     else:
         pytest.fail(f"Unknown db_backend: {db_backend}")

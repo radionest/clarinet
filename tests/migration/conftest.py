@@ -48,6 +48,33 @@ def _pg_sync_url(async_url: str) -> str:
     return async_url.replace("postgresql+asyncpg://", "postgresql+psycopg2://")
 
 
+def create_pg_database(db_name: str) -> tuple[str, str]:
+    """Create a PostgreSQL database for testing and return (db_url, base_url).
+
+    Requires CLARINET_TEST_DATABASE_URL env var (asyncpg format).
+    Returns a psycopg2-compatible URL.
+    """
+    async_url = os.environ["CLARINET_TEST_DATABASE_URL"]
+    sync_base_url = _pg_sync_url(async_url)
+    base_url, _ = sync_base_url.rsplit("/", 1)
+
+    admin_engine = create_engine(f"{base_url}/postgres", isolation_level="AUTOCOMMIT")
+    with admin_engine.connect() as conn:
+        conn.execute(text(f'DROP DATABASE IF EXISTS "{db_name}"'))
+        conn.execute(text(f'CREATE DATABASE "{db_name}"'))
+    admin_engine.dispose()
+
+    return f"{base_url}/{db_name}", base_url
+
+
+def drop_pg_database(db_name: str, base_url: str) -> None:
+    """Drop a PostgreSQL database."""
+    admin_engine = create_engine(f"{base_url}/postgres", isolation_level="AUTOCOMMIT")
+    with admin_engine.connect() as conn:
+        conn.execute(text(f'DROP DATABASE IF EXISTS "{db_name}"'))
+    admin_engine.dispose()
+
+
 @pytest.fixture
 def migration_project(
     request: pytest.FixtureRequest, tmp_path: Path, worker_id: str, db_backend: str
@@ -71,27 +98,15 @@ def migration_project(
     elif db_backend == "postgresql":
         async_url = os.environ["CLARINET_TEST_DATABASE_URL"]
         sync_base_url = _pg_sync_url(async_url)
-        base_url, base_db = sync_base_url.rsplit("/", 1)
+        _, base_db = sync_base_url.rsplit("/", 1)
         worker_db = f"{base_db}_mig_{worker_id}" if worker_id != "master" else f"{base_db}_mig"
 
-        # Create worker database
-        admin_engine = create_engine(f"{base_url}/postgres", isolation_level="AUTOCOMMIT")
-        with admin_engine.connect() as conn:
-            conn.execute(text(f'DROP DATABASE IF EXISTS "{worker_db}"'))
-            conn.execute(text(f'CREATE DATABASE "{worker_db}"'))
-        admin_engine.dispose()
-
-        db_url = f"{base_url}/{worker_db}"
+        db_url, base_url = create_pg_database(worker_db)
         engine = create_engine(db_url)
         with override_database_url(db_url):
             yield project_path, db_url, engine
         engine.dispose()
-
-        # Drop worker database
-        admin_engine = create_engine(f"{base_url}/postgres", isolation_level="AUTOCOMMIT")
-        with admin_engine.connect() as conn:
-            conn.execute(text(f'DROP DATABASE IF EXISTS "{worker_db}"'))
-        admin_engine.dispose()
+        drop_pg_database(worker_db, base_url)
 
     else:
         pytest.fail(f"Unknown db_backend: {db_backend}")
@@ -120,6 +135,28 @@ def get_indexes(engine: Engine, table: str) -> list[dict]:
 
 def get_unique_constraints(engine: Engine, table: str) -> list[dict]:
     return inspect(engine).get_unique_constraints(table)
+
+
+def drop_pg_enums(engine: Engine) -> None:
+    """Drop all user-defined ENUM types in a PostgreSQL database.
+
+    Alembic downgrade drops tables but leaves orphaned ENUMs, which cause
+    'DuplicateObject' on re-upgrade. Call this between downgrade and upgrade.
+    No-op on SQLite.
+    """
+    if engine.dialect.name != "postgresql":
+        return
+    with engine.connect() as conn:
+        rows = conn.execute(
+            text(
+                "SELECT t.typname FROM pg_type t "
+                "JOIN pg_namespace n ON t.typnamespace = n.oid "
+                "WHERE t.typtype = 'e' AND n.nspname = 'public'"
+            )
+        ).fetchall()
+        for (enum_name,) in rows:
+            conn.execute(text(f'DROP TYPE IF EXISTS "{enum_name}" CASCADE'))
+        conn.commit()
 
 
 # ---------------------------------------------------------------------------
