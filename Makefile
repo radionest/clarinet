@@ -8,13 +8,16 @@ help: ## Show this help message
 	@echo "Usage: make [target]"
 	@echo ""
 	@echo "Frontend commands:"
-	@grep -E '^(frontend|run-dev)[^:]*:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-20s %s\n", $$1, $$2}'
+	@grep -E '^(frontend|run-)[^:]*:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-20s %s\n", $$1, $$2}'
 	@echo ""
 	@echo "Code quality commands:"
 	@grep -E '^(format|lint|typecheck|check|pre-commit)[^:]*:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-20s %s\n", $$1, $$2}'
 	@echo ""
 	@echo "Testing commands:"
 	@grep -E '^test[^:]*:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-20s %s\n", $$1, $$2}'
+	@echo ""
+	@echo "Database commands:"
+	@grep -E '^db-[^:]*:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-20s %s\n", $$1, $$2}'
 	@echo ""
 	@echo "Build and install commands:"
 	@grep -E '^(build|install|dev-setup)[^:]*:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-20s %s\n", $$1, $$2}'
@@ -60,10 +63,6 @@ frontend-clean: ## Clean frontend build artifacts
 	@echo "Cleaning frontend artifacts..."
 	@rm -rf clarinet/frontend/build
 	@rm -rf clarinet/static
-
-.PHONY: ohif-build
-ohif-build: ## Download and install OHIF Viewer
-	@uv run clarinet ohif install
 
 .PHONY: run-dev
 run-dev: ## Run development server with frontend (default)
@@ -336,10 +335,6 @@ db-migration: ## Create new migration from model changes
 # =============================================================================
 # Utility Commands
 # =============================================================================
-
-.PHONY: clean-rabbitmq
-clean-rabbitmq: ## Clean orphaned test queues/exchanges from RabbitMQ
-	@uv run clarinet rabbitmq clean
 
 .PHONY: clean
 clean: frontend-clean ## Clean all build artifacts

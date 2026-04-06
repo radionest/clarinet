@@ -914,6 +914,102 @@ def handle_frontend_command(args: argparse.Namespace) -> None:
         sys.exit(1)
 
 
+async def _handle_session(args: argparse.Namespace) -> None:
+    """Handle session management subcommands.
+
+    Each branch acquires its own AsyncSession via ``get_async_session()``.
+    """
+    from datetime import UTC, datetime, timedelta
+    from typing import Any
+    from uuid import UUID
+
+    from sqlalchemy import CursorResult
+    from sqlalchemy import delete as sa_delete
+
+    from clarinet.models.auth import AccessToken
+    from clarinet.utils.database import get_async_session
+    from clarinet.utils.session import (
+        cleanup_expired_sessions,
+        get_session_stats,
+        get_user_sessions,
+        revoke_user_sessions,
+    )
+
+    if args.session_command == "cleanup":
+        async for session in get_async_session():
+            deleted = await cleanup_expired_sessions(session)
+            if args.days:
+                cutoff = datetime.now(UTC) - timedelta(days=args.days)
+                stmt = sa_delete(AccessToken).where(
+                    AccessToken.created_at < cutoff  # type:ignore[arg-type]
+                )
+                old_result: CursorResult[Any] = await session.execute(stmt)  # type: ignore[assignment]
+                await session.commit()
+                if old_result.rowcount > 0:
+                    deleted += old_result.rowcount
+                    logger.info(
+                        f"Removed {old_result.rowcount} sessions older than {args.days} days"
+                    )
+            print(f"Cleaned up {deleted} sessions")
+
+    elif args.session_command == "cleanup-once":
+        from clarinet.services.session_cleanup import SessionCleanupService
+
+        deleted = await SessionCleanupService().cleanup_once()
+        print(f"Cleaned up {deleted} sessions")
+
+    elif args.session_command == "stats":
+        async for session in get_async_session():
+            stats = await get_session_stats(session)
+            print("Session Statistics:")
+            print(f"  Total:        {stats['total']}")
+            print(f"  Active:       {stats['active']}")
+            print(f"  Expired:      {stats['expired']}")
+            print(f"  Avg duration: {stats['average_duration_hours']}h")
+            print("  Active sessions by age:")
+            for bucket, count in stats["by_age"].items():
+                label = bucket.replace("_", " ")
+                print(f"    {label}: {count}")
+
+    elif args.session_command == "revoke-user":
+        try:
+            user_id = UUID(args.user_id)
+        except ValueError:
+            logger.error(f"Invalid user ID (expected UUID): {args.user_id}")
+            sys.exit(1)
+        async for session in get_async_session():
+            count = await revoke_user_sessions(session, user_id)
+            print(f"Revoked {count} sessions for user {user_id}")
+
+    elif args.session_command == "list-user":
+        try:
+            user_id = UUID(args.user_id)
+        except ValueError:
+            logger.error(f"Invalid user ID (expected UUID): {args.user_id}")
+            sys.exit(1)
+        async for session in get_async_session():
+            sessions = await get_user_sessions(session, user_id, active_only=False)
+            if not sessions:
+                print(f"No sessions found for user {user_id}")
+                return
+            now = datetime.now(UTC)
+            print(f"Sessions for user {user_id} ({len(sessions)} total):")
+            for s in sessions:
+                status = "active" if s.expires_at > now else "expired"
+                print(
+                    f"  {s.token[:8]}... | {status} | "
+                    f"created: {s.created_at.isoformat()} | "
+                    f"expires: {s.expires_at.isoformat()}"
+                )
+
+    elif args.session_command == "cleanup-all":
+        async for session in get_async_session():
+            stmt = sa_delete(AccessToken)
+            all_result: CursorResult[Any] = await session.execute(stmt)  # type: ignore[assignment]
+            await session.commit()
+            print(f"Deleted all {all_result.rowcount} sessions")
+
+
 def main() -> None:
     """Main CLI entry point."""
     parser = argparse.ArgumentParser(
@@ -1174,6 +1270,16 @@ def main() -> None:
         handle_frontend_command(args)
     elif args.command == "ohif":
         handle_ohif_command(args)
+    elif args.command == "session":
+        if not args.session_command:
+            session_parser.print_help()
+        else:
+            if args.session_command == "cleanup-all":
+                confirm = input("This will delete ALL sessions. Are you sure? [y/N] ")
+                if confirm.lower() != "y":
+                    print("Aborted.")
+                    sys.exit(0)
+            asyncio.run(_handle_session(args))
     elif args.command == "deploy":
         if args.deploy_command == "systemd":
             from clarinet.cli.deploy import generate_systemd

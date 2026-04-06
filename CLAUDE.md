@@ -23,10 +23,15 @@ Clarinet is a framework for clinical-radiological studies, built on FastAPI, SQL
 
 ## Essential Commands
 
+**Split**: Makefile = developer workflow (test, lint, build), CLI = operator/production tasks
+(init, run, db, admin, worker, session, rabbitmq, ohif, deploy). `make help` lists all targets.
+
+### Development (Makefile)
+
 ```bash
-# Development
+# Run servers
 make run-dev                    # Full stack (API + frontend)
-make run-api                    # API only
+make run-api                    # API only (--headless)
 
 # Code quality
 make format                     # ruff format
@@ -47,22 +52,40 @@ make test-integration           # Integration tests only
 make test-all-stages            # Full pipeline (40min timeout): lint → unit → schema‖VM → fast → PG → E2E
                                 # SKIP_VM=1 / SKIP_SCHEMA=1 to skip heavy stages, KEEP_VM=1 to keep VM
 
-# Database
+# Database (Alembic wrappers)
 make db-upgrade                 # Apply migrations
 make db-downgrade               # Rollback last migration
-uv run clarinet db init         # Initialize DB with admin user
+make db-migration               # Create new migration
 
-# Frontend
+# Frontend (gleam wrappers — faster than CLI)
 make frontend-build             # Production build
 make frontend-deps              # Install dependencies
-
-# OHIF Viewer (optional)
-make ohif-build                 # Download and install OHIF Viewer (served at /ohif)
 
 # Build & cleanup
 make build                      # Full package build
 make clean                      # Clean artifacts
 make dev-setup                  # Set up dev environment
+```
+
+### Operations (CLI)
+
+```bash
+uv run clarinet init [path]              # Scaffold a new project
+uv run clarinet run [--headless]         # Start the server
+uv run clarinet db init                  # Initialize DB with admin user
+uv run clarinet admin create             # Create admin user
+uv run clarinet admin reset-password     # Reset admin password
+uv run clarinet worker [--queues ...]    # Run pipeline worker
+uv run clarinet session stats            # Session statistics
+uv run clarinet session cleanup          # Clean expired sessions (+ --days retention)
+uv run clarinet session cleanup-once     # One-shot cleanup via SessionCleanupService
+uv run clarinet session list-user UID    # List a user's sessions
+uv run clarinet session revoke-user UID  # Revoke all sessions for a user
+uv run clarinet session cleanup-all      # Delete ALL sessions (asks for confirmation)
+uv run clarinet rabbitmq clean           # Delete orphaned test queues/exchanges
+uv run clarinet rabbitmq status          # Show queue statistics
+uv run clarinet ohif install             # Download/install OHIF Viewer (served at /ohif)
+uv run clarinet deploy systemd           # Generate systemd unit files
 ```
 
 ## Anti-patterns
