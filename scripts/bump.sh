@@ -75,8 +75,16 @@ text = re.sub(
 open(path, 'w').write(text)
 "
 
-uv lock >/dev/null
-git add "$PYPROJECT" uv.lock
+if [ -f "uv.lock" ]; then
+  if ! command -v uv >/dev/null 2>&1; then
+    echo "Error: uv.lock is present but 'uv' is not installed" >&2
+    exit 1
+  fi
+  uv lock
+  git add "$PYPROJECT" uv.lock
+else
+  git add "$PYPROJECT"
+fi
 git commit -m "chore: version bump to $NEW"
 git tag "v$NEW"
 git push --atomic origin HEAD "v$NEW"
