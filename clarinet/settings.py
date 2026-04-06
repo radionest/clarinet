@@ -331,6 +331,21 @@ class Settings(BaseSettings):
         else:
             return f"{self.database_driver.value}://{self.database_username}:{self.database_password}@{self.database_host}:{self.database_port}/{self.database_name}"
 
+    @property
+    def sync_database_url(self) -> str:
+        """Database URL for synchronous operations (Alembic, sync engines).
+
+        Alembic's env.py and migration utilities use synchronous SQLAlchemy,
+        so async drivers (asyncpg) must be converted to sync equivalents
+        (psycopg2). SQLite is sync-compatible by default and returned as-is.
+        """
+        url = self.database_url
+        if url.startswith("sqlite"):
+            return url
+        if "postgresql+asyncpg" in url:
+            return url.replace("postgresql+asyncpg", "postgresql+psycopg2")
+        return url
+
     def get_template_dir(self) -> str:
         """Get the template directory path."""
         if self.template_dir:
