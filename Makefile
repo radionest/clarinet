@@ -131,7 +131,7 @@ test-fast: ## Run all tests in parallel (excludes schema tests)
 .PHONY: test-unit
 test-unit: ## Run DB-only tests in parallel (no external services)
 	@echo "Running DB-only tests in parallel..."
-	@./scripts/run_tests.sh -n "$(PYTEST_WORKERS)" --dist loadgroup -m "not pipeline and not dicom and not slicer and not schema" -q
+	@./scripts/run_tests.sh -n "$(PYTEST_WORKERS)" --dist loadgroup -m "$(PYTEST_UNIT_MARKERS)" -q
 
 .PHONY: test-schema
 test-schema: ## Run API schema tests (Schemathesis property-based)
