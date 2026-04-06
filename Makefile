@@ -126,12 +126,12 @@ test-all: test frontend-test ## Run all tests (backend + frontend)
 .PHONY: test-fast
 test-fast: ## Run all tests in parallel (excludes schema tests)
 	@echo "Running all tests in parallel..."
-	@./scripts/run_tests.sh -n "$(PYTEST_WORKERS)" --dist loadgroup -m "not schema and not migration" -q
+	@./scripts/run_tests.sh -n "$(PYTEST_WORKERS)" --dist loadgroup -m "not schema" -q
 
 .PHONY: test-unit
 test-unit: ## Run DB-only tests in parallel (no external services)
 	@echo "Running DB-only tests in parallel..."
-	@./scripts/run_tests.sh -n "$(PYTEST_WORKERS)" --dist loadgroup -m "not pipeline and not dicom and not slicer and not schema and not migration" -q
+	@./scripts/run_tests.sh -n "$(PYTEST_WORKERS)" --dist loadgroup -m "not pipeline and not dicom and not slicer and not schema" -q
 
 .PHONY: test-schema
 test-schema: ## Run API schema tests (Schemathesis property-based)
@@ -154,7 +154,7 @@ test-integration: ## Run integration tests only
 	@./scripts/run_tests.sh tests/integration/
 
 # Marker expression for tests that don't require external services
-PYTEST_UNIT_MARKERS := not pipeline and not dicom and not slicer and not schema and not migration
+PYTEST_UNIT_MARKERS := not pipeline and not dicom and not slicer and not schema
 
 # Max xdist workers (override: PYTEST_WORKERS=4 make test-fast)
 PYTEST_WORKERS ?= 10
