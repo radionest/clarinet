@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 from clarinet.exceptions import MigrationError
 from clarinet.settings import settings
+from clarinet.utils.db_manager import get_async_database_url
 from clarinet.utils.logger import logger
 
 
@@ -437,13 +438,7 @@ async def check_database_initialized() -> bool:
     Returns:
         True if alembic_version table exists, False otherwise
     """
-    # Convert URL for async if needed
-    db_url = settings.database_url
-    if db_url.startswith("sqlite:"):
-        db_url = db_url.replace("sqlite:", "sqlite+aiosqlite:", 1)
-    elif db_url.startswith("postgresql:"):
-        db_url = db_url.replace("postgresql:", "postgresql+asyncpg:", 1)
-
+    db_url = get_async_database_url()
     engine = create_async_engine(db_url)
 
     try:
