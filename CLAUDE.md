@@ -52,7 +52,7 @@ make test-integration           # Integration tests only
 make test-all-stages            # Full pipeline (40min timeout): lint → unit → schema‖VM → fast → PG → E2E
                                 # SKIP_VM=1 / SKIP_SCHEMA=1 to skip heavy stages, KEEP_VM=1 to keep VM
 
-# Database (alembic wrappers)
+# Database (Alembic wrappers)
 make db-upgrade                 # Apply migrations
 make db-downgrade               # Rollback last migration
 make db-migration               # Create new migration

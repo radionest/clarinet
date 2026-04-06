@@ -972,14 +972,22 @@ async def _handle_session(args: argparse.Namespace) -> None:
                 print(f"    {label}: {count}")
 
     elif args.session_command == "revoke-user":
-        async for session in get_async_session():
+        try:
             user_id = UUID(args.user_id)
+        except ValueError:
+            logger.error(f"Invalid user ID (expected UUID): {args.user_id}")
+            sys.exit(1)
+        async for session in get_async_session():
             count = await revoke_user_sessions(session, user_id)
             print(f"Revoked {count} sessions for user {user_id}")
 
     elif args.session_command == "list-user":
-        async for session in get_async_session():
+        try:
             user_id = UUID(args.user_id)
+        except ValueError:
+            logger.error(f"Invalid user ID (expected UUID): {args.user_id}")
+            sys.exit(1)
+        async for session in get_async_session():
             sessions = await get_user_sessions(session, user_id, active_only=False)
             if not sessions:
                 print(f"No sessions found for user {user_id}")
