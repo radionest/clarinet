@@ -15,6 +15,10 @@ import numpy as np
 from clarinet.exceptions.domain import ImageError, ImageReadError, ImageWriteError
 from clarinet.utils.logger import logger
 
+# Internal representation uses LPS (DICOM native). NIfTI uses RAS.
+# Flip X and Y to convert between them (the matrix is its own inverse).
+_LPS_TO_RAS = np.diag([-1.0, -1.0, 1.0])
+
 
 class FileType(enum.Enum):
     """Supported medical image file formats."""
@@ -159,9 +163,12 @@ class Image:
         affine = self._nifti_image.affine
         zooms = nibabel.affines.voxel_sizes(affine)
         self.spacing = tuple(zooms[:3])
-        # Normalize columns to get unit direction vectors
-        self._direction = affine[:3, :3] / zooms[:3]
-        self._origin = (float(affine[0, 3]), float(affine[1, 3]), float(affine[2, 3]))
+        # NIfTI affine is in RAS; convert to internal LPS representation
+        direction_ras = affine[:3, :3] / zooms[:3]
+        self._direction = _LPS_TO_RAS @ direction_ras
+        origin_ras = np.array([affine[0, 3], affine[1, 3], affine[2, 3]])
+        origin_lps = _LPS_TO_RAS @ origin_ras
+        self._origin = (float(origin_lps[0]), float(origin_lps[1]), float(origin_lps[2]))
         self.img = self._nifti_image.get_fdata()
         self._filetype = FileType.NIFTI
         logger.debug(f"Read NIfTI {file_path.name}: shape={self.shape}, dtype={self.img.dtype}")
@@ -298,9 +305,11 @@ class Image:
     def _save_nifti(self, path: Path) -> None:
         """Write voxel data to a NIfTI file."""
         try:
+            # Convert internal LPS to NIfTI RAS
+            direction_ras = _LPS_TO_RAS @ self._direction
             affine = np.eye(4)
-            affine[:3, :3] = self._direction * np.array(self.spacing)
-            affine[:3, 3] = self._origin
+            affine[:3, :3] = direction_ras * np.array(self.spacing)
+            affine[:3, 3] = _LPS_TO_RAS @ np.array(self._origin)
             new_image = nibabel.Nifti1Image(self.img, affine, dtype=self.img.dtype)
             nibabel.save(new_image, str(path))
         except Exception as e:

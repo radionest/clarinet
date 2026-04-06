@@ -167,7 +167,9 @@ def _extract_orientation(
         else:
             slice_dir = np.cross(row_dir, col_dir)
 
-        direction = np.column_stack([row_dir, col_dir, slice_dir])
+        # DICOM row direction = along a row (increasing col index) → numpy axis 1
+        # DICOM col direction = along a column (increasing row index) → numpy axis 0
+        direction = np.column_stack([col_dir, row_dir, slice_dir])
     except (AttributeError, TypeError, IndexError):
         pass
 
