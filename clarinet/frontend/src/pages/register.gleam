@@ -2,6 +2,7 @@
 import api/auth
 import api/models
 import api/types
+import gleam/bool
 import gleam/javascript/promise
 import gleam/option.{type Option, None, Some}
 import gleam/string
@@ -66,7 +67,9 @@ pub fn update(
     UpdatePasswordConfirm(value) ->
       #(Model(..model, password_confirm: value), effect.none(), [])
 
-    Submit ->
+    Submit -> {
+      // Guard against double-submit — same rationale as login.Submit.
+      use <- bool.lazy_guard(model.loading, fn() { #(model, effect.none(), []) })
       case validate(model) {
         Some(err) ->
           #(Model(..model, error: Some(err)), effect.none(), [])
@@ -82,6 +85,7 @@ pub fn update(
           #(Model(..model, loading: True, error: None), eff, [])
         }
       }
+    }
 
     RegisterResult(Ok(user)) ->
       #(Model(..model, loading: False), effect.none(), [

@@ -2,6 +2,7 @@
 import api/auth
 import api/models
 import api/types
+import gleam/bool
 import gleam/javascript/promise
 import gleam/option.{type Option, None, Some}
 import lustre/attribute
@@ -48,6 +49,11 @@ pub fn update(
       #(Model(..model, password: value), effect.none(), [])
 
     Submit -> {
+      // Guard against double-submit: a second Submit may be dispatched in the
+      // same synchronous tick before the DOM is patched with disabled=True on
+      // the button, causing duplicate POST /auth/login requests and session
+      // eviction via _enforce_session_limit.
+      use <- bool.lazy_guard(model.loading, fn() { #(model, effect.none(), []) })
       let eff = {
         use dispatch <- effect.from
         auth.login(model.email, model.password)

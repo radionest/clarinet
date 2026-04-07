@@ -344,14 +344,18 @@ def slicer_url() -> str:
 
 
 @pytest.fixture
-def slicer_service() -> SlicerService:
+def slicer_service(request: pytest.FixtureRequest, worker_id: str) -> SlicerService:
     """SlicerService instance with cached helper source."""
+    logger.info(f"slicer_service fixture: test={request.node.nodeid} worker={worker_id}")
     return SlicerService()
 
 
 @pytest_asyncio.fixture
-async def slicer_client(slicer_url: str) -> SlicerClient:
+async def slicer_client(
+    slicer_url: str, request: pytest.FixtureRequest, worker_id: str
+) -> SlicerClient:
     """Async SlicerClient connected to the local Slicer instance."""
+    logger.info(f"slicer_client fixture: test={request.node.nodeid} worker={worker_id}")
     async with SlicerClient(slicer_url) as client:
         yield client
 
