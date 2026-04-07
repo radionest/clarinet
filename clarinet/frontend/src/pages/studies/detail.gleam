@@ -114,7 +114,10 @@ pub fn update(
 fn handle_error(err: ApiError, fallback_msg: String) -> List(OutMsg) {
   case err {
     AuthError(_) -> [shared.Logout]
-    _ -> [shared.ShowError(fallback_msg)]
+    // SetLoading(False) is needed because the Delete flow toggles the
+    // global spinner via SetLoading(True); without it, a failed delete
+    // would leave the overlay stuck on the page.
+    _ -> [shared.SetLoading(False), shared.ShowError(fallback_msg)]
   }
 }
 
