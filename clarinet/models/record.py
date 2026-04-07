@@ -151,7 +151,7 @@ class RecordBase(BaseModel):
     status: RecordStatus = RecordStatus.pending
 
     # Foreign key fields
-    study_uid: DicomUID | None
+    study_uid: DicomUID | None = None
     series_uid: DicomUID | None = None
     record_type_name: str = Field(min_length=5, max_length=30)
     user_id: UUID | None = None
