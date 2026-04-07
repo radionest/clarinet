@@ -198,14 +198,12 @@ class DatabaseStrategy(Strategy[User, UUID]):
             logger.warning(
                 "Token validation failed: token={}..., path={}, ip={}",
                 token[:8],
-                self.request.url.path if self.request else "N/A",
-                self.request.client.host if self.request and self.request.client else "N/A",
+                request_path or "N/A",
+                request_ip or "N/A",
                 extra={
                     "token_preview": token[:8],
-                    "request_path": self.request.url.path if self.request else None,
-                    "request_ip": self.request.client.host
-                    if self.request and self.request.client
-                    else None,
+                    "request_path": request_path,
+                    "request_ip": request_ip,
                     "reason": "not_found_or_expired",
                 },
             )
