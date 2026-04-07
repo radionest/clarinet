@@ -21,12 +21,14 @@ Triggered from RecordFlow via ``do_task``::
 
 from __future__ import annotations
 
+import asyncio
 import shutil
 import tempfile
 import time
 from pathlib import Path
 
 import pydicom
+from pydicom.errors import InvalidDicomError
 
 from clarinet.exceptions.domain import PipelineStepError
 from clarinet.services.pipeline.context import TaskContext
@@ -83,8 +85,17 @@ def _organize_to_cache(tmp_dir: Path, cache_base: Path, study_uid: str) -> dict[
     """Move retrieved DICOM files into ``dicomweb_cache`` structure.
 
     Reads only ``SeriesInstanceUID`` and ``SOPInstanceUID`` (no pixel
-    data), then moves the file via ``shutil.move`` — fast when source
-    and destination share a filesystem.
+    data), then moves the file via ``shutil.move`` — ``os.rename`` on
+    the same filesystem (guaranteed because ``tmp_dir`` is created
+    inside ``cache_base``).
+
+    For each series that receives at least one new file, pre-existing
+    ``*.dcm`` files in the target directory are removed *before* the
+    first new file is moved in. This prevents the re-fetch case where
+    an expired cache entry leaves stale SOP instances that would then
+    sit alongside fresh ones under a newly-rewritten ``.cached_at``
+    marker — ``DicomWebCache._load_from_disk`` would happily serve the
+    mix as valid.
 
     Writes a ``.cached_at`` marker per series so the disk tier in
     ``DicomWebCache`` recognises the entry on the next OHIF request.
@@ -94,6 +105,7 @@ def _organize_to_cache(tmp_dir: Path, cache_base: Path, study_uid: str) -> dict[
         actually received files.
     """
     grouped: dict[str, int] = {}
+    cleaned_series: set[str] = set()
     for dcm_path in tmp_dir.rglob("*.dcm"):
         try:
             ds = pydicom.dcmread(
@@ -101,7 +113,7 @@ def _organize_to_cache(tmp_dir: Path, cache_base: Path, study_uid: str) -> dict[
                 stop_before_pixels=True,
                 specific_tags=["SeriesInstanceUID", "SOPInstanceUID"],
             )
-        except Exception as exc:
+        except (InvalidDicomError, OSError, AttributeError) as exc:
             logger.warning(f"Skipping unreadable retrieved DICOM {dcm_path}: {exc}")
             continue
 
@@ -109,6 +121,14 @@ def _organize_to_cache(tmp_dir: Path, cache_base: Path, study_uid: str) -> dict[
         sop_uid = str(ds.SOPInstanceUID)
         target_dir = cache_base / study_uid / series_uid
         target_dir.mkdir(parents=True, exist_ok=True)
+
+        # Clear stale files from a previous (expired) cache entry before
+        # writing the first new instance for this series.
+        if series_uid not in cleaned_series:
+            for stale in target_dir.glob("*.dcm"):
+                stale.unlink()
+            cleaned_series.add(series_uid)
+
         target_path = target_dir / f"{sop_uid}.dcm"
         shutil.move(str(dcm_path), str(target_path))
         grouped[series_uid] = grouped.get(series_uid, 0) + 1
@@ -118,6 +138,38 @@ def _organize_to_cache(tmp_dir: Path, cache_base: Path, study_uid: str) -> dict[
         (cache_base / study_uid / series_uid / ".cached_at").write_text(now)
 
     return grouped
+
+
+def _filter_series_to_fetch(
+    series_uids: list[str],
+    storage_path: Path,
+    cache_base: Path,
+    study_uid: str,
+    ttl_seconds: int,
+    skip_if_anon: bool,
+) -> tuple[list[str], int, int]:
+    """Partition series list into fetch / skip_cached / skip_anon.
+
+    Runs synchronous filesystem scans (``iterdir``, ``glob``) — must be
+    called via ``asyncio.to_thread`` from async code. Large deployments
+    may have thousands of patient directories, so walking them in the
+    event loop would block other worker coroutines.
+
+    Returns:
+        Tuple of ``(series_to_fetch, skipped_cached, skipped_anon)``.
+    """
+    series_to_fetch: list[str] = []
+    skipped_cached = 0
+    skipped_anon = 0
+    for series_uid in series_uids:
+        if _is_disk_cache_valid(cache_base, study_uid, series_uid, ttl_seconds):
+            skipped_cached += 1
+            continue
+        if skip_if_anon and _has_dcm_anon(storage_path, study_uid, series_uid):
+            skipped_anon += 1
+            continue
+        series_to_fetch.append(series_uid)
+    return series_to_fetch, skipped_cached, skipped_anon
 
 
 async def _prefetch_dicom_web_impl(msg: PipelineMessage, _ctx: TaskContext) -> None:
@@ -163,22 +215,22 @@ async def _prefetch_dicom_web_impl(msg: PipelineMessage, _ctx: TaskContext) -> N
         logger.info(f"prefetch_dicom_web: no series found for study {msg.study_uid}, nothing to do")
         return
 
-    # 2. Decide which series need prefetching
+    # 2. Decide which series need prefetching. Filesystem scans run off
+    # the event loop — large deployments may have thousands of patient
+    # directories to walk for the dcm_anon check.
     storage_path = Path(settings.storage_path)
     cache_base = storage_path / "dicomweb_cache"
     ttl_seconds = settings.dicomweb_cache_ttl_hours * 3600
 
-    series_to_fetch: list[str] = []
-    skipped_cached = 0
-    skipped_anon = 0
-    for series_uid in series_uids:
-        if _is_disk_cache_valid(cache_base, msg.study_uid, series_uid, ttl_seconds):
-            skipped_cached += 1
-            continue
-        if skip_if_anon and _has_dcm_anon(storage_path, msg.study_uid, series_uid):
-            skipped_anon += 1
-            continue
-        series_to_fetch.append(series_uid)
+    series_to_fetch, skipped_cached, skipped_anon = await asyncio.to_thread(
+        _filter_series_to_fetch,
+        series_uids,
+        storage_path,
+        cache_base,
+        msg.study_uid,
+        ttl_seconds,
+        skip_if_anon,
+    )
 
     if not series_to_fetch:
         logger.info(
@@ -222,6 +274,7 @@ async def _prefetch_dicom_web_impl(msg: PipelineMessage, _ctx: TaskContext) -> N
             total_completed = result.num_completed
         else:
             total_completed = 0
+            failed_series: list[str] = []
             for series_uid in series_to_fetch:
                 result = await client.get_series(
                     study_uid=msg.study_uid,
@@ -230,22 +283,24 @@ async def _prefetch_dicom_web_impl(msg: PipelineMessage, _ctx: TaskContext) -> N
                     output_dir=tmp_path,
                 )
                 if result.num_completed == 0:
-                    logger.warning(
-                        f"prefetch_dicom_web: C-GET returned 0 instances for "
-                        f"series {series_uid} (study {msg.study_uid})"
-                    )
+                    failed_series.append(series_uid)
                     continue
                 total_completed += result.num_completed
 
             if total_completed == 0:
                 raise PipelineStepError(
                     "prefetch_dicom_web",
-                    f"Per-series C-GET retrieved 0 instances for study {msg.study_uid}",
+                    f"Per-series C-GET retrieved 0 instances for study {msg.study_uid} "
+                    f"(all {len(failed_series)} series failed)",
+                )
+            if failed_series:
+                logger.error(
+                    f"prefetch_dicom_web: partial failure for study {msg.study_uid} — "
+                    f"{len(failed_series)}/{len(series_to_fetch)} series returned 0 "
+                    f"instances: {failed_series}"
                 )
 
-        from asyncio import to_thread
-
-        grouped = await to_thread(_organize_to_cache, tmp_path, cache_base, msg.study_uid)
+        grouped = await asyncio.to_thread(_organize_to_cache, tmp_path, cache_base, msg.study_uid)
 
     logger.info(
         f"prefetch_dicom_web: cached study {msg.study_uid} — "
