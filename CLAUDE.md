@@ -107,8 +107,10 @@ Avoid: direct loguru import (use `from clarinet.utils.logger import logger`), sy
 - To resume work in an existing worktree — use `EnterWorktree` with the same name. Never `cd` into worktree path directly
 - Worktrees contain only git-tracked files. `hooks/`, `settings.json`, `settings.local.json` live in `$CLAUDE_PROJECT_DIR/.claude/` and are shared — edit them by the main project path. Build artifacts (formosh) are not copied
 - `ExitWorktree(remove)` requires `discard_changes=true` if there are commits not in main (even if already pushed)
+- **For PRs in review prefer `ExitWorktree(keep)` until merge** — review cycles need the same branch back; `EnterWorktree` only creates new branches, so resuming after `remove` means manual `git worktree add` (awkward, easy to violate "no branch switch in root")
+- **`gh pr create` is gated by a pre-PR review hook** — before `gh pr create`, run `Agent(subagent_type=pr-diff-reviewer)` to satisfy the hook and surface real blockers
 - The Stop hook blocks session end in a worktree — ask the user to choose:
-  1. **Push + PR**: commit all, `git push -u origin <branch>`, `gh pr create`, then `ExitWorktree(remove, discard_changes=true)`
+  1. **Push + PR**: commit all → `git push -u origin <branch>` → `Agent(pr-diff-reviewer)` → `gh pr create` → `ExitWorktree(keep)` (remove only after PR merges)
   2. **Keep**: `ExitWorktree(keep)` — worktree stays for later
   3. **Discard**: `ExitWorktree(remove, discard_changes=true)`
 
@@ -137,5 +139,6 @@ Avoid: direct loguru import (use `from clarinet.utils.logger import logger`), sy
   - `recordflow-dsl.md` — full DSL API reference (for recordflow/ and *_flow.py)
   - `project-setup.md` — project init, settings, plan/ structure (for settings.toml and plan/)
   - `e2e-tests.md` — frontend stack, VM sub-path, selectors (for deploy/test/e2e/)
+  - `logging-pii.md` — sanitize headers (Referer/Origin) before logging, loguru `extra=` quirk (for auth_config.py and logger.py)
 
 Update the most specific file. Keep CLAUDE.md files minimal — move detailed reference to `.claude/rules/`.
