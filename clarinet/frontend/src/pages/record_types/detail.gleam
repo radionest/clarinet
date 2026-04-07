@@ -1,6 +1,6 @@
 // Record type detail page (admin only) — self-contained MVU module
 import api/models.{type Record, type RecordTypeStats}
-import utils/status
+import components/status_badge
 import gleam/dict
 import gleam/int
 import gleam/list
@@ -26,8 +26,14 @@ pub type Msg {
 
 // --- Init ---
 
-pub fn init(name: String, _shared: Shared) -> #(Model, Effect(Msg), List(OutMsg)) {
-  #(Model(name: name), effect.none(), [shared.ReloadRecordTypeStats, shared.ReloadRecords])
+pub fn init(
+  name: String,
+  _shared: Shared,
+) -> #(Model, Effect(Msg), List(OutMsg)) {
+  #(Model(name: name), effect.none(), [
+    shared.ReloadRecordTypeStats,
+    shared.ReloadRecords,
+  ])
 }
 
 // --- Update ---
@@ -49,10 +55,7 @@ pub fn view(model: Model, shared: Shared) -> Element(Msg) {
   }
 }
 
-fn find_stats(
-  shared: Shared,
-  name: String,
-) -> option.Option(RecordTypeStats) {
+fn find_stats(shared: Shared, name: String) -> option.Option(RecordTypeStats) {
   case shared.cache.record_type_stats {
     Some(stats) ->
       list.find(stats, fn(s) { s.name == name }) |> option.from_result
@@ -183,12 +186,14 @@ fn record_row(record: Record) -> Element(Msg) {
   html.tr([], [
     html.td([], [html.text(record_id_str)]),
     html.td([], [html.text(record.patient_id)]),
-    html.td([], [html.text(status.display_text(record.status))]),
+    html.td([], [status_badge.render(record.status)]),
     html.td([], [html.text(option.unwrap(record.user_id, "-"))]),
     html.td([], [
       html.a(
         [
-          attribute.href(router.route_to_path(router.RecordDetail(record_id_str))),
+          attribute.href(
+            router.route_to_path(router.RecordDetail(record_id_str)),
+          ),
           attribute.class("btn btn-sm btn-outline"),
         ],
         [html.text("View")],

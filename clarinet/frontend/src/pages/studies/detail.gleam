@@ -2,11 +2,12 @@
 import api/models.{type Patient, type Record, type Series, type Study}
 import api/studies
 import api/types.{type ApiError, AuthError}
+import components/status_badge
 import gleam/dict
 import gleam/int
+import gleam/javascript/promise
 import gleam/list
 import gleam/option.{type Option, None, Some}
-import gleam/javascript/promise
 import lustre/attribute
 import lustre/effect.{type Effect}
 import lustre/element.{type Element}
@@ -15,7 +16,6 @@ import lustre/event
 import router
 import shared.{type OutMsg, type Shared}
 import utils/load_status.{type LoadStatus}
-import utils/status
 import utils/viewer
 
 // --- Model ---
@@ -37,7 +37,10 @@ pub type Msg {
 
 // --- Init ---
 
-pub fn init(study_uid: String, _shared: Shared) -> #(Model, Effect(Msg), List(OutMsg)) {
+pub fn init(
+  study_uid: String,
+  _shared: Shared,
+) -> #(Model, Effect(Msg), List(OutMsg)) {
   let model = Model(study_uid: study_uid, load_status: load_status.Loading)
   #(model, load_study_effect(study_uid), [shared.ReloadRecords])
 }
@@ -57,26 +60,23 @@ pub fn update(
   _shared: Shared,
 ) -> #(Model, Effect(Msg), List(OutMsg)) {
   case msg {
-    StudyLoaded(Ok(study)) ->
-      #(
-        Model(..model, load_status: load_status.Loaded),
-        effect.none(),
-        [shared.CacheStudy(study)],
-      )
+    StudyLoaded(Ok(study)) -> #(
+      Model(..model, load_status: load_status.Loaded),
+      effect.none(),
+      [shared.CacheStudy(study)],
+    )
 
-    StudyLoaded(Error(err)) ->
-      #(
-        Model(..model, load_status: load_status.Failed("Failed to load study")),
-        effect.none(),
-        handle_error(err, "Failed to load study"),
-      )
+    StudyLoaded(Error(err)) -> #(
+      Model(..model, load_status: load_status.Failed("Failed to load study")),
+      effect.none(),
+      handle_error(err, "Failed to load study"),
+    )
 
-    RetryLoad ->
-      #(
-        Model(..model, load_status: load_status.Loading),
-        load_study_effect(model.study_uid),
-        [],
-      )
+    RetryLoad -> #(
+      Model(..model, load_status: load_status.Loading),
+      load_study_effect(model.study_uid),
+      [],
+    )
 
     Delete -> {
       let eff = {
@@ -88,24 +88,24 @@ pub fn update(
       #(model, eff, [shared.SetLoading(True)])
     }
 
-    DeleteResult(Ok(_)) ->
-      #(model, effect.none(), [
-        shared.SetLoading(False),
-        shared.ReloadStudies,
-        shared.ShowSuccess("Study deleted successfully"),
-        shared.Navigate(router.Studies),
-      ])
+    DeleteResult(Ok(_)) -> #(model, effect.none(), [
+      shared.SetLoading(False),
+      shared.ReloadStudies,
+      shared.ShowSuccess("Study deleted successfully"),
+      shared.Navigate(router.Studies),
+    ])
 
-    DeleteResult(Error(err)) ->
-      #(model, effect.none(), handle_error(err, "Failed to delete study"))
+    DeleteResult(Error(err)) -> #(
+      model,
+      effect.none(),
+      handle_error(err, "Failed to delete study"),
+    )
 
-    NavigateBack ->
-      #(model, effect.none(), [shared.Navigate(router.Studies)])
+    NavigateBack -> #(model, effect.none(), [shared.Navigate(router.Studies)])
 
-    RequestDelete ->
-      #(model, effect.none(), [
-        shared.OpenDeleteConfirm("study", model.study_uid),
-      ])
+    RequestDelete -> #(model, effect.none(), [
+      shared.OpenDeleteConfirm("study", model.study_uid),
+    ])
   }
 }
 
@@ -324,11 +324,13 @@ fn record_row(record: Record) -> Element(Msg) {
   html.tr([], [
     html.td([], [html.text(record_id_str)]),
     html.td([], [html.text(type_label)]),
-    html.td([], [html.text(status.display_text(record.status))]),
+    html.td([], [status_badge.render(record.status)]),
     html.td([], [
       html.a(
         [
-          attribute.href(router.route_to_path(router.RecordDetail(record_id_str))),
+          attribute.href(
+            router.route_to_path(router.RecordDetail(record_id_str)),
+          ),
           attribute.class("btn btn-sm btn-outline"),
         ],
         [html.text("View")],

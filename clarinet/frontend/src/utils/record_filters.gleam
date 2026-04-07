@@ -1,0 +1,64 @@
+// Shared filter helpers for Record lists
+import api/models.{type Record}
+import gleam/dict.{type Dict}
+import gleam/list
+import gleam/string
+import utils/status
+
+/// Filter records by an active filter dict (keys: "status", "record_type", "patient").
+/// Missing keys mean "no filter on that dimension".
+pub fn apply_filters(
+  records: List(Record),
+  filters: Dict(String, String),
+) -> List(Record) {
+  list.filter(records, fn(record) {
+    let status_ok = case dict.get(filters, "status") {
+      Ok(status_filter) ->
+        status.to_backend_string(record.status) == status_filter
+      Error(_) -> True
+    }
+
+    let type_ok = case dict.get(filters, "record_type") {
+      Ok(type_filter) -> record.record_type_name == type_filter
+      Error(_) -> True
+    }
+
+    let patient_ok = case dict.get(filters, "patient") {
+      Ok(patient_filter) -> record.patient_id == patient_filter
+      Error(_) -> True
+    }
+
+    status_ok && type_ok && patient_ok
+  })
+}
+
+/// Static dropdown options for the status filter.
+pub fn status_options() -> List(#(String, String)) {
+  [
+    #("", "All Statuses"),
+    #("blocked", "Blocked"),
+    #("pending", "Pending"),
+    #("inwork", "In Progress"),
+    #("finished", "Completed"),
+    #("failed", "Failed"),
+    #("paused", "Paused"),
+  ]
+}
+
+/// Build dropdown options for the record type filter from the given records.
+pub fn type_options(records: List(Record)) -> List(#(String, String)) {
+  let types =
+    list.map(records, fn(r) { r.record_type_name })
+    |> list.unique()
+    |> list.sort(fn(a, b) { string.compare(a, b) })
+  [#("", "All Types"), ..list.map(types, fn(t) { #(t, t) })]
+}
+
+/// Build dropdown options for the patient filter from the given records.
+pub fn patient_options(records: List(Record)) -> List(#(String, String)) {
+  let patients =
+    list.map(records, fn(r) { r.patient_id })
+    |> list.unique()
+    |> list.sort(fn(a, b) { string.compare(a, b) })
+  [#("", "All Patients"), ..list.map(patients, fn(p) { #(p, p) })]
+}

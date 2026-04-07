@@ -6,12 +6,14 @@ import api/models.{
 }
 import api/patients
 import api/types.{type ApiError, AuthError}
-import gleam/dict
+import components/forms/base
+import components/status_badge
+import gleam/dict.{type Dict}
 import gleam/int
+import gleam/javascript/promise
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/string
-import gleam/javascript/promise
 import lustre/attribute
 import lustre/effect.{type Effect}
 import lustre/element.{type Element}
@@ -20,7 +22,7 @@ import lustre/event
 import router
 import shared.{type OutMsg, type Shared}
 import utils/load_status.{type LoadStatus}
-import utils/status
+import utils/record_filters
 
 // --- Model ---
 
@@ -31,6 +33,7 @@ pub type Model {
     pacs_studies: List(PacsStudyWithSeries),
     pacs_loading: Bool,
     pacs_importing: Option(String),
+    active_filters: Dict(String, String),
   )
 }
 
@@ -51,6 +54,10 @@ pub type Msg {
   ImportPacs(study_uid: String)
   PacsImported(Result(Study, ApiError))
   ClearPacs
+  // Records filter
+  AddFilter(key: String, value: String)
+  RemoveFilter(key: String)
+  ClearFilters
   // Navigation
   NavigateBack
   RequestDelete
@@ -58,7 +65,10 @@ pub type Msg {
 
 // --- Init ---
 
-pub fn init(patient_id: String, _shared: Shared) -> #(Model, Effect(Msg), List(OutMsg)) {
+pub fn init(
+  patient_id: String,
+  _shared: Shared,
+) -> #(Model, Effect(Msg), List(OutMsg)) {
   let model =
     Model(
       patient_id: patient_id,
@@ -66,6 +76,7 @@ pub fn init(patient_id: String, _shared: Shared) -> #(Model, Effect(Msg), List(O
       pacs_studies: [],
       pacs_loading: False,
       pacs_importing: None,
+      active_filters: dict.new(),
     )
   #(model, load_patient_effect(patient_id), [shared.ReloadRecords])
 }
@@ -85,29 +96,26 @@ pub fn update(
   _shared: Shared,
 ) -> #(Model, Effect(Msg), List(OutMsg)) {
   case msg {
-    PatientLoaded(Ok(patient)) ->
-      #(
-        Model(..model, patient_load_status: load_status.Loaded),
-        effect.none(),
-        [shared.CachePatient(patient)],
-      )
+    PatientLoaded(Ok(patient)) -> #(
+      Model(..model, patient_load_status: load_status.Loaded),
+      effect.none(),
+      [shared.CachePatient(patient)],
+    )
 
-    PatientLoaded(Error(err)) ->
-      #(
-        Model(
-          ..model,
-          patient_load_status: load_status.Failed("Failed to load patient"),
-        ),
-        effect.none(),
-        handle_error(err, "Failed to load patient"),
-      )
+    PatientLoaded(Error(err)) -> #(
+      Model(
+        ..model,
+        patient_load_status: load_status.Failed("Failed to load patient"),
+      ),
+      effect.none(),
+      handle_error(err, "Failed to load patient"),
+    )
 
-    RetryLoad ->
-      #(
-        Model(..model, patient_load_status: load_status.Loading),
-        load_patient_effect(model.patient_id),
-        [],
-      )
+    RetryLoad -> #(
+      Model(..model, patient_load_status: load_status.Loading),
+      load_patient_effect(model.patient_id),
+      [],
+    )
 
     Anonymize -> {
       let eff = {
@@ -119,15 +127,17 @@ pub fn update(
       #(model, eff, [shared.SetLoading(True)])
     }
 
-    AnonymizeResult(Ok(patient)) ->
-      #(model, effect.none(), [
-        shared.SetLoading(False),
-        shared.CachePatient(patient),
-        shared.ShowSuccess("Patient anonymized successfully"),
-      ])
+    AnonymizeResult(Ok(patient)) -> #(model, effect.none(), [
+      shared.SetLoading(False),
+      shared.CachePatient(patient),
+      shared.ShowSuccess("Patient anonymized successfully"),
+    ])
 
-    AnonymizeResult(Error(err)) ->
-      #(model, effect.none(), handle_error(err, "Failed to anonymize patient"))
+    AnonymizeResult(Error(err)) -> #(
+      model,
+      effect.none(),
+      handle_error(err, "Failed to anonymize patient"),
+    )
 
     Delete -> {
       let eff = {
@@ -139,16 +149,18 @@ pub fn update(
       #(model, eff, [shared.SetLoading(True)])
     }
 
-    DeleteResult(Ok(_)) ->
-      #(model, effect.none(), [
-        shared.SetLoading(False),
-        shared.ReloadPatients,
-        shared.ShowSuccess("Patient deleted successfully"),
-        shared.Navigate(router.Patients),
-      ])
+    DeleteResult(Ok(_)) -> #(model, effect.none(), [
+      shared.SetLoading(False),
+      shared.ReloadPatients,
+      shared.ShowSuccess("Patient deleted successfully"),
+      shared.Navigate(router.Patients),
+    ])
 
-    DeleteResult(Error(err)) ->
-      #(model, effect.none(), handle_error(err, "Failed to delete patient"))
+    DeleteResult(Error(err)) -> #(
+      model,
+      effect.none(),
+      handle_error(err, "Failed to delete patient"),
+    )
 
     SearchPacs -> {
       let eff = {
@@ -160,15 +172,17 @@ pub fn update(
       #(Model(..model, pacs_loading: True), eff, [])
     }
 
-    PacsLoaded(Ok(studies)) ->
-      #(Model(..model, pacs_studies: studies, pacs_loading: False), effect.none(), [])
+    PacsLoaded(Ok(studies)) -> #(
+      Model(..model, pacs_studies: studies, pacs_loading: False),
+      effect.none(),
+      [],
+    )
 
-    PacsLoaded(Error(err)) ->
-      #(
-        Model(..model, pacs_loading: False),
-        effect.none(),
-        handle_error(err, "Failed to search PACS"),
-      )
+    PacsLoaded(Error(err)) -> #(
+      Model(..model, pacs_loading: False),
+      effect.none(),
+      handle_error(err, "Failed to search PACS"),
+    )
 
     ImportPacs(study_uid) -> {
       let eff = {
@@ -199,27 +213,44 @@ pub fn update(
       )
     }
 
-    PacsImported(Error(err)) ->
-      #(
-        Model(..model, pacs_importing: None),
-        effect.none(),
-        handle_error(err, "Failed to import study from PACS"),
-      )
+    PacsImported(Error(err)) -> #(
+      Model(..model, pacs_importing: None),
+      effect.none(),
+      handle_error(err, "Failed to import study from PACS"),
+    )
 
-    ClearPacs ->
-      #(
-        Model(..model, pacs_studies: [], pacs_loading: False, pacs_importing: None),
-        effect.none(),
-        [],
-      )
+    ClearPacs -> #(
+      Model(
+        ..model,
+        pacs_studies: [],
+        pacs_loading: False,
+        pacs_importing: None,
+      ),
+      effect.none(),
+      [],
+    )
 
-    NavigateBack ->
-      #(model, effect.none(), [shared.Navigate(router.Patients)])
+    AddFilter(key, value) -> {
+      let filters = dict.insert(model.active_filters, key, value)
+      #(Model(..model, active_filters: filters), effect.none(), [])
+    }
 
-    RequestDelete ->
-      #(model, effect.none(), [
-        shared.OpenDeleteConfirm("patient", model.patient_id),
-      ])
+    RemoveFilter(key) -> {
+      let filters = dict.delete(model.active_filters, key)
+      #(Model(..model, active_filters: filters), effect.none(), [])
+    }
+
+    ClearFilters -> #(
+      Model(..model, active_filters: dict.new()),
+      effect.none(),
+      [],
+    )
+
+    NavigateBack -> #(model, effect.none(), [shared.Navigate(router.Patients)])
+
+    RequestDelete -> #(model, effect.none(), [
+      shared.OpenDeleteConfirm("patient", model.patient_id),
+    ])
   }
 }
 
@@ -279,7 +310,7 @@ fn render_detail(model: Model, shared: Shared, patient: Patient) -> Element(Msg)
     patient_info_card(patient),
     studies_section(patient.studies),
     pacs_section(model, patient),
-    records_section(patient_records),
+    records_section(model, patient_records),
   ])
 }
 
@@ -381,7 +412,9 @@ fn study_row(study: Study) -> Element(Msg) {
     html.td([], [
       html.a(
         [
-          attribute.href(router.route_to_path(router.StudyDetail(study.study_uid))),
+          attribute.href(
+            router.route_to_path(router.StudyDetail(study.study_uid)),
+          ),
           attribute.class("btn btn-sm btn-outline"),
         ],
         [html.text("View")],
@@ -390,7 +423,9 @@ fn study_row(study: Study) -> Element(Msg) {
   ])
 }
 
-fn records_section(records: List(Record)) -> Element(Msg) {
+fn records_section(model: Model, records: List(Record)) -> Element(Msg) {
+  let filtered = record_filters.apply_filters(records, model.active_filters)
+
   html.div([attribute.class("card")], [
     html.h3([], [html.text("Records")]),
     case records {
@@ -399,19 +434,80 @@ fn records_section(records: List(Record)) -> Element(Msg) {
           html.text("No records found for this patient."),
         ])
       _ ->
-        html.div([attribute.class("table-responsive")], [
-          html.table([attribute.class("table")], [
-            html.thead([], [
-              html.tr([], [
-                html.th([], [html.text("ID")]),
-                html.th([], [html.text("Type")]),
-                html.th([], [html.text("Status")]),
-                html.th([], [html.text("Actions")]),
-              ]),
-            ]),
-            html.tbody([], list.map(records, record_row)),
-          ]),
+        html.div([], [
+          records_filter_bar(model, records),
+          case filtered {
+            [] ->
+              html.p([attribute.class("text-muted")], [
+                html.text("No records match the current filters."),
+              ])
+            _ ->
+              html.div([attribute.class("table-responsive")], [
+                html.table([attribute.class("table")], [
+                  html.thead([], [
+                    html.tr([], [
+                      html.th([], [html.text("ID")]),
+                      html.th([], [html.text("Type")]),
+                      html.th([], [html.text("Status")]),
+                      html.th([], [html.text("Actions")]),
+                    ]),
+                  ]),
+                  html.tbody([], list.map(filtered, record_row)),
+                ]),
+              ])
+          },
         ])
+    },
+  ])
+}
+
+fn records_filter_bar(model: Model, all_records: List(Record)) -> Element(Msg) {
+  let status_value =
+    dict.get(model.active_filters, "status")
+    |> option.from_result()
+    |> option.unwrap("")
+
+  let type_value =
+    dict.get(model.active_filters, "record_type")
+    |> option.from_result()
+    |> option.unwrap("")
+
+  let has_filters = !dict.is_empty(model.active_filters)
+
+  html.div([attribute.class("filter-bar")], [
+    base.select(
+      name: "filter-status",
+      value: status_value,
+      options: record_filters.status_options(),
+      on_change: fn(val) {
+        case val {
+          "" -> RemoveFilter("status")
+          _ -> AddFilter("status", val)
+        }
+      },
+    ),
+    base.select(
+      name: "filter-record-type",
+      value: type_value,
+      options: record_filters.type_options(all_records),
+      on_change: fn(val) {
+        case val {
+          "" -> RemoveFilter("record_type")
+          _ -> AddFilter("record_type", val)
+        }
+      },
+    ),
+    case has_filters {
+      True ->
+        html.button(
+          [
+            attribute.type_("button"),
+            attribute.class("btn btn-sm btn-outline"),
+            event.on_click(ClearFilters),
+          ],
+          [html.text("Clear Filters")],
+        )
+      False -> html.text("")
     },
   ])
 }
@@ -428,11 +524,13 @@ fn record_row(record: Record) -> Element(Msg) {
   html.tr([], [
     html.td([], [html.text(record_id_str)]),
     html.td([], [html.text(type_label)]),
-    html.td([], [html.text(status.display_text(record.status))]),
+    html.td([], [status_badge.render(record.status)]),
     html.td([], [
       html.a(
         [
-          attribute.href(router.route_to_path(router.RecordDetail(record_id_str))),
+          attribute.href(
+            router.route_to_path(router.RecordDetail(record_id_str)),
+          ),
           attribute.class("btn btn-sm btn-outline"),
         ],
         [html.text("View")],
@@ -559,17 +657,18 @@ fn pacs_study_rows(
       let series_details_row =
         html.tr([attribute.class("pacs-series-details-row")], [
           html.td([attribute.attribute("colspan", "5")], [
-            element.element("details", [attribute.class("pacs-series-details")], [
-              element.element("summary", [], [
-                html.text("Show series"),
-              ]),
-              html.table([attribute.class("series-table")], [
-                html.tbody(
-                  [],
-                  list.map(series, fn(s) { pacs_series_row(s) }),
-                ),
-              ]),
-            ]),
+            element.element(
+              "details",
+              [attribute.class("pacs-series-details")],
+              [
+                element.element("summary", [], [
+                  html.text("Show series"),
+                ]),
+                html.table([attribute.class("series-table")], [
+                  html.tbody([], list.map(series, fn(s) { pacs_series_row(s) })),
+                ]),
+              ],
+            ),
           ]),
         ])
       [study_row, series_details_row]

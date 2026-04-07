@@ -3,12 +3,12 @@ import api/models.{type Record}
 import api/records
 import api/types.{type ApiError, AuthError}
 import components/forms/base
+import components/status_badge
 import gleam/dict.{type Dict}
 import gleam/int
+import gleam/javascript/promise
 import gleam/list
 import gleam/option.{None, Some}
-import gleam/string
-import gleam/javascript/promise
 import lustre/attribute
 import lustre/effect.{type Effect}
 import lustre/element.{type Element}
@@ -17,7 +17,7 @@ import lustre/event
 import router
 import shared.{type OutMsg, type Shared}
 import utils/permissions
-import utils/status
+import utils/record_filters
 
 // --- Model ---
 
@@ -60,11 +60,11 @@ pub fn update(
       #(Model(active_filters: filters), effect.none(), [])
     }
 
-    ClearFilters ->
-      #(Model(active_filters: dict.new()), effect.none(), [])
+    ClearFilters -> #(Model(active_filters: dict.new()), effect.none(), [])
 
-    RequestFail(record_id) ->
-      #(model, effect.none(), [shared.OpenFailPrompt(record_id)])
+    RequestFail(record_id) -> #(model, effect.none(), [
+      shared.OpenFailPrompt(record_id),
+    ])
 
     Restart(record_id) -> {
       let eff = {
@@ -76,16 +76,18 @@ pub fn update(
       #(model, eff, [shared.SetLoading(True)])
     }
 
-    RestartResult(Ok(record)) ->
-      #(model, effect.none(), [
-        shared.SetLoading(False),
-        shared.CacheRecord(record),
-        shared.ShowSuccess("Record restarted successfully"),
-        shared.ReloadRecords,
-      ])
+    RestartResult(Ok(record)) -> #(model, effect.none(), [
+      shared.SetLoading(False),
+      shared.CacheRecord(record),
+      shared.ShowSuccess("Record restarted successfully"),
+      shared.ReloadRecords,
+    ])
 
-    RestartResult(Error(err)) ->
-      #(model, effect.none(), handle_error(err, "Failed to restart record"))
+    RestartResult(Error(err)) -> #(
+      model,
+      effect.none(),
+      handle_error(err, "Failed to restart record"),
+    )
   }
 }
 
@@ -139,31 +141,9 @@ fn filter_bar(model: Model, all_records: List(Record)) -> Element(Msg) {
     |> option.from_result()
     |> option.unwrap("")
 
-  let status_options = [
-    #("", "All Statuses"),
-    #("blocked", "Blocked"),
-    #("pending", "Pending"),
-    #("inwork", "In Progress"),
-    #("finished", "Completed"),
-    #("failed", "Failed"),
-    #("paused", "Paused"),
-  ]
-
-  let type_options = {
-    let types =
-      list.map(all_records, fn(r) { r.record_type_name })
-      |> list.unique()
-      |> list.sort(fn(a, b) { string.compare(a, b) })
-    [#("", "All Types"), ..list.map(types, fn(t) { #(t, t) })]
-  }
-
-  let patient_options = {
-    let patients =
-      list.map(all_records, fn(r) { r.patient_id })
-      |> list.unique()
-      |> list.sort(fn(a, b) { string.compare(a, b) })
-    [#("", "All Patients"), ..list.map(patients, fn(p) { #(p, p) })]
-  }
+  let status_options = record_filters.status_options()
+  let type_options = record_filters.type_options(all_records)
+  let patient_options = record_filters.patient_options(all_records)
 
   let has_filters = !dict.is_empty(model.active_filters)
 
@@ -216,37 +196,13 @@ fn filter_bar(model: Model, all_records: List(Record)) -> Element(Msg) {
   ])
 }
 
-fn apply_filters(
-  records: List(Record),
-  filters: Dict(String, String),
-) -> List(Record) {
-  list.filter(records, fn(record) {
-    let status_ok = case dict.get(filters, "status") {
-      Ok(status_filter) -> status.to_backend_string(record.status) == status_filter
-      Error(_) -> True
-    }
-
-    let type_ok = case dict.get(filters, "record_type") {
-      Ok(type_filter) -> record.record_type_name == type_filter
-      Error(_) -> True
-    }
-
-    let patient_ok = case dict.get(filters, "patient") {
-      Ok(patient_filter) -> record.patient_id == patient_filter
-      Error(_) -> True
-    }
-
-    status_ok && type_ok && patient_ok
-  })
-}
-
 fn records_table(
   model: Model,
   shared: Shared,
   all_records: List(Record),
 ) -> Element(Msg) {
   let records =
-    apply_filters(all_records, model.active_filters)
+    record_filters.apply_filters(all_records, model.active_filters)
     |> list.sort(fn(a, b) {
       int.compare(option.unwrap(a.id, 0), option.unwrap(b.id, 0))
     })
@@ -286,15 +242,6 @@ fn record_row(shared: Shared, record: Record) -> Element(Msg) {
     None -> record.record_type_name
   }
 
-  let #(status_class, status_text) = case record.status {
-    types.Blocked -> #("badge-blocked", "Blocked")
-    types.Pending -> #("badge-pending", "Pending")
-    types.InWork -> #("badge-progress", "In Progress")
-    types.Finished -> #("badge-success", "Completed")
-    types.Failed -> #("badge-danger", "Failed")
-    types.Paused -> #("badge-paused", "Paused")
-  }
-
   let can_fill = permissions.can_fill_record(record, shared.user)
   let can_edit = permissions.can_edit_record(record, shared.user)
   let can_fail = permissions.can_fail_record(record, shared.user)
@@ -303,11 +250,7 @@ fn record_row(shared: Shared, record: Record) -> Element(Msg) {
   html.tr([], [
     html.td([], [html.text(record_id_str)]),
     html.td([], [html.text(type_label)]),
-    html.td([], [
-      html.span([attribute.class("badge " <> status_class)], [
-        html.text(status_text),
-      ]),
-    ]),
+    html.td([], [status_badge.render(record.status)]),
     html.td([], [html.text(record.patient_id)]),
     html.td([], [html.text(format_study_series_summary(record))]),
     html.td([], [
@@ -325,7 +268,9 @@ fn record_row(shared: Shared, record: Record) -> Element(Msg) {
         True, _ ->
           html.a(
             [
-              attribute.href(router.route_to_path(router.RecordDetail(record_id_str))),
+              attribute.href(
+                router.route_to_path(router.RecordDetail(record_id_str)),
+              ),
               attribute.class("btn btn-sm btn-primary"),
             ],
             [html.text("Fill")],
@@ -333,7 +278,9 @@ fn record_row(shared: Shared, record: Record) -> Element(Msg) {
         _, True ->
           html.a(
             [
-              attribute.href(router.route_to_path(router.RecordDetail(record_id_str))),
+              attribute.href(
+                router.route_to_path(router.RecordDetail(record_id_str)),
+              ),
               attribute.class("btn btn-sm btn-secondary"),
             ],
             [html.text("Edit")],
@@ -341,7 +288,9 @@ fn record_row(shared: Shared, record: Record) -> Element(Msg) {
         _, _ ->
           html.a(
             [
-              attribute.href(router.route_to_path(router.RecordDetail(record_id_str))),
+              attribute.href(
+                router.route_to_path(router.RecordDetail(record_id_str)),
+              ),
               attribute.class("btn btn-sm btn-outline"),
             ],
             [html.text("View")],
