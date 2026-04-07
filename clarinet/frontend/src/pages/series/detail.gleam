@@ -2,11 +2,12 @@
 import api/models.{type Record, type Series}
 import api/series
 import api/types.{type ApiError, AuthError}
+import components/status_badge
 import gleam/dict
 import gleam/int
+import gleam/javascript/promise
 import gleam/list
 import gleam/option.{type Option, None, Some}
-import gleam/javascript/promise
 import lustre/attribute
 import lustre/effect.{type Effect}
 import lustre/element.{type Element}
@@ -15,7 +16,6 @@ import lustre/event
 import router
 import shared.{type OutMsg, type Shared}
 import utils/load_status.{type LoadStatus}
-import utils/status
 import utils/viewer
 
 // --- Model ---
@@ -34,7 +34,10 @@ pub type Msg {
 
 // --- Init ---
 
-pub fn init(series_uid: String, _shared: Shared) -> #(Model, Effect(Msg), List(OutMsg)) {
+pub fn init(
+  series_uid: String,
+  _shared: Shared,
+) -> #(Model, Effect(Msg), List(OutMsg)) {
   let model = Model(series_uid: series_uid, load_status: load_status.Loading)
   #(model, load_series_effect(series_uid), [])
 }
@@ -54,29 +57,27 @@ pub fn update(
   _shared: Shared,
 ) -> #(Model, Effect(Msg), List(OutMsg)) {
   case msg {
-    SeriesLoaded(Ok(s)) ->
-      #(
-        Model(..model, load_status: load_status.Loaded),
-        effect.none(),
-        [shared.CacheSeries(s)],
-      )
+    SeriesLoaded(Ok(s)) -> #(
+      Model(..model, load_status: load_status.Loaded),
+      effect.none(),
+      [shared.CacheSeries(s)],
+    )
 
-    SeriesLoaded(Error(err)) ->
-      #(
-        Model(..model, load_status: load_status.Failed("Failed to load series")),
-        effect.none(),
-        handle_error(err, "Failed to load series"),
-      )
+    SeriesLoaded(Error(err)) -> #(
+      Model(..model, load_status: load_status.Failed("Failed to load series")),
+      effect.none(),
+      handle_error(err, "Failed to load series"),
+    )
 
-    RetryLoad ->
-      #(
-        Model(..model, load_status: load_status.Loading),
-        load_series_effect(model.series_uid),
-        [],
-      )
+    RetryLoad -> #(
+      Model(..model, load_status: load_status.Loading),
+      load_series_effect(model.series_uid),
+      [],
+    )
 
-    NavigateBack(study_uid) ->
-      #(model, effect.none(), [shared.Navigate(router.StudyDetail(study_uid))])
+    NavigateBack(study_uid) -> #(model, effect.none(), [
+      shared.Navigate(router.StudyDetail(study_uid)),
+    ])
   }
 }
 
@@ -232,12 +233,14 @@ fn record_row(record: Record) -> Element(Msg) {
   html.tr([], [
     html.td([], [html.text(record_id_str)]),
     html.td([], [html.text(record.record_type_name)]),
-    html.td([], [html.text(status.display_text(record.status))]),
+    html.td([], [status_badge.render(record.status)]),
     html.td([], [html.text(record.patient_id)]),
     html.td([], [
       html.a(
         [
-          attribute.href(router.route_to_path(router.RecordDetail(record_id_str))),
+          attribute.href(
+            router.route_to_path(router.RecordDetail(record_id_str)),
+          ),
           attribute.class("btn btn-sm btn-outline"),
         ],
         [html.text("View")],
