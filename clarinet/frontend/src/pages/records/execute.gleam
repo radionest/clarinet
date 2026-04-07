@@ -20,6 +20,7 @@ import lustre/event
 import plinth/javascript/global
 import router
 import shared.{type OutMsg, type Shared}
+import utils/load_status.{type LoadStatus}
 import utils/logger
 import utils/permissions
 import utils/viewer
@@ -29,6 +30,7 @@ import utils/viewer
 pub type Model {
   Model(
     record_id: String,
+    record_load_status: LoadStatus,
     slicer_loading: Bool,
     slicer_available: Option(Bool),
     slicer_ping_timer: Option(global.TimerID),
@@ -39,6 +41,10 @@ pub type Model {
 // --- Msg ---
 
 pub type Msg {
+  // Record load tracker (parallel to shared.ReloadRecord which also drives
+  // cache + auto-assign in cache.gleam — see init for details)
+  RecordLoadProbe(Result(Record, ApiError))
+  RetryLoad
   // Formosh form events
   FormSubmitSuccess
   FormSubmitError(String)
@@ -73,6 +79,7 @@ pub fn init(record_id: String, _shared: Shared) -> #(Model, Effect(Msg), List(Ou
   let model =
     Model(
       record_id: record_id,
+      record_load_status: load_status.Loading,
       slicer_loading: False,
       slicer_available: None,
       slicer_ping_timer: None,
@@ -87,8 +94,25 @@ pub fn init(record_id: String, _shared: Shared) -> #(Model, Effect(Msg), List(Ou
     |> promise.tap(fn(result) { dispatch(SchemaLoaded(result)) })
     Nil
   }
+  // shared.ReloadRecord drives cache + auto-assign (cache.gleam owns that
+  // logic). We additionally fire a local probe so the page can distinguish
+  // a failed fetch from a still-loading state without leaking the toast as
+  // the only failure signal. Browser HTTP cache typically dedupes the two
+  // GETs.
+  let probe_eff = load_record_probe_effect(record_id)
 
-  #(model, effect.batch([ping_eff, schema_eff]), [shared.ReloadRecord(record_id)])
+  #(
+    model,
+    effect.batch([ping_eff, schema_eff, probe_eff]),
+    [shared.ReloadRecord(record_id)],
+  )
+}
+
+fn load_record_probe_effect(record_id: String) -> Effect(Msg) {
+  use dispatch <- effect.from
+  records.get_record(record_id)
+  |> promise.tap(fn(result) { dispatch(RecordLoadProbe(result)) })
+  Nil
 }
 
 /// Cleanup slicer ping timer — called from main.gleam on route change
@@ -108,6 +132,31 @@ pub fn update(
   shared: Shared,
 ) -> #(Model, Effect(Msg), List(OutMsg)) {
   case msg {
+    // Record load probe (parallel to cache.gleam ReloadRecord flow)
+    RecordLoadProbe(Ok(_)) ->
+      #(
+        Model(..model, record_load_status: load_status.Loaded),
+        effect.none(),
+        [],
+      )
+
+    RecordLoadProbe(Error(_)) ->
+      #(
+        Model(
+          ..model,
+          record_load_status: load_status.Failed("Failed to load record"),
+        ),
+        effect.none(),
+        [],
+      )
+
+    RetryLoad ->
+      #(
+        Model(..model, record_load_status: load_status.Loading),
+        load_record_probe_effect(model.record_id),
+        [shared.ReloadRecord(model.record_id)],
+      )
+
     // Schema hydration
     SchemaLoaded(Ok(schema_json)) ->
       #(Model(..model, hydrated_schema: Some(schema_json)), effect.none(), [])
@@ -372,10 +421,17 @@ fn start_slicer_ping_timer() -> Effect(Msg) {
 // --- View ---
 
 pub fn view(model: Model, shared: Shared) -> Element(Msg) {
-  case dict.get(shared.cache.records, model.record_id) {
-    Ok(record) -> render_record_execution(model, record, shared)
-    Error(_) -> loading_view(model.record_id)
-  }
+  load_status.render(
+    model.record_load_status,
+    fn() { loading_view(model.record_id) },
+    fn() {
+      case dict.get(shared.cache.records, model.record_id) {
+        Ok(record) -> render_record_execution(model, record, shared)
+        Error(_) -> loading_view(model.record_id)
+      }
+    },
+    fn(msg) { retry_error_view(msg) },
+  )
 }
 
 fn render_record_execution(
@@ -761,5 +817,15 @@ fn loading_view(record_id: String) -> Element(Msg) {
 fn error_view(message: String) -> Element(Msg) {
   html.div([attribute.class("error-container")], [
     html.p([attribute.class("error-message")], [html.text(message)]),
+  ])
+}
+
+fn retry_error_view(message: String) -> Element(Msg) {
+  html.div([attribute.class("error-container")], [
+    html.p([attribute.class("error-message")], [html.text(message)]),
+    html.button(
+      [attribute.class("btn btn-primary"), event.on_click(RetryLoad)],
+      [html.text("Retry")],
+    ),
   ])
 }

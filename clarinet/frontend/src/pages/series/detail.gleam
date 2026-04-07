@@ -14,13 +14,14 @@ import lustre/element/html
 import lustre/event
 import router
 import shared.{type OutMsg, type Shared}
+import utils/load_status.{type LoadStatus}
 import utils/status
 import utils/viewer
 
 // --- Model ---
 
 pub type Model {
-  Model(series_uid: String)
+  Model(series_uid: String, load_status: LoadStatus)
 }
 
 // --- Msg ---
@@ -28,19 +29,21 @@ pub type Model {
 pub type Msg {
   SeriesLoaded(Result(Series, ApiError))
   NavigateBack(study_uid: String)
+  RetryLoad
 }
 
 // --- Init ---
 
 pub fn init(series_uid: String, _shared: Shared) -> #(Model, Effect(Msg), List(OutMsg)) {
-  let model = Model(series_uid: series_uid)
-  let eff = {
-    use dispatch <- effect.from
-    series.get_series(series_uid)
-    |> promise.tap(fn(result) { dispatch(SeriesLoaded(result)) })
-    Nil
-  }
-  #(model, eff, [])
+  let model = Model(series_uid: series_uid, load_status: load_status.Loading)
+  #(model, load_series_effect(series_uid), [])
+}
+
+fn load_series_effect(series_uid: String) -> Effect(Msg) {
+  use dispatch <- effect.from
+  series.get_series(series_uid)
+  |> promise.tap(fn(result) { dispatch(SeriesLoaded(result)) })
+  Nil
 }
 
 // --- Update ---
@@ -52,10 +55,25 @@ pub fn update(
 ) -> #(Model, Effect(Msg), List(OutMsg)) {
   case msg {
     SeriesLoaded(Ok(s)) ->
-      #(model, effect.none(), [shared.CacheSeries(s)])
+      #(
+        Model(..model, load_status: load_status.Loaded),
+        effect.none(),
+        [shared.CacheSeries(s)],
+      )
 
     SeriesLoaded(Error(err)) ->
-      #(model, effect.none(), handle_error(err, "Failed to load series"))
+      #(
+        Model(..model, load_status: load_status.Failed("Failed to load series")),
+        effect.none(),
+        handle_error(err, "Failed to load series"),
+      )
+
+    RetryLoad ->
+      #(
+        Model(..model, load_status: load_status.Loading),
+        load_series_effect(model.series_uid),
+        [],
+      )
 
     NavigateBack(study_uid) ->
       #(model, effect.none(), [shared.Navigate(router.StudyDetail(study_uid))])
@@ -67,17 +85,24 @@ pub fn update(
 fn handle_error(err: ApiError, fallback_msg: String) -> List(OutMsg) {
   case err {
     AuthError(_) -> [shared.Logout]
-    _ -> [shared.SetLoading(False), shared.ShowError(fallback_msg)]
+    _ -> [shared.ShowError(fallback_msg)]
   }
 }
 
 // --- View ---
 
 pub fn view(model: Model, shared: Shared) -> Element(Msg) {
-  case dict.get(shared.cache.series, model.series_uid) {
-    Ok(s) -> render_detail(s)
-    Error(_) -> loading_view(model.series_uid)
-  }
+  load_status.render(
+    model.load_status,
+    fn() { loading_view(model.series_uid) },
+    fn() {
+      case dict.get(shared.cache.series, model.series_uid) {
+        Ok(s) -> render_detail(s)
+        Error(_) -> loading_view(model.series_uid)
+      }
+    },
+    fn(msg) { error_view(msg) },
+  )
 }
 
 fn render_detail(s: Series) -> Element(Msg) {
@@ -225,5 +250,15 @@ fn loading_view(series_uid: String) -> Element(Msg) {
   html.div([attribute.class("loading-container")], [
     html.div([attribute.class("spinner")], []),
     html.p([], [html.text("Loading series " <> series_uid <> "...")]),
+  ])
+}
+
+fn error_view(message: String) -> Element(Msg) {
+  html.div([attribute.class("error-container")], [
+    html.p([attribute.class("error-message")], [html.text(message)]),
+    html.button(
+      [attribute.class("btn btn-primary"), event.on_click(RetryLoad)],
+      [html.text("Retry")],
+    ),
   ])
 }

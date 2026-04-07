@@ -17,11 +17,12 @@ import lustre/element/html
 import lustre/event
 import router
 import shared.{type OutMsg, type Shared}
+import utils/load_status.{type LoadStatus}
 
 // --- Model ---
 
 pub type Model {
-  Model(name: String)
+  Model(name: String, load_status: LoadStatus)
 }
 
 // --- Msg ---
@@ -30,18 +31,24 @@ pub type Msg {
   RecordTypeLoaded(Result(RecordType, types.ApiError))
   FormSubmitSuccess(name: String)
   FormSubmitError(error: String)
+  RetryLoad
 }
 
 // --- Init ---
 
 pub fn init(name: String, _shared: Shared) -> #(Model, Effect(Msg), List(OutMsg)) {
-  let eff = {
-    use dispatch <- effect.from
-    records.get_record_type(name)
-    |> promise.tap(fn(result) { dispatch(RecordTypeLoaded(result)) })
-    Nil
-  }
-  #(Model(name: name), eff, [])
+  #(
+    Model(name: name, load_status: load_status.Loading),
+    load_record_type_effect(name),
+    [],
+  )
+}
+
+fn load_record_type_effect(name: String) -> Effect(Msg) {
+  use dispatch <- effect.from
+  records.get_record_type(name)
+  |> promise.tap(fn(result) { dispatch(RecordTypeLoaded(result)) })
+  Nil
 }
 
 // --- Update ---
@@ -53,9 +60,26 @@ pub fn update(
 ) -> #(Model, Effect(Msg), List(OutMsg)) {
   case msg {
     RecordTypeLoaded(Ok(rt)) ->
-      #(model, effect.none(), [shared.CacheRecordType(rt)])
+      #(
+        Model(..model, load_status: load_status.Loaded),
+        effect.none(),
+        [shared.CacheRecordType(rt)],
+      )
     RecordTypeLoaded(Error(_)) ->
-      #(model, effect.none(), [shared.ShowError("Failed to load record type")])
+      #(
+        Model(
+          ..model,
+          load_status: load_status.Failed("Failed to load record type"),
+        ),
+        effect.none(),
+        [shared.ShowError("Failed to load record type")],
+      )
+    RetryLoad ->
+      #(
+        Model(..model, load_status: load_status.Loading),
+        load_record_type_effect(model.name),
+        [],
+      )
     FormSubmitSuccess(name) ->
       #(model, effect.none(), [
         shared.ShowSuccess("Record type updated successfully"),
@@ -70,10 +94,17 @@ pub fn update(
 // --- View ---
 
 pub fn view(model: Model, shared: Shared) -> Element(Msg) {
-  case dict.get(shared.cache.record_types, model.name) {
-    Ok(rt) -> render_edit(rt, model.name)
-    Error(_) -> loading_view(model.name)
-  }
+  load_status.render(
+    model.load_status,
+    fn() { loading_view(model.name) },
+    fn() {
+      case dict.get(shared.cache.record_types, model.name) {
+        Ok(rt) -> render_edit(rt, model.name)
+        Error(_) -> loading_view(model.name)
+      }
+    },
+    fn(msg) { error_view(msg) },
+  )
 }
 
 /// JSON Schema for the RecordType edit form
@@ -270,5 +301,15 @@ fn loading_view(name: String) -> Element(Msg) {
   html.div([attribute.class("loading-container")], [
     html.div([attribute.class("spinner")], []),
     html.p([], [html.text("Loading record type " <> name <> "...")]),
+  ])
+}
+
+fn error_view(message: String) -> Element(Msg) {
+  html.div([attribute.class("error-container")], [
+    html.p([attribute.class("error-message")], [html.text(message)]),
+    html.button(
+      [attribute.class("btn btn-primary"), event.on_click(RetryLoad)],
+      [html.text("Retry")],
+    ),
   ])
 }

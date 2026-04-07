@@ -19,6 +19,7 @@ import lustre/element/html
 import lustre/event
 import router
 import shared.{type OutMsg, type Shared}
+import utils/load_status.{type LoadStatus}
 import utils/status
 
 // --- Model ---
@@ -26,6 +27,7 @@ import utils/status
 pub type Model {
   Model(
     patient_id: String,
+    patient_load_status: LoadStatus,
     pacs_studies: List(PacsStudyWithSeries),
     pacs_loading: Bool,
     pacs_importing: Option(String),
@@ -35,6 +37,9 @@ pub type Model {
 // --- Msg ---
 
 pub type Msg {
+  // Load
+  PatientLoaded(Result(Patient, ApiError))
+  RetryLoad
   // Patient actions
   Anonymize
   AnonymizeResult(Result(Patient, ApiError))
@@ -57,11 +62,19 @@ pub fn init(patient_id: String, _shared: Shared) -> #(Model, Effect(Msg), List(O
   let model =
     Model(
       patient_id: patient_id,
+      patient_load_status: load_status.Loading,
       pacs_studies: [],
       pacs_loading: False,
       pacs_importing: None,
     )
-  #(model, effect.none(), [shared.ReloadPatient(patient_id), shared.ReloadRecords])
+  #(model, load_patient_effect(patient_id), [shared.ReloadRecords])
+}
+
+fn load_patient_effect(patient_id: String) -> Effect(Msg) {
+  use dispatch <- effect.from
+  patients.get_patient(patient_id)
+  |> promise.tap(fn(result) { dispatch(PatientLoaded(result)) })
+  Nil
 }
 
 // --- Update ---
@@ -72,6 +85,30 @@ pub fn update(
   _shared: Shared,
 ) -> #(Model, Effect(Msg), List(OutMsg)) {
   case msg {
+    PatientLoaded(Ok(patient)) ->
+      #(
+        Model(..model, patient_load_status: load_status.Loaded),
+        effect.none(),
+        [shared.CachePatient(patient)],
+      )
+
+    PatientLoaded(Error(err)) ->
+      #(
+        Model(
+          ..model,
+          patient_load_status: load_status.Failed("Failed to load patient"),
+        ),
+        effect.none(),
+        handle_error(err, "Failed to load patient"),
+      )
+
+    RetryLoad ->
+      #(
+        Model(..model, patient_load_status: load_status.Loading),
+        load_patient_effect(model.patient_id),
+        [],
+      )
+
     Anonymize -> {
       let eff = {
         use dispatch <- effect.from
@@ -198,10 +235,17 @@ fn handle_error(err: ApiError, fallback_msg: String) -> List(OutMsg) {
 // --- View ---
 
 pub fn view(model: Model, shared: Shared) -> Element(Msg) {
-  case dict.get(shared.cache.patients, model.patient_id) {
-    Ok(patient) -> render_detail(model, shared, patient)
-    Error(_) -> loading_view(model.patient_id)
-  }
+  load_status.render(
+    model.patient_load_status,
+    fn() { loading_view(model.patient_id) },
+    fn() {
+      case dict.get(shared.cache.patients, model.patient_id) {
+        Ok(patient) -> render_detail(model, shared, patient)
+        Error(_) -> loading_view(model.patient_id)
+      }
+    },
+    fn(msg) { error_view(msg) },
+  )
 }
 
 fn render_detail(model: Model, shared: Shared, patient: Patient) -> Element(Msg) {
@@ -568,5 +612,15 @@ fn loading_view(patient_id: String) -> Element(Msg) {
   html.div([attribute.class("loading-container")], [
     html.div([attribute.class("spinner")], []),
     html.p([], [html.text("Loading patient " <> patient_id <> "...")]),
+  ])
+}
+
+fn error_view(message: String) -> Element(Msg) {
+  html.div([attribute.class("error-container")], [
+    html.p([attribute.class("error-message")], [html.text(message)]),
+    html.button(
+      [attribute.class("btn btn-primary"), event.on_click(RetryLoad)],
+      [html.text("Retry")],
+    ),
   ])
 }

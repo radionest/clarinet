@@ -15,6 +15,7 @@ import lustre/element/html
 import lustre/event
 import router
 import shared.{type OutMsg, type Shared}
+import utils/load_status.{type LoadStatus}
 import utils/status
 
 // --- Model ---
@@ -22,9 +23,11 @@ import utils/status
 pub type Model {
   Model(
     admin_stats: Option(models.AdminStats),
+    stats_status: LoadStatus,
     editing_record_id: Option(Int),
     editing_status_record_id: Option(Int),
     role_matrix: Option(models.RoleMatrix),
+    matrix_status: LoadStatus,
     role_toggling: Option(#(String, String)),
   )
 }
@@ -34,6 +37,7 @@ pub type Model {
 pub type Msg {
   // Data loading
   AdminStatsLoaded(Result(models.AdminStats, types.ApiError))
+  RetryLoadStats
   // Record assignment
   ToggleAssignDropdown(record_id: Option(Int))
   AssignUser(record_id: Int, user_id: String)
@@ -44,6 +48,7 @@ pub type Msg {
   ChangeStatusResult(Result(models.Record, types.ApiError))
   // Role matrix
   RoleMatrixLoaded(Result(models.RoleMatrix, types.ApiError))
+  RetryLoadMatrix
   ToggleUserRole(user_id: String, role_name: String, add: Bool)
   UserRoleToggled(Result(Nil, types.ApiError))
 }
@@ -54,9 +59,11 @@ pub fn init(_shared: Shared) -> #(Model, Effect(Msg), List(OutMsg)) {
   let model =
     Model(
       admin_stats: None,
+      stats_status: load_status.Loading,
       editing_record_id: None,
       editing_status_record_id: None,
       role_matrix: None,
+      matrix_status: load_status.Loading,
       role_toggling: None,
     )
   let effects =
@@ -76,12 +83,32 @@ pub fn update(
 ) -> #(Model, Effect(Msg), List(OutMsg)) {
   case msg {
     AdminStatsLoaded(Ok(stats)) ->
-      #(Model(..model, admin_stats: Some(stats)), effect.none(), [
-        shared.SetLoading(False),
-      ])
+      #(
+        Model(
+          ..model,
+          admin_stats: Some(stats),
+          stats_status: load_status.Loaded,
+        ),
+        effect.none(),
+        [shared.SetLoading(False)],
+      )
 
     AdminStatsLoaded(Error(err)) ->
-      #(model, effect.none(), handle_error(err, "Failed to load admin statistics"))
+      #(
+        Model(
+          ..model,
+          stats_status: load_status.Failed("Failed to load admin statistics"),
+        ),
+        effect.none(),
+        handle_error(err, "Failed to load admin statistics"),
+      )
+
+    RetryLoadStats ->
+      #(
+        Model(..model, stats_status: load_status.Loading),
+        load_effect(admin_api.get_admin_stats, AdminStatsLoaded),
+        [],
+      )
 
     ToggleAssignDropdown(record_id) ->
       #(Model(..model, editing_record_id: record_id), effect.none(), [])
@@ -98,12 +125,20 @@ pub fn update(
       ])
     }
 
-    AssignUserResult(Ok(record)) ->
-      #(model, effect.none(), [
-        shared.SetLoading(False),
-        shared.CacheRecord(record),
-        shared.ShowSuccess("User assigned successfully"),
-      ])
+    AssignUserResult(Ok(record)) -> {
+      // Refresh admin stats — assigning a user can change `unassigned_records`
+      // and similar derived counts that the cards display.
+      let stats_eff = load_effect(admin_api.get_admin_stats, AdminStatsLoaded)
+      #(
+        Model(..model, stats_status: load_status.Loading),
+        stats_eff,
+        [
+          shared.SetLoading(False),
+          shared.CacheRecord(record),
+          shared.ShowSuccess("User assigned successfully"),
+        ],
+      )
+    }
 
     AssignUserResult(Error(err)) ->
       #(model, effect.none(), handle_error(err, "Failed to assign user to record"))
@@ -127,12 +162,19 @@ pub fn update(
       ])
     }
 
-    ChangeStatusResult(Ok(record)) ->
-      #(model, effect.none(), [
-        shared.SetLoading(False),
-        shared.CacheRecord(record),
-        shared.ShowSuccess("Status updated successfully"),
-      ])
+    ChangeStatusResult(Ok(record)) -> {
+      // Refresh admin stats — `records_by_status` cards become stale otherwise.
+      let stats_eff = load_effect(admin_api.get_admin_stats, AdminStatsLoaded)
+      #(
+        Model(..model, stats_status: load_status.Loading),
+        stats_eff,
+        [
+          shared.SetLoading(False),
+          shared.CacheRecord(record),
+          shared.ShowSuccess("Status updated successfully"),
+        ],
+      )
+    }
 
     ChangeStatusResult(Error(err)) ->
       #(
@@ -142,12 +184,32 @@ pub fn update(
       )
 
     RoleMatrixLoaded(Ok(matrix)) ->
-      #(Model(..model, role_matrix: Some(matrix)), effect.none(), [
-        shared.SetLoading(False),
-      ])
+      #(
+        Model(
+          ..model,
+          role_matrix: Some(matrix),
+          matrix_status: load_status.Loaded,
+        ),
+        effect.none(),
+        [shared.SetLoading(False)],
+      )
 
     RoleMatrixLoaded(Error(err)) ->
-      #(model, effect.none(), handle_error(err, "Failed to load role matrix"))
+      #(
+        Model(
+          ..model,
+          matrix_status: load_status.Failed("Failed to load role matrix"),
+        ),
+        effect.none(),
+        handle_error(err, "Failed to load role matrix"),
+      )
+
+    RetryLoadMatrix ->
+      #(
+        Model(..model, matrix_status: load_status.Loading),
+        load_effect(admin_api.get_role_matrix, RoleMatrixLoaded),
+        [],
+      )
 
     ToggleUserRole(user_id, role_name, add) -> {
       let eff = {
@@ -203,19 +265,43 @@ fn load_effect(
 pub fn view(model: Model, shared: Shared) -> Element(Msg) {
   html.div([attribute.class("container")], [
     html.h1([], [html.text("Admin Dashboard")]),
-    case model.admin_stats {
-      Some(stats) ->
-        html.div([attribute.class("dashboard-content")], [
-          overview_section(stats),
-          status_section(stats),
-          roles_section(model),
-          records_section(model, shared),
-        ])
-      None ->
-        html.div([attribute.class("loading")], [
-          html.p([], [html.text("Loading statistics...")]),
-        ])
+    html.div([attribute.class("dashboard-content")], [
+      stats_view(model),
+      roles_section(model),
+      records_section(model, shared),
+    ]),
+  ])
+}
+
+fn stats_view(model: Model) -> Element(Msg) {
+  load_status.render(
+    model.stats_status,
+    fn() {
+      html.div([attribute.class("loading")], [
+        html.p([], [html.text("Loading statistics...")]),
+      ])
     },
+    fn() {
+      case model.admin_stats {
+        Some(stats) ->
+          element.fragment([overview_section(stats), status_section(stats)])
+        None ->
+          html.div([attribute.class("loading")], [
+            html.p([], [html.text("Loading statistics...")]),
+          ])
+      }
+    },
+    fn(msg) { retry_view(msg, RetryLoadStats) },
+  )
+}
+
+fn retry_view(message: String, retry_msg: Msg) -> Element(Msg) {
+  html.div([attribute.class("error-container")], [
+    html.p([attribute.class("error-message")], [html.text(message)]),
+    html.button(
+      [attribute.class("btn btn-primary"), event.on_click(retry_msg)],
+      [html.text("Retry")],
+    ),
   ])
 }
 
@@ -262,43 +348,54 @@ fn status_section(stats: models.AdminStats) -> Element(Msg) {
 fn roles_section(model: Model) -> Element(Msg) {
   html.div([attribute.class("dashboard-section")], [
     html.h3([], [html.text("Role Matrix")]),
-    case model.role_matrix {
-      None ->
+    load_status.render(
+      model.matrix_status,
+      fn() {
         html.p([attribute.class("text-muted")], [
           html.text("Loading role matrix..."),
         ])
-      Some(matrix) ->
-        case matrix.roles {
-          [] ->
+      },
+      fn() {
+        case model.role_matrix {
+          None ->
             html.p([attribute.class("text-muted")], [
-              html.text("No roles defined."),
+              html.text("Loading role matrix..."),
             ])
-          roles ->
-            html.div([attribute.class("table-responsive")], [
-              html.table([attribute.class("table")], [
-                html.thead([], [
-                  html.tr(
-                    [],
-                    [
-                      html.th([], [html.text("User")]),
-                      ..list.map(roles, fn(role) {
-                        html.th([], [html.text(role)])
-                      })
-                    ],
-                  ),
-                ]),
-                html.tbody(
-                  [],
-                  matrix.users
-                    |> list.sort(fn(a, b) { string.compare(a.email, b.email) })
-                    |> list.map(fn(user) {
-                      role_matrix_row(model, user, roles)
-                    }),
-                ),
-              ]),
-            ])
+          Some(matrix) ->
+            case matrix.roles {
+              [] ->
+                html.p([attribute.class("text-muted")], [
+                  html.text("No roles defined."),
+                ])
+              roles ->
+                html.div([attribute.class("table-responsive")], [
+                  html.table([attribute.class("table")], [
+                    html.thead([], [
+                      html.tr(
+                        [],
+                        [
+                          html.th([], [html.text("User")]),
+                          ..list.map(roles, fn(role) {
+                            html.th([], [html.text(role)])
+                          })
+                        ],
+                      ),
+                    ]),
+                    html.tbody(
+                      [],
+                      matrix.users
+                        |> list.sort(fn(a, b) { string.compare(a.email, b.email) })
+                        |> list.map(fn(user) {
+                          role_matrix_row(model, user, roles)
+                        }),
+                    ),
+                  ]),
+                ])
+            }
         }
-    },
+      },
+      fn(msg) { retry_view(msg, RetryLoadMatrix) },
+    ),
   ])
 }
 
