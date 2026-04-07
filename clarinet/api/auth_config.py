@@ -6,6 +6,7 @@ Following KISS principle - minimal configuration.
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime, timedelta
 from typing import Any, ClassVar
+from urllib.parse import urlsplit
 from uuid import UUID, uuid4
 
 from cachetools import TTLCache
@@ -53,14 +54,26 @@ class UserManager(BaseUserManager[User, UUID]):
     ) -> None:
         """Called after successful login."""
         del response  # Unused but required by interface
-        logger.info(f"User {user.id} logged in.")
+        user_id = str(user.id)
+        logger.info(f"User {user.id} logged in.", extra={"user_id": user_id})
         if request:
+            # Strip query/fragment from Referer to avoid leaking secrets
+            raw_referer = request.headers.get("Referer", "")
+            if raw_referer:
+                parts = urlsplit(raw_referer)
+                safe_referer = (
+                    f"{parts.scheme}://{parts.netloc}{parts.path}"
+                    if parts.scheme and parts.netloc
+                    else parts.path
+                )[:512]
+            else:
+                safe_referer = ""
             logger.debug(
                 f"Login request metadata for user {user.id}",
                 extra={
-                    "user_id": str(user.id),
+                    "user_id": user_id,
                     "user_agent": request.headers.get("User-Agent", "")[:512],
-                    "referer": request.headers.get("Referer", "")[:512],
+                    "referer": safe_referer,
                     "request_path": request.url.path,
                 },
             )
@@ -177,17 +190,17 @@ class DatabaseStrategy(Strategy[User, UUID]):
         access_token = result.scalar_one_or_none()
 
         if not access_token:
+            request_path = self.request.url.path if self.request else None
+            request_ip = self.request.client.host if self.request and self.request.client else None
             logger.warning(
                 "Token validation failed: token={}..., path={}, ip={}",
                 token[:8],
-                self.request.url.path if self.request else "N/A",
-                self.request.client.host if self.request and self.request.client else "N/A",
+                request_path or "N/A",
+                request_ip or "N/A",
                 extra={
                     "token_preview": token[:8],
-                    "request_path": self.request.url.path if self.request else None,
-                    "request_ip": self.request.client.host
-                    if self.request and self.request.client
-                    else None,
+                    "request_path": request_path,
+                    "request_ip": request_ip,
                     "reason": "not_found_or_expired",
                 },
             )
