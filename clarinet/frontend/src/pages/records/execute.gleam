@@ -316,13 +316,29 @@ pub fn update(
       #(model, effect.none(), [])
 
     SlicerPing -> {
-      let eff = {
-        use dispatch <- effect.from
-        slicer.ping()
-        |> promise.tap(fn(result) { dispatch(SlicerPingResult(result)) })
-        Nil
+      // Skip pinging once we know the record has no slicer_script — also
+      // tear down the interval timer so we don't keep dispatching no-ops.
+      // While the record is still loading the cache lookup returns False,
+      // so the very first ping (fired before ReloadRecord lands) still
+      // goes out; subsequent ticks (10s apart) catch up.
+      case record_definitely_has_no_slicer_script(model.record_id, shared) {
+        True -> {
+          logger.info(
+            "slicer",
+            "stopping ping timer: record has no slicer_script",
+          )
+          #(Model(..model, slicer_ping_timer: None), cleanup(model), [])
+        }
+        False -> {
+          let eff = {
+            use dispatch <- effect.from
+            slicer.ping()
+            |> promise.tap(fn(result) { dispatch(SlicerPingResult(result)) })
+            Nil
+          }
+          #(model, eff, [])
+        }
       }
-      #(model, eff, [])
     }
 
     SlicerPingResult(Ok(data)) -> {
@@ -389,6 +405,24 @@ fn has_slicer_script(record_id: String, shared: Shared) -> Bool {
       record_type: Some(models.RecordType(slicer_script: Some(_), ..)),
       ..,
     )) -> True
+    _ -> False
+  }
+}
+
+/// Returns True only when the record is in the cache AND its record_type
+/// has no slicer_script (or no record_type at all). Returns False if the
+/// record is not yet in the cache, so callers defer the decision until
+/// the next tick.
+fn record_definitely_has_no_slicer_script(
+  record_id: String,
+  shared: Shared,
+) -> Bool {
+  case dict.get(shared.cache.records, record_id) {
+    Ok(models.Record(
+      record_type: Some(models.RecordType(slicer_script: None, ..)),
+      ..,
+    )) -> True
+    Ok(models.Record(record_type: None, ..)) -> True
     _ -> False
   }
 }
