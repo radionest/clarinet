@@ -168,12 +168,12 @@ pub fn update(
     // Formosh form events
     FormSubmitSuccess -> {
       logger.info("form", "submit success: record_id=" <> model.record_id)
-      let slicer_effect = case has_slicer_script(model.record_id, shared) {
-        True -> {
+      let slicer_effect = case slicer_script_status(model.record_id, shared) {
+        Some(True) -> {
           logger.info("slicer", "clearing scene after form submit")
           dispatch_local(SlicerClearScene)
         }
-        False -> effect.none()
+        _ -> effect.none()
       }
       #(
         model,
@@ -200,9 +200,9 @@ pub fn update(
     }
 
     CompleteRecordResult(Ok(record)) -> {
-      let slicer_eff = case has_slicer_script(model.record_id, shared) {
-        True -> dispatch_local(SlicerClearScene)
-        False -> effect.none()
+      let slicer_eff = case slicer_script_status(model.record_id, shared) {
+        Some(True) -> dispatch_local(SlicerClearScene)
+        _ -> effect.none()
       }
       #(model, slicer_eff, [
         shared.SetLoading(False),
@@ -227,9 +227,9 @@ pub fn update(
     }
 
     ResubmitRecordResult(Ok(record)) -> {
-      let slicer_eff = case has_slicer_script(model.record_id, shared) {
-        True -> dispatch_local(SlicerClearScene)
-        False -> effect.none()
+      let slicer_eff = case slicer_script_status(model.record_id, shared) {
+        Some(True) -> dispatch_local(SlicerClearScene)
+        _ -> effect.none()
       }
       #(model, slicer_eff, [
         shared.SetLoading(False),
@@ -318,18 +318,18 @@ pub fn update(
     SlicerPing -> {
       // Skip pinging once we know the record has no slicer_script — also
       // tear down the interval timer so we don't keep dispatching no-ops.
-      // While the record is still loading the cache lookup returns False,
+      // While the record is still loading the cache lookup returns None,
       // so the very first ping (fired before ReloadRecord lands) still
       // goes out; subsequent ticks (10s apart) catch up.
-      case record_definitely_has_no_slicer_script(model.record_id, shared) {
-        True -> {
-          logger.info(
+      case slicer_script_status(model.record_id, shared) {
+        Some(False) -> {
+          logger.debug(
             "slicer",
             "stopping ping timer: record has no slicer_script",
           )
           #(Model(..model, slicer_ping_timer: None), cleanup(model), [])
         }
-        False -> {
+        _ -> {
           let eff = {
             use dispatch <- effect.from
             slicer.ping()
@@ -399,31 +399,24 @@ fn handle_error(err: ApiError, fallback_msg: String) -> List(OutMsg) {
   }
 }
 
-fn has_slicer_script(record_id: String, shared: Shared) -> Bool {
+/// Tri-state slicer_script presence:
+/// - `Some(True)`  — record is cached and its record_type has a slicer_script
+/// - `Some(False)` — record is cached but the record_type has no slicer_script
+/// - `None`        — record is not in the cache yet; callers should defer
+///
+/// Records always have a `record_type` (backend invariant), so we don't
+/// match on `record_type: None` — it falls into `None` alongside "not loaded".
+fn slicer_script_status(record_id: String, shared: Shared) -> Option(Bool) {
   case dict.get(shared.cache.records, record_id) {
     Ok(models.Record(
       record_type: Some(models.RecordType(slicer_script: Some(_), ..)),
       ..,
-    )) -> True
-    _ -> False
-  }
-}
-
-/// Returns True only when the record is in the cache AND its record_type
-/// has no slicer_script (or no record_type at all). Returns False if the
-/// record is not yet in the cache, so callers defer the decision until
-/// the next tick.
-fn record_definitely_has_no_slicer_script(
-  record_id: String,
-  shared: Shared,
-) -> Bool {
-  case dict.get(shared.cache.records, record_id) {
+    )) -> Some(True)
     Ok(models.Record(
       record_type: Some(models.RecordType(slicer_script: None, ..)),
       ..,
-    )) -> True
-    Ok(models.Record(record_type: None, ..)) -> True
-    _ -> False
+    )) -> Some(False)
+    _ -> None
   }
 }
 
