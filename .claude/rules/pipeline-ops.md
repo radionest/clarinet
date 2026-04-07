@@ -50,5 +50,6 @@ Optional group `pipeline` in `pyproject.toml`:
 
 Registered in `clarinet/services/pipeline/tasks/` — imported at broker startup.
 - `convert_series_to_nifti` — C-GET DICOM series → NIfTI conversion. Queue: `clarinet.dicom`. Requires `msg.series_uid`. Idempotent (skips if `volume.nii.gz` exists). Output: `VOLUME_NIFTI` FileDef (level=SERIES).
+- `prefetch_dicom_web` — prefetch a study into the DICOMweb disk cache via direct C-GET to `{storage_path}/dicomweb_cache/{study}/{series}/`. Queue: `clarinet.dicom`. Requires `msg.study_uid`. Bypasses API memory tier. Idempotent (skips series with valid disk cache or `dcm_anon/` copy). Payload: `skip_if_anon` (default `True`).
 
 Task name collision: `register_task()` in `chain.py` prevents project tasks from shadowing built-in tasks (identity check `existing is not task` → `PipelineConfigError`).

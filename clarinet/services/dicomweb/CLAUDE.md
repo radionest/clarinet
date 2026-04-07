@@ -35,6 +35,13 @@ Request → 1. Memory cache (cachetools.TTLCache[str, MemoryCachedSeries], O(1) 
 - **Disk tier**: `.dcm` files + `.cached_at` marker. TTL controlled by `dicomweb_cache_ttl_hours`. Loaded into memory on first access after restart.
 - **Background persistence**: After C-GET to memory, `asyncio.create_task` writes datasets to disk via `asyncio.to_thread`, guarded by `_disk_write_semaphore` (default 4) to avoid flooding the thread pool. On shutdown, pending tasks are cancelled.
 
+### Populating the disk tier from the pipeline
+
+Two ways to warm the disk cache without going through OHIF:
+
+1. **HTTP preload** — `POST /dicom-web/preload/{study_uid}` via `DicomWebProxyService.start_preload()`. Fills both memory (API process) and disk tiers, returns a `task_id` for polling progress. Triggered from the frontend preload widget. Caveat: memory tier holds whole datasets → N concurrent preloads can bloat API server RAM.
+2. **Pipeline task** — `prefetch_dicom_web` in `clarinet/services/pipeline/tasks/cache_dicomweb.py`. Runs in a worker process, does a direct `client.get_study(output_dir=...)` into a temp dir under `cache_base` (same filesystem for atomic `shutil.move`), then publishes files into `dicomweb_cache/{study}/{series}/` with a `.cached_at` marker. Bypasses memory tier entirely — safe for bulk RecordFlow triggers (`record('x').on_finished().do_task(prefetch_dicom_web)`). Memory tier warms lazily on the next OHIF request via `_load_from_disk`.
+
 ## Flow
 
 ```
