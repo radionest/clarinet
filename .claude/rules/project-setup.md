@@ -12,13 +12,17 @@ paths:
 ## Creating a Project
 
 ```bash
-clarinet init my_project --template bigliver   # Full template (Python config, workflows, pipeline)
+clarinet init my_project --template research    # Research scaffold with .claude/ docs for agents (Python config, plan/)
+clarinet init my_project --template bigliver    # Full liver template (Python config, workflows, pipeline)
 clarinet init my_project --template demo        # Simple demo (JSON/TOML config)
 clarinet init my_project                        # Bare skeleton
 clarinet init --list-templates                  # Show available templates
 ```
 
-Templates are copied from `examples/` in the Clarinet package.
+Templates are copied from `examples/` in the Clarinet package. The `research`
+template ships a `.claude/CLAUDE.md` and `.claude/rules/*.md` covering
+definitions / workflows / slicer / schemas / utils — agents working in a
+generated project get section-specific guidance auto-loaded.
 
 ## Project Structure
 

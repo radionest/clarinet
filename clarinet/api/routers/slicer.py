@@ -177,6 +177,13 @@ async def open_record_in_slicer(
     slicer_url = f"http://{client_ip}:{settings.slicer_port}"
     logger.info(f"Opening record {record_id} in Slicer at {slicer_url}")
 
+    # Reset Slicer state before loading a new record. User-switching
+    # workflows would otherwise accumulate VTK nodes from previous records,
+    # eventually flooding Qt event loop with "Input port 0 has 0
+    # connections" warnings and making subsequent requests time out.
+    # Non-blocking: failure logs a warning but proceeds with main script.
+    await service.reset_scene(slicer_url, request_timeout=5.0)
+
     result = await service.execute(
         slicer_url, record_read.record_type.slicer_script, context, request_timeout=60.0
     )

@@ -16,6 +16,7 @@ import components/forms/patient_form
 import components/forms/record_form
 import components/layout
 import formosh/component as formosh_component
+import gleam/bool
 import gleam/dict
 import gleam/dynamic/decode
 import gleam/int
@@ -326,6 +327,11 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
 
     // Authentication
     store.LoginSubmit(email, password) -> {
+      // Guard against double-submit: a second LoginSubmit may be dispatched
+      // in the same synchronous tick before the DOM is patched with
+      // disabled=True on the button, causing duplicate POST /auth/login
+      // requests and session eviction via _enforce_session_limit.
+      use <- bool.lazy_guard(model.loading, fn() { #(model, effect.none()) })
       let login_effect = {
         use dispatch <- effect.from
         auth.login(email, password)
@@ -370,6 +376,8 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     }
 
     store.RegisterSubmit(email, password) -> {
+      // Guard against double-submit — same rationale as LoginSubmit.
+      use <- bool.lazy_guard(model.loading, fn() { #(model, effect.none()) })
       let register_request =
         models.RegisterRequest(email: email, password: password)
       let register_effect = {

@@ -29,6 +29,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from clarinet.services.slicer.service import SlicerService
+from clarinet.utils.logger import logger
 
 pytestmark = [
     pytest.mark.slicer,
@@ -210,7 +211,8 @@ def pacs_series_uid(pacs_series: dict[str, str]) -> str:
 
 
 @pytest.fixture
-def slicer_service() -> SlicerService:
+def slicer_service(request: pytest.FixtureRequest, worker_id: str) -> SlicerService:
+    logger.info(f"slicer_service fixture (e2e): test={request.node.nodeid} worker={worker_id}")
     return SlicerService()
 
 
