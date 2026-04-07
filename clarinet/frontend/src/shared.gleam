@@ -40,6 +40,7 @@ pub type OutMsg {
   ReloadPatient(String)
   ReloadRecord(String)
   OpenDeleteConfirm(resource: String, id: String)
+  OpenFailPrompt(record_id: String)
   SetUser(User)
   Logout
   StartPreload(viewer_url: String, study_uid: String)

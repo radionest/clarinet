@@ -363,6 +363,55 @@ async def create_resection_report(
     )
 
 
+async def dispatch_nifti_conversion(
+    record: RecordRead,
+    context: dict[str, Any],  # noqa: ARG001
+    client: ClarinetClient,  # noqa: ARG001
+) -> None:
+    """Dispatch DICOM→NIfTI conversion for the best series from first-check."""
+    best_series = (record.data or {}).get("best_series")
+    if not best_series:
+        logger.warning(f"No best_series in first-check for study {record.study_uid}")
+        return
+
+    from clarinet.services.pipeline.broker import extract_routing_key
+    from clarinet.services.pipeline.tasks.convert_series import convert_series_to_nifti
+
+    msg = PipelineMessage(
+        patient_id=record.patient_id,
+        study_uid=record.study_uid,
+        series_uid=best_series,
+    )
+    routing_key = extract_routing_key("clarinet.dicom")
+    await (
+        convert_series_to_nifti.kicker().with_labels(routing_key=routing_key).kiq(msg.model_dump())
+    )
+    logger.info(f"Dispatched NIfTI conversion for series {best_series}")
+
+
+async def create_view_nifti_record(
+    record: RecordRead,
+    context: dict[str, Any],  # noqa: ARG001
+    client: ClarinetClient,
+) -> None:
+    """Create ``view-nifti`` record for the best series from first-check."""
+    best_series = (record.data or {}).get("best_series")
+    if not best_series:
+        return
+
+    from clarinet.models import RecordCreate
+
+    await client.create_record(
+        RecordCreate(
+            record_type_name="view-nifti",
+            patient_id=record.patient_id,
+            study_uid=record.study_uid,
+            series_uid=best_series,
+            context_info=f"Created by flow from first-check (id={record.id})",
+        )
+    )
+
+
 # ---------------------------------------------------------------------------
 # Flow: создание записей по результатам first-check
 # ---------------------------------------------------------------------------
@@ -372,6 +421,13 @@ async def create_resection_report(
 
 # first-check → anonymize-study (instead of direct segmentation creation)
 (record("first-check").on_finished().if_record(F.is_good == True).create_record("anonymize-study"))
+
+# first-check → DICOM→NIfTI conversion for the best series
+(record("first-check").on_finished().if_record(F.is_good == True).call(dispatch_nifti_conversion))
+
+# first-check → create view-nifti record
+# (blocking on volume.nii.gz happens later when the task resolves FileRef)
+(record("first-check").on_finished().if_record(F.is_good == True).call(create_view_nifti_record))
 
 # Run anonymization on creation
 (

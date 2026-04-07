@@ -29,7 +29,9 @@ class SlicerClient:
             script: Python code to execute inside Slicer.
 
         Returns:
-            JSON response from Slicer.
+            Dict from Slicer's ``__execResult`` variable. The script must assign
+            a dict to ``__execResult`` for it to appear in the response.
+            ``print()`` output goes to Slicer console only, not the HTTP response.
 
         Raises:
             SlicerConnectionError: If the connection fails or times out.

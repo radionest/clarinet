@@ -7,6 +7,11 @@ improving type safety and reducing repetition.
 from typing import Annotated, Any
 
 from annotated_types import Ge, Gt, Le
+from sqlalchemy import JSON
+from sqlalchemy.dialects.postgresql import JSONB
+
+# SQLAlchemy column type: JSONB on PostgreSQL, JSON (text) on SQLite
+PortableJSON = JSON().with_variant(JSONB(), "postgresql")
 
 # JSON-compatible types for API responses and database fields
 type JSONDict = dict[str, Any]

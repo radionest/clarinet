@@ -14,6 +14,7 @@ import lustre/effect.{type Effect}
 import lustre/element.{type Element}
 import lustre/element/html
 import lustre/event
+import router
 import shared.{type OutMsg, type Shared}
 import utils/permissions
 import utils/status
@@ -30,6 +31,7 @@ pub type Msg {
   AddFilter(key: String, value: String)
   RemoveFilter(key: String)
   ClearFilters
+  RequestFail(record_id: String)
   Restart(record_id: String)
   RestartResult(Result(Record, ApiError))
 }
@@ -60,6 +62,9 @@ pub fn update(
 
     ClearFilters ->
       #(Model(active_filters: dict.new()), effect.none(), [])
+
+    RequestFail(record_id) ->
+      #(model, effect.none(), [shared.OpenFailPrompt(record_id)])
 
     Restart(record_id) -> {
       let eff = {
@@ -292,6 +297,7 @@ fn record_row(shared: Shared, record: Record) -> Element(Msg) {
 
   let can_fill = permissions.can_fill_record(record, shared.user)
   let can_edit = permissions.can_edit_record(record, shared.user)
+  let can_fail = permissions.can_fail_record(record, shared.user)
   let can_restart = permissions.can_restart_record(record, shared.user)
 
   html.tr([], [
@@ -319,7 +325,7 @@ fn record_row(shared: Shared, record: Record) -> Element(Msg) {
         True, _ ->
           html.a(
             [
-              attribute.href("/records/" <> record_id_str),
+              attribute.href(router.route_to_path(router.RecordDetail(record_id_str))),
               attribute.class("btn btn-sm btn-primary"),
             ],
             [html.text("Fill")],
@@ -327,7 +333,7 @@ fn record_row(shared: Shared, record: Record) -> Element(Msg) {
         _, True ->
           html.a(
             [
-              attribute.href("/records/" <> record_id_str),
+              attribute.href(router.route_to_path(router.RecordDetail(record_id_str))),
               attribute.class("btn btn-sm btn-secondary"),
             ],
             [html.text("Edit")],
@@ -335,11 +341,22 @@ fn record_row(shared: Shared, record: Record) -> Element(Msg) {
         _, _ ->
           html.a(
             [
-              attribute.href("/records/" <> record_id_str),
+              attribute.href(router.route_to_path(router.RecordDetail(record_id_str))),
               attribute.class("btn btn-sm btn-outline"),
             ],
             [html.text("View")],
           )
+      },
+      case can_fail {
+        True ->
+          html.button(
+            [
+              attribute.class("btn btn-sm btn-danger"),
+              event.on_click(RequestFail(record_id_str)),
+            ],
+            [html.text("Fail")],
+          )
+        False -> element.none()
       },
       case can_restart {
         True ->

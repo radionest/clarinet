@@ -42,6 +42,10 @@ paths:
 - `refine_alignment_by_centroids(moving_seg, reference_seg, transform_node, min_landmarks=1)` → `int` — rigid-body from matched centroids
 - `setup_segment_focus_observer(editable_seg, reference_seg, reference_views=, editable_views=, only_empty=, on_refine=)` — auto-navigate to centroid on selection
 
+## PacsHelper methods
+
+- `PacsHelper.verify() -> bool` — test PACS connectivity via C-ECHO (`ctkDICOMEcho`). Returns True on success, False on failure. Logs diagnostics (ACL, AE title, IP). Graceful fallback if `ctkDICOMEcho` unavailable.
+
 ## VTK / Slicer pitfalls
 
 1. **Shared labelmaps (Slicer 5.0+):** `segment.GetRepresentation("Binary labelmap")` returns the *shared* labelmap — same for all segments. Use `node.GetBinaryLabelmapRepresentation(seg_id, output)` instead.
@@ -57,3 +61,14 @@ paths:
    seg.SetReferenceImageGeometryParameterFromVolumeNode(volume)
    seg_logic.ExportAllSegmentsToLabelmapNode(seg, labelmap, 0)
    ```
+
+## Slicer exec protocol
+
+Scripts sent via `POST /slicer/exec` return JSON through `__execResult`, NOT stdout.
+
+- `__execResult = {"key": "value"}` → HTTP 200, response body = `{"key": "value"}`
+- `print(...)` → visible in Slicer console only, NOT in HTTP response
+- Script error → HTTP 500, `{"success": false, "message": "..."}`
+- No `__execResult` set → HTTP 200, response body = `{}`
+
+In e2e tests, always use `__execResult = {...}` and assert on response keys.

@@ -86,6 +86,7 @@ class Settings(BaseSettings):
 
     # Storage settings
     storage_path: str = str(Path.home() / "clarinet/data")
+    storage_path_client: str | None = None
     anon_id_prefix: str = "CLARINET"
 
     @field_validator("storage_path")
@@ -138,7 +139,7 @@ class Settings(BaseSettings):
     dicom_ip: str | None = None
     dicom_max_pdu: int = 16384
     dicom_max_concurrent_associations: int = 8
-    dicom_retrieve_mode: Literal["c-get", "c-move"] = "c-get"
+    dicom_retrieve_mode: Literal["c-get", "c-get-study", "c-move", "c-move-study"] = "c-get"
     dicom_cmove_timeout: float = 300.0  # seconds to wait for SCP to receive instances
     dicom_log_identifiers: bool = False
 
@@ -329,6 +330,21 @@ class Settings(BaseSettings):
             return f"sqlite:///{self.database_name}.db"
         else:
             return f"{self.database_driver.value}://{self.database_username}:{self.database_password}@{self.database_host}:{self.database_port}/{self.database_name}"
+
+    @property
+    def sync_database_url(self) -> str:
+        """Database URL for synchronous operations (Alembic, sync engines).
+
+        Alembic's env.py and migration utilities use synchronous SQLAlchemy,
+        so async drivers (asyncpg) must be converted to sync equivalents
+        (psycopg2). SQLite is sync-compatible by default and returned as-is.
+        """
+        url = self.database_url
+        if url.startswith("sqlite"):
+            return url
+        if "postgresql+asyncpg" in url:
+            return url.replace("postgresql+asyncpg", "postgresql+psycopg2")
+        return url
 
     def get_template_dir(self) -> str:
         """Get the template directory path."""

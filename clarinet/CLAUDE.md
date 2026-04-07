@@ -108,7 +108,7 @@ Each service has its own CLAUDE.md — see `services/*/CLAUDE.md` for details.
 - `services/dicom/` — DICOM client (pynetdicom)
 - `services/slicer/` — 3D Slicer integration
 - `services/image/` — Image processing (numpy)
-- `services/record_service.py` — Record mutations with RecordFlow triggers
+- `services/record_service.py` — Record mutations with RecordFlow triggers + `check_files()` (auto-unblock, checksum comparison, file-change notifications)
 - `services/study_service.py` — Study management with entity-creation triggers
 
 `clarinet/client.py` — `ClarinetClient`: HTTP client to own API (used by RecordFlow and pipeline tasks). See file for full method list.
@@ -119,7 +119,10 @@ CLI: `uv run clarinet admin create`, `uv run clarinet admin reset-password`. Aut
 
 ## Session Management
 
-Session-based auth (fastapi-users, `AccessToken`). CLI: `uv run clarinet session stats/cleanup/revoke-user/list-user`.
+Session-based auth (fastapi-users, `AccessToken`). Subcommands of `uv run clarinet session`:
+`stats`, `cleanup [--days N]`, `cleanup-once`, `list-user UID`, `revoke-user UID`,
+`cleanup-all` (asks for confirmation). Helpers live in `clarinet/utils/session.py`;
+the long-running cleanup loop is `SessionCleanupService` in `clarinet/services/session_cleanup.py`.
 
 ## Alembic Migrations
 

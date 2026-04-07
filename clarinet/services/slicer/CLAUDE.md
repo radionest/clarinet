@@ -56,10 +56,14 @@ Key methods: `SlicerHelper(working_folder)`, `load_volume()`, `create_segmentati
 
 DIMSE (C-FIND + C-GET/C-MOVE) integration via `ctkDICOMQuery` / `ctkDICOMRetrieve`.
 
-- `PacsHelper(host, port, called_aet, calling_aet, prefer_cget, move_aet)` — explicit connection params (for testing)
+- `PacsHelper(host, port, called_aet, calling_aet, retrieve_mode, move_aet)` — explicit connection params (for testing)
+- `PacsHelper.verify() -> bool` — C-ECHO connectivity test; logs diagnostics on failure
+- **Retrieve modes** (`dicom_retrieve_mode` setting / `CLARINET_DICOM_RETRIEVE_MODE`):
+  - `c-get` (default) / `c-move` — per-series retrieve
+  - `c-get-study` / `c-move-study` — study-level retrieve (for PACS rejecting series-level associations)
 - `PacsHelper.from_slicer(server_name=None)` — reads PACS config from `QSettings` (`DICOM/ServerNodes/*`) as a **workaround** for `ctkDICOMVisualBrowser` not reflecting user-configured servers; picks first query/retrieve-enabled server or falls back to first server. Each user configures PACS once in `Edit > Application Settings > DICOM`. Logs via `_pacs_log` (`logging.getLogger("clarinet.slicer.pacs")`)
-- `retrieve_study(study_instance_uid)` → **local-first**: checks `slicer.dicomDatabase` for existing series, falls back to C-FIND + C-GET from PACS, then **C-MOVE if C-GET fails** (Orthanc without CGet plugin)
-- `retrieve_series(study_instance_uid, series_instance_uid)` → **local-first**: checks `slicer.dicomDatabase.filesForSeries()`, falls back to C-GET, then **C-MOVE if C-GET fails**
+- `retrieve_study(study_instance_uid)` → **local-first**: checks `slicer.dicomDatabase` for existing series, falls back to C-FIND + retrieve from PACS using `retrieve_mode` strategy
+- `retrieve_series(study_instance_uid, series_instance_uid)` → **local-first**: checks `slicer.dicomDatabase.filesForSeries()`, falls back to retrieve from PACS using `retrieve_mode` strategy
 - Called internally by `SlicerHelper.load_study_from_pacs()` and `load_series_from_pacs()` — not used directly by scripts
 
 ### Local-first lookup strategy
@@ -68,9 +72,9 @@ Both `retrieve_study()` and `retrieve_series()` check Slicer's local DICOM datab
 
 ### PACS configuration
 
-PACS connection params are injected from Clarinet `settings.py` (`pacs_host`, `pacs_port`, `pacs_aet`, `dicom_aet`) into context variables by `build_slicer_context()`. The `_get_pacs_helper()` function reads these globals at runtime and creates `PacsHelper` directly — no dependency on Slicer's internal DICOM settings.
+Hybrid approach: PACS server params (`pacs_host`, `pacs_port`, `pacs_aet`) are injected from Clarinet `settings.py` into context variables by `build_slicer_context()`. The `_get_pacs_helper()` function reads these globals at runtime for server connection, but always reads `calling_aet` and `move_aet` from Slicer's QSettings via `PacsHelper.from_slicer()` — each user's Slicer has its own AE title for C-MOVE destination.
 
-Fallback: if context variables are absent (standalone/manual usage), `PacsHelper.from_slicer()` reads from Slicer's QSettings.
+Fallback: if context variables are absent (standalone/manual usage), `PacsHelper.from_slicer()` provides all params from Slicer's QSettings.
 
 **Usage via POST /exec:**
 ```json
@@ -96,3 +100,10 @@ Fallback: if context variables are absent (standalone/manual usage), `PacsHelper
 - E2E tests: `tests/e2e/test_slicer_pacs_workflow.py` — Slicer ↔ PACS (C-GET/C-MOVE) without mocks: PacsHelper retrieval, load_study/series_from_pacs, record-open API, backend C-MOVE → Slicer load
 - Helper has `_Dummy` stubs so `helper.py` is importable without Slicer
 - All slicer tests use `xdist_group("slicer")` for parallel safety — single Slicer instance shared across tests
+
+### E2E test patterns
+
+- Scripts return results via `__execResult = {...}`, NOT `print(json.dumps(...))`
+- Use `_pacs_helper_script_block()` for explicit PacsHelper params
+- Use `_monkey_patch_from_slicer_block()` for overriding `from_slicer()`
+- Use `_context_injection_block()` for Clarinet PACS context variables

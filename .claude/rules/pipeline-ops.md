@@ -18,6 +18,7 @@ paths:
 | `pipeline_retry_delay` (int) | 5 | Initial retry delay in seconds |
 | `pipeline_retry_max_delay` (int) | 120 | Max retry delay with exponential backoff |
 | `pipeline_ack_type` (AcknowledgeType) | `when_executed` | `when_received` \| `when_executed` \| `when_saved` |
+| `PYTEST_WORKERS` (env, Makefile) | 10 | Max xdist workers; override: `PYTEST_WORKERS=4 make test-fast` |
 
 ## Testing
 
@@ -44,3 +45,10 @@ Optional group `pipeline` in `pyproject.toml`:
 - `taskiq>=0.11.0`
 - `taskiq-aio-pika>=0.4.0`
 - `taskiq-redis>=1.0.0`
+
+## Built-in Tasks
+
+Registered in `clarinet/services/pipeline/tasks/` — imported at broker startup.
+- `convert_series_to_nifti` — C-GET DICOM series → NIfTI conversion. Queue: `clarinet.dicom`. Requires `msg.series_uid`. Idempotent (skips if `volume.nii.gz` exists). Output: `VOLUME_NIFTI` FileDef (level=SERIES).
+
+Task name collision: `register_task()` in `chain.py` prevents project tasks from shadowing built-in tasks (identity check `existing is not task` → `PipelineConfigError`).

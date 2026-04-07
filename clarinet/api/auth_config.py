@@ -52,8 +52,18 @@ class UserManager(BaseUserManager[User, UUID]):
         response: Response | None = None,
     ) -> None:
         """Called after successful login."""
-        del request, response  # Unused but required by interface
+        del response  # Unused but required by interface
         logger.info(f"User {user.id} logged in.")
+        if request:
+            logger.debug(
+                f"Login request metadata for user {user.id}",
+                extra={
+                    "user_id": str(user.id),
+                    "user_agent": request.headers.get("User-Agent", "")[:512],
+                    "referer": request.headers.get("Referer", "")[:512],
+                    "request_path": request.url.path,
+                },
+            )
 
 
 # No longer need custom SQLModelUserDatabase - use fastapi_users_db_sqlmodel instead
@@ -131,6 +141,7 @@ class DatabaseStrategy(Strategy[User, UUID]):
                 "user_id": str(user.id),
                 "expires_at": expires_at.isoformat(),
                 "ip_address": ip_address,
+                "user_agent": user_agent,
             },
         )
 
@@ -171,6 +182,14 @@ class DatabaseStrategy(Strategy[User, UUID]):
                 token[:8],
                 self.request.url.path if self.request else "N/A",
                 self.request.client.host if self.request and self.request.client else "N/A",
+                extra={
+                    "token_preview": token[:8],
+                    "request_path": self.request.url.path if self.request else None,
+                    "request_ip": self.request.client.host
+                    if self.request and self.request.client
+                    else None,
+                    "reason": "not_found_or_expired",
+                },
             )
             self._user_cache.pop(token, None)
             return None

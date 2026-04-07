@@ -1,0 +1,32 @@
+{
+    "$comment": "Example schema for the first-check record type. Replace with your project's data shape.",
+    "type": "object",
+    "properties": {
+        "is_good": {
+            "type": "boolean",
+            "title": "Подходит для исследования",
+            "description": "Whether the study is suitable for the trial"
+        }
+    },
+    "required": ["is_good"],
+    "if": {
+        "properties": { "is_good": { "const": true } }
+    },
+    "then": {
+        "properties": {
+            "study_type": {
+                "type": "string",
+                "title": "Тип исследования",
+                "enum": ["CT", "MRI"]
+            },
+            "best_series": {
+                "type": "string",
+                "title": "Лучшая серия",
+                "description": "DICOM Series UID for downstream tasks",
+                "x-options": {"source": "study_series"}
+            }
+        },
+        "required": ["study_type", "best_series"]
+    },
+    "unevaluatedProperties": false
+}

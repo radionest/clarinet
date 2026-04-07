@@ -63,6 +63,7 @@ pub type Msg {
   NavigateBack
   Restart
   RestartResult(Result(Record, ApiError))
+  RequestFail
   RequestPreload(viewer_url: String, study_uid: String)
 }
 
@@ -316,6 +317,9 @@ pub fn update(
     RestartResult(Error(err)) ->
       #(model, effect.none(), handle_error(err, "Failed to restart record"))
 
+    RequestFail ->
+      #(model, effect.none(), [shared.OpenFailPrompt(model.record_id)])
+
     RequestPreload(viewer_url, study_uid) ->
       #(model, effect.none(), [shared.StartPreload(viewer_url, study_uid)])
   }
@@ -431,6 +435,17 @@ fn render_record_execution(
         ],
         [html.text("Back to Records")],
       ),
+      case permissions.can_fail_record(record, shared.user) {
+        True ->
+          html.button(
+            [
+              attribute.class("btn btn-danger"),
+              event.on_click(RequestFail),
+            ],
+            [html.text("Fail")],
+          )
+        False -> element.none()
+      },
       case permissions.can_restart_record(record, shared.user) {
         True ->
           html.button(

@@ -314,6 +314,52 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     // Cache delegation (all data loading, caches, auto-assign)
     store.CacheMsg(cmsg) -> delegate_cache(model, cmsg)
 
+    // Manual fail — update reason in modal
+    store.UpdateFailReason(reason) -> {
+      #(store.Model(..model, fail_reason: reason), effect.none())
+    }
+
+    // Manual fail — confirm and submit
+    store.ConfirmFailRecord(record_id) -> {
+      let reason = string.trim(model.fail_reason)
+      let eff = {
+        use dispatch <- effect.from
+        records.fail_record(record_id, reason)
+        |> promise.tap(fn(result) {
+          dispatch(store.FailRecordResult(result))
+        })
+        Nil
+      }
+      #(
+        store.Model(
+          ..model,
+          modal_open: False,
+          modal_content: store.NoModal,
+          fail_reason: "",
+          loading: True,
+        ),
+        eff,
+      )
+    }
+
+    store.FailRecordResult(Ok(record)) -> {
+      let is_admin = case model.user {
+        Some(models.User(is_superuser: True, ..)) -> True
+        _ -> False
+      }
+      let new_model =
+        store.Model(..model, cache: cache.put_record(model.cache, record))
+        |> store.set_loading(False)
+        |> store.set_success("Record marked as failed")
+      #(
+        new_model,
+        dispatch_msg(store.CacheMsg(cache.LoadRecords(is_admin))),
+      )
+    }
+
+    store.FailRecordResult(Error(err)) ->
+      handle_api_error(model, err, "Failed to mark record as failed")
+
     // Modal actions
     store.OpenModal(content) -> {
       #(
@@ -324,7 +370,7 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
 
     store.CloseModal -> {
       #(
-        store.Model(..model, modal_open: False, modal_content: store.NoModal),
+        store.Model(..model, modal_open: False, modal_content: store.NoModal, fail_reason: ""),
         effect.none(),
       )
     }
@@ -717,6 +763,16 @@ fn apply_out_msgs(
             store.Model(..m, modal_open: True, modal_content: store.ConfirmDelete(resource, id)),
             eff_list,
           )
+        shared.OpenFailPrompt(record_id) ->
+          #(
+            store.Model(
+              ..m,
+              modal_open: True,
+              modal_content: store.FailRecordPrompt(record_id),
+              fail_reason: "",
+            ),
+            eff_list,
+          )
         shared.SetUser(user) ->
           #(store.set_user(m, user), eff_list)
         shared.Logout ->
@@ -859,7 +915,51 @@ fn render_route_placeholder(route: Route) -> Element(Msg) {
 }
 
 fn render_modal(model: Model) -> Element(Msg) {
-  render_confirm_modal(model)
+  case model.modal_content {
+    store.FailRecordPrompt(record_id) -> render_fail_modal(model, record_id)
+    _ -> render_confirm_modal(model)
+  }
+}
+
+fn render_fail_modal(model: Model, record_id: String) -> Element(Msg) {
+  let is_empty = string.trim(model.fail_reason) == ""
+  html.div([attribute.class("modal-backdrop")], [
+    html.div([attribute.class("modal")], [
+      html.div([attribute.class("modal-header")], [
+        html.h3([attribute.class("modal-title")], [html.text("Mark as Failed")]),
+      ]),
+      html.div([attribute.class("form-group")], [
+        html.label([], [html.text("Reason:")]),
+        html.textarea(
+          [
+            attribute.class("form-control"),
+            attribute.attribute("rows", "3"),
+            attribute.value(model.fail_reason),
+            event.on_input(store.UpdateFailReason),
+            attribute.placeholder("Describe why this record is being failed..."),
+          ],
+          "",
+        ),
+      ]),
+      html.div([attribute.class("modal-footer")], [
+        html.button(
+          [
+            attribute.class("btn btn-secondary"),
+            event.on_click(store.CloseModal),
+          ],
+          [html.text("Cancel")],
+        ),
+        html.button(
+          [
+            attribute.class("btn btn-danger"),
+            attribute.disabled(is_empty),
+            event.on_click(store.ConfirmFailRecord(record_id)),
+          ],
+          [html.text("Fail")],
+        ),
+      ]),
+    ]),
+  ])
 }
 
 fn render_confirm_modal(model: Model) -> Element(Msg) {

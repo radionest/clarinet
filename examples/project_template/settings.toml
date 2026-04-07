@@ -1,0 +1,42 @@
+# Clarinet research project — development settings
+# See `.claude/CLAUDE.md` for an overview of the available keys.
+
+# ── Project ──────────────────────────────────────────
+project_name = "TODO: Project Name"
+project_description = "TODO: short description of the research"
+root_url = "/my_project"
+api_base_url = "http://127.0.0.1:8111/my_project/api"
+
+# Custom roles beyond the standard admin / user / doctor / auto / expert.
+# Any RecordDef.role that is not standard MUST appear here.
+extra_roles = []
+
+# ── Server / Logging ─────────────────────────────────
+host = "0.0.0.0"
+debug = true
+log_level = "INFO"
+log_console_level = "INFO"
+
+# ── Database ─────────────────────────────────────────
+database_driver = "postgresql+asyncpg"
+# database_name, database_host, ... — see settings.local.toml (env vars)
+
+# ── Storage ──────────────────────────────────────────
+anon_id_prefix = "MY_PROJECT"
+
+# ── Features ─────────────────────────────────────────
+recordflow_enabled = true   # event-driven workflow
+pipeline_enabled = true     # task queue (requires RabbitMQ)
+frontend_enabled = true     # serve the SPA
+
+# ── Python config mode ───────────────────────────────
+# All paths below are relative to ``config_tasks_path``.
+config_mode = "python"
+config_tasks_path = "./plan/"
+config_record_types_file = "definitions/record_types.py"
+config_context_hydrators_file = "hydrators/context_hydrators.py"
+recordflow_paths = ["./plan/workflows"]
+
+# ── DICOM ────────────────────────────────────────────
+dicom_retrieve_mode = "c-move"
+anon_send_to_pacs = false

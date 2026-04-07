@@ -139,14 +139,14 @@ class TestPacsHelperConstruction:
             port=4242,
             called_aet="PACS",
             calling_aet="SLICER",
-            prefer_cget=True,
+            retrieve_mode="c-get",
             move_aet="SLICER",
         )
         assert pacs.host == "192.168.1.10"
         assert pacs.port == 4242
         assert pacs.called_aet == "PACS"
         assert pacs.calling_aet == "SLICER"
-        assert pacs.prefer_cget is True
+        assert pacs.retrieve_mode == "c-get"
         assert pacs.move_aet == "SLICER"
 
     def test_constructor_defaults(self) -> None:
@@ -157,8 +157,8 @@ class TestPacsHelperConstruction:
             called_aet="ORTHANC",
             calling_aet="MYSCU",
         )
-        assert pacs.prefer_cget is True
-        assert pacs.move_aet == "SLICER"
+        assert pacs.retrieve_mode == "c-get"
+        assert pacs.move_aet == "MYSCU"
 
     def test_slicer_helper_has_load_study_from_pacs(self) -> None:
         """SlicerHelper exposes load_study_from_pacs method."""
@@ -317,14 +317,21 @@ async def test_set_dual_layout(
     """Set dual layout — verify it runs without error."""
     context = {"working_folder": "/tmp"}
     script = """
+import numpy as np
 s = SlicerHelper(working_folder)
 seg_a = s.create_segmentation('DualA')
 seg_b = s.create_segmentation('DualB')
-# Dual layout needs volume nodes; create minimal ones
+# Create volumes with actual image data to avoid VTK "Input port 0 has 0 connections"
+# warnings that flood the event loop and block subsequent HTTP requests
 vol_a = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLScalarVolumeNode', 'VolA')
 vol_b = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLScalarVolumeNode', 'VolB')
+dummy = np.zeros((2, 2, 2), dtype=np.int16)
+slicer.util.updateVolumeFromArray(vol_a, dummy)
+slicer.util.updateVolumeFromArray(vol_b, dummy)
 s.set_dual_layout(vol_a, vol_b, seg_a=seg_a, seg_b=seg_b, linked=True)
 print('dual_layout_ok')
+# Clear scene to stop VTK rendering on empty views between tests
+slicer.mrmlScene.Clear(0)
 """
     result = await slicer_service.execute(slicer_url, script, context=context)
     assert isinstance(result, dict)

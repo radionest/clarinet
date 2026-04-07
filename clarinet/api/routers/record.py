@@ -31,6 +31,7 @@ from clarinet.api.auth_config import current_active_user
 from clarinet.api.dependencies import (
     AuthorizedRecordDep,
     CurrentUserDep,
+    MutableRecordDep,
     PaginationDep,
     RecordRepositoryDep,
     RecordServiceDep,
@@ -70,7 +71,6 @@ from clarinet.services.schema_hydration import hydrate_schema
 from clarinet.services.slicer.context import build_slicer_context_async
 from clarinet.settings import settings
 from clarinet.types import RecordData
-from clarinet.utils.file_checksums import checksums_changed, compute_checksums
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -402,7 +402,7 @@ async def update_record_status(
     record_id: int,
     record_status: RecordStatus,
     service: RecordServiceDep,
-    _authorized_record: AuthorizedRecordDep,
+    _authorized_record: MutableRecordDep,
     user: CurrentUserDep,
 ) -> RecordRead:
     """Update a record's status."""
@@ -523,7 +523,7 @@ _SUBMIT_STATUSES = (RecordStatus.finished, RecordStatus.failed)
 @router.post("/{record_id}/data", response_model=RecordRead)
 async def submit_record_data(
     record_id: int,
-    authorized_record: AuthorizedRecordDep,
+    authorized_record: MutableRecordDep,
     repo: RecordRepositoryDep,
     service: RecordServiceDep,
     rt_service: RecordTypeServiceDep,
@@ -566,7 +566,7 @@ async def submit_record_data(
 @router.patch("/{record_id}/data", response_model=RecordRead)
 async def update_record_data(
     record_id: int,
-    authorized_record: AuthorizedRecordDep,
+    authorized_record: MutableRecordDep,
     repo: RecordRepositoryDep,
     service: RecordServiceDep,
     rt_service: RecordTypeServiceDep,
@@ -594,7 +594,7 @@ async def update_record_data(
 @router.post("/{record_id}/submit", response_model=RecordRead)
 async def submit_record_with_validation(
     record_id: int,
-    authorized_record: AuthorizedRecordDep,
+    authorized_record: MutableRecordDep,
     repo: RecordRepositoryDep,
     service: RecordServiceDep,
     rt_service: RecordTypeServiceDep,
@@ -647,7 +647,7 @@ async def submit_record_with_validation(
 @router.patch("/{record_id}/submit", response_model=RecordRead)
 async def resubmit_record_with_validation(
     record_id: int,
-    authorized_record: AuthorizedRecordDep,
+    authorized_record: MutableRecordDep,
     repo: RecordRepositoryDep,
     service: RecordServiceDep,
     rt_service: RecordTypeServiceDep,
@@ -738,58 +738,45 @@ async def validate_files_endpoint(
 @router.post("/{record_id}/check-files", response_model=FileCheckResult)
 async def check_record_files(
     record_id: int,
-    authorized_record: AuthorizedRecordDep,
-    repo: RecordRepositoryDep,
+    _authorized_record: AuthorizedRecordDep,
     service: RecordServiceDep,
 ) -> FileCheckResult:
     """Compute current file checksums, compare with stored, trigger invalidation if changed.
 
     For ``blocked`` records, this endpoint also checks whether the required
     input files have appeared and auto-transitions to ``pending`` if so.
-
-    Args:
-        record_id: ID of the record to check files for
-
-    Returns:
-        FileCheckResult with changed files and current checksums
     """
-    record = authorized_record
-    record_read = RecordRead.model_validate(record)
+    changed_files, checksums = await service.check_files(record_id)
+    return FileCheckResult(changed_files=changed_files, checksums=checksums)
 
-    # Fetch parent for fallback pattern resolution
-    parent_read = None
-    if record.parent_record_id is not None:
-        parent = await repo.get_with_relations(record.parent_record_id)
-        parent_read = RecordRead.model_validate(parent)
 
-    # Auto-unblock: if record is blocked, check whether input files are now present
-    if record.status == RecordStatus.blocked:
-        file_result = await validate_record_files(record_read, parent=parent_read)
-        if file_result is not None and file_result.valid:
-            if file_result.matched_files:
-                await repo.set_files(record, file_result.matched_files)
-            record, _ = await service.update_status(record_id, RecordStatus.pending)
-            record_read = RecordRead.model_validate(record)
-        else:
-            # Still blocked — return early with empty result
-            return FileCheckResult(changed_files=[], checksums={})
+_MANUALLY_FAILABLE_STATUSES = (RecordStatus.pending, RecordStatus.inwork)
 
-    new_checksums = await compute_checksums(
-        record_read.record_type.file_registry or [],
-        record_read,
-        Path(record_read.working_folder),
-    )
-    old_checksums = {
-        link.name: link.checksum for link in (record_read.file_links or []) if link.checksum
-    }
-    changed = checksums_changed(old_checksums, new_checksums)
 
-    await repo.update_checksums(record, new_checksums)
+@router.post("/{record_id}/fail", response_model=RecordRead)
+async def fail_record(
+    record_id: int,
+    authorized_record: AuthorizedRecordDep,
+    service: RecordServiceDep,
+    user: CurrentUserDep,
+    reason: str = Body(embed=True, min_length=1),
+) -> RecordRead:
+    """Manually mark a record as failed with a reason.
 
-    if changed:
-        await service.notify_file_change(record)
+    Only records in ``pending`` or ``inwork`` status can be failed manually.
+    """
+    reason = reason.strip()
+    if not reason:
+        raise CONFLICT.with_context("Reason cannot be empty or whitespace-only.")
 
-    return FileCheckResult(changed_files=list(changed), checksums=new_checksums)
+    if authorized_record.status not in _MANUALLY_FAILABLE_STATUSES:
+        raise CONFLICT.with_context(
+            f"Cannot fail record in '{authorized_record.status.value}' status. "
+            f"Allowed: {', '.join(s.value for s in _MANUALLY_FAILABLE_STATUSES)}."
+        )
+
+    updated = await service.fail_record(record_id, reason)
+    return mask_record_patient_data(RecordRead.model_validate(updated), user)
 
 
 @router.post("/{record_id}/invalidate", response_model=RecordRead)

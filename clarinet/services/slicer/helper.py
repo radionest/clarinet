@@ -161,20 +161,22 @@ def _get_pacs_helper(server_name: str | None = None) -> PacsHelper:
         host = g["pacs_host"]
         port = int(g["pacs_port"])
         called_aet = g["pacs_aet"]
-        calling_aet = g.get("dicom_aet", "SLICER")
         retrieve_mode = g.get("dicom_retrieve_mode", "c-get")
-        prefer_cget = retrieve_mode != "c-move"
+        # calling_aet and move_aet must come from Slicer's own config —
+        # each user's Slicer has its own AE title for C-MOVE destination
+        slicer_pacs = PacsHelper.from_slicer(server_name)
         _pacs_log.info(
             f"Using PACS from Clarinet settings: {host}:{port} "
-            f"(AET={called_aet}, mode={retrieve_mode})"
+            f"(AET={called_aet}, mode={retrieve_mode}, "
+            f"move_dest={slicer_pacs.calling_aet})"
         )
         return PacsHelper(
             host=host,
             port=port,
             called_aet=called_aet,
-            calling_aet=calling_aet,
-            prefer_cget=prefer_cget,
-            move_aet=calling_aet,
+            calling_aet=slicer_pacs.calling_aet,
+            retrieve_mode=retrieve_mode,
+            move_aet=slicer_pacs.move_aet,
         )
     return PacsHelper.from_slicer(server_name)
 
@@ -187,21 +189,77 @@ class PacsHelper:
     DICOM module, or pass them explicitly for testing.
     """
 
+    # Valid retrieve strategies:
+    #   c-get        — C-GET per series, fallback to C-MOVE per series
+    #   c-get-study  — C-GET whole study, fallback to C-MOVE whole study
+    #   c-move       — C-MOVE per series (no C-GET attempt)
+    #   c-move-study — C-MOVE whole study (no C-GET attempt)
+    VALID_MODES = ("c-get", "c-get-study", "c-move", "c-move-study")
+
     def __init__(
         self,
         host: str,
         port: int,
         called_aet: str,
         calling_aet: str,
-        prefer_cget: bool = True,
-        move_aet: str = "SLICER",
+        retrieve_mode: str = "c-get",
+        move_aet: str | None = None,
     ) -> None:
         self.host = host
         self.port = port
         self.called_aet = called_aet
         self.calling_aet = calling_aet
-        self.prefer_cget = prefer_cget
-        self.move_aet = move_aet
+        if retrieve_mode not in self.VALID_MODES:
+            raise ValueError(
+                f"Unsupported retrieve_mode {retrieve_mode!r}. "
+                f"Expected one of: {', '.join(self.VALID_MODES)}"
+            )
+        self.retrieve_mode = retrieve_mode
+        self.move_aet = calling_aet if move_aet is None else move_aet
+
+    def verify(self) -> bool:
+        """Test PACS connectivity via C-ECHO (DICOM Verification SOP Class).
+
+        Returns True if PACS responds to C-ECHO, False otherwise.
+        Logs the result at INFO/ERROR level for diagnostics.
+        """
+        try:
+            echo = ctk.ctkDICOMEcho()
+        except AttributeError:
+            _pacs_log.warning("C-ECHO not available (ctkDICOMEcho missing in this Slicer version)")
+            return True  # assume OK if we can't test
+
+        echo.callingAETitle = self.calling_aet
+        echo.calledAETitle = self.called_aet
+        echo.host = self.host
+        echo.port = self.port
+
+        try:
+            ok = bool(echo.echo())
+        except Exception as e:
+            _pacs_log.error(
+                f"C-ECHO exception: {e} "
+                f"(calling={self.calling_aet}, called={self.called_aet}, "
+                f"host={self.host}:{self.port})"
+            )
+            return False
+
+        if ok:
+            _pacs_log.info(
+                f"C-ECHO OK: {self.calling_aet} → {self.host}:{self.port} "
+                f"(called={self.called_aet})"
+            )
+        else:
+            _pacs_log.error(
+                f"C-ECHO failed: PACS not reachable or rejected association "
+                f"(calling={self.calling_aet}, called={self.called_aet}, "
+                f"host={self.host}:{self.port}). "
+                f"Check: (1) AE title '{self.calling_aet}' is allowed by the PACS ACL "
+                f"with the correct IP of this machine; "
+                f"(2) PACS AE title '{self.called_aet}' and address "
+                f"{self.host}:{self.port} are correct."
+            )
+        return ok
 
     @classmethod
     def from_slicer(cls, server_name: str | None = None) -> PacsHelper:
@@ -230,6 +288,14 @@ class PacsHelper:
         # persisted to QSettings. The ctkDICOMVisualBrowser loads its own
         # hard-coded defaults (ExampleHost, MedicalConnections) and does NOT
         # reflect servers added through the settings dialog.
+        #
+        # Additionally, the Calling AET is stored in TWO places that are NOT
+        # synchronized:
+        #   - Global: QSettings key "CallingAETitle" (no DICOM/ prefix) —
+        #     this is what the user sets in Application Settings > DICOM
+        #   - Per-server: DICOM/ServerNodes/{i}["Calling AETitle"] — defaults
+        #     to "CTK" and is rarely changed by users
+        # We read from the global key first, falling back to per-server.
         #
         # Reading from QSettings directly ensures we see the servers that the
         # user actually configured.
@@ -280,11 +346,25 @@ class PacsHelper:
         host = server["Address"]
         port = int(server["Port"])
         called_aet = server["Called AETitle"]
-        calling_aet = server["Calling AETitle"]
-        prefer_cget = server.get("Retrieve Protocol", "CGET") == "CGET"
+
+        global_aet = settings.value("CallingAETitle")
+        if global_aet:
+            calling_aet = str(global_aet)
+        else:
+            per_server_aet = server.get("Calling AETitle", "SLICER")
+            calling_aet = str(per_server_aet)
+            _pacs_log.warning(
+                f"CallingAETitle not set in Slicer global settings, "
+                f"using {'per-server' if per_server_aet != 'SLICER' else 'default'} "
+                f"value: {calling_aet}. "
+                f"Set it in Edit > Application Settings > DICOM > Calling AE Title."
+            )
+
+        retrieve_mode = "c-get" if server.get("Retrieve Protocol", "CGET") == "CGET" else "c-move"
 
         _pacs_log.info(
-            f"Using PACS server: {server.get('Name', 'unknown')} ({host}:{port}, AET={called_aet})"
+            f"Using PACS server: {server.get('Name', 'unknown')} "
+            f"({host}:{port}, AET={called_aet}, calling={calling_aet})"
         )
 
         return cls(
@@ -292,16 +372,77 @@ class PacsHelper:
             port=port,
             called_aet=called_aet,
             calling_aet=calling_aet,
-            prefer_cget=prefer_cget,
+            retrieve_mode=retrieve_mode,
             move_aet=calling_aet,
         )
+
+    def _retrieve_study_level(self, retrieve: Any, study_instance_uid: str) -> None:
+        """Retrieve using study-level DIMSE operations (getStudy/moveStudy)."""
+        prefer_cget = self.retrieve_mode.startswith("c-get")
+        if prefer_cget:
+            _pacs_log.info(f"C-GET study {study_instance_uid} ...")
+            ok = retrieve.getStudy(study_instance_uid)
+            if not ok:
+                _pacs_log.warning(f"C-GET study failed (ok={ok}), falling back to C-MOVE study")
+                retrieve.moveDestinationAETitle = self.move_aet
+                ok = retrieve.moveStudy(study_instance_uid)
+                if not ok:
+                    _pacs_log.error(
+                        f"C-MOVE study failed (ok={ok}) for {study_instance_uid} "
+                        f"(calling={self.calling_aet}, called={self.called_aet}, "
+                        f"host={self.host}:{self.port}, move_dest={self.move_aet})"
+                    )
+        else:
+            _pacs_log.info(f"C-MOVE study {study_instance_uid} ...")
+            retrieve.moveDestinationAETitle = self.move_aet
+            ok = retrieve.moveStudy(study_instance_uid)
+            if not ok:
+                _pacs_log.error(
+                    f"C-MOVE study failed (ok={ok}) for {study_instance_uid} "
+                    f"(calling={self.calling_aet}, called={self.called_aet}, "
+                    f"host={self.host}:{self.port}, move_dest={self.move_aet})"
+                )
+
+    def _retrieve_series_level(
+        self, retrieve: Any, study_instance_uid: str, series_instance_uid: str
+    ) -> None:
+        """Retrieve using series-level DIMSE operations (getSeries/moveSeries)."""
+        prefer_cget = self.retrieve_mode.startswith("c-get")
+        if prefer_cget:
+            _pacs_log.info(f"C-GET series {series_instance_uid} ...")
+            ok = retrieve.getSeries(study_instance_uid, series_instance_uid)
+            if not ok or not (
+                slicer.dicomDatabase and slicer.dicomDatabase.filesForSeries(series_instance_uid)
+            ):
+                _pacs_log.warning(
+                    f"C-GET failed for series {series_instance_uid} (ok={ok}), "
+                    f"falling back to C-MOVE"
+                )
+                retrieve.moveDestinationAETitle = self.move_aet
+                ok = retrieve.moveSeries(study_instance_uid, series_instance_uid)
+                if not ok:
+                    _pacs_log.error(
+                        f"C-MOVE series failed (ok={ok}) for {series_instance_uid} "
+                        f"(calling={self.calling_aet}, called={self.called_aet}, "
+                        f"host={self.host}:{self.port}, move_dest={self.move_aet})"
+                    )
+        else:
+            _pacs_log.info(f"C-MOVE series {series_instance_uid} ...")
+            retrieve.moveDestinationAETitle = self.move_aet
+            ok = retrieve.moveSeries(study_instance_uid, series_instance_uid)
+            if not ok:
+                _pacs_log.error(
+                    f"C-MOVE series failed (ok={ok}) for {series_instance_uid} "
+                    f"(calling={self.calling_aet}, called={self.called_aet}, "
+                    f"host={self.host}:{self.port}, move_dest={self.move_aet})"
+                )
 
     def retrieve_study(self, study_instance_uid: str) -> list[str]:
         """Load a DICOM study into the MRML scene (local-first).
 
         Checks Slicer's local DICOM database first and loads from there if the
-        study already exists. Falls back to C-FIND + C-GET from PACS, then
-        C-MOVE if C-GET fails.
+        study already exists. Falls back to C-FIND + retrieve from PACS using
+        the configured strategy (c-get, c-get-study, c-move, c-move-study).
 
         Args:
             study_instance_uid: DICOM Study Instance UID to retrieve.
@@ -322,7 +463,12 @@ class PacsHelper:
             if loaded:
                 return loaded
 
-        # 2. C-FIND: query PACS for the study
+        # 2. Verify PACS connectivity
+        if not self.verify():
+            _pacs_log.error("Aborting retrieve — PACS connectivity check failed")
+            return []
+
+        # 3. C-FIND: query PACS for the study
         _pacs_log.info(f"C-FIND study {study_instance_uid} ...")
         query = ctk.ctkDICOMQuery()
         query.callingAETitle = self.calling_aet
@@ -333,7 +479,16 @@ class PacsHelper:
 
         temp_db = ctk.ctkDICOMDatabase()
         temp_db.openDatabase("")
-        query.query(temp_db)
+        try:
+            query.query(temp_db)
+        except Exception as e:
+            _pacs_log.error(
+                f"C-FIND failed for study {study_instance_uid}: {e} "
+                f"(calling={self.calling_aet}, called={self.called_aet}, "
+                f"host={self.host}:{self.port})"
+            )
+            temp_db.closeDatabase()
+            return []
 
         series_to_retrieve: list[str] = [
             series_uid
@@ -341,8 +496,15 @@ class PacsHelper:
             if study_uid == study_instance_uid
         ]
         _pacs_log.info(f"C-FIND returned {len(series_to_retrieve)} series")
+        if not series_to_retrieve:
+            _pacs_log.warning(
+                f"C-FIND returned 0 series for study {study_instance_uid} — "
+                f"study may not exist on PACS or association was rejected"
+            )
+            temp_db.closeDatabase()
+            return []
 
-        # 3. C-GET/C-MOVE with fallback: retrieve series into Slicer DICOM database
+        # 4. Retrieve into Slicer DICOM database using configured strategy
         retrieve = ctk.ctkDICOMRetrieve()
         retrieve.callingAETitle = self.calling_aet
         retrieve.calledAETitle = self.called_aet
@@ -352,32 +514,42 @@ class PacsHelper:
 
         _pacs_log.info(
             f"DIMSE retrieve: {self.calling_aet} → {self.host}:{self.port} "
-            f"(called={self.called_aet}, move_dest={self.move_aet})"
+            f"(called={self.called_aet}, mode={self.retrieve_mode}, move_dest={self.move_aet})"
         )
 
         retrieved_series_uids: list[str] = []
-        for series_uid in series_to_retrieve:
-            if self.prefer_cget:
-                ok = retrieve.getSeries(study_instance_uid, series_uid)
-                if not ok or not (db and db.filesForSeries(series_uid)):
-                    _pacs_log.warning(
-                        f"C-GET failed for series {series_uid} (ok={ok}), falling back to C-MOVE"
+        study_level = self.retrieve_mode.endswith("-study")
+
+        if study_level:
+            # Study-level: single getStudy/moveStudy call retrieves all series at once
+            self._retrieve_study_level(retrieve, study_instance_uid)
+            for series_uid in series_to_retrieve:
+                files = db.filesForSeries(series_uid) if db else ()
+                if files:
+                    _pacs_log.info(f"Retrieved {len(files)} files for series {series_uid}")
+                    retrieved_series_uids.append(series_uid)
+                else:
+                    _pacs_log.error(
+                        f"Retrieve failed: 0 files for series {series_uid} "
+                        f"(calling={self.calling_aet}, called={self.called_aet}, "
+                        f"host={self.host}:{self.port}, move_dest={self.move_aet})"
                     )
-                    retrieve.moveDestinationAETitle = self.move_aet
-                    retrieve.moveSeries(study_instance_uid, series_uid)
-            else:
-                _pacs_log.info(f"C-MOVE series {series_uid} ...")
-                retrieve.moveDestinationAETitle = self.move_aet
-                retrieve.moveSeries(study_instance_uid, series_uid)
+        else:
+            # Series-level: retrieve each series individually
+            for series_uid in series_to_retrieve:
+                self._retrieve_series_level(retrieve, study_instance_uid, series_uid)
+                files = db.filesForSeries(series_uid) if db else ()
+                if files:
+                    _pacs_log.info(f"Retrieved {len(files)} files for series {series_uid}")
+                    retrieved_series_uids.append(series_uid)
+                else:
+                    _pacs_log.error(
+                        f"Retrieve failed: 0 files for series {series_uid} "
+                        f"(calling={self.calling_aet}, called={self.called_aet}, "
+                        f"host={self.host}:{self.port}, move_dest={self.move_aet})"
+                    )
 
-            files = db.filesForSeries(series_uid) if db else ()
-            if files:
-                _pacs_log.info(f"Retrieved {len(files)} files for series {series_uid}")
-                retrieved_series_uids.append(series_uid)
-            else:
-                _pacs_log.error(f"Retrieve failed: 0 files for series {series_uid}")
-
-        # 4. Load ONLY the retrieved series into the MRML scene
+        # 5. Load ONLY the retrieved series into the MRML scene
         from DICOMLib import DICOMUtils  # type: ignore[import-not-found]
 
         loaded_node_ids: list[str] = DICOMUtils.loadSeriesByUID(retrieved_series_uids)
@@ -389,8 +561,9 @@ class PacsHelper:
         """Load a single DICOM series into the MRML scene (local-first).
 
         Checks Slicer's local DICOM database first and loads from there if the
-        series already exists. Falls back to C-GET from PACS, then C-MOVE if
-        C-GET fails (common with Orthanc without the CGet plugin).
+        series already exists. Falls back to retrieve from PACS using the
+        configured strategy. With ``-study`` modes, retrieves the entire study
+        but only loads the requested series.
 
         Args:
             study_instance_uid: DICOM Study Instance UID.
@@ -409,7 +582,12 @@ class PacsHelper:
             if loaded:
                 return loaded
 
-        # 2. Retrieve from PACS with C-GET → C-MOVE fallback
+        # 2. Verify PACS connectivity
+        if not self.verify():
+            _pacs_log.error("Aborting retrieve — PACS connectivity check failed")
+            return []
+
+        # 3. Retrieve from PACS using configured strategy
         retrieve = ctk.ctkDICOMRetrieve()
         retrieve.callingAETitle = self.calling_aet
         retrieve.calledAETitle = self.called_aet
@@ -419,20 +597,14 @@ class PacsHelper:
 
         _pacs_log.info(
             f"DIMSE retrieve: {self.calling_aet} → {self.host}:{self.port} "
-            f"(called={self.called_aet}, move_dest={self.move_aet})"
+            f"(called={self.called_aet}, mode={self.retrieve_mode}, move_dest={self.move_aet})"
         )
 
-        if self.prefer_cget:
-            _pacs_log.info(f"C-GET series {series_instance_uid} ...")
-            ok = retrieve.getSeries(study_instance_uid, series_instance_uid)
-            if not ok or not (db and db.filesForSeries(series_instance_uid)):
-                _pacs_log.warning(f"C-GET failed (ok={ok}), falling back to C-MOVE")
-                retrieve.moveDestinationAETitle = self.move_aet
-                retrieve.moveSeries(study_instance_uid, series_instance_uid)
+        if self.retrieve_mode.endswith("-study"):
+            # Study-level retrieval — downloads entire study, loads requested series
+            self._retrieve_study_level(retrieve, study_instance_uid)
         else:
-            _pacs_log.info(f"C-MOVE series {series_instance_uid} ...")
-            retrieve.moveDestinationAETitle = self.move_aet
-            retrieve.moveSeries(study_instance_uid, series_instance_uid)
+            self._retrieve_series_level(retrieve, study_instance_uid, series_instance_uid)
 
         # Verify files arrived in the database
         files_after = db.filesForSeries(series_instance_uid) if db else ()
@@ -848,6 +1020,61 @@ class SlicerHelper:
                 f"Check PACS configuration in Edit > Application Settings > DICOM."
             )
         return node_ids
+
+    def download_series_zip(
+        self,
+        study_uid: str,
+        series_uid: str,
+        server_url: str,
+        auth_cookie: str,
+    ) -> str:
+        """Download DICOM series ZIP from Clarinet, extract, import into Slicer DB.
+
+        Alternative to DIMSE retrieval — downloads via HTTP from Clarinet's
+        DICOMweb cache endpoint.
+
+        Args:
+            study_uid: DICOM Study Instance UID.
+            series_uid: DICOM Series Instance UID.
+            server_url: Clarinet API base URL (e.g. "http://host:8000").
+            auth_cookie: Cookie header value (e.g. "clarinet_session=token").
+
+        Returns:
+            Path to the directory containing extracted DICOM files.
+        """
+        import shutil
+        import tempfile
+        import urllib.request
+        import zipfile
+
+        url = f"{server_url}/dicom-web/studies/{study_uid}/series/{series_uid}/archive"
+        req = urllib.request.Request(url)
+        req.add_header("Cookie", auth_cookie)
+
+        extract_dir = os.path.join(self.working_folder, "_dicom_download", series_uid)
+        os.makedirs(extract_dir, exist_ok=True)
+
+        tmp = tempfile.NamedTemporaryFile(suffix=".zip", delete=False)  # noqa: SIM115
+        tmp_path = tmp.name
+        tmp.close()
+        try:
+            with urllib.request.urlopen(req) as resp, open(tmp_path, "wb") as f:
+                shutil.copyfileobj(resp, f)
+            with zipfile.ZipFile(tmp_path) as zf:
+                zf.extractall(extract_dir)
+        finally:
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+
+        # Import into Slicer DICOM database (if running inside Slicer)
+        try:
+            from DICOMLib import DICOMUtils  # type: ignore[import-not-found]
+
+            DICOMUtils.importDicom(extract_dir)
+        except ImportError:
+            pass
+
+        return extract_dir
 
     def get_segment_names(self, segmentation: SegmentationBuilder | Any) -> list[str]:
         """Get ordered list of segment names from a segmentation node.

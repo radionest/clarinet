@@ -363,6 +363,8 @@ cmd_deploy() {
 
 cmd_bake() {
     local dicom_dir="${1:-}"
+    local auto_fetched_dicom=""
+
     if [[ -n "$dicom_dir" ]]; then
         dicom_dir="$(realpath "$dicom_dir")"
         if [[ ! -d "$dicom_dir" ]]; then
@@ -370,6 +372,15 @@ cmd_bake() {
             exit 1
         fi
         log "DICOM test images: $dicom_dir"
+    elif [[ -n "${DICOM_SOURCE_URL:-}" ]]; then
+        # Auto-fetch from source Orthanc
+        log "No DICOM dir specified — fetching from ${DICOM_SOURCE_URL}..."
+        auto_fetched_dicom="$(mktemp -d -t bake-dicom-XXXXXX)"
+        if ! dicom_dir=$("$SCRIPT_DIR/fetch-test-dicom.sh" --output "$auto_fetched_dicom" \
+            | tail -1) || [[ ! -d "$dicom_dir" ]]; then
+            err "Failed to fetch DICOM test data"
+            exit 1
+        fi
     fi
 
     require_commands virsh virt-install cloud-localds qemu-img
@@ -384,6 +395,7 @@ cmd_bake() {
         virsh destroy "$bake_name" 2>/dev/null || true
         virsh undefine "$bake_name" --remove-all-storage 2>/dev/null || true
         rm -f "$bake_disk" "$bake_seed"
+        [[ -n "$auto_fetched_dicom" ]] && rm -rf "$auto_fetched_dicom"
     }
     trap _cleanup_bake ERR
 
@@ -483,6 +495,8 @@ cmd_bake() {
     # Export: flatten overlay into standalone golden qcow2
     log "Exporting golden image (this may take a minute)..."
     mkdir -p "$IMAGES_DIR"
+    # Remove old golden image (may be owned by libvirt-qemu from a previous bake)
+    rm -f "$GOLDEN_IMAGE" 2>/dev/null || sudo rm -f "$GOLDEN_IMAGE"
     qemu-img convert -c -O qcow2 "$bake_disk" "$GOLDEN_IMAGE"
 
     # Grant libvirt read access to golden image
@@ -495,6 +509,11 @@ cmd_bake() {
     # Cleanup baking VM
     virsh undefine "$bake_name" --remove-all-storage 2>/dev/null || true
     rm -f "$bake_disk" "$bake_seed"
+
+    # Clean up auto-fetched DICOM temp dir
+    if [[ -n "$auto_fetched_dicom" ]]; then
+        rm -rf "$auto_fetched_dicom"
+    fi
 
     trap - ERR
 

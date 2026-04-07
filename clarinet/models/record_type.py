@@ -10,9 +10,9 @@ import json as json_lib
 from typing import TYPE_CHECKING, Any
 
 from pydantic import field_validator, model_validator
-from sqlmodel import JSON, Column, Field, Relationship, SQLModel
+from sqlmodel import Column, Field, Relationship, SQLModel
 
-from clarinet.types import RecordSchema, SlicerArgs, SlicerHydratorNames
+from clarinet.types import PortableJSON, RecordSchema, SlicerArgs, SlicerHydratorNames
 from clarinet.utils.validators import validate_json_safe, validate_slug
 
 from .base import DicomQueryLevel
@@ -89,14 +89,16 @@ class RecordType(RecordTypeBase, table=True):
     """
 
     name: str = Field(primary_key=True)
-    data_schema: RecordSchema | None = Field(default_factory=dict, sa_column=Column(JSON))
+    data_schema: RecordSchema | None = Field(default_factory=dict, sa_column=Column(PortableJSON))
 
-    slicer_script_args: SlicerArgs | None = Field(default_factory=dict, sa_column=Column(JSON))
+    slicer_script_args: SlicerArgs | None = Field(
+        default_factory=dict, sa_column=Column(PortableJSON)
+    )
     slicer_result_validator_args: SlicerArgs | None = Field(
-        default_factory=dict, sa_column=Column(JSON)
+        default_factory=dict, sa_column=Column(PortableJSON)
     )
     slicer_context_hydrators: SlicerHydratorNames | None = Field(
-        default=None, sa_column=Column(JSON)
+        default=None, sa_column=Column(PortableJSON)
     )
 
     role_name: str | None = Field(foreign_key="userrole.name", default=None)

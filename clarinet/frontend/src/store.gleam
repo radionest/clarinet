@@ -1,6 +1,6 @@
 // Global state management
 import api/info.{type ProjectInfo}
-import api/models.{type User}
+import api/models.{type Record, type User}
 import api/types.{type ApiError}
 import cache
 import gleam/option.{type Option, None, Some}
@@ -43,6 +43,7 @@ pub type Model {
     // Modal state
     modal_open: Bool,
     modal_content: ModalContent,
+    fail_reason: String,
     // Preload
     preload: preload.Model,
     // Active page model (for modular pages)
@@ -75,6 +76,7 @@ pub type PageModel {
 pub type ModalContent {
   NoModal
   ConfirmDelete(resource: String, id: String)
+  FailRecordPrompt(record_id: String)
 }
 
 // Application messages
@@ -133,6 +135,11 @@ pub type Msg {
   // Cache delegation (all data loading lives in cache.gleam)
   CacheMsg(cache.Msg)
 
+  // Manual fail record (modal-based)
+  UpdateFailReason(String)
+  ConfirmFailRecord(record_id: String)
+  FailRecordResult(Result(Record, ApiError))
+
   // Preload delegation
   PreloadMsg(preload.Msg)
 }
@@ -151,6 +158,7 @@ pub fn init() -> Model {
     cache: cache.init(),
     modal_open: False,
     modal_content: NoModal,
+    fail_reason: "",
     preload: preload.init(),
     page: NoPage,
   )

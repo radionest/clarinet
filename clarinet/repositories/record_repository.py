@@ -606,6 +606,32 @@ class RecordRepository(BaseRepository[Record]):
         await self.session.commit()
         return await self.get_with_relations(record_id)
 
+    async def fail_record(self, record_id: int, reason: str) -> tuple[Record, RecordStatus]:
+        """Mark a record as failed with a reason appended to context_info.
+
+        Args:
+            record_id: ID of the record to fail.
+            reason: Human-readable reason for failure.
+
+        Returns:
+            Tuple of (record with relations loaded, old status).
+
+        Raises:
+            RecordNotFoundError: If record doesn't exist.
+        """
+        record = await self.get(record_id)
+        old_status = record.status
+
+        prefixed = f"Manually failed: {reason}"
+        if record.context_info:
+            record.context_info = f"{record.context_info}\n{prefixed}"
+        else:
+            record.context_info = prefixed
+
+        record.status = RecordStatus.failed
+        await self.session.commit()
+        return await self.get_with_relations(record_id), old_status
+
     async def count_by_type_and_context(
         self,
         record_type_name: str,

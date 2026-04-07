@@ -351,6 +351,21 @@ async def authorize_record_access(
 AuthorizedRecordDep = Annotated[Record, Depends(authorize_record_access)]
 
 
+async def authorize_mutable_record_access(
+    record: AuthorizedRecordDep,
+    user: CurrentUserDep,
+) -> Record:
+    """Authorize mutation access: superuser, assigned user, or unassigned record."""
+    if user.is_superuser:
+        return record
+    if record.user_id is None or record.user_id == user.id:
+        return record
+    raise AuthorizationError("Insufficient permissions to modify this record")
+
+
+MutableRecordDep = Annotated[Record, Depends(authorize_mutable_record_access)]
+
+
 def require_mutable_config(request: Request) -> None:
     """Raise AuthorizationError if config_mode is 'python'.
 

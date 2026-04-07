@@ -1,6 +1,8 @@
 """Pipeline definition model for DB-backed pipeline chain definitions."""
 
-from sqlmodel import JSON, Column, Field, SQLModel
+from sqlmodel import Column, Field, SQLModel
+
+from clarinet.types import PortableJSON
 
 
 class PipelineDefinitionBase(SQLModel):
@@ -12,7 +14,7 @@ class PipelineDefinitionBase(SQLModel):
     """
 
     name: str = Field(primary_key=True, min_length=1, max_length=100)
-    steps: list[dict[str, str]] = Field(default_factory=list, sa_column=Column(JSON))
+    steps: list[dict[str, str]] = Field(default_factory=list, sa_column=Column(PortableJSON))
 
 
 class PipelineDefinition(PipelineDefinitionBase, table=True):

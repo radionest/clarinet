@@ -9,6 +9,7 @@ Covers:
 - Unresolved template warning
 """
 
+import sys
 from datetime import date
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
@@ -104,10 +105,10 @@ def _make_record_read(
 def test_pacs_settings_in_context(mock_settings):
     """PACS connection params from settings are injected into context."""
     mock_settings.storage_path = "/storage"
+    mock_settings.storage_path_client = None
     mock_settings.pacs_host = "pacs.local"
     mock_settings.pacs_port = 4242
     mock_settings.pacs_aet = "ORTHANC"
-    mock_settings.dicom_aet = "CLARINET"
     mock_settings.dicom_retrieve_mode = "c-move"
 
     record = _make_record_read(level=DicomQueryLevel.STUDY)
@@ -116,43 +117,54 @@ def test_pacs_settings_in_context(mock_settings):
     assert ctx["pacs_host"] == "pacs.local"
     assert ctx["pacs_port"] == 4242
     assert ctx["pacs_aet"] == "ORTHANC"
-    assert ctx["dicom_aet"] == "CLARINET"
+    assert "dicom_aet" not in ctx
     assert ctx["dicom_retrieve_mode"] == "c-move"
 
 
 @pytest.mark.parametrize(
-    ("mode", "expected_prefer_cget"),
-    [("c-get", True), ("c-move", False)],
+    ("mode", "expected_mode"),
+    [
+        ("c-get", "c-get"),
+        ("c-get-study", "c-get-study"),
+        ("c-move", "c-move"),
+        ("c-move-study", "c-move-study"),
+    ],
 )
-def test_get_pacs_helper_prefer_cget(mode, expected_prefer_cget):
-    """_get_pacs_helper sets prefer_cget based on dicom_retrieve_mode context variable."""
+def test_get_pacs_helper_retrieve_mode(mode, expected_mode):
+    """_get_pacs_helper passes dicom_retrieve_mode to PacsHelper."""
     import clarinet.services.slicer.helper as helper_mod
-    from clarinet.services.slicer.helper import _get_pacs_helper
+    from clarinet.services.slicer.helper import PacsHelper, _get_pacs_helper
 
     injected = {
         "pacs_host": "pacs.local",
         "pacs_port": "4242",
         "pacs_aet": "ORTHANC",
-        "dicom_aet": "CLARINET",
         "dicom_retrieve_mode": mode,
     }
 
+    slicer_stub = PacsHelper(
+        host="ignored", port=0, called_aet="ignored", calling_aet="MY_SLICER", move_aet="MY_SLICER"
+    )
+
     try:
         helper_mod.__dict__.update(injected)
-        pacs = _get_pacs_helper()
+        with patch.object(PacsHelper, "from_slicer", return_value=slicer_stub):
+            pacs = _get_pacs_helper()
     finally:
         for key in injected:
             helper_mod.__dict__.pop(key, None)
 
-    assert pacs.prefer_cget is expected_prefer_cget
+    assert pacs.retrieve_mode == expected_mode
     assert pacs.host == "pacs.local"
     assert pacs.port == 4242
+    assert pacs.calling_aet == "MY_SLICER"
+    assert pacs.move_aet == "MY_SLICER"
 
 
 def test_get_pacs_helper_defaults_to_cget():
-    """_get_pacs_helper defaults to prefer_cget=True when dicom_retrieve_mode is absent."""
+    """_get_pacs_helper defaults to retrieve_mode='c-get' when dicom_retrieve_mode is absent."""
     import clarinet.services.slicer.helper as helper_mod
-    from clarinet.services.slicer.helper import _get_pacs_helper
+    from clarinet.services.slicer.helper import PacsHelper, _get_pacs_helper
 
     injected = {
         "pacs_host": "pacs.local",
@@ -160,20 +172,38 @@ def test_get_pacs_helper_defaults_to_cget():
         "pacs_aet": "ORTHANC",
     }
 
+    slicer_stub = PacsHelper(host="ignored", port=0, called_aet="ignored", calling_aet="SLICER")
+
     try:
         helper_mod.__dict__.update(injected)
-        pacs = _get_pacs_helper()
+        with patch.object(PacsHelper, "from_slicer", return_value=slicer_stub):
+            pacs = _get_pacs_helper()
     finally:
         for key in injected:
             helper_mod.__dict__.pop(key, None)
 
-    assert pacs.prefer_cget is True
+    assert pacs.retrieve_mode == "c-get"
+
+
+def test_pacs_helper_rejects_invalid_retrieve_mode():
+    """PacsHelper raises ValueError for unsupported retrieve_mode."""
+    from clarinet.services.slicer.helper import PacsHelper
+
+    with pytest.raises(ValueError, match="Unsupported retrieve_mode"):
+        PacsHelper(
+            host="localhost",
+            port=4242,
+            called_aet="ORTHANC",
+            calling_aet="SLICER",
+            retrieve_mode="invalid-mode",
+        )
 
 
 @patch("clarinet.services.slicer.context.settings")
 def test_standard_vars_study_level(mock_settings):
     """STUDY level → working_folder + study_uid present."""
     mock_settings.storage_path = "/storage"
+    mock_settings.storage_path_client = None
 
     record = _make_record_read(level=DicomQueryLevel.STUDY)
     ctx = build_slicer_context(record)
@@ -187,6 +217,7 @@ def test_standard_vars_study_level(mock_settings):
 def test_standard_vars_series_level(mock_settings):
     """SERIES level → working_folder + study_uid + series_uid present."""
     mock_settings.storage_path = "/storage"
+    mock_settings.storage_path_client = None
 
     record = _make_record_read(
         level=DicomQueryLevel.SERIES,
@@ -206,6 +237,7 @@ def test_standard_vars_series_level(mock_settings):
 def test_standard_vars_patient_level(mock_settings):
     """PATIENT level → working_folder only (no study_uid/series_uid)."""
     mock_settings.storage_path = "/storage"
+    mock_settings.storage_path_client = None
 
     record = _make_record_read(
         level=DicomQueryLevel.PATIENT,
@@ -228,6 +260,7 @@ def test_standard_vars_patient_level(mock_settings):
 def test_file_paths_from_registry(mock_settings):
     """FileDefinition names → resolved absolute paths in context."""
     mock_settings.storage_path = "/storage"
+    mock_settings.storage_path_client = None
 
     seg_fd = FileDefinitionRead(
         name="segmentation_single",
@@ -250,6 +283,7 @@ def test_file_paths_from_registry(mock_settings):
 def test_output_file_alias(mock_settings):
     """First OUTPUT file → output_file convenience alias."""
     mock_settings.storage_path = "/storage"
+    mock_settings.storage_path_client = None
 
     input_fd = FileDefinitionRead(
         name="master_model",
@@ -281,6 +315,7 @@ def test_output_file_alias(mock_settings):
 def test_cross_level_file_resolution(mock_settings):
     """master_model (PATIENT level) resolved from SERIES-level record."""
     mock_settings.storage_path = "/storage"
+    mock_settings.storage_path_client = None
 
     master_fd = FileDefinitionRead(
         name="master_model",
@@ -310,6 +345,7 @@ def test_cross_level_file_resolution(mock_settings):
 def test_custom_args_override(mock_settings):
     """Custom slicer_script_args override auto-injected values."""
     mock_settings.storage_path = "/storage"
+    mock_settings.storage_path_client = None
 
     record = _make_record_read(
         level=DicomQueryLevel.SERIES,
@@ -335,6 +371,7 @@ def test_custom_args_override(mock_settings):
 def test_unresolved_template_skipped(mock_settings):
     """Unknown placeholder in custom args → key skipped (warning logged via loguru)."""
     mock_settings.storage_path = "/storage"
+    mock_settings.storage_path_client = None
 
     record = _make_record_read(
         level=DicomQueryLevel.STUDY,
@@ -360,6 +397,7 @@ def test_unresolved_template_skipped(mock_settings):
 def test_no_output_file_when_no_outputs(mock_settings):
     """No OUTPUT files in registry → output_file key absent."""
     mock_settings.storage_path = "/storage"
+    mock_settings.storage_path_client = None
 
     input_fd = FileDefinitionRead(
         name="some_input",
@@ -385,10 +423,10 @@ def test_no_output_file_when_no_outputs(mock_settings):
 def test_origin_type_from_parent(mock_settings):
     """origin_type in file patterns resolved from parent when provided."""
     mock_settings.storage_path = "/storage"
+    mock_settings.storage_path_client = None
     mock_settings.pacs_host = "localhost"
     mock_settings.pacs_port = 4242
     mock_settings.pacs_aet = "ORTHANC"
-    mock_settings.dicom_aet = "CLARINET"
     mock_settings.dicom_retrieve_mode = "c-get"
 
     seg_fd = FileDefinitionRead(
@@ -422,6 +460,7 @@ def test_origin_type_from_parent(mock_settings):
 async def test_build_slicer_context_async_no_hydrators(mock_settings):
     """build_slicer_context_async without hydrators returns same as sync."""
     mock_settings.storage_path = "/storage"
+    mock_settings.storage_path_client = None
 
     record = _make_record_read(level=DicomQueryLevel.STUDY)
     mock_session = AsyncMock()
@@ -431,3 +470,117 @@ async def test_build_slicer_context_async_no_hydrators(mock_settings):
     assert ctx["working_folder"] == str(Path("/storage/CLARINET_1/ANON_STUDY"))
     assert ctx["study_uid"] == "ANON_STUDY"
     assert "series_uid" not in ctx
+
+
+# ---------------------------------------------------------------------------
+# Client path translation (storage_path_client)
+# ---------------------------------------------------------------------------
+
+
+_skip_windows = pytest.mark.skipif(sys.platform == "win32", reason="server-only path translation")
+
+
+@_skip_windows
+@pytest.mark.asyncio
+@patch("clarinet.services.slicer.context.settings")
+async def test_client_path_translation_unc(mock_settings):
+    """storage_path_client replaces server paths with UNC paths."""
+    mock_settings.storage_path = "/mnt/vol_storage"
+    mock_settings.storage_path_client = "//server/vol_storage"
+
+    seg_fd = FileDefinitionRead(
+        name="volume_nifti",
+        pattern="volume.nii.gz",
+        role=FileRole.INPUT,
+    )
+    record = _make_record_read(
+        level=DicomQueryLevel.SERIES,
+        file_registry=[seg_fd],
+        series_uid="1.2.3.4.5",
+        series_anon_uid="ANON_SERIES",
+    )
+    record = record.model_copy(update={"clarinet_storage_path": "/mnt/vol_storage"})
+
+    ctx = await build_slicer_context_async(record, AsyncMock())
+
+    assert ctx["working_folder"] == "//server/vol_storage/CLARINET_1/ANON_STUDY/ANON_SERIES"
+    assert ctx["volume_nifti"] == (
+        "//server/vol_storage/CLARINET_1/ANON_STUDY/ANON_SERIES/volume.nii.gz"
+    )
+
+
+@_skip_windows
+@pytest.mark.asyncio
+@patch("clarinet.services.slicer.context.settings")
+async def test_client_path_translation_drive_letter(mock_settings):
+    """storage_path_client with Windows drive letter."""
+    mock_settings.storage_path = "/mnt/vol_storage"
+    mock_settings.storage_path_client = "Z:"
+
+    record = _make_record_read(level=DicomQueryLevel.STUDY)
+    record = record.model_copy(update={"clarinet_storage_path": "/mnt/vol_storage"})
+
+    ctx = await build_slicer_context_async(record, AsyncMock())
+
+    assert ctx["working_folder"] == "Z:/CLARINET_1/ANON_STUDY"
+
+
+@_skip_windows
+@pytest.mark.asyncio
+@patch("clarinet.services.slicer.context.settings")
+async def test_client_path_translation_disabled(mock_settings):
+    """No translation when storage_path_client is None."""
+    mock_settings.storage_path = "/storage"
+    mock_settings.storage_path_client = None
+
+    record = _make_record_read(level=DicomQueryLevel.STUDY)
+    ctx = await build_slicer_context_async(record, AsyncMock())
+
+    assert ctx["working_folder"] == str(Path("/storage/CLARINET_1/ANON_STUDY"))
+
+
+@_skip_windows
+@pytest.mark.asyncio
+@patch("clarinet.services.slicer.context.settings")
+async def test_client_path_translation_non_path_values_unchanged(mock_settings):
+    """Non-path context values (study_uid, pacs_host) are not affected."""
+    mock_settings.storage_path = "/mnt/vol_storage"
+    mock_settings.storage_path_client = "//server/vol_storage"
+    mock_settings.pacs_host = "pacs.local"
+    mock_settings.pacs_port = 4242
+    mock_settings.pacs_aet = "ORTHANC"
+    mock_settings.dicom_retrieve_mode = "c-get"
+
+    record = _make_record_read(level=DicomQueryLevel.STUDY)
+    record = record.model_copy(update={"clarinet_storage_path": "/mnt/vol_storage"})
+
+    ctx = await build_slicer_context_async(record, AsyncMock())
+
+    assert ctx["study_uid"] == "ANON_STUDY"
+    assert ctx["pacs_host"] == "pacs.local"
+    assert ctx["pacs_port"] == 4242
+
+
+@_skip_windows
+@pytest.mark.asyncio
+@patch("clarinet.services.slicer.context.settings")
+async def test_client_path_translation_output_file(mock_settings):
+    """output_file alias is also translated."""
+    mock_settings.storage_path = "/mnt/vol_storage"
+    mock_settings.storage_path_client = "//server/vol_storage"
+
+    seg_fd = FileDefinitionRead(
+        name="segmentation",
+        pattern="seg.nrrd",
+        role=FileRole.OUTPUT,
+    )
+    record = _make_record_read(
+        level=DicomQueryLevel.STUDY,
+        file_registry=[seg_fd],
+    )
+    record = record.model_copy(update={"clarinet_storage_path": "/mnt/vol_storage"})
+
+    ctx = await build_slicer_context_async(record, AsyncMock())
+
+    assert ctx["output_file"].startswith("//server/vol_storage/")
+    assert ctx["segmentation"] == ctx["output_file"]

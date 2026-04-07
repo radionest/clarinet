@@ -693,3 +693,54 @@ class TestWorkerSignalHandling:
                 patch("signal.signal", side_effect=trigger_shutdown),
             ):
                 await run_worker(queues=["clarinet.default"])
+
+
+# ─── Task registry collision detection ────────────────────────────────────────
+
+
+class TestTaskRegistryCollision:
+    """Tests for task name collision detection in register_task()."""
+
+    def test_collision_raises_on_different_object(self):
+        """Registering a task with same name but different object raises."""
+        from clarinet.services.pipeline.chain import register_task
+
+        task_a = AsyncMock()
+        task_a.task_name = "collision_task"
+        task_b = AsyncMock()
+        task_b.task_name = "collision_task"
+
+        register_task(task_a)
+        with pytest.raises(PipelineConfigError, match="collision"):
+            register_task(task_b)
+
+    def test_idempotent_reregistration_of_same_object(self):
+        """Re-registering the same task object does not raise."""
+        from clarinet.services.pipeline.chain import register_task
+
+        task = AsyncMock()
+        task.task_name = "idempotent_task"
+
+        register_task(task)
+        register_task(task)  # must not raise
+        assert _TASK_REGISTRY["idempotent_task"] is task
+
+    def test_pipeline_step_collision_raises(self):
+        """Pipeline.step() raises on collision via register_task."""
+        task_a = AsyncMock()
+        task_a.task_name = "step_collision"
+        task_b = AsyncMock()
+        task_b.task_name = "step_collision"
+
+        Pipeline("pipeline_a").step(task_a)
+        with pytest.raises(PipelineConfigError, match="collision"):
+            Pipeline("pipeline_b").step(task_b)
+
+    def test_pipeline_step_idempotent_same_task(self):
+        """Same task in two pipelines — no error (idempotent)."""
+        task = AsyncMock()
+        task.task_name = "shared_task"
+
+        Pipeline("shared_a").step(task)
+        Pipeline("shared_b").step(task)  # must not raise
+        assert _TASK_REGISTRY["shared_task"] is task
