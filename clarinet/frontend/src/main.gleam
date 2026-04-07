@@ -616,11 +616,24 @@ fn delegate_cache(model: Model, cmsg: cache.Msg) -> #(Model, Effect(Msg)) {
 }
 
 fn delegate_preload(model: Model, pmsg: preload.Msg) -> #(Model, Effect(Msg)) {
+  let was_active = preload.is_active(model.preload)
   let #(preload_model, eff, out_msgs) = preload.update(model.preload, pmsg)
+  let now_active = preload.is_active(preload_model)
+  // While preload is active it owns the modal layer; once it deactivates
+  // (ready / error / cancel), we must clear modal_open or the generic
+  // confirm modal would render on top of the page on its own.
+  // Only touch modal_open when the preload state actually transitioned —
+  // otherwise we would clobber a content-driven modal that has nothing
+  // to do with preload.
+  let modal_open = case was_active, now_active {
+    _, True -> True
+    True, False -> False
+    False, False -> model.modal_open
+  }
   let model = store.Model(
     ..model,
     preload: preload_model,
-    modal_open: preload.is_active(preload_model) || model.modal_open,
+    modal_open: modal_open,
   )
   let out_effects =
     list.fold(out_msgs, [], fn(acc, out_msg) {
