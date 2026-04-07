@@ -5,6 +5,7 @@ import api/records
 import api/studies
 import api/types.{type ApiError, AuthError}
 import components/forms/record_form
+import gleam/bool
 import gleam/dict.{type Dict}
 import gleam/int
 import gleam/javascript/promise
@@ -109,54 +110,56 @@ pub fn update(
         False, False -> False
       }
 
-      let #(updated_model, studies_eff) = case needs_studies_load {
-        True -> {
-          let new_id = updated_model.studies_request_id + 1
-          let m = Model(..updated_model, studies_request_id: new_id)
-          #(m, load_studies_for_patient(new_id, new_data.patient_id))
-        }
-        False -> #(updated_model, effect.none())
+      let #(updated_model, studies_eff) = {
+        use <- bool.guard(!needs_studies_load, #(updated_model, effect.none()))
+        let new_id = updated_model.studies_request_id + 1
+        let m = Model(..updated_model, studies_request_id: new_id)
+        #(m, load_studies_for_patient(new_id, new_data.patient_id))
       }
 
       // Load series when study selected/changed
       let needs_series_load = study_changed && new_data.study_uid != ""
-      let #(updated_model, series_eff) = case needs_series_load {
-        True -> {
-          let new_id = updated_model.series_request_id + 1
-          let m = Model(..updated_model, series_request_id: new_id)
-          #(m, load_series_for_study(new_id, new_data.study_uid))
-        }
-        False -> #(updated_model, effect.none())
+      let #(updated_model, series_eff) = {
+        use <- bool.guard(!needs_series_load, #(updated_model, effect.none()))
+        let new_id = updated_model.series_request_id + 1
+        let m = Model(..updated_model, series_request_id: new_id)
+        #(m, load_series_for_study(new_id, new_data.study_uid))
       }
 
       #(updated_model, effect.batch([studies_eff, series_eff]), [])
     }
 
-    StudiesLoaded(request_id, Ok(studies_list)) ->
-      case request_id == model.studies_request_id {
-        True ->
-          #(Model(..model, form_studies: studies_list), effect.none(), [])
-        False -> #(model, effect.none(), [])
-      }
+    StudiesLoaded(request_id, Ok(studies_list)) -> {
+      use <- bool.guard(
+        request_id != model.studies_request_id,
+        #(model, effect.none(), []),
+      )
+      #(Model(..model, form_studies: studies_list), effect.none(), [])
+    }
 
-    StudiesLoaded(request_id, Error(_)) ->
-      case request_id == model.studies_request_id {
-        True -> #(Model(..model, form_studies: []), effect.none(), [])
-        False -> #(model, effect.none(), [])
-      }
+    StudiesLoaded(request_id, Error(_)) -> {
+      use <- bool.guard(
+        request_id != model.studies_request_id,
+        #(model, effect.none(), []),
+      )
+      #(Model(..model, form_studies: []), effect.none(), [])
+    }
 
-    SeriesLoaded(request_id, Ok(series_list)) ->
-      case request_id == model.series_request_id {
-        True ->
-          #(Model(..model, form_series: series_list), effect.none(), [])
-        False -> #(model, effect.none(), [])
-      }
+    SeriesLoaded(request_id, Ok(series_list)) -> {
+      use <- bool.guard(
+        request_id != model.series_request_id,
+        #(model, effect.none(), []),
+      )
+      #(Model(..model, form_series: series_list), effect.none(), [])
+    }
 
-    SeriesLoaded(request_id, Error(_)) ->
-      case request_id == model.series_request_id {
-        True -> #(Model(..model, form_series: []), effect.none(), [])
-        False -> #(model, effect.none(), [])
-      }
+    SeriesLoaded(request_id, Error(_)) -> {
+      use <- bool.guard(
+        request_id != model.series_request_id,
+        #(model, effect.none(), []),
+      )
+      #(Model(..model, form_series: []), effect.none(), [])
+    }
 
     Submit -> {
       case record_form.validate(model.form_data, shared.cache.record_types) {

@@ -5,6 +5,7 @@ import api/slicer
 import api/types.{type ApiError, type RecordStatus, AuthError}
 import config
 import formosh/component as formosh_component
+import gleam/bool
 import gleam/dict
 import gleam/dynamic.{type Dynamic}
 import gleam/dynamic/decode
@@ -553,50 +554,47 @@ fn render_slicer_toolbar(
     _ -> False
   }
 
-  case has_script {
-    False -> element.none()
-    True -> {
-      let status_badge = case model.slicer_available {
-        Some(True) ->
-          html.span([attribute.class("badge badge-success")], [
-            html.text("Connected"),
-          ])
-        Some(False) ->
-          html.span([attribute.class("badge badge-danger")], [
-            html.text("Unreachable"),
-          ])
-        None ->
-          html.span([attribute.class("badge badge-pending")], [
-            html.text("Checking..."),
-          ])
-      }
+  use <- bool.guard(!has_script, element.none())
 
-      let btn_disabled =
-        model.slicer_loading || model.slicer_available != Some(True)
-
-      html.div([attribute.class("slicer-toolbar card")], [
-        html.div([attribute.class("slicer-toolbar-header")], [
-          html.h4([], [html.text("3D Slicer")]),
-          status_badge,
-        ]),
-        html.div([attribute.class("slicer-toolbar-actions")], [
-          html.button(
-            [
-              attribute.class("btn btn-primary"),
-              attribute.disabled(btn_disabled),
-              event.on_click(OpenInSlicer),
-            ],
-            [
-              case model.slicer_loading {
-                True -> html.text("Opening...")
-                False -> html.text("Open in Slicer")
-              },
-            ],
-          ),
-        ]),
+  let status_badge = case model.slicer_available {
+    Some(True) ->
+      html.span([attribute.class("badge badge-success")], [
+        html.text("Connected"),
       ])
-    }
+    Some(False) ->
+      html.span([attribute.class("badge badge-danger")], [
+        html.text("Unreachable"),
+      ])
+    None ->
+      html.span([attribute.class("badge badge-pending")], [
+        html.text("Checking..."),
+      ])
   }
+
+  let btn_disabled =
+    model.slicer_loading || model.slicer_available != Some(True)
+
+  html.div([attribute.class("slicer-toolbar card")], [
+    html.div([attribute.class("slicer-toolbar-header")], [
+      html.h4([], [html.text("3D Slicer")]),
+      status_badge,
+    ]),
+    html.div([attribute.class("slicer-toolbar-actions")], [
+      html.button(
+        [
+          attribute.class("btn btn-primary"),
+          attribute.disabled(btn_disabled),
+          event.on_click(OpenInSlicer),
+        ],
+        [
+          case model.slicer_loading {
+            True -> html.text("Opening...")
+            False -> html.text("Open in Slicer")
+          },
+        ],
+      ),
+    ]),
+  ])
 }
 
 fn render_dynamic_form(
