@@ -76,7 +76,7 @@ UI feedback:
 - `SetLoading(Bool)` — global spinner flag
 
 Navigation:
-- `Navigate(Route)` — pushes a new URL via `modem.push(router.route_to_path(route))`; triggers `OnRouteChange` → cleanup of current page → init of next page
+- `Navigate(Route)` — pushes a new URL via `modem.push(router.route_to_path(route), None, None)`; triggers `OnRouteChange` → cleanup of current page → init of next page
 
 Cache writes (use after a mutation succeeds — avoids an extra GET):
 - `CacheRecord(Record)`, `CacheStudy(Study)`, `CachePatient(Patient)`, `CacheRecordType(RecordType)`, `CacheSeries(Series)`
@@ -221,8 +221,14 @@ Don't inspect `ServerError.code` / `ValidationError.errors` just to produce a ge
 
 One file per backend resource: `patients.gleam`, `records.gleam`, `studies.gleam`, `series.gleam`, `admin.gleam`, `dicom.gleam`, `dicomweb.gleam`, `slicer.gleam`, `users.gleam`, `auth.gleam`, `info.gleam`.
 
-Shared plumbing:
-- `http_client.gleam` — `base_request`, `build_request`, `build_multipart_request`, `decode_response`. **All** paths go through `config.base_path() <> "/api" <> path` — never hardcode `/api/...`.
+Shared plumbing (`http_client.gleam` — use only the `pub` helpers):
+- `get(path)`, `post(path, body)`, `put(path, body)`, `patch(path, body)`, `delete(path)` — all return `Promise(Result(Dynamic, ApiError))`
+- `post_multipart(path, form)` — multipart/form-data (used by login)
+- `decode_response(data, decoder, error_msg) -> Result(a, ApiError)` — run a `dynamic/decode` decoder and map failure to `ParseError`
+- `process_response` / `request_with_body` are public but called via the wrappers above — no reason to use them directly
+
+**All** paths go through `config.base_path() <> "/api" <> path` internally — never hardcode `/api/...` in a caller; just pass `"/patients/123"` to `http_client.get`.
+
 - `models.gleam` — Gleam record types mirroring backend Pydantic models
 - `types.gleam` — `ApiError` union (`NetworkError | ParseError | AuthError | ServerError(code, msg) | ValidationError(fields)`)
 
@@ -263,7 +269,7 @@ If you can't access the private repo, forms will break at build time; ask the us
 
 ## 11. Logging
 
-`utils/logger.gleam` wraps `console.log` with tag + level. Use it; never `io.debug` in committed code.
+`utils/logger.gleam` exposes `debug/info/warn/error(tag, msg)` — each one wraps the matching `console.*` FFI from `plinth/javascript/console` and prepends `[tag]`. Use it; never `io.debug` in committed code.
 
 ```gleam
 import utils/logger
