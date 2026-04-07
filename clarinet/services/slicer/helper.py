@@ -632,7 +632,17 @@ class SlicerHelper:
     """
 
     def __init__(self, working_folder: str) -> None:
-        """Clear scene and set root directory.
+        """Reset views, clear scene, and set root directory.
+
+        Order matters: slice view composite nodes are detached BEFORE
+        ``mrmlScene.Clear(0)`` to avoid VTK "Input port 0 has 0 connections"
+        warnings that would otherwise flood the Qt event loop and block
+        subsequent HTTP requests. Detaching upstream removes the stale
+        BackgroundVolumeID/ForegroundVolumeID/LabelVolumeID references
+        before Clear deletes the volumes, so no warnings are ever queued
+        and an explicit ``processEvents()`` drain is unnecessary — which
+        also avoids Qt re-entrancy if this runs inside an HTTP event
+        handler.
 
         Args:
             working_folder: Absolute path to the working directory.
@@ -645,7 +655,18 @@ class SlicerHelper:
         self._observer_tags: list[tuple[Any, int]] = []
         self._shortcuts: list[Any] = []
 
-        # Clear scene and set working folder
+        # 1. Detach slice view composite nodes first (avoid dangling refs
+        # to volumes that Clear(0) is about to delete).
+        for name in ("Red", "Yellow", "Green"):
+            widget = self._layout_manager.sliceWidget(name)
+            if widget is None:
+                continue
+            composite = widget.mrmlSliceCompositeNode()
+            composite.SetBackgroundVolumeID(None)
+            composite.SetForegroundVolumeID(None)
+            composite.SetLabelVolumeID(None)
+
+        # 2. Clear scene and set working folder.
         self._scene.Clear(0)
         self._scene.SetRootDirectory(working_folder)
 
