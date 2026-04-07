@@ -354,7 +354,7 @@ fn records_section(model: Model, shared: Shared) -> Element(Msg) {
       ),
     ]),
     case
-      dict.values(shared.records)
+      dict.values(shared.cache.records)
       |> list.sort(fn(a, b) {
         int.compare(option.unwrap(a.id, 0), option.unwrap(b.id, 0))
       })
@@ -432,7 +432,7 @@ fn assign_cell(
     False ->
       case user_id {
         Some(uid) -> {
-          let email = case dict.get(shared.users, uid) {
+          let email = case dict.get(shared.cache.users, uid) {
             Ok(user) -> user.email
             Error(_) -> uid
           }
@@ -474,7 +474,7 @@ fn user_dropdown(shared: Shared, record_id: Int) -> Element(Msg) {
       ],
       [
         html.option([attribute.value("")], "Select user..."),
-        ..dict.values(shared.users)
+        ..dict.values(shared.cache.users)
         |> list.sort(fn(a, b) { string.compare(a.email, b.email) })
         |> list.map(fn(user) {
           html.option([attribute.value(user.id)], user.email)

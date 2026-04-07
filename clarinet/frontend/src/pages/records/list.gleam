@@ -109,7 +109,7 @@ pub fn view(model: Model, shared: Shared) -> Element(Msg) {
   html.div([attribute.class("container")], [
     html.h1([], [html.text(title)]),
     {
-      let all_records = dict.values(shared.records)
+      let all_records = dict.values(shared.cache.records)
       html.div([], [
         filter_bar(model, all_records),
         records_table(model, shared, all_records),

@@ -1,8 +1,7 @@
 import api/models.{
-  type Patient, type Record, type RecordType, type RecordTypeStats, type Series,
-  type Study, type User,
+  type Patient, type Record, type RecordType, type Series, type Study, type User,
 }
-import gleam/dict.{type Dict}
+import cache
 import gleam/option.{type Option}
 import router.{type Route}
 
@@ -14,14 +13,8 @@ pub type Shared {
     route: Route,
     project_name: String,
     project_description: String,
-    // Global caches
-    studies: Dict(String, Study),
-    series: Dict(String, Series),
-    records: Dict(String, Record),
-    record_types: Dict(String, RecordType),
-    patients: Dict(String, Patient),
-    users: Dict(String, User),
-    record_type_stats: Option(List(RecordTypeStats)),
+    // Global entity caches (studies/series/records/record_types/patients/users/record_type_stats)
+    cache: cache.Model,
   )
 }
 

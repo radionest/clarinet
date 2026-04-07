@@ -103,7 +103,7 @@ fn handle_error(err: ApiError, fallback_msg: String) -> List(OutMsg) {
 // --- View ---
 
 pub fn view(model: Model, shared: Shared) -> Element(Msg) {
-  case dict.get(shared.studies, model.study_uid) {
+  case dict.get(shared.cache.studies, model.study_uid) {
     Ok(study) -> render_detail(shared, study)
     Error(_) -> loading_view(model.study_uid)
   }
@@ -111,7 +111,7 @@ pub fn view(model: Model, shared: Shared) -> Element(Msg) {
 
 fn render_detail(shared: Shared, study: Study) -> Element(Msg) {
   let study_records =
-    dict.values(shared.records)
+    dict.values(shared.cache.records)
     |> list.filter(fn(r) { r.study_uid == Some(study.study_uid) })
     |> list.sort(fn(a, b) {
       int.compare(option.unwrap(a.id, 0), option.unwrap(b.id, 0))

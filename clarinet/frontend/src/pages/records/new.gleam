@@ -127,7 +127,7 @@ pub fn update(
       #(Model(..model, form_series: []), effect.none(), [])
 
     Submit -> {
-      case record_form.validate(model.form_data, shared.record_types) {
+      case record_form.validate(model.form_data, shared.cache.record_types) {
         Ok(_) -> {
           let data = model.form_data
           let record_create = models.RecordCreate(

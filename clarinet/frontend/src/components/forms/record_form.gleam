@@ -89,13 +89,13 @@ pub fn view(
   on_submit on_submit: fn() -> msg,
   on_cancel on_cancel: msg,
 ) -> Element(msg) {
-  let record_type_options = build_record_type_options(shared.record_types)
-  let patient_options = build_patient_options(shared.patients)
+  let record_type_options = build_record_type_options(shared.cache.record_types)
+  let patient_options = build_patient_options(shared.cache.patients)
   let study_options = build_study_options(studies)
   let series_options = build_series_options(series_list)
-  let user_options = build_user_options(shared.users)
+  let user_options = build_user_options(shared.cache.users)
 
-  let level = selected_level(data.record_type_name, shared.record_types)
+  let level = selected_level(data.record_type_name, shared.cache.record_types)
 
   form.form(on_submit, [
     html.h3([attribute.class("form-title")], [html.text("Record Information")]),
@@ -181,7 +181,7 @@ pub fn view(
         value: data.parent_record_id,
         options: [
           #("", "No parent record"),
-          ..build_parent_record_options(data.patient_id, shared.records)
+          ..build_parent_record_options(data.patient_id, shared.cache.records)
         ],
         on_change: fn(value) { on_update(UpdateParentRecordId(value)) },
       ),

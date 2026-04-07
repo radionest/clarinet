@@ -56,7 +56,7 @@ pub fn view(_model: Model, shared: Shared) -> Element(Msg) {
     ]),
     {
       let patients =
-        dict.values(shared.patients)
+        dict.values(shared.cache.patients)
         |> list.sort(fn(a, b) { string.compare(a.id, b.id) })
       patients_table(patients)
     },

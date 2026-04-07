@@ -109,19 +109,19 @@ fn stats_section(shared: Shared) -> Element(Msg) {
         Some(models.User(is_superuser: True, ..)) -> [
           stat_card(
             label: "Studies",
-            count: dict.size(shared.studies),
+            count: dict.size(shared.cache.studies),
             color: "blue",
             route: router.Studies,
           ),
           stat_card(
             label: "Records",
-            count: dict.size(shared.records),
+            count: dict.size(shared.cache.records),
             color: "green",
             route: router.Records,
           ),
           stat_card(
             label: "Users",
-            count: dict.size(shared.users),
+            count: dict.size(shared.cache.users),
             color: "purple",
             route: router.Users,
           ),
@@ -129,7 +129,7 @@ fn stats_section(shared: Shared) -> Element(Msg) {
         _ -> [
           stat_card(
             label: "My Records",
-            count: dict.size(shared.records),
+            count: dict.size(shared.cache.records),
             color: "green",
             route: router.Records,
           ),
@@ -143,7 +143,7 @@ fn recent_activity(shared: Shared) -> Element(Msg) {
   html.div([attribute.class("dashboard-section")], [
     html.h3([], [html.text("Recent Studies")]),
     html.div([attribute.class("recent-list")], [
-      case dict.to_list(shared.studies) {
+      case dict.to_list(shared.cache.studies) {
         [] ->
           html.p([attribute.class("empty-state")], [
             html.text("No recent studies found."),

@@ -70,7 +70,7 @@ pub fn update(
 // --- View ---
 
 pub fn view(model: Model, shared: Shared) -> Element(Msg) {
-  case dict.get(shared.record_types, model.name) {
+  case dict.get(shared.cache.record_types, model.name) {
     Ok(rt) -> render_edit(rt, model.name)
     Error(_) -> loading_view(model.name)
   }

@@ -53,7 +53,7 @@ fn find_stats(
   shared: Shared,
   name: String,
 ) -> option.Option(RecordTypeStats) {
-  case shared.record_type_stats {
+  case shared.cache.record_type_stats {
     Some(stats) ->
       list.find(stats, fn(s) { s.name == name }) |> option.from_result
     None -> None
@@ -62,7 +62,7 @@ fn find_stats(
 
 fn render_detail(shared: Shared, stat: RecordTypeStats) -> Element(Msg) {
   let type_records =
-    dict.values(shared.records)
+    dict.values(shared.cache.records)
     |> list.filter(fn(r) { r.record_type_name == stat.name })
     |> list.sort(fn(a, b) {
       int.compare(option.unwrap(a.id, 0), option.unwrap(b.id, 0))

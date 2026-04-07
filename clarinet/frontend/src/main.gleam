@@ -1,17 +1,13 @@
 // Main Lustre application
-import api/admin
 import api/auth
 import api/info
 import api/models
-import api/patients
 import api/records
-import api/studies
 import api/types
-import api/users
+import cache
 import components/layout
 import formosh/component as formosh_component
-import gleam/dict
-import gleam/int
+import gleam/bool
 import gleam/javascript/promise
 import gleam/list
 import gleam/option.{None, Some}
@@ -173,55 +169,45 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           },
         )
 
-      // Don't redirect while session check is in progress
-      case model.checking_session {
-        True -> #(new_model, cleanup_effect)
-        False -> {
-          // Check authentication requirement
-          let is_auth_page = route == router.Login || route == router.Register
-          case router.requires_auth(route), model.user, is_auth_page {
-            True, None, _ -> {
-              // Redirect to login if auth required
-              #(
-                store.set_route(model, router.Login),
-                effect.batch([
-                  cleanup_effect,
-                  modem.push(router.route_to_path(router.Login), option.None, option.None),
-                ]),
-              )
-            }
-            False, Some(_), True -> {
-              // Redirect from login/register if already authenticated
-              #(
-                store.set_route(model, router.Home),
-                effect.batch([
-                  cleanup_effect,
-                  modem.push(router.route_to_path(router.Home), option.None, option.None),
-                ]),
-              )
-            }
-            _, _, _ ->
-              case router.requires_admin_role(route), model.user {
-                True, Some(models.User(is_superuser: False, ..)) -> #(
-                  store.set_route(model, router.Home),
-                  effect.batch([
-                    cleanup_effect,
-                    modem.push(router.route_to_path(router.Home), option.None, option.None),
-                  ]),
-                )
-                _, _ -> {
-                  // Initialize page model for modular pages
-                  let #(new_model, page_init_eff) =
-                    init_page_for_route(new_model, route)
-                  #(
-                    new_model,
-                    effect.batch([cleanup_effect, page_init_eff]),
-                  )
-                }
-              }
-          }
-        }
+      let redirect_to = fn(target: Route) {
+        #(
+          store.set_route(model, target),
+          effect.batch([
+            cleanup_effect,
+            modem.push(router.route_to_path(target), option.None, option.None),
+          ]),
+        )
       }
+
+      // Don't redirect while session check is in progress
+      use <- bool.guard(model.checking_session, #(new_model, cleanup_effect))
+
+      // Redirect to login if auth required but no user
+      use <- bool.guard(
+        router.requires_auth(route) && model.user == None,
+        redirect_to(router.Login),
+      )
+
+      // Redirect from login/register if already authenticated
+      let is_auth_page = route == router.Login || route == router.Register
+      use <- bool.guard(
+        is_auth_page && model.user != None,
+        redirect_to(router.Home),
+      )
+
+      // Redirect non-admin user away from admin route
+      let is_non_admin = case model.user {
+        Some(models.User(is_superuser: False, ..)) -> True
+        _ -> False
+      }
+      use <- bool.guard(
+        router.requires_admin_role(route) && is_non_admin,
+        redirect_to(router.Home),
+      )
+
+      // Initialize page model for modular pages
+      let #(new_model, page_init_eff) = init_page_for_route(new_model, route)
+      #(new_model, effect.batch([cleanup_effect, page_init_eff]))
     }
 
     store.Navigate(route) -> {
@@ -325,177 +311,8 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       #(store.Model(..model, success_message: None), effect.none())
     }
 
-    // Data loading - Studies
-    store.LoadStudies ->
-      load_with_effect(model, studies.get_studies, store.StudiesLoaded)
-
-    store.StudiesLoaded(Ok(studies_list)) -> {
-      let studies_dict =
-        list.fold(studies_list, model.studies, fn(acc, study) {
-          dict.insert(acc, study.study_uid, study)
-        })
-      let new_model =
-        store.Model(..model, studies: studies_dict, loading: False)
-      #(new_model, effect.none())
-    }
-
-    store.StudiesLoaded(Error(err)) ->
-      handle_api_error(model, err, "Failed to load studies")
-
-    // Data loading - Records (role-aware)
-    store.LoadRecords -> {
-      let fetch_fn = case model.user {
-        Some(models.User(is_superuser: True, ..)) -> records.get_records
-        _ -> records.get_my_records
-      }
-      load_with_effect(model, fetch_fn, store.RecordsLoaded)
-    }
-
-    store.RecordsLoaded(Ok(records_list)) -> {
-      let records_dict =
-        list.fold(records_list, model.records, fn(acc, record) {
-          case record.id {
-            Some(id) -> dict.insert(acc, int.to_string(id), record)
-            None -> acc
-          }
-        })
-      let new_model =
-        store.Model(..model, records: records_dict, loading: False)
-      #(new_model, effect.none())
-    }
-
-    store.RecordsLoaded(Error(err)) ->
-      handle_api_error(model, err, "Failed to load records")
-
-    // Data loading - Users
-    store.LoadUsers ->
-      load_with_effect(model, users.get_users, store.UsersLoaded)
-
-    store.UsersLoaded(Ok(users_list)) -> {
-      let users_dict =
-        list.fold(users_list, model.users, fn(acc, user) {
-          dict.insert(acc, user.id, user)
-        })
-      let new_model = store.Model(..model, users: users_dict, loading: False)
-      #(new_model, effect.none())
-    }
-
-    store.UsersLoaded(Error(err)) ->
-      handle_api_error(model, err, "Failed to load users")
-
-    // Data loading - Record Type Stats
-    store.LoadRecordTypeStats ->
-      load_with_effect(
-        model,
-        admin.get_record_type_stats,
-        store.RecordTypeStatsLoaded,
-      )
-
-    store.RecordTypeStatsLoaded(Ok(stats)) -> {
-      let new_model =
-        store.Model(..model, record_type_stats: Some(stats), loading: False)
-      #(new_model, effect.none())
-    }
-
-    store.RecordTypeStatsLoaded(Error(err)) ->
-      handle_api_error(model, err, "Failed to load record type statistics")
-
-    // Data loading - Record Detail
-    store.LoadRecordDetail(id) ->
-      load_with_effect(
-        model,
-        fn() { records.get_record(id) },
-        store.RecordDetailLoaded,
-      )
-
-    store.RecordDetailLoaded(Ok(record)) -> {
-      let new_model =
-        model
-        |> store.cache_record(record)
-        |> store.set_loading(False)
-      // Auto-assign user to unassigned pending/inwork records
-      let assign_effect = case record.user_id, record.status, model.user {
-        None, types.Pending, Some(models.User(id: uid, ..))
-        | None, types.InWork, Some(models.User(id: uid, ..))
-        -> {
-          case record.id {
-            Some(rid) -> {
-              use dispatch <- effect.from
-              records.assign_record_user(rid, uid)
-              |> promise.tap(fn(result) {
-                dispatch(store.AutoAssignResult(result))
-              })
-              Nil
-            }
-            None -> effect.none()
-          }
-        }
-        _, _, _ -> effect.none()
-      }
-      #(new_model, assign_effect)
-    }
-
-    store.AutoAssignResult(Ok(record)) -> {
-      #(store.cache_record(model, record), effect.none())
-    }
-
-    store.AutoAssignResult(Error(_)) -> {
-      // Silently ignore — admin can still work without assignment
-      #(model, effect.none())
-    }
-
-    store.RecordDetailLoaded(Error(err)) ->
-      handle_api_error(model, err, "Failed to load record")
-
-    // Patient data loading
-    store.LoadPatients ->
-      load_with_effect(model, patients.get_patients, store.PatientsLoaded)
-
-    store.PatientsLoaded(Ok(patients_list)) -> {
-      let patients_dict =
-        list.fold(patients_list, model.patients, fn(acc, patient) {
-          dict.insert(acc, patient.id, patient)
-        })
-      let new_model =
-        store.Model(..model, patients: patients_dict, loading: False)
-      #(new_model, effect.none())
-    }
-
-    store.PatientsLoaded(Error(err)) ->
-      handle_api_error(model, err, "Failed to load patients")
-
-    store.LoadPatientDetail(id) ->
-      load_with_effect(
-        model,
-        fn() { patients.get_patient(id) },
-        store.PatientDetailLoaded,
-      )
-
-    store.PatientDetailLoaded(Ok(patient)) -> {
-      let new_model =
-        model
-        |> store.cache_patient(patient)
-        |> store.set_loading(False)
-      #(new_model, effect.none())
-    }
-
-    store.PatientDetailLoaded(Error(err)) ->
-      handle_api_error(model, err, "Failed to load patient")
-
-    // Record types loading (shared — used by record_new page and admin)
-    store.LoadRecordTypes ->
-      load_with_effect(model, records.get_record_types, store.RecordTypesLoaded)
-
-    store.RecordTypesLoaded(Ok(rt_list)) -> {
-      let rt_dict =
-        list.fold(rt_list, model.record_types, fn(acc, rt) {
-          dict.insert(acc, rt.name, rt)
-        })
-      #(store.Model(..model, record_types: rt_dict, loading: False), effect.none())
-    }
-
-    store.RecordTypesLoaded(Error(err)) ->
-      handle_api_error(model, err, "Failed to load record types")
+    // Cache delegation (all data loading, caches, auto-assign)
+    store.CacheMsg(cmsg) -> delegate_cache(model, cmsg)
 
     // Modal actions
     store.OpenModal(content) -> {
@@ -713,24 +530,43 @@ fn delegate_page_update(
   }
 }
 
-// Helper: standard load-and-dispatch pattern for API calls
-fn load_with_effect(
-  model: Model,
-  api_call: fn() -> promise.Promise(Result(a, types.ApiError)),
-  on_result: fn(Result(a, types.ApiError)) -> Msg,
-) -> #(Model, Effect(Msg)) {
-  let eff = {
-    use dispatch <- effect.from
-    api_call() |> promise.tap(fn(r) { dispatch(on_result(r)) })
-    Nil
-  }
-  #(store.set_loading(model, True), eff)
-}
-
 // Helper: dispatch a message as an effect
 fn dispatch_msg(msg: Msg) -> Effect(Msg) {
   use dispatch <- effect.from
   dispatch(msg)
+}
+
+fn delegate_cache(model: Model, cmsg: cache.Msg) -> #(Model, Effect(Msg)) {
+  let #(cache_model, eff, out_msgs) = cache.update(model.cache, cmsg)
+  let model = store.Model(..model, cache: cache_model)
+  let #(model, out_effects) =
+    list.fold(out_msgs, #(model, []), fn(acc, om) {
+      let #(m, effs) = acc
+      case om {
+        cache.Loading(b) -> #(store.set_loading(m, b), effs)
+        cache.ApiFailure(err, fallback) -> {
+          let #(m2, e2) = handle_api_error(m, err, fallback)
+          #(m2, [e2, ..effs])
+        }
+        cache.AutoAssign(rid, uid) -> {
+          let assign_eff = {
+            use dispatch <- effect.from
+            records.assign_record_user(rid, uid)
+            |> promise.tap(fn(r) {
+              dispatch(store.CacheMsg(cache.AutoAssignResult(r)))
+            })
+            Nil
+          }
+          #(m, [assign_eff, ..effs])
+        }
+      }
+    })
+  // Reverse out_effects so they run in the order cache.update declared them.
+  let ordered_effects = [
+    effect.map(eff, store.CacheMsg),
+    ..list.reverse(out_effects)
+  ]
+  #(model, effect.batch(ordered_effects))
 }
 
 fn delegate_preload(model: Model, pmsg: preload.Msg) -> #(Model, Effect(Msg)) {
@@ -764,13 +600,7 @@ fn build_shared(model: Model) -> shared.Shared {
     route: model.route,
     project_name: model.project_name,
     project_description: model.project_description,
-    studies: model.studies,
-    series: model.series,
-    records: model.records,
-    record_types: model.record_types,
-    patients: model.patients,
-    users: model.users,
-    record_type_stats: model.record_type_stats,
+    cache: model.cache,
   )
 }
 
@@ -783,105 +613,54 @@ fn cleanup_current_page(model: Model) -> Effect(Msg) {
   }
 }
 
+/// Generic page init helper — mirrors delegate_page_update pattern.
+/// Call site binds `id`/`name` via hole syntax, e.g. `study_detail.init(id, _)`.
+fn init_page(
+  model: Model,
+  page_init: fn(shared.Shared) -> #(pm, Effect(pmsg), List(OutMsg)),
+  wrap_page: fn(pm) -> store.PageModel,
+  wrap_msg: fn(pmsg) -> Msg,
+) -> #(Model, Effect(Msg)) {
+  let #(page_model, page_eff, out_msgs) = page_init(build_shared(model))
+  let model = store.Model(..model, page: wrap_page(page_model))
+  let #(model, out_effs) = apply_out_msgs(model, out_msgs)
+  #(model, effect.batch([effect.map(page_eff, wrap_msg), out_effs]))
+}
+
 fn init_page_for_route(model: Model, route: Route) -> #(Model, Effect(Msg)) {
-  let shared = build_shared(model)
   case route {
-    router.AdminDashboard -> {
-      let #(page_model, page_eff, out_msgs) = admin_page.init(shared)
-      let model = store.Model(..model, page: store.AdminPage(page_model))
-      let #(model, out_effs) = apply_out_msgs(model, out_msgs)
-      #(model, effect.batch([effect.map(page_eff, store.AdminMsg), out_effs]))
-    }
-    router.Login -> {
-      let #(page_model, page_eff, out_msgs) = login.init(shared)
-      let model = store.Model(..model, page: store.LoginPage(page_model))
-      let #(model, out_effs) = apply_out_msgs(model, out_msgs)
-      #(model, effect.batch([effect.map(page_eff, store.LoginMsg), out_effs]))
-    }
-    router.Register -> {
-      let #(page_model, page_eff, out_msgs) = register.init(shared)
-      let model = store.Model(..model, page: store.RegisterPage(page_model))
-      let #(model, out_effs) = apply_out_msgs(model, out_msgs)
-      #(model, effect.batch([effect.map(page_eff, store.RegisterMsg), out_effs]))
-    }
-    router.Patients -> {
-      let #(page_model, page_eff, out_msgs) = patients_list.init(shared)
-      let model = store.Model(..model, page: store.PatientsListPage(page_model))
-      let #(model, out_effs) = apply_out_msgs(model, out_msgs)
-      #(model, effect.batch([effect.map(page_eff, store.PatientsListMsg), out_effs]))
-    }
-    router.PatientDetail(id) -> {
-      let #(page_model, page_eff, out_msgs) = patient_detail.init(id, shared)
-      let model = store.Model(..model, page: store.PatientDetailPage(page_model))
-      let #(model, out_effs) = apply_out_msgs(model, out_msgs)
-      #(model, effect.batch([effect.map(page_eff, store.PatientDetailMsg), out_effs]))
-    }
-    router.PatientNew -> {
-      let #(page_model, page_eff, out_msgs) = patient_new.init(shared)
-      let model = store.Model(..model, page: store.PatientNewPage(page_model))
-      let #(model, out_effs) = apply_out_msgs(model, out_msgs)
-      #(model, effect.batch([effect.map(page_eff, store.PatientNewMsg), out_effs]))
-    }
-    router.Records -> {
-      let #(page_model, page_eff, out_msgs) = records_list.init(shared)
-      let model = store.Model(..model, page: store.RecordsListPage(page_model))
-      let #(model, out_effs) = apply_out_msgs(model, out_msgs)
-      #(model, effect.batch([effect.map(page_eff, store.RecordsListMsg), out_effs]))
-    }
-    router.RecordDetail(id) -> {
-      let #(page_model, page_eff, out_msgs) = record_execute.init(id, shared)
-      let model = store.Model(..model, page: store.RecordExecutePage(page_model))
-      let #(model, out_effs) = apply_out_msgs(model, out_msgs)
-      #(model, effect.batch([effect.map(page_eff, store.RecordExecuteMsg), out_effs]))
-    }
-    router.RecordNew -> {
-      let #(page_model, page_eff, out_msgs) = record_new.init(shared)
-      let model = store.Model(..model, page: store.RecordNewPage(page_model))
-      let #(model, out_effs) = apply_out_msgs(model, out_msgs)
-      #(model, effect.batch([effect.map(page_eff, store.RecordNewMsg), out_effs]))
-    }
-    router.Studies -> {
-      let #(page_model, page_eff, out_msgs) = studies_list.init(shared)
-      let model = store.Model(..model, page: store.StudiesListPage(page_model))
-      let #(model, out_effs) = apply_out_msgs(model, out_msgs)
-      #(model, effect.batch([effect.map(page_eff, store.StudiesListMsg), out_effs]))
-    }
-    router.StudyDetail(id) | router.StudyViewer(id) -> {
-      let #(page_model, page_eff, out_msgs) = study_detail.init(id, shared)
-      let model = store.Model(..model, page: store.StudyDetailPage(page_model))
-      let #(model, out_effs) = apply_out_msgs(model, out_msgs)
-      #(model, effect.batch([effect.map(page_eff, store.StudyDetailMsg), out_effs]))
-    }
-    router.SeriesDetail(id) -> {
-      let #(page_model, page_eff, out_msgs) = series_detail.init(id, shared)
-      let model = store.Model(..model, page: store.SeriesDetailPage(page_model))
-      let #(model, out_effs) = apply_out_msgs(model, out_msgs)
-      #(model, effect.batch([effect.map(page_eff, store.SeriesDetailMsg), out_effs]))
-    }
-    router.AdminRecordTypes -> {
-      let #(page_model, page_eff, out_msgs) = record_types_list.init(shared)
-      let model = store.Model(..model, page: store.RecordTypesListPage(page_model))
-      let #(model, out_effs) = apply_out_msgs(model, out_msgs)
-      #(model, effect.batch([effect.map(page_eff, store.RecordTypesListMsg), out_effs]))
-    }
-    router.AdminRecordTypeDetail(name) -> {
-      let #(page_model, page_eff, out_msgs) = record_type_detail.init(name, shared)
-      let model = store.Model(..model, page: store.RecordTypeDetailPage(page_model))
-      let #(model, out_effs) = apply_out_msgs(model, out_msgs)
-      #(model, effect.batch([effect.map(page_eff, store.RecordTypeDetailMsg), out_effs]))
-    }
-    router.AdminRecordTypeEdit(name) -> {
-      let #(page_model, page_eff, out_msgs) = record_type_edit.init(name, shared)
-      let model = store.Model(..model, page: store.RecordTypeEditPage(page_model))
-      let #(model, out_effs) = apply_out_msgs(model, out_msgs)
-      #(model, effect.batch([effect.map(page_eff, store.RecordTypeEditMsg), out_effs]))
-    }
-    router.Home -> {
-      let #(page_model, page_eff, out_msgs) = home.init(shared)
-      let model = store.Model(..model, page: store.HomePage(page_model))
-      let #(model, out_effs) = apply_out_msgs(model, out_msgs)
-      #(model, effect.batch([effect.map(page_eff, store.HomeMsg), out_effs]))
-    }
+    router.Home ->
+      init_page(model, home.init, store.HomePage, store.HomeMsg)
+    router.Login ->
+      init_page(model, login.init, store.LoginPage, store.LoginMsg)
+    router.Register ->
+      init_page(model, register.init, store.RegisterPage, store.RegisterMsg)
+    router.AdminDashboard ->
+      init_page(model, admin_page.init, store.AdminPage, store.AdminMsg)
+    router.Patients ->
+      init_page(model, patients_list.init, store.PatientsListPage, store.PatientsListMsg)
+    router.PatientDetail(id) ->
+      init_page(model, patient_detail.init(id, _), store.PatientDetailPage, store.PatientDetailMsg)
+    router.PatientNew ->
+      init_page(model, patient_new.init, store.PatientNewPage, store.PatientNewMsg)
+    router.Records ->
+      init_page(model, records_list.init, store.RecordsListPage, store.RecordsListMsg)
+    router.RecordDetail(id) ->
+      init_page(model, record_execute.init(id, _), store.RecordExecutePage, store.RecordExecuteMsg)
+    router.RecordNew ->
+      init_page(model, record_new.init, store.RecordNewPage, store.RecordNewMsg)
+    router.Studies ->
+      init_page(model, studies_list.init, store.StudiesListPage, store.StudiesListMsg)
+    router.StudyDetail(id) | router.StudyViewer(id) ->
+      init_page(model, study_detail.init(id, _), store.StudyDetailPage, store.StudyDetailMsg)
+    router.SeriesDetail(id) ->
+      init_page(model, series_detail.init(id, _), store.SeriesDetailPage, store.SeriesDetailMsg)
+    router.AdminRecordTypes ->
+      init_page(model, record_types_list.init, store.RecordTypesListPage, store.RecordTypesListMsg)
+    router.AdminRecordTypeDetail(name) ->
+      init_page(model, record_type_detail.init(name, _), store.RecordTypeDetailPage, store.RecordTypeDetailMsg)
+    router.AdminRecordTypeEdit(name) ->
+      init_page(model, record_type_edit.init(name, _), store.RecordTypeEditPage, store.RecordTypeEditMsg)
     _ -> #(store.Model(..model, page: store.NoPage), effect.none())
   }
 }
@@ -903,31 +682,36 @@ fn apply_out_msgs(
         shared.SetLoading(loading) ->
           #(store.set_loading(m, loading), eff_list)
         shared.CacheRecord(record) ->
-          #(store.cache_record(m, record), eff_list)
+          #(store.Model(..m, cache: cache.put_record(m.cache, record)), eff_list)
         shared.CacheStudy(study) ->
-          #(store.cache_study(m, study), eff_list)
+          #(store.Model(..m, cache: cache.put_study(m.cache, study)), eff_list)
         shared.CachePatient(patient) ->
-          #(store.cache_patient(m, patient), eff_list)
+          #(store.Model(..m, cache: cache.put_patient(m.cache, patient)), eff_list)
         shared.CacheRecordType(rt) ->
-          #(store.cache_record_type(m, rt), eff_list)
+          #(store.Model(..m, cache: cache.put_record_type(m.cache, rt)), eff_list)
         shared.CacheSeries(s) ->
-          #(store.cache_series(m, s), eff_list)
-        shared.ReloadRecords ->
-          #(m, [dispatch_msg(store.LoadRecords), ..eff_list])
+          #(store.Model(..m, cache: cache.put_series(m.cache, s)), eff_list)
+        shared.ReloadRecords -> {
+          let is_admin = case m.user {
+            Some(models.User(is_superuser: True, ..)) -> True
+            _ -> False
+          }
+          #(m, [dispatch_msg(store.CacheMsg(cache.LoadRecords(is_admin))), ..eff_list])
+        }
         shared.ReloadStudies ->
-          #(m, [dispatch_msg(store.LoadStudies), ..eff_list])
+          #(m, [dispatch_msg(store.CacheMsg(cache.LoadStudies)), ..eff_list])
         shared.ReloadUsers ->
-          #(m, [dispatch_msg(store.LoadUsers), ..eff_list])
+          #(m, [dispatch_msg(store.CacheMsg(cache.LoadUsers)), ..eff_list])
         shared.ReloadPatients ->
-          #(m, [dispatch_msg(store.LoadPatients), ..eff_list])
+          #(m, [dispatch_msg(store.CacheMsg(cache.LoadPatients)), ..eff_list])
         shared.ReloadRecordTypes ->
-          #(m, [dispatch_msg(store.LoadRecordTypes), ..eff_list])
+          #(m, [dispatch_msg(store.CacheMsg(cache.LoadRecordTypes)), ..eff_list])
         shared.ReloadRecordTypeStats ->
-          #(m, [dispatch_msg(store.LoadRecordTypeStats), ..eff_list])
+          #(m, [dispatch_msg(store.CacheMsg(cache.LoadRecordTypeStats)), ..eff_list])
         shared.ReloadPatient(id) ->
-          #(m, [dispatch_msg(store.LoadPatientDetail(id)), ..eff_list])
+          #(m, [dispatch_msg(store.CacheMsg(cache.LoadPatientDetail(id))), ..eff_list])
         shared.ReloadRecord(id) ->
-          #(m, [dispatch_msg(store.LoadRecordDetail(id)), ..eff_list])
+          #(m, [dispatch_msg(store.CacheMsg(cache.LoadRecordDetail(id, m.user))), ..eff_list])
         shared.OpenDeleteConfirm(resource, id) ->
           #(
             store.Model(..m, modal_open: True, modal_content: store.ConfirmDelete(resource, id)),
@@ -994,156 +778,42 @@ pub fn view(model: Model) -> Element(Msg) {
 }
 
 fn view_content(model: Model) -> Element(Msg) {
-  let content = case model.route {
-    router.Home ->
-      case model.page {
-        store.HomePage(page_model) ->
-          element.map(
-            home.view(page_model, build_shared(model)),
-            store.HomeMsg,
-          )
-        _ -> loading_placeholder()
-      }
-    router.Login ->
-      case model.page {
-        store.LoginPage(page_model) ->
-          element.map(
-            login.view(page_model, build_shared(model)),
-            store.LoginMsg,
-          )
-        _ -> loading_placeholder()
-      }
-    router.Register ->
-      case model.page {
-        store.RegisterPage(page_model) ->
-          element.map(
-            register.view(page_model, build_shared(model)),
-            store.RegisterMsg,
-          )
-        _ -> loading_placeholder()
-      }
-    router.Studies ->
-      case model.page {
-        store.StudiesListPage(page_model) ->
-          element.map(
-            studies_list.view(page_model, build_shared(model)),
-            store.StudiesListMsg,
-          )
-        _ -> loading_placeholder()
-      }
-    router.StudyDetail(_) | router.StudyViewer(_) ->
-      case model.page {
-        store.StudyDetailPage(page_model) ->
-          element.map(
-            study_detail.view(page_model, build_shared(model)),
-            store.StudyDetailMsg,
-          )
-        _ -> loading_placeholder()
-      }
-    router.SeriesDetail(_) ->
-      case model.page {
-        store.SeriesDetailPage(page_model) ->
-          element.map(
-            series_detail.view(page_model, build_shared(model)),
-            store.SeriesDetailMsg,
-          )
-        _ -> loading_placeholder()
-      }
-    router.Records ->
-      case model.page {
-        store.RecordsListPage(page_model) ->
-          element.map(
-            records_list.view(page_model, build_shared(model)),
-            store.RecordsListMsg,
-          )
-        _ -> loading_placeholder()
-      }
-    router.RecordDetail(_) ->
-      case model.page {
-        store.RecordExecutePage(page_model) ->
-          element.map(
-            record_execute.view(page_model, build_shared(model)),
-            store.RecordExecuteMsg,
-          )
-        _ -> loading_placeholder()
-      }
-    router.RecordNew ->
-      case model.page {
-        store.RecordNewPage(page_model) ->
-          element.map(
-            record_new.view(page_model, build_shared(model)),
-            store.RecordNewMsg,
-          )
-        _ -> loading_placeholder()
-      }
-    router.RecordTypeDesign(_id) ->
-      html.div([], [html.text("Record type design page")])
-    router.Patients ->
-      case model.page {
-        store.PatientsListPage(page_model) ->
-          element.map(
-            patients_list.view(page_model, build_shared(model)),
-            store.PatientsListMsg,
-          )
-        _ -> loading_placeholder()
-      }
-    router.PatientNew ->
-      case model.page {
-        store.PatientNewPage(page_model) ->
-          element.map(
-            patient_new.view(page_model, build_shared(model)),
-            store.PatientNewMsg,
-          )
-        _ -> loading_placeholder()
-      }
-    router.PatientDetail(_) ->
-      case model.page {
-        store.PatientDetailPage(page_model) ->
-          element.map(
-            patient_detail.view(page_model, build_shared(model)),
-            store.PatientDetailMsg,
-          )
-        _ -> loading_placeholder()
-      }
-    router.Users -> html.div([], [html.text("Users page")])
-    router.UserProfile(_id) -> html.div([], [html.text("User profile page")])
-    router.AdminDashboard ->
-      case model.page {
-        store.AdminPage(page_model) ->
-          element.map(
-            admin_page.view(page_model, build_shared(model)),
-            store.AdminMsg,
-          )
-        _ -> loading_placeholder()
-      }
-    router.AdminRecordTypes ->
-      case model.page {
-        store.RecordTypesListPage(page_model) ->
-          element.map(
-            record_types_list.view(page_model, build_shared(model)),
-            store.RecordTypesListMsg,
-          )
-        _ -> loading_placeholder()
-      }
-    router.AdminRecordTypeDetail(_) ->
-      case model.page {
-        store.RecordTypeDetailPage(page_model) ->
-          element.map(
-            record_type_detail.view(page_model, build_shared(model)),
-            store.RecordTypeDetailMsg,
-          )
-        _ -> loading_placeholder()
-      }
-    router.AdminRecordTypeEdit(_) ->
-      case model.page {
-        store.RecordTypeEditPage(page_model) ->
-          element.map(
-            record_type_edit.view(page_model, build_shared(model)),
-            store.RecordTypeEditMsg,
-          )
-        _ -> loading_placeholder()
-      }
-    router.NotFound -> html.div([], [html.text("404 - Page not found")])
+  let shared = build_shared(model)
+
+  let content = case model.page {
+    store.HomePage(pm) ->
+      element.map(home.view(pm, shared), store.HomeMsg)
+    store.LoginPage(pm) ->
+      element.map(login.view(pm, shared), store.LoginMsg)
+    store.RegisterPage(pm) ->
+      element.map(register.view(pm, shared), store.RegisterMsg)
+    store.StudiesListPage(pm) ->
+      element.map(studies_list.view(pm, shared), store.StudiesListMsg)
+    store.StudyDetailPage(pm) ->
+      element.map(study_detail.view(pm, shared), store.StudyDetailMsg)
+    store.SeriesDetailPage(pm) ->
+      element.map(series_detail.view(pm, shared), store.SeriesDetailMsg)
+    store.RecordsListPage(pm) ->
+      element.map(records_list.view(pm, shared), store.RecordsListMsg)
+    store.RecordExecutePage(pm) ->
+      element.map(record_execute.view(pm, shared), store.RecordExecuteMsg)
+    store.RecordNewPage(pm) ->
+      element.map(record_new.view(pm, shared), store.RecordNewMsg)
+    store.PatientsListPage(pm) ->
+      element.map(patients_list.view(pm, shared), store.PatientsListMsg)
+    store.PatientDetailPage(pm) ->
+      element.map(patient_detail.view(pm, shared), store.PatientDetailMsg)
+    store.PatientNewPage(pm) ->
+      element.map(patient_new.view(pm, shared), store.PatientNewMsg)
+    store.AdminPage(pm) ->
+      element.map(admin_page.view(pm, shared), store.AdminMsg)
+    store.RecordTypesListPage(pm) ->
+      element.map(record_types_list.view(pm, shared), store.RecordTypesListMsg)
+    store.RecordTypeDetailPage(pm) ->
+      element.map(record_type_detail.view(pm, shared), store.RecordTypeDetailMsg)
+    store.RecordTypeEditPage(pm) ->
+      element.map(record_type_edit.view(pm, shared), store.RecordTypeEditMsg)
+    store.NoPage -> render_route_placeholder(model.route)
   }
 
   let page = case model.route {
@@ -1173,6 +843,19 @@ fn loading_placeholder() -> Element(Msg) {
   html.div([attribute.class("loading")], [
     html.p([], [html.text("Loading...")]),
   ])
+}
+
+/// Placeholder rendering for routes without page modules (Users, NotFound, etc.)
+/// or while a page model is still initializing.
+fn render_route_placeholder(route: Route) -> Element(Msg) {
+  case route {
+    router.RecordTypeDesign(_) ->
+      html.div([], [html.text("Record type design page")])
+    router.Users -> html.div([], [html.text("Users page")])
+    router.UserProfile(_) -> html.div([], [html.text("User profile page")])
+    router.NotFound -> html.div([], [html.text("404 - Page not found")])
+    _ -> loading_placeholder()
+  }
 }
 
 fn render_modal(model: Model) -> Element(Msg) {

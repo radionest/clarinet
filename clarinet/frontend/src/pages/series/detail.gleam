@@ -74,7 +74,7 @@ fn handle_error(err: ApiError, fallback_msg: String) -> List(OutMsg) {
 // --- View ---
 
 pub fn view(model: Model, shared: Shared) -> Element(Msg) {
-  case dict.get(shared.series, model.series_uid) {
+  case dict.get(shared.cache.series, model.series_uid) {
     Ok(s) -> render_detail(s)
     Error(_) -> loading_view(model.series_uid)
   }

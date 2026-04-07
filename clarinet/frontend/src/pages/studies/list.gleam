@@ -49,7 +49,7 @@ pub fn view(_model: Model, shared: Shared) -> Element(Msg) {
     ]),
     {
       let studies =
-        dict.values(shared.studies)
+        dict.values(shared.cache.studies)
         |> list.sort(fn(a, b) { string.compare(a.study_uid, b.study_uid) })
       studies_table(studies)
     },

@@ -1,29 +1,25 @@
 // Global state management
 import api/info.{type ProjectInfo}
-import api/models.{
-  type Patient, type RecordTypeStats,
-  type Series, type Study, type Record, type RecordType, type User,
-}
+import api/models.{type User}
+import api/types.{type ApiError}
+import cache
+import gleam/option.{type Option, None, Some}
 import pages/admin as admin_page
+import pages/home as home_page
 import pages/login as login_page
 import pages/patients/detail as patient_detail_page
 import pages/patients/list as patients_list_page
 import pages/patients/new as patient_new_page
-import pages/records/execute as record_execute_page
-import pages/records/list as records_list_page
 import pages/record_types/detail as record_type_detail_page
 import pages/record_types/edit as record_type_edit_page
 import pages/record_types/list as record_types_list_page
+import pages/records/execute as record_execute_page
+import pages/records/list as records_list_page
 import pages/records/new as record_new_page
 import pages/register as register_page
 import pages/series/detail as series_detail_page
-import pages/home as home_page
 import pages/studies/detail as study_detail_page
 import pages/studies/list as studies_list_page
-import api/types.{type ApiError}
-import gleam/dict.{type Dict}
-import gleam/int
-import gleam/option.{type Option, None, Some}
 import preload
 import router.{type Route}
 
@@ -42,15 +38,8 @@ pub type Model {
     loading: Bool,
     error: Option(String),
     success_message: Option(String),
-    // Data caches
-    studies: Dict(String, Study),
-    series: Dict(String, Series),
-    records: Dict(String, Record),
-    record_types: Dict(String, RecordType),
-    patients: Dict(String, Patient),
-    users: Dict(String, User),
-    // Admin
-    record_type_stats: Option(List(RecordTypeStats)),
+    // Global entity caches
+    cache: cache.Model,
     // Modal state
     modal_open: Bool,
     modal_content: ModalContent,
@@ -126,32 +115,8 @@ pub type Msg {
   // Home page delegation
   HomeMsg(home_page.Msg)
 
-  // Data loading
-  LoadStudies
-  StudiesLoaded(Result(List(Study), ApiError))
-
-  LoadRecords
-  RecordsLoaded(Result(List(Record), ApiError))
-  LoadRecordDetail(id: String)
-  RecordDetailLoaded(Result(Record, ApiError))
-
-  LoadUsers
-  UsersLoaded(Result(List(User), ApiError))
-
-  LoadPatients
-  PatientsLoaded(Result(List(Patient), ApiError))
-  LoadPatientDetail(id: String)
-  PatientDetailLoaded(Result(Patient, ApiError))
-
-  LoadRecordTypeStats
-  RecordTypeStatsLoaded(Result(List(RecordTypeStats), ApiError))
-
   // Admin page delegation
   AdminMsg(admin_page.Msg)
-
-  // Record types loading (used by record_new page init + admin)
-  LoadRecordTypes
-  RecordTypesLoaded(Result(List(RecordType), ApiError))
 
   // UI Actions
   SetError(Option(String))
@@ -165,8 +130,8 @@ pub type Msg {
   // Project info
   ProjectInfoLoaded(Result(ProjectInfo, ApiError))
 
-  // Auto-assign
-  AutoAssignResult(Result(Record, ApiError))
+  // Cache delegation (all data loading lives in cache.gleam)
+  CacheMsg(cache.Msg)
 
   // Preload delegation
   PreloadMsg(preload.Msg)
@@ -183,13 +148,7 @@ pub fn init() -> Model {
     loading: False,
     error: None,
     success_message: None,
-    studies: dict.new(),
-    series: dict.new(),
-    records: dict.new(),
-    record_types: dict.new(),
-    patients: dict.new(),
-    users: dict.new(),
-    record_type_stats: None,
+    cache: cache.init(),
     modal_open: False,
     modal_content: NoModal,
     preload: preload.init(),
@@ -227,35 +186,4 @@ pub fn set_error(model: Model, error: Option(String)) -> Model {
 
 pub fn set_success(model: Model, message: String) -> Model {
   Model(..model, success_message: Some(message))
-}
-
-// Cache helpers
-pub fn cache_study(model: Model, study: Study) -> Model {
-  let studies = dict.insert(model.studies, study.study_uid, study)
-  Model(..model, studies: studies)
-}
-
-pub fn cache_series(model: Model, s: Series) -> Model {
-  let series = dict.insert(model.series, s.series_uid, s)
-  Model(..model, series: series)
-}
-
-pub fn cache_record(model: Model, record: Record) -> Model {
-  case record.id {
-    Some(id) -> {
-      let records = dict.insert(model.records, int.to_string(id), record)
-      Model(..model, records: records)
-    }
-    None -> model
-  }
-}
-
-pub fn cache_record_type(model: Model, record_type: RecordType) -> Model {
-  let record_types = dict.insert(model.record_types, record_type.name, record_type)
-  Model(..model, record_types: record_types)
-}
-
-pub fn cache_patient(model: Model, patient: Patient) -> Model {
-  let patients = dict.insert(model.patients, patient.id, patient)
-  Model(..model, patients: patients)
 }

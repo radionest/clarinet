@@ -45,7 +45,7 @@ pub fn view(_model: Model, shared: Shared) -> Element(Msg) {
     html.div([attribute.class("page-header")], [
       html.h1([], [html.text("Record Types")]),
     ]),
-    case shared.record_type_stats {
+    case shared.cache.record_type_stats {
       None ->
         html.p([attribute.class("text-muted")], [
           html.text("No record type data available."),

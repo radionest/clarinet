@@ -331,7 +331,7 @@ fn handle_error(err: ApiError, fallback_msg: String) -> List(OutMsg) {
 }
 
 fn has_slicer_script(record_id: String, shared: Shared) -> Bool {
-  case dict.get(shared.records, record_id) {
+  case dict.get(shared.cache.records, record_id) {
     Ok(models.Record(
       record_type: Some(models.RecordType(slicer_script: Some(_), ..)),
       ..,
@@ -368,7 +368,7 @@ fn start_slicer_ping_timer() -> Effect(Msg) {
 // --- View ---
 
 pub fn view(model: Model, shared: Shared) -> Element(Msg) {
-  case dict.get(shared.records, model.record_id) {
+  case dict.get(shared.cache.records, model.record_id) {
     Ok(record) -> render_record_execution(model, record, shared)
     Error(_) -> loading_view(model.record_id)
   }

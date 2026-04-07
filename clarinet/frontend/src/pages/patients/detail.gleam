@@ -198,7 +198,7 @@ fn handle_error(err: ApiError, fallback_msg: String) -> List(OutMsg) {
 // --- View ---
 
 pub fn view(model: Model, shared: Shared) -> Element(Msg) {
-  case dict.get(shared.patients, model.patient_id) {
+  case dict.get(shared.cache.patients, model.patient_id) {
     Ok(patient) -> render_detail(model, shared, patient)
     Error(_) -> loading_view(model.patient_id)
   }
@@ -206,7 +206,7 @@ pub fn view(model: Model, shared: Shared) -> Element(Msg) {
 
 fn render_detail(model: Model, shared: Shared, patient: Patient) -> Element(Msg) {
   let patient_records =
-    dict.values(shared.records)
+    dict.values(shared.cache.records)
     |> list.filter(fn(r) { r.patient_id == patient.id })
     |> list.sort(fn(a, b) {
       int.compare(option.unwrap(a.id, 0), option.unwrap(b.id, 0))
