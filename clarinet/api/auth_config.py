@@ -56,15 +56,14 @@ class UserManager(BaseUserManager[User, UUID]):
         del response  # Unused but required by interface
         user_id = str(user.id)
         logger.info(f"User {user.id} logged in.", extra={"user_id": user_id})
-        if request:
-            # Strip query/fragment from Referer to avoid leaking secrets
+        if request is not None:
+            # Keep only scheme://netloc — path segments can carry secrets
+            # (/reset/<token>, /invite/<code>, mailto:, etc.)
             raw_referer = request.headers.get("Referer", "")
             if raw_referer:
                 parts = urlsplit(raw_referer)
                 safe_referer = (
-                    f"{parts.scheme}://{parts.netloc}{parts.path}"
-                    if parts.scheme and parts.netloc
-                    else parts.path
+                    f"{parts.scheme}://{parts.netloc}" if parts.scheme and parts.netloc else ""
                 )[:512]
             else:
                 safe_referer = ""
@@ -132,9 +131,9 @@ class DatabaseStrategy(Strategy[User, UUID]):
         # Extract request metadata
         user_agent = None
         ip_address = None
-        if self.request:
+        if self.request is not None:
             user_agent = self.request.headers.get("User-Agent", "")[:512]
-            if self.request.client:
+            if self.request.client is not None:
                 ip_address = self.request.client.host
 
         access_token = AccessToken(
@@ -176,7 +175,7 @@ class DatabaseStrategy(Strategy[User, UUID]):
                 extra={
                     "token_preview": token[:8],
                     "cache_hit": True,
-                    "request_path": self.request.url.path if self.request else None,
+                    "request_path": self.request.url.path if self.request is not None else None,
                 },
             )
             return self._user_cache[token]  # type: ignore[no-any-return]
@@ -190,8 +189,12 @@ class DatabaseStrategy(Strategy[User, UUID]):
         access_token = result.scalar_one_or_none()
 
         if not access_token:
-            request_path = self.request.url.path if self.request else None
-            request_ip = self.request.client.host if self.request and self.request.client else None
+            request_path = self.request.url.path if self.request is not None else None
+            request_ip = (
+                self.request.client.host
+                if self.request is not None and self.request.client is not None
+                else None
+            )
             logger.warning(
                 "Token validation failed: token={}..., path={}, ip={}",
                 token[:8],
@@ -210,8 +213,8 @@ class DatabaseStrategy(Strategy[User, UUID]):
             return None
 
         # Optional IP validation
-        if settings.session_ip_check and self.request:
-            request_ip = self.request.client.host if self.request.client else None
+        if settings.session_ip_check and self.request is not None:
+            request_ip = self.request.client.host if self.request.client is not None else None
             if access_token.ip_address and request_ip != access_token.ip_address:
                 logger.warning(
                     f"IP mismatch for token {token[:8]}...: "
@@ -241,13 +244,13 @@ class DatabaseStrategy(Strategy[User, UUID]):
                     f"Session idle timeout: token={token[:8]}..., "
                     f"idle_duration={idle_duration.total_seconds():.1f}s, "
                     f"max={max_idle.total_seconds():.1f}s, "
-                    f"path={self.request.url.path if self.request else 'N/A'}",
+                    f"path={self.request.url.path if self.request is not None else 'N/A'}",
                     extra={
                         "token_preview": token[:8],
                         "idle_duration_seconds": idle_duration.total_seconds(),
                         "max_idle_seconds": max_idle.total_seconds(),
                         "last_accessed": last_accessed.isoformat(),
-                        "request_path": self.request.url.path if self.request else None,
+                        "request_path": self.request.url.path if self.request is not None else None,
                         "reason": "idle_timeout",
                     },
                 )
@@ -299,13 +302,13 @@ class DatabaseStrategy(Strategy[User, UUID]):
                 f"token={token[:8]}..., "
                 f"user_exists={user is not None}, "
                 f"user_active={user.is_active if user else False}, "
-                f"path={self.request.url.path if self.request else 'N/A'}",
+                f"path={self.request.url.path if self.request is not None else 'N/A'}",
                 extra={
                     "token_preview": token[:8],
                     "user_id": str(access_token.user_id),
                     "user_exists": user is not None,
                     "user_active": user.is_active if user else False,
-                    "request_path": self.request.url.path if self.request else None,
+                    "request_path": self.request.url.path if self.request is not None else None,
                     "reason": "user_not_found" if not user else "user_inactive",
                 },
             )
@@ -321,7 +324,7 @@ class DatabaseStrategy(Strategy[User, UUID]):
                 extra={
                     "token_preview": token[:8],
                     "user_id": str(user.id),
-                    "request_path": self.request.url.path if self.request else None,
+                    "request_path": self.request.url.path if self.request is not None else None,
                     "cache_stored": True,
                 },
             )
@@ -331,7 +334,7 @@ class DatabaseStrategy(Strategy[User, UUID]):
                 extra={
                     "token_preview": token[:8],
                     "user_id": str(user.id),
-                    "request_path": self.request.url.path if self.request else None,
+                    "request_path": self.request.url.path if self.request is not None else None,
                 },
             )
 

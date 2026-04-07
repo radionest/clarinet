@@ -12,25 +12,26 @@ Loguru quirk: `logger.info("msg", extra={"k": "v"})` nests the dict under
 the project convention.
 """
 
-from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
-from loguru import logger as loguru_logger
+from fastapi import Request
 
 from clarinet.api.auth_config import DatabaseStrategy, UserManager
-from clarinet.models.auth import AccessToken
 from clarinet.models.user import User
+from clarinet.utils.logger import logger
+from tests.utils.urls import AUTH_LOGIN
 
 
 @pytest.fixture
 def captured_records():
     """Capture every loguru record emitted during the test as raw dicts."""
     records: list[dict] = []
-    sink_id = loguru_logger.add(lambda msg: records.append(msg.record), level="DEBUG")
+    sink_id = logger.add(lambda msg: records.append(msg.record), level="DEBUG")
     yield records
-    loguru_logger.remove(sink_id)
+    logger.remove(sink_id)
 
 
 def _records_for(records: list[dict], message_substring: str) -> list[dict]:
@@ -46,33 +47,25 @@ def _make_user(*, active: bool = True) -> User:
     return user
 
 
-def _make_token(user: User) -> AccessToken:
-    token = MagicMock(spec=AccessToken)
-    token.user_id = user.id
-    token.ip_address = None
-    token.last_accessed = datetime.now(UTC)
-    token.created_at = datetime.now(UTC) - timedelta(hours=1)
-    token.expires_at = datetime.now(UTC) + timedelta(hours=24)
-    return token
-
-
 def _make_request(
     *,
     user_agent: str = "TestAgent/1.0",
     referer: str = "",
-    path: str = "/api/auth/login",
+    path: str = AUTH_LOGIN,
     client_host: str = "10.0.0.1",
 ) -> MagicMock:
-    """Build a fastapi.Request-shaped mock with the headers we care about."""
+    """Build a fastapi.Request-shaped mock with the headers we care about.
+
+    Uses ``spec=Request`` plus ``SimpleNamespace`` for ``url`` and ``client``
+    so attribute typos fail loudly instead of being absorbed by MagicMock.
+    """
     headers: dict[str, str] = {"User-Agent": user_agent}
     if referer:
         headers["Referer"] = referer
-    request = MagicMock()
+    request = MagicMock(spec=Request)
     request.headers = headers
-    request.url = MagicMock()
-    request.url.path = path
-    request.client = MagicMock()
-    request.client.host = client_host
+    request.url = SimpleNamespace(path=path)
+    request.client = SimpleNamespace(host=client_host)
     return request
 
 
@@ -190,7 +183,7 @@ class TestOnAfterLoginDebugStructure:
         request = _make_request(
             user_agent="OHIFViewer/3.0",
             referer="https://example.com/ohif/viewer",
-            path="/api/auth/login",
+            path=AUTH_LOGIN,
         )
 
         await manager.on_after_login(user, request=request)
@@ -203,15 +196,16 @@ class TestOnAfterLoginDebugStructure:
         extra = record["extra"]["extra"]
         assert extra["user_id"] == str(user.id)
         assert extra["user_agent"] == "OHIFViewer/3.0"
-        assert extra["referer"] == "https://example.com/ohif/viewer"
-        assert extra["request_path"] == "/api/auth/login"
+        # Path is dropped — only origin survives
+        assert extra["referer"] == "https://example.com"
+        assert extra["request_path"] == AUTH_LOGIN
 
     @pytest.mark.asyncio
-    async def test_referer_query_and_fragment_are_stripped(self, manager, captured_records):
-        """A Referer with secrets in the query string must be sanitized."""
+    async def test_referer_path_query_and_fragment_are_stripped(self, manager, captured_records):
+        """A Referer with secrets anywhere past the netloc must be sanitized."""
         user = _make_user()
         request = _make_request(
-            referer="https://example.com/reset?token=SECRET&email=alice@example.com#frag",
+            referer="https://example.com/reset/SECRET_TOKEN?email=alice@example.com#frag",
         )
 
         await manager.on_after_login(user, request=request)
@@ -219,14 +213,15 @@ class TestOnAfterLoginDebugStructure:
         debugs = _records_for(captured_records, "Login request metadata")
         assert len(debugs) == 1
         referer = debugs[0]["extra"]["extra"]["referer"]
-        assert referer == "https://example.com/reset"
-        assert "SECRET" not in referer
+        assert referer == "https://example.com"
+        assert "SECRET_TOKEN" not in referer
+        assert "reset" not in referer
         assert "alice@example.com" not in referer
         assert "frag" not in referer
 
     @pytest.mark.asyncio
-    async def test_referer_path_only_input_survives(self, manager, captured_records):
-        """A path-only Referer (no scheme/host) should still be logged."""
+    async def test_referer_path_only_input_dropped(self, manager, captured_records):
+        """A path-only Referer (no scheme/host) collapses to empty string."""
         user = _make_user()
         request = _make_request(referer="/some/local/path?q=1")
 
@@ -234,9 +229,8 @@ class TestOnAfterLoginDebugStructure:
 
         debugs = _records_for(captured_records, "Login request metadata")
         assert len(debugs) == 1
-        # urlsplit on path-only string yields scheme="", netloc="" so we fall
-        # back to parts.path; query is still discarded by urlsplit-then-rebuild
-        assert debugs[0]["extra"]["extra"]["referer"] == "/some/local/path"
+        # No scheme/netloc → safe origin is empty; path is never preserved
+        assert debugs[0]["extra"]["extra"]["referer"] == ""
 
     @pytest.mark.asyncio
     async def test_missing_referer_logs_empty_string(self, manager, captured_records):
@@ -259,6 +253,20 @@ class TestOnAfterLoginDebugStructure:
         debugs = _records_for(captured_records, "Login request metadata")
         assert len(debugs) == 1
         assert len(debugs[0]["extra"]["extra"]["user_agent"]) == 512
+
+    @pytest.mark.asyncio
+    async def test_referer_truncated_to_512(self, manager, captured_records):
+        """An overlong Referer origin must be capped at 512 chars."""
+        user = _make_user()
+        # Long netloc so that scheme://netloc exceeds 512 chars
+        long_host = "b" * 1000 + ".example.com"
+        request = _make_request(referer=f"https://{long_host}/path?secret=x")
+
+        await manager.on_after_login(user, request=request)
+
+        debugs = _records_for(captured_records, "Login request metadata")
+        assert len(debugs) == 1
+        assert len(debugs[0]["extra"]["extra"]["referer"]) == 512
 
     @pytest.mark.asyncio
     async def test_no_request_skips_debug_log(self, manager, captured_records):

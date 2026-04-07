@@ -15,8 +15,8 @@ arbitrary headers.** Anything you log explicitly is your responsibility.
 
 | Header | Risk | How to handle |
 |---|---|---|
-| `Referer` | query/fragment may carry tokens, emails, password-reset codes, OAuth state | strip query+fragment, keep `scheme://netloc/path` |
-| `Origin` | usually safe (no path), but truncate to bound size | `[:512]` |
+| `Referer` | path may carry tokens (`/reset/<token>`), emails, password-reset codes, OAuth state — query/fragment too | keep only `scheme://netloc`, drop the rest |
+| `Origin` | usually safe (no path), but truncate to a bounded size | `[:512]` |
 | `User-Agent` | safe, but unbounded — flood risk | `[:512]` |
 | `Authorization` | **never log** — already scrubbed by `scrub_sensitive`, but don't put it in `extra={}` (extra is not scrubbed) |
 | `Cookie` / `Set-Cookie` | **never log** — session tokens |
@@ -31,13 +31,16 @@ raw_referer = request.headers.get("Referer", "")
 if raw_referer:
     parts = urlsplit(raw_referer)
     safe_referer = (
-        f"{parts.scheme}://{parts.netloc}{parts.path}"
+        f"{parts.scheme}://{parts.netloc}"
         if parts.scheme and parts.netloc
-        else parts.path
+        else ""
     )[:512]
 else:
     safe_referer = ""
 ```
+
+Path-only referers (no scheme/netloc) collapse to an empty string —
+the path itself is never preserved because it can carry secrets.
 
 Reference: `clarinet/api/auth_config.py:on_after_login`.
 
@@ -75,7 +78,10 @@ Stick with `extra=` to match existing code unless you have a reason to switch.
 - Are **not** delivered to remote Loki
 
 If you add a new structured field that should land in remote logs, extend
-`_LokiSink.__call__` to include `record["extra"]["extra"]` (mind the nesting).
+`_LokiSink.__call__` with an explicit allowlist of pre-sanitized keys taken
+from `record["extra"]["extra"]` (mind the nesting). Do **not** forward the
+nested dict wholesale — that would push every future header/token preview a
+caller attaches into remote logs.
 
 ## jq filtering
 
