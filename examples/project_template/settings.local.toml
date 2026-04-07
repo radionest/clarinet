@@ -1,0 +1,54 @@
+# Clarinet research project — production settings (env-var driven).
+# Copy `.env.example` to `.env` and fill in the values.
+
+project_name = "TODO: Project Name"
+project_description = "TODO: short description of the research"
+extra_roles = []
+debug = false
+log_level = "INFO"
+log_console_level = "INFO"
+
+# ── Server ───────────────────────────────────────────
+port = "${CLARINET_PORT}"
+host = "0.0.0.0"
+
+# ── Database (PostgreSQL) ────────────────────────────
+database_driver = "postgresql+asyncpg"
+database_name = "${CLARINET_DATABASE_NAME}"
+database_host = "${CLARINET_DATABASE_HOST}"
+database_port = "${CLARINET_DATABASE_PORT}"
+database_login = "${CLARINET_DATABASE_LOGIN}"
+database_password = "${CLARINET_DATABASE_PASSWORD}"
+
+# ── Storage / Security ───────────────────────────────
+storage_path = "${CLARINET_STORAGE_PATH}"
+anon_id_prefix = "MY_PROJECT"
+secret_key = "${CLARINET_SECRET_KEY}"
+admin_password = "${CLARINET_ADMIN_PASSWORD}"
+
+# ── Features ─────────────────────────────────────────
+recordflow_enabled = true
+pipeline_enabled = true
+frontend_enabled = true
+
+# ── RabbitMQ (pipeline) ──────────────────────────────
+rabbitmq_host = "${CLARINET_RABBITMQ_HOST}"
+rabbitmq_login = "${CLARINET_RABBITMQ_LOGIN}"
+rabbitmq_password = "${CLARINET_RABBITMQ_PASSWORD}"
+
+# ── Python config mode ───────────────────────────────
+config_mode = "python"
+config_tasks_path = "./plan/"
+config_record_types_file = "definitions/record_types.py"
+config_context_hydrators_file = "hydrators/context_hydrators.py"
+recordflow_paths = ["./plan/workflows"]
+
+# ── DICOM ────────────────────────────────────────────
+dicom_aet = "${CLARINET_DICOM_AET}"
+dicom_port = 11112
+anon_send_to_pacs = false
+
+# ── PACS ─────────────────────────────────────────────
+pacs_aet = "${CLARINET_PACS_AET}"
+pacs_host = "${CLARINET_PACS_HOST}"
+pacs_port = "${CLARINET_PACS_PORT}"

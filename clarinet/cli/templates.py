@@ -11,13 +11,20 @@ TEMPLATES: dict[str, tuple[str, str]] = {
     "demo": ("demo", "JSON-mode demo with tasks and record flow"),
     "liver": ("demo_liver", "Liver study (TOML config)"),
     "bigliver": ("demo_liver_v2", "Full liver study (Python config, workflows, pipeline)"),
+    "research": (
+        "project_template",
+        "Research project scaffold (Python config, plan/, .claude/ docs for agents)",
+    ),
 }
 
-# Patterns to exclude when copying a template
+# Patterns to exclude when copying a template.
+# NB: ``.claude`` itself is intentionally NOT in this list — templates may ship
+# CLAUDE.md and rules/ for agents. We only exclude per-developer local files.
 _IGNORE_PATTERNS = (
     "data",
     "__pycache__",
-    ".claude",
+    "settings.local.json",
+    "worktrees",
     "*.db",
     "*.log",
     "*.docx",
