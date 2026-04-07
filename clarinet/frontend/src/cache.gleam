@@ -95,8 +95,9 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg), List(OutMsg)) {
     ])
 
     StudiesLoaded(Ok(list_)) -> {
+      // Rebuild from server snapshot so deleted entities disappear.
       let studies =
-        list.fold(list_, model.studies, fn(acc, s) {
+        list.fold(list_, dict.new(), fn(acc, s) {
           dict.insert(acc, s.study_uid, s)
         })
       #(Model(..model, studies: studies), effect.none(), [Loading(False)])
@@ -116,8 +117,10 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg), List(OutMsg)) {
     }
 
     RecordsLoaded(Ok(list_)) -> {
+      // Rebuild from server snapshot so records reassigned away from the
+      // current user (LoadRecords(False)) disappear from "my records".
       let records =
-        list.fold(list_, model.records, fn(acc, r) {
+        list.fold(list_, dict.new(), fn(acc, r) {
           case r.id {
             Some(id) -> dict.insert(acc, int.to_string(id), r)
             None -> acc
@@ -137,7 +140,7 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg), List(OutMsg)) {
 
     UsersLoaded(Ok(list_)) -> {
       let users =
-        list.fold(list_, model.users, fn(acc, u) { dict.insert(acc, u.id, u) })
+        list.fold(list_, dict.new(), fn(acc, u) { dict.insert(acc, u.id, u) })
       #(Model(..model, users: users), effect.none(), [Loading(False)])
     }
 
@@ -152,7 +155,7 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg), List(OutMsg)) {
 
     PatientsLoaded(Ok(list_)) -> {
       let patients =
-        list.fold(list_, model.patients, fn(acc, p) {
+        list.fold(list_, dict.new(), fn(acc, p) {
           dict.insert(acc, p.id, p)
         })
       #(Model(..model, patients: patients), effect.none(), [Loading(False)])
@@ -171,7 +174,7 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg), List(OutMsg)) {
 
     RecordTypesLoaded(Ok(list_)) -> {
       let record_types =
-        list.fold(list_, model.record_types, fn(acc, rt) {
+        list.fold(list_, dict.new(), fn(acc, rt) {
           dict.insert(acc, rt.name, rt)
         })
       #(Model(..model, record_types: record_types), effect.none(), [
