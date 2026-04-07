@@ -25,6 +25,12 @@ pub type Model {
     form_studies: List(Study),
     form_series: List(Series),
     loading: Bool,
+    // Race guards: each cascading load increments these counters and the
+    // result handler discards stale responses whose request_id doesn't match
+    // the current value. Without this, quickly switching the patient or study
+    // can let an older response overwrite the latest one.
+    studies_request_id: Int,
+    series_request_id: Int,
   )
 }
 
@@ -34,8 +40,8 @@ pub type Msg {
   UpdateForm(record_form.RecordFormMsg)
   Submit
   SubmitResult(Result(Record, ApiError))
-  StudiesLoaded(Result(List(Study), ApiError))
-  SeriesLoaded(Result(List(Series), ApiError))
+  StudiesLoaded(request_id: Int, result: Result(List(Study), ApiError))
+  SeriesLoaded(request_id: Int, result: Result(List(Series), ApiError))
   Cancel
 }
 
@@ -49,12 +55,17 @@ pub fn init(shared: Shared) -> #(Model, Effect(Msg), List(OutMsg)) {
       form_studies: [],
       form_series: [],
       loading: False,
+      studies_request_id: 0,
+      series_request_id: 0,
     )
+  // ReloadPatients is required even for non-superusers — the form needs the
+  // patient picker. The backend is expected to scope `/api/patients` results
+  // by the caller's permissions.
   let out_msgs = case shared.user {
     Some(models.User(is_superuser: True, ..)) ->
       [shared.ReloadPatients, shared.ReloadRecordTypes, shared.ReloadUsers, shared.ReloadRecords]
     _ ->
-      [shared.ReloadRecordTypes, shared.ReloadRecords]
+      [shared.ReloadPatients, shared.ReloadRecordTypes, shared.ReloadRecords]
   }
   #(model, effect.none(), out_msgs)
 }
@@ -91,40 +102,61 @@ pub fn update(
         False -> updated_model
       }
 
-      // Load studies when patient selected/changed
-      let studies_eff = case patient_changed, new_data.patient_id {
-        True, "" -> effect.none()
-        True, pid -> load_studies_for_patient(pid)
-        False, _ ->
-          // Also load studies if type changed but patient already selected
-          case type_changed, new_data.patient_id {
-            True, "" -> effect.none()
-            True, pid -> load_studies_for_patient(pid)
-            False, _ -> effect.none()
-          }
+      // Determine whether we need to (re)load studies for the current patient.
+      let needs_studies_load = case patient_changed, type_changed {
+        True, _ -> new_data.patient_id != ""
+        False, True -> new_data.patient_id != ""
+        False, False -> False
+      }
+
+      let #(updated_model, studies_eff) = case needs_studies_load {
+        True -> {
+          let new_id = updated_model.studies_request_id + 1
+          let m = Model(..updated_model, studies_request_id: new_id)
+          #(m, load_studies_for_patient(new_id, new_data.patient_id))
+        }
+        False -> #(updated_model, effect.none())
       }
 
       // Load series when study selected/changed
-      let series_eff = case study_changed, new_data.study_uid {
-        True, "" -> effect.none()
-        True, uid -> load_series_for_study(uid)
-        False, _ -> effect.none()
+      let needs_series_load = study_changed && new_data.study_uid != ""
+      let #(updated_model, series_eff) = case needs_series_load {
+        True -> {
+          let new_id = updated_model.series_request_id + 1
+          let m = Model(..updated_model, series_request_id: new_id)
+          #(m, load_series_for_study(new_id, new_data.study_uid))
+        }
+        False -> #(updated_model, effect.none())
       }
 
       #(updated_model, effect.batch([studies_eff, series_eff]), [])
     }
 
-    StudiesLoaded(Ok(studies_list)) ->
-      #(Model(..model, form_studies: studies_list), effect.none(), [])
+    StudiesLoaded(request_id, Ok(studies_list)) ->
+      case request_id == model.studies_request_id {
+        True ->
+          #(Model(..model, form_studies: studies_list), effect.none(), [])
+        False -> #(model, effect.none(), [])
+      }
 
-    StudiesLoaded(Error(_)) ->
-      #(Model(..model, form_studies: []), effect.none(), [])
+    StudiesLoaded(request_id, Error(_)) ->
+      case request_id == model.studies_request_id {
+        True -> #(Model(..model, form_studies: []), effect.none(), [])
+        False -> #(model, effect.none(), [])
+      }
 
-    SeriesLoaded(Ok(series_list)) ->
-      #(Model(..model, form_series: series_list), effect.none(), [])
+    SeriesLoaded(request_id, Ok(series_list)) ->
+      case request_id == model.series_request_id {
+        True ->
+          #(Model(..model, form_series: series_list), effect.none(), [])
+        False -> #(model, effect.none(), [])
+      }
 
-    SeriesLoaded(Error(_)) ->
-      #(Model(..model, form_series: []), effect.none(), [])
+    SeriesLoaded(request_id, Error(_)) ->
+      case request_id == model.series_request_id {
+        True -> #(Model(..model, form_series: []), effect.none(), [])
+        False -> #(model, effect.none(), [])
+      }
 
     Submit -> {
       case record_form.validate(model.form_data, shared.cache.record_types) {
@@ -203,7 +235,7 @@ fn optional_string(s: String) -> option.Option(String) {
   }
 }
 
-fn load_studies_for_patient(patient_id: String) -> Effect(Msg) {
+fn load_studies_for_patient(request_id: Int, patient_id: String) -> Effect(Msg) {
   use dispatch <- effect.from
   patients.get_patient(patient_id)
   |> promise.tap(fn(result) {
@@ -215,12 +247,12 @@ fn load_studies_for_patient(patient_id: String) -> Effect(Msg) {
         }
       Error(err) -> Error(err)
     }
-    dispatch(StudiesLoaded(studies_result))
+    dispatch(StudiesLoaded(request_id, studies_result))
   })
   Nil
 }
 
-fn load_series_for_study(study_uid: String) -> Effect(Msg) {
+fn load_series_for_study(request_id: Int, study_uid: String) -> Effect(Msg) {
   use dispatch <- effect.from
   studies.get_study(study_uid)
   |> promise.tap(fn(result) {
@@ -232,7 +264,7 @@ fn load_series_for_study(study_uid: String) -> Effect(Msg) {
         }
       Error(err) -> Error(err)
     }
-    dispatch(SeriesLoaded(series_result))
+    dispatch(SeriesLoaded(request_id, series_result))
   })
   Nil
 }
