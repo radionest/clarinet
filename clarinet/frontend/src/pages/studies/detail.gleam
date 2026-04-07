@@ -1,28 +1,145 @@
-// Study detail page (admin only)
+// Study detail page — self-contained MVU module
 import api/models.{type Patient, type Record, type Series, type Study}
-import utils/status
+import api/studies
+import api/types.{type ApiError, AuthError}
 import gleam/dict
 import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
+import gleam/javascript/promise
 import lustre/attribute
+import lustre/effect.{type Effect}
 import lustre/element.{type Element}
 import lustre/element/html
 import lustre/event
 import router
-import store.{type Model, type Msg}
+import shared.{type OutMsg, type Shared}
+import utils/load_status.{type LoadStatus}
+import utils/status
 import utils/viewer
 
-pub fn view(model: Model, study_uid: String) -> Element(Msg) {
-  case dict.get(model.studies, study_uid) {
-    Ok(study) -> render_detail(model, study)
-    Error(_) -> loading_view(study_uid)
+// --- Model ---
+
+pub type Model {
+  Model(study_uid: String, load_status: LoadStatus)
+}
+
+// --- Msg ---
+
+pub type Msg {
+  StudyLoaded(Result(Study, ApiError))
+  Delete
+  DeleteResult(Result(Nil, ApiError))
+  NavigateBack
+  RequestDelete
+  RetryLoad
+}
+
+// --- Init ---
+
+pub fn init(study_uid: String, _shared: Shared) -> #(Model, Effect(Msg), List(OutMsg)) {
+  let model = Model(study_uid: study_uid, load_status: load_status.Loading)
+  #(model, load_study_effect(study_uid), [shared.ReloadRecords])
+}
+
+fn load_study_effect(study_uid: String) -> Effect(Msg) {
+  use dispatch <- effect.from
+  studies.get_study(study_uid)
+  |> promise.tap(fn(result) { dispatch(StudyLoaded(result)) })
+  Nil
+}
+
+// --- Update ---
+
+pub fn update(
+  model: Model,
+  msg: Msg,
+  _shared: Shared,
+) -> #(Model, Effect(Msg), List(OutMsg)) {
+  case msg {
+    StudyLoaded(Ok(study)) ->
+      #(
+        Model(..model, load_status: load_status.Loaded),
+        effect.none(),
+        [shared.CacheStudy(study)],
+      )
+
+    StudyLoaded(Error(err)) ->
+      #(
+        Model(..model, load_status: load_status.Failed("Failed to load study")),
+        effect.none(),
+        handle_error(err, "Failed to load study"),
+      )
+
+    RetryLoad ->
+      #(
+        Model(..model, load_status: load_status.Loading),
+        load_study_effect(model.study_uid),
+        [],
+      )
+
+    Delete -> {
+      let eff = {
+        use dispatch <- effect.from
+        studies.delete_study(model.study_uid)
+        |> promise.tap(fn(result) { dispatch(DeleteResult(result)) })
+        Nil
+      }
+      #(model, eff, [shared.SetLoading(True)])
+    }
+
+    DeleteResult(Ok(_)) ->
+      #(model, effect.none(), [
+        shared.SetLoading(False),
+        shared.ReloadStudies,
+        shared.ShowSuccess("Study deleted successfully"),
+        shared.Navigate(router.Studies),
+      ])
+
+    DeleteResult(Error(err)) ->
+      #(model, effect.none(), handle_error(err, "Failed to delete study"))
+
+    NavigateBack ->
+      #(model, effect.none(), [shared.Navigate(router.Studies)])
+
+    RequestDelete ->
+      #(model, effect.none(), [
+        shared.OpenDeleteConfirm("study", model.study_uid),
+      ])
   }
 }
 
-fn render_detail(model: Model, study: Study) -> Element(Msg) {
+// --- Helpers ---
+
+fn handle_error(err: ApiError, fallback_msg: String) -> List(OutMsg) {
+  case err {
+    AuthError(_) -> [shared.Logout]
+    // SetLoading(False) is needed because the Delete flow toggles the
+    // global spinner via SetLoading(True); without it, a failed delete
+    // would leave the overlay stuck on the page.
+    _ -> [shared.SetLoading(False), shared.ShowError(fallback_msg)]
+  }
+}
+
+// --- View ---
+
+pub fn view(model: Model, shared: Shared) -> Element(Msg) {
+  load_status.render(
+    model.load_status,
+    fn() { loading_view(model.study_uid) },
+    fn() {
+      case dict.get(shared.cache.studies, model.study_uid) {
+        Ok(study) -> render_detail(shared, study)
+        Error(_) -> loading_view(model.study_uid)
+      }
+    },
+    fn(msg) { error_view(msg) },
+  )
+}
+
+fn render_detail(shared: Shared, study: Study) -> Element(Msg) {
   let study_records =
-    dict.values(model.records)
+    dict.values(shared.cache.records)
     |> list.filter(fn(r) { r.study_uid == Some(study.study_uid) })
     |> list.sort(fn(a, b) {
       int.compare(option.unwrap(a.id, 0), option.unwrap(b.id, 0))
@@ -35,17 +152,14 @@ fn render_detail(model: Model, study: Study) -> Element(Msg) {
         html.button(
           [
             attribute.class("btn btn-secondary"),
-            event.on_click(store.Navigate(router.Studies)),
+            event.on_click(NavigateBack),
           ],
           [html.text("Back to Studies")],
         ),
         html.button(
           [
             attribute.class("btn btn-danger"),
-            event.on_click(store.OpenModal(store.ConfirmDelete(
-              "study",
-              study.study_uid,
-            ))),
+            event.on_click(RequestDelete),
           ],
           [html.text("Delete Study")],
         ),
@@ -227,5 +341,15 @@ fn loading_view(study_uid: String) -> Element(Msg) {
   html.div([attribute.class("loading-container")], [
     html.div([attribute.class("spinner")], []),
     html.p([], [html.text("Loading study " <> study_uid <> "...")]),
+  ])
+}
+
+fn error_view(message: String) -> Element(Msg) {
+  html.div([attribute.class("error-container")], [
+    html.p([attribute.class("error-message")], [html.text(message)]),
+    html.button(
+      [attribute.class("btn btn-primary"), event.on_click(RetryLoad)],
+      [html.text("Retry")],
+    ),
   ])
 }

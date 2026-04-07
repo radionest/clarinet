@@ -1,23 +1,107 @@
-// Records list page
+// Records list page — self-contained MVU module
 import api/models.{type Record}
-import api/types
-import utils/permissions
-import utils/status
+import api/records
+import api/types.{type ApiError, AuthError}
 import components/forms/base
-import gleam/dict
+import gleam/dict.{type Dict}
 import gleam/int
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/string
+import gleam/javascript/promise
 import lustre/attribute
+import lustre/effect.{type Effect}
 import lustre/element.{type Element}
 import lustre/element/html
 import lustre/event
 import router
-import store.{type Model, type Msg}
+import shared.{type OutMsg, type Shared}
+import utils/permissions
+import utils/status
 
-pub fn view(model: Model) -> Element(Msg) {
-  let is_admin = case model.user {
+// --- Model ---
+
+pub type Model {
+  Model(active_filters: Dict(String, String))
+}
+
+// --- Msg ---
+
+pub type Msg {
+  AddFilter(key: String, value: String)
+  RemoveFilter(key: String)
+  ClearFilters
+  RequestFail(record_id: String)
+  Restart(record_id: String)
+  RestartResult(Result(Record, ApiError))
+}
+
+// --- Init ---
+
+pub fn init(_shared: Shared) -> #(Model, Effect(Msg), List(OutMsg)) {
+  #(Model(active_filters: dict.new()), effect.none(), [shared.ReloadRecords])
+}
+
+// --- Update ---
+
+pub fn update(
+  model: Model,
+  msg: Msg,
+  _shared: Shared,
+) -> #(Model, Effect(Msg), List(OutMsg)) {
+  case msg {
+    AddFilter(key, value) -> {
+      let filters = dict.insert(model.active_filters, key, value)
+      #(Model(active_filters: filters), effect.none(), [])
+    }
+
+    RemoveFilter(key) -> {
+      let filters = dict.delete(model.active_filters, key)
+      #(Model(active_filters: filters), effect.none(), [])
+    }
+
+    ClearFilters ->
+      #(Model(active_filters: dict.new()), effect.none(), [])
+
+    RequestFail(record_id) ->
+      #(model, effect.none(), [shared.OpenFailPrompt(record_id)])
+
+    Restart(record_id) -> {
+      let eff = {
+        use dispatch <- effect.from
+        records.restart_record(record_id)
+        |> promise.tap(fn(result) { dispatch(RestartResult(result)) })
+        Nil
+      }
+      #(model, eff, [shared.SetLoading(True)])
+    }
+
+    RestartResult(Ok(record)) ->
+      #(model, effect.none(), [
+        shared.SetLoading(False),
+        shared.CacheRecord(record),
+        shared.ShowSuccess("Record restarted successfully"),
+        shared.ReloadRecords,
+      ])
+
+    RestartResult(Error(err)) ->
+      #(model, effect.none(), handle_error(err, "Failed to restart record"))
+  }
+}
+
+// --- Helpers ---
+
+fn handle_error(err: ApiError, fallback_msg: String) -> List(OutMsg) {
+  case err {
+    AuthError(_) -> [shared.Logout]
+    _ -> [shared.SetLoading(False), shared.ShowError(fallback_msg)]
+  }
+}
+
+// --- View ---
+
+pub fn view(model: Model, shared: Shared) -> Element(Msg) {
+  let is_admin = case shared.user {
     Some(u) -> u.is_superuser
     None -> False
   }
@@ -29,18 +113,12 @@ pub fn view(model: Model) -> Element(Msg) {
 
   html.div([attribute.class("container")], [
     html.h1([], [html.text(title)]),
-    case model.loading {
-      True ->
-        html.div([attribute.class("loading")], [
-          html.p([], [html.text("Loading records...")]),
-        ])
-      False -> {
-        let all_records = dict.values(model.records)
-        html.div([], [
-          filter_bar(model, all_records),
-          records_table(model, all_records),
-        ])
-      }
+    {
+      let all_records = dict.values(shared.cache.records)
+      html.div([], [
+        filter_bar(model, all_records),
+        records_table(model, shared, all_records),
+      ])
     },
   ])
 }
@@ -96,8 +174,8 @@ fn filter_bar(model: Model, all_records: List(Record)) -> Element(Msg) {
       options: status_options,
       on_change: fn(val) {
         case val {
-          "" -> store.RemoveFilter("status")
-          _ -> store.AddFilter("status", val)
+          "" -> RemoveFilter("status")
+          _ -> AddFilter("status", val)
         }
       },
     ),
@@ -107,8 +185,8 @@ fn filter_bar(model: Model, all_records: List(Record)) -> Element(Msg) {
       options: type_options,
       on_change: fn(val) {
         case val {
-          "" -> store.RemoveFilter("record_type")
-          _ -> store.AddFilter("record_type", val)
+          "" -> RemoveFilter("record_type")
+          _ -> AddFilter("record_type", val)
         }
       },
     ),
@@ -118,8 +196,8 @@ fn filter_bar(model: Model, all_records: List(Record)) -> Element(Msg) {
       options: patient_options,
       on_change: fn(val) {
         case val {
-          "" -> store.RemoveFilter("patient")
-          _ -> store.AddFilter("patient", val)
+          "" -> RemoveFilter("patient")
+          _ -> AddFilter("patient", val)
         }
       },
     ),
@@ -129,7 +207,7 @@ fn filter_bar(model: Model, all_records: List(Record)) -> Element(Msg) {
           [
             attribute.type_("button"),
             attribute.class("btn btn-sm btn-outline"),
-            event.on_click(store.ClearFilters),
+            event.on_click(ClearFilters),
           ],
           [html.text("Clear Filters")],
         )
@@ -140,7 +218,7 @@ fn filter_bar(model: Model, all_records: List(Record)) -> Element(Msg) {
 
 fn apply_filters(
   records: List(Record),
-  filters: dict.Dict(String, String),
+  filters: Dict(String, String),
 ) -> List(Record) {
   list.filter(records, fn(record) {
     let status_ok = case dict.get(filters, "status") {
@@ -162,7 +240,11 @@ fn apply_filters(
   })
 }
 
-fn records_table(model: Model, all_records: List(Record)) -> Element(Msg) {
+fn records_table(
+  model: Model,
+  shared: Shared,
+  all_records: List(Record),
+) -> Element(Msg) {
   let records =
     apply_filters(all_records, model.active_filters)
     |> list.sort(fn(a, b) {
@@ -188,14 +270,14 @@ fn records_table(model: Model, all_records: List(Record)) -> Element(Msg) {
           ]),
           html.tbody(
             [],
-            list.map(records, fn(record) { record_row(model, record) }),
+            list.map(records, fn(record) { record_row(shared, record) }),
           ),
         ]),
       ])
   }
 }
 
-fn record_row(model: Model, record: Record) -> Element(Msg) {
+fn record_row(shared: Shared, record: Record) -> Element(Msg) {
   let record_id = option.unwrap(record.id, 0)
   let record_id_str = int.to_string(record_id)
 
@@ -213,10 +295,10 @@ fn record_row(model: Model, record: Record) -> Element(Msg) {
     types.Paused -> #("badge-paused", "Paused")
   }
 
-  let can_fill = permissions.can_fill_record(record, model.user)
-  let can_edit = permissions.can_edit_record(record, model.user)
-  let can_fail = permissions.can_fail_record(record, model.user)
-  let can_restart = permissions.can_restart_record(record, model.user)
+  let can_fill = permissions.can_fill_record(record, shared.user)
+  let can_edit = permissions.can_edit_record(record, shared.user)
+  let can_fail = permissions.can_fail_record(record, shared.user)
+  let can_restart = permissions.can_restart_record(record, shared.user)
 
   html.tr([], [
     html.td([], [html.text(record_id_str)]),
@@ -270,7 +352,7 @@ fn record_row(model: Model, record: Record) -> Element(Msg) {
           html.button(
             [
               attribute.class("btn btn-sm btn-danger"),
-              event.on_click(store.OpenModal(store.FailRecordPrompt(record_id_str))),
+              event.on_click(RequestFail(record_id_str)),
             ],
             [html.text("Fail")],
           )
@@ -281,7 +363,7 @@ fn record_row(model: Model, record: Record) -> Element(Msg) {
           html.button(
             [
               attribute.class("btn btn-sm btn-warning"),
-              event.on_click(store.RestartRecord(record_id_str)),
+              event.on_click(Restart(record_id_str)),
             ],
             [html.text("Restart")],
           )

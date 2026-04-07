@@ -1,25 +1,13 @@
 // Main Lustre application
-import api/admin
 import api/auth
-import api/dicom
-import api/dicomweb
 import api/info
 import api/models
-import api/patients
 import api/records
-import api/series
-import api/slicer
-import api/studies
 import api/types
-import api/users
-import components/forms/patient_form
-import components/forms/record_form
+import cache
 import components/layout
 import formosh/component as formosh_component
 import gleam/bool
-import gleam/dict
-import gleam/dynamic/decode
-import gleam/int
 import gleam/javascript/promise
 import gleam/list
 import gleam/option.{None, Some}
@@ -33,6 +21,7 @@ import lustre/element.{type Element}
 import lustre/element/html
 import lustre/event
 import modem
+import preload
 import pages/admin as admin_page
 import pages/home
 import pages/login
@@ -52,6 +41,7 @@ import pages/studies/list as studies_list
 import plinth/browser/window
 import plinth/javascript/global
 import router.{type Route}
+import shared.{type OutMsg}
 import store.{type Model, type Msg}
 
 // Initialize the application
@@ -159,101 +149,65 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         <> ", user: "
         <> string.inspect(model.user),
       )
-      // Stop any existing timers when changing routes
-      let stop_timer_effect = case model.slicer_ping_timer {
-        Some(timer_id) -> {
-          effect.from(fn(_dispatch) { global.clear_interval(timer_id) })
-        }
-        None -> effect.none()
-      }
-      let stop_preload_effect = stop_preload_timer(model)
-      let stop_timer_effect =
-        effect.batch([stop_timer_effect, stop_preload_effect])
+      // Cleanup current page (e.g. slicer ping timer) + stop preload
+      let page_cleanup = cleanup_current_page(model)
+      let preload_cleanup =
+        effect.map(preload.stop_timer(model.preload), store.PreloadMsg)
+      let cleanup_effect = effect.batch([page_cleanup, preload_cleanup])
+      let was_preloading = preload.is_active(model.preload)
       let new_model =
         store.Model(
           ..store.set_route(model, route),
-          slicer_ping_timer: None,
-          slicer_available: None,
-          preload_timer: None,
-          modal_open: case model.preload_timer {
-            Some(_) -> False
-            None -> model.modal_open
+          preload: preload.init(),
+          modal_open: case was_preloading {
+            True -> False
+            False -> model.modal_open
           },
-          modal_content: case model.preload_timer {
-            Some(_) -> store.NoModal
-            None -> model.modal_content
+          modal_content: case was_preloading {
+            True -> store.NoModal
+            False -> model.modal_content
           },
         )
 
-      // Don't redirect while session check is in progress
-      case model.checking_session {
-        True -> #(new_model, stop_timer_effect)
-        False -> {
-          // Check authentication requirement
-          let is_auth_page = route == router.Login || route == router.Register
-          case router.requires_auth(route), model.user, is_auth_page {
-            True, None, _ -> {
-              // Redirect to login if auth required
-              #(
-                store.Model(
-                  ..store.set_route(model, router.Login),
-                  slicer_ping_timer: None,
-                  slicer_available: None,
-                ),
-                effect.batch([
-                  stop_timer_effect,
-                  modem.push(router.route_to_path(router.Login), option.None, option.None),
-                ]),
-              )
-            }
-            False, Some(_), True -> {
-              // Redirect from login/register if already authenticated
-              #(
-                store.Model(
-                  ..store.set_route(model, router.Home),
-                  slicer_ping_timer: None,
-                  slicer_available: None,
-                ),
-                effect.batch([
-                  stop_timer_effect,
-                  modem.push(router.route_to_path(router.Home), option.None, option.None),
-                ]),
-              )
-            }
-            _, _, _ ->
-              case router.requires_admin_role(route), model.user {
-                True, Some(models.User(is_superuser: False, ..)) -> #(
-                  store.Model(
-                    ..store.set_route(model, router.Home),
-                    slicer_ping_timer: None,
-                    slicer_available: None,
-                  ),
-                  effect.batch([
-                    stop_timer_effect,
-                    modem.push(router.route_to_path(router.Home), option.None, option.None),
-                  ]),
-                )
-                _, _ -> {
-                  // Clear form state when entering form pages
-                  let new_model = case route {
-                    router.RecordNew ->
-                      new_model
-                      |> store.clear_record_form()
-                      |> store.clear_form_errors()
-                    _ -> new_model
-                  }
-                  #(
-                    new_model,
-                    effect.batch([
-                      stop_timer_effect,
-                      load_route_data(new_model, route),
-                    ]),
-                  )
-                }
-              }
-          }
-        }
+      let redirect_to = fn(target: Route) {
+        #(
+          store.set_route(model, target),
+          effect.batch([
+            cleanup_effect,
+            modem.push(router.route_to_path(target), option.None, option.None),
+          ]),
+        )
       }
+
+      // Don't redirect while session check is in progress
+      use <- bool.guard(model.checking_session, #(new_model, cleanup_effect))
+
+      // Redirect to login if auth required but no user
+      use <- bool.guard(
+        router.requires_auth(route) && model.user == None,
+        redirect_to(router.Login),
+      )
+
+      // Redirect from login/register if already authenticated
+      let is_auth_page = route == router.Login || route == router.Register
+      use <- bool.guard(
+        is_auth_page && model.user != None,
+        redirect_to(router.Home),
+      )
+
+      // Redirect non-admin user away from admin route
+      let is_non_admin = case model.user {
+        Some(models.User(is_superuser: False, ..)) -> True
+        _ -> False
+      }
+      use <- bool.guard(
+        router.requires_admin_role(route) && is_non_admin,
+        redirect_to(router.Home),
+      )
+
+      // Initialize page model for modular pages
+      let #(new_model, page_init_eff) = init_page_for_route(new_model, route)
+      #(new_model, effect.batch([cleanup_effect, page_init_eff]))
     }
 
     store.Navigate(route) -> {
@@ -286,7 +240,11 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
                   store.set_route(new_model, router.Home),
                   modem.push(router.route_to_path(router.Home), option.None, option.None),
                 )
-                _, _ -> #(new_model, load_route_data(new_model, route))
+                _, _ -> {
+                  let #(new_model, page_init_eff) =
+                    init_page_for_route(new_model, route)
+                  #(new_model, page_init_eff)
+                }
               }
           }
         }
@@ -298,138 +256,34 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
               store.set_route(new_model, router.Login),
               modem.push(router.route_to_path(router.Login), option.None, option.None),
             )
-            False -> #(new_model, effect.none())
+            False -> {
+              let #(new_model, page_init_eff) =
+                init_page_for_route(new_model, model.route)
+              #(new_model, page_init_eff)
+            }
           }
         }
       }
     }
 
-    // Auth form updates
-    store.LoginUpdateEmail(value) -> {
-      #(store.Model(..model, login_email: value), effect.none())
-    }
-
-    store.LoginUpdatePassword(value) -> {
-      #(store.Model(..model, login_password: value), effect.none())
-    }
-
-    store.RegisterUpdateEmail(value) -> {
-      #(store.Model(..model, register_email: value), effect.none())
-    }
-
-    store.RegisterUpdatePassword(value) -> {
-      #(store.Model(..model, register_password: value), effect.none())
-    }
-
-    store.RegisterUpdatePasswordConfirm(value) -> {
-      #(store.Model(..model, register_password_confirm: value), effect.none())
-    }
-
-    // Authentication
-    store.LoginSubmit(email, password) -> {
-      // Guard against double-submit: a second LoginSubmit may be dispatched
-      // in the same synchronous tick before the DOM is patched with
-      // disabled=True on the button, causing duplicate POST /auth/login
-      // requests and session eviction via _enforce_session_limit.
-      use <- bool.lazy_guard(model.loading, fn() { #(model, effect.none()) })
-      let login_effect = {
-        use dispatch <- effect.from
-        auth.login(email, password)
-        |> promise.tap(fn(result) {
-          case result {
-            Ok(response) -> dispatch(store.LoginSuccess(response.user))
-            Error(error) -> dispatch(store.LoginError(error))
-          }
-        })
-        Nil
-      }
-      #(store.set_loading(model, True), login_effect)
-    }
-
-    store.LoginSuccess(user) -> {
-      // Cookie authentication is handled automatically
-      // Just update the model with the user
-      let new_model =
-        model
-        |> store.set_user(user)
-        |> store.set_loading(False)
-        |> store.clear_messages()
-        |> store.clear_auth_forms()
-        |> store.set_route(router.Home)
-
-      #(new_model, modem.push(router.route_to_path(router.Home), option.None, option.None))
-    }
-
-    store.LoginError(error) -> {
-      let error_msg = case error {
-        types.AuthError(msg) -> msg
-        types.NetworkError(msg) -> "Network error: " <> msg
-        _ -> "Login failed. Please try again."
-      }
-
-      let new_model =
-        model
-        |> store.set_loading(False)
-        |> store.set_error(Some(error_msg))
-
-      #(new_model, effect.none())
-    }
-
-    store.RegisterSubmit(email, password) -> {
-      // Guard against double-submit — same rationale as LoginSubmit.
-      use <- bool.lazy_guard(model.loading, fn() { #(model, effect.none()) })
-      let register_request =
-        models.RegisterRequest(email: email, password: password)
-      let register_effect = {
-        use dispatch <- effect.from
-        auth.register(register_request)
-        |> promise.tap(fn(result) {
-          case result {
-            Ok(user) -> dispatch(store.RegisterSuccess(user))
-            Error(error) -> dispatch(store.RegisterError(error))
-          }
-        })
-        Nil
-      }
-      #(
-        store.set_loading(model, True) |> store.clear_messages(),
-        register_effect,
+    // Auth page delegation
+    store.LoginMsg(page_msg) ->
+      delegate_page_update(
+        model,
+        fn(p) { case p { store.LoginPage(m) -> Ok(m) _ -> Error(Nil) } },
+        fn(m, s) { login.update(m, page_msg, s) },
+        store.LoginPage,
+        store.LoginMsg,
       )
-    }
 
-    store.RegisterSuccess(user) -> {
-      // Registration successful - user is logged in via cookie
-      let new_model =
-        model
-        |> store.set_user(user)
-        |> store.set_loading(False)
-        |> store.clear_messages()
-        |> store.clear_auth_forms()
-        |> store.set_success(
-          "Registration successful! Welcome to " <> model.project_name <> ".",
-        )
-        |> store.set_route(router.Home)
-
-      #(new_model, modem.push(router.route_to_path(router.Home), option.None, option.None))
-    }
-
-    store.RegisterError(error) -> {
-      let error_msg = case error {
-        types.ValidationError(_) ->
-          "Invalid registration data. Please check your inputs."
-        types.AuthError(msg) -> msg
-        types.ServerError(409, _) -> "Username or email already exists."
-        types.NetworkError(msg) -> "Network error: " <> msg
-        _ -> "Registration failed. Please try again."
-      }
-
-      let new_model =
-        model
-        |> store.set_loading(False)
-        |> store.set_error(Some(error_msg))
-
-      #(new_model, effect.none())
-    }
+    store.RegisterMsg(page_msg) ->
+      delegate_page_update(
+        model,
+        fn(p) { case p { store.RegisterPage(m) -> Ok(m) _ -> Error(Nil) } },
+        fn(m, s) { register.update(m, page_msg, s) },
+        store.RegisterPage,
+        store.RegisterMsg,
+      )
 
     store.Logout -> {
       let logout_effect = {
@@ -457,240 +311,15 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       #(store.Model(..model, success_message: None), effect.none())
     }
 
-    // Data loading - Studies
-    store.LoadStudies ->
-      load_with_effect(model, studies.get_studies, store.StudiesLoaded)
+    // Cache delegation (all data loading, caches, auto-assign)
+    store.CacheMsg(cmsg) -> delegate_cache(model, cmsg)
 
-    store.StudiesLoaded(Ok(studies_list)) -> {
-      let studies_dict =
-        list.fold(studies_list, model.studies, fn(acc, study) {
-          dict.insert(acc, study.study_uid, study)
-        })
-      let new_model =
-        store.Model(..model, studies: studies_dict, loading: False)
-      #(new_model, effect.none())
-    }
-
-    store.StudiesLoaded(Error(err)) ->
-      handle_api_error(model, err, "Failed to load studies")
-
-    // Data loading - Records (role-aware)
-    store.LoadRecords -> {
-      let fetch_fn = case model.user {
-        Some(models.User(is_superuser: True, ..)) -> records.get_records
-        _ -> records.get_my_records
-      }
-      load_with_effect(model, fetch_fn, store.RecordsLoaded)
-    }
-
-    store.RecordsLoaded(Ok(records_list)) -> {
-      let records_dict =
-        list.fold(records_list, model.records, fn(acc, record) {
-          case record.id {
-            Some(id) -> dict.insert(acc, int.to_string(id), record)
-            None -> acc
-          }
-        })
-      let new_model =
-        store.Model(..model, records: records_dict, loading: False)
-      #(new_model, effect.none())
-    }
-
-    store.RecordsLoaded(Error(err)) ->
-      handle_api_error(model, err, "Failed to load records")
-
-    // Data loading - Users
-    store.LoadUsers ->
-      load_with_effect(model, users.get_users, store.UsersLoaded)
-
-    store.UsersLoaded(Ok(users_list)) -> {
-      let users_dict =
-        list.fold(users_list, model.users, fn(acc, user) {
-          dict.insert(acc, user.id, user)
-        })
-      let new_model = store.Model(..model, users: users_dict, loading: False)
-      #(new_model, effect.none())
-    }
-
-    store.UsersLoaded(Error(err)) ->
-      handle_api_error(model, err, "Failed to load users")
-
-    // Data loading - Admin Stats
-    store.LoadAdminStats ->
-      load_with_effect(model, admin.get_admin_stats, store.AdminStatsLoaded)
-
-    store.AdminStatsLoaded(Ok(stats)) -> {
-      let new_model =
-        store.Model(..model, admin_stats: Some(stats), loading: False)
-      #(new_model, effect.none())
-    }
-
-    store.AdminStatsLoaded(Error(err)) ->
-      handle_api_error(model, err, "Failed to load admin statistics")
-
-    // Data loading - Record Type Stats
-    store.LoadRecordTypeStats ->
-      load_with_effect(
-        model,
-        admin.get_record_type_stats,
-        store.RecordTypeStatsLoaded,
-      )
-
-    store.RecordTypeStatsLoaded(Ok(stats)) -> {
-      let new_model =
-        store.Model(..model, record_type_stats: Some(stats), loading: False)
-      #(new_model, effect.none())
-    }
-
-    store.RecordTypeStatsLoaded(Error(err)) ->
-      handle_api_error(model, err, "Failed to load record type statistics")
-
-    // Admin record assignment
-    store.AdminToggleAssignDropdown(record_id) -> {
-      #(store.Model(..model, admin_editing_record_id: record_id), effect.none())
-    }
-
-    store.AdminAssignUser(record_id, user_id) -> {
-      let assign_effect = {
-        use dispatch <- effect.from
-        admin.assign_record_user(record_id, user_id)
-        |> promise.tap(fn(result) {
-          dispatch(store.AdminAssignUserResult(result))
-        })
-        Nil
-      }
-      #(
-        store.Model(..model, admin_editing_record_id: None, loading: True),
-        assign_effect,
-      )
-    }
-
-    store.AdminAssignUserResult(Ok(record)) -> {
-      let new_model =
-        model
-        |> store.cache_record(record)
-        |> store.set_loading(False)
-        |> store.set_success("User assigned successfully")
-      #(new_model, effect.none())
-    }
-
-    store.AdminAssignUserResult(Error(err)) ->
-      handle_api_error(model, err, "Failed to assign user to record")
-
-    // Admin status change
-    store.AdminToggleStatusDropdown(record_id) -> {
-      #(
-        store.Model(..model, admin_editing_status_record_id: record_id),
-        effect.none(),
-      )
-    }
-
-    store.AdminChangeStatus(record_id, status) -> {
-      let change_effect = {
-        use dispatch <- effect.from
-        admin.update_record_status(record_id, status)
-        |> promise.tap(fn(result) {
-          dispatch(store.AdminChangeStatusResult(result))
-        })
-        Nil
-      }
-      #(
-        store.Model(
-          ..model,
-          admin_editing_status_record_id: None,
-          loading: True,
-        ),
-        change_effect,
-      )
-    }
-
-    store.AdminChangeStatusResult(Ok(record)) -> {
-      let new_model =
-        model
-        |> store.cache_record(record)
-        |> store.set_loading(False)
-        |> store.set_success("Status updated successfully")
-      #(new_model, effect.none())
-    }
-
-    store.AdminChangeStatusResult(Error(err)) ->
-      handle_api_error(model, err, "Failed to update record status")
-
-    // Data loading - Record Detail
-    store.LoadRecordDetail(id) ->
-      load_with_effect(
-        model,
-        fn() { records.get_record(id) },
-        store.RecordDetailLoaded,
-      )
-
-    store.RecordDetailLoaded(Ok(record)) -> {
-      let new_model =
-        model
-        |> store.cache_record(record)
-        |> store.set_loading(False)
-      // Auto-assign user to unassigned pending/inwork records
-      let assign_effect = case record.user_id, record.status, model.user {
-        None, types.Pending, Some(models.User(id: uid, ..))
-        | None, types.InWork, Some(models.User(id: uid, ..))
-        -> {
-          case record.id {
-            Some(rid) -> {
-              use dispatch <- effect.from
-              records.assign_record_user(rid, uid)
-              |> promise.tap(fn(result) {
-                dispatch(store.AutoAssignResult(result))
-              })
-              Nil
-            }
-            None -> effect.none()
-          }
-        }
-        _, _, _ -> effect.none()
-      }
-      #(new_model, assign_effect)
-    }
-
-    store.AutoAssignResult(Ok(record)) -> {
-      #(store.cache_record(model, record), effect.none())
-    }
-
-    store.AutoAssignResult(Error(_)) -> {
-      // Silently ignore — admin can still work without assignment
-      #(model, effect.none())
-    }
-
-    // Restart auto task
-    store.RestartRecord(record_id) -> {
-      let eff = {
-        use dispatch <- effect.from
-        records.restart_record(record_id)
-        |> promise.tap(fn(result) {
-          dispatch(store.RestartRecordResult(result))
-        })
-        Nil
-      }
-      #(store.set_loading(model, True), eff)
-    }
-
-    store.RestartRecordResult(Ok(record)) -> {
-      #(
-        model
-          |> store.cache_record(record)
-          |> store.set_loading(False)
-          |> store.set_success("Record restarted successfully"),
-        dispatch_msg(store.LoadRecords),
-      )
-    }
-
-    store.RestartRecordResult(Error(err)) ->
-      handle_api_error(model, err, "Failed to restart record")
-
-    // Manual fail
+    // Manual fail — update reason in modal
     store.UpdateFailReason(reason) -> {
       #(store.Model(..model, fail_reason: reason), effect.none())
     }
 
+    // Manual fail — confirm and submit
     store.ConfirmFailRecord(record_id) -> {
       let reason = string.trim(model.fail_reason)
       let eff = {
@@ -714,705 +343,22 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     }
 
     store.FailRecordResult(Ok(record)) -> {
+      let is_admin = case model.user {
+        Some(models.User(is_superuser: True, ..)) -> True
+        _ -> False
+      }
+      let new_model =
+        store.Model(..model, cache: cache.put_record(model.cache, record))
+        |> store.set_loading(False)
+        |> store.set_success("Record marked as failed")
       #(
-        model
-          |> store.cache_record(record)
-          |> store.set_loading(False)
-          |> store.set_success("Record marked as failed"),
-        dispatch_msg(store.LoadRecords),
+        new_model,
+        dispatch_msg(store.CacheMsg(cache.LoadRecords(is_admin))),
       )
     }
 
     store.FailRecordResult(Error(err)) ->
       handle_api_error(model, err, "Failed to mark record as failed")
-
-    store.RecordDetailLoaded(Error(err)) ->
-      handle_api_error(model, err, "Failed to load record")
-
-    // Formosh form events
-    store.FormSubmitSuccess(record_id) -> {
-      logger.info("form", "submit success: record_id=" <> record_id)
-      // Clear Slicer scene if this record type uses Slicer
-      let slicer_effect = case dict.get(model.records, record_id) {
-        Ok(models.Record(
-          record_type: Some(models.RecordType(slicer_script: Some(_), ..)),
-          ..,
-        )) -> {
-          logger.info("slicer", "clearing scene after form submit")
-          dispatch_msg(store.SlicerClearScene)
-        }
-        _ -> effect.none()
-      }
-      #(
-        store.set_success(model, "Record data submitted successfully"),
-        effect.batch([
-          dispatch_msg(store.LoadRecordDetail(record_id)),
-          slicer_effect,
-        ]),
-      )
-    }
-
-    store.FormSubmitError(error) -> {
-      #(store.set_error(model, Some(error)), effect.none())
-    }
-
-    // Slicer record completion (no form)
-    store.CompleteRecord(record_id) -> {
-      let eff = {
-        use dispatch <- effect.from
-        records.submit_record(record_id)
-        |> promise.tap(fn(result) {
-          dispatch(store.CompleteRecordResult(record_id, result))
-        })
-        Nil
-      }
-      #(store.set_loading(model, True), eff)
-    }
-
-    store.CompleteRecordResult(record_id, Ok(record)) -> {
-      let slicer_effect = case dict.get(model.records, record_id) {
-        Ok(models.Record(
-          record_type: Some(models.RecordType(slicer_script: Some(_), ..)),
-          ..,
-        )) -> dispatch_msg(store.SlicerClearScene)
-        _ -> effect.none()
-      }
-      #(
-        model
-          |> store.cache_record(record)
-          |> store.set_loading(False)
-          |> store.set_success("Record completed successfully"),
-        effect.batch([
-          dispatch_msg(store.LoadRecordDetail(record_id)),
-          slicer_effect,
-        ]),
-      )
-    }
-
-    store.CompleteRecordResult(_record_id, Error(err)) ->
-      handle_api_error(model, err, "Failed to complete record")
-
-    // Re-submit finished record (no form, PATCH)
-    store.ResubmitRecord(record_id) -> {
-      let eff = {
-        use dispatch <- effect.from
-        records.resubmit_record(record_id)
-        |> promise.tap(fn(result) {
-          dispatch(store.ResubmitRecordResult(record_id, result))
-        })
-        Nil
-      }
-      #(store.set_loading(model, True), eff)
-    }
-
-    store.ResubmitRecordResult(record_id, Ok(record)) -> {
-      let slicer_effect = case dict.get(model.records, record_id) {
-        Ok(models.Record(
-          record_type: Some(models.RecordType(slicer_script: Some(_), ..)),
-          ..,
-        )) -> dispatch_msg(store.SlicerClearScene)
-        _ -> effect.none()
-      }
-      #(
-        model
-          |> store.cache_record(record)
-          |> store.set_loading(False)
-          |> store.set_success("Record re-submitted successfully"),
-        effect.batch([
-          dispatch_msg(store.LoadRecordDetail(record_id)),
-          slicer_effect,
-        ]),
-      )
-    }
-
-    store.ResubmitRecordResult(_record_id, Error(err)) ->
-      handle_api_error(model, err, "Failed to re-submit record")
-
-    // RecordType edit
-    store.LoadRecordTypeForEdit(name) ->
-      load_with_effect(
-        model,
-        fn() { records.get_record_type(name) },
-        store.RecordTypeForEditLoaded,
-      )
-
-    store.RecordTypeForEditLoaded(Ok(rt)) -> {
-      let new_model =
-        model
-        |> store.cache_record_type(rt)
-        |> store.set_loading(False)
-      #(new_model, effect.none())
-    }
-
-    store.RecordTypeForEditLoaded(Error(_err)) -> {
-      let new_model =
-        model
-        |> store.set_loading(False)
-        |> store.set_error(Some("Failed to load record type"))
-      #(new_model, effect.none())
-    }
-
-    store.RecordTypeEditSuccess(name) -> {
-      let new_model =
-        model
-        |> store.set_success("Record type updated successfully")
-        |> store.set_route(router.AdminRecordTypeDetail(name))
-      #(
-        new_model,
-        effect.batch([
-          modem.push(
-            router.route_to_path(router.AdminRecordTypeDetail(name)),
-            option.None,
-            option.None,
-          ),
-          dispatch_msg(store.LoadRecordTypeStats),
-        ]),
-      )
-    }
-
-    store.RecordTypeEditError(error) -> {
-      #(store.set_error(model, Some(error)), effect.none())
-    }
-
-    // Slicer operations
-    store.OpenInSlicer(record_id) -> {
-      logger.info(
-        "slicer",
-        "opening: record_id="
-        <> record_id
-        <> ", user="
-        <> case model.user {
-          Some(user) -> user.email
-          None -> "none"
-        },
-      )
-      let open_effect = {
-        use dispatch <- effect.from
-        slicer.open_record(record_id)
-        |> promise.tap(fn(result) { dispatch(store.SlicerOpenResult(result)) })
-        Nil
-      }
-      #(store.Model(..model, slicer_loading: True), open_effect)
-    }
-
-    store.SlicerOpenResult(Ok(_)) -> {
-      logger.info("slicer", "open completed")
-      #(
-        store.Model(..model, slicer_loading: False)
-          |> store.set_success("Workspace opened in 3D Slicer"),
-        effect.none(),
-      )
-    }
-
-    store.SlicerOpenResult(Error(err)) -> {
-      let error_msg = case err {
-        types.ServerError(502, _) ->
-          "3D Slicer is not reachable. Is it running?"
-        types.ServerError(_, msg) -> "Slicer error: " <> msg
-        types.NetworkError(msg) -> "Network error: " <> msg
-        _ -> "Failed to open record in Slicer"
-      }
-      #(
-        store.Model(..model, slicer_loading: False)
-          |> store.set_error(Some(error_msg)),
-        effect.none(),
-      )
-    }
-
-    store.SlicerValidate(record_id) -> {
-      logger.info(
-        "slicer",
-        "validating: record_id="
-        <> record_id
-        <> ", user="
-        <> case model.user {
-          Some(user) -> user.email
-          None -> "none"
-        },
-      )
-      let validate_effect = {
-        use dispatch <- effect.from
-        slicer.validate_record(record_id)
-        |> promise.tap(fn(result) {
-          dispatch(store.SlicerValidateResult(result))
-        })
-        Nil
-      }
-      #(store.Model(..model, slicer_loading: True), validate_effect)
-    }
-
-    store.SlicerValidateResult(Ok(_)) -> {
-      logger.info("slicer", "validation completed")
-      #(
-        store.Model(..model, slicer_loading: False)
-          |> store.set_success("Slicer validation completed"),
-        dispatch_msg(store.SlicerClearScene),
-      )
-    }
-
-    store.SlicerValidateResult(Error(err)) -> {
-      let error_msg = case err {
-        types.ServerError(502, _) ->
-          "3D Slicer is not reachable for validation. Is it running?"
-        types.ServerError(_, msg) -> "Validation error: " <> msg
-        types.NetworkError(msg) -> "Network error: " <> msg
-        _ -> "Slicer validation failed"
-      }
-      #(
-        store.Model(..model, slicer_loading: False)
-          |> store.set_error(Some(error_msg)),
-        effect.none(),
-      )
-    }
-
-    store.SlicerClearScene -> {
-      let clear_effect = {
-        use dispatch <- effect.from
-        slicer.clear_scene()
-        |> promise.tap(fn(result) {
-          dispatch(store.SlicerClearSceneResult(result))
-        })
-        Nil
-      }
-      #(model, clear_effect)
-    }
-
-    store.SlicerClearSceneResult(_) -> {
-      // Silently ignore both success and error — data is already saved
-      #(model, effect.none())
-    }
-
-    store.SlicerPing -> {
-      let ping_effect = {
-        use dispatch <- effect.from
-        slicer.ping()
-        |> promise.tap(fn(result) { dispatch(store.SlicerPingResult(result)) })
-        Nil
-      }
-      #(model, ping_effect)
-    }
-
-    store.SlicerPingResult(Ok(data)) -> {
-      // Backend returns {"ok": true/false} — decode the "ok" field
-      let ok_decoder = decode.at(["ok"], decode.bool)
-      let available = case decode.run(data, ok_decoder) {
-        Ok(True) -> True
-        _ -> False
-      }
-      #(store.Model(..model, slicer_available: Some(available)), effect.none())
-    }
-
-    store.SlicerPingResult(Error(_)) -> {
-      #(store.Model(..model, slicer_available: Some(False)), effect.none())
-    }
-
-    store.SlicerPingTimerStarted(timer_id) -> {
-      #(store.Model(..model, slicer_ping_timer: Some(timer_id)), effect.none())
-    }
-
-    store.StopSlicerPingTimer -> {
-      case model.slicer_ping_timer {
-        Some(timer_id) -> {
-          let clear_effect =
-            effect.from(fn(_dispatch) { global.clear_interval(timer_id) })
-          #(
-            store.Model(
-              ..model,
-              slicer_ping_timer: None,
-              slicer_available: None,
-            ),
-            clear_effect,
-          )
-        }
-        None -> #(model, effect.none())
-      }
-    }
-
-    // Filters
-    store.AddFilter(key, value) -> {
-      #(store.apply_filter(model, key, value), effect.none())
-    }
-    store.RemoveFilter(key) -> {
-      #(store.remove_filter(model, key), effect.none())
-    }
-    store.ClearFilters -> {
-      #(store.clear_filters(model), effect.none())
-    }
-
-    // Patient data loading
-    store.LoadPatients ->
-      load_with_effect(model, patients.get_patients, store.PatientsLoaded)
-
-    store.PatientsLoaded(Ok(patients_list)) -> {
-      let patients_dict =
-        list.fold(patients_list, model.patients, fn(acc, patient) {
-          dict.insert(acc, patient.id, patient)
-        })
-      let new_model =
-        store.Model(..model, patients: patients_dict, loading: False)
-      #(new_model, effect.none())
-    }
-
-    store.PatientsLoaded(Error(err)) ->
-      handle_api_error(model, err, "Failed to load patients")
-
-    store.LoadPatientDetail(id) ->
-      load_with_effect(
-        model,
-        fn() { patients.get_patient(id) },
-        store.PatientDetailLoaded,
-      )
-
-    store.PatientDetailLoaded(Ok(patient)) -> {
-      let new_model =
-        model
-        |> store.cache_patient(patient)
-        |> store.set_loading(False)
-      #(new_model, effect.none())
-    }
-
-    store.PatientDetailLoaded(Error(err)) ->
-      handle_api_error(model, err, "Failed to load patient")
-
-    // Patient form handling
-    store.UpdatePatientFormId(value) -> {
-      #(store.Model(..model, patient_form_id: value), effect.none())
-    }
-
-    store.UpdatePatientFormName(value) -> {
-      #(store.Model(..model, patient_form_name: value), effect.none())
-    }
-
-    store.SubmitPatientForm -> {
-      let form_data =
-        patient_form.PatientFormData(
-          id: model.patient_form_id,
-          name: model.patient_form_name,
-        )
-      case patient_form.validate(form_data) {
-        Ok(data) -> {
-          let submit_effect = {
-            use dispatch <- effect.from
-            patients.create_patient(data.id, data.name)
-            |> promise.tap(fn(result) {
-              dispatch(store.PatientFormSubmitted(result))
-            })
-            Nil
-          }
-          #(
-            model |> store.set_loading(True) |> store.clear_form_errors(),
-            submit_effect,
-          )
-        }
-        Error(errors) -> {
-          #(store.Model(..model, form_errors: errors), effect.none())
-        }
-      }
-    }
-
-    store.PatientFormSubmitted(Ok(patient)) -> {
-      let new_model =
-        model
-        |> store.cache_patient(patient)
-        |> store.set_loading(False)
-        |> store.clear_patient_form()
-        |> store.clear_form_errors()
-        |> store.set_success("Patient created successfully")
-        |> store.set_route(router.PatientDetail(patient.id))
-      let nav_effect =
-        modem.push(
-          router.route_to_path(router.PatientDetail(patient.id)),
-          option.None,
-          option.None,
-        )
-      #(new_model, nav_effect)
-    }
-
-    store.PatientFormSubmitted(Error(err)) ->
-      handle_api_error(model, err, "Failed to create patient")
-
-    // Record creation form
-    store.LoadRecordTypes ->
-      load_with_effect(model, records.get_record_types, store.RecordTypesLoaded)
-
-    store.RecordTypesLoaded(Ok(rt_list)) -> {
-      let rt_dict =
-        list.fold(rt_list, model.record_types, fn(acc, rt) {
-          dict.insert(acc, rt.name, rt)
-        })
-      #(store.Model(..model, record_types: rt_dict, loading: False), effect.none())
-    }
-
-    store.RecordTypesLoaded(Error(err)) ->
-      handle_api_error(model, err, "Failed to load record types")
-
-    store.UpdateRecordFormRecordType(value) -> {
-      let new_model =
-        store.Model(
-          ..model,
-          record_form_record_type_name: value,
-          // Reset study/series when type changes
-          record_form_study_uid: "",
-          record_form_series_uid: "",
-          record_form_studies: [],
-          record_form_series: [],
-        )
-      // Re-load studies if a patient is already selected
-      case model.record_form_patient_id {
-        "" -> #(new_model, effect.none())
-        patient_id -> #(new_model, load_record_form_studies(patient_id))
-      }
-    }
-
-    store.UpdateRecordFormPatient(value) -> {
-      let new_model =
-        store.Model(
-          ..model,
-          record_form_patient_id: value,
-          // Reset study/series when patient changes
-          record_form_study_uid: "",
-          record_form_series_uid: "",
-          record_form_studies: [],
-          record_form_series: [],
-        )
-      case value {
-        "" -> #(new_model, effect.none())
-        patient_id -> {
-          #(new_model, load_record_form_studies(patient_id))
-        }
-      }
-    }
-
-    store.RecordFormStudiesLoaded(Ok(studies_list)) -> {
-      #(
-        store.Model(..model, record_form_studies: studies_list),
-        effect.none(),
-      )
-    }
-
-    store.RecordFormStudiesLoaded(Error(_)) -> {
-      #(
-        store.Model(..model, record_form_studies: []),
-        effect.none(),
-      )
-    }
-
-    store.UpdateRecordFormStudy(value) -> {
-      let new_model =
-        store.Model(
-          ..model,
-          record_form_study_uid: value,
-          // Reset series when study changes
-          record_form_series_uid: "",
-          record_form_series: [],
-        )
-      case value {
-        "" -> #(new_model, effect.none())
-        study_uid -> {
-          // Load series for the selected study
-          let eff = {
-            use dispatch <- effect.from
-            studies.get_study(study_uid)
-            |> promise.tap(fn(result) {
-              let series_result = case result {
-                Ok(study) ->
-                  case study.series {
-                    Some(series_list) -> Ok(series_list)
-                    None -> Ok([])
-                  }
-                Error(err) -> Error(err)
-              }
-              dispatch(store.RecordFormSeriesLoaded(series_result))
-            })
-            Nil
-          }
-          #(new_model, eff)
-        }
-      }
-    }
-
-    store.RecordFormSeriesLoaded(Ok(series_list)) -> {
-      #(
-        store.Model(..model, record_form_series: series_list),
-        effect.none(),
-      )
-    }
-
-    store.RecordFormSeriesLoaded(Error(_)) -> {
-      #(
-        store.Model(..model, record_form_series: []),
-        effect.none(),
-      )
-    }
-
-    store.UpdateRecordFormSeries(value) -> {
-      #(store.Model(..model, record_form_series_uid: value), effect.none())
-    }
-
-    store.UpdateRecordFormUser(value) -> {
-      #(store.Model(..model, record_form_user_id: value), effect.none())
-    }
-
-    store.UpdateRecordFormParentRecordId(value) -> {
-      #(store.Model(..model, record_form_parent_record_id: value), effect.none())
-    }
-
-    store.UpdateRecordFormContextInfo(value) -> {
-      #(store.Model(..model, record_form_context_info: value), effect.none())
-    }
-
-    store.SubmitRecordForm -> {
-      case record_form.validate(model) {
-        Ok(_) -> {
-          let record_create = models.RecordCreate(
-            record_type_name: model.record_form_record_type_name,
-            patient_id: model.record_form_patient_id,
-            status: types.Pending,
-            study_uid: case model.record_form_study_uid {
-              "" -> None
-              v -> Some(v)
-            },
-            series_uid: case model.record_form_series_uid {
-              "" -> None
-              v -> Some(v)
-            },
-            user_id: case model.record_form_user_id {
-              "" -> None
-              v -> Some(v)
-            },
-            parent_record_id: case model.record_form_parent_record_id {
-              "" -> None
-              v -> case int.parse(v) {
-                Ok(id) -> Some(id)
-                Error(_) -> None
-              }
-            },
-            context_info: case model.record_form_context_info {
-              "" -> None
-              v -> Some(v)
-            },
-          )
-          let submit_effect = {
-            use dispatch <- effect.from
-            records.create_record(record_create)
-            |> promise.tap(fn(result) {
-              dispatch(store.RecordFormSubmitted(result))
-            })
-            Nil
-          }
-          #(
-            model |> store.set_loading(True) |> store.clear_form_errors(),
-            submit_effect,
-          )
-        }
-        Error(errors) -> {
-          #(store.Model(..model, form_errors: errors), effect.none())
-        }
-      }
-    }
-
-    store.RecordFormSubmitted(Ok(record)) -> {
-      let new_model =
-        model
-        |> store.cache_record(record)
-        |> store.set_loading(False)
-        |> store.clear_record_form()
-        |> store.clear_form_errors()
-        |> store.set_success("Record created successfully")
-      case record.id {
-        Some(id) -> {
-          let rid = int.to_string(id)
-          let new_model = store.set_route(new_model, router.RecordDetail(rid))
-          #(new_model, modem.push(
-            router.route_to_path(router.RecordDetail(rid)),
-            option.None,
-            option.None,
-          ))
-        }
-        None -> {
-          let new_model = store.set_route(new_model, router.Records)
-          #(new_model, modem.push(
-            router.route_to_path(router.Records),
-            option.None,
-            option.None,
-          ))
-        }
-      }
-    }
-
-    store.RecordFormSubmitted(Error(err)) ->
-      handle_api_error(model, err, "Failed to create record")
-
-    // Patient anonymize
-    store.AnonymizePatient(id) ->
-      load_with_effect(
-        model,
-        fn() { patients.anonymize_patient(id) },
-        store.PatientAnonymized,
-      )
-
-    store.PatientAnonymized(Ok(patient)) -> {
-      let new_model =
-        model
-        |> store.cache_patient(patient)
-        |> store.set_loading(False)
-        |> store.set_success("Patient anonymized successfully")
-      #(new_model, effect.none())
-    }
-
-    store.PatientAnonymized(Error(err)) ->
-      handle_api_error(model, err, "Failed to anonymize patient")
-
-    // Delete patient
-    store.DeletePatient(id) -> {
-      let delete_effect = {
-        use dispatch <- effect.from
-        patients.delete_patient(id)
-        |> promise.tap(fn(result) { dispatch(store.PatientDeleted(result)) })
-        Nil
-      }
-      #(store.set_loading(model, True), delete_effect)
-    }
-
-    store.PatientDeleted(Ok(_)) -> {
-      let new_model =
-        model
-        |> store.set_loading(False)
-        |> store.set_success("Patient deleted successfully")
-        |> store.set_route(router.Patients)
-      #(
-        new_model,
-        effect.batch([
-          modem.push(router.route_to_path(router.Patients), option.None, option.None),
-          dispatch_msg(store.LoadPatients),
-        ]),
-      )
-    }
-
-    store.PatientDeleted(Error(err)) ->
-      handle_api_error(model, err, "Failed to delete patient")
-
-    // Delete study
-    store.DeleteStudy(study_uid) -> {
-      let delete_effect = {
-        use dispatch <- effect.from
-        studies.delete_study(study_uid)
-        |> promise.tap(fn(result) { dispatch(store.StudyDeleted(result)) })
-        Nil
-      }
-      #(store.set_loading(model, True), delete_effect)
-    }
-
-    store.StudyDeleted(Ok(_)) -> {
-      let new_model =
-        model
-        |> store.set_loading(False)
-        |> store.set_success("Study deleted successfully")
-      #(new_model, modem.back(1))
-    }
-
-    store.StudyDeleted(Error(err)) ->
-      handle_api_error(model, err, "Failed to delete study")
 
     // Modal actions
     store.OpenModal(content) -> {
@@ -1433,142 +379,16 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       let close_model =
         store.Model(..model, modal_open: False, modal_content: store.NoModal)
       case model.modal_content {
-        store.ConfirmDelete("patient", id) -> #(
+        store.ConfirmDelete("patient", _id) -> #(
           close_model,
-          dispatch_msg(store.DeletePatient(id)),
+          dispatch_msg(store.PatientDetailMsg(patient_detail.Delete)),
         )
-        store.ConfirmDelete("study", uid) -> #(
+        store.ConfirmDelete("study", _uid) -> #(
           close_model,
-          dispatch_msg(store.DeleteStudy(uid)),
+          dispatch_msg(store.StudyDetailMsg(study_detail.Delete)),
         )
         _ -> #(close_model, effect.none())
       }
-    }
-
-    // Data loading - Study Detail
-    store.LoadStudyDetail(id) ->
-      load_with_effect(
-        model,
-        fn() { studies.get_study(id) },
-        store.StudyDetailLoaded,
-      )
-
-    store.StudyDetailLoaded(Ok(study)) -> {
-      let new_model =
-        model
-        |> store.cache_study(study)
-        |> store.set_loading(False)
-      #(new_model, effect.none())
-    }
-
-    store.StudyDetailLoaded(Error(err)) ->
-      handle_api_error(model, err, "Failed to load study")
-
-    // Data loading - Series Detail
-    store.LoadSeriesDetail(id) ->
-      load_with_effect(
-        model,
-        fn() { series.get_series(id) },
-        store.SeriesDetailLoaded,
-      )
-
-    store.SeriesDetailLoaded(Ok(s)) -> {
-      let new_model =
-        model
-        |> store.cache_series(s)
-        |> store.set_loading(False)
-      #(new_model, effect.none())
-    }
-
-    store.SeriesDetailLoaded(Error(err)) ->
-      handle_api_error(model, err, "Failed to load series")
-
-    // PACS operations
-    store.SearchPacsStudies(patient_id) -> {
-      let search_effect = {
-        use dispatch <- effect.from
-        dicom.search_patient_studies(patient_id)
-        |> promise.tap(fn(result) { dispatch(store.PacsStudiesLoaded(result)) })
-        Nil
-      }
-      #(store.set_pacs_loading(model, True), search_effect)
-    }
-
-    store.PacsStudiesLoaded(Ok(pacs_studies)) -> {
-      #(store.set_pacs_studies(model, pacs_studies), effect.none())
-    }
-
-    store.PacsStudiesLoaded(Error(err)) ->
-      handle_api_error(
-        store.set_pacs_loading(model, False),
-        err,
-        "Failed to search PACS",
-      )
-
-    store.ImportPacsStudy(study_uid, patient_id) -> {
-      let import_effect = {
-        use dispatch <- effect.from
-        dicom.import_study(study_uid, patient_id)
-        |> promise.tap(fn(result) { dispatch(store.PacsStudyImported(result)) })
-        Nil
-      }
-      #(store.Model(..model, pacs_importing: Some(study_uid)), import_effect)
-    }
-
-    store.PacsStudyImported(Ok(study)) -> {
-      // Mark study as existing in PACS results
-      let updated_pacs =
-        list.map(model.pacs_studies, fn(ps) {
-          case ps.study.study_instance_uid == study.study_uid {
-            True -> models.PacsStudyWithSeries(..ps, already_exists: True)
-            False -> ps
-          }
-        })
-      let new_model =
-        model
-        |> store.cache_study(study)
-        |> fn(m) {
-          store.Model(..m, pacs_importing: None, pacs_studies: updated_pacs)
-        }
-        |> store.set_success("Study imported from PACS successfully")
-      // Reload patient detail to show new study
-      let reload_effect =
-        dispatch_msg(store.LoadPatientDetail(study.patient_id))
-      #(new_model, reload_effect)
-    }
-
-    store.PacsStudyImported(Error(err)) ->
-      handle_api_error(
-        store.Model(..model, pacs_importing: None),
-        err,
-        "Failed to import study from PACS",
-      )
-
-    store.ClearPacsResults -> {
-      #(store.clear_pacs(model), effect.none())
-    }
-
-    // Schema hydration
-    store.LoadHydratedSchema(record_id) -> {
-      let eff =
-        effect.from(fn(dispatch) {
-          records.get_hydrated_schema(record_id)
-          |> promise.map(fn(result) {
-            dispatch(store.HydratedSchemaLoaded(record_id, result))
-          })
-          Nil
-        })
-      #(model, eff)
-    }
-
-    store.HydratedSchemaLoaded(record_id, Ok(schema_json)) -> {
-      let schemas = dict.insert(model.hydrated_schemas, record_id, schema_json)
-      #(store.Model(..model, hydrated_schemas: schemas), effect.none())
-    }
-
-    store.HydratedSchemaLoaded(_record_id, Error(_)) -> {
-      // Silently fall back to static schema
-      #(model, effect.none())
     }
 
     // Project info
@@ -1588,266 +408,172 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       #(model, effect.none())
     }
 
-    // Role matrix
-    store.LoadRoleMatrix ->
-      load_with_effect(model, admin.get_role_matrix, store.RoleMatrixLoaded)
-
-    store.RoleMatrixLoaded(Ok(matrix)) -> {
-      let new_model =
-        store.Model(..model, role_matrix: Some(matrix), loading: False)
-      #(new_model, effect.none())
-    }
-
-    store.RoleMatrixLoaded(Error(err)) ->
-      handle_api_error(model, err, "Failed to load role matrix")
-
-    store.ToggleUserRole(user_id, role_name, add) -> {
-      let toggle_effect = {
-        use dispatch <- effect.from
-        let api_call = case add {
-          True -> admin.add_user_role(user_id, role_name)
-          False -> admin.remove_user_role(user_id, role_name)
-        }
-        api_call
-        |> promise.tap(fn(result) { dispatch(store.UserRoleToggled(result)) })
-        Nil
-      }
-      #(
-        store.Model(..model, role_toggling: Some(#(user_id, role_name))),
-        toggle_effect,
+    // Admin page delegation
+    store.AdminMsg(page_msg) ->
+      delegate_page_update(
+        model,
+        fn(p) { case p { store.AdminPage(m) -> Ok(m) _ -> Error(Nil) } },
+        fn(m, s) { admin_page.update(m, page_msg, s) },
+        store.AdminPage,
+        store.AdminMsg,
       )
-    }
 
-    store.UserRoleToggled(Ok(_)) -> {
-      let new_model =
-        store.Model(..model, role_toggling: None)
-        |> store.set_success("Role updated successfully")
-      #(new_model, dispatch_msg(store.LoadRoleMatrix))
-    }
+    // Patient page delegation
+    store.PatientsListMsg(page_msg) ->
+      delegate_page_update(
+        model,
+        fn(p) { case p { store.PatientsListPage(m) -> Ok(m) _ -> Error(Nil) } },
+        fn(m, s) { patients_list.update(m, page_msg, s) },
+        store.PatientsListPage,
+        store.PatientsListMsg,
+      )
 
-    store.UserRoleToggled(Error(err)) -> {
-      let new_model = store.Model(..model, role_toggling: None)
-      handle_api_error(new_model, err, "Failed to update role")
-    }
+    store.PatientDetailMsg(page_msg) ->
+      delegate_page_update(
+        model,
+        fn(p) { case p { store.PatientDetailPage(m) -> Ok(m) _ -> Error(Nil) } },
+        fn(m, s) { patient_detail.update(m, page_msg, s) },
+        store.PatientDetailPage,
+        store.PatientDetailMsg,
+      )
+
+    store.PatientNewMsg(page_msg) ->
+      delegate_page_update(
+        model,
+        fn(p) { case p { store.PatientNewPage(m) -> Ok(m) _ -> Error(Nil) } },
+        fn(m, s) { patient_new.update(m, page_msg, s) },
+        store.PatientNewPage,
+        store.PatientNewMsg,
+      )
+
+    // Record page delegation
+    store.RecordsListMsg(page_msg) ->
+      delegate_page_update(
+        model,
+        fn(p) { case p { store.RecordsListPage(m) -> Ok(m) _ -> Error(Nil) } },
+        fn(m, s) { records_list.update(m, page_msg, s) },
+        store.RecordsListPage,
+        store.RecordsListMsg,
+      )
+
+    store.RecordExecuteMsg(page_msg) ->
+      delegate_page_update(
+        model,
+        fn(p) { case p { store.RecordExecutePage(m) -> Ok(m) _ -> Error(Nil) } },
+        fn(m, s) { record_execute.update(m, page_msg, s) },
+        store.RecordExecutePage,
+        store.RecordExecuteMsg,
+      )
+
+    store.RecordNewMsg(page_msg) ->
+      delegate_page_update(
+        model,
+        fn(p) { case p { store.RecordNewPage(m) -> Ok(m) _ -> Error(Nil) } },
+        fn(m, s) { record_new.update(m, page_msg, s) },
+        store.RecordNewPage,
+        store.RecordNewMsg,
+      )
+
+    // Study/Series page delegation
+    store.StudiesListMsg(page_msg) ->
+      delegate_page_update(
+        model,
+        fn(p) { case p { store.StudiesListPage(m) -> Ok(m) _ -> Error(Nil) } },
+        fn(m, s) { studies_list.update(m, page_msg, s) },
+        store.StudiesListPage,
+        store.StudiesListMsg,
+      )
+
+    store.StudyDetailMsg(page_msg) ->
+      delegate_page_update(
+        model,
+        fn(p) { case p { store.StudyDetailPage(m) -> Ok(m) _ -> Error(Nil) } },
+        fn(m, s) { study_detail.update(m, page_msg, s) },
+        store.StudyDetailPage,
+        store.StudyDetailMsg,
+      )
+
+    store.SeriesDetailMsg(page_msg) ->
+      delegate_page_update(
+        model,
+        fn(p) { case p { store.SeriesDetailPage(m) -> Ok(m) _ -> Error(Nil) } },
+        fn(m, s) { series_detail.update(m, page_msg, s) },
+        store.SeriesDetailPage,
+        store.SeriesDetailMsg,
+      )
+
+    // Record type page delegation
+    store.RecordTypesListMsg(page_msg) ->
+      delegate_page_update(
+        model,
+        fn(p) { case p { store.RecordTypesListPage(m) -> Ok(m) _ -> Error(Nil) } },
+        fn(m, s) { record_types_list.update(m, page_msg, s) },
+        store.RecordTypesListPage,
+        store.RecordTypesListMsg,
+      )
+
+    store.RecordTypeDetailMsg(page_msg) ->
+      delegate_page_update(
+        model,
+        fn(p) { case p { store.RecordTypeDetailPage(m) -> Ok(m) _ -> Error(Nil) } },
+        fn(m, s) { record_type_detail.update(m, page_msg, s) },
+        store.RecordTypeDetailPage,
+        store.RecordTypeDetailMsg,
+      )
+
+    store.RecordTypeEditMsg(page_msg) ->
+      delegate_page_update(
+        model,
+        fn(p) { case p { store.RecordTypeEditPage(m) -> Ok(m) _ -> Error(Nil) } },
+        fn(m, s) { record_type_edit.update(m, page_msg, s) },
+        store.RecordTypeEditPage,
+        store.RecordTypeEditMsg,
+      )
+
+    // Home page delegation
+    store.HomeMsg(page_msg) ->
+      delegate_page_update(
+        model,
+        fn(p) { case p { store.HomePage(m) -> Ok(m) _ -> Error(Nil) } },
+        fn(m, s) { home.update(m, page_msg, s) },
+        store.HomePage,
+        store.HomeMsg,
+      )
 
     store.SetError(error) -> {
       #(store.set_error(model, error), effect.none())
     }
 
-    // Preload
-    store.StartPreload(viewer_url, study_uid) -> {
-      let preload_effect = {
-        use dispatch <- effect.from
-        dicomweb.preload_study(study_uid)
-        |> promise.tap(fn(result) {
-          dispatch(store.PreloadStarted(viewer_url, case result {
-            Ok(data) ->
-              case decode.run(data, decode.at(["task_id"], decode.string)) {
-                Ok(tid) -> tid
-                Error(_) -> ""
-              }
-            Error(_) -> ""
-          }, study_uid))
-        })
-        Nil
-      }
-      #(
-        store.Model(
-          ..model,
-          modal_open: True,
-          modal_content: store.PreloadProgress(
-            viewer_url: viewer_url,
-            task_id: "",
-            study_uid: study_uid,
-            received: 0,
-            total: None,
-            status: "starting",
-          ),
-        ),
-        preload_effect,
-      )
-    }
-
-    store.PreloadStarted(viewer_url, task_id, study_uid) -> {
-      case task_id {
-        "" ->
-          // Failed to start — just open viewer directly
-          #(
-            store.Model(..model, modal_open: False, modal_content: store.NoModal),
-            effect.from(fn(_dispatch) {
-              window.open(viewer_url, "_blank", "")
-              Nil
-            }),
-          )
-        _ -> {
-          let timer_effect = {
-            use dispatch <- effect.from
-            let timer_id =
-              global.set_interval(2000, fn() {
-                dispatch(store.PreloadPollTick(task_id, viewer_url, study_uid))
-              })
-            dispatch(store.PreloadPollTick(task_id, viewer_url, study_uid))
-            dispatch(store.SetPreloadTimer(timer_id))
-          }
-          #(
-            store.Model(
-              ..model,
-              modal_content: store.PreloadProgress(
-                viewer_url: viewer_url,
-                task_id: task_id,
-                study_uid: study_uid,
-                received: 0,
-                total: None,
-                status: "starting",
-              ),
-            ),
-            timer_effect,
-          )
-        }
-      }
-    }
-
-    store.SetPreloadTimer(timer_id) -> {
-      #(store.Model(..model, preload_timer: Some(timer_id)), effect.none())
-    }
-
-    store.PreloadPollTick(task_id, viewer_url, study_uid) -> {
-      let poll_effect = {
-        use dispatch <- effect.from
-        dicomweb.preload_progress(study_uid, task_id)
-        |> promise.tap(fn(result) {
-          dispatch(store.PreloadProgressUpdate(
-            task_id, viewer_url, study_uid, result,
-          ))
-        })
-        Nil
-      }
-      #(model, poll_effect)
-    }
-
-    store.PreloadProgressUpdate(task_id, viewer_url, study_uid, Ok(data)) -> {
-      let status =
-        decode.run(data, decode.at(["status"], decode.string))
-        |> option.from_result
-        |> option.unwrap("unknown")
-      let received =
-        decode.run(data, decode.at(["received"], decode.int))
-        |> option.from_result
-        |> option.unwrap(0)
-      let total =
-        decode.run(data, decode.at(["total"], decode.int))
-        |> option.from_result
-
-      case status {
-        "ready" -> {
-          // Stop timer, open viewer, close modal
-          let stop_effect = stop_preload_timer(model)
-          let open_effect =
-            effect.from(fn(_dispatch) {
-              window.open(viewer_url, "_blank", "")
-              Nil
-            })
-          #(
-            store.Model(
-              ..model,
-              modal_open: False,
-              modal_content: store.NoModal,
-              preload_timer: None,
-            ),
-            effect.batch([stop_effect, open_effect]),
-          )
-        }
-        "error" -> {
-          let stop_effect = stop_preload_timer(model)
-          let error_msg =
-            decode.run(data, decode.at(["error"], decode.string))
-            |> option.from_result
-            |> option.unwrap("Preload failed")
-          #(
-            store.Model(
-              ..model,
-              modal_open: False,
-              modal_content: store.NoModal,
-              preload_timer: None,
-            )
-              |> store.set_error(Some(error_msg)),
-            stop_effect,
-          )
-        }
-        _ ->
-          #(
-            store.Model(
-              ..model,
-              modal_content: store.PreloadProgress(
-                viewer_url: viewer_url,
-                task_id: task_id,
-                study_uid: study_uid,
-                received: received,
-                total: total,
-                status: status,
-              ),
-            ),
-            effect.none(),
-          )
-      }
-    }
-
-    store.PreloadProgressUpdate(_, _, _, Error(err)) -> {
-      logger.warn(
-        "preload",
-        "Progress poll failed: " <> string.inspect(err),
-      )
-      #(model, effect.none())
-    }
-
-    store.CancelPreload -> {
-      let stop_effect = stop_preload_timer(model)
-      #(
-        store.Model(
-          ..model,
-          modal_open: False,
-          modal_content: store.NoModal,
-          preload_timer: None,
-        ),
-        stop_effect,
-      )
-    }
-
-    // Default case
-    _ -> #(model, effect.none())
+    // Preload delegation
+    store.PreloadMsg(pmsg) -> delegate_preload(model, pmsg)
   }
 }
 
-// Helper: standard load-and-dispatch pattern for API calls
-fn load_with_effect(
+/// Generic page delegation helper — reduces boilerplate for MVU page updates
+fn delegate_page_update(
   model: Model,
-  api_call: fn() -> promise.Promise(Result(a, types.ApiError)),
-  on_result: fn(Result(a, types.ApiError)) -> Msg,
+  get_page: fn(store.PageModel) -> Result(page_model, Nil),
+  do_update: fn(page_model, shared.Shared) -> #(page_model, Effect(page_msg), List(OutMsg)),
+  wrap_page: fn(page_model) -> store.PageModel,
+  wrap_msg: fn(page_msg) -> Msg,
 ) -> #(Model, Effect(Msg)) {
-  let eff = {
-    use dispatch <- effect.from
-    api_call() |> promise.tap(fn(r) { dispatch(on_result(r)) })
-    Nil
-  }
-  #(store.set_loading(model, True), eff)
-}
-
-// Helper: load studies for a patient into record form state
-fn load_record_form_studies(patient_id: String) -> Effect(Msg) {
-  use dispatch <- effect.from
-  patients.get_patient(patient_id)
-  |> promise.tap(fn(result) {
-    let studies_result = case result {
-      Ok(patient) ->
-        case patient.studies {
-          Some(s) -> Ok(s)
-          None -> Ok([])
-        }
-      Error(err) -> Error(err)
+  case get_page(model.page) {
+    Ok(page_model) -> {
+      let #(new_page, eff, out_msgs) =
+        do_update(page_model, build_shared(model))
+      let model =
+        store.Model(..model, page: wrap_page(new_page))
+      let #(model, out_effects) = apply_out_msgs(model, out_msgs)
+      #(
+        model,
+        effect.batch([
+          effect.map(eff, wrap_msg),
+          out_effects,
+        ]),
+      )
     }
-    dispatch(store.RecordFormStudiesLoaded(studies_result))
-  })
-  Nil
+    Error(_) -> #(model, effect.none())
+  }
 }
 
 // Helper: dispatch a message as an effect
@@ -1856,28 +582,222 @@ fn dispatch_msg(msg: Msg) -> Effect(Msg) {
   dispatch(msg)
 }
 
-fn stop_preload_timer(model: Model) -> Effect(Msg) {
-  case model.preload_timer {
-    Some(timer_id) ->
-      effect.from(fn(_dispatch) { global.clear_interval(timer_id) })
-    None -> effect.none()
+fn delegate_cache(model: Model, cmsg: cache.Msg) -> #(Model, Effect(Msg)) {
+  let #(cache_model, eff, out_msgs) = cache.update(model.cache, cmsg)
+  let model = store.Model(..model, cache: cache_model)
+  let #(model, out_effects) =
+    list.fold(out_msgs, #(model, []), fn(acc, om) {
+      let #(m, effs) = acc
+      case om {
+        cache.Loading(b) -> #(store.set_loading(m, b), effs)
+        cache.ApiFailure(err, fallback) -> {
+          let #(m2, e2) = handle_api_error(m, err, fallback)
+          #(m2, [e2, ..effs])
+        }
+        cache.AutoAssign(rid, uid) -> {
+          let assign_eff = {
+            use dispatch <- effect.from
+            records.assign_record_user(rid, uid)
+            |> promise.tap(fn(r) {
+              dispatch(store.CacheMsg(cache.AutoAssignResult(r)))
+            })
+            Nil
+          }
+          #(m, [assign_eff, ..effs])
+        }
+      }
+    })
+  // Reverse out_effects so they run in the order cache.update declared them.
+  let ordered_effects = [
+    effect.map(eff, store.CacheMsg),
+    ..list.reverse(out_effects)
+  ]
+  #(model, effect.batch(ordered_effects))
+}
+
+fn delegate_preload(model: Model, pmsg: preload.Msg) -> #(Model, Effect(Msg)) {
+  let was_active = preload.is_active(model.preload)
+  let #(preload_model, eff, out_msgs) = preload.update(model.preload, pmsg)
+  let now_active = preload.is_active(preload_model)
+  // While preload is active it owns the modal layer; once it deactivates
+  // (ready / error / cancel), we must clear modal_open or the generic
+  // confirm modal would render on top of the page on its own.
+  // Only touch modal_open when the preload state actually transitioned —
+  // otherwise we would clobber a content-driven modal that has nothing
+  // to do with preload.
+  let modal_open = case was_active, now_active {
+    _, True -> True
+    True, False -> False
+    False, False -> model.modal_open
+  }
+  let model = store.Model(
+    ..model,
+    preload: preload_model,
+    modal_open: modal_open,
+  )
+  let out_effects =
+    list.fold(out_msgs, [], fn(acc, out_msg) {
+      case out_msg {
+        preload.OpenViewer(url) -> [
+          effect.from(fn(_dispatch) {
+            let _ = window.open(url, "_blank", "")
+            Nil
+          }),
+          ..acc
+        ]
+        preload.ShowError(msg) -> {
+          [dispatch_msg(store.SetError(Some(msg))), ..acc]
+        }
+      }
+    })
+  #(model, effect.batch([effect.map(eff, store.PreloadMsg), ..out_effects]))
+}
+
+fn build_shared(model: Model) -> shared.Shared {
+  shared.Shared(
+    user: model.user,
+    route: model.route,
+    project_name: model.project_name,
+    project_description: model.project_description,
+    cache: model.cache,
+  )
+}
+
+/// Cleanup current page before route change (e.g. slicer ping timer)
+fn cleanup_current_page(model: Model) -> Effect(Msg) {
+  case model.page {
+    store.RecordExecutePage(page_model) ->
+      effect.map(record_execute.cleanup(page_model), store.RecordExecuteMsg)
+    _ -> effect.none()
   }
 }
 
-// Helper: start periodic slicer ping timer (immediate ping + 10s interval)
-fn start_slicer_ping_timer() -> Effect(Msg) {
-  use dispatch <- effect.from
-  // Immediate first ping
-  dispatch(store.SlicerPing)
-  // Set up periodic pings every 10 seconds
-  let timer_id =
-    global.set_interval(10_000, fn() { dispatch(store.SlicerPing) })
-  dispatch(store.SlicerPingTimerStarted(timer_id))
+/// Generic page init helper — mirrors delegate_page_update pattern.
+/// Call site binds `id`/`name` via hole syntax, e.g. `study_detail.init(id, _)`.
+fn init_page(
+  model: Model,
+  page_init: fn(shared.Shared) -> #(pm, Effect(pmsg), List(OutMsg)),
+  wrap_page: fn(pm) -> store.PageModel,
+  wrap_msg: fn(pmsg) -> Msg,
+) -> #(Model, Effect(Msg)) {
+  let #(page_model, page_eff, out_msgs) = page_init(build_shared(model))
+  let model = store.Model(..model, page: wrap_page(page_model))
+  let #(model, out_effs) = apply_out_msgs(model, out_msgs)
+  #(model, effect.batch([effect.map(page_eff, wrap_msg), out_effs]))
+}
+
+fn init_page_for_route(model: Model, route: Route) -> #(Model, Effect(Msg)) {
+  case route {
+    router.Home ->
+      init_page(model, home.init, store.HomePage, store.HomeMsg)
+    router.Login ->
+      init_page(model, login.init, store.LoginPage, store.LoginMsg)
+    router.Register ->
+      init_page(model, register.init, store.RegisterPage, store.RegisterMsg)
+    router.AdminDashboard ->
+      init_page(model, admin_page.init, store.AdminPage, store.AdminMsg)
+    router.Patients ->
+      init_page(model, patients_list.init, store.PatientsListPage, store.PatientsListMsg)
+    router.PatientDetail(id) ->
+      init_page(model, patient_detail.init(id, _), store.PatientDetailPage, store.PatientDetailMsg)
+    router.PatientNew ->
+      init_page(model, patient_new.init, store.PatientNewPage, store.PatientNewMsg)
+    router.Records ->
+      init_page(model, records_list.init, store.RecordsListPage, store.RecordsListMsg)
+    router.RecordDetail(id) ->
+      init_page(model, record_execute.init(id, _), store.RecordExecutePage, store.RecordExecuteMsg)
+    router.RecordNew ->
+      init_page(model, record_new.init, store.RecordNewPage, store.RecordNewMsg)
+    router.Studies ->
+      init_page(model, studies_list.init, store.StudiesListPage, store.StudiesListMsg)
+    router.StudyDetail(id) | router.StudyViewer(id) ->
+      init_page(model, study_detail.init(id, _), store.StudyDetailPage, store.StudyDetailMsg)
+    router.SeriesDetail(id) ->
+      init_page(model, series_detail.init(id, _), store.SeriesDetailPage, store.SeriesDetailMsg)
+    router.AdminRecordTypes ->
+      init_page(model, record_types_list.init, store.RecordTypesListPage, store.RecordTypesListMsg)
+    router.AdminRecordTypeDetail(name) ->
+      init_page(model, record_type_detail.init(name, _), store.RecordTypeDetailPage, store.RecordTypeDetailMsg)
+    router.AdminRecordTypeEdit(name) ->
+      init_page(model, record_type_edit.init(name, _), store.RecordTypeEditPage, store.RecordTypeEditMsg)
+    _ -> #(store.Model(..model, page: store.NoPage), effect.none())
+  }
+}
+
+fn apply_out_msgs(
+  model: Model,
+  msgs: List(OutMsg),
+) -> #(Model, Effect(Msg)) {
+  let #(final_model, effs) =
+    list.fold(msgs, #(model, []), fn(acc, out_msg) {
+      let #(m, eff_list) = acc
+      case out_msg {
+        shared.ShowSuccess(text) ->
+          #(store.set_success(m, text), eff_list)
+        shared.ShowError(text) ->
+          #(store.set_error(m, option.Some(text)), eff_list)
+        shared.Navigate(route) ->
+          #(m, [modem.push(router.route_to_path(route), option.None, option.None), ..eff_list])
+        shared.SetLoading(loading) ->
+          #(store.set_loading(m, loading), eff_list)
+        shared.CacheRecord(record) ->
+          #(store.Model(..m, cache: cache.put_record(m.cache, record)), eff_list)
+        shared.CacheStudy(study) ->
+          #(store.Model(..m, cache: cache.put_study(m.cache, study)), eff_list)
+        shared.CachePatient(patient) ->
+          #(store.Model(..m, cache: cache.put_patient(m.cache, patient)), eff_list)
+        shared.CacheRecordType(rt) ->
+          #(store.Model(..m, cache: cache.put_record_type(m.cache, rt)), eff_list)
+        shared.CacheSeries(s) ->
+          #(store.Model(..m, cache: cache.put_series(m.cache, s)), eff_list)
+        shared.ReloadRecords -> {
+          let is_admin = case m.user {
+            Some(models.User(is_superuser: True, ..)) -> True
+            _ -> False
+          }
+          #(m, [dispatch_msg(store.CacheMsg(cache.LoadRecords(is_admin))), ..eff_list])
+        }
+        shared.ReloadStudies ->
+          #(m, [dispatch_msg(store.CacheMsg(cache.LoadStudies)), ..eff_list])
+        shared.ReloadUsers ->
+          #(m, [dispatch_msg(store.CacheMsg(cache.LoadUsers)), ..eff_list])
+        shared.ReloadPatients ->
+          #(m, [dispatch_msg(store.CacheMsg(cache.LoadPatients)), ..eff_list])
+        shared.ReloadRecordTypes ->
+          #(m, [dispatch_msg(store.CacheMsg(cache.LoadRecordTypes)), ..eff_list])
+        shared.ReloadRecordTypeStats ->
+          #(m, [dispatch_msg(store.CacheMsg(cache.LoadRecordTypeStats)), ..eff_list])
+        shared.ReloadPatient(id) ->
+          #(m, [dispatch_msg(store.CacheMsg(cache.LoadPatientDetail(id))), ..eff_list])
+        shared.ReloadRecord(id) ->
+          #(m, [dispatch_msg(store.CacheMsg(cache.LoadRecordDetail(id, m.user))), ..eff_list])
+        shared.OpenDeleteConfirm(resource, id) ->
+          #(
+            store.Model(..m, modal_open: True, modal_content: store.ConfirmDelete(resource, id)),
+            eff_list,
+          )
+        shared.OpenFailPrompt(record_id) ->
+          #(
+            store.Model(
+              ..m,
+              modal_open: True,
+              modal_content: store.FailRecordPrompt(record_id),
+              fail_reason: "",
+            ),
+            eff_list,
+          )
+        shared.SetUser(user) ->
+          #(store.set_user(m, user), eff_list)
+        shared.Logout ->
+          #(m, [dispatch_msg(store.Logout), ..eff_list])
+        shared.StartPreload(viewer_url, study_uid) ->
+          #(m, [dispatch_msg(store.PreloadMsg(preload.Start(viewer_url, study_uid))), ..eff_list])
+      }
+    })
+  #(final_model, effect.batch(list.reverse(effs)))
 }
 
 /// Handles API errors with automatic session expiry detection.
-/// On AuthError: clears user, shows expiry message, redirects to login.
-/// On other errors: shows the provided fallback message.
 fn handle_api_error(
   model: Model,
   err: types.ApiError,
@@ -1885,7 +805,6 @@ fn handle_api_error(
 ) -> #(Model, Effect(Msg)) {
   case err {
     types.AuthError(msg) -> {
-      // Log detailed auth error for debugging
       logger.error(
         "auth",
         "session error - msg: "
@@ -1897,8 +816,6 @@ fn handle_api_error(
           Some(user) -> user.id
           None -> "none"
         }
-        <> ", slicer_loading: "
-        <> string.inspect(model.slicer_loading)
         <> ", loading: "
         <> string.inspect(model.loading),
       )
@@ -1930,29 +847,42 @@ pub fn view(model: Model) -> Element(Msg) {
 }
 
 fn view_content(model: Model) -> Element(Msg) {
-  let content = case model.route {
-    router.Home -> home.view(model)
-    router.Login -> login.view(model)
-    router.Register -> register.view(model)
-    router.Studies -> studies_list.view(model)
-    router.StudyDetail(id) -> study_detail.view(model, id)
-    router.StudyViewer(id) -> study_detail.view(model, id)
-    router.SeriesDetail(id) -> series_detail.view(model, id)
-    router.Records -> records_list.view(model)
-    router.RecordDetail(id) -> record_execute.view(model, id)
-    router.RecordNew -> record_new.view(model)
-    router.RecordTypeDesign(_id) ->
-      html.div([], [html.text("Record type design page")])
-    router.Patients -> patients_list.view(model)
-    router.PatientNew -> patient_new.view(model)
-    router.PatientDetail(id) -> patient_detail.view(model, id)
-    router.Users -> html.div([], [html.text("Users page")])
-    router.UserProfile(_id) -> html.div([], [html.text("User profile page")])
-    router.AdminDashboard -> admin_page.view(model)
-    router.AdminRecordTypes -> record_types_list.view(model)
-    router.AdminRecordTypeDetail(name) -> record_type_detail.view(model, name)
-    router.AdminRecordTypeEdit(name) -> record_type_edit.view(model, name)
-    router.NotFound -> html.div([], [html.text("404 - Page not found")])
+  let shared = build_shared(model)
+
+  let content = case model.page {
+    store.HomePage(pm) ->
+      element.map(home.view(pm, shared), store.HomeMsg)
+    store.LoginPage(pm) ->
+      element.map(login.view(pm, shared), store.LoginMsg)
+    store.RegisterPage(pm) ->
+      element.map(register.view(pm, shared), store.RegisterMsg)
+    store.StudiesListPage(pm) ->
+      element.map(studies_list.view(pm, shared), store.StudiesListMsg)
+    store.StudyDetailPage(pm) ->
+      element.map(study_detail.view(pm, shared), store.StudyDetailMsg)
+    store.SeriesDetailPage(pm) ->
+      element.map(series_detail.view(pm, shared), store.SeriesDetailMsg)
+    store.RecordsListPage(pm) ->
+      element.map(records_list.view(pm, shared), store.RecordsListMsg)
+    store.RecordExecutePage(pm) ->
+      element.map(record_execute.view(pm, shared), store.RecordExecuteMsg)
+    store.RecordNewPage(pm) ->
+      element.map(record_new.view(pm, shared), store.RecordNewMsg)
+    store.PatientsListPage(pm) ->
+      element.map(patients_list.view(pm, shared), store.PatientsListMsg)
+    store.PatientDetailPage(pm) ->
+      element.map(patient_detail.view(pm, shared), store.PatientDetailMsg)
+    store.PatientNewPage(pm) ->
+      element.map(patient_new.view(pm, shared), store.PatientNewMsg)
+    store.AdminPage(pm) ->
+      element.map(admin_page.view(pm, shared), store.AdminMsg)
+    store.RecordTypesListPage(pm) ->
+      element.map(record_types_list.view(pm, shared), store.RecordTypesListMsg)
+    store.RecordTypeDetailPage(pm) ->
+      element.map(record_type_detail.view(pm, shared), store.RecordTypeDetailMsg)
+    store.RecordTypeEditPage(pm) ->
+      element.map(record_type_edit.view(pm, shared), store.RecordTypeEditMsg)
+    store.NoPage -> render_route_placeholder(model.route)
   }
 
   let page = case model.route {
@@ -1960,18 +890,47 @@ fn view_content(model: Model) -> Element(Msg) {
     _ -> layout.view(model, content)
   }
 
-  case model.modal_open {
-    True -> html.div([], [page, render_modal(model)])
-    False -> page
+  case preload.is_active(model.preload) {
+    True ->
+      case model.preload.progress {
+        Some(state) ->
+          html.div([], [
+            page,
+            element.map(preload.view_modal(state), store.PreloadMsg),
+          ])
+        None -> page
+      }
+    False ->
+      case model.modal_open {
+        True -> html.div([], [page, render_modal(model)])
+        False -> page
+      }
+  }
+}
+
+fn loading_placeholder() -> Element(Msg) {
+  html.div([attribute.class("loading")], [
+    html.p([], [html.text("Loading...")]),
+  ])
+}
+
+/// Rendered when no `PageModel` is set yet for the current route.
+/// `NotFound` lives here because it doesn't need its own MVU module.
+/// Other routes hit this only as a transient state during init.
+fn render_route_placeholder(route: Route) -> Element(Msg) {
+  case route {
+    router.NotFound ->
+      html.div([attribute.class("not-found")], [
+        html.h1([], [html.text("404")]),
+        html.p([], [html.text("Page not found")]),
+      ])
+    _ -> loading_placeholder()
   }
 }
 
 fn render_modal(model: Model) -> Element(Msg) {
   case model.modal_content {
-    store.FailRecordPrompt(record_id) ->
-      render_fail_modal(model, record_id)
-    store.PreloadProgress(_, _, _, received, total, status) ->
-      render_preload_modal(received, total, status)
+    store.FailRecordPrompt(record_id) -> render_fail_modal(model, record_id)
     _ -> render_confirm_modal(model)
   }
 }
@@ -2011,66 +970,6 @@ fn render_fail_modal(model: Model, record_id: String) -> Element(Msg) {
             event.on_click(store.ConfirmFailRecord(record_id)),
           ],
           [html.text("Fail")],
-        ),
-      ]),
-    ]),
-  ])
-}
-
-fn render_preload_modal(
-  received: Int,
-  total: option.Option(Int),
-  status: String,
-) -> Element(Msg) {
-  let progress_text = case status {
-    "checking_cache" -> "Checking cache..."
-    "starting" -> "Starting preload..."
-    "fetching" ->
-      case total {
-        Some(t) ->
-          "Received " <> int.to_string(received) <> " of ~" <> int.to_string(t)
-        None -> "Received " <> int.to_string(received) <> " images..."
-      }
-    "ready" -> "Ready!"
-    _ -> "Loading..."
-  }
-
-  let progress_bar = case total {
-    Some(t) if t > 0 -> {
-      let pct = { received * 100 } / t
-      let width = int.to_string(int.min(pct, 100)) <> "%"
-      html.div([attribute.class("progress-bar-container")], [
-        html.div(
-          [
-            attribute.class("progress-bar"),
-            attribute.style("width", width),
-          ],
-          [],
-        ),
-      ])
-    }
-    _ ->
-      html.div([attribute.class("progress-bar-container")], [
-        html.div([attribute.class("progress-bar progress-bar-indeterminate")], []),
-      ])
-  }
-
-  html.div([attribute.class("modal-backdrop")], [
-    html.div([attribute.class("modal")], [
-      html.div([attribute.class("modal-header")], [
-        html.h3([attribute.class("modal-title")], [
-          html.text("Loading images..."),
-        ]),
-      ]),
-      html.p([], [html.text(progress_text)]),
-      progress_bar,
-      html.div([attribute.class("modal-footer")], [
-        html.button(
-          [
-            attribute.class("btn btn-secondary"),
-            event.on_click(store.CancelPreload),
-          ],
-          [html.text("Cancel")],
         ),
       ]),
     ]),
@@ -2118,69 +1017,4 @@ fn render_confirm_modal(model: Model) -> Element(Msg) {
       ]),
     ]),
   ])
-}
-
-// Load data for route
-fn load_route_data(model: Model, route: Route) -> Effect(Msg) {
-  case route, model.user {
-    router.Home, Some(models.User(is_superuser: True, ..)) ->
-      effect.batch([
-        dispatch_msg(store.LoadStudies),
-        dispatch_msg(store.LoadRecords),
-        dispatch_msg(store.LoadUsers),
-      ])
-    router.Home, Some(_) -> dispatch_msg(store.LoadRecords)
-    router.Home, None -> effect.none()
-    router.Studies, Some(models.User(is_superuser: True, ..)) ->
-      dispatch_msg(store.LoadStudies)
-    router.StudyDetail(id), Some(models.User(is_superuser: True, ..)) ->
-      effect.batch([
-        dispatch_msg(store.LoadStudyDetail(id)),
-        dispatch_msg(store.LoadRecords),
-      ])
-    router.StudyViewer(id), Some(models.User(is_superuser: True, ..)) ->
-      dispatch_msg(store.LoadStudyDetail(id))
-    router.SeriesDetail(id), Some(models.User(is_superuser: True, ..)) ->
-      dispatch_msg(store.LoadSeriesDetail(id))
-    router.Records, _ -> dispatch_msg(store.LoadRecords)
-    router.RecordDetail(id), Some(_) ->
-      effect.batch([
-        dispatch_msg(store.LoadRecordDetail(id)),
-        dispatch_msg(store.LoadHydratedSchema(id)),
-        start_slicer_ping_timer(),
-      ])
-    router.Patients, Some(models.User(is_superuser: True, ..)) ->
-      dispatch_msg(store.LoadPatients)
-    router.PatientDetail(id), Some(models.User(is_superuser: True, ..)) ->
-      effect.batch([
-        dispatch_msg(store.LoadPatientDetail(id)),
-        dispatch_msg(store.LoadRecords),
-      ])
-    router.RecordNew, Some(models.User(is_superuser: True, ..)) ->
-      effect.batch([
-        dispatch_msg(store.LoadPatients),
-        dispatch_msg(store.LoadRecordTypes),
-        dispatch_msg(store.LoadUsers),
-        dispatch_msg(store.LoadRecords),
-      ])
-    router.PatientNew, _ -> effect.none()
-    router.Users, Some(models.User(is_superuser: True, ..)) ->
-      dispatch_msg(store.LoadUsers)
-    router.AdminDashboard, Some(_) ->
-      effect.batch([
-        dispatch_msg(store.LoadAdminStats),
-        dispatch_msg(store.LoadRecords),
-        dispatch_msg(store.LoadUsers),
-        dispatch_msg(store.LoadRoleMatrix),
-      ])
-    router.AdminRecordTypes, Some(_) -> dispatch_msg(store.LoadRecordTypeStats)
-    router.AdminRecordTypeDetail(_), Some(_) ->
-      effect.batch([
-        dispatch_msg(store.LoadRecordTypeStats),
-        dispatch_msg(store.LoadRecords),
-      ])
-    router.AdminRecordTypeEdit(name), Some(_) ->
-      dispatch_msg(store.LoadRecordTypeForEdit(name))
-    _, _ -> effect.none()
-  }
 }

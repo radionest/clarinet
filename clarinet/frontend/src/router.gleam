@@ -1,7 +1,6 @@
 // Client-side routing with Modem
 import config
 import gleam/list
-import gleam/option.{type Option, None, Some}
 import gleam/string
 import gleam/uri.{type Uri}
 
@@ -16,13 +15,10 @@ pub type Route {
   Records
   RecordDetail(id: String)
   RecordNew
-  RecordTypeDesign(id: Option(String))
   Patients
   PatientDetail(id: String)
   PatientNew
   SeriesDetail(id: String)
-  Users
-  UserProfile(id: String)
   AdminDashboard
   AdminRecordTypes
   AdminRecordTypeDetail(name: String)
@@ -43,14 +39,10 @@ pub fn route_to_path(route: Route) -> String {
     Records -> "/records"
     RecordDetail(id) -> "/records/" <> id
     RecordNew -> "/records/new"
-    RecordTypeDesign(None) -> "/records/type/new"
-    RecordTypeDesign(Some(id)) -> "/records/type/" <> id
     Patients -> "/patients"
     PatientNew -> "/patients/new"
     PatientDetail(id) -> "/patients/" <> id
     SeriesDetail(id) -> "/series/" <> id
-    Users -> "/users"
-    UserProfile(id) -> "/users/" <> id
     AdminDashboard -> "/admin"
     AdminRecordTypes -> "/admin/record-types"
     AdminRecordTypeDetail(name) -> "/admin/record-types/" <> name
@@ -82,15 +74,11 @@ pub fn parse_route(uri: Uri) -> Route {
     ["studies", id] -> StudyDetail(id)
     ["records"] -> Records
     ["records", "new"] -> RecordNew
-    ["records", "type", "new"] -> RecordTypeDesign(None)
-    ["records", "type", id] -> RecordTypeDesign(Some(id))
     ["records", id] -> RecordDetail(id)
     ["patients"] -> Patients
     ["patients", "new"] -> PatientNew
     ["patients", id] -> PatientDetail(id)
     ["series", id] -> SeriesDetail(id)
-    ["users"] -> Users
-    ["users", id] -> UserProfile(id)
     ["admin"] -> AdminDashboard
     ["admin", "record-types"] -> AdminRecordTypes
     ["admin", "record-types", name, "edit"] -> AdminRecordTypeEdit(name)
@@ -118,8 +106,6 @@ pub fn requires_admin_role(route: Route) -> Bool {
     | PatientDetail(_)
     | PatientNew
     | RecordNew
-    | Users
-    | UserProfile(_)
     | AdminDashboard
     | AdminRecordTypes
     | AdminRecordTypeDetail(_)
@@ -140,14 +126,10 @@ pub fn get_route_title(route: Route) -> String {
     Records -> "Records"
     RecordDetail(_) -> "Record Details"
     RecordNew -> "New Record"
-    RecordTypeDesign(None) -> "New Record Type"
-    RecordTypeDesign(Some(_)) -> "Edit Record Type"
     Patients -> "Patients"
     PatientDetail(_) -> "Patient Details"
     PatientNew -> "New Patient"
     SeriesDetail(_) -> "Series Details"
-    Users -> "Users"
-    UserProfile(_) -> "User Profile"
     AdminDashboard -> "Admin Dashboard"
     AdminRecordTypes -> "Record Types"
     AdminRecordTypeDetail(_) -> "Record Type Details"
@@ -162,9 +144,8 @@ fn section(route: Route) -> String {
     Login -> "login"
     Register -> "register"
     Studies | StudyDetail(_) | StudyViewer(_) | SeriesDetail(_) -> "studies"
-    Records | RecordDetail(_) | RecordNew | RecordTypeDesign(_) -> "records"
+    Records | RecordDetail(_) | RecordNew -> "records"
     Patients | PatientDetail(_) | PatientNew -> "patients"
-    Users | UserProfile(_) -> "users"
     AdminDashboard
     | AdminRecordTypes
     | AdminRecordTypeDetail(_)

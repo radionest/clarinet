@@ -1,16 +1,26 @@
 // Global state management
 import api/info.{type ProjectInfo}
-import api/models.{
-  type AdminStats, type PacsStudyWithSeries, type Patient, type RecordTypeStats,
-  type RoleMatrix, type Series, type Study, type Record, type RecordType, type User,
-}
+import api/models.{type Record, type User}
 import api/types.{type ApiError}
-import gleam/dict.{type Dict}
-import gleam/dynamic
-import gleam/int
-import gleam/json.{type Json}
+import cache
 import gleam/option.{type Option, None, Some}
-import plinth/javascript/global
+import pages/admin as admin_page
+import pages/home as home_page
+import pages/login as login_page
+import pages/patients/detail as patient_detail_page
+import pages/patients/list as patients_list_page
+import pages/patients/new as patient_new_page
+import pages/record_types/detail as record_type_detail_page
+import pages/record_types/edit as record_type_edit_page
+import pages/record_types/list as record_types_list_page
+import pages/records/execute as record_execute_page
+import pages/records/list as records_list_page
+import pages/records/new as record_new_page
+import pages/register as register_page
+import pages/series/detail as series_detail_page
+import pages/studies/detail as study_detail_page
+import pages/studies/list as studies_list_page
+import preload
 import router.{type Route}
 
 // Application state model
@@ -28,85 +38,45 @@ pub type Model {
     loading: Bool,
     error: Option(String),
     success_message: Option(String),
-    // Data caches
-    studies: Dict(String, Study),
-    series: Dict(String, Series),
-    records: Dict(String, Record),
-    record_types: Dict(String, RecordType),
-    patients: Dict(String, Patient),
-    users: Dict(String, User),
-    // Auth form states (controlled inputs)
-    login_email: String,
-    login_password: String,
-    register_email: String,
-    register_password: String,
-    register_password_confirm: String,
-    // Form states
-    study_form: Option(dynamic.Dynamic),
-    // Will hold form data dynamically
-    record_type_form: Option(dynamic.Dynamic),
-    patient_form_id: String,
-    patient_form_name: String,
-    // Record creation form
-    record_form_record_type_name: String,
-    record_form_patient_id: String,
-    record_form_study_uid: String,
-    record_form_series_uid: String,
-    record_form_user_id: String,
-    record_form_parent_record_id: String,
-    record_form_context_info: String,
-    record_form_studies: List(Study),
-    record_form_series: List(Series),
-    form_errors: Dict(String, String),
-    // Pagination
-    current_page: Int,
-    items_per_page: Int,
-    total_items: Int,
-    // Filters
-    search_query: String,
-    active_filters: Dict(String, String),
-    // Admin
-    admin_stats: Option(AdminStats),
-    record_type_stats: Option(List(RecordTypeStats)),
-    admin_editing_record_id: Option(Int),
-    admin_editing_status_record_id: Option(Int),
+    // Global entity caches
+    cache: cache.Model,
     // Modal state
     modal_open: Bool,
     modal_content: ModalContent,
     fail_reason: String,
-    // PACS state
-    pacs_studies: List(PacsStudyWithSeries),
-    pacs_loading: Bool,
-    pacs_importing: Option(String),
-    // Slicer state
-    slicer_loading: Bool,
-    slicer_available: Option(Bool),
-    slicer_ping_timer: Option(global.TimerID),
-    // Hydrated schemas cache (record_id -> schema JSON string)
-    hydrated_schemas: Dict(String, String),
-    // Role matrix
-    role_matrix: Option(RoleMatrix),
-    role_toggling: Option(#(String, String)),
-    // Preload state
-    preload_timer: Option(global.TimerID),
+    // Preload
+    preload: preload.Model,
+    // Active page model (for modular pages)
+    page: PageModel,
   )
+}
+
+// Active page model (for modular pages)
+pub type PageModel {
+  NoPage
+  AdminPage(admin_page.Model)
+  LoginPage(login_page.Model)
+  RegisterPage(register_page.Model)
+  PatientsListPage(patients_list_page.Model)
+  PatientDetailPage(patient_detail_page.Model)
+  PatientNewPage(patient_new_page.Model)
+  RecordsListPage(records_list_page.Model)
+  RecordExecutePage(record_execute_page.Model)
+  RecordNewPage(record_new_page.Model)
+  StudiesListPage(studies_list_page.Model)
+  StudyDetailPage(study_detail_page.Model)
+  SeriesDetailPage(series_detail_page.Model)
+  RecordTypesListPage(record_types_list_page.Model)
+  RecordTypeDetailPage(record_type_detail_page.Model)
+  RecordTypeEditPage(record_type_edit_page.Model)
+  HomePage(home_page.Model)
 }
 
 // Modal content types
 pub type ModalContent {
   NoModal
   ConfirmDelete(resource: String, id: String)
-  ViewDetails(resource: String, data: Json)
-  EditForm(resource: String, id: Option(String))
   FailRecordPrompt(record_id: String)
-  PreloadProgress(
-    viewer_url: String,
-    task_id: String,
-    study_uid: String,
-    received: Int,
-    total: Option(Int),
-    status: String,
-  )
 }
 
 // Application messages
@@ -117,194 +87,61 @@ pub type Msg {
 
   // Authentication
   CheckSessionResult(Result(User, ApiError))
-  LoginSubmit(email: String, password: String)
-  LoginSuccess(user: User)
-  LoginError(ApiError)
-  LoginUpdateEmail(String)
-  LoginUpdatePassword(String)
-  RegisterSubmit(email: String, password: String)
-  RegisterSuccess(user: User)
-  RegisterError(ApiError)
-  RegisterUpdateEmail(String)
-  RegisterUpdatePassword(String)
-  RegisterUpdatePasswordConfirm(String)
   Logout
   LogoutComplete
 
-  // Data loading
-  LoadStudies
-  StudiesLoaded(Result(List(Study), ApiError))
-  LoadStudyDetail(id: String)
-  StudyDetailLoaded(Result(Study, ApiError))
+  // Auth page delegation
+  LoginMsg(login_page.Msg)
+  RegisterMsg(register_page.Msg)
 
-  LoadSeriesDetail(id: String)
-  SeriesDetailLoaded(Result(Series, ApiError))
+  // Patient page delegation
+  PatientsListMsg(patients_list_page.Msg)
+  PatientDetailMsg(patient_detail_page.Msg)
+  PatientNewMsg(patient_new_page.Msg)
 
-  LoadRecords
-  RecordsLoaded(Result(List(Record), ApiError))
-  LoadRecordDetail(id: String)
-  RecordDetailLoaded(Result(Record, ApiError))
+  // Record page delegation
+  RecordsListMsg(records_list_page.Msg)
+  RecordExecuteMsg(record_execute_page.Msg)
+  RecordNewMsg(record_new_page.Msg)
 
-  LoadUsers
-  UsersLoaded(Result(List(User), ApiError))
+  // Study/Series page delegation
+  StudiesListMsg(studies_list_page.Msg)
+  StudyDetailMsg(study_detail_page.Msg)
+  SeriesDetailMsg(series_detail_page.Msg)
 
-  LoadPatients
-  PatientsLoaded(Result(List(Patient), ApiError))
-  LoadPatientDetail(id: String)
-  PatientDetailLoaded(Result(Patient, ApiError))
-  AnonymizePatient(id: String)
-  PatientAnonymized(Result(Patient, ApiError))
-  DeletePatient(id: String)
-  PatientDeleted(Result(Nil, ApiError))
-  DeleteStudy(study_uid: String)
-  StudyDeleted(Result(Nil, ApiError))
+  // Record type page delegation
+  RecordTypesListMsg(record_types_list_page.Msg)
+  RecordTypeDetailMsg(record_type_detail_page.Msg)
+  RecordTypeEditMsg(record_type_edit_page.Msg)
 
-  LoadAdminStats
-  AdminStatsLoaded(Result(AdminStats, ApiError))
+  // Home page delegation
+  HomeMsg(home_page.Msg)
 
-  LoadRecordTypeStats
-  RecordTypeStatsLoaded(Result(List(RecordTypeStats), ApiError))
-
-  // Admin record assignment
-  AdminToggleAssignDropdown(record_id: Option(Int))
-  AdminAssignUser(record_id: Int, user_id: String)
-  AdminAssignUserResult(Result(Record, ApiError))
-
-  // Admin status change
-  AdminToggleStatusDropdown(record_id: Option(Int))
-  AdminChangeStatus(record_id: Int, status: String)
-  AdminChangeStatusResult(Result(Record, ApiError))
-
-  // Form handling
-  UpdateStudyForm(dynamic.Dynamic)
-  SubmitStudyForm
-  StudyFormSubmitted(Result(Study, ApiError))
-
-  UpdateRecordTypeForm(dynamic.Dynamic)
-  UpdateRecordTypeSchema(Json)
-  SubmitRecordTypeForm
-  RecordTypeFormSubmitted(Result(RecordType, ApiError))
-
-  UpdatePatientFormId(String)
-  UpdatePatientFormName(String)
-  SubmitPatientForm
-  PatientFormSubmitted(Result(Patient, ApiError))
-
-  // Record creation form
-  UpdateRecordFormRecordType(String)
-  UpdateRecordFormPatient(String)
-  UpdateRecordFormStudy(String)
-  UpdateRecordFormSeries(String)
-  UpdateRecordFormUser(String)
-  UpdateRecordFormParentRecordId(String)
-  UpdateRecordFormContextInfo(String)
-  RecordFormStudiesLoaded(Result(List(Study), ApiError))
-  RecordFormSeriesLoaded(Result(List(Series), ApiError))
-  LoadRecordTypes
-  RecordTypesLoaded(Result(List(RecordType), ApiError))
-  SubmitRecordForm
-  RecordFormSubmitted(Result(Record, ApiError))
-
-  // Slicer record completion (no form)
-  CompleteRecord(record_id: String)
-  CompleteRecordResult(record_id: String, result: Result(Record, ApiError))
-
-  // Re-submit finished record (no form, PATCH)
-  ResubmitRecord(record_id: String)
-  ResubmitRecordResult(record_id: String, result: Result(Record, ApiError))
-
-  // Formosh form events
-  FormSubmitSuccess(record_id: String)
-  FormSubmitError(error: String)
-
-  // RecordType edit
-  LoadRecordTypeForEdit(name: String)
-  RecordTypeForEditLoaded(Result(RecordType, ApiError))
-  RecordTypeEditSuccess(name: String)
-  RecordTypeEditError(error: String)
+  // Admin page delegation
+  AdminMsg(admin_page.Msg)
 
   // UI Actions
-  SetLoading(Bool)
   SetError(Option(String))
   ClearError
-  SetSuccessMessage(String)
   ClearSuccessMessage
 
   OpenModal(ModalContent)
   CloseModal
   ConfirmModalAction
 
-  // Search and filters
-  UpdateSearchQuery(String)
-  AddFilter(key: String, value: String)
-  RemoveFilter(key: String)
-  ClearFilters
-
-  // Pagination
-  SetPage(Int)
-  SetItemsPerPage(Int)
-
-  // PACS operations
-  SearchPacsStudies(patient_id: String)
-  PacsStudiesLoaded(Result(List(PacsStudyWithSeries), ApiError))
-  ImportPacsStudy(study_uid: String, patient_id: String)
-  PacsStudyImported(Result(Study, ApiError))
-  ClearPacsResults
-
-  // Slicer operations
-  OpenInSlicer(record_id: String)
-  SlicerOpenResult(Result(dynamic.Dynamic, ApiError))
-  SlicerValidate(record_id: String)
-  SlicerValidateResult(Result(dynamic.Dynamic, ApiError))
-  SlicerClearScene
-  SlicerClearSceneResult(Result(dynamic.Dynamic, ApiError))
-  SlicerPing
-  SlicerPingResult(Result(dynamic.Dynamic, ApiError))
-  SlicerPingTimerStarted(global.TimerID)
-  StopSlicerPingTimer
-
-  // Schema hydration
-  LoadHydratedSchema(record_id: String)
-  HydratedSchemaLoaded(record_id: String, result: Result(String, ApiError))
-
   // Project info
   ProjectInfoLoaded(Result(ProjectInfo, ApiError))
 
-  // Auto-assign
-  AutoAssignResult(Result(Record, ApiError))
+  // Cache delegation (all data loading lives in cache.gleam)
+  CacheMsg(cache.Msg)
 
-  // Restart auto task
-  RestartRecord(record_id: String)
-  RestartRecordResult(Result(Record, ApiError))
-
-  // Manual fail
+  // Manual fail record (modal-based)
   UpdateFailReason(String)
   ConfirmFailRecord(record_id: String)
   FailRecordResult(Result(Record, ApiError))
 
-  // Role matrix
-  LoadRoleMatrix
-  RoleMatrixLoaded(Result(RoleMatrix, ApiError))
-  ToggleUserRole(user_id: String, role_name: String, add: Bool)
-  UserRoleToggled(Result(Nil, ApiError))
-
-  // Preload
-  StartPreload(viewer_url: String, study_uid: String)
-  PreloadStarted(viewer_url: String, task_id: String, study_uid: String)
-  PreloadPollTick(task_id: String, viewer_url: String, study_uid: String)
-  PreloadProgressUpdate(
-    task_id: String,
-    viewer_url: String,
-    study_uid: String,
-    result: Result(dynamic.Dynamic, ApiError),
-  )
-  CancelPreload
-  SetPreloadTimer(global.TimerID)
-
-  // Misc
-  NoOp
-  RefreshData
-  ShowSchemaError(String)
+  // Preload delegation
+  PreloadMsg(preload.Msg)
 }
 
 // Initialize application state
@@ -318,53 +155,12 @@ pub fn init() -> Model {
     loading: False,
     error: None,
     success_message: None,
-    login_email: "",
-    login_password: "",
-    register_email: "",
-    register_password: "",
-    register_password_confirm: "",
-    studies: dict.new(),
-    series: dict.new(),
-    records: dict.new(),
-    record_types: dict.new(),
-    patients: dict.new(),
-    users: dict.new(),
-    study_form: None,
-    record_type_form: None,
-    patient_form_id: "",
-    patient_form_name: "",
-    record_form_record_type_name: "",
-    record_form_patient_id: "",
-    record_form_study_uid: "",
-    record_form_series_uid: "",
-    record_form_user_id: "",
-    record_form_parent_record_id: "",
-    record_form_context_info: "",
-    record_form_studies: [],
-    record_form_series: [],
-    form_errors: dict.new(),
-    current_page: 1,
-    items_per_page: 20,
-    total_items: 0,
-    search_query: "",
-    active_filters: dict.new(),
-    admin_stats: None,
-    record_type_stats: None,
-    admin_editing_record_id: None,
-    admin_editing_status_record_id: None,
+    cache: cache.init(),
     modal_open: False,
     modal_content: NoModal,
     fail_reason: "",
-    pacs_studies: [],
-    pacs_loading: False,
-    pacs_importing: None,
-    slicer_loading: False,
-    slicer_available: None,
-    slicer_ping_timer: None,
-    hydrated_schemas: dict.new(),
-    role_matrix: None,
-    role_toggling: None,
-    preload_timer: None,
+    preload: preload.init(),
+    page: NoPage,
   )
 }
 
@@ -377,10 +173,6 @@ pub fn set_user(model: Model, user: User) -> Model {
   Model(..model, user: Some(user))
 }
 
-pub fn clear_user(model: Model) -> Model {
-  Model(..model, user: None)
-}
-
 pub fn reset_for_logout(model: Model) -> Model {
   let fresh = init()
   Model(
@@ -388,6 +180,7 @@ pub fn reset_for_logout(model: Model) -> Model {
     project_name: model.project_name,
     project_description: model.project_description,
     checking_session: False,
+    page: NoPage,
   )
 }
 
@@ -401,109 +194,4 @@ pub fn set_error(model: Model, error: Option(String)) -> Model {
 
 pub fn set_success(model: Model, message: String) -> Model {
   Model(..model, success_message: Some(message))
-}
-
-pub fn clear_messages(model: Model) -> Model {
-  Model(..model, error: None, success_message: None)
-}
-
-pub fn clear_auth_forms(model: Model) -> Model {
-  Model(
-    ..model,
-    login_email: "",
-    login_password: "",
-    register_email: "",
-    register_password: "",
-    register_password_confirm: "",
-  )
-}
-
-// Cache helpers
-pub fn cache_study(model: Model, study: Study) -> Model {
-  // Use study_uid as the key
-  let studies = dict.insert(model.studies, study.study_uid, study)
-  Model(..model, studies: studies)
-}
-
-pub fn cache_series(model: Model, s: Series) -> Model {
-  let series = dict.insert(model.series, s.series_uid, s)
-  Model(..model, series: series)
-}
-
-pub fn cache_record(model: Model, record: Record) -> Model {
-  case record.id {
-    Some(id) -> {
-      let records = dict.insert(model.records, int.to_string(id), record)
-      Model(..model, records: records)
-    }
-    None -> model
-  }
-}
-
-pub fn cache_record_type(model: Model, record_type: RecordType) -> Model {
-  // Use name as the key for RecordType
-  let record_types = dict.insert(model.record_types, record_type.name, record_type)
-  Model(..model, record_types: record_types)
-}
-
-pub fn cache_patient(model: Model, patient: Patient) -> Model {
-  let patients = dict.insert(model.patients, patient.id, patient)
-  Model(..model, patients: patients)
-}
-
-pub fn clear_patient_form(model: Model) -> Model {
-  Model(..model, patient_form_id: "", patient_form_name: "")
-}
-
-pub fn clear_record_form(model: Model) -> Model {
-  Model(
-    ..model,
-    record_form_record_type_name: "",
-    record_form_patient_id: "",
-    record_form_study_uid: "",
-    record_form_series_uid: "",
-    record_form_user_id: "",
-    record_form_parent_record_id: "",
-    record_form_context_info: "",
-    record_form_studies: [],
-    record_form_series: [],
-  )
-}
-
-// Form helpers
-pub fn set_form_error(model: Model, field: String, error: String) -> Model {
-  let errors = dict.insert(model.form_errors, field, error)
-  Model(..model, form_errors: errors)
-}
-
-pub fn clear_form_errors(model: Model) -> Model {
-  Model(..model, form_errors: dict.new())
-}
-
-// Filter helpers
-pub fn apply_filter(model: Model, key: String, value: String) -> Model {
-  let filters = dict.insert(model.active_filters, key, value)
-  Model(..model, active_filters: filters)
-}
-
-pub fn remove_filter(model: Model, key: String) -> Model {
-  let filters = dict.delete(model.active_filters, key)
-  Model(..model, active_filters: filters)
-}
-
-pub fn clear_filters(model: Model) -> Model {
-  Model(..model, active_filters: dict.new(), search_query: "")
-}
-
-// PACS helpers
-pub fn set_pacs_loading(model: Model, loading: Bool) -> Model {
-  Model(..model, pacs_loading: loading)
-}
-
-pub fn set_pacs_studies(model: Model, studies: List(PacsStudyWithSeries)) -> Model {
-  Model(..model, pacs_studies: studies, pacs_loading: False)
-}
-
-pub fn clear_pacs(model: Model) -> Model {
-  Model(..model, pacs_studies: [], pacs_loading: False, pacs_importing: None)
 }

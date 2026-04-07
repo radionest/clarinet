@@ -1,35 +1,307 @@
-// Admin Dashboard page
+// Admin Dashboard page — self-contained MVU module
+import api/admin as admin_api
 import api/models
 import api/types
-import utils/status
 import gleam/dict
 import gleam/int
+import gleam/javascript/promise
 import gleam/list
-import gleam/option.{None, Some}
+import gleam/option.{type Option, None, Some}
 import gleam/string
 import lustre/attribute
+import lustre/effect.{type Effect}
 import lustre/element.{type Element}
 import lustre/element/html
 import lustre/event
 import router
-import store.{type Model, type Msg}
+import shared.{type OutMsg, type Shared}
+import utils/load_status.{type LoadStatus}
+import utils/status
 
-pub fn view(model: Model) -> Element(Msg) {
+// --- Model ---
+
+pub type Model {
+  Model(
+    admin_stats: Option(models.AdminStats),
+    stats_status: LoadStatus,
+    editing_record_id: Option(Int),
+    editing_status_record_id: Option(Int),
+    role_matrix: Option(models.RoleMatrix),
+    matrix_status: LoadStatus,
+    role_toggling: Option(#(String, String)),
+  )
+}
+
+// --- Msg ---
+
+pub type Msg {
+  // Data loading
+  AdminStatsLoaded(Result(models.AdminStats, types.ApiError))
+  RetryLoadStats
+  // Record assignment
+  ToggleAssignDropdown(record_id: Option(Int))
+  AssignUser(record_id: Int, user_id: String)
+  AssignUserResult(Result(models.Record, types.ApiError))
+  // Status change
+  ToggleStatusDropdown(record_id: Option(Int))
+  ChangeStatus(record_id: Int, status: String)
+  ChangeStatusResult(Result(models.Record, types.ApiError))
+  // Role matrix
+  RoleMatrixLoaded(Result(models.RoleMatrix, types.ApiError))
+  RetryLoadMatrix
+  ToggleUserRole(user_id: String, role_name: String, add: Bool)
+  UserRoleToggled(Result(Nil, types.ApiError))
+}
+
+// --- Init ---
+
+pub fn init(_shared: Shared) -> #(Model, Effect(Msg), List(OutMsg)) {
+  let model =
+    Model(
+      admin_stats: None,
+      stats_status: load_status.Loading,
+      editing_record_id: None,
+      editing_status_record_id: None,
+      role_matrix: None,
+      matrix_status: load_status.Loading,
+      role_toggling: None,
+    )
+  let effects =
+    effect.batch([
+      load_effect(admin_api.get_admin_stats, AdminStatsLoaded),
+      load_effect(admin_api.get_role_matrix, RoleMatrixLoaded),
+    ])
+  #(model, effects, [shared.ReloadRecords, shared.ReloadUsers])
+}
+
+// --- Update ---
+
+pub fn update(
+  model: Model,
+  msg: Msg,
+  _shared: Shared,
+) -> #(Model, Effect(Msg), List(OutMsg)) {
+  case msg {
+    AdminStatsLoaded(Ok(stats)) ->
+      #(
+        Model(
+          ..model,
+          admin_stats: Some(stats),
+          stats_status: load_status.Loaded,
+        ),
+        effect.none(),
+        [shared.SetLoading(False)],
+      )
+
+    AdminStatsLoaded(Error(err)) ->
+      #(
+        Model(
+          ..model,
+          stats_status: load_status.Failed("Failed to load admin statistics"),
+        ),
+        effect.none(),
+        handle_error(err, "Failed to load admin statistics"),
+      )
+
+    RetryLoadStats ->
+      #(
+        Model(..model, stats_status: load_status.Loading),
+        load_effect(admin_api.get_admin_stats, AdminStatsLoaded),
+        [],
+      )
+
+    ToggleAssignDropdown(record_id) ->
+      #(Model(..model, editing_record_id: record_id), effect.none(), [])
+
+    AssignUser(record_id, user_id) -> {
+      let eff = {
+        use dispatch <- effect.from
+        admin_api.assign_record_user(record_id, user_id)
+        |> promise.tap(fn(result) { dispatch(AssignUserResult(result)) })
+        Nil
+      }
+      #(Model(..model, editing_record_id: None), eff, [
+        shared.SetLoading(True),
+      ])
+    }
+
+    AssignUserResult(Ok(record)) -> {
+      // Refresh admin stats — assigning a user can change `unassigned_records`
+      // and similar derived counts that the cards display.
+      let stats_eff = load_effect(admin_api.get_admin_stats, AdminStatsLoaded)
+      #(
+        Model(..model, stats_status: load_status.Loading),
+        stats_eff,
+        [
+          shared.SetLoading(False),
+          shared.CacheRecord(record),
+          shared.ShowSuccess("User assigned successfully"),
+        ],
+      )
+    }
+
+    AssignUserResult(Error(err)) ->
+      #(model, effect.none(), handle_error(err, "Failed to assign user to record"))
+
+    ToggleStatusDropdown(record_id) ->
+      #(
+        Model(..model, editing_status_record_id: record_id),
+        effect.none(),
+        [],
+      )
+
+    ChangeStatus(record_id, status_str) -> {
+      let eff = {
+        use dispatch <- effect.from
+        admin_api.update_record_status(record_id, status_str)
+        |> promise.tap(fn(result) { dispatch(ChangeStatusResult(result)) })
+        Nil
+      }
+      #(Model(..model, editing_status_record_id: None), eff, [
+        shared.SetLoading(True),
+      ])
+    }
+
+    ChangeStatusResult(Ok(record)) -> {
+      // Refresh admin stats — `records_by_status` cards become stale otherwise.
+      let stats_eff = load_effect(admin_api.get_admin_stats, AdminStatsLoaded)
+      #(
+        Model(..model, stats_status: load_status.Loading),
+        stats_eff,
+        [
+          shared.SetLoading(False),
+          shared.CacheRecord(record),
+          shared.ShowSuccess("Status updated successfully"),
+        ],
+      )
+    }
+
+    ChangeStatusResult(Error(err)) ->
+      #(
+        model,
+        effect.none(),
+        handle_error(err, "Failed to update record status"),
+      )
+
+    RoleMatrixLoaded(Ok(matrix)) ->
+      #(
+        Model(
+          ..model,
+          role_matrix: Some(matrix),
+          matrix_status: load_status.Loaded,
+        ),
+        effect.none(),
+        [shared.SetLoading(False)],
+      )
+
+    RoleMatrixLoaded(Error(err)) ->
+      #(
+        Model(
+          ..model,
+          matrix_status: load_status.Failed("Failed to load role matrix"),
+        ),
+        effect.none(),
+        handle_error(err, "Failed to load role matrix"),
+      )
+
+    RetryLoadMatrix ->
+      #(
+        Model(..model, matrix_status: load_status.Loading),
+        load_effect(admin_api.get_role_matrix, RoleMatrixLoaded),
+        [],
+      )
+
+    ToggleUserRole(user_id, role_name, add) -> {
+      let eff = {
+        use dispatch <- effect.from
+        let api_call = case add {
+          True -> admin_api.add_user_role(user_id, role_name)
+          False -> admin_api.remove_user_role(user_id, role_name)
+        }
+        api_call
+        |> promise.tap(fn(result) { dispatch(UserRoleToggled(result)) })
+        Nil
+      }
+      #(Model(..model, role_toggling: Some(#(user_id, role_name))), eff, [])
+    }
+
+    UserRoleToggled(Ok(_)) -> {
+      let eff = load_effect(admin_api.get_role_matrix, RoleMatrixLoaded)
+      #(Model(..model, role_toggling: None), eff, [
+        shared.ShowSuccess("Role updated successfully"),
+      ])
+    }
+
+    UserRoleToggled(Error(err)) ->
+      #(
+        Model(..model, role_toggling: None),
+        effect.none(),
+        handle_error(err, "Failed to update role"),
+      )
+
+  }
+}
+
+// --- Helpers ---
+
+fn handle_error(err: types.ApiError, fallback_msg: String) -> List(OutMsg) {
+  case err {
+    types.AuthError(_) -> [shared.Logout]
+    _ -> [shared.SetLoading(False), shared.ShowError(fallback_msg)]
+  }
+}
+
+fn load_effect(
+  api_call: fn() -> promise.Promise(Result(a, types.ApiError)),
+  on_result: fn(Result(a, types.ApiError)) -> Msg,
+) -> Effect(Msg) {
+  use dispatch <- effect.from
+  api_call() |> promise.tap(fn(r) { dispatch(on_result(r)) })
+  Nil
+}
+
+// --- View ---
+
+pub fn view(model: Model, shared: Shared) -> Element(Msg) {
   html.div([attribute.class("container")], [
     html.h1([], [html.text("Admin Dashboard")]),
-    case model.admin_stats {
-      Some(stats) ->
-        html.div([attribute.class("dashboard-content")], [
-          overview_section(stats),
-          status_section(stats),
-          roles_section(model),
-          records_section(model),
-        ])
-      None ->
-        html.div([attribute.class("loading")], [
-          html.p([], [html.text("Loading statistics...")]),
-        ])
+    html.div([attribute.class("dashboard-content")], [
+      stats_view(model),
+      roles_section(model),
+      records_section(model, shared),
+    ]),
+  ])
+}
+
+fn stats_view(model: Model) -> Element(Msg) {
+  load_status.render(
+    model.stats_status,
+    fn() {
+      html.div([attribute.class("loading")], [
+        html.p([], [html.text("Loading statistics...")]),
+      ])
     },
+    fn() {
+      case model.admin_stats {
+        Some(stats) ->
+          element.fragment([overview_section(stats), status_section(stats)])
+        None ->
+          html.div([attribute.class("loading")], [
+            html.p([], [html.text("Loading statistics...")]),
+          ])
+      }
+    },
+    fn(msg) { retry_view(msg, RetryLoadStats) },
+  )
+}
+
+fn retry_view(message: String, retry_msg: Msg) -> Element(Msg) {
+  html.div([attribute.class("error-container")], [
+    html.p([attribute.class("error-message")], [html.text(message)]),
+    html.button(
+      [attribute.class("btn btn-primary"), event.on_click(retry_msg)],
+      [html.text("Retry")],
+    ),
   ])
 }
 
@@ -38,9 +310,21 @@ fn overview_section(stats: models.AdminStats) -> Element(Msg) {
     html.h3([], [html.text("System Overview")]),
     html.div([attribute.class("stats-grid")], [
       admin_stat_card(label: "Studies", count: stats.total_studies, color: "blue"),
-      admin_stat_card(label: "Records", count: stats.total_records, color: "green"),
-      admin_stat_card(label: "Users", count: stats.total_users, color: "purple"),
-      admin_stat_card(label: "Patients", count: stats.total_patients, color: "orange"),
+      admin_stat_card(
+        label: "Records",
+        count: stats.total_records,
+        color: "green",
+      ),
+      admin_stat_card(
+        label: "Users",
+        count: stats.total_users,
+        color: "purple",
+      ),
+      admin_stat_card(
+        label: "Patients",
+        count: stats.total_patients,
+        color: "orange",
+      ),
     ]),
   ])
 }
@@ -54,8 +338,8 @@ fn status_section(stats: models.AdminStats) -> Element(Msg) {
         |> dict.to_list
         |> list.sort(fn(a, b) { string.compare(a.0, b.0) })
         |> list.map(fn(pair) {
-          let #(status, count) = pair
-          admin_stat_card(label: status, count: count, color: status_color(status))
+          let #(s, count) = pair
+          admin_stat_card(label: s, count: count, color: status_color(s))
         }),
     ),
   ])
@@ -64,41 +348,54 @@ fn status_section(stats: models.AdminStats) -> Element(Msg) {
 fn roles_section(model: Model) -> Element(Msg) {
   html.div([attribute.class("dashboard-section")], [
     html.h3([], [html.text("Role Matrix")]),
-    case model.role_matrix {
-      None ->
+    load_status.render(
+      model.matrix_status,
+      fn() {
         html.p([attribute.class("text-muted")], [
           html.text("Loading role matrix..."),
         ])
-      Some(matrix) ->
-        case matrix.roles {
-          [] ->
+      },
+      fn() {
+        case model.role_matrix {
+          None ->
             html.p([attribute.class("text-muted")], [
-              html.text("No roles defined."),
+              html.text("Loading role matrix..."),
             ])
-          roles ->
-            html.div([attribute.class("table-responsive")], [
-              html.table([attribute.class("table")], [
-                html.thead([], [
-                  html.tr(
-                    [],
-                    [
-                      html.th([], [html.text("User")]),
-                      ..list.map(roles, fn(role) {
-                        html.th([], [html.text(role)])
-                      })
-                    ],
-                  ),
-                ]),
-                html.tbody(
-                  [],
-                  matrix.users
-                    |> list.sort(fn(a, b) { string.compare(a.email, b.email) })
-                    |> list.map(fn(user) { role_matrix_row(model, user, roles) }),
-                ),
-              ]),
-            ])
+          Some(matrix) ->
+            case matrix.roles {
+              [] ->
+                html.p([attribute.class("text-muted")], [
+                  html.text("No roles defined."),
+                ])
+              roles ->
+                html.div([attribute.class("table-responsive")], [
+                  html.table([attribute.class("table")], [
+                    html.thead([], [
+                      html.tr(
+                        [],
+                        [
+                          html.th([], [html.text("User")]),
+                          ..list.map(roles, fn(role) {
+                            html.th([], [html.text(role)])
+                          })
+                        ],
+                      ),
+                    ]),
+                    html.tbody(
+                      [],
+                      matrix.users
+                        |> list.sort(fn(a, b) { string.compare(a.email, b.email) })
+                        |> list.map(fn(user) {
+                          role_matrix_row(model, user, roles)
+                        }),
+                    ),
+                  ]),
+                ])
+            }
         }
-    },
+      },
+      fn(msg) { retry_view(msg, RetryLoadMatrix) },
+    ),
   ])
 }
 
@@ -134,14 +431,14 @@ fn role_matrix_row(
           attribute.class("checkbox-input"),
           attribute.checked(has_role),
           attribute.disabled(is_toggling),
-          event.on_click(store.ToggleUserRole(user.id, role, !has_role)),
+          event.on_click(ToggleUserRole(user.id, role, !has_role)),
         ]),
       ])
     })
   ])
 }
 
-fn records_section(model: Model) -> Element(Msg) {
+fn records_section(model: Model, shared: Shared) -> Element(Msg) {
   html.div([attribute.class("dashboard-section")], [
     html.div([attribute.class("section-header")], [
       html.h3([], [html.text("Records")]),
@@ -149,19 +446,20 @@ fn records_section(model: Model) -> Element(Msg) {
         [
           attribute.class("btn btn-primary"),
           attribute.href(router.route_to_path(router.RecordNew)),
-          event.on_click(store.Navigate(router.RecordNew)),
         ],
         [html.text("Create Record")],
       ),
     ]),
     case
-      dict.values(model.records)
+      dict.values(shared.cache.records)
       |> list.sort(fn(a, b) {
         int.compare(option.unwrap(a.id, 0), option.unwrap(b.id, 0))
       })
     {
       [] ->
-        html.p([attribute.class("text-muted")], [html.text("No records found.")])
+        html.p([attribute.class("text-muted")], [
+          html.text("No records found."),
+        ])
       records ->
         html.div([attribute.class("table-responsive")], [
           html.table([attribute.class("table")], [
@@ -176,7 +474,9 @@ fn records_section(model: Model) -> Element(Msg) {
             ]),
             html.tbody(
               [],
-              list.map(records, fn(record) { record_row(model, record) }),
+              list.map(records, fn(record) {
+                record_row(model, shared, record)
+              }),
             ),
           ]),
         ])
@@ -184,37 +484,52 @@ fn records_section(model: Model) -> Element(Msg) {
   ])
 }
 
-fn record_row(model: Model, record: models.Record) -> Element(Msg) {
+fn record_row(
+  model: Model,
+  shared: Shared,
+  record: models.Record,
+) -> Element(Msg) {
   let record_id = case record.id {
     Some(id) -> id
     None -> 0
   }
 
-  let is_editing = model.admin_editing_record_id == Some(record_id)
+  let is_editing = model.editing_record_id == Some(record_id)
 
   html.tr([], [
     html.td([], [html.text(int.to_string(record_id))]),
     html.td([], [html.text(record.record_type_name)]),
     html.td([], [
-      status_cell(model: model, record_id: record_id, status: record.status),
+      status_cell(
+        model: model,
+        record_id: record_id,
+        status: record.status,
+      ),
     ]),
     html.td([], [html.text(record.patient_id)]),
-    html.td([], [assign_cell(model: model, record_id: record_id, user_id: record.user_id, is_editing: is_editing)]),
+    html.td([], [
+      assign_cell(
+        shared: shared,
+        record_id: record_id,
+        user_id: record.user_id,
+        is_editing: is_editing,
+      ),
+    ]),
   ])
 }
 
 fn assign_cell(
-  model model: Model,
+  shared shared: Shared,
   record_id record_id: Int,
-  user_id user_id: option.Option(String),
+  user_id user_id: Option(String),
   is_editing is_editing: Bool,
 ) -> Element(Msg) {
   case is_editing {
-    True -> user_dropdown(model, record_id)
+    True -> user_dropdown(shared, record_id)
     False ->
       case user_id {
         Some(uid) -> {
-          let email = case dict.get(model.users, uid) {
+          let email = case dict.get(shared.cache.users, uid) {
             Ok(user) -> user.email
             Error(_) -> uid
           }
@@ -224,7 +539,7 @@ fn assign_cell(
             html.button(
               [
                 attribute.class("btn btn-sm btn-outline"),
-                event.on_click(store.AdminToggleAssignDropdown(Some(record_id))),
+                event.on_click(ToggleAssignDropdown(Some(record_id))),
               ],
               [html.text("Change")],
             ),
@@ -234,7 +549,7 @@ fn assign_cell(
           html.button(
             [
               attribute.class("btn btn-sm btn-primary"),
-              event.on_click(store.AdminToggleAssignDropdown(Some(record_id))),
+              event.on_click(ToggleAssignDropdown(Some(record_id))),
             ],
             [html.text("Assign")],
           )
@@ -242,21 +557,21 @@ fn assign_cell(
   }
 }
 
-fn user_dropdown(model: Model, record_id: Int) -> Element(Msg) {
+fn user_dropdown(shared: Shared, record_id: Int) -> Element(Msg) {
   html.div([attribute.class("assign-dropdown")], [
     html.select(
       [
         attribute.class("form-select form-select-sm"),
         event.on_input(fn(value) {
           case value {
-            "" -> store.AdminToggleAssignDropdown(None)
-            uid -> store.AdminAssignUser(record_id, uid)
+            "" -> ToggleAssignDropdown(None)
+            uid -> AssignUser(record_id, uid)
           }
         }),
       ],
       [
         html.option([attribute.value("")], "Select user..."),
-        ..dict.values(model.users)
+        ..dict.values(shared.cache.users)
         |> list.sort(fn(a, b) { string.compare(a.email, b.email) })
         |> list.map(fn(user) {
           html.option([attribute.value(user.id)], user.email)
@@ -266,7 +581,7 @@ fn user_dropdown(model: Model, record_id: Int) -> Element(Msg) {
     html.button(
       [
         attribute.class("btn btn-sm btn-outline"),
-        event.on_click(store.AdminToggleAssignDropdown(None)),
+        event.on_click(ToggleAssignDropdown(None)),
       ],
       [html.text("Cancel")],
     ),
@@ -278,20 +593,24 @@ fn status_cell(
   record_id record_id: Int,
   status record_status: types.RecordStatus,
 ) -> Element(Msg) {
-  let is_editing = model.admin_editing_status_record_id == Some(record_id)
+  let is_editing = model.editing_status_record_id == Some(record_id)
   let status_str = status.to_backend_string(record_status)
   case is_editing {
-    True -> html.div([attribute.class("assign-cell")], [status_dropdown(record_id)])
+    True ->
+      html.div([attribute.class("assign-cell")], [
+        status_dropdown(record_id),
+      ])
     False ->
       html.div([attribute.class("assign-cell")], [
-        html.span([attribute.class("badge badge-" <> status_color(status_str))], [
-          html.text(status_str),
-        ]),
+        html.span(
+          [attribute.class("badge badge-" <> status_color(status_str))],
+          [html.text(status_str)],
+        ),
         html.text(" "),
         html.button(
           [
             attribute.class("btn btn-sm btn-outline"),
-            event.on_click(store.AdminToggleStatusDropdown(Some(record_id))),
+            event.on_click(ToggleStatusDropdown(Some(record_id))),
           ],
           [html.text("Change")],
         ),
@@ -307,8 +626,8 @@ fn status_dropdown(record_id: Int) -> Element(Msg) {
         attribute.class("form-select form-select-sm"),
         event.on_input(fn(value) {
           case value {
-            "" -> store.AdminToggleStatusDropdown(None)
-            s -> store.AdminChangeStatus(record_id, s)
+            "" -> ToggleStatusDropdown(None)
+            s -> ChangeStatus(record_id, s)
           }
         }),
       ],
@@ -322,14 +641,18 @@ fn status_dropdown(record_id: Int) -> Element(Msg) {
     html.button(
       [
         attribute.class("btn btn-sm btn-outline"),
-        event.on_click(store.AdminToggleStatusDropdown(None)),
+        event.on_click(ToggleStatusDropdown(None)),
       ],
       [html.text("Cancel")],
     ),
   ])
 }
 
-fn admin_stat_card(label label: String, count count: Int, color color: String) -> Element(Msg) {
+fn admin_stat_card(
+  label label: String,
+  count count: Int,
+  color color: String,
+) -> Element(Msg) {
   html.div([attribute.class("stat-card card stat-" <> color)], [
     html.div([attribute.class("stat-value")], [
       html.text(int.to_string(count)),
@@ -338,8 +661,8 @@ fn admin_stat_card(label label: String, count count: Int, color color: String) -
   ])
 }
 
-fn status_color(status: String) -> String {
-  case status {
+fn status_color(s: String) -> String {
+  case s {
     "blocked" -> "yellow"
     "pending" -> "blue"
     "inwork" -> "orange"

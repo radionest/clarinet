@@ -1,4 +1,4 @@
-// Studies list page (admin only)
+// Studies list page — self-contained MVU module
 import api/models
 import gleam/dict
 import gleam/int
@@ -6,27 +6,52 @@ import gleam/list
 import gleam/option
 import gleam/string
 import lustre/attribute
+import lustre/effect.{type Effect}
 import lustre/element.{type Element}
 import lustre/element/html
 import router
-import store.{type Model, type Msg}
+import shared.{type OutMsg, type Shared}
 
-pub fn view(model: Model) -> Element(Msg) {
+// --- Model ---
+
+pub type Model {
+  Model
+}
+
+// --- Msg ---
+
+pub type Msg {
+  NoOp
+}
+
+// --- Init ---
+
+pub fn init(_shared: Shared) -> #(Model, Effect(Msg), List(OutMsg)) {
+  #(Model, effect.none(), [shared.ReloadStudies])
+}
+
+// --- Update ---
+
+pub fn update(
+  model: Model,
+  _msg: Msg,
+  _shared: Shared,
+) -> #(Model, Effect(Msg), List(OutMsg)) {
+  #(model, effect.none(), [])
+}
+
+// --- View ---
+
+pub fn view(_model: Model, shared: Shared) -> Element(Msg) {
   html.div([attribute.class("container")], [
     html.div([attribute.class("page-header")], [
       html.h1([], [html.text("Studies")]),
     ]),
-    case model.loading {
-      True ->
-        html.div([attribute.class("loading")], [
-          html.p([], [html.text("Loading studies...")]),
-        ])
-      False -> {
-        let studies =
-          dict.values(model.studies)
-          |> list.sort(fn(a, b) { string.compare(a.study_uid, b.study_uid) })
-        studies_table(studies)
-      }
+    {
+      let studies =
+        dict.values(shared.cache.studies)
+        |> list.sort(fn(a, b) { string.compare(a.study_uid, b.study_uid) })
+      studies_table(studies)
     },
   ])
 }

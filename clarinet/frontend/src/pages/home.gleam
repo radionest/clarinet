@@ -1,35 +1,72 @@
-// Home/Dashboard page
+// Home/Dashboard page — self-contained MVU module
 import api/models
 import gleam/dict
 import gleam/int
 import gleam/list
 import gleam/option.{None, Some}
 import lustre/attribute
+import lustre/effect.{type Effect}
 import lustre/element.{type Element}
 import lustre/element/html
 import router
-import store.{type Model, type Msg}
+import shared.{type OutMsg, type Shared}
 
-pub fn view(model: Model) -> Element(Msg) {
+// --- Model ---
+
+pub type Model {
+  Model
+}
+
+// --- Msg ---
+
+pub type Msg {
+  NoOp
+}
+
+// --- Init ---
+
+pub fn init(shared: Shared) -> #(Model, Effect(Msg), List(OutMsg)) {
+  let out_msgs = case shared.user {
+    Some(models.User(is_superuser: True, ..)) ->
+      [shared.ReloadStudies, shared.ReloadRecords, shared.ReloadUsers]
+    Some(_) ->
+      [shared.ReloadRecords]
+    None -> []
+  }
+  #(Model, effect.none(), out_msgs)
+}
+
+// --- Update ---
+
+pub fn update(
+  model: Model,
+  _msg: Msg,
+  _shared: Shared,
+) -> #(Model, Effect(Msg), List(OutMsg)) {
+  #(model, effect.none(), [])
+}
+
+// --- View ---
+
+pub fn view(_model: Model, shared: Shared) -> Element(Msg) {
   html.div([attribute.class("container")], [
     html.h1([], [html.text("Dashboard")]),
-
-    case model.user {
+    case shared.user {
       Some(user) -> {
         html.div([attribute.class("dashboard-content")], [
           html.p([attribute.class("welcome")], [
             html.text("Welcome back, " <> user.email <> "!"),
           ]),
-          stats_section(model),
+          stats_section(shared),
           case user.is_superuser {
-            True -> recent_activity(model)
+            True -> recent_activity(shared)
             False -> html.text("")
           },
         ])
       }
       None -> {
         html.div([attribute.class("welcome-section")], [
-          html.h2([], [html.text("Welcome to " <> model.project_name)]),
+          html.h2([], [html.text("Welcome to " <> shared.project_name)]),
           html.p([], [html.text("Please log in to access the dashboard.")]),
           html.a(
             [
@@ -63,30 +100,44 @@ fn stat_card(
   ])
 }
 
-fn stats_section(model: Model) -> Element(Msg) {
+fn stats_section(shared: Shared) -> Element(Msg) {
   html.div([attribute.class("dashboard-section")], [
     html.h3([], [html.text("Overview")]),
     html.div(
       [attribute.class("stats-grid")],
-      case model.user {
+      case shared.user {
         Some(models.User(is_superuser: True, ..)) -> [
-          stat_card(label: "Studies", count: dict.size(model.studies), color: "blue", route: router.Studies),
-          stat_card(label: "Records", count: dict.size(model.records), color: "green", route: router.Records),
-          stat_card(label: "Users", count: dict.size(model.users), color: "purple", route: router.Users),
+          stat_card(
+            label: "Studies",
+            count: dict.size(shared.cache.studies),
+            color: "blue",
+            route: router.Studies,
+          ),
+          stat_card(
+            label: "Records",
+            count: dict.size(shared.cache.records),
+            color: "green",
+            route: router.Records,
+          ),
         ]
         _ -> [
-          stat_card(label: "My Records", count: dict.size(model.records), color: "green", route: router.Records),
+          stat_card(
+            label: "My Records",
+            count: dict.size(shared.cache.records),
+            color: "green",
+            route: router.Records,
+          ),
         ]
       },
     ),
   ])
 }
 
-fn recent_activity(model: Model) -> Element(Msg) {
+fn recent_activity(shared: Shared) -> Element(Msg) {
   html.div([attribute.class("dashboard-section")], [
     html.h3([], [html.text("Recent Studies")]),
     html.div([attribute.class("recent-list")], [
-      case dict.to_list(model.studies) {
+      case dict.to_list(shared.cache.studies) {
         [] ->
           html.p([attribute.class("empty-state")], [
             html.text("No recent studies found."),
