@@ -119,12 +119,6 @@ fn stats_section(shared: Shared) -> Element(Msg) {
             color: "green",
             route: router.Records,
           ),
-          stat_card(
-            label: "Users",
-            count: dict.size(shared.cache.users),
-            color: "purple",
-            route: router.Users,
-          ),
         ]
         _ -> [
           stat_card(

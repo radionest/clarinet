@@ -914,15 +914,16 @@ fn loading_placeholder() -> Element(Msg) {
   ])
 }
 
-/// Placeholder rendering for routes without page modules (Users, NotFound, etc.)
-/// or while a page model is still initializing.
+/// Rendered when no `PageModel` is set yet for the current route.
+/// `NotFound` lives here because it doesn't need its own MVU module.
+/// Other routes hit this only as a transient state during init.
 fn render_route_placeholder(route: Route) -> Element(Msg) {
   case route {
-    router.RecordTypeDesign(_) ->
-      html.div([], [html.text("Record type design page")])
-    router.Users -> html.div([], [html.text("Users page")])
-    router.UserProfile(_) -> html.div([], [html.text("User profile page")])
-    router.NotFound -> html.div([], [html.text("404 - Page not found")])
+    router.NotFound ->
+      html.div([attribute.class("not-found")], [
+        html.h1([], [html.text("404")]),
+        html.p([], [html.text("Page not found")]),
+      ])
     _ -> loading_placeholder()
   }
 }
