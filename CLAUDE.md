@@ -139,7 +139,7 @@ Avoid: direct loguru import (use `from clarinet.utils.logger import logger`), sy
   - `recordflow-dsl.md` — full DSL API reference (for recordflow/ and *_flow.py)
   - `project-setup.md` — project init, settings, plan/ structure (for settings.toml and plan/)
   - `e2e-tests.md` — frontend stack, VM sub-path, selectors (for deploy/test/e2e/)
-  - `frontend.md` — MVU page contract, Shared/OutMsg, effects, cache, pitfalls (for clarinet/frontend/src/)
+  - `frontend.md` — MVU page contract, Shared/OutMsg, effects, cache, pitfalls (for clarinet/frontend/src/ and test/)
   - `logging-pii.md` — sanitize headers (Referer/Origin) before logging, loguru `extra=` quirk (for auth_config.py and logger.py)
 
 Update the most specific file. Keep CLAUDE.md files minimal — move detailed reference to `.claude/rules/`.
