@@ -20,7 +20,6 @@ import urllib.request
 from pathlib import Path
 
 from clarinet.settings import settings
-from clarinet.utils.db_manager import db_manager
 from clarinet.utils.logger import logger
 
 
@@ -539,12 +538,14 @@ async def _run_pipeline_worker(
 
 
 async def init_database() -> None:
-    """Initialize the database with tables and default data."""
+    """Initialize the database: apply alembic migrations + create admin user."""
     from clarinet.utils.bootstrap import initialize_application_data
+    from clarinet.utils.migrations import cli_upgrade
 
     logger.info("Initializing database...")
-    await db_manager.create_db_and_tables_async()
-    await initialize_application_data()  # Changed from add_default_user_roles
+    # Apply all alembic migrations instead of SQLModel.metadata.create_all
+    cli_upgrade("head")
+    await initialize_application_data()
     logger.info("Database initialized successfully")
 
 
@@ -1052,7 +1053,23 @@ def main() -> None:
     # db command
     db_parser = subparsers.add_parser("db", help="Database management")
     db_subparsers = db_parser.add_subparsers(dest="db_command")
-    db_subparsers.add_parser("init", help="Initialize database with tables")
+    db_subparsers.add_parser("init", help="Initialize database with tables and admin user")
+
+    # db migrate (default: upgrade to head)
+    migrate_parser = db_subparsers.add_parser(
+        "migrate", help="Run pending database migrations (default: upgrade to head)"
+    )
+    migrate_subparsers = migrate_parser.add_subparsers(dest="migrate_command")
+    migrate_subparsers.add_parser("status", help="Show current and pending migrations")
+    migrate_subparsers.add_parser("history", help="Show migration history")
+    migrate_down_parser = migrate_subparsers.add_parser("down", help="Rollback migrations")
+    migrate_down_parser.add_argument(
+        "steps", nargs="?", type=int, default=1, help="Number of migrations to rollback"
+    )
+    migrate_create_parser = migrate_subparsers.add_parser(
+        "create", help="Create a new migration (autogenerate from models)"
+    )
+    migrate_create_parser.add_argument("-m", "--message", required=True, help="Migration message")
 
     # admin command
     admin_parser = subparsers.add_parser("admin", help="Admin user management")
@@ -1214,6 +1231,30 @@ def main() -> None:
     elif args.command == "db":
         if args.db_command == "init":
             asyncio.run(init_database())
+        elif args.db_command == "migrate":
+            from clarinet.utils.migrations import (
+                cli_create,
+                cli_current,
+                cli_downgrade,
+                cli_history,
+                cli_pending,
+                cli_upgrade,
+            )
+
+            migrate_sub = getattr(args, "migrate_command", None)
+            if migrate_sub is None:
+                cli_upgrade("head")
+            elif migrate_sub == "status":
+                cli_current()
+                cli_pending()
+            elif migrate_sub == "history":
+                cli_history()
+            elif migrate_sub == "down":
+                cli_downgrade(args.steps)
+            elif migrate_sub == "create":
+                cli_create(args.message)
+            else:
+                migrate_parser.print_help()
         else:
             db_parser.print_help()
     elif args.command == "admin":

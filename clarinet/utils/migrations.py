@@ -386,6 +386,40 @@ def get_pending_migrations(project_path: Path | None = None) -> list[str]:
     return pending
 
 
+def verify_migrations_applied(project_path: Path | None = None) -> None:
+    """Fail-fast check: raise if alembic not initialized or migrations pending.
+
+    Called from the FastAPI lifespan before any DB access. All production
+    projects are initialized via ``clarinet init-migrations``; absence of
+    alembic is a configuration error.
+
+    Args:
+        project_path: Path to the project directory. Defaults to cwd.
+
+    Raises:
+        MigrationError: alembic not initialized, database has no
+            ``alembic_version`` (fresh DB), or pending migrations exist.
+    """
+    try:
+        pending = get_pending_migrations(project_path)
+    except FileNotFoundError as exc:
+        raise MigrationError(
+            "Alembic not initialized in project. Run: clarinet init-migrations"
+        ) from exc
+    except MigrationError as exc:
+        # ``get_pending_migrations`` raises a bare ``MigrationError`` when the
+        # DB has no current revision (fresh DB without ``alembic_version``)
+        # while alembic has a head — i.e. migrations were never applied.
+        raise MigrationError(
+            "Database has no alembic_version (fresh database). Run: clarinet db migrate"
+        ) from exc
+
+    if pending:
+        raise MigrationError(
+            f"{len(pending)} pending migration(s): {', '.join(pending)}. Run: clarinet db migrate"
+        )
+
+
 def get_migration_history(
     project_path: Path | None = None,
 ) -> list[tuple[str, str | set[str], str]]:

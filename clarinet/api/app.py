@@ -135,8 +135,23 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     """
     Application lifespan context manager.
 
-    Creates database tables, adds default roles, and loads record types.
+    Verifies alembic migrations are applied, then creates any missing tables,
+    adds default roles, and loads record types.
     """
+    # Fail-fast: alembic migrations must be applied before any DB access.
+    # All production projects are initialized via ``clarinet init-migrations``.
+    from clarinet.exceptions import MigrationError
+    from clarinet.utils.migrations import verify_migrations_applied
+
+    try:
+        verify_migrations_applied()
+    except MigrationError as e:
+        raise StartupError(
+            component="Database",
+            reason=str(e),
+            hint="Apply migrations via: clarinet db migrate",
+        ) from e
+
     await db_manager.create_db_and_tables_async()
     logger.info("Database initialized with async support")
 

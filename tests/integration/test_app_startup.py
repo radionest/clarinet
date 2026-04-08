@@ -242,6 +242,28 @@ async def test_startup_ohif_missing(startup_settings, monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_startup_fails_when_migrations_pending(startup_settings, monkeypatch):
+    """Lifespan raises ``StartupError`` when alembic reports pending migrations.
+
+    The global autouse ``_bypass_migration_check`` fixture in
+    ``tests/conftest.py`` normally neutralizes the check; here we override it
+    locally so the real fail-fast path runs.
+    """
+    from clarinet.api.app import StartupError
+    from clarinet.exceptions import MigrationError
+
+    def _raise_pending() -> None:
+        raise MigrationError("1 pending migration(s): abc123. Run: clarinet db migrate")
+
+    monkeypatch.setattr("clarinet.utils.migrations.verify_migrations_applied", _raise_pending)
+
+    app = FastAPI(lifespan=lifespan)
+    with pytest.raises(StartupError, match="Database"):
+        async with lifespan(app):
+            pass  # should not reach here
+
+
+@pytest.mark.asyncio
 async def test_startup_recordflow_no_eager_healthcheck(startup_settings, capture_logs, monkeypatch):
     """RecordFlow startup must NOT perform eager API health check.
 
