@@ -201,6 +201,7 @@ second_review = RecordDef(
     description="Second review — doctor classifies lesions that were missed in the initial segmentation",
     label="Second review",
     level="SERIES",
+    role="doctor",
     min_records=1,
     max_records=1,
     slicer_script="scripts/second_review.py",
