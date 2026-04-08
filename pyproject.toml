@@ -176,8 +176,7 @@ filterwarnings = [
     # FastAPI + aiormq: asyncio.iscoroutinefunction deprecated in Python 3.14
     "ignore::DeprecationWarning:fastapi",
     "ignore::DeprecationWarning:aiormq",
-    # pydicom v4.0 deprecations (write_like_original, is_little_endian, is_implicit_VR)
-    "ignore:.*write_like_original.*:DeprecationWarning:pydicom",
+    # pydicom v4.0 deprecations (is_little_endian/is_implicit_VR used by tests for fake datasets)
     "ignore:.*is_little_endian.*:DeprecationWarning:pydicom",
     "ignore:.*is_implicit_VR.*:DeprecationWarning:pydicom",
     # pydicom UserWarnings: fake UIDs in tests + ANONYMIZED encoding

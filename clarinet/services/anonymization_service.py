@@ -367,4 +367,4 @@ class AnonymizationService:
     @staticmethod
     def _write_dataset(dataset: Dataset, file_path: Path) -> None:
         """Write dataset to file (sync, called via to_thread)."""
-        dataset.save_as(file_path, write_like_original=False)
+        dataset.save_as(file_path, enforce_file_format=True)
