@@ -32,7 +32,7 @@ Request → 1. Memory cache (cachetools.TTLCache[str, MemoryCachedSeries], O(1) 
 
 - **Memory tier**: `TTLCache` holds `MemoryCachedSeries` with `dict[str, Dataset]` keyed by SOPInstanceUID. TTL controlled by `dicomweb_memory_cache_ttl_minutes`, max entries by `dicomweb_memory_cache_max_entries` (LRU eviction).
 - **dcm_anon tier**: Anonymized DICOM files written by `AnonymizationService` into working folder `dcm_anon/` subdirectories. No TTL — files persist until manually deleted. Path lookup iterates patient dirs and caches results in `_dcm_anon_path_cache`.
-- **Disk tier**: `.dcm` files + `.cached_at` marker. TTL controlled by `dicomweb_cache_ttl_hours`. Loaded into memory on first access after restart.
+- **Disk tier**: `.dcm` files + `.cached_at` marker. Read-path returns any present entry — DICOM on the PACS is immutable, so staleness is a non-concept. Lifecycle (TTL- and size-based eviction) is owned exclusively by `DicomWebCacheCleanupService`, driven by `dicomweb_cache_ttl_hours` and `dicomweb_cache_max_size_gb`. `dicomweb_cache_cleanup_enabled=True` is the de-facto contract for bounding disk growth. Loaded into memory on first access after restart.
 - **Background persistence**: After C-GET to memory, `asyncio.create_task` writes datasets to disk via `asyncio.to_thread`, guarded by `_disk_write_semaphore` (default 4) to avoid flooding the thread pool. On shutdown, pending tasks are cancelled.
 
 ### Populating the disk tier from the pipeline

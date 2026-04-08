@@ -15,7 +15,7 @@ from clarinet.services.pipeline.context import FileResolver, RecordQuery, TaskCo
 from clarinet.services.pipeline.message import PipelineMessage
 from clarinet.services.pipeline.tasks.cache_dicomweb import (
     _has_dcm_anon,
-    _is_disk_cache_valid,
+    _has_disk_cache,
     _organize_to_cache,
     _prefetch_dicom_web_impl,
 )
@@ -81,38 +81,36 @@ def _make_dcm(path: Path, series_uid: str, sop_uid: str) -> None:
     ds.save_as(path, enforce_file_format=True)
 
 
-class TestIsDiskCacheValid:
-    """Tests for the disk cache validity check."""
+class TestHasDiskCache:
+    """Tests for the disk cache presence check.
+
+    No TTL check: DICOM on the PACS is immutable, so any present entry
+    is valid until the cleanup service physically removes it.
+    """
 
     def test_missing_marker_returns_false(self, tmp_path: Path):
-        assert _is_disk_cache_valid(tmp_path, "1.2.3", "1.2.3.4", ttl_seconds=3600) is False
+        assert _has_disk_cache(tmp_path, "1.2.3", "1.2.3.4") is False
 
     def test_missing_dcm_files_returns_false(self, tmp_path: Path):
         series_dir = tmp_path / "1.2.3" / "1.2.3.4"
         series_dir.mkdir(parents=True)
         (series_dir / ".cached_at").write_text(str(time.time()))
-        assert _is_disk_cache_valid(tmp_path, "1.2.3", "1.2.3.4", ttl_seconds=3600) is False
+        assert _has_disk_cache(tmp_path, "1.2.3", "1.2.3.4") is False
 
-    def test_expired_marker_returns_false(self, tmp_path: Path):
+    def test_old_marker_still_valid(self, tmp_path: Path):
+        """An ancient marker is still a cache hit — lifecycle is cleanup's job."""
         series_dir = tmp_path / "1.2.3" / "1.2.3.4"
         series_dir.mkdir(parents=True)
-        (series_dir / ".cached_at").write_text(str(time.time() - 7200))
+        (series_dir / ".cached_at").write_text(str(time.time() - 7 * 86400))
         (series_dir / "instance.dcm").write_bytes(b"fake")
-        assert _is_disk_cache_valid(tmp_path, "1.2.3", "1.2.3.4", ttl_seconds=3600) is False
-
-    def test_corrupt_marker_returns_false(self, tmp_path: Path):
-        series_dir = tmp_path / "1.2.3" / "1.2.3.4"
-        series_dir.mkdir(parents=True)
-        (series_dir / ".cached_at").write_text("not a number")
-        (series_dir / "instance.dcm").write_bytes(b"fake")
-        assert _is_disk_cache_valid(tmp_path, "1.2.3", "1.2.3.4", ttl_seconds=3600) is False
+        assert _has_disk_cache(tmp_path, "1.2.3", "1.2.3.4") is True
 
     def test_valid_cache_returns_true(self, tmp_path: Path):
         series_dir = tmp_path / "1.2.3" / "1.2.3.4"
         series_dir.mkdir(parents=True)
         (series_dir / ".cached_at").write_text(str(time.time()))
         (series_dir / "instance.dcm").write_bytes(b"fake")
-        assert _is_disk_cache_valid(tmp_path, "1.2.3", "1.2.3.4", ttl_seconds=3600) is True
+        assert _has_disk_cache(tmp_path, "1.2.3", "1.2.3.4") is True
 
 
 class TestHasDcmAnon:
@@ -203,8 +201,9 @@ class TestOrganizeToCache:
     def test_refetch_clears_stale_marker_first(self, tmp_path: Path):
         """Re-fetch must remove .cached_at *before* moving fresh files.
 
-        Locks in the fix for the race where DicomWebCache._load_from_disk
-        sees an expired marker and rmtree's the series mid-write.
+        Guarantees atomic publication from the OHIF reader's perspective:
+        the API process must never see a present marker pointing at a
+        directory that holds a mix of stale and fresh *.dcm files.
         """
         tmp_dir = tmp_path / "tmp"
         cache_base = tmp_path / "cache"

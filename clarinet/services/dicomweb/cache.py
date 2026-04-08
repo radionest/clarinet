@@ -184,6 +184,11 @@ class DicomWebCache:
     def _load_from_disk(self, study_uid: str, series_uid: str) -> dict[str, Dataset] | None:
         """Load series from disk cache (synchronous, call via to_thread).
 
+        Disk cache entries live until ``DicomWebCacheCleanupService`` removes
+        them (TTL- or size-based eviction). No staleness check here: DICOM
+        data on the PACS is immutable, so a present entry is always valid
+        as long as the marker and at least one ``*.dcm`` file exist.
+
         Args:
             study_uid: Study Instance UID
             series_uid: Series Instance UID
@@ -195,12 +200,6 @@ class DicomWebCache:
         marker = series_dir / ".cached_at"
 
         if not marker.exists():
-            return None
-
-        cached_at = float(marker.read_text().strip())
-        if time.time() - cached_at > self._ttl_seconds:
-            logger.debug(f"Disk cache expired for series {series_uid}")
-            shutil.rmtree(series_dir, ignore_errors=True)
             return None
 
         dcm_files = sorted(series_dir.glob("*.dcm"))
