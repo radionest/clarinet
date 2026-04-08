@@ -12,7 +12,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal, Self
 
-from pydantic import field_validator
+from pydantic import SecretStr, field_validator
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
@@ -131,7 +131,7 @@ class Settings(BaseSettings):
     database_port: int = 5432
     database_name: str = "clarinet"
     database_username: str = "postgres"
-    database_password: str = "postgres"
+    database_password: SecretStr = SecretStr("postgres")
 
     # DICOM settings (local node)
     dicom_aet: str = "CLARINET"
@@ -329,7 +329,7 @@ class Settings(BaseSettings):
         if self.database_driver == DatabaseDriver.SQLITE:
             return f"sqlite:///{self.database_name}.db"
         else:
-            return f"{self.database_driver.value}://{self.database_username}:{self.database_password}@{self.database_host}:{self.database_port}/{self.database_name}"
+            return f"{self.database_driver.value}://{self.database_username}:{self.database_password.get_secret_value()}@{self.database_host}:{self.database_port}/{self.database_name}"
 
     @property
     def sync_database_url(self) -> str:

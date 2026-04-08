@@ -11,6 +11,7 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 from sqlalchemy import event
+from sqlalchemy.engine import make_url
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -103,7 +104,8 @@ class DatabaseManager:
                 json_serializer=_pydantic_json_serializer,
             )
 
-        logger.info(f"Async database engine created: {async_url}")
+        safe_url = make_url(async_url).render_as_string(hide_password=True)
+        logger.info(f"Async database engine created: {safe_url}")
         return engine
 
     @property

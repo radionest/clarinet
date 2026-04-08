@@ -71,6 +71,17 @@ def scrub_sensitive(text: str) -> str:
     return text
 
 
+def _scrub_patcher(record: Record) -> None:
+    """Loguru patcher that scrubs secrets from every record's message.
+
+    Applied globally via ``_logger.patch`` so console, file, and remote sinks
+    all see the sanitized text. Exception tracebacks are still scrubbed
+    explicitly in ``_json_format`` and ``_LokiSink`` because the patcher only
+    runs at record creation time, while exceptions are formatted later.
+    """
+    record["message"] = scrub_sensitive(record["message"])
+
+
 class _LokiSink:
     """Loguru sink that POSTs JSON logs to a Loki-compatible endpoint."""
 
@@ -140,13 +151,15 @@ def _json_format(record: Record) -> str:
         "mod": record["name"],
         "fn": record["function"],
         "line": record["line"],
-        "msg": record["message"],
+        "msg": scrub_sensitive(record["message"]),
     }
 
     if record["exception"] is not None:
         exc = record["exception"]
         if exc.type is not None:
-            subset["exc"] = "".join(traceback.format_exception(exc.type, exc.value, exc.traceback))
+            subset["exc"] = scrub_sensitive(
+                "".join(traceback.format_exception(exc.type, exc.value, exc.traceback))
+            )
 
     record["extra"]["_json"] = _json_dumps(subset)
     return "{extra[_json]}\n"
@@ -339,6 +352,13 @@ setup_logging(
     remote_level=settings.log_remote_level,
     remote_labels=settings.log_remote_labels,
 )
+
+# Apply the scrub patcher so every log call (regardless of sink) gets a
+# sanitized message — defense in depth on top of explicit scrubbing in
+# `_json_format` and `_LokiSink`. Reassigning `_logger` ensures
+# `InterceptHandler.emit` (which redirects stdlib logging from sqlalchemy,
+# fastapi-users, etc.) also goes through the patched proxy.
+_logger = _logger.patch(_scrub_patcher)
 
 # Export loguru's logger as the module's logger
 logger = _logger
