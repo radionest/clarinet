@@ -26,6 +26,7 @@ import json
 import logging
 import os
 import re
+from enum import Enum
 from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
@@ -59,6 +60,39 @@ else:
         ctk = _Dummy()
 
 EditorEffectName = Literal["Paint", "Erase", "Threshold", "Draw", "Islands"]
+
+
+class OverwriteMode(str, Enum):
+    """Segment Editor "Modify other segments" masking mode.
+
+    Mirrors the dropdown in the Segment Editor "Masking" section. The enum
+    uses plain string values instead of ``vtkMRMLSegmentEditorNode`` constants
+    because ``helper.py`` must stay importable outside Slicer (see the
+    ``_Dummy`` fallback at module top): ``slicer.vtkMRMLSegmentEditorNode`` is
+    ``None`` there, and referencing ``.OverwriteAllSegments`` at class-body
+    evaluation time would crash the import. Integer constants are looked up
+    lazily in ``_resolve_overwrite_mode`` at call time, inside Slicer.
+    """
+
+    OVERWRITE_ALL = "overwrite_all"
+    OVERWRITE_VISIBLE = "overwrite_visible"
+    ALLOW_OVERLAP = "allow_overlap"
+
+
+def _resolve_overwrite_mode(mode: OverwriteMode) -> int:
+    """Resolve an ``OverwriteMode`` to its ``vtkMRMLSegmentEditorNode`` constant.
+
+    Called only inside Slicer — the ``slicer`` module is real here, so the
+    constants (which may change integer values between Slicer releases) are
+    read from the authoritative source instead of being hard-coded.
+    """
+    match mode:
+        case OverwriteMode.OVERWRITE_ALL:
+            return int(slicer.vtkMRMLSegmentEditorNode.OverwriteAllSegments)
+        case OverwriteMode.OVERWRITE_VISIBLE:
+            return int(slicer.vtkMRMLSegmentEditorNode.OverwriteVisibleSegments)
+        case OverwriteMode.ALLOW_OVERLAP:
+            return int(slicer.vtkMRMLSegmentEditorNode.OverwriteNone)
 
 
 class SlicerHelperError(Exception):
@@ -815,6 +849,7 @@ class SlicerHelper:
         threshold: tuple[float, float] | None = None,
         sphere_brush: bool = True,
         source_volume: Any = None,
+        overwrite_mode: OverwriteMode = OverwriteMode.OVERWRITE_ALL,
     ) -> None:
         """Open SegmentEditor and configure tools.
 
@@ -825,6 +860,11 @@ class SlicerHelper:
             threshold: Optional (min, max) threshold values for Threshold effect.
             sphere_brush: Use spherical brush (True) or circular (False).
             source_volume: Override source volume node. Falls back to ``_image_node``.
+            overwrite_mode: "Modify other segments" masking mode applied to the
+                shared ``vtkMRMLSegmentEditorNode``. Defaults to
+                ``OverwriteMode.OVERWRITE_ALL`` so every effect (Paint, Erase,
+                Scissors, Islands, ...) forces overwrite regardless of the
+                user's persisted Slicer preferences.
         """
         seg_node = (
             segmentation.node if isinstance(segmentation, SegmentationBuilder) else segmentation
@@ -833,6 +873,13 @@ class SlicerHelper:
         slicer.util.selectModule("SegmentEditor")
         self._editor_widget = slicer.modules.segmenteditor.widgetRepresentation().self().editor
         self._editor_widget.setSegmentationNode(seg_node)
+
+        # Force the masking mode after setSegmentationNode() — Slicer may reset
+        # the editor node's state when a new segmentation is attached, so the
+        # overwrite mode has to be reapplied every time setup_editor() runs.
+        editor_node = self._scene.GetFirstNodeByClass("vtkMRMLSegmentEditorNode")
+        if editor_node is not None:
+            editor_node.SetOverwriteMode(_resolve_overwrite_mode(overwrite_mode))
 
         volume = source_volume if source_volume is not None else self._image_node
         if volume is not None:
