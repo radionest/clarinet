@@ -268,6 +268,7 @@ mdk_conclusion = RecordDef(
     role="mdk",
     min_records=1,
     max_records=1,
+    mask_patient_data=False,
     files=[FileRef(master_model, "input")],
     # Data per lesion: classification (metastasis, disappeared_metastasis, unclear,
     #   cyst, hemangioma, benign_unclear) + treatment (cluster_removal, isolated_removal, not_planned)
@@ -288,6 +289,7 @@ resection_model = RecordDef(
     role="expert",
     min_records=1,
     max_records=1,
+    mask_patient_data=False,
     slicer_script="scripts/resection_model.py",
     slicer_result_validator="validators/resection_model_validator.py",
     slicer_context_hydrators=["patient_first_study"],
@@ -307,6 +309,7 @@ resection_plan = RecordDef(
     role="expert",
     min_records=1,
     max_records=1,
+    mask_patient_data=False,
     slicer_script="scripts/resection_plan.py",
     files=[
         FileRef(resection_model_file, "input"),
@@ -323,6 +326,7 @@ resection_report = RecordDef(
     role="surgeon",
     min_records=1,
     max_records=1,
+    mask_patient_data=False,
     data_schema="schemas/resection-report.schema.json",
     files=[FileRef(master_model, "input")],
     # Data: lesions[].lesion_num (readonly, prefilled), lesions[].cluster (editable)
@@ -344,6 +348,7 @@ intraop_protocol = RecordDef(
     role="surgeon",
     min_records=1,
     max_records=1,
+    mask_patient_data=False,
     files=[FileRef(master_model, "input")],
     # Data per lesion: us_found (bool), removed (bool), fragment_number (int)
     # Data additional: additionally_found_lesions list
@@ -381,6 +386,7 @@ histology = RecordDef(
     role="pathologist",
     min_records=1,
     max_records=1,
+    mask_patient_data=False,
     files=[FileRef(master_model, "input")],
     # Data per lesion: macro_visible (bool), micro_visible (bool),
     #   tumor_cells (yes/no/no_data), tumor_fibrotic_ratio (float, nullable)

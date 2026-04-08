@@ -266,6 +266,11 @@ async def _to_record_type_create(
         kwargs["slicer_result_validator_args"] = rt_def.slicer_result_validator_args
     if rt_def.slicer_context_hydrators is not None:
         kwargs["slicer_context_hydrators"] = rt_def.slicer_context_hydrators
+    # Only forward mask_patient_data when explicitly set in the RecordDef so the
+    # reconciler skips comparison (and preserves DB state) when the field is
+    # absent from config — matching the contract of all other optional fields.
+    if "mask_patient_data" in rt_def.model_fields_set:
+        kwargs["mask_patient_data"] = rt_def.mask_patient_data
     if data_schema is not None:
         kwargs["data_schema"] = data_schema
     if file_registry is not None:

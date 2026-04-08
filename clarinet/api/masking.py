@@ -2,11 +2,17 @@
 
 When a patient has been anonymized (anon_name is set), non-superusers see
 anonymized identifiers instead of real patient/study/series data.
+
+RecordTypes may opt out of masking via ``mask_patient_data=False`` — used for
+record types filled by clinicians who need real patient IDs (surgery,
+pathology, MDK). Each deanonymized access is audit-logged at INFO level
+without leaking PII (identifiers only).
 """
 
 from collections.abc import Sequence
 
 from clarinet.models import Record, RecordRead, User
+from clarinet.utils.logger import logger
 
 
 def mask_record_patient_data(record: RecordRead, user: User) -> RecordRead:
@@ -26,6 +32,15 @@ def mask_record_patient_data(record: RecordRead, user: User) -> RecordRead:
         return record
 
     if record.patient.anon_name is None:
+        return record
+
+    # Per-record-type opt-out: clinical roles (surgeons, pathologists, MDK)
+    # need real patient identifiers. Each access is audit-logged.
+    if not record.record_type.mask_patient_data:
+        logger.info(
+            f"deanon_access user_id={user.id} record_id={record.id} "
+            f"record_type={record.record_type.name}"
+        )
         return record
 
     # Build masked patient

@@ -72,6 +72,15 @@ class RecordTypeBase(SQLModel):
     data_schema: RecordSchema | None = None
     slicer_context_hydrators: SlicerHydratorNames | None = None
 
+    mask_patient_data: bool = Field(
+        default=True,
+        description=(
+            "Whether to mask patient/study/series identifiers for non-superusers "
+            "when the patient has been anonymized. Set to False for record types "
+            "filled by clinicians who need real patient IDs (surgery, pathology, MDK)."
+        ),
+    )
+
     @field_validator("data_schema", mode="after")
     @classmethod
     def validate_data_schema_safe(cls, v: RecordSchema | None) -> RecordSchema | None:
@@ -218,6 +227,7 @@ class RecordTypeOptional(SQLModel):
     slicer_result_validator_args: SlicerArgs | None = None
     data_schema: RecordSchema | None = None
     slicer_context_hydrators: SlicerHydratorNames | None = None
+    mask_patient_data: bool | None = Field(default=None)
 
     role_name: str | None = Field(default=None)
     max_records: int | None = Field(default=None)
