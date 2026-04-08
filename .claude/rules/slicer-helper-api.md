@@ -22,7 +22,7 @@ paths:
 - `load_segmentation(path, name=None)` → loads segmentation from file, sets reference geometry
 - `set_segmentation_visibility(segmentation, visible)` — show/hide via `SetVisibility()`
 - `configure_segment_display(segmentation, segment_name, *, color=, fill_opacity=, outline_opacity=, outline_thickness=)` — per-segment 2D display
-- `setup_editor(seg, effect=, brush_size=, threshold=, source_volume=, overwrite_mode=OverwriteMode.OVERWRITE_ALL)` — configures SegmentEditor. The overwrite mode is reapplied on every call because Slicer may reset editor-node state when a new segmentation is attached
+- `setup_editor(seg, effect=, brush_size=, threshold=, sphere_brush=, source_volume=, overwrite_mode=OverwriteMode.OVERWRITE_ALL)` — configures SegmentEditor. The overwrite mode is reapplied on every call because Slicer may reset editor-node state when a new segmentation is attached
 - `set_layout("axial"|"sagittal"|"coronal"|"four_up")`
 - `annotate(text)`, `configure_slab(thickness=)`, `setup_edit_mask(path)`
 - `add_view_shortcuts()` — a/s/c keys for view switching

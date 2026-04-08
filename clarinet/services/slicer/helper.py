@@ -62,6 +62,10 @@ else:
 EditorEffectName = Literal["Paint", "Erase", "Threshold", "Draw", "Islands"]
 
 
+class SlicerHelperError(Exception):
+    """Error raised by helper functions when Slicer operations fail."""
+
+
 class OverwriteMode(str, Enum):
     """Segment Editor "Modify other segments" masking mode.
 
@@ -93,10 +97,8 @@ def _resolve_overwrite_mode(mode: OverwriteMode) -> int:
             return int(slicer.vtkMRMLSegmentEditorNode.OverwriteVisibleSegments)
         case OverwriteMode.ALLOW_OVERLAP:
             return int(slicer.vtkMRMLSegmentEditorNode.OverwriteNone)
-
-
-class SlicerHelperError(Exception):
-    """Error raised by helper functions when Slicer operations fail."""
+        case _:
+            raise SlicerHelperError(f"Unsupported overwrite mode: {mode!r}")
 
 
 def export_segmentation(name: str, output_path: str) -> str:
@@ -877,7 +879,11 @@ class SlicerHelper:
         # Force the masking mode after setSegmentationNode() — Slicer may reset
         # the editor node's state when a new segmentation is attached, so the
         # overwrite mode has to be reapplied every time setup_editor() runs.
-        editor_node = self._scene.GetFirstNodeByClass("vtkMRMLSegmentEditorNode")
+        # Ask the widget directly for its parameter-set node instead of scanning
+        # the scene with GetFirstNodeByClass(): the scene may hold several
+        # vtkMRMLSegmentEditorNode instances and only the widget knows which
+        # one actually drives the active editor.
+        editor_node = self._editor_widget.mrmlSegmentEditorNode()
         if editor_node is not None:
             editor_node.SetOverwriteMode(_resolve_overwrite_mode(overwrite_mode))
 
