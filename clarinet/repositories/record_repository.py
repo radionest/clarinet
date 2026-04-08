@@ -14,6 +14,7 @@ from sqlalchemy import and_, distinct, exists, func, literal, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased, selectinload
 from sqlmodel import col, select
+from sqlmodel.sql.expression import SelectOfScalar
 
 from clarinet.exceptions.domain import (
     RecordConstraintViolationError,
@@ -798,11 +799,11 @@ class RecordRepository(BaseRepository[Record]):
 
     @staticmethod
     def _apply_anon_uid_filter(
-        statement: Any,
+        statement: SelectOfScalar[Record],
         value: str | None,
         model: type,
         column: Any,
-    ) -> Any:
+    ) -> SelectOfScalar[Record]:
         """Apply Null / * / exact match filter for anonymous UID columns."""
         match value:
             case None:
@@ -816,9 +817,9 @@ class RecordRepository(BaseRepository[Record]):
 
     @staticmethod
     def _apply_data_query_filters(
-        statement: Any,
+        statement: SelectOfScalar[Record],
         queries: list[RecordFindResult],
-    ) -> Any:
+    ) -> SelectOfScalar[Record]:
         """Apply JSON data field comparison filters."""
         if not queries:
             return statement
