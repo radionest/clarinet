@@ -115,7 +115,7 @@ async def test_mask_patient_data_change_triggers_update(
     test_session: AsyncSession,
 ) -> None:
     """Toggling ``mask_patient_data`` between config versions is a diff."""
-    # v1: default True (not explicitly set — but reconciler treats default as unchanged)
+    # v1: explicit True — matches the ORM default, so creation only
     config_v1 = [_make_config("mask-test", mask_patient_data=True)]
     result = await reconcile_record_types(config_v1, test_session)
     assert "mask-test" in result.created

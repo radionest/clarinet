@@ -387,18 +387,24 @@ def get_pending_migrations(project_path: Path | None = None) -> list[str]:
 
 
 def verify_migrations_applied(project_path: Path | None = None) -> None:
-    """Fail-fast check: raise if alembic not initialized or migrations pending.
+    """Fail-fast check: raise if alembic is misconfigured or out of sync.
 
     Called from the FastAPI lifespan before any DB access. All production
-    projects are initialized via ``clarinet init-migrations``; absence of
-    alembic is a configuration error.
+    projects are initialized via ``clarinet init-migrations``.
 
     Args:
         project_path: Path to the project directory. Defaults to cwd.
 
     Raises:
-        MigrationError: alembic not initialized, database has no
-            ``alembic_version`` (fresh DB), or pending migrations exist.
+        MigrationError: Four distinct cases, each with an actionable hint:
+
+            1. alembic not initialized in the project —
+               ``clarinet init-migrations``
+            2. DB has no ``alembic_version`` row while scripts exist —
+               ``clarinet db migrate``
+            3. DB has a revision but no alembic scripts are present —
+               ``clarinet db migrate status`` (state mismatch)
+            4. pending migrations exist — ``clarinet db migrate``
     """
     try:
         pending = get_pending_migrations(project_path)
@@ -407,11 +413,19 @@ def verify_migrations_applied(project_path: Path | None = None) -> None:
             "Alembic not initialized in project. Run: clarinet init-migrations"
         ) from exc
     except MigrationError as exc:
-        # ``get_pending_migrations`` raises a bare ``MigrationError`` when the
-        # DB has no current revision (fresh DB without ``alembic_version``)
-        # while alembic has a head — i.e. migrations were never applied.
+        # ``get_pending_migrations`` raises a bare ``MigrationError`` when
+        # either ``current`` or ``head`` is None but not both — disambiguate
+        # so the operator sees an actionable message for their case.
+        config = get_alembic_config(project_path)
+        head = ScriptDirectory.from_config(config).get_current_head()
+        current = get_current_revision(project_path)
+        if head is not None and current is None:
+            raise MigrationError(
+                "Database has no alembic_version (fresh database). Run: clarinet db migrate"
+            ) from exc
         raise MigrationError(
-            "Database has no alembic_version (fresh database). Run: clarinet db migrate"
+            f"Alembic state mismatch (db current={current!r}, "
+            f"scripts head={head!r}). Run: clarinet db migrate status"
         ) from exc
 
     if pending:
