@@ -264,6 +264,34 @@ async def test_startup_fails_when_migrations_pending(startup_settings, monkeypat
 
 
 @pytest.mark.asyncio
+async def test_startup_preserves_case_specific_migration_hint(startup_settings, monkeypatch):
+    """Lifespan forwards the per-case remediation from the MigrationError.
+
+    ``verify_migrations_applied`` encodes a different fix command per case.
+    The StartupError must surface the *right* command for each case instead
+    of collapsing them into a hardcoded generic hint.
+    """
+    from clarinet.api.app import StartupError
+    from clarinet.exceptions import MigrationError
+
+    def _raise_not_initialized() -> None:
+        raise MigrationError("Alembic not initialized in project. Run: clarinet init-migrations")
+
+    monkeypatch.setattr(
+        "clarinet.utils.migrations.verify_migrations_applied", _raise_not_initialized
+    )
+
+    app = FastAPI(lifespan=lifespan)
+    with pytest.raises(StartupError) as exc_info:
+        async with lifespan(app):
+            pass
+
+    # The specific remediation must survive the StartupError wrap
+    assert "clarinet init-migrations" in str(exc_info.value)
+    assert "clarinet db migrate" not in str(exc_info.value)
+
+
+@pytest.mark.asyncio
 async def test_startup_recordflow_no_eager_healthcheck(startup_settings, capture_logs, monkeypatch):
     """RecordFlow startup must NOT perform eager API health check.
 

@@ -715,11 +715,20 @@ def cli_history() -> None:
 
 
 def cli_pending() -> None:
-    """Show pending migrations."""
+    """Show pending migrations.
+
+    Reports alembic state errors (fresh DB without ``alembic_version``,
+    script/DB mismatch) as info instead of raising a traceback — this
+    command is intended to *describe* state, not abort on anomalies.
+    """
     try:
         pending = get_pending_migrations()
     except FileNotFoundError:
         logger.error("Alembic not initialized. Run 'clarinet init-migrations' first.")
+        return
+    except MigrationError as exc:
+        detail = str(exc) or "alembic state mismatch (current or head missing)"
+        logger.info(f"Cannot list pending migrations: {detail}")
         return
     if pending:
         logger.info(f"Pending migrations: {', '.join(pending)}")

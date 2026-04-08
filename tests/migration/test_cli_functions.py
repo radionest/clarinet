@@ -180,6 +180,21 @@ class TestCliPending:
         # cli_pending catches FileNotFoundError → logs error, returns
         cli_pending()  # should not raise
 
+    def test_cli_pending_swallows_bare_migration_error(self, migration_project, monkeypatch):
+        """cli_pending reports bare MigrationError as info instead of crashing.
+
+        On a fresh DB or a script/DB mismatch, ``get_pending_migrations``
+        raises a bare ``MigrationError``. ``clarinet db migrate status`` is
+        a state-reporting command and must not blow up when state is unusual.
+        """
+        project_path, _db_url, _engine = migration_project
+        init_and_apply(project_path)
+        monkeypatch.chdir(project_path)
+        rollback_migration(1, project_path)
+
+        # Must not raise
+        cli_pending()
+
 
 class TestGetAlembicConfig:
     """Tests for get_alembic_config."""

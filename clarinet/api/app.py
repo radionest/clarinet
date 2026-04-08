@@ -146,10 +146,23 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     try:
         verify_migrations_applied()
     except MigrationError as e:
+        # ``verify_migrations_applied`` encodes a case-specific remediation in
+        # the message ("... Run: clarinet init-migrations" / "... Run: clarinet
+        # db migrate" / "... Run: clarinet db migrate status"). Split it out so
+        # the StartupError banner shows the *right* command for each case
+        # instead of collapsing everything into a single generic hint.
+        msg = str(e)
+        reason, sep, hint_cmd = msg.rpartition(" Run: ")
+        if sep:
+            reason = reason.rstrip()
+            hint = f"Run: {hint_cmd.strip()}"
+        else:
+            reason = msg
+            hint = "Run: clarinet db migrate"
         raise StartupError(
             component="Database",
-            reason=str(e),
-            hint="Apply migrations via: clarinet db migrate",
+            reason=reason,
+            hint=hint,
         ) from e
 
     await db_manager.create_db_and_tables_async()

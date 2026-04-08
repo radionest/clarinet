@@ -51,8 +51,9 @@ def test_raises_when_db_has_no_alembic_version() -> None:
     has no current revision while alembic has a head. ``verify_migrations_applied``
     must rewrap that into a clear, case-specific message.
     """
-    mock_script_dir = MagicMock()
+    mock_script_dir = MagicMock(spec=["get_current_head"])
     mock_script_dir.get_current_head.return_value = "abc123"
+    mock_config = MagicMock(spec=[])
 
     with (
         patch(
@@ -61,7 +62,7 @@ def test_raises_when_db_has_no_alembic_version() -> None:
         ),
         patch(
             "clarinet.utils.migrations.get_alembic_config",
-            return_value=MagicMock(),
+            return_value=mock_config,
         ),
         patch(
             "clarinet.utils.migrations.ScriptDirectory.from_config",
@@ -80,8 +81,9 @@ def test_raises_when_db_has_no_alembic_version() -> None:
 
 def test_raises_on_alembic_state_mismatch() -> None:
     """DB has revision but alembic has no head → state mismatch hint."""
-    mock_script_dir = MagicMock()
+    mock_script_dir = MagicMock(spec=["get_current_head"])
     mock_script_dir.get_current_head.return_value = None  # no scripts
+    mock_config = MagicMock(spec=[])
 
     with (
         patch(
@@ -90,7 +92,7 @@ def test_raises_on_alembic_state_mismatch() -> None:
         ),
         patch(
             "clarinet.utils.migrations.get_alembic_config",
-            return_value=MagicMock(),
+            return_value=mock_config,
         ),
         patch(
             "clarinet.utils.migrations.ScriptDirectory.from_config",
