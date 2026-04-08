@@ -28,6 +28,37 @@ def _write_record_types(tmp_path, content: str) -> None:
 
 
 @pytest.mark.asyncio
+async def test_mask_patient_data_only_forwarded_when_explicit(tmp_path) -> None:
+    """``mask_patient_data`` is omitted from ``RecordTypeCreate`` when not set in RecordDef.
+
+    Convention: optional fields are propagated only when explicitly set in the
+    Python config so the reconciler skips them and preserves DB state. Mirrors
+    how every other optional field is handled in ``_to_record_type_create``.
+    """
+    _write_record_types(
+        tmp_path,
+        """\
+        from clarinet.config.primitives import RecordDef
+
+        # Explicit False — must be forwarded
+        clinical = RecordDef(name="clinical-rt", level="STUDY", mask_patient_data=False)
+        # Default — must NOT be forwarded
+        radiology = RecordDef(name="radiology-rt", level="STUDY")
+        """,
+    )
+
+    config_items = await load_python_config(tmp_path)
+    by_name = {item.name: item for item in config_items}
+
+    # Explicit False is forwarded and visible in model_fields_set
+    assert "mask_patient_data" in by_name["clinical-rt"].model_fields_set
+    assert by_name["clinical-rt"].mask_patient_data is False
+
+    # Unset stays absent so the reconciler skips comparison and preserves DB
+    assert "mask_patient_data" not in by_name["radiology-rt"].model_fields_set
+
+
+@pytest.mark.asyncio
 async def test_bootstrap_loads_python_config(
     test_session: AsyncSession,
     tmp_path,

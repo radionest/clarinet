@@ -111,6 +111,30 @@ async def test_unchanged_not_modified(
 
 
 @pytest.mark.asyncio
+async def test_mask_patient_data_change_triggers_update(
+    test_session: AsyncSession,
+) -> None:
+    """Toggling ``mask_patient_data`` between config versions is a diff."""
+    # v1: explicit True — matches the ORM default, so creation only
+    config_v1 = [_make_config("mask-test", mask_patient_data=True)]
+    result = await reconcile_record_types(config_v1, test_session)
+    assert "mask-test" in result.created
+
+    # Clear cached state before re-reconciling
+    test_session.expire_all()
+
+    # v2: explicit False — must be detected as a change
+    config_v2 = [_make_config("mask-test", mask_patient_data=False)]
+    result = await reconcile_record_types(config_v2, test_session)
+    assert "mask-test" in result.updated
+
+    # Verify DB value
+    stmt = select(RecordType).where(RecordType.name == "mask-test")
+    row = (await test_session.execute(stmt)).scalar_one()
+    assert row.mask_patient_data is False
+
+
+@pytest.mark.asyncio
 async def test_orphan_detection(
     test_session: AsyncSession,
     seed_record_type: RecordType,

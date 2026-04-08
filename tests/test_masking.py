@@ -1,7 +1,11 @@
 """Unit tests for patient data masking (clarinet/api/masking.py)."""
 
+from collections.abc import Generator
 from datetime import UTC, datetime
+from typing import Any
 from uuid import uuid4
+
+import pytest
 
 from clarinet.api.masking import mask_record_patient_data, mask_records
 from clarinet.models.base import DicomQueryLevel
@@ -11,6 +15,27 @@ from clarinet.models.record_type import RecordTypeRead
 from clarinet.models.study import SeriesBase, StudyBase
 from clarinet.models.user import User
 from clarinet.settings import settings
+from clarinet.utils.logger import logger
+
+
+@pytest.fixture
+def capture_info_logs() -> Generator[list[str]]:
+    """Capture loguru INFO (and above) log messages during a test.
+
+    Yields a list of ``record["message"]`` strings. Audit-level tests need
+    INFO, so this is distinct from the ERROR-only ``capture_logs`` fixture
+    in ``tests/integration/conftest.py``.
+    """
+    messages: list[str] = []
+
+    def _sink(message: Any) -> None:
+        messages.append(message.record["message"])
+
+    sink_id = logger.add(_sink, level="INFO", format="{message}")
+    try:
+        yield messages
+    finally:
+        logger.remove(sink_id)
 
 
 def _make_user(*, is_superuser: bool = False) -> User:
@@ -41,6 +66,7 @@ def _make_record_read(
     study_anon_uid: str | None = "9.8.7.6.5.4.3.2",
     series_uid: str | None = "1.2.3.4.5.6.7.8.9",
     series_anon_uid: str | None = "9.8.7.6.5.4.3.2.1",
+    mask_patient_data: bool = True,
 ) -> RecordRead:
     """Create a test RecordRead instance.
 
@@ -53,6 +79,7 @@ def _make_record_read(
         study_anon_uid: Anonymized study UID (None = not anonymized).
         series_uid: Series UID (None = no series).
         series_anon_uid: Anonymized series UID (None = not anonymized).
+        mask_patient_data: Whether the record type masks patient data.
 
     Returns:
         RecordRead instance with all relationships populated.
@@ -83,6 +110,7 @@ def _make_record_read(
     record_type = RecordTypeRead(
         name="test-type-xxxxx",
         level=DicomQueryLevel.SERIES if series_uid else DicomQueryLevel.STUDY,
+        mask_patient_data=mask_patient_data,
     )
 
     return RecordRead(
@@ -328,6 +356,78 @@ class TestMaskRecordPatientData:
         assert result.patient_id == "REAL_PAT_001"
         assert result.patient.id == "REAL_PAT_001"
         assert result.patient.name == "Anon Patient Name"
+
+    def test_record_type_opted_out_not_masked(self, capture_info_logs: list[str]) -> None:
+        """``mask_patient_data=False`` bypasses masking and writes audit log."""
+        user = _make_user(is_superuser=False)
+        record = _make_record_read(
+            patient_id="REAL_PAT_001",
+            patient_name="Real Patient Name",
+            anon_name="Anon Patient Name",
+            auto_id=42,
+            mask_patient_data=False,
+        )
+
+        result = mask_record_patient_data(record, user)
+
+        # Real data returned despite anonymized patient
+        assert result.patient_id == "REAL_PAT_001"
+        assert result.patient.id == "REAL_PAT_001"
+        assert result.patient.name == "Real Patient Name"
+        assert result.study_uid == "1.2.3.4.5.6.7.8"
+        assert result.study is not None
+        assert result.study.study_uid == "1.2.3.4.5.6.7.8"
+        assert result.series_uid == "1.2.3.4.5.6.7.8.9"
+        assert result.series is not None
+        assert result.series.series_uid == "1.2.3.4.5.6.7.8.9"
+
+        # Audit log contains identifiers only — no PII leakage
+        audit_lines = [m for m in capture_info_logs if "deanon_access" in m]
+        assert len(audit_lines) == 1
+        audit_msg = audit_lines[0]
+        assert f"user_id={user.id}" in audit_msg
+        assert "record_id=1" in audit_msg
+        assert "record_type=test-type-xxxxx" in audit_msg
+        # PII must never leak into audit logs
+        assert "Real Patient Name" not in audit_msg
+        assert "REAL_PAT_001" not in audit_msg
+        assert "1.2.3.4.5.6.7.8" not in audit_msg
+
+    def test_record_type_masked_explicit_default(self) -> None:
+        """Explicit ``mask_patient_data=True`` behaves identically to the default."""
+        user = _make_user(is_superuser=False)
+        record = _make_record_read(
+            patient_id="REAL_PAT_001",
+            patient_name="Real Patient Name",
+            anon_name="Anon Patient Name",
+            auto_id=42,
+            mask_patient_data=True,
+        )
+
+        result = mask_record_patient_data(record, user)
+
+        # Standard masking applies
+        assert result.patient.name == "Anon Patient Name"
+        assert result.patient_id == f"{settings.anon_id_prefix}_42"
+
+    def test_superuser_bypasses_mask_patient_data_flag(self, capture_info_logs: list[str]) -> None:
+        """Superusers always see real data regardless of the opt-out flag."""
+        superuser = _make_user(is_superuser=True)
+
+        # Case 1: opt-out flag set — no audit log (superuser short-circuits first)
+        record_opted_out = _make_record_read(
+            anon_name="Anon Name", auto_id=1, mask_patient_data=False
+        )
+        result = mask_record_patient_data(record_opted_out, superuser)
+        assert result.patient.name == "Real Patient Name"
+
+        # Case 2: flag default (True) — still sees real data
+        record_default = _make_record_read(anon_name="Anon Name", auto_id=1, mask_patient_data=True)
+        result = mask_record_patient_data(record_default, superuser)
+        assert result.patient.name == "Real Patient Name"
+
+        # No audit log for superuser access
+        assert not any("deanon_access" in m for m in capture_info_logs)
 
 
 class TestMaskRecords:

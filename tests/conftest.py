@@ -52,6 +52,23 @@ def _disable_toml_export():
     yield
 
 
+@pytest.fixture(autouse=True, scope="session")
+def _bypass_migration_check():
+    """Skip the lifespan fail-fast check on pending alembic migrations.
+
+    Tests create schema via ``SQLModel.metadata.create_all`` in the
+    ``test_engine`` fixture, bypassing alembic entirely. The production
+    fail-fast check in ``clarinet.api.app.lifespan`` must therefore be
+    neutralized session-wide so any ``TestClient`` / ``async with lifespan``
+    invocation proceeds. Tests that explicitly verify the fail-fast path
+    override this via ``monkeypatch``.
+    """
+    from unittest.mock import patch
+
+    with patch("clarinet.utils.migrations.verify_migrations_applied", return_value=None):
+        yield
+
+
 @pytest.fixture(scope="session")
 def test_settings() -> Settings:
     """Test settings with in-memory SQLite."""

@@ -122,6 +122,7 @@ class RecordDef(BaseModel):
     slicer_result_validator: str | None = None
     slicer_result_validator_args: dict[str, str] | None = None
     slicer_context_hydrators: list[str] | None = None
+    mask_patient_data: bool = True
 
     def __init__(self, *, role: str | None = None, **kwargs: Any) -> None:
         """Accept ``role`` as a user-friendly alias for ``role_name``."""

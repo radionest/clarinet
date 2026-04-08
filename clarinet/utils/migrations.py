@@ -386,6 +386,54 @@ def get_pending_migrations(project_path: Path | None = None) -> list[str]:
     return pending
 
 
+def verify_migrations_applied(project_path: Path | None = None) -> None:
+    """Fail-fast check: raise if alembic is misconfigured or out of sync.
+
+    Called from the FastAPI lifespan before any DB access. All production
+    projects are initialized via ``clarinet init-migrations``.
+
+    Args:
+        project_path: Path to the project directory. Defaults to cwd.
+
+    Raises:
+        MigrationError: Four distinct cases, each with an actionable hint:
+
+            1. alembic not initialized in the project —
+               ``clarinet init-migrations``
+            2. DB has no ``alembic_version`` row while scripts exist —
+               ``clarinet db migrate``
+            3. DB has a revision but no alembic scripts are present —
+               ``clarinet db migrate status`` (state mismatch)
+            4. pending migrations exist — ``clarinet db migrate``
+    """
+    try:
+        pending = get_pending_migrations(project_path)
+    except FileNotFoundError as exc:
+        raise MigrationError(
+            "Alembic not initialized in project. Run: clarinet init-migrations"
+        ) from exc
+    except MigrationError as exc:
+        # ``get_pending_migrations`` raises a bare ``MigrationError`` when
+        # either ``current`` or ``head`` is None but not both — disambiguate
+        # so the operator sees an actionable message for their case.
+        config = get_alembic_config(project_path)
+        head = ScriptDirectory.from_config(config).get_current_head()
+        current = get_current_revision(project_path)
+        if head is not None and current is None:
+            raise MigrationError(
+                "Database has no alembic_version (fresh database). Run: clarinet db migrate"
+            ) from exc
+        raise MigrationError(
+            f"Alembic state mismatch (db current={current!r}, "
+            f"scripts head={head!r}). Run: clarinet db migrate status"
+        ) from exc
+
+    if pending:
+        raise MigrationError(
+            f"{len(pending)} pending migration(s): {', '.join(pending)}. Run: clarinet db migrate"
+        )
+
+
 def get_migration_history(
     project_path: Path | None = None,
 ) -> list[tuple[str, str | set[str], str]]:
@@ -667,11 +715,20 @@ def cli_history() -> None:
 
 
 def cli_pending() -> None:
-    """Show pending migrations."""
+    """Show pending migrations.
+
+    Reports alembic state errors (fresh DB without ``alembic_version``,
+    script/DB mismatch) as info instead of raising a traceback — this
+    command is intended to *describe* state, not abort on anomalies.
+    """
     try:
         pending = get_pending_migrations()
     except FileNotFoundError:
         logger.error("Alembic not initialized. Run 'clarinet init-migrations' first.")
+        return
+    except MigrationError as exc:
+        detail = str(exc) or "alembic state mismatch (current or head missing)"
+        logger.info(f"Cannot list pending migrations: {detail}")
         return
     if pending:
         logger.info(f"Pending migrations: {', '.join(pending)}")
