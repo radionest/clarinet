@@ -56,8 +56,13 @@ window.config = {
 // them from customizationService for the default tool group, so we re-bind at runtime
 // after the toolGroupService has been initialized and tools have been added.
 (function patchOhifMouseBindings() {
-  // Cornerstone3D MouseBindings enum (numeric values from
-  // cornerstone3D/packages/tools/src/enums/ToolBindings.ts)
+  // Numeric values of cornerstone3D MouseBindings enum, pinned to @cornerstonejs/tools
+  // 4.15.29 (bundled by @ohif/extension-cornerstone 3.12.0 — see OHIF v3.12.0
+  // extensions/cornerstone/package.json). Source of truth:
+  // https://github.com/cornerstonejs/cornerstone3D/blob/v4.15.29/packages/tools/src/enums/ToolBindings.ts
+  // If clarinet/settings.py:ohif_default_version is bumped past 3.12.x, re-verify
+  // these constants against the new bundled cornerstone3D version — a silent enum
+  // shift would make the rebind apply to the wrong mouse buttons.
   var Primary = 1;
   var Secondary = 2;
   var Wheel = 524288;
