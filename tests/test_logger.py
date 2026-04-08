@@ -264,6 +264,40 @@ class TestScrubSensitive:
         assert "abc" not in result
 
 
+class TestScrubPatcher:
+    """The patched `logger` exported by clarinet.utils.logger scrubs every sink."""
+
+    def test_file_sink_via_exported_logger_scrubs_db_url(self) -> None:
+        from clarinet.utils.logger import logger as patched_logger
+
+        buf = StringIO()
+        sink_id = patched_logger.add(buf, format="{message}", level="DEBUG", enqueue=False)
+        try:
+            patched_logger.info(
+                "Async database engine created: postgresql+asyncpg://app:s3cret@db:5432/x"
+            )
+        finally:
+            patched_logger.remove(sink_id)
+
+        output = buf.getvalue()
+        assert "s3cret" not in output
+        assert "://app:***@db" in output
+
+    def test_file_sink_via_exported_logger_scrubs_password_kv(self) -> None:
+        from clarinet.utils.logger import logger as patched_logger
+
+        buf = StringIO()
+        sink_id = patched_logger.add(buf, format="{message}", level="DEBUG", enqueue=False)
+        try:
+            patched_logger.info("connecting with password=hunter2 token=abc")
+        finally:
+            patched_logger.remove(sink_id)
+
+        output = buf.getvalue()
+        assert "hunter2" not in output
+        assert "abc" not in output
+
+
 class TestLokiSink:
     """Tests for _LokiSink class."""
 
