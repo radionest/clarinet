@@ -10,6 +10,7 @@ import pytest
 
 from clarinet.exceptions.domain import PipelineStepError
 from clarinet.models.base import DicomQueryLevel
+from clarinet.services.dicom.models import RetrieveResult, SeriesResult
 from clarinet.services.pipeline.context import FileResolver, RecordQuery, TaskContext
 from clarinet.services.pipeline.message import PipelineMessage
 from clarinet.services.pipeline.tasks.cache_dicomweb import (
@@ -18,6 +19,23 @@ from clarinet.services.pipeline.tasks.cache_dicomweb import (
     _organize_to_cache,
     _prefetch_dicom_web_impl,
 )
+
+
+def _series_result(series_uid: str, study_uid: str = "STUDY1") -> MagicMock:
+    """Build a SeriesResult-shaped mock with explicit attributes."""
+    mock = MagicMock(spec=SeriesResult)
+    mock.study_instance_uid = study_uid
+    mock.series_instance_uid = series_uid
+    return mock
+
+
+def _retrieve_result(num_completed: int) -> MagicMock:
+    """Build a RetrieveResult-shaped mock with explicit attributes."""
+    mock = MagicMock(spec=RetrieveResult)
+    mock.num_completed = num_completed
+    mock.num_failed = 0
+    mock.status = "Success"
+    return mock
 
 
 def _build_ctx(tmp_path: Path) -> TaskContext:
@@ -153,6 +171,66 @@ class TestOrganizeToCache:
         assert grouped == {"SER1": 1}
         assert (cache_base / "STUDY1" / "SER1" / "SOP1.dcm").exists()
 
+    def test_skips_dicom_with_missing_uids(self, tmp_path: Path):
+        """A readable DICOM lacking SeriesInstanceUID/SOPInstanceUID is skipped."""
+        import pydicom
+        from pydicom.dataset import FileMetaDataset
+
+        tmp_dir = tmp_path / "tmp"
+        cache_base = tmp_path / "cache"
+        tmp_dir.mkdir()
+
+        # Build a DICOM that omits both UIDs
+        file_meta = FileMetaDataset()
+        file_meta.MediaStorageSOPClassUID = "1.2.840.10008.5.1.4.1.1.2"
+        file_meta.MediaStorageSOPInstanceUID = "1.2.3"
+        file_meta.TransferSyntaxUID = "1.2.840.10008.1.2"
+        ds = pydicom.Dataset()
+        ds.file_meta = file_meta
+        ds.PatientName = "Anon"
+        ds.is_little_endian = True
+        ds.is_implicit_VR = True
+        bad = tmp_dir / "no_uids.dcm"
+        ds.save_as(bad, enforce_file_format=True)
+
+        _make_dcm(tmp_dir / "good.dcm", "SER1", "SOP1")
+
+        grouped = _organize_to_cache(tmp_dir, cache_base, study_uid="STUDY1")
+
+        assert grouped == {"SER1": 1}
+        assert (cache_base / "STUDY1" / "SER1" / "SOP1.dcm").exists()
+
+    def test_refetch_clears_stale_marker_first(self, tmp_path: Path):
+        """Re-fetch must remove .cached_at *before* moving fresh files.
+
+        Locks in the fix for the race where DicomWebCache._load_from_disk
+        sees an expired marker and rmtree's the series mid-write.
+        """
+        tmp_dir = tmp_path / "tmp"
+        cache_base = tmp_path / "cache"
+        tmp_dir.mkdir()
+
+        # Pre-populate stale entry: old SOP files + expired .cached_at
+        old_series_dir = cache_base / "STUDY1" / "SER1"
+        old_series_dir.mkdir(parents=True)
+        (old_series_dir / "STALE_SOP_001.dcm").write_bytes(b"stale1")
+        (old_series_dir / "STALE_SOP_002.dcm").write_bytes(b"stale2")
+        (old_series_dir / ".cached_at").write_text("0.0")  # 1970, definitely expired
+
+        # New fetch arrives
+        _make_dcm(tmp_dir / "fresh.dcm", "SER1", "FRESH_SOP")
+        grouped = _organize_to_cache(tmp_dir, cache_base, study_uid="STUDY1")
+
+        assert grouped == {"SER1": 1}
+        # Stale files removed
+        assert not (old_series_dir / "STALE_SOP_001.dcm").exists()
+        assert not (old_series_dir / "STALE_SOP_002.dcm").exists()
+        # Fresh file present
+        assert (old_series_dir / "FRESH_SOP.dcm").exists()
+        # Marker rewritten with current timestamp (not the stale 0.0)
+        new_cached_at = float((old_series_dir / ".cached_at").read_text())
+        assert new_cached_at > time.time() - 60
+
 
 class TestPrefetchDicomWebImpl:
     """Tests for the core prefetch logic."""
@@ -162,6 +240,16 @@ class TestPrefetchDicomWebImpl:
         ctx = _build_ctx(tmp_path)
         msg = PipelineMessage(patient_id="PAT001", study_uid="")
         with pytest.raises(PipelineStepError, match="study_uid is required"):
+            await _prefetch_dicom_web_impl(msg, ctx)
+
+    @pytest.mark.asyncio
+    async def test_non_bool_skip_if_anon_raises(self, tmp_path: Path):
+        """Reject non-bool payload values to prevent silent intent inversion."""
+        ctx = _build_ctx(tmp_path)
+        msg = PipelineMessage(
+            patient_id="PAT001", study_uid="STUDY1", payload={"skip_if_anon": "false"}
+        )
+        with pytest.raises(PipelineStepError, match="skip_if_anon must be a bool"):
             await _prefetch_dicom_web_impl(msg, ctx)
 
     @pytest.mark.asyncio
@@ -200,10 +288,7 @@ class TestPrefetchDicomWebImpl:
             (series_dir / "inst.dcm").write_bytes(b"fake")
             (series_dir / ".cached_at").write_text(str(time.time()))
 
-        series_results = [
-            MagicMock(series_instance_uid="SER1"),
-            MagicMock(series_instance_uid="SER2"),
-        ]
+        series_results = [_series_result("SER1"), _series_result("SER2")]
         mock_client = AsyncMock()
         mock_client.find_series = AsyncMock(return_value=series_results)
         mock_client.get_study = AsyncMock()
@@ -231,7 +316,7 @@ class TestPrefetchDicomWebImpl:
         (anon / "inst.dcm").write_bytes(b"fake")
 
         mock_client = AsyncMock()
-        mock_client.find_series = AsyncMock(return_value=[MagicMock(series_instance_uid="SER1")])
+        mock_client.find_series = AsyncMock(return_value=[_series_result("SER1")])
         mock_client.get_study = AsyncMock()
         mock_client.get_series = AsyncMock()
 
@@ -259,11 +344,11 @@ class TestPrefetchDicomWebImpl:
         (anon / "inst.dcm").write_bytes(b"fake")
 
         mock_client = AsyncMock()
-        mock_client.find_series = AsyncMock(return_value=[MagicMock(series_instance_uid="SER1")])
+        mock_client.find_series = AsyncMock(return_value=[_series_result("SER1")])
 
         async def fake_get_study(study_uid, peer, output_dir):
             _make_dcm(output_dir / "fetched.dcm", "SER1", "SOP-NEW")
-            return MagicMock(num_completed=1)
+            return _retrieve_result(num_completed=1)
 
         mock_client.get_study = AsyncMock(side_effect=fake_get_study)
 
@@ -289,16 +374,13 @@ class TestPrefetchDicomWebImpl:
 
         mock_client = AsyncMock()
         mock_client.find_series = AsyncMock(
-            return_value=[
-                MagicMock(series_instance_uid="SER1"),
-                MagicMock(series_instance_uid="SER2"),
-            ]
+            return_value=[_series_result("SER1"), _series_result("SER2")]
         )
 
         async def fake_get_study(study_uid, peer, output_dir):
             _make_dcm(output_dir / "a.dcm", "SER1", "SOP1")
             _make_dcm(output_dir / "b.dcm", "SER2", "SOP2")
-            return MagicMock(num_completed=2)
+            return _retrieve_result(num_completed=2)
 
         mock_client.get_study = AsyncMock(side_effect=fake_get_study)
         mock_client.get_series = AsyncMock()
@@ -330,15 +412,12 @@ class TestPrefetchDicomWebImpl:
 
         mock_client = AsyncMock()
         mock_client.find_series = AsyncMock(
-            return_value=[
-                MagicMock(series_instance_uid="SER1"),
-                MagicMock(series_instance_uid="SER2"),
-            ]
+            return_value=[_series_result("SER1"), _series_result("SER2")]
         )
 
         async def fake_get_series(study_uid, series_uid, peer, output_dir):
             _make_dcm(output_dir / "new.dcm", series_uid, "SOP-NEW")
-            return MagicMock(num_completed=1)
+            return _retrieve_result(num_completed=1)
 
         mock_client.get_study = AsyncMock()
         mock_client.get_series = AsyncMock(side_effect=fake_get_series)
@@ -362,8 +441,8 @@ class TestPrefetchDicomWebImpl:
         msg = PipelineMessage(patient_id="PAT001", study_uid="STUDY1")
 
         mock_client = AsyncMock()
-        mock_client.find_series = AsyncMock(return_value=[MagicMock(series_instance_uid="SER1")])
-        mock_client.get_study = AsyncMock(return_value=MagicMock(num_completed=0))
+        mock_client.find_series = AsyncMock(return_value=[_series_result("SER1")])
+        mock_client.get_study = AsyncMock(return_value=_retrieve_result(num_completed=0))
 
         with (
             patch("clarinet.services.dicom.DicomClient", return_value=mock_client),

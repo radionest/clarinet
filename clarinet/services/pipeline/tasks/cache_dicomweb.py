@@ -89,16 +89,18 @@ def _organize_to_cache(tmp_dir: Path, cache_base: Path, study_uid: str) -> dict[
     the same filesystem (guaranteed because ``tmp_dir`` is created
     inside ``cache_base``).
 
-    For each series that receives at least one new file, pre-existing
-    ``*.dcm`` files in the target directory are removed *before* the
-    first new file is moved in. This prevents the re-fetch case where
-    an expired cache entry leaves stale SOP instances that would then
-    sit alongside fresh ones under a newly-rewritten ``.cached_at``
-    marker — ``DicomWebCache._load_from_disk`` would happily serve the
-    mix as valid.
+    For each series that receives at least one new file, the previous
+    ``.cached_at`` marker is removed *first*, then pre-existing ``*.dcm``
+    files are unlinked, then fresh files are moved in. The marker must
+    be removed before stale files because ``DicomWebCache._load_from_disk``
+    in the API process can read an expired marker, declare the series
+    invalid, and ``shutil.rmtree`` the directory while we are mid-write
+    — with the marker gone, the API process gets a clean cache miss
+    (returns ``None``) instead of racing on rmtree.
 
-    Writes a ``.cached_at`` marker per series so the disk tier in
-    ``DicomWebCache`` recognises the entry on the next OHIF request.
+    Writes a fresh ``.cached_at`` marker per series at the end so the
+    disk tier in ``DicomWebCache`` recognises the entry on the next
+    OHIF request.
 
     Returns:
         Mapping ``series_uid → instance count`` for the series that
@@ -117,16 +119,31 @@ def _organize_to_cache(tmp_dir: Path, cache_base: Path, study_uid: str) -> dict[
             logger.warning(f"Skipping unreadable retrieved DICOM {dcm_path}: {exc}")
             continue
 
-        series_uid = str(ds.SeriesInstanceUID)
-        sop_uid = str(ds.SOPInstanceUID)
+        # Tags may be absent even after a successful read — pydicom's
+        # specific_tags hint is best-effort, not a presence guarantee.
+        series_uid_attr = getattr(ds, "SeriesInstanceUID", None)
+        sop_uid_attr = getattr(ds, "SOPInstanceUID", None)
+        if not series_uid_attr or not sop_uid_attr:
+            logger.warning(
+                f"Skipping retrieved DICOM with missing UIDs: {dcm_path} "
+                f"(SeriesInstanceUID={series_uid_attr!r}, "
+                f"SOPInstanceUID={sop_uid_attr!r})"
+            )
+            continue
+
+        series_uid = str(series_uid_attr)
+        sop_uid = str(sop_uid_attr)
         target_dir = cache_base / study_uid / series_uid
         target_dir.mkdir(parents=True, exist_ok=True)
 
-        # Clear stale files from a previous (expired) cache entry before
-        # writing the first new instance for this series.
+        # Clear stale state from a previous (possibly expired) cache
+        # entry before writing the first new instance for this series.
+        # Marker first — see docstring for the rationale (race with
+        # _load_from_disk → rmtree on expired marker).
         if series_uid not in cleaned_series:
+            (target_dir / ".cached_at").unlink(missing_ok=True)
             for stale in target_dir.glob("*.dcm"):
-                stale.unlink()
+                stale.unlink(missing_ok=True)
             cleaned_series.add(series_uid)
 
         target_path = target_dir / f"{sop_uid}.dcm"
@@ -190,7 +207,16 @@ async def _prefetch_dicom_web_impl(msg: PipelineMessage, _ctx: TaskContext) -> N
             "a record that has a study_uid",
         )
 
-    skip_if_anon = bool(msg.payload.get("skip_if_anon", True))
+    # Strict bool check — `bool("false") == True` would silently invert
+    # user intent if the payload was carried as JSON and arrived as a string.
+    raw_skip_if_anon = msg.payload.get("skip_if_anon", True)
+    if not isinstance(raw_skip_if_anon, bool):
+        raise PipelineStepError(
+            "prefetch_dicom_web",
+            f"payload.skip_if_anon must be a bool, got {type(raw_skip_if_anon).__name__}: "
+            f"{raw_skip_if_anon!r}",
+        )
+    skip_if_anon = raw_skip_if_anon
 
     from clarinet.services.dicom import DicomClient, DicomNode, SeriesQuery
 
