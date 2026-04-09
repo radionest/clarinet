@@ -6,6 +6,7 @@ unique constraints, and indexes.
 """
 
 import pytest
+from sqlalchemy import Boolean
 from sqlmodel import SQLModel
 
 from clarinet.models import *  # noqa: F403
@@ -180,3 +181,92 @@ class TestMigrationOperations:
 
         pending = get_pending_migrations(project_path)
         assert pending == [], f"Should have no pending migrations, got: {pending}"
+
+
+# Columns that exist in the very first init migration of any deployed project.
+# They never go through ``ALTER TABLE ADD COLUMN`` on a populated table, so they
+# do not need ``server_default``. Any NEW non-nullable Boolean column must
+# declare ``server_default`` — see ``test_not_null_bool_columns_have_server_default``.
+#
+# Do not extend this list lightly. The right fix for any newly added Boolean
+# column is to declare ``sa_column_kwargs={"server_default": text("1")}`` (or
+# ``text("0")``) on the SQLModel ``Field``. Only fields that genuinely shipped
+# in the day-1 schema belong here.
+GRANDFATHERED_BOOL_COLUMNS_WITHOUT_SERVER_DEFAULT: set[tuple[str, str]] = {
+    # File registry — initial schema (M2M for record type files).
+    ("filedefinition", "multiple"),
+    ("recordtype_file_link", "required"),
+    # fastapi-users managed columns — defined on the upstream base class,
+    # cannot be modified from clarinet without forking SQLAlchemyBaseUserTable.
+    ("user", "is_active"),
+    ("user", "is_superuser"),
+    ("user", "is_verified"),
+}
+
+
+class TestServerDefaultsForAdditiveMigrations:
+    """Catches the bug class behind PR #144 (``mask_patient_data``).
+
+    When a NOT NULL Boolean column is added to an SQLModel that already has
+    deployed data, alembic autogenerate emits ``ALTER TABLE ... ADD COLUMN ...
+    BOOLEAN NOT NULL`` and PostgreSQL refuses with ``contains null values``.
+    SQLite is more lenient and accepts the same DDL, which is how this bug
+    slipped into PR #144 — the SQLite-only test matrix never exercised the
+    failure path.
+
+    The fix is to declare ``sa_column_kwargs={"server_default": text("1")}``
+    on the field; alembic then renders the column with ``DEFAULT '1'`` and
+    PostgreSQL backfills existing rows during the ALTER.
+
+    These tests are pure metadata introspection — they do not require a real
+    database — so they run identically on the SQLite and PostgreSQL legs of
+    ``make test-all-stages``.
+    """
+
+    def test_not_null_bool_columns_have_server_default(self):
+        """Every non-nullable ``Boolean`` column must declare ``server_default``.
+
+        New offenders should be fixed by adding
+        ``sa_column_kwargs={"server_default": text("1")}`` (or ``"0"``) to
+        the SQLModel ``Field`` definition. Only add to
+        ``GRANDFATHERED_BOOL_COLUMNS_WITHOUT_SERVER_DEFAULT`` if the column
+        is shipped in the very first init migration and is not added later.
+        """
+        offenders: list[str] = []
+        for table_name, table in SQLModel.metadata.tables.items():
+            for col in table.columns:
+                if not isinstance(col.type, Boolean):
+                    continue
+                if col.nullable or col.primary_key:
+                    continue
+                if col.server_default is not None:
+                    continue
+                if (table_name, col.name) in GRANDFATHERED_BOOL_COLUMNS_WITHOUT_SERVER_DEFAULT:
+                    continue
+                offenders.append(f"{table_name}.{col.name}")
+
+        assert not offenders, (
+            "NOT NULL Boolean columns without server_default — adding any of "
+            "these to a populated PostgreSQL table will fail with 'contains "
+            "null values'. Add sa_column_kwargs={'server_default': text('1')} "
+            "(or text('0')) to the SQLModel Field definition. See PR #144 "
+            "and clarinet/models/CLAUDE.md → 'Additive migrations on populated "
+            "tables'.\n"
+            f"Offenders: {offenders}"
+        )
+
+    def test_recordtype_mask_patient_data_has_server_default(self):
+        """Targeted regression for the original PR #144 bug.
+
+        Even if the generic check above is relaxed, this column specifically
+        must keep its ``server_default`` because real production deployments
+        upgrade through it.
+        """
+        from clarinet.models import RecordType
+
+        col = RecordType.__table__.c.mask_patient_data
+        assert not col.nullable, "mask_patient_data must remain NOT NULL"
+        assert col.server_default is not None, (
+            "mask_patient_data must declare server_default — see "
+            "clarinet/models/record_type.py for the in-line rationale."
+        )

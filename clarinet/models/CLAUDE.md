@@ -142,6 +142,40 @@ JSON Schema metadata, while Pydantic's `Field()` uses `json_schema_extra`. Using
 one silently does nothing. Rule: if the class inherits `SQLModel` → use `schema_extra`;
 if it inherits `pydantic.BaseModel` → use `json_schema_extra`.
 
+## Additive migrations on populated tables
+
+**Every new non-nullable column on an existing table must declare `server_default`.**
+
+Without it, alembic autogenerate emits `ALTER TABLE ... ADD COLUMN ... NOT NULL`,
+which PostgreSQL rejects with `column "..." of relation "..." contains null values`
+on any populated database. SQLite is more lenient and silently accepts the same DDL,
+so SQLite-only test runs do **not** catch this — the bug surfaces only against PG.
+
+**Pattern (booleans):**
+```python
+mask_patient_data: bool = Field(
+    default=True,
+    sa_column_kwargs={"server_default": text("1")},
+)
+```
+
+Use the literal `text("1")` (not `text("true")` or `expression.true()`):
+SQLite stores `BOOLEAN` as `INTEGER` and rejects `'true'` inside `ALTER TABLE`,
+PostgreSQL accepts `'1'` for `BOOLEAN` via implicit cast — `"1"` is the only
+literal that survives both dialects.
+
+**Alternatives (when `server_default` is not appropriate):**
+- Make the column nullable (`Optional[X]`) — only if `None` is meaningful at the
+  domain level, not just to bypass this check.
+- Hand-write a multi-step migration: add column nullable → backfill via
+  `op.execute("UPDATE ...")` → `alter_column(..., nullable=False)`. Reserve for
+  values that cannot be expressed as a single SQL literal.
+
+**Regression tests:** `tests/migration/test_schema_integrity.py::TestServerDefaultsForAdditiveMigrations`
+(metadata scan) and `tests/migration/test_data_preservation.py::TestAddNotNullBooleanRequiresServerDefault`
+(real ALTER TABLE on populated SQLite + PostgreSQL via `db_backend` parametrization,
+runs in stage 6 of `make test-all-stages`).
+
 ## Type Aliases (`clarinet/types.py`)
 
 `PortableJSON = JSON().with_variant(JSONB(), "postgresql")` — JSONB on PostgreSQL (supports GROUP BY / DISTINCT / equality), JSON on SQLite. Use for all JSON columns.
