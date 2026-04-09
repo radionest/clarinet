@@ -14,7 +14,11 @@ source "$PROJECT_DIR/deploy/vm/vm.conf"
 source "$PROJECT_DIR/deploy/lib/logging.sh"
 init_logging "vm-tests"
 
-SSH_OPTS=(-o StrictHostKeyChecking=no -i "$SSH_KEY_PATH")
+SSH_OPTS=(
+    -o StrictHostKeyChecking=no
+    -o "UserKnownHostsFile=${KNOWN_HOSTS_FILE}"
+    -i "$SSH_KEY_PATH"
+)
 
 LOCAL_PORT=15432
 TEST_DB="clarinet_test"
@@ -73,25 +77,25 @@ log "Opening SSH tunnel (localhost:$LOCAL_PORT -> VM:5432)..."
 ssh "${SSH_OPTS[@]}" -N -L "$LOCAL_PORT:localhost:5432" "clarinet@$VM_IP" &
 TUNNEL_PID=$!
 
-# A live ssh -N process is not proof the tunnel works: OpenSSH silently
+# A live `ssh -N` process is not proof the tunnel works: OpenSSH silently
 # disables port forwarding when the host key conflicts (e.g. stale
-# known_hosts after VM reimage), leaving `kill -0` happy but the listening
-# socket absent. Probe the local port instead.
+# known_hosts after VM reimage), leaving `kill -0` happy but no listener on
+# the local port. Probe the listener directly with a short retry loop.
+tunnel_ready=0
 for _ in 1 2 3 4 5 6 7 8 9 10; do
     if (exec 3<>"/dev/tcp/localhost/$LOCAL_PORT") 2>/dev/null; then
         exec 3<&-
         exec 3>&-
+        tunnel_ready=1
         break
     fi
     sleep 0.5
 done
-if ! (exec 3<>"/dev/tcp/localhost/$LOCAL_PORT") 2>/dev/null; then
+if [ "$tunnel_ready" -ne 1 ]; then
     err "SSH tunnel did not open a listener on localhost:$LOCAL_PORT"
-    err "Check for stale known_hosts entry for $VM_IP"
+    err "Check for stale known_hosts entry for $VM_IP in $KNOWN_HOSTS_FILE"
     exit 1
 fi
-exec 3<&-
-exec 3>&-
 log "Tunnel active (PID $TUNNEL_PID)."
 
 export CLARINET_TEST_DATABASE_URL="postgresql+asyncpg://clarinet:${DB_PASS}@localhost:${LOCAL_PORT}/${TEST_DB}"
