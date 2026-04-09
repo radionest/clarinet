@@ -268,6 +268,60 @@ class TestBackgroundDiskWriteSafety:
             await cache._write_to_disk_background("study1", "series1", instances)
 
 
+class TestLoadFromDiskNoTTL:
+    """Read-time does not evict — disk cache lifecycle is cleanup's job.
+
+    DICOM data on the PACS is immutable, so ``_load_from_disk`` returns any
+    present entry regardless of how old the marker is. Physical removal
+    happens only via ``evict_expired`` / ``evict_by_size`` in the background
+    cleanup service.
+    """
+
+    def test_ancient_entry_is_returned(self, tmp_cache_dir: Path) -> None:
+        """A week-old marker must still be a cache hit."""
+        cache = DicomWebCache(base_dir=tmp_cache_dir, ttl_hours=1)
+
+        create_disk_series(
+            tmp_cache_dir,
+            "study1",
+            "series_old",
+            cached_at=time.time() - 7 * 86400,
+        )
+
+        mock_ds = MagicMock()
+        mock_ds.SOPInstanceUID = "1.2.3"
+        with patch("clarinet.services.dicomweb.cache.pydicom.dcmread", return_value=mock_ds):
+            result = cache._load_from_disk("study1", "series_old")
+
+        assert result is not None
+        assert "1.2.3" in result
+        # Files are still on disk
+        assert (tmp_cache_dir / "study1" / "series_old").exists()
+
+    def test_cleanup_still_removes_ancient_entry(self, tmp_cache_dir: Path) -> None:
+        """Background cleanup remains the sole lifecycle authority."""
+        cache = DicomWebCache(base_dir=tmp_cache_dir, ttl_hours=1)
+
+        create_disk_series(
+            tmp_cache_dir,
+            "study1",
+            "series_old",
+            cached_at=time.time() - 7 * 86400,
+        )
+
+        # Read-path does not touch the files, regardless of age
+        mock_ds = MagicMock()
+        mock_ds.SOPInstanceUID = "1.2.3"
+        with patch("clarinet.services.dicomweb.cache.pydicom.dcmread", return_value=mock_ds):
+            assert cache._load_from_disk("study1", "series_old") is not None
+        assert (tmp_cache_dir / "study1" / "series_old").exists()
+
+        # Cleanup is what actually removes
+        removed = cache.evict_expired()
+        assert removed == 1
+        assert not (tmp_cache_dir / "study1" / "series_old").exists()
+
+
 class TestEvictExpired:
     """Test evict_expired() removes expired entries and preserves fresh ones."""
 

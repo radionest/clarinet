@@ -38,24 +38,16 @@ from clarinet.settings import settings
 from clarinet.utils.logger import logger
 
 
-def _is_disk_cache_valid(
-    cache_base: Path, study_uid: str, series_uid: str, ttl_seconds: int
-) -> bool:
-    """Check whether a series already has a non-expired disk cache entry.
+def _has_disk_cache(cache_base: Path, study_uid: str, series_uid: str) -> bool:
+    """Check whether a series has a disk cache entry.
 
-    Mirrors the validity check in ``DicomWebCache._load_from_disk``: a
-    ``.cached_at`` marker must exist, hold a parseable timestamp within
-    TTL, and the directory must contain at least one ``*.dcm`` file.
+    Mirrors ``DicomWebCache._load_from_disk``: a ``.cached_at`` marker
+    plus at least one ``*.dcm`` file. No TTL check — DICOM data on the
+    PACS is immutable, and disk cache lifecycle is managed by
+    ``DicomWebCacheCleanupService``.
     """
     series_dir = cache_base / study_uid / series_uid
-    marker = series_dir / ".cached_at"
-    if not marker.exists():
-        return False
-    try:
-        cached_at = float(marker.read_text().strip())
-    except (ValueError, OSError):
-        return False
-    if time.time() - cached_at > ttl_seconds:
+    if not (series_dir / ".cached_at").exists():
         return False
     return any(series_dir.glob("*.dcm"))
 
@@ -89,18 +81,13 @@ def _organize_to_cache(tmp_dir: Path, cache_base: Path, study_uid: str) -> dict[
     the same filesystem (guaranteed because ``tmp_dir`` is created
     inside ``cache_base``).
 
-    For each series that receives at least one new file, the previous
-    ``.cached_at`` marker is removed *first*, then pre-existing ``*.dcm``
-    files are unlinked, then fresh files are moved in. The marker must
-    be removed before stale files because ``DicomWebCache._load_from_disk``
-    in the API process can read an expired marker, declare the series
-    invalid, and ``shutil.rmtree`` the directory while we are mid-write
-    — with the marker gone, the API process gets a clean cache miss
-    (returns ``None``) instead of racing on rmtree.
-
-    Writes a fresh ``.cached_at`` marker per series at the end so the
-    disk tier in ``DicomWebCache`` recognises the entry on the next
-    OHIF request.
+    Publication is atomic from the OHIF reader's point of view: for each
+    series that receives at least one new file, the previous ``.cached_at``
+    marker is removed *first*, then pre-existing ``*.dcm`` files are
+    unlinked, then fresh files are moved in, and finally a new marker is
+    written. This guarantees the API process never sees a series whose
+    marker is present but whose directory contains a mix of stale and
+    fresh instances mid-write.
 
     Returns:
         Mapping ``series_uid → instance count`` for the series that
@@ -136,10 +123,10 @@ def _organize_to_cache(tmp_dir: Path, cache_base: Path, study_uid: str) -> dict[
         target_dir = cache_base / study_uid / series_uid
         target_dir.mkdir(parents=True, exist_ok=True)
 
-        # Clear stale state from a previous (possibly expired) cache
-        # entry before writing the first new instance for this series.
-        # Marker first — see docstring for the rationale (race with
-        # _load_from_disk → rmtree on expired marker).
+        # Clear stale state from a previous cache entry before writing
+        # the first new instance for this series. Marker is removed
+        # first so the API reader never sees a present marker pointing
+        # at a mix of stale and fresh *.dcm files during the publish.
         if series_uid not in cleaned_series:
             (target_dir / ".cached_at").unlink(missing_ok=True)
             for stale in target_dir.glob("*.dcm"):
@@ -162,7 +149,6 @@ def _filter_series_to_fetch(
     storage_path: Path,
     cache_base: Path,
     study_uid: str,
-    ttl_seconds: int,
     skip_if_anon: bool,
 ) -> tuple[list[str], int, int]:
     """Partition series list into fetch / skip_cached / skip_anon.
@@ -179,7 +165,7 @@ def _filter_series_to_fetch(
     skipped_cached = 0
     skipped_anon = 0
     for series_uid in series_uids:
-        if _is_disk_cache_valid(cache_base, study_uid, series_uid, ttl_seconds):
+        if _has_disk_cache(cache_base, study_uid, series_uid):
             skipped_cached += 1
             continue
         if skip_if_anon and _has_dcm_anon(storage_path, study_uid, series_uid):
@@ -246,7 +232,6 @@ async def _prefetch_dicom_web_impl(msg: PipelineMessage, _ctx: TaskContext) -> N
     # directories to walk for the dcm_anon check.
     storage_path = Path(settings.storage_path)
     cache_base = storage_path / "dicomweb_cache"
-    ttl_seconds = settings.dicomweb_cache_ttl_hours * 3600
 
     series_to_fetch, skipped_cached, skipped_anon = await asyncio.to_thread(
         _filter_series_to_fetch,
@@ -254,7 +239,6 @@ async def _prefetch_dicom_web_impl(msg: PipelineMessage, _ctx: TaskContext) -> N
         storage_path,
         cache_base,
         msg.study_uid,
-        ttl_seconds,
         skip_if_anon,
     )
 
