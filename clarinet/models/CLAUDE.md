@@ -153,16 +153,33 @@ so SQLite-only test runs do **not** catch this — the bug surfaces only against
 
 **Pattern (booleans):**
 ```python
+from sqlalchemy.sql import expression as sql_expression
+
 mask_patient_data: bool = Field(
     default=True,
-    sa_column_kwargs={"server_default": text("1")},
+    sa_column_kwargs={"server_default": sql_expression.true()},
+)
+unique_per_user: bool = Field(
+    default=False,
+    sa_column_kwargs={"server_default": sql_expression.false()},
 )
 ```
 
-Use the literal `text("1")` (not `text("true")` or `expression.true()`):
-SQLite stores `BOOLEAN` as `INTEGER` and rejects `'true'` inside `ALTER TABLE`,
-PostgreSQL accepts `'1'` for `BOOLEAN` via implicit cast — `"1"` is the only
-literal that survives both dialects.
+Use `sql_expression.true()` / `sql_expression.false()` — these are the only
+**dialect-aware** Boolean literals in SQLAlchemy. They render as `true`/`false`
+on PostgreSQL (required — PG has no implicit int→bool cast, so `DEFAULT 1`
+fails even in `CREATE TABLE` on an empty DB with "default for column is of
+type integer") and as `1`/`0` on SQLite (which stores BOOLEAN as INTEGER).
+
+**Do NOT use:**
+- `text("1")` / `text("0")` — bypasses the dialect visitor, emits raw integer
+  literal on PG, breaks both `CREATE TABLE` and `ALTER TABLE`. This was the
+  trap PR #149 v1 fell into; fixed in PR #150.
+- `text("true")` / `text("false")` — portable SQL keywords in theory but
+  SQLite rejects them inside `ALTER TABLE` in some versions.
+- `"1"` as plain string — quoted string literal `'1'` works on PG via implicit
+  cast but is indirect and produces a `DefaultClause` that alembic's autogen
+  compares poorly against existing column defaults, causing spurious diffs.
 
 **Alternatives (when `server_default` is not appropriate):**
 - Make the column nullable (`Optional[X]`) — only if `None` is meaningful at the
@@ -172,9 +189,11 @@ literal that survives both dialects.
   values that cannot be expressed as a single SQL literal.
 
 **Regression tests:** `tests/migration/test_schema_integrity.py::TestServerDefaultsForAdditiveMigrations`
-(metadata scan) and `tests/migration/test_data_preservation.py::TestAddNotNullBooleanRequiresServerDefault`
-(real ALTER TABLE on populated SQLite + PostgreSQL via `db_backend` parametrization,
-runs in stage 6 of `make test-all-stages`).
+(metadata scan — always runs) and `tests/migration/test_data_preservation.py::TestAddNotNullBooleanRequiresServerDefault`
+(real `ALTER TABLE` on populated SQLite + PostgreSQL via `db_backend`
+parametrization). The PG leg runs in stage 6 of `make test-all-stages`; to
+reproduce locally without the full VM, point `CLARINET_TEST_DATABASE_URL` at
+any PG instance and run `make test-migration` (see `tests/migration/conftest.py`).
 
 ## Type Aliases (`clarinet/types.py`)
 

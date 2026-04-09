@@ -169,6 +169,12 @@ test-migration: ## Run migration tests (SQLite; set CLARINET_TEST_DATABASE_URL f
 	@echo "Running migration tests..."
 	@./scripts/run_tests.sh tests/migration/ -m migration -v
 
+.PHONY: test-migration-pg
+test-migration-pg: ## Run migration tests against klara PostgreSQL (needs SSH access)
+	@echo "Running migration tests against klara PostgreSQL..."
+	@CLARINET_TEST_DATABASE_URL="postgresql+asyncpg://clarinet_test:clarinet_test@192.168.122.151:5432/clarinet_mig_base" \
+		./scripts/run_tests.sh tests/migration/ -m migration -v
+
 .PHONY: test-py312
 test-py312: ## Run unit tests on Python 3.12 (requires uv + python3.12)
 	@command -v uv >/dev/null 2>&1 || { echo "Error: uv is required but not installed"; exit 1; }
@@ -198,6 +204,22 @@ _test-all-stages-impl:
 	@echo "  Stage 2/8: test-unit (DB-only, xdist)   "
 	@echo "=========================================="
 	@./scripts/run_tests.sh -n "$(PYTEST_WORKERS)" --dist loadgroup -m "not pipeline and not dicom and not slicer and not schema" -q
+	@echo ""
+	@echo "=========================================="
+	@echo "  Stage 2b/8: migration tests on PG       "
+	@echo "  (fast failure for default-literal bugs) "
+	@echo "=========================================="
+	@if [ -n "$${CLARINET_TEST_DATABASE_URL}" ]; then \
+		echo "Using CLARINET_TEST_DATABASE_URL from env"; \
+		./scripts/run_tests.sh tests/migration/ -m migration -q; \
+	elif nc -z 192.168.122.151 5432 2>/dev/null; then \
+		echo "klara PG reachable — using it"; \
+		CLARINET_TEST_DATABASE_URL="postgresql+asyncpg://clarinet_test:clarinet_test@192.168.122.151:5432/clarinet_mig_base" \
+			./scripts/run_tests.sh tests/migration/ -m migration -q; \
+	else \
+		echo "⚠  No PG available — migration tests running on SQLite only (stage 6 will catch PG-specific bugs)"; \
+		./scripts/run_tests.sh tests/migration/ -m migration -q; \
+	fi
 	@echo ""
 	@echo "=========================================="
 	@echo "  Stage 3/8: schema tests ‖ VM provision  "
