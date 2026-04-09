@@ -204,12 +204,29 @@ _get_ip() {
 _wait_for_ssh() {
     local max_attempts=60
     local attempt=0
+    local cleaned=0
+
+    mkdir -p "$(dirname "$KNOWN_HOSTS_FILE")"
+    touch "$KNOWN_HOSTS_FILE"
 
     while [[ $attempt -lt $max_attempts ]]; do
         local ip
         ip="$(_get_ip)"
         if [[ -n "$ip" ]]; then
-            if ssh -o StrictHostKeyChecking=no -o ConnectTimeout=3 \
+            # Remove any stale host key for this IP from the dedicated
+            # known_hosts file. libvirt often re-assigns the same address to
+            # a freshly reimaged VM, which produces a new host key. OpenSSH's
+            # StrictHostKeyChecking=no still refuses port forwarding when the
+            # known_hosts entry conflicts, which silently breaks Stage 6 SSH
+            # tunnels in `make test-all-stages`. The dedicated file keeps the
+            # user's ~/.ssh/known_hosts untouched.
+            if [[ $cleaned -eq 0 ]]; then
+                ssh-keygen -f "$KNOWN_HOSTS_FILE" -R "$ip" &>/dev/null || true
+                cleaned=1
+            fi
+            if ssh -o StrictHostKeyChecking=no \
+                   -o "UserKnownHostsFile=${KNOWN_HOSTS_FILE}" \
+                   -o ConnectTimeout=3 \
                    -o BatchMode=yes -i "$SSH_KEY_PATH" \
                    "${VM_USER}@${ip}" "cloud-init status --wait" &>/dev/null; then
                 log "SSH is ready at $ip"
@@ -293,7 +310,7 @@ cmd_deploy() {
         exit 1
     fi
 
-    local scp_opts=(-o StrictHostKeyChecking=no -i "$SSH_KEY_PATH")
+    local scp_opts=(-o StrictHostKeyChecking=no -o "UserKnownHostsFile=${KNOWN_HOSTS_FILE}" -i "$SSH_KEY_PATH")
     local ssh_target="${VM_USER}@${ip}"
 
     if [[ -n "$wheel" ]]; then
@@ -457,7 +474,7 @@ cmd_bake() {
     local bake_ip
     bake_ip="$(_get_ip)"
     VM_NAME="$orig_vm_name"
-    local scp_opts=(-o StrictHostKeyChecking=no -i "$SSH_KEY_PATH")
+    local scp_opts=(-o StrictHostKeyChecking=no -o "UserKnownHostsFile=${KNOWN_HOSTS_FILE}" -i "$SSH_KEY_PATH")
     local ssh_target="${VM_USER}@${bake_ip}"
 
     log "Uploading bake script..."

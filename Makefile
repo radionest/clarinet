@@ -153,6 +153,11 @@ test-integration: ## Run integration tests only
 	@echo "Running integration tests..."
 	@./scripts/run_tests.sh tests/integration/
 
+.PHONY: test-slicer
+test-slicer: ## Run Slicer tests sequentially (no xdist) with extended timeout
+	@echo "Running Slicer tests sequentially (requires local 3D Slicer on :2016)..."
+	@uv run pytest tests/ -m slicer --timeout=60 -v --tb=short
+
 # Marker expression for tests that don't require external services
 PYTEST_UNIT_MARKERS := not pipeline and not dicom and not slicer and not schema
 
@@ -240,8 +245,13 @@ _test-all-stages-impl:
 		echo "  Stage 5/8: test-fast (all, xdist + VM)  "; \
 		echo "=========================================="; \
 		VM_IP=$$(bash $(VM_SH) ip 2>/dev/null); \
-		CLARINET_TEST_PACS_HOST="$$VM_IP" ./scripts/run_tests.sh -n "$(PYTEST_WORKERS)" --dist loadgroup -m "not schema" -q; \
+		CLARINET_TEST_PACS_HOST="$$VM_IP" ./scripts/run_tests.sh -n "$(PYTEST_WORKERS)" --dist loadgroup -m "not slicer and not schema" -q; \
 	fi
+	@echo ""
+	@echo "=========================================="
+	@echo "  Stage 5b/8: slicer tests (sequential)  "
+	@echo "=========================================="
+	@$(MAKE) test-slicer
 	@if [ "$${SKIP_VM}" = "1" ]; then \
 		echo ""; \
 		echo "=========================================="; \

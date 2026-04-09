@@ -338,13 +338,18 @@ def _check_slicer() -> None:
 
 
 @pytest.fixture
-def slicer_url() -> str:
-    """Base URL for the local Slicer web server."""
+def slicer_url(_check_slicer: None) -> str:
+    """Base URL for the local Slicer web server.
+
+    Auto-skips when Slicer is unreachable (same pattern as ``pacs_available``).
+    """
     return f"http://{SLICER_HOST}:{SLICER_PORT}"
 
 
 @pytest.fixture
-def slicer_service(request: pytest.FixtureRequest, worker_id: str) -> SlicerService:
+def slicer_service(
+    _check_slicer: None, request: pytest.FixtureRequest, worker_id: str
+) -> SlicerService:
     """SlicerService instance with cached helper source."""
     logger.info(f"slicer_service fixture: test={request.node.nodeid} worker={worker_id}")
     return SlicerService()

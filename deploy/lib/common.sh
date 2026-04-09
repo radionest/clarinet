@@ -25,5 +25,8 @@ ssh_vm() {
         err "Could not determine VM IP. Is the VM running?"
         exit 1
     fi
-    ssh -o StrictHostKeyChecking=no -i "$SSH_KEY_PATH" "${VM_USER}@${ip}" "$@"
+    ssh -o StrictHostKeyChecking=no \
+        -o "UserKnownHostsFile=${KNOWN_HOSTS_FILE}" \
+        -i "$SSH_KEY_PATH" \
+        "${VM_USER}@${ip}" "$@"
 }
