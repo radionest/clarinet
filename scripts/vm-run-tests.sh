@@ -72,12 +72,26 @@ trap cleanup EXIT
 log "Opening SSH tunnel (localhost:$LOCAL_PORT -> VM:5432)..."
 ssh "${SSH_OPTS[@]}" -N -L "$LOCAL_PORT:localhost:5432" "clarinet@$VM_IP" &
 TUNNEL_PID=$!
-sleep 1
 
-if ! kill -0 "$TUNNEL_PID" 2>/dev/null; then
-    err "SSH tunnel failed to start"
+# A live ssh -N process is not proof the tunnel works: OpenSSH silently
+# disables port forwarding when the host key conflicts (e.g. stale
+# known_hosts after VM reimage), leaving `kill -0` happy but the listening
+# socket absent. Probe the local port instead.
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+    if (exec 3<>"/dev/tcp/localhost/$LOCAL_PORT") 2>/dev/null; then
+        exec 3<&-
+        exec 3>&-
+        break
+    fi
+    sleep 0.5
+done
+if ! (exec 3<>"/dev/tcp/localhost/$LOCAL_PORT") 2>/dev/null; then
+    err "SSH tunnel did not open a listener on localhost:$LOCAL_PORT"
+    err "Check for stale known_hosts entry for $VM_IP"
     exit 1
 fi
+exec 3<&-
+exec 3>&-
 log "Tunnel active (PID $TUNNEL_PID)."
 
 export CLARINET_TEST_DATABASE_URL="postgresql+asyncpg://clarinet:${DB_PASS}@localhost:${LOCAL_PORT}/${TEST_DB}"
@@ -90,8 +104,10 @@ uv run pytest tests/ \
     -n auto --dist loadgroup -q
 
 log "=== Stage 7b: test-fast (PostgreSQL) ==="
+# slicer tests excluded: they hit host-local 3D Slicer sequentially in Stage 5b,
+# parallel xdist would race against the single-threaded Slicer web server.
 uv run pytest tests/ \
-    -m "not schema" \
+    -m "not slicer and not schema" \
     -n auto --dist loadgroup -q
 
 if [ "$SKIP_SCHEMA" != "1" ]; then

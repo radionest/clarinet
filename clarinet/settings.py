@@ -103,7 +103,7 @@ class Settings(BaseSettings):
     # Slicer settings
     slicer_script_paths: list[str] = []
     slicer_port: int = 2016
-    slicer_timeout: float = 10.0
+    slicer_timeout: float = 20.0
 
     # PACS server settings (used by backend DICOM service for anonymization etc.)
     pacs_host: str = "localhost"

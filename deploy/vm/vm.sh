@@ -204,11 +204,21 @@ _get_ip() {
 _wait_for_ssh() {
     local max_attempts=60
     local attempt=0
+    local cleaned=0
 
     while [[ $attempt -lt $max_attempts ]]; do
         local ip
         ip="$(_get_ip)"
         if [[ -n "$ip" ]]; then
+            # Remove any stale host key for this IP. libvirt often re-assigns
+            # the same address to a freshly reimaged VM, which produces a new
+            # host key. OpenSSH's StrictHostKeyChecking=no still refuses port
+            # forwarding when a known_hosts entry conflicts, which silently
+            # breaks Stage 6 SSH tunnels in `make test-all-stages`.
+            if [[ $cleaned -eq 0 ]]; then
+                ssh-keygen -R "$ip" &>/dev/null || true
+                cleaned=1
+            fi
             if ssh -o StrictHostKeyChecking=no -o ConnectTimeout=3 \
                    -o BatchMode=yes -i "$SSH_KEY_PATH" \
                    "${VM_USER}@${ip}" "cloud-init status --wait" &>/dev/null; then
