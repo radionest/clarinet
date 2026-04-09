@@ -205,7 +205,7 @@ GRANDFATHERED_BOOL_COLUMNS_WITHOUT_SERVER_DEFAULT: set[tuple[str, str]] = {
 
 
 class TestServerDefaultsForAdditiveMigrations:
-    """Catches the bug class behind PR #144 (``mask_patient_data``).
+    """Catches the bug class behind PR #144 / PR #149 (``mask_patient_data``).
 
     When a NOT NULL Boolean column is added to an SQLModel that already has
     deployed data, alembic autogenerate emits ``ALTER TABLE ... ADD COLUMN ...
@@ -214,9 +214,13 @@ class TestServerDefaultsForAdditiveMigrations:
     slipped into PR #144 — the SQLite-only test matrix never exercised the
     failure path.
 
-    The fix is to declare ``sa_column_kwargs={"server_default": text("1")}``
-    on the field; alembic then renders the column with ``DEFAULT '1'`` and
-    PostgreSQL backfills existing rows during the ALTER.
+    The fix is to declare
+    ``sa_column_kwargs={"server_default": sql_expression.true()}`` (or
+    ``.false()``) on the field. Those are the only dialect-aware Boolean
+    literals in SQLAlchemy — they render as ``true``/``false`` on PostgreSQL
+    and as ``1``/``0`` on SQLite. A raw ``text("1")`` bypasses the dialect
+    visitor and emits a bare integer literal on PG, which PG rejects because
+    it has no implicit int→bool cast (this was the PR #149 v1 regression).
 
     These tests are pure metadata introspection — they do not require a real
     database — so they run identically on the SQLite and PostgreSQL legs of
@@ -227,8 +231,8 @@ class TestServerDefaultsForAdditiveMigrations:
         """Every non-nullable ``Boolean`` column must declare ``server_default``.
 
         New offenders should be fixed by adding
-        ``sa_column_kwargs={"server_default": text("1")}`` (or ``"0"``) to
-        the SQLModel ``Field`` definition. Only add to
+        ``sa_column_kwargs={"server_default": sql_expression.true()}`` (or
+        ``.false()``) to the SQLModel ``Field`` definition. Only add to
         ``GRANDFATHERED_BOOL_COLUMNS_WITHOUT_SERVER_DEFAULT`` if the column
         is shipped in the very first init migration and is not added later.
         """
@@ -248,10 +252,11 @@ class TestServerDefaultsForAdditiveMigrations:
         assert not offenders, (
             "NOT NULL Boolean columns without server_default — adding any of "
             "these to a populated PostgreSQL table will fail with 'contains "
-            "null values'. Add sa_column_kwargs={'server_default': text('1')} "
-            "(or text('0')) to the SQLModel Field definition. See PR #144 "
-            "and clarinet/models/CLAUDE.md → 'Additive migrations on populated "
-            "tables'.\n"
+            "null values'. Add sa_column_kwargs={'server_default': "
+            "sql_expression.true()} (or .false()) to the SQLModel Field "
+            "definition. Do NOT use text('1') — it emits a bare integer literal "
+            "on PG and breaks CREATE TABLE. See clarinet/models/CLAUDE.md → "
+            "'Additive migrations on populated tables'.\n"
             f"Offenders: {offenders}"
         )
 

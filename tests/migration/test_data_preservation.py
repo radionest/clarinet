@@ -351,15 +351,22 @@ class TestRenameColumn:
 class TestAddNotNullBooleanRequiresServerDefault:
     """Regression for PR #144 (``mask_patient_data`` on RecordType).
 
-    Adding a NOT NULL Boolean column to a populated table on PostgreSQL fails
-    when the migration omits ``server_default``. SQLite is more lenient and
-    silently accepts the same DDL, which is why the bug originally slipped
-    through the test matrix. This class exercises both halves on every backend
-    so a future regression is caught regardless of which DB the suite runs on.
+    Two independent failure modes must be tested, both PostgreSQL-specific:
+
+    1. ``ALTER TABLE ADD COLUMN BOOLEAN NOT NULL`` without any default — PG
+       rejects this on populated tables with ``contains null values``.
+    2. ``... DEFAULT 1`` (integer literal, what a naive ``text("1")`` produces)
+       — PG has no implicit int→bool cast, so even empty tables fail with
+       ``default for column is of type integer`` in both CREATE and ALTER.
+
+    SQLite accepts both bad forms silently, which is how each bug slipped
+    through the test matrix. The good form uses
+    ``sqlalchemy.sql.expression.true()`` / ``false()`` — the only dialect-aware
+    Boolean literal (``true`` on PG, ``1`` on SQLite).
     """
 
     def test_without_server_default_fails_on_postgres(self, tmp_path, db_backend):
-        """The bad pattern: ALTER ADD COLUMN BOOLEAN NOT NULL on populated PG."""
+        """Mode 1: ALTER ADD COLUMN BOOLEAN NOT NULL on populated PG."""
         if db_backend != "postgresql":
             pytest.skip("This failure mode is PostgreSQL-specific")
 
@@ -387,7 +394,6 @@ class TestAddNotNullBooleanRequiresServerDefault:
         with engine.begin() as conn:
             conn.execute(text("INSERT INTO rectype (name) VALUES ('existing')"))
 
-        # Bad pattern — same DDL alembic autogenerate would emit without server_default
         write_migration_script(
             versions,
             "h2",
@@ -401,23 +407,59 @@ class TestAddNotNullBooleanRequiresServerDefault:
             message="add bool not null without default",
         )
 
-        # PG raises IntegrityError ("contains null values") wrapped by SQLAlchemy.
-        # Newer asyncpg/psycopg can also surface this as ProgrammingError, so we
-        # accept either to keep the test stable across driver versions.
         with pytest.raises((IntegrityError, ProgrammingError)):
             command.upgrade(cfg, "head")
 
         engine.dispose()
 
-    def test_with_server_default_text_1_succeeds(self, tmp_path, db_backend):
-        """The good pattern: ``server_default=text('1')`` backfills existing rows.
+    def test_text_1_literal_fails_on_postgres(self, tmp_path, db_backend):
+        """Mode 2: ``server_default=text("1")`` renders as integer ``1`` on PG.
 
-        Runs on both SQLite and PostgreSQL because the literal ``"1"`` is the
-        only Boolean default that survives both dialects (SQLite stores Boolean
-        as INTEGER and rejects ``'true'`` in ALTER TABLE; PostgreSQL accepts
-        ``'1'`` for BOOLEAN via implicit cast). This mirrors the
-        ``sa_column_kwargs={"server_default": text("1")}`` declaration on
-        ``RecordTypeBase.mask_patient_data``.
+        This is the trap the original fix for PR #144 fell into (PR #149 v1):
+        ``text("1")`` looks portable because SQLite stores BOOLEAN as INTEGER
+        and happily accepts ``DEFAULT 1``, but PostgreSQL has no implicit
+        int→bool cast and rejects ``DEFAULT 1`` outright — *even on an empty
+        table* during CREATE TABLE. The fix is ``sql_expression.true()``.
+        """
+        if db_backend != "postgresql":
+            pytest.skip("This failure mode is PostgreSQL-specific")
+
+        from sqlalchemy.exc import ProgrammingError
+
+        db_url = _setup_db_url(tmp_path, db_backend)
+        project = tmp_path / "project"
+        project.mkdir()
+        versions = init_bare_alembic(project, db_url)
+        cfg = _alembic_cfg(project, db_url)
+
+        # CREATE TABLE with the broken default — should fail on PG even with
+        # no data present. Using batch_alter here is irrelevant; this is about
+        # the default literal type, not migration strategy.
+        write_migration_script(
+            versions,
+            "j1",
+            None,
+            upgrade_ops=(
+                'op.create_table("rectype",\n'
+                '    sa.Column("name", sa.String(30), primary_key=True),\n'
+                '    sa.Column("mask_patient_data", sa.Boolean,\n'
+                '        server_default=sa.text("1"), nullable=False),\n'
+                ")"
+            ),
+            downgrade_ops='op.drop_table("rectype")',
+            message="create with bad int default",
+        )
+
+        with pytest.raises(ProgrammingError, match="integer"):
+            command.upgrade(cfg, "head")
+
+    def test_with_sql_expression_true_succeeds(self, tmp_path, db_backend):
+        """The good pattern: ``server_default=sql_expression.true()``.
+
+        Runs on both backends: PG emits ``DEFAULT true`` (native bool literal),
+        SQLite emits ``DEFAULT 1`` (native int literal). Both CREATE TABLE and
+        a subsequent ALTER TABLE on a populated table succeed; the existing
+        row is backfilled.
         """
         db_url = _setup_db_url(tmp_path, db_backend)
         project = tmp_path / "project"
@@ -446,13 +488,14 @@ class TestAddNotNullBooleanRequiresServerDefault:
             "i2",
             "i1",
             upgrade_ops=(
+                "from sqlalchemy.sql import expression\n"
                 'op.add_column("rectype",\n'
                 '    sa.Column("mask_patient_data", sa.Boolean,\n'
-                '        server_default=sa.text("1"), nullable=False))'
+                "        server_default=expression.true(), nullable=False))"
             ),
             downgrade_ops='with op.batch_alter_table("rectype") as batch_op:\n'
             '    batch_op.drop_column("mask_patient_data")',
-            message="add bool not null with default",
+            message="add bool not null with expression.true",
         )
         command.upgrade(cfg, "head")
 
