@@ -22,6 +22,7 @@ Project-specific checklist read by the global `pr-diff-reviewer` subagent. Appli
 - **P10.** Self-referencing SQLModel relationships use `Optional["ClassName"]` / `list["ClassName"]` with `# noqa: UP045, UP037` and `sa_relationship_kwargs={"remote_side": ..., "foreign_keys": ...}`. Do not let ruff auto-fix these.
 - **P11.** Async DB URL conversion uses the `get_async_database_url()` helper from `clarinet.utils.db_manager`, not manual `str.replace("psycopg2", "asyncpg")`.
 - **P12.** Alembic template `alembic/script.py.mako` stays self-contained: `import sqlmodel`, `from sqlalchemy import Text` (and any other symbols referenced in generated migrations) must be present.
+- **P12a.** **New non-nullable columns on existing tables MUST declare `server_default`** (or be `Optional[...]`). Without it, alembic autogenerate emits `ALTER TABLE ... ADD COLUMN ... NOT NULL` and PostgreSQL refuses with `column "..." of relation "..." contains null values` on populated tables. Use `sa_column_kwargs={"server_default": text("1")}` for booleans (literal `"1"` works on both SQLite and PostgreSQL — see in-line comment on `RecordTypeBase.mask_patient_data`). Real bug, PR #144.
 
 ## API surface
 

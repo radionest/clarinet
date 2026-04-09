@@ -348,6 +348,126 @@ class TestRenameColumn:
         engine.dispose()
 
 
+class TestAddNotNullBooleanRequiresServerDefault:
+    """Regression for PR #144 (``mask_patient_data`` on RecordType).
+
+    Adding a NOT NULL Boolean column to a populated table on PostgreSQL fails
+    when the migration omits ``server_default``. SQLite is more lenient and
+    silently accepts the same DDL, which is why the bug originally slipped
+    through the test matrix. This class exercises both halves on every backend
+    so a future regression is caught regardless of which DB the suite runs on.
+    """
+
+    def test_without_server_default_fails_on_postgres(self, tmp_path, db_backend):
+        """The bad pattern: ALTER ADD COLUMN BOOLEAN NOT NULL on populated PG."""
+        if db_backend != "postgresql":
+            pytest.skip("This failure mode is PostgreSQL-specific")
+
+        from sqlalchemy.exc import IntegrityError, ProgrammingError
+
+        db_url = _setup_db_url(tmp_path, db_backend)
+        project = tmp_path / "project"
+        project.mkdir()
+        versions = init_bare_alembic(project, db_url)
+        cfg = _alembic_cfg(project, db_url)
+
+        write_migration_script(
+            versions,
+            "h1",
+            None,
+            upgrade_ops='op.create_table("rectype",\n'
+            '    sa.Column("name", sa.String(30), primary_key=True),\n'
+            ")",
+            downgrade_ops='op.drop_table("rectype")',
+            message="create rectype",
+        )
+        command.upgrade(cfg, "head")
+
+        engine = create_engine(db_url)
+        with engine.begin() as conn:
+            conn.execute(text("INSERT INTO rectype (name) VALUES ('existing')"))
+
+        # Bad pattern — same DDL alembic autogenerate would emit without server_default
+        write_migration_script(
+            versions,
+            "h2",
+            "h1",
+            upgrade_ops=(
+                'op.add_column("rectype",\n'
+                '    sa.Column("mask_patient_data", sa.Boolean, nullable=False))'
+            ),
+            downgrade_ops='with op.batch_alter_table("rectype") as batch_op:\n'
+            '    batch_op.drop_column("mask_patient_data")',
+            message="add bool not null without default",
+        )
+
+        # PG raises IntegrityError ("contains null values") wrapped by SQLAlchemy.
+        # Newer asyncpg/psycopg can also surface this as ProgrammingError, so we
+        # accept either to keep the test stable across driver versions.
+        with pytest.raises((IntegrityError, ProgrammingError)):
+            command.upgrade(cfg, "head")
+
+        engine.dispose()
+
+    def test_with_server_default_text_1_succeeds(self, tmp_path, db_backend):
+        """The good pattern: ``server_default=text('1')`` backfills existing rows.
+
+        Runs on both SQLite and PostgreSQL because the literal ``"1"`` is the
+        only Boolean default that survives both dialects (SQLite stores Boolean
+        as INTEGER and rejects ``'true'`` in ALTER TABLE; PostgreSQL accepts
+        ``'1'`` for BOOLEAN via implicit cast). This mirrors the
+        ``sa_column_kwargs={"server_default": text("1")}`` declaration on
+        ``RecordTypeBase.mask_patient_data``.
+        """
+        db_url = _setup_db_url(tmp_path, db_backend)
+        project = tmp_path / "project"
+        project.mkdir()
+        versions = init_bare_alembic(project, db_url)
+        cfg = _alembic_cfg(project, db_url)
+
+        write_migration_script(
+            versions,
+            "i1",
+            None,
+            upgrade_ops='op.create_table("rectype",\n'
+            '    sa.Column("name", sa.String(30), primary_key=True),\n'
+            ")",
+            downgrade_ops='op.drop_table("rectype")',
+            message="create rectype",
+        )
+        command.upgrade(cfg, "head")
+
+        engine = create_engine(db_url)
+        with engine.begin() as conn:
+            conn.execute(text("INSERT INTO rectype (name) VALUES ('existing')"))
+
+        write_migration_script(
+            versions,
+            "i2",
+            "i1",
+            upgrade_ops=(
+                'op.add_column("rectype",\n'
+                '    sa.Column("mask_patient_data", sa.Boolean,\n'
+                '        server_default=sa.text("1"), nullable=False))'
+            ),
+            downgrade_ops='with op.batch_alter_table("rectype") as batch_op:\n'
+            '    batch_op.drop_column("mask_patient_data")',
+            message="add bool not null with default",
+        )
+        command.upgrade(cfg, "head")
+
+        with engine.connect() as conn:
+            row = conn.execute(
+                text("SELECT name, mask_patient_data FROM rectype WHERE name='existing'")
+            ).fetchone()
+        assert row is not None
+        assert row[0] == "existing"
+        # SQLite returns 1, PostgreSQL returns True — accept both.
+        assert row[1] in (True, 1)
+
+        engine.dispose()
+
+
 class TestAddNotNullWithDefault:
     """Scenario 7: Add NOT NULL column with backfill via batch_alter_table."""
 

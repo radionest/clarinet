@@ -10,6 +10,7 @@ import json as json_lib
 from typing import TYPE_CHECKING, Any
 
 from pydantic import field_validator, model_validator
+from sqlalchemy import text
 from sqlmodel import Column, Field, Relationship, SQLModel
 
 from clarinet.types import PortableJSON, RecordSchema, SlicerArgs, SlicerHydratorNames
@@ -66,14 +67,31 @@ class RecordTypeBase(SQLModel):
     role_name: str | None = Field(default=None)
     max_records: int | None = Field(default=None, ge=0, le=10000)
     min_records: int | None = Field(default=1, ge=0, le=10000)
-    unique_per_user: bool = Field(default=False)
+    # ``server_default=text("1")`` lets alembic safely add this column to
+    # populated tables. See ``mask_patient_data`` below for the full rationale.
+    unique_per_user: bool = Field(
+        default=False,
+        sa_column_kwargs={"server_default": text("0")},
+    )
     level: DicomQueryLevel = Field(default=DicomQueryLevel.SERIES)
 
     data_schema: RecordSchema | None = None
     slicer_context_hydrators: SlicerHydratorNames | None = None
 
+    # ``server_default=text("1")`` is required so that alembic autogenerate emits
+    # ``ALTER TABLE recordtype ADD COLUMN ... NOT NULL DEFAULT '1'`` instead of
+    # the unsafe ``... NOT NULL`` form. Without it PostgreSQL rejects the migration
+    # on populated tables: ``column "mask_patient_data" of relation "recordtype"
+    # contains null values``. SQLite is more lenient and silently allows the bad
+    # form, which is how the bug originally slipped through tests (PR #144).
+    #
+    # Why ``text("1")`` instead of ``text("true")`` / ``expression.true()``:
+    # SQLite stores Boolean as INTEGER (0/1) and refuses string literals like
+    # ``'true'`` inside ALTER TABLE; PostgreSQL accepts ``'1'`` for BOOLEAN via
+    # implicit cast. ``"1"`` is the only literal that survives both dialects.
     mask_patient_data: bool = Field(
         default=True,
+        sa_column_kwargs={"server_default": text("1")},
         description=(
             "Whether to mask patient/study/series identifiers for non-superusers "
             "when the patient has been anonymized. Set to False for record types "
