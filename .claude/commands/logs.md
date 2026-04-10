@@ -1,6 +1,6 @@
 ---
 description: Analyze Clarinet app logs (JSONL) or test reports (JSON) with jq
-argument-hint: <path to log file(s)> [focus: module, time range, error, entity]
+argument-hint: <path to log file> [focus: module, time range, error, entity]
 allowed-tools:
   - Bash
   - Read
@@ -55,7 +55,7 @@ jq -r '.t' FILE | sed -n '1p;$p'
 wc -l FILE
 
 # 1d. Top clarinet modules by volume (exclude third-party noise)
-jq -r 'select(.mod | startswith("clarinet.")) | .mod' FILE | sort | uniq -c | sort -rn | head -15
+jq -r 'select((.mod // "") | startswith("clarinet.")) | .mod' FILE | sort | uniq -c | sort -rn | head -15
 ```
 
 **For test reports (JSON):**
@@ -65,10 +65,10 @@ jq -r 'select(.mod | startswith("clarinet.")) | .mod' FILE | sort | uniq -c | so
 jq '.summary' FILE
 
 # 1b. Failed test names
-jq -r '.tests[] | select(.outcome == "failed") | .nodeid' FILE
+jq -r '.tests[] | select(.outcome == "failed" or .outcome == "error") | .nodeid' FILE
 
 # 1c. Error categories
-jq -r '.tests[] | select(.outcome == "failed") | .call.longrepr' FILE | grep -oP '(IntegrityError|ValidationError|AssertionError|TypeError|KeyError|HTTPException|ConnectionError|TimeoutError|NOT NULL|UNIQUE|500 Internal|404 Not Found|AcceptedNegativeData|UndefinedStatusCode|RejectedPositiveData)' | sort | uniq -c | sort -rn
+jq -r '.tests[] | select(.outcome == "failed" or .outcome == "error") | .call.longrepr' FILE | grep -oP '(IntegrityError|ValidationError|AssertionError|TypeError|KeyError|HTTPException|ConnectionError|TimeoutError|NOT NULL|UNIQUE|500 Internal|404 Not Found|AcceptedNegativeData|UndefinedStatusCode|RejectedPositiveData)' | sort | uniq -c | sort -rn
 ```
 
 Present the overview to the user as a concise summary table.
