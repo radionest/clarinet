@@ -120,6 +120,47 @@ class Image:
         """Shape of the voxel array."""
         return tuple(self.img.shape)
 
+    @property
+    def affine_4x4(self) -> np.ndarray:
+        """4x4 voxel-to-physical affine matrix in LPS coordinates."""
+        A = np.eye(4)
+        A[:3, :3] = self._direction * np.array(self.spacing)
+        A[:3, 3] = np.array(self._origin)
+        return A
+
+    def _same_grid(self, other: Image, *, atol: float = 1e-4) -> bool:
+        """Check whether two images share the same voxel grid."""
+        if self.shape != other.shape:
+            return False
+        return bool(np.allclose(self.affine_4x4, other.affine_4x4, atol=atol, rtol=0))
+
+    def reindex_to(self, target: Image, *, order: int = 1) -> Self:
+        """Resample this image into *target*'s voxel grid.
+
+        Args:
+            target: Image whose grid (direction, origin, spacing, shape) defines
+                the output coordinate system.
+            order: Interpolation order (0 = nearest-neighbor, 1 = linear).
+
+        Returns:
+            New image with target's spatial metadata and resampled data.
+        """
+        from scipy.ndimage import affine_transform
+
+        mapping = np.linalg.inv(self.affine_4x4) @ target.affine_4x4
+        resampled = affine_transform(
+            self.img,
+            mapping[:3, :3],
+            offset=mapping[:3, 3],
+            output_shape=target.shape,
+            order=order,
+            mode="constant",
+            cval=0.0,
+        )
+        result = type(self)(template=target)
+        result.img = resampled
+        return result
+
     def read(self, file_path: Path) -> None:
         """Read an image file, dispatching by extension.
 

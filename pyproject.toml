@@ -47,6 +47,7 @@ dependencies = [
     "numpy>=1.24.3",
     "nibabel>=5.0.0",
     "scikit-image>=0.20.0",
+    "scipy>=1.10.0",
     "pynrrd>=1.0.0",
     "dicom-anonymizer>=1.0.0",
     "faststream[rabbit]>=0.3.0",
