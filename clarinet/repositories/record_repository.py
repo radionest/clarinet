@@ -193,7 +193,11 @@ class RecordRepository(BaseRepository[Record]):
             raise RecordNotFoundError(record_id)
         return record
 
-    async def get_all_with_relations(self, skip: int = 0, limit: int = 100) -> Sequence[Record]:
+    # FASTFIX: default limit raised from 100 to 10_000 to unblock SPA list views.
+    # Frontend currently loads everything into a global Model and filters client-side,
+    # so records with id > 100 were invisible even when the displayed subset was <100.
+    # Proper fix: PaginationDep on endpoints + scoped cache refactor (see PR discussion).
+    async def get_all_with_relations(self, skip: int = 0, limit: int = 10_000) -> Sequence[Record]:
         """Get all records with all relationships eagerly loaded.
 
         Args:
@@ -215,7 +219,7 @@ class RecordRepository(BaseRepository[Record]):
         return result.scalars().all()
 
     async def get_all_for_user_roles(
-        self, role_names: set[str], skip: int = 0, limit: int = 100
+        self, role_names: set[str], skip: int = 0, limit: int = 10_000
     ) -> Sequence[Record]:
         """Get all records whose RecordType.role_name matches one of the given roles.
 
@@ -249,7 +253,7 @@ class RecordRepository(BaseRepository[Record]):
         self,
         user_id: UUID,
         skip: int = 0,
-        limit: int = 100,
+        limit: int = 10_000,
         role_names: set[str] | None = None,
         include_unassigned: bool = False,
         exclude_unique_violations: bool = False,
