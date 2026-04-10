@@ -631,15 +631,6 @@ class ClarinetClient:
 
     # ==================== Record Management ====================
 
-    async def get_records(self) -> list[RecordRead]:
-        """Get all records.
-
-        Returns:
-            List of all records
-        """
-        response = await self._request("GET", "/records/")
-        return [RecordRead.model_validate(t) for t in response.json()]
-
     async def get_record(self, record_id: int) -> RecordRead:
         """Get record by ID.
 
