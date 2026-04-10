@@ -147,16 +147,19 @@ class Image:
         """
         from scipy.ndimage import affine_transform
 
-        mapping = np.linalg.inv(self.affine_4x4) @ target.affine_4x4
-        resampled = affine_transform(
-            self.img,
-            mapping[:3, :3],
-            offset=mapping[:3, 3],
-            output_shape=target.shape,
-            order=order,
-            mode="constant",
-            cval=0.0,
-        )
+        try:
+            mapping = np.linalg.inv(self.affine_4x4) @ target.affine_4x4
+            resampled = affine_transform(
+                self.img,
+                mapping[:3, :3],
+                offset=mapping[:3, 3],
+                output_shape=target.shape,
+                order=order,
+                mode="constant",
+                cval=0.0,
+            )
+        except Exception as exc:
+            raise ImageError(f"Failed to reindex image onto target grid: {exc}") from exc
         result = type(self)(template=target)
         result.img = resampled
         return result

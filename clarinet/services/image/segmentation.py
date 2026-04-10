@@ -276,7 +276,7 @@ class Segmentation(Image):
         """Return *other* reindexed to *self*'s grid, or unchanged if grids match."""
         if self._same_grid(other):
             return other
-        return other.reindex_to(self)
+        return other.reindex_to(self, order=0)
 
     # ------------------------------------------------------------------
     # Named set operations (preferred API)

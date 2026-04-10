@@ -914,6 +914,17 @@ class TestSpatialAlignment:
         b = _make_seg(shape=(10, 10, 12))
         assert not a._same_grid(b)
 
+    def test_same_grid_false_spacing(self) -> None:
+        a = _make_seg(spacing=(1.0, 1.0, 1.0))
+        b = _make_seg(spacing=(1.0, 1.0, 2.0))
+        assert not a._same_grid(b)
+
+    def test_same_grid_false_direction(self) -> None:
+        a = _make_seg()
+        flipped = np.array([[1, 0, 0], [0, 1, 0], [0, 0, -1]], dtype=float)
+        b = _make_seg(direction=flipped)
+        assert not a._same_grid(b)
+
     def test_same_grid_within_tolerance(self) -> None:
         a = _make_seg(origin=(0.0, 0.0, 0.0))
         b = _make_seg(origin=(0.0, 0.0, 1e-6))
@@ -952,6 +963,23 @@ class TestSpatialAlignment:
         assert np.sum(result.img[2:5, 2:5, 0:3]) > 0
         assert np.sum(result.img[2:5, 2:5, 7:10]) == 0
         # Labels preserved
+        assert set(np.unique(result.img)) == {0, 3}
+
+    def test_reindex_into_flipped_target(self) -> None:
+        """Source is identity, target has flipped z + shifted origin."""
+        shape = (10, 10, 10)
+        data = np.zeros(shape, dtype=np.uint8)
+        data[2:5, 2:5, 2:5] = 3
+
+        src = _make_seg(shape=shape, data=data)
+
+        flipped_dir = np.array([[1, 0, 0], [0, 1, 0], [0, 0, -1]], dtype=float)
+        target = _make_seg(shape=shape, direction=flipped_dir, origin=(0.0, 0.0, 9.0))
+
+        result = src.reindex_to(target)
+        # k=2..4 in identity space → k=5..7 in flipped target
+        assert np.sum(result.img[2:5, 2:5, 5:8]) > 0
+        assert np.sum(result.img[2:5, 2:5, 2:5]) == 0
         assert set(np.unique(result.img)) == {0, 3}
 
     def test_reindex_preserves_labels(self) -> None:
