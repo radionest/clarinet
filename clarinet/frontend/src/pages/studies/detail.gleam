@@ -1,5 +1,7 @@
 // Study detail page — self-contained MVU module
 import api/models.{type Patient, type Record, type Series, type Study}
+import cache
+import cache/bucket
 import api/studies
 import api/types.{type ApiError, AuthError}
 import clarinet_frontend/i18n.{type Key}
@@ -43,7 +45,9 @@ pub fn init(
   _shared: Shared,
 ) -> #(Model, Effect(Msg), List(OutMsg)) {
   let model = Model(study_uid: study_uid, load_status: load_status.Loading)
-  #(model, load_study_effect(study_uid), [shared.ReloadRecords])
+  #(model, load_study_effect(study_uid), [
+    shared.FetchBucket(bucket.RecordsByStudy(study_uid)),
+  ])
 }
 
 fn load_study_effect(study_uid: String) -> Effect(Msg) {
@@ -140,8 +144,7 @@ pub fn view(model: Model, shared: Shared) -> Element(Msg) {
 
 fn render_detail(shared: Shared, study: Study) -> Element(Msg) {
   let study_records =
-    dict.values(shared.cache.records)
-    |> list.filter(fn(r) { r.study_uid == Some(study.study_uid) })
+    cache.bucket_items(shared.cache, bucket.RecordsByStudy(study.study_uid))
     |> list.sort(fn(a, b) {
       int.compare(option.unwrap(a.id, 0), option.unwrap(b.id, 0))
     })

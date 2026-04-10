@@ -251,7 +251,7 @@ async def _find_records(
 
     response = await client.post(RECORDS_FIND, json=body)
     assert response.status_code == 200, response.text
-    return response.json()
+    return response.json()["items"]
 
 
 def _make_mock_study(

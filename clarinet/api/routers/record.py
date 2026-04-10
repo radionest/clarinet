@@ -32,7 +32,6 @@ from clarinet.api.dependencies import (
     AuthorizedRecordDep,
     CurrentUserDep,
     MutableRecordDep,
-    PaginationDep,
     RecordRepositoryDep,
     RecordServiceDep,
     RecordTypeRepositoryDep,
@@ -56,6 +55,7 @@ from clarinet.models import (
     Record,
     RecordCreate,
     RecordOptional,
+    RecordPage,
     RecordRead,
     RecordSearchQuery,
     RecordStatus,
@@ -216,65 +216,6 @@ async def delete_record_type(
 
 
 # Record Endpoints
-
-
-@router.get("/", response_model=list[RecordRead])
-async def get_all_records(
-    repo: RecordRepositoryDep,
-    user: CurrentUserDep,
-) -> list[RecordRead]:
-    """Get all records with relations loaded.
-
-    Superusers see all records. Non-superusers see only records matching their roles.
-    """
-    if user.is_superuser:
-        records = await repo.get_all_with_relations()
-    else:
-        role_names = get_user_role_names(user)
-        records = await repo.get_all_for_user_roles(role_names)
-    return mask_records(records, user)
-
-
-@router.get("/my", response_model=list[RecordRead])
-async def get_my_records(
-    repo: RecordRepositoryDep,
-    user: CurrentUserDep,
-) -> list[RecordRead]:
-    """Get records for the current user with relations loaded.
-
-    Superusers see only their own assigned records.
-    Non-superusers see their assigned records plus unassigned records matching their roles.
-    """
-    role_names = None if user.is_superuser else get_user_role_names(user)
-    is_regular_user = not user.is_superuser
-    records = await repo.find_by_user(
-        user.id,
-        role_names=role_names,
-        include_unassigned=is_regular_user,
-        exclude_unique_violations=is_regular_user,
-    )
-    return mask_records(records, user)
-
-
-@router.get("/my/pending", response_model=list[RecordRead])
-async def get_my_pending_records(
-    repo: RecordRepositoryDep,
-    user: CurrentUserDep,
-) -> list[RecordRead]:
-    """Get pending records for the current user with relations loaded.
-
-    Superusers see only their own pending records.
-    Non-superusers see their pending records plus unassigned pending records matching their roles.
-    """
-    role_names = None if user.is_superuser else get_user_role_names(user)
-    is_regular_user = not user.is_superuser
-    records = await repo.find_pending_by_user(
-        user.id,
-        role_names=role_names,
-        include_unassigned=is_regular_user,
-        exclude_unique_violations=is_regular_user,
-    )
-    return mask_records(records, user)
 
 
 @router.get("/available_types", response_model=dict[str, int])
@@ -811,22 +752,31 @@ async def invalidate_record(
     return RecordRead.model_validate(record)
 
 
-@router.post("/find", response_model=list[RecordRead])
+@router.post("/find", response_model=RecordPage)
 async def find_records(
-    pagination: PaginationDep,
     repo: RecordRepositoryDep,
     user: CurrentUserDep,
     query: RecordSearchQuery,
-) -> list[RecordRead]:
-    """Find records by various criteria."""
+) -> RecordPage:
+    """Search records with cursor-based pagination."""
     role_names = None if user.is_superuser else get_user_role_names(user)
     criteria = RecordSearchCriteria(
-        **query.model_dump(exclude={"data_queries"}),
+        **query.model_dump(exclude={"data_queries", "cursor", "limit", "sort"}),
         data_queries=query.data_queries,
         role_names=role_names,
     )
-    records = await repo.find_by_criteria(criteria, skip=pagination.skip, limit=pagination.limit)
-    return mask_records(records, user)
+    result = await repo.find_page(
+        criteria,
+        cursor=query.cursor,
+        limit=query.limit,
+        sort=query.sort,
+    )
+    return RecordPage(
+        items=mask_records(result.records, user),
+        next_cursor=result.next_cursor,
+        limit=query.limit,
+        sort=query.sort,
+    )
 
 
 # Dependency functions (used by other parts of the application)

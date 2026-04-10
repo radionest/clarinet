@@ -1,8 +1,9 @@
 // Record type detail page (admin only) — self-contained MVU module
 import api/models.{type Record, type RecordTypeStats}
+import cache
+import cache/bucket
 import clarinet_frontend/i18n.{type Key}
 import components/status_badge
-import gleam/dict
 import gleam/int
 import gleam/list
 import gleam/option.{None, Some}
@@ -33,7 +34,7 @@ pub fn init(
 ) -> #(Model, Effect(Msg), List(OutMsg)) {
   #(Model(name: name), effect.none(), [
     shared.ReloadRecordTypeStats,
-    shared.ReloadRecords,
+    shared.FetchBucket(bucket.RecordsByRecordType(name)),
   ])
 }
 
@@ -66,8 +67,7 @@ fn find_stats(shared: Shared, name: String) -> option.Option(RecordTypeStats) {
 
 fn render_detail(shared: Shared, stat: RecordTypeStats) -> Element(Msg) {
   let type_records =
-    dict.values(shared.cache.records)
-    |> list.filter(fn(r) { r.record_type_name == stat.name })
+    cache.bucket_items(shared.cache, bucket.RecordsByRecordType(stat.name))
     |> list.sort(fn(a, b) {
       int.compare(option.unwrap(a.id, 0), option.unwrap(b.id, 0))
     })

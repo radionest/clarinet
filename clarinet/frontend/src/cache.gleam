@@ -5,13 +5,16 @@ import api/models.{
   type Study, type User,
 }
 import api/patients
+import api/record_page.{type RecordPage}
 import api/records
 import api/studies
 import api/types.{type ApiError}
 import api/users
+import cache/bucket.{type Bucket, type BucketKey, type BucketStatus}
 import gleam/dict.{type Dict}
 import gleam/int
 import gleam/javascript/promise.{type Promise}
+import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import lustre/effect.{type Effect}
@@ -27,6 +30,7 @@ pub type Model {
     patients: Dict(String, Patient),
     users: Dict(String, User),
     record_type_stats: Option(List(RecordTypeStats)),
+    record_buckets: Dict(String, Bucket),
   )
 }
 
@@ -58,6 +62,14 @@ pub type Msg {
 
   // Auto-assign follow-up (result of OutMsg.AutoAssign)
   AutoAssignResult(Result(Record, ApiError))
+
+  // Bucket-based pagination
+  FetchBucketMsg(key: BucketKey)
+  FetchMoreMsg(key: BucketKey)
+  BucketLoaded(key: BucketKey, result: Result(RecordPage, ApiError))
+  BucketMoreLoaded(key: BucketKey, result: Result(RecordPage, ApiError))
+  InvalidateBucketMsg(key: BucketKey)
+  InvalidateAllRecordBucketsMsg
 }
 
 // --- OutMsg ---
@@ -82,6 +94,7 @@ pub fn init() -> Model {
     patients: dict.new(),
     users: dict.new(),
     record_type_stats: None,
+    record_buckets: dict.new(),
   )
 }
 
@@ -107,31 +120,10 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg), List(OutMsg)) {
       ApiFailure(err, "Failed to load studies"),
     ])
 
-    // --- Records (role-aware) ---
-    LoadRecords(is_admin) -> {
-      let fetch_fn = case is_admin {
-        True -> records.get_records
-        False -> records.get_my_records
-      }
-      #(model, load_effect(fetch_fn, RecordsLoaded), [Loading(True)])
-    }
+    // --- Records (legacy, kept for compatibility) ---
+    LoadRecords(_is_admin) -> #(model, effect.none(), [])
 
-    RecordsLoaded(Ok(list_)) -> {
-      // Rebuild from server snapshot so records reassigned away from the
-      // current user (LoadRecords(False)) disappear from "my records".
-      let records =
-        list.fold(list_, dict.new(), fn(acc, r) {
-          case r.id {
-            Some(id) -> dict.insert(acc, int.to_string(id), r)
-            None -> acc
-          }
-        })
-      #(Model(..model, records: records), effect.none(), [Loading(False)])
-    }
-
-    RecordsLoaded(Error(err)) -> #(model, effect.none(), [
-      ApiFailure(err, "Failed to load records"),
-    ])
+    RecordsLoaded(_) -> #(model, effect.none(), [])
 
     // --- Users ---
     LoadUsers -> #(model, load_effect(users.get_users, UsersLoaded), [
@@ -266,6 +258,155 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg), List(OutMsg)) {
 
     // Silently ignore failed auto-assign — admin can still work without it
     AutoAssignResult(Error(_)) -> #(model, effect.none(), [])
+
+    // --- Record Buckets ---
+    FetchBucketMsg(key) -> {
+      let topic = bucket.key_to_topic(key)
+      let now = now_ms()
+      let is_fresh = case dict.get(model.record_buckets, topic) {
+        Ok(b) -> bucket.is_fresh(b.status, now)
+        Error(_) -> False
+      }
+      case is_fresh {
+        True -> #(model, effect.none(), [])
+        False -> {
+          let b =
+            bucket.Bucket(
+              key: key,
+              status: bucket.Loading,
+              items: [],
+              next_cursor: None,
+            )
+          let new_buckets = dict.insert(model.record_buckets, topic, b)
+          #(
+            Model(..model, record_buckets: new_buckets),
+            fetch_bucket_effect(key, None),
+            [],
+          )
+        }
+      }
+    }
+
+    FetchMoreMsg(key) -> {
+      let topic = bucket.key_to_topic(key)
+      case dict.get(model.record_buckets, topic) {
+        Ok(b) ->
+          case b.next_cursor {
+            Some(_cursor) -> {
+              let updated =
+                bucket.Bucket(..b, status: bucket.LoadingMore(now_ms()))
+              let new_buckets =
+                dict.insert(model.record_buckets, topic, updated)
+              #(
+                Model(..model, record_buckets: new_buckets),
+                fetch_bucket_more_effect(key, b.next_cursor),
+                [],
+              )
+            }
+            None -> #(model, effect.none(), [])
+          }
+        Error(_) -> #(model, effect.none(), [])
+      }
+    }
+
+    BucketLoaded(key, Ok(page)) -> {
+      let topic = bucket.key_to_topic(key)
+      let b =
+        bucket.Bucket(
+          key: key,
+          status: bucket.Live(now_ms()),
+          items: page.items,
+          next_cursor: page.next_cursor,
+        )
+      let new_buckets = dict.insert(model.record_buckets, topic, b)
+      // Also upsert items into secondary records dict
+      let new_records = upsert_records_dict(model.records, page.items)
+      #(
+        Model(..model, record_buckets: new_buckets, records: new_records),
+        effect.none(),
+        [],
+      )
+    }
+
+    BucketLoaded(key, Error(err)) -> {
+      let topic = bucket.key_to_topic(key)
+      let b =
+        bucket.Bucket(
+          key: key,
+          status: bucket.Failed(api_error_msg(err)),
+          items: [],
+          next_cursor: None,
+        )
+      let new_buckets = dict.insert(model.record_buckets, topic, b)
+      #(
+        Model(..model, record_buckets: new_buckets),
+        effect.none(),
+        [ApiFailure(err, "Failed to load records")],
+      )
+    }
+
+    BucketMoreLoaded(key, Ok(page)) -> {
+      let topic = bucket.key_to_topic(key)
+      case dict.get(model.record_buckets, topic) {
+        Ok(b) -> {
+          let updated =
+            bucket.Bucket(
+              ..b,
+              status: bucket.Live(now_ms()),
+              items: list.flatten([b.items, page.items]),
+              next_cursor: page.next_cursor,
+            )
+          let new_buckets =
+            dict.insert(model.record_buckets, topic, updated)
+          let new_records = upsert_records_dict(model.records, page.items)
+          #(
+            Model(..model, record_buckets: new_buckets, records: new_records),
+            effect.none(),
+            [],
+          )
+        }
+        Error(_) -> #(model, effect.none(), [])
+      }
+    }
+
+    BucketMoreLoaded(key, Error(err)) -> {
+      let topic = bucket.key_to_topic(key)
+      case dict.get(model.record_buckets, topic) {
+        Ok(b) -> {
+          // Revert to Live status, keep existing items
+          let updated =
+            bucket.Bucket(..b, status: bucket.Live(now_ms()))
+          let new_buckets =
+            dict.insert(model.record_buckets, topic, updated)
+          #(
+            Model(..model, record_buckets: new_buckets),
+            effect.none(),
+            [ApiFailure(err, "Failed to load more records")],
+          )
+        }
+        Error(_) -> #(model, effect.none(), [])
+      }
+    }
+
+    InvalidateBucketMsg(key) -> {
+      let topic = bucket.key_to_topic(key)
+      case dict.get(model.record_buckets, topic) {
+        Ok(b) -> {
+          let new_buckets =
+            dict.insert(model.record_buckets, topic, bucket.mark_stale(b))
+          #(Model(..model, record_buckets: new_buckets), effect.none(), [])
+        }
+        Error(_) -> #(model, effect.none(), [])
+      }
+    }
+
+    InvalidateAllRecordBucketsMsg -> {
+      let new_buckets =
+        dict.map_values(model.record_buckets, fn(_k, b) {
+          bucket.mark_stale(b)
+        })
+      #(Model(..model, record_buckets: new_buckets), effect.none(), [])
+    }
   }
 }
 
@@ -295,7 +436,104 @@ pub fn put_patient(model: Model, patient: Patient) -> Model {
   Model(..model, patients: dict.insert(model.patients, patient.id, patient))
 }
 
+// --- Bucket helpers (public) ---
+
+pub fn bucket_items(model: Model, key: BucketKey) -> List(Record) {
+  let topic = bucket.key_to_topic(key)
+  case dict.get(model.record_buckets, topic) {
+    Ok(b) -> b.items
+    Error(_) -> []
+  }
+}
+
+pub fn bucket_has_more(model: Model, key: BucketKey) -> Bool {
+  let topic = bucket.key_to_topic(key)
+  case dict.get(model.record_buckets, topic) {
+    Ok(b) -> option.is_some(b.next_cursor)
+    Error(_) -> False
+  }
+}
+
+pub fn bucket_status(model: Model, key: BucketKey) -> BucketStatus {
+  let topic = bucket.key_to_topic(key)
+  case dict.get(model.record_buckets, topic) {
+    Ok(b) -> b.status
+    Error(_) -> bucket.Cold
+  }
+}
+
+pub fn upsert_record_in_buckets(model: Model, record: Record) -> Model {
+  let new_buckets =
+    dict.map_values(model.record_buckets, fn(_k, b) {
+      let new_items =
+        list.map(b.items, fn(r) {
+          case r.id == record.id {
+            True -> record
+            False -> r
+          }
+        })
+      bucket.Bucket(..b, items: new_items)
+    })
+  Model(..model, record_buckets: new_buckets)
+}
+
 // --- Private helpers ---
+
+fn bucket_key_to_filter(key: BucketKey) -> List(#(String, json.Json)) {
+  case key {
+    bucket.RecordsAll -> []
+    bucket.RecordsMine(uid) -> [#("user_id", json.string(uid))]
+    bucket.RecordsByPatient(pid) -> [#("patient_id", json.string(pid))]
+    bucket.RecordsByStudy(suid) -> [#("study_uid", json.string(suid))]
+    bucket.RecordsByRecordType(name) -> [
+      #("record_type_name", json.string(name)),
+    ]
+  }
+}
+
+fn fetch_bucket_effect(key: BucketKey, cursor: Option(String)) -> Effect(Msg) {
+  let filter = bucket_key_to_filter(key)
+  use dispatch <- effect.from
+  records.find_records(filter, cursor, 100)
+  |> promise.tap(fn(result) { dispatch(BucketLoaded(key, result)) })
+  Nil
+}
+
+fn fetch_bucket_more_effect(
+  key: BucketKey,
+  cursor: Option(String),
+) -> Effect(Msg) {
+  let filter = bucket_key_to_filter(key)
+  use dispatch <- effect.from
+  records.find_records(filter, cursor, 100)
+  |> promise.tap(fn(result) { dispatch(BucketMoreLoaded(key, result)) })
+  Nil
+}
+
+fn upsert_records_dict(
+  records_dict: Dict(String, Record),
+  items: List(Record),
+) -> Dict(String, Record) {
+  list.fold(items, records_dict, fn(acc, r) {
+    case r.id {
+      Some(id) -> dict.insert(acc, int.to_string(id), r)
+      None -> acc
+    }
+  })
+}
+
+fn api_error_msg(err: ApiError) -> String {
+  case err {
+    types.NetworkError(msg) -> msg
+    types.ParseError(msg) -> msg
+    types.AuthError(msg) -> msg
+    types.ServerError(_, msg) -> msg
+    types.ValidationError(_) -> "Validation error"
+  }
+}
+
+@external(javascript, "../cache_ffi.mjs", "now_ms")
+fn now_ms() -> Int
 
 fn load_effect(
   api_call: fn() -> Promise(Result(a, ApiError)),

@@ -23,8 +23,6 @@ USERS_ROLES = "/api/user/roles"
 # --- Records ---
 RECORDS_BASE = "/api/records"
 RECORDS_FIND = "/api/records/find"
-RECORDS_MY = "/api/records/my"
-RECORDS_MY_PENDING = "/api/records/my/pending"
 RECORDS_AVAILABLE_TYPES = "/api/records/available_types"
 RECORDS_BULK_STATUS = "/api/records/bulk/status"
 

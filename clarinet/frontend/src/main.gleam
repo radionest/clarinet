@@ -765,8 +765,15 @@ fn apply_out_msgs(
           #(m, [modem.push(router.route_to_path(route), option.None, option.None), ..eff_list])
         shared.SetLoading(loading) ->
           #(store.set_loading(m, loading), eff_list)
-        shared.CacheRecord(record) ->
-          #(store.Model(..m, cache: cache.put_record(m.cache, record)), eff_list)
+        shared.CacheRecord(record) -> {
+          let new_cache =
+            cache.put_record(m.cache, record)
+            |> cache.upsert_record_in_buckets(record)
+          #(store.Model(..m, cache: new_cache), [
+            dispatch_msg(store.CacheMsg(cache.InvalidateAllRecordBucketsMsg)),
+            ..eff_list
+          ])
+        }
         shared.CacheStudy(study) ->
           #(store.Model(..m, cache: cache.put_study(m.cache, study)), eff_list)
         shared.CachePatient(patient) ->
@@ -775,13 +782,14 @@ fn apply_out_msgs(
           #(store.Model(..m, cache: cache.put_record_type(m.cache, rt)), eff_list)
         shared.CacheSeries(s) ->
           #(store.Model(..m, cache: cache.put_series(m.cache, s)), eff_list)
-        shared.ReloadRecords -> {
-          let is_admin = case m.user {
-            Some(models.User(is_superuser: True, ..)) -> True
-            _ -> False
-          }
-          #(m, [dispatch_msg(store.CacheMsg(cache.LoadRecords(is_admin))), ..eff_list])
-        }
+        shared.FetchBucket(key) ->
+          #(m, [dispatch_msg(store.CacheMsg(cache.FetchBucketMsg(key))), ..eff_list])
+        shared.FetchMoreBucket(key) ->
+          #(m, [dispatch_msg(store.CacheMsg(cache.FetchMoreMsg(key))), ..eff_list])
+        shared.InvalidateBucket(key) ->
+          #(m, [dispatch_msg(store.CacheMsg(cache.InvalidateBucketMsg(key))), ..eff_list])
+        shared.InvalidateAllRecordBuckets ->
+          #(m, [dispatch_msg(store.CacheMsg(cache.InvalidateAllRecordBucketsMsg)), ..eff_list])
         shared.ReloadStudies ->
           #(m, [dispatch_msg(store.CacheMsg(cache.LoadStudies)), ..eff_list])
         shared.ReloadUsers ->

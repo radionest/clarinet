@@ -1,7 +1,9 @@
 // Records list page — self-contained MVU module
-import api/models.{type Record}
+import api/models.{type Record, type User}
 import api/records
 import api/types.{type ApiError, AuthError}
+import cache
+import cache/bucket
 import clarinet_frontend/i18n
 import components/forms/base
 import components/status_badge
@@ -39,8 +41,17 @@ pub type Msg {
 
 // --- Init ---
 
-pub fn init(_shared: Shared) -> #(Model, Effect(Msg), List(OutMsg)) {
-  #(Model(active_filters: dict.new()), effect.none(), [shared.ReloadRecords])
+pub fn init(shared: Shared) -> #(Model, Effect(Msg), List(OutMsg)) {
+  let key = bucket_key_for_user(shared.user)
+  #(Model(active_filters: dict.new()), effect.none(), [shared.FetchBucket(key)])
+}
+
+fn bucket_key_for_user(user: option.Option(User)) -> bucket.BucketKey {
+  case user {
+    Some(u) if u.is_superuser -> bucket.RecordsAll
+    Some(u) -> bucket.RecordsMine(u.id)
+    None -> bucket.RecordsAll
+  }
 }
 
 // --- Update ---
@@ -81,7 +92,7 @@ pub fn update(
       shared.SetLoading(False),
       shared.CacheRecord(record),
       shared.ShowSuccess(shared.translate(i18n.RecordsMsgRestarted)),
-      shared.ReloadRecords,
+      shared.InvalidateAllRecordBuckets,
     ])
 
     RestartResult(Error(err)) -> #(
@@ -118,7 +129,8 @@ pub fn view(model: Model, shared: Shared) -> Element(Msg) {
   html.div([attribute.class("container")], [
     html.h1([], [html.text(title)]),
     {
-      let all_records = dict.values(shared.cache.records)
+      let key = bucket_key_for_user(shared.user)
+      let all_records = cache.bucket_items(shared.cache, key)
       html.div([], [
         filter_bar(model, shared, all_records),
         records_table(model, shared, all_records),

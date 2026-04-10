@@ -6,6 +6,7 @@ supporting both low-level API calls and high-level convenience methods.
 """
 
 import getpass
+from collections.abc import AsyncIterator
 from datetime import date
 from typing import Any, cast
 from uuid import UUID
@@ -17,6 +18,7 @@ from clarinet.models import (
     PatientRead,
     PatientSave,
     RecordCreate,
+    RecordPage,
     RecordRead,
     RecordStatus,
     RecordType,
@@ -638,24 +640,6 @@ class ClarinetClient:
         response = await self._request("GET", "/records/")
         return [RecordRead.model_validate(t) for t in response.json()]
 
-    async def get_my_records(self) -> list[RecordRead]:
-        """Get records assigned to current user.
-
-        Returns:
-            List of user's records
-        """
-        response = await self._request("GET", "/records/my")
-        return [RecordRead.model_validate(t) for t in response.json()]
-
-    async def get_my_pending_records(self) -> list[RecordRead]:
-        """Get pending records assigned to current user.
-
-        Returns:
-            List of user's pending records
-        """
-        response = await self._request("GET", "/records/my/pending")
-        return [RecordRead.model_validate(t) for t in response.json()]
-
     async def get_record(self, record_id: int) -> RecordRead:
         """Get record by ID.
 
@@ -846,27 +830,52 @@ class ClarinetClient:
         result: dict[str, Any] = response.json()
         return result
 
+    async def find_records_page(
+        self,
+        cursor: str | None = None,
+        limit: int = 100,
+        sort: str = "changed_at_desc",
+        **filters: Any,
+    ) -> RecordPage:
+        """Find records with cursor-based pagination.
+
+        Returns:
+            RecordPage with items, next_cursor, limit, sort
+        """
+        body = {k: v for k, v in filters.items() if v is not None}
+        body["cursor"] = cursor
+        body["limit"] = limit
+        body["sort"] = sort
+        response = await self._request("POST", "/records/find", json=body)
+        return RecordPage.model_validate(response.json())
+
     async def find_records(
         self,
         skip: int = 0,
         limit: int = 100,
         **filters: Any,
     ) -> list[RecordRead]:
-        """Find records by various criteria.
+        """Legacy wrapper — returns first page items only."""
+        if skip:
+            logger.warning("find_records.skip is ignored after cursor migration")
+        page = await self.find_records_page(limit=limit, **filters)
+        return page.items
 
-        Args:
-            skip: Number of records to skip (pagination)
-            limit: Maximum number of records to return
-            **filters: Additional filter parameters (patient_id, study_uid, etc.)
-
-        Returns:
-            List of matching records
-        """
-        params = {"skip": skip, "limit": limit}
-        body = {k: v for k, v in filters.items() if v is not None}
-
-        response = await self._request("POST", "/records/find", params=params, json=body)
-        return [RecordRead.model_validate(t) for t in response.json()]
+    async def iter_records(
+        self,
+        batch: int = 500,
+        sort: str = "changed_at_desc",
+        **filters: Any,
+    ) -> AsyncIterator[RecordRead]:
+        """Stream all matching records through cursor pages."""
+        cursor: str | None = None
+        while True:
+            page = await self.find_records_page(cursor=cursor, limit=batch, sort=sort, **filters)
+            for record in page.items:
+                yield record
+            if page.next_cursor is None:
+                return
+            cursor = page.next_cursor
 
     # ==================== High-Level Convenience Methods ====================
 
@@ -1027,25 +1036,10 @@ class ClarinetClient:
         skip: int = 0,
         limit: int = 100,
     ) -> list[RecordRead]:
-        """Advanced record search with multiple filter options.
-
-        Args:
-            patient_id: Filter by patient ID
-            patient_anon_id: Filter by anonymized patient ID
-            series_uid: Filter by series UID
-            study_uid: Filter by study UID
-            user_id: Filter by assigned user
-            record_type_name: Filter by record type name
-            record_status: Filter by record status
-            wo_user: Filter by records without user (True) or with user (False)
-            skip: Pagination offset
-            limit: Maximum results
-
-        Returns:
-            List of matching records
-        """
+        """Advanced record search with multiple filter options."""
+        if skip:
+            logger.warning("find_records_advanced.skip is ignored after cursor migration")
         return await self.find_records(
-            skip=skip,
             limit=limit,
             patient_id=patient_id,
             patient_anon_id=patient_anon_id,

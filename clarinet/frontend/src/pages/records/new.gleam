@@ -64,9 +64,9 @@ pub fn init(shared: Shared) -> #(Model, Effect(Msg), List(OutMsg)) {
   // by the caller's permissions.
   let out_msgs = case shared.user {
     Some(models.User(is_superuser: True, ..)) ->
-      [shared.ReloadPatients, shared.ReloadRecordTypes, shared.ReloadUsers, shared.ReloadRecords]
+      [shared.ReloadPatients, shared.ReloadRecordTypes, shared.ReloadUsers]
     _ ->
-      [shared.ReloadPatients, shared.ReloadRecordTypes, shared.ReloadRecords]
+      [shared.ReloadPatients, shared.ReloadRecordTypes]
   }
   #(model, effect.none(), out_msgs)
 }

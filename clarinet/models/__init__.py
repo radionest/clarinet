@@ -38,6 +38,7 @@ from .record import (
     RecordFindResult,
     RecordFindResultComparisonOperator,
     RecordOptional,
+    RecordPage,
     RecordRead,
     RecordSearchQuery,
 )
@@ -93,6 +94,7 @@ __all__ = [
     "RecordFindResult",
     "RecordFindResultComparisonOperator",
     "RecordOptional",
+    "RecordPage",
     "RecordRead",
     "RecordSearchQuery",
     "RecordStatus",

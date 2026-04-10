@@ -19,7 +19,7 @@ from pydantic import (
     computed_field,
     model_validator,
 )
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, event, func
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, String, event, func
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlmodel import Column, Field, Relationship, SQLModel
 
@@ -180,6 +180,10 @@ class RecordBase(BaseModel):
 
 class Record(RecordBase, table=True):
     """Model representing a record in the system."""
+
+    __table_args__ = (
+        Index("ix_record_changed_at_id_desc", "changed_at", "id", postgresql_using="btree"),
+    )
 
     id: int | None = Field(default=None, primary_key=True)
 
@@ -501,6 +505,22 @@ class RecordSearchQuery(SQLModel):
     wo_user: bool | None = None
     random_one: bool = False
     data_queries: list[RecordFindResult] = Field(default_factory=list)
+
+    # Cursor pagination
+    cursor: str | None = None
+    limit: int = Field(default=100, ge=1, le=1000)
+    sort: Literal["changed_at_desc", "id_asc", "id_desc"] = "changed_at_desc"
+
+
+class RecordPage(SQLModel):
+    """Paginated page of records with cursor for next page."""
+
+    model_config = ConfigDict(extra="forbid")  # type: ignore[assignment]
+
+    items: list[RecordRead]
+    next_cursor: str | None = None
+    limit: int
+    sort: Literal["changed_at_desc", "id_asc", "id_desc"] = "changed_at_desc"
 
 
 SeriesFind.model_rebuild()
