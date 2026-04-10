@@ -90,15 +90,14 @@ def _resolve_overwrite_mode(mode: OverwriteMode) -> int:
     constants (which may change integer values between Slicer releases) are
     read from the authoritative source instead of being hard-coded.
     """
-    match mode:
-        case OverwriteMode.OVERWRITE_ALL:
-            return int(slicer.vtkMRMLSegmentEditorNode.OverwriteAllSegments)
-        case OverwriteMode.OVERWRITE_VISIBLE:
-            return int(slicer.vtkMRMLSegmentEditorNode.OverwriteVisibleSegments)
-        case OverwriteMode.ALLOW_OVERLAP:
-            return int(slicer.vtkMRMLSegmentEditorNode.OverwriteNone)
-        case _:
-            raise SlicerHelperError(f"Unsupported overwrite mode: {mode!r}")
+    if mode == OverwriteMode.OVERWRITE_ALL:
+        return int(slicer.vtkMRMLSegmentEditorNode.OverwriteAllSegments)
+    elif mode == OverwriteMode.OVERWRITE_VISIBLE:
+        return int(slicer.vtkMRMLSegmentEditorNode.OverwriteVisibleSegments)
+    elif mode == OverwriteMode.ALLOW_OVERLAP:
+        return int(slicer.vtkMRMLSegmentEditorNode.OverwriteNone)
+    else:
+        raise SlicerHelperError(f"Unsupported overwrite mode: {mode!r}")
 
 
 def export_segmentation(name: str, output_path: str) -> str:
