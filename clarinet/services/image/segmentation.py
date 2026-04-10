@@ -18,6 +18,7 @@ from skimage.morphology import (
 )
 
 from clarinet.services.image.image import Image
+from clarinet.utils.logger import logger
 
 PropName = Literal["axis_major_length", "num_pixels", "area"]
 
@@ -206,6 +207,7 @@ class Segmentation(Image):
         Args:
             other: Segmentation to subtract.
         """
+        other = self._align_other(other)  # type: ignore[assignment]
         img = self.img.copy()
         img[other.img != 0] = 0
         self.img = img
@@ -224,6 +226,7 @@ class Segmentation(Image):
         Raises:
             ValueError: If an ROI in `other` overlaps multiple labels.
         """
+        other = self._align_other(other)  # type: ignore[assignment]
         for region in regionprops(label(other.img)):
             coords = region.coords
             intersection = self.img[coords[:, 0], coords[:, 1], coords[:, 2]]
@@ -244,6 +247,36 @@ class Segmentation(Image):
             other: Source segmentation to copy from.
         """
         self.img = other.img
+
+    def reindex_to(self, target: Image, *, order: int = 0) -> Segmentation:
+        """Resample into *target*'s voxel grid (nearest-neighbor only).
+
+        Overrides :meth:`Image.reindex_to` to force ``order=0``, preventing
+        label value corruption from interpolation.
+        """
+        if order != 0:
+            logger.warning("Segmentation.reindex_to: forcing order=0 to prevent label corruption")
+        from scipy.ndimage import affine_transform
+
+        mapping = np.linalg.inv(self.affine_4x4) @ target.affine_4x4
+        resampled = affine_transform(
+            self.img,
+            mapping[:3, :3],
+            offset=mapping[:3, 3],
+            output_shape=target.shape,
+            order=0,
+            mode="constant",
+            cval=0,
+        )
+        result = Segmentation(autolabel=False, template=target)
+        result.img = resampled
+        return result
+
+    def _align_other(self, other: Image) -> Image:
+        """Return *other* reindexed to *self*'s grid, or unchanged if grids match."""
+        if self._same_grid(other):
+            return other
+        return other.reindex_to(self, order=0)
 
     # ------------------------------------------------------------------
     # Named set operations (preferred API)
@@ -267,6 +300,7 @@ class Segmentation(Image):
         Returns:
             New Segmentation with only the kept labels.
         """
+        other = self._align_other(other)  # type: ignore[assignment]
         output = Segmentation(template=self)
         for region in self.label_props:
             coords = region.coords
@@ -291,6 +325,7 @@ class Segmentation(Image):
         """
         if other.img.size == 1:
             return Segmentation(template=self, copy_data=True)
+        other = self._align_other(other)  # type: ignore[assignment]
         output = Segmentation(template=self)
         combined = self.img.astype(np.uint16) + other.img.astype(np.uint16)
         combined[combined != 0] = 1
@@ -321,6 +356,7 @@ class Segmentation(Image):
         """
         if other.img.size == 1:
             return Segmentation(template=self, copy_data=True)
+        other = self._align_other(other)  # type: ignore[assignment]
         output = Segmentation(template=self)
         for region in self.label_props:
             coords = region.coords

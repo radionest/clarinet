@@ -850,3 +850,212 @@ class TestCOCO:
 
         with pytest.raises(ImageReadError, match="Failed to read COCO JSON"):
             coco_to_segmentation(bad_json, vol)
+
+
+# ---------------------------------------------------------------------------
+# Spatial alignment tests
+# ---------------------------------------------------------------------------
+
+
+def _make_seg(
+    shape: tuple[int, ...] = (10, 10, 10),
+    spacing: tuple[float, float, float] = (1.0, 1.0, 1.0),
+    origin: tuple[float, float, float] = (0.0, 0.0, 0.0),
+    direction: np.ndarray | None = None,
+    data: np.ndarray | None = None,
+) -> Segmentation:
+    """Helper to build a Segmentation with explicit spatial metadata."""
+    seg = Segmentation(autolabel=False)
+    if direction is None:
+        direction = np.eye(3)
+    seg._direction = direction.copy()
+    seg._origin = origin
+    seg._spacing = spacing
+    if data is not None:
+        seg.img = data
+    else:
+        seg.img = np.zeros(shape, dtype=np.uint8)
+    return seg
+
+
+class TestSpatialAlignment:
+    """Tests for affine_4x4, _same_grid, reindex_to, and aligned set operations."""
+
+    # -- affine_4x4 --
+
+    def test_affine_4x4_identity(self) -> None:
+        seg = _make_seg()
+        expected = np.eye(4)
+        np.testing.assert_array_almost_equal(seg.affine_4x4, expected)
+
+    def test_affine_4x4_custom(self) -> None:
+        direction = np.array([[0, 1, 0], [1, 0, 0], [0, 0, -1]], dtype=float)
+        seg = _make_seg(spacing=(0.5, 0.6, 0.7), origin=(10.0, 20.0, 30.0), direction=direction)
+        A = seg.affine_4x4
+        # direction * spacing → columns of A[:3,:3]
+        expected_rot = direction * np.array([0.5, 0.6, 0.7])
+        np.testing.assert_array_almost_equal(A[:3, :3], expected_rot)
+        np.testing.assert_array_almost_equal(A[:3, 3], [10.0, 20.0, 30.0])
+
+    # -- _same_grid --
+
+    def test_same_grid_true(self) -> None:
+        a = _make_seg(origin=(1.0, 2.0, 3.0))
+        b = _make_seg(origin=(1.0, 2.0, 3.0))
+        assert a._same_grid(b)
+
+    def test_same_grid_false_origin(self) -> None:
+        a = _make_seg(origin=(0.0, 0.0, 0.0))
+        b = _make_seg(origin=(0.0, 0.0, 1.0))
+        assert not a._same_grid(b)
+
+    def test_same_grid_false_shape(self) -> None:
+        a = _make_seg(shape=(10, 10, 10))
+        b = _make_seg(shape=(10, 10, 12))
+        assert not a._same_grid(b)
+
+    def test_same_grid_false_spacing(self) -> None:
+        a = _make_seg(spacing=(1.0, 1.0, 1.0))
+        b = _make_seg(spacing=(1.0, 1.0, 2.0))
+        assert not a._same_grid(b)
+
+    def test_same_grid_false_direction(self) -> None:
+        a = _make_seg()
+        flipped = np.array([[1, 0, 0], [0, 1, 0], [0, 0, -1]], dtype=float)
+        b = _make_seg(direction=flipped)
+        assert not a._same_grid(b)
+
+    def test_same_grid_within_tolerance(self) -> None:
+        a = _make_seg(origin=(0.0, 0.0, 0.0))
+        b = _make_seg(origin=(0.0, 0.0, 1e-6))
+        assert a._same_grid(b)
+
+    # -- reindex_to --
+
+    def test_reindex_identity_noop(self) -> None:
+        data = np.zeros((10, 10, 10), dtype=np.uint8)
+        data[3:6, 3:6, 3:6] = 5
+        a = _make_seg(data=data)
+        target = _make_seg()  # same grid
+        result = a.reindex_to(target)
+        np.testing.assert_array_equal(result.img, data)
+
+    def test_reindex_axis_flip(self) -> None:
+        """Flip axis 2: direction [0,0,-1], origin shifted so physical coords match."""
+        shape = (10, 10, 10)
+        data = np.zeros(shape, dtype=np.uint8)
+        data[2:5, 2:5, 7:10] = 3  # blob at high k-indices
+
+        # Source: flipped z-axis, origin at physical end
+        flipped_dir = np.array([[1, 0, 0], [0, 1, 0], [0, 0, -1]], dtype=float)
+        src = _make_seg(
+            shape=shape,
+            origin=(0.0, 0.0, 9.0),  # physical z starts at 9, goes to 0
+            direction=flipped_dir,
+            data=data,
+        )
+
+        # Target: standard orientation
+        target = _make_seg(shape=shape, origin=(0.0, 0.0, 0.0))
+
+        result = src.reindex_to(target)
+        # Blob at k=7..9 in flipped space → k=0..2 in standard space
+        assert np.sum(result.img[2:5, 2:5, 0:3]) > 0
+        assert np.sum(result.img[2:5, 2:5, 7:10]) == 0
+        # Labels preserved
+        assert set(np.unique(result.img)) == {0, 3}
+
+    def test_reindex_into_flipped_target(self) -> None:
+        """Source is identity, target has flipped z + shifted origin."""
+        shape = (10, 10, 10)
+        data = np.zeros(shape, dtype=np.uint8)
+        data[2:5, 2:5, 2:5] = 3
+
+        src = _make_seg(shape=shape, data=data)
+
+        flipped_dir = np.array([[1, 0, 0], [0, 1, 0], [0, 0, -1]], dtype=float)
+        target = _make_seg(shape=shape, direction=flipped_dir, origin=(0.0, 0.0, 9.0))
+
+        result = src.reindex_to(target)
+        # k=2..4 in identity space → k=5..7 in flipped target
+        assert np.sum(result.img[2:5, 2:5, 5:8]) > 0
+        assert np.sum(result.img[2:5, 2:5, 2:5]) == 0
+        assert set(np.unique(result.img)) == {0, 3}
+
+    def test_reindex_preserves_labels(self) -> None:
+        """order=0 must never create new label values."""
+        data = np.zeros((10, 10, 10), dtype=np.uint8)
+        data[1:4, 1:4, 1:4] = 5
+        data[6:9, 6:9, 6:9] = 8
+        src = _make_seg(data=data, spacing=(1.0, 1.0, 1.0))
+        target = _make_seg(spacing=(1.2, 1.2, 1.2))  # different spacing
+        result = src.reindex_to(target)
+        assert set(np.unique(result.img)).issubset({0, 5, 8})
+
+    # -- set operations with misaligned grids --
+
+    def test_difference_with_flipped_axis(self) -> None:
+        """Reproduces the production bug: same physical blob, flipped grid → 0 FP."""
+        shape = (10, 10, 20)
+        blob = np.zeros(shape, dtype=np.uint8)
+        blob[3:7, 3:7, 12:18] = 1  # blob at high k
+
+        # seg: standard orientation
+        seg = _make_seg(shape=shape, data=blob.copy())
+
+        # proj: z-axis flipped, origin adjusted
+        flipped_dir = np.array([[1, 0, 0], [0, 1, 0], [0, 0, -1]], dtype=float)
+        proj_data = np.zeros(shape, dtype=np.uint8)
+        proj_data[3:7, 3:7, 2:8] = 1  # same physical location, mirrored indices
+        proj = _make_seg(
+            shape=shape,
+            origin=(0.0, 0.0, 19.0),
+            direction=flipped_dir,
+            data=proj_data,
+        )
+
+        fp = seg.difference(proj, max_overlap_ratio=0.05)
+        assert fp.count == 0  # no false positives
+
+    def test_union_with_different_origin(self) -> None:
+        shape = (10, 10, 10)
+        data_a = np.zeros(shape, dtype=np.uint8)
+        data_a[2:5, 2:5, 2:5] = 1
+        a = _make_seg(shape=shape, origin=(0.0, 0.0, 0.0), data=data_a)
+
+        # b is shifted 2 voxels along z
+        data_b = np.zeros(shape, dtype=np.uint8)
+        data_b[2:5, 2:5, 0:3] = 1  # same physical location as a's blob
+        b = _make_seg(shape=shape, origin=(0.0, 0.0, 2.0), data=data_b)
+
+        result = a.union(b)
+        # The blob from b should land at k=2..4 in a's space
+        assert np.sum(result.img[2:5, 2:5, 2:5]) > 0
+
+    def test_subtract_with_flip(self) -> None:
+        shape = (10, 10, 10)
+        data_self = np.zeros(shape, dtype=np.uint8)
+        data_self[2:5, 2:5, 7:10] = 1
+
+        seg = _make_seg(shape=shape, data=data_self)
+
+        # other: same physical blob, flipped z
+        flipped_dir = np.array([[1, 0, 0], [0, 1, 0], [0, 0, -1]], dtype=float)
+        data_other = np.zeros(shape, dtype=np.uint8)
+        data_other[2:5, 2:5, 0:3] = 1
+        other = _make_seg(
+            shape=shape,
+            origin=(0.0, 0.0, 9.0),
+            direction=flipped_dir,
+            data=data_other,
+        )
+
+        seg.subtract(other)
+        # After subtract, blob at k=7..9 should be zeroed
+        assert np.sum(seg.img[2:5, 2:5, 7:10]) == 0
+
+    def test_fast_path_returns_same_object(self) -> None:
+        a = _make_seg()
+        b = _make_seg()
+        aligned = a._align_other(b)
+        assert aligned is b  # no copy, same object
