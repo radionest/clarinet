@@ -83,7 +83,7 @@ jq -c 'select(.l == "ERROR") | {t, mod, fn, msg}' FILE
 jq -c 'select(.l == "ERROR") | "\(.mod):\(.fn) — \(.msg)"' FILE | sort | uniq -c | sort -rn
 
 # 2c. Warnings by module (EXCLUDE known noise: pydicom, PIL, asyncio debug)
-jq -c 'select(.l == "WARNING" and (.mod | test("^(pydicom|PIL|asyncio)") | not)) | "\(.mod):\(.fn)"' FILE | sort | uniq -c | sort -rn | head -20
+jq -c 'select(.l == "WARNING" and ((.mod // "") | test("^(pydicom|PIL|asyncio)") | not)) | "\(.mod):\(.fn)"' FILE | sort | uniq -c | sort -rn | head -20
 
 # 2d. Exceptions with tracebacks
 jq -c 'select(.exc != null) | {t, mod, fn, msg, exc: (.exc | split("\n") | last)}' FILE
