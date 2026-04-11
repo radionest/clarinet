@@ -1,4 +1,5 @@
 // Static typed form for Patient creation
+import clarinet_frontend/i18n.{type Key}
 import components/forms/base as form
 import gleam/dict.{type Dict}
 import gleam/option.{None, Some}
@@ -30,18 +31,19 @@ pub fn view(
   on_update on_update: fn(PatientFormMsg) -> msg,
   on_submit on_submit: fn() -> msg,
   on_cancel on_cancel: msg,
+  translate translate: fn(Key) -> String,
 ) -> Element(msg) {
   form.form(on_submit, [
-    html.h3([attribute.class("form-title")], [html.text("Patient Information")]),
+    html.h3([attribute.class("form-title")], [html.text(translate(i18n.FormPatientInfo))]),
 
     // Patient ID field (required)
     form.field(
-      label: "Patient ID",
+      label: translate(i18n.FormPatientId),
       name: "patient_id",
       input: form.text_input(
         name: "patient_id",
         value: data.id,
-        placeholder: Some("Enter Patient ID"),
+        placeholder: Some(translate(i18n.FormPatientIdPlaceholder)),
         on_input: fn(value) { on_update(UpdatePatientId(value)) },
       ),
       errors: errors,
@@ -50,12 +52,12 @@ pub fn view(
 
     // Patient Name field (required)
     form.field(
-      label: "Patient Name",
+      label: translate(i18n.FormPatientName),
       name: "patient_name",
       input: form.text_input(
         name: "patient_name",
         value: data.name,
-        placeholder: Some("Enter Patient Name"),
+        placeholder: Some(translate(i18n.FormPatientNamePlaceholder)),
         on_input: fn(value) { on_update(UpdatePatientName(value)) },
       ),
       errors: errors,
@@ -64,8 +66,8 @@ pub fn view(
 
     // Form actions
     html.div([attribute.class("form-actions")], [
-      form.submit_button(text: "Create Patient", disabled: loading, on_click: None),
-      form.cancel_button(text: "Cancel", on_click: on_cancel),
+      form.submit_button(text: translate(i18n.FormBtnCreatePatient), disabled: loading, on_click: None),
+      form.cancel_button(text: translate(i18n.BtnCancel), on_click: on_cancel),
     ]),
 
     // Loading overlay

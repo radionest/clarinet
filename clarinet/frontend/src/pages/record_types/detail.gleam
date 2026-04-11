@@ -1,5 +1,6 @@
 // Record type detail page (admin only) — self-contained MVU module
 import api/models.{type Record, type RecordTypeStats}
+import clarinet_frontend/i18n.{type Key}
 import components/status_badge
 import gleam/dict
 import gleam/int
@@ -95,7 +96,7 @@ fn render_detail(shared: Shared, stat: RecordTypeStats) -> Element(Msg) {
     ]),
     info_card(stat),
     stats_cards(stat),
-    records_section(type_records),
+    records_section(type_records, shared.translate),
   ])
 }
 
@@ -152,7 +153,7 @@ fn stat_card(label: String, value: String) -> Element(Msg) {
   ])
 }
 
-fn records_section(records: List(Record)) -> Element(Msg) {
+fn records_section(records: List(Record), translate: fn(Key) -> String) -> Element(Msg) {
   html.div([attribute.class("card")], [
     html.h3([], [html.text("Records")]),
     case records {
@@ -172,21 +173,21 @@ fn records_section(records: List(Record)) -> Element(Msg) {
                 html.th([], [html.text("Actions")]),
               ]),
             ]),
-            html.tbody([], list.map(records, record_row)),
+            html.tbody([], list.map(records, record_row(_, translate))),
           ]),
         ])
     },
   ])
 }
 
-fn record_row(record: Record) -> Element(Msg) {
+fn record_row(record: Record, translate: fn(Key) -> String) -> Element(Msg) {
   let record_id = option.unwrap(record.id, 0)
   let record_id_str = int.to_string(record_id)
 
   html.tr([], [
     html.td([], [html.text(record_id_str)]),
     html.td([], [html.text(record.patient_id)]),
-    html.td([], [status_badge.render(record.status)]),
+    html.td([], [status_badge.render(record.status, translate)]),
     html.td([], [html.text(option.unwrap(record.user_id, "-"))]),
     html.td([], [
       html.a(

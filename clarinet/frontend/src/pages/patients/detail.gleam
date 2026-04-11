@@ -6,6 +6,7 @@ import api/models.{
 }
 import api/patients
 import api/types.{type ApiError, AuthError}
+import clarinet_frontend/i18n.{type Key}
 import components/forms/base
 import components/status_badge
 import gleam/dict.{type Dict}
@@ -310,7 +311,7 @@ fn render_detail(model: Model, shared: Shared, patient: Patient) -> Element(Msg)
     patient_info_card(patient),
     studies_section(patient.studies),
     pacs_section(model, patient),
-    records_section(model, patient_records),
+    records_section(model, patient_records, shared.translate),
   ])
 }
 
@@ -423,7 +424,7 @@ fn study_row(study: Study) -> Element(Msg) {
   ])
 }
 
-fn records_section(model: Model, records: List(Record)) -> Element(Msg) {
+fn records_section(model: Model, records: List(Record), translate: fn(Key) -> String) -> Element(Msg) {
   let filtered = record_filters.apply_filters(records, model.active_filters)
 
   html.div([attribute.class("card")], [
@@ -435,7 +436,7 @@ fn records_section(model: Model, records: List(Record)) -> Element(Msg) {
         ])
       _ ->
         html.div([], [
-          records_filter_bar(model, records),
+          records_filter_bar(model, records, translate),
           case filtered {
             [] ->
               html.p([attribute.class("text-muted")], [
@@ -452,7 +453,7 @@ fn records_section(model: Model, records: List(Record)) -> Element(Msg) {
                       html.th([], [html.text("Actions")]),
                     ]),
                   ]),
-                  html.tbody([], list.map(filtered, record_row)),
+                  html.tbody([], list.map(filtered, record_row(_, translate))),
                 ]),
               ])
           },
@@ -461,7 +462,7 @@ fn records_section(model: Model, records: List(Record)) -> Element(Msg) {
   ])
 }
 
-fn records_filter_bar(model: Model, all_records: List(Record)) -> Element(Msg) {
+fn records_filter_bar(model: Model, all_records: List(Record), translate: fn(Key) -> String) -> Element(Msg) {
   let status_value =
     dict.get(model.active_filters, "status")
     |> option.from_result()
@@ -478,7 +479,7 @@ fn records_filter_bar(model: Model, all_records: List(Record)) -> Element(Msg) {
     base.select(
       name: "filter-status",
       value: status_value,
-      options: record_filters.status_options(),
+      options: record_filters.status_options(translate),
       on_change: fn(val) {
         case val {
           "" -> RemoveFilter("status")
@@ -489,7 +490,7 @@ fn records_filter_bar(model: Model, all_records: List(Record)) -> Element(Msg) {
     base.select(
       name: "filter-record-type",
       value: type_value,
-      options: record_filters.type_options(all_records),
+      options: record_filters.type_options(all_records, translate),
       on_change: fn(val) {
         case val {
           "" -> RemoveFilter("record_type")
@@ -512,7 +513,7 @@ fn records_filter_bar(model: Model, all_records: List(Record)) -> Element(Msg) {
   ])
 }
 
-fn record_row(record: Record) -> Element(Msg) {
+fn record_row(record: Record, translate: fn(Key) -> String) -> Element(Msg) {
   let record_id = option.unwrap(record.id, 0)
   let record_id_str = int.to_string(record_id)
 
@@ -524,7 +525,7 @@ fn record_row(record: Record) -> Element(Msg) {
   html.tr([], [
     html.td([], [html.text(record_id_str)]),
     html.td([], [html.text(type_label)]),
-    html.td([], [status_badge.render(record.status)]),
+    html.td([], [status_badge.render(record.status, translate)]),
     html.td([], [
       html.a(
         [

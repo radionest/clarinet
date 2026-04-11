@@ -2,6 +2,7 @@
 import api/auth
 import api/models
 import api/types
+import clarinet_frontend/i18n
 import gleam/bool
 import gleam/javascript/promise
 import gleam/option.{type Option, None, Some}
@@ -39,7 +40,7 @@ pub fn init(_shared: Shared) -> #(Model, Effect(Msg), List(OutMsg)) {
 pub fn update(
   model: Model,
   msg: Msg,
-  _shared: Shared,
+  shared: Shared,
 ) -> #(Model, Effect(Msg), List(OutMsg)) {
   case msg {
     UpdateEmail(value) ->
@@ -72,8 +73,8 @@ pub fn update(
     LoginResult(Error(err)) -> {
       let error_msg = case err {
         types.AuthError(msg) -> msg
-        types.NetworkError(msg) -> "Network error: " <> msg
-        _ -> "Login failed. Please try again."
+        types.NetworkError(msg) -> msg
+        _ -> shared.translate(i18n.LoginFailed)
       }
       #(Model(..model, loading: False, error: Some(error_msg)), effect.none(), [])
     }
@@ -92,13 +93,13 @@ pub fn view(model: Model, shared: Shared) -> Element(Msg) {
         html.p([attribute.class("login-subtitle text-muted")], [
           html.text(shared.project_description),
         ]),
-        login_form(model),
+        login_form(model, shared),
         html.div([attribute.class("login-footer")], [
           html.p([attribute.class("text-muted")], [
-            html.text("Don't have an account? "),
+            html.text(shared.translate(i18n.LoginNoAccount)),
             html.a(
               [attribute.href(router.route_to_path(router.Register))],
-              [html.text("Register here")],
+              [html.text(shared.translate(i18n.LoginRegisterLink))],
             ),
           ]),
         ]),
@@ -107,21 +108,22 @@ pub fn view(model: Model, shared: Shared) -> Element(Msg) {
   ])
 }
 
-fn login_form(model: Model) -> Element(Msg) {
+fn login_form(model: Model, shared: Shared) -> Element(Msg) {
+  let t = shared.translate
   html.form(
     [attribute.class("login-form"), event.on_submit(fn(_) { Submit })],
     [
       // Email field
       html.div([attribute.class("form-group")], [
         html.label([attribute.for("email"), attribute.class("form-label")], [
-          html.text("Email"),
+          html.text(t(i18n.LoginEmail)),
         ]),
         html.input([
           attribute.class("form-input"),
           attribute.type_("email"),
           attribute.id("email"),
           attribute.name("email"),
-          attribute.placeholder("Enter your email"),
+          attribute.placeholder(t(i18n.LoginEmailPlaceholder)),
           attribute.value(model.email),
           attribute.required(True),
           attribute.disabled(model.loading),
@@ -132,14 +134,14 @@ fn login_form(model: Model) -> Element(Msg) {
       html.div([attribute.class("form-group")], [
         html.label(
           [attribute.for("password"), attribute.class("form-label")],
-          [html.text("Password")],
+          [html.text(t(i18n.LoginPassword))],
         ),
         html.input([
           attribute.class("form-input"),
           attribute.type_("password"),
           attribute.id("password"),
           attribute.name("password"),
-          attribute.placeholder("Enter password"),
+          attribute.placeholder(t(i18n.LoginPasswordPlaceholder)),
           attribute.value(model.password),
           attribute.required(True),
           attribute.disabled(model.loading),
@@ -161,8 +163,8 @@ fn login_form(model: Model) -> Element(Msg) {
         ],
         [
           case model.loading {
-            True -> html.text("Logging in...")
-            False -> html.text("Login")
+            True -> html.text(t(i18n.LoginSubmitting))
+            False -> html.text(t(i18n.LoginSubmit))
           },
         ],
       ),

@@ -1,5 +1,6 @@
 // Home/Dashboard page — self-contained MVU module
 import api/models
+import clarinet_frontend/i18n
 import gleam/dict
 import gleam/int
 import gleam/list
@@ -49,13 +50,14 @@ pub fn update(
 // --- View ---
 
 pub fn view(_model: Model, shared: Shared) -> Element(Msg) {
+  let t = shared.translate
   html.div([attribute.class("container")], [
-    html.h1([], [html.text("Dashboard")]),
+    html.h1([], [html.text(t(i18n.HomeDashboard))]),
     case shared.user {
       Some(user) -> {
         html.div([attribute.class("dashboard-content")], [
           html.p([attribute.class("welcome")], [
-            html.text("Welcome back, " <> user.email <> "!"),
+            html.text(t(i18n.HomeWelcome(user.email))),
           ]),
           stats_section(shared),
           case user.is_superuser {
@@ -66,14 +68,14 @@ pub fn view(_model: Model, shared: Shared) -> Element(Msg) {
       }
       None -> {
         html.div([attribute.class("welcome-section")], [
-          html.h2([], [html.text("Welcome to " <> shared.project_name)]),
-          html.p([], [html.text("Please log in to access the dashboard.")]),
+          html.h2([], [html.text(t(i18n.HomeWelcomeTo(shared.project_name)))]),
+          html.p([], [html.text(t(i18n.HomeLoginPrompt))]),
           html.a(
             [
               attribute.href(router.route_to_path(router.Login)),
               attribute.class("btn btn-primary"),
             ],
-            [html.text("Login")],
+            [html.text(t(i18n.BtnLogin))],
           ),
         ])
       }
@@ -86,6 +88,7 @@ fn stat_card(
   count count: Int,
   color color: String,
   route route: router.Route,
+  link_text link_text: String,
 ) -> Element(Msg) {
   html.div([attribute.class("stat-card card stat-" <> color)], [
     html.div([attribute.class("stat-value")], [html.text(int.to_string(count))]),
@@ -95,37 +98,41 @@ fn stat_card(
         attribute.href(router.route_to_path(route)),
         attribute.class("stat-link"),
       ],
-      [html.text("View all →")],
+      [html.text(link_text)],
     ),
   ])
 }
 
 fn stats_section(shared: Shared) -> Element(Msg) {
+  let t = shared.translate
   html.div([attribute.class("dashboard-section")], [
-    html.h3([], [html.text("Overview")]),
+    html.h3([], [html.text(t(i18n.HomeOverview))]),
     html.div(
       [attribute.class("stats-grid")],
       case shared.user {
         Some(models.User(is_superuser: True, ..)) -> [
           stat_card(
-            label: "Studies",
+            label: t(i18n.HomeStudies),
             count: dict.size(shared.cache.studies),
             color: "blue",
             route: router.Studies,
+            link_text: t(i18n.HomeViewAll),
           ),
           stat_card(
-            label: "Records",
+            label: t(i18n.HomeRecords),
             count: dict.size(shared.cache.records),
             color: "green",
             route: router.Records,
+            link_text: t(i18n.HomeViewAll),
           ),
         ]
         _ -> [
           stat_card(
-            label: "My Records",
+            label: t(i18n.HomeMyRecords),
             count: dict.size(shared.cache.records),
             color: "green",
             route: router.Records,
+            link_text: t(i18n.HomeViewAll),
           ),
         ]
       },
@@ -134,13 +141,14 @@ fn stats_section(shared: Shared) -> Element(Msg) {
 }
 
 fn recent_activity(shared: Shared) -> Element(Msg) {
+  let t = shared.translate
   html.div([attribute.class("dashboard-section")], [
-    html.h3([], [html.text("Recent Studies")]),
+    html.h3([], [html.text(t(i18n.HomeRecentStudies))]),
     html.div([attribute.class("recent-list")], [
       case dict.to_list(shared.cache.studies) {
         [] ->
           html.p([attribute.class("empty-state")], [
-            html.text("No recent studies found."),
+            html.text(t(i18n.HomeNoRecentStudies)),
           ])
         studies -> {
           studies

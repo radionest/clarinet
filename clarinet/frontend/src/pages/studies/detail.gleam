@@ -2,6 +2,7 @@
 import api/models.{type Patient, type Record, type Series, type Study}
 import api/studies
 import api/types.{type ApiError, AuthError}
+import clarinet_frontend/i18n.{type Key}
 import components/status_badge
 import gleam/dict
 import gleam/int
@@ -168,7 +169,7 @@ fn render_detail(shared: Shared, study: Study) -> Element(Msg) {
     study_info_card(study),
     patient_section(study.patient, study.patient_id),
     series_section(study.series),
-    records_section(study_records),
+    records_section(study_records, shared.translate),
   ])
 }
 
@@ -286,7 +287,7 @@ fn series_row(s: Series) -> Element(Msg) {
   ])
 }
 
-fn records_section(records: List(Record)) -> Element(Msg) {
+fn records_section(records: List(Record), translate: fn(Key) -> String) -> Element(Msg) {
   html.div([attribute.class("card")], [
     html.h3([], [html.text("Records")]),
     case records {
@@ -305,14 +306,14 @@ fn records_section(records: List(Record)) -> Element(Msg) {
                 html.th([], [html.text("Actions")]),
               ]),
             ]),
-            html.tbody([], list.map(records, record_row)),
+            html.tbody([], list.map(records, record_row(_, translate))),
           ]),
         ])
     },
   ])
 }
 
-fn record_row(record: Record) -> Element(Msg) {
+fn record_row(record: Record, translate: fn(Key) -> String) -> Element(Msg) {
   let record_id = option.unwrap(record.id, 0)
   let record_id_str = int.to_string(record_id)
 
@@ -324,7 +325,7 @@ fn record_row(record: Record) -> Element(Msg) {
   html.tr([], [
     html.td([], [html.text(record_id_str)]),
     html.td([], [html.text(type_label)]),
-    html.td([], [status_badge.render(record.status)]),
+    html.td([], [status_badge.render(record.status, translate)]),
     html.td([], [
       html.a(
         [

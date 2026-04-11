@@ -2,6 +2,7 @@
 import api/models.{type Patient}
 import api/patients
 import api/types.{type ApiError, AuthError}
+import clarinet_frontend/i18n
 import components/forms/patient_form
 import gleam/dict.{type Dict}
 import gleam/javascript/promise
@@ -50,7 +51,7 @@ pub fn init(_shared: Shared) -> #(Model, Effect(Msg), List(OutMsg)) {
 pub fn update(
   model: Model,
   msg: Msg,
-  _shared: Shared,
+  shared: Shared,
 ) -> #(Model, Effect(Msg), List(OutMsg)) {
   case msg {
     UpdateForm(form_msg) -> {
@@ -89,12 +90,12 @@ pub fn update(
     SubmitResult(Ok(patient)) ->
       #(Model(..model, loading: False), effect.none(), [
         shared.CachePatient(patient),
-        shared.ShowSuccess("Patient created successfully"),
+        shared.ShowSuccess(shared.translate(i18n.PatientsMsgCreated)),
         shared.Navigate(router.PatientDetail(patient.id)),
       ])
 
     SubmitResult(Error(err)) ->
-      #(Model(..model, loading: False), effect.none(), handle_error(err, "Failed to create patient"))
+      #(Model(..model, loading: False), effect.none(), handle_error(err, shared.translate(i18n.PatientsMsgCreateFailed)))
 
     Cancel ->
       #(model, effect.none(), [shared.Navigate(router.Patients)])
@@ -112,12 +113,12 @@ fn handle_error(err: ApiError, fallback_msg: String) -> List(OutMsg) {
 
 // --- View ---
 
-pub fn view(model: Model, _shared: Shared) -> Element(Msg) {
+pub fn view(model: Model, shared: Shared) -> Element(Msg) {
   let form_data =
     patient_form.PatientFormData(id: model.form_id, name: model.form_name)
 
   html.div([attribute.class("container")], [
-    html.h1([], [html.text("New Patient")]),
+    html.h1([], [html.text(shared.translate(i18n.PatientsNewTitle))]),
     patient_form.view(
       data: form_data,
       errors: model.form_errors,
@@ -125,6 +126,7 @@ pub fn view(model: Model, _shared: Shared) -> Element(Msg) {
       on_update: fn(msg) { UpdateForm(msg) },
       on_submit: fn() { Submit },
       on_cancel: Cancel,
+      translate: shared.translate,
     ),
   ])
 }

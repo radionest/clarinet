@@ -1,4 +1,5 @@
 // Main layout component with navbar and content area
+import clarinet_frontend/i18n
 import gleam/option.{None, Some}
 import lustre/attribute
 import lustre/element.{type Element}
@@ -19,22 +20,24 @@ pub fn view(model: Model, content: Element(Msg)) -> Element(Msg) {
 
 // Navigation bar
 fn navbar(model: Model) -> Element(Msg) {
+  let t = i18n.translate(model.locale, _)
   html.nav([attribute.class("navbar")], [
     html.div([attribute.class("navbar-brand")], [
       nav_link(route: router.Home, text: model.project_name, current_route: model.route),
     ]),
     html.div([attribute.class("navbar-menu")], [
-      nav_link(route: router.Records, text: "Records", current_route: model.route),
+      nav_link(route: router.Records, text: t(i18n.NavRecords), current_route: model.route),
       case is_admin(model) {
         True ->
           element.fragment([
-            nav_link(route: router.Studies, text: "Studies", current_route: model.route),
-            nav_link(route: router.Patients, text: "Patients", current_route: model.route),
-            nav_link(route: router.AdminRecordTypes, text: "Record Types", current_route: model.route),
-            nav_link(route: router.AdminDashboard, text: "Admin", current_route: model.route),
+            nav_link(route: router.Studies, text: t(i18n.NavStudies), current_route: model.route),
+            nav_link(route: router.Patients, text: t(i18n.NavPatients), current_route: model.route),
+            nav_link(route: router.AdminRecordTypes, text: t(i18n.NavRecordTypes), current_route: model.route),
+            nav_link(route: router.AdminDashboard, text: t(i18n.NavAdmin), current_route: model.route),
           ])
         False -> html.text("")
       },
+      locale_switcher(model),
       user_menu(model),
     ]),
   ])
@@ -72,7 +75,7 @@ fn user_menu(model: Model) -> Element(Msg) {
             attribute.class("btn-logout"),
             event.on_click(store.Logout),
           ],
-          [html.text("Logout")],
+          [html.text(i18n.translate(model.locale, i18n.BtnLogout))],
         ),
       ])
     }
@@ -123,10 +126,21 @@ fn footer(model: Model) -> Element(Msg) {
   html.footer([attribute.class("app-footer")], [
     html.div([attribute.class("container")], [
       html.p([], [
-        html.text("© 2024 " <> model.project_name <> " " <> model.project_description),
+        html.text(i18n.translate(model.locale, i18n.FooterCopyright(model.project_name, model.project_description))),
       ]),
     ]),
   ])
+}
+
+// Locale switcher button
+fn locale_switcher(model: Model) -> Element(Msg) {
+  html.button(
+    [
+      attribute.class("btn-locale"),
+      event.on_click(store.SetLocale(i18n.next_locale(model.locale))),
+    ],
+    [html.text(i18n.locale_label(model.locale))],
+  )
 }
 
 // Check if user is admin

@@ -5,12 +5,14 @@ import api/models
 import api/records
 import api/types
 import cache
+import clarinet_frontend/i18n
 import components/layout
 import formosh/component as formosh_component
 import gleam/bool
 import gleam/javascript/promise
 import gleam/list
 import gleam/option.{None, Some}
+import gleam/result
 import gleam/string
 import gleam/uri.{type Uri}
 import utils/logger
@@ -21,6 +23,9 @@ import lustre/element.{type Element}
 import lustre/element/html
 import lustre/event
 import modem
+import plinth/javascript/global
+import plinth/javascript/storage
+import plinth/browser/window
 import preload
 import pages/admin as admin_page
 import pages/home
@@ -38,8 +43,6 @@ import pages/register
 import pages/series/detail as series_detail
 import pages/studies/detail as study_detail
 import pages/studies/list as studies_list
-import plinth/browser/window
-import plinth/javascript/global
 import router.{type Route}
 import shared.{type OutMsg}
 import store.{type Model, type Msg}
@@ -54,6 +57,14 @@ pub fn main() {
 // Initialize with routing
 fn init(_flags) -> #(Model, Effect(Msg)) {
   let model = store.init()
+
+  // Restore locale from localStorage
+  let saved_locale =
+    storage.local()
+    |> result.try(storage.get_item(_, "clarinet_locale"))
+    |> result.map(i18n.locale_from_string)
+    |> result.unwrap(i18n.En)
+  let model = store.Model(..model, locale: saved_locale)
 
   // Set up routing with modem
   let initial_route = case modem.initial_uri() {
@@ -544,6 +555,18 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       #(store.set_error(model, error), effect.none())
     }
 
+    // Locale
+    store.SetLocale(new_locale) -> {
+      let save_effect = effect.from(fn(_dispatch) {
+        let _ = case storage.local() {
+          Ok(ls) -> storage.set_item(ls, "clarinet_locale", i18n.locale_to_string(new_locale))
+          Error(_) -> Error(Nil)
+        }
+        Nil
+      })
+      #(store.Model(..model, locale: new_locale), save_effect)
+    }
+
     // Preload delegation
     store.PreloadMsg(pmsg) -> delegate_preload(model, pmsg)
   }
@@ -660,6 +683,8 @@ fn build_shared(model: Model) -> shared.Shared {
     project_name: model.project_name,
     project_description: model.project_description,
     cache: model.cache,
+    translate: i18n.translate(model.locale, _),
+    locale: model.locale,
   )
 }
 

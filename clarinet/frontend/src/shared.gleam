@@ -2,6 +2,7 @@ import api/models.{
   type Patient, type Record, type RecordType, type Series, type Study, type User,
 }
 import cache
+import clarinet_frontend/i18n.{type Key, type Locale}
 import gleam/option.{type Option}
 import router.{type Route}
 
@@ -15,6 +16,9 @@ pub type Shared {
     project_description: String,
     // Global entity caches (studies/series/records/record_types/patients/users/record_type_stats)
     cache: cache.Model,
+    // i18n
+    translate: fn(Key) -> String,
+    locale: Locale,
   )
 }
 
