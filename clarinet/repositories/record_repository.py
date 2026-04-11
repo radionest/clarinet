@@ -7,10 +7,11 @@ SQLAlchemy InstrumentedAttribute on SQLModel classes (known limitation).
 import random
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import and_, distinct, exists, func, literal, or_
+from sqlalchemy import and_, distinct, exists, func, literal, or_, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased, selectinload
 from sqlmodel import col, select
@@ -33,6 +34,7 @@ from clarinet.models.user import User, UserRole
 from clarinet.repositories.base import BaseRepository
 from clarinet.types import RecordData
 from clarinet.utils.logger import logger
+from clarinet.utils.pagination import SortOrder, decode_cursor, encode_cursor
 
 
 @dataclass
@@ -53,6 +55,14 @@ class RecordSearchCriteria:
     random_one: bool = False
     role_names: set[str] | None = None
     data_queries: list[RecordFindResult] = field(default_factory=list)
+
+
+@dataclass
+class RecordPageResult:
+    """Result of cursor-based paginated record search."""
+
+    records: Sequence[Record]
+    next_cursor: str | None
 
 
 _COMPARISON_OPS: dict[RecordFindResultComparisonOperator, Callable[..., Any]] = {
@@ -842,22 +852,8 @@ class RecordRepository(BaseRepository[Record]):
             statement = statement.where(op_fn(data_field.cast(query.sql_type), query.result_value))
         return statement
 
-    async def find_by_criteria(
-        self,
-        criteria: RecordSearchCriteria,
-        skip: int = 0,
-        limit: int = 100,
-    ) -> Sequence[Record]:
-        """Find records by various criteria with all relations loaded.
-
-        Args:
-            criteria: Search criteria
-            skip: Number of records to skip
-            limit: Maximum number of records to return
-
-        Returns:
-            List of matching records with relations loaded
-        """
+    def _build_criteria_query(self, criteria: RecordSearchCriteria) -> SelectOfScalar[Record]:
+        """Build a filtered SELECT from criteria, WITHOUT ordering or pagination."""
         statement = (
             select(Record)
             .join(RecordType)
@@ -927,6 +923,17 @@ class RecordRepository(BaseRepository[Record]):
         # Data filters
         statement = self._apply_data_query_filters(statement, criteria.data_queries)
 
+        return statement
+
+    async def find_by_criteria(
+        self,
+        criteria: RecordSearchCriteria,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> Sequence[Record]:
+        """Find records by various criteria with all relations loaded."""
+        statement = self._build_criteria_query(criteria)
+
         # Pagination — all joins are N:1, so no duplicates possible (.distinct() removed
         # because PostgreSQL cannot compare JSON columns needed by Record.data).
         statement = self._paginate(statement, skip, limit)
@@ -939,6 +946,58 @@ class RecordRepository(BaseRepository[Record]):
 
         logger.info(f"Found {len(results)} records matching criteria")
         return results
+
+    async def find_page(
+        self,
+        criteria: RecordSearchCriteria,
+        *,
+        cursor: str | None,
+        limit: int,
+        sort: SortOrder = "changed_at_desc",
+    ) -> RecordPageResult:
+        """Find records with keyset cursor pagination."""
+        if criteria.random_one:
+            raise ValidationError("random_one is incompatible with cursor pagination")
+
+        statement = self._build_criteria_query(criteria)
+
+        # Sort order
+        match sort:
+            case "changed_at_desc":
+                statement = statement.order_by(col(Record.changed_at).desc(), col(Record.id).desc())
+            case "id_asc":
+                statement = statement.order_by(col(Record.id).asc())
+            case "id_desc":
+                statement = statement.order_by(col(Record.id).desc())
+
+        # Keyset WHERE from cursor
+        if cursor:
+            data = decode_cursor(cursor, sort)
+            match sort:
+                case "changed_at_desc":
+                    cursor_ts = datetime.fromisoformat(data["k"]) if data["k"] else None
+                    statement = statement.where(
+                        tuple_(col(Record.changed_at), col(Record.id))
+                        < tuple_(literal(cursor_ts), literal(data["i"]))
+                    )
+                case "id_asc":
+                    statement = statement.where(col(Record.id) > data["i"])
+                case "id_desc":
+                    statement = statement.where(col(Record.id) < data["i"])
+
+        # Fetch limit+1 to detect next page
+        statement = statement.limit(limit + 1)
+        result = await self.session.execute(statement)
+        records = list(result.scalars().all())
+
+        if len(records) > limit:
+            records = records[:limit]
+            last = records[-1]
+            next_cursor = encode_cursor(sort, last.changed_at, last.id)  # type: ignore[arg-type]
+        else:
+            next_cursor = None
+
+        return RecordPageResult(records=records, next_cursor=next_cursor)
 
     async def get_status_counts(self) -> dict[str, int]:
         """Get record counts grouped by status.

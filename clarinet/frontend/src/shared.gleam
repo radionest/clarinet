@@ -2,6 +2,7 @@ import api/models.{
   type Patient, type Record, type RecordType, type Series, type Study, type User,
 }
 import cache
+import cache/bucket.{type BucketKey}
 import clarinet_frontend/i18n.{type Key, type Locale}
 import gleam/option.{type Option}
 import router.{type Route}
@@ -35,7 +36,10 @@ pub type OutMsg {
   CachePatient(Patient)
   CacheRecordType(RecordType)
   CacheSeries(Series)
-  ReloadRecords
+  FetchBucket(BucketKey)
+  FetchMoreBucket(BucketKey)
+  InvalidateBucket(BucketKey)
+  InvalidateAllRecordBuckets
   ReloadStudies
   ReloadUsers
   ReloadPatients

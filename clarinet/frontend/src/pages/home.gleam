@@ -1,5 +1,7 @@
 // Home/Dashboard page — self-contained MVU module
 import api/models
+import cache
+import cache/bucket
 import clarinet_frontend/i18n
 import gleam/dict
 import gleam/int
@@ -27,11 +29,16 @@ pub type Msg {
 // --- Init ---
 
 pub fn init(shared: Shared) -> #(Model, Effect(Msg), List(OutMsg)) {
+  let bucket_key = case shared.user {
+    Some(models.User(is_superuser: True, ..)) -> bucket.RecordsAll
+    Some(u) -> bucket.RecordsMine(u.id)
+    None -> bucket.RecordsAll
+  }
   let out_msgs = case shared.user {
     Some(models.User(is_superuser: True, ..)) ->
-      [shared.ReloadStudies, shared.ReloadRecords, shared.ReloadUsers]
+      [shared.ReloadStudies, shared.FetchBucket(bucket_key), shared.ReloadUsers]
     Some(_) ->
-      [shared.ReloadRecords]
+      [shared.FetchBucket(bucket_key)]
     None -> []
   }
   #(Model, effect.none(), out_msgs)
@@ -120,21 +127,22 @@ fn stats_section(shared: Shared) -> Element(Msg) {
           ),
           stat_card(
             label: t(i18n.HomeRecords),
-            count: dict.size(shared.cache.records),
+            count: list.length(cache.bucket_items(shared.cache, bucket.RecordsAll)),
             color: "green",
             route: router.Records,
             link_text: t(i18n.HomeViewAll),
           ),
         ]
-        _ -> [
+        Some(u) -> [
           stat_card(
             label: t(i18n.HomeMyRecords),
-            count: dict.size(shared.cache.records),
+            count: list.length(cache.bucket_items(shared.cache, bucket.RecordsMine(u.id))),
             color: "green",
             route: router.Records,
             link_text: t(i18n.HomeViewAll),
           ),
         ]
+        None -> []
       },
     ),
   ])

@@ -722,11 +722,13 @@ class RecordFlowEngine:
         await self._ensure_authenticated()
         for target_type_name in action.record_type_names:
             try:
-                target_records = await self.clarinet_client.find_records(
-                    patient_id=ctx.patient_id,
-                    record_type_name=target_type_name,
-                    limit=1000,
-                )
+                target_records = [
+                    r
+                    async for r in self.clarinet_client.iter_records(
+                        patient_id=ctx.patient_id,
+                        record_type_name=target_type_name,
+                    )
+                ]
             except Exception as e:
                 logger.error(
                     f"Failed to find records of type '{target_type_name}' "

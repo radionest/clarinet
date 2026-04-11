@@ -15,7 +15,8 @@ Beyond `BaseRepository`, `RecordRepository` has:
 | `get_with_record_type(id)` | Eager-loads `record_type` |
 | `get_with_relations(id)` | Eager-loads patient, study, series, record_type |
 | `get_all_with_relations(skip, limit)` | All records with full eager load |
-| `find_by_criteria(criteria)` | Complex search via `RecordSearchCriteria` |
+| `find_by_criteria(criteria)` | Complex search via `RecordSearchCriteria` (legacy, uses offset pagination) |
+| `find_page(criteria, *, cursor, limit, sort)` | Cursor-based keyset pagination via `RecordSearchCriteria` |
 | `find_by_user(user_id, ...)` | Records for specific user |
 | `find_pending_by_user(user_id)` | Pending/inwork records |
 | `create_with_relations(record)` | Create with eager load after commit |

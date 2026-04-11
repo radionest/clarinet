@@ -266,26 +266,26 @@ async def superuser_client(test_session, test_settings, superuser):
 
 
 @pytest.mark.asyncio
-async def test_get_records_superuser_sees_all(
+async def test_find_records_superuser_sees_all(
     superuser_client, record_role_a, record_role_b, record_null_role
 ):
-    """Superuser GET /api/records/ should see all 3 records."""
-    response = await superuser_client.get("/api/records/")
+    """Superuser POST /api/records/find should see all 3 records."""
+    response = await superuser_client.post("/api/records/find", json={})
     assert response.status_code == 200
-    data = response.json()
+    data = response.json()["items"]
     assert len(data) == 3
     record_ids = {r["id"] for r in data}
     assert record_ids == {record_role_a.id, record_role_b.id, record_null_role.id}
 
 
 @pytest.mark.asyncio
-async def test_get_records_role_user_sees_own_role(
+async def test_find_records_role_user_sees_own_role(
     role_a_client, record_role_a, record_role_b, record_null_role
 ):
-    """Non-superuser with role_a_test GET /api/records/ should only see record_role_a."""
-    response = await role_a_client.get("/api/records/")
+    """Non-superuser with role_a_test POST /api/records/find should only see record_role_a."""
+    response = await role_a_client.post("/api/records/find", json={})
     assert response.status_code == 200
-    data = response.json()
+    data = response.json()["items"]
     assert len(data) == 1
     assert data[0]["id"] == record_role_a.id
     assert data[0]["record_type"]["name"] == "rtype-role-a-test"
@@ -325,7 +325,7 @@ async def test_find_records_role_filtering(
         json={"patient_id": "TEST_PAT001"},
     )
     assert response.status_code == 200
-    data = response.json()
+    data = response.json()["items"]
     assert len(data) == 1
     assert data[0]["id"] == record_role_a.id
 
@@ -439,21 +439,24 @@ async def test_superuser_sees_all_available_types(
 async def test_my_records_endpoint_filtered_by_role(
     test_session, role_a_client, user_with_role_a, record_role_a, record_role_b
 ):
-    """GET /api/records/my returns assigned + unassigned records matching user's role.
+    """POST /api/records/find returns only records matching user's role.
 
-    Non-superusers see their own assigned records AND unassigned records matching
-    their roles. Records assigned to other roles should not appear.
+    Non-superusers see only records whose RecordType.role_name matches their roles.
+    Records assigned to other roles should not appear.
     """
     # Assign record_role_a to user_with_role_a
     record_role_a.user_id = user_with_role_a.id
     test_session.add(record_role_a)
     await test_session.commit()
 
-    response = await role_a_client.get("/api/records/my")
+    response = await role_a_client.post(
+        "/api/records/find",
+        json={"user_id": str(user_with_role_a.id)},
+    )
     assert response.status_code == 200
-    data = response.json()
+    data = response.json()["items"]
 
-    # Should see assigned record_role_a; record_role_b is a different role (unassigned but wrong role)
+    # Should see assigned record_role_a; record_role_b is a different role
     assert len(data) == 1
     assert data[0]["id"] == record_role_a.id
 
@@ -520,7 +523,7 @@ async def test_my_records_includes_unassigned_matching_role(
     test_series,
     record_type_role_a,
 ):
-    """GET /api/records/my includes unassigned records matching the user's role."""
+    """POST /api/records/find includes both assigned and unassigned records matching the user's role."""
     # Assign record_role_a to user
     record_role_a.user_id = user_with_role_a.id
     test_session.add(record_role_a)
@@ -540,9 +543,9 @@ async def test_my_records_includes_unassigned_matching_role(
     await test_session.commit()
     await test_session.refresh(unassigned_record)
 
-    response = await role_a_client.get("/api/records/my")
+    response = await role_a_client.post("/api/records/find", json={})
     assert response.status_code == 200
-    data = response.json()
+    data = response.json()["items"]
 
     record_ids = {r["id"] for r in data}
     assert record_role_a.id in record_ids
@@ -561,7 +564,7 @@ async def test_my_records_excludes_other_user_assigned_records(
     test_series,
     record_type_role_a,
 ):
-    """GET /api/records/my excludes records assigned to other users, even if role matches."""
+    """POST /api/records/find with wo_user=True excludes records assigned to any user."""
     # Create another user
     other_user_id = uuid4()
     other_user = User(
@@ -580,10 +583,10 @@ async def test_my_records_excludes_other_user_assigned_records(
     test_session.add(record_role_a)
     await test_session.commit()
 
-    response = await role_a_client.get("/api/records/my")
+    response = await role_a_client.post("/api/records/find", json={"wo_user": True})
     assert response.status_code == 200
-    data = response.json()
+    data = response.json()["items"]
 
-    # The record is assigned to another user, should not appear
+    # The record is assigned to another user, should not appear with wo_user=True
     record_ids = {r["id"] for r in data}
     assert record_role_a.id not in record_ids

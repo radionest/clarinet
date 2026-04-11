@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from uuid import UUID
 
     from clarinet.client import ClarinetClient
-    from clarinet.models import Patient, RecordCreate, RecordRead, RecordStatus
+    from clarinet.models import Patient, RecordCreate, RecordPage, RecordRead, RecordStatus
     from clarinet.models.study import SeriesRead, StudyRead
     from clarinet.types import RecordData
 
@@ -133,8 +133,21 @@ class SyncPipelineClient:
         """Get record by ID."""
         return _call_async(self._client.get_record(record_id), self._loop)
 
+    def find_records_page(
+        self,
+        cursor: str | None = None,
+        limit: int = 100,
+        sort: str = "changed_at_desc",
+        **filters: Any,
+    ) -> RecordPage:
+        """Find records with cursor-based pagination."""
+        return _call_async(
+            self._client.find_records_page(cursor=cursor, limit=limit, sort=sort, **filters),
+            self._loop,
+        )
+
     def find_records(self, skip: int = 0, limit: int = 100, **filters: Any) -> list[RecordRead]:
-        """Find records by various criteria."""
+        """Legacy wrapper — returns first page items only."""
         return _call_async(self._client.find_records(skip, limit, **filters), self._loop)
 
     def find_records_advanced(
@@ -166,6 +179,19 @@ class SyncPipelineClient:
             ),
             self._loop,
         )
+
+    def iter_records(
+        self,
+        batch: int = 500,
+        sort: str = "changed_at_desc",
+        **filters: Any,
+    ) -> list[RecordRead]:
+        """Collect all matching records through cursor pages (sync)."""
+
+        async def _collect() -> list[RecordRead]:
+            return [r async for r in self._client.iter_records(batch=batch, sort=sort, **filters)]
+
+        return _call_async(_collect(), self._loop)
 
     def update_record_data(self, record_id: int, data: RecordData) -> RecordRead:
         """Update data on a finished record."""

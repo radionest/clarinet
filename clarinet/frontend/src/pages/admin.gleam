@@ -2,6 +2,8 @@
 import api/admin as admin_api
 import api/models
 import api/types
+import cache
+import cache/bucket
 import gleam/bool
 import gleam/dict
 import gleam/int
@@ -72,7 +74,7 @@ pub fn init(_shared: Shared) -> #(Model, Effect(Msg), List(OutMsg)) {
       load_effect(admin_api.get_admin_stats, AdminStatsLoaded),
       load_effect(admin_api.get_role_matrix, RoleMatrixLoaded),
     ])
-  #(model, effects, [shared.ReloadRecords, shared.ReloadUsers])
+  #(model, effects, [shared.FetchBucket(bucket.RecordsAll), shared.ReloadUsers])
 }
 
 // --- Update ---
@@ -452,7 +454,7 @@ fn records_section(model: Model, shared: Shared) -> Element(Msg) {
       ),
     ]),
     case
-      dict.values(shared.cache.records)
+      cache.bucket_items(shared.cache, bucket.RecordsAll)
       |> list.sort(fn(a, b) {
         int.compare(option.unwrap(a.id, 0), option.unwrap(b.id, 0))
       })

@@ -4,6 +4,8 @@ import api/models.{
   type PacsSeriesResult, type PacsStudyWithSeries, type Patient, type Record,
   type Study,
 }
+import cache
+import cache/bucket
 import api/patients
 import api/types.{type ApiError, AuthError}
 import clarinet_frontend/i18n.{type Key}
@@ -79,7 +81,9 @@ pub fn init(
       pacs_importing: None,
       active_filters: dict.new(),
     )
-  #(model, load_patient_effect(patient_id), [shared.ReloadRecords])
+  #(model, load_patient_effect(patient_id), [
+    shared.FetchBucket(bucket.RecordsByPatient(patient_id)),
+  ])
 }
 
 fn load_patient_effect(patient_id: String) -> Effect(Msg) {
@@ -282,8 +286,7 @@ pub fn view(model: Model, shared: Shared) -> Element(Msg) {
 
 fn render_detail(model: Model, shared: Shared, patient: Patient) -> Element(Msg) {
   let patient_records =
-    dict.values(shared.cache.records)
-    |> list.filter(fn(r) { r.patient_id == patient.id })
+    cache.bucket_items(shared.cache, bucket.RecordsByPatient(patient.id))
     |> list.sort(fn(a, b) {
       int.compare(option.unwrap(a.id, 0), option.unwrap(b.id, 0))
     })

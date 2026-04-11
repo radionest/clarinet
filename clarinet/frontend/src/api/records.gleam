@@ -1,6 +1,7 @@
 // Record API endpoints
 import api/http_client
 import api/models.{type FileDefinition, type Record, type RecordCreate, type RecordType}
+import api/record_page.{type RecordPage}
 import api/types.{type ApiError}
 import api/users
 import utils/status
@@ -10,31 +11,38 @@ import gleam/dynamic/decode
 import gleam/int
 import gleam/javascript/promise.{type Promise}
 import gleam/json
+import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
 import utils/json_utils
 
-// Get all records
-pub fn get_records() -> Promise(Result(List(Record), ApiError)) {
-  http_client.get("/records/")
-  |> promise.map(fn(res) {
-    result.try(res, http_client.decode_response(
-      _,
-      decode.list(record_decoder()),
-      "Invalid records data",
-    ))
-  })
-}
 
-// Get current user's records
-pub fn get_my_records() -> Promise(Result(List(Record), ApiError)) {
-  http_client.get("/records/my")
+
+// Search records with cursor-based pagination
+pub fn find_records(
+  filter_fields: List(#(String, json.Json)),
+  cursor: Option(String),
+  limit: Int,
+) -> Promise(Result(RecordPage, ApiError)) {
+  let cursor_field = case cursor {
+    Some(c) -> [#("cursor", json.string(c))]
+    None -> []
+  }
+  let body =
+    json.object(
+      list.flatten([filter_fields, cursor_field, [#("limit", json.int(limit))]]),
+    )
+    |> json.to_string
+  http_client.post("/records/find", body)
   |> promise.map(fn(res) {
-    result.try(res, http_client.decode_response(
-      _,
-      decode.list(record_decoder()),
-      "Invalid records data",
-    ))
+    result.try(
+      res,
+      http_client.decode_response(
+        _,
+        record_page.decoder(record_decoder()),
+        "Invalid page data",
+      ),
+    )
   })
 }
 
