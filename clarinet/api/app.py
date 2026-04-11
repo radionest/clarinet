@@ -410,8 +410,7 @@ def create_app(root_path: str = "") -> FastAPI:
 
         if not static_dirs:
             # Should not happen: _check_frontend() in lifespan catches this.
-            # Defensive fallback for edge cases (e.g. dir deleted after startup).
-            logger.error("Static directory disappeared after startup")
+            logger.error("No static directories found after startup")
 
         # Cache rendered index.html with $BASE_PATH substituted
         _index_html_cache: dict[str, str] = {}
@@ -463,9 +462,14 @@ def create_app(root_path: str = "") -> FastAPI:
 
             # Try to serve the requested file (project-level overrides built-in)
             for sd in static_dirs:
-                requested_file = sd / full_path
-                if requested_file.exists() and requested_file.is_file():
-                    return FileResponse(requested_file)
+                base = sd.resolve()
+                candidate = (base / full_path).resolve()
+                try:
+                    candidate.relative_to(base)
+                except ValueError:
+                    continue
+                if candidate.is_file():
+                    return FileResponse(candidate)
 
             # Serve index.html for all other routes (SPA routing)
             for sd in static_dirs:

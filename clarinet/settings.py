@@ -383,13 +383,15 @@ class Settings(BaseSettings):
         """
         if self.project_static_path:
             p = Path(self.project_static_path)
-            return p if p.exists() else None
+            if p.is_dir():
+                return p
         if self.project_path:
             p = Path(self.project_path) / "static"
-            return p if p.exists() else None
+            if p.is_dir():
+                return p
         # Legacy fallback
         custom_path = Path.cwd() / "clarinet_custom"
-        return custom_path if custom_path.exists() else None
+        return custom_path if custom_path.is_dir() else None
 
     @property
     def static_directories(self) -> list[Path]:
