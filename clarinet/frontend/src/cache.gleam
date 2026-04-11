@@ -270,13 +270,17 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg), List(OutMsg)) {
       case is_fresh {
         True -> #(model, effect.none(), [])
         False -> {
-          let b =
-            bucket.Bucket(
-              key: key,
-              status: bucket.Loading,
-              items: [],
-              next_cursor: None,
-            )
+          // Preserve existing items for stale-while-revalidate
+          let b = case dict.get(model.record_buckets, topic) {
+            Ok(existing) -> bucket.Bucket(..existing, status: bucket.Loading)
+            Error(_) ->
+              bucket.Bucket(
+                key: key,
+                status: bucket.Loading,
+                items: [],
+                next_cursor: None,
+              )
+          }
           let new_buckets = dict.insert(model.record_buckets, topic, b)
           #(
             Model(..model, record_buckets: new_buckets),
@@ -330,13 +334,18 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg), List(OutMsg)) {
 
     BucketLoaded(key, Error(err)) -> {
       let topic = bucket.key_to_topic(key)
-      let b =
-        bucket.Bucket(
-          key: key,
-          status: bucket.Failed(api_error_msg(err)),
-          items: [],
-          next_cursor: None,
-        )
+      // Preserve existing items on failure (stale-while-revalidate)
+      let b = case dict.get(model.record_buckets, topic) {
+        Ok(existing) ->
+          bucket.Bucket(..existing, status: bucket.Failed(api_error_msg(err)))
+        Error(_) ->
+          bucket.Bucket(
+            key: key,
+            status: bucket.Failed(api_error_msg(err)),
+            items: [],
+            next_cursor: None,
+          )
+      }
       let new_buckets = dict.insert(model.record_buckets, topic, b)
       #(
         Model(..model, record_buckets: new_buckets),
