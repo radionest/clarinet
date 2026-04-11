@@ -376,7 +376,18 @@ class Settings(BaseSettings):
 
     @property
     def custom_static_path(self) -> Path | None:
-        """Path to user custom static files."""
+        """Path to project-level static files (favicon, CSS overrides, etc.).
+
+        Resolution order: explicit ``project_static_path`` setting →
+        ``<project_path>/static`` → legacy ``CWD/clarinet_custom``.
+        """
+        if self.project_static_path:
+            p = Path(self.project_static_path)
+            return p if p.exists() else None
+        if self.project_path:
+            p = Path(self.project_path) / "static"
+            return p if p.exists() else None
+        # Legacy fallback
         custom_path = Path.cwd() / "clarinet_custom"
         return custom_path if custom_path.exists() else None
 
