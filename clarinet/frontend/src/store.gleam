@@ -3,6 +3,7 @@ import api/info.{type ProjectInfo}
 import api/models.{type Record, type User}
 import api/types.{type ApiError}
 import cache
+import clarinet_frontend/i18n
 import gleam/option.{type Option, None, Some}
 import pages/admin as admin_page
 import pages/home as home_page
@@ -46,6 +47,8 @@ pub type Model {
     fail_reason: String,
     // Preload
     preload: preload.Model,
+    // Locale
+    locale: i18n.Locale,
     // Active page model (for modular pages)
     page: PageModel,
   )
@@ -142,6 +145,9 @@ pub type Msg {
 
   // Preload delegation
   PreloadMsg(preload.Msg)
+
+  // Locale
+  SetLocale(i18n.Locale)
 }
 
 // Initialize application state
@@ -160,6 +166,7 @@ pub fn init() -> Model {
     modal_content: NoModal,
     fail_reason: "",
     preload: preload.init(),
+    locale: i18n.En,
     page: NoPage,
   )
 }
@@ -179,6 +186,7 @@ pub fn reset_for_logout(model: Model) -> Model {
     ..fresh,
     project_name: model.project_name,
     project_description: model.project_description,
+    locale: model.locale,
     checking_session: False,
     page: NoPage,
   )

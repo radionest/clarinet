@@ -1,5 +1,6 @@
 // Shared filter helpers for Record lists
 import api/models.{type Record}
+import clarinet_frontend/i18n.{type Key}
 import gleam/dict.{type Dict}
 import gleam/list
 import gleam/string
@@ -33,32 +34,38 @@ pub fn apply_filters(
 }
 
 /// Static dropdown options for the status filter.
-pub fn status_options() -> List(#(String, String)) {
+pub fn status_options(translate: fn(Key) -> String) -> List(#(String, String)) {
   [
-    #("", "All Statuses"),
-    #("blocked", "Blocked"),
-    #("pending", "Pending"),
-    #("inwork", "In Progress"),
-    #("finished", "Completed"),
-    #("failed", "Failed"),
-    #("paused", "Paused"),
+    #("", translate(i18n.FilterAllStatuses)),
+    #("blocked", translate(i18n.StatusBlocked)),
+    #("pending", translate(i18n.StatusPending)),
+    #("inwork", translate(i18n.StatusInProgress)),
+    #("finished", translate(i18n.StatusCompleted)),
+    #("failed", translate(i18n.StatusFailed)),
+    #("paused", translate(i18n.StatusPaused)),
   ]
 }
 
 /// Build dropdown options for the record type filter from the given records.
-pub fn type_options(records: List(Record)) -> List(#(String, String)) {
+pub fn type_options(
+  records: List(Record),
+  translate: fn(Key) -> String,
+) -> List(#(String, String)) {
   let types =
     list.map(records, fn(r) { r.record_type_name })
     |> list.unique()
     |> list.sort(fn(a, b) { string.compare(a, b) })
-  [#("", "All Types"), ..list.map(types, fn(t) { #(t, t) })]
+  [#("", translate(i18n.FilterAllTypes)), ..list.map(types, fn(t) { #(t, t) })]
 }
 
 /// Build dropdown options for the patient filter from the given records.
-pub fn patient_options(records: List(Record)) -> List(#(String, String)) {
+pub fn patient_options(
+  records: List(Record),
+  translate: fn(Key) -> String,
+) -> List(#(String, String)) {
   let patients =
     list.map(records, fn(r) { r.patient_id })
     |> list.unique()
     |> list.sort(fn(a, b) { string.compare(a, b) })
-  [#("", "All Patients"), ..list.map(patients, fn(p) { #(p, p) })]
+  [#("", translate(i18n.FilterAllPatients)), ..list.map(patients, fn(p) { #(p, p) })]
 }

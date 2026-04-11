@@ -2,6 +2,7 @@
 import api/models.{type Record, type Series}
 import api/series
 import api/types.{type ApiError, AuthError}
+import clarinet_frontend/i18n.{type Key}
 import components/status_badge
 import gleam/dict
 import gleam/int
@@ -98,7 +99,7 @@ pub fn view(model: Model, shared: Shared) -> Element(Msg) {
     fn() { loading_view(model.series_uid) },
     fn() {
       case dict.get(shared.cache.series, model.series_uid) {
-        Ok(s) -> render_detail(s)
+        Ok(s) -> render_detail(s, shared.translate)
         Error(_) -> loading_view(model.series_uid)
       }
     },
@@ -106,7 +107,7 @@ pub fn view(model: Model, shared: Shared) -> Element(Msg) {
   )
 }
 
-fn render_detail(s: Series) -> Element(Msg) {
+fn render_detail(s: Series, translate: fn(Key) -> String) -> Element(Msg) {
   html.div([attribute.class("container")], [
     html.div([attribute.class("page-header")], [
       html.h1([], [html.text("Series: " <> s.series_uid)]),
@@ -120,7 +121,7 @@ fn render_detail(s: Series) -> Element(Msg) {
     ]),
     series_info_card(s),
     parent_study_section(s),
-    records_section(s.records),
+    records_section(s.records, translate),
   ])
 }
 
@@ -199,7 +200,7 @@ fn parent_study_section(s: Series) -> Element(Msg) {
   }
 }
 
-fn records_section(records: Option(List(Record))) -> Element(Msg) {
+fn records_section(records: Option(List(Record)), translate: fn(Key) -> String) -> Element(Msg) {
   html.div([attribute.class("card")], [
     html.h3([], [html.text("Records")]),
     case records {
@@ -219,21 +220,21 @@ fn records_section(records: Option(List(Record))) -> Element(Msg) {
                 html.th([], [html.text("Actions")]),
               ]),
             ]),
-            html.tbody([], list.map(record_list, record_row)),
+            html.tbody([], list.map(record_list, record_row(_, translate))),
           ]),
         ])
     },
   ])
 }
 
-fn record_row(record: Record) -> Element(Msg) {
+fn record_row(record: Record, translate: fn(Key) -> String) -> Element(Msg) {
   let record_id = option.unwrap(record.id, 0)
   let record_id_str = int.to_string(record_id)
 
   html.tr([], [
     html.td([], [html.text(record_id_str)]),
     html.td([], [html.text(record.record_type_name)]),
-    html.td([], [status_badge.render(record.status)]),
+    html.td([], [status_badge.render(record.status, translate)]),
     html.td([], [html.text(record.patient_id)]),
     html.td([], [
       html.a(

@@ -1,5 +1,6 @@
 // Patients list page — self-contained MVU module
 import api/models
+import clarinet_frontend/i18n.{type Key}
 import gleam/dict
 import gleam/int
 import gleam/list
@@ -43,53 +44,54 @@ pub fn update(
 // --- View ---
 
 pub fn view(_model: Model, shared: Shared) -> Element(Msg) {
+  let t = shared.translate
   html.div([attribute.class("container")], [
     html.div([attribute.class("page-header")], [
-      html.h1([], [html.text("Patients")]),
+      html.h1([], [html.text(t(i18n.PatientsTitle))]),
       html.a(
         [
           attribute.href(router.route_to_path(router.PatientNew)),
           attribute.class("btn btn-primary"),
         ],
-        [html.text("New Patient")],
+        [html.text(t(i18n.BtnNewPatient))],
       ),
     ]),
     {
       let patients =
         dict.values(shared.cache.patients)
         |> list.sort(fn(a, b) { string.compare(a.id, b.id) })
-      patients_table(patients)
+      patients_table(patients, t)
     },
   ])
 }
 
-fn patients_table(patients: List(models.Patient)) -> Element(Msg) {
+fn patients_table(patients: List(models.Patient), translate: fn(Key) -> String) -> Element(Msg) {
   case patients {
     [] ->
-      html.p([attribute.class("text-muted")], [html.text("No patients found.")])
+      html.p([attribute.class("text-muted")], [html.text(translate(i18n.PatientsNoFound))])
     _ ->
       html.div([attribute.class("table-responsive")], [
         html.table([attribute.class("table")], [
           html.thead([], [
             html.tr([], [
-              html.th([], [html.text("ID")]),
-              html.th([], [html.text("Name")]),
-              html.th([], [html.text("Anon ID")]),
-              html.th([], [html.text("Anon Name")]),
-              html.th([], [html.text("Studies")]),
-              html.th([], [html.text("Actions")]),
+              html.th([], [html.text(translate(i18n.ThId))]),
+              html.th([], [html.text(translate(i18n.ThName))]),
+              html.th([], [html.text(translate(i18n.ThAnonId))]),
+              html.th([], [html.text(translate(i18n.ThAnonName))]),
+              html.th([], [html.text(translate(i18n.ThStudies))]),
+              html.th([], [html.text(translate(i18n.ThActions))]),
             ]),
           ]),
           html.tbody(
             [],
-            list.map(patients, patient_row),
+            list.map(patients, patient_row(_, translate)),
           ),
         ]),
       ])
   }
 }
 
-fn patient_row(patient: models.Patient) -> Element(Msg) {
+fn patient_row(patient: models.Patient, translate: fn(Key) -> String) -> Element(Msg) {
   let studies_count = case patient.studies {
     Some(studies) -> int.to_string(list.length(studies))
     None -> "0"
@@ -107,7 +109,7 @@ fn patient_row(patient: models.Patient) -> Element(Msg) {
           attribute.href(router.route_to_path(router.PatientDetail(patient.id))),
           attribute.class("btn btn-sm btn-outline"),
         ],
-        [html.text("View")],
+        [html.text(translate(i18n.BtnView))],
       ),
     ]),
   ])

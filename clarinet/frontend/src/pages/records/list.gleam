@@ -2,6 +2,7 @@
 import api/models.{type Record}
 import api/records
 import api/types.{type ApiError, AuthError}
+import clarinet_frontend/i18n
 import components/forms/base
 import components/status_badge
 import gleam/dict.{type Dict}
@@ -47,7 +48,7 @@ pub fn init(_shared: Shared) -> #(Model, Effect(Msg), List(OutMsg)) {
 pub fn update(
   model: Model,
   msg: Msg,
-  _shared: Shared,
+  shared: Shared,
 ) -> #(Model, Effect(Msg), List(OutMsg)) {
   case msg {
     AddFilter(key, value) -> {
@@ -79,14 +80,14 @@ pub fn update(
     RestartResult(Ok(record)) -> #(model, effect.none(), [
       shared.SetLoading(False),
       shared.CacheRecord(record),
-      shared.ShowSuccess("Record restarted successfully"),
+      shared.ShowSuccess(shared.translate(i18n.RecordsMsgRestarted)),
       shared.ReloadRecords,
     ])
 
     RestartResult(Error(err)) -> #(
       model,
       effect.none(),
-      handle_error(err, "Failed to restart record"),
+      handle_error(err, shared.translate(i18n.RecordsMsgRestartFailed)),
     )
   }
 }
@@ -108,9 +109,10 @@ pub fn view(model: Model, shared: Shared) -> Element(Msg) {
     None -> False
   }
 
+  let t = shared.translate
   let title = case is_admin {
-    True -> "All Records"
-    False -> "Records"
+    True -> t(i18n.RecordsAllTitle)
+    False -> t(i18n.RecordsTitle)
   }
 
   html.div([attribute.class("container")], [
@@ -118,14 +120,14 @@ pub fn view(model: Model, shared: Shared) -> Element(Msg) {
     {
       let all_records = dict.values(shared.cache.records)
       html.div([], [
-        filter_bar(model, all_records),
+        filter_bar(model, shared, all_records),
         records_table(model, shared, all_records),
       ])
     },
   ])
 }
 
-fn filter_bar(model: Model, all_records: List(Record)) -> Element(Msg) {
+fn filter_bar(model: Model, shared: Shared, all_records: List(Record)) -> Element(Msg) {
   let status_value =
     dict.get(model.active_filters, "status")
     |> option.from_result()
@@ -141,9 +143,9 @@ fn filter_bar(model: Model, all_records: List(Record)) -> Element(Msg) {
     |> option.from_result()
     |> option.unwrap("")
 
-  let status_options = record_filters.status_options()
-  let type_options = record_filters.type_options(all_records)
-  let patient_options = record_filters.patient_options(all_records)
+  let status_options = record_filters.status_options(shared.translate)
+  let type_options = record_filters.type_options(all_records, shared.translate)
+  let patient_options = record_filters.patient_options(all_records, shared.translate)
 
   let has_filters = !dict.is_empty(model.active_filters)
 
@@ -189,7 +191,7 @@ fn filter_bar(model: Model, all_records: List(Record)) -> Element(Msg) {
             attribute.class("btn btn-sm btn-outline"),
             event.on_click(ClearFilters),
           ],
-          [html.text("Clear Filters")],
+          [html.text(shared.translate(i18n.BtnClearFilters))],
         )
       False -> html.text("")
     },
@@ -209,19 +211,19 @@ fn records_table(
 
   case records {
     [] ->
-      html.p([attribute.class("text-muted")], [html.text("No records found.")])
+      html.p([attribute.class("text-muted")], [html.text(shared.translate(i18n.RecordsNoFound))])
     _ ->
       html.div([attribute.class("table-responsive")], [
         html.table([attribute.class("table")], [
           html.thead([], [
             html.tr([], [
-              html.th([], [html.text("ID")]),
-              html.th([], [html.text("Record Type")]),
-              html.th([], [html.text("Status")]),
-              html.th([], [html.text("Patient")]),
-              html.th([], [html.text("Study / Series")]),
-              html.th([], [html.text("Modality")]),
-              html.th([], [html.text("Actions")]),
+              html.th([], [html.text(shared.translate(i18n.ThId))]),
+              html.th([], [html.text(shared.translate(i18n.ThRecordType))]),
+              html.th([], [html.text(shared.translate(i18n.ThStatus))]),
+              html.th([], [html.text(shared.translate(i18n.ThPatient))]),
+              html.th([], [html.text(shared.translate(i18n.ThStudySeries))]),
+              html.th([], [html.text(shared.translate(i18n.ThModality))]),
+              html.th([], [html.text(shared.translate(i18n.ThActions))]),
             ]),
           ]),
           html.tbody(
@@ -250,7 +252,7 @@ fn record_row(shared: Shared, record: Record) -> Element(Msg) {
   html.tr([], [
     html.td([], [html.text(record_id_str)]),
     html.td([], [html.text(type_label)]),
-    html.td([], [status_badge.render(record.status)]),
+    html.td([], [status_badge.render(record.status, shared.translate)]),
     html.td([], [html.text(record.patient_id)]),
     html.td([], [html.text(format_study_series_summary(record))]),
     html.td([], [
@@ -273,7 +275,7 @@ fn record_row(shared: Shared, record: Record) -> Element(Msg) {
               ),
               attribute.class("btn btn-sm btn-primary"),
             ],
-            [html.text("Fill")],
+            [html.text(shared.translate(i18n.BtnFill))],
           )
         _, True ->
           html.a(
@@ -283,7 +285,7 @@ fn record_row(shared: Shared, record: Record) -> Element(Msg) {
               ),
               attribute.class("btn btn-sm btn-secondary"),
             ],
-            [html.text("Edit")],
+            [html.text(shared.translate(i18n.BtnEdit))],
           )
         _, _ ->
           html.a(
@@ -293,7 +295,7 @@ fn record_row(shared: Shared, record: Record) -> Element(Msg) {
               ),
               attribute.class("btn btn-sm btn-outline"),
             ],
-            [html.text("View")],
+            [html.text(shared.translate(i18n.BtnView))],
           )
       },
       case can_fail {
@@ -303,7 +305,7 @@ fn record_row(shared: Shared, record: Record) -> Element(Msg) {
               attribute.class("btn btn-sm btn-danger"),
               event.on_click(RequestFail(record_id_str)),
             ],
-            [html.text("Fail")],
+            [html.text(shared.translate(i18n.BtnFail))],
           )
         False -> element.none()
       },
@@ -314,7 +316,7 @@ fn record_row(shared: Shared, record: Record) -> Element(Msg) {
               attribute.class("btn btn-sm btn-warning"),
               event.on_click(Restart(record_id_str)),
             ],
-            [html.text("Restart")],
+            [html.text(shared.translate(i18n.BtnRestart))],
           )
         False -> element.none()
       },
