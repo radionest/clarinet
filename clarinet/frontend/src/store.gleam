@@ -186,6 +186,7 @@ pub fn reset_for_logout(model: Model) -> Model {
     ..fresh,
     project_name: model.project_name,
     project_description: model.project_description,
+    locale: model.locale,
     checking_session: False,
     page: NoPage,
   )
