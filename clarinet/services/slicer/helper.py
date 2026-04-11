@@ -2035,9 +2035,12 @@ class SlicerHelper:
 
                 if editable_views:
                     if empty:
-                        _jump_views(editable_views, ref_centroid)
+                        # Don't jump editable views — ref_centroid is in the
+                        # reference volume's world space and may lie outside
+                        # the moving volume's extent after alignment → black.
                         print(
-                            f"[SegFocus] jumped editable views {editable_views} (using ref, segment empty)"
+                            f"[SegFocus] editable views {editable_views} not jumped "
+                            f"(segment empty, ref_centroid may be outside moving volume)"
                         )
                     else:
                         target = edit_centroid or ref_centroid
