@@ -399,20 +399,18 @@ def create_app(root_path: str = "") -> FastAPI:
 
     # Serve frontend if enabled
     if settings.frontend_enabled:
-        # Find first existing static directory
-        static_dir = None
+        # Collect all existing static directories (project-level first, built-in last)
+        static_dirs: list[Path] = []
         for dir_path in settings.static_directories:
             if dir_path.exists():
-                static_dir = dir_path
-                logger.info(f"Using static files from {static_dir}")
-                break
+                static_dirs.append(dir_path)
+                logger.info(f"Static files directory: {dir_path}")
             else:
                 logger.debug(f"Static directory {dir_path} does not exist")
 
-        if not static_dir:
+        if not static_dirs:
             # Should not happen: _check_frontend() in lifespan catches this.
-            # Defensive fallback for edge cases (e.g. dir deleted after startup).
-            logger.error("Static directory disappeared after startup")
+            logger.error("No static directories found after startup")
 
         # Cache rendered index.html with $BASE_PATH substituted
         _index_html_cache: dict[str, str] = {}
@@ -453,8 +451,8 @@ def create_app(root_path: str = "") -> FastAPI:
                     detail="OHIF Viewer not installed. Run 'clarinet ohif install'.",
                 )
 
-            # Check if static directory exists
-            if not static_dir:
+            # Check if any static directory exists
+            if not static_dirs:
                 from fastapi import HTTPException
 
                 raise HTTPException(
@@ -462,15 +460,22 @@ def create_app(root_path: str = "") -> FastAPI:
                     detail="Frontend not built. Run 'make frontend-build' to build the frontend.",
                 )
 
-            # Try to serve the requested file first
-            requested_file = static_dir / full_path
-            if requested_file.exists() and requested_file.is_file():
-                return FileResponse(requested_file)
+            # Try to serve the requested file (project-level overrides built-in)
+            for sd in static_dirs:
+                base = sd.resolve()
+                candidate = (base / full_path).resolve()
+                try:
+                    candidate.relative_to(base)
+                except ValueError:
+                    continue
+                if candidate.is_file():
+                    return FileResponse(candidate)
 
             # Serve index.html for all other routes (SPA routing)
-            index_path = static_dir / "index.html"
-            if index_path.exists():
-                return HTMLResponse(_render_index(index_path))
+            for sd in static_dirs:
+                index_path = sd / "index.html"
+                if index_path.exists():
+                    return HTMLResponse(_render_index(index_path))
 
             # Fallback error if index.html not found
             from fastapi import HTTPException
