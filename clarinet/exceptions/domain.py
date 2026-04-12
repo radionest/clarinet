@@ -206,6 +206,21 @@ class RecordConstraintViolationError(BusinessRuleViolationError):
     """Raised when a record constraint is violated."""
 
 
+class RecordLimitReachedError(RecordConstraintViolationError):
+    """Raised when max_records limit is reached.
+
+    Expected in concurrent flows where multiple triggers try to create
+    the same record type. Engine can safely downgrade to WARNING.
+    """
+
+
+class RecordUniquePerUserError(RecordConstraintViolationError):
+    """Raised when unique_per_user constraint is violated.
+
+    Expected during auto-assign when user already has a record of this type.
+    """
+
+
 # Configuration errors
 class ConfigurationError(ClarinetError):
     """Raised when there's a configuration problem."""

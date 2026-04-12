@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from clarinet.exceptions.domain import RecordConstraintViolationError
+from clarinet.exceptions.domain import RecordUniquePerUserError
 from clarinet.models import Record, RecordRead, RecordStatus
 from clarinet.models.file_schema import FileRole
 from clarinet.services.file_validation import validate_record_files
@@ -349,7 +349,7 @@ class RecordService:
             record: Record with record_type eagerly loaded.
 
         Raises:
-            RecordConstraintViolationError: If user already has a record
+            RecordUniquePerUserError: If user already has a record
                 of this type for the same DICOM context.
         """
         record_type = record.record_type
@@ -365,7 +365,7 @@ class RecordService:
             level=record_type.level,
         )
         if count > 0:
-            raise RecordConstraintViolationError(
+            raise RecordUniquePerUserError(
                 f"User already has a record of type '{record_type.name}' "
                 f"for this {record_type.level.lower()} context"
             )

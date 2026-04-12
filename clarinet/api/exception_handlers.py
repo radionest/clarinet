@@ -33,6 +33,8 @@ def setup_exception_handlers(app: FastAPI) -> None:
         EntityNotFoundError,
         InvalidCredentialsError,
         PipelineError,
+        RecordLimitReachedError,
+        RecordUniquePerUserError,
         SlicerConnectionError,
         SlicerError,
         ValidationError,
@@ -97,6 +99,30 @@ def setup_exception_handlers(app: FastAPI) -> None:
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             content={"detail": str(exc) if str(exc) else "Validation failed"},
+        )
+
+    @app.exception_handler(RecordLimitReachedError)
+    async def handle_record_limit_reached(_: Request, exc: RecordLimitReachedError) -> JSONResponse:
+        """Convert RecordLimitReachedError to 409 with machine-readable code."""
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content={
+                "detail": str(exc) if str(exc) else "Record limit reached",
+                "code": "RECORD_LIMIT_REACHED",
+            },
+        )
+
+    @app.exception_handler(RecordUniquePerUserError)
+    async def handle_record_unique_per_user(
+        _: Request, exc: RecordUniquePerUserError
+    ) -> JSONResponse:
+        """Convert RecordUniquePerUserError to 409 with machine-readable code."""
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content={
+                "detail": str(exc) if str(exc) else "User already has a record of this type",
+                "code": "UNIQUE_PER_USER",
+            },
         )
 
     @app.exception_handler(BusinessRuleViolationError)
