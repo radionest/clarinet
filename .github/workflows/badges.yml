@@ -87,5 +87,9 @@ jobs:
           git remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           cp "$GITHUB_WORKSPACE"/badges/*.svg .
           git add .
-          git commit -q -m "update badges"
-          git push origin HEAD:badges --force
+          if ! git diff --cached --quiet; then
+            git commit -q -m "update badges"
+            git push origin HEAD:badges --force
+          else
+            echo "Badges unchanged, skipping push"
+          fi

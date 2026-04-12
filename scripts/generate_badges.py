@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import tomllib
 import xml.etree.ElementTree as ET
+from html import escape
 from pathlib import Path
 
 # Approximate character widths for Verdana 11px (shields.io compatible)
@@ -50,6 +51,8 @@ def _make_badge(label: str, value: str, color: str) -> str:
     tw = lw + vw
     lx = lw / 2
     vx = lw + vw / 2
+    el = escape(label)
+    ev = escape(value)
     return (
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{tw:.0f}" height="20">'
         f'<linearGradient id="s" x2="0" y2="100%">'
@@ -65,10 +68,10 @@ def _make_badge(label: str, value: str, color: str) -> str:
         f'<g fill="#fff" text-anchor="middle" '
         f'font-family="Verdana,Geneva,DejaVu Sans,sans-serif" '
         f'text-rendering="geometricPrecision" font-size="11">'
-        f'<text x="{lx:.0f}" y="15" fill="#010101" fill-opacity=".3">{label}</text>'
-        f'<text x="{lx:.0f}" y="14">{label}</text>'
-        f'<text x="{vx:.0f}" y="15" fill="#010101" fill-opacity=".3">{value}</text>'
-        f'<text x="{vx:.0f}" y="14">{value}</text>'
+        f'<text x="{lx:.0f}" y="15" fill="#010101" fill-opacity=".3">{el}</text>'
+        f'<text x="{lx:.0f}" y="14">{el}</text>'
+        f'<text x="{vx:.0f}" y="15" fill="#010101" fill-opacity=".3">{ev}</text>'
+        f'<text x="{vx:.0f}" y="14">{ev}</text>'
         f"</g></svg>"
     )
 
