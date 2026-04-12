@@ -246,6 +246,9 @@ class Settings(BaseSettings):
     pipeline_retry_max_delay: int = 120  # Max retry delay with backoff
     pipeline_ack_type: AcknowledgeType = AcknowledgeType.WHEN_EXECUTED
 
+    # Viewer plugin settings (nested dict, configured via [viewers.<name>] in TOML)
+    viewers: dict[str, dict[str, Any]] = {}
+
     # Template settings
     template_dir: str | None = None
     static_dir: str | None = None
