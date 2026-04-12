@@ -125,9 +125,13 @@ def test_find_records(case):
 
     Targets: RecordSearchQuery body, RecordFindResult computed sql_type,
     comparison_operator enum, sentinel values ("Null", "*"),
-    pagination edge cases (skip=-1, limit=0).
+    cursor-based keyset pagination.
+
+    Excludes positive_data_acceptance: cursor field is an opaque base64-encoded
+    token whose validity cannot be expressed in OpenAPI schema (any string
+    matching the charset can still fail JSON/structure decoding).
     """
-    case.call_and_validate()
+    case.call_and_validate(excluded_checks=[positive_data_acceptance])
 
 
 # ---------------------------------------------------------------------------
