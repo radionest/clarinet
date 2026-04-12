@@ -18,6 +18,7 @@ from tests.utils.factories import (
     make_study,
     seed_record,
 )
+from tests.utils.urls import RECORDS_FIND_RANDOM
 
 
 @pytest_asyncio.fixture
@@ -215,7 +216,7 @@ class TestFindRandomRecord:
 class TestFindRandomEndpoint:
     @pytest.mark.asyncio
     async def test_returns_one_record(self, client, page_env):
-        resp = await client.post("/api/records/find/random", json={"patient_id": "PAGE_PAT"})
+        resp = await client.post(RECORDS_FIND_RANDOM, json={"patient_id": "PAGE_PAT"})
         assert resp.status_code == 200
         data = resp.json()
         assert data is not None
@@ -223,14 +224,14 @@ class TestFindRandomEndpoint:
 
     @pytest.mark.asyncio
     async def test_no_match_returns_null(self, client, page_env):
-        resp = await client.post("/api/records/find/random", json={"patient_id": "NONEXISTENT"})
+        resp = await client.post(RECORDS_FIND_RANDOM, json={"patient_id": "NONEXISTENT"})
         assert resp.status_code == 200
         assert resp.json() is None
 
     @pytest.mark.asyncio
     async def test_rejects_pagination_fields(self, client, page_env):
         resp = await client.post(
-            "/api/records/find/random",
+            RECORDS_FIND_RANDOM,
             json={"patient_id": "PAGE_PAT", "cursor": "abc"},
         )
         assert resp.status_code == 422
