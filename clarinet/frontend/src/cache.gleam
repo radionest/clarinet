@@ -12,6 +12,7 @@ import api/types.{type ApiError}
 import api/users
 import cache/bucket.{type Bucket, type BucketKey, type BucketStatus}
 import gleam/dict.{type Dict}
+import gleam/time/timestamp
 import gleam/int
 import gleam/javascript/promise.{type Promise}
 import gleam/json
@@ -541,8 +542,12 @@ fn api_error_msg(err: ApiError) -> String {
   }
 }
 
-@external(javascript, "../cache_ffi.mjs", "now_ms")
-fn now_ms() -> Int
+fn now_ms() -> Int {
+  let #(seconds, nanoseconds) =
+    timestamp.system_time()
+    |> timestamp.to_unix_seconds_and_nanoseconds()
+  seconds * 1000 + nanoseconds / 1_000_000
+}
 
 fn load_effect(
   api_call: fn() -> Promise(Result(a, ApiError)),
