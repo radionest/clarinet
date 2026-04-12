@@ -176,7 +176,7 @@ _CONSOLE_FORMAT = (
 _WARNING_LEVEL_NO = 30
 
 
-def _make_noisy_library_filter(prefixes: list[str]) -> Callable[[Record], bool]:
+def _make_noisy_filter(prefixes: list[str]) -> Callable[[Record], bool]:
     """Create a loguru filter that suppresses DEBUG/INFO from noisy libraries.
 
     Args:
@@ -250,15 +250,15 @@ def setup_logging(
         rotation: When to rotate log files (size or time)
         retention: How long to keep log files
         serialize: Whether to format file logs as JSON lines
-        noisy_libraries: Library name prefixes to suppress on console (DEBUG/INFO hidden,
-            WARNING+ still shown). Pass empty list to disable filtering.
+        noisy_libraries: Library name prefixes to suppress on console and file sinks
+            (DEBUG/INFO hidden, WARNING+ still shown). Pass empty list to disable.
         remote_url: Loki-compatible push endpoint URL. None disables remote logging.
         remote_auth: Authorization header value for the remote endpoint.
         remote_level: Minimum level for remote sink (defaults to level).
         remote_labels: Extra Loki stream labels (e.g. {"env": "prod"}).
     """
     console_format = format or _CONSOLE_FORMAT
-    console_filter = _make_noisy_library_filter(noisy_libraries) if noisy_libraries else None
+    noisy_filter = _make_noisy_filter(noisy_libraries) if noisy_libraries else None
 
     _logger.remove()
 
@@ -268,7 +268,7 @@ def setup_logging(
         sys.stderr,
         level=console_level or level,
         format=console_format,
-        filter=console_filter,
+        filter=noisy_filter,
         colorize=True,
         backtrace=True,
         diagnose=True,
@@ -287,6 +287,7 @@ def setup_logging(
             str(log_path),
             level=level,
             format=file_format,
+            filter=noisy_filter,
             rotation=rotation,
             retention=retention,
             compression="zip",
