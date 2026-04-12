@@ -15,7 +15,6 @@ from pathlib import Path
 
 # Approximate character widths for Verdana 11px (shields.io compatible)
 _NARROW = 4.4
-_WIDE = 9.6
 _CHAR_W: dict[str, float] = {
     " ": 3.3,
     "f": 5.6,
