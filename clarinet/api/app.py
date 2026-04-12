@@ -214,8 +214,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     from clarinet.services.viewer import build_viewer_registry
     from clarinet.services.viewer.registry import ViewerConfig
 
-    viewer_configs = {name: ViewerConfig(**cfg) for name, cfg in settings.viewers.items()}
-    app.state.viewer_registry = build_viewer_registry(viewer_configs)
+    try:
+        viewer_configs = {name: ViewerConfig(**cfg) for name, cfg in settings.viewers.items()}
+        app.state.viewer_registry = build_viewer_registry(viewer_configs)
+    except Exception as e:
+        raise StartupError(
+            component="Viewers",
+            reason=str(e),
+            hint="Fix [viewers.*] configuration in settings.toml",
+        ) from e
 
     if settings.recordflow_enabled:
         try:

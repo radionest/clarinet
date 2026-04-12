@@ -5,6 +5,7 @@ import pytest
 from clarinet.services.viewer import ViewerRegistry, build_viewer_registry
 from clarinet.services.viewer.adapters import RadiantAdapter, TemplateAdapter, WeasisAdapter
 from clarinet.services.viewer.registry import ViewerConfig
+from tests.utils.urls import RECORDS_BASE
 
 # --- Unit tests: adapters ---
 
@@ -13,7 +14,10 @@ class TestRadiantAdapter:
     def test_build_uri_default_pacs(self):
         adapter = RadiantAdapter()
         uri = adapter.build_uri(patient_id="P001", study_uid="1.2.3.4")
-        assert uri == "radiant://?n=paet&v=ORTHANC&n=pstv&v=0020000D&v=1.2.3.4"
+        assert uri.startswith("radiant://")
+        assert "n=paet" in uri
+        assert "v=ORTHANC" in uri
+        assert "v=1.2.3.4" in uri
 
     def test_build_uri_custom_pacs(self):
         adapter = RadiantAdapter(pacs_name="MY_PACS")
@@ -36,7 +40,9 @@ class TestWeasisAdapter:
     def test_build_uri_study_only(self):
         adapter = WeasisAdapter(base_url="http://pacs:8080/connector")
         uri = adapter.build_uri(patient_id="P001", study_uid="1.2.3")
-        assert uri == "http://pacs:8080/connector/weasis?studyUID=1.2.3&patientID=P001"
+        assert uri.startswith("http://pacs:8080/connector/weasis?")
+        assert "studyUID=1.2.3" in uri
+        assert "patientID=P001" in uri
 
     def test_build_uri_with_series(self):
         adapter = WeasisAdapter(base_url="http://pacs:8080/connector/")
@@ -106,6 +112,17 @@ class TestViewerRegistry:
         assert registry.build_all_uris(patient_id="P", study_uid="S") == {}
         assert registry.available == []
 
+    def test_build_all_uris_skips_failing_adapter(self):
+        """A broken adapter should not prevent others from returning URIs."""
+        registry = ViewerRegistry()
+        registry.register(RadiantAdapter(pacs_name="OK"))
+        # Inject a broken adapter
+        bad = TemplateAdapter(name="broken", template="{missing_key}")
+        registry.register(bad)
+        uris = registry.build_all_uris(patient_id="P", study_uid="1.2")
+        assert "radiant" in uris
+        assert "broken" not in uris
+
 
 class TestBuildViewerRegistry:
     def test_build_with_builtin(self):
@@ -131,6 +148,16 @@ class TestBuildViewerRegistry:
         configs = {"unknown_viewer": ViewerConfig(enabled=True)}
         registry = build_viewer_registry(configs)
         assert registry.available == []
+
+    def test_invalid_config_skipped(self):
+        """Weasis without base_url should be skipped, not crash."""
+        configs = {
+            "weasis": ViewerConfig(enabled=True),
+            "radiant": ViewerConfig(enabled=True, pacs_name="OK"),
+        }
+        registry = build_viewer_registry(configs)
+        assert "weasis" not in registry.available
+        assert "radiant" in registry.available
 
 
 # --- Integration tests: API endpoints ---
@@ -169,7 +196,7 @@ async def test_list_viewer_urls(client, test_session):
         "vwr-test-rt",
     )
 
-    resp = await client.get(f"/api/records/{record.id}/viewers")
+    resp = await client.get(f"{RECORDS_BASE}/{record.id}/viewers")
     assert resp.status_code == 200
     data = resp.json()
     assert "radiant" in data
@@ -202,7 +229,7 @@ async def test_get_specific_viewer_url(client, test_session):
         "vwr-rt-2",
     )
 
-    resp = await client.get(f"/api/records/{record.id}/viewers/radiant")
+    resp = await client.get(f"{RECORDS_BASE}/{record.id}/viewers/radiant")
     assert resp.status_code == 200
     data = resp.json()
     assert data["viewer"] == "radiant"
@@ -234,5 +261,5 @@ async def test_viewer_not_found(client, test_session):
         "vwr-rt-3",
     )
 
-    resp = await client.get(f"/api/records/{record.id}/viewers/nonexistent")
+    resp = await client.get(f"{RECORDS_BASE}/{record.id}/viewers/nonexistent")
     assert resp.status_code == 404

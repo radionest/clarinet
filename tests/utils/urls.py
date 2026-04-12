@@ -63,5 +63,9 @@ HEALTH = "/api/health"
 PIPELINES_BASE = "/api/pipelines"
 PIPELINES_SYNC = "/api/pipelines/sync"
 
+# --- Viewers ---
+# Dynamic: f"{RECORDS_BASE}/{record_id}/viewers"
+# Dynamic: f"{RECORDS_BASE}/{record_id}/viewers/{viewer_name}"
+
 # --- DICOMweb (outside /api prefix for OHIF compatibility) ---
 DICOMWEB_BASE = "/dicom-web"

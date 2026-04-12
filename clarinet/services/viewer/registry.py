@@ -46,11 +46,14 @@ class ViewerRegistry:
     ) -> dict[str, str]:
         result: dict[str, str] = {}
         for name, adapter in self._adapters.items():
-            result[name] = adapter.build_uri(
-                patient_id=patient_id,
-                study_uid=study_uid,
-                series_uid=series_uid,
-            )
+            try:
+                result[name] = adapter.build_uri(
+                    patient_id=patient_id,
+                    study_uid=study_uid,
+                    series_uid=series_uid,
+                )
+            except Exception:
+                logger.error(f"Failed to build URI for viewer '{name}'")
         return result
 
     @property
@@ -64,13 +67,19 @@ def build_viewer_registry(viewers: dict[str, ViewerConfig]) -> ViewerRegistry:
     for name, config in viewers.items():
         if not config.enabled:
             continue
-        adapter: ViewerAdapter
-        if name in _BUILTIN_ADAPTERS:
-            adapter = _BUILTIN_ADAPTERS[name].from_config(config)
-        elif config.uri_template:
-            adapter = TemplateAdapter(name=name, template=config.uri_template)
-        else:
-            logger.warning(f"Viewer '{name}' has no built-in adapter and no uri_template — skipped")
+        try:
+            adapter: ViewerAdapter
+            if name in _BUILTIN_ADAPTERS:
+                adapter = _BUILTIN_ADAPTERS[name].from_config(config)
+            elif config.uri_template:
+                adapter = TemplateAdapter(name=name, template=config.uri_template)
+            else:
+                logger.warning(
+                    f"Viewer '{name}' has no built-in adapter and no uri_template — skipped"
+                )
+                continue
+        except ValueError as exc:
+            logger.error(f"Invalid viewer config for '{name}': {exc}")
             continue
         registry.register(adapter)
         logger.info(f"Registered viewer adapter: {name}")

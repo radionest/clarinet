@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from urllib.parse import urlencode
 
 from clarinet.services.viewer.base import ViewerAdapter
 
@@ -35,7 +36,16 @@ class RadiantAdapter(ViewerAdapter):
         series_uid: str | None = None,
     ) -> str:
         # 0020000D = StudyInstanceUID DICOM tag
-        return f"radiant://?n=paet&v={self.pacs_name}&n=pstv&v=0020000D&v={study_uid}"
+        query = urlencode(
+            [
+                ("n", "paet"),
+                ("v", self.pacs_name),
+                ("n", "pstv"),
+                ("v", "0020000D"),
+                ("v", study_uid),
+            ]
+        )
+        return f"radiant://?{query}"
 
 
 class WeasisAdapter(ViewerAdapter):
@@ -65,10 +75,10 @@ class WeasisAdapter(ViewerAdapter):
         study_uid: str,
         series_uid: str | None = None,
     ) -> str:
-        uri = f"{self.base_url}/weasis?studyUID={study_uid}&patientID={patient_id}"
+        params: dict[str, str] = {"studyUID": study_uid, "patientID": patient_id}
         if series_uid:
-            uri += f"&seriesUID={series_uid}"
-        return uri
+            params["seriesUID"] = series_uid
+        return f"{self.base_url}/weasis?{urlencode(params)}"
 
 
 class TemplateAdapter(ViewerAdapter):
