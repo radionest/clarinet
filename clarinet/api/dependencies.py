@@ -299,9 +299,11 @@ ProjectFileRegistryDep = Annotated[
 
 
 def get_viewer_registry(request: Request) -> ViewerRegistry:
-    """Get viewer plugin registry from app state."""
-    registry: ViewerRegistry = request.app.state.viewer_registry
-    return registry
+    """Get viewer plugin registry from app state.
+
+    Returns an empty registry when state is not initialized (e.g. schema tests).
+    """
+    return getattr(request.app.state, "viewer_registry", ViewerRegistry())
 
 
 ViewerRegistryDep = Annotated[ViewerRegistry, Depends(get_viewer_registry)]

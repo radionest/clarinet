@@ -8,7 +8,7 @@ from clarinet.exceptions.http import NOT_FOUND
 router = APIRouter()
 
 
-@router.get("/{record_id}/viewers")
+@router.get("/{record_id}/viewers", responses={404: {"description": "Record not found"}})
 async def list_viewer_urls(
     record: AuthorizedRecordDep,
     registry: ViewerRegistryDep,
@@ -26,7 +26,10 @@ async def list_viewer_urls(
     )
 
 
-@router.get("/{record_id}/viewers/{viewer_name}")
+@router.get(
+    "/{record_id}/viewers/{viewer_name}",
+    responses={404: {"description": "Record or viewer not found"}},
+)
 async def get_viewer_url(
     record: AuthorizedRecordDep,
     registry: ViewerRegistryDep,
