@@ -37,6 +37,22 @@ config_record_types_file = "definitions/record_types.py"
 config_context_hydrators_file = "hydrators/context_hydrators.py"
 recordflow_paths = ["./plan/workflows"]
 
+# ── External Viewers ─────────────────────────────────
+# Enable viewers that support URI schemes (radiant://, weasis://, etc.)
+# API: GET /api/records/{id}/viewers
+#
+# [viewers.radiant]
+# enabled = true
+# pacs_name = "MY_PACS"
+#
+# [viewers.weasis]
+# enabled = true
+# base_url = "http://pacs:8080/weasis-pacs-connector"
+#
+# [viewers.custom_name]
+# enabled = true
+# uri_template = "https://dcm4chee.local/studies/{study_uid}"
+
 # ── DICOM ────────────────────────────────────────────
 dicom_retrieve_mode = "c-move"
 anon_send_to_pacs = false

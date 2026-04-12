@@ -37,6 +37,7 @@ from clarinet.api.routers import record as record
 from clarinet.api.routers import slicer  # slicer doesn't use database, no async version needed,
 from clarinet.api.routers import study as study
 from clarinet.api.routers import user as user
+from clarinet.api.routers import viewer as viewer
 from clarinet.exceptions.domain import RecordFlowError
 from clarinet.services.session_cleanup import session_cleanup_service
 from clarinet.settings import settings
@@ -208,6 +209,20 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # Fail-fast: verify enabled components are available
     _check_frontend()
     _check_ohif()
+
+    # Initialize viewer plugin registry
+    from clarinet.services.viewer import build_viewer_registry
+    from clarinet.services.viewer.registry import ViewerConfig
+
+    try:
+        viewer_configs = {name: ViewerConfig(**cfg) for name, cfg in settings.viewers.items()}
+        app.state.viewer_registry = build_viewer_registry(viewer_configs)
+    except Exception as e:
+        raise StartupError(
+            component="Viewers",
+            reason=str(e),
+            hint="Fix [viewers.*] configuration in settings.toml",
+        ) from e
 
     if settings.recordflow_enabled:
         try:
@@ -385,6 +400,7 @@ def create_app(root_path: str = "") -> FastAPI:
     app.include_router(admin.router, prefix="/api/admin", tags=["Admin"])
     app.include_router(dicom.router, prefix="/api/dicom", tags=["DICOM"])
     app.include_router(pipeline.router, prefix="/api/pipelines", tags=["Pipelines"])
+    app.include_router(viewer.router, prefix="/api/records", tags=["Viewers"])
     app.include_router(health.router, prefix="/api", tags=["Health"])
 
     # Mount DICOMweb proxy router (conditional on settings)

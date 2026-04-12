@@ -34,6 +34,7 @@ from clarinet.services.recordflow.engine import RecordFlowEngine
 from clarinet.services.slicer.service import SlicerService
 from clarinet.services.study_service import StudyService
 from clarinet.services.user_service import UserService
+from clarinet.services.viewer import ViewerRegistry
 from clarinet.settings import settings
 from clarinet.utils.database import get_async_session
 from clarinet.utils.file_registry_resolver import FileRegistryEntry
@@ -292,6 +293,20 @@ def get_project_file_registry(
 ProjectFileRegistryDep = Annotated[
     dict[str, FileRegistryEntry] | None, Depends(get_project_file_registry)
 ]
+
+
+# Viewer plugin dependencies
+
+
+def get_viewer_registry(request: Request) -> ViewerRegistry:
+    """Get viewer plugin registry from app state.
+
+    Returns an empty registry when state is not initialized (e.g. schema tests).
+    """
+    return getattr(request.app.state, "viewer_registry", ViewerRegistry())
+
+
+ViewerRegistryDep = Annotated[ViewerRegistry, Depends(get_viewer_registry)]
 
 
 def get_user_role_names(user: User) -> set[str]:
