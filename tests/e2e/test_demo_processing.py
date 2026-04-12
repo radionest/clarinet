@@ -292,7 +292,7 @@ async def _find_records(
 
     resp = await client.post("/api/records/find", json=params)
     assert resp.status_code == 200, resp.text
-    result: list[dict] = resp.json()
+    result: list[dict] = resp.json()["items"]
     return result
 
 
@@ -729,7 +729,7 @@ class TestFullProcessingChain:
 
         # 9. Verify all records in expected final states
         all_records_resp = await client.post("/api/records/find", json={"study_uid": study_uid})
-        all_records = all_records_resp.json()
+        all_records = all_records_resp.json()["items"]
 
         finished_ids = {r["id"] for r in all_records if r["status"] == "finished"}
         assert dr_id in finished_ids

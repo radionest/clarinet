@@ -450,7 +450,7 @@ async def _find_records(client: AsyncClient, **params: Any) -> list[dict[str, An
     """Find records by criteria."""
     resp = await client.post(RECORDS_FIND, json=params)
     assert resp.status_code == 200, f"Find records failed: {resp.text}"
-    return resp.json()
+    return resp.json()["items"]
 
 
 async def _get_record(client: AsyncClient, record_id: int) -> dict[str, Any]:

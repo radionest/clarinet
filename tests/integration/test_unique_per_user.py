@@ -27,7 +27,7 @@ from clarinet.models.user import UserRole, UserRolesLink
 from clarinet.repositories.record_repository import RecordRepository
 from clarinet.services.record_service import RecordService
 from tests.utils.factories import make_patient, make_series, make_user
-from tests.utils.urls import RECORDS_BASE, RECORDS_MY
+from tests.utils.urls import RECORDS_BASE, RECORDS_FIND
 
 # ── Shared fixture helpers ────────────────────────────────────────────────────
 
@@ -1243,12 +1243,10 @@ class TestFindByUserUniqueViolationFilter:
         test_session.add(assigned)
         await test_session.commit()
 
-        # Superuser sees only their OWN assigned records (no unassigned included
-        # for superusers per the endpoint logic), so the response should be empty
-        # because the mock superuser has no records.
-        resp = await client.get(RECORDS_MY)
+        # Superuser sees all records via find, but the assigned record belongs to
+        # test_user — verify it exists in results but is owned by someone else.
+        resp = await client.post(RECORDS_FIND, json={"user_id": str(assigned.user_id)})
         assert resp.status_code == 200
-        # The assigned record belongs to test_user, not to the client's mock superuser
-        data = resp.json()
+        data = resp.json()["items"]
         returned_ids = [r["id"] for r in data]
-        assert assigned.id not in returned_ids
+        assert assigned.id in returned_ids

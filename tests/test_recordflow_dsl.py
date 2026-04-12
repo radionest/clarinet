@@ -33,6 +33,16 @@ from clarinet.services.recordflow.flow_file import file
 from clarinet.services.recordflow.flow_record import patient, record, series, study
 
 
+def _mock_iter_records(records_list: list[RecordRead]):
+    """Create a side_effect that makes mock.iter_records() return an async generator."""
+
+    async def _iter(*_args, **_kwargs):
+        for r in records_list:
+            yield r
+
+    return _iter
+
+
 def make_record_read(
     name: str,
     data: dict | None = None,
@@ -636,6 +646,7 @@ class TestRecordFlowEngineUnit:
 
         # Mock find_records to return the target
         mock_client.find_records = AsyncMock(return_value=[target_record])
+        mock_client.iter_records = _mock_iter_records([target_record])
         mock_client.invalidate_record = AsyncMock(return_value=target_record)
 
         engine = RecordFlowEngine(mock_client)
@@ -705,6 +716,7 @@ class TestRecordFlowEngineUnit:
 
         # Mock find_records to return target
         mock_client.find_records = AsyncMock(return_value=[target_record])
+        mock_client.iter_records = _mock_iter_records([target_record])
         mock_client.invalidate_record = AsyncMock(return_value=target_record)
 
         # Mock callback
@@ -745,6 +757,7 @@ class TestRecordFlowEngineUnit:
 
         # Mock find_records to return target
         mock_client.find_records = AsyncMock(return_value=[target_record])
+        mock_client.iter_records = _mock_iter_records([target_record])
         mock_client.invalidate_record = AsyncMock(return_value=target_record)
 
         engine = RecordFlowEngine(mock_client)
@@ -781,15 +794,14 @@ class TestRecordFlowEngineUnit:
         target_a = make_record_read("child-a", record_id=2, status=RecordStatus.finished)
         target_b = make_record_read("child-b", record_id=3, status=RecordStatus.finished)
 
-        # Mock find_records to return different targets based on record_type_name
-        async def mock_find_records(**kwargs):
+        # Mock iter_records to return different targets based on record_type_name
+        async def mock_iter_records(**kwargs):
             if kwargs.get("record_type_name") == "child-a":
-                return [target_a]
+                yield target_a
             elif kwargs.get("record_type_name") == "child-b":
-                return [target_b]
-            return []
+                yield target_b
 
-        mock_client.find_records = AsyncMock(side_effect=mock_find_records)
+        mock_client.iter_records = mock_iter_records
         mock_client.invalidate_record = AsyncMock()
 
         engine = RecordFlowEngine(mock_client)
@@ -1609,6 +1621,7 @@ class TestFileFlowEngine:
 
         target_record = make_record_read("projection", record_id=10, status=RecordStatus.finished)
         mock_client.find_records = AsyncMock(return_value=[target_record])
+        mock_client.iter_records = _mock_iter_records([target_record])
         mock_client.invalidate_record = AsyncMock(return_value=target_record)
 
         engine = RecordFlowEngine(mock_client)

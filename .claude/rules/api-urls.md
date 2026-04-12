@@ -44,11 +44,8 @@ URL constants live in `tests/utils/urls.py`. Status codes: 201 = POST create, 20
 
 | URL | Method | Status | Description |
 |---|---|---|---|
-| `/api/records` | GET | 200 | List records |
 | `/api/records` | POST | 201 | Create record |
-| `/api/records/find` | POST | 200 | Search records |
-| `/api/records/my` | GET | 200 | Current user's records |
-| `/api/records/my/pending` | GET | 200 | Current user's pending records |
+| `/api/records/find` | POST | 200 | Search records (cursor pagination, returns RecordPage) |
 | `/api/records/available_types` | GET | 200 | Available record types for user |
 | `/api/records/bulk/status` | PATCH | 204 | Bulk status update |
 | `/api/records/{id}` | GET | 200 | Get record |

@@ -371,8 +371,8 @@ class TestRecordManagement:
         test_session.add(record)
         await test_session.commit()
 
-        # Get user's records
-        records = await clarinet_client.get_my_records()
+        # Get user's records via find_records with user_id filter
+        records = await clarinet_client.find_records(user_id=str(admin_user.id))
 
         assert len(records) >= 1
         # Check that at least one record belongs to admin_user

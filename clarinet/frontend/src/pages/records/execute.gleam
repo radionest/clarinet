@@ -377,7 +377,7 @@ pub fn update(
         shared.SetLoading(False),
         shared.CacheRecord(record),
         shared.ShowSuccess("Record restarted successfully"),
-        shared.ReloadRecords,
+        shared.InvalidateAllRecordBuckets,
       ])
 
     RestartResult(Error(err)) ->

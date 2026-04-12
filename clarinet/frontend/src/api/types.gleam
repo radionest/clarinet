@@ -31,19 +31,3 @@ pub type DicomQueryLevel {
   Study
   Series
 }
-
-// Generic response wrapper
-pub type ApiResponse(a) {
-  Success(data: a)
-  Error(error: ApiError)
-}
-
-// Pagination info
-pub type Pagination {
-  Pagination(page: Int, per_page: Int, total: Int, total_pages: Int)
-}
-
-// List response with pagination
-pub type ListResponse(a) {
-  ListResponse(items: List(a), pagination: Pagination)
-}
