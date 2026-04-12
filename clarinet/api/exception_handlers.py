@@ -37,6 +37,7 @@ def setup_exception_handlers(app: FastAPI) -> None:
         SlicerError,
         ValidationError,
     )
+    from clarinet.utils.pagination import InvalidCursorError
 
     @app.exception_handler(EntityNotFoundError)
     async def handle_entity_not_found(_: Request, exc: EntityNotFoundError) -> JSONResponse:
@@ -80,6 +81,14 @@ def setup_exception_handlers(app: FastAPI) -> None:
         return JSONResponse(
             status_code=status.HTTP_403_FORBIDDEN,
             content={"detail": str(exc) if str(exc) else "Insufficient permissions"},
+        )
+
+    @app.exception_handler(InvalidCursorError)
+    async def handle_invalid_cursor(_: Request, exc: InvalidCursorError) -> JSONResponse:
+        """Convert InvalidCursorError to 400 response (malformed opaque token)."""
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={"detail": str(exc) if str(exc) else "Invalid pagination cursor"},
         )
 
     @app.exception_handler(ValidationError)

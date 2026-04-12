@@ -33,6 +33,10 @@ EXCLUDED_PATTERN = (
     # path params causes route fallthrough (/{user_id} → /), returning list instead
     # of object. Covered by test_medium_endpoints::test_user_read_endpoints.
     r"|^/api/user/\{user_id\}$"
+    # Cursor is an opaque base64 token — Schemathesis generates schema-valid strings
+    # that fail decoding. Covered by test_critical_endpoints::test_find_records (Phase 3)
+    # with excluded_checks=[positive_data_acceptance].
+    r"|^/api/records/find$"
 )
 
 # Suppress common health checks for ASGI transport
