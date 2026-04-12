@@ -14,7 +14,7 @@ from typing import Any
 from clarinet.utils.logger import logger
 
 _FS_MAX_WORKERS = 8
-_SLOW_THRESHOLD_SEC = 1.0
+_SLOW_THRESHOLD_SEC = 2.0
 
 
 def _make_executor() -> ThreadPoolExecutor:
