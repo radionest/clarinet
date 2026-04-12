@@ -35,7 +35,15 @@ if TYPE_CHECKING:
 
 
 # Machine-readable codes returned by the API for expected constraint violations.
-_EXPECTED_CONFLICT_CODES = frozenset({"RECORD_LIMIT_REACHED", "UNIQUE_PER_USER"})
+# Single source of truth: error_code attributes on domain exception classes.
+from clarinet.exceptions.domain import RecordLimitReachedError, RecordUniquePerUserError
+
+_EXPECTED_CONFLICT_CODES = frozenset(
+    {
+        RecordLimitReachedError.error_code,
+        RecordUniquePerUserError.error_code,
+    }
+)
 
 
 def _is_expected_conflict(exc: BaseException) -> bool:
@@ -600,7 +608,9 @@ class RecordFlowEngine:
             )
         except Exception as e:
             if _is_expected_conflict(e):
-                logger.warning(f"Record '{action.record_type_name}' already at limit: {e}")
+                logger.warning(
+                    f"Record '{action.record_type_name}' skipped (expected constraint): {e}"
+                )
             else:
                 logger.error(f"Failed to create record '{action.record_type_name}': {e}")
 

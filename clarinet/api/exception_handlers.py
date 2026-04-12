@@ -108,7 +108,7 @@ def setup_exception_handlers(app: FastAPI) -> None:
             status_code=status.HTTP_409_CONFLICT,
             content={
                 "detail": str(exc) if str(exc) else "Record limit reached",
-                "code": "RECORD_LIMIT_REACHED",
+                "code": RecordLimitReachedError.error_code,
             },
         )
 
@@ -121,7 +121,7 @@ def setup_exception_handlers(app: FastAPI) -> None:
             status_code=status.HTTP_409_CONFLICT,
             content={
                 "detail": str(exc) if str(exc) else "User already has a record of this type",
-                "code": "UNIQUE_PER_USER",
+                "code": RecordUniquePerUserError.error_code,
             },
         )
 
