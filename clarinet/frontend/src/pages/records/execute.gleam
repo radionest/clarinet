@@ -353,7 +353,8 @@ pub fn update(
 
     SlicerPingResult(Error(err)) ->
       case err {
-        AuthError(_) -> #(model, effect.none(), handle_error(err, ""))
+        AuthError(_) ->
+          #(model, effect.none(), handle_error(err, "Slicer ping failed"))
         _ ->
           #(Model(..model, slicer_available: Some(False)), effect.none(), [])
       }
