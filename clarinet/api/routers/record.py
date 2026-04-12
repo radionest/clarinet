@@ -57,6 +57,7 @@ from clarinet.models import (
     RecordOptional,
     RecordPage,
     RecordRead,
+    RecordSearchFilter,
     RecordSearchQuery,
     RecordStatus,
     RecordTypeCreate,
@@ -750,6 +751,26 @@ async def invalidate_record(
         reason=reason,
     )
     return RecordRead.model_validate(record)
+
+
+@router.post("/find/random", response_model=RecordRead | None)
+async def find_random_record(
+    repo: RecordRepositoryDep,
+    user: CurrentUserDep,
+    query: RecordSearchFilter,
+) -> RecordRead | None:
+    """Find a single random record matching filter criteria."""
+    role_names = None if user.is_superuser else get_user_role_names(user)
+    criteria = RecordSearchCriteria(
+        **query.model_dump(exclude={"data_queries"}),
+        data_queries=query.data_queries,
+        role_names=role_names,
+        random_one=True,
+    )
+    results = await repo.find_by_criteria(criteria)
+    if not results:
+        return None
+    return mask_records(results, user)[0]
 
 
 @router.post("/find", response_model=RecordPage)

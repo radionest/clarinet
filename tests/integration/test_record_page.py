@@ -195,3 +195,42 @@ class TestFindPageEdgeCases:
         criteria = RecordSearchCriteria(patient_id="PAGE_PAT", random_one=True)
         with pytest.raises(Exception, match="random_one"):
             await page_env["repo"].find_page(criteria, cursor=None, limit=3, sort="changed_at_desc")
+
+
+class TestFindRandomRecord:
+    @pytest.mark.asyncio
+    async def test_random_returns_one_record(self, page_env):
+        criteria = RecordSearchCriteria(patient_id="PAGE_PAT", random_one=True)
+        results = await page_env["repo"].find_by_criteria(criteria)
+        assert len(results) == 1
+        assert results[0].patient_id == "PAGE_PAT"
+
+    @pytest.mark.asyncio
+    async def test_random_no_match_returns_empty(self, page_env):
+        criteria = RecordSearchCriteria(patient_id="NONEXISTENT", random_one=True)
+        results = await page_env["repo"].find_by_criteria(criteria)
+        assert len(results) == 0
+
+
+class TestFindRandomEndpoint:
+    @pytest.mark.asyncio
+    async def test_returns_one_record(self, client, page_env):
+        resp = await client.post("/api/records/find/random", json={"patient_id": "PAGE_PAT"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data is not None
+        assert data["patient_id"] == "PAGE_PAT"
+
+    @pytest.mark.asyncio
+    async def test_no_match_returns_null(self, client, page_env):
+        resp = await client.post("/api/records/find/random", json={"patient_id": "NONEXISTENT"})
+        assert resp.status_code == 200
+        assert resp.json() is None
+
+    @pytest.mark.asyncio
+    async def test_rejects_pagination_fields(self, client, page_env):
+        resp = await client.post(
+            "/api/records/find/random",
+            json={"patient_id": "PAGE_PAT", "cursor": "abc"},
+        )
+        assert resp.status_code == 422
