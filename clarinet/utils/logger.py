@@ -176,7 +176,7 @@ _CONSOLE_FORMAT = (
 _WARNING_LEVEL_NO = 30
 
 
-def _make_noisy_library_filter(prefixes: list[str]) -> Callable[[Record], bool]:
+def _make_noisy_filter(prefixes: list[str]) -> Callable[[Record], bool]:
     """Create a loguru filter that suppresses DEBUG/INFO from noisy libraries.
 
     Args:
@@ -258,7 +258,7 @@ def setup_logging(
         remote_labels: Extra Loki stream labels (e.g. {"env": "prod"}).
     """
     console_format = format or _CONSOLE_FORMAT
-    console_filter = _make_noisy_library_filter(noisy_libraries) if noisy_libraries else None
+    noisy_filter = _make_noisy_filter(noisy_libraries) if noisy_libraries else None
 
     _logger.remove()
 
@@ -268,7 +268,7 @@ def setup_logging(
         sys.stderr,
         level=console_level or level,
         format=console_format,
-        filter=console_filter,
+        filter=noisy_filter,
         colorize=True,
         backtrace=True,
         diagnose=True,
@@ -287,6 +287,7 @@ def setup_logging(
             str(log_path),
             level=level,
             format=file_format,
+            filter=noisy_filter,
             rotation=rotation,
             retention=retention,
             compression="zip",
