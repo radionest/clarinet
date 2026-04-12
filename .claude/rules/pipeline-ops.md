@@ -14,7 +14,7 @@ paths:
 | `pipeline_result_backend_url` (str \| None) | — | Redis URL; if set, attaches `RedisAsyncResultBackend` enabling `task.wait_result()` |
 | `pipeline_worker_prefetch` (int) | — | Max tasks per worker |
 | `pipeline_default_timeout` (int) | — | Task timeout in seconds |
-| `pipeline_retry_count` (int) | 3 | Max retries for failed tasks |
+| `pipeline_retry_count` (int) | 3 | Max retries for failed tasks (only infrastructure errors — 4xx are never retried) |
 | `pipeline_retry_delay` (int) | 5 | Initial retry delay in seconds |
 | `pipeline_retry_max_delay` (int) | 120 | Max retry delay with exponential backoff |
 | `pipeline_ack_type` (AcknowledgeType) | `when_executed` | `when_received` \| `when_executed` \| `when_saved` |

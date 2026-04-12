@@ -17,7 +17,7 @@ TaskIQ-based distributed task pipeline for long-running operations (GPU processi
 | `broker.py` | `get_broker()` singleton + `create_broker(queue)` per-queue factory, middlewares, result backend |
 | `message.py` | PipelineMessage (Pydantic model) |
 | `chain.py` | Pipeline chain builder DSL (step-by-step, queue routing) |
-| `middleware.py` | DLQPublisher, PipelineChainMiddleware, PipelineLoggingMiddleware, DeadLetterMiddleware |
+| `middleware.py` | RetryMiddleware, DLQPublisher, PipelineChainMiddleware, PipelineLoggingMiddleware, DeadLetterMiddleware |
 | `context.py` | TaskContext system: FileResolver (sync), RecordQuery (async), build_task_context() |
 | `sync_wrappers.py` | SyncRecordQuery, SyncPipelineClient, SyncTaskContext — sync wrappers for thread-based tasks |
 | `task.py` | `pipeline_task()` decorator factory — auto client lifecycle + TaskContext, sync/async auto-detect |
@@ -152,13 +152,14 @@ Task name collision: `register_task()` in `chain.py` prevents project tasks from
 
 ## Retry & DLQ
 
-- **Retries enabled by default** via `SmartRetryMiddleware` with `default_retry_label=True`
+- **Retries enabled by default** via `RetryMiddleware` with `default_retry_label=True`
 - 3 retries, exponential backoff + jitter, max delay 120s (all configurable via settings)
+- **Business errors (4xx) are never retried.** `RetryMiddleware` (extends `SmartRetryMiddleware`) checks `ClarinetAPIError.status_code` — if 400–499, the retry is skipped and the error goes straight to DLQ. Rationale: HTTP 4xx means a business-logic violation (409 Conflict, 404 Not Found, 422 Validation Error) that will fail identically on every attempt. Retrying wastes time and delays error visibility. 5xx errors and non-HTTP exceptions (`ConnectionError`, `TimeoutError`) are retried normally.
 - **`DLQPublisher`** — shared AMQP connection to `clarinet.dead_letter`. One instance is created in `create_broker()` and passed to both `DeadLetterMiddleware` and `PipelineChainMiddleware` (composition pattern). Lifecycle owned by `DeadLetterMiddleware`.
 - **`DeadLetterMiddleware`** routes terminal failures to DLQ after all retries are exhausted
-- SmartRetryMiddleware sets `NoResultError` on retry; DeadLetterMiddleware skips those and only publishes real errors to DLQ
+- `RetryMiddleware` sets `NoResultError` on retry; DeadLetterMiddleware skips those and only publishes real errors to DLQ
 - **`pipeline_ack_type`** controls when messages are acknowledged (default `when_executed` — message redelivered if worker crashes)
-- Middleware order: SmartRetry → Logging → DeadLetter → Chain (DeadLetter must be before Chain so DLQPublisher is started before chain middleware needs it)
+- Middleware order: Retry → Logging → DeadLetter → Chain (DeadLetter must be before Chain so DLQPublisher is started before chain middleware needs it)
 
 ## TaskContext System
 
