@@ -765,12 +765,11 @@ async def find_random_record(
         **query.model_dump(exclude={"data_queries"}),
         data_queries=query.data_queries,
         role_names=role_names,
-        random_one=True,
     )
-    results = await repo.find_by_criteria(criteria)
-    if not results:
+    record = await repo.find_random(criteria)
+    if record is None:
         return None
-    return mask_records(results, user)[0]
+    return mask_records([record], user)[0]
 
 
 @router.post("/find", response_model=RecordPage)

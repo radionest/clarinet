@@ -201,16 +201,16 @@ class TestFindPageEdgeCases:
 class TestFindRandomRecord:
     @pytest.mark.asyncio
     async def test_random_returns_one_record(self, page_env):
-        criteria = RecordSearchCriteria(patient_id="PAGE_PAT", random_one=True)
-        results = await page_env["repo"].find_by_criteria(criteria)
-        assert len(results) == 1
-        assert results[0].patient_id == "PAGE_PAT"
+        criteria = RecordSearchCriteria(patient_id="PAGE_PAT")
+        record = await page_env["repo"].find_random(criteria)
+        assert record is not None
+        assert record.patient_id == "PAGE_PAT"
 
     @pytest.mark.asyncio
-    async def test_random_no_match_returns_empty(self, page_env):
-        criteria = RecordSearchCriteria(patient_id="NONEXISTENT", random_one=True)
-        results = await page_env["repo"].find_by_criteria(criteria)
-        assert len(results) == 0
+    async def test_random_no_match_returns_none(self, page_env):
+        criteria = RecordSearchCriteria(patient_id="NONEXISTENT")
+        record = await page_env["repo"].find_random(criteria)
+        assert record is None
 
 
 class TestFindRandomEndpoint:

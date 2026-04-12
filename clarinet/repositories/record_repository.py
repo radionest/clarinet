@@ -947,6 +947,16 @@ class RecordRepository(BaseRepository[Record]):
         logger.info(f"Found {len(results)} records matching criteria")
         return results
 
+    async def find_random(
+        self,
+        criteria: RecordSearchCriteria,
+    ) -> Record | None:
+        """Find a single random record matching criteria (SQL-level random)."""
+        statement = self._build_criteria_query(criteria)
+        statement = statement.order_by(func.random()).limit(1)
+        result = await self.session.execute(statement)
+        return result.scalars().first()
+
     async def find_page(
         self,
         criteria: RecordSearchCriteria,
