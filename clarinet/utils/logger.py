@@ -250,8 +250,8 @@ def setup_logging(
         rotation: When to rotate log files (size or time)
         retention: How long to keep log files
         serialize: Whether to format file logs as JSON lines
-        noisy_libraries: Library name prefixes to suppress on console (DEBUG/INFO hidden,
-            WARNING+ still shown). Pass empty list to disable filtering.
+        noisy_libraries: Library name prefixes to suppress on console and file sinks
+            (DEBUG/INFO hidden, WARNING+ still shown). Pass empty list to disable.
         remote_url: Loki-compatible push endpoint URL. None disables remote logging.
         remote_auth: Authorization header value for the remote endpoint.
         remote_level: Minimum level for remote sink (defaults to level).
