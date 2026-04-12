@@ -5,7 +5,7 @@ These exceptions are used in repositories and services to represent
 business logic errors without coupling to HTTP status codes.
 """
 
-from typing import Self
+from typing import ClassVar, Self
 from uuid import UUID
 
 
@@ -204,6 +204,25 @@ class RecordTypeAlreadyExistsError(EntityAlreadyExistsError):
 
 class RecordConstraintViolationError(BusinessRuleViolationError):
     """Raised when a record constraint is violated."""
+
+
+class RecordLimitReachedError(RecordConstraintViolationError):
+    """Raised when max_records limit is reached.
+
+    Expected in concurrent flows where multiple triggers try to create
+    the same record type. Engine can safely downgrade to WARNING.
+    """
+
+    error_code: ClassVar[str] = "RECORD_LIMIT_REACHED"
+
+
+class RecordUniquePerUserError(RecordConstraintViolationError):
+    """Raised when unique_per_user constraint is violated.
+
+    Expected during auto-assign when user already has a record of this type.
+    """
+
+    error_code: ClassVar[str] = "UNIQUE_PER_USER"
 
 
 # Configuration errors

@@ -2182,3 +2182,55 @@ class TestMatchCase:
         assert mock_client.create_record.call_count == 1
         call_args = mock_client.create_record.call_args[0][0]
         assert call_args.record_type_name == "first-match"
+
+
+class TestIsExpectedConflict:
+    """Tests for _is_expected_conflict helper in engine."""
+
+    def test_record_limit_reached_is_expected(self):
+        from clarinet.client import ClarinetAPIError
+        from clarinet.services.recordflow.engine import _is_expected_conflict
+
+        exc = ClarinetAPIError(
+            "API error: 409",
+            status_code=409,
+            detail={
+                "detail": "The maximum records limit (1 of 1) is reached",
+                "code": "RECORD_LIMIT_REACHED",
+            },
+        )
+        assert _is_expected_conflict(exc) is True
+
+    def test_unique_per_user_is_expected(self):
+        from clarinet.client import ClarinetAPIError
+        from clarinet.services.recordflow.engine import _is_expected_conflict
+
+        exc = ClarinetAPIError(
+            "API error: 409",
+            status_code=409,
+            detail={"detail": "User already has a record", "code": "UNIQUE_PER_USER"},
+        )
+        assert _is_expected_conflict(exc) is True
+
+    def test_unknown_409_is_not_expected(self):
+        from clarinet.client import ClarinetAPIError
+        from clarinet.services.recordflow.engine import _is_expected_conflict
+
+        exc = ClarinetAPIError(
+            "API error: 409",
+            status_code=409,
+            detail={"detail": "Resource already exists"},
+        )
+        assert _is_expected_conflict(exc) is False
+
+    def test_non_409_is_not_expected(self):
+        from clarinet.client import ClarinetAPIError
+        from clarinet.services.recordflow.engine import _is_expected_conflict
+
+        exc = ClarinetAPIError("API error: 500", status_code=500, detail="Server error")
+        assert _is_expected_conflict(exc) is False
+
+    def test_non_api_error_is_not_expected(self):
+        from clarinet.services.recordflow.engine import _is_expected_conflict
+
+        assert _is_expected_conflict(ValueError("oops")) is False

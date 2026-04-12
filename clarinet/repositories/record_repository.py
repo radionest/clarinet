@@ -19,8 +19,10 @@ from sqlmodel.sql.expression import SelectOfScalar
 
 from clarinet.exceptions.domain import (
     RecordConstraintViolationError,
+    RecordLimitReachedError,
     RecordNotFoundError,
     RecordTypeNotFoundError,
+    RecordUniquePerUserError,
     UserNotFoundError,
     ValidationError,
 )
@@ -784,7 +786,7 @@ class RecordRepository(BaseRepository[Record]):
         record_type = await self.get_record_type(record_type_name)
 
         if record_type.max_records and count >= record_type.max_records:
-            raise RecordConstraintViolationError(
+            raise RecordLimitReachedError(
                 f"The maximum records limit ({count} of {record_type.max_records}) is reached"
             )
 
@@ -806,7 +808,7 @@ class RecordRepository(BaseRepository[Record]):
                 level=level,
             )
             if user_count > 0:
-                raise RecordConstraintViolationError(
+                raise RecordUniquePerUserError(
                     f"User already has a record of type '{record_type.name}' "
                     f"for this {level.lower()} context"
                 )

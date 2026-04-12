@@ -34,6 +34,30 @@ if TYPE_CHECKING:
     from clarinet.services.pipeline import PipelineMessage
 
 
+# Machine-readable codes returned by the API for expected constraint violations.
+# Single source of truth: error_code attributes on domain exception classes.
+from clarinet.exceptions.domain import RecordLimitReachedError, RecordUniquePerUserError
+
+_EXPECTED_CONFLICT_CODES = frozenset(
+    {
+        RecordLimitReachedError.error_code,
+        RecordUniquePerUserError.error_code,
+    }
+)
+
+
+def _is_expected_conflict(exc: BaseException) -> bool:
+    """Check if exception is a 409 with a known constraint violation code."""
+    from clarinet.client import ClarinetAPIError
+
+    if not isinstance(exc, ClarinetAPIError) or exc.status_code != 409:
+        return False
+    detail = exc.detail
+    if isinstance(detail, dict):
+        return detail.get("code") in _EXPECTED_CONFLICT_CODES
+    return False
+
+
 def _is_ssl_error(exc: BaseException) -> bool:
     """Check if an exception chain contains an SSL certificate error."""
     import ssl
@@ -527,7 +551,10 @@ class RecordFlowEngine:
                 case _:
                     logger.warning(f"Unsupported action type for context: {action.type}")
         except Exception as e:
-            logger.error(f"Error executing action {action.type}: {e}")
+            if _is_expected_conflict(e):
+                logger.warning(f"Expected conflict in action {action.type}: {e}")
+            else:
+                logger.error(f"Error executing action {action.type}: {e}")
 
     # ── Action implementations ────────────────────────────────────────────
 
@@ -580,7 +607,12 @@ class RecordFlowEngine:
                 f"for {ctx.study_uid or ctx.patient_id}"
             )
         except Exception as e:
-            logger.error(f"Failed to create record '{action.record_type_name}': {e}")
+            if _is_expected_conflict(e):
+                logger.warning(
+                    f"Record '{action.record_type_name}' skipped (expected constraint): {e}"
+                )
+            else:
+                logger.error(f"Failed to create record '{action.record_type_name}': {e}")
 
     async def _update_record(self, action: UpdateRecordAction, ctx: FlowContext) -> None:
         """Update an existing record.
@@ -646,7 +678,10 @@ class RecordFlowEngine:
         try:
             await self._maybe_await(action.function, *action.args, **kwargs)
         except Exception as e:
-            logger.error(f"Error calling function {action.function.__name__}: {e}")
+            if _is_expected_conflict(e):
+                logger.warning(f"Expected conflict in function {action.function.__name__}: {e}")
+            else:
+                logger.error(f"Error calling function {action.function.__name__}: {e}")
 
     async def _dispatch_pipeline(self, action: PipelineAction, ctx: FlowContext) -> None:
         """Dispatch a task to a registered pipeline.
