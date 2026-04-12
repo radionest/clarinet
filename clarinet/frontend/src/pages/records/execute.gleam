@@ -351,8 +351,12 @@ pub fn update(
       #(Model(..model, slicer_available: Some(available)), effect.none(), [])
     }
 
-    SlicerPingResult(Error(_)) ->
-      #(Model(..model, slicer_available: Some(False)), effect.none(), [])
+    SlicerPingResult(Error(err)) ->
+      case err {
+        AuthError(_) -> #(model, effect.none(), handle_error(err, ""))
+        _ ->
+          #(Model(..model, slicer_available: Some(False)), effect.none(), [])
+      }
 
     SlicerPingTimerStarted(timer_id) ->
       #(Model(..model, slicer_ping_timer: Some(timer_id)), effect.none(), [])
