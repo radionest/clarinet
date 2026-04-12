@@ -852,6 +852,13 @@ class ClarinetClient:
         page = await self.find_records_page(limit=limit, **filters)
         return page.items
 
+    async def find_random_record(self, **filters: Any) -> RecordRead | None:
+        """Find a single random record matching filters."""
+        body = {k: v for k, v in filters.items() if v is not None}
+        response = await self._request("POST", "/records/find/random", json=body)
+        data = response.json()
+        return RecordRead.model_validate(data) if data is not None else None
+
     async def iter_records(
         self,
         batch: int = 500,

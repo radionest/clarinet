@@ -487,8 +487,8 @@ class RecordFind(SQLModel):
     is_absent: bool = False
 
 
-class RecordSearchQuery(SQLModel):
-    """Search query for finding records."""
+class RecordSearchFilter(SQLModel):
+    """Filter criteria for record search (shared by paginated and random endpoints)."""
 
     model_config = ConfigDict(extra="forbid")  # type: ignore[assignment]
 
@@ -503,10 +503,12 @@ class RecordSearchQuery(SQLModel):
     record_status: RecordStatus | None = None
     parent_record_id: DbPositiveInt32 | None = Field(default=None)
     wo_user: bool | None = None
-    random_one: bool = False
     data_queries: list[RecordFindResult] = Field(default_factory=list)
 
-    # Cursor pagination
+
+class RecordSearchQuery(RecordSearchFilter):
+    """Search query with cursor-based pagination."""
+
     cursor: str | None = None
     limit: int = Field(default=100, ge=1, le=1000)
     sort: Literal["changed_at_desc", "id_asc", "id_desc"] = "changed_at_desc"

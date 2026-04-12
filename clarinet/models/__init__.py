@@ -40,6 +40,7 @@ from .record import (
     RecordOptional,
     RecordPage,
     RecordRead,
+    RecordSearchFilter,
     RecordSearchQuery,
 )
 
@@ -96,6 +97,7 @@ __all__ = [
     "RecordOptional",
     "RecordPage",
     "RecordRead",
+    "RecordSearchFilter",
     "RecordSearchQuery",
     "RecordStatus",
     "RecordType",
