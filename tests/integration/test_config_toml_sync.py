@@ -223,3 +223,59 @@ async def test_file_registry_round_trip(
     exported = tomllib.loads((export_dir / "round-trip.toml").read_text())
     assert "file_registry" in exported
     assert exported["file_registry"][0]["name"] == "seg_mask"
+
+
+@pytest.mark.asyncio
+async def test_export_includes_viewer_mode(tmp_path) -> None:
+    """TOML export includes viewer_mode field."""
+    import tomllib
+
+    rt = RecordType(
+        name="viewer-mode-test",
+        level="SERIES",
+        viewer_mode="all_series",
+    )
+
+    path = await export_record_type_to_toml(rt, tmp_path)
+    content = tomllib.loads(path.read_text())
+    assert content["viewer_mode"] == "all_series"
+
+
+@pytest.mark.asyncio
+async def test_export_includes_viewer_mode_default(tmp_path) -> None:
+    """TOML export includes viewer_mode even with default value."""
+    import tomllib
+
+    rt = RecordType(name="viewer-default", level="SERIES")
+
+    path = await export_record_type_to_toml(rt, tmp_path)
+    content = tomllib.loads(path.read_text())
+    assert content["viewer_mode"] == "single_series"
+
+
+@pytest.mark.asyncio
+async def test_export_includes_mask_patient_data(tmp_path) -> None:
+    """TOML export includes mask_patient_data field."""
+    import tomllib
+
+    rt = RecordType(
+        name="mask-test",
+        level="SERIES",
+        mask_patient_data=False,
+    )
+
+    path = await export_record_type_to_toml(rt, tmp_path)
+    content = tomllib.loads(path.read_text())
+    assert content["mask_patient_data"] is False
+
+
+@pytest.mark.asyncio
+async def test_export_includes_mask_patient_data_default(tmp_path) -> None:
+    """TOML export includes mask_patient_data even with default value."""
+    import tomllib
+
+    rt = RecordType(name="mask-default", level="SERIES")
+
+    path = await export_record_type_to_toml(rt, tmp_path)
+    content = tomllib.loads(path.read_text())
+    assert content["mask_patient_data"] is True

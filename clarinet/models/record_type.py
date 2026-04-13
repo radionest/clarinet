@@ -10,13 +10,14 @@ import json as json_lib
 from typing import TYPE_CHECKING, Any
 
 from pydantic import field_validator, model_validator
+from sqlalchemy import String
 from sqlalchemy.sql import expression as sql_expression
 from sqlmodel import Column, Field, Relationship, SQLModel
 
 from clarinet.types import PortableJSON, RecordSchema, SlicerArgs, SlicerHydratorNames
 from clarinet.utils.validators import validate_json_safe, validate_slug
 
-from .base import DicomQueryLevel
+from .base import DicomQueryLevel, ViewerMode
 from .file_schema import FileDefinitionRead, RecordTypeFileLink
 from .user import UserRole
 
@@ -102,6 +103,11 @@ class RecordTypeBase(SQLModel):
             "when the patient has been anonymized. Set to False for record types "
             "filled by clinicians who need real patient IDs (surgery, pathology, MDK)."
         ),
+    )
+
+    viewer_mode: ViewerMode = Field(
+        default=ViewerMode.SINGLE_SERIES,
+        sa_column=Column(String(20), server_default="single_series", nullable=False),
     )
 
     @field_validator("data_schema", mode="after")
@@ -251,6 +257,7 @@ class RecordTypeOptional(SQLModel):
     data_schema: RecordSchema | None = None
     slicer_context_hydrators: SlicerHydratorNames | None = None
     mask_patient_data: bool | None = Field(default=None)
+    viewer_mode: ViewerMode | None = None
 
     role_name: str | None = Field(default=None)
     max_records: int | None = Field(default=None)

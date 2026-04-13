@@ -72,6 +72,7 @@ pub type RecordType {
     max_records: Option(Int),
     min_records: Option(Int),
     unique_per_user: Bool,
+    viewer_mode: String,
     level: DicomQueryLevel,
     file_registry: Option(List(FileDefinition)),
     constraint_role: Option(String),

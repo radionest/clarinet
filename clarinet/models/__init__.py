@@ -12,7 +12,7 @@ from .admin import AdminStats, RecordTypeStats, RoleMatrixResponse, UserRoleInfo
 from .auth import AccessToken
 
 # Base models
-from .base import BaseModel, DicomQueryLevel, DicomUID, RecordStatus
+from .base import BaseModel, DicomQueryLevel, DicomUID, RecordStatus, ViewerMode
 
 # File schema models
 from .file_schema import (
@@ -125,4 +125,5 @@ __all__ = [
     "UserRoleCreate",
     "UserRoleInfo",
     "UserRolesLink",
+    "ViewerMode",
 ]

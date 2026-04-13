@@ -49,9 +49,15 @@ pub fn record_viewer_button(
   viewer_study_uids: Option(List(String)),
   viewer_series_uids: Option(List(String)),
   level: Option(types.DicomQueryLevel),
+  viewer_mode: String,
   class: String,
   on_view: fn(String, String) -> msg,
 ) -> Element(msg) {
+  // In "all_series" mode, don't pass series_uid to OHIF
+  let effective_series_uid = case viewer_mode {
+    "all_series" -> None
+    _ -> series_uid
+  }
   case level {
     Some(types.Study) | Some(types.Series) -> {
       // Use viewer_study_uids if available and non-empty
@@ -67,15 +73,19 @@ pub fn record_viewer_button(
             config.base_path()
             <> "/ohif/viewer?StudyInstanceUIDs="
             <> study_part
-          // Determine series UIDs to include
-          let series_part = case viewer_series_uids {
-            Some(sids) if sids != [] ->
-              "&SeriesInstanceUIDs="
-              <> string.join(sids, "&SeriesInstanceUIDs=")
+          // Determine series UIDs to include (skip in all_series mode)
+          let series_part = case viewer_mode {
+            "all_series" -> ""
             _ ->
-              case level, series_uid {
-                Some(types.Series), Some(s) -> "&SeriesInstanceUIDs=" <> s
-                _, _ -> ""
+              case viewer_series_uids {
+                Some(sids) if sids != [] ->
+                  "&SeriesInstanceUIDs="
+                  <> string.join(sids, "&SeriesInstanceUIDs=")
+                _ ->
+                  case level, effective_series_uid {
+                    Some(types.Series), Some(s) -> "&SeriesInstanceUIDs=" <> s
+                    _, _ -> ""
+                  }
               }
           }
           let url = url <> series_part
@@ -96,7 +106,7 @@ pub fn record_viewer_button(
         None -> {
           let #(url, primary_uid) = case level, study_uid {
             Some(types.Series), Some(suid) -> #(
-              viewer_url(suid, series_uid),
+              viewer_url(suid, effective_series_uid),
               suid,
             )
             _, Some(suid) -> #(viewer_url(suid, None), suid)

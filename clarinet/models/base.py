@@ -50,3 +50,10 @@ class DicomQueryLevel(str, enum.Enum):
     SERIES = "SERIES"
     STUDY = "STUDY"
     PATIENT = "PATIENT"
+
+
+class ViewerMode(str, enum.Enum):
+    """Controls how many series the viewer loads for a record."""
+
+    SINGLE_SERIES = "single_series"
+    ALL_SERIES = "all_series"

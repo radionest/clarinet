@@ -8,7 +8,7 @@ from typing import Any
 
 from pydantic import BaseModel, field_validator
 
-from clarinet.models.base import DicomQueryLevel
+from clarinet.models.base import DicomQueryLevel, ViewerMode
 from clarinet.models.file_schema import FileDefinitionRead, FileRole
 from clarinet.utils.validators import validate_slug
 
@@ -24,6 +24,13 @@ def _coerce_file_role(value: Any) -> Any:
     """Coerce a string to FileRole if possible."""
     if isinstance(value, str) and not isinstance(value, FileRole):
         return FileRole(value.lower())
+    return value
+
+
+def _coerce_viewer_mode(value: Any) -> Any:
+    """Coerce a string to ViewerMode if possible."""
+    if isinstance(value, str) and not isinstance(value, ViewerMode):
+        return ViewerMode(value)
     return value
 
 
@@ -123,6 +130,7 @@ class RecordDef(BaseModel):
     slicer_result_validator_args: dict[str, str] | None = None
     slicer_context_hydrators: list[str] | None = None
     mask_patient_data: bool = True
+    viewer_mode: ViewerMode = ViewerMode.SINGLE_SERIES
 
     def __init__(self, *, role: str | None = None, **kwargs: Any) -> None:
         """Accept ``role`` as a user-friendly alias for ``role_name``."""
@@ -135,6 +143,12 @@ class RecordDef(BaseModel):
     def _coerce_level(cls, v: Any) -> Any:
         """Accept string literals like ``"SERIES"`` for level."""
         return _coerce_dicom_level(v)
+
+    @field_validator("viewer_mode", mode="before")
+    @classmethod
+    def _coerce_viewer_mode(cls, v: Any) -> Any:
+        """Accept string literals like ``"all_series"`` for viewer_mode."""
+        return _coerce_viewer_mode(v)
 
 
 def fileref_to_file_definition(ref: FileRef) -> FileDefinitionRead:

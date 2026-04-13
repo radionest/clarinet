@@ -1,11 +1,25 @@
 """Viewer plugin endpoints — generate URIs for external DICOM viewers."""
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from fastapi import APIRouter
 
 from clarinet.api.dependencies import AuthorizedRecordDep, ViewerRegistryDep
 from clarinet.exceptions.http import NOT_FOUND
 
+if TYPE_CHECKING:
+    from clarinet.models.record import Record
+
 router = APIRouter()
+
+
+def _resolve_series_uid(record: Record) -> str | None:
+    """Return series_uid respecting viewer_mode of the record type."""
+    if record.record_type and record.record_type.viewer_mode == "all_series":
+        return None
+    return record.series_uid
 
 
 @router.get("/{record_id}/viewers", responses={404: {"description": "Record not found"}})
@@ -22,7 +36,7 @@ async def list_viewer_urls(
     return registry.build_all_uris(
         patient_id=record.patient_id,
         study_uid=record.study.anon_uid or record.study.study_uid,
-        series_uid=record.series_uid,
+        series_uid=_resolve_series_uid(record),
     )
 
 
@@ -47,6 +61,6 @@ async def get_viewer_url(
     uri = adapter.build_uri(
         patient_id=record.patient_id,
         study_uid=record.study.anon_uid or record.study.study_uid,
-        series_uid=record.series_uid,
+        series_uid=_resolve_series_uid(record),
     )
     return {"viewer": viewer_name, "uri": uri}
