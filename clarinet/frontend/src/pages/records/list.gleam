@@ -17,6 +17,7 @@ import lustre/effect.{type Effect}
 import lustre/element.{type Element}
 import lustre/element/html
 import lustre/event
+import modem
 import router
 import shared.{type OutMsg, type Shared}
 import utils/permissions
@@ -41,9 +42,12 @@ pub type Msg {
 
 // --- Init ---
 
-pub fn init(shared: Shared) -> #(Model, Effect(Msg), List(OutMsg)) {
+pub fn init(
+  filters: Dict(String, String),
+  shared: Shared,
+) -> #(Model, Effect(Msg), List(OutMsg)) {
   let key = bucket_key_for_user(shared.user)
-  #(Model(active_filters: dict.new()), effect.none(), [shared.FetchBucket(key)])
+  #(Model(active_filters: filters), effect.none(), [shared.FetchBucket(key)])
 }
 
 fn bucket_key_for_user(user: option.Option(User)) -> bucket.BucketKey {
@@ -64,15 +68,18 @@ pub fn update(
   case msg {
     AddFilter(key, value) -> {
       let filters = dict.insert(model.active_filters, key, value)
-      #(Model(active_filters: filters), effect.none(), [])
+      #(Model(active_filters: filters), sync_url_effect(filters), [])
     }
 
     RemoveFilter(key) -> {
       let filters = dict.delete(model.active_filters, key)
-      #(Model(active_filters: filters), effect.none(), [])
+      #(Model(active_filters: filters), sync_url_effect(filters), [])
     }
 
-    ClearFilters -> #(Model(active_filters: dict.new()), effect.none(), [])
+    ClearFilters -> {
+      let filters = dict.new()
+      #(Model(active_filters: filters), sync_url_effect(filters), [])
+    }
 
     RequestFail(record_id) -> #(model, effect.none(), [
       shared.OpenFailPrompt(record_id),
@@ -104,6 +111,15 @@ pub fn update(
 }
 
 // --- Helpers ---
+
+fn sync_url_effect(filters: Dict(String, String)) -> Effect(Msg) {
+  let route = router.Records(filters)
+  modem.replace(
+    router.route_to_path(route),
+    router.filters_to_query(filters),
+    option.None,
+  )
+}
 
 fn handle_error(err: ApiError, fallback_msg: String) -> List(OutMsg) {
   case err {

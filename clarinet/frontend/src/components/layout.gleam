@@ -1,5 +1,6 @@
 // Main layout component with navbar and content area
 import clarinet_frontend/i18n
+import gleam/dict
 import gleam/option.{None, Some}
 import lustre/attribute
 import lustre/element.{type Element}
@@ -26,7 +27,7 @@ fn navbar(model: Model) -> Element(Msg) {
       nav_link(route: router.Home, text: model.project_name, current_route: model.route),
     ]),
     html.div([attribute.class("navbar-menu")], [
-      nav_link(route: router.Records, text: t(i18n.NavRecords), current_route: model.route),
+      nav_link(route: router.Records(dict.new()), text: t(i18n.NavRecords), current_route: model.route),
       case is_admin(model) {
         True ->
           element.fragment([

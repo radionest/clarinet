@@ -1,6 +1,8 @@
 // Client-side routing with Modem
 import config
+import gleam/dict.{type Dict}
 import gleam/list
+import gleam/option.{type Option, None, Some}
 import gleam/string
 import gleam/uri.{type Uri}
 
@@ -12,7 +14,7 @@ pub type Route {
   Studies
   StudyDetail(id: String)
   StudyViewer(id: String)
-  Records
+  Records(filters: Dict(String, String))
   RecordDetail(id: String)
   RecordNew
   Patients
@@ -36,7 +38,7 @@ pub fn route_to_path(route: Route) -> String {
     Studies -> "/studies"
     StudyDetail(id) -> "/studies/" <> id
     StudyViewer(id) -> "/studies/" <> id <> "/viewer"
-    Records -> "/records"
+    Records(_) -> "/records"
     RecordDetail(id) -> "/records/" <> id
     RecordNew -> "/records/new"
     Patients -> "/patients"
@@ -72,7 +74,7 @@ pub fn parse_route(uri: Uri) -> Route {
     ["studies"] -> Studies
     ["studies", id, "viewer"] -> StudyViewer(id)
     ["studies", id] -> StudyDetail(id)
-    ["records"] -> Records
+    ["records"] -> Records(parse_filters_from_query(uri.query))
     ["records", "new"] -> RecordNew
     ["records", id] -> RecordDetail(id)
     ["patients"] -> Patients
@@ -123,7 +125,7 @@ pub fn get_route_title(route: Route) -> String {
     Studies -> "Studies"
     StudyDetail(_) -> "Study Details"
     StudyViewer(_) -> "Study Viewer"
-    Records -> "Records"
+    Records(_) -> "Records"
     RecordDetail(_) -> "Record Details"
     RecordNew -> "New Record"
     Patients -> "Patients"
@@ -144,7 +146,7 @@ fn section(route: Route) -> String {
     Login -> "login"
     Register -> "register"
     Studies | StudyDetail(_) | StudyViewer(_) | SeriesDetail(_) -> "studies"
-    Records | RecordDetail(_) | RecordNew -> "records"
+    Records(_) | RecordDetail(_) | RecordNew -> "records"
     Patients | PatientDetail(_) | PatientNew -> "patients"
     AdminDashboard
     | AdminRecordTypes
@@ -156,4 +158,36 @@ fn section(route: Route) -> String {
 
 pub fn is_same_section(route1: Route, route2: Route) -> Bool {
   section(route1) == section(route2)
+}
+
+const known_filter_keys = ["status", "record_type", "patient"]
+
+fn parse_filters_from_query(query: Option(String)) -> Dict(String, String) {
+  case query {
+    None -> dict.new()
+    Some(qs) ->
+      case uri.parse_query(qs) {
+        Error(_) -> dict.new()
+        Ok(pairs) ->
+          pairs
+          |> list.filter(fn(pair) {
+            list.contains(known_filter_keys, pair.0) && pair.1 != ""
+          })
+          |> dict.from_list
+      }
+  }
+}
+
+pub fn filters_to_query(filters: Dict(String, String)) -> Option(String) {
+  case dict.is_empty(filters) {
+    True -> None
+    False -> Some(uri.query_to_string(dict.to_list(filters)))
+  }
+}
+
+pub fn route_to_query(route: Route) -> Option(String) {
+  case route {
+    Records(filters) -> filters_to_query(filters)
+    _ -> None
+  }
 }

@@ -129,7 +129,7 @@ fn stats_section(shared: Shared) -> Element(Msg) {
             label: t(i18n.HomeRecords),
             count: list.length(cache.bucket_items(shared.cache, bucket.RecordsAll)),
             color: "green",
-            route: router.Records,
+            route: router.Records(dict.new()),
             link_text: t(i18n.HomeViewAll),
           ),
         ]
@@ -138,7 +138,7 @@ fn stats_section(shared: Shared) -> Element(Msg) {
             label: t(i18n.HomeMyRecords),
             count: list.length(cache.bucket_items(shared.cache, bucket.RecordsMine(u.id))),
             color: "green",
-            route: router.Records,
+            route: router.Records(dict.new()),
             link_text: t(i18n.HomeViewAll),
           ),
         ]
