@@ -205,6 +205,37 @@ fn series_base_decoder() -> decode.Decoder(models.Series) {
   ))
 }
 
+// Inline patient decoder to avoid circular deps with patients.gleam
+fn patient_base_decoder() -> decode.Decoder(models.Patient) {
+  use id <- decode.field("id", decode.string)
+  use name <- decode.optional_field("name", None, decode.optional(decode.string))
+  use anon_id <- decode.optional_field(
+    "anon_id",
+    None,
+    decode.optional(decode.string),
+  )
+  use anon_name <- decode.optional_field(
+    "anon_name",
+    None,
+    decode.optional(decode.string),
+  )
+  use auto_id <- decode.optional_field(
+    "auto_id",
+    None,
+    decode.optional(decode.int),
+  )
+
+  decode.success(models.Patient(
+    id: id,
+    name: name,
+    anon_id: anon_id,
+    anon_name: anon_name,
+    auto_id: auto_id,
+    studies: None,
+    records: None,
+  ))
+}
+
 // Public decoder for reuse
 pub fn record_decoder() -> decode.Decoder(Record) {
   use id <- decode.optional_field("id", None, decode.optional(decode.int))
@@ -291,6 +322,11 @@ pub fn record_decoder() -> decode.Decoder(Record) {
     None,
     decode.optional(series_base_decoder()),
   )
+  use patient <- decode.optional_field(
+    "patient",
+    None,
+    decode.optional(patient_base_decoder()),
+  )
 
   let status = status.from_backend_string(status_str)
   let data = case data_dyn {
@@ -315,7 +351,7 @@ pub fn record_decoder() -> decode.Decoder(Record) {
     clarinet_storage_path: None,
     files: None,
     file_checksums: None,
-    patient: None,
+    patient: patient,
     study: study,
     series: series,
     record_type: record_type,

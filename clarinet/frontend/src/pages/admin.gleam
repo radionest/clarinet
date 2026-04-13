@@ -509,7 +509,16 @@ fn record_row(
         status: record.status,
       ),
     ]),
-    html.td([], [html.text(record.patient_id)]),
+    html.td([], [
+      html.text(case record.patient {
+        Some(patient) ->
+          case patient.name {
+            Some(name) -> name <> " (" <> record.patient_id <> ")"
+            None -> record.patient_id
+          }
+        None -> record.patient_id
+      }),
+    ]),
     html.td([], [
       assign_cell(
         shared: shared,
