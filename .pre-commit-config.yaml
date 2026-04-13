@@ -46,6 +46,7 @@ repos:
           - taskiq>=0.12.0
           - taskiq-aio-pika>=0.6.0
           - taskiq-redis>=1.0.0
+          - scipy-stubs
         exclude: ^tests/
 
   - repo: https://github.com/shellcheck-py/shellcheck-py

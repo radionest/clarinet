@@ -248,7 +248,7 @@ class Segmentation(Image):
         """
         self.img = other.img
 
-    def reindex_to(self, target: Image, *, order: int = 0) -> Segmentation:
+    def reindex_to(self, target: Image, *, order: Literal[0, 1] = 0) -> Segmentation:
         """Resample into *target*'s voxel grid (nearest-neighbor only).
 
         Overrides :meth:`Image.reindex_to` to force ``order=0``, preventing
