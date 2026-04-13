@@ -645,6 +645,7 @@ class TestPipelineTaskDecorator:
             await lifecycle_task(raw_message)
 
             # Verify lifecycle: service_token auth (no login) → task → close
+            mock_client.login.assert_not_awaited()
             mock_client.close.assert_awaited_once()
             assert task_executed is True
 

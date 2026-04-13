@@ -282,12 +282,8 @@ class PipelineChainMiddleware(TaskiqMiddleware):
         self._client = client
         self._owns_client = client is None
 
-    async def _ensure_client(self) -> ClarinetClient | None:
-        """Lazily create and authenticate the ClarinetClient.
-
-        Returns:
-            The authenticated client, or None if login fails.
-        """
+    async def _ensure_client(self) -> ClarinetClient:
+        """Lazily create the ClarinetClient with service token auth."""
         if self._client is not None:
             return self._client
 
@@ -385,11 +381,6 @@ class PipelineChainMiddleware(TaskiqMiddleware):
             List of step dicts, or None on failure.
         """
         client = await self._ensure_client()
-        if client is None:
-            reason = f"Pipeline chain: client not initialized for '{pipeline_id}'"
-            logger.error(reason)
-            await self._publish_chain_failure_to_dlq(message, reason)
-            return None
         try:
             return await client.get_pipeline_definition(pipeline_id)
         except ClarinetAPIError as e:

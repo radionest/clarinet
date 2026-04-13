@@ -197,7 +197,7 @@ class Settings(BaseSettings):
     # Internal service token for ClarinetClient (RecordFlow, pipeline tasks).
     # If empty, auto-derived from admin_password so API and workers share
     # the same token without explicit configuration.
-    internal_service_token: str = ""
+    internal_service_token: SecretStr = SecretStr("")
 
     # Anonymization settings
     anon_uid_salt: str = "clarinet-anon-salt-change-in-production"
@@ -316,8 +316,9 @@ class Settings(BaseSettings):
         ``admin_password`` so that API and worker processes share the same
         token without extra configuration.
         """
-        if self.internal_service_token:
-            return self.internal_service_token
+        explicit = self.internal_service_token.get_secret_value()
+        if explicit:
+            return explicit
         if self.admin_password:
             import hashlib
             import hmac
