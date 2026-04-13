@@ -37,6 +37,10 @@ EXCLUDED_PATTERN = (
     # that fail decoding. Covered by test_critical_endpoints::test_find_records (Phase 3)
     # with excluded_checks=[positive_data_acceptance].
     r"|^/api/records/find$"
+    # data_schema is free-form JSON; Schemathesis generates integers exceeding 64-bit
+    # range which the server rejects (orjson limitation). Covered by Phase 3
+    # test_create_record_type / test_update_record_type with excluded positive_data_acceptance.
+    r"|^/api/records/types(/\{record_type_id\})?$"
 )
 
 # Suppress common health checks for ASGI transport
