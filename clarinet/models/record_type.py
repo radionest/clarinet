@@ -34,6 +34,9 @@ class SlicerSettings(SQLModel):
     slicer_result_validator_args: dict[str, str] | None = None
 
 
+_VIEWER_MODES = {"single_series", "all_series"}
+
+
 class RecordTypeBase(SQLModel):
     """Base model for record type data.
 
@@ -109,6 +112,7 @@ class RecordTypeBase(SQLModel):
         default="single_series",
         max_length=20,
         sa_column_kwargs={"server_default": sa_text("'single_series'")},
+        schema_extra={"enum": sorted(_VIEWER_MODES)},
         description=(
             "Controls viewer series loading: 'single_series' passes series_uid "
             "to viewer adapters (default), 'all_series' omits it so all study "
@@ -119,9 +123,8 @@ class RecordTypeBase(SQLModel):
     @field_validator("viewer_mode")
     @classmethod
     def validate_viewer_mode(cls, v: str) -> str:
-        allowed = {"single_series", "all_series"}
-        if v not in allowed:
-            msg = f"viewer_mode must be one of {allowed}, got '{v}'"
+        if v not in _VIEWER_MODES:
+            msg = f"viewer_mode must be one of {_VIEWER_MODES}, got '{v}'"
             raise ValueError(msg)
         return v
 
@@ -277,8 +280,8 @@ class RecordTypeOptional(SQLModel):
     @field_validator("viewer_mode")
     @classmethod
     def validate_viewer_mode_optional(cls, v: str | None) -> str | None:
-        if v is not None and v not in {"single_series", "all_series"}:
-            msg = f"viewer_mode must be 'single_series' or 'all_series', got '{v}'"
+        if v is not None and v not in _VIEWER_MODES:
+            msg = f"viewer_mode must be one of {_VIEWER_MODES}, got '{v}'"
             raise ValueError(msg)
         return v
 
