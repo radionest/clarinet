@@ -18,6 +18,7 @@ pub type Key {
   BtnLogout
   BtnView
   BtnEdit
+  BtnChange
   BtnCancel
   BtnDelete
   BtnBack
@@ -357,6 +358,8 @@ pub fn translate(locale: Locale, key: Key) -> String {
     Ru, BtnView -> "Просмотр"
     En, BtnEdit -> "Edit"
     Ru, BtnEdit -> "Изменить"
+    En, BtnChange -> "Change"
+    Ru, BtnChange -> "Изменить"
     En, BtnCancel -> "Cancel"
     Ru, BtnCancel -> "Отмена"
     En, BtnDelete -> "Delete"

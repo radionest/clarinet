@@ -4,6 +4,8 @@ import api/models
 import api/types
 import cache
 import cache/bucket
+import clarinet_frontend/i18n.{type Key}
+import components/status_badge
 import gleam/bool
 import gleam/dict
 import gleam/int
@@ -507,6 +509,7 @@ fn record_row(
         model: model,
         record_id: record_id,
         status: record.status,
+        translate: shared.translate,
       ),
     ]),
     html.td([], [
@@ -602,34 +605,34 @@ fn status_cell(
   model model: Model,
   record_id record_id: Int,
   status record_status: types.RecordStatus,
+  translate translate: fn(Key) -> String,
 ) -> Element(Msg) {
   let is_editing = model.editing_status_record_id == Some(record_id)
-  let status_str = status.to_backend_string(record_status)
   case is_editing {
     True ->
       html.div([attribute.class("assign-cell")], [
-        status_dropdown(record_id),
+        status_dropdown(record_id, translate),
       ])
     False ->
       html.div([attribute.class("assign-cell")], [
-        html.span(
-          [attribute.class("badge badge-" <> status_color(status_str))],
-          [html.text(status_str)],
-        ),
+        status_badge.render(record_status, translate),
         html.text(" "),
         html.button(
           [
             attribute.class("btn btn-sm btn-outline"),
             event.on_click(ToggleStatusDropdown(Some(record_id))),
           ],
-          [html.text("Change")],
+          [html.text(translate(i18n.BtnChange))],
         ),
       ])
   }
 }
 
-fn status_dropdown(record_id: Int) -> Element(Msg) {
-  let statuses = ["blocked", "pending", "inwork", "finished", "failed", "pause"]
+fn status_dropdown(
+  record_id: Int,
+  translate: fn(Key) -> String,
+) -> Element(Msg) {
+  let statuses = status.all_statuses()
   html.div([attribute.class("assign-dropdown")], [
     html.select(
       [
@@ -642,9 +645,12 @@ fn status_dropdown(record_id: Int) -> Element(Msg) {
         }),
       ],
       [
-        html.option([attribute.value("")], "Select status..."),
+        html.option([attribute.value("")], translate(i18n.AdminSelectStatus)),
         ..list.map(statuses, fn(s) {
-          html.option([attribute.value(s)], s)
+          html.option(
+            [attribute.value(status.to_backend_string(s))],
+            translate(status.to_i18n_key(s)),
+          )
         })
       ],
     ),
@@ -653,7 +659,7 @@ fn status_dropdown(record_id: Int) -> Element(Msg) {
         attribute.class("btn btn-sm btn-outline"),
         event.on_click(ToggleStatusDropdown(None)),
       ],
-      [html.text("Cancel")],
+      [html.text(translate(i18n.BtnCancel))],
     ),
   ])
 }
