@@ -68,13 +68,17 @@ generate_settings() {
 # --- Step 7: Database init ---
 init_database() {
     log "Initializing database..."
-    # Link settings.toml so clarinet CLI finds it
     if [[ ! -f "${INSTALL_DIR}/settings.toml" ]]; then
         warn "settings.toml not found at ${INSTALL_DIR}/settings.toml"
         return
     fi
 
     cd "$INSTALL_DIR"
+
+    # Alembic init-migrations creates alembic.ini, env.py, script.py.mako
+    # and generates the initial migration — idempotent, skips existing files
+    sudo -u clarinet "$VENV_DIR/bin/clarinet" init-migrations || warn "init-migrations returned non-zero (may already be initialized)"
+
     sudo -u clarinet "$VENV_DIR/bin/clarinet" db init || warn "DB init returned non-zero (may already be initialized)"
     log "Database initialized"
 }
