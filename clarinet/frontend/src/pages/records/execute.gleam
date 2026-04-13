@@ -2,7 +2,9 @@
 import api/models.{type Record, type RecordType}
 import api/records
 import api/slicer
-import api/types.{type ApiError, type RecordStatus, AuthError}
+import api/types.{type ApiError, AuthError}
+import clarinet_frontend/i18n
+import components/status_badge
 import config
 import formosh/component as formosh_component
 import gleam/bool
@@ -476,7 +478,7 @@ fn render_record_execution(
     // Header
     html.div([attribute.class("page-header")], [
       html.h2([], [html.text("Record Execution")]),
-      render_record_status(record.status),
+      status_badge.render(record.status, shared.translate),
     ]),
     // Record information
     html.div([attribute.class("record-info card")], [
@@ -508,7 +510,7 @@ fn render_record_execution(
       ),
     ]),
     // Slicer toolbar (only if record type has slicer_script)
-    render_slicer_toolbar(model, record),
+    render_slicer_toolbar(model, record, shared.translate),
     // Dynamic form based on record type's data_schema
     html.div([attribute.class("record-form-container card")], [
       case record.record_type {
@@ -555,6 +557,7 @@ fn render_record_execution(
 fn render_slicer_toolbar(
   model: Model,
   record: Record,
+  translate: fn(i18n.Key) -> String,
 ) -> Element(Msg) {
   let has_script = case record.record_type {
     Some(models.RecordType(slicer_script: Some(_), ..)) -> True
@@ -563,18 +566,18 @@ fn render_slicer_toolbar(
 
   use <- bool.guard(!has_script, element.none())
 
-  let status_badge = case model.slicer_available {
+  let slicer_badge = case model.slicer_available {
     Some(True) ->
       html.span([attribute.class("badge badge-success")], [
-        html.text("Connected"),
+        html.text(translate(i18n.ExecSlicerConnected)),
       ])
     Some(False) ->
       html.span([attribute.class("badge badge-danger")], [
-        html.text("Unreachable"),
+        html.text(translate(i18n.ExecSlicerUnreachable)),
       ])
     None ->
       html.span([attribute.class("badge badge-pending")], [
-        html.text("Checking..."),
+        html.text(translate(i18n.ExecSlicerChecking)),
       ])
   }
 
@@ -584,7 +587,7 @@ fn render_slicer_toolbar(
   html.div([attribute.class("slicer-toolbar card")], [
     html.div([attribute.class("slicer-toolbar-header")], [
       html.h4([], [html.text("3D Slicer")]),
-      status_badge,
+      slicer_badge,
     ]),
     html.div([attribute.class("slicer-toolbar-actions")], [
       html.button(
@@ -732,18 +735,6 @@ fn render_readonly_data(record: Record) -> Element(Msg) {
   }
 }
 
-fn render_record_status(status: RecordStatus) -> Element(Msg) {
-  let #(class, text) = case status {
-    types.Blocked -> #("badge-blocked", "Blocked")
-    types.Pending -> #("badge-pending", "Pending")
-    types.InWork -> #("badge-progress", "In Progress")
-    types.Finished -> #("badge-success", "Completed")
-    types.Failed -> #("badge-danger", "Failed")
-    types.Paused -> #("badge-paused", "Paused")
-  }
-
-  html.span([attribute.class("badge " <> class)], [html.text(text)])
-}
 
 fn format_series_label(
   modality: option.Option(String),
