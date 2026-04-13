@@ -719,6 +719,8 @@ class SlicerHelper:
 
     def _apply_window(self, node: Any, window: tuple[float, float]) -> None:
         display = node.GetScalarVolumeDisplayNode()
+        if display is None:
+            return
         display.AutoWindowLevelOff()
         display.SetWindowLevelMinMax(window[0], window[1])
 
