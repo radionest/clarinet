@@ -129,9 +129,9 @@ Context variables (injected by build_slicer_context):
 ```python
 s = SlicerHelper(working_folder)
 
-# Загрузка из PACS
-s.load_study_from_pacs(study_uid)
-s.load_series_from_pacs(study_uid, series_uid)
+# Загрузка из PACS (window = CT soft tissue)
+s.load_study_from_pacs(study_uid, window=(-200, 300))
+s.load_series_from_pacs(study_uid, series_uid, window=(-200, 300))
 
 # Сегментация
 seg = (

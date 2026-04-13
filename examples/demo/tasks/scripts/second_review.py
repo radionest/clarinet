@@ -16,7 +16,7 @@ Context variables (injected by build_slicer_context):
 import os
 
 s = SlicerHelper(working_folder)  # type: ignore[name-defined]  # noqa: F821
-s.load_study_from_pacs(study_uid)  # type: ignore[name-defined]  # noqa: F821
+s.load_study_from_pacs(study_uid, window=(-200, 300))  # type: ignore[name-defined]  # noqa: F821
 
 # Load projection and doctor segmentation
 projection = s.load_segmentation(master_projection, "Projection")  # type: ignore[name-defined]  # noqa: F821

@@ -14,9 +14,9 @@ s = SlicerHelper(working_folder)  # type: ignore[name-defined]  # noqa: F821
 
 # Load only the best series if a hydrator provided it; otherwise the full study.
 if best_series_uid is not None:  # type: ignore[name-defined]  # noqa: F821
-    s.load_series_from_pacs(study_uid, best_series_uid)  # type: ignore[name-defined]  # noqa: F821
+    s.load_series_from_pacs(study_uid, best_series_uid, window=(-200, 300))  # type: ignore[name-defined]  # noqa: F821
 else:
-    s.load_study_from_pacs(study_uid)  # type: ignore[name-defined]  # noqa: F821
+    s.load_study_from_pacs(study_uid, window=(-200, 300))  # type: ignore[name-defined]  # noqa: F821
 
 # Idempotent: load existing segmentation if the file already exists.
 if os.path.isfile(output_file):  # type: ignore[name-defined]  # noqa: F821

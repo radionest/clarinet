@@ -17,7 +17,7 @@ s = SlicerHelper(working_folder)  # type: ignore[name-defined]  # noqa: F821
 
 # Load volume from PACS
 try:
-    s.load_study_from_pacs(best_study_uid, raise_on_empty=False)  # type: ignore[name-defined]
+    s.load_study_from_pacs(best_study_uid, raise_on_empty=False, window=(-200, 300))  # type: ignore[name-defined]
 except NameError:
     pass
 
