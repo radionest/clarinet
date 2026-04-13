@@ -686,7 +686,6 @@ class TestPipelineTaskDecorator:
         assert called_with["ctx"] is mock_ctx
         assert isinstance(result, dict)
         assert result["patient_id"] == "PAT001"
-        mock_client.login.assert_awaited_once()
         mock_client.close.assert_awaited_once()
 
     @pytest.mark.asyncio

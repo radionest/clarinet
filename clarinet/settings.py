@@ -194,6 +194,11 @@ class Settings(BaseSettings):
     session_secure_cookie: bool = True  # HTTPS only in production
     session_cache_ttl_seconds: int = 30  # In-memory session validation cache TTL
 
+    # Internal service token for ClarinetClient (RecordFlow, pipeline tasks).
+    # If empty, auto-derived from admin_password so API and workers share
+    # the same token without explicit configuration.
+    internal_service_token: SecretStr = SecretStr("")
+
     # Anonymization settings
     anon_uid_salt: str = "clarinet-anon-salt-change-in-production"
     anon_save_to_disk: bool = True
@@ -302,6 +307,28 @@ class Settings(BaseSettings):
     def session_expire_seconds(self) -> int:
         """Get session expiration time in seconds."""
         return self.session_expire_hours * 3600
+
+    @property
+    def effective_service_token(self) -> str:
+        """Service token for internal API clients (RecordFlow, pipeline).
+
+        Returns the explicit token if configured, otherwise derives one from
+        ``admin_password`` so that API and worker processes share the same
+        token without extra configuration.
+        """
+        explicit = self.internal_service_token.get_secret_value()
+        if explicit:
+            return explicit
+        if self.admin_password:
+            import hashlib
+            import hmac
+
+            return hmac.new(
+                b"clarinet-internal-service",
+                self.admin_password.encode(),
+                hashlib.sha256,
+            ).hexdigest()
+        return ""
 
     @classmethod
     def settings_customise_sources(

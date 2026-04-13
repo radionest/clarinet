@@ -19,8 +19,7 @@ async def test_create_anonymization_service_yields_service() -> None:
 
     with patch("clarinet.settings.settings") as mock_settings:
         mock_settings.effective_api_base_url = "http://test:8000/api"
-        mock_settings.admin_email = "admin@test.com"
-        mock_settings.admin_password = "secret"
+        mock_settings.effective_service_token = "test-token"
         mock_settings.api_verify_ssl = False
         mock_settings.dicom_aet = "TEST_AET"
         mock_settings.dicom_max_pdu = 16384
@@ -42,12 +41,10 @@ async def test_create_anonymization_service_yields_service() -> None:
                     StudyRepoAdapter,
                 )
 
-                # Verify ClarinetClient constructed with correct settings
+                # Verify ClarinetClient constructed with service_token
                 mock_client_cls.assert_called_once_with(
                     base_url="http://test:8000/api",
-                    username="admin@test.com",
-                    password="secret",
-                    auto_login=False,
+                    service_token="test-token",
                     verify_ssl=False,
                 )
 
