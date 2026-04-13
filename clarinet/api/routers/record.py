@@ -826,11 +826,13 @@ async def find_random_record(
     query: RecordSearchFilter,
 ) -> RecordRead | None:
     """Find a single random record matching filter criteria."""
-    role_names = None if user.is_superuser else get_user_role_names(user)
+    is_regular_user = not user.is_superuser
+    role_names = get_user_role_names(user) if is_regular_user else None
     criteria = RecordSearchCriteria(
         **query.model_dump(exclude={"data_queries"}),
         data_queries=query.data_queries,
         role_names=role_names,
+        include_unassigned=is_regular_user,
     )
     record = await repo.find_random(criteria)
     if record is None:
@@ -845,11 +847,13 @@ async def find_records(
     query: RecordSearchQuery,
 ) -> RecordPage:
     """Search records with cursor-based pagination."""
-    role_names = None if user.is_superuser else get_user_role_names(user)
+    is_regular_user = not user.is_superuser
+    role_names = get_user_role_names(user) if is_regular_user else None
     criteria = RecordSearchCriteria(
         **query.model_dump(exclude={"data_queries", "cursor", "limit", "sort"}),
         data_queries=query.data_queries,
         role_names=role_names,
+        include_unassigned=is_regular_user,
     )
     result = await repo.find_page(
         criteria,

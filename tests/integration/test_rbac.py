@@ -410,8 +410,8 @@ async def test_get_available_types_filtered_by_role(
     # 1. Pending records
     # 2. Match user's roles
     # Since we have pending records only for role_a, we should see it
-    if "rtype-role-a-test" in data:
-        assert data["rtype-role-a-test"] >= 1
+    assert "rtype-role-a-test" in data
+    assert data["rtype-role-a-test"] >= 1
     # Should not see types outside user's role
     assert "rtype-role-b-test" not in data
     assert "rtype-null-test" not in data
