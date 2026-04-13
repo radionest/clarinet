@@ -1,5 +1,8 @@
 """
-TaskIQ middlewares for pipeline chain advancement, logging, and dead letter queue.
+TaskIQ middlewares for pipeline chain advancement, logging, retry, and dead letter queue.
+
+RetryMiddleware extends SmartRetryMiddleware to skip retries for business (4xx)
+errors — only infrastructure failures (5xx, network) are retried.
 
 DLQPublisher encapsulates a single AMQP connection to the dead letter queue.
 Both DeadLetterMiddleware and PipelineChainMiddleware share one DLQPublisher
@@ -19,6 +22,7 @@ import json
 from typing import TYPE_CHECKING, Any
 
 from taskiq import TaskiqMiddleware
+from taskiq.middlewares import SmartRetryMiddleware as _SmartRetryMiddleware
 
 from clarinet.client import ClarinetAPIError, ClarinetClient
 from clarinet.settings import settings
@@ -222,6 +226,36 @@ class DeadLetterMiddleware(TaskiqMiddleware):
             )
         except Exception as e:
             logger.error(f"Failed to route task '{message.task_name}' to DLQ: {e}")
+
+
+class RetryMiddleware(_SmartRetryMiddleware):
+    """SmartRetryMiddleware that skips retries for business (4xx) errors.
+
+    HTTP 4xx errors from ``ClarinetAPIError`` indicate a business-logic
+    violation (e.g. 409 Conflict, 404 Not Found, 422 Validation Error)
+    that will fail identically on every retry.  Retrying wastes time
+    and delays DLQ routing.
+
+    5xx errors (server/infrastructure failures) and non-HTTP exceptions
+    (``ConnectionError``, ``TimeoutError``, etc.) are retried normally
+    via the parent ``SmartRetryMiddleware``.
+    """
+
+    async def on_error(
+        self,
+        message: TaskiqMessage,
+        result: TaskiqResult[Any],
+        exception: BaseException,
+    ) -> None:
+        if isinstance(exception, ClarinetAPIError):
+            code = exception.status_code
+            if code is not None and 400 <= code < 500:
+                logger.info(
+                    f"Task '{message.task_name}' failed with HTTP {code} — "
+                    f"skipping retry (business error): {exception}"
+                )
+                return
+        await super().on_error(message, result, exception)
 
 
 class PipelineChainMiddleware(TaskiqMiddleware):

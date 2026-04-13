@@ -563,9 +563,9 @@ class TestRetryDefaults:
     """Tests for broker retry configuration."""
 
     def test_default_retry_label_is_true(self):
-        """create_broker() includes SmartRetryMiddleware with default_retry_label=True."""
+        """create_broker() includes RetryMiddleware with default_retry_label=True."""
 
-        from taskiq.middlewares import SmartRetryMiddleware
+        from clarinet.services.pipeline.middleware import RetryMiddleware
 
         with patch("clarinet.services.pipeline.broker.settings") as mock_settings:
             mock_settings.rabbitmq_login = "guest"
@@ -582,15 +582,94 @@ class TestRetryDefaults:
 
             broker = create_broker("test.default")
 
-            # Find SmartRetryMiddleware in the broker's middlewares
-            smart_retry = None
+            # Find RetryMiddleware in the broker's middlewares
+            retry_mw = None
             for mw in broker.middlewares:
-                if isinstance(mw, SmartRetryMiddleware):
-                    smart_retry = mw
+                if isinstance(mw, RetryMiddleware):
+                    retry_mw = mw
                     break
 
-            assert smart_retry is not None, "SmartRetryMiddleware not found in broker middlewares"
-            assert smart_retry.default_retry_label is True
+            assert retry_mw is not None, "RetryMiddleware not found in broker middlewares"
+            assert retry_mw.default_retry_label is True
+
+
+class TestRetryMiddleware:
+    """Tests for RetryMiddleware — business error (4xx) skip logic."""
+
+    @pytest.mark.asyncio
+    async def test_skips_retry_on_4xx(self):
+        """ClarinetAPIError with 4xx status code should not be retried."""
+        from taskiq import TaskiqMessage, TaskiqResult
+
+        from clarinet.client import ClarinetAPIError
+        from clarinet.services.pipeline.middleware import RetryMiddleware
+
+        middleware = RetryMiddleware(default_retry_count=3, default_retry_label=True)
+        msg = TaskiqMessage(task_id="t1", task_name="test_task", labels={}, args=[], kwargs={})
+        exc = ClarinetAPIError("Conflict", status_code=409, detail="Invalid submit status")
+        result = TaskiqResult(is_err=True, return_value=None, execution_time=0.1, error=exc)
+
+        with patch(
+            "taskiq.middlewares.SmartRetryMiddleware.on_error", new_callable=AsyncMock
+        ) as mock_super:
+            await middleware.on_error(msg, result, exc)
+            mock_super.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_retries_on_5xx(self):
+        """ClarinetAPIError with 5xx status code should be retried normally."""
+        from taskiq import TaskiqMessage, TaskiqResult
+
+        from clarinet.client import ClarinetAPIError
+        from clarinet.services.pipeline.middleware import RetryMiddleware
+
+        middleware = RetryMiddleware(default_retry_count=3, default_retry_label=True)
+        msg = TaskiqMessage(task_id="t2", task_name="test_task", labels={}, args=[], kwargs={})
+        exc = ClarinetAPIError("Internal error", status_code=502)
+        result = TaskiqResult(is_err=True, return_value=None, execution_time=0.1, error=exc)
+
+        with patch(
+            "taskiq.middlewares.SmartRetryMiddleware.on_error", new_callable=AsyncMock
+        ) as mock_super:
+            await middleware.on_error(msg, result, exc)
+            mock_super.assert_called_once_with(msg, result, exc)
+
+    @pytest.mark.asyncio
+    async def test_retries_on_non_api_error(self):
+        """Non-ClarinetAPIError exceptions should be retried normally."""
+        from taskiq import TaskiqMessage, TaskiqResult
+
+        from clarinet.services.pipeline.middleware import RetryMiddleware
+
+        middleware = RetryMiddleware(default_retry_count=3, default_retry_label=True)
+        msg = TaskiqMessage(task_id="t3", task_name="test_task", labels={}, args=[], kwargs={})
+        exc = ConnectionError("RabbitMQ connection lost")
+        result = TaskiqResult(is_err=True, return_value=None, execution_time=0.1, error=exc)
+
+        with patch(
+            "taskiq.middlewares.SmartRetryMiddleware.on_error", new_callable=AsyncMock
+        ) as mock_super:
+            await middleware.on_error(msg, result, exc)
+            mock_super.assert_called_once_with(msg, result, exc)
+
+    @pytest.mark.asyncio
+    async def test_retries_on_api_error_without_status_code(self):
+        """ClarinetAPIError without status_code should be retried."""
+        from taskiq import TaskiqMessage, TaskiqResult
+
+        from clarinet.client import ClarinetAPIError
+        from clarinet.services.pipeline.middleware import RetryMiddleware
+
+        middleware = RetryMiddleware(default_retry_count=3, default_retry_label=True)
+        msg = TaskiqMessage(task_id="t4", task_name="test_task", labels={}, args=[], kwargs={})
+        exc = ClarinetAPIError("Unknown error")
+        result = TaskiqResult(is_err=True, return_value=None, execution_time=0.1, error=exc)
+
+        with patch(
+            "taskiq.middlewares.SmartRetryMiddleware.on_error", new_callable=AsyncMock
+        ) as mock_super:
+            await middleware.on_error(msg, result, exc)
+            mock_super.assert_called_once_with(msg, result, exc)
 
 
 # ─── Worker signal handling (Windows regression) ─────────────────────────────

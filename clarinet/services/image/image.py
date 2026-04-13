@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import enum
 from pathlib import Path
-from typing import Any, Self
+from typing import Any, Literal, Self
 
 import nibabel
 import nibabel.affines
@@ -134,7 +134,7 @@ class Image:
             return False
         return bool(np.allclose(self.affine_4x4, other.affine_4x4, atol=atol, rtol=0))
 
-    def reindex_to(self, target: Image, *, order: int = 1) -> Self:
+    def reindex_to(self, target: Image, *, order: Literal[0, 1] = 1) -> Self:
         """Resample this image into *target*'s voxel grid.
 
         Args:

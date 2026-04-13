@@ -1,7 +1,7 @@
 """
 TaskIQ broker configuration for the pipeline service.
 
-Provides AioPikaBroker singleton with SmartRetryMiddleware and dead letter queue.
+Provides AioPikaBroker singleton with RetryMiddleware and dead letter queue.
 Uses existing RabbitMQ settings from clarinet.settings.
 """
 
@@ -107,18 +107,17 @@ def create_broker(queue_name: str = DEFAULT_QUEUE) -> AsyncBroker:
     )
 
     # Attach middlewares
-    from taskiq.middlewares import SmartRetryMiddleware
-
     from .middleware import (
         DeadLetterMiddleware,
         DLQPublisher,
         PipelineChainMiddleware,
         PipelineLoggingMiddleware,
+        RetryMiddleware,
     )
 
     dlq = DLQPublisher()
     broker = broker.with_middlewares(
-        SmartRetryMiddleware(
+        RetryMiddleware(
             default_retry_count=settings.pipeline_retry_count,
             default_retry_label=True,
             default_delay=settings.pipeline_retry_delay,
