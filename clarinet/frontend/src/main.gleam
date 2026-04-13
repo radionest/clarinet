@@ -16,6 +16,7 @@ import gleam/result
 import gleam/string
 import gleam/uri.{type Uri}
 import utils/logger
+import utils/storage as app_storage
 import lustre
 import lustre/attribute
 import lustre/effect.{type Effect}
@@ -303,7 +304,11 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         |> promise.tap(fn(_) { dispatch(store.LogoutComplete) })
         Nil
       }
-      #(store.reset_for_logout(model), logout_effect)
+      let clear_storage = app_storage.clear_prefixed(app_storage.Local)
+      #(
+        store.reset_for_logout(model),
+        effect.batch([logout_effect, clear_storage]),
+      )
     }
 
     store.LogoutComplete -> {
@@ -858,7 +863,14 @@ fn handle_api_error(
         |> store.set_loading(False)
         |> store.set_error(Some("Session expired. Please log in again."))
         |> store.set_route(router.Login)
-      #(new_model, modem.push(router.route_to_path(router.Login), option.None, option.None))
+      let clear_storage = app_storage.clear_prefixed(app_storage.Local)
+      #(
+        new_model,
+        effect.batch([
+          clear_storage,
+          modem.push(router.route_to_path(router.Login), option.None, option.None),
+        ]),
+      )
     }
     _ -> {
       let new_model =
