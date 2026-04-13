@@ -201,7 +201,7 @@ pub fn update(
     SubmitResult(Ok(record)) -> {
       let route = case record.id {
         Some(id) -> router.RecordDetail(int.to_string(id))
-        None -> router.Records
+        None -> router.Records(dict.new())
       }
       #(Model(..model, loading: False), effect.none(), [
         shared.CacheRecord(record),
@@ -218,7 +218,7 @@ pub fn update(
       )
 
     Cancel ->
-      #(model, effect.none(), [shared.Navigate(router.Records)])
+      #(model, effect.none(), [shared.Navigate(router.Records(dict.new()))])
   }
 }
 

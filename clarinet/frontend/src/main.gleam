@@ -223,10 +223,10 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
 
     store.Navigate(route) -> {
       logger.debug("router", "Navigate route: " <> string.inspect(route))
-      // Use Modem to update URL without page reload
       let path = router.route_to_path(route)
+      let query = router.route_to_query(route)
       logger.debug("router", "pushing path: " <> path)
-      #(model, modem.push(path, option.None, option.None))
+      #(model, modem.push(path, query, option.None))
     }
 
     // Session restoration
@@ -727,8 +727,8 @@ fn init_page_for_route(model: Model, route: Route) -> #(Model, Effect(Msg)) {
       init_page(model, patient_detail.init(id, _), store.PatientDetailPage, store.PatientDetailMsg)
     router.PatientNew ->
       init_page(model, patient_new.init, store.PatientNewPage, store.PatientNewMsg)
-    router.Records ->
-      init_page(model, records_list.init, store.RecordsListPage, store.RecordsListMsg)
+    router.Records(filters) ->
+      init_page(model, records_list.init(filters, _), store.RecordsListPage, store.RecordsListMsg)
     router.RecordDetail(id) ->
       init_page(model, record_execute.init(id, _), store.RecordExecutePage, store.RecordExecuteMsg)
     router.RecordNew ->
@@ -762,7 +762,7 @@ fn apply_out_msgs(
         shared.ShowError(text) ->
           #(store.set_error(m, option.Some(text)), eff_list)
         shared.Navigate(route) ->
-          #(m, [modem.push(router.route_to_path(route), option.None, option.None), ..eff_list])
+          #(m, [modem.push(router.route_to_path(route), router.route_to_query(route), option.None), ..eff_list])
         shared.SetLoading(loading) ->
           #(store.set_loading(m, loading), eff_list)
         shared.CacheRecord(record) -> {

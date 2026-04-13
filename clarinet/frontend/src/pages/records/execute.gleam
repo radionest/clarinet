@@ -364,7 +364,7 @@ pub fn update(
 
     // Navigation
     NavigateBack ->
-      #(model, effect.none(), [shared.Navigate(router.Records)])
+      #(model, effect.none(), [shared.Navigate(router.Records(dict.new()))])
 
     // Restart
     Restart -> {
