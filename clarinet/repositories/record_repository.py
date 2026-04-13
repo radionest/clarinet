@@ -32,7 +32,7 @@ from clarinet.models.file_schema import RecordFileLink, RecordTypeFileLink
 from clarinet.models.patient import Patient
 from clarinet.models.record import RecordFindResult, RecordFindResultComparisonOperator, RecordType
 from clarinet.models.study import Series, Study
-from clarinet.models.user import User, UserRole
+from clarinet.models.user import User, UserRolesLink
 from clarinet.repositories.base import BaseRepository
 from clarinet.types import RecordData
 from clarinet.utils.logger import logger
@@ -54,6 +54,7 @@ class RecordSearchCriteria:
     record_status: RecordStatus | None = None
     parent_record_id: int | None = None
     wo_user: bool | None = None
+    include_unassigned: bool = False
     random_one: bool = False
     role_names: set[str] | None = None
     data_queries: list[RecordFindResult] = field(default_factory=list)
@@ -905,7 +906,12 @@ class RecordRepository(BaseRepository[Record]):
             statement = statement.where(col(Record.user_id).is_not(None))
 
         if criteria.user_id:
-            statement = statement.where(Record.user_id == criteria.user_id)
+            if criteria.include_unassigned:
+                statement = statement.where(
+                    or_(col(Record.user_id) == criteria.user_id, col(Record.user_id).is_(None))
+                )
+            else:
+                statement = statement.where(Record.user_id == criteria.user_id)
 
         # Record filters
         if criteria.record_status:
@@ -1072,11 +1078,18 @@ class RecordRepository(BaseRepository[Record]):
         Returns:
             Dict mapping RecordType to count of pending records
         """
+        # Get user's role names first, then filter record types
+        role_result = await self.session.execute(
+            select(col(UserRolesLink.role_name)).where(UserRolesLink.user_id == user_id)
+        )
+        role_names = {r[0] for r in role_result.all()}
+        if not role_names:
+            return {}
+
         statement = (
             select(RecordType.name, func.count(col(Record.id)).label("record_count"))
             .join(Record)
-            .join(UserRole)
-            .where(UserRole.users.any(User.id == user_id))  # type: ignore[attr-defined]
+            .where(col(RecordType.role_name).in_(list(role_names)))
             .where(Record.status == RecordStatus.pending)
         )
         if exclude_unique_violations:
