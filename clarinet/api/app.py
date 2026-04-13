@@ -106,9 +106,7 @@ async def _init_recordflow(app: FastAPI) -> None:
 
     client = ClarinetClient(
         base_url=settings.effective_api_base_url,
-        username=settings.admin_email,
-        password=settings.admin_password,
-        auto_login=False,
+        service_token=settings.effective_service_token,
         verify_ssl=settings.api_verify_ssl,
     )
 

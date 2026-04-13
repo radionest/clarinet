@@ -105,6 +105,7 @@ class ClarinetClient:
         auto_login: bool = True,
         log_requests: bool = False,
         verify_ssl: bool = True,
+        service_token: str | None = None,
     ) -> None:
         """Initialize Clarinet client.
 
@@ -117,11 +118,15 @@ class ClarinetClient:
             log_requests: Enable request/response logging (default: False)
             verify_ssl: Verify SSL certificates (default: True). Set to False
                        for self-signed certificates.
+            service_token: Static service token for internal clients. When set,
+                          sent as X-Internal-Token header — no login() needed,
+                          no AccessToken created in DB.
         """
         self.base_url = base_url.rstrip("/")
         self.username = username
         self.password = password
         self.log_requests = log_requests
+        self.service_token = service_token
 
         # Create async HTTP client with cookie jar for session management
         self.client = httpx.AsyncClient(
@@ -129,15 +134,17 @@ class ClarinetClient:
         )
         self._authenticated = False
 
-        # Auto-login if credentials provided
-        if auto_login and username:
+        if service_token:
+            self.client.headers["X-Internal-Token"] = service_token
+            self._authenticated = True
+        elif auto_login and username:
             # Note: __init__ cannot be async, so we'll login on first request
             # User can also call login() manually
             pass
 
     async def __aenter__(self) -> "ClarinetClient":
         """Async context manager entry."""
-        if self.username and not self._authenticated:
+        if not self._authenticated and self.username:
             await self.login()
         return self
 
@@ -275,6 +282,9 @@ class ClarinetClient:
         Raises:
             ClarinetAuthError: On authentication failure
         """
+        if self.service_token:
+            return await self.get_me()
+
         username = username or self.username
         password = password or self.password
 

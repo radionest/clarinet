@@ -178,6 +178,8 @@ class RecordFlowEngine:
         await self._ensure_api_reachable()
         if self.clarinet_client._authenticated:
             return
+        if self.clarinet_client.service_token:
+            return
         if self.clarinet_client.username and self.clarinet_client.password:
             await self.clarinet_client.login()
 

@@ -293,17 +293,9 @@ class PipelineChainMiddleware(TaskiqMiddleware):
 
         client = ClarinetClient(
             base_url=settings.effective_api_base_url,
-            username=settings.admin_email,
-            password=settings.admin_password,
-            auto_login=False,
+            service_token=settings.effective_service_token,
             verify_ssl=settings.api_verify_ssl,
         )
-        try:
-            await client.login()
-        except Exception as e:
-            logger.error(f"Pipeline chain: failed to login ClarinetClient: {e}")
-            await client.close()
-            return None
 
         self._client = client
         return self._client

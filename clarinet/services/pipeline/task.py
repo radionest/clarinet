@@ -72,13 +72,10 @@ def pipeline_task(
             message = PipelineMessage.model_validate(msg)
             client = ClarinetClient(
                 base_url=settings.effective_api_base_url,
-                username=settings.admin_email,
-                password=settings.admin_password,
-                auto_login=False,
+                service_token=settings.effective_service_token,
                 verify_ssl=settings.api_verify_ssl,
             )
             try:
-                await client.login()
                 ctx = await build_task_context(message, client)
                 pre_checksums = await ctx.files.snapshot_checksums()
 

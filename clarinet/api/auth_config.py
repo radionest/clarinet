@@ -3,6 +3,7 @@ Fastapi-users configuration for session-based authentication.
 Following KISS principle - minimal configuration.
 """
 
+import hmac
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime, timedelta
 from typing import Any, ClassVar
@@ -10,7 +11,7 @@ from urllib.parse import urlsplit
 from uuid import UUID, uuid4
 
 from cachetools import TTLCache
-from fastapi import Depends, Request, Response
+from fastapi import Depends, HTTPException, Request, Response
 from fastapi_users import BaseUserManager, FastAPIUsers
 from fastapi_users.authentication import (
     AuthenticationBackend,
@@ -416,7 +417,87 @@ fastapi_users = FastAPIUsers[User, UUID](
     [auth_backend],
 )
 
-# Export ready dependencies
-current_active_user = fastapi_users.current_user(active=True)
-current_superuser = fastapi_users.current_user(active=True, superuser=True)
-optional_current_user = fastapi_users.current_user(optional=True)
+# --- Internal service token auth (RecordFlow, pipeline tasks) ---
+
+_service_user_cache: TTLCache = TTLCache(maxsize=1, ttl=300)
+
+
+async def _get_service_user(request: Request, session: AsyncSession) -> User | None:
+    """Authenticate internal clients via X-Internal-Token header.
+
+    Returns the admin User when the header matches, bypassing cookie auth
+    and AccessToken creation entirely.
+    """
+    effective_token = settings.effective_service_token
+    if not effective_token:
+        return None
+
+    header_token = request.headers.get("X-Internal-Token")
+    if not header_token:
+        return None
+
+    if not hmac.compare_digest(header_token, effective_token):
+        logger.warning(
+            f"Invalid service token from {request.client.host if request.client else 'unknown'}",
+            extra={"reason": "invalid_service_token"},
+        )
+        return None
+
+    cache_key = "service_user"
+    if cache_key in _service_user_cache:
+        return _service_user_cache[cache_key]  # type: ignore[no-any-return]
+
+    stmt = (
+        select(User).where(User.email == settings.admin_email).options(selectinload(User.roles))  # type: ignore[arg-type]
+    )
+    result = await session.execute(stmt)
+    user = result.scalar_one_or_none()
+
+    if user and user.is_active:
+        session.expunge(user)
+        _service_user_cache[cache_key] = user
+        return user
+
+    return None
+
+
+# --- Public auth dependencies (service token → cookie fallback) ---
+
+_fu_optional_user = fastapi_users.current_user(optional=True)
+
+
+async def current_active_user(
+    request: Request,
+    session: AsyncSession = Depends(get_async_session),
+    fu_user: User | None = Depends(_fu_optional_user),
+) -> User:
+    """Return the current authenticated user.
+
+    Checks X-Internal-Token header first (internal clients), then falls
+    back to cookie-based session auth (browser users).
+    """
+    service_user = await _get_service_user(request, session)
+    if service_user is not None:
+        return service_user
+    if fu_user is None or not fu_user.is_active:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    return fu_user
+
+
+async def current_superuser(
+    user: User = Depends(current_active_user),
+) -> User:
+    """Require an active superuser (admin or service token)."""
+    if not user.is_superuser:
+        raise HTTPException(status_code=403, detail="Not a superuser")
+    return user
+
+
+async def optional_current_user(
+    request: Request,
+    session: AsyncSession = Depends(get_async_session),
+    fu_user: User | None = Depends(_fu_optional_user),
+) -> User | None:
+    """Return the current user if authenticated, or None."""
+    service_user = await _get_service_user(request, session)
+    return service_user or fu_user
