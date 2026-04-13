@@ -717,6 +717,13 @@ class SlicerHelper:
             shortcut.deleteLater()
         self._shortcuts.clear()
 
+    def _apply_window(self, node: Any, window: tuple[float, float]) -> None:
+        display = node.GetScalarVolumeDisplayNode()
+        if display is None:
+            return
+        display.AutoWindowLevelOff()
+        display.SetWindowLevelMinMax(window[0], window[1])
+
     def load_volume(
         self,
         path: str,
@@ -735,9 +742,7 @@ class SlicerHelper:
         self._image_node = slicer.util.loadVolume(full_path)
 
         if window is not None:
-            display = self._image_node.GetScalarVolumeDisplayNode()
-            display.AutoWindowLevelOff()
-            display.SetWindowLevelMinMax(window[0], window[1])
+            self._apply_window(self._image_node, window)
 
         return self._image_node
 
@@ -1011,6 +1016,7 @@ class SlicerHelper:
         *,
         server_name: str | None = None,
         raise_on_empty: bool = True,
+        window: tuple[float, float] | None = None,
     ) -> list[str]:
         """Load a DICOM study from PACS into the current scene.
 
@@ -1023,6 +1029,7 @@ class SlicerHelper:
                 (only used in fallback mode).
             raise_on_empty: If True (default), raise SlicerHelperError when no
                 DICOM nodes are loaded. Set to False for optional/fallback loads.
+            window: Optional (min, max) window level values for the loaded volume.
 
         Returns:
             List of loaded MRML node IDs.
@@ -1038,6 +1045,8 @@ class SlicerHelper:
             node = self._scene.GetNodeByID(nid)
             if node is not None and node.IsA("vtkMRMLScalarVolumeNode"):
                 self._image_node = node
+                if window is not None:
+                    self._apply_window(node, window)
                 break
 
         node_ids = node_ids or []
@@ -1055,6 +1064,7 @@ class SlicerHelper:
         *,
         server_name: str | None = None,
         raise_on_empty: bool = True,
+        window: tuple[float, float] | None = None,
     ) -> list[str]:
         """Load a single DICOM series from PACS into the current scene.
 
@@ -1068,6 +1078,7 @@ class SlicerHelper:
                 (only used in fallback mode).
             raise_on_empty: If True (default), raise SlicerHelperError when no
                 DICOM nodes are loaded. Set to False for optional/fallback loads.
+            window: Optional (min, max) window level values for the loaded volume.
 
         Returns:
             List of loaded MRML node IDs.
@@ -1083,6 +1094,8 @@ class SlicerHelper:
             node = self._scene.GetNodeByID(nid)
             if node is not None and node.IsA("vtkMRMLScalarVolumeNode"):
                 self._image_node = node
+                if window is not None:
+                    self._apply_window(node, window)
                 break
 
         node_ids = node_ids or []

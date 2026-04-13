@@ -27,8 +27,8 @@ paths:
 - `annotate(text)`, `configure_slab(thickness=)`, `setup_edit_mask(path)`
 - `add_view_shortcuts()` — a/s/c keys for view switching
 - `add_shortcuts(shortcuts: list[tuple[str, str]])` — custom keyboard shortcuts
-- `load_study_from_pacs(study_instance_uid, *, server_name=, raise_on_empty=True)` → list of MRML node IDs; auto-sets first scalar volume as `_image_node`
-- `load_series_from_pacs(study_instance_uid, series_instance_uid, *, server_name=, raise_on_empty=True)` → list of MRML node IDs; loads only specified series
+- `load_study_from_pacs(study_instance_uid, *, server_name=, raise_on_empty=True, window=)` → list of MRML node IDs; auto-sets first scalar volume as `_image_node`
+- `load_series_from_pacs(study_instance_uid, series_instance_uid, *, server_name=, raise_on_empty=True, window=)` → list of MRML node IDs; loads only specified series
 - `get_segment_names(segmentation)` → `list[str]`
 - `get_segment_centroid(segmentation, segment_name)` → `tuple[float,float,float] | None` — per-segment labelmap center via numpy
 - `copy_segments(source_seg, target_seg, segment_names=None, empty=False)`

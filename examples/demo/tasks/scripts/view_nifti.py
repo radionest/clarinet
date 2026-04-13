@@ -9,6 +9,6 @@ Context variables (injected by build_slicer_context):
 
 s = SlicerHelper(working_folder)  # type: ignore[name-defined]  # noqa: F821
 
-s.load_volume(volume_nifti)  # type: ignore[name-defined]  # noqa: F821
+s.load_volume(volume_nifti, window=(-200, 300))  # type: ignore[name-defined]  # noqa: F821
 s.set_layout("axial")
 s.annotate("NIfTI volume")

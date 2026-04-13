@@ -29,14 +29,14 @@ if TYPE_CHECKING:
 s = SlicerHelper(working_folder)  # type: ignore[name-defined]  # noqa: F821
 
 # 1. Load CT reference (model) volume — _image_node = model_vol
-model_node_ids = s.load_series_from_pacs(model_study_uid, model_series_uid)  # type: ignore[name-defined]  # noqa: F821
+model_node_ids = s.load_series_from_pacs(model_study_uid, model_series_uid, window=(-200, 300))  # type: ignore[name-defined]  # noqa: F821
 model_vol = slicer.mrmlScene.GetNodeByID(model_node_ids[0])  # type: ignore[name-defined]
 
 # 2. Load master model segmentation (reference geometry from model_vol)
 master_seg = s.load_segmentation(master_model, "MasterModel")  # type: ignore[name-defined]  # noqa: F821
 
 # 3. Load target series — _image_node = target_vol
-target_node_ids = s.load_series_from_pacs(study_uid, best_series_uid)  # type: ignore[name-defined]  # noqa: F821
+target_node_ids = s.load_series_from_pacs(study_uid, best_series_uid, window=(-200, 300))  # type: ignore[name-defined]  # noqa: F821
 target_vol = slicer.mrmlScene.GetNodeByID(target_node_ids[0])  # type: ignore[name-defined]
 
 # 4. Create or load projection (reference geometry from target_vol)
