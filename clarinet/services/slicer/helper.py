@@ -1277,6 +1277,84 @@ class SlicerHelper:
         ras = mat.MultiplyPoint([ci, cj, ck, 1.0])
         return (ras[0], ras[1], ras[2])
 
+    def get_largest_island_centroid(
+        self,
+        segmentation: SegmentationBuilder | Any,
+        segment_name: str,
+    ) -> tuple[float, float, float] | None:
+        """Compute the RAS centroid of the largest connected component in a segment.
+
+        Like ``get_segment_centroid`` but isolates the largest island first
+        via ``vtkImageConnectivityFilter``. Useful for segments that contain
+        multiple disconnected regions (e.g. ``_pool`` in second_review) where
+        the overall bounding-box center would fall in empty space.
+
+        Safe to call from observer callbacks — pure VTK + numpy, no event
+        processing.
+
+        Args:
+            segmentation: SegmentationBuilder or raw segmentation node.
+            segment_name: Name of the segment to find.
+
+        Returns:
+            (R, A, S) centroid of the largest island, or None if empty.
+        """
+        import numpy as np  # type: ignore[import-not-found]
+        import vtkSegmentationCorePython as vtkSegCore  # type: ignore[import-not-found]
+        from vtk.util.numpy_support import vtk_to_numpy  # type: ignore[import-not-found]
+
+        node = segmentation.node if isinstance(segmentation, SegmentationBuilder) else segmentation
+        vtk_seg = node.GetSegmentation()
+
+        seg_id = _find_segment_id(vtk_seg, segment_name)
+        if seg_id is None:
+            return None
+
+        labelmap = vtkSegCore.vtkOrientedImageData()
+        node.GetBinaryLabelmapRepresentation(seg_id, labelmap)
+
+        extent = labelmap.GetExtent()
+        if extent[0] > extent[1]:
+            return None
+
+        # Isolate the largest connected component.
+        # vtkOrientedImageData IS-A vtkImageData, so SetInputData accepts it.
+        conn = vtk.vtkImageConnectivityFilter()
+        conn.SetInputData(labelmap)
+        conn.SetExtractionModeToLargestRegion()
+        conn.Update()
+        filtered = conn.GetOutput()
+
+        scalars = filtered.GetPointData().GetScalars()
+        if scalars is None:
+            return None
+
+        dims = filtered.GetDimensions()
+        arr = vtk_to_numpy(scalars).reshape(dims[2], dims[1], dims[0])
+
+        mask = arr > 0
+
+        i_any = np.any(mask, axis=(0, 1))
+        j_any = np.any(mask, axis=(0, 2))
+        k_any = np.any(mask, axis=(1, 2))
+
+        i_idx = np.where(i_any)[0]
+        if len(i_idx) == 0:
+            return None
+        j_idx = np.where(j_any)[0]
+        k_idx = np.where(k_any)[0]
+
+        ci = (float(i_idx[0]) + float(i_idx[-1])) / 2.0 + extent[0]
+        cj = (float(j_idx[0]) + float(j_idx[-1])) / 2.0 + extent[2]
+        ck = (float(k_idx[0]) + float(k_idx[-1])) / 2.0 + extent[4]
+
+        # IJK → RAS via the ORIGINAL labelmap's image-to-world matrix.
+        # The filter output is a plain vtkImageData that may lose orientation.
+        mat = vtk.vtkMatrix4x4()
+        labelmap.GetImageToWorldMatrix(mat)
+        ras = mat.MultiplyPoint([ci, cj, ck, 1.0])
+        return (ras[0], ras[1], ras[2])
+
     def _local_to_world_centroid(
         self,
         segmentation: SegmentationBuilder | Any,
@@ -1298,6 +1376,31 @@ class SlicerHelper:
             World RAS centroid or None if the segment is empty.
         """
         local = self.get_segment_centroid(segmentation, segment_name)
+        if local is None:
+            return None
+
+        node = segmentation.node if isinstance(segmentation, SegmentationBuilder) else segmentation
+        parent_tf = node.GetParentTransformNode()
+        if parent_tf is None:
+            return local
+
+        mat = vtk.vtkMatrix4x4()
+        parent_tf.GetMatrixTransformToWorld(mat)
+        world = mat.MultiplyPoint([local[0], local[1], local[2], 1.0])
+        return (world[0], world[1], world[2])
+
+    def _local_to_world_island_centroid(
+        self,
+        segmentation: SegmentationBuilder | Any,
+        segment_name: str,
+    ) -> tuple[float, float, float] | None:
+        """Convert largest-island centroid from local RAS to world RAS.
+
+        Same as ``_local_to_world_centroid`` but delegates to
+        ``get_largest_island_centroid`` for segments with disconnected
+        islands (e.g. ``_pool``).
+        """
+        local = self.get_largest_island_centroid(segmentation, segment_name)
         if local is None:
             return None
 
@@ -1873,6 +1976,7 @@ class SlicerHelper:
         editable_views: list[str] | None = None,
         only_empty: bool = True,
         on_refine: Any | None = None,
+        island_segments: list[str] | None = None,
     ) -> None:
         """Auto-navigate to segment centroid when selecting a segment.
 
@@ -1880,6 +1984,13 @@ class SlicerHelper:
         views to the centroid of the matching segment. Reference views always
         jump to the reference segmentation centroid. Editable views jump to
         the editable segmentation centroid (or fall back to reference if empty).
+
+        For segments listed in ``island_segments``, the centroid of the
+        **largest connected component** is used instead of the overall
+        bounding-box center (via ``get_largest_island_centroid``). This
+        prevents navigation to empty space between disconnected islands
+        (e.g. ``_pool`` in second_review). Island centroids are never
+        cached because the segment content changes as the user classifies.
 
         .. note:: **Observer design — lessons learned**
 
@@ -1944,11 +2055,14 @@ class SlicerHelper:
             on_refine: Optional callback invoked before centroid computation
                 on each segment switch. Use to update alignment transforms
                 so that centroids reflect the latest registration.
+            island_segments: Segment names whose centroid should be
+                computed via largest-island extraction (no cache).
         """
         if reference_views is None:
             reference_views = ["Red", "Yellow"]
         if editable_views is None:
             editable_views = []
+        _island_set = set(island_segments) if island_segments else set()
 
         editable_node = (
             editable_seg.node if isinstance(editable_seg, SegmentationBuilder) else editable_seg
@@ -1996,6 +2110,27 @@ class SlicerHelper:
                     return
 
                 segment_name = segment.GetName()
+
+                # Island segments: compute largest-island centroid, no caching.
+                # Content changes as user classifies, so recompute each time.
+                if segment_name in _island_set:
+                    print(
+                        f"[SegFocus] island segment '{segment_name}' "
+                        f"— computing largest-island centroid"
+                    )
+                    island_centroid = helper_ref._local_to_world_island_centroid(
+                        editable_node, segment_name
+                    )
+                    if island_centroid is None:
+                        print(f"[SegFocus] island segment '{segment_name}' is empty, skipping")
+                        return
+                    print(
+                        f"[SegFocus] island centroid: R={island_centroid[0]:.1f}, "
+                        f"A={island_centroid[1]:.1f}, S={island_centroid[2]:.1f}"
+                    )
+                    _jump_views(reference_views + editable_views, island_centroid)
+                    print("[SegFocus] jumped all views to island centroid")
+                    return
 
                 # Run refinement callback (e.g. update alignment transform)
                 # BEFORE centroid computation so coordinates are up-to-date.

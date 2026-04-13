@@ -31,6 +31,7 @@ paths:
 - `load_series_from_pacs(study_instance_uid, series_instance_uid, *, server_name=, raise_on_empty=True)` → list of MRML node IDs; loads only specified series
 - `get_segment_names(segmentation)` → `list[str]`
 - `get_segment_centroid(segmentation, segment_name)` → `tuple[float,float,float] | None` — per-segment labelmap center via numpy
+- `get_largest_island_centroid(segmentation, segment_name)` → `tuple[float,float,float] | None` — largest connected component centroid via `vtkImageConnectivityFilter`; use for multi-island segments like `_pool`
 - `copy_segments(source_seg, target_seg, segment_names=None, empty=False)`
 - `sync_segments(source_seg, target_seg, empty=False)` → `list[str]` — copy missing segments by name
 - `rename_segments(segmentation, prefix="NEW", color=None, start_from=1)` → `int`
@@ -41,7 +42,7 @@ paths:
 - `set_dual_layout(volume_a, volume_b, seg_a=None, seg_b=None, linked=True, orientation_a=None, orientation_b=None)` — side-by-side view with auto-detected orientation
 - `align_by_center(moving_volume, reference_volume, moving_segmentation=None, transform_name="AlignTransform")` → translation transform
 - `refine_alignment_by_centroids(moving_seg, reference_seg, transform_node, min_landmarks=1)` → `int` — rigid-body from matched centroids
-- `setup_segment_focus_observer(editable_seg, reference_seg, reference_views=, editable_views=, only_empty=, on_refine=)` — auto-navigate to centroid on selection
+- `setup_segment_focus_observer(editable_seg, reference_seg, reference_views=, editable_views=, only_empty=, on_refine=, island_segments=)` — auto-navigate to centroid on selection; segments in `island_segments` use largest-component centroid (no cache)
 
 ## PacsHelper methods
 

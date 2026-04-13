@@ -55,6 +55,13 @@ s.configure_segment_display(
 )
 
 s.setup_editor(classification, effect="Islands")
+s.setup_segment_focus_observer(
+    classification,
+    classification,
+    reference_views=["Red"],
+    only_empty=False,
+    island_segments=["_pool"],
+)
 s.set_layout("axial")
 s.add_view_shortcuts()
 s.annotate("Classify missed lesions")
