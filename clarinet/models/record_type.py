@@ -10,7 +10,7 @@ import json as json_lib
 from typing import TYPE_CHECKING, Any
 
 from pydantic import field_validator, model_validator
-from sqlalchemy import text as sa_text
+from sqlalchemy import String
 from sqlalchemy.sql import expression as sql_expression
 from sqlmodel import Column, Field, Relationship, SQLModel
 
@@ -107,7 +107,7 @@ class RecordTypeBase(SQLModel):
 
     viewer_mode: ViewerMode = Field(
         default=ViewerMode.SINGLE_SERIES,
-        sa_column_kwargs={"server_default": sa_text("'single_series'")},
+        sa_column=Column(String(20), server_default="single_series", nullable=False),
     )
 
     @field_validator("data_schema", mode="after")
