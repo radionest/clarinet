@@ -22,6 +22,7 @@ import router
 import shared.{type OutMsg, type Shared}
 import utils/permissions
 import utils/record_filters
+import utils/storage
 
 // --- Model ---
 
@@ -42,12 +43,27 @@ pub type Msg {
 
 // --- Init ---
 
+const storage_key = "records.filters"
+
 pub fn init(
   filters: Dict(String, String),
   shared: Shared,
 ) -> #(Model, Effect(Msg), List(OutMsg)) {
   let key = bucket_key_for_user(shared.user)
-  #(Model(active_filters: filters), effect.none(), [shared.FetchBucket(key)])
+  let #(effective_filters, init_fx) = case dict.is_empty(filters) {
+    // URL has filters — use them and persist to localStorage
+    False -> #(filters, save_filters(filters))
+    // URL empty — try localStorage fallback
+    True -> {
+      let saved = storage.load_dict_sync(storage.Local, storage_key)
+      case dict.is_empty(saved) {
+        True -> #(dict.new(), effect.none())
+        // Restore from localStorage and sync URL
+        False -> #(saved, sync_url_effect(saved))
+      }
+    }
+  }
+  #(Model(active_filters: effective_filters), init_fx, [shared.FetchBucket(key)])
 }
 
 fn bucket_key_for_user(user: option.Option(User)) -> bucket.BucketKey {
@@ -68,17 +84,17 @@ pub fn update(
   case msg {
     AddFilter(key, value) -> {
       let filters = dict.insert(model.active_filters, key, value)
-      #(Model(active_filters: filters), sync_url_effect(filters), [])
+      #(Model(active_filters: filters), sync_filters_effect(filters), [])
     }
 
     RemoveFilter(key) -> {
       let filters = dict.delete(model.active_filters, key)
-      #(Model(active_filters: filters), sync_url_effect(filters), [])
+      #(Model(active_filters: filters), sync_filters_effect(filters), [])
     }
 
     ClearFilters -> {
       let filters = dict.new()
-      #(Model(active_filters: filters), sync_url_effect(filters), [])
+      #(Model(active_filters: filters), sync_filters_effect(filters), [])
     }
 
     RequestFail(record_id) -> #(model, effect.none(), [
@@ -119,6 +135,14 @@ fn sync_url_effect(filters: Dict(String, String)) -> Effect(Msg) {
     router.filters_to_query(filters),
     option.None,
   )
+}
+
+fn save_filters(filters: Dict(String, String)) -> Effect(Msg) {
+  storage.save_dict(storage.Local, storage_key, filters)
+}
+
+fn sync_filters_effect(filters: Dict(String, String)) -> Effect(Msg) {
+  effect.batch([sync_url_effect(filters), save_filters(filters)])
 }
 
 fn handle_error(err: ApiError, fallback_msg: String) -> List(OutMsg) {
