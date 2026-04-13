@@ -1,0 +1,95 @@
+name: Badges
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**/*.md"
+      - ".claude/**"
+      - "docs/**"
+      - "examples/**/docs/**"
+      - "dev-notes/**"
+  workflow_dispatch:
+
+jobs:
+  badges:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: clarinet_test
+          POSTGRES_PASSWORD: clarinet_test
+          POSTGRES_DB: clarinet_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U clarinet_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      rabbitmq:
+        image: rabbitmq:3-management
+        env:
+          RABBITMQ_DEFAULT_USER: clarinet_test
+          RABBITMQ_DEFAULT_PASS: clarinet_test
+        ports:
+          - 5672:5672
+          - 15672:15672
+        options: >-
+          --health-cmd "rabbitmq-diagnostics -q ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          cache-dependency-glob: "**/pyproject.toml"
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Run tests with coverage
+        env:
+          CLARINET_TEST_DATABASE_URL: postgresql+asyncpg://clarinet_test:clarinet_test@localhost:5432/clarinet_test
+          CLARINET_TEST_RABBITMQ_HOST: localhost
+          CLARINET_TEST_RABBITMQ_MANAGEMENT_USER: clarinet_test
+          CLARINET_TEST_RABBITMQ_MANAGEMENT_PASS: clarinet_test
+        run: >-
+          uv run pytest tests/ deploy/test/
+          -m "not dicom and not slicer"
+          --cov=clarinet --cov-report=xml
+          -q --tb=no
+
+      - name: Generate badges
+        run: python scripts/generate_badges.py
+
+      - name: Push badges to badges branch
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cd "$(mktemp -d)"
+          git init -q
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          cp "$GITHUB_WORKSPACE"/badges/*.svg .
+          git add .
+          if ! git diff --cached --quiet; then
+            git commit -q -m "update badges"
+            git push origin HEAD:badges --force
+          else
+            echo "Badges unchanged, skipping push"
+          fi
