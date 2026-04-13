@@ -2111,6 +2111,11 @@ class SlicerHelper:
 
                 segment_name = segment.GetName()
 
+                # Run refinement callback (e.g. update alignment transform)
+                # BEFORE centroid computation so coordinates are up-to-date.
+                if on_refine is not None:
+                    on_refine()
+
                 # Island segments: compute largest-island centroid, no caching.
                 # Content changes as user classifies, so recompute each time.
                 if segment_name in _island_set:
@@ -2131,11 +2136,6 @@ class SlicerHelper:
                     _jump_views(reference_views + editable_views, island_centroid)
                     print("[SegFocus] jumped all views to island centroid")
                     return
-
-                # Run refinement callback (e.g. update alignment transform)
-                # BEFORE centroid computation so coordinates are up-to-date.
-                if on_refine is not None:
-                    on_refine()
 
                 # Editable centroid doubles as emptiness check: None = empty.
                 # Use _local_to_world_centroid to account for parent transforms.
