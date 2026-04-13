@@ -428,10 +428,14 @@ async def _process_submission(
             session,
             parent=parent_read,
         )
+        # Prepend record_id check — ensures validation runs on the same record that was opened
+        validator_script = (
+            "validate_record_id(record_id)\n" + record_read.record_type.slicer_result_validator
+        )
         slicer_url = f"http://{client_ip}:{settings.slicer_port}"
         await slicer_service.execute(
             slicer_url,
-            record_read.record_type.slicer_result_validator,
+            validator_script,
             context,
             request_timeout=60.0,
         )

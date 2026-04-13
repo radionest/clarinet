@@ -11,6 +11,7 @@ paths:
 `build_slicer_context(record: RecordRead) -> dict[str, Any]` assembles the context dict in layers:
 
 1. **Standard vars** (auto, by DICOM level):
+   - `record_id` — always
    - `working_folder` — always
    - `study_uid` — for STUDY and SERIES level
    - `series_uid` — for SERIES level only

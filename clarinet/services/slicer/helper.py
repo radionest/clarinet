@@ -49,12 +49,13 @@ else:
             app: Any = None
             util: Any = None
             vtkMRMLLayoutNode: Any = None
-            modules: Any = None
+            modules: Any = None  # replaced below
 
             def __getattr__(self, name: str) -> Any:
                 return None
 
         slicer = _Dummy()
+        slicer.modules = _Dummy()
         qt = _Dummy()
         vtk = _Dummy()
         ctk = _Dummy()
@@ -146,6 +147,29 @@ def _find_segment_id(vtk_seg: Any, name: str) -> str | None:
 def clear_scene() -> None:
     """Clear the current Slicer MRML scene."""
     slicer.mrmlScene.Clear(0)
+
+
+def store_record_id(rid: int) -> None:
+    """Store the opened record ID in Slicer module scope for later validation."""
+    slicer.modules._clarinet_record_id = rid
+
+
+def validate_record_id(rid: int) -> None:
+    """Check that the current Slicer session was opened with this record.
+
+    Raises:
+        SlicerHelperError: If no record was opened or if the IDs don't match.
+    """
+    stored = getattr(slicer.modules, "_clarinet_record_id", None)
+    if stored is None:
+        raise SlicerHelperError(
+            f"No record was opened in Slicer before validation (expected record_id={rid})"
+        )
+    if stored != rid:
+        raise SlicerHelperError(
+            f"Record mismatch: Slicer has record_id={stored}, "
+            f"but validation requested for record_id={rid}"
+        )
 
 
 LAYOUT_MAP: dict[str, str] = {

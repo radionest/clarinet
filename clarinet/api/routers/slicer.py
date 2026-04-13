@@ -184,9 +184,10 @@ async def open_record_in_slicer(
     # Non-blocking: failure logs a warning but proceeds with main script.
     await service.reset_scene(slicer_url, request_timeout=5.0)
 
-    result = await service.execute(
-        slicer_url, record_read.record_type.slicer_script, context, request_timeout=60.0
-    )
+    # Append record_id store so validation can verify the same record is open
+    open_script = record_read.record_type.slicer_script + "\nstore_record_id(record_id)"
+
+    result = await service.execute(slicer_url, open_script, context, request_timeout=60.0)
 
     logger.info(
         f"Slicer open operation completed: record_id={record_id}",
@@ -254,9 +255,12 @@ async def validate_record_in_slicer(
     slicer_url = f"http://{client_ip}:{settings.slicer_port}"
     logger.info(f"Validating record {record_id} in Slicer at {slicer_url}")
 
-    result = await service.execute(
-        slicer_url, record_read.record_type.slicer_result_validator, context, request_timeout=60.0
+    # Prepend record_id check — ensures validation runs on the same record that was opened
+    validator_script = (
+        "validate_record_id(record_id)\n" + record_read.record_type.slicer_result_validator
     )
+
+    result = await service.execute(slicer_url, validator_script, context, request_timeout=60.0)
 
     logger.info(
         f"Slicer validation operation completed: record_id={record_id}",
