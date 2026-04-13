@@ -305,9 +305,11 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         Nil
       }
       let clear_storage = app_storage.clear_prefixed(app_storage.Local)
+      let preload_cleanup =
+        effect.map(preload.stop_timer(model.preload), store.PreloadMsg)
       #(
         store.reset_for_logout(model),
-        effect.batch([logout_effect, clear_storage]),
+        effect.batch([logout_effect, clear_storage, preload_cleanup]),
       )
     }
 

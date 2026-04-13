@@ -70,8 +70,9 @@ pub fn is_active(model: Model) -> Bool {
 // --- Update ---
 
 pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg), List(OutMsg)) {
-  case msg {
-    Start(viewer_url, study_uid) -> {
+  case msg, model.progress {
+    // Entry points — always handle regardless of progress state
+    Start(viewer_url, study_uid), _ -> {
       let eff = {
         use dispatch <- effect.from
         dicomweb.preload_study(study_uid)
@@ -99,7 +100,16 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg), List(OutMsg)) {
       #(Model(..model, progress: Some(progress)), eff, [])
     }
 
-    Started(viewer_url, task_id, study_uid) -> {
+    Cancel, _ -> {
+      let stop_eff = stop_timer(model)
+      #(Model(timer: None, progress: None), stop_eff, [])
+    }
+
+    // No active preload — drop stale messages
+    _, None -> #(model, effect.none(), [])
+
+    // Active preload handlers
+    Started(viewer_url, task_id, study_uid), Some(_) -> {
       case task_id {
         "" ->
           // Failed to start — just open viewer directly
@@ -128,11 +138,11 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg), List(OutMsg)) {
       }
     }
 
-    SetTimer(timer_id) -> {
+    SetTimer(timer_id), Some(_) -> {
       #(Model(..model, timer: Some(timer_id)), effect.none(), [])
     }
 
-    PollTick(task_id, viewer_url, study_uid) -> {
+    PollTick(task_id, viewer_url, study_uid), Some(_) -> {
       let poll_effect = {
         use dispatch <- effect.from
         dicomweb.preload_progress(study_uid, task_id)
@@ -144,7 +154,7 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg), List(OutMsg)) {
       #(model, poll_effect, [])
     }
 
-    ProgressUpdate(task_id, viewer_url, study_uid, Ok(data)) -> {
+    ProgressUpdate(task_id, viewer_url, study_uid, Ok(data)), Some(_) -> {
       let status =
         decode.run(data, decode.at(["status"], decode.string))
         |> option.from_result
@@ -189,17 +199,22 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg), List(OutMsg)) {
       }
     }
 
-    ProgressUpdate(_, _, _, Error(err)) -> {
-      logger.warn(
-        "preload",
-        "Progress poll failed: " <> string.inspect(err),
-      )
-      #(model, effect.none(), [])
-    }
-
-    Cancel -> {
-      let stop_eff = stop_timer(model)
-      #(Model(timer: None, progress: None), stop_eff, [])
+    ProgressUpdate(_, _, _, Error(err)), Some(_) -> {
+      case err {
+        types.AuthError(_) -> {
+          let stop_eff = stop_timer(model)
+          #(Model(timer: None, progress: None), stop_eff, [
+            ShowError("Session expired"),
+          ])
+        }
+        _ -> {
+          logger.warn(
+            "preload",
+            "Progress poll failed: " <> string.inspect(err),
+          )
+          #(model, effect.none(), [])
+        }
+      }
     }
   }
 }
