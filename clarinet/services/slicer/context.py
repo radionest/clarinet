@@ -138,6 +138,7 @@ def build_slicer_context(
     file_registry = record.record_type.file_registry or []
 
     # -- Layer 1: Standard variables (by level) --
+    context["record_id"] = record.id
     working_dirs = FileResolver.build_working_dirs(record)
     record_level = DicomQueryLevel(level) if isinstance(level, str) else level
     context["working_folder"] = str(working_dirs.get(record_level, ""))

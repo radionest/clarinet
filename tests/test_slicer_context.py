@@ -9,6 +9,7 @@ Covers:
 - Unresolved template warning
 """
 
+import contextlib
 import sys
 from datetime import date
 from pathlib import Path
@@ -249,6 +250,18 @@ def test_standard_vars_patient_level(mock_settings):
     assert ctx["working_folder"] == str(Path("/storage/CLARINET_1"))
     assert "study_uid" not in ctx
     assert "series_uid" not in ctx
+
+
+@patch("clarinet.services.slicer.context.settings")
+def test_record_id_in_context(mock_settings):
+    """record_id is always present in context regardless of DICOM level."""
+    mock_settings.storage_path = "/storage"
+    mock_settings.storage_path_client = None
+
+    record = _make_record_read(level=DicomQueryLevel.STUDY)
+    ctx = build_slicer_context(record)
+
+    assert ctx["record_id"] == 1
 
 
 # ---------------------------------------------------------------------------
@@ -584,3 +597,43 @@ async def test_client_path_translation_output_file(mock_settings):
 
     assert ctx["output_file"].startswith("//server/vol_storage/")
     assert ctx["segmentation"] == ctx["output_file"]
+
+
+# ---------------------------------------------------------------------------
+# store_record_id / validate_record_id
+# ---------------------------------------------------------------------------
+
+
+def test_store_and_validate_record_id():
+    """store_record_id + validate_record_id round-trip succeeds for same ID."""
+    from clarinet.services.slicer.helper import store_record_id, validate_record_id
+
+    store_record_id(42)
+    validate_record_id(42)  # should not raise
+
+
+def test_validate_record_id_mismatch():
+    """validate_record_id raises on ID mismatch."""
+    from clarinet.services.slicer.helper import (
+        SlicerHelperError,
+        store_record_id,
+        validate_record_id,
+    )
+
+    store_record_id(42)
+    with pytest.raises(SlicerHelperError, match=r"record_id=42.*record_id=99"):
+        validate_record_id(99)
+
+
+def test_validate_record_id_no_open():
+    """validate_record_id raises when no record was opened."""
+    # Clear any stored value from previous tests
+    import clarinet.services.slicer.helper as helper_mod
+    from clarinet.services.slicer.helper import SlicerHelperError, validate_record_id
+
+    slicer_mod = helper_mod.slicer
+    with contextlib.suppress(AttributeError):
+        delattr(slicer_mod.modules, "_clarinet_record_id")
+
+    with pytest.raises(SlicerHelperError, match="No record was opened"):
+        validate_record_id(1)

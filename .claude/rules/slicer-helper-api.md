@@ -10,6 +10,8 @@ paths:
 - `SlicerHelperError(Exception)` — lightweight exception for helper errors
 - `export_segmentation(name, output_path)` → exports segmentation node to file
 - `clear_scene()` → calls `slicer.mrmlScene.Clear(0)`
+- `store_record_id(rid)` — saves record ID to `slicer.modules` (called automatically after `/open`)
+- `validate_record_id(rid)` — checks stored record ID matches expected (called automatically before validation); raises `SlicerHelperError` on mismatch or if no record was opened
 - `OverwriteMode` — str enum for Segment Editor "Modify other segments" masking mode: `OVERWRITE_ALL` (default in `setup_editor`), `OVERWRITE_VISIBLE`, `ALLOW_OVERLAP`. Resolved to `vtkMRMLSegmentEditorNode` constants lazily inside Slicer so the module stays importable under the `_Dummy` fallback
 
 ## SlicerHelper class
