@@ -73,7 +73,8 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg), List(OutMsg)) {
   case msg, model.progress {
     // Entry points — always handle regardless of progress state
     Start(viewer_url, study_uid), _ -> {
-      let eff = {
+      let cleanup = stop_timer(model)
+      let preload_eff = {
         use dispatch <- effect.from
         dicomweb.preload_study(study_uid)
         |> promise.tap(fn(result) {
@@ -97,7 +98,11 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg), List(OutMsg)) {
           total: None,
           status: "starting",
         )
-      #(Model(..model, progress: Some(progress)), eff, [])
+      #(
+        Model(timer: None, progress: Some(progress)),
+        effect.batch([cleanup, preload_eff]),
+        [],
+      )
     }
 
     Cancel, _ -> {
@@ -142,59 +147,75 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg), List(OutMsg)) {
       #(Model(..model, timer: Some(timer_id)), effect.none(), [])
     }
 
-    PollTick(task_id, viewer_url, study_uid), Some(_) -> {
-      let poll_effect = {
-        use dispatch <- effect.from
-        dicomweb.preload_progress(study_uid, task_id)
-        |> promise.tap(fn(result) {
-          dispatch(ProgressUpdate(task_id, viewer_url, study_uid, result))
-        })
-        Nil
+    PollTick(task_id, viewer_url, study_uid), Some(progress) -> {
+      case progress.task_id == task_id {
+        False -> #(model, effect.none(), [])
+        True -> {
+          let poll_effect = {
+            use dispatch <- effect.from
+            dicomweb.preload_progress(study_uid, task_id)
+            |> promise.tap(fn(result) {
+              dispatch(ProgressUpdate(task_id, viewer_url, study_uid, result))
+            })
+            Nil
+          }
+          #(model, poll_effect, [])
+        }
       }
-      #(model, poll_effect, [])
     }
 
-    ProgressUpdate(task_id, viewer_url, study_uid, Ok(data)), Some(_) -> {
-      let status =
-        decode.run(data, decode.at(["status"], decode.string))
-        |> option.from_result
-        |> option.unwrap("unknown")
-      let received =
-        decode.run(data, decode.at(["received"], decode.int))
-        |> option.from_result
-        |> option.unwrap(0)
-      let total =
-        decode.run(data, decode.at(["total"], decode.int))
-        |> option.from_result
-
-      case status {
-        "ready" -> {
-          let stop_eff = stop_timer(model)
-          #(
-            Model(timer: None, progress: None),
-            stop_eff,
-            [OpenViewer(viewer_url)],
-          )
-        }
-        "error" -> {
-          let stop_eff = stop_timer(model)
-          let error_msg =
-            decode.run(data, decode.at(["error"], decode.string))
+    ProgressUpdate(task_id, viewer_url, study_uid, Ok(data)), Some(progress) -> {
+      case progress.task_id == task_id {
+        False -> #(model, effect.none(), [])
+        True -> {
+          let status =
+            decode.run(data, decode.at(["status"], decode.string))
             |> option.from_result
-            |> option.unwrap("Preload failed")
-          #(Model(timer: None, progress: None), stop_eff, [ShowError(error_msg)])
-        }
-        _ -> {
-          let progress =
-            ProgressState(
-              viewer_url: viewer_url,
-              task_id: task_id,
-              study_uid: study_uid,
-              received: received,
-              total: total,
-              status: status,
-            )
-          #(Model(..model, progress: Some(progress)), effect.none(), [])
+            |> option.unwrap("unknown")
+          let received =
+            decode.run(data, decode.at(["received"], decode.int))
+            |> option.from_result
+            |> option.unwrap(0)
+          let total =
+            decode.run(data, decode.at(["total"], decode.int))
+            |> option.from_result
+
+          case status {
+            "ready" -> {
+              let stop_eff = stop_timer(model)
+              #(
+                Model(timer: None, progress: None),
+                stop_eff,
+                [OpenViewer(viewer_url)],
+              )
+            }
+            "error" -> {
+              let stop_eff = stop_timer(model)
+              let error_msg =
+                decode.run(data, decode.at(["error"], decode.string))
+                |> option.from_result
+                |> option.unwrap("Preload failed")
+              #(Model(timer: None, progress: None), stop_eff, [
+                ShowError(error_msg),
+              ])
+            }
+            _ -> {
+              let new_progress =
+                ProgressState(
+                  viewer_url: viewer_url,
+                  task_id: task_id,
+                  study_uid: study_uid,
+                  received: received,
+                  total: total,
+                  status: status,
+                )
+              #(
+                Model(..model, progress: Some(new_progress)),
+                effect.none(),
+                [],
+              )
+            }
+          }
         }
       }
     }
@@ -202,6 +223,7 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg), List(OutMsg)) {
     ProgressUpdate(_, _, _, Error(err)), Some(_) -> {
       case err {
         types.AuthError(_) -> {
+          logger.warn("preload", "Session expired during preload")
           let stop_eff = stop_timer(model)
           #(Model(timer: None, progress: None), stop_eff, [
             ShowError("Session expired"),
