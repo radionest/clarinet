@@ -27,6 +27,8 @@ RECORDS_FIND_RANDOM = "/api/records/find/random"
 RECORDS_AVAILABLE_TYPES = "/api/records/available_types"
 RECORDS_BULK_STATUS = "/api/records/bulk/status"
 
+# Dynamic: f"{RECORDS_BASE}/{record_id}/data/prefill"
+
 # --- Record types ---
 RECORD_TYPES = "/api/records/types"
 RECORD_TYPES_FIND = "/api/records/types/find"

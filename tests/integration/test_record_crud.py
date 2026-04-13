@@ -441,3 +441,176 @@ async def test_validate_files_no_lazy_load(
     )
     # Should not be a 500 server error (MissingGreenlet)
     assert response.status_code != 500
+
+
+# ---------------------------------------------------------------------------
+# Prefill endpoint tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+async def _prefill_record_type(test_session):
+    """RecordType with a schema for prefill tests."""
+    rt = RecordType(
+        name="prefill-test-type",
+        description="Type for prefill tests",
+        data_schema={
+            "type": "object",
+            "properties": {
+                "lesions": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "lesion_num": {"type": "integer"},
+                            "cluster": {"type": "integer"},
+                        },
+                    },
+                },
+                "notes": {"type": "string"},
+            },
+            "required": ["lesions"],
+        },
+    )
+    test_session.add(rt)
+    await test_session.commit()
+    return rt
+
+
+@pytest.fixture
+async def _pending_record(test_session, test_patient, test_study, _prefill_record_type):
+    """Pending record without data for prefill tests."""
+    record = Record(
+        patient_id=test_patient.id,
+        study_uid=test_study.study_uid,
+        record_type_name=_prefill_record_type.name,
+        status=RecordStatus.pending,
+    )
+    test_session.add(record)
+    await test_session.commit()
+    await test_session.refresh(record)
+    return record
+
+
+@pytest.mark.asyncio
+async def test_prefill_post_success(client, _pending_record):
+    """POST prefill sets data on a pending record without changing status."""
+    prefill = {"lesions": [{"lesion_num": 1, "cluster": 2}]}
+    response = await client.post(
+        f"/api/records/{_pending_record.id}/data/prefill",
+        json=prefill,
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "pending"
+    assert data["data"]["lesions"][0]["lesion_num"] == 1
+
+
+@pytest.mark.asyncio
+async def test_prefill_post_conflict_if_data_exists(client, test_session, _pending_record):
+    """POST prefill returns 409 when record already has data."""
+    _pending_record.data = {"lesions": []}
+    test_session.add(_pending_record)
+    await test_session.commit()
+
+    response = await client.post(
+        f"/api/records/{_pending_record.id}/data/prefill",
+        json={"lesions": [{"lesion_num": 1}]},
+    )
+    assert response.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_prefill_put_replaces_data(client, test_session, _pending_record):
+    """PUT prefill replaces existing data entirely."""
+    _pending_record.data = {"lesions": [{"lesion_num": 99}]}
+    test_session.add(_pending_record)
+    await test_session.commit()
+
+    new_data = {"lesions": [{"lesion_num": 1}]}
+    response = await client.put(
+        f"/api/records/{_pending_record.id}/data/prefill",
+        json=new_data,
+    )
+    assert response.status_code == 200
+    assert response.json()["data"]["lesions"] == [{"lesion_num": 1}]
+
+
+@pytest.mark.asyncio
+async def test_prefill_patch_merges_data(client, test_session, _pending_record):
+    """PATCH prefill merges new data into existing."""
+    _pending_record.data = {"lesions": [{"lesion_num": 1}]}
+    test_session.add(_pending_record)
+    await test_session.commit()
+
+    response = await client.patch(
+        f"/api/records/{_pending_record.id}/data/prefill",
+        json={"notes": "extra info"},
+    )
+    assert response.status_code == 200
+    result = response.json()["data"]
+    assert result["lesions"] == [{"lesion_num": 1}]
+    assert result["notes"] == "extra info"
+
+
+@pytest.mark.asyncio
+async def test_prefill_rejects_finished_record(client, test_session, _pending_record):
+    """Prefill returns 409 for a finished record."""
+    _pending_record.status = RecordStatus.finished
+    test_session.add(_pending_record)
+    await test_session.commit()
+
+    response = await client.post(
+        f"/api/records/{_pending_record.id}/data/prefill",
+        json={"lesions": []},
+    )
+    assert response.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_prefill_rejects_inwork_record(client, test_session, _pending_record):
+    """Prefill returns 409 for an inwork record."""
+    _pending_record.status = RecordStatus.inwork
+    test_session.add(_pending_record)
+    await test_session.commit()
+
+    response = await client.post(
+        f"/api/records/{_pending_record.id}/data/prefill",
+        json={"lesions": []},
+    )
+    assert response.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_prefill_allows_blocked_record(client, test_session, _pending_record):
+    """Prefill works on blocked records."""
+    _pending_record.status = RecordStatus.blocked
+    test_session.add(_pending_record)
+    await test_session.commit()
+
+    response = await client.post(
+        f"/api/records/{_pending_record.id}/data/prefill",
+        json={"lesions": [{"lesion_num": 1}]},
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "blocked"
+
+
+@pytest.mark.asyncio
+async def test_prefill_partial_validation_allows_missing_required(client, _pending_record):
+    """Prefill skips 'required' validation — empty object passes for schema with required fields."""
+    response = await client.post(
+        f"/api/records/{_pending_record.id}/data/prefill",
+        json={},
+    )
+    assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_prefill_partial_validation_rejects_type_errors(client, _pending_record):
+    """Prefill still validates types — string where integer expected fails."""
+    response = await client.post(
+        f"/api/records/{_pending_record.id}/data/prefill",
+        json={"lesions": "not-an-array"},
+    )
+    assert response.status_code == 422

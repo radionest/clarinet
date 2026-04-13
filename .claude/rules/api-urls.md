@@ -55,6 +55,9 @@ URL constants live in `tests/utils/urls.py`. Status codes: 201 = POST create, 20
 | `/api/records/{id}/user` | PATCH | 200 | Assign user |
 | `/api/records/{id}/data` | POST | 200 | Submit data |
 | `/api/records/{id}/data` | PATCH | 200 | Update data |
+| `/api/records/{id}/data/prefill` | POST | 200 | Prefill data (error if exists) |
+| `/api/records/{id}/data/prefill` | PUT | 200 | Replace prefill data |
+| `/api/records/{id}/data/prefill` | PATCH | 200 | Merge into prefill data |
 | `/api/records/{id}/validate-files` | POST | 200 | Validate files |
 | `/api/records/{id}/check-files` | POST | 200 | Check files |
 | `/api/records/{id}/fail` | POST | 200 | Manually fail record |

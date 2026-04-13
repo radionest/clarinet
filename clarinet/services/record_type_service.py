@@ -14,7 +14,7 @@ from clarinet.exceptions.domain import ValidationError
 from clarinet.models.record import RecordType
 from clarinet.services.schema_hydration import hydrate_schema
 from clarinet.utils.file_link_sync import sync_file_links
-from clarinet.utils.validation import validate_json_by_schema
+from clarinet.utils.validation import validate_json_by_schema, validate_json_by_schema_partial
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -146,6 +146,28 @@ class RecordTypeService:
         if record.record_type.data_schema:
             hydrated = await hydrate_schema(record.record_type.data_schema, record, self.session)
             validate_json_by_schema(data, hydrated)
+
+        return data
+
+    async def validate_record_data_partial(self, record: Record, data: RecordData) -> RecordData:
+        """Validate record data against schema with ``required`` constraints removed.
+
+        Same as :meth:`validate_record_data` but allows missing fields.
+        Use for prefill where data is intentionally incomplete.
+
+        Args:
+            record: Record with record_type loaded.
+            data: Data to validate.
+
+        Returns:
+            Validated data.
+
+        Raises:
+            ValidationError: If data violates type/format constraints.
+        """
+        if record.record_type.data_schema:
+            hydrated = await hydrate_schema(record.record_type.data_schema, record, self.session)
+            validate_json_by_schema_partial(data, hydrated)
 
         return data
 
