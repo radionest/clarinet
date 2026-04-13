@@ -501,6 +501,8 @@ fn render_record_execution(
         record.viewer_study_uids,
         record.viewer_series_uids,
         option.map(record.record_type, fn(rt) { rt.level }),
+        option.map(record.record_type, fn(rt) { rt.viewer_mode })
+          |> option.unwrap("single_series"),
         "btn btn-primary",
         fn(url, study_uid) { RequestPreload(url, study_uid) },
       ),

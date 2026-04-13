@@ -19,10 +19,13 @@ async def list_viewer_urls(
     """
     if record.study is None:
         return {}
+    series_uid = record.series_uid
+    if record.record_type and record.record_type.viewer_mode == "all_series":
+        series_uid = None
     return registry.build_all_uris(
         patient_id=record.patient_id,
         study_uid=record.study.anon_uid or record.study.study_uid,
-        series_uid=record.series_uid,
+        series_uid=series_uid,
     )
 
 
@@ -44,9 +47,12 @@ async def get_viewer_url(
         raise NOT_FOUND.with_context(f"Viewer '{viewer_name}' is not configured")
     if record.study is None:
         return {"viewer": viewer_name, "uri": ""}
+    series_uid = record.series_uid
+    if record.record_type and record.record_type.viewer_mode == "all_series":
+        series_uid = None
     uri = adapter.build_uri(
         patient_id=record.patient_id,
         study_uid=record.study.anon_uid or record.study.study_uid,
-        series_uid=record.series_uid,
+        series_uid=series_uid,
     )
     return {"viewer": viewer_name, "uri": uri}

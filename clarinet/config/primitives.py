@@ -4,7 +4,7 @@ These primitives are used in Python config files (``record_types.py``) to
 define RecordTypes in a declarative, type-safe way.
 """
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, field_validator
 
@@ -123,6 +123,7 @@ class RecordDef(BaseModel):
     slicer_result_validator_args: dict[str, str] | None = None
     slicer_context_hydrators: list[str] | None = None
     mask_patient_data: bool = True
+    viewer_mode: Literal["single_series", "all_series"] = "single_series"
 
     def __init__(self, *, role: str | None = None, **kwargs: Any) -> None:
         """Accept ``role`` as a user-friendly alias for ``role_name``."""

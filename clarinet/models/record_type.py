@@ -10,6 +10,7 @@ import json as json_lib
 from typing import TYPE_CHECKING, Any
 
 from pydantic import field_validator, model_validator
+from sqlalchemy import text as sa_text
 from sqlalchemy.sql import expression as sql_expression
 from sqlmodel import Column, Field, Relationship, SQLModel
 
@@ -103,6 +104,26 @@ class RecordTypeBase(SQLModel):
             "filled by clinicians who need real patient IDs (surgery, pathology, MDK)."
         ),
     )
+
+    viewer_mode: str = Field(
+        default="single_series",
+        max_length=20,
+        sa_column_kwargs={"server_default": sa_text("'single_series'")},
+        description=(
+            "Controls viewer series loading: 'single_series' passes series_uid "
+            "to viewer adapters (default), 'all_series' omits it so all study "
+            "series are loaded."
+        ),
+    )
+
+    @field_validator("viewer_mode")
+    @classmethod
+    def validate_viewer_mode(cls, v: str) -> str:
+        allowed = {"single_series", "all_series"}
+        if v not in allowed:
+            msg = f"viewer_mode must be one of {allowed}, got '{v}'"
+            raise ValueError(msg)
+        return v
 
     @field_validator("data_schema", mode="after")
     @classmethod
@@ -251,6 +272,15 @@ class RecordTypeOptional(SQLModel):
     data_schema: RecordSchema | None = None
     slicer_context_hydrators: SlicerHydratorNames | None = None
     mask_patient_data: bool | None = Field(default=None)
+    viewer_mode: str | None = Field(default=None)
+
+    @field_validator("viewer_mode")
+    @classmethod
+    def validate_viewer_mode_optional(cls, v: str | None) -> str | None:
+        if v is not None and v not in {"single_series", "all_series"}:
+            msg = f"viewer_mode must be 'single_series' or 'all_series', got '{v}'"
+            raise ValueError(msg)
+        return v
 
     role_name: str | None = Field(default=None)
     max_records: int | None = Field(default=None)

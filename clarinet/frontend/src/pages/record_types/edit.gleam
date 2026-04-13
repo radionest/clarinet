@@ -145,6 +145,12 @@ const record_type_edit_schema = "{
       \"title\": \"Unique Per User\",
       \"default\": false
     },
+    \"viewer_mode\": {
+      \"type\": \"string\",
+      \"title\": \"Viewer Mode\",
+      \"enum\": [\"single_series\", \"all_series\"],
+      \"default\": \"single_series\"
+    },
     \"slicer_script\": {
       \"type\": \"string\",
       \"title\": \"Slicer Script\"
@@ -234,6 +240,7 @@ fn build_initial_values(rt: RecordType) -> String {
     #("min_records", json.nullable(rt.min_records, json.int)),
     #("max_records", json.nullable(rt.max_records, json.int)),
     #("unique_per_user", json.bool(rt.unique_per_user)),
+    #("viewer_mode", json.string(rt.viewer_mode)),
     #("slicer_script", json.nullable(rt.slicer_script, json.string)),
     #(
       "slicer_result_validator",
