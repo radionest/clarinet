@@ -1082,7 +1082,7 @@ class RecordRepository(BaseRepository[Record]):
         role_result = await self.session.execute(
             select(col(UserRolesLink.role_name)).where(UserRolesLink.user_id == user_id)
         )
-        role_names = {r[0] for r in role_result.all()}
+        role_names = set(role_result.scalars().all())
         if not role_names:
             return {}
 
