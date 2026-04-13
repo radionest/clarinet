@@ -1979,6 +1979,10 @@ class SlicerHelper:
         landmark_tf.GetMatrix(matrix)
         transform_node.SetMatrixTransformToParent(matrix)
 
+        # Reset slice views so they recompute extent for the new transform
+        # (same as align_by_center — without this, views go black).
+        self._layout_manager.resetSliceViews()
+
         return int(n_pairs)
 
     def setup_segment_focus_observer(
