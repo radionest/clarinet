@@ -39,6 +39,7 @@ pub type Key {
   ThDate
   ThDescription
   ThModality
+  ThStudy
   ThStudySeries
   ThUser
   ThStudies
@@ -396,6 +397,8 @@ pub fn translate(locale: Locale, key: Key) -> String {
     Ru, ThDescription -> "Описание"
     En, ThModality -> "Modality"
     Ru, ThModality -> "Модальность"
+    En, ThStudy -> "Study"
+    Ru, ThStudy -> "Исследование"
     En, ThStudySeries -> "Study / Series"
     Ru, ThStudySeries -> "Исследование / Серия"
     En, ThUser -> "User"
