@@ -225,6 +225,19 @@ class TestSlicerHelperMethodsExist:
         assert hasattr(SlicerHelper, "setup_segment_focus_observer")
         assert callable(SlicerHelper.setup_segment_focus_observer)
 
+    def test_get_largest_island_centroid_exists(self) -> None:
+        """SlicerHelper exposes get_largest_island_centroid method."""
+        assert hasattr(SlicerHelper, "get_largest_island_centroid")
+        assert callable(SlicerHelper.get_largest_island_centroid)
+
+    def test_setup_segment_focus_observer_island_segments_param(self) -> None:
+        """setup_segment_focus_observer accepts island_segments with default None."""
+        import inspect
+
+        sig = inspect.signature(SlicerHelper.setup_segment_focus_observer)
+        param = sig.parameters["island_segments"]
+        assert param.default is None
+
 
 # --- SlicerHelper new methods: integration tests (require running Slicer) ---
 
@@ -335,3 +348,68 @@ slicer.mrmlScene.Clear(0)
 """
     result = await slicer_service.execute(slicer_url, script, context=context)
     assert isinstance(result, dict)
+
+
+async def test_get_largest_island_centroid(
+    slicer_service: SlicerService,
+    slicer_url: str,
+) -> None:
+    """Largest-island centroid lands inside the bigger blob, not between islands."""
+    context = {"working_folder": "/tmp"}
+    script = """
+import numpy as np
+
+s = SlicerHelper(working_folder)
+
+# Create a volume so the segmentation has reference geometry.
+vol = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLScalarVolumeNode', '_IslandVol')
+dummy = np.zeros((60, 60, 60), dtype=np.int16)
+slicer.util.updateVolumeFromArray(vol, dummy)
+
+seg_node = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLSegmentationNode', '_IslandSeg')
+seg_node.CreateDefaultDisplayNodes()
+seg_node.SetReferenceImageGeometryParameterFromVolumeNode(vol)
+
+seg_logic = slicer.modules.segmentations.logic()
+
+# Build a labelmap with two disconnected blobs:
+#   Small blob: voxels [5:10, 5:10, 5:10]   (125 voxels)
+#   Large blob: voxels [40:55, 40:55, 40:55] (3375 voxels)
+lm = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLLabelMapVolumeNode', '_IslandLM')
+arr = np.zeros((60, 60, 60), dtype=np.uint8)
+arr[5:10, 5:10, 5:10] = 1      # small island
+arr[40:55, 40:55, 40:55] = 1   # large island
+slicer.util.updateVolumeFromArray(lm, arr)
+seg_logic.ImportLabelmapToSegmentationNode(lm, seg_node)
+slicer.mrmlScene.RemoveNode(lm)
+
+# Rename the imported segment to "_pool"
+vtk_seg = seg_node.GetSegmentation()
+seg_id = vtk_seg.GetNthSegmentID(0)
+vtk_seg.GetSegment(seg_id).SetName('_pool')
+
+# Compute centroids
+island_c = s.get_largest_island_centroid(seg_node, '_pool')
+overall_c = s.get_segment_centroid(seg_node, '_pool')
+
+assert island_c is not None, "island centroid should not be None"
+assert overall_c is not None, "overall centroid should not be None"
+
+# The large blob spans voxels 40-54 in each axis.
+# The overall BB center spans 5-54, midpoint ~(29.5, 29.5, 29.5) — between blobs.
+# Verify island centroid is different from overall (not in the gap between islands).
+dist = sum((a - b) ** 2 for a, b in zip(island_c, overall_c)) ** 0.5
+assert dist > 1.0, (
+    f"island and overall centroids should differ significantly, "
+    f"got dist={dist:.2f}, island={island_c}, overall={overall_c}"
+)
+
+__execResult = {
+    "island_centroid": list(island_c),
+    "overall_centroid": list(overall_c),
+    "distance": dist,
+}
+"""
+    result = await slicer_service.execute(slicer_url, script, context=context)
+    assert isinstance(result, dict)
+    assert result.get("distance", 0) > 1.0
