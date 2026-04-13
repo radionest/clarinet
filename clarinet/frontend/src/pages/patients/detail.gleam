@@ -452,6 +452,7 @@ fn records_section(model: Model, records: List(Record), translate: fn(Key) -> St
                     html.tr([], [
                       html.th([], [html.text("ID")]),
                       html.th([], [html.text("Type")]),
+                      html.th([], [html.text(translate(i18n.ThStudy))]),
                       html.th([], [html.text("Status")]),
                       html.th([], [html.text("Actions")]),
                     ]),
@@ -525,9 +526,23 @@ fn record_row(record: Record, translate: fn(Key) -> String) -> Element(Msg) {
     None -> record.record_type_name
   }
 
+  let study_label = case record.record_type {
+    Some(rt) ->
+      case rt.level {
+        types.Patient -> "-"
+        _ ->
+          case record.study {
+            Some(study) -> option.unwrap(study.study_description, "-")
+            None -> "-"
+          }
+      }
+    None -> "-"
+  }
+
   html.tr([], [
     html.td([], [html.text(record_id_str)]),
     html.td([], [html.text(type_label)]),
+    html.td([], [html.text(study_label)]),
     html.td([], [status_badge.render(record.status, translate)]),
     html.td([], [
       html.a(
