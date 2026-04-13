@@ -176,6 +176,21 @@ class RecordService:
 
         return record, old_status
 
+    async def prefill_data(self, record_id: int, data: RecordData) -> tuple[Record, RecordStatus]:
+        """Write prefill data without firing RecordFlow triggers.
+
+        For pipeline tasks writing preliminary data to pending/blocked records.
+        Caller is responsible for status checks and data merging.
+
+        Args:
+            record_id: Record ID.
+            data: Prefill data (already validated/merged by caller).
+
+        Returns:
+            Tuple of (updated record, old status).
+        """
+        return await self.repo.update_data(record_id, data)
+
     async def update_data(self, record_id: int, data: RecordData) -> tuple[Record, RecordStatus]:
         """Update record data (no status change) and fire data-update trigger.
 

@@ -8,7 +8,7 @@ supporting both low-level API calls and high-level convenience methods.
 import getpass
 from collections.abc import AsyncIterator
 from datetime import date
-from typing import Any, cast
+from typing import Any, Literal, cast
 from uuid import UUID
 
 import httpx
@@ -692,6 +692,30 @@ class ClarinetClient:
         response = await self._request(
             "PATCH",
             f"/records/{record_id}/data",
+            json=data,
+        )
+        return RecordRead.model_validate(response.json())
+
+    async def prefill_record_data(
+        self,
+        record_id: int,
+        data: RecordData,
+        *,
+        method: Literal["POST", "PUT", "PATCH"] = "POST",
+    ) -> RecordRead:
+        """Write prefill data to a pending/blocked record without triggering flows.
+
+        Args:
+            record_id: Record ID.
+            data: Prefill data.
+            method: POST (error if data exists), PUT (replace), PATCH (merge).
+
+        Returns:
+            Updated record.
+        """
+        response = await self._request(
+            method,
+            f"/records/{record_id}/data/prefill",
             json=data,
         )
         return RecordRead.model_validate(response.json())

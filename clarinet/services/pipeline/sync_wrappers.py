@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
     from collections.abc import Coroutine
@@ -227,6 +227,19 @@ class SyncPipelineClient:
         """Invalidate a record."""
         return _call_async(
             self._client.invalidate_record(record_id, mode, source_record_id, reason),
+            self._loop,
+        )
+
+    def prefill_record_data(
+        self,
+        record_id: int,
+        data: RecordData,
+        *,
+        method: Literal["POST", "PUT", "PATCH"] = "POST",
+    ) -> RecordRead:
+        """Prefill data on a pending/blocked record without triggering flows."""
+        return _call_async(
+            self._client.prefill_record_data(record_id, data, method=method),
             self._loop,
         )
 

@@ -533,6 +533,72 @@ async def update_record_data(
     )
 
 
+_PREFILL_STATUSES = (RecordStatus.pending, RecordStatus.blocked)
+
+
+async def _do_prefill(
+    record_id: int,
+    record: Record,
+    data: RecordData,
+    user: User,
+    service: RecordService,
+    rt_service: RecordTypeService,
+) -> RecordRead:
+    """Validate and persist prefill data without status change or triggers."""
+    if record.status not in _PREFILL_STATUSES:
+        raise CONFLICT.with_context(
+            f"Record status '{record.status.value}' does not allow prefill. "
+            f"Allowed: {', '.join(s.value for s in _PREFILL_STATUSES)}."
+        )
+    validated = await rt_service.validate_record_data_partial(record, data)
+    updated, _ = await service.prefill_data(record_id, validated)
+    return mask_record_patient_data(RecordRead.model_validate(updated), user)
+
+
+@router.post("/{record_id}/data/prefill", response_model=RecordRead)
+async def prefill_record_data_post(
+    record_id: int,
+    authorized_record: MutableRecordDep,
+    service: RecordServiceDep,
+    rt_service: RecordTypeServiceDep,
+    user: CurrentUserDep,
+    data: RecordData = Body(),
+) -> RecordRead:
+    """Set prefill data on a pending/blocked record. Errors if data already exists."""
+    if authorized_record.data:
+        raise CONFLICT.with_context(
+            "Record already has data. Use PUT to replace or PATCH to merge."
+        )
+    return await _do_prefill(record_id, authorized_record, data, user, service, rt_service)
+
+
+@router.put("/{record_id}/data/prefill", response_model=RecordRead)
+async def prefill_record_data_put(
+    record_id: int,
+    authorized_record: MutableRecordDep,
+    service: RecordServiceDep,
+    rt_service: RecordTypeServiceDep,
+    user: CurrentUserDep,
+    data: RecordData = Body(),
+) -> RecordRead:
+    """Replace prefill data on a pending/blocked record."""
+    return await _do_prefill(record_id, authorized_record, data, user, service, rt_service)
+
+
+@router.patch("/{record_id}/data/prefill", response_model=RecordRead)
+async def prefill_record_data_patch(
+    record_id: int,
+    authorized_record: MutableRecordDep,
+    service: RecordServiceDep,
+    rt_service: RecordTypeServiceDep,
+    user: CurrentUserDep,
+    data: RecordData = Body(),
+) -> RecordRead:
+    """Merge new data into existing prefill data on a pending/blocked record."""
+    merged = {**(authorized_record.data or {}), **data}
+    return await _do_prefill(record_id, authorized_record, merged, user, service, rt_service)
+
+
 @router.post("/{record_id}/submit", response_model=RecordRead)
 async def submit_record_with_validation(
     record_id: int,
