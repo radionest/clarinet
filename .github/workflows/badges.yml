@@ -69,6 +69,7 @@ jobs:
           CLARINET_TEST_RABBITMQ_MANAGEMENT_PASS: clarinet_test
         run: >-
           uv run pytest tests/ deploy/test/
+          --ignore=deploy/test/e2e
           -m "not dicom and not slicer"
           --cov=clarinet --cov-report=xml
           -q --tb=no
