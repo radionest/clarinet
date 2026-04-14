@@ -94,7 +94,7 @@ async def hydrate_study_series(
         return []
 
     result: list[dict[str, Any]] = []
-    for s in study.series:
+    for s in sorted(study.series, key=lambda s: s.series_number or 0):
         parts: list[str] = [f"#{s.series_number}"]
         if s.series_description:
             parts.append(s.series_description)
