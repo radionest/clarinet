@@ -62,6 +62,9 @@ pub type Shared {
     project_name: String,         // branding, loaded from /api/info
     project_description: String,
     cache: cache.Model,           // entity caches — studies/series/records/record_types/patients/users/record_type_stats
+    viewers: List(ViewerInfo),    // configured viewers from /api/info at startup
+    translate: fn(Key) -> String, // i18n lookup (from current locale)
+    locale: Locale,               // current locale
   )
 }
 ```
@@ -301,3 +304,11 @@ Tags in current use: `router`, `auth`, `api`, `cache`, `preload`. Pick the close
   - `src/pages/patients/detail.gleam` — full LoadStatus + mutations + PACS integration
   - `src/pages/records/execute.gleam` — timers, viewer handle, `cleanup` export
   - `src/pages/records/new.gleam` — form-heavy page using `components/forms/`
+
+## 14. Gleam Toolchain
+
+- **Binary**: if `gleam` is not in PATH, use `/home/linuxbrew/.linuxbrew/bin/gleam`
+- **CWD**: always run gleam commands from `clarinet/frontend/` (where `gleam.toml` lives)
+- **Quick check**: `make frontend-check` (type-checks without building)
+- **Full build**: `make frontend-build`
+- **Never** run `gleam check` from project root — it will fail with "gleam.toml not found"
