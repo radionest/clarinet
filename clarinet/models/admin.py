@@ -54,3 +54,10 @@ class RoleMatrixResponse(PydanticBaseModel):
 
     roles: list[str]
     users: list[UserRoleInfo]
+
+
+class ClearOutputFilesResult(PydanticBaseModel):
+    """Result of clearing output files from disk for a record."""
+
+    deleted_files: list[str]
+    deleted_links: int

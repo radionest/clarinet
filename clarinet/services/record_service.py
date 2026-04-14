@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from clarinet.exceptions.domain import RecordUniquePerUserError
+from clarinet.exceptions.domain import BusinessRuleViolationError, RecordUniquePerUserError
 from clarinet.models import Record, RecordRead, RecordStatus
 from clarinet.models.file_schema import FileRole
 from clarinet.services.file_validation import validate_record_files
@@ -333,6 +333,73 @@ class RecordService:
             await self.notify_file_change(record)
 
         return list(changed), new_checksums
+
+    async def clear_output_files(self, record_id: int) -> tuple[list[str], int]:
+        """Delete OUTPUT files from disk and their RecordFileLink rows.
+
+        Only allowed for records NOT in ``finished`` status. Intended for
+        clearing stale output files before retrying a failed pipeline task.
+
+        Args:
+            record_id: Record ID.
+
+        Returns:
+            Tuple of (list of deleted filenames, number of deleted DB links).
+
+        Raises:
+            BusinessRuleViolationError: If the record is in ``finished`` status.
+        """
+        from clarinet.services.file_validation import _build_working_dirs
+        from clarinet.utils.file_patterns import glob_file_paths, resolve_pattern
+        from clarinet.utils.fs import run_in_fs_thread
+
+        record = await self.repo.get_with_relations(record_id)
+
+        if record.status == RecordStatus.finished:
+            raise BusinessRuleViolationError("Cannot clear output files for a finished record")
+
+        record_read = RecordRead.model_validate(record)
+        output_defs = [
+            fd for fd in (record_read.record_type.file_registry or []) if fd.role == FileRole.OUTPUT
+        ]
+        if not output_defs:
+            return [], 0
+
+        working_dir = Path(record_read.working_folder)
+        working_dirs = _build_working_dirs(record_read)
+
+        # Resolve parent for pattern fallback
+        parent_read: RecordRead | None = None
+        if record.parent_record_id is not None:
+            parent = await self.repo.get_with_relations(record.parent_record_id)
+            parent_read = RecordRead.model_validate(parent)
+
+        deleted_files: list[str] = []
+        for fd in output_defs:
+            target_dir = (
+                working_dirs[fd.level] if fd.level and fd.level in working_dirs else working_dir
+            )
+
+            if fd.multiple:
+                paths = await run_in_fs_thread(glob_file_paths, fd, target_dir)
+            else:
+                resolved = resolve_pattern(fd.pattern, record_read, parent_read)
+                file_path = target_dir / resolved
+                exists = await run_in_fs_thread(file_path.is_file)
+                paths = [file_path] if exists else []
+
+            for p in paths:
+                await run_in_fs_thread(p.unlink)
+                deleted_files.append(p.name)
+                logger.info(f"Deleted output file {p} for record {record_id}")
+
+        deleted_links = await self.repo.delete_output_file_links(record)
+
+        logger.info(
+            f"Cleared output files for record {record_id}: "
+            f"{len(deleted_files)} files, {deleted_links} links"
+        )
+        return deleted_files, deleted_links
 
     async def notify_file_updates(
         self,

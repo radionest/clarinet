@@ -12,6 +12,7 @@ from typing import Any
 from uuid import UUID
 
 from sqlalchemy import and_, distinct, exists, func, literal, or_, tuple_
+from sqlalchemy import delete as sa_delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased, selectinload
 from sqlmodel import col, select
@@ -28,7 +29,7 @@ from clarinet.exceptions.domain import (
 )
 from clarinet.models import Record
 from clarinet.models.base import RecordStatus
-from clarinet.models.file_schema import RecordFileLink, RecordTypeFileLink
+from clarinet.models.file_schema import FileRole, RecordFileLink, RecordTypeFileLink
 from clarinet.models.patient import Patient
 from clarinet.models.record import RecordFindResult, RecordFindResultComparisonOperator, RecordType
 from clarinet.models.study import Series, Study
@@ -488,6 +489,34 @@ class RecordRepository(BaseRepository[Record]):
             )
             self.session.add(link)
         await self.session.commit()
+
+    async def delete_output_file_links(self, record: Record) -> int:
+        """Delete RecordFileLink rows for OUTPUT file definitions.
+
+        Uses a single SQL DELETE to avoid race conditions with concurrent
+        writers (e.g. pipeline tasks creating file links).
+
+        Args:
+            record: Record with eager-loaded record_type.file_links.
+
+        Returns:
+            Number of deleted RecordFileLink rows.
+        """
+        output_fd_ids = {
+            link.file_definition_id
+            for link in record.record_type.file_links
+            if link.role == FileRole.OUTPUT
+        }
+        if not output_fd_ids:
+            return 0
+
+        stmt = sa_delete(RecordFileLink).where(
+            col(RecordFileLink.record_id) == record.id,
+            col(RecordFileLink.file_definition_id).in_(output_fd_ids),
+        )
+        result = await self.session.execute(stmt)
+        await self.session.commit()
+        return result.rowcount  # type: ignore[union-attr, no-any-return, attr-defined]
 
     async def assign_user(self, record_id: int, user_id: UUID) -> tuple[Record, RecordStatus]:
         """Assign a user to a record and set status to inwork.
