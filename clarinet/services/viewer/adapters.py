@@ -85,6 +85,10 @@ class OHIFAdapter(ViewerAdapter):
     """OHIF Viewer (web-based, served from the same application).
 
     Generates URLs like ``/ohif/viewer?StudyInstanceUIDs=...``.
+
+    Note: the frontend also builds OHIF URLs client-side (in ``viewer.gleam``)
+    because it needs the HTML ``<base>`` path and drives the preload flow.
+    Keep both in sync when changing the URL shape.
     """
 
     name = "ohif"
