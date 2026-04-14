@@ -416,6 +416,7 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           ..model,
           project_name: project_info.project_name,
           project_description: project_info.project_description,
+          viewers: project_info.viewers,
         ),
         effect.none(),
       )
@@ -690,6 +691,7 @@ fn build_shared(model: Model) -> shared.Shared {
     project_name: model.project_name,
     project_description: model.project_description,
     cache: model.cache,
+    viewers: model.viewers,
     translate: i18n.translate(model.locale, _),
     locale: model.locale,
   )

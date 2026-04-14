@@ -81,6 +81,39 @@ class WeasisAdapter(ViewerAdapter):
         return f"{self.base_url}/weasis?{urlencode(params)}"
 
 
+class OHIFAdapter(ViewerAdapter):
+    """OHIF Viewer (web-based, served from the same application).
+
+    Generates URLs like ``/ohif/viewer?StudyInstanceUIDs=...``.
+
+    Note: the frontend also builds OHIF URLs client-side (in ``viewer.gleam``)
+    because it needs the HTML ``<base>`` path and drives the preload flow.
+    Keep both in sync when changing the URL shape.
+    """
+
+    name = "ohif"
+    uri_scheme = "https://"
+
+    def __init__(self, *, base_path: str = "") -> None:
+        self.base_path = base_path.rstrip("/")
+
+    @classmethod
+    def from_config(cls, config: ViewerConfig) -> OHIFAdapter:
+        return cls(base_path=config.base_url or "")
+
+    def build_uri(
+        self,
+        *,
+        patient_id: str,
+        study_uid: str,
+        series_uid: str | None = None,
+    ) -> str:
+        url = f"{self.base_path}/ohif/viewer?StudyInstanceUIDs={study_uid}"
+        if series_uid:
+            url += f"&SeriesInstanceUIDs={series_uid}"
+        return url
+
+
 class TemplateAdapter(ViewerAdapter):
     """Generic adapter using a URI template string.
 

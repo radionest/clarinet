@@ -1,3 +1,4 @@
+import api/info.{type ViewerInfo}
 import api/models.{
   type Patient, type Record, type RecordType, type Series, type Study, type User,
 }
@@ -17,6 +18,8 @@ pub type Shared {
     project_description: String,
     // Global entity caches (studies/series/records/record_types/patients/users/record_type_stats)
     cache: cache.Model,
+    // Viewer plugins
+    viewers: List(ViewerInfo),
     // i18n
     translate: fn(Key) -> String,
     locale: Locale,

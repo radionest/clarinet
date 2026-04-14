@@ -497,7 +497,8 @@ fn render_record_execution(
         ),
       ]),
       render_record_metadata(record),
-      viewer.record_viewer_button(
+      viewer.record_viewer_buttons(
+        shared.viewers,
         record.study_uid,
         record.series_uid,
         record.viewer_study_uids,

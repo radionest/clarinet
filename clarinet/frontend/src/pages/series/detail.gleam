@@ -1,4 +1,5 @@
 // Series detail page — self-contained MVU module
+import api/info.{type ViewerInfo}
 import api/models.{type Record, type Series}
 import api/series
 import api/types.{type ApiError, AuthError}
@@ -99,7 +100,7 @@ pub fn view(model: Model, shared: Shared) -> Element(Msg) {
     fn() { loading_view(model.series_uid) },
     fn() {
       case dict.get(shared.cache.series, model.series_uid) {
-        Ok(s) -> render_detail(s, shared.translate)
+        Ok(s) -> render_detail(s, shared)
         Error(_) -> loading_view(model.series_uid)
       }
     },
@@ -107,7 +108,7 @@ pub fn view(model: Model, shared: Shared) -> Element(Msg) {
   )
 }
 
-fn render_detail(s: Series, translate: fn(Key) -> String) -> Element(Msg) {
+fn render_detail(s: Series, shared: Shared) -> Element(Msg) {
   html.div([attribute.class("container")], [
     html.div([attribute.class("page-header")], [
       html.h1([], [html.text("Series: " <> s.series_uid)]),
@@ -119,13 +120,16 @@ fn render_detail(s: Series, translate: fn(Key) -> String) -> Element(Msg) {
         [html.text("Back to Study")],
       ),
     ]),
-    series_info_card(s),
+    series_info_card(shared.viewers, s),
     parent_study_section(s),
-    records_section(s.records, translate),
+    records_section(s.records, shared.translate),
   ])
 }
 
-fn series_info_card(s: Series) -> Element(Msg) {
+fn series_info_card(
+  viewers: List(ViewerInfo),
+  s: Series,
+) -> Element(Msg) {
   html.div([attribute.class("card")], [
     html.h3([], [html.text("Series Information")]),
     html.dl([attribute.class("record-metadata")], [
@@ -153,7 +157,8 @@ fn series_info_card(s: Series) -> Element(Msg) {
       ]),
     ]),
     html.div([attribute.class("card-actions")], [
-      viewer.viewer_button(
+      viewer.viewer_buttons(
+        viewers,
         Some(s.study_uid),
         Some(s.series_uid),
         "btn btn-primary",
