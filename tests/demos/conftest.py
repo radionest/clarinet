@@ -164,3 +164,48 @@ def orthanc_patient_with_two_studies(
             return {"patient_id": patient_name, "studies": studies}
 
     pytest.skip("No patient with 2+ studies found on Orthanc PACS")
+
+
+@pytest.fixture(scope="session")
+def orthanc_two_series_same_patient(
+    _check_pacs: None,
+) -> dict[str, Any]:
+    """Find a patient with 2+ series (from any studies) for alignment demos.
+
+    Picks two series from the same patient so they share anatomy and
+    coordinate space, making alignment visually meaningful.
+
+    Returns:
+        Dict with ``patient_id``, ``series_a`` and ``series_b``, each
+        containing ``study_uid`` and ``series_uid``.
+    """
+    resp = requests.get(f"{PACS_REST_URL}/patients", timeout=5)
+    resp.raise_for_status()
+
+    for pid in resp.json():
+        patient = requests.get(f"{PACS_REST_URL}/patients/{pid}", timeout=5).json()
+        patient_name = patient.get("MainDicomTags", {}).get("PatientName", pid)
+
+        all_series: list[dict[str, str]] = []
+        for sid in patient.get("Studies", []):
+            study = requests.get(f"{PACS_REST_URL}/studies/{sid}", timeout=5).json()
+            study_uid = study["MainDicomTags"]["StudyInstanceUID"]
+
+            for s in requests.get(f"{PACS_REST_URL}/studies/{sid}/series", timeout=5).json():
+                if not s.get("Instances"):
+                    continue
+                all_series.append(
+                    {
+                        "study_uid": study_uid,
+                        "series_uid": s["MainDicomTags"]["SeriesInstanceUID"],
+                    }
+                )
+
+        if len(all_series) >= 2:
+            return {
+                "patient_id": patient_name,
+                "series_a": all_series[0],
+                "series_b": all_series[1],
+            }
+
+    pytest.skip("No patient with 2+ series found on Orthanc PACS")

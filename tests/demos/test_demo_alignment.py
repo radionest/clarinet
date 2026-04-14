@@ -56,15 +56,17 @@ async def test_demo_alignment(
     slicer_url: str,
     pacs_monkey_patch: str,
     demo_working_dir: Path,
-    orthanc_patient_with_two_studies: dict[str, Any],
+    orthanc_two_series_same_patient: dict[str, Any],
 ) -> None:
-    """Open Slicer with two studies, 10 random ROIs on the reference."""
-    patient = orthanc_patient_with_two_studies
-    study_a = patient["studies"][0]
-    study_b = patient["studies"][1]
+    """Open Slicer with two series from the same patient, 10 random ROIs on the reference."""
+    data = orthanc_two_series_same_patient
+    sa = data["series_a"]
+    sb = data["series_b"]
 
-    ref_study_uid = study_a["study_uid"]
-    mov_study_uid = study_b["study_uid"]
+    ref_study_uid = sa["study_uid"]
+    ref_series_uid = sa["series_uid"]
+    mov_study_uid = sb["study_uid"]
+    mov_series_uid = sb["series_uid"]
 
     script = f"""\
 {pacs_monkey_patch}
@@ -73,10 +75,10 @@ import numpy as np
 
 s = SlicerHelper('{demo_working_dir}')
 
-# --- Load reference volume from PACS ---
-s.load_study_from_pacs('{ref_study_uid}', window=(-200, 300))
+# --- Load reference series from PACS ---
+s.load_series_from_pacs('{ref_study_uid}', '{ref_series_uid}', window=(-200, 300))
 ref_vol = s._image_node
-print(f"[Demo] reference volume loaded from study {ref_study_uid}")
+print(f"[Demo] reference series loaded: {ref_series_uid}")
 
 # --- Create reference segmentation with 10 ROIs (helper API) ---
 ref_seg = s.create_segmentation("Reference")
@@ -120,10 +122,10 @@ for name in names:
     if c:
         print(f"[Demo] {{name}} centroid: R={{c[0]:.1f}}, A={{c[1]:.1f}}, S={{c[2]:.1f}}")
 
-# --- Load moving volume from PACS ---
-s.load_study_from_pacs('{mov_study_uid}', window=(-200, 300))
+# --- Load moving series from PACS (different reconstruction) ---
+s.load_series_from_pacs('{mov_study_uid}', '{mov_series_uid}', window=(-200, 300))
 mov_vol = s._image_node
-print(f"[Demo] moving volume loaded from study {mov_study_uid}")
+print(f"[Demo] moving series loaded: {mov_series_uid}")
 
 # --- Copy segments to projection (helper API) ---
 projection = s.create_segmentation("Projection")
@@ -136,8 +138,12 @@ s.set_dual_layout(ref_vol, mov_vol, seg_a=ref_seg, seg_b=projection, linked=Fals
 align_tf = s.align_by_center(mov_vol, ref_vol, moving_segmentation=projection)
 
 # --- Refinement callback (helper API) ---
+# Use .node to pass raw MRML nodes — avoids SegmentationBuilder
+# identity issues in Slicer's exec() callback context.
+_proj_node = projection.node
+_ref_node = ref_seg.node
 def _refine():
-    n = s.refine_alignment_by_centroids(projection, ref_seg, align_tf)
+    n = s.refine_alignment_by_centroids(_proj_node, _ref_node, align_tf)
     print(f"[Demo] alignment refined with {{n}} landmark pairs")
 
 # --- Editor on projection (helper API) ---
@@ -158,11 +164,11 @@ s.annotate("Demo: paint ROIs on projection to match reference, alignment refines
 
 __execResult = {{
     "status": "ok",
-    "ref_study": "{ref_study_uid}",
-    "mov_study": "{mov_study_uid}",
+    "ref_series": "{ref_series_uid}",
+    "mov_series": "{mov_series_uid}",
     "roi_count": 10,
 }}
 """
     result = await slicer_service.execute(slicer_url, script, request_timeout=120.0)
     assert result.get("status") == "ok"
-    print(f"[Demo] alignment demo loaded: ref={ref_study_uid}, mov={mov_study_uid}, 10 ROIs")
+    print(f"[Demo] alignment demo loaded: ref={ref_series_uid}, mov={mov_series_uid}, 10 ROIs")

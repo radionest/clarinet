@@ -71,8 +71,10 @@ align_tf = s.align_by_center(target_vol, model_vol, moving_segmentation=projecti
 s.setup_editor(projection, effect="Paint", brush_size=5.0, source_volume=target_vol)
 
 # 8. Auto-navigate: Red -> master centroid, Yellow -> projection centroid
+_proj_node = projection.node
+_master_node = master_seg.node
 def _refine():
-    s.refine_alignment_by_centroids(projection, master_seg, align_tf)
+    s.refine_alignment_by_centroids(_proj_node, _master_node, align_tf)
 
 s.setup_segment_focus_observer(
     projection,

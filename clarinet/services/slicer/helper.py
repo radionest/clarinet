@@ -683,6 +683,9 @@ class PacsHelper:
         return loaded_node_ids or []
 
 
+_current_helper: SlicerHelper | None = None
+
+
 class SlicerHelper:
     """DSL for concise 3D Slicer workspace setup.
 
@@ -706,6 +709,11 @@ class SlicerHelper:
         Args:
             working_folder: Absolute path to the working directory.
         """
+        global _current_helper
+        if _current_helper is not None:
+            _current_helper.cleanup()
+        _current_helper = self
+
         self.working_folder = working_folder
         self._scene = slicer.mrmlScene
         self._layout_manager = slicer.app.layoutManager()
@@ -731,11 +739,22 @@ class SlicerHelper:
 
     @staticmethod
     def _unwrap_node(segmentation: SegmentationBuilder | Any) -> Any:
-        """Extract the raw MRML node from a SegmentationBuilder or pass through."""
-        return segmentation.node if isinstance(segmentation, SegmentationBuilder) else segmentation
+        """Extract the raw MRML node from a SegmentationBuilder or pass through.
+
+        Uses ``getattr`` fallback because ``isinstance`` may fail when
+        the helper runs inside Slicer's ``exec()`` context where class
+        identity can differ from the module-level definition.
+        """
+        if isinstance(segmentation, SegmentationBuilder):
+            return segmentation.node
+        return getattr(segmentation, "node", segmentation)
 
     def cleanup(self) -> None:
-        """Remove all observers and shortcuts registered by this helper."""
+        """Remove all observers, shortcuts, and MRML references.
+
+        Breaks the ref cycle: ``_observer_tags`` → node → observer callback
+        → closure (``helper_ref``) → ``self`` → ``_observer_tags``.
+        """
         for node, tag in self._observer_tags:
             with contextlib.suppress(Exception):
                 node.RemoveObserver(tag)
@@ -745,6 +764,9 @@ class SlicerHelper:
             shortcut.setParent(None)
             shortcut.deleteLater()
         self._shortcuts.clear()
+
+        self._editor_widget = None
+        self._image_node = None
 
     def _apply_window(self, node: Any, window: tuple[float, float]) -> None:
         display = node.GetScalarVolumeDisplayNode()
@@ -1904,14 +1926,17 @@ class SlicerHelper:
         )
         tf_node.SetMatrixTransformToParent(mat)
 
-        moving_volume.SetAndObserveTransformNodeID(tf_node.GetID())
+        # Chain with any pre-existing transform (e.g. acquisition transform
+        # added by Slicer's DICOM loader for irregular geometry).
+        # Result: volume → existing_tf → alignment_tf → world
+        existing_tf = moving_volume.GetParentTransformNode()
+        if existing_tf is not None:
+            existing_tf.SetAndObserveTransformNodeID(tf_node.GetID())
+        else:
+            moving_volume.SetAndObserveTransformNodeID(tf_node.GetID())
+
         if moving_segmentation is not None:
-            seg_node = (
-                moving_segmentation.node
-                if isinstance(moving_segmentation, SegmentationBuilder)
-                else moving_segmentation
-            )
-            seg_node.SetAndObserveTransformNodeID(tf_node.GetID())
+            self._unwrap_node(moving_segmentation).SetAndObserveTransformNodeID(tf_node.GetID())
 
         # Reset slice views so they recompute their extent/range to account
         # for the newly transformed volume position.  Without this, scrolling
@@ -1948,6 +1973,9 @@ class SlicerHelper:
         moving_names = set(self.get_segment_names(moving_seg))
         ref_names = set(self.get_segment_names(reference_seg))
         common = moving_names & ref_names
+        print(
+            f"[Alignment] common segments: {sorted(common)} (mov={len(moving_names)}, ref={len(ref_names)})"
+        )
 
         source_pts = vtk.vtkPoints()
         target_pts = vtk.vtkPoints()
@@ -1956,7 +1984,13 @@ class SlicerHelper:
             mov_c = self.get_segment_centroid(moving_seg, name)
             ref_c = self.get_segment_centroid(reference_seg, name)
             if mov_c is None or ref_c is None:
+                print(f"[Alignment] skip '{name}': mov={mov_c}, ref={ref_c}")
                 continue
+            print(
+                f"[Alignment] pair '{name}': "
+                f"mov=({mov_c[0]:.1f}, {mov_c[1]:.1f}, {mov_c[2]:.1f}) "
+                f"ref=({ref_c[0]:.1f}, {ref_c[1]:.1f}, {ref_c[2]:.1f})"
+            )
             source_pts.InsertNextPoint(mov_c)
             target_pts.InsertNextPoint(ref_c)
 
@@ -2147,10 +2181,14 @@ class SlicerHelper:
             if segment_name not in _ref_centroids:
                 ref_centroid = helper_ref._local_to_world_centroid(reference_node, segment_name)
                 _ref_centroids[segment_name] = ref_centroid
-                print(f"[SegFocus] ref centroid computed and cached for '{segment_name}'")
+                print(
+                    f"[SegFocus] ref centroid computed and cached for '{segment_name}' (cache_id={id(_ref_centroids):#x})"
+                )
             else:
                 ref_centroid = _ref_centroids[segment_name]
-                print(f"[SegFocus] ref centroid from cache for '{segment_name}'")
+                print(
+                    f"[SegFocus] ref centroid from cache for '{segment_name}' (cache_id={id(_ref_centroids):#x})"
+                )
 
             if ref_centroid is None:
                 print(f"[SegFocus] no centroid for '{segment_name}' in reference, skipping")
@@ -2164,22 +2202,13 @@ class SlicerHelper:
             print(f"[SegFocus] jumped reference views {reference_views}")
 
             if editable_views:
-                if empty:
-                    # Don't jump editable views — ref_centroid is in the
-                    # reference volume's world space and may lie outside
-                    # the moving volume's extent after alignment → black.
-                    print(
-                        f"[SegFocus] editable views {editable_views} not jumped "
-                        f"(segment empty, ref_centroid may be outside moving volume)"
-                    )
-                else:
-                    target = edit_centroid or ref_centroid
-                    _jump_views(editable_views, target)
-                    source = "edit" if edit_centroid else "ref (fallback)"
-                    print(
-                        f"[SegFocus] jumped editable views {editable_views} "
-                        f"(using {source}: R={target[0]:.1f}, A={target[1]:.1f}, S={target[2]:.1f})"
-                    )
+                target = edit_centroid or ref_centroid
+                _jump_views(editable_views, target)
+                source = "edit" if edit_centroid else "ref (predicted)"
+                print(
+                    f"[SegFocus] jumped editable views {editable_views} "
+                    f"(using {source}: R={target[0]:.1f}, A={target[1]:.1f}, S={target[2]:.1f})"
+                )
 
         def on_segment_changed(caller: Any, _event: Any) -> None:
             nonlocal _in_callback
