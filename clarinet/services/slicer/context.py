@@ -99,6 +99,7 @@ def _translate_paths_for_client(
     client_base = client_base.rstrip("/\\")
 
     translated = {}
+    translations: list[str] = []
     for key, value in context.items():
         if not isinstance(value, str):
             translated[key] = value
@@ -107,8 +108,15 @@ def _translate_paths_for_client(
             rel = PurePosixPath(value).relative_to(server)
             suffix = f"/{rel}" if str(rel) != "." else ""
             translated[key] = client_base + suffix
+            translations.append(f"{key}: {value} -> {translated[key]}")
         except ValueError:
             translated[key] = value
+
+    if translations:
+        logger.debug(
+            f"Slicer path translation (server={server_base} -> client={client_base}): {translations}"
+        )
+
     return translated
 
 

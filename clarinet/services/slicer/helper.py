@@ -806,6 +806,12 @@ class SlicerHelper:
         full_path = path if os.path.isabs(path) else os.path.join(self.working_folder, path)
         self._image_node = slicer.util.loadVolume(full_path)
 
+        if self._image_node is None:
+            raise SlicerHelperError(
+                f"Failed to load volume: {full_path!r}. "
+                f"Check that the file exists and the format is supported."
+            )
+
         if window is not None:
             self._apply_window(self._image_node, window)
 
@@ -838,6 +844,12 @@ class SlicerHelper:
         """
         full_path = path if os.path.isabs(path) else os.path.join(self.working_folder, path)
         seg_node = slicer.util.loadSegmentation(full_path)
+
+        if seg_node is None:
+            raise SlicerHelperError(
+                f"Failed to load segmentation: {full_path!r}. "
+                f"Check that the file exists and the format is supported."
+            )
 
         if name is not None:
             seg_node.SetName(name)
