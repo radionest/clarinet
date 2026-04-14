@@ -88,9 +88,13 @@ f"{settings.anon_id_prefix}_{auto_id}"  # Returns None if auto_id is None
 `Callable[[], str | None]` instead of `str | None` (upstream mypy bug, pydantic#11687).
 
 `Patient.auto_id` — unique non-PK integer, **NOT NULL** at the DB level.
-Auto-assigned by `PatientRepository.create()` via `MAX(auto_id) + 1`.
-The `sa_column` has `nullable=False, unique=True` but **no** `autoincrement`
-(SQLite ignores autoincrement on non-PK columns).
+Auto-assigned by `PatientRepository.create()` via a **monotonic counter** that
+never decreases, even after patient deletion:
+- **PostgreSQL**: native `Sequence` (`patient_auto_id_seq`) — `nextval()`.
+- **SQLite**: `AutoIdCounter` table (single-row counter, lazy-seeded from `MAX(auto_id)`).
+
+When an explicit `auto_id` is provided, `_advance_counter()` advances the
+sequence/counter to at least that value, preventing future collisions.
 
 The Python type is `int | None` (default `None`) so that `PatientRepository.create()`
 can accept a `Patient` with `auto_id=None` and assign it before flush.

@@ -6,7 +6,7 @@ SQLAlchemy InstrumentedAttribute on SQLModel classes (known limitation).
 
 from collections.abc import Sequence
 
-from sqlalchemy import func
+from sqlalchemy import func, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -14,10 +14,13 @@ from sqlmodel import select
 
 from clarinet.exceptions.domain import DatabaseIntegrityError, PatientNotFoundError
 from clarinet.models import Patient, Study
+from clarinet.models.counter import AutoIdCounter, patient_auto_id_seq
 from clarinet.repositories.base import BaseRepository
+from clarinet.settings import DatabaseDriver, settings
 from clarinet.utils.logger import logger
 
 _MAX_AUTO_ID_RETRIES = 3
+_COUNTER_NAME = "patient_auto_id"
 
 
 class PatientRepository(BaseRepository[Patient]):
@@ -30,6 +33,7 @@ class PatientRepository(BaseRepository[Patient]):
     async def create(self, entity: Patient) -> Patient:
         """Create patient, auto-assigning auto_id if not provided."""
         if entity.auto_id is not None:
+            await self._advance_counter(entity.auto_id)
             return await super().create(entity)
 
         for attempt in range(1, _MAX_AUTO_ID_RETRIES + 1):
@@ -54,10 +58,55 @@ class PatientRepository(BaseRepository[Patient]):
         raise DatabaseIntegrityError("Failed to assign unique auto_id")  # unreachable
 
     async def _next_auto_id(self) -> int:
-        """Return MAX(auto_id) + 1, or 1 if no patients exist."""
-        result = await self.session.execute(select(func.coalesce(func.max(Patient.auto_id), 0)))
-        current_max: int = result.scalar_one()  # type: ignore[assignment]
-        return current_max + 1
+        """Atomically increment and return the next patient auto_id.
+
+        PostgreSQL: native sequence (nextval).
+        SQLite: counter table with lazy seeding from MAX(Patient.auto_id).
+        """
+        if settings.database_driver != DatabaseDriver.SQLITE:
+            result = await self.session.execute(select(patient_auto_id_seq.next_value()))
+            return result.scalar_one()
+
+        # SQLite fallback: counter table
+        stmt = select(AutoIdCounter).where(AutoIdCounter.name == _COUNTER_NAME)
+        counter_result = await self.session.execute(stmt)
+        counter: AutoIdCounter | None = counter_result.scalar_one_or_none()  # type: ignore[assignment]
+
+        if counter is None:
+            max_result = await self.session.execute(
+                select(func.coalesce(func.max(Patient.auto_id), 0))
+            )
+            seed: int = max_result.scalar_one()  # type: ignore[assignment]
+            counter = AutoIdCounter(name=_COUNTER_NAME, last_value=seed)
+            self.session.add(counter)
+
+        counter.last_value += 1
+        await self.session.flush()
+        return counter.last_value
+
+    async def _advance_counter(self, value: int) -> None:
+        """Advance counter/sequence to at least ``value`` to prevent future collisions."""
+        if settings.database_driver != DatabaseDriver.SQLITE:
+            await self.session.execute(
+                text(
+                    "SELECT setval('patient_auto_id_seq', "
+                    "GREATEST(:val, (SELECT last_value FROM patient_auto_id_seq)))"
+                ),
+                {"val": value},
+            )
+            return
+
+        # SQLite fallback
+        stmt = select(AutoIdCounter).where(AutoIdCounter.name == _COUNTER_NAME)
+        counter_result = await self.session.execute(stmt)
+        counter: AutoIdCounter | None = counter_result.scalar_one_or_none()  # type: ignore[assignment]
+
+        if counter is None:
+            counter = AutoIdCounter(name=_COUNTER_NAME, last_value=value)
+            self.session.add(counter)
+        elif counter.last_value < value:
+            counter.last_value = value
+        await self.session.flush()
 
     async def get_all_with_studies(self, skip: int = 0, limit: int = 100) -> Sequence[Patient]:
         """Get all patients with studies loaded.
