@@ -50,6 +50,7 @@ ADMIN_STATS = "/api/admin/stats"
 ADMIN_RT_STATS = "/api/admin/record-types/stats"
 ADMIN_RECORD_STATUS = "/api/admin/records"  # + /{id}/status
 ADMIN_RECORD_USER = "/api/admin/records"  # + /{id}/user
+ADMIN_RECORD_OUTPUT_FILES = "/api/admin/records"  # + /{id}/output-files
 
 # --- Slicer ---
 SLICER_BASE = "/api/slicer"

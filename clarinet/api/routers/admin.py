@@ -8,7 +8,12 @@ from fastapi import Path as PathParam
 
 from clarinet.api.dependencies import AdminServiceDep, RecordServiceDep, SuperUserDep
 from clarinet.models import Record, RecordRead
-from clarinet.models.admin import AdminStats, RecordTypeStats, RoleMatrixResponse
+from clarinet.models.admin import (
+    AdminStats,
+    ClearOutputFilesResult,
+    RecordTypeStats,
+    RoleMatrixResponse,
+)
 from clarinet.models.base import RecordStatus
 
 router = APIRouter(
@@ -103,6 +108,20 @@ async def admin_unassign_record_user(
     """
     record, _ = await service.unassign_user(record_id)
     return record
+
+
+@router.delete("/records/{record_id}/output-files", response_model=ClearOutputFilesResult)
+async def clear_record_output_files(
+    record_id: Annotated[int, PathParam(ge=1, le=2147483647)],
+    _current_user: SuperUserDep,
+    service: RecordServiceDep,
+) -> ClearOutputFilesResult:
+    """Delete OUTPUT files from disk for a non-finished record (superuser only).
+
+    Intended for clearing stale output files before retrying a failed pipeline task.
+    """
+    deleted_files, deleted_links = await service.clear_output_files(record_id)
+    return ClearOutputFilesResult(deleted_files=deleted_files, deleted_links=deleted_links)
 
 
 @router.get("/role-matrix", response_model=RoleMatrixResponse)
