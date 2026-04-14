@@ -64,8 +64,9 @@ def test_build_script_with_context(slicer_service: SlicerService) -> None:
     assert "class SlicerHelper" in full
     # Context should appear
     assert "x = 10" in full
-    # User script at the end
-    assert full.endswith("print('user code')")
+    # User script wrapped in _run()
+    assert "    print('user code')" in full
+    assert "def _run():" in full
 
 
 def test_build_script_without_context(slicer_service: SlicerService) -> None:
@@ -74,4 +75,22 @@ def test_build_script_without_context(slicer_service: SlicerService) -> None:
     full = slicer_service._build_script(script, None)
 
     assert "# --- context variables ---" not in full
-    assert full.endswith("print('no context')")
+    assert "    print('no context')" in full
+
+
+def test_build_script_run_can_access_helper_names(slicer_service: SlicerService) -> None:
+    """Regression: _run() must resolve SlicerHelper even if user script shadows the name.
+
+    User scripts like ``SlicerHelper = SlicerHelper(working_folder)`` make
+    the name local to _run() without explicit ``global`` declarations,
+    causing UnboundLocalError. The global declarations added by
+    _build_script() prevent this.
+    """
+    # Simulate the pattern that triggers UnboundLocalError without the fix:
+    # assignment to SlicerHelper inside _run() would make it local.
+    script = "SlicerHelper = SlicerHelper\n__execResult = {'ok': True}"
+    full = slicer_service._build_script(script, {"working_folder": "/tmp"})
+
+    ns: dict = {}
+    exec(full, ns)  # would raise UnboundLocalError without global declarations
+    assert ns["__execResult"]["ok"] is True

@@ -1,5 +1,6 @@
 """SlicerService — orchestrates building and sending scripts to 3D Slicer."""
 
+import ast
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +33,26 @@ __execResult = {"cleaned": True}
 """
 
 
+def _extract_top_level_names(source: str) -> list[str]:
+    """Extract top-level class, function, and variable names from Python source.
+
+    Used to generate ``global`` declarations inside ``_run()`` so that
+    user scripts wrapped in the function scope can still access (and even
+    shadow) helper-level names without triggering ``UnboundLocalError``.
+    """
+    names: set[str] = set()
+    for node in ast.iter_child_nodes(ast.parse(source)):
+        if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+            names.add(node.name)
+        elif isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    names.add(target.id)
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            names.add(node.target.id)
+    return sorted(names)
+
+
 class SlicerService:
     """Orchestrates building and sending scripts to Slicer.
 
@@ -43,6 +64,7 @@ class SlicerService:
     def __init__(self) -> None:
         """Read and cache ``helper.py`` source code."""
         self._helper_source: str = _HELPER_PATH.read_text(encoding="utf-8")
+        self._helper_globals: list[str] = _extract_top_level_names(self._helper_source)
         # DEBUG, not INFO: SlicerService is created per-request via Depends,
         # so an INFO line on every instantiation would flood the log.
         logger.debug(
@@ -157,7 +179,11 @@ class SlicerService:
 
         # Wrap context + user script in a function for local scope.
         indent = "    "
-        run_lines = ["def _run():", f"{indent}global __execResult"]
+        # Declare helper names as global so _run() can access (and shadow)
+        # them without UnboundLocalError — user scripts may do
+        # ``SlicerHelper = SlicerHelper(...)`` which makes the name local.
+        global_names = ", ".join(["__execResult", *self._helper_globals])
+        run_lines = ["def _run():", f"{indent}global {global_names}"]
         if context:
             for line in self._build_context_block(context).split("\n"):
                 run_lines.append(f"{indent}{line}")
