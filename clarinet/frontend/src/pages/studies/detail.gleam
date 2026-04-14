@@ -1,4 +1,5 @@
 // Study detail page — self-contained MVU module
+import api/info.{type ViewerInfo}
 import api/models.{type Patient, type Record, type Series, type Study}
 import cache
 import cache/bucket
@@ -169,14 +170,14 @@ fn render_detail(shared: Shared, study: Study) -> Element(Msg) {
         ),
       ]),
     ]),
-    study_info_card(study),
+    study_info_card(shared.viewers, study),
     patient_section(study.patient, study.patient_id),
-    series_section(study.series),
+    series_section(shared.viewers, study.series),
     records_section(study_records, shared.translate),
   ])
 }
 
-fn study_info_card(study: Study) -> Element(Msg) {
+fn study_info_card(viewers: List(ViewerInfo), study: Study) -> Element(Msg) {
   html.div([attribute.class("card")], [
     html.h3([], [html.text("Study Information")]),
     html.dl([attribute.class("record-metadata")], [
@@ -190,7 +191,12 @@ fn study_info_card(study: Study) -> Element(Msg) {
       html.dd([], [html.text(study.patient_id)]),
     ]),
     html.div([attribute.class("card-actions")], [
-      viewer.viewer_button(Some(study.study_uid), None, "btn btn-primary"),
+      viewer.viewer_buttons(
+        viewers,
+        Some(study.study_uid),
+        None,
+        "btn btn-primary",
+      ),
     ]),
   ])
 }
@@ -236,7 +242,10 @@ fn patient_section(patient: Option(Patient), patient_id: String) -> Element(Msg)
   ])
 }
 
-fn series_section(series: Option(List(Series))) -> Element(Msg) {
+fn series_section(
+  viewers: List(ViewerInfo),
+  series: Option(List(Series)),
+) -> Element(Msg) {
   html.div([attribute.class("card")], [
     html.h3([], [html.text("Series")]),
     case series {
@@ -256,14 +265,17 @@ fn series_section(series: Option(List(Series))) -> Element(Msg) {
                 html.th([], [html.text("Actions")]),
               ]),
             ]),
-            html.tbody([], list.map(series_list, series_row)),
+            html.tbody(
+              [],
+              list.map(series_list, fn(s) { series_row(viewers, s) }),
+            ),
           ]),
         ])
     },
   ])
 }
 
-fn series_row(s: Series) -> Element(Msg) {
+fn series_row(viewers: List(ViewerInfo), s: Series) -> Element(Msg) {
   html.tr([], [
     html.td([], [html.text(s.series_uid)]),
     html.td([], [html.text(option.unwrap(s.series_description, "-"))]),
@@ -280,7 +292,8 @@ fn series_row(s: Series) -> Element(Msg) {
           ],
           [html.text("View")],
         ),
-        viewer.viewer_button(
+        viewer.viewer_buttons(
+          viewers,
           Some(s.study_uid),
           Some(s.series_uid),
           "btn btn-sm btn-outline",

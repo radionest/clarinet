@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 
-from clarinet.services.viewer.adapters import RadiantAdapter, TemplateAdapter, WeasisAdapter
+from clarinet.services.viewer.adapters import (
+    OHIFAdapter,
+    RadiantAdapter,
+    TemplateAdapter,
+    WeasisAdapter,
+)
 from clarinet.services.viewer.base import ViewerAdapter
 from clarinet.utils.logger import logger
 
@@ -19,7 +24,8 @@ class ViewerConfig(BaseModel):
 
 
 # Built-in adapters keyed by name → factory class
-_BUILTIN_ADAPTERS: dict[str, type[RadiantAdapter] | type[WeasisAdapter]] = {
+_BUILTIN_ADAPTERS: dict[str, type[OHIFAdapter] | type[RadiantAdapter] | type[WeasisAdapter]] = {
+    "ohif": OHIFAdapter,
     "radiant": RadiantAdapter,
     "weasis": WeasisAdapter,
 }
@@ -59,6 +65,16 @@ class ViewerRegistry:
     @property
     def available(self) -> list[str]:
         return list(self._adapters)
+
+    def viewer_info(self) -> list[dict[str, str]]:
+        """Return metadata for each registered viewer (for frontend config)."""
+        result: list[dict[str, str]] = []
+        for name, adapter in self._adapters.items():
+            info: dict[str, str] = {"name": name}
+            if isinstance(adapter, RadiantAdapter):
+                info["pacs_name"] = adapter.pacs_name
+            result.append(info)
+        return result
 
 
 def build_viewer_registry(viewers: dict[str, ViewerConfig]) -> ViewerRegistry:

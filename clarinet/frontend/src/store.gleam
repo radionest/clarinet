@@ -1,5 +1,5 @@
 // Global state management
-import api/info.{type ProjectInfo}
+import api/info.{type ProjectInfo, type ViewerInfo}
 import api/models.{type Record, type User}
 import api/types.{type ApiError}
 import cache
@@ -47,6 +47,8 @@ pub type Model {
     fail_reason: String,
     // Preload
     preload: preload.Model,
+    // Viewers
+    viewers: List(ViewerInfo),
     // Locale
     locale: i18n.Locale,
     // Active page model (for modular pages)
@@ -166,6 +168,7 @@ pub fn init() -> Model {
     modal_content: NoModal,
     fail_reason: "",
     preload: preload.init(),
+    viewers: [],
     locale: i18n.En,
     page: NoPage,
   )
@@ -186,6 +189,7 @@ pub fn reset_for_logout(model: Model) -> Model {
     ..fresh,
     project_name: model.project_name,
     project_description: model.project_description,
+    viewers: model.viewers,
     locale: model.locale,
     checking_session: False,
     page: NoPage,
