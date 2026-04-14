@@ -59,6 +59,7 @@ make db-migration               # Create new migration
 
 # Frontend (gleam wrappers — faster than CLI)
 make frontend-build             # Production build
+make frontend-check             # Type-check (gleam check)
 make frontend-deps              # Install dependencies
 
 # Build & cleanup
