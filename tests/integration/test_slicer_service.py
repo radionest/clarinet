@@ -94,3 +94,19 @@ def test_build_script_run_can_access_helper_names(slicer_service: SlicerService)
     ns: dict = {}
     exec(full, ns)  # would raise UnboundLocalError without global declarations
     assert ns["__execResult"]["ok"] is True
+
+
+def test_build_script_run_can_access_nested_imports(slicer_service: SlicerService) -> None:
+    """Regression: slicer/qt/vtk/ctk must be declared global in _run().
+
+    These names are assigned inside try/except ImportError in helper.py,
+    so ast.iter_child_nodes() misses them. Without explicit global
+    declarations, ``slicer = SlicerHelper(...)`` makes ``slicer`` local
+    and any prior ``slicer.*`` call raises UnboundLocalError.
+    """
+    script = "slicer = slicer\n__execResult = {'ok': True}"
+    full = slicer_service._build_script(script, {"working_folder": "/tmp"})
+
+    ns: dict = {}
+    exec(full, ns)
+    assert ns["__execResult"]["ok"] is True

@@ -64,7 +64,12 @@ class SlicerService:
     def __init__(self) -> None:
         """Read and cache ``helper.py`` source code."""
         self._helper_source: str = _HELPER_PATH.read_text(encoding="utf-8")
-        self._helper_globals: list[str] = _extract_top_level_names(self._helper_source)
+        # AST extraction misses names assigned inside nested blocks (if/try/except).
+        # slicer, qt, vtk, ctk are imported inside try/except ImportError in helper.py.
+        _NESTED_IMPORTS = {"slicer", "qt", "vtk", "ctk"}
+        self._helper_globals: list[str] = sorted(
+            set(_extract_top_level_names(self._helper_source)) | _NESTED_IMPORTS
+        )
         # DEBUG, not INFO: SlicerService is created per-request via Depends,
         # so an INFO line on every instantiation would flood the log.
         logger.debug(
