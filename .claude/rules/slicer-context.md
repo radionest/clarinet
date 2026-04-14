@@ -1,6 +1,7 @@
 ---
 paths:
   - "clarinet/services/slicer/context*.py"
+  - "clarinet/services/slicer/service.py"
   - "tasks/**/context_hydrators.py"
 ---
 
@@ -65,3 +66,25 @@ async def hydrate_patient_first_study(record, context, ctx):
     first = sorted(studies, key=lambda s: s.date or "")[0]
     return {"best_study_uid": first.anon_uid or first.study_uid}
 ```
+
+## exec scope в `_build_script` (`service.py`)
+
+`_build_script` оборачивает context + пользовательский скрипт в `def _run()`, чтобы все переменные были function-local и GC'd после return (VTK-объекты ~1-3 GB на том).
+
+### Проблема: `exec(code, globals, locals)` с раздельными dict
+
+Slicer's web handler может вызвать `exec(code, g, l)` с раздельными globals/locals. В этом случае:
+- Helper-определения (классы, функции) попадают в `l` (locals)
+- `_run().__globals__` указывает на `g` (globals) — `_run()` не видит имена из `l`
+- Паттерн `SlicerHelper = SlicerHelper(...)` в скрипте делает `SlicerHelper` локальной переменной `_run()`, вызывая `UnboundLocalError`
+- Дефолтные значения в определениях классов (напр. `overwrite_mode: OverwriteMode = OverwriteMode.OVERWRITE_ALL`) вычисляются при определении — если `OverwriteMode` в `l`, а не в `g`, определение класса падает
+
+### Почему `globals().update(locals())` не работает
+
+Внутри `_run()` вызов `globals().update(locals())` копирует текущие locals в globals. Но определения классов из helper.py (напр. `SlicerHelper`) содержат дефолтные значения, которые вычисляются **при определении класса** — до того, как `globals().update(locals())` успеет скопировать зависимые имена.
+
+### Текущий подход: `global` declarations
+
+`_extract_top_level_names(source)` парсит helper.py через `ast` при инициализации `SlicerService.__init__` и кеширует список top-level имён в `self._helper_globals`.
+
+`_build_script` генерирует `global SlicerHelper, PacsHelper, OverwriteMode, ...` в начале `_run()`. Это говорит Python, что эти имена — глобальные, и `_run()` читает/пишет их из `g` напрямую, обходя проблему раздельных dict'ов.
