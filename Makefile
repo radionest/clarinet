@@ -64,6 +64,10 @@ frontend-clean: ## Clean frontend build artifacts
 	@rm -rf clarinet/frontend/build
 	@rm -rf clarinet/static
 
+.PHONY: frontend-check
+frontend-check: ## Type-check frontend (no build)
+	@cd clarinet/frontend && gleam check
+
 .PHONY: run-dev
 run-dev: ## Run development server with frontend (default)
 	@echo "Starting development server with frontend..."
