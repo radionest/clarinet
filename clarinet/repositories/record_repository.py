@@ -516,7 +516,7 @@ class RecordRepository(BaseRepository[Record]):
         )
         result = await self.session.execute(stmt)
         await self.session.commit()
-        return result.rowcount  # type: ignore[union-attr, no-any-return, attr-defined]
+        return int(result.rowcount or 0)  # type: ignore[attr-defined]
 
     async def assign_user(self, record_id: int, user_id: UUID) -> tuple[Record, RecordStatus]:
         """Assign a user to a record and set status to inwork.

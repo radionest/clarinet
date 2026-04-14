@@ -389,7 +389,10 @@ class RecordService:
                 paths = [file_path] if exists else []
 
             for p in paths:
-                await run_in_fs_thread(p.unlink)
+                try:
+                    await run_in_fs_thread(p.unlink)
+                except FileNotFoundError:
+                    continue
                 deleted_files.append(p.name)
                 logger.info(f"Deleted output file {p} for record {record_id}")
 
