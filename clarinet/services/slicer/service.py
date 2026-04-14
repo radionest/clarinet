@@ -145,12 +145,28 @@ class SlicerService:
             return await client.execute(script)
 
     def _build_script(self, script: str, context: dict[str, Any] | None) -> str:
-        """Combine helper + context + user script."""
+        """Combine helper + context + user script.
+
+        Helper definitions (SlicerHelper, PacsHelper, etc.) stay in globals.
+        Context variables and user script are wrapped in ``def _run()`` so
+        all user variables are function-local and get GC'd on return.
+        This prevents VTK C++ objects (volumes ~1-3 GB) from accumulating
+        in Slicer's reused exec() global namespace across requests.
+        """
         parts = [self._helper_source, ""]
+
+        # Wrap context + user script in a function for local scope.
+        indent = "    "
+        run_lines = ["def _run():", f"{indent}global __execResult"]
         if context:
-            parts.append(self._build_context_block(context))
-            parts.append("")
-        parts.append(script)
+            for line in self._build_context_block(context).split("\n"):
+                run_lines.append(f"{indent}{line}")
+            run_lines.append("")
+        for line in script.split("\n"):
+            run_lines.append(f"{indent}{line}" if line.strip() else "")
+        run_lines.extend(["", "_run()", "del _run"])
+
+        parts.append("\n".join(run_lines))
         return "\n".join(parts)
 
     @staticmethod

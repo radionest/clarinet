@@ -683,7 +683,10 @@ class PacsHelper:
         return loaded_node_ids or []
 
 
-_current_helper: SlicerHelper | None = None
+# Only initialize on first load — subsequent exec() calls must NOT reset
+# this to None, otherwise cleanup() in __init__ can't reach the old helper.
+if "_current_helper" not in globals():
+    _current_helper: SlicerHelper | None = None
 
 
 class SlicerHelper:
@@ -709,6 +712,8 @@ class SlicerHelper:
         Args:
             working_folder: Absolute path to the working directory.
         """
+        import gc
+
         global _current_helper
         if _current_helper is not None:
             _current_helper.cleanup()
@@ -736,6 +741,15 @@ class SlicerHelper:
         # 2. Clear scene and set working folder.
         self._scene.Clear(0)
         self._scene.SetRootDirectory(working_folder)
+
+        # 3. Force GC + return freed pages to OS.
+        gc.collect()
+        try:
+            import ctypes
+
+            ctypes.cdll.LoadLibrary("libc.so.6").malloc_trim(0)
+        except OSError:
+            pass  # non-Linux
 
     @staticmethod
     def _unwrap_node(segmentation: SegmentationBuilder | Any) -> Any:
