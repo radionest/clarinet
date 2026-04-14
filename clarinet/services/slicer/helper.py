@@ -683,6 +683,12 @@ class PacsHelper:
         return loaded_node_ids or []
 
 
+# Only initialize on first load — subsequent exec() calls must NOT reset
+# this to None, otherwise cleanup() in __init__ can't reach the old helper.
+if "_current_helper" not in globals():
+    _current_helper: SlicerHelper | None = None
+
+
 class SlicerHelper:
     """DSL for concise 3D Slicer workspace setup.
 
@@ -706,6 +712,13 @@ class SlicerHelper:
         Args:
             working_folder: Absolute path to the working directory.
         """
+        import gc
+
+        global _current_helper
+        if _current_helper is not None:
+            _current_helper.cleanup()
+        _current_helper = self
+
         self.working_folder = working_folder
         self._scene = slicer.mrmlScene
         self._layout_manager = slicer.app.layoutManager()
@@ -729,8 +742,33 @@ class SlicerHelper:
         self._scene.Clear(0)
         self._scene.SetRootDirectory(working_folder)
 
+        # 3. Force GC + return freed pages to OS.
+        gc.collect()
+        try:
+            import ctypes
+
+            ctypes.cdll.LoadLibrary("libc.so.6").malloc_trim(0)
+        except OSError:
+            pass  # non-Linux
+
+    @staticmethod
+    def _unwrap_node(segmentation: SegmentationBuilder | Any) -> Any:
+        """Extract the raw MRML node from a SegmentationBuilder or pass through.
+
+        Uses ``getattr`` fallback because ``isinstance`` may fail when
+        the helper runs inside Slicer's ``exec()`` context where class
+        identity can differ from the module-level definition.
+        """
+        if isinstance(segmentation, SegmentationBuilder):
+            return segmentation.node
+        return getattr(segmentation, "node", segmentation)
+
     def cleanup(self) -> None:
-        """Remove all observers and shortcuts registered by this helper."""
+        """Remove all observers, shortcuts, and MRML references.
+
+        Breaks the ref cycle: ``_observer_tags`` → node → observer callback
+        → closure (``helper_ref``) → ``self`` → ``_observer_tags``.
+        """
         for node, tag in self._observer_tags:
             with contextlib.suppress(Exception):
                 node.RemoveObserver(tag)
@@ -740,6 +778,9 @@ class SlicerHelper:
             shortcut.setParent(None)
             shortcut.deleteLater()
         self._shortcuts.clear()
+
+        self._editor_widget = None
+        self._image_node = None
 
     def _apply_window(self, node: Any, window: tuple[float, float]) -> None:
         display = node.GetScalarVolumeDisplayNode()
@@ -826,7 +867,7 @@ class SlicerHelper:
             segmentation: SegmentationBuilder or raw segmentation node.
             visible: Whether the segmentation should be visible.
         """
-        node = segmentation.node if isinstance(segmentation, SegmentationBuilder) else segmentation
+        node = self._unwrap_node(segmentation)
         display = node.GetDisplayNode()
         if display is not None:
             display.SetVisibility(int(visible))
@@ -852,7 +893,7 @@ class SlicerHelper:
             outline_thickness: Slice intersection line thickness in pixels
                 (applies to the whole segmentation display node).
         """
-        node = segmentation.node if isinstance(segmentation, SegmentationBuilder) else segmentation
+        node = self._unwrap_node(segmentation)
         vtk_seg = node.GetSegmentation()
         display = node.GetDisplayNode()
 
@@ -896,9 +937,7 @@ class SlicerHelper:
                 Scissors, Islands, ...) forces overwrite regardless of the
                 user's persisted Slicer preferences.
         """
-        seg_node = (
-            segmentation.node if isinstance(segmentation, SegmentationBuilder) else segmentation
-        )
+        seg_node = self._unwrap_node(segmentation)
 
         slicer.util.selectModule("SegmentEditor")
         self._editor_widget = slicer.modules.segmenteditor.widgetRepresentation().self().editor
@@ -1195,13 +1234,69 @@ class SlicerHelper:
         Returns:
             List of segment names in index order.
         """
-        node = segmentation.node if isinstance(segmentation, SegmentationBuilder) else segmentation
+        node = self._unwrap_node(segmentation)
         vtk_seg = node.GetSegmentation()
         names: list[str] = []
         for i in range(vtk_seg.GetNumberOfSegments()):
             seg_id = vtk_seg.GetNthSegmentID(i)
             names.append(vtk_seg.GetSegment(seg_id).GetName())
         return names
+
+    @staticmethod
+    def _centroid_from_labelmap(
+        image_data: Any,
+        extent: tuple[int, int, int, int, int, int],
+        image_to_world_source: Any,
+    ) -> tuple[float, float, float] | None:
+        """Compute bounding-box centroid from a VTK labelmap in RAS coords.
+
+        Uses ``np.any`` axis projections instead of ``np.nonzero`` to avoid
+        allocating huge coordinate arrays (~10-50x faster, negligible memory).
+
+        VTK stores scalars in Fortran-contiguous order (i varies fastest),
+        so numpy reshape must be ``(k, j, i)`` = ``(dims[2], dims[1], dims[0])``.
+        Consequently ``np.any(mask, axis=(0, 1))`` collapses k and j, yielding
+        a 1-D boolean array along the i-axis, and so on for j and k.
+
+        Args:
+            image_data: ``vtkImageData`` whose scalars contain the mask.
+            extent: ``(xmin, xmax, ymin, ymax, zmin, zmax)`` of the labelmap.
+            image_to_world_source: Image data to read the IJK→RAS matrix from.
+                May differ from *image_data* when ``vtkImageConnectivityFilter``
+                (or similar) strips orientation metadata from its output.
+
+        Returns:
+            ``(R, A, S)`` centroid or ``None`` if the mask is empty.
+        """
+        import numpy as np
+        from vtk.util.numpy_support import vtk_to_numpy  # type: ignore[import-not-found]
+
+        scalars = image_data.GetPointData().GetScalars()
+        if scalars is None:
+            return None
+
+        dims = image_data.GetDimensions()
+        arr = vtk_to_numpy(scalars).reshape(dims[2], dims[1], dims[0])
+        mask = arr > 0
+
+        i_any = np.any(mask, axis=(0, 1))
+        j_any = np.any(mask, axis=(0, 2))
+        k_any = np.any(mask, axis=(1, 2))
+
+        i_idx = np.where(i_any)[0]
+        if len(i_idx) == 0:
+            return None
+        j_idx = np.where(j_any)[0]
+        k_idx = np.where(k_any)[0]
+
+        ci = (float(i_idx[0]) + float(i_idx[-1])) / 2.0 + extent[0]
+        cj = (float(j_idx[0]) + float(j_idx[-1])) / 2.0 + extent[2]
+        ck = (float(k_idx[0]) + float(k_idx[-1])) / 2.0 + extent[4]
+
+        mat = vtk.vtkMatrix4x4()
+        image_to_world_source.GetImageToWorldMatrix(mat)
+        ras = mat.MultiplyPoint([ci, cj, ck, 1.0])
+        return (ras[0], ras[1], ras[2])
 
     def get_segment_centroid(
         self,
@@ -1234,19 +1329,6 @@ class SlicerHelper:
            This is the same API used internally by
            ``slicer.util.arrayFromSegmentBinaryLabelmap()``.
 
-        .. note:: **np.nonzero() vs np.any() — performance**
-
-           The naive approach (``np.nonzero(arr > 0)``) allocates three huge
-           arrays containing coordinates of ALL non-zero voxels. For a large
-           segment in a 512x512x300 volume this means millions of int64
-           entries per array — hundreds of MB of allocation per call.
-
-           Instead we use ``np.any(mask, axis=(...))`` to project the 3D
-           boolean mask down to three 1D arrays (length ~512 each). Then
-           ``np.where()`` on those tiny arrays gives min/max indices per axis.
-           The centroid is the midpoint of the tight bounding box — identical
-           result, ~10-50x faster, negligible memory.
-
         Args:
             segmentation: SegmentationBuilder or raw segmentation node.
             segment_name: Name of the segment to find.
@@ -1254,11 +1336,9 @@ class SlicerHelper:
         Returns:
             (R, A, S) centroid tuple, or None if the segment is empty.
         """
-        import numpy as np
         import vtkSegmentationCorePython as vtkSegCore  # type: ignore[import-not-found]
-        from vtk.util.numpy_support import vtk_to_numpy  # type: ignore[import-not-found]
 
-        node = segmentation.node if isinstance(segmentation, SegmentationBuilder) else segmentation
+        node = self._unwrap_node(segmentation)
         vtk_seg = node.GetSegmentation()
 
         seg_id = _find_segment_id(vtk_seg, segment_name)
@@ -1272,47 +1352,11 @@ class SlicerHelper:
         labelmap = vtkSegCore.vtkOrientedImageData()
         node.GetBinaryLabelmapRepresentation(seg_id, labelmap)
 
-        # extent = (xmin, xmax, ymin, ymax, zmin, zmax); xmin > xmax means empty.
         extent = labelmap.GetExtent()
         if extent[0] > extent[1]:
             return None
 
-        scalars = labelmap.GetPointData().GetScalars()
-        if scalars is None:
-            return None
-
-        # VTK stores scalars in Fortran-contiguous order (i varies fastest),
-        # but numpy reshape expects (slowest, ..., fastest) = (k, j, i).
-        dims = labelmap.GetDimensions()
-        arr = vtk_to_numpy(scalars).reshape(dims[2], dims[1], dims[0])
-
-        mask = arr > 0
-
-        # Axis projections: collapse 3D mask to 1D per axis.
-        # np.any(mask, axis=(0,1)) keeps the i-axis, collapsing k and j.
-        # Result: three boolean arrays of length ~dims[0/1/2] (~512 each).
-        # See docstring "np.nonzero() vs np.any()" above.
-        i_any = np.any(mask, axis=(0, 1))  # length dims[0]
-        j_any = np.any(mask, axis=(0, 2))  # length dims[1]
-        k_any = np.any(mask, axis=(1, 2))  # length dims[2]
-
-        i_idx = np.where(i_any)[0]
-        if len(i_idx) == 0:
-            return None
-        j_idx = np.where(j_any)[0]
-        k_idx = np.where(k_any)[0]
-
-        # Tight bounding-box center in array coords (k, j, i) → IJK.
-        # extent offsets translate from local labelmap coords to volume IJK.
-        ci = (float(i_idx[0]) + float(i_idx[-1])) / 2.0 + extent[0]
-        cj = (float(j_idx[0]) + float(j_idx[-1])) / 2.0 + extent[2]
-        ck = (float(k_idx[0]) + float(k_idx[-1])) / 2.0 + extent[4]
-
-        # IJK → RAS via the labelmap's own image-to-world matrix.
-        mat = vtk.vtkMatrix4x4()
-        labelmap.GetImageToWorldMatrix(mat)
-        ras = mat.MultiplyPoint([ci, cj, ck, 1.0])
-        return (ras[0], ras[1], ras[2])
+        return self._centroid_from_labelmap(labelmap, extent, labelmap)
 
     def get_largest_island_centroid(
         self,
@@ -1336,11 +1380,9 @@ class SlicerHelper:
         Returns:
             (R, A, S) centroid of the largest island, or None if empty.
         """
-        import numpy as np  # type: ignore[import-not-found]
         import vtkSegmentationCorePython as vtkSegCore  # type: ignore[import-not-found]
-        from vtk.util.numpy_support import vtk_to_numpy  # type: ignore[import-not-found]
 
-        node = segmentation.node if isinstance(segmentation, SegmentationBuilder) else segmentation
+        node = self._unwrap_node(segmentation)
         vtk_seg = node.GetSegmentation()
 
         seg_id = _find_segment_id(vtk_seg, segment_name)
@@ -1360,37 +1402,27 @@ class SlicerHelper:
         conn.SetInputData(labelmap)
         conn.SetExtractionModeToLargestRegion()
         conn.Update()
-        filtered = conn.GetOutput()
 
-        scalars = filtered.GetPointData().GetScalars()
-        if scalars is None:
-            return None
+        # Use filter output for scalars but ORIGINAL labelmap for the
+        # image-to-world matrix (filter output may lose orientation).
+        return self._centroid_from_labelmap(conn.GetOutput(), extent, labelmap)
 
-        dims = filtered.GetDimensions()
-        arr = vtk_to_numpy(scalars).reshape(dims[2], dims[1], dims[0])
+    def _apply_parent_transform(
+        self,
+        node: Any,
+        local: tuple[float, float, float],
+    ) -> tuple[float, float, float]:
+        """Apply the node's parent MRML transform to a local RAS point.
 
-        mask = arr > 0
-
-        i_any = np.any(mask, axis=(0, 1))
-        j_any = np.any(mask, axis=(0, 2))
-        k_any = np.any(mask, axis=(1, 2))
-
-        i_idx = np.where(i_any)[0]
-        if len(i_idx) == 0:
-            return None
-        j_idx = np.where(j_any)[0]
-        k_idx = np.where(k_any)[0]
-
-        ci = (float(i_idx[0]) + float(i_idx[-1])) / 2.0 + extent[0]
-        cj = (float(j_idx[0]) + float(j_idx[-1])) / 2.0 + extent[2]
-        ck = (float(k_idx[0]) + float(k_idx[-1])) / 2.0 + extent[4]
-
-        # IJK → RAS via the ORIGINAL labelmap's image-to-world matrix.
-        # The filter output is a plain vtkImageData that may lose orientation.
+        If the node has no parent transform, returns *local* unchanged.
+        """
+        parent_tf = node.GetParentTransformNode()
+        if parent_tf is None:
+            return local
         mat = vtk.vtkMatrix4x4()
-        labelmap.GetImageToWorldMatrix(mat)
-        ras = mat.MultiplyPoint([ci, cj, ck, 1.0])
-        return (ras[0], ras[1], ras[2])
+        parent_tf.GetMatrixTransformToWorld(mat)
+        world = mat.MultiplyPoint([local[0], local[1], local[2], 1.0])
+        return (world[0], world[1], world[2])
 
     def _local_to_world_centroid(
         self,
@@ -1404,27 +1436,11 @@ class SlicerHelper:
         parent MRML transform (e.g. an alignment transform), this method
         applies it to produce world RAS coordinates suitable for
         ``JumpSlice``.
-
-        Args:
-            segmentation: Segmentation node or SegmentationBuilder.
-            segment_name: Name of the segment.
-
-        Returns:
-            World RAS centroid or None if the segment is empty.
         """
         local = self.get_segment_centroid(segmentation, segment_name)
         if local is None:
             return None
-
-        node = segmentation.node if isinstance(segmentation, SegmentationBuilder) else segmentation
-        parent_tf = node.GetParentTransformNode()
-        if parent_tf is None:
-            return local
-
-        mat = vtk.vtkMatrix4x4()
-        parent_tf.GetMatrixTransformToWorld(mat)
-        world = mat.MultiplyPoint([local[0], local[1], local[2], 1.0])
-        return (world[0], world[1], world[2])
+        return self._apply_parent_transform(self._unwrap_node(segmentation), local)
 
     def _local_to_world_island_centroid(
         self,
@@ -1440,16 +1456,7 @@ class SlicerHelper:
         local = self.get_largest_island_centroid(segmentation, segment_name)
         if local is None:
             return None
-
-        node = segmentation.node if isinstance(segmentation, SegmentationBuilder) else segmentation
-        parent_tf = node.GetParentTransformNode()
-        if parent_tf is None:
-            return local
-
-        mat = vtk.vtkMatrix4x4()
-        parent_tf.GetMatrixTransformToWorld(mat)
-        world = mat.MultiplyPoint([local[0], local[1], local[2], 1.0])
-        return (world[0], world[1], world[2])
+        return self._apply_parent_transform(self._unwrap_node(segmentation), local)
 
     def copy_segments(
         self,
@@ -1466,8 +1473,8 @@ class SlicerHelper:
             segment_names: Optional list of segment names to copy. Copies all if None.
             empty: If True, copy only segment metadata (name + color) without data.
         """
-        source_node = source_seg.node if isinstance(source_seg, SegmentationBuilder) else source_seg
-        target_node = target_seg.node if isinstance(target_seg, SegmentationBuilder) else target_seg
+        source_node = self._unwrap_node(source_seg)
+        target_node = self._unwrap_node(target_seg)
         source_vtk_seg = source_node.GetSegmentation()
         target_vtk_seg = target_node.GetSegmentation()
 
@@ -1526,7 +1533,7 @@ class SlicerHelper:
         Returns:
             Number of renamed segments.
         """
-        node = segmentation.node if isinstance(segmentation, SegmentationBuilder) else segmentation
+        node = self._unwrap_node(segmentation)
         vtk_seg = node.GetSegmentation()
         count = vtk_seg.GetNumberOfSegments()
         for i in range(count):
@@ -1558,7 +1565,7 @@ class SlicerHelper:
         Returns:
             The number assigned to the new segment.
         """
-        node = segmentation.node if isinstance(segmentation, SegmentationBuilder) else segmentation
+        node = self._unwrap_node(segmentation)
         vtk_seg = node.GetSegmentation()
         names = self.get_segment_names(segmentation)
 
@@ -1607,8 +1614,8 @@ class SlicerHelper:
         """
         import numpy as np  # type: ignore[import-not-found]
 
-        node_a = seg_a.node if isinstance(seg_a, SegmentationBuilder) else seg_a
-        node_b = seg_b.node if isinstance(seg_b, SegmentationBuilder) else seg_b
+        node_a = self._unwrap_node(seg_a)
+        node_b = self._unwrap_node(seg_b)
 
         # Align both to the same reference grid
         if self._image_node is not None:
@@ -1689,7 +1696,7 @@ class SlicerHelper:
         """
         import numpy as np  # type: ignore[import-not-found]
 
-        node = segmentation.node if isinstance(segmentation, SegmentationBuilder) else segmentation
+        node = self._unwrap_node(segmentation)
 
         if self._image_node is not None:
             node.SetReferenceImageGeometryParameterFromVolumeNode(self._image_node)
@@ -1757,8 +1764,8 @@ class SlicerHelper:
         """
         import numpy as np  # type: ignore[import-not-found]
 
-        source_node = source_seg.node if isinstance(source_seg, SegmentationBuilder) else source_seg
-        target_node = target_seg.node if isinstance(target_seg, SegmentationBuilder) else target_seg
+        source_node = self._unwrap_node(source_seg)
+        target_node = self._unwrap_node(target_seg)
 
         if self._image_node is not None:
             source_node.SetReferenceImageGeometryParameterFromVolumeNode(self._image_node)
@@ -1858,13 +1865,13 @@ class SlicerHelper:
 
         # Restrict segmentation visibility to specific views
         if seg_a is not None:
-            node_a = seg_a.node if isinstance(seg_a, SegmentationBuilder) else seg_a
+            node_a = self._unwrap_node(seg_a)
             display_a = node_a.GetDisplayNode()
             if display_a is not None:
                 display_a.SetViewNodeIDs(["vtkMRMLSliceNodeRed"])
 
         if seg_b is not None:
-            node_b = seg_b.node if isinstance(seg_b, SegmentationBuilder) else seg_b
+            node_b = self._unwrap_node(seg_b)
             display_b = node_b.GetDisplayNode()
             if display_b is not None:
                 display_b.SetViewNodeIDs(["vtkMRMLSliceNodeYellow"])
@@ -1933,14 +1940,17 @@ class SlicerHelper:
         )
         tf_node.SetMatrixTransformToParent(mat)
 
-        moving_volume.SetAndObserveTransformNodeID(tf_node.GetID())
+        # Chain with any pre-existing transform (e.g. acquisition transform
+        # added by Slicer's DICOM loader for irregular geometry).
+        # Result: volume → existing_tf → alignment_tf → world
+        existing_tf = moving_volume.GetParentTransformNode()
+        if existing_tf is not None:
+            existing_tf.SetAndObserveTransformNodeID(tf_node.GetID())
+        else:
+            moving_volume.SetAndObserveTransformNodeID(tf_node.GetID())
+
         if moving_segmentation is not None:
-            seg_node = (
-                moving_segmentation.node
-                if isinstance(moving_segmentation, SegmentationBuilder)
-                else moving_segmentation
-            )
-            seg_node.SetAndObserveTransformNodeID(tf_node.GetID())
+            self._unwrap_node(moving_segmentation).SetAndObserveTransformNodeID(tf_node.GetID())
 
         # Reset slice views so they recompute their extent/range to account
         # for the newly transformed volume position.  Without this, scrolling
@@ -1977,6 +1987,9 @@ class SlicerHelper:
         moving_names = set(self.get_segment_names(moving_seg))
         ref_names = set(self.get_segment_names(reference_seg))
         common = moving_names & ref_names
+        print(
+            f"[Alignment] common segments: {sorted(common)} (mov={len(moving_names)}, ref={len(ref_names)})"
+        )
 
         source_pts = vtk.vtkPoints()
         target_pts = vtk.vtkPoints()
@@ -1985,7 +1998,13 @@ class SlicerHelper:
             mov_c = self.get_segment_centroid(moving_seg, name)
             ref_c = self.get_segment_centroid(reference_seg, name)
             if mov_c is None or ref_c is None:
+                print(f"[Alignment] skip '{name}': mov={mov_c}, ref={ref_c}")
                 continue
+            print(
+                f"[Alignment] pair '{name}': "
+                f"mov=({mov_c[0]:.1f}, {mov_c[1]:.1f}, {mov_c[2]:.1f}) "
+                f"ref=({ref_c[0]:.1f}, {ref_c[1]:.1f}, {ref_c[2]:.1f})"
+            )
             source_pts.InsertNextPoint(mov_c)
             target_pts.InsertNextPoint(ref_c)
 
@@ -2105,12 +2124,8 @@ class SlicerHelper:
             editable_views = []
         _island_set = set(island_segments) if island_segments else set()
 
-        editable_node = (
-            editable_seg.node if isinstance(editable_seg, SegmentationBuilder) else editable_seg
-        )
-        reference_node = (
-            reference_seg.node if isinstance(reference_seg, SegmentationBuilder) else reference_seg
-        )
+        editable_node = self._unwrap_node(editable_seg)
+        reference_node = self._unwrap_node(reference_seg)
 
         editor_node = self._scene.GetFirstNodeByClass("vtkMRMLSegmentEditorNode")
         if editor_node is None:
@@ -2132,6 +2147,82 @@ class SlicerHelper:
         # Re-entry guard: JumpSlice can trigger ModifiedEvent on the editor
         # node, which would re-invoke this callback. See docstring note #1.
         _in_callback = False
+
+        def _handle_island_segment(segment_name: str) -> None:
+            """Navigate all views to the largest-island centroid (no cache).
+
+            Island segments (e.g. ``_pool``) are always navigated regardless
+            of ``only_empty`` — their content changes as the user classifies,
+            so recomputing each time is intentional.
+            """
+            print(f"[SegFocus] island segment '{segment_name}' — computing largest-island centroid")
+
+            # Compute separate centroids for each view set: reference and
+            # editable may be in different world spaces after alignment.
+            ref_centroid = helper_ref._local_to_world_island_centroid(reference_node, segment_name)
+            edit_centroid = helper_ref._local_to_world_island_centroid(editable_node, segment_name)
+
+            if ref_centroid is None and edit_centroid is None:
+                print(f"[SegFocus] island segment '{segment_name}' is empty, skipping")
+                return
+
+            if ref_centroid is not None and reference_views:
+                _jump_views(reference_views, ref_centroid)
+                print(
+                    f"[SegFocus] jumped reference views {reference_views} to island centroid "
+                    f"R={ref_centroid[0]:.1f}, A={ref_centroid[1]:.1f}, S={ref_centroid[2]:.1f}"
+                )
+
+            if edit_centroid is not None and editable_views:
+                _jump_views(editable_views, edit_centroid)
+                print(
+                    f"[SegFocus] jumped editable views {editable_views} to island centroid "
+                    f"R={edit_centroid[0]:.1f}, A={edit_centroid[1]:.1f}, S={edit_centroid[2]:.1f}"
+                )
+
+        def _handle_regular_segment(segment_name: str, seg_id: str) -> None:
+            """Navigate reference/editable views using cached centroids."""
+            # Editable centroid doubles as emptiness check: None = empty.
+            edit_centroid = helper_ref._local_to_world_centroid(editable_node, segment_name)
+            empty = edit_centroid is None
+            print(f"[SegFocus] selected: '{segment_name}' (id={seg_id}, empty={empty})")
+
+            if only_empty and not empty:
+                print(f"[SegFocus] skipping non-empty segment (only_empty={only_empty})")
+                return
+
+            # Lookup reference centroid (cached after first computation).
+            if segment_name not in _ref_centroids:
+                ref_centroid = helper_ref._local_to_world_centroid(reference_node, segment_name)
+                _ref_centroids[segment_name] = ref_centroid
+                print(
+                    f"[SegFocus] ref centroid computed and cached for '{segment_name}' (cache_id={id(_ref_centroids):#x})"
+                )
+            else:
+                ref_centroid = _ref_centroids[segment_name]
+                print(
+                    f"[SegFocus] ref centroid from cache for '{segment_name}' (cache_id={id(_ref_centroids):#x})"
+                )
+
+            if ref_centroid is None:
+                print(f"[SegFocus] no centroid for '{segment_name}' in reference, skipping")
+                return
+
+            print(
+                f"[SegFocus] ref centroid: R={ref_centroid[0]:.1f}, "
+                f"A={ref_centroid[1]:.1f}, S={ref_centroid[2]:.1f}"
+            )
+            _jump_views(reference_views, ref_centroid)
+            print(f"[SegFocus] jumped reference views {reference_views}")
+
+            if editable_views:
+                target = edit_centroid or ref_centroid
+                _jump_views(editable_views, target)
+                source = "edit" if edit_centroid else "ref (predicted)"
+                print(
+                    f"[SegFocus] jumped editable views {editable_views} "
+                    f"(using {source}: R={target[0]:.1f}, A={target[1]:.1f}, S={target[2]:.1f})"
+                )
 
         def on_segment_changed(caller: Any, _event: Any) -> None:
             nonlocal _in_callback
@@ -2157,75 +2248,10 @@ class SlicerHelper:
                 if on_refine is not None:
                     on_refine()
 
-                # Island segments: compute largest-island centroid, no caching.
-                # Content changes as user classifies, so recompute each time.
                 if segment_name in _island_set:
-                    print(
-                        f"[SegFocus] island segment '{segment_name}' "
-                        f"— computing largest-island centroid"
-                    )
-                    island_centroid = helper_ref._local_to_world_island_centroid(
-                        editable_node, segment_name
-                    )
-                    if island_centroid is None:
-                        print(f"[SegFocus] island segment '{segment_name}' is empty, skipping")
-                        return
-                    print(
-                        f"[SegFocus] island centroid: R={island_centroid[0]:.1f}, "
-                        f"A={island_centroid[1]:.1f}, S={island_centroid[2]:.1f}"
-                    )
-                    _jump_views(reference_views + editable_views, island_centroid)
-                    print("[SegFocus] jumped all views to island centroid")
-                    return
-
-                # Editable centroid doubles as emptiness check: None = empty.
-                # Use _local_to_world_centroid to account for parent transforms.
-                edit_centroid = helper_ref._local_to_world_centroid(editable_node, segment_name)
-                empty = edit_centroid is None
-                print(f"[SegFocus] selected: '{segment_name}' (id={seg_id}, empty={empty})")
-
-                if only_empty and not empty:
-                    print(f"[SegFocus] skipping non-empty segment (only_empty={only_empty})")
-                    return
-
-                # Lookup reference centroid (cached after first computation).
-                # Reference has no parent transform, so world = local.
-                if segment_name not in _ref_centroids:
-                    ref_centroid = helper_ref._local_to_world_centroid(reference_node, segment_name)
-                    _ref_centroids[segment_name] = ref_centroid
-                    print(f"[SegFocus] ref centroid computed and cached for '{segment_name}'")
+                    _handle_island_segment(segment_name)
                 else:
-                    ref_centroid = _ref_centroids[segment_name]
-                    print(f"[SegFocus] ref centroid from cache for '{segment_name}'")
-
-                if ref_centroid is None:
-                    print(f"[SegFocus] no centroid for '{segment_name}' in reference, skipping")
-                    return
-
-                print(
-                    f"[SegFocus] ref centroid: R={ref_centroid[0]:.1f}, "
-                    f"A={ref_centroid[1]:.1f}, S={ref_centroid[2]:.1f}"
-                )
-                _jump_views(reference_views, ref_centroid)
-                print(f"[SegFocus] jumped reference views {reference_views}")
-
-                if editable_views:
-                    if empty:
-                        # Don't jump editable views — ref_centroid is in the
-                        # reference volume's world space and may lie outside
-                        # the moving volume's extent after alignment → black.
-                        print(
-                            f"[SegFocus] editable views {editable_views} not jumped "
-                            f"(segment empty, ref_centroid may be outside moving volume)"
-                        )
-                    else:
-                        target = edit_centroid or ref_centroid
-                        _jump_views(editable_views, target)
-                        source = "edit" if edit_centroid else "ref (fallback)"
-                        print(
-                            f"[SegFocus] jumped editable views {editable_views} "
-                            f"(using {source}: R={target[0]:.1f}, A={target[1]:.1f}, S={target[2]:.1f})"
-                        )
+                    _handle_regular_segment(segment_name, seg_id)
             except Exception as e:
                 print(f"[SlicerHelper] segment focus error: {e}")
             finally:

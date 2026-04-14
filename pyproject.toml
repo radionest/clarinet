@@ -165,6 +165,7 @@ markers = [
     "pipeline: tests for pipeline task queue service",
     "schema: API schema testing with Schemathesis (property-based)",
     "migration: database migration tests (Alembic upgrade/downgrade)",
+    "demo: interactive Slicer demos (not part of CI, requires Slicer + PACS)",
 ]
 filterwarnings = [
     # FastAPI + aiormq: asyncio.iscoroutinefunction deprecated in Python 3.14

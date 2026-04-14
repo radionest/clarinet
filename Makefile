@@ -156,7 +156,23 @@ test-integration: ## Run integration tests only
 .PHONY: test-slicer
 test-slicer: ## Run Slicer tests sequentially (no xdist) with extended timeout
 	@echo "Running Slicer tests sequentially (requires local 3D Slicer on :2016)..."
-	@uv run pytest tests/ -m slicer --timeout=60 -v --tb=short
+	@uv run pytest tests/ -m "slicer and not demo" --timeout=60 -v --tb=short
+
+.PHONY: slicer-demo-segment
+slicer-demo-segment: ## Demo: single-volume segmentation in Slicer
+	@uv run pytest tests/demos/test_demo_segment.py -v -s --timeout=120 -n0
+
+.PHONY: slicer-demo-project
+slicer-demo-project: ## Demo: dual-layout projection in Slicer
+	@uv run pytest tests/demos/test_demo_project.py -v -s --timeout=120 -n0
+
+.PHONY: slicer-demo-alignment
+slicer-demo-alignment: ## Demo: dual-layout with 10 random ROIs for alignment testing
+	@uv run pytest tests/demos/test_demo_alignment.py -v -s --timeout=120 -n0
+
+.PHONY: slicer-demo-all
+slicer-demo-all: ## Run all Slicer demos sequentially
+	@uv run pytest tests/demos/ -v -s --timeout=120 -n0
 
 # Marker expression for tests that don't require external services
 PYTEST_UNIT_MARKERS := not pipeline and not dicom and not slicer and not schema
