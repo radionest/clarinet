@@ -227,6 +227,7 @@ class Settings(BaseSettings):
     ]
     series_filter_min_instance_count: int | None = None
     series_filter_unknown_modality_policy: str = "include"
+    series_filter_excluded_descriptions: list[str] = []
     series_filter_on_import: bool = False
 
     # Config mode settings

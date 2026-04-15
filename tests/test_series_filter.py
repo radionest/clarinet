@@ -200,6 +200,87 @@ class TestMinInstanceCount:
 
 
 # ---------------------------------------------------------------------------
+# Excluded description patterns
+# ---------------------------------------------------------------------------
+
+
+class TestExcludedDescriptions:
+    """Tests for series_description regex exclusion."""
+
+    def test_simple_substring_match(self) -> None:
+        """Pattern 'surview' excludes 'SURVIEW IMAGES'."""
+        f = SeriesFilter(
+            excluded_modalities=frozenset(),
+            unknown_modality_policy="include",
+            excluded_descriptions=["surview"],
+        )
+        result = f.filter(
+            ["s"], to_criteria=lambda _: _criteria(series_description="SURVIEW IMAGES")
+        )
+        assert result.included == []
+        assert "surview" in result.excluded[0].reason
+
+    def test_regex_match(self) -> None:
+        """Pattern 'tracker.*graph' excludes 'Tracker Position Graph'."""
+        f = SeriesFilter(
+            excluded_modalities=frozenset(),
+            unknown_modality_policy="include",
+            excluded_descriptions=["tracker.*graph"],
+        )
+        result = f.filter(
+            ["s"], to_criteria=lambda _: _criteria(series_description="Tracker Position Graph")
+        )
+        assert result.included == []
+        assert "tracker.*graph" in result.excluded[0].reason
+
+    def test_case_insensitive(self) -> None:
+        """Pattern matching is case-insensitive."""
+        f = SeriesFilter(
+            excluded_modalities=frozenset(),
+            unknown_modality_policy="include",
+            excluded_descriptions=["surview"],
+        )
+        result = f.filter(["s"], to_criteria=lambda _: _criteria(series_description="SurView"))
+        assert result.included == []
+
+    def test_empty_patterns_no_exclusion(self) -> None:
+        """Empty pattern list does not exclude anything."""
+        f = SeriesFilter(
+            excluded_modalities=frozenset(),
+            unknown_modality_policy="include",
+            excluded_descriptions=[],
+        )
+        result = f.filter(
+            ["s"], to_criteria=lambda _: _criteria(series_description="SURVIEW IMAGES")
+        )
+        assert result.included == ["s"]
+
+    def test_none_description_skipped(self) -> None:
+        """NULL series_description is not matched against patterns."""
+        f = SeriesFilter(
+            excluded_modalities=frozenset(),
+            unknown_modality_policy="include",
+            excluded_descriptions=["surview"],
+        )
+        result = f.filter(["s"], to_criteria=lambda _: _criteria(series_description=None))
+        assert result.included == ["s"]
+
+    def test_combined_with_modality_blocklist(self) -> None:
+        """Modality blocklist fires before description pattern."""
+        f = SeriesFilter(
+            excluded_modalities=frozenset({"SR"}),
+            unknown_modality_policy="include",
+            excluded_descriptions=["surview"],
+        )
+        result = f.filter(
+            ["s"],
+            to_criteria=lambda _: _criteria(modality="SR", series_description="SURVIEW IMAGES"),
+        )
+        assert result.included == []
+        assert "Modality" in result.excluded[0].reason
+
+
+# ---------------------------------------------------------------------------
 # Mixed scenarios
 # ---------------------------------------------------------------------------
 
