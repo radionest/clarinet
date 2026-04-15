@@ -33,6 +33,7 @@ paths:
 - `load_series_from_pacs(study_instance_uid, series_instance_uid, *, server_name=, raise_on_empty=True, window=)` → list of MRML node IDs; loads only specified series
 - `get_segment_names(segmentation)` → `list[str]`
 - `get_segment_centroid(segmentation, segment_name)` → `tuple[float,float,float] | None` — per-segment labelmap center via numpy
+- `count_segment_components(segmentation, segment_name)` → `int` — number of connected components via `scipy.ndimage.label` (6-connectivity); 0 if empty or not found
 - `get_largest_island_centroid(segmentation, segment_name)` → `tuple[float,float,float] | None` — largest connected component centroid via `vtkImageConnectivityFilter`; use for multi-island segments like `_pool`
 - `copy_segments(source_seg, target_seg, segment_names=None, empty=False)`
 - `sync_segments(source_seg, target_seg, empty=False)` → `list[str]` — copy missing segments by name
