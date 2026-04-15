@@ -39,15 +39,15 @@ class PatientRepository(BaseRepository[Patient]):
         for attempt in range(1, _MAX_AUTO_ID_RETRIES + 1):
             entity.auto_id = await self._next_auto_id()
             try:
-                self.session.add(entity)
-                await self.session.flush()
+                async with self.session.begin_nested():
+                    self.session.add(entity)
+                    await self.session.flush()
                 await self.session.refresh(entity)
                 return entity
             except IntegrityError as exc:
                 logger.warning(
                     f"auto_id conflict on attempt {attempt}/{_MAX_AUTO_ID_RETRIES}: {exc}"
                 )
-                await self.session.rollback()
                 if attempt == _MAX_AUTO_ID_RETRIES:
                     raise DatabaseIntegrityError(
                         f"Failed to assign unique auto_id after {_MAX_AUTO_ID_RETRIES} attempts"
@@ -87,11 +87,9 @@ class PatientRepository(BaseRepository[Patient]):
     async def _advance_counter(self, value: int) -> None:
         """Advance counter/sequence to at least ``value`` to prevent future collisions."""
         if settings.database_driver != DatabaseDriver.SQLITE:
+            seq = patient_auto_id_seq.name
             await self.session.execute(
-                text(
-                    "SELECT setval('patient_auto_id_seq', "
-                    "GREATEST(:val, (SELECT last_value FROM patient_auto_id_seq)))"
-                ),
+                text(f"SELECT setval('{seq}', GREATEST(:val, (SELECT last_value FROM {seq})))"),
                 {"val": value},
             )
             return
@@ -102,7 +100,11 @@ class PatientRepository(BaseRepository[Patient]):
         counter: AutoIdCounter | None = counter_result.scalar_one_or_none()  # type: ignore[assignment]
 
         if counter is None:
-            counter = AutoIdCounter(name=_COUNTER_NAME, last_value=value)
+            max_result = await self.session.execute(
+                select(func.coalesce(func.max(Patient.auto_id), 0))
+            )
+            current_max: int = max_result.scalar_one()  # type: ignore[assignment]
+            counter = AutoIdCounter(name=_COUNTER_NAME, last_value=max(value, current_max))
             self.session.add(counter)
         elif counter.last_value < value:
             counter.last_value = value
