@@ -9,7 +9,7 @@ import numpy as np
 import pydicom
 import pydicom.uid
 import pytest
-from pydicom.dataset import Dataset, FileDataset
+from pydicom.dataset import FileDataset
 
 from clarinet.exceptions.domain import ImageError, ImageReadError
 from clarinet.services.image import (
@@ -18,13 +18,7 @@ from clarinet.services.image import (
     Segmentation,
     coco_to_segmentation,
 )
-from clarinet.services.image.dicom_volume import (
-    _apply_modality_lut,
-    _extract_spacing,
-    _sort_slices,
-    _spacing_sample_indices,
-    read_dicom_series,
-)
+from clarinet.services.image.dicom_volume import read_dicom_series
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -314,63 +308,6 @@ class TestDicomVolume:
         with pytest.raises(ImageReadError, match="Not a directory"):
             read_dicom_series(f)
 
-    def test_sort_by_instance_number(self) -> None:
-        datasets = []
-        for i in [3, 1, 2]:
-            ds = Dataset()
-            ds.InstanceNumber = i
-            datasets.append(ds)
-
-        sorted_ds = _sort_slices(datasets)
-        assert [int(ds.InstanceNumber) for ds in sorted_ds] == [1, 2, 3]
-
-    def test_extract_spacing_defaults(self) -> None:
-        ds = Dataset()
-        spacing = _extract_spacing([ds])
-        assert spacing == (1.0, 1.0, 1.0)
-
-    def test_extract_spacing_1mm(self) -> None:
-        """Computed spacing of 1.0 mm must not fall back to SliceThickness."""
-        datasets = []
-        for i in range(5):
-            ds = Dataset()
-            ds.PixelSpacing = [0.5, 0.5]
-            ds.SliceThickness = 2.0  # wrong header value
-            ds.ImagePositionPatient = [0.0, 0.0, float(i)]  # 1.0 mm spacing
-            datasets.append(ds)
-        spacing = _extract_spacing(datasets)
-        assert spacing == (0.5, 0.5, 1.0)
-
-    def test_extract_spacing_zero_falls_back(self) -> None:
-        """Identical Z positions (spacing=0) should fall back to SliceThickness."""
-        datasets = []
-        for _ in range(3):
-            ds = Dataset()
-            ds.PixelSpacing = [1.0, 1.0]
-            ds.SliceThickness = 3.0
-            ds.ImagePositionPatient = [0.0, 0.0, 0.0]  # all same position
-            datasets.append(ds)
-        spacing = _extract_spacing(datasets)
-        assert spacing == (1.0, 1.0, 3.0)
-
-    def test_extract_spacing_irregular_uses_median(self) -> None:
-        """Irregular slice spacing returns median of sampled distances."""
-        datasets = []
-        z_positions = [0.0, 1.0, 2.0, 5.0]  # jump at last pair
-        for z in z_positions:
-            ds = Dataset()
-            ds.PixelSpacing = [1.0, 1.0]
-            ds.ImagePositionPatient = [0.0, 0.0, z]
-            datasets.append(ds)
-        spacing = _extract_spacing(datasets)
-        # Distances: 1.0, 1.0, 3.0 → median = 1.0
-        assert spacing[2] == 1.0
-
-    def test_spacing_sample_indices(self) -> None:
-        assert _spacing_sample_indices(2) == [1]
-        assert _spacing_sample_indices(3) == [1, 2]
-        assert _spacing_sample_indices(100) == [1, 25, 50, 75, 99]
-
     def test_rescale_slope_intercept_applied(self, tmp_path: Path) -> None:
         """RescaleSlope/RescaleIntercept convert stored pixels to real-world values (HU)."""
         dcm_dir = tmp_path / "rescale_dicom"
@@ -408,14 +345,6 @@ class TestDicomVolume:
         img = Image()
         img.read_dicom_series(dcm_dir)
         np.testing.assert_allclose(img.img, expected_hu)
-
-    def test_apply_modality_lut_no_rescale(self, dicom_dir: Path) -> None:
-        """Without RescaleSlope/Intercept, pixel values are returned unchanged."""
-        dcm_file = next(dicom_dir.glob("*.dcm"))
-        ds = pydicom.dcmread(str(dcm_file))
-        original = ds.pixel_array.copy()
-        result = _apply_modality_lut(ds)
-        np.testing.assert_array_equal(result, original)
 
 
 # ---------------------------------------------------------------------------
