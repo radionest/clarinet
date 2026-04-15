@@ -106,6 +106,7 @@ Avoid: direct loguru import (use `from clarinet.utils.logger import logger`), sy
 - Feature development: always enter a worktree via `EnterWorktree` before making changes
 - Quick fixes, typos, config changes — work directly in main, no worktree needed
 - To resume work in an existing worktree — use `EnterWorktree` with the same name. Never `cd` into worktree path directly
+- **"Goto worktree of branch X"** — first run `git worktree list`, find the worktree that has branch X, then `EnterWorktree(name=<worktree-name>)`. Do NOT pass a branch name to `EnterWorktree` — it creates a *new* worktree with prefix `worktree-{name}`, causing double-prefix bugs
 - Worktrees contain only git-tracked files. `hooks/`, `settings.json`, `settings.local.json` live in `$CLAUDE_PROJECT_DIR/.claude/` and are shared — edit them by the main project path. Build artifacts (formosh) are not copied
 - `ExitWorktree(remove)` requires `discard_changes=true` if there are commits not in main (even if already pushed)
 - **For PRs in review prefer `ExitWorktree(keep)` until merge** — review cycles need the same branch back; `EnterWorktree` only creates new branches, so resuming after `remove` means manual `git worktree add` (awkward, easy to violate "no branch switch in root")
