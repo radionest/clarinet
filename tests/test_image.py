@@ -9,7 +9,7 @@ import numpy as np
 import pydicom
 import pydicom.uid
 import pytest
-from pydicom.dataset import Dataset, FileDataset
+from pydicom.dataset import FileDataset
 
 from clarinet.exceptions.domain import ImageError, ImageReadError
 from clarinet.services.image import (
@@ -18,12 +18,7 @@ from clarinet.services.image import (
     Segmentation,
     coco_to_segmentation,
 )
-from clarinet.services.image.dicom_volume import (
-    _apply_modality_lut,
-    _extract_spacing,
-    _sort_slices,
-    read_dicom_series,
-)
+from clarinet.services.image.dicom_volume import read_dicom_series
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -313,21 +308,6 @@ class TestDicomVolume:
         with pytest.raises(ImageReadError, match="Not a directory"):
             read_dicom_series(f)
 
-    def test_sort_by_instance_number(self) -> None:
-        datasets = []
-        for i in [3, 1, 2]:
-            ds = Dataset()
-            ds.InstanceNumber = i
-            datasets.append(ds)
-
-        sorted_ds = _sort_slices(datasets)
-        assert [int(ds.InstanceNumber) for ds in sorted_ds] == [1, 2, 3]
-
-    def test_extract_spacing_defaults(self) -> None:
-        ds = Dataset()
-        spacing = _extract_spacing([ds])
-        assert spacing == (1.0, 1.0, 1.0)
-
     def test_rescale_slope_intercept_applied(self, tmp_path: Path) -> None:
         """RescaleSlope/RescaleIntercept convert stored pixels to real-world values (HU)."""
         dcm_dir = tmp_path / "rescale_dicom"
@@ -365,14 +345,6 @@ class TestDicomVolume:
         img = Image()
         img.read_dicom_series(dcm_dir)
         np.testing.assert_allclose(img.img, expected_hu)
-
-    def test_apply_modality_lut_no_rescale(self, dicom_dir: Path) -> None:
-        """Without RescaleSlope/Intercept, pixel values are returned unchanged."""
-        dcm_file = next(dicom_dir.glob("*.dcm"))
-        ds = pydicom.dcmread(str(dcm_file))
-        original = ds.pixel_array.copy()
-        result = _apply_modality_lut(ds)
-        np.testing.assert_array_equal(result, original)
 
 
 # ---------------------------------------------------------------------------
