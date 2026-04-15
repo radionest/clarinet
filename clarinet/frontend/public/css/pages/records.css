@@ -1,0 +1,123 @@
+/* ============================
+   Record pages
+   ============================ */
+
+.record-execution-page {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 0 var(--spacing-md);
+}
+
+.page-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: var(--spacing-lg);
+    flex-wrap: wrap;
+    gap: var(--spacing-sm);
+}
+
+.page-actions {
+    display: flex;
+    gap: var(--spacing-sm);
+    margin-top: var(--spacing-md);
+}
+
+.record-info {
+    margin-bottom: var(--spacing-md);
+}
+
+.record-description {
+    color: var(--text-secondary);
+    margin-bottom: var(--spacing-md);
+}
+
+.record-metadata {
+    & dl {
+        display: grid;
+        grid-template-columns: auto 1fr;
+        gap: var(--spacing-xs) var(--spacing-md);
+        margin: 0;
+    }
+
+    & dt {
+        font-weight: 600;
+        color: var(--text-secondary);
+        font-size: 0.875rem;
+    }
+
+    & dd {
+        margin: 0;
+    }
+}
+
+.record-form-container {
+    margin-top: var(--spacing-lg);
+}
+
+.no-schema,
+.no-data {
+    background: var(--surface-color);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: var(--spacing-lg);
+    text-align: center;
+    color: var(--text-secondary);
+}
+
+.raw-data {
+    margin-top: var(--spacing-md);
+}
+
+.json-display {
+    background: #1e293b;
+    color: #e2e8f0;
+    border-radius: var(--radius-md);
+    padding: var(--spacing-md);
+    overflow-x: auto;
+    font-family: "Fira Code", "Cascadia Code", monospace;
+    font-size: 0.875rem;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
+/* PACS series details */
+.pacs-series-details-row {
+    & > td {
+        padding-top: 0;
+    }
+
+    &:hover {
+        background: inherit;
+    }
+}
+
+.pacs-series-details {
+    & summary {
+        cursor: pointer;
+        color: var(--accent-color);
+        font-size: 0.875rem;
+        padding: var(--spacing-xs) 0;
+        user-select: none;
+
+        &:hover {
+            text-decoration: underline;
+        }
+    }
+}
+
+.series-table {
+    width: 100%;
+    margin-top: var(--spacing-xs);
+
+    & .series-detail-row td {
+        padding: var(--spacing-xs) var(--spacing-md);
+        font-size: 0.875rem;
+        border-bottom: 1px solid var(--border-color);
+    }
+
+    & .series-detail-row:last-child td {
+        border-bottom: none;
+    }
+}

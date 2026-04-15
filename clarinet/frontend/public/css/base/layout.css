@@ -1,0 +1,29 @@
+/* ============================
+   App layout & container
+   ============================ */
+
+.container {
+    max-width: var(--container-max-width);
+    margin: 0 auto;
+    padding: 0 20px;
+}
+
+.app-layout {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+.main-content {
+    flex: 1;
+    padding: var(--spacing-lg) 0;
+    margin-top: var(--navbar-height);
+}
+
+.app-footer {
+    border-top: 1px solid var(--border-color);
+    padding: var(--spacing-md) 0;
+    color: var(--text-secondary);
+    font-size: 0.875rem;
+    text-align: center;
+}

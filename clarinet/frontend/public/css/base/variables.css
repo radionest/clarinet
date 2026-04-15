@@ -1,0 +1,44 @@
+/* ============================
+   Design tokens
+   ============================ */
+
+:root {
+    /* Brand palette */
+    --primary-color: #1e40af;
+    --secondary-color: #64748b;
+    --accent-color: #f59e0b;
+    --background-color: #ffffff;
+    --text-color: #1f2937;
+    --border-color: #e5e7eb;
+
+    /* Semantic colors */
+    --danger-color: #dc2626;
+    --warning-color: #d97706;
+    --success-color: #16a34a;
+    --info-color: #2563eb;
+
+    /* Surface & text */
+    --surface-color: #f8fafc;
+    --text-secondary: #6b7280;
+
+    /* Layout */
+    --navbar-height: 56px;
+    --container-max-width: 1200px;
+
+    /* Shadows */
+    --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.1);
+    --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.1);
+    --shadow-lg: 0 10px 20px rgba(0, 0, 0, 0.15);
+
+    /* Radii */
+    --radius-sm: 4px;
+    --radius-md: 6px;
+    --radius-lg: 8px;
+
+    /* Spacing (4-8px system) */
+    --spacing-xs: 4px;
+    --spacing-sm: 8px;
+    --spacing-md: 16px;
+    --spacing-lg: 24px;
+    --spacing-xl: 32px;
+}

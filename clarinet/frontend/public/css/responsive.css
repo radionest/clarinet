@@ -1,0 +1,71 @@
+/* ============================
+   Responsive overrides (mobile)
+   ============================ */
+
+@media (max-width: 768px) {
+    /* Navbar */
+    .navbar {
+        padding: 0 var(--spacing-sm);
+    }
+
+    .navbar-menu {
+        gap: 0;
+    }
+
+    .navbar-item {
+        padding: var(--spacing-xs) var(--spacing-sm);
+        font-size: 0.8rem;
+    }
+
+    .navbar-user {
+        margin-left: var(--spacing-sm);
+        padding-left: var(--spacing-sm);
+    }
+
+    .username {
+        display: none;
+    }
+
+    /* Notifications */
+    .notifications {
+        left: var(--spacing-sm);
+        right: var(--spacing-sm);
+        max-width: none;
+    }
+
+    /* Modal */
+    .modal {
+        width: 95%;
+        padding: var(--spacing-md);
+    }
+
+    /* Stats grid */
+    .stats-grid {
+        grid-template-columns: 1fr;
+    }
+
+    /* Record page */
+    .record-execution-page {
+        padding: 0 var(--spacing-sm);
+    }
+
+    .page-header {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    /* Record metadata */
+    .record-metadata dl {
+        grid-template-columns: 1fr;
+    }
+
+    /* Form rows */
+    .form-row {
+        flex-direction: column;
+    }
+
+    /* Container */
+    .container {
+        padding: 0 var(--spacing-sm);
+    }
+}
