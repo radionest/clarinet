@@ -41,6 +41,8 @@ EXCLUDED_PATTERN = (
     # range which the server rejects (orjson limitation). Covered by Phase 3
     # test_create_record_type / test_update_record_type with excluded positive_data_acceptance.
     r"|^/api/records/types(/\{record_type_id\})?$"
+    # Photo endpoints require multipart file upload — Schemathesis can't generate valid files
+    r"|^/api/records/\{record_id\}/photos"
 )
 
 # Suppress common health checks for ASGI transport
