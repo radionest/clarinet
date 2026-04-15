@@ -40,6 +40,7 @@ from .sync_wrappers import build_sync_context
 def pipeline_task(
     queue: str | None = None,
     *,
+    task_name: str | None = None,
     auto_submit: bool = False,
     **task_kwargs: Any,
 ) -> Callable[..., Any]:
@@ -55,6 +56,8 @@ def pipeline_task(
 
     Args:
         queue: Optional queue override for the broker task registration.
+        task_name: Explicit task name. If ``None``, auto-generates
+            ``'{settings.pipeline_task_namespace}:{fn.__name__}'``.
         auto_submit: If ``True`` and handler returns a ``dict``, automatically
             calls ``submit_record_data(msg.record_id, result)``.
         **task_kwargs: Additional keyword arguments forwarded to
@@ -116,6 +119,11 @@ def pipeline_task(
         kw: dict[str, Any] = {**task_kwargs}
         if queue is not None:
             kw["queue"] = queue
+        kw["task_name"] = (
+            task_name
+            if task_name is not None
+            else f"{settings.pipeline_task_namespace}:{fn.__name__}"
+        )
         decorated = broker.task(**kw)(wrapper)
         register_task(decorated)
         return decorated

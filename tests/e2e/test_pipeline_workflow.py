@@ -728,8 +728,9 @@ class TestRecordFlowDrivenTaskDispatch:
 
         record("first-check").on_status("finished").do_task(mock_task)
 
-        # do_task uses task_name (broker-registered name), not __name__
-        pipeline_name = f"_task:{mock_task.task_name}"
+        # do_task strips namespace prefix from task_name for pipeline naming
+        func_name = mock_task.task_name.rsplit(":", 1)[-1]
+        pipeline_name = f"_task:{func_name}"
         pipeline = get_pipeline(pipeline_name)
         assert pipeline is not None
         assert len(pipeline.steps) == 1

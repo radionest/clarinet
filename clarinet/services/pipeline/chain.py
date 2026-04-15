@@ -167,6 +167,11 @@ def register_task(task: AsyncTaskiqDecoratedTask[..., Any]) -> None:
     Args:
         task: The TaskIQ decorated task function.
     """
+    if ":" not in task.task_name:
+        logger.warning(
+            f"Task '{task.task_name}' registered without namespace prefix. "
+            f"Use @pipeline_task() or explicit task_name='namespace:name'."
+        )
     existing = _TASK_REGISTRY.get(task.task_name)
     if existing is not None and existing is not task:
         raise PipelineConfigError(

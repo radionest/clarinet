@@ -867,10 +867,8 @@ async def _rabbitmq_clean(dry_run: bool = False) -> None:
     from clarinet.services.pipeline.rabbitmq_cleanup import cleanup_test_resources
 
     result = await cleanup_test_resources(
-        host=settings.rabbitmq_host,
-        management_port=settings.rabbitmq_management_port,
-        login=settings.rabbitmq_login,
-        password=settings.rabbitmq_password,
+        base_url=settings.rabbitmq_management_base_url,
+        auth=settings.rabbitmq_management_auth,
         dry_run=dry_run,
     )
 
@@ -888,10 +886,8 @@ async def _rabbitmq_status() -> None:
     from clarinet.services.pipeline.rabbitmq_cleanup import get_queue_stats
 
     stats = await get_queue_stats(
-        host=settings.rabbitmq_host,
-        management_port=settings.rabbitmq_management_port,
-        login=settings.rabbitmq_login,
-        password=settings.rabbitmq_password,
+        base_url=settings.rabbitmq_management_base_url,
+        auth=settings.rabbitmq_management_auth,
     )
 
     print("RabbitMQ Queue Statistics")
@@ -900,6 +896,24 @@ async def _rabbitmq_status() -> None:
     print(f"  Total exchanges:  {stats['total_exchanges']}")
     print(f"  Test exchanges:   {stats['test_exchanges']}")
     print(f"  Stuck messages:   {stats['stuck_messages']}")
+
+
+async def _rabbitmq_purge_stale(queues: list[str] | None = None, force: bool = False) -> None:
+    """Purge messages from production queues (migration helper)."""
+    from clarinet.services.pipeline.rabbitmq_cleanup import purge_queue_messages
+
+    result = await purge_queue_messages(
+        base_url=settings.rabbitmq_management_base_url,
+        auth=settings.rabbitmq_management_auth,
+        queue_names=queues,
+        dry_run=not force,
+    )
+
+    if not force:
+        print(f"Found {result['messages_found']} messages in production queues")
+        print("Run with --force to purge them.")
+    else:
+        print(f"Purged {result['messages_purged']} messages from {result['queues_purged']} queues")
 
 
 def handle_frontend_command(args: argparse.Namespace) -> None:
@@ -1169,6 +1183,17 @@ def main() -> None:
     # rabbitmq status
     rabbitmq_subparsers.add_parser("status", help="Show RabbitMQ queue statistics")
 
+    # rabbitmq purge-stale
+    purge_parser = rabbitmq_subparsers.add_parser(
+        "purge-stale", help="Purge messages from production queues"
+    )
+    purge_parser.add_argument(
+        "--force", action="store_true", help="Actually purge (default: dry-run)"
+    )
+    purge_parser.add_argument(
+        "--queue", type=str, action="append", help="Specific queue(s) to purge"
+    )
+
     # session command
     session_parser = subparsers.add_parser("session", help="Session management commands")
     session_subparsers = session_parser.add_subparsers(dest="session_command")
@@ -1305,6 +1330,8 @@ def main() -> None:
             asyncio.run(_rabbitmq_clean(dry_run=args.dry_run))
         elif args.rabbitmq_command == "status":
             asyncio.run(_rabbitmq_status())
+        elif args.rabbitmq_command == "purge-stale":
+            asyncio.run(_rabbitmq_purge_stale(queues=args.queue, force=args.force))
         else:
             rabbitmq_parser.print_help()
     elif args.command == "frontend":

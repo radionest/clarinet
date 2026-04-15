@@ -74,7 +74,12 @@ def _get_task() -> Any:
 
     broker = get_broker()
 
-    @broker.task(task_name="anonymize_study", queue=DICOM_QUEUE)
+    from clarinet.settings import settings
+
+    @broker.task(
+        task_name=f"{settings.pipeline_task_namespace}:anonymize_study",
+        queue=DICOM_QUEUE,
+    )
     async def anonymize_study_task(
         study_uid: str,
         save_to_disk: bool | None = None,
