@@ -45,6 +45,11 @@ jq 'select(.exc != null)' /tmp/clarinet.log
 jq 'select(.mod | startswith("clarinet.services.pipeline"))' /tmp/clarinet.log
 ```
 
+## Slicer logs
+
+Slicer runs locally (NOT on VMs). Logs at `/tmp/Slicer-<user>/Slicer_<version>_<pid>_<date>.log`.
+Error markers: `Server error`, `Traceback`, `__execResult`. Use `Read` on the tail, not serial greps.
+
 ## JSON log keys
 
 | Key | Content |
