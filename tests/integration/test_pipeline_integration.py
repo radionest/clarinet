@@ -357,6 +357,87 @@ class TestQueueRouting:
             await gpu_broker.shutdown()
 
 
+# ─── 3b. Auto-Pipeline Queue Routing ──────────────────────────────────────
+
+
+class TestAutoTaskQueueRouting:
+    """do_task() auto-pipelines respect _pipeline_queue attribute."""
+
+    async def test_auto_pipeline_gpu_task_routes_to_gpu_queue(
+        self,
+        pipeline_broker_factory: Any,
+        rabbitmq_url: str,
+        test_queues: dict[str, str],
+    ) -> None:
+        """Auto-pipeline from GPU task routes message to GPU queue."""
+        from clarinet.services.pipeline import get_pipeline
+        from clarinet.services.pipeline.broker import GPU_QUEUE
+        from clarinet.services.recordflow.flow_record import FlowRecord
+
+        gpu_broker = await pipeline_broker_factory("gpu")
+
+        try:
+
+            @gpu_broker.task(task_name="test_auto_gpu_route")
+            async def gpu_task(data: dict[str, Any]) -> dict[str, Any]:
+                return data
+
+            gpu_task._pipeline_queue = GPU_QUEUE
+
+            fr = FlowRecord("test-type")
+            fr.on_status("finished").do_task(gpu_task)
+
+            pipeline = get_pipeline("_task:test_auto_gpu_route")
+            assert pipeline is not None
+            assert pipeline.steps[0].queue == GPU_QUEUE
+
+            msg = PipelineMessage(patient_id="P1", study_uid="S1")
+            await pipeline.run(msg)
+
+            gpu_msg = await _get_message_from_queue(rabbitmq_url, test_queues["gpu"])
+            assert gpu_msg is not None
+            default_count = await _queue_message_count(rabbitmq_url, test_queues["default"])
+            assert default_count == 0
+        finally:
+            await gpu_broker.shutdown()
+
+    async def test_auto_pipeline_default_task_routes_to_default_queue(
+        self,
+        pipeline_broker_factory: Any,
+        rabbitmq_url: str,
+        test_queues: dict[str, str],
+    ) -> None:
+        """Auto-pipeline from default task routes message to default queue."""
+        from clarinet.services.pipeline import get_pipeline
+        from clarinet.services.pipeline.broker import DEFAULT_QUEUE
+        from clarinet.services.recordflow.flow_record import FlowRecord
+
+        default_broker = await pipeline_broker_factory("default")
+
+        try:
+
+            @default_broker.task(task_name="test_auto_default_route")
+            async def default_task(data: dict[str, Any]) -> dict[str, Any]:
+                return data
+
+            fr = FlowRecord("test-type")
+            fr.on_status("finished").do_task(default_task)
+
+            pipeline = get_pipeline("_task:test_auto_default_route")
+            assert pipeline is not None
+            assert pipeline.steps[0].queue == DEFAULT_QUEUE
+
+            msg = PipelineMessage(patient_id="P2", study_uid="S2")
+            await pipeline.run(msg)
+
+            default_msg = await _get_message_from_queue(rabbitmq_url, test_queues["default"])
+            assert default_msg is not None
+            gpu_count = await _queue_message_count(rabbitmq_url, test_queues["gpu"])
+            assert gpu_count == 0
+        finally:
+            await default_broker.shutdown()
+
+
 # ─── 4. Task Execution ──────────────────────────────────────────────────────
 
 

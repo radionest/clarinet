@@ -388,6 +388,119 @@ class TestPipelineActionDSL:
         assert len(pipeline.steps) == 1
         assert pipeline.steps[0].task is mock_task
 
+    def test_do_task_preserves_gpu_queue(self):
+        """do_task() passes _pipeline_queue to the auto-pipeline step."""
+        from clarinet.services.pipeline import get_pipeline
+        from clarinet.services.recordflow.flow_record import RECORD_REGISTRY, FlowRecord
+
+        RECORD_REGISTRY.clear()
+
+        mock_task = MagicMock()
+        mock_task.task_name = "ns:gpu_segmentation"
+        mock_task._pipeline_queue = "clarinet.gpu"
+
+        fr = FlowRecord("ct-scan")
+        fr.on_status("finished").do_task(mock_task)
+
+        pipeline = get_pipeline("_task:gpu_segmentation")
+        assert pipeline is not None
+        assert pipeline.steps[0].queue == "clarinet.gpu"
+
+    def test_do_task_preserves_dicom_queue(self):
+        """do_task() preserves clarinet.dicom queue from task attribute."""
+        from clarinet.services.pipeline import get_pipeline
+        from clarinet.services.recordflow.flow_record import RECORD_REGISTRY, FlowRecord
+
+        RECORD_REGISTRY.clear()
+
+        mock_task = MagicMock()
+        mock_task.task_name = "ns:dicom_fetch"
+        mock_task._pipeline_queue = "clarinet.dicom"
+
+        fr = FlowRecord("ct-scan")
+        fr.on_status("finished").do_task(mock_task)
+
+        pipeline = get_pipeline("_task:dicom_fetch")
+        assert pipeline is not None
+        assert pipeline.steps[0].queue == "clarinet.dicom"
+
+    def test_do_task_defaults_queue_when_no_attribute(self):
+        """do_task() uses DEFAULT_QUEUE when task has no _pipeline_queue."""
+        from clarinet.services.pipeline import get_pipeline
+        from clarinet.services.recordflow.flow_record import RECORD_REGISTRY, FlowRecord
+
+        RECORD_REGISTRY.clear()
+
+        mock_task = MagicMock(spec=[])  # no auto-created attributes
+        mock_task.task_name = "ns:plain_task"
+
+        fr = FlowRecord("ct-scan")
+        fr.on_status("finished").do_task(mock_task)
+
+        pipeline = get_pipeline("_task:plain_task")
+        assert pipeline is not None
+        assert pipeline.steps[0].queue == DEFAULT_QUEUE
+
+    def test_do_task_defaults_queue_when_none(self):
+        """do_task() uses DEFAULT_QUEUE when _pipeline_queue is None."""
+        from clarinet.services.pipeline import get_pipeline
+        from clarinet.services.recordflow.flow_record import RECORD_REGISTRY, FlowRecord
+
+        RECORD_REGISTRY.clear()
+
+        mock_task = MagicMock()
+        mock_task.task_name = "ns:none_queue_task"
+        mock_task._pipeline_queue = None
+
+        fr = FlowRecord("ct-scan")
+        fr.on_status("finished").do_task(mock_task)
+
+        pipeline = get_pipeline("_task:none_queue_task")
+        assert pipeline is not None
+        assert pipeline.steps[0].queue == DEFAULT_QUEUE
+
+    def test_do_task_dedup_preserves_queue(self):
+        """Second do_task() call reuses the pipeline — queue stays correct."""
+        from clarinet.services.pipeline import get_pipeline
+        from clarinet.services.recordflow.flow_record import RECORD_REGISTRY, FlowRecord
+
+        RECORD_REGISTRY.clear()
+
+        mock_task = MagicMock()
+        mock_task.task_name = "ns:dedup_gpu"
+        mock_task._pipeline_queue = "clarinet.gpu"
+
+        fr1 = FlowRecord("ct-scan")
+        fr1.on_status("finished").do_task(mock_task)
+
+        fr2 = FlowRecord("mri-scan")
+        fr2.on_status("finished").do_task(mock_task)
+
+        pipeline = get_pipeline("_task:dedup_gpu")
+        assert pipeline is not None
+        assert len(pipeline.steps) == 1
+        assert pipeline.steps[0].queue == "clarinet.gpu"
+
+    def test_pipeline_task_attribute_set(self):
+        """@pipeline_task(queue=...) stores queue as _pipeline_queue."""
+        from clarinet.services.pipeline.task import pipeline_task
+
+        @pipeline_task(queue="clarinet.gpu")
+        async def dummy_gpu_task(msg, ctx):
+            pass
+
+        assert dummy_gpu_task._pipeline_queue == "clarinet.gpu"
+
+    def test_pipeline_task_attribute_none_by_default(self):
+        """@pipeline_task() without queue stores None as _pipeline_queue."""
+        from clarinet.services.pipeline.task import pipeline_task
+
+        @pipeline_task()
+        async def dummy_default_task(msg, ctx):
+            pass
+
+        assert dummy_default_task._pipeline_queue is None
+
 
 # ─── Exceptions ──────────────────────────────────────────────────────────────
 
