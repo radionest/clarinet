@@ -118,9 +118,29 @@ pub fn record_viewer_buttons(
   class: String,
   on_view: fn(String, String) -> msg,
 ) -> Element(msg) {
-  case level {
-    Some(types.Patient) | None -> element.none()
-    Some(types.Study) | Some(types.Series) ->
+  case level, viewer_study_uids {
+    Some(types.Patient), Some(uids) if uids != [] ->
+      element.fragment(
+        list.filter_map(viewers, fn(v) {
+          case parse_kind(v.name) {
+            Ohif ->
+              Ok(ohif_record_button(
+                study_uid,
+                series_uid,
+                viewer_study_uids,
+                viewer_series_uids,
+                level,
+                viewer_mode,
+                class,
+                on_view,
+              ))
+            _ -> Error(Nil)
+          }
+        }),
+      )
+    Some(types.Patient), _ -> element.none()
+    None, _ -> element.none()
+    Some(types.Study), _ | Some(types.Series), _ ->
       element.fragment(
         list.filter_map(viewers, fn(v) {
           case parse_kind(v.name) {
