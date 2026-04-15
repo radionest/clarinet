@@ -22,6 +22,7 @@ from clarinet.services.image.dicom_volume import (
     _apply_modality_lut,
     _extract_spacing,
     _sort_slices,
+    _spacing_sample_indices,
     read_dicom_series,
 )
 
@@ -327,6 +328,48 @@ class TestDicomVolume:
         ds = Dataset()
         spacing = _extract_spacing([ds])
         assert spacing == (1.0, 1.0, 1.0)
+
+    def test_extract_spacing_1mm(self) -> None:
+        """Computed spacing of 1.0 mm must not fall back to SliceThickness."""
+        datasets = []
+        for i in range(5):
+            ds = Dataset()
+            ds.PixelSpacing = [0.5, 0.5]
+            ds.SliceThickness = 2.0  # wrong header value
+            ds.ImagePositionPatient = [0.0, 0.0, float(i)]  # 1.0 mm spacing
+            datasets.append(ds)
+        spacing = _extract_spacing(datasets)
+        assert spacing == (0.5, 0.5, 1.0)
+
+    def test_extract_spacing_zero_falls_back(self) -> None:
+        """Identical Z positions (spacing=0) should fall back to SliceThickness."""
+        datasets = []
+        for _ in range(3):
+            ds = Dataset()
+            ds.PixelSpacing = [1.0, 1.0]
+            ds.SliceThickness = 3.0
+            ds.ImagePositionPatient = [0.0, 0.0, 0.0]  # all same position
+            datasets.append(ds)
+        spacing = _extract_spacing(datasets)
+        assert spacing == (1.0, 1.0, 3.0)
+
+    def test_extract_spacing_irregular_uses_median(self) -> None:
+        """Irregular slice spacing returns median of sampled distances."""
+        datasets = []
+        z_positions = [0.0, 1.0, 2.0, 5.0]  # jump at last pair
+        for z in z_positions:
+            ds = Dataset()
+            ds.PixelSpacing = [1.0, 1.0]
+            ds.ImagePositionPatient = [0.0, 0.0, z]
+            datasets.append(ds)
+        spacing = _extract_spacing(datasets)
+        # Distances: 1.0, 1.0, 3.0 → median = 1.0
+        assert spacing[2] == 1.0
+
+    def test_spacing_sample_indices(self) -> None:
+        assert _spacing_sample_indices(2) == [1]
+        assert _spacing_sample_indices(3) == [1, 2]
+        assert _spacing_sample_indices(100) == [1, 25, 50, 75, 99]
 
     def test_rescale_slope_intercept_applied(self, tmp_path: Path) -> None:
         """RescaleSlope/RescaleIntercept convert stored pixels to real-world values (HU)."""

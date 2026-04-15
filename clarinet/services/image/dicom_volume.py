@@ -97,12 +97,21 @@ def _sort_slices(datasets: Sequence[pydicom.Dataset]) -> list[pydicom.Dataset]:
             return list(datasets)
 
 
+def _spacing_sample_indices(n: int) -> list[int]:
+    """Return up to 5 indices for sampling inter-slice distances."""
+    if n <= 2:
+        return [1]
+    candidates = {1, n // 4, n // 2, 3 * n // 4, n - 1}
+    return sorted(i for i in candidates if 1 <= i < n)
+
+
 def _extract_spacing(datasets: Sequence[pydicom.Dataset]) -> tuple[float, float, float]:
     """Extract voxel spacing from DICOM datasets.
 
     Row and column spacing come from PixelSpacing.
-    Slice spacing is computed from ImagePositionPatient if available,
-    otherwise from SliceThickness.
+    Slice spacing is the median of sampled inter-slice distances from
+    ImagePositionPatient; falls back to SliceThickness when positions
+    are unavailable.
 
     Returns:
         (row_spacing, col_spacing, slice_spacing) in mm.
@@ -117,17 +126,30 @@ def _extract_spacing(datasets: Sequence[pydicom.Dataset]) -> tuple[float, float,
         logger.warning("PixelSpacing not found, defaulting to 1.0")
         row_sp, col_sp = 1.0, 1.0
 
-    # Slice spacing: prefer computed from positions
+    # Slice spacing: median of sampled pair distances
     slice_sp = 1.0
     if len(datasets) > 1:
-        try:
-            z0 = float(datasets[0].ImagePositionPatient[2])
-            z1 = float(datasets[1].ImagePositionPatient[2])
-            slice_sp = abs(z1 - z0)
-        except (AttributeError, TypeError, IndexError):
-            pass
+        sample_indices = _spacing_sample_indices(len(datasets))
+        spacings: list[float] = []
+        for i in sample_indices:
+            try:
+                z0 = float(datasets[i - 1].ImagePositionPatient[2])
+                z1 = float(datasets[i].ImagePositionPatient[2])
+                d = abs(z1 - z0)
+                if d > 0:
+                    spacings.append(d)
+            except (AttributeError, TypeError, IndexError):
+                continue
 
-    if slice_sp == 0.0 or (slice_sp == 1.0 and len(datasets) > 1):
+        if spacings:
+            arr = np.array(spacings)
+            slice_sp = float(np.median(arr))
+            if len(arr) > 1 and np.std(arr) / np.mean(arr) > 0.1:
+                logger.warning(f"Irregular slice spacing: {arr.tolist()}")
+        else:
+            slice_sp = 0.0  # no valid distances → trigger SliceThickness fallback
+
+    if slice_sp == 0.0:
         try:
             slice_sp = float(ds0.SliceThickness)
         except (AttributeError, TypeError):

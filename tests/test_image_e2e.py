@@ -568,6 +568,45 @@ class TestSpatialPreservation:
         assert pytest.approx(img2.spacing, abs=1e-4) == VOLUME_SPACING
         assert pytest.approx(img2.origin, abs=1e-4) == (0.0, 0.0, 0.0)
 
+    def test_dicom_to_nifti_spacing_1mm(self, tmp_path: Path) -> None:
+        """1.0 mm computed spacing must not be overridden by SliceThickness."""
+        dcm_dir = tmp_path / "dicom_1mm"
+        dcm_dir.mkdir()
+        n_slices = 8
+        for i in range(n_slices):
+            filename = dcm_dir / f"slice_{i:04d}.dcm"
+            file_meta = pydicom.Dataset()
+            file_meta.MediaStorageSOPClassUID = pydicom.uid.CTImageStorage
+            file_meta.MediaStorageSOPInstanceUID = pydicom.uid.generate_uid()
+            file_meta.TransferSyntaxUID = pydicom.uid.ExplicitVRLittleEndian
+
+            ds = FileDataset(str(filename), {}, file_meta=file_meta, preamble=b"\x00" * 128)
+            ds.Rows = 4
+            ds.Columns = 4
+            ds.BitsAllocated = 16
+            ds.BitsStored = 16
+            ds.HighBit = 15
+            ds.PixelRepresentation = 1
+            ds.SamplesPerPixel = 1
+            ds.PhotometricInterpretation = "MONOCHROME2"
+            ds.PixelSpacing = [0.75, 0.75]
+            ds.SliceThickness = 2.0  # wrong header — must be ignored
+            ds.ImagePositionPatient = [0.0, 0.0, float(i)]  # 1.0 mm spacing
+            ds.ImageOrientationPatient = [1, 0, 0, 0, 1, 0]
+            ds.InstanceNumber = i + 1
+            ds.PixelData = np.ones((4, 4), dtype=np.int16).tobytes()
+            pydicom.dcmwrite(str(filename), ds)
+
+        img = Image(dtype=np.int16)
+        img.read_dicom_series(dcm_dir)
+
+        nifti_path = tmp_path / "out_1mm.nii.gz"
+        img.save_as(nifti_path, FileType.NIFTI)
+
+        img2 = Image(dtype=np.int16)
+        img2.read(nifti_path)
+        assert pytest.approx(img2.spacing, abs=1e-4) == (0.75, 0.75, 1.0)
+
     def test_dicom_to_nrrd_spacing(self, dicom_series_dir: Path, tmp_path: Path) -> None:
         """DICOM → NRRD preserves spacing."""
         img = Image(dtype=np.int16)
