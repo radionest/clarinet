@@ -19,7 +19,7 @@ log_console_level = "INFO"
 
 # ── Database ─────────────────────────────────────────
 database_driver = "postgresql+asyncpg"
-# database_name, database_host, ... — see settings.local.toml (env vars)
+# database_name, database_host, ... — see settings.custom.toml (env vars)
 
 # ── Storage ──────────────────────────────────────────
 anon_id_prefix = "MY_PROJECT"

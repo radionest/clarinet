@@ -1,7 +1,6 @@
 ---
 paths:
   - "settings.toml"
-  - "settings.local.toml"
   - "settings.custom.toml"
   - "plan/**"
   - "examples/**"
@@ -29,7 +28,7 @@ generated project get section-specific guidance auto-loaded.
 ```
 my_project/
   settings.toml              # Dev config (SQLite, debug=true)
-  settings.local.toml        # Prod template (env var references)
+  settings.custom.toml       # Prod template (env var references)
   .env.example               # Copy to .env for secrets
   .gitignore
   plan/                      # Python config mode directory
