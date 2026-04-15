@@ -19,6 +19,7 @@ from clarinet.services.image import (
     coco_to_segmentation,
 )
 from clarinet.services.image.dicom_volume import (
+    _apply_modality_lut,
     _extract_spacing,
     _sort_slices,
     read_dicom_series,
@@ -326,6 +327,52 @@ class TestDicomVolume:
         ds = Dataset()
         spacing = _extract_spacing([ds])
         assert spacing == (1.0, 1.0, 1.0)
+
+    def test_rescale_slope_intercept_applied(self, tmp_path: Path) -> None:
+        """RescaleSlope/RescaleIntercept convert stored pixels to real-world values (HU)."""
+        dcm_dir = tmp_path / "rescale_dicom"
+        dcm_dir.mkdir()
+        stored_value = 1105
+        intercept = -1024.0
+        slope = 1.0
+        expected_hu = stored_value * slope + intercept  # 81.0
+
+        for i in range(2):
+            filename = dcm_dir / f"slice_{i:03d}.dcm"
+            file_meta = pydicom.Dataset()
+            file_meta.MediaStorageSOPClassUID = pydicom.uid.CTImageStorage
+            file_meta.MediaStorageSOPInstanceUID = pydicom.uid.generate_uid()
+            file_meta.TransferSyntaxUID = pydicom.uid.ExplicitVRLittleEndian
+
+            ds = FileDataset(str(filename), {}, file_meta=file_meta, preamble=b"\x00" * 128)
+            ds.Rows = 2
+            ds.Columns = 2
+            ds.BitsAllocated = 16
+            ds.BitsStored = 16
+            ds.HighBit = 15
+            ds.PixelRepresentation = 0
+            ds.SamplesPerPixel = 1
+            ds.PhotometricInterpretation = "MONOCHROME2"
+            ds.PixelSpacing = [1.0, 1.0]
+            ds.ImagePositionPatient = [0.0, 0.0, float(i)]
+            ds.ImageOrientationPatient = [1, 0, 0, 0, 1, 0]
+            ds.InstanceNumber = i + 1
+            ds.RescaleSlope = slope
+            ds.RescaleIntercept = intercept
+            ds.PixelData = np.full((2, 2), stored_value, dtype=np.uint16).tobytes()
+            pydicom.dcmwrite(str(filename), ds)
+
+        img = Image()
+        img.read_dicom_series(dcm_dir)
+        np.testing.assert_allclose(img.img, expected_hu)
+
+    def test_apply_modality_lut_no_rescale(self, dicom_dir: Path) -> None:
+        """Without RescaleSlope/Intercept, pixel values are returned unchanged."""
+        dcm_file = next(dicom_dir.glob("*.dcm"))
+        ds = pydicom.dcmread(str(dcm_file))
+        original = ds.pixel_array.copy()
+        result = _apply_modality_lut(ds)
+        np.testing.assert_array_equal(result, original)
 
 
 # ---------------------------------------------------------------------------

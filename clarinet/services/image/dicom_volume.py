@@ -59,7 +59,7 @@ def read_dicom_series(
     origin, direction = _extract_orientation(sorted_datasets)
 
     try:
-        volume = np.stack([ds.pixel_array for ds in sorted_datasets], axis=-1)
+        volume = np.stack([_apply_modality_lut(ds) for ds in sorted_datasets], axis=-1)
     except ValueError as e:
         raise ImageReadError(f"Inconsistent slice dimensions in {directory}") from e
 
@@ -68,6 +68,16 @@ def read_dicom_series(
         f"shape={volume.shape}, spacing={spacing}"
     )
     return volume, spacing, origin, direction
+
+
+def _apply_modality_lut(ds: pydicom.Dataset) -> np.ndarray:
+    """Apply RescaleSlope/RescaleIntercept to convert stored pixels to real-world values (e.g. HU)."""
+    arr = ds.pixel_array
+    slope = float(getattr(ds, "RescaleSlope", 1))
+    intercept = float(getattr(ds, "RescaleIntercept", 0))
+    if slope != 1 or intercept != 0:
+        return arr.astype(np.float32) * slope + intercept
+    return arr
 
 
 def _sort_slices(datasets: Sequence[pydicom.Dataset]) -> list[pydicom.Dataset]:
