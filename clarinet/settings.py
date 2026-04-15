@@ -117,6 +117,7 @@ class Settings(BaseSettings):
     rabbitmq_port: int = 5672
     rabbitmq_exchange: str = "clarinet"
     rabbitmq_management_port: int = 15672
+    rabbitmq_management_url: str | None = None
     rabbitmq_management_login: str | None = None
     rabbitmq_management_password: str | None = None
     rabbitmq_max_consumers: int = 0
@@ -320,6 +321,18 @@ class Settings(BaseSettings):
             self.rabbitmq_management_login or self.rabbitmq_login,
             self.rabbitmq_management_password or self.rabbitmq_password,
         )
+
+    @property
+    def rabbitmq_management_base_url(self) -> str:
+        """Base URL for RabbitMQ Management HTTP API.
+
+        Returns ``rabbitmq_management_url`` if set explicitly (e.g.
+        ``https://rmq.example.com:15672``), otherwise constructs
+        ``http://{rabbitmq_host}:{rabbitmq_management_port}``.
+        """
+        if self.rabbitmq_management_url:
+            return self.rabbitmq_management_url.rstrip("/")
+        return f"http://{self.rabbitmq_host}:{self.rabbitmq_management_port}"
 
     @property
     def effective_api_base_url(self) -> str:

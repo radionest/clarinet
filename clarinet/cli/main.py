@@ -866,12 +866,9 @@ async def _rabbitmq_clean(dry_run: bool = False) -> None:
     """Delete orphaned test queues/exchanges from RabbitMQ."""
     from clarinet.services.pipeline.rabbitmq_cleanup import cleanup_test_resources
 
-    login, password = settings.rabbitmq_management_auth
     result = await cleanup_test_resources(
-        host=settings.rabbitmq_host,
-        management_port=settings.rabbitmq_management_port,
-        login=login,
-        password=password,
+        base_url=settings.rabbitmq_management_base_url,
+        auth=settings.rabbitmq_management_auth,
         dry_run=dry_run,
     )
 
@@ -888,12 +885,9 @@ async def _rabbitmq_status() -> None:
     """Show RabbitMQ queue statistics."""
     from clarinet.services.pipeline.rabbitmq_cleanup import get_queue_stats
 
-    login, password = settings.rabbitmq_management_auth
     stats = await get_queue_stats(
-        host=settings.rabbitmq_host,
-        management_port=settings.rabbitmq_management_port,
-        login=login,
-        password=password,
+        base_url=settings.rabbitmq_management_base_url,
+        auth=settings.rabbitmq_management_auth,
     )
 
     print("RabbitMQ Queue Statistics")
@@ -908,12 +902,9 @@ async def _rabbitmq_purge_stale(queues: list[str] | None = None, force: bool = F
     """Purge messages from production queues (migration helper)."""
     from clarinet.services.pipeline.rabbitmq_cleanup import purge_queue_messages
 
-    login, password = settings.rabbitmq_management_auth
     result = await purge_queue_messages(
-        host=settings.rabbitmq_host,
-        management_port=settings.rabbitmq_management_port,
-        login=login,
-        password=password,
+        base_url=settings.rabbitmq_management_base_url,
+        auth=settings.rabbitmq_management_auth,
         queue_names=queues,
         dry_run=not force,
     )

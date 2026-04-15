@@ -1,7 +1,8 @@
-"""RabbitMQ test resource cleanup via Management HTTP API.
+"""RabbitMQ resource cleanup via Management HTTP API.
 
 Provides functions to list and delete orphaned test queues/exchanges
-left behind by crashed or interrupted test runs.
+left behind by crashed or interrupted test runs, and to purge messages
+from production queues during task-name migrations.
 """
 
 from urllib.parse import quote
@@ -15,6 +16,9 @@ TEST_QUEUE_PREFIXES = ("test_", "e2e_", "clarinet_startup_test.", "taskiq.")
 
 # Patterns identifying test resources (exchanges)
 TEST_EXCHANGE_PREFIXES = ("clarinet_test_", "clarinet_e2e_", "clarinet_startup_test")
+
+# Production queue prefix (matches broker.py constants)
+_PROD_QUEUE_PREFIX = "clarinet."
 
 
 async def list_test_queues(base_url: str, auth: tuple[str, str]) -> list[str]:
@@ -49,23 +53,16 @@ async def list_test_exchanges(base_url: str, auth: tuple[str, str]) -> list[str]
         return [e["name"] for e in resp.json() if e["name"].startswith(TEST_EXCHANGE_PREFIXES)]
 
 
-async def get_queue_stats(
-    host: str, management_port: int, login: str, password: str
-) -> dict[str, int]:
+async def get_queue_stats(base_url: str, auth: tuple[str, str]) -> dict[str, int]:
     """Get RabbitMQ queue statistics.
 
     Args:
-        host: RabbitMQ host.
-        management_port: Management API port (typically 15672).
-        login: Management API login.
-        password: Management API password.
+        base_url: RabbitMQ Management API base URL.
+        auth: Tuple of (login, password).
 
     Returns:
         Dict with total_queues, test_queues, total_exchanges, test_exchanges counts.
     """
-    base_url = f"http://{host}:{management_port}"
-    auth = (login, password)
-
     async with httpx.AsyncClient(auth=auth, timeout=10) as client:
         q_resp = await client.get(f"{base_url}/api/queues/%2F?columns=name,messages,consumers")
         q_resp.raise_for_status()
@@ -89,28 +86,21 @@ async def get_queue_stats(
 
 
 async def cleanup_test_resources(
-    host: str,
-    management_port: int,
-    login: str,
-    password: str,
+    base_url: str,
+    auth: tuple[str, str],
     *,
     dry_run: bool = False,
 ) -> dict[str, int]:
     """Delete all test queues and exchanges from RabbitMQ.
 
     Args:
-        host: RabbitMQ host.
-        management_port: Management API port (typically 15672).
-        login: Management API login.
-        password: Management API password.
+        base_url: RabbitMQ Management API base URL.
+        auth: Tuple of (login, password).
         dry_run: If True, only report what would be deleted.
 
     Returns:
         Dict with queues_deleted, exchanges_deleted (and *_found for dry_run).
     """
-    base_url = f"http://{host}:{management_port}"
-    auth = (login, password)
-
     queues = await list_test_queues(base_url, auth)
     exchanges = await list_test_exchanges(base_url, auth)
 
@@ -149,15 +139,9 @@ async def cleanup_test_resources(
     return {"queues_deleted": deleted_q, "exchanges_deleted": deleted_e}
 
 
-# Production queue prefix (matches broker.py constants)
-_PROD_QUEUE_PREFIX = "clarinet."
-
-
 async def purge_queue_messages(
-    host: str,
-    management_port: int,
-    login: str,
-    password: str,
+    base_url: str,
+    auth: tuple[str, str],
     queue_names: list[str] | None = None,
     *,
     dry_run: bool = False,
@@ -168,10 +152,8 @@ async def purge_queue_messages(
     queues if none specified) while keeping the queues themselves intact.
 
     Args:
-        host: RabbitMQ host.
-        management_port: Management API port (typically 15672).
-        login: Management API login.
-        password: Management API password.
+        base_url: RabbitMQ Management API base URL.
+        auth: Tuple of (login, password).
         queue_names: Specific queues to purge. If ``None``, purges all
             ``clarinet.*`` queues.
         dry_run: If ``True``, only report what would be purged.
@@ -179,9 +161,6 @@ async def purge_queue_messages(
     Returns:
         Dict with ``queues_purged`` count and ``messages_purged`` total.
     """
-    base_url = f"http://{host}:{management_port}"
-    auth = (login, password)
-
     async with httpx.AsyncClient(auth=auth, timeout=10) as client:
         resp = await client.get(f"{base_url}/api/queues/%2F?columns=name,messages")
         resp.raise_for_status()
@@ -217,6 +196,10 @@ async def purge_queue_messages(
                     purged += 1
                     total_messages += q.get("messages", 0)
                     logger.info(f"Purged {q['messages']} messages from: {q['name']}")
+                else:
+                    logger.warning(
+                        f"Unexpected status purging {q['name']}: {resp.status_code} {resp.text}"
+                    )
             except Exception:
                 logger.warning(f"Failed to purge queue: {q['name']}")
 

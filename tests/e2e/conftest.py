@@ -39,10 +39,8 @@ async def _cleanup_orphaned_e2e_resources() -> AsyncGenerator[None]:
         from clarinet.services.pipeline.rabbitmq_cleanup import cleanup_test_resources
 
         result = await cleanup_test_resources(
-            host=RABBITMQ_HOST,
-            management_port=15672,
-            login="clarinet",
-            password="clarinet",
+            base_url=f"http://{RABBITMQ_HOST}:15672",
+            auth=("clarinet", "clarinet"),
         )
         if result["queues_deleted"] or result["exchanges_deleted"]:
             from loguru import logger
