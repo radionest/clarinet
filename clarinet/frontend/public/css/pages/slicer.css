@@ -1,0 +1,25 @@
+/* ============================
+   Slicer toolbar
+   ============================ */
+
+.slicer-toolbar {
+    background: white;
+    border: 1px solid var(--border-color);
+    border-left: 4px solid var(--accent-color);
+    border-radius: var(--radius-md);
+    padding: var(--spacing-md);
+    margin-bottom: var(--spacing-md);
+}
+
+.slicer-toolbar-header {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    margin-bottom: var(--spacing-sm);
+    font-weight: 600;
+}
+
+.slicer-toolbar-actions {
+    display: flex;
+    gap: var(--spacing-sm);
+}

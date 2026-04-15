@@ -1,0 +1,57 @@
+/* ============================
+   Notifications (toast, right side)
+   ============================ */
+
+.notifications {
+    position: fixed;
+    top: calc(var(--navbar-height) + var(--spacing-md));
+    right: var(--spacing-md);
+    z-index: 1500;
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-sm);
+    max-width: 400px;
+    width: 100%;
+    pointer-events: none;
+}
+
+.notification {
+    padding: var(--spacing-md);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-md);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: var(--spacing-sm);
+    animation: slide-in-right 0.3s ease-out;
+    pointer-events: auto;
+}
+
+.notification-error {
+    background: #fef2f2;
+    border-left: 4px solid var(--danger-color);
+    color: #991b1b;
+}
+
+.notification-success {
+    background: #f0fdf4;
+    border-left: 4px solid var(--success-color);
+    color: #166534;
+}
+
+.notification-close {
+    background: none;
+    border: none;
+    font-size: 1.25rem;
+    cursor: pointer;
+    color: inherit;
+    opacity: 0.6;
+    padding: 0 var(--spacing-xs);
+    line-height: 1;
+    flex-shrink: 0;
+    transition: opacity 0.2s;
+
+    &:hover {
+        opacity: 1;
+    }
+}
