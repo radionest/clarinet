@@ -7,6 +7,7 @@ import time (optional) and anonymization time (always).
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Self, TypeVar
@@ -87,7 +88,8 @@ class SeriesFilter:
     Rules applied in order:
     1. Modality check (blocklist)
     2. Unknown modality policy
-    3. Minimum instance count
+    3. Excluded description patterns
+    4. Minimum instance count
     """
 
     def __init__(
@@ -95,6 +97,7 @@ class SeriesFilter:
         excluded_modalities: frozenset[str] | None = None,
         min_instance_count: int | None = None,
         unknown_modality_policy: str | None = None,
+        excluded_descriptions: list[str] | None = None,
     ):
         self.excluded_modalities = frozenset(
             m.upper() for m in (excluded_modalities or settings.series_filter_excluded_modalities)
@@ -109,6 +112,14 @@ class SeriesFilter:
             if unknown_modality_policy is not None
             else settings.series_filter_unknown_modality_policy
         )
+        patterns = (
+            excluded_descriptions
+            if excluded_descriptions is not None
+            else settings.series_filter_excluded_descriptions
+        )
+        self._excluded_description_patterns: list[tuple[str, re.Pattern[str]]] = [
+            (p, re.compile(p, re.IGNORECASE)) for p in patterns
+        ]
 
     def filter(
         self, items: list[T], to_criteria: Callable[[T], SeriesFilterCriteria]
@@ -145,7 +156,16 @@ class SeriesFilter:
         if not modality and self.unknown_modality_policy == "exclude":
             return "Unknown modality (NULL)"
 
-        # Rule 3: minimum instance count
+        # Rule 3: excluded description patterns
+        if c.series_description is not None and self._excluded_description_patterns:
+            for pattern_str, compiled in self._excluded_description_patterns:
+                if compiled.search(c.series_description):
+                    return (
+                        f"Series description '{c.series_description}' "
+                        f"matches excluded pattern '{pattern_str}'"
+                    )
+
+        # Rule 4: minimum instance count
         if (
             self.min_instance_count is not None
             and c.instance_count is not None
