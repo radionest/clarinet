@@ -117,6 +117,8 @@ class Settings(BaseSettings):
     rabbitmq_port: int = 5672
     rabbitmq_exchange: str = "clarinet"
     rabbitmq_management_port: int = 15672
+    rabbitmq_management_login: str | None = None
+    rabbitmq_management_password: str | None = None
     rabbitmq_max_consumers: int = 0
 
     # Queue requirements
@@ -292,6 +294,32 @@ class Settings(BaseSettings):
     # Project customization
     project_path: Path | None = None
     project_static_path: Path | None = None
+
+    @property
+    def pipeline_task_namespace(self) -> str:
+        """Normalized project name for use as a pipeline task name prefix.
+
+        Converts ``project_name`` to lowercase, replaces spaces and hyphens
+        with underscores, and strips non-alphanumeric characters.
+        Falls back to ``'clarinet'`` if the result is empty.
+        """
+        import re
+
+        name = self.project_name.lower().replace(" ", "_").replace("-", "_")
+        name = re.sub(r"[^a-z0-9_]", "", name)
+        return name or "clarinet"
+
+    @property
+    def rabbitmq_management_auth(self) -> tuple[str, str]:
+        """Credentials for RabbitMQ Management HTTP API.
+
+        Falls back to AMQP credentials when management-specific ones
+        are not configured.
+        """
+        return (
+            self.rabbitmq_management_login or self.rabbitmq_login,
+            self.rabbitmq_management_password or self.rabbitmq_password,
+        )
 
     @property
     def effective_api_base_url(self) -> str:

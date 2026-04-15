@@ -501,7 +501,8 @@ class FlowRecord:
         """
         from clarinet.services.pipeline import Pipeline, get_pipeline
 
-        pipeline_name = f"_task:{task_func.task_name}"
+        func_name = task_func.task_name.rsplit(":", 1)[-1]
+        pipeline_name = f"_task:{func_name}"
         if get_pipeline(pipeline_name) is None:
             Pipeline(pipeline_name).step(task_func)
 
