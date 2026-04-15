@@ -56,3 +56,32 @@ async def test_auto_id_fills_gap(test_session) -> None:
     await repo.create(p2)
 
     assert p2.auto_id == 101
+
+
+@pytest.mark.asyncio
+async def test_auto_id_no_reuse_after_delete(test_session) -> None:
+    """Deleting a patient does not cause auto_id to decrease."""
+    repo = PatientRepository(test_session)
+
+    p1 = Patient(id="DEL_PAT_001", name="First")
+    await repo.create(p1)
+    assert p1.auto_id == 1
+
+    await repo.delete(p1)
+
+    p2 = Patient(id="DEL_PAT_002", name="Second")
+    await repo.create(p2)
+    assert p2.auto_id == 2  # NOT 1
+
+
+@pytest.mark.asyncio
+async def test_explicit_auto_id_advances_counter(test_session) -> None:
+    """Explicit high auto_id advances the counter to prevent future collision."""
+    repo = PatientRepository(test_session)
+
+    p1 = Patient(id="ADV_PAT_001", name="Explicit", auto_id=50)
+    await repo.create(p1)
+
+    p2 = Patient(id="ADV_PAT_002", name="Auto")
+    await repo.create(p2)
+    assert p2.auto_id == 51

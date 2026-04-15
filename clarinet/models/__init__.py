@@ -14,6 +14,9 @@ from .auth import AccessToken
 # Base models
 from .base import BaseModel, DicomQueryLevel, DicomUID, RecordStatus, ViewerMode
 
+# Auto-ID counters
+from .counter import AutoIdCounter, patient_auto_id_seq
+
 # File schema models
 from .file_schema import (
     FileDefinition,
@@ -74,6 +77,7 @@ from .user import User, UserCreate, UserRead, UserRole, UserRoleCreate, UserRole
 __all__ = [
     "AccessToken",
     "AdminStats",
+    "AutoIdCounter",
     "BaseModel",
     "DicomQueryLevel",
     "DicomUID",
@@ -126,4 +130,5 @@ __all__ = [
     "UserRoleInfo",
     "UserRolesLink",
     "ViewerMode",
+    "patient_auto_id_seq",
 ]

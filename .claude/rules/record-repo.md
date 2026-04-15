@@ -46,6 +46,11 @@ Beyond `BaseRepository`, `RecordRepository` has:
 
 ## PatientRepository: auto_id Generation
 
-`PatientRepository.create()` overrides the base `create()` to auto-assign `auto_id = MAX(auto_id) + 1`
-when `entity.auto_id is None`. Retries up to 3 times on `IntegrityError` (UNIQUE conflict).
-If `auto_id` is explicitly provided, falls through to `super().create()` without the MAX query.
+`PatientRepository.create()` overrides the base `create()` to auto-assign `auto_id` via a
+**monotonic counter** that never decreases (even after patient deletion):
+- **PostgreSQL**: native `Sequence` (`patient_auto_id_seq`) — `nextval()`.
+- **SQLite**: `AutoIdCounter` table (single-row counter, lazy-seeded from `MAX(auto_id)`).
+
+Retries up to 3 times on `IntegrityError` (UNIQUE conflict) as a safety net.
+If `auto_id` is explicitly provided, `_advance_counter()` advances the sequence/counter
+to at least that value before inserting, preventing future collisions.
