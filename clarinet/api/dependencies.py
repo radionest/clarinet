@@ -28,6 +28,7 @@ from clarinet.services.anonymization_service import AnonymizationService
 from clarinet.services.dicom import DicomClient
 from clarinet.services.dicom.models import DicomNode
 from clarinet.services.dicomweb import DicomWebCache, DicomWebProxyService
+from clarinet.services.photo_service import PhotoService
 from clarinet.services.record_service import RecordService
 from clarinet.services.record_type_service import RecordTypeService
 from clarinet.services.recordflow.engine import RecordFlowEngine
@@ -217,6 +218,17 @@ RecordServiceDep = Annotated[RecordService, Depends(get_record_service)]
 RecordTypeServiceDep = Annotated[RecordTypeService, Depends(get_record_type_service)]
 AdminServiceDep = Annotated[AdminService, Depends(get_admin_service)]
 SlicerServiceDep = Annotated[SlicerService, Depends(get_slicer_service)]
+
+
+# Photo service factory
+
+
+async def get_photo_service() -> PhotoService:
+    """Get photo service instance."""
+    return PhotoService()
+
+
+PhotoServiceDep = Annotated[PhotoService, Depends(get_photo_service)]
 
 
 # DICOM dependencies

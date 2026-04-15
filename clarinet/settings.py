@@ -95,6 +95,15 @@ class Settings(BaseSettings):
         """Resolve relative storage_path to absolute so external tools get correct paths."""
         return str(Path(v).resolve())
 
+    # Photo upload settings
+    photos_max_size_mb: int = 10
+    photos_allowed_types: list[str] = [
+        "image/jpeg",
+        "image/png",
+        "image/heic",
+        "image/webp",
+    ]
+
     anon_names_list: str | None = None
 
     # Frontend settings
