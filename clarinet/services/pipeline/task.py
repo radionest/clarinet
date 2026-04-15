@@ -125,6 +125,7 @@ def pipeline_task(
             else f"{settings.pipeline_task_namespace}:{fn.__name__}"
         )
         decorated = broker.task(**kw)(wrapper)
+        decorated._pipeline_queue = queue
         register_task(decorated)
         return decorated
 
