@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from clarinet.models.record import Record
 from clarinet.repositories.study_repository import StudyRepository
+from clarinet.repositories.user_repository import UserRepository
 from clarinet.utils.logger import logger
 
 
@@ -33,6 +34,7 @@ class HydrationContext:
     """
 
     study_repo: StudyRepository
+    user_repo: UserRepository
 
     @classmethod
     def from_session(cls, session: AsyncSession) -> HydrationContext:
@@ -41,7 +43,10 @@ class HydrationContext:
         Args:
             session: Async DB session for the current request.
         """
-        return cls(study_repo=StudyRepository(session))
+        return cls(
+            study_repo=StudyRepository(session),
+            user_repo=UserRepository(session),
+        )
 
 
 type HydratorFunc = Callable[
