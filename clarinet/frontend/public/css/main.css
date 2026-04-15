@@ -714,6 +714,59 @@ h6 { font-size: 1rem; }
     margin-top: var(--spacing-xs);
 }
 
+/* Array (list) fields */
+.array-item {
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 0.75rem 1rem;
+    margin-bottom: 0.75rem;
+    background: var(--bg-secondary, #f9fafb);
+}
+
+.array-item-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.array-item-index {
+    font-weight: 600;
+}
+
+.remove-array-item {
+    margin-left: auto;
+    color: var(--danger-color);
+    background: none;
+    border: 1px solid var(--danger-color);
+    border-radius: var(--radius-md);
+    padding: 0.25rem 0.5rem;
+    cursor: pointer;
+    font-size: 0.875rem;
+}
+
+.remove-array-item:hover {
+    background: var(--danger-color);
+    color: white;
+}
+
+.add-array-item {
+    margin-top: 0.5rem;
+    padding: 0.375rem 0.75rem;
+    border: 1px dashed var(--border-color);
+    border-radius: var(--radius-md);
+    background: none;
+    cursor: pointer;
+    color: var(--text-secondary);
+}
+
+.add-array-item:hover {
+    border-color: var(--primary-color);
+    color: var(--primary-color);
+}
+
 /* ============================
    10. Buttons (extended)
    ============================ */
