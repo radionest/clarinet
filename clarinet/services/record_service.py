@@ -334,6 +334,129 @@ class RecordService:
 
         return list(changed), new_checksums
 
+    async def delete_record_cascade(self, record_id: int) -> tuple[list[int], int]:
+        """Delete a record, all its descendants, and their OUTPUT files.
+
+        Check-and-delete runs inside a single DB transaction with row locks
+        on the whole subtree (``SELECT ... FOR UPDATE``), so a concurrent
+        transaction cannot flip a record to ``inwork`` between the guard and
+        the delete. If any record in the subtree is in ``inwork`` status the
+        operation aborts and nothing is deleted.
+
+        Files on disk are unlinked AFTER the DB commit; a filesystem failure
+        at that stage is logged but does not undo the DB delete — the API
+        response reflects the committed DB state, with orphan files at worst.
+
+        Args:
+            record_id: ID of the subtree root to delete.
+
+        Returns:
+            Tuple of (deleted record IDs in BFS order, number of files removed).
+
+        Raises:
+            RecordNotFoundError: If the root record doesn't exist.
+            BusinessRuleViolationError: If any record in the subtree is inwork.
+        """
+        from clarinet.utils.fs import run_in_fs_thread
+
+        records = await self.repo.collect_descendants(record_id, for_update=True)
+
+        inwork_ids = [r.id for r in records if r.status == RecordStatus.inwork]
+        if inwork_ids:
+            raise BusinessRuleViolationError(
+                f"Cannot delete record {record_id}: subtree contains "
+                f"{len(inwork_ids)} inwork record(s) (ids={inwork_ids})"
+            )
+
+        # Resolve the root's parent (outside the subtree) so pattern
+        # resolution for the subtree root can use parent-derived fields.
+        root_parent_read: RecordRead | None = None
+        root_parent_id = records[0].parent_record_id if records else None
+        if root_parent_id is not None:
+            parent = await self.repo.get_with_relations(root_parent_id)
+            root_parent_read = RecordRead.model_validate(parent)
+
+        # BFS order: parents appear before children — build reads iteratively
+        # so children can look up parent_read without a second pass.
+        reads: dict[int, RecordRead] = {}
+        paths_to_unlink: list[Path] = []
+        for record in records:
+            if record.id is None:
+                continue
+            record_read = RecordRead.model_validate(record)
+            reads[record.id] = record_read
+            if record.parent_record_id is None:
+                parent_read = None
+            else:
+                parent_read = reads.get(record.parent_record_id, root_parent_read)
+            paths_to_unlink.extend(await self._collect_output_file_paths(record_read, parent_read))
+
+        # Deduplicate — glob patterns (multiple=True) on shared working_dirs
+        # can yield the same path from multiple records in the subtree.
+        paths_to_unlink = list(dict.fromkeys(paths_to_unlink))
+
+        deleted_ids = [r.id for r in records if r.id is not None]
+        # Keep the transaction open: commit only after we've issued the DELETE,
+        # so the row locks acquired above cover the whole check-and-delete.
+        await self.repo.delete_records(deleted_ids, commit=False)
+        await self.repo.session.commit()
+
+        files_removed = 0
+        for p in paths_to_unlink:
+            try:
+                await run_in_fs_thread(p.unlink)
+            except FileNotFoundError:
+                continue
+            except OSError as exc:
+                logger.warning(
+                    f"Failed to delete output file {p} during cascade delete "
+                    f"of record {record_id}: {exc}"
+                )
+                continue
+            files_removed += 1
+            logger.info(f"Deleted output file {p} during cascade delete of record {record_id}")
+
+        logger.info(
+            f"Cascade-deleted record {record_id}: {len(deleted_ids)} records, "
+            f"{files_removed} files removed"
+        )
+        return deleted_ids, files_removed
+
+    async def _collect_output_file_paths(
+        self,
+        record_read: RecordRead,
+        parent_read: RecordRead | None,
+    ) -> list[Path]:
+        """Resolve OUTPUT file paths that exist on disk for a single record.
+
+        Shared between ``clear_output_files`` and ``delete_record_cascade``.
+        """
+        from clarinet.services.file_validation import _build_working_dirs
+        from clarinet.utils.file_patterns import glob_file_paths, resolve_pattern
+        from clarinet.utils.fs import run_in_fs_thread
+
+        output_defs = [
+            fd for fd in (record_read.record_type.file_registry or []) if fd.role == FileRole.OUTPUT
+        ]
+        if not output_defs:
+            return []
+
+        working_dir = Path(record_read.working_folder)
+        working_dirs = _build_working_dirs(record_read)
+
+        resolved: list[Path] = []
+        for fd in output_defs:
+            target_dir = (
+                working_dirs[fd.level] if fd.level and fd.level in working_dirs else working_dir
+            )
+            if fd.multiple:
+                resolved.extend(await run_in_fs_thread(glob_file_paths, fd, target_dir))
+            else:
+                file_path = target_dir / resolve_pattern(fd.pattern, record_read, parent_read)
+                if await run_in_fs_thread(file_path.is_file):
+                    resolved.append(file_path)
+        return resolved
+
     async def clear_output_files(self, record_id: int) -> tuple[list[str], int]:
         """Delete OUTPUT files from disk and their RecordFileLink rows.
 
@@ -349,8 +472,6 @@ class RecordService:
         Raises:
             BusinessRuleViolationError: If the record is in ``finished`` status.
         """
-        from clarinet.services.file_validation import _build_working_dirs
-        from clarinet.utils.file_patterns import glob_file_paths, resolve_pattern
         from clarinet.utils.fs import run_in_fs_thread
 
         record = await self.repo.get_with_relations(record_id)
@@ -359,14 +480,6 @@ class RecordService:
             raise BusinessRuleViolationError("Cannot clear output files for a finished record")
 
         record_read = RecordRead.model_validate(record)
-        output_defs = [
-            fd for fd in (record_read.record_type.file_registry or []) if fd.role == FileRole.OUTPUT
-        ]
-        if not output_defs:
-            return [], 0
-
-        working_dir = Path(record_read.working_folder)
-        working_dirs = _build_working_dirs(record_read)
 
         # Resolve parent for pattern fallback
         parent_read: RecordRead | None = None
@@ -374,27 +487,16 @@ class RecordService:
             parent = await self.repo.get_with_relations(record.parent_record_id)
             parent_read = RecordRead.model_validate(parent)
 
+        paths = await self._collect_output_file_paths(record_read, parent_read)
+
         deleted_files: list[str] = []
-        for fd in output_defs:
-            target_dir = (
-                working_dirs[fd.level] if fd.level and fd.level in working_dirs else working_dir
-            )
-
-            if fd.multiple:
-                paths = await run_in_fs_thread(glob_file_paths, fd, target_dir)
-            else:
-                resolved = resolve_pattern(fd.pattern, record_read, parent_read)
-                file_path = target_dir / resolved
-                exists = await run_in_fs_thread(file_path.is_file)
-                paths = [file_path] if exists else []
-
-            for p in paths:
-                try:
-                    await run_in_fs_thread(p.unlink)
-                except FileNotFoundError:
-                    continue
-                deleted_files.append(p.name)
-                logger.info(f"Deleted output file {p} for record {record_id}")
+        for p in paths:
+            try:
+                await run_in_fs_thread(p.unlink)
+            except FileNotFoundError:
+                continue
+            deleted_files.append(p.name)
+            logger.info(f"Deleted output file {p} for record {record_id}")
 
         deleted_links = await self.repo.delete_output_file_links(record)
 

@@ -38,6 +38,14 @@ pub fn can_fail_record(record: Record, user: Option(User)) -> Bool {
   }
 }
 
+/// Check if the current user can delete a record (admin-only cascade).
+pub fn can_delete_record(_record: Record, user: Option(User)) -> Bool {
+  case user {
+    Some(u) -> u.is_superuser
+    None -> False
+  }
+}
+
 /// Check if an admin can restart a record (Finished or Failed + auto/slicer + superuser)
 pub fn can_restart_record(record: Record, user: Option(User)) -> Bool {
   let has_slicer = case record.record_type {

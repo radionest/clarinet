@@ -11,6 +11,7 @@ from clarinet.models import Record, RecordRead
 from clarinet.models.admin import (
     AdminStats,
     ClearOutputFilesResult,
+    DeleteRecordResult,
     RecordTypeStats,
     RoleMatrixResponse,
 )
@@ -108,6 +109,24 @@ async def admin_unassign_record_user(
     """
     record, _ = await service.unassign_user(record_id)
     return record
+
+
+@router.delete(
+    "/records/{record_id}",
+    response_model=DeleteRecordResult,
+    responses={409: {"description": "Subtree contains a record in 'inwork' status"}},
+)
+async def delete_record_cascade(
+    record_id: Annotated[int, PathParam(ge=1, le=2147483647)],
+    _current_user: SuperUserDep,
+    service: RecordServiceDep,
+) -> DeleteRecordResult:
+    """Delete a record with all descendants and their OUTPUT files (superuser only).
+
+    Aborts with 409 Conflict if any record in the subtree is in ``inwork`` status.
+    """
+    deleted_ids, files_removed = await service.delete_record_cascade(record_id)
+    return DeleteRecordResult(deleted_ids=deleted_ids, files_removed=files_removed)
 
 
 @router.delete("/records/{record_id}/output-files", response_model=ClearOutputFilesResult)
