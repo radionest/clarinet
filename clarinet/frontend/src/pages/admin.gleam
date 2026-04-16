@@ -539,7 +539,10 @@ fn assign_cell(
   is_editing is_editing: Bool,
 ) -> Element(Msg) {
   case is_editing {
-    True -> user_dropdown(shared, record_id)
+    True ->
+      html.div([attribute.class("assign-cell")], [
+        user_dropdown(shared, record_id),
+      ])
     False ->
       case user_id {
         Some(uid) -> {
