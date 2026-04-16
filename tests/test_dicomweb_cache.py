@@ -691,3 +691,60 @@ class TestStudyLevelCache:
 
         # Client should have been called exactly once
         assert mock_client.get_study_to_memory.call_count == 1
+
+
+class TestStudyUidValidation:
+    """Test compensatory guard against study_uid/series_uid pair mismatch.
+
+    Defends OHIF from ``HangingProtocolService`` crashes when a masked
+    (anon) StudyInstanceUID is paired with an original SeriesInstanceUID
+    — the retrieved DICOM would carry the original StudyInstanceUID and
+    break OHIF's displaySet → study linkage.
+    """
+
+    def test_validator_passes_on_match(self) -> None:
+        ds = MagicMock()
+        ds.StudyInstanceUID = "study1"
+        DicomWebCache._validate_series_in_study("study1", "series1", {"sop1": ds})
+
+    def test_validator_raises_on_mismatch(self) -> None:
+        ds = MagicMock()
+        ds.StudyInstanceUID = "real_study"
+        with pytest.raises(RuntimeError, match="does not belong to the requested study"):
+            DicomWebCache._validate_series_in_study("anon_study", "series1", {"sop1": ds})
+
+    def test_validator_silent_when_attribute_missing(self) -> None:
+        # Plain MagicMock auto-creates a non-str attribute — best-effort validator
+        # must not raise on fixtures without a real StudyInstanceUID.
+        instances = {f"1.2.3.{i}": MagicMock() for i in range(2)}
+        DicomWebCache._validate_series_in_study("study1", "series1", instances)
+
+    def test_validator_silent_on_empty_instances(self) -> None:
+        DicomWebCache._validate_series_in_study("study1", "series1", {})
+
+    @pytest.mark.asyncio
+    async def test_ensure_series_cached_rejects_mismatched_cget(self, cache: DicomWebCache) -> None:
+        """C-GET that returns a series under a different StudyInstanceUID must fail loudly."""
+        ds = MagicMock()
+        ds.SOPInstanceUID = "sop1"
+        ds.StudyInstanceUID = "real_study"  # PACS returned original, not anon
+
+        mock_result = MagicMock()
+        mock_result.instances = {"sop1": ds}
+        mock_result.num_completed = 1
+        mock_result.status = 0x0000
+
+        mock_client = MagicMock()
+        mock_client.get_series_to_memory = AsyncMock(return_value=mock_result)
+        mock_pacs = MagicMock()
+
+        with pytest.raises(RuntimeError, match="does not belong to the requested study"):
+            await cache.ensure_series_cached(
+                study_uid="anon_study",
+                series_uid="series1",
+                client=mock_client,
+                pacs=mock_pacs,
+            )
+
+        # Failed validation must not leave a partial entry in memory
+        assert cache._get_from_memory("anon_study", "series1") is None

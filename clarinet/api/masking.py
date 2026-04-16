@@ -52,34 +52,36 @@ def mask_record_patient_data(record: RecordRead, user: User) -> RecordRead:
 
     masked_patient = record.patient.model_copy(update=patient_update)
 
-    # Build masked study
-    masked_study = record.study
-    if record.study is not None and record.study.anon_uid is not None:
-        masked_study = record.study.model_copy(update={"study_uid": record.study.anon_uid})
-
-    # Build masked series
-    masked_series = record.series
-    if record.series is not None and record.series.anon_uid is not None:
-        masked_series = record.series.model_copy(update={"series_uid": record.series.anon_uid})
-
-    # Build top-level updates
-    updates: dict = {
-        "patient": masked_patient,
-        "study": masked_study,
-        "series": masked_series,
-    }
-
-    # Mask top-level patient_id
+    updates: dict = {"patient": masked_patient}
     if record.patient.anon_id is not None:
         updates["patient_id"] = record.patient.anon_id
 
-    # Mask top-level study_uid
-    if record.study is not None and record.study.anon_uid is not None:
+    # Study + series are masked together to keep the (study_uid, series_uid) pair
+    # consistent. If study has no anon_uid we leave both untouched — otherwise
+    # the UI could end up with an anonymized study pointing at an original
+    # series (or vice versa), which breaks OHIF because the series' embedded
+    # StudyInstanceUID won't match the URL's StudyInstanceUID.
+    study_is_masked = record.study is not None and record.study.anon_uid is not None
+    if study_is_masked:
+        assert record.study is not None and record.study.anon_uid is not None
+        updates["study"] = record.study.model_copy(update={"study_uid": record.study.anon_uid})
         updates["study_uid"] = record.study.anon_uid
 
-    # Mask top-level series_uid
-    if record.series is not None and record.series.anon_uid is not None:
-        updates["series_uid"] = record.series.anon_uid
+        if record.series is not None:
+            if record.series.anon_uid is not None:
+                updates["series"] = record.series.model_copy(
+                    update={"series_uid": record.series.anon_uid}
+                )
+                updates["series_uid"] = record.series.anon_uid
+            else:
+                # Series has no anon_uid while study is anonymized — typically
+                # because SeriesFilter excluded it during anonymization (e.g.
+                # localizer, low instance count). Leaking the original
+                # SeriesInstanceUID under the anon StudyInstanceUID would crash
+                # the OHIF HangingProtocolService (study_uid mismatch between
+                # URL and series metadata).
+                updates["series"] = None
+                updates["series_uid"] = None
 
     return record.model_copy(update=updates)
 
