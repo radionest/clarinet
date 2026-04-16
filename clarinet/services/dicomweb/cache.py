@@ -64,6 +64,37 @@ class DicomWebCache:
     def _series_dir(self, study_uid: str, series_uid: str) -> Path:
         return self._base_dir / study_uid / series_uid
 
+    @staticmethod
+    def _validate_series_in_study(
+        study_uid: str, series_uid: str, instances: dict[str, Any]
+    ) -> None:
+        """Raise if any instance's StudyInstanceUID differs from study_uid.
+
+        Compensatory guard against inconsistent caller input — e.g. an anonymized
+        StudyInstanceUID paired with an original SeriesInstanceUID. Without this,
+        OHIF would receive series metadata whose embedded StudyInstanceUID
+        doesn't match the one in its request URL and crash with
+        ``Cannot read properties of undefined (reading 'StudyInstanceUID')`` in
+        ``HangingProtocolService._setProtocol``.
+
+        Scans every instance (cheap dict iteration, n usually ≤ few hundred)
+        to catch mixed payloads where only some instances are mismatched.
+        Best-effort: silently passes when instances have no usable
+        StudyInstanceUID attribute (e.g. MagicMock fixtures in unit tests).
+        """
+        for sop_uid, ds in instances.items():
+            actual = getattr(ds, "StudyInstanceUID", None)
+            if not isinstance(actual, str):
+                continue
+            if actual != study_uid:
+                raise RuntimeError(
+                    f"Instance {sop_uid} of series {series_uid} does not "
+                    f"belong to the requested study {study_uid}: "
+                    f"StudyInstanceUID is {actual}. This usually indicates "
+                    "an anonymized study paired with a non-anonymized "
+                    "series UID."
+                )
+
     def _cache_key(self, study_uid: str, series_uid: str) -> str:
         return f"{study_uid}/{series_uid}"
 
@@ -314,6 +345,7 @@ class DicomWebCache:
                     f"dcm_anon hit for series {series_uid} — "
                     f"loading {len(anon_instances)} instances to memory"
                 )
+                self._validate_series_in_study(study_uid, series_uid, anon_instances)
                 return self._put_to_memory(
                     study_uid, series_uid, anon_instances, disk_persisted=True
                 )
@@ -325,6 +357,7 @@ class DicomWebCache:
                     f"Disk cache hit for series {series_uid} — "
                     f"loading {len(disk_instances)} instances to memory"
                 )
+                self._validate_series_in_study(study_uid, series_uid, disk_instances)
                 return self._put_to_memory(
                     study_uid, series_uid, disk_instances, disk_persisted=True
                 )
@@ -343,6 +376,8 @@ class DicomWebCache:
                 raise RuntimeError(
                     f"C-GET returned 0 instances for series {series_uid} (status: {result.status})"
                 )
+
+            self._validate_series_in_study(study_uid, series_uid, result.instances)
 
             # Store in memory immediately
             entry = self._put_to_memory(
