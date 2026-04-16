@@ -15,6 +15,7 @@ from tests.utils.factories import (
     make_study,
     seed_record,
 )
+from tests.utils.urls import ADMIN_RECORDS
 
 
 @pytest_asyncio.fixture
@@ -114,7 +115,7 @@ class TestDeleteRecordCascade:
         child_b = cascade_env["child_b"]
         files = cascade_env["files"]
 
-        resp = await client.delete(f"/api/admin/records/{root.id}")
+        resp = await client.delete(f"{ADMIN_RECORDS}/{root.id}")
 
         assert resp.status_code == 200
         data = resp.json()
@@ -153,7 +154,7 @@ class TestDeleteRecordCascade:
         grand_file = working_dir / f"output_{grandchild.id}.nrrd"
         grand_file.write_bytes(b"grand data")
 
-        resp = await client.delete(f"/api/admin/records/{root.id}")
+        resp = await client.delete(f"{ADMIN_RECORDS}/{root.id}")
         assert resp.status_code == 200
         data = resp.json()
         assert grandchild.id in data["deleted_ids"]
@@ -167,7 +168,7 @@ class TestDeleteRecordCascade:
         child_b = cascade_env["child_b"]
         files = cascade_env["files"]
 
-        resp = await client.delete(f"/api/admin/records/{child_a.id}")
+        resp = await client.delete(f"{ADMIN_RECORDS}/{child_a.id}")
         assert resp.status_code == 200
         assert resp.json()["deleted_ids"] == [child_a.id]
 
@@ -191,7 +192,7 @@ class TestDeleteRecordCascade:
         child_a_db.status = RecordStatus.inwork
         await test_session.commit()
 
-        resp = await client.delete(f"/api/admin/records/{root.id}")
+        resp = await client.delete(f"{ADMIN_RECORDS}/{root.id}")
         assert resp.status_code == 409
 
         # Nothing deleted: all files still exist, all records still in DB
@@ -209,12 +210,12 @@ class TestDeleteRecordCascade:
         root_db.status = RecordStatus.inwork
         await test_session.commit()
 
-        resp = await client.delete(f"/api/admin/records/{root.id}")
+        resp = await client.delete(f"{ADMIN_RECORDS}/{root.id}")
         assert resp.status_code == 409
 
     @pytest.mark.asyncio
     async def test_delete_nonexistent_record(self, client):
-        resp = await client.delete("/api/admin/records/999999")
+        resp = await client.delete(f"{ADMIN_RECORDS}/999999")
         assert resp.status_code == 404
 
     @pytest.mark.asyncio
@@ -232,7 +233,7 @@ class TestDeleteRecordCascade:
             )
         await test_session.commit()
 
-        resp = await client.delete(f"/api/admin/records/{root.id}")
+        resp = await client.delete(f"{ADMIN_RECORDS}/{root.id}")
         assert resp.status_code == 200
 
         result = await test_session.execute(select(RecordFileLink))
@@ -247,7 +248,7 @@ class TestDeleteRecordCascade:
         # Remove one OUTPUT file before calling DELETE
         files[root.id].unlink()
 
-        resp = await client.delete(f"/api/admin/records/{root.id}")
+        resp = await client.delete(f"{ADMIN_RECORDS}/{root.id}")
         assert resp.status_code == 200
         for f in files.values():
             assert not f.exists()

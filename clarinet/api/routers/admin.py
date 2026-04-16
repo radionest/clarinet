@@ -111,7 +111,11 @@ async def admin_unassign_record_user(
     return record
 
 
-@router.delete("/records/{record_id}", response_model=DeleteRecordResult)
+@router.delete(
+    "/records/{record_id}",
+    response_model=DeleteRecordResult,
+    responses={409: {"description": "Subtree contains a record in 'inwork' status"}},
+)
 async def delete_record_cascade(
     record_id: Annotated[int, PathParam(ge=1, le=2147483647)],
     _current_user: SuperUserDep,

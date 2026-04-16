@@ -76,7 +76,7 @@ pub type Msg {
   RequestPreload(viewer_url: String, study_uid: String)
   // Admin delete
   RequestDelete
-  Delete
+  Delete(id: String)
   DeleteResult(Result(Nil, ApiError))
 }
 
@@ -406,10 +406,10 @@ pub fn update(
         shared.OpenDeleteConfirm("record", model.record_id),
       ])
 
-    Delete -> {
+    Delete(id) -> {
       let eff = {
         use dispatch <- effect.from
-        records.delete_record(model.record_id)
+        records.delete_record(id)
         |> promise.tap(fn(result) { dispatch(DeleteResult(result)) })
         Nil
       }
@@ -424,8 +424,14 @@ pub fn update(
         shared.Navigate(router.Records(dict.new())),
       ])
 
-    DeleteResult(Error(err)) ->
-      #(model, effect.none(), handle_error(err, "Failed to delete record"))
+    DeleteResult(Error(err)) -> {
+      let msg = case err {
+        types.ServerError(409, _) ->
+          "Cannot delete: subtree contains records currently in work"
+        _ -> "Failed to delete record"
+      }
+      #(model, effect.none(), handle_error(err, msg))
+    }
   }
 }
 

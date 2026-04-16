@@ -337,10 +337,15 @@ class RecordService:
     async def delete_record_cascade(self, record_id: int) -> tuple[list[int], int]:
         """Delete a record, all its descendants, and their OUTPUT files.
 
-        Atomic w.r.t. the database: if any record in the subtree is in
-        ``inwork`` status, the operation is aborted and nothing is deleted.
-        Files on disk are unlinked AFTER the DB commit — a later FS failure
-        leaves orphan files rather than dangling DB rows.
+        Check-and-delete runs inside a single DB transaction with row locks
+        on the whole subtree (``SELECT ... FOR UPDATE``), so a concurrent
+        transaction cannot flip a record to ``inwork`` between the guard and
+        the delete. If any record in the subtree is in ``inwork`` status the
+        operation aborts and nothing is deleted.
+
+        Files on disk are unlinked AFTER the DB commit; a filesystem failure
+        at that stage is logged but does not undo the DB delete — the API
+        response reflects the committed DB state, with orphan files at worst.
 
         Args:
             record_id: ID of the subtree root to delete.
@@ -354,7 +359,7 @@ class RecordService:
         """
         from clarinet.utils.fs import run_in_fs_thread
 
-        records = await self.repo.collect_descendants(record_id)
+        records = await self.repo.collect_descendants(record_id, for_update=True)
 
         inwork_ids = [r.id for r in records if r.status == RecordStatus.inwork]
         if inwork_ids:
@@ -362,6 +367,14 @@ class RecordService:
                 f"Cannot delete record {record_id}: subtree contains "
                 f"{len(inwork_ids)} inwork record(s) (ids={inwork_ids})"
             )
+
+        # Resolve the root's parent (outside the subtree) so pattern
+        # resolution for the subtree root can use parent-derived fields.
+        root_parent_read: RecordRead | None = None
+        root_parent_id = records[0].parent_record_id if records else None
+        if root_parent_id is not None:
+            parent = await self.repo.get_with_relations(root_parent_id)
+            root_parent_read = RecordRead.model_validate(parent)
 
         # BFS order: parents appear before children — build reads iteratively
         # so children can look up parent_read without a second pass.
@@ -372,7 +385,10 @@ class RecordService:
                 continue
             record_read = RecordRead.model_validate(record)
             reads[record.id] = record_read
-            parent_read = reads.get(record.parent_record_id) if record.parent_record_id else None
+            if record.parent_record_id is None:
+                parent_read = None
+            else:
+                parent_read = reads.get(record.parent_record_id, root_parent_read)
             paths_to_unlink.extend(await self._collect_output_file_paths(record_read, parent_read))
 
         # Deduplicate — glob patterns (multiple=True) on shared working_dirs
@@ -380,13 +396,22 @@ class RecordService:
         paths_to_unlink = list(dict.fromkeys(paths_to_unlink))
 
         deleted_ids = [r.id for r in records if r.id is not None]
-        await self.repo.delete_records(deleted_ids)
+        # Keep the transaction open: commit only after we've issued the DELETE,
+        # so the row locks acquired above cover the whole check-and-delete.
+        await self.repo.delete_records(deleted_ids, commit=False)
+        await self.repo.session.commit()
 
         files_removed = 0
         for p in paths_to_unlink:
             try:
                 await run_in_fs_thread(p.unlink)
             except FileNotFoundError:
+                continue
+            except OSError as exc:
+                logger.warning(
+                    f"Failed to delete output file {p} during cascade delete "
+                    f"of record {record_id}: {exc}"
+                )
                 continue
             files_removed += 1
             logger.info(f"Deleted output file {p} during cascade delete of record {record_id}")

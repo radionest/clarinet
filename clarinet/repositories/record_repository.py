@@ -775,7 +775,7 @@ class RecordRepository(BaseRepository[Record]):
             raise RecordTypeNotFoundError(name)
         return record_type
 
-    async def delete_records(self, record_ids: list[int]) -> int:
+    async def delete_records(self, record_ids: list[int], *, commit: bool = True) -> int:
         """Bulk-delete records by primary key in a single SQL statement.
 
         ``RecordFileLink`` rows are cleaned up by the database-level
@@ -788,6 +788,8 @@ class RecordRepository(BaseRepository[Record]):
 
         Args:
             record_ids: IDs to delete. Empty list is a no-op.
+            commit: When ``False``, skip the final commit so the caller can
+                keep the transaction (and any row locks) open. Default ``True``.
 
         Returns:
             Number of deleted rows.
@@ -796,18 +798,24 @@ class RecordRepository(BaseRepository[Record]):
             return 0
         stmt = sa_delete(Record).where(col(Record.id).in_(record_ids))
         result = await self.session.execute(stmt)
-        await self.session.commit()
+        if commit:
+            await self.session.commit()
         return int(result.rowcount or 0)  # type: ignore[attr-defined]
 
-    async def collect_descendants(self, root_id: int) -> list[Record]:
+    async def collect_descendants(self, root_id: int, *, for_update: bool = False) -> list[Record]:
         """Collect the root record and all its descendants in BFS order.
 
         Each returned Record has ``patient``, ``study``, ``series``,
         ``record_type.file_links`` and ``file_links`` eagerly loaded so that
         the caller can resolve OUTPUT file paths without extra queries.
+        Siblings are ordered by ``Record.id`` so the result is reproducible.
 
         Args:
             root_id: ID of the root record.
+            for_update: When ``True``, acquire row-level locks on the whole
+                subtree (`SELECT ... FOR UPDATE`). The caller is responsible
+                for holding the transaction open until it commits the
+                subsequent mutation, otherwise locks are released prematurely.
 
         Returns:
             List starting with the root followed by descendants (BFS order).
@@ -816,6 +824,10 @@ class RecordRepository(BaseRepository[Record]):
             RecordNotFoundError: If the root doesn't exist.
         """
         root = await self.get_with_relations(root_id)
+        if for_update:
+            await self.session.execute(
+                select(Record).where(col(Record.id) == root_id).with_for_update()
+            )
         collected: list[Record] = [root]
         visited: set[int] = {root_id}
         frontier: list[int] = [root_id]
@@ -824,6 +836,7 @@ class RecordRepository(BaseRepository[Record]):
             statement = (
                 select(Record)
                 .where(col(Record.parent_record_id).in_(frontier))
+                .order_by(col(Record.id).asc())
                 .options(
                     selectinload(Record.patient),  # type: ignore[arg-type]
                     selectinload(Record.study),  # type: ignore[arg-type]
@@ -832,6 +845,8 @@ class RecordRepository(BaseRepository[Record]):
                     _record_file_links_eager_load(),
                 )
             )
+            if for_update:
+                statement = statement.with_for_update()
             result = await self.session.execute(statement)
             new_ids: list[int] = []
             for child in result.scalars().all():

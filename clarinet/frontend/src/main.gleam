@@ -405,9 +405,9 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           close_model,
           dispatch_msg(store.StudyDetailMsg(study_detail.Delete)),
         )
-        store.ConfirmDelete("record", _id) -> #(
+        store.ConfirmDelete("record", id) -> #(
           close_model,
-          dispatch_msg(store.RecordExecuteMsg(record_execute.Delete)),
+          dispatch_msg(store.RecordExecuteMsg(record_execute.Delete(id))),
         )
         _ -> #(close_model, effect.none())
       }
