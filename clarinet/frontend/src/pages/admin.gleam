@@ -6,7 +6,6 @@ import cache
 import cache/bucket
 import clarinet_frontend/i18n.{type Key}
 import components/status_badge
-import gleam/bool
 import gleam/dict
 import gleam/int
 import gleam/javascript/promise
@@ -539,34 +538,39 @@ fn assign_cell(
   user_id user_id: Option(String),
   is_editing is_editing: Bool,
 ) -> Element(Msg) {
-  use <- bool.guard(is_editing, user_dropdown(shared, record_id))
-
-  case user_id {
-    Some(uid) -> {
-      let email = case dict.get(shared.cache.users, uid) {
-        Ok(user) -> user.email
-        Error(_) -> uid
-      }
+  case is_editing {
+    True ->
       html.div([attribute.class("assign-cell")], [
-        html.span([], [html.text(email)]),
-        html.text(" "),
-        html.button(
-          [
-            attribute.class("btn btn-sm btn-outline"),
-            event.on_click(ToggleAssignDropdown(Some(record_id))),
-          ],
-          [html.text("Change")],
-        ),
+        user_dropdown(shared, record_id),
       ])
-    }
-    None ->
-      html.button(
-        [
-          attribute.class("btn btn-sm btn-primary"),
-          event.on_click(ToggleAssignDropdown(Some(record_id))),
-        ],
-        [html.text("Assign")],
-      )
+    False ->
+      case user_id {
+        Some(uid) -> {
+          let email = case dict.get(shared.cache.users, uid) {
+            Ok(user) -> user.email
+            Error(_) -> uid
+          }
+          html.div([attribute.class("assign-cell")], [
+            html.span([], [html.text(email)]),
+            html.text(" "),
+            html.button(
+              [
+                attribute.class("btn btn-sm btn-outline"),
+                event.on_click(ToggleAssignDropdown(Some(record_id))),
+              ],
+              [html.text("Change")],
+            ),
+          ])
+        }
+        None ->
+          html.button(
+            [
+              attribute.class("btn btn-sm btn-primary"),
+              event.on_click(ToggleAssignDropdown(Some(record_id))),
+            ],
+            [html.text("Assign")],
+          )
+      }
   }
 }
 
