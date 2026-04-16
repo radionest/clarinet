@@ -64,13 +64,25 @@ def mask_record_patient_data(record: RecordRead, user: User) -> RecordRead:
     study_is_masked = record.study is not None and record.study.anon_uid is not None
     if study_is_masked:
         assert record.study is not None and record.study.anon_uid is not None
-        updates["study"] = record.study.model_copy(update={"study_uid": record.study.anon_uid})
+        # Also mask nested study.patient_id — otherwise the real patient ID
+        # leaks through the study relation even though top-level patient_id
+        # is anonymized.
+        study_nested_update: dict = {"study_uid": record.study.anon_uid}
+        if record.patient.anon_id is not None:
+            study_nested_update["patient_id"] = record.patient.anon_id
+        updates["study"] = record.study.model_copy(update=study_nested_update)
         updates["study_uid"] = record.study.anon_uid
 
         if record.series is not None:
             if record.series.anon_uid is not None:
+                # Rewrite series.study_uid to the anon study UID too — leaving
+                # it as the original would make the nested series still point
+                # at a real StudyInstanceUID for non-superusers.
                 updates["series"] = record.series.model_copy(
-                    update={"series_uid": record.series.anon_uid}
+                    update={
+                        "series_uid": record.series.anon_uid,
+                        "study_uid": record.study.anon_uid,
+                    }
                 )
                 updates["series_uid"] = record.series.anon_uid
             else:

@@ -180,9 +180,13 @@ class TestMaskRecordPatientData:
         assert result.study_uid == "9.8.7.6.5.4.3.2"
         assert result.study is not None
         assert result.study.study_uid == "9.8.7.6.5.4.3.2"
+        # Nested study.patient_id must not leak the real patient ID
+        assert result.study.patient_id == expected_anon_id
         assert result.series_uid == "9.8.7.6.5.4.3.2.1"
         assert result.series is not None
         assert result.series.series_uid == "9.8.7.6.5.4.3.2.1"
+        # Nested series.study_uid must point at the anon study, not the real one
+        assert result.series.study_uid == "9.8.7.6.5.4.3.2"
 
     def test_non_admin_non_anonymized_patient_no_masking(self) -> None:
         """Non-superuser sees original data when patient is not anonymized."""
@@ -272,6 +276,37 @@ class TestMaskRecordPatientData:
         # Series UID is masked
         assert result.series_uid == "9.8.7.6.5.4.3.2.1"
         assert result.series is not None
+        assert result.series.series_uid == "9.8.7.6.5.4.3.2.1"
+
+    def test_nested_parent_identifiers_also_masked(self) -> None:
+        """Nested study.patient_id and series.study_uid are masked too.
+
+        Regression: previously only top-level + own UIDs were rewritten, so a
+        non-superuser still saw the real patient ID via ``record.study.patient_id``
+        and the real study UID via ``record.series.study_uid`` — leaking PII and
+        making the response internally inconsistent on the anon path.
+        """
+        user = _make_user(is_superuser=False)
+        record = _make_record_read(
+            patient_id="REAL_PAT_001",
+            patient_name="Real Patient Name",
+            anon_name="Anon Patient Name",
+            auto_id=7,
+            study_uid="1.2.3.4.5.6.7.8",
+            study_anon_uid="9.8.7.6.5.4.3.2",
+            series_uid="1.2.3.4.5.6.7.8.9",
+            series_anon_uid="9.8.7.6.5.4.3.2.1",
+        )
+
+        result = mask_record_patient_data(record, user)
+
+        expected_anon_id = f"{settings.anon_id_prefix}_7"
+        # No real identifiers anywhere in the response
+        assert result.study is not None
+        assert result.study.patient_id == expected_anon_id
+        assert result.study.study_uid == "9.8.7.6.5.4.3.2"
+        assert result.series is not None
+        assert result.series.study_uid == "9.8.7.6.5.4.3.2"
         assert result.series.series_uid == "9.8.7.6.5.4.3.2.1"
 
     def test_anon_study_drops_series_without_anon_uid(self) -> None:

@@ -713,6 +713,17 @@ class TestStudyUidValidation:
         with pytest.raises(RuntimeError, match="does not belong to the requested study"):
             DicomWebCache._validate_series_in_study("anon_study", "series1", {"sop1": ds})
 
+    def test_validator_detects_mid_series_mismatch(self) -> None:
+        """Mixed payload: first instance matches, later one doesn't — must still raise."""
+        good = MagicMock()
+        good.StudyInstanceUID = "study1"
+        bad = MagicMock()
+        bad.StudyInstanceUID = "other_study"
+        with pytest.raises(RuntimeError, match="does not belong to the requested study"):
+            DicomWebCache._validate_series_in_study(
+                "study1", "series1", {"sop1": good, "sop2": bad}
+            )
+
     def test_validator_silent_when_attribute_missing(self) -> None:
         # Plain MagicMock auto-creates a non-str attribute — best-effort validator
         # must not raise on fixtures without a real StudyInstanceUID.

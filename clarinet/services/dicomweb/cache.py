@@ -68,7 +68,7 @@ class DicomWebCache:
     def _validate_series_in_study(
         study_uid: str, series_uid: str, instances: dict[str, Any]
     ) -> None:
-        """Raise if the first instance's StudyInstanceUID differs from study_uid.
+        """Raise if any instance's StudyInstanceUID differs from study_uid.
 
         Compensatory guard against inconsistent caller input — e.g. an anonymized
         StudyInstanceUID paired with an original SeriesInstanceUID. Without this,
@@ -77,22 +77,23 @@ class DicomWebCache:
         ``Cannot read properties of undefined (reading 'StudyInstanceUID')`` in
         ``HangingProtocolService._setProtocol``.
 
+        Scans every instance (cheap dict iteration, n usually ≤ few hundred)
+        to catch mixed payloads where only some instances are mismatched.
         Best-effort: silently passes when instances have no usable
         StudyInstanceUID attribute (e.g. MagicMock fixtures in unit tests).
         """
-        if not instances:
-            return
-        first_ds = next(iter(instances.values()))
-        actual = getattr(first_ds, "StudyInstanceUID", None)
-        if not isinstance(actual, str):
-            return
-        if actual != study_uid:
-            raise RuntimeError(
-                f"Series {series_uid} does not belong to the requested study "
-                f"{study_uid}: instance StudyInstanceUID is {actual}. This "
-                "usually indicates an anonymized study paired with a "
-                "non-anonymized series UID."
-            )
+        for sop_uid, ds in instances.items():
+            actual = getattr(ds, "StudyInstanceUID", None)
+            if not isinstance(actual, str):
+                continue
+            if actual != study_uid:
+                raise RuntimeError(
+                    f"Instance {sop_uid} of series {series_uid} does not "
+                    f"belong to the requested study {study_uid}: "
+                    f"StudyInstanceUID is {actual}. This usually indicates "
+                    "an anonymized study paired with a non-anonymized "
+                    "series UID."
+                )
 
     def _cache_key(self, study_uid: str, series_uid: str) -> str:
         return f"{study_uid}/{series_uid}"
