@@ -172,6 +172,100 @@ def validate_record_id(rid: int) -> None:
         )
 
 
+def get_segment_names(segmentation_node: Any) -> list[str]:
+    """Get ordered list of segment names from a segmentation node.
+
+    Args:
+        segmentation_node: Raw vtkMRMLSegmentationNode.
+
+    Returns:
+        List of segment names in index order.
+    """
+    vtk_seg = segmentation_node.GetSegmentation()
+    names: list[str] = []
+    for i in range(vtk_seg.GetNumberOfSegments()):
+        seg_id = vtk_seg.GetNthSegmentID(i)
+        names.append(vtk_seg.GetSegment(seg_id).GetName())
+    return names
+
+
+def _get_segment_mask(segmentation_node: Any, segment_id: str) -> Any | None:
+    """Extract a per-segment binary mask as a reshaped numpy bool array.
+
+    Returns ``None`` for any "empty" case — missing labelmap extent, missing
+    scalars, or all-zero voxels — so callers can collapse emptiness checks
+    and component-counting into a single ``None`` guard.
+
+    Args:
+        segmentation_node: Raw vtkMRMLSegmentationNode.
+        segment_id: Segment ID within the node's segmentation.
+
+    Returns:
+        3D boolean mask with shape ``(dims[2], dims[1], dims[0])`` matching
+        the VTK Fortran-order reshape convention, or ``None`` if the segment
+        has no non-zero voxels.
+    """
+    import vtkSegmentationCorePython as vtkSegCore  # type: ignore[import-not-found]
+    from vtk.util.numpy_support import vtk_to_numpy  # type: ignore[import-not-found]
+
+    labelmap = vtkSegCore.vtkOrientedImageData()
+    segmentation_node.GetBinaryLabelmapRepresentation(segment_id, labelmap)
+
+    extent = labelmap.GetExtent()
+    if extent[0] > extent[1]:
+        return None
+    scalars = labelmap.GetPointData().GetScalars()
+    if scalars is None:
+        return None
+
+    dims = labelmap.GetDimensions()
+    arr = vtk_to_numpy(scalars).reshape(dims[2], dims[1], dims[0])
+    mask = arr > 0
+    if not mask.any():
+        return None
+    return mask
+
+
+def is_segment_empty(segmentation_node: Any, segment_id: str) -> bool:
+    """Check if a segment has no non-zero voxels.
+
+    Args:
+        segmentation_node: Raw vtkMRMLSegmentationNode.
+        segment_id: Segment ID within the node's segmentation.
+
+    Returns:
+        True if segment is empty (no voxels) or not found.
+    """
+    return _get_segment_mask(segmentation_node, segment_id) is None
+
+
+def count_segment_components(segmentation_node: Any, segment_name: str) -> int:
+    """Count connected components in a named segment.
+
+    Uses per-segment binary labelmap and scipy.ndimage.label with 6-connectivity.
+
+    Args:
+        segmentation_node: Raw vtkMRMLSegmentationNode.
+        segment_name: Display name of the segment.
+
+    Returns:
+        Number of connected components. 0 if segment is empty or not found.
+    """
+    from scipy.ndimage import label  # type: ignore[import-not-found]
+
+    vtk_seg = segmentation_node.GetSegmentation()
+    seg_id = _find_segment_id(vtk_seg, segment_name)
+    if seg_id is None:
+        return 0
+
+    mask = _get_segment_mask(segmentation_node, seg_id)
+    if mask is None:
+        return 0
+
+    _, num_components = label(mask)
+    return int(num_components)
+
+
 LAYOUT_MAP: dict[str, str] = {
     "axial": "SlicerLayoutOneUpRedSliceView",
     "sagittal": "SlicerLayoutOneUpYellowSliceView",
@@ -1246,13 +1340,7 @@ class SlicerHelper:
         Returns:
             List of segment names in index order.
         """
-        node = self._unwrap_node(segmentation)
-        vtk_seg = node.GetSegmentation()
-        names: list[str] = []
-        for i in range(vtk_seg.GetNumberOfSegments()):
-            seg_id = vtk_seg.GetNthSegmentID(i)
-            names.append(vtk_seg.GetSegment(seg_id).GetName())
-        return names
+        return get_segment_names(self._unwrap_node(segmentation))
 
     @staticmethod
     def _centroid_from_labelmap(
@@ -1387,38 +1475,7 @@ class SlicerHelper:
         Returns:
             Number of connected components. 0 if segment is empty or not found.
         """
-        import numpy as np
-        import vtkSegmentationCorePython as vtkSegCore  # type: ignore[import-not-found]
-        from scipy.ndimage import label  # type: ignore[import-not-found]
-        from vtk.util.numpy_support import vtk_to_numpy  # type: ignore[import-not-found]
-
-        node = self._unwrap_node(segmentation)
-        vtk_seg = node.GetSegmentation()
-
-        seg_id = _find_segment_id(vtk_seg, segment_name)
-        if seg_id is None:
-            return 0
-
-        labelmap = vtkSegCore.vtkOrientedImageData()
-        node.GetBinaryLabelmapRepresentation(seg_id, labelmap)
-
-        extent = labelmap.GetExtent()
-        if extent[0] > extent[1]:
-            return 0
-
-        scalars = labelmap.GetPointData().GetScalars()
-        if scalars is None:
-            return 0
-
-        dims = labelmap.GetDimensions()
-        arr = vtk_to_numpy(scalars).reshape(dims[2], dims[1], dims[0])
-        mask = arr > 0
-
-        if not np.any(mask):
-            return 0
-
-        _, num_components = label(mask)
-        return int(num_components)
+        return count_segment_components(self._unwrap_node(segmentation), segment_name)
 
     def get_largest_island_centroid(
         self,
