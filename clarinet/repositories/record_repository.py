@@ -775,6 +775,75 @@ class RecordRepository(BaseRepository[Record]):
             raise RecordTypeNotFoundError(name)
         return record_type
 
+    async def delete_records(self, record_ids: list[int]) -> int:
+        """Bulk-delete records by primary key in a single SQL statement.
+
+        ``RecordFileLink`` rows are cleaned up by the database-level
+        ``ondelete="CASCADE"`` FK. ``parent_record_id`` references are
+        cleared by ``ondelete="SET NULL"``.
+
+        This avoids ORM unit-of-work ordering pitfalls that apply when
+        deleting self-referential rows via ``session.delete()`` without
+        eagerly loaded ``child_records`` on every level.
+
+        Args:
+            record_ids: IDs to delete. Empty list is a no-op.
+
+        Returns:
+            Number of deleted rows.
+        """
+        if not record_ids:
+            return 0
+        stmt = sa_delete(Record).where(col(Record.id).in_(record_ids))
+        result = await self.session.execute(stmt)
+        await self.session.commit()
+        return int(result.rowcount or 0)  # type: ignore[attr-defined]
+
+    async def collect_descendants(self, root_id: int) -> list[Record]:
+        """Collect the root record and all its descendants in BFS order.
+
+        Each returned Record has ``patient``, ``study``, ``series``,
+        ``record_type.file_links`` and ``file_links`` eagerly loaded so that
+        the caller can resolve OUTPUT file paths without extra queries.
+
+        Args:
+            root_id: ID of the root record.
+
+        Returns:
+            List starting with the root followed by descendants (BFS order).
+
+        Raises:
+            RecordNotFoundError: If the root doesn't exist.
+        """
+        root = await self.get_with_relations(root_id)
+        collected: list[Record] = [root]
+        visited: set[int] = {root_id}
+        frontier: list[int] = [root_id]
+
+        while frontier:
+            statement = (
+                select(Record)
+                .where(col(Record.parent_record_id).in_(frontier))
+                .options(
+                    selectinload(Record.patient),  # type: ignore[arg-type]
+                    selectinload(Record.study),  # type: ignore[arg-type]
+                    selectinload(Record.series),  # type: ignore[arg-type]
+                    _record_type_with_files(),
+                    _record_file_links_eager_load(),
+                )
+            )
+            result = await self.session.execute(statement)
+            new_ids: list[int] = []
+            for child in result.scalars().all():
+                if child.id is None or child.id in visited:
+                    continue
+                visited.add(child.id)
+                collected.append(child)
+                new_ids.append(child.id)
+            frontier = new_ids
+
+        return collected
+
     async def validate_parent_record(self, parent_record_id: int) -> Record:
         """Validate parent record exists and return it (for user_id inheritance).
 

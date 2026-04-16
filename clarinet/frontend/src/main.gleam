@@ -405,6 +405,10 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           close_model,
           dispatch_msg(store.StudyDetailMsg(study_detail.Delete)),
         )
+        store.ConfirmDelete("record", _id) -> #(
+          close_model,
+          dispatch_msg(store.RecordExecuteMsg(record_execute.Delete)),
+        )
         _ -> #(close_model, effect.none())
       }
     }
@@ -1038,6 +1042,12 @@ fn render_confirm_modal(model: Model) -> Element(Msg) {
       "Are you sure you want to delete study \""
         <> uid
         <> "\"? This will permanently delete all associated series and records. This action cannot be undone.",
+    )
+    store.ConfirmDelete("record", id) -> #(
+      "Delete Record",
+      "Are you sure you want to delete record #"
+        <> id
+        <> "? This will cascade-delete all child records and their OUTPUT files. This action cannot be undone.",
     )
     _ -> #("Confirm", "Are you sure?")
   }

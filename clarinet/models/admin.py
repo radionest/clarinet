@@ -61,3 +61,10 @@ class ClearOutputFilesResult(PydanticBaseModel):
 
     deleted_files: list[str]
     deleted_links: int
+
+
+class DeleteRecordResult(PydanticBaseModel):
+    """Result of cascade-deleting a record with its descendants and output files."""
+
+    deleted_ids: list[int]
+    files_removed: int
