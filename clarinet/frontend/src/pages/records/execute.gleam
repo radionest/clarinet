@@ -693,10 +693,14 @@ fn render_editable_form(
     False -> "POST"
   }
 
+  let upload_url =
+    config.base_path() <> "/api/records/" <> record_id <> "/photos"
+
   let base_attrs = [
     formosh_component.schema_string(schema_json),
     formosh_component.submit_url(submit_url),
     formosh_component.submit_method(method),
+    formosh_component.upload_base_url(upload_url),
     event.on("formosh-submit", decode_form_submit()),
   ]
 

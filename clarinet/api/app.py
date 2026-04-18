@@ -32,6 +32,7 @@ from clarinet.api.routers import dicom as dicom
 from clarinet.api.routers import dicomweb as dicomweb
 from clarinet.api.routers import health as health
 from clarinet.api.routers import info as info
+from clarinet.api.routers import photos as photos
 from clarinet.api.routers import pipeline as pipeline
 from clarinet.api.routers import record as record
 from clarinet.api.routers import slicer  # slicer doesn't use database, no async version needed,
@@ -398,6 +399,7 @@ def create_app(root_path: str = "") -> FastAPI:
     app.include_router(admin.router, prefix="/api/admin", tags=["Admin"])
     app.include_router(dicom.router, prefix="/api/dicom", tags=["DICOM"])
     app.include_router(pipeline.router, prefix="/api/pipelines", tags=["Pipelines"])
+    app.include_router(photos.router, prefix="/api/records", tags=["Photos"])
     app.include_router(viewer.router, prefix="/api/records", tags=["Viewers"])
     app.include_router(health.router, prefix="/api", tags=["Health"])
 
