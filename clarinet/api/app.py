@@ -6,7 +6,7 @@ middleware, and static files.
 """
 
 from collections.abc import AsyncGenerator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from string import Template
 
@@ -364,6 +364,28 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         logger.info("Application shutdown")
 
 
+@asynccontextmanager
+async def _lifespan_with_logging(app: FastAPI) -> AsyncGenerator[None]:
+    """Wrap ``lifespan`` so ``StartupError`` reaches the structured log.
+
+    ``StartupError`` inherits from ``SystemExit`` and uvicorn intercepts it on
+    the ASGI level to terminate the process. FastAPI exception handlers fire
+    only for HTTP requests, so without this wrapper the failure never reaches
+    the JSONL file or remote Loki sink — only the stderr banner from
+    ``StartupError.__init__``.
+    """
+    try:
+        async with lifespan(app):
+            yield
+    except StartupError as exc:
+        logger.opt(exception=True).critical(
+            f"Startup failed [{exc.component}]: {exc.reason} (hint: {exc.hint})"
+        )
+        with suppress(Exception):
+            await logger.complete()
+        raise
+
+
 def create_app(root_path: str = "") -> FastAPI:
     """
     Create and configure the FastAPI application.
@@ -388,7 +410,7 @@ def create_app(root_path: str = "") -> FastAPI:
         description=settings.project_description,
         version="0.1.0",
         debug=settings.debug,
-        lifespan=lifespan,
+        lifespan=_lifespan_with_logging,
         root_path=root_path,
         default_response_class=_default_response_class or JSONResponse,
     )

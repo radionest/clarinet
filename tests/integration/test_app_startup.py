@@ -293,6 +293,36 @@ async def test_startup_preserves_case_specific_migration_hint(startup_settings, 
 
 
 @pytest.mark.asyncio
+async def test_lifespan_wrapper_logs_startup_error(
+    startup_settings, capture_logs, monkeypatch, tmp_path
+):
+    """``_lifespan_with_logging`` writes a CRITICAL record to the structured log
+    before re-raising ``StartupError``.
+
+    Without the wrapper, ``StartupError`` (a ``SystemExit`` subclass) is
+    intercepted by uvicorn at the ASGI level and never reaches the JSONL log.
+    """
+    from clarinet.api.app import StartupError, _lifespan_with_logging
+
+    monkeypatch.setattr(settings, "frontend_enabled", True)
+    monkeypatch.setattr(
+        type(settings),
+        "static_path",
+        property(lambda self: tmp_path / "nonexistent_static"),
+    )
+
+    app = FastAPI(lifespan=_lifespan_with_logging)
+
+    with pytest.raises(StartupError, match="Frontend"):
+        async with _lifespan_with_logging(app):
+            pass
+
+    assert any("Startup failed [Frontend]" in m for m in capture_logs), (
+        f"Expected CRITICAL banner in logs, got: {capture_logs}"
+    )
+
+
+@pytest.mark.asyncio
 async def test_startup_recordflow_no_eager_healthcheck(startup_settings, capture_logs, monkeypatch):
     """RecordFlow startup must NOT perform eager API health check.
 
