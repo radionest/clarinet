@@ -61,6 +61,18 @@ class QueueConfig(BaseSettings):
         return False
 
 
+@lru_cache(maxsize=4)
+def _derive_service_token(password: str) -> str:
+    import hashlib
+
+    return hashlib.pbkdf2_hmac(
+        "sha256",
+        password.encode(),
+        b"clarinet-internal-service",
+        iterations=200_000,
+    ).hex()
+
+
 class Settings(BaseSettings):
     """Main settings class for Clarinet.
 
@@ -385,14 +397,7 @@ class Settings(BaseSettings):
         if explicit:
             return explicit
         if self.admin_password:
-            import hashlib
-
-            return hashlib.pbkdf2_hmac(
-                "sha256",
-                self.admin_password.encode(),
-                b"clarinet-internal-service",
-                iterations=200_000,
-            ).hex()
+            return _derive_service_token(self.admin_password)
         return ""
 
     @classmethod
