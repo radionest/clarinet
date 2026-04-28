@@ -8,6 +8,10 @@ paths:
 
 URL constants live in `tests/utils/urls.py`. Status codes: 201 = POST create, 204 = DELETE/bulk, 200 = default.
 
+**Rule:** All test files must use constants from `tests/utils/urls.py` — no hardcoded URL strings. New endpoints must have a matching constant added.
+
+**Rule:** Endpoints that return 409 (business conflict) must declare `responses={409: {"description": "..."}}` in the decorator.
+
 ### Auth (`/api/auth`)
 
 | URL | Method | Status | Description |
@@ -103,9 +107,9 @@ URL constants live in `tests/utils/urls.py`. Status codes: 201 = POST create, 20
 | URL | Method | Status | Description |
 |---|---|---|---|
 | `/api/admin/stats` | GET | 200 | Admin stats |
+| `/api/admin/records/{id}` | DELETE | 200 | Cascade-delete record + descendants + output files (admin; 409 if any inwork) |
 | `/api/admin/records/{id}/assign` | PATCH | 200 | Admin assign record |
 | `/api/admin/records/{id}/status` | PATCH | 200 | Admin set record status |
-| `/api/admin/records/{id}` | DELETE | 200 | Cascade-delete record + descendants + output files (admin; 409 if any inwork) |
 | `/api/admin/records/{id}/user` | DELETE | 200 | Admin unassign record user |
 | `/api/admin/records/{id}/output-files` | DELETE | 200 | Clear output files (admin) |
 | `/api/admin/record-types/stats` | GET | 200 | Record type stats |
