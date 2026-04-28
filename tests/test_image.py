@@ -308,6 +308,53 @@ class TestDicomVolume:
         with pytest.raises(ImageReadError, match="Not a directory"):
             read_dicom_series(f)
 
+    def test_multi_series_warns_and_reads_first(self, tmp_path: Path) -> None:
+        """When the directory contains multiple DICOM series, only the first is read
+        and a warning is emitted. Closes the silent-selection gap from PR #221 review."""
+        from clarinet.utils.logger import logger as clarinet_logger
+
+        dcm_dir = tmp_path / "multi_series"
+        dcm_dir.mkdir()
+
+        for series_idx, series_uid_suffix in enumerate(["series_a", "series_b"]):
+            series_uid = pydicom.uid.generate_uid(prefix=f"1.2.3.{series_idx}.")
+            for slice_idx in range(2):
+                filename = dcm_dir / f"{series_uid_suffix}_{slice_idx:03d}.dcm"
+                file_meta = pydicom.Dataset()
+                file_meta.MediaStorageSOPClassUID = pydicom.uid.CTImageStorage
+                file_meta.MediaStorageSOPInstanceUID = pydicom.uid.generate_uid()
+                file_meta.TransferSyntaxUID = pydicom.uid.ExplicitVRLittleEndian
+
+                ds = FileDataset(str(filename), {}, file_meta=file_meta, preamble=b"\x00" * 128)
+                ds.Rows = 3
+                ds.Columns = 3
+                ds.BitsAllocated = 16
+                ds.BitsStored = 16
+                ds.HighBit = 15
+                ds.PixelRepresentation = 0
+                ds.SamplesPerPixel = 1
+                ds.PhotometricInterpretation = "MONOCHROME2"
+                ds.PixelSpacing = [1.0, 1.0]
+                ds.SliceThickness = 1.0
+                ds.SeriesInstanceUID = series_uid
+                ds.ImagePositionPatient = [0.0, 0.0, float(slice_idx)]
+                ds.ImageOrientationPatient = [1, 0, 0, 0, 1, 0]
+                ds.InstanceNumber = slice_idx + 1
+                ds.PixelData = np.full((3, 3), series_idx, dtype=np.uint16).tobytes()
+                pydicom.dcmwrite(str(filename), ds)
+
+        captured: list[str] = []
+        sink_id = clarinet_logger.add(
+            lambda message: captured.append(message.record["message"]), level="WARNING"
+        )
+        try:
+            volume, _, _, _ = read_dicom_series(dcm_dir)
+        finally:
+            clarinet_logger.remove(sink_id)
+
+        assert volume.shape == (3, 3, 2)
+        assert any("Multiple DICOM series" in m for m in captured)
+
     def test_rescale_slope_intercept_applied(self, tmp_path: Path) -> None:
         """RescaleSlope/RescaleIntercept convert stored pixels to real-world values (HU)."""
         dcm_dir = tmp_path / "rescale_dicom"

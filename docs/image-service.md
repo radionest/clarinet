@@ -174,32 +174,33 @@ Annotations referencing unknown `imageId` are logged as warnings and skipped.
 
 ## DICOM Volume Reader
 
+Implemented in `dicom_volume.py` as a thin wrapper around `SimpleITK.ImageSeriesReader` + GDCM.
+Supports compressed (JPEG/JPEG2000/JPEG-LS), Enhanced multi-frame, and vendor-specific DICOMs out of the box.
+
 ### File Discovery
 
-1. `sorted(directory.glob("*.dcm"))` — looks for `.dcm` files first
-2. If none found, falls back to all non-hidden files in the directory (common in PACS exports)
-3. Raises `ImageReadError` if no files found
+1. `sitk.ImageSeriesReader.GetGDCMSeriesIDs(directory)` — GDCM scans by file content (DICM magic bytes), not extension
+2. Raises `ImageReadError` if no DICOM series detected
+3. If multiple series are present, the **first** is selected and a WARNING is logged; the rest are ignored
 
 ### Error Tolerance
 
-- Files that fail `pydicom.dcmread()` are silently skipped (logged at DEBUG)
-- DICOM files without `pixel_array` attribute are silently skipped
-- Only raises `ImageReadError` when zero valid datasets remain
-- `ValueError` from `np.stack` (inconsistent dimensions) is wrapped as `ImageReadError`
+- Files GDCM does not recognize as DICOM are silently ignored
+- Raises `ImageReadError` when no series is detected, when the chosen series has no files, or when `Execute()` fails (`RuntimeError` → `ImageReadError`)
 
 ### Slice Sorting
 
-Priority order:
-1. `ImagePositionPatient[2]` (Z-coordinate) — most reliable
-2. `InstanceNumber` — fallback when position unavailable
-3. File order — last resort (with WARNING log)
+GDCM sorts slices by projection of `ImagePositionPatient` onto the slice direction (handles oblique acquisitions).
+Falls back to `InstanceNumber` when position metadata is unavailable.
 
-### Spacing Extraction
+### Spacing, Origin, Direction
 
-| Component | Primary source | Fallback |
-|---|---|---|
-| Row/col spacing | `PixelSpacing[0], [1]` | `1.0` (with WARNING) |
-| Slice spacing | `abs(ImagePositionPatient[2] difference)` between first two slices | `SliceThickness` → `1.0` |
+Pulled directly from the resulting `sitk.Image`:
+- `GetSpacing()` returns `(x, y, z)`, mapped to internal `(row=y, col=x, slice=z)`
+- `GetOrigin()` returns `(x, y, z)` in LPS, used as-is
+- `GetDirection()` reshaped to a 3×3 matrix; columns are reordered from `(x, y, z)` to `(y, x, z)` to match the numpy axis convention
+
+`RescaleSlope`/`RescaleIntercept` are applied automatically by GDCM during `Execute()`.
 
 ---
 

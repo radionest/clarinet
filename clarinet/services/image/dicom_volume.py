@@ -40,10 +40,16 @@ def read_dicom_series(
     if not series_ids:
         raise ImageReadError(f"No DICOM files found in {directory}")
 
-    # Use the first (usually only) series in the directory
-    dicom_names = reader.GetGDCMSeriesFileNames(str(directory), series_ids[0])
+    selected_series = series_ids[0]
+    if len(series_ids) > 1:
+        logger.warning(
+            f"Multiple DICOM series in {directory} ({len(series_ids)} found), "
+            f"reading only the first: {selected_series}"
+        )
+
+    dicom_names = reader.GetGDCMSeriesFileNames(str(directory), selected_series)
     if not dicom_names:
-        raise ImageReadError(f"No valid DICOM files with pixel data in {directory}")
+        raise ImageReadError(f"No DICOM files in series {selected_series} of {directory}")
 
     reader.SetFileNames(dicom_names)
     try:
@@ -63,9 +69,11 @@ def read_dicom_series(
     ox, oy, oz = image.GetOrigin()
     origin = (float(ox), float(oy), float(oz))
 
-    # Direction: SimpleITK columns (x, y, z) → internal columns (y, x, z)
+    # Direction: SimpleITK columns (x, y, z) → internal columns (y, x, z).
+    # Fancy indexing returns a non-contiguous view; force C-contiguous so
+    # downstream consumers can rely on .tobytes() / C-extension passing.
     d = np.array(image.GetDirection()).reshape(3, 3)
-    direction = d[:, [1, 0, 2]]
+    direction = np.ascontiguousarray(d[:, [1, 0, 2]])
 
     logger.debug(
         f"Read {len(dicom_names)} DICOM slices from {directory.name}: "
