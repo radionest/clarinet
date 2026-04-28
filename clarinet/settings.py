@@ -61,6 +61,31 @@ class QueueConfig(BaseSettings):
         return False
 
 
+# PBKDF2 parameters for the internal service token derived from admin_password.
+# Changing any of these breaks the cross-process contract between API and
+# workers — they must be updated on both sides simultaneously, and downstream
+# deployments will need to re-derive any cached tokens. Mirrored in the
+# acceptance test deploy/test/acceptance/test_service_token.py.
+SERVICE_TOKEN_SALT = b"clarinet-internal-service"
+SERVICE_TOKEN_PBKDF2_ITERATIONS = 200_000
+
+
+# maxsize=4 covers the realistic range: production runs with one password,
+# tests can rotate through a small number of values per process. The cached
+# string already lives in the long-lived Settings singleton, so the cache
+# adds no extra plaintext exposure beyond what is already retained.
+@lru_cache(maxsize=4)
+def _derive_service_token(password: str) -> str:
+    import hashlib
+
+    return hashlib.pbkdf2_hmac(
+        "sha256",
+        password.encode(),
+        SERVICE_TOKEN_SALT,
+        iterations=SERVICE_TOKEN_PBKDF2_ITERATIONS,
+    ).hex()
+
+
 class Settings(BaseSettings):
     """Main settings class for Clarinet.
 
@@ -385,14 +410,7 @@ class Settings(BaseSettings):
         if explicit:
             return explicit
         if self.admin_password:
-            import hashlib
-            import hmac
-
-            return hmac.new(
-                b"clarinet-internal-service",
-                self.admin_password.encode(),
-                hashlib.sha256,
-            ).hexdigest()
+            return _derive_service_token(self.admin_password)
         return ""
 
     @classmethod
