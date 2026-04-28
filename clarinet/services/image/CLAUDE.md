@@ -13,7 +13,7 @@
 
 - **NIfTI** (.nii, .nii.gz): read + write via nibabel
 - **NRRD** (.nrrd): read + write via pynrrd
-- **DICOM** series: read-only via pydicom (write requires UID generation — out of scope)
+- **DICOM** series: read-only via SimpleITK/GDCM (write requires UID generation — out of scope)
 
 ## Key Design
 
@@ -25,7 +25,7 @@
 ## Dependencies
 
 - `numpy`, `nibabel`, `scikit-image`, `pynrrd` (declared in `pyproject.toml` image extra)
-- `pydicom` (main dependency, used by `dicom_volume.py`)
+- `SimpleITK` (DICOM series reader in `dicom_volume.py`); `pydicom` (used by anonymizer/dicomweb/dicom services)
 
 ## Integration with Pipeline
 
