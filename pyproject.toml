@@ -166,6 +166,7 @@ markers = [
     "schema: API schema testing with Schemathesis (property-based)",
     "migration: database migration tests (Alembic upgrade/downgrade)",
     "demo: interactive Slicer demos (not part of CI, requires Slicer + PACS)",
+    "postgres_only: tests requiring real PostgreSQL backend (skipped on SQLite)",
 ]
 filterwarnings = [
     # FastAPI + aiormq: asyncio.iscoroutinefunction deprecated in Python 3.14

@@ -76,7 +76,7 @@ pub type Msg {
   RequestPreload(viewer_url: String, study_uid: String)
   // Admin delete
   RequestDelete
-  Delete(id: String)
+  Delete
   DeleteResult(Result(Nil, ApiError))
 }
 
@@ -406,10 +406,10 @@ pub fn update(
         shared.OpenDeleteConfirm("record", model.record_id),
       ])
 
-    Delete(id) -> {
+    Delete -> {
       let eff = {
         use dispatch <- effect.from
-        records.delete_record(id)
+        records.delete_record(model.record_id)
         |> promise.tap(fn(result) { dispatch(DeleteResult(result)) })
         Nil
       }

@@ -9,8 +9,10 @@ from uuid import UUID
 from clarinet.exceptions.domain import BusinessRuleViolationError, RecordUniquePerUserError
 from clarinet.models import Record, RecordRead, RecordStatus
 from clarinet.models.file_schema import FileRole
-from clarinet.services.file_validation import validate_record_files
+from clarinet.services.file_validation import _build_working_dirs, validate_record_files
 from clarinet.utils.file_checksums import checksums_changed, compute_checksums
+from clarinet.utils.file_patterns import glob_file_paths, resolve_pattern
+from clarinet.utils.fs import run_in_fs_thread
 from clarinet.utils.logger import logger
 
 if TYPE_CHECKING:
@@ -357,8 +359,6 @@ class RecordService:
             RecordNotFoundError: If the root record doesn't exist.
             BusinessRuleViolationError: If any record in the subtree is inwork.
         """
-        from clarinet.utils.fs import run_in_fs_thread
-
         records = await self.repo.collect_descendants(record_id, for_update=True)
 
         inwork_ids = [r.id for r in records if r.status == RecordStatus.inwork]
@@ -381,8 +381,7 @@ class RecordService:
         reads: dict[int, RecordRead] = {}
         paths_to_unlink: list[Path] = []
         for record in records:
-            if record.id is None:
-                continue
+            assert record.id is not None
             record_read = RecordRead.model_validate(record)
             reads[record.id] = record_read
             if record.parent_record_id is None:
@@ -395,7 +394,7 @@ class RecordService:
         # can yield the same path from multiple records in the subtree.
         paths_to_unlink = list(dict.fromkeys(paths_to_unlink))
 
-        deleted_ids = [r.id for r in records if r.id is not None]
+        deleted_ids = list(reads.keys())
         # Keep the transaction open: commit only after we've issued the DELETE,
         # so the row locks acquired above cover the whole check-and-delete.
         await self.repo.delete_records(deleted_ids, commit=False)
@@ -431,10 +430,6 @@ class RecordService:
 
         Shared between ``clear_output_files`` and ``delete_record_cascade``.
         """
-        from clarinet.services.file_validation import _build_working_dirs
-        from clarinet.utils.file_patterns import glob_file_paths, resolve_pattern
-        from clarinet.utils.fs import run_in_fs_thread
-
         output_defs = [
             fd for fd in (record_read.record_type.file_registry or []) if fd.role == FileRole.OUTPUT
         ]
@@ -472,8 +467,6 @@ class RecordService:
         Raises:
             BusinessRuleViolationError: If the record is in ``finished`` status.
         """
-        from clarinet.utils.fs import run_in_fs_thread
-
         record = await self.repo.get_with_relations(record_id)
 
         if record.status == RecordStatus.finished:

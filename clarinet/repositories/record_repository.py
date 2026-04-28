@@ -178,11 +178,14 @@ class RecordRepository(BaseRepository[Record]):
             raise RecordNotFoundError(record_id)
         return record
 
-    async def get_with_relations(self, record_id: int) -> Record:
+    async def get_with_relations(self, record_id: int, *, lock: bool = False) -> Record:
         """Get a single record with all relationships eagerly loaded.
 
         Args:
             record_id: Record ID
+            lock: When ``True``, acquire a row-level lock on the record
+                (``SELECT ... FOR UPDATE``). Caller must keep the transaction
+                open until the lock is no longer needed.
 
         Returns:
             Record with patient, study, series, and record_type loaded
@@ -201,6 +204,8 @@ class RecordRepository(BaseRepository[Record]):
                 _record_file_links_eager_load(),
             )
         )
+        if lock:
+            statement = statement.with_for_update()
         result = await self.session.execute(statement)
         record = result.scalars().first()
         if not record:
@@ -823,11 +828,7 @@ class RecordRepository(BaseRepository[Record]):
         Raises:
             RecordNotFoundError: If the root doesn't exist.
         """
-        root = await self.get_with_relations(root_id)
-        if for_update:
-            await self.session.execute(
-                select(Record).where(col(Record.id) == root_id).with_for_update()
-            )
+        root = await self.get_with_relations(root_id, lock=for_update)
         collected: list[Record] = [root]
         visited: set[int] = {root_id}
         frontier: list[int] = [root_id]
