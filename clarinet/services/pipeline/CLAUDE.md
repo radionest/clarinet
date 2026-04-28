@@ -6,17 +6,20 @@ TaskIQ-based distributed task pipeline for long-running operations (GPU processi
 
 - **TaskIQ** as task queue (not FastStream) — built-in retry, DLQ, FastAPI DI compatibility
 - **AioPikaBroker** connects to RabbitMQ via existing `settings.rabbitmq_*` configuration
-- **Direct exchange** (`clarinet`) with queue-based routing (`clarinet.default`, `clarinet.gpu`, `clarinet.dicom`)
-- **PipelineChainMiddleware** advances multi-step pipelines via DB-backed definitions (HTTP API lookup)
+- **Direct exchange** (`settings.rabbitmq_exchange`, default `clarinet`) with **per-queue brokers**: each queue gets its own `AioPikaBroker` instance via `get_broker_for(queue_name)`
+- **Project-namespaced queues**: queue names are `{settings.pipeline_task_namespace}.{default,gpu,dicom,dead_letter}`. With the default `project_name = "Clarinet"` they remain `clarinet.default`/`.gpu`/`.dicom`/`.dead_letter`. Other projects (e.g. `project_name = "Liver"`) get their own isolated queues
+- **routing_key = full queue name** — guarantees no cross-project routing collisions on a shared exchange
+- **Tasks are bound to brokers at decoration time**: `@pipeline_task(queue=...)` registers on `get_broker_for(queue)`. `task.kicker().kiq()` always publishes to the correct queue without any routing-key juggling
+- **PipelineChainMiddleware** advances multi-step pipelines via DB-backed definitions (HTTP API lookup); next-step dispatch goes through the next task's own broker
 
 ## Module Structure
 
 | File | Purpose |
 |------|---------|
-| `__init__.py` | Public API: Pipeline, PipelineMessage, get_pipeline, etc. |
-| `broker.py` | `get_broker()` singleton + `create_broker(queue)` per-queue factory, middlewares, result backend |
+| `__init__.py` | Public API: Pipeline, PipelineMessage, get_pipeline, get_broker_for, get_all_brokers, reset_brokers, etc. |
+| `broker.py` | `get_broker_for(queue)` per-queue registry, `create_broker(queue)` factory, middlewares, result backend |
 | `message.py` | PipelineMessage (Pydantic model) |
-| `chain.py` | Pipeline chain builder DSL (step-by-step, queue routing) |
+| `chain.py` | Pipeline chain builder DSL (step-by-step, task-bound queue routing) |
 | `middleware.py` | RetryMiddleware, DLQPublisher, PipelineChainMiddleware, PipelineLoggingMiddleware, DeadLetterMiddleware |
 | `context.py` | TaskContext system: FileResolver (sync), RecordQuery (async), build_task_context() |
 | `sync_wrappers.py` | SyncRecordQuery, SyncPipelineClient, SyncTaskContext — sync wrappers for thread-based tasks |
@@ -31,13 +34,19 @@ TaskIQ-based distributed task pipeline for long-running operations (GPU processi
 ```python
 from clarinet.services.pipeline import Pipeline, PipelineMessage
 
+# Step queues come from the tasks themselves (set via @pipeline_task(queue=...))
 imaging_pipeline = (
     Pipeline("ct_segmentation")
-    .step(fetch_dicom, queue="clarinet.dicom")
-    .step(run_segmentation, queue="clarinet.gpu")
-    .step(generate_report, queue="clarinet.default")
+    .step(fetch_dicom)
+    .step(run_segmentation)
+    .step(generate_report)
 )
 ```
+
+`Pipeline.step(task, queue=...)` is allowed only when the explicit queue
+matches the task's own `_pipeline_queue`; mismatch raises
+`PipelineConfigError` (the task is already bound to a different broker
+and silently re-routing would publish to the wrong queue).
 
 ### Define a task
 
@@ -46,13 +55,19 @@ and TaskContext construction automatically:
 
 ```python
 from clarinet.services.pipeline import pipeline_task, PipelineMessage, TaskContext
+from clarinet.settings import settings
 
-@pipeline_task(queue="clarinet.dicom")
+@pipeline_task(queue=settings.dicom_queue_name)
 async def fetch_dicom(msg: PipelineMessage, ctx: TaskContext):
     path = ctx.files.resolve("dicom_source")
     # ... fetch DICOM data using ctx.client, ctx.records ...
     await ctx.client.update_record_data(msg.record_id, {"status": "fetched"})
 ```
+
+Use `settings.default_queue_name`, `settings.gpu_queue_name`,
+`settings.dicom_queue_name`, `settings.dlq_queue_name` instead of
+hard-coding `"clarinet.gpu"` etc.  This keeps your project's queues
+isolated from other Clarinet deployments on the same RabbitMQ.
 
 The decorator also auto-registers the task in `_TASK_REGISTRY` (no manual `register_task()` needed).
 Retries are enabled by default (3x, exponential backoff + jitter). Extra kwargs are forwarded
@@ -118,13 +133,18 @@ uv run clarinet worker --dicom WORKER:4006    # with Storage SCP for C-MOVE
 
 ## Queue Routing
 
-- Exchange: `clarinet` (direct type)
-- Routing key convention: `clarinet.gpu` → routing key `gpu`
-- Default queue: `clarinet.default` (all workers)
-- GPU queue: `clarinet.gpu` (workers with `have_gpu=True`)
-- DICOM queue: `clarinet.dicom` (workers with `have_dicom=True`)
-- Workers call `create_broker(queue_name)` per queue — each gets its own exchange/queue binding.
-  `get_broker()` returns the default singleton used for task dispatch in the application.
+- Exchange: `settings.rabbitmq_exchange` (direct type)
+- Queue name = `{settings.pipeline_task_namespace}.{kind}` where `kind ∈ {default, gpu, dicom, dead_letter}`
+- For default `project_name = "Clarinet"`: `clarinet.default`/`.gpu`/`.dicom`/`.dead_letter` (backward-compatible)
+- For projects with custom `project_name` (e.g. `"Liver Project"`): `liver_project.default`/`.gpu`/`.dicom`/`.dead_letter`
+- **routing_key = full queue name** (not the suffix) — guarantees no cross-project collisions
+- Default queue: `settings.default_queue_name` (all workers)
+- GPU queue: `settings.gpu_queue_name` (workers with `have_gpu=True`)
+- DICOM queue: `settings.dicom_queue_name` (workers with `have_dicom=True`)
+- Per-queue broker registry: `get_broker_for(queue_name)` returns the cached broker (creates on first use).
+  `get_broker()` is a backward-compat shim equivalent to `get_broker_for(settings.default_queue_name)`.
+  `get_all_brokers()` returns the snapshot of all created brokers (used by API lifespan to start/stop them).
+  `reset_brokers()` clears the registry — for tests.
 
 ## Chain Advancement (DB-backed)
 
@@ -141,8 +161,8 @@ After each step, `PipelineChainMiddleware.post_execute()` fetches the definition
 ## Built-in Tasks
 
 Located in `tasks/` — auto-imported when broker starts:
-- `convert_series_to_nifti` (queue `clarinet.dicom`) — downloads DICOM via C-GET, converts to NIfTI with correct affine/spacing. Requires `msg.series_uid`. Idempotent (skips if output exists). Output: `VOLUME_NIFTI` FileDef, level=SERIES.
-- `prefetch_dicom_web` (queue `clarinet.dicom`) — prefetches a study into the DICOMweb disk cache via direct C-GET to `{storage_path}/dicomweb_cache/{study}/{series}/`. Requires `msg.study_uid`. Bypasses the API memory tier. Idempotent (skips series with valid disk cache or `dcm_anon/` copy). Payload knob: `skip_if_anon` (default `True`).
+- `convert_series_to_nifti` (queue `settings.dicom_queue_name`) — downloads DICOM via C-GET, converts to NIfTI with correct affine/spacing. Requires `msg.series_uid`. Idempotent (skips if output exists). Output: `VOLUME_NIFTI` FileDef, level=SERIES.
+- `prefetch_dicom_web` (queue `settings.dicom_queue_name`) — prefetches a study into the DICOMweb disk cache via direct C-GET to `{storage_path}/dicomweb_cache/{study}/{series}/`. Requires `msg.study_uid`. Bypasses the API memory tier. Idempotent (skips series with valid disk cache or `dcm_anon/` copy). Payload knob: `skip_if_anon` (default `True`).
 
 Task name collision: `register_task()` in `chain.py` prevents project tasks from shadowing built-in tasks (identity check `existing is not task` → `PipelineConfigError`).
 
@@ -155,7 +175,7 @@ Task name collision: `register_task()` in `chain.py` prevents project tasks from
 - **Retries enabled by default** via `RetryMiddleware` with `default_retry_label=True`
 - 3 retries, exponential backoff + jitter, max delay 120s (all configurable via settings)
 - **Business errors (4xx) are never retried.** `RetryMiddleware` (extends `SmartRetryMiddleware`) checks `ClarinetAPIError.status_code` — if 400–499, the retry is skipped and the error goes straight to DLQ. Rationale: HTTP 4xx means a business-logic violation (409 Conflict, 404 Not Found, 422 Validation Error) that will fail identically on every attempt. Retrying wastes time and delays error visibility. 5xx errors and non-HTTP exceptions (`ConnectionError`, `TimeoutError`) are retried normally.
-- **`DLQPublisher`** — shared AMQP connection to `clarinet.dead_letter`. One instance is created in `create_broker()` and passed to both `DeadLetterMiddleware` and `PipelineChainMiddleware` (composition pattern). Lifecycle owned by `DeadLetterMiddleware`.
+- **`DLQPublisher`** — shared AMQP connection to `settings.dlq_queue_name` (e.g. `clarinet.dead_letter`). One instance is created in `create_broker()` and passed to both `DeadLetterMiddleware` and `PipelineChainMiddleware` (composition pattern). Lifecycle owned by `DeadLetterMiddleware`.
 - **`DeadLetterMiddleware`** routes terminal failures to DLQ after all retries are exhausted
 - `RetryMiddleware` sets `NoResultError` on retry; DeadLetterMiddleware skips those and only publishes real errors to DLQ
 - **`pipeline_ack_type`** controls when messages are acknowledged (default `when_executed` — message redelivered if worker crashes)

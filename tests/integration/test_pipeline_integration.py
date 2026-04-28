@@ -371,9 +371,9 @@ class TestAutoTaskQueueRouting:
     ) -> None:
         """Auto-pipeline from GPU task routes message to GPU queue."""
         from clarinet.services.pipeline import get_pipeline
-        from clarinet.services.pipeline.broker import GPU_QUEUE
         from clarinet.services.recordflow.flow_record import FlowRecord
 
+        gpu_queue = test_queues["gpu"]
         gpu_broker = await pipeline_broker_factory("gpu")
 
         try:
@@ -382,14 +382,14 @@ class TestAutoTaskQueueRouting:
             async def gpu_task(data: dict[str, Any]) -> dict[str, Any]:
                 return data
 
-            gpu_task._pipeline_queue = GPU_QUEUE
+            gpu_task._pipeline_queue = gpu_queue
 
             fr = FlowRecord("test-type")
             fr.on_status("finished").do_task(gpu_task)
 
             pipeline = get_pipeline("_task:test_auto_gpu_route")
             assert pipeline is not None
-            assert pipeline.steps[0].queue == GPU_QUEUE
+            assert pipeline.steps[0].queue == gpu_queue
 
             msg = PipelineMessage(patient_id="P1", study_uid="S1")
             await pipeline.run(msg)
@@ -409,8 +409,8 @@ class TestAutoTaskQueueRouting:
     ) -> None:
         """Auto-pipeline from default task routes message to default queue."""
         from clarinet.services.pipeline import get_pipeline
-        from clarinet.services.pipeline.broker import DEFAULT_QUEUE
         from clarinet.services.recordflow.flow_record import FlowRecord
+        from clarinet.settings import settings
 
         default_broker = await pipeline_broker_factory("default")
 
@@ -425,7 +425,9 @@ class TestAutoTaskQueueRouting:
 
             pipeline = get_pipeline("_task:test_auto_default_route")
             assert pipeline is not None
-            assert pipeline.steps[0].queue == DEFAULT_QUEUE
+            # _pipeline_queue is not set on @broker.task tasks, so the
+            # auto-pipeline falls back to the project's default queue.
+            assert pipeline.steps[0].queue == settings.default_queue_name
 
             msg = PipelineMessage(patient_id="P2", study_uid="S2")
             await pipeline.run(msg)

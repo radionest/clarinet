@@ -499,13 +499,13 @@ class FlowRecord:
         Returns:
             Self for method chaining.
         """
-        from clarinet.services.pipeline import DEFAULT_QUEUE, Pipeline, get_pipeline
+        from clarinet.services.pipeline import Pipeline, get_pipeline
 
         func_name = task_func.task_name.rsplit(":", 1)[-1]
         pipeline_name = f"_task:{func_name}"
         if get_pipeline(pipeline_name) is None:
-            task_queue = getattr(task_func, "_pipeline_queue", None) or DEFAULT_QUEUE
-            Pipeline(pipeline_name).step(task_func, queue=task_queue)
+            # Step picks up the task's bound queue (_pipeline_queue) by default.
+            Pipeline(pipeline_name).step(task_func)
 
         action = PipelineAction(
             pipeline_name=pipeline_name,

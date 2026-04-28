@@ -45,7 +45,10 @@ def task(func: Any = None, /, **kwargs: Any) -> Any:
         def my_task(msg, ctx): ...
 
 
-        @task(queue="clarinet.gpu")
+        from clarinet.settings import settings
+
+
+        @task(queue=settings.gpu_queue_name)
         async def gpu_task(msg, ctx): ...
     """
     if func is not None:

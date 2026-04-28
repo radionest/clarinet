@@ -48,16 +48,16 @@ async def _check_database() -> str:
 
 
 def _check_pipeline() -> str:
-    """Check pipeline broker status."""
+    """Check pipeline broker status across all registered queues."""
     if not settings.pipeline_enabled:
         return "disabled"
     try:
-        from clarinet.services.pipeline import get_broker
+        from clarinet.services.pipeline import get_all_brokers
 
-        broker = get_broker()
-        if broker is not None:
-            return "ok"
-        return "error"
+        brokers = get_all_brokers()
+        if not brokers:
+            return "error"
+        return "ok"
     except Exception as e:
         logger.error(f"Health check: pipeline error: {e}")
         return "error"

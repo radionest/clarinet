@@ -234,12 +234,30 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     if settings.pipeline_enabled:
         try:
-            from clarinet.services.pipeline import get_broker, sync_pipeline_definitions
+            from clarinet.services.pipeline import (
+                get_all_brokers,
+                get_broker_for,
+                load_task_modules,
+                sync_pipeline_definitions,
+            )
 
-            broker = get_broker()
-            await broker.startup()
-            app.state.pipeline_broker = broker
-            logger.info("Pipeline broker started")
+            # Load flow files so each @pipeline_task decorator registers
+            # its task on the per-queue broker for its declared queue.
+            # Errors in flow files surface as a startup failure here —
+            # the API can no longer hide them by deferring to the worker.
+            load_task_modules()
+
+            # Always materialise the default broker so the API can
+            # dispatch via Pipeline.run() and emit ad-hoc tasks even
+            # when no flow files declare a default-queue task.
+            _ = get_broker_for(settings.default_queue_name)
+
+            brokers = get_all_brokers()
+            for queue_name, broker in brokers.items():
+                await broker.startup()
+                logger.info(f"Pipeline broker started for queue '{queue_name}'")
+
+            app.state.pipeline_brokers = brokers
 
             count = await sync_pipeline_definitions()
             logger.info(f"Synced {count} pipeline definition(s) to database")
@@ -321,9 +339,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
             await session_cleanup_service.stop()
             logger.info("Session cleanup service stopped")
 
-        if settings.pipeline_enabled and getattr(app.state, "pipeline_broker", None):
-            await app.state.pipeline_broker.shutdown()
-            logger.info("Pipeline broker stopped")
+        if settings.pipeline_enabled and getattr(app.state, "pipeline_brokers", None):
+            from clarinet.services.pipeline import reset_brokers
+
+            for queue_name, broker in app.state.pipeline_brokers.items():
+                await broker.shutdown()
+                logger.info(f"Pipeline broker stopped for queue '{queue_name}'")
+            reset_brokers()
 
         if settings.recordflow_enabled:
             await _shutdown_recordflow(app)

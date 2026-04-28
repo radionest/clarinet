@@ -1330,8 +1330,11 @@ def main() -> None:
     elif args.command == "worker":
         queues = args.queues
         if queues:
-            # Normalize queue names: "gpu" -> "clarinet.gpu"
-            queues = [q if "." in q else f"clarinet.{q}" for q in queues]
+            # Normalize queue names: "gpu" -> "{namespace}.gpu" (current project)
+            from clarinet.settings import settings as _settings
+
+            ns = _settings.pipeline_task_namespace
+            queues = [q if "." in q else f"{ns}.{q}" for q in queues]
         dicom_scp = _parse_dicom_scp_arg(args.dicom) if args.dicom else None
         with contextlib.suppress(KeyboardInterrupt):
             asyncio.run(

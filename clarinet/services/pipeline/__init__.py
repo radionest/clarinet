@@ -4,15 +4,18 @@ Pipeline Service — Distributed task pipeline for Clarinet.
 Provides a TaskIQ-based task queue with chain middleware for
 multi-step distributed pipelines (GPU processing, DICOM operations, etc.).
 
+Queue names are project-namespaced via ``settings.pipeline_task_namespace``.
+Each queue gets its own broker — looked up via ``get_broker_for(queue_name)``.
+
 Example:
     from clarinet.services.pipeline import Pipeline, PipelineMessage, get_pipeline
 
-    # Define a pipeline
+    # Define a pipeline (each task already declares its queue via the decorator)
     imaging_pipeline = (
         Pipeline("ct_segmentation")
-        .step(fetch_dicom, queue="clarinet.dicom")
-        .step(run_segmentation, queue="clarinet.gpu")
-        .step(generate_report, queue="clarinet.default")
+        .step(fetch_dicom)
+        .step(run_segmentation)
+        .step(generate_report)
     )
 
     # Execute
@@ -26,14 +29,13 @@ Example:
 from clarinet.exceptions.domain import PipelineConfigError, PipelineError, PipelineStepError
 
 from .broker import (
-    DEFAULT_QUEUE,
-    DICOM_QUEUE,
-    DLQ_QUEUE,
-    GPU_QUEUE,
     create_broker,
-    extract_routing_key,
+    get_all_brokers,
     get_broker,
+    get_broker_for,
     get_test_broker,
+    is_registered,
+    reset_brokers,
 )
 from .chain import (
     Pipeline,
@@ -48,13 +50,9 @@ from .message import PipelineMessage
 from .middleware import DeadLetterMiddleware, DLQPublisher
 from .sync_wrappers import SyncPipelineClient, SyncRecordQuery, SyncTaskContext
 from .task import pipeline_task
-from .worker import get_worker_queues, run_worker
+from .worker import get_worker_queues, load_task_modules, run_worker
 
 __all__ = [
-    "DEFAULT_QUEUE",
-    "DICOM_QUEUE",
-    "DLQ_QUEUE",
-    "GPU_QUEUE",
     "DLQPublisher",
     "DeadLetterMiddleware",
     "FileResolver",
@@ -70,15 +68,19 @@ __all__ = [
     "TaskContext",
     "build_task_context",
     "create_broker",
-    "extract_routing_key",
+    "get_all_brokers",
     "get_all_pipelines",
     "get_broker",
+    "get_broker_for",
     "get_pipeline",
     "get_test_broker",
     "get_worker_queues",
+    "is_registered",
+    "load_task_modules",
     "persist_definitions",
     "pipeline_task",
     "register_task",
+    "reset_brokers",
     "run_worker",
     "sync_pipeline_definitions",
 ]

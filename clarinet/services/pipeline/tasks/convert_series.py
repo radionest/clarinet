@@ -120,7 +120,7 @@ async def _convert_series_impl(msg: PipelineMessage, ctx: TaskContext) -> None:
     logger.info(f"Saved NIfTI volume to {output_path}")
 
 
-@pipeline_task(queue="clarinet.dicom")
+@pipeline_task(queue=settings.dicom_queue_name)
 async def convert_series_to_nifti(msg: PipelineMessage, ctx: TaskContext) -> None:
     """Download DICOM series from PACS and convert to NIfTI.
 

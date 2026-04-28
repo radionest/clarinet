@@ -8,7 +8,9 @@ Sync handlers are auto-detected and run in a thread via ``asyncio.to_thread()``,
 receiving a ``SyncTaskContext`` instead of ``TaskContext``.
 
 Example:
-    @pipeline_task(queue="clarinet.gpu")
+    from clarinet.settings import settings
+
+    @pipeline_task(queue=settings.gpu_queue_name)
     async def run_segmentation(msg: PipelineMessage, ctx: TaskContext):
         seg_path = ctx.files.resolve("segmentation")
         ...
@@ -30,7 +32,7 @@ from clarinet.client import ClarinetClient
 from clarinet.settings import settings
 from clarinet.utils.logger import logger
 
-from .broker import get_broker
+from .broker import get_broker_for
 from .chain import register_task
 from .context import FileResolver, build_task_context
 from .message import PipelineMessage
@@ -55,7 +57,9 @@ def pipeline_task(
     chain middleware can propagate it to the next step.
 
     Args:
-        queue: Optional queue override for the broker task registration.
+        queue: Optional queue name. Defaults to ``settings.default_queue_name``.
+            The task is registered on ``get_broker_for(queue)``, so
+            ``task.kicker().kiq()`` always publishes to this queue.
         task_name: Explicit task name. If ``None``, auto-generates
             ``'{settings.pipeline_task_namespace}:{fn.__name__}'``.
         auto_submit: If ``True`` and handler returns a ``dict``, automatically
@@ -64,7 +68,7 @@ def pipeline_task(
             ``broker.task()``.
 
     Returns:
-        Decorator that registers the task on the singleton broker.
+        Decorator that registers the task on its target queue's broker.
     """
 
     def decorator(fn: Callable[..., Any]) -> Any:
@@ -114,18 +118,17 @@ def pipeline_task(
             finally:
                 await client.close()
 
-        # Register on the singleton broker
-        broker = get_broker()
+        target_queue = queue or settings.default_queue_name
+        broker = get_broker_for(target_queue)
         kw: dict[str, Any] = {**task_kwargs}
-        if queue is not None:
-            kw["queue"] = queue
+        kw["queue"] = target_queue
         kw["task_name"] = (
             task_name
             if task_name is not None
             else f"{settings.pipeline_task_namespace}:{fn.__name__}"
         )
         decorated = broker.task(**kw)(wrapper)
-        decorated._pipeline_queue = queue
+        decorated._pipeline_queue = target_queue
         register_task(decorated)
         return decorated
 

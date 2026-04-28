@@ -634,7 +634,7 @@ class TestPipelineTaskDecorator:
     """Tests for pipeline_task() decorator."""
 
     @pytest.mark.asyncio
-    @patch("clarinet.services.pipeline.task.get_broker")
+    @patch("clarinet.services.pipeline.task.get_broker_for")
     @patch("clarinet.services.pipeline.task.register_task")
     @patch("clarinet.services.pipeline.task.build_task_context")
     @patch("clarinet.services.pipeline.task.ClarinetClient")
@@ -689,7 +689,7 @@ class TestPipelineTaskDecorator:
         mock_client.close.assert_awaited_once()
 
     @pytest.mark.asyncio
-    @patch("clarinet.services.pipeline.task.get_broker")
+    @patch("clarinet.services.pipeline.task.get_broker_for")
     @patch("clarinet.services.pipeline.task.register_task")
     @patch("clarinet.services.pipeline.task.build_task_context")
     @patch("clarinet.services.pipeline.task.ClarinetClient")
@@ -733,7 +733,7 @@ class TestPipelineTaskDecorator:
         assert result["payload"] == {"result": "ok"}
 
     @pytest.mark.asyncio
-    @patch("clarinet.services.pipeline.task.get_broker")
+    @patch("clarinet.services.pipeline.task.get_broker_for")
     @patch("clarinet.services.pipeline.task.register_task")
     @patch("clarinet.services.pipeline.task.build_task_context")
     @patch("clarinet.services.pipeline.task.ClarinetClient")
@@ -778,7 +778,7 @@ class TestPipelineTaskDecorator:
         mock_client.close.assert_awaited_once()
 
     @pytest.mark.asyncio
-    @patch("clarinet.services.pipeline.task.get_broker")
+    @patch("clarinet.services.pipeline.task.get_broker_for")
     @patch("clarinet.services.pipeline.task.register_task")
     @patch("clarinet.services.pipeline.task.build_task_context")
     @patch("clarinet.services.pipeline.task.ClarinetClient")
@@ -821,7 +821,7 @@ class TestPipelineTaskDecorator:
             await error_task(msg_dict)
 
     @pytest.mark.asyncio
-    @patch("clarinet.services.pipeline.task.get_broker")
+    @patch("clarinet.services.pipeline.task.get_broker_for")
     @patch("clarinet.services.pipeline.task.register_task")
     @patch("clarinet.services.pipeline.task.build_task_context")
     @patch("clarinet.services.pipeline.task.ClarinetClient")
@@ -1089,7 +1089,7 @@ class TestSyncHandlerDetection:
     """Tests for automatic sync/async handler detection in pipeline_task."""
 
     @pytest.mark.asyncio
-    @patch("clarinet.services.pipeline.task.get_broker")
+    @patch("clarinet.services.pipeline.task.get_broker_for")
     @patch("clarinet.services.pipeline.task.register_task")
     @patch("clarinet.services.pipeline.task.build_task_context")
     @patch("clarinet.services.pipeline.task.ClarinetClient")
@@ -1133,7 +1133,7 @@ class TestSyncHandlerDetection:
         assert received["ctx_type"] == "SyncTaskContext"
 
     @pytest.mark.asyncio
-    @patch("clarinet.services.pipeline.task.get_broker")
+    @patch("clarinet.services.pipeline.task.get_broker_for")
     @patch("clarinet.services.pipeline.task.register_task")
     @patch("clarinet.services.pipeline.task.build_task_context")
     @patch("clarinet.services.pipeline.task.ClarinetClient")
@@ -1185,7 +1185,7 @@ class TestAutoSubmit:
     """Tests for the auto_submit parameter of pipeline_task."""
 
     @pytest.mark.asyncio
-    @patch("clarinet.services.pipeline.task.get_broker")
+    @patch("clarinet.services.pipeline.task.get_broker_for")
     @patch("clarinet.services.pipeline.task.register_task")
     @patch("clarinet.services.pipeline.task.build_task_context")
     @patch("clarinet.services.pipeline.task.ClarinetClient")
@@ -1227,7 +1227,7 @@ class TestAutoSubmit:
         mock_client.submit_record_data.assert_awaited_once_with(42, {"result": "ok"})
 
     @pytest.mark.asyncio
-    @patch("clarinet.services.pipeline.task.get_broker")
+    @patch("clarinet.services.pipeline.task.get_broker_for")
     @patch("clarinet.services.pipeline.task.register_task")
     @patch("clarinet.services.pipeline.task.build_task_context")
     @patch("clarinet.services.pipeline.task.ClarinetClient")
@@ -1269,7 +1269,7 @@ class TestAutoSubmit:
         mock_client.submit_record_data.assert_not_awaited()
 
     @pytest.mark.asyncio
-    @patch("clarinet.services.pipeline.task.get_broker")
+    @patch("clarinet.services.pipeline.task.get_broker_for")
     @patch("clarinet.services.pipeline.task.register_task")
     @patch("clarinet.services.pipeline.task.build_task_context")
     @patch("clarinet.services.pipeline.task.ClarinetClient")
@@ -1312,7 +1312,7 @@ class TestAutoSubmit:
         mock_client.submit_record_data.assert_not_awaited()
 
     @pytest.mark.asyncio
-    @patch("clarinet.services.pipeline.task.get_broker")
+    @patch("clarinet.services.pipeline.task.get_broker_for")
     @patch("clarinet.services.pipeline.task.register_task")
     @patch("clarinet.services.pipeline.task.build_task_context")
     @patch("clarinet.services.pipeline.task.ClarinetClient")
@@ -1355,7 +1355,7 @@ class TestAutoSubmit:
         assert result["payload"] == {"result": "ok"}
 
     @pytest.mark.asyncio
-    @patch("clarinet.services.pipeline.task.get_broker")
+    @patch("clarinet.services.pipeline.task.get_broker_for")
     @patch("clarinet.services.pipeline.task.register_task")
     @patch("clarinet.services.pipeline.task.build_task_context")
     @patch("clarinet.services.pipeline.task.ClarinetClient")

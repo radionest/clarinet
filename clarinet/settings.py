@@ -315,6 +315,26 @@ class Settings(BaseSettings):
         return name or "clarinet"
 
     @property
+    def default_queue_name(self) -> str:
+        """Project-namespaced default queue name."""
+        return f"{self.pipeline_task_namespace}.default"
+
+    @property
+    def gpu_queue_name(self) -> str:
+        """Project-namespaced GPU queue name."""
+        return f"{self.pipeline_task_namespace}.gpu"
+
+    @property
+    def dicom_queue_name(self) -> str:
+        """Project-namespaced DICOM queue name."""
+        return f"{self.pipeline_task_namespace}.dicom"
+
+    @property
+    def dlq_queue_name(self) -> str:
+        """Project-namespaced dead letter queue name."""
+        return f"{self.pipeline_task_namespace}.dead_letter"
+
+    @property
     def rabbitmq_management_auth(self) -> tuple[str, str]:
         """Credentials for RabbitMQ Management HTTP API.
 
