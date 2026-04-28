@@ -311,7 +311,7 @@ async def test_lifespan_wrapper_logs_startup_error(
         property(lambda self: tmp_path / "nonexistent_static"),
     )
 
-    app = FastAPI(lifespan=_lifespan_with_logging)
+    app = FastAPI()
 
     with pytest.raises(StartupError, match="Frontend"):
         async with _lifespan_with_logging(app):
