@@ -386,13 +386,13 @@ class Settings(BaseSettings):
             return explicit
         if self.admin_password:
             import hashlib
-            import hmac
 
-            return hmac.new(
-                b"clarinet-internal-service",
+            return hashlib.pbkdf2_hmac(
+                "sha256",
                 self.admin_password.encode(),
-                hashlib.sha256,
-            ).hexdigest()
+                b"clarinet-internal-service",
+                iterations=200_000,
+            ).hex()
         return ""
 
     @classmethod
