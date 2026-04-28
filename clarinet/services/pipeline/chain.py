@@ -10,9 +10,9 @@ Example:
 
     imaging_pipeline = (
         Pipeline("ct_segmentation")
-        .step(fetch_dicom, queue="clarinet.dicom")
-        .step(run_segmentation, queue="clarinet.gpu")
-        .step(generate_report, queue="clarinet.default")
+        .step(fetch_dicom)
+        .step(run_segmentation)
+        .step(generate_report)
     )
 
     # Execute (dispatches first step):
@@ -24,9 +24,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from clarinet.exceptions.domain import PipelineConfigError
+from clarinet.settings import settings
 from clarinet.utils.logger import logger
 
-from .broker import DEFAULT_QUEUE, extract_routing_key
 from .message import PipelineMessage
 
 if TYPE_CHECKING:
@@ -41,17 +41,52 @@ _TASK_REGISTRY: dict[str, AsyncTaskiqDecoratedTask[..., Any]] = {}
 _PIPELINE_REGISTRY: dict[str, Pipeline] = {}
 
 
+def _resolve_step_queue(
+    task: AsyncTaskiqDecoratedTask[..., Any],
+    queue: str | None,
+) -> str:
+    """Resolve the queue for a pipeline step.
+
+    A task is bound to one broker at decoration time
+    (``task._pipeline_queue``).  Specifying a different queue here would
+    silently route through the wrong broker, so any mismatch raises.
+
+    Args:
+        task: The TaskIQ decorated task.
+        queue: Optional explicit queue from ``Pipeline.step(..., queue=...)``.
+
+    Returns:
+        The queue this step will publish to.
+
+    Raises:
+        PipelineConfigError: If *queue* differs from the task's bound queue.
+    """
+    bound = getattr(task, "_pipeline_queue", None)
+    resolved = queue or bound or settings.default_queue_name
+    if bound is not None and queue is not None and queue != bound:
+        raise PipelineConfigError(
+            f"Task '{task.task_name}' is registered for queue '{bound}' but the "
+            f"pipeline step requests '{queue}'. Either re-decorate the task with "
+            f"queue='{queue}' or omit queue= from .step() to use the task's queue."
+        )
+    return resolved
+
+
 class PipelineStep:
     """A single step in a pipeline chain.
 
     Args:
         task: The TaskIQ decorated task function.
-        queue: Target queue name for this step.
+        queue: Optional override; defaults to the task's bound queue.
     """
 
-    def __init__(self, task: AsyncTaskiqDecoratedTask[..., Any], queue: str = DEFAULT_QUEUE):
+    def __init__(
+        self,
+        task: AsyncTaskiqDecoratedTask[..., Any],
+        queue: str | None = None,
+    ):
         self.task = task
-        self.queue = queue
+        self.queue = _resolve_step_queue(task, queue)
         self.task_name = task.task_name
 
     def to_dict(self) -> dict[str, str]:
@@ -77,8 +112,8 @@ class Pipeline:
     Example:
         pipeline = (
             Pipeline("ct_segmentation")
-            .step(fetch_dicom, queue="clarinet.dicom")
-            .step(run_segmentation, queue="clarinet.gpu")
+            .step(fetch_dicom)
+            .step(run_segmentation)
             .step(generate_report)
         )
     """
@@ -91,16 +126,26 @@ class Pipeline:
     def step(
         self,
         task: AsyncTaskiqDecoratedTask[..., Any],
-        queue: str = DEFAULT_QUEUE,
+        queue: str | None = None,
     ) -> Pipeline:
         """Add a step to the pipeline.
 
+        The step uses the task's own queue by default — the queue it was
+        bound to via ``@pipeline_task(queue=...)``.  Passing *queue* with
+        a value different from the task's bound queue raises, since the
+        task is already wired to a specific broker.
+
         Args:
             task: The TaskIQ decorated task function.
-            queue: Target queue name (default: ``clarinet.default``).
+            queue: Optional override; must match the task's bound queue
+                if specified.
 
         Returns:
             Self for method chaining.
+
+        Raises:
+            PipelineConfigError: If *queue* conflicts with the task's
+                bound queue.
         """
         pipeline_step = PipelineStep(task=task, queue=queue)
         self.steps.append(pipeline_step)
@@ -130,12 +175,11 @@ class Pipeline:
             raise PipelineConfigError(f"Pipeline '{self.name}' has no steps")
 
         first_step = self.steps[0]
-        routing_key = extract_routing_key(first_step.queue)
 
         labels = {
             "pipeline_id": self.name,
             "step_index": "0",
-            "routing_key": routing_key,
+            "queue": first_step.queue,
             **extra_labels,
         }
 

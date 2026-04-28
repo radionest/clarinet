@@ -318,7 +318,7 @@ async def _prefetch_dicom_web_impl(msg: PipelineMessage, _ctx: TaskContext) -> N
     )
 
 
-@pipeline_task(queue="clarinet.dicom")
+@pipeline_task(queue=settings.dicom_queue_name)
 async def prefetch_dicom_web(msg: PipelineMessage, ctx: TaskContext) -> None:
     """Prefetch a study into the DICOMweb disk cache via direct C-GET.
 

@@ -59,11 +59,26 @@ async def test_health_pipeline_disabled():
 
 @pytest.mark.asyncio
 async def test_health_pipeline_ok():
-    """Health endpoint reports pipeline as ok when broker exists."""
+    """Health endpoint reports pipeline as ok when at least one broker is registered."""
     from clarinet.api.routers.health import _check_pipeline
 
     with patch("clarinet.api.routers.health.settings") as mock_settings:
         mock_settings.pipeline_enabled = True
-        with patch("clarinet.services.pipeline.get_broker", return_value=MagicMock()):
+        with patch(
+            "clarinet.services.pipeline.get_all_brokers",
+            return_value={"clarinet.default": MagicMock()},
+        ):
             result = _check_pipeline()
             assert result == "ok"
+
+
+@pytest.mark.asyncio
+async def test_health_pipeline_error_when_no_brokers():
+    """Health endpoint reports error when pipeline_enabled but no brokers exist."""
+    from clarinet.api.routers.health import _check_pipeline
+
+    with patch("clarinet.api.routers.health.settings") as mock_settings:
+        mock_settings.pipeline_enabled = True
+        with patch("clarinet.services.pipeline.get_all_brokers", return_value={}):
+            result = _check_pipeline()
+            assert result == "error"

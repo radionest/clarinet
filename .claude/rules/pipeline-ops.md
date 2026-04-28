@@ -46,10 +46,31 @@ Optional group `pipeline` in `pyproject.toml`:
 - `taskiq-aio-pika>=0.4.0`
 - `taskiq-redis>=1.0.0`
 
+## Queue Namespacing
+
+Queue names are derived from `settings.pipeline_task_namespace` (which is normalized
+from `settings.project_name`):
+
+| Setting property | Default (`project_name="Clarinet"`) | Custom (`project_name="Liver"`) |
+|---|---|---|
+| `settings.default_queue_name` | `clarinet.default` | `liver.default` |
+| `settings.gpu_queue_name` | `clarinet.gpu` | `liver.gpu` |
+| `settings.dicom_queue_name` | `clarinet.dicom` | `liver.dicom` |
+| `settings.dlq_queue_name` | `clarinet.dead_letter` | `liver.dead_letter` |
+
+Tasks should use these properties (`settings.dicom_queue_name`) instead of hard-coded
+strings (`"clarinet.dicom"`) — otherwise multi-project deployments collide on the same
+RabbitMQ queue.
+
+`routing_key = full queue name` — guarantees no cross-project collisions on a shared
+exchange.  Each queue gets its own broker via `get_broker_for(queue_name)`; tasks are
+bound to their broker at decoration time, so `task.kicker().kiq()` always publishes to
+the right queue.
+
 ## Built-in Tasks
 
 Registered in `clarinet/services/pipeline/tasks/` — imported at broker startup.
-- `convert_series_to_nifti` — C-GET DICOM series → NIfTI conversion. Queue: `clarinet.dicom`. Requires `msg.series_uid`. Idempotent (skips if `volume.nii.gz` exists). Output: `VOLUME_NIFTI` FileDef (level=SERIES).
-- `prefetch_dicom_web` — prefetch a study into the DICOMweb disk cache via direct C-GET to `{storage_path}/dicomweb_cache/{study}/{series}/`. Queue: `clarinet.dicom`. Requires `msg.study_uid`. Bypasses API memory tier. Idempotent (skips series with valid disk cache or `dcm_anon/` copy). Payload: `skip_if_anon` (default `True`).
+- `convert_series_to_nifti` — C-GET DICOM series → NIfTI conversion. Queue: `settings.dicom_queue_name`. Requires `msg.series_uid`. Idempotent (skips if `volume.nii.gz` exists). Output: `VOLUME_NIFTI` FileDef (level=SERIES).
+- `prefetch_dicom_web` — prefetch a study into the DICOMweb disk cache via direct C-GET to `{storage_path}/dicomweb_cache/{study}/{series}/`. Queue: `settings.dicom_queue_name`. Requires `msg.study_uid`. Bypasses API memory tier. Idempotent (skips series with valid disk cache or `dcm_anon/` copy). Payload: `skip_if_anon` (default `True`).
 
 Task name collision: `register_task()` in `chain.py` prevents project tasks from shadowing built-in tasks (identity check `existing is not task` → `PipelineConfigError`).

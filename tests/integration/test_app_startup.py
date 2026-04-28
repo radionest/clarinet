@@ -48,7 +48,7 @@ async def cleanup_startup_test_queues():
             for name in [
                 "clarinet_startup_test.default",
                 "clarinet_startup_test.default.delay",
-                "clarinet_startup_test.dlq",
+                "clarinet_startup_test.dead_letter",
             ]:
                 try:
                     queue = await channel.declare_queue(name, passive=True)
@@ -69,19 +69,17 @@ async def cleanup_startup_test_queues():
 @pytest.fixture(autouse=True)
 def _reset_singletons():
     """Reset global singletons so each test gets a fresh engine/broker."""
-    import clarinet.services.pipeline.broker as broker_mod
-
-    orig_broker = broker_mod._broker
+    from clarinet.services.pipeline import reset_brokers
 
     db_manager._async_engine = None
     db_manager._async_session_factory = None
-    broker_mod._broker = None
+    reset_brokers()
 
     yield
 
     db_manager._async_engine = None
     db_manager._async_session_factory = None
-    broker_mod._broker = orig_broker
+    reset_brokers()
 
 
 @pytest.fixture
@@ -142,21 +140,18 @@ async def test_startup_pipeline_enabled(
     )
 
     monkeypatch.setattr(settings, "pipeline_enabled", True)
+    monkeypatch.setattr(settings, "project_name", "Clarinet Startup Test")
     monkeypatch.setattr(settings, "rabbitmq_host", RABBITMQ_HOST)
     monkeypatch.setattr(settings, "rabbitmq_port", RABBITMQ_PORT)
     monkeypatch.setattr(settings, "rabbitmq_login", RABBITMQ_USER)
     monkeypatch.setattr(settings, "rabbitmq_password", RABBITMQ_PASS)
     monkeypatch.setattr(settings, "rabbitmq_exchange", "clarinet_startup_test")
 
-    import clarinet.services.pipeline.broker as broker_mod
-
-    monkeypatch.setattr(broker_mod, "DEFAULT_QUEUE", "clarinet_startup_test.default")
-    monkeypatch.setattr(broker_mod, "DLQ_QUEUE", "clarinet_startup_test.dlq")
-
     app = FastAPI(lifespan=lifespan)
 
     async with lifespan(app):
-        assert app.state.pipeline_broker is not None
+        assert app.state.pipeline_brokers
+        assert settings.default_queue_name in app.state.pipeline_brokers
 
     # Regression: no client/login errors during startup
     login_errors = [
@@ -189,7 +184,13 @@ async def test_startup_pipeline_rabbitmq_unavailable(startup_settings, capture_l
     )
     mock_broker.shutdown = AsyncMock()
 
-    with patch("clarinet.services.pipeline.get_broker", return_value=mock_broker):
+    with (
+        patch(
+            "clarinet.services.pipeline.get_all_brokers",
+            return_value={settings.default_queue_name: mock_broker},
+        ),
+        patch("clarinet.services.pipeline.worker._load_task_modules"),
+    ):
         app = FastAPI(lifespan=lifespan)
 
         with pytest.raises(StartupError, match="Pipeline"):

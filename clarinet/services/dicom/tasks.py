@@ -70,15 +70,14 @@ def _get_task() -> Any:
     Returns:
         The decorated ``anonymize_study_task`` broker task.
     """
-    from clarinet.services.pipeline.broker import DICOM_QUEUE, get_broker
-
-    broker = get_broker()
-
+    from clarinet.services.pipeline.broker import get_broker_for
     from clarinet.settings import settings
+
+    broker = get_broker_for(settings.dicom_queue_name)
 
     @broker.task(
         task_name=f"{settings.pipeline_task_namespace}:anonymize_study",
-        queue=DICOM_QUEUE,
+        queue=settings.dicom_queue_name,
     )
     async def anonymize_study_task(
         study_uid: str,
@@ -113,11 +112,19 @@ _task: Any = None
 def get_anonymize_study_task() -> Any:
     """Get the anonymize_study broker task (lazy init).
 
+    Re-creates the task if the cached broker has been cleared via
+    :func:`clarinet.services.pipeline.reset_brokers` (typically between
+    test runs).
+
     Returns:
         The TaskIQ-decorated task callable.
     """
     global _task
-    if _task is None:
+
+    from clarinet.services.pipeline.broker import _BROKERS
+    from clarinet.settings import settings
+
+    if _task is None or settings.dicom_queue_name not in _BROKERS:
         _task = _get_task()
     return _task
 

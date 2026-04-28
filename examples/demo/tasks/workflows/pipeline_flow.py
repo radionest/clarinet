@@ -142,7 +142,7 @@ def compare_w_projection(msg: PipelineMessage, ctx: SyncTaskContext) -> dict[str
     }
 
 
-@pipeline_task(queue="clarinet.dicom")
+@pipeline_task(queue=settings.dicom_queue_name)
 async def anonymize_study_pipeline(msg: PipelineMessage, ctx: TaskContext) -> None:
     """Anonymize the study: fetch from PACS, anonymize tags, send to PACS."""
     assert msg.record_id is not None
@@ -374,7 +374,6 @@ async def dispatch_nifti_conversion(
         logger.warning(f"No best_series in first-check for study {record.study_uid}")
         return
 
-    from clarinet.services.pipeline.broker import extract_routing_key
     from clarinet.services.pipeline.tasks.convert_series import convert_series_to_nifti
 
     msg = PipelineMessage(
@@ -382,10 +381,7 @@ async def dispatch_nifti_conversion(
         study_uid=record.study_uid,
         series_uid=best_series,
     )
-    routing_key = extract_routing_key("clarinet.dicom")
-    await (
-        convert_series_to_nifti.kicker().with_labels(routing_key=routing_key).kiq(msg.model_dump())
-    )
+    await convert_series_to_nifti.kicker().kiq(msg.model_dump())
     logger.info(f"Dispatched NIfTI conversion for series {best_series}")
 
 

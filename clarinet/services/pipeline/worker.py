@@ -10,8 +10,6 @@ from __future__ import annotations
 from clarinet.settings import settings
 from clarinet.utils.logger import logger, reconfigure_for_worker
 
-from .broker import DEFAULT_QUEUE, DICOM_QUEUE, GPU_QUEUE
-
 
 def get_worker_queues() -> list[str]:
     """Auto-detect worker queues based on machine capabilities.
@@ -22,25 +20,25 @@ def get_worker_queues() -> list[str]:
     Returns:
         List of queue names this worker should consume from.
     """
-    queues = [DEFAULT_QUEUE]
+    queues = [settings.default_queue_name]
 
     if settings.have_gpu:
-        queues.append(GPU_QUEUE)
+        queues.append(settings.gpu_queue_name)
         logger.info("GPU capability detected — worker will listen to GPU queue")
 
     if settings.have_dicom:
-        queues.append(DICOM_QUEUE)
+        queues.append(settings.dicom_queue_name)
         logger.info("DICOM capability detected — worker will listen to DICOM queue")
 
     return queues
 
 
 def _load_task_modules() -> None:
-    """Import flow files to register pipeline tasks on the singleton broker.
+    """Import flow files to register pipeline tasks on per-queue brokers.
 
     Discovers ``*_flow.py`` files from ``settings.recordflow_paths`` and
-    loads them via ``importlib.util`` so that ``@broker.task()`` decorators
-    populate the singleton broker's task registry.
+    loads them via ``importlib.util`` so that ``@pipeline_task()`` and
+    ``@broker.task()`` decorators populate the per-queue broker registry.
 
     Before loading, adds the tasks directory to ``sys.path`` and pre-loads
     ``record_types.py`` (if present) so that sibling imports like
@@ -112,8 +110,10 @@ async def run_worker(
 ) -> None:
     """Start a TaskIQ worker process for the given queues.
 
-    Loads task modules to register handlers on the singleton broker,
-    then starts broker instances for each queue.
+    Loads task modules first — each ``@pipeline_task`` decorator registers
+    its task on the per-queue broker for its declared queue.  Then we
+    look up each requested queue's broker via ``get_broker_for`` (returns
+    the same broker the decorators populated) and consume from it.
 
     Args:
         queues: Queue names to listen on (auto-detected if None).
@@ -126,7 +126,7 @@ async def run_worker(
     import signal
     import sys
 
-    from .broker import create_broker, get_broker
+    from .broker import get_broker_for
 
     reconfigure_for_worker(log_file=log_file)
 
@@ -155,25 +155,7 @@ async def run_worker(
 
         logger.info(f"Starting pipeline worker on queues: {queues} (workers={workers})")
 
-        # Singleton broker has all tasks registered via @broker.task() decorators
-        singleton = get_broker()
-
-        brokers = []
-        for queue_name in queues:
-            if queue_name == DEFAULT_QUEUE:
-                brokers.append(singleton)
-            else:
-                # Create per-queue broker and re-register all tasks using public API.
-                # register_task() creates a new AsyncTaskiqDecoratedTask bound to qbroker,
-                # preserving the original task name and labels.
-                qbroker = create_broker(queue_name)
-                for task in singleton.get_all_tasks().values():
-                    qbroker.register_task(
-                        task.original_func,
-                        task_name=task.task_name,
-                        **task.labels,
-                    )
-                brokers.append(qbroker)
+        brokers = [get_broker_for(q) for q in queues]
 
         # Start all brokers and begin consuming via TaskIQ receiver
         from taskiq.api.receiver import run_receiver_task
@@ -193,7 +175,8 @@ async def run_worker(
             )
 
         logger.info(f"Pipeline worker started, listening on {len(brokers)} queue(s)")
-        logger.info(f"Registered tasks: {list(singleton.get_all_tasks().keys())}")
+        for queue_name, broker in zip(queues, brokers, strict=True):
+            logger.info(f"Queue '{queue_name}' tasks: {list(broker.get_all_tasks().keys())}")
 
         shutdown_event = asyncio.Event()
 

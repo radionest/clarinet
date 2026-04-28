@@ -28,8 +28,6 @@ from clarinet.client import ClarinetAPIError, ClarinetClient
 from clarinet.settings import settings
 from clarinet.utils.logger import logger
 
-from .broker import extract_routing_key
-
 if TYPE_CHECKING:
     from aio_pika.abc import AbstractChannel, AbstractRobustConnection
     from taskiq import TaskiqMessage, TaskiqResult
@@ -56,9 +54,9 @@ class DLQPublisher:
         amqp_url: Optional AMQP URL override. Falls back to
             ``_build_amqp_url()`` when not provided (production default).
         queue_name: Optional queue name override. Falls back to
-            ``DLQ_QUEUE`` when not provided (production default).
-            Frozen after ``startup()`` — all subsequent ``publish()``
-            calls use the resolved name.
+            ``settings.dlq_queue_name`` when not provided (production
+            default).  Frozen after ``startup()`` — all subsequent
+            ``publish()`` calls use the resolved name.
     """
 
     def __init__(self, amqp_url: str | None = None, queue_name: str | None = None) -> None:
@@ -77,10 +75,10 @@ class DLQPublisher:
 
         import aio_pika
 
-        from .broker import DLQ_QUEUE, _build_amqp_url
+        from .broker import _build_amqp_url
 
         url = self._amqp_url or _build_amqp_url()
-        queue = self._queue_name or DLQ_QUEUE
+        queue = self._queue_name or settings.dlq_queue_name
         self._queue_name = queue  # freeze resolved name
         self._connection = await aio_pika.connect_robust(url)
         self._channel = await self._connection.channel()
@@ -429,16 +427,25 @@ class PipelineChainMiddleware(TaskiqMiddleware):
             await self._publish_chain_failure_to_dlq(message, reason)
             return
 
-        # Build labels for the next step — no pipeline_chain, just ID + index
+        queue = next_step.get("queue", settings.default_queue_name)
+        bound_queue = getattr(task_func, "_pipeline_queue", None)
+        if bound_queue is not None and bound_queue != queue:
+            reason = (
+                f"Pipeline chain: definition expects task '{task_name}' on queue "
+                f"'{queue}' but the registered task is bound to '{bound_queue}'. "
+                f"The pipeline definition is out of sync with the task registration."
+            )
+            logger.error(f"{reason} → DLQ")
+            await self._publish_chain_failure_to_dlq(message, reason)
+            return
+
+        # Labels are kept for observability — task_func is already bound to
+        # the right broker, so routing happens automatically via kicker().
         next_labels: dict[str, str] = {
             "pipeline_id": pipeline_id,
             "step_index": str(next_index),
+            "queue": queue,
         }
-
-        # Route to the correct queue via routing_key
-        queue = next_step.get("queue", "clarinet.default")
-        routing_key = extract_routing_key(queue)
-        next_labels["routing_key"] = routing_key
 
         # Prepare the message argument — pass the previous result through
         from .message import PipelineMessage

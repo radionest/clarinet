@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from clarinet.exceptions.domain import PipelineConfigError
-from clarinet.services.pipeline.broker import DEFAULT_QUEUE, DICOM_QUEUE, GPU_QUEUE
+from clarinet.services.pipeline.broker import reset_brokers
 from clarinet.services.pipeline.chain import (
     _PIPELINE_REGISTRY,
     _TASK_REGISTRY,
@@ -21,16 +21,23 @@ from clarinet.services.pipeline.chain import (
 )
 from clarinet.services.pipeline.message import PipelineMessage
 from clarinet.services.pipeline.worker import get_worker_queues
+from clarinet.settings import settings
+
+DEFAULT_QUEUE = settings.default_queue_name
+GPU_QUEUE = settings.gpu_queue_name
+DICOM_QUEUE = settings.dicom_queue_name
 
 
 @pytest.fixture(autouse=True)
 def _clear_registries():
-    """Clear pipeline registries before each test."""
+    """Clear pipeline + broker registries before each test."""
     _TASK_REGISTRY.clear()
     _PIPELINE_REGISTRY.clear()
+    reset_brokers()
     yield
     _TASK_REGISTRY.clear()
     _PIPELINE_REGISTRY.clear()
+    reset_brokers()
 
 
 # ─── PipelineMessage ────────────────────────────────────────────────────────
@@ -106,28 +113,33 @@ class TestPipeline:
 
     def test_pipeline_step_chaining(self):
         """Steps can be chained and preserve order."""
-        # Create mock tasks
+        # Create mock tasks. _pipeline_queue must be an explicit string —
+        # bare AsyncMock auto-creates a MagicMock attribute that breaks
+        # the queue-resolution invariant in PipelineStep.
         mock_task1 = AsyncMock()
         mock_task1.task_name = "step_one"
+        mock_task1._pipeline_queue = DICOM_QUEUE
         mock_task2 = AsyncMock()
         mock_task2.task_name = "step_two"
+        mock_task2._pipeline_queue = GPU_QUEUE
 
         p = (
             Pipeline("chain_test")
-            .step(mock_task1, queue="clarinet.dicom")
-            .step(mock_task2, queue="clarinet.gpu")
+            .step(mock_task1, queue=DICOM_QUEUE)
+            .step(mock_task2, queue=GPU_QUEUE)
         )
 
         assert len(p.steps) == 2
         assert p.steps[0].task_name == "step_one"
-        assert p.steps[0].queue == "clarinet.dicom"
+        assert p.steps[0].queue == DICOM_QUEUE
         assert p.steps[1].task_name == "step_two"
-        assert p.steps[1].queue == "clarinet.gpu"
+        assert p.steps[1].queue == GPU_QUEUE
 
     def test_pipeline_registers_tasks(self):
         """Steps register their tasks in the global task registry."""
         mock_task = AsyncMock()
         mock_task.task_name = "registered_task"
+        mock_task._pipeline_queue = None
 
         Pipeline("reg_test").step(mock_task)
 
@@ -135,13 +147,23 @@ class TestPipeline:
         assert _TASK_REGISTRY["registered_task"] is mock_task
 
     def test_pipeline_default_queue(self):
-        """Steps default to clarinet.default queue."""
+        """Steps default to settings.default_queue_name when task has none."""
         mock_task = AsyncMock()
         mock_task.task_name = "default_q_task"
+        mock_task._pipeline_queue = None
 
         p = Pipeline("default_q_test").step(mock_task)
 
         assert p.steps[0].queue == DEFAULT_QUEUE
+
+    def test_pipeline_step_queue_override_raises_on_mismatch(self):
+        """Specifying a queue that conflicts with the task's bound queue raises."""
+        mock_task = AsyncMock()
+        mock_task.task_name = "bound_task"
+        mock_task._pipeline_queue = GPU_QUEUE
+
+        with pytest.raises(PipelineConfigError, match="bound_task"):
+            Pipeline("override_test").step(mock_task, queue=DICOM_QUEUE)
 
     @pytest.mark.asyncio
     async def test_pipeline_run_empty_raises(self):
@@ -155,6 +177,7 @@ class TestPipeline:
         """Pipeline repr shows name and step names."""
         mock_task = AsyncMock()
         mock_task.task_name = "repr_task"
+        mock_task._pipeline_queue = None
 
         p = Pipeline("repr_test").step(mock_task)
         repr_str = repr(p)
@@ -184,6 +207,7 @@ class TestPipeline:
         """Pipeline.run() dispatches the first step with correct labels."""
         mock_task = MagicMock()
         mock_task.task_name = "dispatch_task"
+        mock_task._pipeline_queue = None
 
         kicker_mock = MagicMock()
         mock_task.kicker.return_value = kicker_mock
@@ -199,7 +223,9 @@ class TestPipeline:
         call_kwargs = kicker_mock.with_labels.call_args[1]
         assert call_kwargs["pipeline_id"] == "dispatch_test"
         assert call_kwargs["step_index"] == "0"
+        assert call_kwargs["queue"] == DEFAULT_QUEUE
         assert "pipeline_chain" not in call_kwargs
+        assert "routing_key" not in call_kwargs
 
 
 # ─── sync_pipeline_definitions ────────────────────────────────────────────────
@@ -217,8 +243,10 @@ class TestSyncPipelineDefinitions:
 
         mock_task1 = AsyncMock()
         mock_task1.task_name = "sync_step_a"
+        mock_task1._pipeline_queue = None
         mock_task2 = AsyncMock()
         mock_task2.task_name = "sync_step_b"
+        mock_task2._pipeline_queue = None
 
         Pipeline("sync_test").step(mock_task1).step(mock_task2)
 
@@ -240,8 +268,10 @@ class TestSyncPipelineDefinitions:
 
         mock_task1 = AsyncMock()
         mock_task1.task_name = "update_step_1"
+        mock_task1._pipeline_queue = None
         mock_task2 = AsyncMock()
         mock_task2.task_name = "update_step_2"
+        mock_task2._pipeline_queue = None
 
         repo = PipelineDefinitionRepository(test_session)
 
@@ -267,42 +297,38 @@ class TestSyncPipelineDefinitions:
 class TestWorkerQueues:
     """Tests for worker queue auto-detection."""
 
-    def test_default_queues(self):
+    def test_default_queues(self, monkeypatch):
         """Worker with no capabilities gets only default queue."""
-        with patch("clarinet.services.pipeline.worker.settings") as mock_settings:
-            mock_settings.have_gpu = False
-            mock_settings.have_dicom = False
-            queues = get_worker_queues()
-            assert queues == [DEFAULT_QUEUE]
+        monkeypatch.setattr(settings, "have_gpu", False)
+        monkeypatch.setattr(settings, "have_dicom", False)
+        queues = get_worker_queues()
+        assert queues == [DEFAULT_QUEUE]
 
-    def test_gpu_queue(self):
+    def test_gpu_queue(self, monkeypatch):
         """Worker with GPU capability gets default + GPU queues."""
-        with patch("clarinet.services.pipeline.worker.settings") as mock_settings:
-            mock_settings.have_gpu = True
-            mock_settings.have_dicom = False
-            queues = get_worker_queues()
-            assert DEFAULT_QUEUE in queues
-            assert GPU_QUEUE in queues
+        monkeypatch.setattr(settings, "have_gpu", True)
+        monkeypatch.setattr(settings, "have_dicom", False)
+        queues = get_worker_queues()
+        assert DEFAULT_QUEUE in queues
+        assert GPU_QUEUE in queues
 
-    def test_dicom_queue(self):
+    def test_dicom_queue(self, monkeypatch):
         """Worker with DICOM capability gets default + DICOM queues."""
-        with patch("clarinet.services.pipeline.worker.settings") as mock_settings:
-            mock_settings.have_gpu = False
-            mock_settings.have_dicom = True
-            queues = get_worker_queues()
-            assert DEFAULT_QUEUE in queues
-            assert DICOM_QUEUE in queues
+        monkeypatch.setattr(settings, "have_gpu", False)
+        monkeypatch.setattr(settings, "have_dicom", True)
+        queues = get_worker_queues()
+        assert DEFAULT_QUEUE in queues
+        assert DICOM_QUEUE in queues
 
-    def test_all_queues(self):
+    def test_all_queues(self, monkeypatch):
         """Worker with all capabilities gets all queues."""
-        with patch("clarinet.services.pipeline.worker.settings") as mock_settings:
-            mock_settings.have_gpu = True
-            mock_settings.have_dicom = True
-            queues = get_worker_queues()
-            assert DEFAULT_QUEUE in queues
-            assert GPU_QUEUE in queues
-            assert DICOM_QUEUE in queues
-            assert len(queues) == 3
+        monkeypatch.setattr(settings, "have_gpu", True)
+        monkeypatch.setattr(settings, "have_dicom", True)
+        queues = get_worker_queues()
+        assert DEFAULT_QUEUE in queues
+        assert GPU_QUEUE in queues
+        assert DICOM_QUEUE in queues
+        assert len(queues) == 3
 
 
 # ─── RecordFlow PipelineAction integration ───────────────────────────────────
@@ -371,6 +397,7 @@ class TestPipelineActionDSL:
 
         mock_task = MagicMock()
         mock_task.task_name = "auto_pipeline_task"
+        mock_task._pipeline_queue = None
 
         fr = FlowRecord("ct-scan")
         fr.on_status("finished").do_task(mock_task, threshold=0.5)
@@ -482,24 +509,24 @@ class TestPipelineActionDSL:
         assert pipeline.steps[0].queue == "clarinet.gpu"
 
     def test_pipeline_task_attribute_set(self):
-        """@pipeline_task(queue=...) stores queue as _pipeline_queue."""
+        """@pipeline_task(queue=...) stores the queue as _pipeline_queue."""
         from clarinet.services.pipeline.task import pipeline_task
 
-        @pipeline_task(queue="clarinet.gpu")
+        @pipeline_task(queue=GPU_QUEUE)
         async def dummy_gpu_task(msg, ctx):
             pass
 
-        assert dummy_gpu_task._pipeline_queue == "clarinet.gpu"
+        assert dummy_gpu_task._pipeline_queue == GPU_QUEUE
 
-    def test_pipeline_task_attribute_none_by_default(self):
-        """@pipeline_task() without queue stores None as _pipeline_queue."""
+    def test_pipeline_task_attribute_defaults_to_default_queue(self):
+        """@pipeline_task() without queue stores settings.default_queue_name."""
         from clarinet.services.pipeline.task import pipeline_task
 
         @pipeline_task()
         async def dummy_default_task(msg, ctx):
             pass
 
-        assert dummy_default_task._pipeline_queue is None
+        assert dummy_default_task._pipeline_queue == DEFAULT_QUEUE
 
 
 # ─── Exceptions ──────────────────────────────────────────────────────────────
@@ -686,6 +713,7 @@ class TestRetryDefaults:
             mock_settings.rabbitmq_host = "localhost"
             mock_settings.rabbitmq_port = 5672
             mock_settings.rabbitmq_exchange = "test"
+            mock_settings.dlq_queue_name = "test.dead_letter"
             mock_settings.pipeline_result_backend_url = None
             mock_settings.pipeline_retry_count = 3
             mock_settings.pipeline_retry_delay = 5
@@ -810,9 +838,12 @@ class TestWorkerSignalHandling:
             patch("clarinet.services.pipeline.worker._load_task_modules"),
             patch(
                 "clarinet.services.pipeline.worker.get_worker_queues",
-                return_value=["clarinet.default"],
+                return_value=[DEFAULT_QUEUE],
             ),
-            patch("clarinet.services.pipeline.broker.get_broker", return_value=mock_broker),
+            patch(
+                "clarinet.services.pipeline.broker.get_broker_for",
+                return_value=mock_broker,
+            ),
             patch("taskiq.api.receiver.run_receiver_task", new_callable=AsyncMock),
         ):
             yield
@@ -834,7 +865,7 @@ class TestWorkerSignalHandling:
                 callback()
 
             with patch.object(loop, "add_signal_handler", side_effect=spy_add_signal_handler):
-                await run_worker(queues=["clarinet.default"])
+                await run_worker(queues=[DEFAULT_QUEUE])
 
             assert signal.SIGINT in registered_signals
             assert signal.SIGTERM in registered_signals
@@ -857,7 +888,7 @@ class TestWorkerSignalHandling:
                 return original_signal
 
             with patch("signal.signal", side_effect=spy_signal):
-                await run_worker(queues=["clarinet.default"])
+                await run_worker(queues=[DEFAULT_QUEUE])
 
             assert signal.SIGINT in registered
             assert signal.SIGTERM not in registered
@@ -884,7 +915,7 @@ class TestWorkerSignalHandling:
                 patch.object(loop, "add_signal_handler", side_effect=fail_add_signal_handler),
                 patch("signal.signal", side_effect=trigger_shutdown),
             ):
-                await run_worker(queues=["clarinet.default"])
+                await run_worker(queues=[DEFAULT_QUEUE])
 
 
 # ─── Task registry collision detection ────────────────────────────────────────
@@ -921,8 +952,10 @@ class TestTaskRegistryCollision:
         """Pipeline.step() raises on collision via register_task."""
         task_a = AsyncMock()
         task_a.task_name = "step_collision"
+        task_a._pipeline_queue = None
         task_b = AsyncMock()
         task_b.task_name = "step_collision"
+        task_b._pipeline_queue = None
 
         Pipeline("pipeline_a").step(task_a)
         with pytest.raises(PipelineConfigError, match="collision"):
@@ -932,7 +965,44 @@ class TestTaskRegistryCollision:
         """Same task in two pipelines — no error (idempotent)."""
         task = AsyncMock()
         task.task_name = "shared_task"
+        task._pipeline_queue = None
 
         Pipeline("shared_a").step(task)
         Pipeline("shared_b").step(task)  # must not raise
         assert _TASK_REGISTRY["shared_task"] is task
+
+
+# ─── Namespace in queue names ─────────────────────────────────────────────────
+
+
+class TestQueueNamespacing:
+    """Queue names are derived from settings.pipeline_task_namespace."""
+
+    def test_default_namespace_keeps_clarinet_prefix(self, monkeypatch):
+        """project_name='Clarinet' → queues stay 'clarinet.*' (backward compat)."""
+        monkeypatch.setattr(settings, "project_name", "Clarinet")
+        assert settings.default_queue_name == "clarinet.default"
+        assert settings.gpu_queue_name == "clarinet.gpu"
+        assert settings.dicom_queue_name == "clarinet.dicom"
+        assert settings.dlq_queue_name == "clarinet.dead_letter"
+
+    def test_custom_project_name_namespaces_all_queues(self, monkeypatch):
+        """A custom project_name produces a namespaced queue set."""
+        monkeypatch.setattr(settings, "project_name", "Liver Project")
+        assert settings.default_queue_name == "liver_project.default"
+        assert settings.gpu_queue_name == "liver_project.gpu"
+        assert settings.dicom_queue_name == "liver_project.dicom"
+        assert settings.dlq_queue_name == "liver_project.dead_letter"
+
+    def test_decorator_binds_to_namespaced_queue(self, monkeypatch):
+        """@pipeline_task() registers on the project-namespaced default queue."""
+        from clarinet.services.pipeline.task import pipeline_task
+
+        monkeypatch.setattr(settings, "project_name", "Liver")
+        reset_brokers()  # next get_broker_for(...) creates a fresh broker
+
+        @pipeline_task()
+        async def liver_default_task(msg, ctx):
+            pass
+
+        assert liver_default_task._pipeline_queue == "liver.default"
