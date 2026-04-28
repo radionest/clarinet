@@ -108,6 +108,7 @@ async def run_worker(
     queues: list[str] | None = None,
     workers: int = 2,
     start_scp: bool = False,
+    log_file: str | None = None,
 ) -> None:
     """Start a TaskIQ worker process for the given queues.
 
@@ -118,6 +119,8 @@ async def run_worker(
         queues: Queue names to listen on (auto-detected if None).
         workers: Number of concurrent worker tasks per queue.
         start_scp: Start a Storage SCP for C-MOVE retrieval.
+        log_file: Optional override for the worker log path
+            (forwarded to :func:`reconfigure_for_worker`).
     """
     import asyncio
     import signal
@@ -125,8 +128,7 @@ async def run_worker(
 
     from .broker import create_broker, get_broker
 
-    # Reconfigure logging so the worker writes to clarinet_worker.log
-    reconfigure_for_worker()
+    reconfigure_for_worker(log_file=log_file)
 
     # Start Storage SCP before loading tasks (they may use C-MOVE immediately)
     scp = None

@@ -1,5 +1,7 @@
 """Unit tests for clarinet.settings."""
 
+from pathlib import Path
+
 import pytest
 from pydantic import SecretStr
 
@@ -43,3 +45,52 @@ class TestDatabasePasswordSecret:
     ) -> None:
         """The constructed URL must use the real password — masking is for logs only."""
         assert "hunter2" in settings_with_password.database_url
+
+
+class TestGetWorkerLogFile:
+    """Resolution rules for ``Settings.get_worker_log_file``."""
+
+    @pytest.fixture
+    def settings(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Settings:
+        monkeypatch.setenv("CLARINET_LOG_DIR", str(tmp_path))
+        monkeypatch.setenv("CLARINET_LOG_TO_FILE", "true")
+        monkeypatch.delenv("CLARINET_WORKER_LOG_FILE", raising=False)
+        return Settings()
+
+    def test_default(self, settings: Settings, tmp_path: Path) -> None:
+        assert settings.get_worker_log_file() == tmp_path / "clarinet_worker.log"
+
+    def test_relative_setting_resolved_inside_log_dir(
+        self, settings: Settings, tmp_path: Path
+    ) -> None:
+        settings.worker_log_file = "gpu.log"
+        assert settings.get_worker_log_file() == tmp_path / "gpu.log"
+
+    def test_absolute_setting_used_as_is(self, settings: Settings, tmp_path: Path) -> None:
+        absolute = tmp_path.parent / "abs_worker.log"
+        settings.worker_log_file = str(absolute)
+        assert settings.get_worker_log_file() == absolute
+
+    def test_override_wins_over_setting(self, settings: Settings, tmp_path: Path) -> None:
+        settings.worker_log_file = "from_setting.log"
+        result = settings.get_worker_log_file("override.log")
+        assert result == tmp_path / "override.log"
+
+    def test_returns_none_when_log_to_file_disabled(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        monkeypatch.setenv("CLARINET_LOG_DIR", str(tmp_path))
+        monkeypatch.setenv("CLARINET_LOG_TO_FILE", "false")
+        monkeypatch.setenv("CLARINET_WORKER_LOG_FILE", "anything.log")
+        s = Settings()
+        assert s.get_worker_log_file() is None
+        assert s.get_worker_log_file("override.log") is None
+
+    def test_env_var_picked_up(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """Env var CLARINET_WORKER_LOG_FILE auto-populates the field."""
+        monkeypatch.setenv("CLARINET_LOG_DIR", str(tmp_path))
+        monkeypatch.setenv("CLARINET_LOG_TO_FILE", "true")
+        monkeypatch.setenv("CLARINET_WORKER_LOG_FILE", "from_env.log")
+        s = Settings()
+        assert s.worker_log_file == "from_env.log"
+        assert s.get_worker_log_file() == tmp_path / "from_env.log"

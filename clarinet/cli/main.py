@@ -511,6 +511,7 @@ async def _run_pipeline_worker(
     queues: list[str] | None,
     workers: int,
     dicom_scp: tuple[str, int] | None = None,
+    log_file: str | None = None,
 ) -> None:
     """Run the pipeline task worker.
 
@@ -518,6 +519,7 @@ async def _run_pipeline_worker(
         queues: Queue names to listen on (auto-detected if None).
         workers: Number of concurrent worker tasks.
         dicom_scp: Optional (AET, port) to start a Storage SCP for C-MOVE.
+        log_file: Optional override for the worker log file path.
     """
     from clarinet.services.pipeline import run_worker
 
@@ -534,7 +536,12 @@ async def _run_pipeline_worker(
             "Set CLARINET_PIPELINE_ENABLED=true to enable."
         )
 
-    await run_worker(queues=queues, workers=workers, start_scp=dicom_scp is not None)
+    await run_worker(
+        queues=queues,
+        workers=workers,
+        start_scp=dicom_scp is not None,
+        log_file=log_file,
+    )
 
 
 async def init_database() -> None:
@@ -1167,6 +1174,13 @@ def main() -> None:
         metavar="AET:PORT",
         help="Start Storage SCP for C-MOVE retrieval (e.g. WORKER:4006)",
     )
+    worker_parser.add_argument(
+        "--log-file",
+        type=str,
+        default=None,
+        metavar="PATH",
+        help="Override worker log file (absolute path or filename relative to log_dir)",
+    )
 
     # rabbitmq command
     rabbitmq_parser = subparsers.add_parser("rabbitmq", help="RabbitMQ management commands")
@@ -1320,7 +1334,14 @@ def main() -> None:
             queues = [q if "." in q else f"clarinet.{q}" for q in queues]
         dicom_scp = _parse_dicom_scp_arg(args.dicom) if args.dicom else None
         with contextlib.suppress(KeyboardInterrupt):
-            asyncio.run(_run_pipeline_worker(queues, args.workers, dicom_scp=dicom_scp))
+            asyncio.run(
+                _run_pipeline_worker(
+                    queues,
+                    args.workers,
+                    dicom_scp=dicom_scp,
+                    log_file=args.log_file,
+                )
+            )
     elif args.command == "init-migrations":
         from clarinet.utils.migrations import init_alembic_in_project
 

@@ -272,6 +272,9 @@ class Settings(BaseSettings):
     log_console_level: str | None = None  # If None, uses log_level
     log_serialize: bool = True  # JSON format for file logs
     log_noisy_libraries: list[str] = ["pynetdicom"]  # Suppress console INFO/DEBUG from these
+    worker_log_file: str | None = (
+        None  # Override worker log path; None → "{log_dir}/clarinet_worker.log"
+    )
 
     # Remote logging (Loki-compatible push API)
     log_remote_url: str | None = (
@@ -440,6 +443,20 @@ class Settings(BaseSettings):
         if self.log_dir:
             return Path(self.log_dir)
         return Path(self.storage_path) / "logs"
+
+    def get_worker_log_file(self, override: str | None = None) -> Path | None:
+        """Resolve worker log file path.
+
+        Priority: explicit override > settings.worker_log_file > default
+        ``clarinet_worker.log``. Absolute paths used as-is; relative paths
+        resolved inside :meth:`get_log_dir`. Returns ``None`` when
+        ``log_to_file`` is disabled.
+        """
+        if not self.log_to_file:
+            return None
+        raw = override or self.worker_log_file or "clarinet_worker.log"
+        path = Path(raw)
+        return path if path.is_absolute() else self.get_log_dir() / path
 
     @property
     def static_path(self) -> Path:
