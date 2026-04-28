@@ -16,7 +16,6 @@ Clarinet is a framework for clinical-radiological studies, built on FastAPI, SQL
 ## Code Style
 
 - All Python tools run through **uv**: `uv run <command>`
-- Type hints on all functions
 - Docstrings: required on public functions with non-obvious behavior. Skip on trivial CRUD where name + types suffice. Focus on "why", gotchas, raises
 - Custom exceptions from `clarinet.exceptions.http` (NOT_FOUND, CONFLICT, etc.)
 - Async/await for all I/O; `asyncio.gather()` for parallel independent tasks (except on shared `AsyncSession` — see `clarinet/CLAUDE.md`)
@@ -133,15 +132,19 @@ Avoid: direct loguru import (use `from clarinet.utils.logger import logger`), sy
   - `api-deps.md` — DI aliases, RBAC, factory patterns, DICOMweb endpoints (for dependencies.py and routers/)
   - `pipeline-ops.md` — settings, testing, dependencies (for pipeline/)
   - `record-repo.md` — specialized methods, invalidation, auto_id (for record repos)
+  - `record-data-api.md` — submit/update/prefill data flow (for plan/workflows/)
+  - `recordflow-dsl.md` — full DSL API reference (for recordflow/ and *_flow.py)
+  - `schema-hydration.md` — dynamic field options resolver (for schema_hydration.py and hydrators)
   - `slicer-context.md` — context builder & hydration (for context*.py and hydrators)
   - `slicer-helper-api.md` — SlicerHelper full API + VTK pitfalls (for helper.py)
   - `schemathesis.md` — property-based testing guide (for tests/schema/)
   - `file-registry.md` — file definition M2M system (for file_schema.py)
   - `test-debugging.md` — jq recipes for test/log analysis (for tests/)
-  - `recordflow-dsl.md` — full DSL API reference (for recordflow/ and *_flow.py)
+  - `ci-debugging.md` — gh CLI workflow debugging (for .github/workflows/)
   - `project-setup.md` — project init, settings, plan/ structure (for settings.toml and plan/)
   - `e2e-tests.md` — frontend stack, VM sub-path, selectors (for deploy/test/e2e/)
   - `frontend.md` — MVU page contract, Shared/OutMsg, effects, cache, pitfalls (for clarinet/frontend/src/ and test/)
   - `logging-pii.md` — sanitize headers (Referer/Origin) before logging, loguru `extra=` quirk (for auth_config.py and logger.py)
+  - `pr-review.md` — project-specific PR review checklist (used by pr-diff-reviewer subagent)
 
 Update the most specific file. Keep CLAUDE.md files minimal — move detailed reference to `.claude/rules/`.
