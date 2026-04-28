@@ -254,7 +254,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
             brokers = get_all_brokers()
             for queue_name, broker in brokers.items():
-                await broker.startup()
+                try:
+                    await broker.startup()
+                except Exception:
+                    logger.exception(
+                        f"Pipeline broker failed to start for queue '{queue_name}' "
+                        f"(dlq='{settings.dlq_queue_name}', "
+                        f"exchange='{settings.rabbitmq_exchange}')"
+                    )
+                    raise
                 logger.info(f"Pipeline broker started for queue '{queue_name}'")
 
             app.state.pipeline_brokers = brokers
