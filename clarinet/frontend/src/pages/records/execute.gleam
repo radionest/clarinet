@@ -74,6 +74,10 @@ pub type Msg {
   RestartResult(Result(Record, ApiError))
   RequestFail
   RequestPreload(viewer_url: String, study_uid: String)
+  // Admin delete
+  RequestDelete
+  Delete
+  DeleteResult(Result(Nil, ApiError))
 }
 
 // --- Init ---
@@ -395,6 +399,39 @@ pub fn update(
 
     RequestPreload(viewer_url, study_uid) ->
       #(model, effect.none(), [shared.StartPreload(viewer_url, study_uid)])
+
+    // Admin delete: open confirm modal first
+    RequestDelete ->
+      #(model, effect.none(), [
+        shared.OpenDeleteConfirm("record", model.record_id),
+      ])
+
+    Delete -> {
+      let eff = {
+        use dispatch <- effect.from
+        records.delete_record(model.record_id)
+        |> promise.tap(fn(result) { dispatch(DeleteResult(result)) })
+        Nil
+      }
+      #(model, eff, [shared.SetLoading(True)])
+    }
+
+    DeleteResult(Ok(_)) ->
+      #(model, effect.none(), [
+        shared.SetLoading(False),
+        shared.InvalidateAllRecordBuckets,
+        shared.ShowSuccess("Record deleted successfully"),
+        shared.Navigate(router.Records(dict.new())),
+      ])
+
+    DeleteResult(Error(err)) -> {
+      let msg = case err {
+        types.ServerError(409, _) ->
+          "Cannot delete: subtree contains records currently in work"
+        _ -> "Failed to delete record"
+      }
+      #(model, effect.none(), handle_error(err, msg))
+    }
   }
 }
 
@@ -548,6 +585,17 @@ fn render_record_execution(
               event.on_click(Restart),
             ],
             [html.text("Restart")],
+          )
+        False -> element.none()
+      },
+      case permissions.can_delete_record(record, shared.user) {
+        True ->
+          html.button(
+            [
+              attribute.class("btn btn-danger"),
+              event.on_click(RequestDelete),
+            ],
+            [html.text("Delete Record")],
           )
         False -> element.none()
       },

@@ -617,6 +617,13 @@ pub fn restart_record(
   })
 }
 
+/// Admin-only cascade delete of a record, its descendants and output files.
+/// Returns 409 if any record in the subtree is inwork.
+pub fn delete_record(id: String) -> Promise(Result(Nil, ApiError)) {
+  http_client.delete("/admin/records/" <> id)
+  |> promise.map(fn(res) { result.map(res, fn(_) { Nil }) })
+}
+
 /// Manually fail a record with a reason
 pub fn fail_record(
   record_id: String,

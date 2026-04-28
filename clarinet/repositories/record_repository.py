@@ -178,11 +178,14 @@ class RecordRepository(BaseRepository[Record]):
             raise RecordNotFoundError(record_id)
         return record
 
-    async def get_with_relations(self, record_id: int) -> Record:
+    async def get_with_relations(self, record_id: int, *, lock: bool = False) -> Record:
         """Get a single record with all relationships eagerly loaded.
 
         Args:
             record_id: Record ID
+            lock: When ``True``, acquire a row-level lock on the record
+                (``SELECT ... FOR UPDATE``). Caller must keep the transaction
+                open until the lock is no longer needed.
 
         Returns:
             Record with patient, study, series, and record_type loaded
@@ -201,6 +204,8 @@ class RecordRepository(BaseRepository[Record]):
                 _record_file_links_eager_load(),
             )
         )
+        if lock:
+            statement = statement.with_for_update()
         result = await self.session.execute(statement)
         record = result.scalars().first()
         if not record:
@@ -774,6 +779,86 @@ class RecordRepository(BaseRepository[Record]):
         if not record_type:
             raise RecordTypeNotFoundError(name)
         return record_type
+
+    async def delete_records(self, record_ids: list[int], *, commit: bool = True) -> int:
+        """Bulk-delete records by primary key in a single SQL statement.
+
+        ``RecordFileLink`` rows are cleaned up by the database-level
+        ``ondelete="CASCADE"`` FK. ``parent_record_id`` references are
+        cleared by ``ondelete="SET NULL"``.
+
+        This avoids ORM unit-of-work ordering pitfalls that apply when
+        deleting self-referential rows via ``session.delete()`` without
+        eagerly loaded ``child_records`` on every level.
+
+        Args:
+            record_ids: IDs to delete. Empty list is a no-op.
+            commit: When ``False``, skip the final commit so the caller can
+                keep the transaction (and any row locks) open. Default ``True``.
+
+        Returns:
+            Number of deleted rows.
+        """
+        if not record_ids:
+            return 0
+        stmt = sa_delete(Record).where(col(Record.id).in_(record_ids))
+        result = await self.session.execute(stmt)
+        if commit:
+            await self.session.commit()
+        return int(result.rowcount or 0)  # type: ignore[attr-defined]
+
+    async def collect_descendants(self, root_id: int, *, for_update: bool = False) -> list[Record]:
+        """Collect the root record and all its descendants in BFS order.
+
+        Each returned Record has ``patient``, ``study``, ``series``,
+        ``record_type.file_links`` and ``file_links`` eagerly loaded so that
+        the caller can resolve OUTPUT file paths without extra queries.
+        Siblings are ordered by ``Record.id`` so the result is reproducible.
+
+        Args:
+            root_id: ID of the root record.
+            for_update: When ``True``, acquire row-level locks on the whole
+                subtree (`SELECT ... FOR UPDATE`). The caller is responsible
+                for holding the transaction open until it commits the
+                subsequent mutation, otherwise locks are released prematurely.
+
+        Returns:
+            List starting with the root followed by descendants (BFS order).
+
+        Raises:
+            RecordNotFoundError: If the root doesn't exist.
+        """
+        root = await self.get_with_relations(root_id, lock=for_update)
+        collected: list[Record] = [root]
+        visited: set[int] = {root_id}
+        frontier: list[int] = [root_id]
+
+        while frontier:
+            statement = (
+                select(Record)
+                .where(col(Record.parent_record_id).in_(frontier))
+                .order_by(col(Record.id).asc())
+                .options(
+                    selectinload(Record.patient),  # type: ignore[arg-type]
+                    selectinload(Record.study),  # type: ignore[arg-type]
+                    selectinload(Record.series),  # type: ignore[arg-type]
+                    _record_type_with_files(),
+                    _record_file_links_eager_load(),
+                )
+            )
+            if for_update:
+                statement = statement.with_for_update()
+            result = await self.session.execute(statement)
+            new_ids: list[int] = []
+            for child in result.scalars().all():
+                if child.id is None or child.id in visited:
+                    continue
+                visited.add(child.id)
+                collected.append(child)
+                new_ids.append(child.id)
+            frontier = new_ids
+
+        return collected
 
     async def validate_parent_record(self, parent_record_id: int) -> Record:
         """Validate parent record exists and return it (for user_id inheritance).
