@@ -31,8 +31,14 @@
   `anonymize_study_pipeline` did not reach `clarinet.dicom`.
 - `clarinet.services.pipeline.get_all_brokers()` — snapshot of created
   brokers (used by API lifespan to start/stop them all).
+- `clarinet.services.pipeline.is_registered(queue_name)` — public check
+  for whether a broker for *queue_name* has been created.
 - `clarinet.services.pipeline.reset_brokers()` — clears the broker
-  registry; intended for tests.
+  registry; the caller is responsible for shutting brokers down first
+  (otherwise the open AMQP connection leaks).
+- `clarinet.services.pipeline.load_task_modules()` — promoted from the
+  worker-private `_load_task_modules`; used by both the worker and the
+  API lifespan.
 - `Pipeline.step(task, queue=...)` now raises `PipelineConfigError` if the
   explicit queue conflicts with the task's bound queue
   (`task._pipeline_queue`).  Previously this was silently re-routed
@@ -43,10 +49,14 @@
 
 ### Migration notes
 
-- Workers must be restarted after upgrading to pick up the new queue
-  names.  Old queues (e.g. `clarinet.default` on a project whose
-  `project_name` is not `"Clarinet"`) will remain in RabbitMQ with stale
-  messages — drain or delete them via the Management UI.
+- **Workers AND the API server must be restarted** after upgrading to
+  pick up the new queue names.  The API now imports flow files at
+  startup (so it can dispatch via the right per-queue broker) — any
+  exception in a flow file now fails API startup as well as worker
+  startup.  Make sure flow files are import-safe.
+- Old queues (e.g. `clarinet.default` on a project whose `project_name`
+  is not `"Clarinet"`) will remain in RabbitMQ with stale messages —
+  drain or delete them via the Management UI.
 - Downstream projects: replace
   `from clarinet.services.pipeline import DEFAULT_QUEUE` (and friends)
   with `from clarinet.settings import settings; settings.default_queue_name`

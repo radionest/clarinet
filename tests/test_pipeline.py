@@ -23,6 +23,9 @@ from clarinet.services.pipeline.message import PipelineMessage
 from clarinet.services.pipeline.worker import get_worker_queues
 from clarinet.settings import settings
 
+# Module-level snapshots of the namespaced queue names. Captured at
+# import time — tests that monkeypatch ``settings.project_name`` must use
+# ``settings.X_queue_name`` directly instead of these constants.
 DEFAULT_QUEUE = settings.default_queue_name
 GPU_QUEUE = settings.gpu_queue_name
 DICOM_QUEUE = settings.dicom_queue_name
@@ -155,6 +158,16 @@ class TestPipeline:
         p = Pipeline("default_q_test").step(mock_task)
 
         assert p.steps[0].queue == DEFAULT_QUEUE
+
+    def test_pipeline_step_uses_task_bound_queue_when_present(self):
+        """step() without queue= picks up task._pipeline_queue."""
+        mock_task = AsyncMock()
+        mock_task.task_name = "bound_only_task"
+        mock_task._pipeline_queue = GPU_QUEUE
+
+        p = Pipeline("implicit_queue").step(mock_task)
+
+        assert p.steps[0].queue == GPU_QUEUE
 
     def test_pipeline_step_queue_override_raises_on_mismatch(self):
         """Specifying a queue that conflicts with the task's bound queue raises."""
@@ -835,7 +848,7 @@ class TestWorkerSignalHandling:
         mock_broker.shutdown = AsyncMock()
         with (
             patch("clarinet.services.pipeline.worker.reconfigure_for_worker"),
-            patch("clarinet.services.pipeline.worker._load_task_modules"),
+            patch("clarinet.services.pipeline.worker.load_task_modules"),
             patch(
                 "clarinet.services.pipeline.worker.get_worker_queues",
                 return_value=[DEFAULT_QUEUE],
@@ -996,6 +1009,7 @@ class TestQueueNamespacing:
 
     def test_decorator_binds_to_namespaced_queue(self, monkeypatch):
         """@pipeline_task() registers on the project-namespaced default queue."""
+        from clarinet.services.pipeline import get_all_brokers, is_registered
         from clarinet.services.pipeline.task import pipeline_task
 
         monkeypatch.setattr(settings, "project_name", "Liver")
@@ -1006,3 +1020,51 @@ class TestQueueNamespacing:
             pass
 
         assert liver_default_task._pipeline_queue == "liver.default"
+        assert is_registered("liver.default")
+        assert "liver.default" in get_all_brokers()
+
+    @pytest.mark.asyncio
+    async def test_chain_dispatch_publishes_dlq_on_queue_mismatch(self):
+        """When the persisted definition's queue disagrees with the registered
+        task's bound queue, the chain middleware must skip dispatch and emit
+        a chain_failure to the DLQ — guards against stale pipeline definitions
+        rerouting tasks through the wrong broker."""
+        from taskiq import TaskiqMessage
+
+        from clarinet.services.pipeline.middleware import (
+            DLQPublisher,
+            PipelineChainMiddleware,
+        )
+
+        bound_task = AsyncMock()
+        bound_task.task_name = "queue_mismatch_task"
+        bound_task._pipeline_queue = GPU_QUEUE
+        _TASK_REGISTRY[bound_task.task_name] = bound_task
+
+        dlq = DLQPublisher()
+        dlq.publish = AsyncMock()
+        middleware = PipelineChainMiddleware(dlq=dlq)
+
+        prev_message = TaskiqMessage(
+            task_id="t-prev",
+            task_name="prev",
+            labels={"pipeline_id": "p", "step_index": "0"},
+            args=[],
+            kwargs={},
+        )
+
+        await middleware._dispatch_next_step(
+            prev_message,
+            "p",
+            {"task_name": bound_task.task_name, "queue": DICOM_QUEUE},
+            1,
+            {"patient_id": "P", "study_uid": "S"},
+        )
+
+        bound_task.kicker.assert_not_called()
+        dlq.publish.assert_called_once()
+        payload = dlq.publish.call_args.args[0]
+        assert payload["error_type"] == "chain_failure"
+        assert bound_task.task_name in payload["error"]
+        assert GPU_QUEUE in payload["error"]
+        assert DICOM_QUEUE in payload["error"]

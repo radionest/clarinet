@@ -34,6 +34,7 @@ from .broker import (
     get_broker,
     get_broker_for,
     get_test_broker,
+    is_registered,
     reset_brokers,
 )
 from .chain import (
@@ -49,7 +50,7 @@ from .message import PipelineMessage
 from .middleware import DeadLetterMiddleware, DLQPublisher
 from .sync_wrappers import SyncPipelineClient, SyncRecordQuery, SyncTaskContext
 from .task import pipeline_task
-from .worker import get_worker_queues, run_worker
+from .worker import get_worker_queues, load_task_modules, run_worker
 
 __all__ = [
     "DLQPublisher",
@@ -74,6 +75,8 @@ __all__ = [
     "get_pipeline",
     "get_test_broker",
     "get_worker_queues",
+    "is_registered",
+    "load_task_modules",
     "persist_definitions",
     "pipeline_task",
     "register_task",

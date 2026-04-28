@@ -121,10 +121,10 @@ def get_anonymize_study_task() -> Any:
     """
     global _task
 
-    from clarinet.services.pipeline.broker import _BROKERS
+    from clarinet.services.pipeline import is_registered
     from clarinet.settings import settings
 
-    if _task is None or settings.dicom_queue_name not in _BROKERS:
+    if _task is None or not is_registered(settings.dicom_queue_name):
         _task = _get_task()
     return _task
 

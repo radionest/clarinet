@@ -33,7 +33,7 @@ def get_worker_queues() -> list[str]:
     return queues
 
 
-def _load_task_modules() -> None:
+def load_task_modules() -> None:
     """Import flow files to register pipeline tasks on per-queue brokers.
 
     Discovers ``*_flow.py`` files from ``settings.recordflow_paths`` and
@@ -148,7 +148,7 @@ async def run_worker(
     receiver_tasks: list[asyncio.Task[None]] = []
     brokers: list = []
     try:
-        _load_task_modules()
+        load_task_modules()
 
         if queues is None:
             queues = get_worker_queues()

@@ -189,7 +189,7 @@ async def test_startup_pipeline_rabbitmq_unavailable(startup_settings, capture_l
             "clarinet.services.pipeline.get_all_brokers",
             return_value={settings.default_queue_name: mock_broker},
         ),
-        patch("clarinet.services.pipeline.worker._load_task_modules"),
+        patch("clarinet.services.pipeline.worker.load_task_modules"),
     ):
         app = FastAPI(lifespan=lifespan)
 

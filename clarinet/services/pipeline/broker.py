@@ -138,10 +138,19 @@ def get_broker_for(queue_name: str) -> AsyncBroker:
     Tasks registered for different queues end up on different broker
     instances — so ``task.kicker().kiq()`` always publishes to the queue
     that owns the task, regardless of which worker calls it.
+
+    Not thread-safe: assumes initialization happens from a single thread
+    (decorators import-time, lifespan startup).  If concurrent callers
+    are ever added, wrap the check-and-insert with a lock.
     """
     if queue_name not in _BROKERS:
         _BROKERS[queue_name] = create_broker(queue_name)
     return _BROKERS[queue_name]
+
+
+def is_registered(queue_name: str) -> bool:
+    """Return True when a broker for *queue_name* has been created."""
+    return queue_name in _BROKERS
 
 
 def get_broker() -> AsyncBroker:
@@ -158,7 +167,14 @@ def get_all_brokers() -> dict[str, AsyncBroker]:
 
 
 def reset_brokers() -> None:
-    """Clear the broker registry — for tests that need a fresh registry."""
+    """Drop the broker registry without shutting any broker down.
+
+    Caller contract: any broker previously returned by ``get_broker_for``
+    must already have been shut down (``await broker.shutdown()``) before
+    calling this — otherwise the open AMQP connection leaks.  Intended
+    for the API lifespan teardown (which awaits shutdown for each
+    broker first) and for tests that re-build the registry between cases.
+    """
     _BROKERS.clear()
 
 

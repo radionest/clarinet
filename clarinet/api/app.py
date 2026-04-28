@@ -237,18 +237,20 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
             from clarinet.services.pipeline import (
                 get_all_brokers,
                 get_broker_for,
+                load_task_modules,
                 sync_pipeline_definitions,
             )
-            from clarinet.services.pipeline.worker import _load_task_modules
-
-            # Always materialise the default broker so the API can dispatch
-            # via Pipeline.run() and emit ad-hoc tasks even when no flow
-            # files are configured.
-            get_broker_for(settings.default_queue_name)
 
             # Load flow files so each @pipeline_task decorator registers
             # its task on the per-queue broker for its declared queue.
-            _load_task_modules()
+            # Errors in flow files surface as a startup failure here —
+            # the API can no longer hide them by deferring to the worker.
+            load_task_modules()
+
+            # Always materialise the default broker so the API can
+            # dispatch via Pipeline.run() and emit ad-hoc tasks even
+            # when no flow files declare a default-queue task.
+            _ = get_broker_for(settings.default_queue_name)
 
             brokers = get_all_brokers()
             for queue_name, broker in brokers.items():
