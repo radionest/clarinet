@@ -5,6 +5,7 @@
 // Dict(String, String) filter map; the router whitelist already accepts
 // them, so no extra parsing logic is needed.
 import gleam/dict.{type Dict}
+import gleam/order
 import lustre/attribute
 import lustre/element.{type Element}
 import lustre/element/html
@@ -94,16 +95,35 @@ pub fn th_sortable(
     True -> "sortable sortable-active"
     False -> "sortable"
   }
+  // The clickable element is a <button> inside <th> so it is keyboard-
+  // focusable and screen readers announce it as a control.
   html.th(
+    [attribute.class(cls), attribute.attribute("aria-sort", aria_sort)],
     [
-      attribute.class(cls),
-      attribute.attribute("aria-sort", aria_sort),
-      event.on_click(on_click_for(key)),
+      html.button(
+        [
+          attribute.type_("button"),
+          attribute.class("table-sort-trigger"),
+          event.on_click(on_click_for(key)),
+        ],
+        [html.text(label <> arrow)],
+      ),
     ],
-    [html.text(label <> arrow)],
   )
 }
 
 pub fn th_static(label: String) -> Element(msg) {
   html.th([], [html.text(label)])
+}
+
+/// Wrap a base comparator with the requested sort direction.
+/// `Asc` returns the comparator unchanged; `Desc` negates the result.
+pub fn with_direction(
+  base: fn(a, a) -> order.Order,
+  dir: SortDirection,
+) -> fn(a, a) -> order.Order {
+  case dir {
+    Asc -> base
+    Desc -> fn(x, y) { order.negate(base(x, y)) }
+  }
 }

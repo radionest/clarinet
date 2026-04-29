@@ -26,7 +26,7 @@ import utils/permissions
 import utils/record_filters
 import utils/status
 import utils/storage
-import utils/table_sort.{type SortDirection, Asc, Desc}
+import utils/table_sort.{type SortDirection}
 
 // --- Model ---
 
@@ -342,10 +342,7 @@ fn record_comparator(
       int.compare(option.unwrap(a.id, 0), option.unwrap(b.id, 0))
     }
   }
-  case dir {
-    Asc -> base
-    Desc -> fn(a, b) { order.negate(base(a, b)) }
-  }
+  table_sort.with_direction(base, dir)
 }
 
 fn record_row(shared: Shared, record: Record) -> Element(Msg) {

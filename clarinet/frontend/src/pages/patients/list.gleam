@@ -14,7 +14,7 @@ import lustre/element/html
 import modem
 import router
 import shared.{type OutMsg, type Shared}
-import utils/table_sort.{type SortDirection, Asc, Desc}
+import utils/table_sort.{type SortDirection}
 
 // --- Model ---
 
@@ -157,10 +157,7 @@ fn patient_comparator(
       string.compare(a.id, b.id)
     }
   }
-  case dir {
-    Asc -> base
-    Desc -> fn(a, b) { order.negate(base(a, b)) }
-  }
+  table_sort.with_direction(base, dir)
 }
 
 fn patient_row(patient: models.Patient, translate: fn(Key) -> String) -> Element(Msg) {

@@ -13,7 +13,7 @@ import lustre/element/html
 import modem
 import router
 import shared.{type OutMsg, type Shared}
-import utils/table_sort.{type SortDirection, Asc, Desc}
+import utils/table_sort.{type SortDirection}
 
 // --- Model ---
 
@@ -141,10 +141,7 @@ fn study_comparator(
       string.compare(a.study_uid, b.study_uid)
     }
   }
-  case dir {
-    Asc -> base
-    Desc -> fn(a, b) { order.negate(base(a, b)) }
-  }
+  table_sort.with_direction(base, dir)
 }
 
 fn study_row(study: models.Study) -> Element(Msg) {
