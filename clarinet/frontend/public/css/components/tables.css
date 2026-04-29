@@ -32,3 +32,35 @@
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
 }
+
+.table th.sortable {
+    user-select: none;
+    transition: background-color 0.15s ease;
+}
+
+.table th.sortable:hover {
+    background-color: var(--surface-hover);
+}
+
+.table th.sortable-active {
+    color: var(--primary-color);
+}
+
+.table th.sortable .table-sort-trigger {
+    background: transparent;
+    border: 0;
+    padding: 0;
+    margin: 0;
+    font: inherit;
+    color: inherit;
+    text-transform: inherit;
+    letter-spacing: inherit;
+    cursor: pointer;
+    width: 100%;
+    text-align: left;
+}
+
+.table th.sortable .table-sort-trigger:focus-visible {
+    outline: 2px solid var(--primary-color);
+    outline-offset: 2px;
+}

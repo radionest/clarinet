@@ -11,13 +11,13 @@ pub type Route {
   Home
   Login
   Register
-  Studies
+  Studies(filters: Dict(String, String))
   StudyDetail(id: String)
   StudyViewer(id: String)
   Records(filters: Dict(String, String))
   RecordDetail(id: String)
   RecordNew
-  Patients
+  Patients(filters: Dict(String, String))
   PatientDetail(id: String)
   PatientNew
   SeriesDetail(id: String)
@@ -35,13 +35,13 @@ pub fn route_to_path(route: Route) -> String {
     Home -> "/"
     Login -> "/login"
     Register -> "/register"
-    Studies -> "/studies"
+    Studies(_) -> "/studies"
     StudyDetail(id) -> "/studies/" <> id
     StudyViewer(id) -> "/studies/" <> id <> "/viewer"
     Records(_) -> "/records"
     RecordDetail(id) -> "/records/" <> id
     RecordNew -> "/records/new"
-    Patients -> "/patients"
+    Patients(_) -> "/patients"
     PatientNew -> "/patients/new"
     PatientDetail(id) -> "/patients/" <> id
     SeriesDetail(id) -> "/series/" <> id
@@ -71,13 +71,13 @@ pub fn parse_route(uri: Uri) -> Route {
     [] -> Home
     ["login"] -> Login
     ["register"] -> Register
-    ["studies"] -> Studies
+    ["studies"] -> Studies(parse_filters_from_query(uri.query))
     ["studies", id, "viewer"] -> StudyViewer(id)
     ["studies", id] -> StudyDetail(id)
     ["records"] -> Records(parse_filters_from_query(uri.query))
     ["records", "new"] -> RecordNew
     ["records", id] -> RecordDetail(id)
-    ["patients"] -> Patients
+    ["patients"] -> Patients(parse_filters_from_query(uri.query))
     ["patients", "new"] -> PatientNew
     ["patients", id] -> PatientDetail(id)
     ["series", id] -> SeriesDetail(id)
@@ -101,10 +101,10 @@ pub fn requires_auth(route: Route) -> Bool {
 // Check if route requires admin role
 pub fn requires_admin_role(route: Route) -> Bool {
   case route {
-    Studies
+    Studies(_)
     | StudyDetail(_)
     | SeriesDetail(_)
-    | Patients
+    | Patients(_)
     | PatientDetail(_)
     | PatientNew
     | RecordNew
@@ -122,13 +122,13 @@ pub fn get_route_title(route: Route) -> String {
     Home -> "Dashboard"
     Login -> "Login"
     Register -> "Register"
-    Studies -> "Studies"
+    Studies(_) -> "Studies"
     StudyDetail(_) -> "Study Details"
     StudyViewer(_) -> "Study Viewer"
     Records(_) -> "Records"
     RecordDetail(_) -> "Record Details"
     RecordNew -> "New Record"
-    Patients -> "Patients"
+    Patients(_) -> "Patients"
     PatientDetail(_) -> "Patient Details"
     PatientNew -> "New Patient"
     SeriesDetail(_) -> "Series Details"
@@ -145,9 +145,9 @@ fn section(route: Route) -> String {
     Home -> "home"
     Login -> "login"
     Register -> "register"
-    Studies | StudyDetail(_) | StudyViewer(_) | SeriesDetail(_) -> "studies"
+    Studies(_) | StudyDetail(_) | StudyViewer(_) | SeriesDetail(_) -> "studies"
     Records(_) | RecordDetail(_) | RecordNew -> "records"
-    Patients | PatientDetail(_) | PatientNew -> "patients"
+    Patients(_) | PatientDetail(_) | PatientNew -> "patients"
     AdminDashboard
     | AdminRecordTypes
     | AdminRecordTypeDetail(_)
@@ -160,7 +160,11 @@ pub fn is_same_section(route1: Route, route2: Route) -> Bool {
   section(route1) == section(route2)
 }
 
-const known_filter_keys = ["status", "record_type", "patient"]
+// All query-string keys the router will accept and round-trip. Keep the
+// user-controlled subset (status / record_type / patient) in sync with
+// `user_filter_keys` in `utils/record_filters.gleam` — that list drives
+// the "Clear filters" action and intentionally omits sort/sort_dir.
+const known_filter_keys = ["status", "record_type", "patient", "sort", "sort_dir"]
 
 fn parse_filters_from_query(query: Option(String)) -> Dict(String, String) {
   case query {
@@ -187,7 +191,8 @@ pub fn filters_to_query(filters: Dict(String, String)) -> Option(String) {
 
 pub fn route_to_query(route: Route) -> Option(String) {
   case route {
-    Records(filters) -> filters_to_query(filters)
+    Records(filters) | Studies(filters) | Patients(filters) ->
+      filters_to_query(filters)
     _ -> None
   }
 }
