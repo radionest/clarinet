@@ -94,8 +94,11 @@ def setup_exception_handlers(app: FastAPI) -> None:
         )
 
     @app.exception_handler(ValidationError)
-    async def handle_validation_error(_: Request, exc: ValidationError) -> JSONResponse:
+    async def handle_validation_error(request: Request, exc: ValidationError) -> JSONResponse:
         """Convert ValidationError to 422 response."""
+        logger.opt(exception=exc).error(
+            f"422 ValidationError on {request.method} {request.url.path}: {exc}"
+        )
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             content={"detail": str(exc) if str(exc) else "Validation failed"},
@@ -154,8 +157,11 @@ def setup_exception_handlers(app: FastAPI) -> None:
         )
 
     @app.exception_handler(SlicerError)
-    async def handle_slicer_error(_: Request, exc: SlicerError) -> JSONResponse:
+    async def handle_slicer_error(request: Request, exc: SlicerError) -> JSONResponse:
         """Convert SlicerError to 422 response."""
+        logger.opt(exception=exc).error(
+            f"422 SlicerError on {request.method} {request.url.path}: {exc}"
+        )
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             content={"detail": str(exc) if str(exc) else "Slicer operation failed"},
@@ -245,16 +251,22 @@ def setup_exception_handlers(app: FastAPI) -> None:
         )
 
     @app.exception_handler(OverflowError)
-    async def handle_overflow_error(_: Request, _exc: OverflowError) -> JSONResponse:
+    async def handle_overflow_error(request: Request, exc: OverflowError) -> JSONResponse:
         """Convert OverflowError to 422 response."""
+        logger.opt(exception=exc).error(
+            f"422 OverflowError on {request.method} {request.url.path}: {exc}"
+        )
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             content={"detail": "Numeric value out of range"},
         )
 
     @app.exception_handler(ValueError)
-    async def handle_value_error(_: Request, exc: ValueError) -> JSONResponse:
+    async def handle_value_error(request: Request, exc: ValueError) -> JSONResponse:
         """Convert ValueError (embedded null byte, etc.) to 422."""
+        logger.opt(exception=exc).error(
+            f"422 ValueError on {request.method} {request.url.path}: {exc}"
+        )
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             content={"detail": str(exc)},
