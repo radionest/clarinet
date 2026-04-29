@@ -1250,3 +1250,169 @@ class TestFindByUserUniqueViolationFilter:
         data = resp.json()["items"]
         returned_ids = [r["id"] for r in data]
         assert assigned.id in returned_ids
+
+
+# ── Section 4d: POST /api/records/find unique_per_user filter via router ─────
+
+
+@pytest_asyncio.fixture
+async def upu_role(test_session):
+    """Role used by the upu_role_type RecordType / upu_regular_user tests."""
+    role = UserRole(name="upu-role")
+    test_session.add(role)
+    await test_session.commit()
+    await test_session.refresh(role)
+    return role
+
+
+@pytest_asyncio.fixture
+async def upu_role_type(test_session, upu_role):
+    """RecordType with unique_per_user=True at SERIES level + role_name=upu-role."""
+    rt = RecordType(
+        name="upu-role-series-type",
+        description="unique_per_user + role_name for E2E tests",
+        unique_per_user=True,
+        level=DicomQueryLevel.SERIES,
+        role_name=upu_role.name,
+    )
+    test_session.add(rt)
+    await test_session.commit()
+    await test_session.refresh(rt)
+    return rt
+
+
+@pytest_asyncio.fixture
+async def upu_regular_user(test_session, upu_role):
+    """Non-superuser with the upu-role role assigned (eager-loaded)."""
+    from uuid import uuid4
+
+    from sqlalchemy.orm import selectinload
+    from sqlmodel import select
+
+    from clarinet.models.user import User
+    from clarinet.utils.auth import get_password_hash
+
+    user_id = uuid4()
+    user = User(
+        id=user_id,
+        email="upu_regular@test.com",
+        hashed_password=get_password_hash("x"),
+        is_active=True,
+        is_verified=True,
+        is_superuser=False,
+    )
+    test_session.add(user)
+    await test_session.commit()
+    test_session.add(UserRolesLink(user_id=user_id, role_name=upu_role.name))
+    await test_session.commit()
+    stmt = select(User).where(User.id == user_id).options(selectinload(User.roles))
+    result = await test_session.execute(stmt)
+    return result.scalar_one()
+
+
+class TestFindRecordsApiUniqueViolationFilter:
+    """Tests for ``POST /api/records/find`` (regular user vs superuser).
+
+    Verifies that the router wires ``exclude_unique_violations=is_regular_user``
+    into the criteria, so a regular user does not see unassigned pending
+    duplicates for a context where they already have a finished record, while
+    the superuser still sees everything.
+    """
+
+    @pytest.mark.asyncio
+    async def test_regular_user_does_not_see_unassigned_violating_pending(
+        self,
+        test_session,
+        test_patient,
+        test_study,
+        test_series,
+        upu_role_type,
+        upu_regular_user,
+    ):
+        """Regular user calling /api/records/find with their own user_id does
+        not see an unassigned pending record for a context they already
+        completed (finished record of the same unique_per_user type)."""
+        from httpx import ASGITransport, AsyncClient
+
+        from clarinet.api.app import app
+        from clarinet.api.auth_config import current_active_user
+        from clarinet.utils.database import get_async_session
+
+        finished = Record(
+            patient_id=test_patient.id,
+            study_uid=test_study.study_uid,
+            series_uid=test_series.series_uid,
+            user_id=upu_regular_user.id,
+            record_type_name=upu_role_type.name,
+            status=RecordStatus.finished,
+        )
+        unassigned_dup = Record(
+            patient_id=test_patient.id,
+            study_uid=test_study.study_uid,
+            series_uid=test_series.series_uid,
+            user_id=None,
+            record_type_name=upu_role_type.name,
+            status=RecordStatus.pending,
+        )
+        test_session.add_all([finished, unassigned_dup])
+        await test_session.commit()
+        await test_session.refresh(finished)
+        await test_session.refresh(unassigned_dup)
+
+        async def override_get_session():
+            yield test_session
+
+        app.dependency_overrides[get_async_session] = override_get_session
+        app.dependency_overrides[current_active_user] = lambda: upu_regular_user
+
+        try:
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test", cookies={}) as ac:
+                resp = await ac.post(RECORDS_FIND, json={"user_id": str(upu_regular_user.id)})
+            assert resp.status_code == 200
+            ids = [r["id"] for r in resp.json()["items"]]
+            assert finished.id in ids
+            assert unassigned_dup.id not in ids
+        finally:
+            app.dependency_overrides.clear()
+
+    @pytest.mark.asyncio
+    async def test_superuser_sees_unassigned_violating_pending(
+        self,
+        client,
+        test_session,
+        test_patient,
+        test_study,
+        test_series,
+        upu_role_type,
+        upu_regular_user,
+    ):
+        """Superuser calling /api/records/find without user_id sees both the
+        finished record (owned by another user) and the unassigned pending
+        duplicate — no filtering applies for superusers."""
+        finished = Record(
+            patient_id=test_patient.id,
+            study_uid=test_study.study_uid,
+            series_uid=test_series.series_uid,
+            user_id=upu_regular_user.id,
+            record_type_name=upu_role_type.name,
+            status=RecordStatus.finished,
+        )
+        unassigned_dup = Record(
+            patient_id=test_patient.id,
+            study_uid=test_study.study_uid,
+            series_uid=test_series.series_uid,
+            user_id=None,
+            record_type_name=upu_role_type.name,
+            status=RecordStatus.pending,
+        )
+        test_session.add_all([finished, unassigned_dup])
+        await test_session.commit()
+        await test_session.refresh(finished)
+        await test_session.refresh(unassigned_dup)
+
+        resp = await client.post(RECORDS_FIND, json={"record_type_name": upu_role_type.name})
+        assert resp.status_code == 200
+        ids = [r["id"] for r in resp.json()["items"]]
+        assert finished.id in ids
+        assert unassigned_dup.id in ids

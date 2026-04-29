@@ -837,6 +837,7 @@ async def find_random_record(
         data_queries=query.data_queries,
         role_names=role_names,
         include_unassigned=is_regular_user,
+        exclude_unique_violations=is_regular_user,
     )
     record = await repo.find_random(criteria)
     if record is None:
@@ -858,6 +859,7 @@ async def find_records(
         data_queries=query.data_queries,
         role_names=role_names,
         include_unassigned=is_regular_user,
+        exclude_unique_violations=is_regular_user,
     )
     result = await repo.find_page(
         criteria,
