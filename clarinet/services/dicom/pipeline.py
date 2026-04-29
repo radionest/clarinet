@@ -25,7 +25,17 @@ async def run_anonymization(
 
     Reads ``send_to_pacs`` and ``save_to_disk`` from ``msg.payload``, falling
     back to the corresponding ``settings.anon_*`` defaults.
+
+    Raises:
+        ValueError: when ``msg.record_id`` is None — this helper is record-aware
+            and must not silently degrade into an untracked anonymization.
     """
+    if msg.record_id is None:
+        raise ValueError(
+            "run_anonymization requires PipelineMessage.record_id; "
+            "use AnonymizationOrchestrator directly for record-less anonymization"
+        )
+
     do_send = msg.payload.get("send_to_pacs", settings.anon_send_to_pacs)
     do_save = msg.payload.get("save_to_disk", settings.anon_save_to_disk)
 

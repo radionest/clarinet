@@ -1,7 +1,7 @@
 """Unit tests for AnonymizationOrchestrator."""
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -53,6 +53,7 @@ def _orchestrator(
         client.anonymize_patient.side_effect = patient_anon_error
     client.submit_record_data = AsyncMock()
     client.update_record_data = AsyncMock()
+    client.update_record_status = AsyncMock()
 
     service = MagicMock()
     if anon_error is not None:
@@ -68,10 +69,12 @@ async def test_run_without_record_id_skips_bookkeeping() -> None:
     """No record_id: only ensures Patient and runs anonymization."""
     orch, client, service = _orchestrator()
 
-    result = await orch.run("1.2.3", record_id=None)
+    result = await orch.run("1.2.3", record_id=None, save_to_disk=False, send_to_pacs=False)
 
     client.anonymize_patient.assert_awaited_once_with("P1")
-    service.anonymize_study.assert_awaited_once_with("1.2.3", save_to_disk=None, send_to_pacs=None)
+    service.anonymize_study.assert_awaited_once_with(
+        "1.2.3", save_to_disk=False, send_to_pacs=False
+    )
     client.submit_record_data.assert_not_awaited()
     client.update_record_data.assert_not_awaited()
     assert result.anon_study_uid == "9.9.9"
@@ -290,13 +293,64 @@ async def test_pending_record_uses_post_for_submit() -> None:
 
 
 @pytest.mark.asyncio
-async def test_failed_status_uses_post_even_on_finished_record() -> None:
-    """Explicit status=failed forces POST even on a finished record."""
+async def test_failed_status_on_finished_record_uses_patch_then_status() -> None:
+    """status=failed on a finished Record uses PATCH + update_record_status.
+
+    POST submit_record_data on a finished Record returns 409, which would
+    swallow the original anonymization error. Use PATCH for data, then
+    update_record_status to perform the status transition.
+    """
     record = SimpleNamespace(status=RecordStatus.finished, data=None)
     orch, client, _ = _orchestrator(record=record, anon_error=AnonymizationFailedError("x"))
 
     with pytest.raises(AnonymizationFailedError):
         await orch.run("1.2.3", record_id=42)
 
+    client.submit_record_data.assert_not_awaited()
+    client.update_record_data.assert_awaited_once()
+    client.update_record_status.assert_awaited_once_with(42, RecordStatus.failed)
+
+
+@pytest.mark.asyncio
+async def test_preflight_get_study_failure_marks_record_failed() -> None:
+    """Pre-flight get_study failure also writes error to the Record."""
+    record = SimpleNamespace(status=RecordStatus.pending, data=None)
+    orch, client, _service = _orchestrator(record=record)
+    client.get_study = AsyncMock(side_effect=RuntimeError("network down"))
+
+    with pytest.raises(RuntimeError):
+        await orch.run("1.2.3", record_id=42)
+
+    client.submit_record_data.assert_awaited_once()
+    args = client.submit_record_data.await_args
+    assert "network down" in args.args[1]["error"]
+    assert args.kwargs["status"] == RecordStatus.failed
+
+
+@pytest.mark.asyncio
+async def test_preflight_patient_anonymize_failure_marks_record_failed() -> None:
+    """Non-409 error from anonymize_patient also marks Record failed."""
+    record = SimpleNamespace(status=RecordStatus.pending, data=None)
+    orch, client, _service = _orchestrator(
+        record=record, patient_anon_error=ClarinetAPIError("server", status_code=500)
+    )
+
+    with pytest.raises(ClarinetAPIError):
+        await orch.run("1.2.3", record_id=42)
+
     client.submit_record_data.assert_awaited_once()
     assert client.submit_record_data.await_args.kwargs["status"] == RecordStatus.failed
+
+
+@pytest.mark.asyncio
+async def test_resolved_send_to_pacs_passed_to_anon_service() -> None:
+    """settings defaults reach anon_service.anonymize_study (consistency)."""
+    record = SimpleNamespace(status=RecordStatus.pending, data=None)
+    orch, _client, service = _orchestrator(record=record)
+
+    with patch("clarinet.services.dicom.orchestrator.settings") as mock_settings:
+        mock_settings.anon_save_to_disk = True
+        mock_settings.anon_send_to_pacs = True
+        await orch.run("1.2.3", record_id=42)
+
+    service.anonymize_study.assert_awaited_once_with("1.2.3", save_to_disk=True, send_to_pacs=True)

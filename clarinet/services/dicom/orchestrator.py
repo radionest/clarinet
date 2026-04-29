@@ -65,53 +65,60 @@ class AnonymizationOrchestrator:
             Exception: any error from DICOM anonymization is re-raised after
                 marking the Record ``failed`` so retry/DLQ middleware see it.
         """
+        do_save = save_to_disk if save_to_disk is not None else settings.anon_save_to_disk
         do_send = send_to_pacs if send_to_pacs is not None else settings.anon_send_to_pacs
 
-        # Fetch once and reuse for skip-guard + Patient anonymization.
-        study = await self.client.get_study(study_uid)
-
-        if record_id is not None:
-            already_anon_uid = await self._already_done(study, record_id, do_send)
-            if already_anon_uid is not None:
-                logger.info(f"Study {study_uid} already anonymized, skipping")
-                await self._submit(
-                    record_id,
-                    {
-                        "skipped": True,
-                        "anon_study_uid": already_anon_uid,
-                        **(extra_record_data or {}),
-                    },
-                )
-                return AnonymizationResult(
-                    study_uid=study_uid,
-                    anon_study_uid=already_anon_uid,
-                    series_count=0,
-                    series_anonymized=0,
-                    series_skipped=0,
-                    instances_anonymized=0,
-                    instances_failed=0,
-                    sent_to_pacs=False,
-                )
-
-        await self._ensure_patient_anonymized(study.patient_id)
-
         try:
+            # All Record-touching steps live inside this try so any pre-flight
+            # error (get_study, skip-guard read, anonymize_patient) also marks
+            # the Record failed instead of leaving it stuck in pending/inwork.
+            study = await self.client.get_study(study_uid)
+
+            if record_id is not None:
+                already_anon_uid = await self._already_done(study, record_id, do_send)
+                if already_anon_uid is not None:
+                    logger.info(f"Study {study_uid} already anonymized, skipping")
+                    await self._submit(
+                        record_id,
+                        {
+                            "skipped": True,
+                            "anon_study_uid": already_anon_uid,
+                            **(extra_record_data or {}),
+                        },
+                    )
+                    return AnonymizationResult(
+                        study_uid=study_uid,
+                        anon_study_uid=already_anon_uid,
+                        series_count=0,
+                        series_anonymized=0,
+                        series_skipped=0,
+                        instances_anonymized=0,
+                        instances_failed=0,
+                        sent_to_pacs=False,
+                    )
+
+            await self._ensure_patient_anonymized(study.patient_id)
+
             result = await self.anon_service.anonymize_study(
                 study_uid,
-                save_to_disk=save_to_disk,
-                send_to_pacs=send_to_pacs,
+                save_to_disk=do_save,
+                send_to_pacs=do_send,
             )
         except Exception as exc:
-            # Mark the Record as failed for any exception (network, runtime, domain)
-            # so it doesn't hang in pending/inwork; then re-raise so retry/DLQ
-            # middleware can apply its policy.
+            # Catch every exception so the tracking Record is marked failed
+            # before re-raising; retry/DLQ middleware still see the original
+            # error. Best-effort: a failure inside _submit itself is logged
+            # but does not mask the original exception.
             logger.exception(f"Anonymization failed for study {study_uid}")
             if record_id is not None:
-                await self._submit(
-                    record_id,
-                    {"error": str(exc), **(extra_record_data or {})},
-                    status=RecordStatus.failed,
-                )
+                try:
+                    await self._submit(
+                        record_id,
+                        {"error": str(exc), **(extra_record_data or {})},
+                        status=RecordStatus.failed,
+                    )
+                except Exception:
+                    logger.exception(f"Failed to mark record {record_id} as failed after error")
             raise
 
         if record_id is not None:
@@ -185,13 +192,21 @@ class AnonymizationOrchestrator:
     ) -> None:
         """Submit data to the Record.
 
-        Uses PATCH (``update_record_data``) when the Record is already finished
-        and no explicit status is provided; otherwise POST (``submit_record_data``).
-        Without this guard, a re-run on a finished Record would 409 on POST.
+        ``submit_record_data`` (POST) requires the Record to be in
+        ``pending``/``blocked``; on a finished Record it returns 409. To support
+        re-runs (skip-guard or post-success failure) on already-finished Records,
+        switch to ``update_record_data`` (PATCH) for data, then transition the
+        status separately when an explicit ``status`` is requested. Without this
+        split, a failure on a finished Record would replace the original error
+        with a 409 and lose the diagnostic information.
         """
         record = await self.client.get_record(record_id)
-        if record.status == RecordStatus.finished and status is None:
+        is_finished = record.status == RecordStatus.finished
+
+        if is_finished:
             await self.client.update_record_data(record_id, data)
+            if status is not None and status != RecordStatus.finished:
+                await self.client.update_record_status(record_id, status)
         else:
             await self.client.submit_record_data(record_id, data, status=status)
 
