@@ -248,6 +248,24 @@ The app is deployed behind a sub-path (`/liver_nir/`, `/lung_ct/`, ...). `config
 - `parse_route` strips the prefix before matching, so pattern-matching URL segments in `parse_route` uses the **clean** path (no prefix).
 - E2E tests go through `PATH_PREFIX` from `deploy/vm/vm.conf`. If you change routing, update Playwright selectors too — see `.claude/rules/e2e-tests.md`.
 
+### Changing a `Route` variant signature
+
+Adding/removing a field on a `Route` variant (e.g. `Studies` → `Studies(filters: Dict(...))`) breaks every bare reference. **Before** the edit, grep all callers and treat the result as your file list:
+
+```
+rg -n 'router\.(Studies|Patients|...)\b' clarinet/frontend/src/
+```
+
+Typical hits beyond `router.gleam` itself: `main.gleam` (`init_page_for_route`), `components/layout.gleam` (`nav_link`), `pages/<area>/{detail,new}.gleam` (`shared.Navigate(router.X)`, `NavigateBack`), `pages/home.gleam` (stat-card routes). Plans listing only "files to edit" routinely miss these — verify yourself, don't trust the list.
+
+### Silent URL state sync — `utils/url.gleam`
+
+When a Msg already mutates the page `Model` locally (e.g. column-sort click, filter toggle) and the URL change must **not** trigger `OnRouteChange` → `init_page_for_route` → API refetch, use `utils/url.replace_state(path, query)`. It calls `history.replaceState` via FFI without dispatching modem's `on_url_change`.
+
+Use `modem.replace` / `modem.push` only when a full page re-init is the intended outcome (e.g. `Navigate` between sections). For SPA-internal state mirrored into the URL, prefer `url.replace_state`.
+
+Reference: `pages/{studies,patients}/list.gleam` use it via `url.replace_route(route)`; sortable-table flow in `utils/table_sort.gleam` is the canonical example.
+
 ## 9. Gleam / Decoder Gotchas
 
 - `decode.optional_field(key, default, decoder)` — **default is the second argument**, not the last.
