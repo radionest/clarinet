@@ -293,6 +293,12 @@ class RecordOptional(SQLModel):
     viewer_series_uids: list[str] | None = None
 
 
+class RecordContextInfoUpdate(SQLModel):
+    """Body model for ``PATCH /records/{id}/context-info``."""
+
+    context_info: str | None = Field(default=None, max_length=3000)
+
+
 class RecordRead(RecordBase):
     """Pydantic model for reading record data with related entities."""
 
@@ -476,6 +482,14 @@ class RecordRead(RecordBase):
             )
 
         return all_args
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def context_info_html(self) -> str | None:
+        """Render ``context_info`` (markdown) to sanitized HTML for the frontend."""
+        from clarinet.utils.markdown import markdown_to_safe_html
+
+        return markdown_to_safe_html(self.context_info)
 
 
 class RecordFind(SQLModel):

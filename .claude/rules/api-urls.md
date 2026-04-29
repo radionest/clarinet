@@ -57,6 +57,7 @@ URL constants live in `tests/utils/urls.py`. Status codes: 201 = POST create, 20
 | `/api/records/{id}/schema` | GET | 200 | Hydrated JSON Schema (x-options → oneOf) |
 | `/api/records/{id}/status` | PATCH | 200 | Update status |
 | `/api/records/{id}/user` | PATCH | 200 | Assign user |
+| `/api/records/{id}/context-info` | PATCH | 200 | Replace context_info (markdown). Body: `{"context_info": str \| null}`. Auth: superuser/owner/unassigned |
 | `/api/records/{id}/data` | POST | 200 | Submit data |
 | `/api/records/{id}/data` | PATCH | 200 | Update data |
 | `/api/records/{id}/data/prefill` | POST | 200 | Prefill data (error if exists) |

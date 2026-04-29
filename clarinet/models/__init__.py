@@ -36,6 +36,7 @@ from .pipeline_definition import PipelineDefinition, PipelineDefinitionRead
 from .record import (
     Record,
     RecordBase,
+    RecordContextInfoUpdate,
     RecordCreate,
     RecordFind,
     RecordFindResult,
@@ -93,6 +94,7 @@ __all__ = [
     "PipelineDefinitionRead",
     "Record",
     "RecordBase",
+    "RecordContextInfoUpdate",
     "RecordCreate",
     "RecordFileLink",
     "RecordFind",

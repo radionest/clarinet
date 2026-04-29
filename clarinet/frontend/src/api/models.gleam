@@ -86,6 +86,8 @@ pub type Record {
     id: Option(Int),
     // Primary key
     context_info: Option(String),
+    // Markdown source; also rendered to safe HTML by the backend
+    context_info_html: Option(String),
     status: RecordStatus,
     study_uid: Option(String),
     series_uid: Option(String),

@@ -28,6 +28,7 @@ RECORDS_AVAILABLE_TYPES = "/api/records/available_types"
 RECORDS_BULK_STATUS = "/api/records/bulk/status"
 
 # Dynamic: f"{RECORDS_BASE}/{record_id}/data/prefill"
+# Dynamic: f"{RECORDS_BASE}/{record_id}/context-info"
 
 # --- Record types ---
 RECORD_TYPES = "/api/records/types"
