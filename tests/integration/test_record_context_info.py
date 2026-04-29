@@ -241,6 +241,28 @@ async def test_owner_can_update(test_session, test_settings, env):
 
 
 @pytest.mark.asyncio
+async def test_role_user_on_unassigned_record_allowed(test_session, test_settings, env):
+    """Role-authorised user can update a record with ``user_id is None``."""
+    user = await _make_user(test_session, role="ctx-tester")
+
+    record = env["record"]
+    assert record.user_id is None  # seeded without an owner
+    setup_auth_overrides(user, test_session, test_settings)
+    transport = ASGITransport(app=app)
+    try:
+        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+            resp = await ac.patch(
+                f"{RECORDS_BASE}/{record.id}/context-info",
+                json={"context_info": "claimed"},
+            )
+        assert resp.status_code == 200
+        assert resp.json()["context_info"] == "claimed"
+    finally:
+        app.dependency_overrides.pop(current_active_user, None)
+        app.dependency_overrides.pop(current_superuser, None)
+
+
+@pytest.mark.asyncio
 async def test_non_owner_with_role_match_forbidden(test_session, test_settings, env):
     """Role match alone is not enough — non-owner gets 403 from MutableRecordDep."""
     owner = await _make_user(test_session, role=None)
