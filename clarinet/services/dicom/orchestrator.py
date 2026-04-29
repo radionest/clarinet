@@ -13,7 +13,6 @@ from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
 
 from clarinet.client import ClarinetAPIError, ClarinetClient
-from clarinet.exceptions.domain import AnonymizationFailedError
 from clarinet.models.base import RecordStatus
 from clarinet.services.anonymization_service import AnonymizationService
 from clarinet.services.dicom.models import AnonymizationResult
@@ -63,8 +62,8 @@ class AnonymizationOrchestrator:
                 ``data`` payload (success, skip, and error branches).
 
         Raises:
-            AnonymizationFailedError: re-raised after the Record is marked
-                ``failed`` so retry/DLQ middleware see the failure.
+            Exception: any error from DICOM anonymization is re-raised after
+                marking the Record ``failed`` so retry/DLQ middleware see it.
         """
         do_send = send_to_pacs if send_to_pacs is not None else settings.anon_send_to_pacs
 
@@ -102,7 +101,10 @@ class AnonymizationOrchestrator:
                 save_to_disk=save_to_disk,
                 send_to_pacs=send_to_pacs,
             )
-        except AnonymizationFailedError as exc:
+        except Exception as exc:
+            # Mark the Record as failed for any exception (network, runtime, domain)
+            # so it doesn't hang in pending/inwork; then re-raise so retry/DLQ
+            # middleware can apply its policy.
             logger.exception(f"Anonymization failed for study {study_uid}")
             if record_id is not None:
                 await self._submit(

@@ -229,12 +229,19 @@ async def _find_anonymize_record(
     repo: RecordRepository,
     study_uid: str,
 ) -> Record | None:
+    """Resolve the tracking Record for ``study_uid``.
+
+    If multiple records exist (shouldn't, but defensively), pick the most recent
+    by id so the choice is deterministic across calls.
+    """
     criteria = RecordSearchCriteria(
         study_uid=study_uid,
         record_type_name=settings.anon_record_type_name,
     )
-    records = await repo.find_by_criteria(criteria, limit=1)
-    return records[0] if records else None
+    records = await repo.find_by_criteria(criteria, limit=10)
+    if not records:
+        return None
+    return max(records, key=lambda r: r.id or 0)
 
 
 async def _dispatch_background_anonymization(

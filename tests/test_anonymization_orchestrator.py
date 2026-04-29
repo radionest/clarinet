@@ -175,6 +175,21 @@ async def test_error_path_submits_failed_status_and_reraises() -> None:
 
 
 @pytest.mark.asyncio
+async def test_general_exception_marks_record_failed_and_reraises() -> None:
+    """Any non-domain exception (network, runtime) also marks the Record failed."""
+    record = SimpleNamespace(status=RecordStatus.pending, data=None)
+    orch, client, _ = _orchestrator(record=record, anon_error=RuntimeError("PACS connection lost"))
+
+    with pytest.raises(RuntimeError):
+        await orch.run("1.2.3", record_id=42)
+
+    client.submit_record_data.assert_awaited_once()
+    args = client.submit_record_data.await_args
+    assert "PACS connection lost" in args.args[1]["error"]
+    assert args.kwargs["status"] == RecordStatus.failed
+
+
+@pytest.mark.asyncio
 async def test_patient_already_anonymized_409_is_ignored() -> None:
     """409 from anonymize_patient is benign and does not abort the flow."""
     orch, client, service = _orchestrator(
