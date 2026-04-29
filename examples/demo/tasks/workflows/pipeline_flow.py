@@ -19,7 +19,6 @@ import numpy as np
 from record_types import master_model, master_projection, segmentation
 from utils.seg_utils import master_label_converter, save_seg_nrrd
 
-from clarinet.models.base import RecordStatus
 from clarinet.services.image import Segmentation
 from clarinet.services.pipeline import (
     PipelineMessage,
@@ -144,74 +143,20 @@ def compare_w_projection(msg: PipelineMessage, ctx: SyncTaskContext) -> dict[str
 
 @pipeline_task(queue=settings.dicom_queue_name)
 async def anonymize_study_pipeline(msg: PipelineMessage, ctx: TaskContext) -> None:
-    """Anonymize the study: fetch from PACS, anonymize tags, send to PACS."""
-    assert msg.record_id is not None
+    """Anonymize the study and tag the Record with the project's study_type.
 
-    do_send = msg.payload.get("send_to_pacs", settings.anon_send_to_pacs)
+    Thin wrapper over the framework's :func:`run_anonymization` helper that
+    looks up ``study_type`` from the related ``first-check`` record (project
+    knowledge) and passes it as ``extra_record_data`` so it lands in the
+    anonymize-study Record's ``data`` payload.
+    """
+    from clarinet.services.dicom.pipeline import run_anonymization
 
-    # Get study_type from first_check for downstream matching
     first_checks = await ctx.records.find("first-check", study_uid=msg.study_uid)
     first_data = first_checks[0].data if first_checks else None
     study_type = first_data.get("study_type") if first_data else None
 
-    # Smart skip-guard: allow re-run if previous attempt failed or didn't send
-    study = await ctx.client.get_study(msg.study_uid)
-    record = await ctx.client.get_record(msg.record_id)
-    prev_data = record.data or {}
-
-    already_done = (
-        study.anon_uid is not None
-        and "error" not in prev_data
-        and (prev_data.get("sent_to_pacs", False) or not do_send)
-    )
-
-    if already_done:
-        logger.info(f"Study {msg.study_uid} already anonymized, skipping")
-        await ctx.client.submit_record_data(
-            msg.record_id,
-            {
-                "study_type": study_type,
-                "skipped": True,
-                "anon_study_uid": study.anon_uid,
-            },
-        )
-        return
-
-    # Ensure patient has anon_name (anon_id is always set via auto_id)
-    try:
-        await ctx.client.anonymize_patient(msg.patient_id)
-    except Exception:
-        logger.debug(f"Patient {msg.patient_id} already anonymized")
-
-    # Run anonymization (fresh DB session, direct PACS access)
-    from clarinet.services.dicom.tasks import _create_anonymization_service
-
-    try:
-        async with _create_anonymization_service() as service:
-            result = await service.anonymize_study(msg.study_uid, send_to_pacs=do_send)
-    except Exception as exc:
-        logger.exception(f"Anonymization failed for study {msg.study_uid}")
-        await ctx.client.submit_record_data(
-            msg.record_id,
-            {"study_type": study_type, "error": str(exc)},
-            status=RecordStatus.failed,
-        )
-        return
-
-    await ctx.client.submit_record_data(
-        msg.record_id,
-        {
-            "study_type": study_type,
-            "anon_study_uid": result.anon_study_uid,
-            "instances_anonymized": result.instances_anonymized,
-            "instances_failed": result.instances_failed,
-            "instances_send_failed": result.instances_send_failed,
-            "sent_to_pacs": result.sent_to_pacs,
-            "series_count": result.series_count,
-            "series_anonymized": result.series_anonymized,
-            "series_skipped": result.series_skipped,
-        },
-    )
+    await run_anonymization(msg, ctx, extra_record_data={"study_type": study_type})
 
 
 async def create_projection_record(

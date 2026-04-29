@@ -84,9 +84,10 @@ def load_task_modules() -> None:
 
     if settings.have_dicom:
         try:
-            from clarinet.services.dicom.tasks import get_anonymize_study_task
+            from clarinet.services.dicom.pipeline import (
+                anonymize_study_pipeline as _asp,  # noqa: F401
+            )
 
-            get_anonymize_study_task()
             logger.info("Loaded built-in DICOM pipeline tasks")
         except ImportError as e:
             logger.warning(f"Could not load DICOM tasks: {e}")
