@@ -58,6 +58,9 @@ class RecordSearchCriteria:
     include_unassigned: bool = False
     random_one: bool = False
     role_names: set[str] | None = None
+    # Hides unassigned records of unique_per_user types where ``user_id``
+    # already has a record at the matching DICOM level. Requires ``user_id``
+    # to be set; ``_build_criteria_query`` joins ``RecordType`` automatically.
     exclude_unique_violations: bool = False
     data_queries: list[RecordFindResult] = field(default_factory=list)
 

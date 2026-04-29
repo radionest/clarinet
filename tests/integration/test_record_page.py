@@ -6,6 +6,8 @@ import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from clarinet.models.base import DicomQueryLevel, RecordStatus
+from clarinet.models.record import RecordType
 from clarinet.repositories.record_repository import (
     RecordRepository,
     RecordSearchCriteria,
@@ -250,9 +252,6 @@ class TestFindPageUniqueViolationFilter:
     async def test_flag_hides_unassigned_violating_record(
         self, test_session, test_user, test_patient, test_study
     ):
-        from clarinet.models.base import DicomQueryLevel, RecordStatus
-        from clarinet.models.record import RecordType
-
         rt = RecordType(
             name="upu-study-rt",
             unique_per_user=True,
@@ -295,9 +294,6 @@ class TestFindPageUniqueViolationFilter:
     async def test_flag_off_keeps_unassigned_violating_record(
         self, test_session, test_user, test_patient, test_study
     ):
-        from clarinet.models.base import DicomQueryLevel, RecordStatus
-        from clarinet.models.record import RecordType
-
         rt = RecordType(
             name="upu-study-rt-off",
             unique_per_user=True,
@@ -340,9 +336,6 @@ class TestFindPageUniqueViolationFilter:
     async def test_flag_does_not_hide_non_unique_type(
         self, test_session, test_user, test_patient, test_study
     ):
-        from clarinet.models.base import DicomQueryLevel, RecordStatus
-        from clarinet.models.record import RecordType
-
         rt = RecordType(
             name="non-upu-rt",
             unique_per_user=False,
