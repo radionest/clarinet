@@ -69,8 +69,9 @@ the right queue.
 
 ## Built-in Tasks
 
-Registered in `clarinet/services/pipeline/tasks/` — imported at broker startup.
+Registered in `clarinet/services/pipeline/tasks/` and `clarinet/services/dicom/pipeline.py` — imported at broker startup.
 - `convert_series_to_nifti` — C-GET DICOM series → NIfTI conversion. Queue: `settings.dicom_queue_name`. Requires `msg.series_uid`. Idempotent (skips if `volume.nii.gz` exists). Output: `VOLUME_NIFTI` FileDef (level=SERIES).
 - `prefetch_dicom_web` — prefetch a study into the DICOMweb disk cache via direct C-GET to `{storage_path}/dicomweb_cache/{study}/{series}/`. Queue: `settings.dicom_queue_name`. Requires `msg.study_uid`. Bypasses API memory tier. Idempotent (skips series with valid disk cache or `dcm_anon/` copy). Payload: `skip_if_anon` (default `True`).
+- `anonymize_study_pipeline` — Record-aware DICOM anonymization (skip-guard + Patient anonymize + DICOM anonymize + submit to Record). Queue: `settings.dicom_queue_name`. Requires `msg.record_id`. Payload knobs: `save_to_disk`, `send_to_pacs`. Downstream wraps via `run_anonymization(msg, ctx, extra_record_data=...)` to add project-specific Record fields.
 
 Task name collision: `register_task()` in `chain.py` prevents project tasks from shadowing built-in tasks (identity check `existing is not task` → `PipelineConfigError`).

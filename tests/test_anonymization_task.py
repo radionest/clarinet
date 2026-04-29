@@ -1,4 +1,4 @@
-"""Unit tests for clarinet.services.dicom.tasks — background anonymization."""
+"""Unit tests for clarinet.services.dicom.tasks + dispatch helpers."""
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -12,7 +12,7 @@ from clarinet.services.dicom.models import BackgroundAnonymizationStatus
 
 @pytest.mark.asyncio
 async def test_create_anonymization_service_yields_service() -> None:
-    """_create_anonymization_service yields an AnonymizationService with HTTP-backed repos."""
+    """create_anonymization_service yields a service with HTTP-backed repos."""
     mock_client = AsyncMock()
     mock_client.__aenter__ = AsyncMock(return_value=mock_client)
     mock_client.__aexit__ = AsyncMock(return_value=False)
@@ -31,17 +31,15 @@ async def test_create_anonymization_service_yields_service() -> None:
             "clarinet.client.ClarinetClient",
             return_value=mock_client,
         ) as mock_client_cls:
-            from clarinet.services.dicom.tasks import _create_anonymization_service
+            from clarinet.services.dicom.tasks import create_anonymization_service
 
-            async with _create_anonymization_service() as service:
-                from clarinet.services.anonymization_service import AnonymizationService
+            async with create_anonymization_service() as service:
                 from clarinet.services.dicom.repo_adapters import (
                     PatientRepoAdapter,
                     SeriesRepoAdapter,
                     StudyRepoAdapter,
                 )
 
-                # Verify ClarinetClient constructed with service_token
                 mock_client_cls.assert_called_once_with(
                     base_url="http://test:8000/api",
                     service_token="test-token",
@@ -53,80 +51,66 @@ async def test_create_anonymization_service_yields_service() -> None:
                 assert isinstance(service.patient_repo, PatientRepoAdapter)
                 assert isinstance(service.series_repo, SeriesRepoAdapter)
 
-                # Verify adapters are wired to the same client
                 assert service.study_repo._client is mock_client
                 assert service.patient_repo._client is mock_client
                 assert service.series_repo._client is mock_client
 
 
 @pytest.mark.asyncio
-async def test_anonymize_study_background_success() -> None:
-    """anonymize_study_background calls service.anonymize_study and logs success."""
-    mock_service = AsyncMock()
-    mock_service.anonymize_study = AsyncMock()
-
-    with patch(
-        "clarinet.services.dicom.tasks._create_anonymization_service",
-    ) as mock_ctx:
-        mock_ctx.return_value.__aenter__ = AsyncMock(return_value=mock_service)
-        mock_ctx.return_value.__aexit__ = AsyncMock(return_value=False)
-
-        from clarinet.services.dicom.tasks import anonymize_study_background
-
-        await anonymize_study_background("1.2.3", save_to_disk=True, send_to_pacs=False)
-
-    mock_service.anonymize_study.assert_awaited_once_with(
-        "1.2.3", save_to_disk=True, send_to_pacs=False
-    )
-
-
-@pytest.mark.asyncio
-async def test_anonymize_study_background_catches_exceptions() -> None:
-    """anonymize_study_background catches and logs exceptions without raising."""
-    mock_service = AsyncMock()
-    mock_service.anonymize_study = AsyncMock(side_effect=RuntimeError("DB gone"))
-
-    with patch(
-        "clarinet.services.dicom.tasks._create_anonymization_service",
-    ) as mock_ctx:
-        mock_ctx.return_value.__aenter__ = AsyncMock(return_value=mock_service)
-        mock_ctx.return_value.__aexit__ = AsyncMock(return_value=False)
-
-        from clarinet.services.dicom.tasks import anonymize_study_background
-
-        # Should not raise
-        await anonymize_study_background("1.2.3")
-
-    mock_service.anonymize_study.assert_awaited_once()
-
-
-@pytest.mark.asyncio
 async def test_dispatch_background_pipeline_enabled() -> None:
-    """When pipeline is enabled, dispatches via task.kiq()."""
+    """When pipeline is enabled, dispatches via task.kicker().kiq()."""
+    record = MagicMock()
+    record.id = 42
+    record.patient_id = "P1"
+
     mock_task = MagicMock()
-    mock_task.kiq = AsyncMock()
+    mock_task.kicker.return_value.kiq = AsyncMock()
 
     with (
         patch("clarinet.api.routers.dicom.settings") as mock_settings,
-        patch(
-            "clarinet.services.dicom.tasks.get_anonymize_study_task",
-            return_value=mock_task,
-        ),
+        patch("clarinet.services.dicom.pipeline.anonymize_study_pipeline", mock_task),
     ):
         mock_settings.pipeline_enabled = True
 
         from clarinet.api.routers.dicom import _dispatch_background_anonymization
 
-        result = await _dispatch_background_anonymization("1.2.3", True, False)
+        result = await _dispatch_background_anonymization("1.2.3", record, True, False)
 
     assert result == BackgroundAnonymizationStatus(study_uid="1.2.3")
-    mock_task.kiq.assert_awaited_once_with("1.2.3", save_to_disk=True, send_to_pacs=False)
+    mock_task.kicker.return_value.kiq.assert_awaited_once()
+    sent_msg = mock_task.kicker.return_value.kiq.await_args.args[0]
+    assert sent_msg["study_uid"] == "1.2.3"
+    assert sent_msg["record_id"] == 42
+    assert sent_msg["patient_id"] == "P1"
+    assert sent_msg["payload"]["save_to_disk"] is True
+    assert sent_msg["payload"]["send_to_pacs"] is False
+
+
+@pytest.mark.asyncio
+async def test_dispatch_background_pipeline_disabled() -> None:
+    """When pipeline is disabled, dispatches via asyncio.create_task."""
+    record = MagicMock()
+    record.id = 42
+    record.patient_id = "P1"
+
+    with (
+        patch("clarinet.api.routers.dicom.settings") as mock_settings,
+        patch("clarinet.api.routers.dicom.asyncio") as mock_asyncio,
+    ):
+        mock_settings.pipeline_enabled = False
+        mock_asyncio.create_task = MagicMock()
+
+        from clarinet.api.routers.dicom import _dispatch_background_anonymization
+
+        result = await _dispatch_background_anonymization("1.2.3", record, None, None)
+
+    assert result == BackgroundAnonymizationStatus(study_uid="1.2.3")
+    mock_asyncio.create_task.assert_called_once()
 
 
 @pytest.mark.asyncio
 async def test_anonymize_study_raises_on_failure_threshold() -> None:
     """anonymize_study raises AnonymizationFailedError when failure ratio >= threshold."""
-    # Create a mock study with one series
     mock_series = MagicMock()
     mock_series.series_uid = "1.2.3.4.5.6"
     mock_series.modality = "CT"
@@ -140,9 +124,7 @@ async def test_anonymize_study_raises_on_failure_threshold() -> None:
     mock_patient.anon_id = "ANON_001"
     mock_patient.anon_name = "AnonName"
 
-    # Build a dataset that will fail during anonymization
     bad_ds = Dataset()
-    # Intentionally missing required tags → anonymizer will raise KeyError
 
     mock_retrieve_result = MagicMock()
     mock_retrieve_result.instances = {"1.2.3.100": bad_ds}
@@ -190,7 +172,7 @@ async def test_anonymize_study_succeeds_below_threshold() -> None:
     mock_series.series_uid = "1.2.3.4.5.6"
     mock_series.modality = "CT"
     mock_series.series_description = "Axial"
-    mock_series.instance_count = None  # unknown count — skip >= comparison
+    mock_series.instance_count = None
 
     mock_study = MagicMock()
     mock_study.patient_id = 1
@@ -200,7 +182,6 @@ async def test_anonymize_study_succeeds_below_threshold() -> None:
     mock_patient.anon_id = "ANON_001"
     mock_patient.anon_name = "AnonName"
 
-    # Build a valid dataset
     good_ds = Dataset()
     good_ds.PatientID = "REAL_PAT"
     good_ds.PatientName = "Real^Name"
@@ -250,24 +231,3 @@ async def test_anonymize_study_succeeds_below_threshold() -> None:
 
     assert result.instances_anonymized == 1
     assert result.instances_failed == 0
-
-
-@pytest.mark.asyncio
-async def test_dispatch_background_pipeline_disabled() -> None:
-    """When pipeline is disabled, dispatches via asyncio.create_task."""
-    with (
-        patch("clarinet.api.routers.dicom.settings") as mock_settings,
-        patch("clarinet.api.routers.dicom.asyncio") as mock_asyncio,
-        patch(
-            "clarinet.services.dicom.tasks.anonymize_study_background",
-        ) as mock_bg,
-    ):
-        mock_settings.pipeline_enabled = False
-        mock_bg.return_value = AsyncMock()()
-
-        from clarinet.api.routers.dicom import _dispatch_background_anonymization
-
-        result = await _dispatch_background_anonymization("1.2.3", None, None)
-
-    assert result == BackgroundAnonymizationStatus(study_uid="1.2.3")
-    mock_asyncio.create_task.assert_called_once()

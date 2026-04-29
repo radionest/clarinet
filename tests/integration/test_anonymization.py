@@ -146,7 +146,7 @@ async def test_anonymize_study_success(client, test_session, mock_anon_settings)
 
 @pytest.mark.asyncio
 async def test_anonymize_study_background(client, test_session) -> None:
-    """Background mode returns immediately with status."""
+    """Background mode with a tracking Record returns 202."""
     from datetime import UTC, datetime
 
     from clarinet.models.study import Series, Study
@@ -170,6 +170,8 @@ async def test_anonymize_study_background(client, test_session) -> None:
     )
     test_session.add(series)
     await test_session.commit()
+
+    await _seed_anonymize_study_record(test_session, "1.2.777.1", "BG_PAT_001")
 
     with patch(
         "clarinet.api.routers.dicom._dispatch_background_anonymization",
@@ -749,3 +751,205 @@ async def test_anonymize_batch_cstore_partial_failure(
     assert data["instances_anonymized"] == 3
     assert data["instances_failed"] == 0
     assert data["instances_send_failed"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Record-aware path: when an `anonymize-study` Record exists for the study,
+# the endpoint dispatches via AnonymizationOrchestrator instead of raw
+# AnonymizationService.
+# ---------------------------------------------------------------------------
+
+
+async def _seed_anonymize_study_record(
+    test_session,
+    study_uid: str,
+    patient_id: str,
+) -> int:
+    """Create RecordType + Record for ``anonymize-study`` and return record id."""
+    from clarinet.models.base import DicomQueryLevel
+    from clarinet.models.record import Record, RecordType
+
+    if await test_session.get(RecordType, "anonymize-study") is None:
+        rt = RecordType(name="anonymize-study", level=DicomQueryLevel.STUDY)
+        test_session.add(rt)
+        await test_session.commit()
+
+    record = Record(
+        patient_id=patient_id,
+        study_uid=study_uid,
+        record_type_name="anonymize-study",
+    )
+    test_session.add(record)
+    await test_session.commit()
+    await test_session.refresh(record)
+    return record.id
+
+
+@pytest.mark.asyncio
+async def test_anonymize_with_record_dispatches_orchestrator(
+    client, test_session, mock_anon_settings
+) -> None:
+    """When a tracking Record exists, sync mode goes through the Orchestrator."""
+    from contextlib import asynccontextmanager
+    from datetime import UTC, datetime
+
+    from clarinet.models.study import Study
+    from clarinet.services.dicom.models import AnonymizationResult
+
+    patient = make_patient("ORCH_PAT_001", "Orch Patient", auto_id=70)
+    test_session.add(patient)
+    await test_session.commit()
+
+    study = Study(
+        patient_id="ORCH_PAT_001",
+        study_uid="1.2.700.1",
+        date=datetime.now(UTC).date(),
+    )
+    test_session.add(study)
+    await test_session.commit()
+
+    record_id = await _seed_anonymize_study_record(test_session, "1.2.700.1", "ORCH_PAT_001")
+
+    expected = AnonymizationResult(
+        study_uid="1.2.700.1",
+        anon_study_uid="2.25.42",
+        series_count=0,
+        series_anonymized=0,
+        series_skipped=0,
+        instances_anonymized=0,
+        instances_failed=0,
+    )
+
+    orch = AsyncMock()
+    orch.run = AsyncMock(return_value=expected)
+
+    @asynccontextmanager
+    async def fake_factory(client=None):
+        yield orch
+
+    with patch(
+        "clarinet.api.routers.dicom.create_anonymization_orchestrator",
+        fake_factory,
+    ):
+        response = await client.post(
+            "/api/dicom/studies/1.2.700.1/anonymize",
+            json={"save_to_disk": False, "send_to_pacs": False},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["anon_study_uid"] == "2.25.42"
+    orch.run.assert_awaited_once()
+    assert orch.run.await_args.kwargs["record_id"] == record_id
+
+
+@pytest.mark.asyncio
+async def test_anonymize_background_no_record_returns_404(client, test_session) -> None:
+    """Background dispatch without a tracking Record returns 404."""
+    from datetime import UTC, datetime
+
+    from clarinet.models.study import Study
+
+    patient = make_patient("NOREC_PAT", "NoRec Patient", auto_id=71)
+    study = Study(
+        patient_id="NOREC_PAT",
+        study_uid="1.2.701.1",
+        date=datetime.now(UTC).date(),
+    )
+    test_session.add_all([patient, study])
+    await test_session.commit()
+
+    response = await client.post("/api/dicom/studies/1.2.701.1/anonymize?background=true")
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_anonymize_background_with_record_dispatches(client, test_session) -> None:
+    """Background dispatch with a tracking Record returns 202 and calls dispatcher."""
+    from datetime import UTC, datetime
+
+    from clarinet.models.study import Study
+    from clarinet.services.dicom.models import BackgroundAnonymizationStatus
+
+    patient = make_patient("BGREC_PAT", "BgRec Patient", auto_id=72)
+    test_session.add(patient)
+    await test_session.commit()
+
+    study = Study(
+        patient_id="BGREC_PAT",
+        study_uid="1.2.702.1",
+        date=datetime.now(UTC).date(),
+    )
+    test_session.add(study)
+    await test_session.commit()
+
+    record_id = await _seed_anonymize_study_record(test_session, "1.2.702.1", "BGREC_PAT")
+
+    with patch(
+        "clarinet.api.routers.dicom._dispatch_background_anonymization",
+        new_callable=AsyncMock,
+        return_value=BackgroundAnonymizationStatus(study_uid="1.2.702.1"),
+    ) as mock_dispatch:
+        response = await client.post("/api/dicom/studies/1.2.702.1/anonymize?background=true")
+
+    assert response.status_code == 202
+    mock_dispatch.assert_awaited_once()
+    dispatched_record = mock_dispatch.await_args.args[1]
+    assert dispatched_record.id == record_id
+
+
+@pytest.mark.asyncio
+async def test_anonymize_no_record_sync_falls_back_to_raw(
+    client, test_session, mock_anon_settings
+) -> None:
+    """Sync without Record runs raw anonymization (backwards compatible)."""
+    from datetime import UTC, datetime
+
+    from clarinet.models.study import Series, Study
+
+    patient = make_patient("RAW_PAT_001", "Raw Patient", auto_id=73)
+    test_session.add(patient)
+    await test_session.commit()
+
+    study = Study(
+        patient_id="RAW_PAT_001",
+        study_uid="1.2.703.1",
+        date=datetime.now(UTC).date(),
+    )
+    test_session.add(study)
+    await test_session.commit()
+
+    series = Series(study_uid="1.2.703.1", series_uid="1.2.703.1.1", series_number=1)
+    test_session.add(series)
+    await test_session.commit()
+
+    mock_ds = Dataset()
+    mock_ds.PatientID = "RAW_PAT_001"
+    mock_ds.PatientName = "Raw Patient"
+    mock_ds.StudyInstanceUID = "1.2.703.1"
+    mock_ds.SeriesInstanceUID = "1.2.703.1.1"
+    mock_ds.SOPInstanceUID = "1.2.703.1.1.1"
+    mock_ds.SOPClassUID = "1.2.840.10008.5.1.4.1.1.2"
+    mock_ds.Modality = "CT"
+
+    file_meta = Dataset()
+    file_meta.MediaStorageSOPInstanceUID = "1.2.703.1.1.1"
+    file_meta.MediaStorageSOPClassUID = "1.2.840.10008.5.1.4.1.1.2"
+    file_meta.TransferSyntaxUID = "1.2.840.10008.1.2.1"
+    mock_ds.file_meta = file_meta
+
+    mock_retrieve_result = RetrieveResult(
+        status="success", num_completed=1, instances={"1.2.703.1.1.1": mock_ds}
+    )
+
+    with patch(
+        "clarinet.services.dicom.client.DicomClient.get_series_to_memory",
+        new_callable=AsyncMock,
+        return_value=mock_retrieve_result,
+    ):
+        response = await client.post(
+            "/api/dicom/studies/1.2.703.1/anonymize",
+            json={"save_to_disk": False, "send_to_pacs": False},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["instances_anonymized"] == 1

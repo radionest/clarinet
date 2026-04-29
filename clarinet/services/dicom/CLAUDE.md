@@ -12,6 +12,9 @@ dicom/
   client.py         # Async facade — delegates to operations via asyncio.to_thread()
   anonymizer.py     # Anonymizer, PACS stubs (planned; not yet exported)
   series_filter.py  # Configurable series filter (modality blocklist, instance count, unknown policy)
+  orchestrator.py   # AnonymizationOrchestrator — Record-aware skip-guard + Patient + submit
+  pipeline.py       # Built-in @pipeline_task anonymize_study_pipeline + run_anonymization helper
+  tasks.py          # create_anonymization_service factory (raw, no Record bookkeeping)
   __init__.py       # Public API re-exports
 ```
 
@@ -78,6 +81,18 @@ result = await client.get_study(study_uid=studies[0].study_instance_uid, peer=pa
 ## Association Semaphore
 
 `DicomOperations._association()` enforces a global `threading.Semaphore` to limit concurrent DICOM associations across all operations (DICOMweb, anonymization, import). Initialized in app lifespan via `DicomOperations.set_association_semaphore(settings.dicom_max_concurrent_associations)`. Uses `threading.Semaphore` (not `asyncio.Semaphore`) because `_association()` is synchronous, called via `asyncio.to_thread()`.
+
+## Anonymization API surface
+
+Three entry points, all sharing the same `AnonymizationService` for raw DICOM work:
+
+- **`AnonymizationService`** (DI alias `AnonymizationServiceDep`) — raw anonymize_study, no Record. Used by HTTP sync without a tracking Record (raw mode, backwards-compat).
+- **`AnonymizationOrchestrator`** (`orchestrator.py`) — wraps the service with skip-guard, idempotent Patient anonymization, and Record submission. On success: PATCH (`update_record_data`) when the Record is already finished, POST (`submit_record_data`) otherwise. On **any** unhandled exception (domain, network, runtime) raised anywhere in the flow — including pre-flight `get_study` and Patient anonymization — the orchestrator marks the Record `failed` (with `error` field), then re-raises so retry/DLQ middleware see it. For finished records the failed transition uses PATCH + `update_record_status` to avoid the 409 from POST. Use via `create_anonymization_orchestrator(client=...)` async context manager.
+- **`anonymize_study_pipeline`** (`pipeline.py`) — built-in `@pipeline_task` that runs the orchestrator with the worker's `ctx.client`. Downstream wraps this with `run_anonymization(msg, ctx, extra_record_data={...})` to add project-specific Record fields.
+
+Skip-guard policy: `study.anon_uid is set` AND `prev Record data has no error` AND `(sent_to_pacs already true OR not sending this run)` → skip. Re-run is always permitted after a previous error or when this run upgrades to send-to-PACS.
+
+The HTTP endpoint `POST /api/dicom/studies/{uid}/anonymize` resolves a tracking Record by `settings.anon_record_type_name` (default `"anonymize-study"`); when present, sync mode runs the orchestrator and background mode dispatches `anonymize_study_pipeline` (or in-process orchestrator when `pipeline_enabled=False`); without a Record, sync runs raw and background returns 404.
 
 ## Key conventions
 

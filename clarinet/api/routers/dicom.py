@@ -9,11 +9,15 @@ from clarinet.api.dependencies import (
     AnonymizationServiceDep,
     DicomClientDep,
     PacsNodeDep,
+    RecordRepositoryDep,
     StudyRepositoryDep,
     StudyServiceDep,
     SuperUserDep,
 )
+from clarinet.exceptions import NOT_FOUND
+from clarinet.models import Record
 from clarinet.models.study import StudyRead
+from clarinet.repositories.record_repository import RecordRepository, RecordSearchCriteria
 from clarinet.services.dicom.models import (
     AnonymizationResult,
     AnonymizeStudyRequest,
@@ -23,6 +27,7 @@ from clarinet.services.dicom.models import (
     SeriesQuery,
     StudyQuery,
 )
+from clarinet.services.dicom.orchestrator import create_anonymization_orchestrator
 from clarinet.services.dicom.series_filter import SeriesFilter, SeriesFilterCriteria
 from clarinet.settings import settings
 from clarinet.utils.dicom import parse_dicom_date
@@ -115,8 +120,6 @@ async def import_study_from_pacs(
     )
 
     if not studies:
-        from clarinet.exceptions import NOT_FOUND
-
         raise NOT_FOUND.with_context(f"Study {request.study_instance_uid} not found in PACS")
 
     pacs_study = studies[0]
@@ -169,68 +172,134 @@ async def import_study_from_pacs(
 @router.post(
     "/studies/{study_uid}/anonymize",
     response_model=AnonymizationResult,
-    responses={202: {"model": BackgroundAnonymizationStatus}},
+    responses={
+        202: {"model": BackgroundAnonymizationStatus},
+        404: {"description": "Study or anonymize-study Record not found"},
+    },
 )
 async def anonymize_study(
     study_uid: str,
     _user: SuperUserDep,
     service: AnonymizationServiceDep,
+    record_repo: RecordRepositoryDep,
     request: AnonymizeStudyRequest | None = None,
     background: bool = Query(False, description="Run anonymization in the background"),
 ) -> AnonymizationResult | JSONResponse:
     """Anonymize a study: fetch from PACS, anonymize tags, distribute.
 
-    Args:
-        study_uid: Study Instance UID to anonymize
-        _user: Authenticated superuser
-        service: Anonymization service
-        request: Optional overrides for save_to_disk/send_to_pacs
-        background: If true, run in background and return immediately
-
-    Returns:
-        Anonymization result or status dict if running in background
+    When a tracking Record (``settings.anon_record_type_name``) exists for the
+    study, dispatches via ``AnonymizationOrchestrator`` — applies skip-guard,
+    anonymizes the Patient, and writes the result to the Record. Without a
+    Record, sync mode runs raw anonymization (backwards-compatible) and
+    background mode returns 404.
     """
     save_to_disk = request.save_to_disk if request else None
     send_to_pacs = request.send_to_pacs if request else None
 
+    record = await _find_anonymize_record(record_repo, study_uid)
+
     if background:
-        result = await _dispatch_background_anonymization(study_uid, save_to_disk, send_to_pacs)
+        if record is None:
+            raise NOT_FOUND.with_context(
+                f"No '{settings.anon_record_type_name}' record exists for study {study_uid}"
+            )
+        result = await _dispatch_background_anonymization(
+            study_uid, record, save_to_disk, send_to_pacs
+        )
         return JSONResponse(status_code=202, content=result.model_dump())
 
-    return await service.anonymize_study(
-        study_uid,
-        save_to_disk=save_to_disk,
-        send_to_pacs=send_to_pacs,
+    if record is None:
+        # Raw mode: no Record tracking, no Patient anonymization, no skip-guard.
+        return await service.anonymize_study(
+            study_uid,
+            save_to_disk=save_to_disk,
+            send_to_pacs=send_to_pacs,
+        )
+
+    async with create_anonymization_orchestrator() as orch:
+        return await orch.run(
+            study_uid,
+            record_id=record.id,
+            save_to_disk=save_to_disk,
+            send_to_pacs=send_to_pacs,
+        )
+
+
+async def _find_anonymize_record(
+    repo: RecordRepository,
+    study_uid: str,
+) -> Record | None:
+    """Resolve the tracking Record for ``study_uid``.
+
+    If multiple records exist (shouldn't, but defensively), pick the most recent
+    by id so the choice is deterministic across calls.
+    """
+    criteria = RecordSearchCriteria(
+        study_uid=study_uid,
+        record_type_name=settings.anon_record_type_name,
     )
+    records = await repo.find_by_criteria(criteria, limit=10)
+    if not records:
+        return None
+    return max(records, key=lambda r: r.id or 0)
 
 
 async def _dispatch_background_anonymization(
     study_uid: str,
+    record: Record,
     save_to_disk: bool | None,
     send_to_pacs: bool | None,
 ) -> BackgroundAnonymizationStatus:
-    """Dispatch anonymization to pipeline or in-process background task.
+    """Dispatch anonymization to pipeline (TaskIQ) or in-process background task."""
+    payload: dict[str, bool] = {}
+    if save_to_disk is not None:
+        payload["save_to_disk"] = save_to_disk
+    if send_to_pacs is not None:
+        payload["send_to_pacs"] = send_to_pacs
 
-    Args:
-        study_uid: Study Instance UID to anonymize.
-        save_to_disk: Override for save-to-disk setting.
-        send_to_pacs: Override for send-to-PACS setting.
+    record_id = record.id
+    assert record_id is not None, "Persisted Record always has an id"
 
-    Returns:
-        Background anonymization status.
-    """
     if settings.pipeline_enabled:
-        from clarinet.services.dicom.tasks import get_anonymize_study_task
+        from clarinet.services.dicom.pipeline import anonymize_study_pipeline
+        from clarinet.services.pipeline import PipelineMessage
 
-        task = get_anonymize_study_task()
-        await task.kiq(study_uid, save_to_disk=save_to_disk, send_to_pacs=send_to_pacs)
+        msg = PipelineMessage(
+            patient_id=record.patient_id,
+            study_uid=study_uid,
+            record_id=record_id,
+            payload=payload,
+        )
+        await anonymize_study_pipeline.kicker().kiq(msg.model_dump())
     else:
-        from clarinet.services.dicom.tasks import anonymize_study_background
-
         bg_task = asyncio.create_task(
-            anonymize_study_background(study_uid, save_to_disk, send_to_pacs)
+            _run_orchestrator_in_process(study_uid, record_id, save_to_disk, send_to_pacs)
         )
         _background_tasks.add(bg_task)
         bg_task.add_done_callback(_background_tasks.discard)
 
     return BackgroundAnonymizationStatus(study_uid=study_uid)
+
+
+async def _run_orchestrator_in_process(
+    study_uid: str,
+    record_id: int,
+    save_to_disk: bool | None,
+    send_to_pacs: bool | None,
+) -> None:
+    """In-process fallback when ``pipeline_enabled=False``.
+
+    Catches all exceptions so the background task is never disrupted.
+    The Orchestrator already records errors to the Record before re-raising.
+    """
+    try:
+        async with create_anonymization_orchestrator() as orch:
+            await orch.run(
+                study_uid,
+                record_id=record_id,
+                save_to_disk=save_to_disk,
+                send_to_pacs=send_to_pacs,
+            )
+        logger.info(f"Background anonymization completed for study {study_uid}")
+    except Exception:
+        logger.exception(f"Background anonymization failed for study {study_uid}")

@@ -120,7 +120,7 @@ URL constants live in `tests/utils/urls.py`. Status codes: 201 = POST create, 20
 |---|---|---|---|
 | `/api/dicom/patient/{id}/studies` | GET | 200 | PACS patient studies |
 | `/api/dicom/import-study` | POST | 200 | Import study from PACS |
-| `/api/dicom/studies/{uid}/anonymize` | POST | 200 | Anonymize study |
+| `/api/dicom/studies/{uid}/anonymize` | POST | 200 | Anonymize study (sync). 202 in `?background=true` mode (requires `anonymize-study` Record). 404 in background mode without that Record |
 
 ### Pipelines (`/api/pipelines`)
 
