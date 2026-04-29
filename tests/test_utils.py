@@ -270,3 +270,43 @@ class TestMigrationTemplate:
         assert "from clarinet.models.base import Base" not in content
         assert "from sqlmodel import SQLModel" in content
         assert "target_metadata = SQLModel.metadata" in content
+
+
+# ===================================================================
+# Markdown rendering
+# ===================================================================
+
+
+class TestMarkdownToSafeHtml:
+    """Tests for ``clarinet.utils.markdown.markdown_to_safe_html`` cache."""
+
+    def test_repeated_input_uses_cache(self):
+        from clarinet.utils.markdown import markdown_to_safe_html
+
+        markdown_to_safe_html.cache_clear()
+        first = markdown_to_safe_html("**bold**")
+        second = markdown_to_safe_html("**bold**")
+
+        assert first == second
+        assert "<strong>bold</strong>" in first
+
+        info = markdown_to_safe_html.cache_info()
+        assert info.hits >= 1
+        assert info.misses == 1
+
+    def test_distinct_inputs_miss_cache(self):
+        from clarinet.utils.markdown import markdown_to_safe_html
+
+        markdown_to_safe_html.cache_clear()
+        markdown_to_safe_html("alpha")
+        markdown_to_safe_html("beta")
+
+        info = markdown_to_safe_html.cache_info()
+        assert info.misses == 2
+        assert info.hits == 0
+
+    def test_none_and_empty_return_none(self):
+        from clarinet.utils.markdown import markdown_to_safe_html
+
+        assert markdown_to_safe_html(None) is None
+        assert markdown_to_safe_html("") is None

@@ -12,6 +12,7 @@ import gleam/dict
 import gleam/dynamic.{type Dynamic}
 import gleam/dynamic/decode
 import gleam/int
+import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/javascript/promise
@@ -867,6 +868,17 @@ fn render_record_metadata(record: Record) -> Element(Msg) {
         None -> element.none()
       },
     ]),
+    case record.context_info_html {
+      Some(html_str) ->
+        html.div(
+          [
+            attribute.class("context-info"),
+            attribute.property("innerHTML", json.string(html_str)),
+          ],
+          [],
+        )
+      None -> element.none()
+    },
   ])
 }
 

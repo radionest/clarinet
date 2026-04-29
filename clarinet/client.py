@@ -743,6 +743,25 @@ class ClarinetClient:
         response = await self._request("PATCH", f"/records/{record_id}", json=fields)
         return RecordRead.model_validate(response.json())
 
+    async def update_record_context_info(
+        self, record_id: int, context_info: str | None
+    ) -> RecordRead:
+        """Replace context_info (markdown source) on a record.
+
+        Args:
+            record_id: Record ID.
+            context_info: Markdown text, or ``None`` to clear. Max 3000 chars.
+
+        Returns:
+            Updated record (response includes ``context_info_html``).
+        """
+        response = await self._request(
+            "PATCH",
+            f"/records/{record_id}/context-info",
+            json={"context_info": context_info},
+        )
+        return RecordRead.model_validate(response.json())
+
     async def invalidate_record(
         self,
         record_id: int,

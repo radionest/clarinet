@@ -53,6 +53,7 @@ from clarinet.exceptions import CONFLICT, NOT_FOUND
 from clarinet.exceptions.domain import AuthorizationError
 from clarinet.models import (
     Record,
+    RecordContextInfoUpdate,
     RecordCreate,
     RecordOptional,
     RecordPage,
@@ -362,6 +363,25 @@ async def assign_record_to_user(
 ) -> RecordRead:
     """Assign a record to a user."""
     record, _ = await service.assign_user(record_id, user_id)
+    return mask_record_patient_data(RecordRead.model_validate(record), user)
+
+
+@router.patch("/{record_id}/context-info", response_model=RecordRead)
+async def update_record_context_info(
+    record_id: int,
+    body: RecordContextInfoUpdate,
+    repo: RecordRepositoryDep,
+    _authorized_record: MutableRecordDep,
+    user: CurrentUserDep,
+) -> RecordRead:
+    """Replace ``context_info`` (markdown source) on a record.
+
+    Permitted to superusers (which includes pipeline service tokens), the
+    record's assigned user, and any role-authorised user when the record is
+    unassigned. Pass ``null`` to clear the field. The rendered HTML is
+    available on the response as ``context_info_html``.
+    """
+    record = await repo.update_fields(record_id, {"context_info": body.context_info})
     return mask_record_patient_data(RecordRead.model_validate(record), user)
 
 

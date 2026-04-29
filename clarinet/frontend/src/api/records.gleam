@@ -250,6 +250,11 @@ pub fn record_decoder() -> decode.Decoder(Record) {
     None,
     decode.optional(decode.string),
   )
+  use context_info_html <- decode.optional_field(
+    "context_info_html",
+    None,
+    decode.optional(decode.string),
+  )
   use status_str <- decode.field("status", decode.string)
   use study_uid <- decode.optional_field(
     "study_uid",
@@ -343,6 +348,7 @@ pub fn record_decoder() -> decode.Decoder(Record) {
   decode.success(models.Record(
     id: id,
     context_info: context_info,
+    context_info_html: context_info_html,
     status: status,
     study_uid: study_uid,
     series_uid: series_uid,
