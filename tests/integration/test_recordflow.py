@@ -78,11 +78,11 @@ async def record_types(test_session: AsyncSession) -> dict[str, RecordType]:
     ]
     series_level_types = ["series-markup"]
     for name in study_level_types:
-        rt = RecordType(name=name, level=DicomQueryLevel.STUDY)
+        rt = RecordType(name=name, level=DicomQueryLevel.STUDY, unique_per_user=False)
         test_session.add(rt)
         types[name] = rt
     for name in series_level_types:
-        rt = RecordType(name=name, level=DicomQueryLevel.SERIES)
+        rt = RecordType(name=name, level=DicomQueryLevel.SERIES, unique_per_user=False)
         test_session.add(rt)
         types[name] = rt
     await test_session.commit()
