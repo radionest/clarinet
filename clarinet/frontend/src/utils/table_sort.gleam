@@ -16,6 +16,9 @@ pub type SortDirection {
   Desc
 }
 
+/// Parse a sort-direction string. Only the literal `"desc"` produces
+/// `Desc`; every other value (including unknown strings, empty, typos
+/// like `"ascending"`) silently falls back to `Asc`.
 pub fn parse_sort_dir(s: String) -> SortDirection {
   case s {
     "desc" -> Desc
@@ -63,14 +66,25 @@ pub fn next_sort(
   }
 }
 
+/// Write the sort selection into the filter dict.
+/// When `col == default_col` and `dir == Asc`, the keys are *removed*
+/// instead of inserted, so URLs don't get cluttered with default values.
 pub fn write_sort(
   filters: Dict(String, String),
   col: String,
   dir: SortDirection,
+  default_col: String,
 ) -> Dict(String, String) {
-  filters
-  |> dict.insert("sort", col)
-  |> dict.insert("sort_dir", sort_dir_to_string(dir))
+  case col == default_col, dir {
+    True, Asc ->
+      filters
+      |> dict.delete("sort")
+      |> dict.delete("sort_dir")
+    _, _ ->
+      filters
+      |> dict.insert("sort", col)
+      |> dict.insert("sort_dir", sort_dir_to_string(dir))
+  }
 }
 
 pub fn th_sortable(

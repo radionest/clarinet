@@ -1,5 +1,6 @@
 // Studies list page — self-contained MVU module
 import api/models
+import clarinet_frontend/i18n.{type Key}
 import gleam/dict.{type Dict}
 import gleam/int
 import gleam/list
@@ -10,10 +11,10 @@ import lustre/attribute
 import lustre/effect.{type Effect}
 import lustre/element.{type Element}
 import lustre/element/html
-import modem
 import router
 import shared.{type OutMsg, type Shared}
 import utils/table_sort.{type SortDirection}
+import utils/url
 
 // --- Model ---
 
@@ -50,62 +51,64 @@ pub fn update(
       let #(cur_col, cur_dir) =
         table_sort.read_sort(model.active_filters, default_sort_col)
       let #(new_col, new_dir) = table_sort.next_sort(cur_col, cur_dir, col)
-      let new_filters = table_sort.write_sort(model.active_filters, new_col, new_dir)
+      let new_filters =
+        table_sort.write_sort(model.active_filters, new_col, new_dir, default_sort_col)
       #(Model(active_filters: new_filters), sync_url_effect(new_filters), [])
     }
   }
 }
 
 fn sync_url_effect(filters: Dict(String, String)) -> Effect(Msg) {
-  modem.replace(
+  url.replace_state(
     router.route_to_path(router.Studies(filters)),
     router.filters_to_query(filters),
-    option.None,
   )
 }
 
 // --- View ---
 
 pub fn view(model: Model, shared: Shared) -> Element(Msg) {
+  let t = shared.translate
   let #(sort_col, sort_dir) =
     table_sort.read_sort(model.active_filters, default_sort_col)
   let cmp = study_comparator(sort_col, sort_dir)
 
   html.div([attribute.class("container")], [
     html.div([attribute.class("page-header")], [
-      html.h1([], [html.text("Studies")]),
+      html.h1([], [html.text(t(i18n.StudiesTitle))]),
     ]),
     {
       let studies =
         dict.values(shared.cache.studies)
         |> list.sort(cmp)
-      studies_table(studies, sort_col, sort_dir)
+      studies_table(studies, t, sort_col, sort_dir)
     },
   ])
 }
 
 fn studies_table(
   studies: List(models.Study),
+  translate: fn(Key) -> String,
   sort_col: String,
   sort_dir: SortDirection,
 ) -> Element(Msg) {
   case studies {
     [] ->
-      html.p([attribute.class("text-muted")], [html.text("No studies found.")])
+      html.p([attribute.class("text-muted")], [html.text(translate(i18n.StudiesNoFound))])
     _ ->
       html.div([attribute.class("table-responsive")], [
         html.table([attribute.class("table")], [
           html.thead([], [
             html.tr([], [
-              table_sort.th_sortable("Study UID", "study_uid", sort_col, sort_dir, ColumnHeaderClicked),
-              table_sort.th_sortable("Date", "date", sort_col, sort_dir, ColumnHeaderClicked),
-              table_sort.th_sortable("Patient ID", "patient_id", sort_col, sort_dir, ColumnHeaderClicked),
-              table_sort.th_sortable("Anon UID", "anon_uid", sort_col, sort_dir, ColumnHeaderClicked),
-              table_sort.th_sortable("Series", "series_count", sort_col, sort_dir, ColumnHeaderClicked),
-              table_sort.th_static("Actions"),
+              table_sort.th_sortable(translate(i18n.ThStudyUid), "study_uid", sort_col, sort_dir, ColumnHeaderClicked),
+              table_sort.th_sortable(translate(i18n.ThDate), "date", sort_col, sort_dir, ColumnHeaderClicked),
+              table_sort.th_sortable(translate(i18n.ThPatient), "patient_id", sort_col, sort_dir, ColumnHeaderClicked),
+              table_sort.th_sortable(translate(i18n.ThAnonUid), "anon_uid", sort_col, sort_dir, ColumnHeaderClicked),
+              table_sort.th_sortable(translate(i18n.ThSeries), "series_count", sort_col, sort_dir, ColumnHeaderClicked),
+              table_sort.th_static(translate(i18n.ThActions)),
             ]),
           ]),
-          html.tbody([], list.map(studies, study_row)),
+          html.tbody([], list.map(studies, study_row(_, translate))),
         ]),
       ])
   }
@@ -144,7 +147,7 @@ fn study_comparator(
   table_sort.with_direction(base, dir)
 }
 
-fn study_row(study: models.Study) -> Element(Msg) {
+fn study_row(study: models.Study, translate: fn(Key) -> String) -> Element(Msg) {
   let series_count = case study.series {
     option.Some(s) -> int.to_string(list.length(s))
     option.None -> "-"
@@ -162,7 +165,7 @@ fn study_row(study: models.Study) -> Element(Msg) {
           attribute.href(router.route_to_path(router.StudyDetail(study.study_uid))),
           attribute.class("btn btn-sm btn-outline"),
         ],
-        [html.text("View")],
+        [html.text(translate(i18n.BtnView))],
       ),
     ]),
   ])

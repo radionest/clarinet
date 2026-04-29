@@ -11,10 +11,10 @@ import lustre/attribute
 import lustre/effect.{type Effect}
 import lustre/element.{type Element}
 import lustre/element/html
-import modem
 import router
 import shared.{type OutMsg, type Shared}
 import utils/table_sort.{type SortDirection}
+import utils/url
 
 // --- Model ---
 
@@ -51,17 +51,17 @@ pub fn update(
       let #(cur_col, cur_dir) =
         table_sort.read_sort(model.active_filters, default_sort_col)
       let #(new_col, new_dir) = table_sort.next_sort(cur_col, cur_dir, col)
-      let new_filters = table_sort.write_sort(model.active_filters, new_col, new_dir)
+      let new_filters =
+        table_sort.write_sort(model.active_filters, new_col, new_dir, default_sort_col)
       #(Model(active_filters: new_filters), sync_url_effect(new_filters), [])
     }
   }
 }
 
 fn sync_url_effect(filters: Dict(String, String)) -> Effect(Msg) {
-  modem.replace(
+  url.replace_state(
     router.route_to_path(router.Patients(filters)),
     router.filters_to_query(filters),
-    option.None,
   )
 }
 

@@ -39,11 +39,11 @@
 }
 
 .table th.sortable:hover {
-    background-color: var(--surface-hover, #e5e7eb);
+    background-color: var(--surface-hover);
 }
 
 .table th.sortable-active {
-    color: var(--primary-color, #2563eb);
+    color: var(--primary-color);
 }
 
 .table th.sortable .table-sort-trigger {
@@ -61,6 +61,6 @@
 }
 
 .table th.sortable .table-sort-trigger:focus-visible {
-    outline: 2px solid var(--primary-color, #2563eb);
+    outline: 2px solid var(--primary-color);
     outline-offset: 2px;
 }

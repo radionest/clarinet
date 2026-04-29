@@ -19,7 +19,6 @@ import lustre/effect.{type Effect}
 import lustre/element.{type Element}
 import lustre/element/html
 import lustre/event
-import modem
 import router
 import shared.{type OutMsg, type Shared}
 import utils/permissions
@@ -27,6 +26,7 @@ import utils/record_filters
 import utils/status
 import utils/storage
 import utils/table_sort.{type SortDirection}
+import utils/url
 
 // --- Model ---
 
@@ -100,7 +100,10 @@ pub fn update(
     }
 
     ClearFilters -> {
-      let filters = dict.new()
+      // Clearing filters preserves the current sort selection — sorting
+      // is independent from filtering and resetting it on every "Clear"
+      // would be surprising.
+      let filters = record_filters.clear_user_filters(model.active_filters)
       #(Model(active_filters: filters), sync_filters_effect(filters), [])
     }
 
@@ -109,7 +112,7 @@ pub fn update(
         table_sort.read_sort(model.active_filters, default_sort_col)
       let #(new_col, new_dir) = table_sort.next_sort(cur_col, cur_dir, col)
       let new_filters =
-        table_sort.write_sort(model.active_filters, new_col, new_dir)
+        table_sort.write_sort(model.active_filters, new_col, new_dir, default_sort_col)
       #(Model(active_filters: new_filters), sync_filters_effect(new_filters), [])
     }
 
@@ -145,11 +148,9 @@ pub fn update(
 // --- Helpers ---
 
 fn sync_url_effect(filters: Dict(String, String)) -> Effect(Msg) {
-  let route = router.Records(filters)
-  modem.replace(
-    router.route_to_path(route),
+  url.replace_state(
+    router.route_to_path(router.Records(filters)),
     router.filters_to_query(filters),
-    option.None,
   )
 }
 

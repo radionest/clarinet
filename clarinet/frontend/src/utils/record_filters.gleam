@@ -6,6 +6,16 @@ import gleam/list
 import gleam/string
 import utils/status
 
+const user_filter_keys = ["status", "record_type", "patient"]
+
+/// Strip the user-controlled filter keys from `filters`, leaving any
+/// other keys (notably `"sort"` / `"sort_dir"`) intact. Used by
+/// "Clear filters" actions that should reset filtering without
+/// touching the sort selection.
+pub fn clear_user_filters(filters: Dict(String, String)) -> Dict(String, String) {
+  list.fold(user_filter_keys, filters, fn(acc, key) { dict.delete(acc, key) })
+}
+
 /// Filter records by an active filter dict (keys: "status", "record_type", "patient").
 /// Missing keys mean "no filter on that dimension".
 pub fn apply_filters(
