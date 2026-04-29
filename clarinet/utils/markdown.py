@@ -9,6 +9,8 @@ callbacks, but a malicious or buggy writer must not be able to inject
 
 from __future__ import annotations
 
+from functools import lru_cache
+
 import markdown as _md
 import nh3
 
@@ -44,11 +46,18 @@ _ALLOWED_ATTRS: dict[str, set[str]] = {"a": {"href", "title"}}
 _ALLOWED_URL_SCHEMES: set[str] = {"http", "https", "mailto"}
 
 
+@lru_cache(maxsize=512)
 def markdown_to_safe_html(text: str | None) -> str | None:
     """Render markdown to sanitized HTML.
 
     Returns ``None`` for ``None`` or empty input, and also when sanitization
     leaves the output empty (so frontends can simply skip rendering).
+
+    The result is cached by input text to avoid re-running Python-Markdown
+    and nh3 on every ``RecordRead`` serialisation in list endpoints. Cache
+    is per-process and bounded by ``maxsize`` — stale entries are evicted
+    LRU-style. Call ``markdown_to_safe_html.cache_clear()`` in tests when
+    you need a clean slate.
     """
     if not text:
         return None
