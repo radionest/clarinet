@@ -823,6 +823,33 @@ async def invalidate_record(
     return RecordRead.model_validate(record)
 
 
+def _build_record_search_criteria(
+    query: RecordSearchFilter,
+    user: User,
+    *,
+    extra_excludes: set[str] | None = None,
+) -> RecordSearchCriteria:
+    """Build ``RecordSearchCriteria`` for /records/find endpoints.
+
+    Regular users get their roles attached, ``include_unassigned=True``, and
+    ``exclude_unique_violations=True`` so unassigned context-duplicates of
+    unique_per_user types they already completed are hidden. Superusers get
+    no role filter and no violation filter.
+    """
+    is_regular_user = not user.is_superuser
+    role_names = get_user_role_names(user) if is_regular_user else None
+    excludes = {"data_queries"}
+    if extra_excludes:
+        excludes |= extra_excludes
+    return RecordSearchCriteria(
+        **query.model_dump(exclude=excludes),
+        data_queries=query.data_queries,
+        role_names=role_names,
+        include_unassigned=is_regular_user,
+        exclude_unique_violations=is_regular_user,
+    )
+
+
 @router.post("/find/random", response_model=RecordRead | None)
 async def find_random_record(
     repo: RecordRepositoryDep,
@@ -830,14 +857,7 @@ async def find_random_record(
     query: RecordSearchFilter,
 ) -> RecordRead | None:
     """Find a single random record matching filter criteria."""
-    is_regular_user = not user.is_superuser
-    role_names = get_user_role_names(user) if is_regular_user else None
-    criteria = RecordSearchCriteria(
-        **query.model_dump(exclude={"data_queries"}),
-        data_queries=query.data_queries,
-        role_names=role_names,
-        include_unassigned=is_regular_user,
-    )
+    criteria = _build_record_search_criteria(query, user)
     record = await repo.find_random(criteria)
     if record is None:
         return None
@@ -851,13 +871,8 @@ async def find_records(
     query: RecordSearchQuery,
 ) -> RecordPage:
     """Search records with cursor-based pagination."""
-    is_regular_user = not user.is_superuser
-    role_names = get_user_role_names(user) if is_regular_user else None
-    criteria = RecordSearchCriteria(
-        **query.model_dump(exclude={"data_queries", "cursor", "limit", "sort"}),
-        data_queries=query.data_queries,
-        role_names=role_names,
-        include_unassigned=is_regular_user,
+    criteria = _build_record_search_criteria(
+        query, user, extra_excludes={"cursor", "limit", "sort"}
     )
     result = await repo.find_page(
         criteria,

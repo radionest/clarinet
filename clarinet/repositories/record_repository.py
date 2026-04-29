@@ -58,6 +58,10 @@ class RecordSearchCriteria:
     include_unassigned: bool = False
     random_one: bool = False
     role_names: set[str] | None = None
+    # Hides unassigned records of unique_per_user types where ``user_id``
+    # already has a record at the matching DICOM level. Requires ``user_id``
+    # to be set; ``_build_criteria_query`` joins ``RecordType`` automatically.
+    exclude_unique_violations: bool = False
     data_queries: list[RecordFindResult] = field(default_factory=list)
 
 
@@ -1026,6 +1030,9 @@ class RecordRepository(BaseRepository[Record]):
                 )
             else:
                 statement = statement.where(Record.user_id == criteria.user_id)
+
+        if criteria.exclude_unique_violations and criteria.user_id:
+            statement = statement.where(_unique_per_user_violation_filter(criteria.user_id))
 
         # Record filters
         if criteria.record_status:

@@ -6,6 +6,8 @@ import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from clarinet.models.base import DicomQueryLevel, RecordStatus
+from clarinet.models.record import RecordType
 from clarinet.repositories.record_repository import (
     RecordRepository,
     RecordSearchCriteria,
@@ -235,3 +237,139 @@ class TestFindRandomEndpoint:
             json={"patient_id": "PAGE_PAT", "cursor": "abc"},
         )
         assert resp.status_code == 422
+
+
+class TestFindPageUniqueViolationFilter:
+    """Tests for RecordSearchCriteria.exclude_unique_violations in find_page.
+
+    Verifies that the criteria flag wires the existing
+    ``_unique_per_user_violation_filter`` into ``find_page`` for unassigned
+    records of ``unique_per_user`` types, while leaving non-unique types and
+    superuser-style queries (flag off) untouched.
+    """
+
+    @pytest.mark.asyncio
+    async def test_flag_hides_unassigned_violating_record(
+        self, test_session, test_user, test_patient, test_study
+    ):
+        rt = RecordType(
+            name="upu-study-rt",
+            unique_per_user=True,
+            level=DicomQueryLevel.STUDY,
+        )
+        test_session.add(rt)
+        await test_session.commit()
+
+        finished = await seed_record(
+            test_session,
+            patient_id=test_patient.id,
+            study_uid=test_study.study_uid,
+            series_uid=None,
+            rt_name=rt.name,
+            user_id=test_user.id,
+            status=RecordStatus.finished,
+        )
+        unassigned_dup = await seed_record(
+            test_session,
+            patient_id=test_patient.id,
+            study_uid=test_study.study_uid,
+            series_uid=None,
+            rt_name=rt.name,
+            user_id=None,
+            status=RecordStatus.pending,
+        )
+
+        repo = RecordRepository(test_session)
+        criteria = RecordSearchCriteria(
+            user_id=test_user.id,
+            include_unassigned=True,
+            exclude_unique_violations=True,
+        )
+        result = await repo.find_page(criteria, cursor=None, limit=50, sort="changed_at_desc")
+        ids = [r.id for r in result.records]
+        assert finished.id in ids
+        assert unassigned_dup.id not in ids
+
+    @pytest.mark.asyncio
+    async def test_flag_off_keeps_unassigned_violating_record(
+        self, test_session, test_user, test_patient, test_study
+    ):
+        rt = RecordType(
+            name="upu-study-rt-off",
+            unique_per_user=True,
+            level=DicomQueryLevel.STUDY,
+        )
+        test_session.add(rt)
+        await test_session.commit()
+
+        finished = await seed_record(
+            test_session,
+            patient_id=test_patient.id,
+            study_uid=test_study.study_uid,
+            series_uid=None,
+            rt_name=rt.name,
+            user_id=test_user.id,
+            status=RecordStatus.finished,
+        )
+        unassigned_dup = await seed_record(
+            test_session,
+            patient_id=test_patient.id,
+            study_uid=test_study.study_uid,
+            series_uid=None,
+            rt_name=rt.name,
+            user_id=None,
+            status=RecordStatus.pending,
+        )
+
+        repo = RecordRepository(test_session)
+        criteria = RecordSearchCriteria(
+            user_id=test_user.id,
+            include_unassigned=True,
+            exclude_unique_violations=False,
+        )
+        result = await repo.find_page(criteria, cursor=None, limit=50, sort="changed_at_desc")
+        ids = [r.id for r in result.records]
+        assert finished.id in ids
+        assert unassigned_dup.id in ids
+
+    @pytest.mark.asyncio
+    async def test_flag_does_not_hide_non_unique_type(
+        self, test_session, test_user, test_patient, test_study
+    ):
+        rt = RecordType(
+            name="non-upu-rt",
+            unique_per_user=False,
+            level=DicomQueryLevel.STUDY,
+        )
+        test_session.add(rt)
+        await test_session.commit()
+
+        finished = await seed_record(
+            test_session,
+            patient_id=test_patient.id,
+            study_uid=test_study.study_uid,
+            series_uid=None,
+            rt_name=rt.name,
+            user_id=test_user.id,
+            status=RecordStatus.finished,
+        )
+        unassigned = await seed_record(
+            test_session,
+            patient_id=test_patient.id,
+            study_uid=test_study.study_uid,
+            series_uid=None,
+            rt_name=rt.name,
+            user_id=None,
+            status=RecordStatus.pending,
+        )
+
+        repo = RecordRepository(test_session)
+        criteria = RecordSearchCriteria(
+            user_id=test_user.id,
+            include_unassigned=True,
+            exclude_unique_violations=True,
+        )
+        result = await repo.find_page(criteria, cursor=None, limit=50, sort="changed_at_desc")
+        ids = [r.id for r in result.records]
+        assert finished.id in ids
+        assert unassigned.id in ids
