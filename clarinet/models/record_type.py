@@ -72,7 +72,7 @@ class RecordTypeBase(SQLModel):
     # column to populated tables. See ``mask_patient_data`` below for the
     # full rationale.
     unique_per_user: bool = Field(
-        default=False,
+        default=True,
         sa_column_kwargs={"server_default": sql_expression.false()},
     )
     level: DicomQueryLevel = Field(default=DicomQueryLevel.SERIES)
