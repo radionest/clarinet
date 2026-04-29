@@ -32,3 +32,17 @@
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
 }
+
+.table th.sortable {
+    cursor: pointer;
+    user-select: none;
+    transition: background-color 0.15s ease;
+}
+
+.table th.sortable:hover {
+    background-color: var(--surface-hover, #e5e7eb);
+}
+
+.table th.sortable-active {
+    color: var(--primary-color, #2563eb);
+}

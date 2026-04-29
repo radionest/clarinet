@@ -1,48 +1,76 @@
 // Studies list page — self-contained MVU module
 import api/models
-import gleam/dict
+import gleam/dict.{type Dict}
 import gleam/int
 import gleam/list
 import gleam/option
+import gleam/order
 import gleam/string
 import lustre/attribute
 import lustre/effect.{type Effect}
 import lustre/element.{type Element}
 import lustre/element/html
+import modem
 import router
 import shared.{type OutMsg, type Shared}
+import utils/table_sort.{type SortDirection, Asc, Desc}
 
 // --- Model ---
 
 pub type Model {
-  Model
+  Model(active_filters: Dict(String, String))
 }
 
 // --- Msg ---
 
 pub type Msg {
-  NoOp
+  ColumnHeaderClicked(column: String)
 }
 
 // --- Init ---
 
-pub fn init(_shared: Shared) -> #(Model, Effect(Msg), List(OutMsg)) {
-  #(Model, effect.none(), [shared.ReloadStudies])
+const default_sort_col = "study_uid"
+
+pub fn init(
+  filters: Dict(String, String),
+  _shared: Shared,
+) -> #(Model, Effect(Msg), List(OutMsg)) {
+  #(Model(active_filters: filters), effect.none(), [shared.ReloadStudies])
 }
 
 // --- Update ---
 
 pub fn update(
   model: Model,
-  _msg: Msg,
+  msg: Msg,
   _shared: Shared,
 ) -> #(Model, Effect(Msg), List(OutMsg)) {
-  #(model, effect.none(), [])
+  case msg {
+    ColumnHeaderClicked(col) -> {
+      let #(cur_col, cur_dir) =
+        table_sort.read_sort(model.active_filters, default_sort_col)
+      let #(new_col, new_dir) = table_sort.next_sort(cur_col, cur_dir, col)
+      let new_filters = table_sort.write_sort(model.active_filters, new_col, new_dir)
+      #(Model(active_filters: new_filters), sync_url_effect(new_filters), [])
+    }
+  }
+}
+
+fn sync_url_effect(filters: Dict(String, String)) -> Effect(Msg) {
+  modem.replace(
+    router.route_to_path(router.Studies(filters)),
+    router.filters_to_query(filters),
+    option.None,
+  )
 }
 
 // --- View ---
 
-pub fn view(_model: Model, shared: Shared) -> Element(Msg) {
+pub fn view(model: Model, shared: Shared) -> Element(Msg) {
+  let #(sort_col, sort_dir) =
+    table_sort.read_sort(model.active_filters, default_sort_col)
+  let cmp = study_comparator(sort_col, sort_dir)
+
   html.div([attribute.class("container")], [
     html.div([attribute.class("page-header")], [
       html.h1([], [html.text("Studies")]),
@@ -50,13 +78,17 @@ pub fn view(_model: Model, shared: Shared) -> Element(Msg) {
     {
       let studies =
         dict.values(shared.cache.studies)
-        |> list.sort(fn(a, b) { string.compare(a.study_uid, b.study_uid) })
-      studies_table(studies)
+        |> list.sort(cmp)
+      studies_table(studies, sort_col, sort_dir)
     },
   ])
 }
 
-fn studies_table(studies: List(models.Study)) -> Element(Msg) {
+fn studies_table(
+  studies: List(models.Study),
+  sort_col: String,
+  sort_dir: SortDirection,
+) -> Element(Msg) {
   case studies {
     [] ->
       html.p([attribute.class("text-muted")], [html.text("No studies found.")])
@@ -65,17 +97,53 @@ fn studies_table(studies: List(models.Study)) -> Element(Msg) {
         html.table([attribute.class("table")], [
           html.thead([], [
             html.tr([], [
-              html.th([], [html.text("Study UID")]),
-              html.th([], [html.text("Date")]),
-              html.th([], [html.text("Patient ID")]),
-              html.th([], [html.text("Anon UID")]),
-              html.th([], [html.text("Series")]),
-              html.th([], [html.text("Actions")]),
+              table_sort.th_sortable("Study UID", "study_uid", sort_col, sort_dir, ColumnHeaderClicked),
+              table_sort.th_sortable("Date", "date", sort_col, sort_dir, ColumnHeaderClicked),
+              table_sort.th_sortable("Patient ID", "patient_id", sort_col, sort_dir, ColumnHeaderClicked),
+              table_sort.th_sortable("Anon UID", "anon_uid", sort_col, sort_dir, ColumnHeaderClicked),
+              table_sort.th_sortable("Series", "series_count", sort_col, sort_dir, ColumnHeaderClicked),
+              table_sort.th_static("Actions"),
             ]),
           ]),
           html.tbody([], list.map(studies, study_row)),
         ]),
       ])
+  }
+}
+
+fn study_comparator(
+  col: String,
+  dir: SortDirection,
+) -> fn(models.Study, models.Study) -> order.Order {
+  let base = case col {
+    "study_uid" -> fn(a: models.Study, b: models.Study) {
+      string.compare(a.study_uid, b.study_uid)
+    }
+    "date" -> fn(a: models.Study, b: models.Study) {
+      string.compare(a.date, b.date)
+    }
+    "patient_id" -> fn(a: models.Study, b: models.Study) {
+      string.compare(a.patient_id, b.patient_id)
+    }
+    "anon_uid" -> fn(a: models.Study, b: models.Study) {
+      string.compare(
+        option.unwrap(a.anon_uid, ""),
+        option.unwrap(b.anon_uid, ""),
+      )
+    }
+    "series_count" -> fn(a: models.Study, b: models.Study) {
+      int.compare(
+        list.length(option.unwrap(a.series, [])),
+        list.length(option.unwrap(b.series, [])),
+      )
+    }
+    _ -> fn(a: models.Study, b: models.Study) {
+      string.compare(a.study_uid, b.study_uid)
+    }
+  }
+  case dir {
+    Asc -> base
+    Desc -> fn(a, b) { order.negate(base(a, b)) }
   }
 }
 

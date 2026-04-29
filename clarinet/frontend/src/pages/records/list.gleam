@@ -12,6 +12,8 @@ import gleam/int
 import gleam/javascript/promise
 import gleam/list
 import gleam/option.{None, Some}
+import gleam/order
+import gleam/string
 import lustre/attribute
 import lustre/effect.{type Effect}
 import lustre/element.{type Element}
@@ -22,7 +24,9 @@ import router
 import shared.{type OutMsg, type Shared}
 import utils/permissions
 import utils/record_filters
+import utils/status
 import utils/storage
+import utils/table_sort.{type SortDirection, Asc, Desc}
 
 // --- Model ---
 
@@ -36,10 +40,13 @@ pub type Msg {
   AddFilter(key: String, value: String)
   RemoveFilter(key: String)
   ClearFilters
+  ColumnHeaderClicked(column: String)
   RequestFail(record_id: String)
   Restart(record_id: String)
   RestartResult(Result(Record, ApiError))
 }
+
+const default_sort_col = "id"
 
 // --- Init ---
 
@@ -95,6 +102,15 @@ pub fn update(
     ClearFilters -> {
       let filters = dict.new()
       #(Model(active_filters: filters), sync_filters_effect(filters), [])
+    }
+
+    ColumnHeaderClicked(col) -> {
+      let #(cur_col, cur_dir) =
+        table_sort.read_sort(model.active_filters, default_sort_col)
+      let #(new_col, new_dir) = table_sort.next_sort(cur_col, cur_dir, col)
+      let new_filters =
+        table_sort.write_sort(model.active_filters, new_col, new_dir)
+      #(Model(active_filters: new_filters), sync_filters_effect(new_filters), [])
     }
 
     RequestFail(record_id) -> #(model, effect.none(), [
@@ -255,11 +271,12 @@ fn records_table(
   shared: Shared,
   all_records: List(Record),
 ) -> Element(Msg) {
+  let #(sort_col, sort_dir) =
+    table_sort.read_sort(model.active_filters, default_sort_col)
+  let cmp = record_comparator(sort_col, sort_dir)
   let records =
     record_filters.apply_filters(all_records, model.active_filters)
-    |> list.sort(fn(a, b) {
-      int.compare(option.unwrap(a.id, 0), option.unwrap(b.id, 0))
-    })
+    |> list.sort(cmp)
 
   case records {
     [] ->
@@ -269,13 +286,13 @@ fn records_table(
         html.table([attribute.class("table")], [
           html.thead([], [
             html.tr([], [
-              html.th([], [html.text(shared.translate(i18n.ThId))]),
-              html.th([], [html.text(shared.translate(i18n.ThRecordType))]),
-              html.th([], [html.text(shared.translate(i18n.ThStatus))]),
-              html.th([], [html.text(shared.translate(i18n.ThPatient))]),
-              html.th([], [html.text(shared.translate(i18n.ThStudySeries))]),
-              html.th([], [html.text(shared.translate(i18n.ThModality))]),
-              html.th([], [html.text(shared.translate(i18n.ThActions))]),
+              table_sort.th_sortable(shared.translate(i18n.ThId), "id", sort_col, sort_dir, ColumnHeaderClicked),
+              table_sort.th_sortable(shared.translate(i18n.ThRecordType), "record_type", sort_col, sort_dir, ColumnHeaderClicked),
+              table_sort.th_sortable(shared.translate(i18n.ThStatus), "status", sort_col, sort_dir, ColumnHeaderClicked),
+              table_sort.th_sortable(shared.translate(i18n.ThPatient), "patient", sort_col, sort_dir, ColumnHeaderClicked),
+              table_sort.th_static(shared.translate(i18n.ThStudySeries)),
+              table_sort.th_sortable(shared.translate(i18n.ThModality), "modality", sort_col, sort_dir, ColumnHeaderClicked),
+              table_sort.th_static(shared.translate(i18n.ThActions)),
             ]),
           ]),
           html.tbody(
@@ -284,6 +301,50 @@ fn records_table(
           ),
         ]),
       ])
+  }
+}
+
+fn record_modality(record: Record) -> String {
+  case record.series {
+    Some(series) -> option.unwrap(series.modality, "")
+    None ->
+      case record.study {
+        Some(study) -> option.unwrap(study.modalities_in_study, "")
+        None -> ""
+      }
+  }
+}
+
+fn record_comparator(
+  col: String,
+  dir: SortDirection,
+) -> fn(Record, Record) -> order.Order {
+  let base = case col {
+    "id" -> fn(a: Record, b: Record) {
+      int.compare(option.unwrap(a.id, 0), option.unwrap(b.id, 0))
+    }
+    "record_type" -> fn(a: Record, b: Record) {
+      string.compare(a.record_type_name, b.record_type_name)
+    }
+    "status" -> fn(a: Record, b: Record) {
+      string.compare(
+        status.to_backend_string(a.status),
+        status.to_backend_string(b.status),
+      )
+    }
+    "patient" -> fn(a: Record, b: Record) {
+      string.compare(a.patient_id, b.patient_id)
+    }
+    "modality" -> fn(a: Record, b: Record) {
+      string.compare(record_modality(a), record_modality(b))
+    }
+    _ -> fn(a: Record, b: Record) {
+      int.compare(option.unwrap(a.id, 0), option.unwrap(b.id, 0))
+    }
+  }
+  case dir {
+    Asc -> base
+    Desc -> fn(a, b) { order.negate(base(a, b)) }
   }
 }
 

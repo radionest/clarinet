@@ -122,7 +122,7 @@ fn stats_section(shared: Shared) -> Element(Msg) {
             label: t(i18n.HomeStudies),
             count: dict.size(shared.cache.studies),
             color: "blue",
-            route: router.Studies,
+            route: router.Studies(dict.new()),
             link_text: t(i18n.HomeViewAll),
           ),
           stat_card(

@@ -158,7 +158,7 @@ pub fn update(
       shared.SetLoading(False),
       shared.ReloadPatients,
       shared.ShowSuccess("Patient deleted successfully"),
-      shared.Navigate(router.Patients),
+      shared.Navigate(router.Patients(dict.new())),
     ])
 
     DeleteResult(Error(err)) -> #(
@@ -251,7 +251,7 @@ pub fn update(
       [],
     )
 
-    NavigateBack -> #(model, effect.none(), [shared.Navigate(router.Patients)])
+    NavigateBack -> #(model, effect.none(), [shared.Navigate(router.Patients(dict.new()))])
 
     RequestDelete -> #(model, effect.none(), [
       shared.OpenDeleteConfirm("patient", model.patient_id),

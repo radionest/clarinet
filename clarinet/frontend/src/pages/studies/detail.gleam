@@ -98,7 +98,7 @@ pub fn update(
       shared.SetLoading(False),
       shared.ReloadStudies,
       shared.ShowSuccess("Study deleted successfully"),
-      shared.Navigate(router.Studies),
+      shared.Navigate(router.Studies(dict.new())),
     ])
 
     DeleteResult(Error(err)) -> #(
@@ -107,7 +107,7 @@ pub fn update(
       handle_error(err, "Failed to delete study"),
     )
 
-    NavigateBack -> #(model, effect.none(), [shared.Navigate(router.Studies)])
+    NavigateBack -> #(model, effect.none(), [shared.Navigate(router.Studies(dict.new()))])
 
     RequestDelete -> #(model, effect.none(), [
       shared.OpenDeleteConfirm("study", model.study_uid),

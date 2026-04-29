@@ -98,7 +98,7 @@ pub fn update(
       #(Model(..model, loading: False), effect.none(), handle_error(err, shared.translate(i18n.PatientsMsgCreateFailed)))
 
     Cancel ->
-      #(model, effect.none(), [shared.Navigate(router.Patients)])
+      #(model, effect.none(), [shared.Navigate(router.Patients(dict.new()))])
   }
 }
 

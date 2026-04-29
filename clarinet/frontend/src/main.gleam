@@ -734,8 +734,8 @@ fn init_page_for_route(model: Model, route: Route) -> #(Model, Effect(Msg)) {
       init_page(model, register.init, store.RegisterPage, store.RegisterMsg)
     router.AdminDashboard ->
       init_page(model, admin_page.init, store.AdminPage, store.AdminMsg)
-    router.Patients ->
-      init_page(model, patients_list.init, store.PatientsListPage, store.PatientsListMsg)
+    router.Patients(filters) ->
+      init_page(model, patients_list.init(filters, _), store.PatientsListPage, store.PatientsListMsg)
     router.PatientDetail(id) ->
       init_page(model, patient_detail.init(id, _), store.PatientDetailPage, store.PatientDetailMsg)
     router.PatientNew ->
@@ -746,8 +746,8 @@ fn init_page_for_route(model: Model, route: Route) -> #(Model, Effect(Msg)) {
       init_page(model, record_execute.init(id, _), store.RecordExecutePage, store.RecordExecuteMsg)
     router.RecordNew ->
       init_page(model, record_new.init, store.RecordNewPage, store.RecordNewMsg)
-    router.Studies ->
-      init_page(model, studies_list.init, store.StudiesListPage, store.StudiesListMsg)
+    router.Studies(filters) ->
+      init_page(model, studies_list.init(filters, _), store.StudiesListPage, store.StudiesListMsg)
     router.StudyDetail(id) | router.StudyViewer(id) ->
       init_page(model, study_detail.init(id, _), store.StudyDetailPage, store.StudyDetailMsg)
     router.SeriesDetail(id) ->
