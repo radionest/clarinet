@@ -6,6 +6,9 @@ import gleam/list
 import gleam/string
 import utils/status
 
+// User-controlled filter keys for the records list. Subset of
+// `router.known_filter_keys` (which also accepts sort / sort_dir).
+// When adding a new filter, update both lists.
 const user_filter_keys = ["status", "record_type", "patient"]
 
 /// Strip the user-controlled filter keys from `filters`, leaving any

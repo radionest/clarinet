@@ -4,6 +4,7 @@
 // would only cause a redundant API reload.
 import gleam/option.{type Option, Some}
 import lustre/effect.{type Effect}
+import router.{type Route}
 
 @external(javascript, "./url.ffi.mjs", "replace_state")
 fn do_replace_state(_path: String) -> Nil {
@@ -18,4 +19,10 @@ pub fn replace_state(path: String, query: Option(String)) -> Effect(msg) {
   }
   do_replace_state(full)
   Nil
+}
+
+/// Convenience wrapper: serialise a Route via `router.route_to_path` /
+/// `router.route_to_query` and call `replace_state`.
+pub fn replace_route(route: Route) -> Effect(msg) {
+  replace_state(router.route_to_path(route), router.route_to_query(route))
 }

@@ -59,10 +59,7 @@ pub fn update(
 }
 
 fn sync_url_effect(filters: Dict(String, String)) -> Effect(Msg) {
-  url.replace_state(
-    router.route_to_path(router.Studies(filters)),
-    router.filters_to_query(filters),
-  )
+  url.replace_route(router.Studies(filters))
 }
 
 // --- View ---

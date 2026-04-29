@@ -148,10 +148,7 @@ pub fn update(
 // --- Helpers ---
 
 fn sync_url_effect(filters: Dict(String, String)) -> Effect(Msg) {
-  url.replace_state(
-    router.route_to_path(router.Records(filters)),
-    router.filters_to_query(filters),
-  )
+  url.replace_route(router.Records(filters))
 }
 
 fn save_filters(filters: Dict(String, String)) -> Effect(Msg) {
@@ -305,15 +302,20 @@ fn records_table(
   }
 }
 
-fn record_modality(record: Record) -> String {
-  case record.series {
-    Some(series) -> option.unwrap(series.modality, "")
+/// Resolve the modality column value: prefer series.modality, fall back
+/// to study.modalities_in_study, then to a single dash. The same string
+/// is used for display and as the sort key, so rows without a modality
+/// cluster together consistently in both directions.
+fn record_modality_text(record: Record) -> String {
+  let raw = case record.series {
+    Some(series) -> series.modality
     None ->
       case record.study {
-        Some(study) -> option.unwrap(study.modalities_in_study, "")
-        None -> ""
+        Some(study) -> study.modalities_in_study
+        None -> None
       }
   }
+  option.unwrap(raw, "-")
 }
 
 fn record_comparator(
@@ -337,7 +339,7 @@ fn record_comparator(
       string.compare(a.patient_id, b.patient_id)
     }
     "modality" -> fn(a: Record, b: Record) {
-      string.compare(record_modality(a), record_modality(b))
+      string.compare(record_modality_text(a), record_modality_text(b))
     }
     _ -> fn(a: Record, b: Record) {
       int.compare(option.unwrap(a.id, 0), option.unwrap(b.id, 0))
@@ -366,16 +368,7 @@ fn record_row(shared: Shared, record: Record) -> Element(Msg) {
     html.td([], [status_badge.render(record.status, shared.translate)]),
     html.td([], [html.text(record.patient_id)]),
     html.td([], [html.text(format_study_series_summary(record))]),
-    html.td([], [
-      html.text(case record.series {
-        Some(series) -> option.unwrap(series.modality, "-")
-        None ->
-          case record.study {
-            Some(study) -> option.unwrap(study.modalities_in_study, "-")
-            None -> "-"
-          }
-      }),
-    ]),
+    html.td([], [html.text(record_modality_text(record))]),
     html.td([], [
       case can_fill, can_edit {
         True, _ ->

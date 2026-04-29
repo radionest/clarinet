@@ -160,6 +160,10 @@ pub fn is_same_section(route1: Route, route2: Route) -> Bool {
   section(route1) == section(route2)
 }
 
+// All query-string keys the router will accept and round-trip. Keep the
+// user-controlled subset (status / record_type / patient) in sync with
+// `user_filter_keys` in `utils/record_filters.gleam` — that list drives
+// the "Clear filters" action and intentionally omits sort/sort_dir.
 const known_filter_keys = ["status", "record_type", "patient", "sort", "sort_dir"]
 
 fn parse_filters_from_query(query: Option(String)) -> Dict(String, String) {
