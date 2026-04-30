@@ -29,7 +29,7 @@ src/
 ├── api/                     # HTTP clients (one file per backend resource) + models.gleam + types.gleam
 ├── components/              # Reusable UI: layout.gleam, forms/ (base, patient_form, record_form)
 ├── pages/                   # Self-contained MVU page modules (see contract below)
-└── utils/                   # load_status, logger, dom, permissions, viewer, status, url (silent replaceState), table_sort
+└── utils/                   # load_status, logger, dom, permissions, viewer, status, storage, json_utils, record_filters, url (silent replaceState), table_sort
 ```
 
 ## Page Module Contract
