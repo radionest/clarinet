@@ -224,27 +224,35 @@ def setup_exception_handlers(app: FastAPI) -> None:
         )
 
     @app.exception_handler(ArgumentError)
-    async def handle_argument_error(_: Request, exc: ArgumentError) -> JSONResponse:
+    async def handle_argument_error(request: Request, exc: ArgumentError) -> JSONResponse:
         """Convert SQLAlchemy ArgumentError (ambiguous joins, etc.) to 422."""
-        logger.warning("Database argument error: {}", exc)
+        logger.opt(exception=exc).error(
+            f"422 ArgumentError on {request.method} {request.url.path}: {exc}"
+        )
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             content={"detail": "Invalid query parameters"},
         )
 
     @app.exception_handler(InvalidRequestError)
-    async def handle_invalid_request_error(_: Request, exc: InvalidRequestError) -> JSONResponse:
+    async def handle_invalid_request_error(
+        request: Request, exc: InvalidRequestError
+    ) -> JSONResponse:
         """Convert SQLAlchemy InvalidRequestError to 422 response."""
-        logger.warning("Database request error: {}", exc)
+        logger.opt(exception=exc).error(
+            f"422 InvalidRequestError on {request.method} {request.url.path}: {exc}"
+        )
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             content={"detail": "Invalid query parameters"},
         )
 
     @app.exception_handler(StatementError)
-    async def handle_statement_error(_: Request, exc: StatementError) -> JSONResponse:
+    async def handle_statement_error(request: Request, exc: StatementError) -> JSONResponse:
         """Convert SQLAlchemy StatementError (null bytes, type mismatches) to 422."""
-        logger.warning("Database statement error: {}", exc.orig)
+        logger.opt(exception=exc).error(
+            f"422 StatementError on {request.method} {request.url.path}: {exc.orig}"
+        )
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             content={"detail": "Invalid data for database operation"},
