@@ -106,8 +106,10 @@ Avoid: direct loguru import (use `from clarinet.utils.logger import logger`), sy
 - Quick fixes, typos, config changes — work directly in main, no worktree needed
 - To resume work in an existing worktree — use `EnterWorktree` with the same name. Never `cd` into worktree path directly
 - **"Goto worktree of branch X"** — first run `git worktree list`, find the worktree that has branch X, then `EnterWorktree(name=<worktree-name>)`. Do NOT pass a branch name to `EnterWorktree` — it creates a *new* worktree with prefix `worktree-{name}`, causing double-prefix bugs
-- Worktrees contain only git-tracked files. `hooks/`, `settings.json`, `settings.local.json` live in `$CLAUDE_PROJECT_DIR/.claude/` and are shared — edit them by the main project path. Build artifacts (formosh) are not copied
+- Worktrees contain only git-tracked files. **Checked-in** under `.claude/` (visible in every worktree, edit normally + commit): `rules/`, `agents/`, `commands/`, `skills/`. **Shared** via `$CLAUDE_PROJECT_DIR/.claude/` (NOT in git, edit only via the main project path): `hooks/`, `settings.json`, `settings.local.json`. Build artifacts (formosh) are not copied
+- **First `make`/`pytest`/`uv` command in a fresh worktree creates a new venv** — wrap with `timeout 300` (or omit `timeout` for the very first invocation). Subsequent runs share the venv and need only the usual `timeout 120`
 - `ExitWorktree(remove)` requires `discard_changes=true` if there are commits not in main (even if already pushed)
+- **`gh pr merge --delete-branch` from inside a worktree leaves it on a deleted branch** — `git status` later shows "no branch / detached". Run `gh pr merge` from main and then `ExitWorktree(remove, discard_changes=true)`, or skip `--delete-branch` and let `ExitWorktree(remove)` clean up locally
 - **For PRs in review prefer `ExitWorktree(keep)` until merge** — review cycles need the same branch back; `EnterWorktree` only creates new branches, so resuming after `remove` means manual `git worktree add` (awkward, easy to violate "no branch switch in root")
 - **`gh pr create` is gated by a pre-PR review hook** — before `gh pr create`, run `Agent(subagent_type=pr-diff-reviewer)` to satisfy the hook and surface real blockers
 - The Stop hook blocks session end in a worktree — ask the user to choose:
@@ -118,6 +120,8 @@ Avoid: direct loguru import (use `from clarinet.utils.logger import logger`), sy
 ## Pre-commit Checklist
 
 - `make check` passes (format + lint + typecheck)
+- **After `make check` — `Read` files again before any further `Edit`**: `ruff format` may have rewritten the source (line wrap, trailing commas, import order), and stale `Edit` strings will fail with "old_string not found"
+- New untyped Python dependency → add it to a `[[tool.mypy.overrides]]` block with `ignore_missing_imports = true` in `pyproject.toml`. Otherwise `make typecheck` fails with `Library stubs not installed for "<pkg>"` after the first import
 - Tests written and passing
 - Docstrings on non-trivial public functions
 - No secrets in code

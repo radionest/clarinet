@@ -120,10 +120,38 @@ Use `tests/utils/urls.py` instead of hardcoded URL strings. Full endpoint table 
 
 ### Model Factories
 
-- `tests/utils/factories.py` — sync, no DB: `make_patient()`, `make_user()`, `seed_record()`
-- `tests/utils/test_helpers.py` — async, persisted: `PatientFactory.create_patient()`, etc.
+| Helper | Module | DB | Returns | Use for |
+|---|---|---|---|---|
+| `make_patient(pid, name, auto_id=)` | `factories.py` | sync | `Patient` | unit tests, in-memory ORM checks |
+| `make_study(patient_id, uid=)` | `factories.py` | sync | `Study` | same |
+| `make_series(study_uid, uid=, num=)` | `factories.py` | sync | `Series` | same |
+| `make_user(**kw)` | `factories.py` | sync | `User` | building auth fixtures, role/permission unit tests |
+| `make_record_type(name=, **kw)` | `factories.py` | sync | `RecordType` | unit tests touching record types |
+| `make_record_type_config(name, level=)` | `factories.py` | sync | `RecordTypeCreate` | reconciler/config tests |
+| `seed_record(session, ...)` | `factories.py` | async | `Record` (committed) | when a record must exist before the request under test |
+| `PatientFactory.create_patient(session, ...)` | `test_helpers.py` | async | `Patient` (committed) | integration tests; can also create `Study`/`Series` |
+| `RecordFactory.create_record(...)` | `test_helpers.py` | async | `Record` (committed) | same |
+| `UserFactory.create_user(...)` | `test_helpers.py` | async | `User` (committed) | persisted user with hashed password |
+| `create_mock_superuser(session, email=)` | `conftest.py` | async | `User` (committed + expunged) | overriding `client` fixture in e2e/auth tests |
+| `create_authenticated_client(user, session, settings)` | `conftest.py` | async | `AsyncClient` | drop-in replacement for the `client` fixture |
+| `next_auto_id()` | `factories.py` | sync | `int` | shared counter — `make_patient` and `PatientFactory` both call it; do NOT instantiate `Patient(...)` directly |
 
-Both share `next_auto_id()` counter — never create `Patient(...)` directly in tests.
+#### Example: add a permission test
+
+```python
+async def test_admin_endpoint_rejects_non_superuser(test_session, test_settings):
+    user = await create_mock_superuser(test_session, email="x@test.com")
+    user.is_superuser = False  # downgrade to a regular user
+    async for ac in create_authenticated_client(user, test_session, test_settings):
+        rt = make_record_type(name="rt-perm-test")
+        test_session.add(rt)
+        await test_session.commit()
+
+        resp = await ac.delete(f"/api/admin/records/{some_id}")
+        assert resp.status_code == 403
+```
+
+Mix sync (`make_*`) and async (`*Factory.create_*`) freely — sync factories produce instances you `session.add()` yourself; async factories commit and refresh for you.
 
 ### Fixture Hierarchy
 
