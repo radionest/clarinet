@@ -326,7 +326,7 @@ case record.context_info_html {
 Reference: `pages/records/execute.gleam` (`render_context_info`).
 
 **Rules:**
-- The HTML **must** already be sanitized on the backend. Never feed user-controlled raw HTML through `attribute.property("innerHTML", ...)` — it bypasses Lustre's escaping and is a stored XSS sink. The backend uses `bleach` with an allowlist; mirror that contract whenever you add a new "render-HTML-from-server" surface.
+- The HTML **must** already be sanitized on the backend. Never feed user-controlled raw HTML through `attribute.property("innerHTML", ...)` — it bypasses Lustre's escaping and is a stored XSS sink. The backend uses `nh3.clean(...)` with explicit tag/attribute/url-scheme allowlists (see `clarinet/utils/markdown.py`); mirror those allowlists whenever you add a new "render-HTML-from-server" surface.
 - `attribute.property` (NOT `attribute.attribute`) — Lustre distinguishes DOM properties from HTML attributes. `innerHTML` is a property; the attribute form silently does nothing.
 - Wrap the value in `json.string(...)` because `attribute.property` takes a `Json` value, not a raw `String`.
 - Keep the children list empty (`[]`). Anything you put there is wiped by `innerHTML` on first render and reappears on the next, causing flicker.

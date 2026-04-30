@@ -29,7 +29,7 @@ Endpoint:
 | `PATCH /api/records/{id}/context-info` | `{"context_info": str \| null}` | superuser, owner, or any authorised user when record is unassigned | Replaces the field. Pass `null` to clear |
 
 Server-side:
-- Source: `record.context_info` (markdown). Rendered HTML: `record.context_info_html` on the response, sanitized via `bleach` allowlist (markdown → HTML → sanitize).
+- Source: `record.context_info` (markdown). Rendered HTML: `record.context_info_html` on the response, sanitized via `nh3.clean(...)` with explicit tag/attribute/url-scheme allowlists (see `clarinet/utils/markdown.py`; markdown → HTML → sanitize).
 - Use `RecordContextInfoUpdate` (Pydantic) as the request body — do NOT reuse `RecordUpdate` / `RecordData`.
 - Backed by `repo.update_fields(record_id, {"context_info": body.context_info})` — does not touch `record.data` or status.
 - No RecordFlow triggers fire. If you need behavior on context change, add a separate endpoint — do not piggyback on this one.
