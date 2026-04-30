@@ -114,6 +114,8 @@ URL constants live in `tests/utils/urls.py`. Status codes: 201 = POST create, 20
 | `/api/admin/records/{id}/user` | DELETE | 200 | Admin unassign record user |
 | `/api/admin/records/{id}/output-files` | DELETE | 200 | Clear output files (admin) |
 | `/api/admin/record-types/stats` | GET | 200 | Record type stats |
+| `/api/admin/reports` | GET | 200 | List custom SQL reports (`*.sql` from `settings.reports_path`) |
+| `/api/admin/reports/{name}/download?format=csv\|xlsx` | GET | 200 | Download report as CSV or XLSX (default: csv) |
 
 ### DICOM (`/api/dicom`)
 

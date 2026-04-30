@@ -267,6 +267,10 @@ class Settings(BaseSettings):
     config_context_hydrators_file: str = "context_hydrators.py"
     config_schema_hydrators_file: str = "hydrators.py"
 
+    # Reports settings (custom SQL reports, downloaded as CSV/XLSX by superusers)
+    reports_path: str = "./review/"
+    reports_query_timeout_seconds: int = 300  # 5 minutes
+
     # RecordFlow settings
     recordflow_enabled: bool = False  # Enable RecordFlow workflow engine
     recordflow_paths: list[str] = []  # Directories containing *_flow.py files
