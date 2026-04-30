@@ -307,6 +307,7 @@ Lustre escapes everything by default — `html.text(s)` always produces text, ne
 ```gleam
 import gleam/json
 import lustre/attribute
+import lustre/element       // for element.none()
 import lustre/element/html
 
 case record.context_info_html {
