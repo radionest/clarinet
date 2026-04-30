@@ -126,11 +126,13 @@ __all__ = [
     "StudyCreate",
     "StudyRead",
     "User",
+    "UserCreate",
     "UserRead",
     "UserRole",
     "UserRoleCreate",
     "UserRoleInfo",
     "UserRolesLink",
+    "UserUpdate",
     "ViewerMode",
     "patient_auto_id_seq",
 ]
