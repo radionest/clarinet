@@ -99,11 +99,14 @@ Avoid: direct loguru import (use `from clarinet.utils.logger import logger`), sy
 - `make check` instead of separate format/lint/typecheck calls
 - Read related files in parallel (up to 5 Read calls in one message), not sequentially
 - Don't use TaskCreate/TaskUpdate to break work into phases — only when the user explicitly asks for progress tracking
+- **Edit existing files, Write only new ones.** `Write` on a path that already exists fails with `File has not been read yet` and forces an extra `Read` round-trip. For ≥3 sequential edits on one file, prefer a single `Read` + several `Edit`s over multiple `Write` rewrites
+- After a structural change (function signature, behaviour of a shared helper), `make test-fast -k <module>` BEFORE `make check` — type/lint pass doesn't catch behavioural regressions in tests that mocked the old contract
 
 ## Worktree Workflow
 
 - Feature development: always enter a worktree via `EnterWorktree` before making changes
-- Quick fixes, typos, config changes — work directly in main, no worktree needed
+- **`Plan` / `python-developer` / `feature-dev:*` agents are blocked on main by `require-worktree-agent.sh`** (read-only `feature-dev:code-explorer` and `feature-dev:code-reviewer` are exempt). Enter the worktree before launching them — applies to research stages too (e.g. `feature-dev` phase 4 architecture spawns), not only when editing
+- Quick fixes, typos, config changes — work directly in main, no worktree needed. **But** `require-worktree.sh` blocks `Edit`/`Write` on repo files when on main; `.claude/` is exempted (shared infra — edit in main), everything else under `clarinet/`, `tests/`, `alembic/`, `examples/` requires a worktree
 - To resume work in an existing worktree — use `EnterWorktree` with the same name. Never `cd` into worktree path directly
 - **"Goto worktree of branch X"** — first run `git worktree list`, find the worktree that has branch X, then `EnterWorktree(name=<worktree-name>)`. Do NOT pass a branch name to `EnterWorktree` — it creates a *new* worktree with prefix `worktree-{name}`, causing double-prefix bugs
 - Worktrees contain only git-tracked files. `hooks/`, `settings.json`, `settings.local.json` live in `$CLAUDE_PROJECT_DIR/.claude/` and are shared — edit them by the main project path. Build artifacts (formosh) are not copied
