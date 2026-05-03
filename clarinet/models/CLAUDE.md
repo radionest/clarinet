@@ -123,6 +123,24 @@ Key points:
 
 When changing `*Read`, `*Create`, or `*Optional` schemas — update corresponding Gleam types in `clarinet/frontend/clarinet/api/`.
 
+## Primary keys after insert/get — `int | None` typing
+
+All `*.id` fields on table models are typed `int | None` (SQLModel default — populated only after flush). Mypy will flag any call site that passes `record.id` to a parameter typed `int`:
+
+```text
+Argument 2 to "_run_orchestrator_in_process" has incompatible type "int | None"; expected "int"  [arg-type]
+```
+
+When the value is guaranteed by an upstream invariant (record came from a repository `get`/`find`, or has just been flushed), narrow with an explicit assert at the call site — do **not** weaken the callee's signature to `int | None`:
+
+```python
+record = await record_repo.get(record_id)
+assert record.id is not None  # SQLModel PK after get
+_run_orchestrator_in_process(study_uid, record.id, ...)
+```
+
+Real example: `clarinet/api/routers/dicom.py::_dispatch_background_anonymization` (mypy regression in PR #237).
+
 ## Pitfalls
 
 **`from __future__ import annotations` is forbidden in `table=True` files.**

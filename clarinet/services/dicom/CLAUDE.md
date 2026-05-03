@@ -94,6 +94,8 @@ Skip-guard policy: `study.anon_uid is set` AND `prev Record data has no error` A
 
 The HTTP endpoint `POST /api/dicom/studies/{uid}/anonymize` resolves a tracking Record by `settings.anon_record_type_name` (default `"anonymize-study"`); when present, sync mode runs the orchestrator and background mode dispatches `anonymize_study_pipeline` (or in-process orchestrator when `pipeline_enabled=False`); without a Record, sync runs raw and background returns 404.
 
+`_run_orchestrator_in_process` accepts `record_id: int` (not `int | None`). Callers must `assert record.id is not None` after `_find_anonymize_record` to satisfy mypy — see `clarinet/models/CLAUDE.md` → "Primary keys after insert/get".
+
 ## Key conventions
 
 - All I/O goes through `asyncio.to_thread()` because pynetdicom is synchronous
