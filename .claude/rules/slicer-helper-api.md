@@ -24,7 +24,7 @@ paths:
 - `load_segmentation(path, name=None)` → loads segmentation from file, sets reference geometry
 - `set_segmentation_visibility(segmentation, visible)` — show/hide via `SetVisibility()`
 - `configure_segment_display(segmentation, segment_name, *, color=, fill_opacity=, outline_opacity=, outline_thickness=)` — per-segment 2D display
-- `setup_editor(seg, effect=, brush_size=, threshold=, sphere_brush=, source_volume=, overwrite_mode=OverwriteMode.OVERWRITE_ALL)` — configures SegmentEditor. The overwrite mode is reapplied on every call because Slicer may reset editor-node state when a new segmentation is attached
+- `setup_editor(seg, effect=, brush_size=, threshold=, sphere_brush=, source_volume=, overwrite_mode=OverwriteMode.OVERWRITE_ALL)` — configures SegmentEditor. The overwrite mode is reapplied on every call because Slicer may reset editor-node state when a new segmentation is attached. Pass `effect=None` to open the editor with no active drawing tool — use this when the editor is needed only as a container for `setup_segment_focus_observer` (read-only viewer with label navigation)
 - `set_layout("axial"|"sagittal"|"coronal"|"four_up")`
 - `annotate(text)`, `configure_slab(thickness=)`, `setup_edit_mask(path)`
 - `add_view_shortcuts()` — a/s/c keys for view switching
@@ -45,7 +45,7 @@ paths:
 - `set_dual_layout(volume_a, volume_b, seg_a=None, seg_b=None, linked=True, orientation_a=None, orientation_b=None)` — side-by-side view with auto-detected orientation
 - `align_by_center(moving_volume, reference_volume, moving_segmentation=None, transform_name="AlignTransform")` → translation transform
 - `refine_alignment_by_centroids(moving_seg, reference_seg, transform_node, min_landmarks=1)` → `int` — rigid-body from matched centroids
-- `setup_segment_focus_observer(editable_seg, reference_seg, reference_views=, editable_views=, only_empty=, on_refine=, island_segments=)` — auto-navigate to centroid on selection; segments in `island_segments` use largest-component centroid (no cache)
+- `setup_segment_focus_observer(editable_seg, reference_seg, reference_views=, editable_views=, only_empty=, on_refine=, island_segments=)` — auto-navigate to centroid on selection; segments in `island_segments` use largest-component centroid (no cache). Raises `SlicerHelperError` if no `vtkMRMLSegmentEditorNode` exists in the scene — call `setup_editor()` first (use `effect=None` for viewer-only mode)
 
 ## PacsHelper methods
 

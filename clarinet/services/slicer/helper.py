@@ -1021,7 +1021,7 @@ class SlicerHelper:
     def setup_editor(
         self,
         segmentation: SegmentationBuilder | Any,
-        effect: EditorEffectName = "Paint",
+        effect: EditorEffectName | None = "Paint",
         brush_size: float = 20.0,
         threshold: tuple[float, float] | None = None,
         sphere_brush: bool = True,
@@ -1032,7 +1032,11 @@ class SlicerHelper:
 
         Args:
             segmentation: SegmentationBuilder or raw segmentation node.
-            effect: Effect name to activate.
+            effect: Effect name to activate, or ``None`` for read-only / observer
+                mode — the editor opens with no active drawing tool. Use this
+                when the editor is needed only as a container for
+                ``setup_segment_focus_observer`` (label navigation in a viewer
+                without editing).
             brush_size: Brush diameter in mm.
             threshold: Optional (min, max) threshold values for Threshold effect.
             sphere_brush: Use spherical brush (True) or circular (False).
@@ -1064,7 +1068,13 @@ class SlicerHelper:
         if volume is not None:
             self._editor_widget.setSourceVolumeNode(volume)
 
-        # Configure effect
+        if effect is None:
+            # Read-only / observer mode: clear any previously-active tool so
+            # Paint/Erase is not silently armed. Empty name deactivates the
+            # current effect in Slicer.
+            self._editor_widget.setActiveEffectByName("")
+            return
+
         self._editor_widget.setActiveEffectByName(effect)
         active_effect = self._editor_widget.activeEffect()
 
@@ -2248,7 +2258,12 @@ class SlicerHelper:
 
         editor_node = self._scene.GetFirstNodeByClass("vtkMRMLSegmentEditorNode")
         if editor_node is None:
-            return
+            raise SlicerHelperError(
+                "setup_segment_focus_observer() requires a "
+                "vtkMRMLSegmentEditorNode in the scene. Call setup_editor() "
+                "first (pass effect=None for a viewer that only needs label "
+                "navigation, no active drawing tool)."
+            )
 
         helper_ref = self  # prevent garbage collection of SlicerHelper
 

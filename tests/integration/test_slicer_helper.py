@@ -77,6 +77,50 @@ print('editor_ok')
     assert isinstance(result, dict)
 
 
+async def test_setup_editor_no_effect(
+    slicer_service: SlicerService,
+    slicer_url: str,
+) -> None:
+    """setup_editor(effect=None) opens the editor without any active drawing tool."""
+    context = {"working_folder": "/tmp"}
+    script = """
+s = SlicerHelper(working_folder)
+seg = s.create_segmentation('NoEffectTest')
+seg.add_segment('Probe', color=(1, 0, 0))
+s.setup_editor(seg, effect=None)
+editor = slicer.modules.segmenteditor.widgetRepresentation().self().editor
+__execResult = {'has_active_effect': editor.activeEffect() is not None}
+"""
+    result = await slicer_service.execute(slicer_url, script, context=context)
+    assert isinstance(result, dict)
+    assert result.get("has_active_effect") is False
+
+
+async def test_setup_segment_focus_observer_requires_editor(
+    slicer_service: SlicerService,
+    slicer_url: str,
+) -> None:
+    """Observer raises SlicerHelperError when no editor node is in the scene."""
+    context = {"working_folder": "/tmp"}
+    script = """
+s = SlicerHelper(working_folder)  # __init__ clears the scene
+seg = s.create_segmentation('NoEditorObserver')
+seg.add_segment('A', color=(1, 0, 0))
+try:
+    s.setup_segment_focus_observer(seg, seg)
+    raised = False
+    msg = ''
+except SlicerHelperError as e:
+    raised = True
+    msg = str(e)
+__execResult = {'raised': raised, 'msg': msg}
+"""
+    result = await slicer_service.execute(slicer_url, script, context=context)
+    assert isinstance(result, dict)
+    assert result.get("raised") is True
+    assert "setup_editor" in result.get("msg", "")
+
+
 async def test_set_layout(
     slicer_service: SlicerService,
     slicer_url: str,
@@ -237,6 +281,16 @@ class TestSlicerHelperMethodsExist:
         sig = inspect.signature(SlicerHelper.setup_segment_focus_observer)
         param = sig.parameters["island_segments"]
         assert param.default is None
+
+    def test_setup_editor_effect_accepts_none(self) -> None:
+        """setup_editor accepts effect=None (read-only / observer mode)."""
+        import inspect
+
+        sig = inspect.signature(SlicerHelper.setup_editor)
+        param = sig.parameters["effect"]
+        assert param.default == "Paint"
+        # Annotation must allow None: ``EditorEffectName | None``.
+        assert "None" in str(param.annotation)
 
 
 # --- SlicerHelper new methods: integration tests (require running Slicer) ---
