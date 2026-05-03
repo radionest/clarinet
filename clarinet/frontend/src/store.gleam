@@ -6,6 +6,7 @@ import cache
 import clarinet_frontend/i18n
 import gleam/option.{type Option, None, Some}
 import pages/admin as admin_page
+import pages/admin/reports as admin_reports_page
 import pages/home as home_page
 import pages/login as login_page
 import pages/patients/detail as patient_detail_page
@@ -74,6 +75,7 @@ pub type PageModel {
   RecordTypesListPage(record_types_list_page.Model)
   RecordTypeDetailPage(record_type_detail_page.Model)
   RecordTypeEditPage(record_type_edit_page.Model)
+  AdminReportsPage(admin_reports_page.Model)
   HomePage(home_page.Model)
 }
 
@@ -124,6 +126,7 @@ pub type Msg {
 
   // Admin page delegation
   AdminMsg(admin_page.Msg)
+  AdminReportsMsg(admin_reports_page.Msg)
 
   // UI Actions
   SetError(Option(String))

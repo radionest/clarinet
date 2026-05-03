@@ -379,6 +379,11 @@ pub type RecordTypeStatusCounts {
   )
 }
 
+// Custom SQL report template (matches backend ReportTemplate)
+pub type ReportTemplate {
+  ReportTemplate(name: String, title: String, description: String)
+}
+
 // Record type with aggregate statistics
 pub type RecordTypeStats {
   RecordTypeStats(

@@ -20,6 +20,7 @@ from clarinet.repositories.patient_repository import PatientRepository
 from clarinet.repositories.pipeline_definition_repository import PipelineDefinitionRepository
 from clarinet.repositories.record_repository import RecordRepository
 from clarinet.repositories.record_type_repository import RecordTypeRepository
+from clarinet.repositories.report_repository import ReportRepository
 from clarinet.repositories.series_repository import SeriesRepository
 from clarinet.repositories.study_repository import StudyRepository
 from clarinet.repositories.user_repository import UserRepository
@@ -31,6 +32,7 @@ from clarinet.services.dicomweb import DicomWebCache, DicomWebProxyService
 from clarinet.services.record_service import RecordService
 from clarinet.services.record_type_service import RecordTypeService
 from clarinet.services.recordflow.engine import RecordFlowEngine
+from clarinet.services.report_service import ReportRegistry, ReportService
 from clarinet.services.slicer.service import SlicerService
 from clarinet.services.study_service import StudyService
 from clarinet.services.user_service import UserService
@@ -293,6 +295,29 @@ def get_project_file_registry(
 ProjectFileRegistryDep = Annotated[
     dict[str, FileRegistryEntry] | None, Depends(get_project_file_registry)
 ]
+
+
+# Report registry / service dependencies
+
+
+def get_report_registry(request: Request) -> ReportRegistry:
+    """Get the SQL report registry from app state.
+
+    Returns an empty registry when state is not initialized (e.g. schema tests
+    or test fixtures that bypass lifespan).
+    """
+    return getattr(request.app.state, "report_registry", ReportRegistry([]))
+
+
+ReportRegistryDep = Annotated[ReportRegistry, Depends(get_report_registry)]
+
+
+async def get_report_service(registry: ReportRegistryDep) -> ReportService:
+    """Get the report service with a fresh repository instance."""
+    return ReportService(registry, ReportRepository())
+
+
+ReportServiceDep = Annotated[ReportService, Depends(get_report_service)]
 
 
 # Viewer plugin dependencies

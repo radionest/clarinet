@@ -35,6 +35,7 @@ def setup_exception_handlers(app: FastAPI) -> None:
         PipelineError,
         RecordLimitReachedError,
         RecordUniquePerUserError,
+        ReportQueryError,
         SlicerConnectionError,
         SlicerError,
         ValidationError,
@@ -174,6 +175,15 @@ def setup_exception_handlers(app: FastAPI) -> None:
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content={"detail": str(exc) if str(exc) else "Pipeline operation failed"},
+        )
+
+    @app.exception_handler(ReportQueryError)
+    async def handle_report_query_error(_: Request, exc: ReportQueryError) -> JSONResponse:
+        """Convert ReportQueryError to 500 response (SQL failure or timeout)."""
+        logger.opt(exception=exc).error("Report query failed")
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"detail": str(exc) if str(exc) else "Report query failed"},
         )
 
     @app.exception_handler(ConfigurationError)

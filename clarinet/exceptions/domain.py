@@ -225,6 +225,19 @@ class RecordUniquePerUserError(RecordConstraintViolationError):
     error_code: ClassVar[str] = "UNIQUE_PER_USER"
 
 
+# Report exceptions (custom SQL reports)
+class ReportNotFoundError(EntityNotFoundError):
+    """Raised when a report template name is not registered."""
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+        super().__init__(f"Report '{name}' not found")
+
+
+class ReportQueryError(ClarinetError):
+    """Raised when a custom SQL report fails to execute or times out."""
+
+
 # Configuration errors
 class ConfigurationError(ClarinetError):
     """Raised when there's a configuration problem."""

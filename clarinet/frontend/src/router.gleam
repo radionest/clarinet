@@ -25,6 +25,7 @@ pub type Route {
   AdminRecordTypes
   AdminRecordTypeDetail(name: String)
   AdminRecordTypeEdit(name: String)
+  AdminReports
   NotFound
 }
 
@@ -49,6 +50,7 @@ pub fn route_to_path(route: Route) -> String {
     AdminRecordTypes -> "/admin/record-types"
     AdminRecordTypeDetail(name) -> "/admin/record-types/" <> name
     AdminRecordTypeEdit(name) -> "/admin/record-types/" <> name <> "/edit"
+    AdminReports -> "/admin/reports"
     NotFound -> "/404"
   }
   base <> path
@@ -82,6 +84,7 @@ pub fn parse_route(uri: Uri) -> Route {
     ["patients", id] -> PatientDetail(id)
     ["series", id] -> SeriesDetail(id)
     ["admin"] -> AdminDashboard
+    ["admin", "reports"] -> AdminReports
     ["admin", "record-types"] -> AdminRecordTypes
     ["admin", "record-types", name, "edit"] -> AdminRecordTypeEdit(name)
     ["admin", "record-types", name] -> AdminRecordTypeDetail(name)
@@ -111,7 +114,8 @@ pub fn requires_admin_role(route: Route) -> Bool {
     | AdminDashboard
     | AdminRecordTypes
     | AdminRecordTypeDetail(_)
-    | AdminRecordTypeEdit(_) -> True
+    | AdminRecordTypeEdit(_)
+    | AdminReports -> True
     _ -> False
   }
 }
@@ -136,6 +140,7 @@ pub fn get_route_title(route: Route) -> String {
     AdminRecordTypes -> "Record Types"
     AdminRecordTypeDetail(_) -> "Record Type Details"
     AdminRecordTypeEdit(_) -> "Edit Record Type"
+    AdminReports -> "Reports"
     NotFound -> "Page Not Found"
   }
 }
@@ -151,7 +156,8 @@ fn section(route: Route) -> String {
     AdminDashboard
     | AdminRecordTypes
     | AdminRecordTypeDetail(_)
-    | AdminRecordTypeEdit(_) -> "admin"
+    | AdminRecordTypeEdit(_)
+    | AdminReports -> "admin"
     NotFound -> "notfound"
   }
 }

@@ -267,6 +267,10 @@ class Settings(BaseSettings):
     config_context_hydrators_file: str = "context_hydrators.py"
     config_schema_hydrators_file: str = "hydrators.py"
 
+    # Reports settings (custom SQL reports, downloaded as CSV/XLSX by superusers)
+    reports_path: str = "./review/"
+    reports_query_timeout_seconds: int = 300  # 5 minutes
+
     # RecordFlow settings
     recordflow_enabled: bool = False  # Enable RecordFlow workflow engine
     recordflow_paths: list[str] = []  # Directories containing *_flow.py files
@@ -496,6 +500,22 @@ class Settings(BaseSettings):
         raw = override or self.worker_log_file or "clarinet_worker.log"
         path = Path(raw)
         return path if path.is_absolute() else self.get_log_dir() / path
+
+    def get_reports_path(self) -> Path:
+        """Resolve :attr:`reports_path` to an absolute :class:`Path`.
+
+        Relative paths are anchored to ``project_path`` when set, otherwise
+        left as-is and interpreted relative to the current working directory.
+        Without this anchoring, the default ``./review/`` would silently miss
+        a populated reports folder when the API is started from a different
+        directory (e.g. via systemd unit).
+        """
+        p = Path(self.reports_path)
+        if p.is_absolute():
+            return p
+        if self.project_path is not None:
+            return Path(self.project_path) / p
+        return p
 
     @property
     def static_path(self) -> Path:

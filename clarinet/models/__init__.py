@@ -59,6 +59,9 @@ from .record_type import (
     SlicerSettings,
 )
 
+# Report models (custom SQL reports)
+from .report import ReportFormat, ReportTemplate
+
 # Study models
 from .study import (
     Series,
@@ -114,6 +117,8 @@ __all__ = [
     "RecordTypeOptional",
     "RecordTypeRead",
     "RecordTypeStats",
+    "ReportFormat",
+    "ReportTemplate",
     "RoleMatrixResponse",
     "Series",
     "SeriesBase",

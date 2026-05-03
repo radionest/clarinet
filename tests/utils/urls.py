@@ -54,6 +54,9 @@ ADMIN_RECORD_STATUS = "/api/admin/records"  # + /{id}/status
 ADMIN_RECORD_USER = "/api/admin/records"  # + /{id}/user
 ADMIN_RECORD_OUTPUT_FILES = "/api/admin/records"  # + /{id}/output-files
 
+# --- Reports ---
+ADMIN_REPORTS = "/api/admin/reports"  # GET list; + /{name}/download for file
+
 # --- Slicer ---
 SLICER_BASE = "/api/slicer"
 SLICER_PING = "/api/slicer/ping"

@@ -34,6 +34,7 @@ from clarinet.api.routers import health as health
 from clarinet.api.routers import info as info
 from clarinet.api.routers import pipeline as pipeline
 from clarinet.api.routers import record as record
+from clarinet.api.routers import reports as reports
 from clarinet.api.routers import slicer  # slicer doesn't use database, no async version needed,
 from clarinet.api.routers import study as study
 from clarinet.api.routers import user as user
@@ -196,6 +197,28 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     slicer_hydrator_count = load_custom_slicer_hydrators(settings.config_tasks_path)
     if slicer_hydrator_count:
         logger.info(f"Loaded {slicer_hydrator_count} custom slicer context hydrator(s)")
+
+    # Load custom SQL report templates from project's reports folder
+    from clarinet.services.report_service import ReportRegistry
+    from clarinet.settings import DatabaseDriver
+    from clarinet.utils.report_discovery import discover_report_templates
+
+    reports_path = settings.get_reports_path()
+    report_templates = discover_report_templates(reports_path)
+    app.state.report_registry = ReportRegistry(report_templates)
+    if report_templates:
+        logger.info(f"Loaded {len(report_templates)} report template(s) from {reports_path}")
+        if settings.database_driver == DatabaseDriver.SQLITE:
+            # On SQLite ``SET TRANSACTION READ ONLY`` does not exist; the
+            # repository falls back to a SELECT/WITH parser check, which
+            # blocks accidental DML/DDL but cannot guard against side
+            # effects of a SELECT calling a custom function.
+            logger.warning(
+                "Custom SQL reports loaded with SQLite driver — "
+                "read-only transactions are unavailable; only the "
+                "SELECT/WITH parser check protects mutating queries. "
+                "Use PostgreSQL for production."
+            )
 
     try:
         await ensure_admin_exists()
@@ -448,6 +471,7 @@ def create_app(root_path: str = "") -> FastAPI:
     app.include_router(study.router, prefix="/api")
     app.include_router(slicer.router, prefix="/api/slicer", tags=["Slicer"])
     app.include_router(admin.router, prefix="/api/admin", tags=["Admin"])
+    app.include_router(reports.router, prefix="/api/admin/reports", tags=["Reports"])
     app.include_router(dicom.router, prefix="/api/dicom", tags=["DICOM"])
     app.include_router(pipeline.router, prefix="/api/pipelines", tags=["Pipelines"])
     app.include_router(viewer.router, prefix="/api/records", tags=["Viewers"])

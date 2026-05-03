@@ -125,6 +125,16 @@ pub fn request_with_body(
   }
 }
 
+/// Builds the absolute backend URL for an API path.
+///
+/// Use for `<a href>` / `<img src>` / form actions where the browser, not
+/// `gleam_fetch`, performs the request — e.g. native file downloads via
+/// `Content-Disposition: attachment`. For Fetch-driven calls, use the
+/// `get`/`post`/... helpers below; they prepend the same prefix internally.
+pub fn api_url(path: String) -> String {
+  config.base_path() <> "/api" <> path
+}
+
 /// Performs a GET request to the specified API path.
 pub fn get(path: String) -> Promise(Result(Dynamic, ApiError)) {
   request_with_body(method: http.Get, path: path, body: None)
