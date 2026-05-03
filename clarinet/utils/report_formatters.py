@@ -10,6 +10,8 @@ import io
 from collections.abc import Sequence
 from typing import Any
 
+from openpyxl import Workbook
+
 
 def to_csv(columns: Sequence[str], rows: Sequence[Sequence[Any]]) -> io.BytesIO:
     """Build a UTF-8 CSV with a BOM so Excel opens Cyrillic files correctly.
@@ -32,8 +34,6 @@ def to_xlsx(columns: Sequence[str], rows: Sequence[Sequence[Any]]) -> io.BytesIO
     Write-only mode streams rows to the underlying zip without keeping the
     whole sheet in memory, so reasonably large reports stay flat in RSS.
     """
-    from openpyxl import Workbook
-
     wb = Workbook(write_only=True)
     ws = wb.create_sheet(title="Report")
     ws.append(list(columns))

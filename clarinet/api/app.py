@@ -200,14 +200,25 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     # Load custom SQL report templates from project's reports folder
     from clarinet.services.report_service import ReportRegistry
+    from clarinet.settings import DatabaseDriver
     from clarinet.utils.report_discovery import discover_report_templates
 
-    report_templates = discover_report_templates(settings.reports_path)
+    reports_path = settings.get_reports_path()
+    report_templates = discover_report_templates(reports_path)
     app.state.report_registry = ReportRegistry(report_templates)
     if report_templates:
-        logger.info(
-            f"Loaded {len(report_templates)} report template(s) from {settings.reports_path}"
-        )
+        logger.info(f"Loaded {len(report_templates)} report template(s) from {reports_path}")
+        if settings.database_driver == DatabaseDriver.SQLITE:
+            # On SQLite ``SET TRANSACTION READ ONLY`` does not exist; the
+            # repository falls back to a SELECT/WITH parser check, which
+            # blocks accidental DML/DDL but cannot guard against side
+            # effects of a SELECT calling a custom function.
+            logger.warning(
+                "Custom SQL reports loaded with SQLite driver — "
+                "read-only transactions are unavailable; only the "
+                "SELECT/WITH parser check protects mutating queries. "
+                "Use PostgreSQL for production."
+            )
 
     try:
         await ensure_admin_exists()

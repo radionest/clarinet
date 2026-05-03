@@ -8,6 +8,7 @@ leak into unrelated queries on the same connection.
 """
 
 import asyncio
+import re
 from typing import Any
 
 from sqlalchemy import text
@@ -15,7 +16,29 @@ from sqlalchemy import text
 from clarinet.exceptions.domain import ReportQueryError
 from clarinet.settings import DatabaseDriver, settings
 from clarinet.utils.db_manager import DatabaseManager, db_manager
-from clarinet.utils.logger import logger
+
+# Strips leading whitespace, line comments (``--``), and block comments
+# (``/* ... */``) from the start of a SQL string so :func:`_validate_select_only`
+# can inspect the first real keyword.
+_LEADING_SQL_NOISE_RE = re.compile(
+    r"\A(?:\s+|--[^\n]*\n?|/\*.*?\*/)+",
+    flags=re.DOTALL,
+)
+
+
+def _validate_select_only(sql: str) -> None:
+    """Reject anything that does not start with ``SELECT`` or ``WITH``.
+
+    Defense in depth: the PostgreSQL path also sets
+    ``SET TRANSACTION READ ONLY``, but on SQLite that pragma does not exist
+    and a misconfigured deployment (``database_driver = sqlite``, the default)
+    would otherwise execute ``DELETE`` / ``DROP`` from a ``*.sql`` file
+    without protection.
+    """
+    head = _LEADING_SQL_NOISE_RE.sub("", sql)
+    keyword = head.split(None, 1)[0] if head else ""
+    if keyword.lower() not in {"select", "with"}:
+        raise ReportQueryError("Report SQL must start with SELECT or WITH")
 
 
 class ReportRepository:
@@ -40,14 +63,14 @@ class ReportRepository:
         Raises:
             ReportQueryError: SQL failed to execute or the timeout fired.
         """
+        _validate_select_only(sql)
         sql_timeout = settings.reports_query_timeout_seconds
         wait_timeout = sql_timeout + self._PYTHON_TIMEOUT_BUFFER_SECONDS
 
         try:
             return await asyncio.wait_for(self._run(sql, sql_timeout), timeout=wait_timeout)
         except TimeoutError as exc:
-            logger.error(f"Report query exceeded {wait_timeout}s asyncio timeout")
-            raise ReportQueryError("Report query timed out") from exc
+            raise ReportQueryError(f"Report query exceeded {wait_timeout:.0f}s timeout") from exc
 
     async def _run(
         self,
@@ -61,11 +84,13 @@ class ReportRepository:
                 columns = list(result.keys())
                 rows = [tuple(row) for row in result.fetchall()]
             except Exception as exc:
-                # Log first, then surface as a typed domain error so the
-                # exception handler maps it to a uniform 500 response.
-                logger.error(f"Report SQL execution failed: {exc}")
+                # Surface as a typed domain error; the exception handler
+                # logs the full traceback via ``logger.opt(exception=exc)``
+                # and the original DB error is preserved on ``__cause__``.
+                # Keep the message generic so SQL fragments / value data
+                # do not leak into the HTTP response body.
                 await session.rollback()
-                raise ReportQueryError(f"Report execution failed: {exc}") from exc
+                raise ReportQueryError("Report execution failed") from exc
             else:
                 # Read-only path: discard the transaction explicitly so the
                 # connection returns to the pool in a clean state regardless

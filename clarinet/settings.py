@@ -501,6 +501,22 @@ class Settings(BaseSettings):
         path = Path(raw)
         return path if path.is_absolute() else self.get_log_dir() / path
 
+    def get_reports_path(self) -> Path:
+        """Resolve :attr:`reports_path` to an absolute :class:`Path`.
+
+        Relative paths are anchored to ``project_path`` when set, otherwise
+        left as-is and interpreted relative to the current working directory.
+        Without this anchoring, the default ``./review/`` would silently miss
+        a populated reports folder when the API is started from a different
+        directory (e.g. via systemd unit).
+        """
+        p = Path(self.reports_path)
+        if p.is_absolute():
+            return p
+        if self.project_path is not None:
+            return Path(self.project_path) / p
+        return p
+
     @property
     def static_path(self) -> Path:
         """Path to built frontend static files."""
