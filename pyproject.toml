@@ -147,6 +147,8 @@ module = [
     "orjson.*",
     "markdown",
     "markdown.*",
+    "nh3",
+    "nh3.*",
 ]
 ignore_missing_imports = true
 
