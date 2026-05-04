@@ -120,10 +120,42 @@ Use `tests/utils/urls.py` instead of hardcoded URL strings. Full endpoint table 
 
 ### Model Factories
 
-- `tests/utils/factories.py` — sync, no DB: `make_patient()`, `make_user()`, `seed_record()`
-- `tests/utils/test_helpers.py` — async, persisted: `PatientFactory.create_patient()`, etc.
+| Helper | Module | Mode | Returns | Use for |
+|---|---|---|---|---|
+| `make_patient(pid, name, auto_id=)` | `factories.py` | sync, no DB | `Patient` | unit tests, in-memory ORM checks |
+| `make_study(patient_id, uid=)` | `factories.py` | sync, no DB | `Study` | same |
+| `make_series(study_uid, uid=, num=)` | `factories.py` | sync, no DB | `Series` | same |
+| `make_user(**kw)` | `factories.py` | sync, no DB | `User` | building auth fixtures, role/permission unit tests |
+| `make_record_type(name=, **kw)` | `factories.py` | sync, no DB | `RecordType` | unit tests touching record types |
+| `make_record_type_config(name, level=)` | `factories.py` | sync, no DB | `RecordTypeCreate` | reconciler/config tests |
+| `seed_record(session, ...)` | `factories.py` | async, commits | `Record` | when a record must exist before the request under test |
+| `PatientFactory.create_patient(session, ...)` | `test_helpers.py` | async, commits | `Patient` | integration tests; can also create `Study`/`Series` |
+| `RecordFactory.create_record(session, user, record_type, ...)` | `test_helpers.py` | async, commits | `Record` | same |
+| `UserFactory.create_user(...)` | `test_helpers.py` | async, commits | `User` | persisted user with hashed password |
+| `create_mock_superuser(session, email=)` | `conftest.py` | async, commits + expunges | `User` | overriding `client` fixture in e2e/auth tests |
+| `create_authenticated_client(user, session, settings)` | `conftest.py` | async generator | `AsyncClient` | drop-in replacement for the `client` fixture |
+| `next_auto_id()` | `factories.py` | sync, no DB | `int` | shared counter — `make_patient` and `PatientFactory` both call it; do NOT instantiate `Patient(...)` directly |
 
-Both share `next_auto_id()` counter — never create `Patient(...)` directly in tests.
+#### Example: add a permission test
+
+```python
+async def test_admin_delete_record_rejects_non_superuser(test_session, test_settings):
+    # Owner of the record (regular user, not superuser).
+    user = await create_mock_superuser(test_session, email="x@test.com")
+    user.is_superuser = False  # downgrade to a regular user
+
+    # Persist a RecordType (sync factory + manual commit) and a Record (async factory).
+    rt = make_record_type(name="rt-perm-test")
+    test_session.add(rt)
+    await test_session.commit()
+    record = await RecordFactory.create_record(test_session, user=user, record_type=rt)
+
+    async for ac in create_authenticated_client(user, test_session, test_settings):
+        resp = await ac.delete(f"/api/admin/records/{record.id}")
+        assert resp.status_code == 403
+```
+
+Mix sync (`make_*`) and async (`*Factory.create_*`) freely — sync factories produce instances you `session.add()` yourself; async factories commit and refresh for you.
 
 ### Fixture Hierarchy
 

@@ -300,6 +300,40 @@ logger.error("auth", "session check failed: " <> message)
 
 Tags in current use: `router`, `auth`, `api`, `cache`, `preload`. Pick the closest or invent a new one.
 
+## 11.5. Inserting Server-Sanitized HTML
+
+Lustre escapes everything by default — `html.text(s)` always produces text, never markup. To render pre-sanitized HTML from the backend (e.g. `record.context_info_html`, produced by the markdown → bleach pipeline), set the DOM `innerHTML` **property** (not an attribute) on a wrapper element:
+
+```gleam
+import gleam/json
+import lustre/attribute
+import lustre/element       // for element.none()
+import lustre/element/html
+
+case record.context_info_html {
+  Some(html_str) ->
+    html.div(
+      [
+        attribute.class("context-info"),
+        attribute.property("innerHTML", json.string(html_str)),
+      ],
+      [],   // children must be empty — innerHTML replaces them
+    )
+  None -> element.none()
+}
+```
+
+Reference: `pages/records/execute.gleam` (`render_context_info`).
+
+**Rules:**
+- The HTML **must** already be sanitized on the backend. Never feed user-controlled raw HTML through `attribute.property("innerHTML", ...)` — it bypasses Lustre's escaping and is a stored XSS sink. The backend uses `nh3.clean(...)` with explicit tag/attribute/url-scheme allowlists (see `clarinet/utils/markdown.py`); mirror those allowlists whenever you add a new "render-HTML-from-server" surface.
+- `attribute.property` (NOT `attribute.attribute`) — Lustre distinguishes DOM properties from HTML attributes. `innerHTML` is a property; the attribute form silently does nothing.
+- Wrap the value in `json.string(...)` because `attribute.property` takes a `Json` value, not a raw `String`.
+- Keep the children list empty (`[]`). Anything you put there is wiped by `innerHTML` on first render and reappears on the next, causing flicker.
+- Pair with `Some/None` (or equivalent guard) — passing `json.string("")` still resets `innerHTML` and clobbers any default content.
+
+The same pattern works for other DOM properties (`value` on inputs, `srcdoc` on iframes, etc.) — `attribute.property(name, json.<type>(value))`.
+
 ## 12. Common Pitfalls
 
 - **Forgetting `delegate_page_update` wiring** — you add a new `PageMsg` variant in `store.Msg` but skip the dispatcher in `main.update`. Gleam will catch the missing case arm. Always add both the `store.Msg` variant AND the `main.update` delegation in the same change.
