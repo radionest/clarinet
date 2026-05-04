@@ -285,12 +285,14 @@ class TestSlicerHelperMethodsExist:
     def test_setup_editor_effect_accepts_none(self) -> None:
         """setup_editor accepts effect=None (read-only / observer mode)."""
         import inspect
+        from typing import get_args, get_type_hints
 
         sig = inspect.signature(SlicerHelper.setup_editor)
-        param = sig.parameters["effect"]
-        assert param.default == "Paint"
-        # Annotation must allow None: ``EditorEffectName | None``.
-        assert "None" in str(param.annotation)
+        assert sig.parameters["effect"].default == "Paint"
+        # Resolved annotation is ``EditorEffectName | None`` — the union
+        # must include ``NoneType``.
+        hints = get_type_hints(SlicerHelper.setup_editor)
+        assert type(None) in get_args(hints["effect"])
 
 
 # --- SlicerHelper new methods: integration tests (require running Slicer) ---

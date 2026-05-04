@@ -1073,22 +1073,21 @@ class SlicerHelper:
             # Paint/Erase is not silently armed. Empty name deactivates the
             # current effect in Slicer.
             self._editor_widget.setActiveEffectByName("")
-            return
+        else:
+            self._editor_widget.setActiveEffectByName(effect)
+            active_effect = self._editor_widget.activeEffect()
 
-        self._editor_widget.setActiveEffectByName(effect)
-        active_effect = self._editor_widget.activeEffect()
-
-        if active_effect is not None:
-            if effect in ("Paint", "Erase"):
-                active_effect.setCommonParameter("BrushDiameterIsRelative", 0)
-                active_effect.setCommonParameter("BrushAbsoluteDiameter", brush_size)
-                active_effect.setCommonParameter("BrushSphere", int(sphere_brush))
-            elif effect == "Threshold" and threshold is not None:
-                active_effect.setParameter("MinimumThreshold", threshold[0])
-                active_effect.setParameter("MaximumThreshold", threshold[1])
-                active_effect.self().onUseForPaint()
-            elif effect == "Islands":
-                active_effect.setParameter("Operation", "ADD_SELECTED_ISLAND")
+            if active_effect is not None:
+                if effect in ("Paint", "Erase"):
+                    active_effect.setCommonParameter("BrushDiameterIsRelative", 0)
+                    active_effect.setCommonParameter("BrushAbsoluteDiameter", brush_size)
+                    active_effect.setCommonParameter("BrushSphere", int(sphere_brush))
+                elif effect == "Threshold" and threshold is not None:
+                    active_effect.setParameter("MinimumThreshold", threshold[0])
+                    active_effect.setParameter("MaximumThreshold", threshold[1])
+                    active_effect.self().onUseForPaint()
+                elif effect == "Islands":
+                    active_effect.setParameter("Operation", "ADD_SELECTED_ISLAND")
 
     def set_layout(self, layout: str) -> None:
         """Set view layout.
@@ -2256,14 +2255,19 @@ class SlicerHelper:
         editable_node = self._unwrap_node(editable_seg)
         reference_node = self._unwrap_node(reference_seg)
 
-        editor_node = self._scene.GetFirstNodeByClass("vtkMRMLSegmentEditorNode")
-        if editor_node is None:
+        # Ask the widget for its parameter-set node instead of scanning the
+        # scene with GetFirstNodeByClass(): the scene may hold several
+        # vtkMRMLSegmentEditorNode instances and only the widget knows which
+        # one actually drives the active editor (mirrors setup_editor at
+        # helper.py:1052-1058).
+        if self._editor_widget is None:
             raise SlicerHelperError(
-                "setup_segment_focus_observer() requires a "
-                "vtkMRMLSegmentEditorNode in the scene. Call setup_editor() "
-                "first (pass effect=None for a viewer that only needs label "
-                "navigation, no active drawing tool)."
+                "setup_segment_focus_observer() requires the segment editor "
+                "widget. Call setup_editor() first (pass effect=None for a "
+                "viewer that only needs label navigation, no active drawing "
+                "tool)."
             )
+        editor_node = self._editor_widget.mrmlSegmentEditorNode()
 
         helper_ref = self  # prevent garbage collection of SlicerHelper
 
