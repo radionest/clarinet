@@ -742,8 +742,8 @@ fn init_page_for_route(model: Model, route: Route) -> #(Model, Effect(Msg)) {
       init_page(model, login.init, store.LoginPage, store.LoginMsg)
     router.Register ->
       init_page(model, register.init, store.RegisterPage, store.RegisterMsg)
-    router.AdminDashboard ->
-      init_page(model, admin_page.init, store.AdminPage, store.AdminMsg)
+    router.AdminDashboard(filters) ->
+      init_page(model, admin_page.init(filters, _), store.AdminPage, store.AdminMsg)
     router.Patients(filters) ->
       init_page(model, patients_list.init(filters, _), store.PatientsListPage, store.PatientsListMsg)
     router.PatientDetail(id) ->

@@ -1,15 +1,19 @@
 // Shared filter helpers for Record lists
-import api/models.{type Record}
+import api/models.{type Record, type User}
 import clarinet_frontend/i18n.{type Key}
 import gleam/dict.{type Dict}
 import gleam/list
+import gleam/option.{None, Some}
 import gleam/string
 import utils/status
 
 // User-controlled filter keys for the records list. Subset of
 // `router.known_filter_keys` (which also accepts sort / sort_dir).
 // When adding a new filter, update both lists.
-const user_filter_keys = ["status", "record_type", "patient"]
+pub const user_filter_keys = ["status", "record_type", "patient", "user"]
+
+/// Special "user" filter value matching records with no assigned user.
+pub const unassigned_user_value = "unassigned"
 
 /// Strip the user-controlled filter keys from `filters`, leaving any
 /// other keys (notably `"sort"` / `"sort_dir"`) intact. Used by
@@ -19,8 +23,10 @@ pub fn clear_user_filters(filters: Dict(String, String)) -> Dict(String, String)
   list.fold(user_filter_keys, filters, fn(acc, key) { dict.delete(acc, key) })
 }
 
-/// Filter records by an active filter dict (keys: "status", "record_type", "patient").
-/// Missing keys mean "no filter on that dimension".
+/// Filter records by an active filter dict.
+/// Recognised keys: `"status"`, `"record_type"`, `"patient"`, `"user"`.
+/// For `"user"`, the special value `unassigned_user_value` matches records
+/// with no assigned user. Missing keys mean "no filter on that dimension".
 pub fn apply_filters(
   records: List(Record),
   filters: Dict(String, String),
@@ -42,7 +48,16 @@ pub fn apply_filters(
       Error(_) -> True
     }
 
-    status_ok && type_ok && patient_ok
+    let user_ok = case dict.get(filters, "user") {
+      Ok(user_filter) ->
+        case user_filter == unassigned_user_value {
+          True -> record.user_id == None
+          False -> record.user_id == Some(user_filter)
+        }
+      Error(_) -> True
+    }
+
+    status_ok && type_ok && patient_ok && user_ok
   })
 }
 
@@ -81,4 +96,49 @@ pub fn patient_options(
     |> list.unique()
     |> list.sort(fn(a, b) { string.compare(a, b) })
   [#("", translate(i18n.FilterAllPatients)), ..list.map(patients, fn(p) { #(p, p) })]
+}
+
+/// Build dropdown options for the assigned-user filter.
+/// Includes only users actually referenced by `records` so the dropdown
+/// stays scoped to what the table can show. The "unassigned" entry is
+/// included whenever any record has no assigned user.
+pub fn user_options(
+  records: List(Record),
+  users: Dict(String, User),
+  translate: fn(Key) -> String,
+) -> List(#(String, String)) {
+  let referenced_ids =
+    list.filter_map(records, fn(r) {
+      case r.user_id {
+        Some(uid) -> Ok(uid)
+        None -> Error(Nil)
+      }
+    })
+    |> list.unique()
+
+  let user_entries =
+    list.map(referenced_ids, fn(uid) {
+      let label = case dict.get(users, uid) {
+        Ok(user) -> user.email
+        Error(_) -> uid
+      }
+      #(uid, label)
+    })
+    |> list.sort(fn(a, b) { string.compare(a.1, b.1) })
+
+  let has_unassigned =
+    list.any(records, fn(r) {
+      case r.user_id {
+        None -> True
+        Some(_) -> False
+      }
+    })
+
+  let unassigned_entry = case has_unassigned {
+    True -> [#(unassigned_user_value, translate(i18n.FormNoUserUnassigned))]
+    False -> []
+  }
+
+  [#("", translate(i18n.FilterAllUsers)), ..unassigned_entry]
+  |> list.append(user_entries)
 }

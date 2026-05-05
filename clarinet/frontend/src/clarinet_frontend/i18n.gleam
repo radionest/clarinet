@@ -79,6 +79,7 @@ pub type Key {
   FilterAllStatuses
   FilterAllTypes
   FilterAllPatients
+  FilterAllUsers
 
   // --- Layout ---
   FooterCopyright(project_name: String, project_description: String)
@@ -473,6 +474,8 @@ pub fn translate(locale: Locale, key: Key) -> String {
     Ru, FilterAllTypes -> "Все типы"
     En, FilterAllPatients -> "All Patients"
     Ru, FilterAllPatients -> "Все пациенты"
+    En, FilterAllUsers -> "All Users"
+    Ru, FilterAllUsers -> "Все пользователи"
 
     // --- Layout ---
     En, FooterCopyright(name, desc) -> "© 2024 " <> name <> " " <> desc
