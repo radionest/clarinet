@@ -79,8 +79,22 @@ def read_dicom_series(
     # producing a SI flip in saved NIfTI. Force right-handed by recomputing
     # the slice axis from the cross product of the row/column axes; this is
     # a no-op for series that already have a consistent direction matrix.
-    if np.linalg.det(d) < 0:
-        d[:, 2] = np.cross(d[:, 0], d[:, 1])
+    # Assumes slice axis is approximately ±(row x col); for gantry-tilted CT
+    # this would drop the tilt component (rare on modern scanners).
+    det = np.linalg.det(d)
+    if det < 0:
+        slice_from_cross = np.cross(d[:, 0], d[:, 1])
+        if np.dot(slice_from_cross, d[:, 2]) < 0:
+            logger.debug(
+                f"Left-handed DICOM direction matrix in {directory.name} "
+                f"(det={det:.3f}); recomputing slice axis from row x col"
+            )
+            d[:, 2] = slice_from_cross
+        else:
+            logger.warning(
+                f"Left-handed direction matrix in {directory.name} "
+                f"(det={det:.3f}) with consistent slice axis — leaving as-is"
+            )
     direction = np.ascontiguousarray(d[:, [1, 0, 2]])
 
     logger.debug(
