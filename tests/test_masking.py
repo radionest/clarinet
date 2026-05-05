@@ -611,6 +611,7 @@ class TestMaskRecords:
 
         with patch("clarinet.api.masking.settings") as masking_settings:
             masking_settings.anon_per_study_patient_id = True
+            masking_settings.anon_per_study_patient_id_hex_length = 8
             masking_settings.anon_uid_salt = "test-salt"
             result = mask_record_patient_data(record, user)
 

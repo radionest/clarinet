@@ -62,7 +62,9 @@ def mask_record_patient_data(record: RecordRead, user: User) -> RecordRead:
         and study_anon_uid is not None
     ):
         masked_id: str | None = compute_per_study_patient_id(
-            settings.anon_uid_salt, record.study_uid
+            settings.anon_uid_salt,
+            record.study_uid,
+            settings.anon_per_study_patient_id_hex_length,
         )
         masked_name: str | None = masked_id
     else:

@@ -154,7 +154,11 @@ class AnonymizationService:
         patient = await self.patient_repo.get(study.patient_id)
 
         if do_per_study:
-            anon_patient_id = compute_per_study_patient_id(settings.anon_uid_salt, study_uid)
+            anon_patient_id = compute_per_study_patient_id(
+                settings.anon_uid_salt,
+                study_uid,
+                settings.anon_per_study_patient_id_hex_length,
+            )
             anon_patient_name = anon_patient_id
         else:
             anon_id = patient.anon_id

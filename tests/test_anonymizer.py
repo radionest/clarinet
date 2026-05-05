@@ -348,3 +348,10 @@ class TestComputePerStudyPatientId:
     def test_matches_sha256_prefix(self) -> None:
         expected = hashlib.sha256(b"salt:1.2.3.4").hexdigest()[:8]
         assert compute_per_study_patient_id("salt", "1.2.3.4") == expected
+
+    def test_custom_length(self) -> None:
+        assert len(compute_per_study_patient_id("salt", "1.2.3.4", 16)) == 16
+        assert len(compute_per_study_patient_id("salt", "1.2.3.4", 4)) == 4
+        # Custom length is a prefix of the default — same hash, different slice.
+        full = compute_per_study_patient_id("salt", "1.2.3.4", 64)
+        assert full.startswith(compute_per_study_patient_id("salt", "1.2.3.4"))
