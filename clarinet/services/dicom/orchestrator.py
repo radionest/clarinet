@@ -60,8 +60,8 @@ class AnonymizationOrchestrator:
             save_to_disk: Override ``settings.anon_save_to_disk``.
             send_to_pacs: Override ``settings.anon_send_to_pacs``.
             per_study_patient_id: Override ``settings.anon_per_study_patient_id``.
-                Skip-branch returns ``anon_patient_id=""`` (re-run after a prior
-                success skips the work; downstream should guard on truthiness).
+                Skip-branch returns ``anon_patient_id=None`` — anonymization was
+                already done in a previous run, so no fresh hash is produced.
             extra_record_data: Project-specific fields merged into the Record
                 ``data`` payload (success, skip, and error branches).
 

@@ -16,10 +16,17 @@ def compute_per_study_patient_id(salt: str, study_uid: str) -> str:
     """Per-study deterministic PatientID/PatientName for DICOM anonymization.
 
     sha256(f"{salt}:{study_uid}") -> first 8 hex characters. Same study_uid +
-    salt -> same hash (idempotent re-runs). Fits LO (64) and PN (64 per
-    component) DICOM constraints. Used when ``settings.anon_per_study_patient_id``
-    is enabled to prevent PACS-side correlation across studies of the same
-    patient.
+    salt -> same hash (idempotent re-runs). Used when
+    ``settings.anon_per_study_patient_id`` is enabled to prevent PACS-side
+    correlation across studies of the same patient.
+
+    Truncation rationale (8 hex chars = 32 bits): keeps the visible PatientID
+    short and readable while staying well within DICOM LO (64) and PN (64 per
+    component) limits. By the birthday bound, collision probability is
+    ~0.012% at 1k studies, ~1.15% at 10k, and ~50% near 77k. For projects
+    that may exceed ~10k anonymized studies, increase the slice (16 hex =
+    64 bits drops collision probability to negligible levels at any realistic
+    scale).
     """
     return hashlib.sha256(f"{salt}:{study_uid}".encode()).hexdigest()[:8]
 

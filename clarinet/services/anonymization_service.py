@@ -156,9 +156,6 @@ class AnonymizationService:
         if do_per_study:
             anon_patient_id = compute_per_study_patient_id(settings.anon_uid_salt, study_uid)
             anon_patient_name = anon_patient_id
-            # DEBUG-only: pairing original study_uid with the hash in logs would
-            # weaken the per-study unlinkability the feature provides.
-            logger.debug(f"Per-study Patient ID: study={study_uid} hash={anon_patient_id}")
         else:
             anon_id = patient.anon_id
             if anon_id is None:

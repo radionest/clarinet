@@ -152,7 +152,7 @@ class AnonymizationResult(BaseModel):
 
     study_uid: str
     anon_study_uid: str
-    anon_patient_id: str = ""
+    anon_patient_id: str | None = None
     series_count: int
     series_anonymized: int = 0
     series_skipped: int = 0
