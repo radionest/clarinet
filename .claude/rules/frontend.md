@@ -258,6 +258,17 @@ rg -n 'router\.(Studies|Patients|...)\b' clarinet/frontend/src/
 
 Typical hits beyond `router.gleam` itself: `main.gleam` (`init_page_for_route`), `components/layout.gleam` (`nav_link`), `pages/<area>/{detail,new}.gleam` (`shared.Navigate(router.X)`, `NavigateBack`), `pages/home.gleam` (stat-card routes). Plans listing only "files to edit" routinely miss these — verify yourself, don't trust the list.
 
+**Inside `router.gleam` itself (the grep above doesn't catch these — they pattern-match on the constructor without a `router.` prefix):**
+
+- `route_to_path` — URL builder; every variant must produce a path
+- `parse_route` — URL → variant
+- `to_title` — page title shown in `<title>` and the layout header
+- `requires_auth` / `requires_admin_role` — guard predicates
+- `section` — drives active-tab highlighting in the nav bar
+- `route_to_query` — query-string serialization (only matters for variants with filters)
+
+For a parameterised variant (`X(filters: Dict)`): match in **all six** functions above, plus `main.init_page_for_route`, plus every bare `router.X` reference in `components/layout.gleam` (`nav_link(route: ...)`) and pages doing `shared.Navigate(router.X)` / `router.route_to_path(router.X)`.
+
 ### Silent URL state sync — `utils/url.gleam`
 
 When a Msg already mutates the page `Model` locally (e.g. column-sort click, filter toggle) and the URL change must **not** trigger `OnRouteChange` → `init_page_for_route` → API refetch, use `utils/url.replace_state(path, query)`. It calls `history.replaceState` via FFI without dispatching modem's `on_url_change`.
@@ -265,6 +276,60 @@ When a Msg already mutates the page `Model` locally (e.g. column-sort click, fil
 Use `modem.replace` / `modem.push` only when a full page re-init is the intended outcome (e.g. `Navigate` between sections). For SPA-internal state mirrored into the URL, prefer `url.replace_state`.
 
 Reference: `pages/{studies,patients}/list.gleam` use it via `url.replace_route(route)`; sortable-table flow in `utils/table_sort.gleam` is the canonical example.
+
+## 8.5. List Page Pattern (filters + sorting + URL/localStorage)
+
+Pages that show a filterable, sortable list of cached entities follow one
+template. Reference: `pages/records/list.gleam` (also `studies/list.gleam`,
+`patients/list.gleam`). Reuse the building blocks below — do not reinvent
+them in the page.
+
+**Building blocks:**
+
+- `utils/record_filters.gleam` — `apply_filters`, `clear_user_filters`,
+  `keep_serializable`, dropdown option builders (`status_options`,
+  `type_options`, `patient_options`). Two key constants:
+  - `user_filter_keys` — what `clear_user_filters` removes (no sort).
+  - `serializable_filter_keys` — superset that includes `sort` / `sort_dir`.
+    Single source of truth for **both** URL parsing
+    (`router.parse_filters_from_query`) and outgoing writes
+    (`router.filters_to_query`, page `save_filters`).
+- `utils/table_sort.gleam` — sortable column headers, URL-persisted sort.
+- `utils/url.gleam` — `replace_state` / `replace_route` for silent URL sync.
+- `utils/storage.gleam` — `save_dict` / `load_dict_sync` for localStorage.
+
+**Model field:**
+
+```gleam
+pub type Model {
+  Model(
+    ...,
+    active_filters: Dict(String, String),  // user filter keys + sort/sort_dir
+  )
+}
+```
+
+**Init flow:** read `filters` from URL → fall back to `localStorage` →
+defensively pass through `record_filters.keep_serializable` so a stale
+localStorage entry from a previous schema can't leak unknown keys into
+the model.
+
+**Update flow:** every filter/sort mutation calls `sync_filters_effect(filters)`
+which `effect.batch`-es URL sync + localStorage save. Both writers must
+go through `record_filters.keep_serializable` — `router.filters_to_query`
+already does, the page-local `save_filters` must do the same. Otherwise
+transient model fields can leak into persistent state.
+
+**Adding a new filter dimension:**
+
+1. Add the key to `record_filters.user_filter_keys` AND
+   `record_filters.serializable_filter_keys` (same file, same change).
+2. Extend `apply_filters` with the new branch.
+3. Add a dropdown option builder if needed (`patient_options`-style).
+4. Wire the dropdown in the page's `view`.
+
+**Adding a new sort column:** see `utils/table_sort.gleam` — only the
+per-page `record_comparator` changes.
 
 ## 9. Gleam / Decoder Gotchas
 

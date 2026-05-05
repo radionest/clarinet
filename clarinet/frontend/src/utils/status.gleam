@@ -41,7 +41,9 @@ pub fn to_backend_string(status: types.RecordStatus) -> String {
   }
 }
 
-/// Parse a backend status string into a RecordStatus (defaults to Pending)
+/// Parse a backend status string into a RecordStatus (defaults to Pending).
+/// Accepts both `"paused"` (round-trips with `to_backend_string`) and the
+/// historical `"pause"` (older AdminStats payloads still ship this).
 pub fn from_backend_string(s: String) -> types.RecordStatus {
   case s {
     "blocked" -> types.Blocked
@@ -49,7 +51,21 @@ pub fn from_backend_string(s: String) -> types.RecordStatus {
     "inwork" -> types.InWork
     "finished" -> types.Finished
     "failed" -> types.Failed
-    "pause" -> types.Paused
+    "paused" | "pause" -> types.Paused
     _ -> types.Pending
+  }
+}
+
+/// Tailwind colour name for a status badge. Pair with
+/// `status.to_i18n_key(s) |> translate` for the label. Exhaustive match —
+/// adding a new `RecordStatus` variant is a compile error here.
+pub fn color(status: types.RecordStatus) -> String {
+  case status {
+    types.Blocked -> "yellow"
+    types.Pending -> "blue"
+    types.InWork -> "orange"
+    types.Finished -> "green"
+    types.Failed -> "red"
+    types.Paused -> "gray"
   }
 }

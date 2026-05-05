@@ -7,10 +7,20 @@ import gleam/option.{None, Some}
 import gleam/string
 import utils/status
 
-// User-controlled filter keys for the records list. Subset of
-// `router.known_filter_keys` (which also accepts sort / sort_dir).
-// When adding a new filter, update both lists.
+// User-controlled filter keys for the records list. Cleared by the
+// "Clear filters" action; do NOT include sort/sort_dir here (we want
+// "Clear filters" to keep the user's sort selection).
 pub const user_filter_keys = ["status", "record_type", "patient", "user"]
+
+// Superset of `user_filter_keys` — every key that gets persisted to the
+// URL query string and to localStorage. Single source of truth for both
+// `router.parse_filters_from_query` (incoming whitelist) and
+// `keep_serializable` (outgoing whitelist used by save_filters /
+// filters_to_query). When adding a new filter, update `user_filter_keys`
+// AND this constant in the same change.
+pub const serializable_filter_keys = [
+  "status", "record_type", "patient", "user", "sort", "sort_dir",
+]
 
 /// Special "user" filter value matching records with no assigned user.
 /// Wrapped in double underscores to make it visually distinct from real
@@ -23,6 +33,15 @@ pub const unassigned_user_value = "__unassigned__"
 /// touching the sort selection.
 pub fn clear_user_filters(filters: Dict(String, String)) -> Dict(String, String) {
   list.fold(user_filter_keys, filters, fn(acc, key) { dict.delete(acc, key) })
+}
+
+/// Drop any keys not in `serializable_filter_keys` from `filters`. Apply
+/// before writing to URL or localStorage so transient model fields can't
+/// leak into persistent state.
+pub fn keep_serializable(
+  filters: Dict(String, String),
+) -> Dict(String, String) {
+  dict.filter(filters, fn(k, _) { list.contains(serializable_filter_keys, k) })
 }
 
 /// True if `filters` contains at least one user-controlled key. Drives the
