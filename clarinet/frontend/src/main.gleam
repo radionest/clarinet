@@ -1,7 +1,6 @@
 // Main Lustre application
 import api/auth
 import api/info
-import api/models
 import api/records
 import api/types
 import cache
@@ -16,6 +15,7 @@ import gleam/result
 import gleam/string
 import gleam/uri.{type Uri}
 import utils/logger
+import utils/permissions
 import utils/storage as app_storage
 import lustre
 import lustre/attribute
@@ -210,8 +210,8 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
 
       // Redirect non-admin user away from admin route
       let is_non_admin = case model.user {
-        Some(models.User(is_superuser: False, ..)) -> True
-        _ -> False
+        Some(user) -> !permissions.is_admin_user(user)
+        None -> False
       }
       use <- bool.guard(
         router.requires_admin_role(route) && is_non_admin,
@@ -247,18 +247,28 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
               store.set_route(new_model, router.Home),
               modem.push(router.route_to_path(router.Home), option.None, option.None),
             )
-            _, _, _ ->
-              case router.requires_admin_role(route), new_model.user {
-                True, Some(models.User(is_superuser: False, ..)) -> #(
+            _, _, _ -> {
+              let needs_admin = router.requires_admin_role(route)
+              let is_non_admin = case new_model.user {
+                Some(user) -> !permissions.is_admin_user(user)
+                None -> False
+              }
+              case needs_admin && is_non_admin {
+                True -> #(
                   store.set_route(new_model, router.Home),
-                  modem.push(router.route_to_path(router.Home), option.None, option.None),
+                  modem.push(
+                    router.route_to_path(router.Home),
+                    option.None,
+                    option.None,
+                  ),
                 )
-                _, _ -> {
+                False -> {
                   let #(new_model, page_init_eff) =
                     init_page_for_route(new_model, route)
                   #(new_model, page_init_eff)
                 }
               }
+            }
           }
         }
         Error(_) -> {
@@ -363,8 +373,8 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
 
     store.FailRecordResult(Ok(record)) -> {
       let is_admin = case model.user {
-        Some(models.User(is_superuser: True, ..)) -> True
-        _ -> False
+        Some(user) -> permissions.is_admin_user(user)
+        None -> False
       }
       let new_model =
         store.Model(..model, cache: cache.put_record(model.cache, record))

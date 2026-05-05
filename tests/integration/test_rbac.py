@@ -16,6 +16,7 @@ from httpx import ASGITransport, AsyncClient
 
 from clarinet.api.app import app
 from clarinet.api.auth_config import current_active_user, current_superuser
+from clarinet.api.dependencies import current_admin_user
 from clarinet.models.record import Record, RecordType
 from clarinet.models.user import User, UserRole, UserRolesLink
 from clarinet.utils.auth import get_password_hash
@@ -240,6 +241,82 @@ async def superuser_client(test_session, test_settings, superuser):
     app.dependency_overrides[get_async_session] = override_get_session
     app.dependency_overrides[current_active_user] = lambda: superuser
     app.dependency_overrides[current_superuser] = lambda: superuser
+    app.dependency_overrides[current_admin_user] = lambda: superuser
+
+    try:
+        from clarinet.settings import get_settings
+
+        app.dependency_overrides[get_settings] = override_get_settings
+    except (ImportError, AttributeError):
+        pass
+
+    try:
+        import clarinet.api.auth_config
+
+        clarinet.api.auth_config.settings = test_settings
+    except (ImportError, AttributeError):
+        pass
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test", cookies={}) as ac:
+        yield ac
+
+    app.dependency_overrides.clear()
+
+
+@pytest_asyncio.fixture
+async def admin_role(test_session):
+    """Create the built-in 'admin' UserRole used by AdminUserDep."""
+    role = UserRole(name="admin")
+    test_session.add(role)
+    await test_session.commit()
+    await test_session.refresh(role)
+    return role
+
+
+@pytest_asyncio.fixture
+async def admin_role_user(test_session, admin_role):
+    """Create a non-superuser user assigned to the 'admin' role."""
+    from sqlalchemy.orm import selectinload
+    from sqlmodel import select
+
+    user_id = uuid4()
+    user = User(
+        id=user_id,
+        email="admin_role@test.com",
+        hashed_password=get_password_hash("password"),
+        is_active=True,
+        is_verified=True,
+        is_superuser=False,
+    )
+    test_session.add(user)
+    await test_session.commit()
+
+    test_session.add(UserRolesLink(user_id=user_id, role_name="admin"))
+    await test_session.commit()
+
+    stmt = select(User).where(User.id == user_id).options(selectinload(User.roles))
+    result = await test_session.execute(stmt)
+    user = result.scalars().first()
+    return user
+
+
+@pytest_asyncio.fixture
+async def admin_role_client(test_session, test_settings, admin_role_user):
+    """AsyncClient for a non-superuser holding the 'admin' role.
+
+    Overrides ``current_active_user`` only — admin endpoints must reach
+    ``current_admin_user`` for real, which checks the role on ``admin_role_user``.
+    """
+
+    async def override_get_session():
+        yield test_session
+
+    async def override_get_settings():
+        return test_settings
+
+    app.dependency_overrides[get_async_session] = override_get_session
+    app.dependency_overrides[current_active_user] = lambda: admin_role_user
 
     try:
         from clarinet.settings import get_settings
@@ -590,3 +667,67 @@ async def test_my_records_excludes_other_user_assigned_records(
     # The record is assigned to another user, should not appear with wo_user=True
     record_ids = {r["id"] for r in data}
     assert record_role_a.id not in record_ids
+
+
+# Admin-role access tests (Solution 1: AdminUserDep accepts is_superuser OR 'admin' role)
+
+
+@pytest.mark.asyncio
+async def test_admin_endpoint_admin_role_user_ok(admin_role_client):
+    """Non-superuser with the 'admin' role can access /api/admin/* endpoints."""
+    response = await admin_role_client.get("/api/admin/stats")
+    assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_admin_endpoint_random_role_user_403(role_a_client):
+    """Non-superuser with a non-admin role still gets 403 from admin endpoints."""
+    response = await role_a_client.get("/api/admin/stats")
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_reports_endpoint_admin_role_user_ok(admin_role_client):
+    """Admin-role user can list custom SQL reports."""
+    response = await admin_role_client.get("/api/admin/reports")
+    assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_studies_endpoint_admin_role_user_ok(admin_role_client):
+    """Admin-role user can list studies (router-level admin gate on study.py)."""
+    response = await admin_role_client.get("/api/studies")
+    assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_patients_endpoint_admin_role_user_ok(admin_role_client):
+    """Admin-role user can list patients (router-level admin gate on study.py)."""
+    response = await admin_role_client.get("/api/patients")
+    assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_users_endpoint_admin_role_user_ok(admin_role_client):
+    """Admin-role user can list users (per-endpoint admin gate on user.py)."""
+    response = await admin_role_client.get("/api/user/")
+    assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_user_read_includes_role_names(admin_role_client):
+    """`UserRead` exposes ``role_names`` so the SPA can drive admin gates."""
+    response = await admin_role_client.get("/api/user/me")
+    assert response.status_code == 200
+    body = response.json()
+    assert "role_names" in body
+    assert "admin" in body["role_names"]
+
+
+@pytest.mark.asyncio
+async def test_user_read_role_names_empty_for_no_roles(superuser_client):
+    """Superuser without explicit roles gets an empty ``role_names`` list."""
+    response = await superuser_client.get("/api/user/me")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["role_names"] == []

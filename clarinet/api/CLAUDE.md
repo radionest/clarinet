@@ -10,10 +10,12 @@ Changing auth levels on routers has cascading impact on tests — check `tests/t
 | Router | Auth Level | Notes |
 |--------|-----------|-------|
 | `record.py` | `CurrentUserDep` | Role-based filtering on list/find endpoints; `AuthorizedRecordDep` on single-record endpoints |
-| `study.py` | `current_superuser` | Admin-only (patients, studies, series) |
+| `study.py` | `current_admin_user` | Admin-only (patients, studies, series): is_superuser OR `admin` role |
 | `record_type.py` | `current_superuser` | Admin-only for mutations; read is open to authenticated |
-| `user.py` | `current_superuser` | Admin-only |
-| `admin.py` | `current_superuser` | Admin-only |
+| `user.py` | `AdminUserDep` | Admin-only mutations: is_superuser OR `admin` role; `/me` and `/me/roles` are open to any authenticated user |
+| `admin.py` | `AdminUserDep` | Admin-only: is_superuser OR `admin` role |
+| `reports.py` | `AdminUserDep` | Admin-only: is_superuser OR `admin` role |
+| `dicom.py` | `SuperUserDep` | Superuser-only — DICOM ops stay locked to is_superuser |
 | `dicomweb.py` | `CurrentUserDep` | Any authenticated user |
 
 ## Application Lifespan (app.py)

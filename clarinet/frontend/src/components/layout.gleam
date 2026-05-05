@@ -8,6 +8,7 @@ import lustre/element/html
 import lustre/event
 import router
 import store.{type Model, type Msg}
+import utils/permissions
 
 // Main layout view
 pub fn view(model: Model, content: Element(Msg)) -> Element(Msg) {
@@ -145,13 +146,10 @@ fn locale_switcher(model: Model) -> Element(Msg) {
   )
 }
 
-// Check if user is admin
+// Check if user is admin (superuser or 'admin' role)
 fn is_admin(model: Model) -> Bool {
   case model.user {
-    Some(user) -> {
-      // Check if user is superuser or has admin role
-      user.is_superuser
-    }
+    Some(user) -> permissions.is_admin_user(user)
     None -> False
   }
 }

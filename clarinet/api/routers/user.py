@@ -10,9 +10,9 @@ from fastapi import APIRouter, Depends, status
 
 from clarinet.api.auth_config import current_active_user
 from clarinet.api.dependencies import (
+    AdminUserDep,
     CurrentUserDep,
     PaginationDep,
-    SuperUserDep,
     UserServiceDep,
 )
 from clarinet.models import User, UserCreate, UserRead, UserRole, UserRoleCreate, UserUpdate
@@ -53,7 +53,7 @@ async def get_my_roles(
 @router.get("/roles", response_model=list[UserRole])
 async def list_roles(
     service: UserServiceDep,
-    _current_user: SuperUserDep,
+    _current_user: AdminUserDep,
 ) -> list[UserRole]:
     """List all available roles."""
     return await service.list_roles()
@@ -63,7 +63,7 @@ async def list_roles(
 async def get_role_details(
     role_name: str,
     service: UserServiceDep,
-    _current_user: SuperUserDep,
+    _current_user: AdminUserDep,
 ) -> UserRole:
     """Get role details by name."""
     return await service.get_role(role_name)
@@ -73,7 +73,7 @@ async def get_role_details(
 async def create_role(
     new_role: UserRoleCreate,
     service: UserServiceDep,
-    _current_user: SuperUserDep,
+    _current_user: AdminUserDep,
 ) -> UserRole:
     """Create a new role."""
     return await service.create_role(name=new_role.name)
@@ -84,7 +84,7 @@ async def create_role(
 async def list_users(
     service: UserServiceDep,
     pagination: PaginationDep,
-    _current_user: SuperUserDep,
+    _current_user: AdminUserDep,
 ) -> list[User]:
     """List all users with pagination."""
     return await service.list_users(pagination.skip, pagination.limit)
@@ -94,7 +94,7 @@ async def list_users(
 async def get_user(
     user_id: UUID,
     service: UserServiceDep,
-    _current_user: SuperUserDep,
+    _current_user: AdminUserDep,
 ) -> User:
     """Get user by ID."""
     return await service.get_user(user_id)
@@ -104,7 +104,7 @@ async def get_user(
 async def create_user(
     user: UserCreate,
     service: UserServiceDep,
-    _current_user: SuperUserDep,
+    _current_user: AdminUserDep,
 ) -> User:
     """Create a new user."""
     return await service.create_user(user)
@@ -115,7 +115,7 @@ async def update_user(
     user_id: UUID,
     user_update: UserUpdate,
     service: UserServiceDep,
-    _current_user: SuperUserDep,
+    _current_user: AdminUserDep,
 ) -> User:
     """Update a user's information."""
     return await service.update_user(user_id, user_update)
@@ -125,7 +125,7 @@ async def update_user(
 async def delete_user(
     user_id: UUID,
     service: UserServiceDep,
-    _current_user: SuperUserDep,
+    _current_user: AdminUserDep,
 ) -> None:
     """Delete a user by ID."""
     await service.delete_user(user_id)
@@ -135,7 +135,7 @@ async def delete_user(
 async def get_user_roles(
     user_id: UUID,
     service: UserServiceDep,
-    _current_user: SuperUserDep,
+    _current_user: AdminUserDep,
 ) -> list[UserRole]:
     """Get roles for a specific user."""
     return await service.get_user_roles(user_id)
@@ -146,7 +146,7 @@ async def add_user_role(
     user_id: UUID,
     role_name: str,
     service: UserServiceDep,
-    _current_user: SuperUserDep,
+    _current_user: AdminUserDep,
 ) -> User:
     """Assign a role to a user."""
     return await service.assign_role(user_id, role_name)
@@ -157,7 +157,7 @@ async def remove_user_role(
     user_id: UUID,
     role_name: str,
     service: UserServiceDep,
-    _current_user: SuperUserDep,
+    _current_user: AdminUserDep,
 ) -> User:
     """Remove a role from a user."""
     return await service.remove_role(user_id, role_name)
@@ -168,7 +168,7 @@ async def remove_user_role(
 async def activate_user(
     user_id: UUID,
     service: UserServiceDep,
-    _current_user: SuperUserDep,
+    _current_user: AdminUserDep,
 ) -> User:
     """Activate a user account."""
     return await service.activate_user(user_id)
@@ -178,7 +178,7 @@ async def activate_user(
 async def deactivate_user(
     user_id: UUID,
     service: UserServiceDep,
-    _current_user: SuperUserDep,
+    _current_user: AdminUserDep,
 ) -> User:
     """Deactivate a user account."""
     return await service.deactivate_user(user_id)

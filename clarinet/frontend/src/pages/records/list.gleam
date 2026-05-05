@@ -75,8 +75,11 @@ pub fn init(
 
 fn bucket_key_for_user(user: option.Option(User)) -> bucket.BucketKey {
   case user {
-    Some(u) if u.is_superuser -> bucket.RecordsAll
-    Some(u) -> bucket.RecordsMine(u.id)
+    Some(u) ->
+      case permissions.is_admin_user(u) {
+        True -> bucket.RecordsAll
+        False -> bucket.RecordsMine(u.id)
+      }
     None -> bucket.RecordsAll
   }
 }
@@ -170,7 +173,7 @@ fn handle_error(err: ApiError, fallback_msg: String) -> List(OutMsg) {
 
 pub fn view(model: Model, shared: Shared) -> Element(Msg) {
   let is_admin = case shared.user {
-    Some(u) -> u.is_superuser
+    Some(u) -> permissions.is_admin_user(u)
     None -> False
   }
 

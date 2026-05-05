@@ -6,7 +6,7 @@ from uuid import UUID
 from fastapi import APIRouter
 from fastapi import Path as PathParam
 
-from clarinet.api.dependencies import AdminServiceDep, RecordServiceDep, SuperUserDep
+from clarinet.api.dependencies import AdminServiceDep, AdminUserDep, RecordServiceDep
 from clarinet.models import Record, RecordRead
 from clarinet.models.admin import (
     AdminStats,
@@ -30,13 +30,13 @@ router = APIRouter(
 
 @router.get("/stats", response_model=AdminStats)
 async def get_admin_stats(
-    _current_user: SuperUserDep,
+    _current_user: AdminUserDep,
     service: AdminServiceDep,
 ) -> AdminStats:
     """Get system-wide aggregate statistics.
 
     Args:
-        _current_user: Authenticated superuser (enforced by dependency).
+        _current_user: Authenticated admin user (superuser or admin role).
         service: Admin service.
 
     Returns:
@@ -49,15 +49,15 @@ async def get_admin_stats(
 async def admin_assign_record_user(
     record_id: Annotated[int, PathParam(ge=1, le=2147483647)],
     user_id: UUID,
-    _current_user: SuperUserDep,
+    _current_user: AdminUserDep,
     service: RecordServiceDep,
 ) -> Record:
-    """Assign a user to a record (superuser only).
+    """Assign a user to a record (admin only).
 
     Args:
         record_id: The record to assign.
         user_id: The user UUID to assign.
-        _current_user: Authenticated superuser (enforced by dependency).
+        _current_user: Authenticated admin user (superuser or admin role).
         service: Record service.
 
     Returns:
@@ -71,15 +71,15 @@ async def admin_assign_record_user(
 async def admin_update_record_status(
     record_id: Annotated[int, PathParam(ge=1, le=2147483647)],
     record_status: RecordStatus,
-    _current_user: SuperUserDep,
+    _current_user: AdminUserDep,
     service: RecordServiceDep,
 ) -> Record:
-    """Set any status on a record (superuser only).
+    """Set any status on a record (admin only).
 
     Args:
         record_id: The record to update.
         record_status: New status to set.
-        _current_user: Authenticated superuser (enforced by dependency).
+        _current_user: Authenticated admin user (superuser or admin role).
         service: Record service.
 
     Returns:
@@ -92,16 +92,16 @@ async def admin_update_record_status(
 @router.delete("/records/{record_id}/user", response_model=RecordRead)
 async def admin_unassign_record_user(
     record_id: Annotated[int, PathParam(ge=1, le=2147483647)],
-    _current_user: SuperUserDep,
+    _current_user: AdminUserDep,
     service: RecordServiceDep,
 ) -> Record:
-    """Remove user assignment from a record (superuser only).
+    """Remove user assignment from a record (admin only).
 
     If the record is inwork, status is reset to pending.
 
     Args:
         record_id: The record to unassign.
-        _current_user: Authenticated superuser (enforced by dependency).
+        _current_user: Authenticated admin user (superuser or admin role).
         service: Record service.
 
     Returns:
@@ -118,10 +118,10 @@ async def admin_unassign_record_user(
 )
 async def delete_record_cascade(
     record_id: Annotated[int, PathParam(ge=1, le=2147483647)],
-    _current_user: SuperUserDep,
+    _current_user: AdminUserDep,
     service: RecordServiceDep,
 ) -> DeleteRecordResult:
-    """Delete a record with all descendants and their OUTPUT files (superuser only).
+    """Delete a record with all descendants and their OUTPUT files (admin only).
 
     Aborts with 409 Conflict if any record in the subtree is in ``inwork`` status.
     """
@@ -132,10 +132,10 @@ async def delete_record_cascade(
 @router.delete("/records/{record_id}/output-files", response_model=ClearOutputFilesResult)
 async def clear_record_output_files(
     record_id: Annotated[int, PathParam(ge=1, le=2147483647)],
-    _current_user: SuperUserDep,
+    _current_user: AdminUserDep,
     service: RecordServiceDep,
 ) -> ClearOutputFilesResult:
-    """Delete OUTPUT files from disk for a non-finished record (superuser only).
+    """Delete OUTPUT files from disk for a non-finished record (admin only).
 
     Intended for clearing stale output files before retrying a failed pipeline task.
     """
@@ -145,13 +145,13 @@ async def clear_record_output_files(
 
 @router.get("/role-matrix", response_model=RoleMatrixResponse)
 async def get_role_matrix(
-    _current_user: SuperUserDep,
+    _current_user: AdminUserDep,
     service: AdminServiceDep,
 ) -> RoleMatrixResponse:
     """Get role matrix for admin dashboard.
 
     Args:
-        _current_user: Authenticated superuser (enforced by dependency).
+        _current_user: Authenticated admin user (superuser or admin role).
         service: Admin service.
 
     Returns:
@@ -162,13 +162,13 @@ async def get_role_matrix(
 
 @router.get("/record-types/stats", response_model=list[RecordTypeStats])
 async def get_record_type_stats(
-    _current_user: SuperUserDep,
+    _current_user: AdminUserDep,
     service: AdminServiceDep,
 ) -> list[RecordTypeStats]:
     """Get per-record-type statistics.
 
     Args:
-        _current_user: Authenticated superuser (enforced by dependency).
+        _current_user: Authenticated admin user (superuser or admin role).
         service: Admin service.
 
     Returns:
