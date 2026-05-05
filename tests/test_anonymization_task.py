@@ -74,7 +74,7 @@ async def test_dispatch_background_pipeline_enabled() -> None:
 
         from clarinet.api.routers.dicom import _dispatch_background_anonymization
 
-        result = await _dispatch_background_anonymization("1.2.3", record, True, False)
+        result = await _dispatch_background_anonymization("1.2.3", record, True, False, None)
 
     assert result == BackgroundAnonymizationStatus(study_uid="1.2.3")
     mock_task.kicker.return_value.kiq.assert_awaited_once()
@@ -84,6 +84,7 @@ async def test_dispatch_background_pipeline_enabled() -> None:
     assert sent_msg["patient_id"] == "P1"
     assert sent_msg["payload"]["save_to_disk"] is True
     assert sent_msg["payload"]["send_to_pacs"] is False
+    assert "per_study_patient_id" not in sent_msg["payload"]
 
 
 @pytest.mark.asyncio
@@ -102,7 +103,7 @@ async def test_dispatch_background_pipeline_disabled() -> None:
 
         from clarinet.api.routers.dicom import _dispatch_background_anonymization
 
-        result = await _dispatch_background_anonymization("1.2.3", record, None, None)
+        result = await _dispatch_background_anonymization("1.2.3", record, None, None, None)
 
     assert result == BackgroundAnonymizationStatus(study_uid="1.2.3")
     mock_asyncio.create_task.assert_called_once()

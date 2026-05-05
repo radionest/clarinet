@@ -152,6 +152,7 @@ class AnonymizationResult(BaseModel):
 
     study_uid: str
     anon_study_uid: str
+    anon_patient_id: str = ""
     series_count: int
     series_anonymized: int = 0
     series_skipped: int = 0
@@ -168,6 +169,7 @@ class AnonymizeStudyRequest(BaseModel):
 
     save_to_disk: bool | None = None
     send_to_pacs: bool | None = None
+    per_study_patient_id: bool | None = None
 
 
 class BackgroundAnonymizationStatus(BaseModel):

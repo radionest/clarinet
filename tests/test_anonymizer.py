@@ -1,10 +1,12 @@
 """Unit tests for DicomAnonymizer."""
 
+import hashlib
+
 import pytest
 from pydicom import Dataset
 from pydicom.uid import ExplicitVRLittleEndian
 
-from clarinet.services.dicom.anonymizer import DicomAnonymizer
+from clarinet.services.dicom.anonymizer import DicomAnonymizer, compute_per_study_patient_id
 
 
 @pytest.fixture
@@ -316,3 +318,33 @@ class TestAnonymizeDatasetEdgeCases:
         assert ds2.StudyInstanceUID == a2.generate_anon_uid("1.2.3.2")
         # Cross-check: UIDs differ between the two
         assert ds1.StudyInstanceUID != ds2.StudyInstanceUID
+
+
+class TestComputePerStudyPatientId:
+    """Unit tests for compute_per_study_patient_id helper."""
+
+    def test_deterministic(self) -> None:
+        h1 = compute_per_study_patient_id("salt", "1.2.3.4")
+        h2 = compute_per_study_patient_id("salt", "1.2.3.4")
+        assert h1 == h2
+
+    def test_length_is_eight(self) -> None:
+        assert len(compute_per_study_patient_id("salt", "1.2.3.4")) == 8
+
+    def test_hex_only(self) -> None:
+        h = compute_per_study_patient_id("salt", "1.2.3.4")
+        assert all(c in "0123456789abcdef" for c in h)
+
+    def test_different_study_uids_differ(self) -> None:
+        h1 = compute_per_study_patient_id("salt", "1.2.3.4")
+        h2 = compute_per_study_patient_id("salt", "1.2.3.5")
+        assert h1 != h2
+
+    def test_different_salt_changes_hash(self) -> None:
+        h1 = compute_per_study_patient_id("salt-a", "1.2.3.4")
+        h2 = compute_per_study_patient_id("salt-b", "1.2.3.4")
+        assert h1 != h2
+
+    def test_matches_sha256_prefix(self) -> None:
+        expected = hashlib.sha256(b"salt:1.2.3.4").hexdigest()[:8]
+        assert compute_per_study_patient_id("salt", "1.2.3.4") == expected

@@ -195,6 +195,7 @@ async def anonymize_study(
     """
     save_to_disk = request.save_to_disk if request else None
     send_to_pacs = request.send_to_pacs if request else None
+    per_study_patient_id = request.per_study_patient_id if request else None
 
     record = await _find_anonymize_record(record_repo, study_uid)
 
@@ -204,7 +205,7 @@ async def anonymize_study(
                 f"No '{settings.anon_record_type_name}' record exists for study {study_uid}"
             )
         result = await _dispatch_background_anonymization(
-            study_uid, record, save_to_disk, send_to_pacs
+            study_uid, record, save_to_disk, send_to_pacs, per_study_patient_id
         )
         return JSONResponse(status_code=202, content=result.model_dump())
 
@@ -214,6 +215,7 @@ async def anonymize_study(
             study_uid,
             save_to_disk=save_to_disk,
             send_to_pacs=send_to_pacs,
+            per_study_patient_id=per_study_patient_id,
         )
 
     async with create_anonymization_orchestrator() as orch:
@@ -222,6 +224,7 @@ async def anonymize_study(
             record_id=record.id,
             save_to_disk=save_to_disk,
             send_to_pacs=send_to_pacs,
+            per_study_patient_id=per_study_patient_id,
         )
 
 
@@ -249,6 +252,7 @@ async def _dispatch_background_anonymization(
     record: Record,
     save_to_disk: bool | None,
     send_to_pacs: bool | None,
+    per_study_patient_id: bool | None,
 ) -> BackgroundAnonymizationStatus:
     """Dispatch anonymization to pipeline (TaskIQ) or in-process background task."""
     payload: dict[str, bool] = {}
@@ -256,6 +260,8 @@ async def _dispatch_background_anonymization(
         payload["save_to_disk"] = save_to_disk
     if send_to_pacs is not None:
         payload["send_to_pacs"] = send_to_pacs
+    if per_study_patient_id is not None:
+        payload["per_study_patient_id"] = per_study_patient_id
 
     record_id = record.id
     assert record_id is not None, "Persisted Record always has an id"
@@ -273,7 +279,9 @@ async def _dispatch_background_anonymization(
         await anonymize_study_pipeline.kicker().kiq(msg.model_dump())
     else:
         bg_task = asyncio.create_task(
-            _run_orchestrator_in_process(study_uid, record_id, save_to_disk, send_to_pacs)
+            _run_orchestrator_in_process(
+                study_uid, record_id, save_to_disk, send_to_pacs, per_study_patient_id
+            )
         )
         _background_tasks.add(bg_task)
         bg_task.add_done_callback(_background_tasks.discard)
@@ -286,6 +294,7 @@ async def _run_orchestrator_in_process(
     record_id: int,
     save_to_disk: bool | None,
     send_to_pacs: bool | None,
+    per_study_patient_id: bool | None,
 ) -> None:
     """In-process fallback when ``pipeline_enabled=False``.
 
@@ -299,6 +308,7 @@ async def _run_orchestrator_in_process(
                 record_id=record_id,
                 save_to_disk=save_to_disk,
                 send_to_pacs=send_to_pacs,
+                per_study_patient_id=per_study_patient_id,
             )
         logger.info(f"Background anonymization completed for study {study_uid}")
     except Exception:

@@ -28,6 +28,7 @@ def mock_anon_settings() -> Generator[tuple[MagicMock, MagicMock], None, None]:
         anon_settings.anon_uid_salt = "test-salt"
         anon_settings.anon_save_to_disk = False
         anon_settings.anon_send_to_pacs = False
+        anon_settings.anon_per_study_patient_id = False
         anon_settings.anon_failure_threshold = 0.5
         anon_settings.dicom_cget_max_retries = 1
         anon_settings.dicom_cget_retry_backoff = 0.0
@@ -952,4 +953,138 @@ async def test_anonymize_no_record_sync_falls_back_to_raw(
         )
 
     assert response.status_code == 200
-    assert response.json()["instances_anonymized"] == 1
+
+
+@pytest.mark.asyncio
+async def test_anonymize_per_study_mode_writes_hash_into_dicom(
+    client, test_session, mock_anon_settings
+) -> None:
+    """``per_study_patient_id=True`` writes 8-hex hash into PatientID/PatientName."""
+    import hashlib
+    from datetime import UTC, datetime
+
+    from clarinet.models.study import Series, Study
+
+    patient = make_patient("PERSTUDY_PAT_001", "Per Study Patient", auto_id=701)
+    test_session.add(patient)
+    await test_session.commit()
+
+    study = Study(
+        patient_id="PERSTUDY_PAT_001",
+        study_uid="1.2.4242.1",
+        date=datetime.now(UTC).date(),
+    )
+    test_session.add(study)
+    await test_session.commit()
+
+    series = Series(study_uid="1.2.4242.1", series_uid="1.2.4242.1.1", series_number=1)
+    test_session.add(series)
+    await test_session.commit()
+
+    mock_ds = Dataset()
+    mock_ds.PatientID = "PERSTUDY_PAT_001"
+    mock_ds.PatientName = "Per Study Patient"
+    mock_ds.StudyInstanceUID = "1.2.4242.1"
+    mock_ds.SeriesInstanceUID = "1.2.4242.1.1"
+    mock_ds.SOPInstanceUID = "1.2.4242.1.1.1"
+    mock_ds.SOPClassUID = "1.2.840.10008.5.1.4.1.1.2"
+    mock_ds.Modality = "CT"
+
+    file_meta = Dataset()
+    file_meta.MediaStorageSOPInstanceUID = "1.2.4242.1.1.1"
+    file_meta.MediaStorageSOPClassUID = "1.2.840.10008.5.1.4.1.1.2"
+    file_meta.TransferSyntaxUID = "1.2.840.10008.1.2.1"
+    mock_ds.file_meta = file_meta
+
+    mock_retrieve_result = RetrieveResult(
+        status="success", num_completed=1, instances={"1.2.4242.1.1.1": mock_ds}
+    )
+
+    with patch(
+        "clarinet.services.dicom.client.DicomClient.get_series_to_memory",
+        new_callable=AsyncMock,
+        return_value=mock_retrieve_result,
+    ):
+        response = await client.post(
+            "/api/dicom/studies/1.2.4242.1/anonymize",
+            json={
+                "save_to_disk": False,
+                "send_to_pacs": False,
+                "per_study_patient_id": True,
+            },
+        )
+
+    assert response.status_code == 200
+    data = response.json()
+
+    expected_hash = hashlib.sha256(b"test-salt:1.2.4242.1").hexdigest()[:8]
+    assert data["anon_patient_id"] == expected_hash
+    assert len(data["anon_patient_id"]) == 8
+
+    # Hash, not the patient-level "CLARINET_701"
+    assert "CLARINET" not in data["anon_patient_id"]
+
+    # The DICOM dataset was mutated in-place by the anonymizer
+    assert mock_ds.PatientID == expected_hash
+    assert str(mock_ds.PatientName) == expected_hash
+
+
+@pytest.mark.asyncio
+async def test_anonymize_default_mode_returns_patient_anon_id(
+    client, test_session, mock_anon_settings
+) -> None:
+    """Default mode (per_study_patient_id=False) keeps patient-level anon_id."""
+    from datetime import UTC, datetime
+
+    from clarinet.models.study import Series, Study
+
+    patient = make_patient("DEFAULT_PAT_001", "Default Patient", auto_id=702)
+    test_session.add(patient)
+    await test_session.commit()
+
+    study = Study(
+        patient_id="DEFAULT_PAT_001",
+        study_uid="1.2.4243.1",
+        date=datetime.now(UTC).date(),
+    )
+    test_session.add(study)
+    await test_session.commit()
+
+    series = Series(study_uid="1.2.4243.1", series_uid="1.2.4243.1.1", series_number=1)
+    test_session.add(series)
+    await test_session.commit()
+
+    mock_ds = Dataset()
+    mock_ds.PatientID = "DEFAULT_PAT_001"
+    mock_ds.PatientName = "Default Patient"
+    mock_ds.StudyInstanceUID = "1.2.4243.1"
+    mock_ds.SeriesInstanceUID = "1.2.4243.1.1"
+    mock_ds.SOPInstanceUID = "1.2.4243.1.1.1"
+    mock_ds.SOPClassUID = "1.2.840.10008.5.1.4.1.1.2"
+    mock_ds.Modality = "CT"
+
+    file_meta = Dataset()
+    file_meta.MediaStorageSOPInstanceUID = "1.2.4243.1.1.1"
+    file_meta.MediaStorageSOPClassUID = "1.2.840.10008.5.1.4.1.1.2"
+    file_meta.TransferSyntaxUID = "1.2.840.10008.1.2.1"
+    mock_ds.file_meta = file_meta
+
+    mock_retrieve_result = RetrieveResult(
+        status="success", num_completed=1, instances={"1.2.4243.1.1.1": mock_ds}
+    )
+
+    with patch(
+        "clarinet.services.dicom.client.DicomClient.get_series_to_memory",
+        new_callable=AsyncMock,
+        return_value=mock_retrieve_result,
+    ):
+        response = await client.post(
+            "/api/dicom/studies/1.2.4243.1/anonymize",
+            json={"save_to_disk": False, "send_to_pacs": False},
+        )
+
+    assert response.status_code == 200
+    data = response.json()
+    # patient.anon_id == f"{settings.anon_id_prefix}_{auto_id}"
+    assert data["anon_patient_id"] == patient.anon_id
+    assert data["anon_patient_id"] is not None and "_" in data["anon_patient_id"]

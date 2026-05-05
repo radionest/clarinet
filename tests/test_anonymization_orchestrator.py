@@ -73,7 +73,7 @@ async def test_run_without_record_id_skips_bookkeeping() -> None:
 
     client.anonymize_patient.assert_awaited_once_with("P1")
     service.anonymize_study.assert_awaited_once_with(
-        "1.2.3", save_to_disk=False, send_to_pacs=False
+        "1.2.3", save_to_disk=False, send_to_pacs=False, per_study_patient_id=None
     )
     client.submit_record_data.assert_not_awaited()
     client.update_record_data.assert_not_awaited()
@@ -353,4 +353,6 @@ async def test_resolved_send_to_pacs_passed_to_anon_service() -> None:
         mock_settings.anon_send_to_pacs = True
         await orch.run("1.2.3", record_id=42)
 
-    service.anonymize_study.assert_awaited_once_with("1.2.3", save_to_disk=True, send_to_pacs=True)
+    service.anonymize_study.assert_awaited_once_with(
+        "1.2.3", save_to_disk=True, send_to_pacs=True, per_study_patient_id=None
+    )

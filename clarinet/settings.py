@@ -232,6 +232,7 @@ class Settings(BaseSettings):
     anon_save_to_disk: bool = True
     anon_send_to_pacs: bool = False
     anon_failure_threshold: float = 0.5  # Max allowed failure ratio (0.0-1.0)
+    anon_per_study_patient_id: bool = False  # Use per-study SHA-256 hash as PatientID/PatientName
     anon_record_type_name: str = "anonymize-study"  # RecordType tracking anonymization
 
     # C-GET retry settings

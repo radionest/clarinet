@@ -41,6 +41,7 @@ class AnonymizationOrchestrator:
         record_id: int | None = None,
         save_to_disk: bool | None = None,
         send_to_pacs: bool | None = None,
+        per_study_patient_id: bool | None = None,
         extra_record_data: dict[str, Any] | None = None,
     ) -> AnonymizationResult:
         """Run anonymization with optional Record tracking.
@@ -58,6 +59,9 @@ class AnonymizationOrchestrator:
             record_id: Tracking Record id. ``None`` skips all Record bookkeeping.
             save_to_disk: Override ``settings.anon_save_to_disk``.
             send_to_pacs: Override ``settings.anon_send_to_pacs``.
+            per_study_patient_id: Override ``settings.anon_per_study_patient_id``.
+                Skip-branch returns ``anon_patient_id=""`` (re-run after a prior
+                success skips the work; downstream should guard on truthiness).
             extra_record_data: Project-specific fields merged into the Record
                 ``data`` payload (success, skip, and error branches).
 
@@ -103,6 +107,7 @@ class AnonymizationOrchestrator:
                 study_uid,
                 save_to_disk=do_save,
                 send_to_pacs=do_send,
+                per_study_patient_id=per_study_patient_id,
             )
         except Exception as exc:
             # Catch every exception so the tracking Record is marked failed

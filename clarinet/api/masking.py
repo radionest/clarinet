@@ -7,11 +7,17 @@ RecordTypes may opt out of masking via ``mask_patient_data=False`` — used for
 record types filled by clinicians who need real patient IDs (surgery,
 pathology, MDK). Each deanonymized access is audit-logged at INFO level
 without leaking PII (identifiers only).
+
+When ``settings.anon_per_study_patient_id`` is enabled, the masked patient ID
+is a per-study hash (matching what was written into the DICOM tags in PACS),
+so the frontend stays consistent with OHIF and PACS.
 """
 
 from collections.abc import Sequence
 
 from clarinet.models import Record, RecordRead, User
+from clarinet.services.dicom.anonymizer import compute_per_study_patient_id
+from clarinet.settings import settings
 from clarinet.utils.logger import logger
 
 
@@ -43,18 +49,38 @@ def mask_record_patient_data(record: RecordRead, user: User) -> RecordRead:
         )
         return record
 
+    # In per-study mode the masked PatientID/PatientName is the hash that was
+    # written into the DICOM tags in PACS. The hash is only correct after the
+    # study has been anonymized (study.anon_uid is set) — before that, PACS
+    # still holds the real PatientID, so returning the hash here would create
+    # a (hash patient_id, original study_uid) pair that does not match anything
+    # in PACS. Fall back to per-patient anon_id until the study is anonymized.
+    study_anon_uid = record.study.anon_uid if record.study is not None else None
+    if (
+        settings.anon_per_study_patient_id
+        and record.study_uid is not None
+        and study_anon_uid is not None
+    ):
+        masked_id: str | None = compute_per_study_patient_id(
+            settings.anon_uid_salt, record.study_uid
+        )
+        masked_name: str | None = masked_id
+    else:
+        masked_id = record.patient.anon_id
+        masked_name = record.patient.anon_name
+
     # Build masked patient
     patient_update = {}
-    if record.patient.anon_id is not None:
-        patient_update["id"] = record.patient.anon_id
-    if record.patient.anon_name is not None:
-        patient_update["name"] = record.patient.anon_name
+    if masked_id is not None:
+        patient_update["id"] = masked_id
+    if masked_name is not None:
+        patient_update["name"] = masked_name
 
     masked_patient = record.patient.model_copy(update=patient_update)
 
     updates: dict = {"patient": masked_patient}
-    if record.patient.anon_id is not None:
-        updates["patient_id"] = record.patient.anon_id
+    if masked_id is not None:
+        updates["patient_id"] = masked_id
 
     # Study + series are masked together to keep the (study_uid, series_uid) pair
     # consistent. If study has no anon_uid we leave both untouched — otherwise
@@ -68,8 +94,8 @@ def mask_record_patient_data(record: RecordRead, user: User) -> RecordRead:
         # leaks through the study relation even though top-level patient_id
         # is anonymized.
         study_nested_update: dict = {"study_uid": record.study.anon_uid}
-        if record.patient.anon_id is not None:
-            study_nested_update["patient_id"] = record.patient.anon_id
+        if masked_id is not None:
+            study_nested_update["patient_id"] = masked_id
         updates["study"] = record.study.model_copy(update=study_nested_update)
         updates["study_uid"] = record.study.anon_uid
 
