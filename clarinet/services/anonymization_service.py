@@ -17,7 +17,7 @@ from clarinet.exceptions.domain import AnonymizationFailedError
 from clarinet.repositories.patient_repository import PatientRepository
 from clarinet.repositories.series_repository import SeriesRepository
 from clarinet.repositories.study_repository import StudyRepository
-from clarinet.services.dicom.anonymizer import DicomAnonymizer
+from clarinet.services.dicom.anonymizer import DicomAnonymizer, compute_per_study_patient_id
 from clarinet.services.dicom.client import DicomClient
 from clarinet.services.dicom.models import AnonymizationResult, DicomNode, SkippedSeriesInfo
 from clarinet.services.dicom.series_filter import SeriesFilter, SeriesFilterCriteria
@@ -118,6 +118,7 @@ class AnonymizationService:
         study_uid: str,
         save_to_disk: bool | None = None,
         send_to_pacs: bool | None = None,
+        per_study_patient_id: bool | None = None,
     ) -> AnonymizationResult:
         """Anonymize a study: fetch from PACS, anonymize, distribute.
 
@@ -129,28 +130,46 @@ class AnonymizationService:
             study_uid: Study Instance UID
             save_to_disk: Override settings.anon_save_to_disk (None = use setting)
             send_to_pacs: Override settings.anon_send_to_pacs (None = use setting)
+            per_study_patient_id: Override settings.anon_per_study_patient_id.
+                When True, PatientID/PatientName are set to a per-study 8-hex
+                hash (sha256(salt:study_uid)) — different across studies of the
+                same patient, preventing PACS-side correlation.
 
         Returns:
             Anonymization result with statistics
 
         Raises:
-            AnonymizationFailedError: If patient has no anon_id
+            AnonymizationFailedError: If per-patient mode and patient has no anon_id
         """
         do_save = save_to_disk if save_to_disk is not None else settings.anon_save_to_disk
         do_send = send_to_pacs if send_to_pacs is not None else settings.anon_send_to_pacs
+        do_per_study = (
+            per_study_patient_id
+            if per_study_patient_id is not None
+            else settings.anon_per_study_patient_id
+        )
 
         # Load study with series
         study = await self.study_repo.get_with_series(study_uid)
         patient = await self.patient_repo.get(study.patient_id)
 
-        anon_id: str | None = patient.anon_id
-        if anon_id is None:
-            raise AnonymizationFailedError("Patient has no anon_id (auto_id not set)")
+        if do_per_study:
+            anon_patient_id = compute_per_study_patient_id(
+                settings.anon_uid_salt,
+                study_uid,
+                settings.anon_per_study_patient_id_hex_length,
+            )
+            anon_patient_name = anon_patient_id
+        else:
+            anon_id = patient.anon_id
+            if anon_id is None:
+                raise AnonymizationFailedError("Patient has no anon_id (auto_id not set)")
+            anon_patient_id = anon_id
+            anon_patient_name = patient.anon_name or anon_id
 
-        anon_patient_name = patient.anon_name or anon_id
         anonymizer = DicomAnonymizer(
             salt=settings.anon_uid_salt,
-            anon_patient_id=anon_id,
+            anon_patient_id=anon_patient_id,
             anon_patient_name=anon_patient_name,
         )
 
@@ -214,7 +233,12 @@ class AnonymizationService:
             if anonymized and (do_save or do_send):
                 task = asyncio.create_task(
                     self._distribute_series(
-                        anonymized, anon_id, anon_study_uid, anon_series_uid, do_save, do_send
+                        anonymized,
+                        anon_patient_id,
+                        anon_study_uid,
+                        anon_series_uid,
+                        do_save,
+                        do_send,
                     )
                 )
                 pending_tasks.append(task)
@@ -256,6 +280,7 @@ class AnonymizationService:
         return AnonymizationResult(
             study_uid=study_uid,
             anon_study_uid=anon_study_uid,
+            anon_patient_id=anon_patient_id,
             series_count=series_count,
             series_anonymized=len(filter_result.included),
             series_skipped=len(filter_result.excluded),

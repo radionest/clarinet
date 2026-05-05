@@ -12,6 +12,25 @@ from pydicom import Dataset
 from clarinet.utils.logger import logger
 
 
+def compute_per_study_patient_id(salt: str, study_uid: str, length: int = 8) -> str:
+    """Per-study deterministic PatientID/PatientName for DICOM anonymization.
+
+    sha256(f"{salt}:{study_uid}") -> first ``length`` hex characters. Same
+    study_uid + salt + length -> same hash (idempotent re-runs). Used when
+    ``settings.anon_per_study_patient_id`` is enabled to prevent PACS-side
+    correlation across studies of the same patient.
+
+    Truncation rationale: short hex keeps the visible PatientID readable while
+    staying well within DICOM LO (64) and PN (64 per component) limits. By the
+    birthday bound, the default 8 hex chars (32 bits) gives collision
+    probability ~0.012% at 1k studies, ~1.15% at 10k, and ~50% near 77k. Tune
+    via ``settings.anon_per_study_patient_id_hex_length`` for larger projects
+    (16 hex = 64 bits drops collision probability to negligible levels at any
+    realistic scale).
+    """
+    return hashlib.sha256(f"{salt}:{study_uid}".encode()).hexdigest()[:length]
+
+
 class DicomAnonymizer:
     """Stateless DICOM anonymizer with deterministic UID generation.
 

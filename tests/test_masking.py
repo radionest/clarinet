@@ -1,8 +1,10 @@
 """Unit tests for patient data masking (clarinet/api/masking.py)."""
 
+import hashlib
 from collections.abc import Generator
 from datetime import UTC, datetime
 from typing import Any
+from unittest.mock import patch
 from uuid import uuid4
 
 import pytest
@@ -592,6 +594,105 @@ class TestMaskRecords:
         user = _make_user(is_superuser=False)
         results = mask_records([], user)
         assert results == []
+
+    def test_per_study_mode_replaces_patient_id_with_hash(self) -> None:
+        """Per-study mode: masked PatientID is sha256(salt:study_uid)[:8], not anon_id."""
+        user = _make_user(is_superuser=False)
+        record = _make_record_read(
+            patient_id="REAL_PAT_001",
+            patient_name="Real Patient Name",
+            anon_name="Anon Patient Name",
+            auto_id=42,
+            study_uid="1.2.3.4.5.6.7.8",
+            study_anon_uid="9.8.7.6.5.4.3.2",
+            series_uid="1.2.3.4.5.6.7.8.9",
+            series_anon_uid="9.8.7.6.5.4.3.2.1",
+        )
+
+        with patch("clarinet.api.masking.settings") as masking_settings:
+            masking_settings.anon_per_study_patient_id = True
+            masking_settings.anon_per_study_patient_id_hex_length = 8
+            masking_settings.anon_uid_salt = "test-salt"
+            result = mask_record_patient_data(record, user)
+
+        expected_hash = hashlib.sha256(b"test-salt:1.2.3.4.5.6.7.8").hexdigest()[:8]
+        # Top-level + nested all carry the per-study hash, not f"{prefix}_42"
+        assert result.patient_id == expected_hash
+        assert result.patient.id == expected_hash
+        assert result.patient.name == expected_hash
+        assert result.study is not None
+        assert result.study.patient_id == expected_hash
+        # Study/series UIDs still come from study.anon_uid / series.anon_uid
+        assert result.study_uid == "9.8.7.6.5.4.3.2"
+        assert result.series is not None
+        assert result.series.series_uid == "9.8.7.6.5.4.3.2.1"
+
+    def test_per_study_mode_falls_back_until_study_anonymized(self) -> None:
+        """Per-study mode + study.anon_uid=None: fall back to per-patient anon_id.
+
+        Before anonymization completes, PACS still holds the real PatientID, so
+        returning the per-study hash here would point at nothing real. Fall back
+        to anon_id until study.anon_uid is set.
+        """
+        user = _make_user(is_superuser=False)
+        record = _make_record_read(
+            patient_id="REAL_PAT_001",
+            patient_name="Real Patient Name",
+            anon_name="Anon Patient Name",
+            auto_id=42,
+            study_uid="1.2.3.4.5.6.7.8",
+            study_anon_uid=None,  # study not yet anonymized
+            series_uid="1.2.3.4.5.6.7.8.9",
+            series_anon_uid=None,
+        )
+
+        with patch("clarinet.api.masking.settings") as masking_settings:
+            masking_settings.anon_per_study_patient_id = True
+            masking_settings.anon_uid_salt = "test-salt"
+            result = mask_record_patient_data(record, user)
+
+        # Hash NOT applied — patient-level anon_id used instead.
+        expected_anon_id = f"{settings.anon_id_prefix}_42"
+        assert result.patient_id == expected_anon_id
+        assert result.patient.id == expected_anon_id
+        assert result.patient.name == "Anon Patient Name"
+
+    def test_per_study_mode_falls_back_when_no_study_uid(self) -> None:
+        """Per-study mode without study_uid (PATIENT-level): fall back to anon_id."""
+        user = _make_user(is_superuser=False)
+
+        patient = PatientInfo(
+            id="REAL_PAT_001",
+            name="Real Patient Name",
+            anon_name="Anon Patient Name",
+            auto_id=42,
+        )
+        record_type = RecordTypeRead(
+            name="patient-type",
+            level=DicomQueryLevel.PATIENT,
+        )
+        record = RecordRead(
+            id=1,
+            patient_id="REAL_PAT_001",
+            study_uid=None,
+            series_uid=None,
+            record_type_name="patient-type",
+            patient=patient,
+            study=None,
+            series=None,
+            record_type=record_type,
+        )
+
+        with patch("clarinet.api.masking.settings") as masking_settings:
+            masking_settings.anon_per_study_patient_id = True
+            masking_settings.anon_uid_salt = "test-salt"
+            result = mask_record_patient_data(record, user)
+
+        # No study_uid -> per-study hash impossible; falls back to per-patient anon_id
+        expected_anon_id = f"{settings.anon_id_prefix}_42"
+        assert result.patient_id == expected_anon_id
+        assert result.patient.id == expected_anon_id
+        assert result.patient.name == "Anon Patient Name"
 
     def test_mask_records_with_superuser(self) -> None:
         """mask_records with superuser returns unmasked data."""

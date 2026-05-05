@@ -38,6 +38,7 @@ async def run_anonymization(
 
     do_send = msg.payload.get("send_to_pacs", settings.anon_send_to_pacs)
     do_save = msg.payload.get("save_to_disk", settings.anon_save_to_disk)
+    do_per_study = msg.payload.get("per_study_patient_id", settings.anon_per_study_patient_id)
 
     async with create_anonymization_orchestrator(client=ctx.client) as orch:
         return await orch.run(
@@ -45,6 +46,7 @@ async def run_anonymization(
             record_id=msg.record_id,
             save_to_disk=do_save,
             send_to_pacs=do_send,
+            per_study_patient_id=do_per_study,
             extra_record_data=extra_record_data,
         )
 
