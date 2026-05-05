@@ -76,20 +76,20 @@ def read_dicom_series(
     # SimpleITK GDCM can return a left-handed direction matrix on some series
     # (observed on Philips iDose CT) — slice direction has the wrong sign so
     # TransformIndexToPhysicalPoint disagrees with the actual array ordering,
-    # producing a SI flip in saved NIfTI. Force right-handed by recomputing
-    # the slice axis from the cross product of the row/column axes; this is
-    # a no-op for series that already have a consistent direction matrix.
-    # Assumes slice axis is approximately ±(row x col); for gantry-tilted CT
-    # this would drop the tilt component (rare on modern scanners).
+    # producing a SI flip in saved NIfTI. Force right-handed by flipping the
+    # sign of the slice axis; this preserves any gantry-tilt component (the
+    # slice axis itself is computed from IPP deltas, not from row x col, so
+    # it carries real geometry and must not be replaced with a cross product).
+    # No-op for series that already have a consistent direction matrix.
     det = np.linalg.det(d)
     if det < 0:
         slice_from_cross = np.cross(d[:, 0], d[:, 1])
         if np.dot(slice_from_cross, d[:, 2]) < 0:
             logger.debug(
                 f"Left-handed DICOM direction matrix in {directory.name} "
-                f"(det={det:.3f}); recomputing slice axis from row x col"
+                f"(det={det:.3f}); flipping slice-axis sign"
             )
-            d[:, 2] = slice_from_cross
+            d[:, 2] *= -1
         else:
             logger.warning(
                 f"Left-handed direction matrix in {directory.name} "
