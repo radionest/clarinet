@@ -8,7 +8,8 @@ from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 from fastapi_users import schemas
-from pydantic import field_serializer
+from pydantic import Field as PydanticField
+from pydantic import computed_field, field_serializer
 from sqlalchemy import Column, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlmodel import Field, Relationship, SQLModel
@@ -60,9 +61,28 @@ class User(SQLModelBaseUserDB, SQLModel, table=True):
     roles: list["UserRole"] = Relationship(back_populates="users", link_model=UserRolesLink)
     records: list["Record"] = Relationship(back_populates="user")
 
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def role_names(self) -> list[str]:
+        # Read from __dict__ to avoid triggering a lazy-load on `roles` outside
+        # the auth flow (where it is eagerly loaded via selectinload).
+        # If `roles` was never materialised, log a warning so regressions
+        # surface instead of silently returning [].
+        if "roles" not in self.__dict__:
+            from clarinet.utils.logger import logger
+
+            logger.warning(
+                f"User.role_names accessed without eager-loaded roles "
+                f"(user_id={self.id}); returning empty list",
+            )
+            return []
+        return [r.name for r in (self.__dict__["roles"] or [])]
+
 
 class UserRead(schemas.BaseUser[UUID]):
     """Pydantic model for reading user data without sensitive fields."""
+
+    role_names: list[str] = PydanticField(default_factory=list)
 
     @field_serializer("email")
     @classmethod

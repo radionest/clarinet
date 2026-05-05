@@ -13,6 +13,7 @@ import lustre/element.{type Element}
 import lustre/element/html
 import router
 import shared.{type OutMsg, type Shared}
+import utils/permissions
 
 // --- Model ---
 
@@ -30,15 +31,23 @@ pub type Msg {
 
 pub fn init(shared: Shared) -> #(Model, Effect(Msg), List(OutMsg)) {
   let bucket_key = case shared.user {
-    Some(models.User(is_superuser: True, ..)) -> bucket.RecordsAll
-    Some(u) -> bucket.RecordsMine(u.id)
+    Some(u) ->
+      case permissions.is_admin_user(u) {
+        True -> bucket.RecordsAll
+        False -> bucket.RecordsMine(u.id)
+      }
     None -> bucket.RecordsAll
   }
   let out_msgs = case shared.user {
-    Some(models.User(is_superuser: True, ..)) ->
-      [shared.ReloadStudies, shared.FetchBucket(bucket_key), shared.ReloadUsers]
-    Some(_) ->
-      [shared.FetchBucket(bucket_key)]
+    Some(u) ->
+      case permissions.is_admin_user(u) {
+        True -> [
+          shared.ReloadStudies,
+          shared.FetchBucket(bucket_key),
+          shared.ReloadUsers,
+        ]
+        False -> [shared.FetchBucket(bucket_key)]
+      }
     None -> []
   }
   #(Model, effect.none(), out_msgs)
@@ -67,7 +76,7 @@ pub fn view(_model: Model, shared: Shared) -> Element(Msg) {
             html.text(t(i18n.HomeWelcome(user.email))),
           ]),
           stats_section(shared),
-          case user.is_superuser {
+          case permissions.is_admin_user(user) {
             True -> recent_activity(shared)
             False -> html.text("")
           },
@@ -117,31 +126,40 @@ fn stats_section(shared: Shared) -> Element(Msg) {
     html.div(
       [attribute.class("stats-grid")],
       case shared.user {
-        Some(models.User(is_superuser: True, ..)) -> [
-          stat_card(
-            label: t(i18n.HomeStudies),
-            count: dict.size(shared.cache.studies),
-            color: "blue",
-            route: router.Studies(dict.new()),
-            link_text: t(i18n.HomeViewAll),
-          ),
-          stat_card(
-            label: t(i18n.HomeRecords),
-            count: list.length(cache.bucket_items(shared.cache, bucket.RecordsAll)),
-            color: "green",
-            route: router.Records(dict.new()),
-            link_text: t(i18n.HomeViewAll),
-          ),
-        ]
-        Some(u) -> [
-          stat_card(
-            label: t(i18n.HomeMyRecords),
-            count: list.length(cache.bucket_items(shared.cache, bucket.RecordsMine(u.id))),
-            color: "green",
-            route: router.Records(dict.new()),
-            link_text: t(i18n.HomeViewAll),
-          ),
-        ]
+        Some(u) ->
+          case permissions.is_admin_user(u) {
+            True -> [
+              stat_card(
+                label: t(i18n.HomeStudies),
+                count: dict.size(shared.cache.studies),
+                color: "blue",
+                route: router.Studies(dict.new()),
+                link_text: t(i18n.HomeViewAll),
+              ),
+              stat_card(
+                label: t(i18n.HomeRecords),
+                count: list.length(cache.bucket_items(
+                  shared.cache,
+                  bucket.RecordsAll,
+                )),
+                color: "green",
+                route: router.Records(dict.new()),
+                link_text: t(i18n.HomeViewAll),
+              ),
+            ]
+            False -> [
+              stat_card(
+                label: t(i18n.HomeMyRecords),
+                count: list.length(cache.bucket_items(
+                  shared.cache,
+                  bucket.RecordsMine(u.id),
+                )),
+                color: "green",
+                route: router.Records(dict.new()),
+                link_text: t(i18n.HomeViewAll),
+              ),
+            ]
+          }
         None -> []
       },
     ),

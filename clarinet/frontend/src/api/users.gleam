@@ -25,6 +25,11 @@ pub fn user_decoder() -> decode.Decoder(User) {
   use is_active <- decode.optional_field("is_active", True, decode.bool)
   use is_superuser <- decode.optional_field("is_superuser", False, decode.bool)
   use is_verified <- decode.optional_field("is_verified", False, decode.bool)
+  use role_names <- decode.optional_field(
+    "role_names",
+    [],
+    decode.list(decode.string),
+  )
 
   decode.success(models.User(
     id: id,
@@ -32,5 +37,6 @@ pub fn user_decoder() -> decode.Decoder(User) {
     is_active: is_active,
     is_superuser: is_superuser,
     is_verified: is_verified,
+    role_names: role_names,
   ))
 }

@@ -16,6 +16,7 @@ import lustre/element.{type Element}
 import lustre/element/html
 import router
 import shared.{type OutMsg, type Shared}
+import utils/permissions
 
 // --- Model ---
 
@@ -59,14 +60,20 @@ pub fn init(shared: Shared) -> #(Model, Effect(Msg), List(OutMsg)) {
       studies_request_id: 0,
       series_request_id: 0,
     )
-  // ReloadPatients is required even for non-superusers — the form needs the
+  // ReloadPatients is required even for non-admins — the form needs the
   // patient picker. The backend is expected to scope `/api/patients` results
   // by the caller's permissions.
   let out_msgs = case shared.user {
-    Some(models.User(is_superuser: True, ..)) ->
-      [shared.ReloadPatients, shared.ReloadRecordTypes, shared.ReloadUsers]
-    _ ->
-      [shared.ReloadPatients, shared.ReloadRecordTypes]
+    Some(u) ->
+      case permissions.is_admin_user(u) {
+        True -> [
+          shared.ReloadPatients,
+          shared.ReloadRecordTypes,
+          shared.ReloadUsers,
+        ]
+        False -> [shared.ReloadPatients, shared.ReloadRecordTypes]
+      }
+    None -> [shared.ReloadPatients, shared.ReloadRecordTypes]
   }
   #(model, effect.none(), out_msgs)
 }

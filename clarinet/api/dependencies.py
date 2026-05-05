@@ -4,7 +4,7 @@ Dependencies for FastAPI application with enhanced dependency injection.
 
 from typing import Annotated
 
-from fastapi import Depends, Path, Query, Request
+from fastapi import Depends, HTTPException, Path, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from clarinet.api.auth_config import (
@@ -337,16 +337,31 @@ ViewerRegistryDep = Annotated[ViewerRegistry, Depends(get_viewer_registry)]
 def get_user_role_names(user: User) -> set[str]:
     """Extract role names from a user.
 
+    Delegates to ``User.role_names`` (computed_field) which logs a warning
+    when ``roles`` was not eagerly loaded — so regressions in eager-loading
+    surface in logs instead of silently denying access.
+
     Args:
         user: User with roles relation (eagerly loaded in auth flow).
 
     Returns:
         Set of role name strings.
     """
-    try:
-        return {role.name for role in user.roles}
-    except Exception:
-        return set()
+    return set(user.role_names)
+
+
+async def current_admin_user(
+    user: Annotated[User, Depends(current_active_user)],
+) -> User:
+    """Require an active superuser OR a member of the built-in 'admin' role."""
+    if user.is_superuser:
+        return user
+    if "admin" in get_user_role_names(user):
+        return user
+    raise HTTPException(status_code=403, detail="Not authorized for admin operations")
+
+
+AdminUserDep = Annotated[User, Depends(current_admin_user)]
 
 
 async def authorize_record_access(

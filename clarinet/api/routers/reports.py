@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from fastapi import APIRouter, Query
 from fastapi.responses import Response
 
-from clarinet.api.dependencies import ReportServiceDep, SuperUserDep
+from clarinet.api.dependencies import AdminUserDep, ReportServiceDep
 from clarinet.models.report import ReportFormat, ReportTemplate
 
 router = APIRouter(
@@ -33,7 +33,7 @@ def _safe_filename(name: str, extension: str) -> str:
 
 @router.get("", response_model=list[ReportTemplate])
 async def list_reports(
-    _current_user: SuperUserDep,
+    _current_user: AdminUserDep,
     service: ReportServiceDep,
 ) -> list[ReportTemplate]:
     """List available SQL report templates.
@@ -47,7 +47,7 @@ async def list_reports(
 @router.get("/{name}/download")
 async def download_report(
     name: str,
-    _current_user: SuperUserDep,
+    _current_user: AdminUserDep,
     service: ReportServiceDep,
     report_format: ReportFormat = Query(default=ReportFormat.CSV, alias="format"),
 ) -> Response:
