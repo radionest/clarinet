@@ -731,3 +731,39 @@ async def test_user_read_role_names_empty_for_no_roles(superuser_client):
     assert response.status_code == 200
     body = response.json()
     assert body["role_names"] == []
+
+
+@pytest.mark.asyncio
+async def test_list_users_includes_role_names(admin_role_client, admin_role_user):
+    """`GET /api/user/` returns ``role_names`` populated for users with roles.
+
+    Without eager-loading in `UserService.list_users`, the `User.role_names`
+    computed_field silently returns `[]` for every user — regression for the
+    blocker found in PR review.
+    """
+    response = await admin_role_client.get("/api/user/")
+    assert response.status_code == 200
+    payload = response.json()
+    matching = [u for u in payload if u["id"] == str(admin_role_user.id)]
+    assert matching, f"admin_role_user not in /api/user/ response: {payload}"
+    assert "admin" in matching[0]["role_names"]
+
+
+@pytest.mark.asyncio
+async def test_get_user_by_id_includes_role_names(admin_role_client, admin_role_user):
+    """`GET /api/user/{id}` returns ``role_names`` populated for the target user."""
+    response = await admin_role_client.get(f"/api/user/{admin_role_user.id}")
+    assert response.status_code == 200
+    body = response.json()
+    assert "admin" in body["role_names"]
+
+
+@pytest.mark.asyncio
+async def test_dicom_endpoints_reject_admin_role_user(admin_role_client):
+    """DICOM ops stay superuser-only — admin role must NOT unlock /api/dicom/*.
+
+    Pins the deliberate scope choice (see plan §B2 and api/CLAUDE.md): a future
+    accidental swap to AdminUserDep on dicom.py would break this test.
+    """
+    response = await admin_role_client.get("/api/dicom/patient/UNKNOWN/studies")
+    assert response.status_code in (401, 403)

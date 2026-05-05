@@ -25,18 +25,22 @@ class UserService:
         self.user_repo = user_repo
 
     async def get_user(self, user_id: UUID) -> User:
-        """Get user by ID.
+        """Get user by ID with roles eagerly loaded.
+
+        Roles are loaded so that ``UserRead.role_names`` is populated correctly
+        when this user is serialised — the computed field reads ``__dict__`` to
+        avoid lazy-load failures, so the data must be present at fetch time.
 
         Args:
             user_id: User ID
 
         Returns:
-            User object
+            User object with roles loaded
 
         Raises:
             EntityNotFoundError: If user doesn't exist
         """
-        return await self.user_repo.get(user_id)
+        return await self.user_repo.get_with_roles(user_id)
 
     async def get_user_with_roles(self, user_id: UUID) -> User:
         """Get user with roles loaded.
@@ -125,17 +129,18 @@ class UserService:
         return user
 
     async def list_users(self, skip: int = 0, limit: int = 100) -> list[User]:
-        """List all users with pagination.
+        """List all users with pagination, roles eagerly loaded.
+
+        See ``get_user`` for why eager loading is required.
 
         Args:
             skip: Number of records to skip
             limit: Maximum number of records
 
         Returns:
-            List of users
+            List of users with roles loaded
         """
-        users = await self.user_repo.get_all(skip=skip, limit=limit)
-        return list(users)
+        return await self.user_repo.get_all_with_roles(skip=skip, limit=limit)
 
     async def list_roles(self) -> list[UserRole]:
         """List all available roles.
