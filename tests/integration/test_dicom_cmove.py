@@ -33,7 +33,11 @@ PACS_HOST = os.environ.get("CLARINET_TEST_PACS_HOST", "192.168.122.151")
 PACS_PORT = int(os.environ.get("CLARINET_TEST_PACS_PORT", "4242"))
 PACS_AET = "ORTHANC"
 PACS_REST_URL = f"http://{PACS_HOST}:{os.environ.get('CLARINET_TEST_PACS_REST_PORT', '8042')}"
-CALLING_AET = "CMOVE_TEST"
+# Per-worker AET so xdist workers don't clobber each other's modality
+# registration in Orthanc (which is keyed by AET name); a shared name
+# caused C-MOVE responses for one worker to flow into another worker's
+# SCP, doubling its received_count. AET length limit is 16 chars.
+CALLING_AET = f"CMOVE_T_{os.environ.get('PYTEST_XDIST_WORKER', 'master')}"
 
 
 def _free_port() -> int:
