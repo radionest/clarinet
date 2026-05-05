@@ -5,12 +5,14 @@ import api/types
 import cache
 import cache/bucket
 import clarinet_frontend/i18n.{type Key}
+import components/forms/base
 import components/status_badge
-import gleam/dict
+import gleam/dict.{type Dict}
 import gleam/int
 import gleam/javascript/promise
 import gleam/list
 import gleam/option.{type Option, None, Some}
+import gleam/order
 import gleam/string
 import lustre/attribute
 import lustre/effect.{type Effect}
@@ -20,7 +22,10 @@ import lustre/event
 import router
 import shared.{type OutMsg, type Shared}
 import utils/load_status.{type LoadStatus}
+import utils/record_filters
+import utils/records_list_state
 import utils/status
+import utils/table_sort.{type SortDirection}
 
 // --- Model ---
 
@@ -33,6 +38,7 @@ pub type Model {
     role_matrix: Option(models.RoleMatrix),
     matrix_status: LoadStatus,
     role_toggling: Option(#(String, String)),
+    active_filters: Dict(String, String),
   )
 }
 
@@ -55,11 +61,30 @@ pub type Msg {
   RetryLoadMatrix
   ToggleUserRole(user_id: String, role_name: String, add: Bool)
   UserRoleToggled(Result(Nil, types.ApiError))
+  // Records filters / sort
+  AddFilter(key: String, value: String)
+  RemoveFilter(key: String)
+  ClearFilters
+  ColumnHeaderClicked(column: String)
 }
+
+const default_sort_col = "id"
+
+const storage_key = "admin.records.filters"
 
 // --- Init ---
 
-pub fn init(_shared: Shared) -> #(Model, Effect(Msg), List(OutMsg)) {
+pub fn init(
+  filters: Dict(String, String),
+  _shared: Shared,
+) -> #(Model, Effect(Msg), List(OutMsg)) {
+  let #(effective_filters, filters_fx) =
+    records_list_state.resolve_initial_filters(
+      filters,
+      storage_key,
+      router.AdminDashboard,
+    )
+
   let model =
     Model(
       admin_stats: None,
@@ -69,11 +94,13 @@ pub fn init(_shared: Shared) -> #(Model, Effect(Msg), List(OutMsg)) {
       role_matrix: None,
       matrix_status: load_status.Loading,
       role_toggling: None,
+      active_filters: effective_filters,
     )
   let effects =
     effect.batch([
       load_effect(admin_api.get_admin_stats, AdminStatsLoaded),
       load_effect(admin_api.get_role_matrix, RoleMatrixLoaded),
+      filters_fx,
     ])
   #(model, effects, [shared.FetchBucket(bucket.RecordsAll), shared.ReloadUsers])
 }
@@ -243,6 +270,36 @@ pub fn update(
         handle_error(err, "Failed to update role"),
       )
 
+    AddFilter(key, value) -> {
+      let filters = dict.insert(model.active_filters, key, value)
+      #(Model(..model, active_filters: filters), sync_filters_effect(filters), [])
+    }
+
+    RemoveFilter(key) -> {
+      let filters = dict.delete(model.active_filters, key)
+      #(Model(..model, active_filters: filters), sync_filters_effect(filters), [])
+    }
+
+    ClearFilters -> {
+      // Clearing filters preserves the current sort selection — sorting
+      // is independent from filtering (matches /records UX).
+      let filters = record_filters.clear_user_filters(model.active_filters)
+      #(Model(..model, active_filters: filters), sync_filters_effect(filters), [])
+    }
+
+    ColumnHeaderClicked(col) -> {
+      let #(cur_col, cur_dir) =
+        table_sort.read_sort(model.active_filters, default_sort_col)
+      let #(new_col, new_dir) = table_sort.next_sort(cur_col, cur_dir, col)
+      let new_filters =
+        table_sort.write_sort(
+          model.active_filters,
+          new_col,
+          new_dir,
+          default_sort_col,
+        )
+      #(Model(..model, active_filters: new_filters), sync_filters_effect(new_filters), [])
+    }
   }
 }
 
@@ -253,6 +310,14 @@ fn handle_error(err: types.ApiError, fallback_msg: String) -> List(OutMsg) {
     types.AuthError(_) -> [shared.Logout]
     _ -> [shared.SetLoading(False), shared.ShowError(fallback_msg)]
   }
+}
+
+fn sync_filters_effect(filters: Dict(String, String)) -> Effect(Msg) {
+  records_list_state.sync_filters_effect(
+    filters,
+    router.AdminDashboard,
+    storage_key,
+  )
 }
 
 fn load_effect(
@@ -443,6 +508,8 @@ fn role_matrix_row(
 }
 
 fn records_section(model: Model, shared: Shared) -> Element(Msg) {
+  let all_records = cache.bucket_items(shared.cache, bucket.RecordsAll)
+
   html.div([attribute.class("dashboard-section")], [
     html.div([attribute.class("section-header")], [
       html.h3([], [html.text("Records")]),
@@ -454,38 +521,208 @@ fn records_section(model: Model, shared: Shared) -> Element(Msg) {
         [html.text("Create Record")],
       ),
     ]),
-    case
-      cache.bucket_items(shared.cache, bucket.RecordsAll)
-      |> list.sort(fn(a, b) {
-        int.compare(option.unwrap(a.id, 0), option.unwrap(b.id, 0))
-      })
-    {
-      [] ->
-        html.p([attribute.class("text-muted")], [
-          html.text("No records found."),
-        ])
-      records ->
-        html.div([attribute.class("table-responsive")], [
-          html.table([attribute.class("table")], [
-            html.thead([], [
-              html.tr([], [
-                html.th([], [html.text("ID")]),
-                html.th([], [html.text("Record Type")]),
-                html.th([], [html.text("Status")]),
-                html.th([], [html.text("Patient")]),
-                html.th([], [html.text("Assigned User")]),
-              ]),
-            ]),
-            html.tbody(
-              [],
-              list.map(records, fn(record) {
-                record_row(model, shared, record)
-              }),
-            ),
-          ]),
-        ])
+    filter_bar(model, shared, all_records),
+    records_table(model, shared, all_records),
+  ])
+}
+
+fn filter_bar(
+  model: Model,
+  shared: Shared,
+  all_records: List(models.Record),
+) -> Element(Msg) {
+  let status_value =
+    dict.get(model.active_filters, "status")
+    |> option.from_result()
+    |> option.unwrap("")
+
+  let type_value =
+    dict.get(model.active_filters, "record_type")
+    |> option.from_result()
+    |> option.unwrap("")
+
+  let patient_value =
+    dict.get(model.active_filters, "patient")
+    |> option.from_result()
+    |> option.unwrap("")
+
+  let user_value =
+    dict.get(model.active_filters, "user")
+    |> option.from_result()
+    |> option.unwrap("")
+
+  let status_options = record_filters.status_options(shared.translate)
+  let type_options = record_filters.type_options(all_records, shared.translate)
+  let patient_options =
+    record_filters.patient_options(all_records, shared.translate)
+  let user_options =
+    record_filters.user_options(all_records, shared.cache.users, shared.translate)
+
+  let has_user_filters = record_filters.has_user_filters(model.active_filters)
+
+  html.div([attribute.class("filter-bar")], [
+    base.select(
+      name: "filter-status",
+      value: status_value,
+      options: status_options,
+      on_change: fn(val) {
+        case val {
+          "" -> RemoveFilter("status")
+          _ -> AddFilter("status", val)
+        }
+      },
+    ),
+    base.select(
+      name: "filter-record-type",
+      value: type_value,
+      options: type_options,
+      on_change: fn(val) {
+        case val {
+          "" -> RemoveFilter("record_type")
+          _ -> AddFilter("record_type", val)
+        }
+      },
+    ),
+    base.select(
+      name: "filter-patient",
+      value: patient_value,
+      options: patient_options,
+      on_change: fn(val) {
+        case val {
+          "" -> RemoveFilter("patient")
+          _ -> AddFilter("patient", val)
+        }
+      },
+    ),
+    base.select(
+      name: "filter-user",
+      value: user_value,
+      options: user_options,
+      on_change: fn(val) {
+        case val {
+          "" -> RemoveFilter("user")
+          _ -> AddFilter("user", val)
+        }
+      },
+    ),
+    case has_user_filters {
+      True ->
+        html.button(
+          [
+            attribute.type_("button"),
+            attribute.class("btn btn-sm btn-outline"),
+            event.on_click(ClearFilters),
+          ],
+          [html.text(shared.translate(i18n.BtnClearFilters))],
+        )
+      False -> html.text("")
     },
   ])
+}
+
+fn records_table(
+  model: Model,
+  shared: Shared,
+  all_records: List(models.Record),
+) -> Element(Msg) {
+  let #(sort_col, sort_dir) =
+    table_sort.read_sort(model.active_filters, default_sort_col)
+  let cmp = record_comparator(sort_col, sort_dir, shared.cache.users)
+  let records =
+    record_filters.apply_filters(all_records, model.active_filters)
+    |> list.sort(cmp)
+
+  case records {
+    [] ->
+      html.p([attribute.class("text-muted")], [
+        html.text(shared.translate(i18n.AdminNoRecords)),
+      ])
+    _ ->
+      html.div([attribute.class("table-responsive")], [
+        html.table([attribute.class("table")], [
+          html.thead([], [
+            html.tr([], [
+              table_sort.th_sortable(
+                shared.translate(i18n.ThId),
+                "id",
+                sort_col,
+                sort_dir,
+                ColumnHeaderClicked,
+              ),
+              table_sort.th_sortable(
+                shared.translate(i18n.ThRecordType),
+                "record_type",
+                sort_col,
+                sort_dir,
+                ColumnHeaderClicked,
+              ),
+              table_sort.th_sortable(
+                shared.translate(i18n.ThStatus),
+                "status",
+                sort_col,
+                sort_dir,
+                ColumnHeaderClicked,
+              ),
+              table_sort.th_sortable(
+                shared.translate(i18n.ThPatient),
+                "patient",
+                sort_col,
+                sort_dir,
+                ColumnHeaderClicked,
+              ),
+              table_sort.th_sortable(
+                shared.translate(i18n.ThAssignedUser),
+                "user",
+                sort_col,
+                sort_dir,
+                ColumnHeaderClicked,
+              ),
+            ]),
+          ]),
+          html.tbody(
+            [],
+            list.map(records, fn(record) { record_row(model, shared, record) }),
+          ),
+        ]),
+      ])
+  }
+}
+
+fn user_email(
+  user_id: Option(String),
+  users: Dict(String, models.User),
+) -> String {
+  case user_id {
+    Some(uid) ->
+      case dict.get(users, uid) {
+        Ok(user) -> user.email
+        Error(_) -> uid
+      }
+    None -> ""
+  }
+}
+
+fn record_comparator(
+  col: String,
+  dir: SortDirection,
+  users: Dict(String, models.User),
+) -> fn(models.Record, models.Record) -> order.Order {
+  let base = case records_list_state.common_comparator(col) {
+    Ok(cmp) -> cmp
+    Error(_) ->
+      case col {
+        "user" -> fn(a: models.Record, b: models.Record) {
+          string.compare(
+            user_email(a.user_id, users),
+            user_email(b.user_id, users),
+          )
+        }
+        _ -> fn(a: models.Record, b: models.Record) {
+          int.compare(option.unwrap(a.id, 0), option.unwrap(b.id, 0))
+        }
+      }
+  }
+  table_sort.with_direction(base, dir)
 }
 
 fn record_row(
@@ -688,7 +925,7 @@ fn status_color(s: String) -> String {
     "inwork" -> "orange"
     "finished" -> "green"
     "failed" -> "red"
-    "pause" -> "gray"
+    "paused" -> "gray"
     _ -> "blue"
   }
 }

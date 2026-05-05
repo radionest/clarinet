@@ -21,7 +21,7 @@ pub type Route {
   PatientDetail(id: String)
   PatientNew
   SeriesDetail(id: String)
-  AdminDashboard
+  AdminDashboard(filters: Dict(String, String))
   AdminRecordTypes
   AdminRecordTypeDetail(name: String)
   AdminRecordTypeEdit(name: String)
@@ -46,7 +46,7 @@ pub fn route_to_path(route: Route) -> String {
     PatientNew -> "/patients/new"
     PatientDetail(id) -> "/patients/" <> id
     SeriesDetail(id) -> "/series/" <> id
-    AdminDashboard -> "/admin"
+    AdminDashboard(_) -> "/admin"
     AdminRecordTypes -> "/admin/record-types"
     AdminRecordTypeDetail(name) -> "/admin/record-types/" <> name
     AdminRecordTypeEdit(name) -> "/admin/record-types/" <> name <> "/edit"
@@ -83,7 +83,7 @@ pub fn parse_route(uri: Uri) -> Route {
     ["patients", "new"] -> PatientNew
     ["patients", id] -> PatientDetail(id)
     ["series", id] -> SeriesDetail(id)
-    ["admin"] -> AdminDashboard
+    ["admin"] -> AdminDashboard(parse_filters_from_query(uri.query))
     ["admin", "reports"] -> AdminReports
     ["admin", "record-types"] -> AdminRecordTypes
     ["admin", "record-types", name, "edit"] -> AdminRecordTypeEdit(name)
@@ -111,7 +111,7 @@ pub fn requires_admin_role(route: Route) -> Bool {
     | PatientDetail(_)
     | PatientNew
     | RecordNew
-    | AdminDashboard
+    | AdminDashboard(_)
     | AdminRecordTypes
     | AdminRecordTypeDetail(_)
     | AdminRecordTypeEdit(_)
@@ -136,7 +136,7 @@ pub fn get_route_title(route: Route) -> String {
     PatientDetail(_) -> "Patient Details"
     PatientNew -> "New Patient"
     SeriesDetail(_) -> "Series Details"
-    AdminDashboard -> "Admin Dashboard"
+    AdminDashboard(_) -> "Admin Dashboard"
     AdminRecordTypes -> "Record Types"
     AdminRecordTypeDetail(_) -> "Record Type Details"
     AdminRecordTypeEdit(_) -> "Edit Record Type"
@@ -153,7 +153,7 @@ fn section(route: Route) -> String {
     Studies(_) | StudyDetail(_) | StudyViewer(_) | SeriesDetail(_) -> "studies"
     Records(_) | RecordDetail(_) | RecordNew -> "records"
     Patients(_) | PatientDetail(_) | PatientNew -> "patients"
-    AdminDashboard
+    AdminDashboard(_)
     | AdminRecordTypes
     | AdminRecordTypeDetail(_)
     | AdminRecordTypeEdit(_)
@@ -170,7 +170,7 @@ pub fn is_same_section(route1: Route, route2: Route) -> Bool {
 // user-controlled subset (status / record_type / patient) in sync with
 // `user_filter_keys` in `utils/record_filters.gleam` — that list drives
 // the "Clear filters" action and intentionally omits sort/sort_dir.
-const known_filter_keys = ["status", "record_type", "patient", "sort", "sort_dir"]
+const known_filter_keys = ["status", "record_type", "patient", "user", "sort", "sort_dir"]
 
 fn parse_filters_from_query(query: Option(String)) -> Dict(String, String) {
   case query {
@@ -197,8 +197,10 @@ pub fn filters_to_query(filters: Dict(String, String)) -> Option(String) {
 
 pub fn route_to_query(route: Route) -> Option(String) {
   case route {
-    Records(filters) | Studies(filters) | Patients(filters) ->
-      filters_to_query(filters)
+    Records(filters)
+    | Studies(filters)
+    | Patients(filters)
+    | AdminDashboard(filters) -> filters_to_query(filters)
     _ -> None
   }
 }
