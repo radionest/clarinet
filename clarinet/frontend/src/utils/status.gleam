@@ -29,7 +29,11 @@ pub fn display_text(status: types.RecordStatus) -> String {
   }
 }
 
-/// Convert RecordStatus to its backend string representation
+/// Convert RecordStatus to its backend string representation.
+/// Backend canonical for `Paused` is `"pause"` (clarinet/models/base.py
+/// `RecordStatus.pause = "pause"`); previously emitted `"paused"`, which
+/// silently broke the status dropdown in /admin and the `?status=paused`
+/// URL filter on /records (neither matched any backend record).
 pub fn to_backend_string(status: types.RecordStatus) -> String {
   case status {
     types.Blocked -> "blocked"
@@ -37,13 +41,13 @@ pub fn to_backend_string(status: types.RecordStatus) -> String {
     types.InWork -> "inwork"
     types.Finished -> "finished"
     types.Failed -> "failed"
-    types.Paused -> "paused"
+    types.Paused -> "pause"
   }
 }
 
 /// Parse a backend status string into a RecordStatus (defaults to Pending).
-/// Accepts both `"paused"` (round-trips with `to_backend_string`) and the
-/// historical `"pause"` (older AdminStats payloads still ship this).
+/// Backend canonical for `Paused` is `"pause"`; `"paused"` is still accepted
+/// to absorb stale URL/localStorage state from before that was unified.
 pub fn from_backend_string(s: String) -> types.RecordStatus {
   case s {
     "blocked" -> types.Blocked
@@ -51,7 +55,7 @@ pub fn from_backend_string(s: String) -> types.RecordStatus {
     "inwork" -> types.InWork
     "finished" -> types.Finished
     "failed" -> types.Failed
-    "paused" | "pause" -> types.Paused
+    "pause" | "paused" -> types.Paused
     _ -> types.Pending
   }
 }

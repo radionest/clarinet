@@ -13,14 +13,15 @@ pub fn color_returns_expected_tailwind_classes_test() {
   status.color(types.Paused) |> should.equal("gray")
 }
 
-pub fn from_backend_string_round_trips_paused_test() {
-  // to_backend_string emits "paused"; from_backend_string must accept it.
-  // Regression guard: the original AdminStats payload shipped "pause"
-  // (no 'd'), so from_backend_string also accepts that historical form.
-  let s = status.to_backend_string(types.Paused)
-  status.from_backend_string(s) |> should.equal(types.Paused)
+pub fn paused_round_trips_through_backend_canonical_test() {
+  // Backend canonical for Paused is "pause" (no 'd'). Regression guard:
+  // emitting "paused" silently breaks the /admin status dropdown and the
+  // /records ?status= URL filter against a real backend.
+  status.to_backend_string(types.Paused) |> should.equal("pause")
+  status.from_backend_string("pause") |> should.equal(types.Paused)
 }
 
-pub fn from_backend_string_accepts_legacy_pause_test() {
-  status.from_backend_string("pause") |> should.equal(types.Paused)
+pub fn from_backend_string_accepts_legacy_paused_test() {
+  // Stale URL/localStorage state from before unification.
+  status.from_backend_string("paused") |> should.equal(types.Paused)
 }

@@ -98,7 +98,7 @@ pub fn status_options(translate: fn(Key) -> String) -> List(#(String, String)) {
     #("inwork", translate(i18n.StatusInProgress)),
     #("finished", translate(i18n.StatusCompleted)),
     #("failed", translate(i18n.StatusFailed)),
-    #("paused", translate(i18n.StatusPaused)),
+    #("pause", translate(i18n.StatusPaused)),
   ]
 }
 

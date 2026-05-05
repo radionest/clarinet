@@ -262,7 +262,7 @@ Typical hits beyond `router.gleam` itself: `main.gleam` (`init_page_for_route`),
 
 - `route_to_path` — URL builder; every variant must produce a path
 - `parse_route` — URL → variant
-- `to_title` — page title shown in `<title>` and the layout header
+- `get_route_title` — page title shown in `<title>` and the layout header
 - `requires_auth` / `requires_admin_role` — guard predicates
 - `section` — drives active-tab highlighting in the nav bar
 - `route_to_query` — query-string serialization (only matters for variants with filters)
