@@ -408,7 +408,11 @@ fn status_section(stats: models.AdminStats) -> Element(Msg) {
         |> list.sort(fn(a, b) { string.compare(a.0, b.0) })
         |> list.map(fn(pair) {
           let #(s, count) = pair
-          admin_stat_card(label: s, count: count, color: status_color(s))
+          admin_stat_card(
+            label: s,
+            count: count,
+            color: status.color(status.from_backend_string(s)),
+          )
         }),
     ),
   ])
@@ -916,16 +920,4 @@ fn admin_stat_card(
     ]),
     html.div([attribute.class("stat-label")], [html.text(label)]),
   ])
-}
-
-fn status_color(s: String) -> String {
-  case s {
-    "blocked" -> "yellow"
-    "pending" -> "blue"
-    "inwork" -> "orange"
-    "finished" -> "green"
-    "failed" -> "red"
-    "paused" -> "gray"
-    _ -> "blue"
-  }
 }

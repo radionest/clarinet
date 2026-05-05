@@ -5,6 +5,7 @@ import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/string
 import gleam/uri.{type Uri}
+import utils/record_filters
 
 // Route definitions
 pub type Route {
@@ -166,12 +167,6 @@ pub fn is_same_section(route1: Route, route2: Route) -> Bool {
   section(route1) == section(route2)
 }
 
-// All query-string keys the router will accept and round-trip. Keep the
-// user-controlled subset (status / record_type / patient) in sync with
-// `user_filter_keys` in `utils/record_filters.gleam` — that list drives
-// the "Clear filters" action and intentionally omits sort/sort_dir.
-const known_filter_keys = ["status", "record_type", "patient", "user", "sort", "sort_dir"]
-
 fn parse_filters_from_query(query: Option(String)) -> Dict(String, String) {
   case query {
     None -> dict.new()
@@ -181,7 +176,8 @@ fn parse_filters_from_query(query: Option(String)) -> Dict(String, String) {
         Ok(pairs) ->
           pairs
           |> list.filter(fn(pair) {
-            list.contains(known_filter_keys, pair.0) && pair.1 != ""
+            list.contains(record_filters.serializable_filter_keys, pair.0)
+            && pair.1 != ""
           })
           |> dict.from_list
       }
@@ -189,9 +185,10 @@ fn parse_filters_from_query(query: Option(String)) -> Dict(String, String) {
 }
 
 pub fn filters_to_query(filters: Dict(String, String)) -> Option(String) {
-  case dict.is_empty(filters) {
+  let serializable = record_filters.keep_serializable(filters)
+  case dict.is_empty(serializable) {
     True -> None
-    False -> Some(uri.query_to_string(dict.to_list(filters)))
+    False -> Some(uri.query_to_string(dict.to_list(serializable)))
   }
 }
 
