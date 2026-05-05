@@ -13,7 +13,9 @@ import utils/status
 pub const user_filter_keys = ["status", "record_type", "patient", "user"]
 
 /// Special "user" filter value matching records with no assigned user.
-pub const unassigned_user_value = "unassigned"
+/// Wrapped in double underscores to make it visually distinct from real
+/// User.id UUIDs in URLs and avoid accidental collisions.
+pub const unassigned_user_value = "__unassigned__"
 
 /// Strip the user-controlled filter keys from `filters`, leaving any
 /// other keys (notably `"sort"` / `"sort_dir"`) intact. Used by
@@ -21,6 +23,13 @@ pub const unassigned_user_value = "unassigned"
 /// touching the sort selection.
 pub fn clear_user_filters(filters: Dict(String, String)) -> Dict(String, String) {
   list.fold(user_filter_keys, filters, fn(acc, key) { dict.delete(acc, key) })
+}
+
+/// True if `filters` contains at least one user-controlled key. Drives the
+/// "Clear filters" button visibility — we ignore `sort`/`sort_dir` because
+/// sorting is independent and shouldn't make a filter-reset button appear.
+pub fn has_user_filters(filters: Dict(String, String)) -> Bool {
+  list.any(user_filter_keys, fn(key) { dict.has_key(filters, key) })
 }
 
 /// Filter records by an active filter dict.

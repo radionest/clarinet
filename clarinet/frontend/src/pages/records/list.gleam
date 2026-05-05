@@ -23,10 +23,8 @@ import router
 import shared.{type OutMsg, type Shared}
 import utils/permissions
 import utils/record_filters
-import utils/status
-import utils/storage
+import utils/records_list_state
 import utils/table_sort.{type SortDirection}
-import utils/url
 
 // --- Model ---
 
@@ -57,19 +55,12 @@ pub fn init(
   shared: Shared,
 ) -> #(Model, Effect(Msg), List(OutMsg)) {
   let key = bucket_key_for_user(shared.user)
-  let #(effective_filters, init_fx) = case dict.is_empty(filters) {
-    // URL has filters — use them and persist to localStorage
-    False -> #(filters, save_filters(filters))
-    // URL empty — try localStorage fallback
-    True -> {
-      let saved = storage.load_dict_sync(storage.Local, storage_key)
-      case dict.is_empty(saved) {
-        True -> #(dict.new(), effect.none())
-        // Restore from localStorage and sync URL
-        False -> #(saved, sync_url_effect(saved))
-      }
-    }
-  }
+  let #(effective_filters, init_fx) =
+    records_list_state.resolve_initial_filters(
+      filters,
+      storage_key,
+      router.Records,
+    )
   #(Model(active_filters: effective_filters), init_fx, [shared.FetchBucket(key)])
 }
 
@@ -147,16 +138,12 @@ pub fn update(
 
 // --- Helpers ---
 
-fn sync_url_effect(filters: Dict(String, String)) -> Effect(Msg) {
-  url.replace_route(router.Records(filters))
-}
-
-fn save_filters(filters: Dict(String, String)) -> Effect(Msg) {
-  storage.save_dict(storage.Local, storage_key, filters)
-}
-
 fn sync_filters_effect(filters: Dict(String, String)) -> Effect(Msg) {
-  effect.batch([sync_url_effect(filters), save_filters(filters)])
+  records_list_state.sync_filters_effect(
+    filters,
+    router.Records,
+    storage_key,
+  )
 }
 
 fn handle_error(err: ApiError, fallback_msg: String) -> List(OutMsg) {
@@ -213,7 +200,7 @@ fn filter_bar(model: Model, shared: Shared, all_records: List(Record)) -> Elemen
   let type_options = record_filters.type_options(all_records, shared.translate)
   let patient_options = record_filters.patient_options(all_records, shared.translate)
 
-  let has_filters = !dict.is_empty(model.active_filters)
+  let has_filters = record_filters.has_user_filters(model.active_filters)
 
   html.div([attribute.class("filter-bar")], [
     base.select(
@@ -322,28 +309,17 @@ fn record_comparator(
   col: String,
   dir: SortDirection,
 ) -> fn(Record, Record) -> order.Order {
-  let base = case col {
-    "id" -> fn(a: Record, b: Record) {
-      int.compare(option.unwrap(a.id, 0), option.unwrap(b.id, 0))
-    }
-    "record_type" -> fn(a: Record, b: Record) {
-      string.compare(a.record_type_name, b.record_type_name)
-    }
-    "status" -> fn(a: Record, b: Record) {
-      string.compare(
-        status.to_backend_string(a.status),
-        status.to_backend_string(b.status),
-      )
-    }
-    "patient" -> fn(a: Record, b: Record) {
-      string.compare(a.patient_id, b.patient_id)
-    }
-    "modality" -> fn(a: Record, b: Record) {
-      string.compare(record_modality_text(a), record_modality_text(b))
-    }
-    _ -> fn(a: Record, b: Record) {
-      int.compare(option.unwrap(a.id, 0), option.unwrap(b.id, 0))
-    }
+  let base = case records_list_state.common_comparator(col) {
+    Ok(cmp) -> cmp
+    Error(_) ->
+      case col {
+        "modality" -> fn(a: Record, b: Record) {
+          string.compare(record_modality_text(a), record_modality_text(b))
+        }
+        _ -> fn(a: Record, b: Record) {
+          int.compare(option.unwrap(a.id, 0), option.unwrap(b.id, 0))
+        }
+      }
   }
   table_sort.with_direction(base, dir)
 }
