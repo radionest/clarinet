@@ -73,6 +73,28 @@ def read_dicom_series(
     # Fancy indexing returns a non-contiguous view; force C-contiguous so
     # downstream consumers can rely on .tobytes() / C-extension passing.
     d = np.array(image.GetDirection()).reshape(3, 3)
+    # SimpleITK GDCM can return a left-handed direction matrix on some series
+    # (observed on Philips iDose CT) — slice direction has the wrong sign so
+    # TransformIndexToPhysicalPoint disagrees with the actual array ordering,
+    # producing a SI flip in saved NIfTI. Force right-handed by flipping the
+    # sign of the slice axis; this preserves any gantry-tilt component (the
+    # slice axis itself is computed from IPP deltas, not from row x col, so
+    # it carries real geometry and must not be replaced with a cross product).
+    # No-op for series that already have a consistent direction matrix.
+    det = np.linalg.det(d)
+    if det < 0:
+        slice_from_cross = np.cross(d[:, 0], d[:, 1])
+        if np.dot(slice_from_cross, d[:, 2]) < 0:
+            logger.debug(
+                f"Left-handed DICOM direction matrix in {directory.name} "
+                f"(det={det:.3f}); flipping slice-axis sign"
+            )
+            d[:, 2] *= -1
+        else:
+            logger.warning(
+                f"Left-handed direction matrix in {directory.name} "
+                f"(det={det:.3f}) with consistent slice axis — leaving as-is"
+            )
     direction = np.ascontiguousarray(d[:, [1, 0, 2]])
 
     logger.debug(

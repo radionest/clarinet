@@ -355,6 +355,35 @@ class TestDicomVolume:
         assert volume.shape == (3, 3, 2)
         assert any("Multiple DICOM series" in m for m in captured)
 
+    def test_left_handed_direction_corrected(
+        self, dicom_dir: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """SimpleITK GDCM can return a left-handed direction matrix on some series
+        (observed on Philips iDose CT) — det = -1, slice axis sign flipped relative
+        to actual file ordering, causing a SI flip in the saved NIfTI. The reader
+        must detect this and recompute the slice axis from the cross product so the
+        resulting direction is right-handed and matches the array layout.
+        """
+        import SimpleITK as sitk
+
+        original_execute = sitk.ImageSeriesReader.Execute
+
+        def execute_with_flipped_z(self: sitk.ImageSeriesReader) -> sitk.Image:
+            image = original_execute(self)
+            d = np.array(image.GetDirection()).reshape(3, 3)
+            d[:, 2] = -d[:, 2]  # flip slice axis sign — simulate the SimpleITK bug
+            image.SetDirection(tuple(d.flatten()))
+            return image
+
+        monkeypatch.setattr(sitk.ImageSeriesReader, "Execute", execute_with_flipped_z)
+
+        img = Image()
+        img.read_dicom_series(dicom_dir)
+        # After fix, the internal direction must be right-handed (det = +1 for a
+        # standard axial scan where row=y, col=x, slice=+z in LPS).
+        expected = np.array([[0, 1, 0], [1, 0, 0], [0, 0, 1]], dtype=float)
+        np.testing.assert_array_almost_equal(img.direction, expected, decimal=4)
+
     def test_rescale_slope_intercept_applied(self, tmp_path: Path) -> None:
         """RescaleSlope/RescaleIntercept convert stored pixels to real-world values (HU)."""
         dcm_dir = tmp_path / "rescale_dicom"
