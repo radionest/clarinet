@@ -258,15 +258,17 @@ async def anonymize_study_record(
     from clarinet.models.base import DicomQueryLevel
     from clarinet.models.record import Record, RecordType
 
-    if await test_session.get(RecordType, "anonymize-study") is None:
-        rt = RecordType(name="anonymize-study", level=DicomQueryLevel.STUDY)
+    record_type_name = settings.anon_record_type_name
+
+    if await test_session.get(RecordType, record_type_name) is None:
+        rt = RecordType(name=record_type_name, level=DicomQueryLevel.STUDY)
         test_session.add(rt)
         await test_session.commit()
 
     record = Record(
         patient_id=db_patient.id,
         study_uid=imported_study,
-        record_type_name="anonymize-study",
+        record_type_name=record_type_name,
     )
     test_session.add(record)
     await test_session.commit()
