@@ -3,6 +3,7 @@
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 from sqlmodel import select
 
 from clarinet.models import User, UserRole
@@ -103,7 +104,11 @@ class UserRepository(BaseRepository[User]):
         return any(role.name == role_name for role in user.roles)
 
     async def get_all_with_roles(self, skip: int = 0, limit: int = 100) -> list[User]:
-        """Get all users with their roles loaded.
+        """Get all users with their roles loaded in a single query.
+
+        Uses ``selectinload`` so a paginated list of N users issues 2 SQL
+        statements (users + a single batched roles fetch) instead of 1 + N
+        sequential round-trips on a shared ``AsyncSession``.
 
         Args:
             skip: Number of records to skip
@@ -112,10 +117,14 @@ class UserRepository(BaseRepository[User]):
         Returns:
             List of users with roles
         """
-        users = await self.get_all(skip=skip, limit=limit)
-        for user in users:
-            await self.session.refresh(user, ["roles"])
-        return list(users)
+        stmt = (
+            select(User)
+            .options(selectinload(User.roles))  # type: ignore[arg-type]
+            .offset(skip)
+            .limit(limit)
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
 
     async def find_by_role(self, role_name: str) -> list[User]:
         """Find all users with a specific role.

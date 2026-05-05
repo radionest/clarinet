@@ -66,8 +66,17 @@ class User(SQLModelBaseUserDB, SQLModel, table=True):
     def role_names(self) -> list[str]:
         # Read from __dict__ to avoid triggering a lazy-load on `roles` outside
         # the auth flow (where it is eagerly loaded via selectinload).
-        roles = self.__dict__.get("roles") or []
-        return [r.name for r in roles]
+        # If `roles` was never materialised, log a warning so regressions
+        # surface instead of silently returning [].
+        if "roles" not in self.__dict__:
+            from clarinet.utils.logger import logger
+
+            logger.warning(
+                f"User.role_names accessed without eager-loaded roles "
+                f"(user_id={self.id}); returning empty list",
+            )
+            return []
+        return [r.name for r in (self.__dict__["roles"] or [])]
 
 
 class UserRead(schemas.BaseUser[UUID]):

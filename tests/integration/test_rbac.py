@@ -767,3 +767,126 @@ async def test_dicom_endpoints_reject_admin_role_user(admin_role_client):
     """
     response = await admin_role_client.get("/api/dicom/patient/UNKNOWN/studies")
     assert response.status_code in (401, 403)
+
+
+# Mutation endpoints: response must serialise populated `role_names`
+# (regression — list_users / get_user were the original blocker; mutating
+# endpoints share the same root cause and need their own coverage.)
+
+
+@pytest.mark.asyncio
+async def test_assign_role_returns_role_names(superuser_client, test_session):
+    """POST /api/user/{id}/roles/admin must return ``role_names`` populated."""
+    test_session.add(UserRole(name="admin"))
+    await test_session.commit()
+
+    target = User(
+        id=uuid4(),
+        email="assign_target@test.com",
+        hashed_password=get_password_hash("password"),
+        is_active=True,
+        is_verified=True,
+        is_superuser=False,
+    )
+    test_session.add(target)
+    await test_session.commit()
+
+    response = await superuser_client.post(f"/api/user/{target.id}/roles/admin")
+    assert response.status_code == 200
+    body = response.json()
+    assert "admin" in body["role_names"]
+
+
+@pytest.mark.asyncio
+async def test_remove_role_returns_role_names_without_role(superuser_client, test_session):
+    """DELETE /api/user/{id}/roles/{role} must return updated ``role_names``."""
+    test_session.add(UserRole(name="admin"))
+    test_session.add(UserRole(name="aux"))
+    await test_session.commit()
+
+    user_id = uuid4()
+    target = User(
+        id=user_id,
+        email="remove_target@test.com",
+        hashed_password=get_password_hash("password"),
+        is_active=True,
+        is_verified=True,
+        is_superuser=False,
+    )
+    test_session.add(target)
+    await test_session.commit()
+    test_session.add(UserRolesLink(user_id=user_id, role_name="admin"))
+    test_session.add(UserRolesLink(user_id=user_id, role_name="aux"))
+    await test_session.commit()
+
+    response = await superuser_client.delete(f"/api/user/{user_id}/roles/admin")
+    assert response.status_code == 200
+    body = response.json()
+    assert "admin" not in body["role_names"]
+    assert "aux" in body["role_names"]
+
+
+@pytest.mark.asyncio
+async def test_activate_user_returns_role_names(superuser_client, test_session):
+    """POST /api/user/{id}/activate must return populated ``role_names``."""
+    test_session.add(UserRole(name="admin"))
+    await test_session.commit()
+
+    user_id = uuid4()
+    target = User(
+        id=user_id,
+        email="activate_target@test.com",
+        hashed_password=get_password_hash("password"),
+        is_active=False,
+        is_verified=True,
+        is_superuser=False,
+    )
+    test_session.add(target)
+    await test_session.commit()
+    test_session.add(UserRolesLink(user_id=user_id, role_name="admin"))
+    await test_session.commit()
+
+    response = await superuser_client.post(f"/api/user/{user_id}/activate")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["is_active"] is True
+    assert "admin" in body["role_names"]
+
+
+@pytest.mark.asyncio
+async def test_session_cache_invalidated_on_role_remove(superuser_client, test_session):
+    """remove_role must drop the demoted user's entries from DatabaseStrategy._user_cache.
+
+    Without invalidation the cache (TTL 30s) keeps serving the stale User with
+    'admin' in roles — admin endpoints would still pass for the demoted user
+    until expiry.
+    """
+    from clarinet.api.auth_config import DatabaseStrategy
+
+    test_session.add(UserRole(name="admin"))
+    await test_session.commit()
+
+    user_id = uuid4()
+    target = User(
+        id=user_id,
+        email="cache_target@test.com",
+        hashed_password=get_password_hash("password"),
+        is_active=True,
+        is_verified=True,
+        is_superuser=False,
+    )
+    test_session.add(target)
+    await test_session.commit()
+    test_session.add(UserRolesLink(user_id=user_id, role_name="admin"))
+    await test_session.commit()
+
+    fake_token = "tok-cache-test"
+    DatabaseStrategy._user_cache[fake_token] = target
+    assert fake_token in DatabaseStrategy._user_cache
+
+    try:
+        response = await superuser_client.delete(f"/api/user/{user_id}/roles/admin")
+        assert response.status_code == 200
+        assert fake_token not in DatabaseStrategy._user_cache
+    finally:
+        DatabaseStrategy._user_cache.pop(fake_token, None)

@@ -337,16 +337,17 @@ ViewerRegistryDep = Annotated[ViewerRegistry, Depends(get_viewer_registry)]
 def get_user_role_names(user: User) -> set[str]:
     """Extract role names from a user.
 
+    Delegates to ``User.role_names`` (computed_field) which logs a warning
+    when ``roles`` was not eagerly loaded — so regressions in eager-loading
+    surface in logs instead of silently denying access.
+
     Args:
         user: User with roles relation (eagerly loaded in auth flow).
 
     Returns:
         Set of role name strings.
     """
-    try:
-        return {role.name for role in user.roles}
-    except Exception:
-        return set()
+    return set(user.role_names)
 
 
 async def current_admin_user(

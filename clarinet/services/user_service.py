@@ -2,6 +2,7 @@
 
 from uuid import UUID, uuid4
 
+from clarinet.api.auth_config import DatabaseStrategy
 from clarinet.exceptions.domain import (
     InvalidCredentialsError,
     RoleAlreadyExistsError,
@@ -59,6 +60,9 @@ class UserService:
     async def create_user(self, data: UserCreate) -> User:
         """Create new user with hashed password.
 
+        Returns the user with `roles` eagerly loaded (empty for new accounts)
+        so `UserRead.role_names` serialises consistently.
+
         Raises:
             UserAlreadyExistsError: If user with this email already exists
         """
@@ -73,7 +77,8 @@ class UserService:
             is_superuser=data.is_superuser if data.is_superuser is not None else False,
             is_verified=data.is_verified if data.is_verified is not None else False,
         )
-        return await self.user_repo.create(user)
+        created = await self.user_repo.create(user)
+        return await self.user_repo.get_with_roles(created.id)
 
     async def update_user(self, user_id: UUID, data: UserUpdate) -> User:
         """Update user information.
@@ -88,7 +93,8 @@ class UserService:
         if data.password is not None:
             update_fields["hashed_password"] = get_password_hash(data.password)
 
-        return await self.user_repo.update(user, update_fields)
+        await self.user_repo.update(user, update_fields)
+        return await self.user_repo.get_with_roles(user_id)
 
     async def delete_user(self, user_id: UUID) -> None:
         """Delete user.
@@ -168,12 +174,15 @@ class UserService:
     async def assign_role(self, user_id: UUID, role_name: str) -> User:
         """Assign role to user.
 
+        Invalidates the auth-flow user cache so the new role takes effect on
+        the next request instead of waiting up to ``session_cache_ttl_seconds``.
+
         Args:
             user_id: User ID
             role_name: Role name to assign
 
         Returns:
-            Updated user with new role
+            Updated user with new role and `roles` eagerly loaded
 
         Raises:
             EntityNotFoundError: If user or role doesn't exist
@@ -186,17 +195,22 @@ class UserService:
         if await self.user_repo.has_role(user, role_name):
             raise UserAlreadyHasRoleError(user_id, role_name)
 
-        return await self.user_repo.add_role(user, role)
+        await self.user_repo.add_role(user, role)
+        DatabaseStrategy.invalidate_user_cache(user_id)
+        return await self.user_repo.get_with_roles(user_id)
 
     async def remove_role(self, user_id: UUID, role_name: str) -> User:
         """Remove role from user.
+
+        Invalidates the auth-flow user cache so the demotion takes effect
+        immediately instead of after the TTL expires.
 
         Args:
             user_id: User ID
             role_name: Role name to remove
 
         Returns:
-            Updated user without the role
+            Updated user without the role and `roles` eagerly loaded
 
         Raises:
             EntityNotFoundError: If user or role doesn't exist
@@ -204,7 +218,9 @@ class UserService:
         user = await self.user_repo.get(user_id)
         role = await self.user_repo.get_role(role_name)
 
-        return await self.user_repo.remove_role(user, role)
+        await self.user_repo.remove_role(user, role)
+        DatabaseStrategy.invalidate_user_cache(user_id)
+        return await self.user_repo.get_with_roles(user_id)
 
     async def create_role(self, name: str) -> UserRole:
         """Create new role.
@@ -246,25 +262,32 @@ class UserService:
             user_id: User ID
 
         Returns:
-            Activated user
+            Activated user with `roles` eagerly loaded
 
         Raises:
             EntityNotFoundError: If user doesn't exist
         """
         user = await self.user_repo.get(user_id)
-        return await self.user_repo.activate(user)
+        await self.user_repo.activate(user)
+        return await self.user_repo.get_with_roles(user_id)
 
     async def deactivate_user(self, user_id: UUID) -> User:
         """Deactivate user account.
+
+        Invalidates the auth-flow user cache so the deactivation takes effect
+        immediately — otherwise the next request within the TTL would still
+        accept the now-disabled session.
 
         Args:
             user_id: User ID
 
         Returns:
-            Deactivated user
+            Deactivated user with `roles` eagerly loaded
 
         Raises:
             EntityNotFoundError: If user doesn't exist
         """
         user = await self.user_repo.get(user_id)
-        return await self.user_repo.deactivate(user)
+        await self.user_repo.deactivate(user)
+        DatabaseStrategy.invalidate_user_cache(user_id)
+        return await self.user_repo.get_with_roles(user_id)

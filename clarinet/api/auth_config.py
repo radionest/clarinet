@@ -115,6 +115,17 @@ class DatabaseStrategy(Strategy[User, UUID]):
         ttl=max(settings.session_cache_ttl_seconds, 1),
     )
 
+    @classmethod
+    def invalidate_user_cache(cls, user_id: UUID) -> None:
+        """Drop every cached entry whose value.id == user_id.
+
+        Used after role removal / deactivation to make demotions take effect
+        immediately instead of after the TTL expires.
+        """
+        stale = [token for token, cached in cls._user_cache.items() if cached.id == user_id]
+        for token in stale:
+            cls._user_cache.pop(token, None)
+
     def __init__(self, session: AsyncSession, request: Request | None = None) -> None:
         """Initialize strategy with database session and optional request."""
         self.session = session
