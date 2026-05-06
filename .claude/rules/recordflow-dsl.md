@@ -108,7 +108,7 @@ record('measurement').all().d.value > 100
 ```
 
 Two multi-valued sides in one comparison (`record('a').any() == record('b').any()`)
-is unsupported — reduce one side to a single record or constant.
+are unsupported — reduce one side to a single record or constant.
 
 `Field()` / `F.x` self-references always resolve to the trigger record (single).
 

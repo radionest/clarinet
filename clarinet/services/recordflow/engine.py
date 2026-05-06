@@ -11,6 +11,7 @@ import asyncio
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from clarinet.models.base import DicomQueryLevel
 from clarinet.utils.logger import logger
 
 from .flow_action import (
@@ -401,7 +402,7 @@ class RecordFlowEngine:
     @staticmethod
     def _record_in_tree(
         record: RecordRead,
-        trigger_level: str | None,
+        trigger_level: DicomQueryLevel | None,
         trigger_study_uid: str | None,
         trigger_series_uid: str | None,
     ) -> bool:
@@ -422,18 +423,18 @@ class RecordFlowEngine:
         if record.record_type is None:
             return False
         record_level = record.record_type.level
-        if record_level == "PATIENT":
+        if record_level == DicomQueryLevel.PATIENT:
             return True
-        if record_level == "STUDY":
-            if trigger_level == "PATIENT":
+        if record_level == DicomQueryLevel.STUDY:
+            if trigger_level == DicomQueryLevel.PATIENT:
                 return True
             if trigger_study_uid is None:
                 return False
             return record.study_uid == trigger_study_uid
-        if record_level == "SERIES":
-            if trigger_level == "PATIENT":
+        if record_level == DicomQueryLevel.SERIES:
+            if trigger_level == DicomQueryLevel.PATIENT:
                 return True
-            if trigger_level == "STUDY":
+            if trigger_level == DicomQueryLevel.STUDY:
                 if trigger_study_uid is None:
                     return False
                 return record.study_uid == trigger_study_uid
@@ -483,6 +484,12 @@ class RecordFlowEngine:
         await self._ensure_authenticated()
 
         if not record.patient:
+            # Records without a patient violate ``validate_record_level``;
+            # surface this loudly instead of returning an empty context silently.
+            logger.warning(
+                f"Record {record.id} ({record.record_type.name if record.record_type else '?'}) "
+                f"has no patient — context is empty"
+            )
             return {}
 
         try:
@@ -696,14 +703,20 @@ class RecordFlowEngine:
             return
 
         if action.strategy == "single" and len(targets) > 1:
+            ids = [t.id for t in targets[:5]]
+            ids_suffix = ", ..." if len(targets) > 5 else ""
             logger.error(
                 f"update_record('{action.record_name}', strategy='single') "
-                f"ambiguous: found {len(targets)} records in context. "
-                f"Use strategy='all' to update every match."
+                f"ambiguous: found {len(targets)} records in context "
+                f"(ids: {ids}{ids_suffix}). Use strategy='all' to update every match."
             )
             return
 
         if action.status is None:
+            logger.warning(
+                f"update_record('{action.record_name}') has no status to apply — "
+                f"action is a no-op; remove it or pass status="
+            )
             return
 
         try:
