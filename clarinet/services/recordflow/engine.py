@@ -106,7 +106,7 @@ class RecordFlowEngine:
         except httpx.HTTPError as e:
             logger.error(f"RecordFlow: API check failed for {settings.effective_api_base_url}: {e}")
 
-    async def _ensure_authenticated(self) -> None:
+    async def ensure_authenticated(self) -> None:
         """Lazily authenticate the ClarinetClient on first use."""
         await self._ensure_api_reachable()
         if self.clarinet_client._authenticated:
@@ -127,7 +127,7 @@ class RecordFlowEngine:
         task.add_done_callback(self._background_tasks.discard)
 
     @staticmethod
-    async def _maybe_await(func: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+    async def maybe_await(func: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
         """Call a function and await the result if it is a coroutine."""
         result = func(*args, **kwargs)
         if asyncio.iscoroutine(result):
@@ -413,7 +413,7 @@ class RecordFlowEngine:
         Returns:
             Dictionary mapping record type names to lists of matching records.
         """
-        await self._ensure_authenticated()
+        await self.ensure_authenticated()
 
         if not record.patient:
             # Records without a patient violate ``validate_record_level``;
@@ -551,7 +551,7 @@ class RecordFlowEngine:
                 case _:
                     logger.warning(f"Unsupported action type for context: {action.type}")
         except Exception as e:
-            if action_handlers._is_expected_conflict(e):
+            if action_handlers.is_expected_conflict(e):
                 logger.warning(f"Expected conflict in action {action.type}: {e}")
             else:
                 logger.error(f"Error executing action {action.type}: {e}")

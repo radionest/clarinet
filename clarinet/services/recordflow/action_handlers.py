@@ -38,7 +38,7 @@ _EXPECTED_CONFLICT_CODES = frozenset(
 )
 
 
-def _is_expected_conflict(exc: BaseException) -> bool:
+def is_expected_conflict(exc: BaseException) -> bool:
     """Check if exception is a 409 with a known constraint violation code."""
     from clarinet.client import ClarinetAPIError
 
@@ -59,7 +59,7 @@ async def create_record(
     (record context only). ``parent_record_id`` is passed only when a
     source record is present.
     """
-    await engine._ensure_authenticated()
+    await engine.ensure_authenticated()
     from clarinet.models import RecordCreate
 
     series_uid = action.series_uid or ctx.series_uid
@@ -97,7 +97,7 @@ async def create_record(
             f"for {ctx.study_uid or ctx.patient_id}"
         )
     except Exception as e:
-        if _is_expected_conflict(e):
+        if is_expected_conflict(e):
             logger.warning(f"Record '{action.record_type_name}' skipped (expected constraint): {e}")
         else:
             logger.error(f"Failed to create record '{action.record_type_name}': {e}")
@@ -112,7 +112,7 @@ async def update_record(
     in context — skips with an error log if 0 or >1. ``strategy='all'``:
     applies the update to every matching record.
     """
-    await engine._ensure_authenticated()
+    await engine.ensure_authenticated()
     from clarinet.models import RecordStatus
 
     context = ctx.record_context
@@ -187,9 +187,9 @@ async def call_function(
     kwargs |= action.extra_kwargs
 
     try:
-        await engine._maybe_await(action.function, *action.args, **kwargs)
+        await engine.maybe_await(action.function, *action.args, **kwargs)
     except Exception as e:
-        if _is_expected_conflict(e):
+        if is_expected_conflict(e):
             logger.warning(f"Expected conflict in function {action.function.__name__}: {e}")
         else:
             logger.error(f"Error calling function {action.function.__name__}: {e}")
@@ -253,7 +253,7 @@ async def invalidate_records(
     Searches by patient_id (broadest scope) to find ALL records of target
     types, covering all hierarchy levels.
     """
-    await engine._ensure_authenticated()
+    await engine.ensure_authenticated()
     for target_type_name in action.record_type_names:
         try:
             target_records = [
@@ -309,7 +309,7 @@ async def invalidate_from_record(
     if action.callback is None:
         return
     try:
-        await engine._maybe_await(
+        await engine.maybe_await(
             action.callback,
             record=target,
             source_record=source_record,
@@ -351,7 +351,7 @@ async def invalidate_from_file(
     if action.callback is None:
         return
     try:
-        await engine._maybe_await(
+        await engine.maybe_await(
             action.callback,
             record=target,
             source_record=ctx.source_record,

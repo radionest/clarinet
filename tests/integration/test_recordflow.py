@@ -1157,7 +1157,7 @@ class TestLazyAuthentication:
         test_study: Study,
         test_session: AsyncSession,
     ):
-        """Engine calls _ensure_authenticated() and creates record without prior login."""
+        """Engine calls ensure_authenticated() and creates record without prior login."""
         # Series must exist in DB before engine creates a Record referencing it
         series = Series(
             series_uid="1.2.3.99.88.77",
@@ -1180,7 +1180,7 @@ class TestLazyAuthentication:
         fr.add_record("series-markup")
         engine.register_flow(fr)
 
-        # This should trigger _ensure_authenticated → login → create record
+        # This should trigger ensure_authenticated → login → create record
         await engine.handle_entity_created(
             "series",
             patient_id=test_patient.id,
