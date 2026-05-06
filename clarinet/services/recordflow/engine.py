@@ -11,6 +11,7 @@ import asyncio
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from clarinet.models.base import DicomQueryLevel
 from clarinet.utils.logger import logger
 
 from .flow_action import (
@@ -75,7 +76,7 @@ class FlowContext:
     """Unified execution context for all flow trigger types."""
 
     record: RecordRead | None = None
-    record_context: dict[str, RecordRead] | None = None
+    record_context: dict[str, list[RecordRead]] | None = None
     patient_id: str | None = None
     study_uid: str | None = None
     series_uid: str | None = None
@@ -83,7 +84,7 @@ class FlowContext:
     source_record: RecordRead | None = None
 
     @staticmethod
-    def for_record(record: RecordRead, context: dict[str, RecordRead]) -> FlowContext:
+    def for_record(record: RecordRead, context: dict[str, list[RecordRead]]) -> FlowContext:
         """Build context for a record-triggered flow."""
         return FlowContext(
             record=record,
@@ -282,7 +283,10 @@ class RecordFlowEngine:
                 logger.info(
                     f"Executing {trigger_label} flow for '{record_type_name}' (id={record.id})"
                 )
-                await self._execute_flow(flow, record, record_context)
+                # Each flow gets its own shallow-copied dict so per-flow mutations
+                # in _execute_flow (trigger insertion, _SELF) don't leak across
+                # sibling flows registered on the same record type.
+                await self._execute_flow(flow, record, dict(record_context))
 
     async def handle_record_status_change(
         self,
@@ -395,63 +399,115 @@ class RecordFlowEngine:
 
     # ── Context helpers ───────────────────────────────────────────────────
 
-    def _update_context_from_records(
-        self, context: dict[str, RecordRead], records: list[RecordRead]
-    ) -> None:
-        """Merge records into context, keeping the latest by id for each record type."""
+    @staticmethod
+    def _record_in_tree(
+        record: RecordRead,
+        trigger_level: DicomQueryLevel | None,
+        trigger_study_uid: str | None,
+        trigger_series_uid: str | None,
+    ) -> bool:
+        """Tree-filter: keep records on ancestors and subtree of trigger.
+
+        With ``trigger_level``:
+        - PATIENT trigger keeps every record of the patient (entire subtree).
+        - STUDY trigger keeps PATIENT-level + records of the same study (any
+          series_uid, since sibling series belong to the same subtree).
+        - SERIES trigger keeps PATIENT-level + STUDY-level of the same study
+          + SERIES-level of the same series. Sibling series are out of scope.
+
+        PATIENT-level records always pass — they are the topmost ancestor of
+        any trigger. STUDY-/SERIES-level records require the trigger to expose
+        the matching ``study_uid`` / ``series_uid``; if not (e.g. a malformed
+        trigger with ``record_type is None``) they are rejected defensively.
+        """
+        if record.record_type is None:
+            return False
+        record_level = record.record_type.level
+        if record_level == DicomQueryLevel.PATIENT:
+            return True
+        if record_level == DicomQueryLevel.STUDY:
+            if trigger_level == DicomQueryLevel.PATIENT:
+                return True
+            if trigger_study_uid is None:
+                return False
+            return record.study_uid == trigger_study_uid
+        if record_level == DicomQueryLevel.SERIES:
+            if trigger_level == DicomQueryLevel.PATIENT:
+                return True
+            if trigger_level == DicomQueryLevel.STUDY:
+                if trigger_study_uid is None:
+                    return False
+                return record.study_uid == trigger_study_uid
+            # SERIES trigger: keep only the same series.
+            if trigger_series_uid is None:
+                return False
+            return record.series_uid == trigger_series_uid
+        return False
+
+    def _build_context_from_records(
+        self,
+        records: list[RecordRead],
+        trigger: RecordRead,
+    ) -> dict[str, list[RecordRead]]:
+        """Filter and group records by type for the trigger's tree slice."""
+        trigger_level = trigger.record_type.level if trigger.record_type else None
+        trigger_study_uid = trigger.study_uid
+        trigger_series_uid = trigger.series_uid
+
+        context: dict[str, list[RecordRead]] = {}
         for r in records:
             if not (r.record_type and r.record_type.name):
                 continue
-            name = r.record_type.name
-            if name not in context or (r.id and r.id > context[name].id):
-                context[name] = r
+            if not self._record_in_tree(r, trigger_level, trigger_study_uid, trigger_series_uid):
+                continue
+            context.setdefault(r.record_type.name, []).append(r)
 
-    async def _get_record_context(self, record: RecordRead) -> dict[str, RecordRead]:
-        """Get all related records for evaluation context.
+        # Stable order by id (helps deterministic picking when callers iterate).
+        for lst in context.values():
+            lst.sort(key=lambda x: x.id or 0)
+        return context
 
-        Fetches records at all hierarchy levels for the same patient:
-        patient-level, study-level, and series-level records. This enables
-        cross-level invalidation (e.g. series change invalidating patient record).
+    async def _get_record_context(self, record: RecordRead) -> dict[str, list[RecordRead]]:
+        """Build the evaluation context for a record-triggered flow.
+
+        The context contains records on ``ancestors(trigger)`` and ``subtree(trigger)``
+        in the PATIENT → STUDY → SERIES DICOM hierarchy, grouped by record
+        type name. Multiple records of the same type may appear (one per
+        node within the slice).
 
         Args:
             record: The triggering record.
 
         Returns:
-            Dictionary mapping record type names to their latest record instances.
+            Dictionary mapping record type names to lists of matching records.
         """
         await self._ensure_authenticated()
-        context: dict[str, RecordRead] = {}
+
+        if not record.patient:
+            # Records without a patient violate ``validate_record_level``;
+            # surface this loudly instead of returning an empty context silently.
+            logger.warning(
+                f"Record {record.id} ({record.record_type.name if record.record_type else '?'}) "
+                f"has no patient — context is empty"
+            )
+            return {}
 
         try:
-            if record.patient:
-                records = await self.clarinet_client.find_records(
-                    patient_id=record.patient.id, limit=1000
-                )
-                self._update_context_from_records(context, records)
-
-            elif record.study:
-                records = await self.clarinet_client.find_records(
-                    study_uid=record.study.study_uid, limit=1000
-                )
-                self._update_context_from_records(context, records)
-
-            elif record.series:
-                records = await self.clarinet_client.find_records(
-                    series_uid=record.series.series_uid, limit=1000
-                )
-                self._update_context_from_records(context, records)
-
+            records = await self.clarinet_client.find_records(
+                patient_id=record.patient.id, limit=1000
+            )
         except Exception as e:
             logger.error(f"Error getting record context: {e}")
+            return {}
 
-        return context
+        return self._build_context_from_records(records, record)
 
     # ── Flow execution ────────────────────────────────────────────────────
 
     async def _evaluate_and_run_condition(
         self,
         condition: FlowCondition,
-        context: dict[str, RecordRead],
+        context: dict[str, list[RecordRead]],
         ctx: FlowContext,
     ) -> bool | None:
         """Evaluate a condition and run its actions.
@@ -470,18 +526,28 @@ class RecordFlowEngine:
         return met
 
     async def _execute_flow(
-        self, flow: FlowRecord, record: RecordRead, context: dict[str, RecordRead]
+        self,
+        flow: FlowRecord,
+        record: RecordRead,
+        context: dict[str, list[RecordRead]],
     ) -> None:
         """Execute a flow for a specific record.
 
         Args:
             flow: The flow definition to execute.
             record: The triggering record.
-            context: Dictionary of related records.
+            context: Tree-filtered map of record type names to record lists.
         """
-        # Add the current record to context
-        context[flow.record_name] = record
-        context[_SELF] = record
+        # Ensure trigger is in context list (defensive — tree filter normally
+        # already includes it). Clone the per-type list before mutating: the
+        # outer dict was shallow-copied by ``_dispatch_flows`` per flow, but the
+        # inner lists are shared and must not leak appends across flows.
+        trigger_records = list(context.get(flow.record_name, []))
+        if not any(r.id == record.id for r in trigger_records):
+            trigger_records.append(record)
+            trigger_records.sort(key=lambda x: x.id or 0)
+        context[flow.record_name] = trigger_records
+        context[_SELF] = [record]
 
         ctx = FlowContext.for_record(record, context)
 
@@ -617,33 +683,55 @@ class RecordFlowEngine:
                 logger.error(f"Failed to create record '{action.record_type_name}': {e}")
 
     async def _update_record(self, action: UpdateRecordAction, ctx: FlowContext) -> None:
-        """Update an existing record.
+        """Update existing records selected by ``strategy``.
 
-        Args:
-            action: The UpdateRecordAction with target record name and status.
-            ctx: The unified flow context (must have record_context).
+        ``strategy='single'``: requires exactly one record of the given type
+        in context — skips with an error log if 0 or >1. ``strategy='all'``:
+        applies the update to every matching record.
         """
         await self._ensure_authenticated()
         from clarinet.models import RecordStatus
 
         context = ctx.record_context
-        if context is None or action.record_name not in context:
+        if context is None:
+            logger.warning(f"No record context for update_record('{action.record_name}')")
+            return
+
+        targets = context.get(action.record_name, [])
+        if not targets:
             logger.warning(f"Record '{action.record_name}' not found in context for update")
             return
 
-        target_record = context[action.record_name]
+        if action.strategy == "single" and len(targets) > 1:
+            ids = [t.id for t in targets[:5]]
+            ids_suffix = ", ..." if len(targets) > 5 else ""
+            logger.error(
+                f"update_record('{action.record_name}', strategy='single') "
+                f"ambiguous: found {len(targets)} records in context "
+                f"(ids: {ids}{ids_suffix}). Use strategy='all' to update every match."
+            )
+            return
 
-        # Update record status if specified
-        if action.status is not None:
+        if action.status is None:
+            logger.warning(
+                f"update_record('{action.record_name}') has no status to apply — "
+                f"action is a no-op; remove it or pass status="
+            )
+            return
+
+        try:
+            status: str | RecordStatus = action.status
+            if isinstance(status, str):
+                status = RecordStatus(status)
+        except Exception as e:
+            logger.error(f"Invalid status for update_record: {e}")
+            return
+
+        for target in targets:
             try:
-                status: str | RecordStatus = action.status
-                if isinstance(status, str):
-                    status = RecordStatus(status)
-
-                await self.clarinet_client.update_record_status(target_record.id, status)
+                await self.clarinet_client.update_record_status(target.id, status)
                 logger.info(
-                    f"Updated record '{action.record_name}' "
-                    f"(id={target_record.id}) status to {status}"
+                    f"Updated record '{action.record_name}' (id={target.id}) status to {status}"
                 )
             except Exception as e:
                 logger.error(f"Failed to update record status: {e}")

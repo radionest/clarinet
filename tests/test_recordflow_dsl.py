@@ -31,6 +31,7 @@ from clarinet.services.recordflow import (
 )
 from clarinet.services.recordflow.flow_file import file
 from clarinet.services.recordflow.flow_record import patient, record, series, study
+from clarinet.services.recordflow.flow_result import AmbiguousContextError
 
 
 def _mock_iter_records(records_list: list[RecordRead]):
@@ -230,6 +231,130 @@ class TestComparisons:
         comparison = getattr(fr_left, op_method)(fr_right)
         assert isinstance(comparison, FieldComparison)
         assert comparison.evaluate(ctx) is expected
+
+
+# ─── Strategy: any / all / single semantics ──────────────────────────────────
+
+
+class TestStrategyResolution:
+    """Strategy modifiers (.any()/.all()) and ambiguity detection."""
+
+    def test_any_returns_flow_result_with_any_strategy(self):
+        fr = FlowResult("first-check", strategy="any")
+        assert fr.strategy == "any"
+        # `.d.field` propagates strategy through __getattr__
+        chained = fr.d.is_good
+        assert chained.strategy == "any"
+        assert chained.field_path == ["is_good"]
+
+    def test_record_any_creates_any_strategy(self):
+        fr = record("first-check").any()
+        assert isinstance(fr, FlowResult)
+        assert fr.strategy == "any"
+
+    def test_record_all_creates_all_strategy(self):
+        fr = record("first-check").all()
+        assert isinstance(fr, FlowResult)
+        assert fr.strategy == "all"
+
+    def test_single_strategy_raises_on_multiple_records(self):
+        ctx = {
+            "first-check": [
+                make_record_read("first-check", data={"is_good": True}, record_id=1),
+                make_record_read("first-check", data={"is_good": False}, record_id=2),
+            ]
+        }
+        cmp = FlowResult("first-check", ["is_good"]) == True  # noqa: E712
+        with pytest.raises(AmbiguousContextError, match="Found 2 records"):
+            cmp.evaluate(ctx)
+
+    def test_any_strategy_true_when_any_match(self):
+        ctx = {
+            "first-check": [
+                make_record_read("first-check", data={"is_good": False}, record_id=1),
+                make_record_read("first-check", data={"is_good": True}, record_id=2),
+            ]
+        }
+        cmp = record("first-check").any().d.is_good == True  # noqa: E712
+        assert cmp.evaluate(ctx) is True
+
+    def test_any_strategy_false_when_none_match(self):
+        ctx = {
+            "first-check": [
+                make_record_read("first-check", data={"is_good": False}, record_id=1),
+                make_record_read("first-check", data={"is_good": False}, record_id=2),
+            ]
+        }
+        cmp = record("first-check").any().d.is_good == True  # noqa: E712
+        assert cmp.evaluate(ctx) is False
+
+    def test_all_strategy_true_when_all_match(self):
+        ctx = {
+            "first-check": [
+                make_record_read("first-check", data={"is_good": True}, record_id=1),
+                make_record_read("first-check", data={"is_good": True}, record_id=2),
+            ]
+        }
+        cmp = record("first-check").all().d.is_good == True  # noqa: E712
+        assert cmp.evaluate(ctx) is True
+
+    def test_all_strategy_false_when_one_mismatches(self):
+        ctx = {
+            "first-check": [
+                make_record_read("first-check", data={"is_good": True}, record_id=1),
+                make_record_read("first-check", data={"is_good": False}, record_id=2),
+            ]
+        }
+        cmp = record("first-check").all().d.is_good == True  # noqa: E712
+        assert cmp.evaluate(ctx) is False
+
+    def test_all_strategy_false_on_empty_list(self):
+        ctx: dict[str, list[RecordRead]] = {"first-check": []}
+        cmp = record("first-check").all().d.is_good == True  # noqa: E712
+        assert cmp.evaluate(ctx) is False
+
+    def test_any_strategy_false_on_empty_list(self):
+        ctx: dict[str, list[RecordRead]] = {"first-check": []}
+        cmp = record("first-check").any().d.is_good == True  # noqa: E712
+        assert cmp.evaluate(ctx) is False
+
+    def test_any_with_lt_operator(self):
+        ctx = {
+            "measurement": [
+                make_record_read("measurement", data={"value": 50}, record_id=1),
+                make_record_read("measurement", data={"value": 200}, record_id=2),
+            ]
+        }
+        cmp = record("measurement").any().d.value > 100
+        assert cmp.evaluate(ctx) is True
+
+    def test_all_with_gt_operator(self):
+        ctx = {
+            "measurement": [
+                make_record_read("measurement", data={"value": 150}, record_id=1),
+                make_record_read("measurement", data={"value": 200}, record_id=2),
+            ]
+        }
+        cmp = record("measurement").all().d.value > 100
+        assert cmp.evaluate(ctx) is True
+
+        ctx2 = {
+            "measurement": [
+                make_record_read("measurement", data={"value": 50}, record_id=1),
+                make_record_read("measurement", data={"value": 200}, record_id=2),
+            ]
+        }
+        assert cmp.evaluate(ctx2) is False
+
+    def test_two_multivalued_sides_unsupported(self):
+        """any/all on both sides is rejected — must reduce one side."""
+        ctx = {
+            "a": [make_record_read("a", data={"v": 1}, record_id=1)],
+            "b": [make_record_read("b", data={"v": 1}, record_id=2)],
+        }
+        cmp = record("a").any().d.v == record("b").any().d.v
+        with pytest.raises(NotImplementedError, match="multi-valued"):
+            cmp.evaluate(ctx)
 
 
 # ─── FlowRecord DSL — builder ────────────────────────────────────────────────
@@ -437,6 +562,14 @@ class TestFlowRecordDSL:
         assert isinstance(fr.actions[0], UpdateRecordAction)
         assert fr.actions[0].record_name == "target"
         assert fr.actions[0].status == "finished"
+        assert fr.actions[0].strategy == "single"
+
+    def test_update_record_strategy_all(self):
+        """update_record(strategy='all') stores 'all' on the action."""
+        fr = FlowRecord("test-type")
+        fr.update_record("target", status="finished", strategy="all")
+        assert isinstance(fr.actions[0], UpdateRecordAction)
+        assert fr.actions[0].strategy == "all"
 
     def test_do_task_creates_pipeline_action(self):
         """do_task() creates a PipelineAction with _task: prefix."""

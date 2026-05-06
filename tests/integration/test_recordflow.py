@@ -1292,3 +1292,443 @@ class TestFileFlowIntegration:
 
         # Cleanup
         app.state.recordflow_engine = None
+
+
+class TestTreeFilterContext:
+    """Tree-filter (ancestors + subtree of trigger) context isolation."""
+
+    @staticmethod
+    async def _make_second_study(
+        test_session: AsyncSession, patient: Patient, suffix: str = "20"
+    ) -> Study:
+        """Build a sibling study; ``suffix`` must be digits-only (study_uid pattern)."""
+        from datetime import UTC, datetime
+
+        s2 = Study(
+            patient_id=patient.id,
+            study_uid=f"1.2.3.4.5.6.7.8.9.{suffix}",
+            date=datetime.now(UTC).date(),
+        )
+        test_session.add(s2)
+        await test_session.commit()
+        await test_session.refresh(s2)
+        return s2
+
+    @pytest.mark.asyncio
+    async def test_study_trigger_reads_own_study_record(
+        self,
+        clarinet_client: ClarinetClient,
+        flow_engine: RecordFlowEngine,
+        record_types: dict[str, RecordType],
+        test_session: AsyncSession,
+        test_patient: Patient,
+        test_study: Study,
+    ):
+        """STUDY-level trigger sees its own study's first-check, not a sibling's.
+
+        Regression test for the previous flat ``find_records(patient_id=...)``
+        + last-by-id collapse, which leaked sibling-study records into context
+        and gave non-deterministic results when a patient had multiple studies.
+        """
+        study2 = await self._make_second_study(test_session, test_patient)
+
+        # first-check finished on each study with different study_type.
+        # Order matters: study2's first-check has the larger id (would win
+        # under the old last-by-id rule).
+        await _create_record_via_client(
+            clarinet_client,
+            "first-check",
+            test_patient.id,
+            test_study.study_uid,
+            status=RecordStatus.finished,
+            data={"study_type": "CT"},
+        )
+        await _create_record_via_client(
+            clarinet_client,
+            "first-check",
+            test_patient.id,
+            study2.study_uid,
+            status=RecordStatus.finished,
+            data={"study_type": "MRI"},
+        )
+
+        # Flow: doctor-report finishes → if own first-check.study_type=="CT", create confirm-birads.
+        flow = FlowRecord("doctor-report")
+        flow.on_status("finished").if_(
+            FlowResult("first-check", ["study_type"]) == "CT"
+        ).add_record("confirm-birads")
+        flow_engine.register_flow(flow)
+
+        # Trigger on study1 — own first-check is CT → confirm-birads must be created.
+        # Old code: last-by-id picks study2's MRI first-check → False → bug.
+        trigger = await _create_record_via_client(
+            clarinet_client,
+            "doctor-report",
+            test_patient.id,
+            test_study.study_uid,
+            status=RecordStatus.finished,
+        )
+        await flow_engine.handle_record_status_change(trigger)
+
+        confirm = await clarinet_client.find_records(
+            study_uid=test_study.study_uid,
+            record_type_name="confirm-birads",
+        )
+        assert len(confirm) == 1, "tree-filter should pick study1's CT first-check"
+
+        # Trigger on study2 — own first-check is MRI → no confirm-birads.
+        trigger2 = await _create_record_via_client(
+            clarinet_client,
+            "doctor-report",
+            test_patient.id,
+            study2.study_uid,
+            status=RecordStatus.finished,
+        )
+        await flow_engine.handle_record_status_change(trigger2)
+
+        confirm2 = await clarinet_client.find_records(
+            study_uid=study2.study_uid,
+            record_type_name="confirm-birads",
+        )
+        assert len(confirm2) == 0
+
+    @pytest.mark.asyncio
+    async def test_single_strategy_skips_when_ambiguous(
+        self,
+        clarinet_client: ClarinetClient,
+        flow_engine: RecordFlowEngine,
+        test_session: AsyncSession,
+        test_patient: Patient,
+        test_study: Study,
+        record_types: dict[str, RecordType],
+    ):
+        """Default 'single' strategy on multi-record context skips the action.
+
+        Build a PATIENT-level trigger so context contains both studies'
+        first-checks. ``record('first-check').d.X`` (default single) raises
+        :class:`AmbiguousContextError`. ``FlowCondition.evaluate`` re-raises
+        (its own ``on_missing`` defaults to ``"raise"``); the engine's broad
+        ``except Exception`` in ``_evaluate_and_run_condition`` then logs and
+        suppresses the action — sentinel record stays absent.
+        """
+        from clarinet.models.record import RecordType
+
+        # PATIENT-level type for the trigger and an output sentinel.
+        pat_type = RecordType(
+            name="pat-summary",
+            level=DicomQueryLevel.PATIENT,
+            unique_per_user=False,
+        )
+        sentinel_type = RecordType(
+            name="sentinel-output",
+            level=DicomQueryLevel.PATIENT,
+            unique_per_user=False,
+        )
+        test_session.add_all([pat_type, sentinel_type])
+        await test_session.commit()
+
+        study2 = await self._make_second_study(test_session, test_patient, suffix="22")
+
+        # Two first-checks under one patient (different studies).
+        await _create_record_via_client(
+            clarinet_client,
+            "first-check",
+            test_patient.id,
+            test_study.study_uid,
+            status=RecordStatus.finished,
+            data={"study_type": "CT"},
+        )
+        await _create_record_via_client(
+            clarinet_client,
+            "first-check",
+            test_patient.id,
+            study2.study_uid,
+            status=RecordStatus.finished,
+            data={"study_type": "MRI"},
+        )
+
+        # Flow on PATIENT-level pat-summary: single strategy → ambiguous → skip.
+        flow = FlowRecord("pat-summary")
+        flow.on_status("finished").if_(
+            FlowResult("first-check", ["study_type"]) == "CT"
+        ).add_record("sentinel-output")
+        flow_engine.register_flow(flow)
+
+        # Create + finish pat-summary (PATIENT-level, no study_uid).
+        from clarinet.models import RecordCreate
+
+        trigger_create = await clarinet_client.create_record(
+            RecordCreate(record_type_name="pat-summary", patient_id=test_patient.id)
+        )
+        trigger = await clarinet_client.update_record_status(
+            trigger_create.id, RecordStatus.finished
+        )
+        await flow_engine.handle_record_status_change(trigger)
+
+        sentinels = await clarinet_client.find_records(record_type_name="sentinel-output")
+        assert len(sentinels) == 0, "single-strategy ambiguity should suppress action"
+
+    @pytest.mark.asyncio
+    async def test_any_strategy_resolves_multi_record_context(
+        self,
+        clarinet_client: ClarinetClient,
+        flow_engine: RecordFlowEngine,
+        test_session: AsyncSession,
+        test_patient: Patient,
+        test_study: Study,
+        record_types: dict[str, RecordType],
+    ):
+        """``record('first-check').any().d.X`` succeeds across multi-study context."""
+        from clarinet.models import RecordCreate
+        from clarinet.models.record import RecordType
+        from clarinet.services.recordflow import record as flow_record
+
+        pat_type = RecordType(
+            name="pat-summary-any",
+            level=DicomQueryLevel.PATIENT,
+            unique_per_user=False,
+        )
+        sentinel_type = RecordType(
+            name="sentinel-any-output",
+            level=DicomQueryLevel.PATIENT,
+            unique_per_user=False,
+        )
+        test_session.add_all([pat_type, sentinel_type])
+        await test_session.commit()
+
+        study2 = await self._make_second_study(test_session, test_patient, suffix="23")
+
+        await _create_record_via_client(
+            clarinet_client,
+            "first-check",
+            test_patient.id,
+            test_study.study_uid,
+            status=RecordStatus.finished,
+            data={"study_type": "MRI"},
+        )
+        await _create_record_via_client(
+            clarinet_client,
+            "first-check",
+            test_patient.id,
+            study2.study_uid,
+            status=RecordStatus.finished,
+            data={"study_type": "CT"},
+        )
+
+        flow = FlowRecord("pat-summary-any")
+        flow.on_status("finished").if_(
+            flow_record("first-check").any().d.study_type == "CT"
+        ).add_record("sentinel-any-output")
+        flow_engine.register_flow(flow)
+
+        trigger_create = await clarinet_client.create_record(
+            RecordCreate(record_type_name="pat-summary-any", patient_id=test_patient.id)
+        )
+        trigger = await clarinet_client.update_record_status(
+            trigger_create.id, RecordStatus.finished
+        )
+        await flow_engine.handle_record_status_change(trigger)
+
+        sentinels = await clarinet_client.find_records(record_type_name="sentinel-any-output")
+        assert len(sentinels) == 1
+
+    @pytest.mark.asyncio
+    async def test_update_record_strategy_all_updates_every_match(
+        self,
+        clarinet_client: ClarinetClient,
+        flow_engine: RecordFlowEngine,
+        test_session: AsyncSession,
+        test_patient: Patient,
+        test_study: Study,
+        record_types: dict[str, RecordType],
+    ):
+        """``update_record(strategy='all')`` updates every matching record in subtree."""
+        from clarinet.models import RecordCreate
+        from clarinet.models.record import RecordType
+
+        pat_type = RecordType(
+            name="pat-trigger-bulk",
+            level=DicomQueryLevel.PATIENT,
+            unique_per_user=False,
+        )
+        test_session.add(pat_type)
+        await test_session.commit()
+
+        study2 = await self._make_second_study(test_session, test_patient, suffix="24")
+
+        # Two pending first-checks across two studies.
+        for st_uid in (test_study.study_uid, study2.study_uid):
+            await _create_record_via_client(
+                clarinet_client,
+                "first-check",
+                test_patient.id,
+                st_uid,
+                status=RecordStatus.pending,
+            )
+
+        flow = FlowRecord("pat-trigger-bulk")
+        flow.on_status("finished").update_record("first-check", status="blocked", strategy="all")
+        flow_engine.register_flow(flow)
+
+        trigger_create = await clarinet_client.create_record(
+            RecordCreate(record_type_name="pat-trigger-bulk", patient_id=test_patient.id)
+        )
+        trigger = await clarinet_client.update_record_status(
+            trigger_create.id, RecordStatus.finished
+        )
+        await flow_engine.handle_record_status_change(trigger)
+
+        # Both first-checks should have been moved to 'blocked'.
+        all_first_checks = await clarinet_client.find_records(record_type_name="first-check")
+        assert len(all_first_checks) == 2
+        assert all(r.status == RecordStatus.blocked for r in all_first_checks)
+
+    @pytest.mark.asyncio
+    async def test_update_record_strategy_single_skips_on_ambiguity(
+        self,
+        clarinet_client: ClarinetClient,
+        flow_engine: RecordFlowEngine,
+        test_session: AsyncSession,
+        test_patient: Patient,
+        test_study: Study,
+        record_types: dict[str, RecordType],
+    ):
+        """``update_record(strategy='single')`` refuses to pick when context has >1."""
+        from clarinet.models import RecordCreate
+        from clarinet.models.record import RecordType
+
+        pat_type = RecordType(
+            name="pat-trigger-single",
+            level=DicomQueryLevel.PATIENT,
+            unique_per_user=False,
+        )
+        test_session.add(pat_type)
+        await test_session.commit()
+
+        study2 = await self._make_second_study(test_session, test_patient, suffix="25")
+
+        for st_uid in (test_study.study_uid, study2.study_uid):
+            await _create_record_via_client(
+                clarinet_client,
+                "first-check",
+                test_patient.id,
+                st_uid,
+                status=RecordStatus.pending,
+            )
+
+        flow = FlowRecord("pat-trigger-single")
+        flow.on_status("finished").update_record("first-check", status="blocked")
+        flow_engine.register_flow(flow)
+
+        trigger_create = await clarinet_client.create_record(
+            RecordCreate(record_type_name="pat-trigger-single", patient_id=test_patient.id)
+        )
+        trigger = await clarinet_client.update_record_status(
+            trigger_create.id, RecordStatus.finished
+        )
+        await flow_engine.handle_record_status_change(trigger)
+
+        # All first-checks remain pending — strategy='single' refused with >1 matches.
+        all_first_checks = await clarinet_client.find_records(record_type_name="first-check")
+        assert len(all_first_checks) == 2
+        assert all(r.status == RecordStatus.pending for r in all_first_checks)
+
+    @pytest.mark.asyncio
+    async def test_series_trigger_excludes_sibling_series(
+        self,
+        clarinet_client: ClarinetClient,
+        flow_engine: RecordFlowEngine,
+        test_session: AsyncSession,
+        test_patient: Patient,
+        test_study: Study,
+        test_series: Series,
+        record_types: dict[str, RecordType],
+    ):
+        """SERIES trigger sees own series records only; sibling-series are out of scope."""
+        from clarinet.models import RecordCreate
+        from clarinet.models.record import RecordType
+        from clarinet.models.study import Series
+
+        # SERIES-level markup-meta (data carrier) + series-output (action sentinel).
+        meta_type = RecordType(
+            name="markup-meta",
+            level=DicomQueryLevel.SERIES,
+            unique_per_user=False,
+        )
+        output_type = RecordType(
+            name="series-output",
+            level=DicomQueryLevel.SERIES,
+            unique_per_user=False,
+        )
+        test_session.add_all([meta_type, output_type])
+        await test_session.commit()
+
+        # Sibling series under the same study.
+        series_b = Series(
+            study_uid=test_study.study_uid,
+            series_uid=f"{test_series.series_uid}.99",
+            series_number=2,
+            series_description="Sibling series",
+        )
+        test_session.add(series_b)
+        await test_session.commit()
+        await test_session.refresh(series_b)
+
+        # markup-meta on each series with different kind. Order matters: series_b's
+        # record gets the larger id (would win under the old last-by-id collapse).
+        async def _make_meta(series_uid: str, kind: str) -> None:
+            meta = await clarinet_client.create_record(
+                RecordCreate(
+                    record_type_name="markup-meta",
+                    patient_id=test_patient.id,
+                    study_uid=test_study.study_uid,
+                    series_uid=series_uid,
+                )
+            )
+            await clarinet_client.submit_record_data(meta.id, {"kind": kind})
+
+        await _make_meta(test_series.series_uid, "manual")
+        await _make_meta(series_b.series_uid, "auto")
+
+        # Flow: series-markup finishes → if own markup-meta.kind == "manual",
+        # create series-output (SERIES-level, inherits series_uid from trigger).
+        flow = FlowRecord("series-markup")
+        flow.on_status("finished").if_(FlowResult("markup-meta", ["kind"]) == "manual").add_record(
+            "series-output"
+        )
+        flow_engine.register_flow(flow)
+
+        # Trigger on series A — own markup-meta.kind == "manual" → True → output created.
+        # Without tree-filter: last-by-id picks series_b's "auto" → False → no output.
+        trigger_a = await clarinet_client.create_record(
+            RecordCreate(
+                record_type_name="series-markup",
+                patient_id=test_patient.id,
+                study_uid=test_study.study_uid,
+                series_uid=test_series.series_uid,
+            )
+        )
+        trigger_a = await clarinet_client.update_record_status(trigger_a.id, RecordStatus.finished)
+        await flow_engine.handle_record_status_change(trigger_a)
+
+        outputs_a = await clarinet_client.find_records(
+            record_type_name="series-output", series_uid=test_series.series_uid
+        )
+        assert len(outputs_a) == 1, "tree-filter must isolate series A's markup-meta"
+
+        # Trigger on series B — own markup-meta.kind == "auto" → False → no output.
+        trigger_b = await clarinet_client.create_record(
+            RecordCreate(
+                record_type_name="series-markup",
+                patient_id=test_patient.id,
+                study_uid=test_study.study_uid,
+                series_uid=series_b.series_uid,
+            )
+        )
+        trigger_b = await clarinet_client.update_record_status(trigger_b.id, RecordStatus.finished)
+        await flow_engine.handle_record_status_change(trigger_b)
+
+        outputs_b = await clarinet_client.find_records(
+            record_type_name="series-output", series_uid=series_b.series_uid
+        )
+        assert len(outputs_b) == 0

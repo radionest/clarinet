@@ -70,6 +70,15 @@ Entity triggers use separate factory functions (`series()`, `study()`, `patient(
 
 File triggers use the `file()` factory function and are stored in `FILE_REGISTRY`.
 
+## Evaluation context shape
+
+`record_context: dict[str, list[RecordRead]]` — list per record type, tree-filtered to
+`ancestors(trigger) ∪ subtree(trigger)` (PATIENT/STUDY/SERIES hierarchy). `_SELF` is
+always a single-element list (the trigger). Custom `.call(func)` callbacks receive the
+same dict as their `context` kwarg — iterate the list when reading. Strategy semantics
+for `record('X').any()/.all()` and `update_record(strategy=...)` are documented in
+`.claude/rules/recordflow-dsl.md`.
+
 ## Invalidation
 
 `invalidate_records()` searches by **patient_id** (broadest scope), enabling cross-level invalidation:
