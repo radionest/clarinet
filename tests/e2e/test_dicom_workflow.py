@@ -244,6 +244,39 @@ async def imported_study(
 
 
 @pytest_asyncio.fixture
+async def anonymize_study_record(
+    test_session: AsyncSession,
+    imported_study: str,
+    db_patient: Patient,
+) -> int:
+    """Seed a tracking Record + RecordType for ``anonymize-study``.
+
+    The /anonymize endpoint returns 404 in background mode unless a Record of
+    type ``settings.anon_record_type_name`` exists for the study (see
+    clarinet/api/routers/dicom.py: ``anonymize_study`` / ``_find_anonymize_record``).
+    """
+    from clarinet.models.base import DicomQueryLevel
+    from clarinet.models.record import Record, RecordType
+
+    record_type_name = settings.anon_record_type_name
+
+    if await test_session.get(RecordType, record_type_name) is None:
+        rt = RecordType(name=record_type_name, level=DicomQueryLevel.STUDY)
+        test_session.add(rt)
+        await test_session.commit()
+
+    record = Record(
+        patient_id=db_patient.id,
+        study_uid=imported_study,
+        record_type_name=record_type_name,
+    )
+    test_session.add(record)
+    await test_session.commit()
+    await test_session.refresh(record)
+    return record.id
+
+
+@pytest_asyncio.fixture
 async def anon_output_dir(tmp_path: Path) -> AsyncGenerator[Path]:
     """Provide a temporary storage dir for anonymized DICOM files."""
     storage_dir = tmp_path / "storage"
@@ -564,6 +597,7 @@ class TestAnonymizationWorkflow:
         pacs_available: None,
         imported_study: str,
         db_patient: Patient,
+        anonymize_study_record: int,
     ) -> None:
         """Background anonymization returns 202 with study_uid."""
         response = await client.post(

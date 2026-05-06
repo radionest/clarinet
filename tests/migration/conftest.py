@@ -68,10 +68,16 @@ def create_pg_database(db_name: str) -> tuple[str, str]:
 
 
 def drop_pg_database(db_name: str, base_url: str) -> None:
-    """Drop a PostgreSQL database."""
+    """Drop a PostgreSQL database, forcibly terminating active connections.
+
+    ``WITH (FORCE)`` (PostgreSQL 13+) makes teardown robust to lingering
+    asyncpg/psycopg2 connections that ``engine.dispose()`` may not have
+    fully closed before this runs (xdist parallel teardown otherwise hits
+    the pytest 30 s timeout on a hanging DROP).
+    """
     admin_engine = create_engine(f"{base_url}/postgres", isolation_level="AUTOCOMMIT")
     with admin_engine.connect() as conn:
-        conn.execute(text(f'DROP DATABASE IF EXISTS "{db_name}"'))
+        conn.execute(text(f'DROP DATABASE IF EXISTS "{db_name}" WITH (FORCE)'))
     admin_engine.dispose()
 
 
