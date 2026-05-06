@@ -6,11 +6,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from clarinet.exceptions.domain import (
-    BusinessRuleViolationError,
-    FileNotFoundError,
-    RecordUniquePerUserError,
-)
+from clarinet.exceptions.domain import BusinessRuleViolationError, RecordUniquePerUserError
+from clarinet.exceptions.domain import FileNotFoundError as DomainFileNotFoundError
 from clarinet.models import Record, RecordRead, RecordStatus
 from clarinet.models.file_schema import FileDefinitionRead, FileRole
 from clarinet.services.file_validation import _build_working_dirs, validate_record_files
@@ -502,7 +499,7 @@ class RecordService:
             None,
         )
         if file_def is None:
-            raise FileNotFoundError(
+            raise DomainFileNotFoundError(
                 f"Output file '{file_name}' is not defined for record {record_id}"
             )
 
@@ -513,7 +510,7 @@ class RecordService:
 
         paths = await self._resolve_paths_for_file_def(file_def, record_read, parent_read)
         if not paths:
-            raise FileNotFoundError(
+            raise DomainFileNotFoundError(
                 f"Output file '{file_name}' is not available on disk for record {record_id}"
             )
         return paths
