@@ -65,6 +65,7 @@ URL constants live in `tests/utils/urls.py`. Status codes: 201 = POST create, 20
 | `/api/records/{id}/data/prefill` | PATCH | 200 | Merge into prefill data |
 | `/api/records/{id}/validate-files` | POST | 200 | Validate files |
 | `/api/records/{id}/check-files` | POST | 200 | Check files |
+| `/api/records/{id}/output-files/{name}` | GET | 200 | Download a single OUTPUT file by `FileDefinition.name` (404 if not defined or not on disk). Auth: `AuthorizedRecordDep` |
 | `/api/records/{id}/fail` | POST | 200 | Manually fail record |
 | `/api/records/{id}/invalidate` | POST | 200 | Invalidate record |
 | `/api/records/{id}/viewers` | GET | 200 | List viewer URIs for all enabled viewers |

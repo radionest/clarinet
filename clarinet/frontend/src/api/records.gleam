@@ -58,6 +58,13 @@ pub fn get_record(id: String) -> Promise(Result(Record, ApiError)) {
   })
 }
 
+// Build the URL used as `<a href download>` to fetch an OUTPUT file.
+// Cookie auth is automatic; the backend's `Content-Disposition: attachment`
+// triggers the browser's native download flow.
+pub fn output_file_download_url(record_id: String, file_name: String) -> String {
+  http_client.api_url("/records/" <> record_id <> "/output-files/" <> file_name)
+}
+
 // Decoder for nested RecordType (RecordTypeBase from backend)
 fn record_type_base_decoder() -> decode.Decoder(RecordType) {
   use name <- decode.field("name", decode.string)
@@ -102,6 +109,11 @@ fn record_type_base_decoder() -> decode.Decoder(RecordType) {
     "single_series",
     decode.string,
   )
+  use file_registry <- decode.optional_field(
+    "file_registry",
+    None,
+    decode.optional(decode.list(file_definition_decoder())),
+  )
 
   let level = case level_str {
     None -> types.Series
@@ -131,7 +143,7 @@ fn record_type_base_decoder() -> decode.Decoder(RecordType) {
     unique_per_user: unique_per_user,
     viewer_mode: viewer_mode,
     level: level,
-    file_registry: None,
+    file_registry: file_registry,
     constraint_role: None,
     records: None,
   ))
@@ -338,6 +350,11 @@ pub fn record_decoder() -> decode.Decoder(Record) {
     None,
     decode.optional(patient_base_decoder()),
   )
+  use file_links <- decode.optional_field(
+    "file_links",
+    None,
+    decode.optional(decode.list(record_file_link_decoder())),
+  )
 
   let status = status.from_backend_string(status_str)
   let data = case data_dyn {
@@ -363,6 +380,7 @@ pub fn record_decoder() -> decode.Decoder(Record) {
     clarinet_storage_path: None,
     files: None,
     file_checksums: None,
+    file_links: file_links,
     patient: patient,
     study: study,
     series: series,
@@ -378,6 +396,22 @@ pub fn record_decoder() -> decode.Decoder(Record) {
     slicer_args_formatted: None,
     slicer_validator_args_formatted: None,
     slicer_all_args_formatted: None,
+  ))
+}
+
+// Decoder for RecordFileLink (per-file link on a record)
+fn record_file_link_decoder() -> decode.Decoder(models.RecordFileLink) {
+  use name <- decode.field("name", decode.string)
+  use filename <- decode.field("filename", decode.string)
+  use checksum <- decode.optional_field(
+    "checksum",
+    None,
+    decode.optional(decode.string),
+  )
+  decode.success(models.RecordFileLink(
+    name: name,
+    filename: filename,
+    checksum: checksum,
   ))
 }
 

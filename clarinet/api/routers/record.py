@@ -7,6 +7,8 @@ Formerly known as task router.
 
 from __future__ import annotations
 
+import mimetypes
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated
 from uuid import UUID
@@ -23,7 +25,7 @@ from fastapi import (
 from fastapi import (
     Path as FastAPIPath,
 )
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from sqlmodel import SQLModel
 from starlette.responses import Response
 
@@ -780,6 +782,32 @@ async def check_record_files(
     """
     changed_files, checksums = await service.check_files(record_id)
     return FileCheckResult(changed_files=changed_files, checksums=checksums)
+
+
+# Anything outside ``[A-Za-z0-9_.-]`` is replaced before going into the
+# Content-Disposition header so a hostile or accidental filename (newline,
+# double quote) cannot break the response framing.
+_UNSAFE_OUTPUT_FILENAME_RE = re.compile(r"[^A-Za-z0-9_.-]")
+
+
+@router.get("/{record_id}/output-files/{file_name}")
+async def download_output_file(
+    record_id: Annotated[int, FastAPIPath(ge=1, le=2147483647)],
+    file_name: Annotated[str, FastAPIPath(pattern=r"^[a-zA-Z_][a-zA-Z0-9_]*$")],
+    _authorized_record: AuthorizedRecordDep,
+    service: RecordServiceDep,
+) -> FileResponse:
+    """Download a single OUTPUT file by ``FileDefinition.name``.
+
+    For ``multiple=True`` definitions returns the lexicographically first
+    glob match for deterministic behavior — a dedicated ZIP endpoint will
+    be added when serving the whole set is needed.
+    """
+    paths = await service.resolve_output_file(record_id, file_name)
+    file_path = sorted(paths)[0]
+    safe_name = _UNSAFE_OUTPUT_FILENAME_RE.sub("_", file_path.name) or "file"
+    media_type = mimetypes.guess_type(str(file_path))[0] or "application/octet-stream"
+    return FileResponse(path=file_path, filename=safe_name, media_type=media_type)
 
 
 _MANUALLY_FAILABLE_STATUSES = (RecordStatus.pending, RecordStatus.inwork)

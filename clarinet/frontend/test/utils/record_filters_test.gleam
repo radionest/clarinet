@@ -38,6 +38,7 @@ fn make_record(
     clarinet_storage_path: None,
     files: None,
     file_checksums: None,
+    file_links: None,
     patient: None,
     study: None,
     series: None,

@@ -54,6 +54,15 @@ pub type FileDefinition {
   )
 }
 
+// Per-file link on a record (matching backend RecordFileLinkRead)
+pub type RecordFileLink {
+  RecordFileLink(
+    name: String,
+    filename: String,
+    checksum: Option(String),
+  )
+}
+
 // Record Type model (matching backend)
 pub type RecordType {
   RecordType(
@@ -102,6 +111,7 @@ pub type Record {
     clarinet_storage_path: Option(String),
     files: Option(Dict(String, String)),
     file_checksums: Option(Dict(String, String)),
+    file_links: Option(List(RecordFileLink)),
     patient: Option(Patient),
     study: Option(Study),
     series: Option(Series),
