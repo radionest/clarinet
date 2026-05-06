@@ -8,7 +8,6 @@ changes and executes registered flows when their conditions are met.
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from clarinet.models.base import DicomQueryLevel
@@ -23,6 +22,7 @@ from .flow_action import (
     UpdateRecordAction,
 )
 from .flow_condition import FlowCondition
+from .flow_context import FlowContext
 from .flow_file import FlowFileRecord
 from .flow_record import FlowRecord
 from .flow_result import _SELF
@@ -69,52 +69,6 @@ def _is_ssl_error(exc: BaseException) -> bool:
             return True
         current = current.__cause__ or current.__context__
     return False
-
-
-@dataclass(frozen=True, slots=True)
-class FlowContext:
-    """Unified execution context for all flow trigger types."""
-
-    record: RecordRead | None = None
-    record_context: dict[str, list[RecordRead]] | None = None
-    patient_id: str | None = None
-    study_uid: str | None = None
-    series_uid: str | None = None
-    file_name: str | None = None
-    source_record: RecordRead | None = None
-
-    @staticmethod
-    def for_record(record: RecordRead, context: dict[str, list[RecordRead]]) -> FlowContext:
-        """Build context for a record-triggered flow."""
-        return FlowContext(
-            record=record,
-            record_context=context,
-            patient_id=record.patient.id,
-            study_uid=record.study.study_uid if record.study else None,
-            series_uid=record.series.series_uid if record.series else None,
-        )
-
-    @staticmethod
-    def for_entity(
-        patient_id: str,
-        study_uid: str | None = None,
-        series_uid: str | None = None,
-    ) -> FlowContext:
-        """Build context for an entity-creation flow."""
-        return FlowContext(patient_id=patient_id, study_uid=study_uid, series_uid=series_uid)
-
-    @staticmethod
-    def for_file(
-        file_name: str,
-        patient_id: str,
-        source_record: RecordRead | None = None,
-    ) -> FlowContext:
-        """Build context for a file-update flow."""
-        return FlowContext(
-            file_name=file_name,
-            patient_id=patient_id,
-            source_record=source_record,
-        )
 
 
 class RecordFlowEngine:
