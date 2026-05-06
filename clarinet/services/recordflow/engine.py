@@ -282,7 +282,10 @@ class RecordFlowEngine:
                 logger.info(
                     f"Executing {trigger_label} flow for '{record_type_name}' (id={record.id})"
                 )
-                await self._execute_flow(flow, record, record_context)
+                # Each flow gets its own shallow-copied dict so per-flow mutations
+                # in _execute_flow (trigger insertion, _SELF) don't leak across
+                # sibling flows registered on the same record type.
+                await self._execute_flow(flow, record, dict(record_context))
 
     async def handle_record_status_change(
         self,
@@ -411,8 +414,10 @@ class RecordFlowEngine:
         - SERIES trigger keeps PATIENT-level + STUDY-level of the same study
           + SERIES-level of the same series. Sibling series are out of scope.
 
-        Records of unknown level (or trigger of unknown level) are rejected
-        defensively.
+        PATIENT-level records always pass — they are the topmost ancestor of
+        any trigger. STUDY-/SERIES-level records require the trigger to expose
+        the matching ``study_uid`` / ``series_uid``; if not (e.g. a malformed
+        trigger with ``record_type is None``) they are rejected defensively.
         """
         if record.record_type is None:
             return False
@@ -527,11 +532,14 @@ class RecordFlowEngine:
             context: Tree-filtered map of record type names to record lists.
         """
         # Ensure trigger is in context list (defensive — tree filter normally
-        # already includes it).
-        trigger_records = context.setdefault(flow.record_name, [])
+        # already includes it). Clone the per-type list before mutating: the
+        # outer dict was shallow-copied by ``_dispatch_flows`` per flow, but the
+        # inner lists are shared and must not leak appends across flows.
+        trigger_records = list(context.get(flow.record_name, []))
         if not any(r.id == record.id for r in trigger_records):
             trigger_records.append(record)
             trigger_records.sort(key=lambda x: x.id or 0)
+        context[flow.record_name] = trigger_records
         context[_SELF] = [record]
 
         ctx = FlowContext.for_record(record, context)

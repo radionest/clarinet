@@ -111,3 +111,10 @@ Two multi-valued sides in one comparison (`record('a').any() == record('b').any(
 is unsupported — reduce one side to a single record or constant.
 
 `Field()` / `F.x` self-references always resolve to the trigger record (single).
+
+### Custom callbacks (`.call(func)`)
+
+`func` receives `context: dict[str, list[RecordRead]]` (same tree-filtered map as
+the DSL conditions see). Earlier this kwarg was `dict[str, RecordRead]`; downstream
+callbacks that read it must iterate the list. `record`, `client`, and any
+`extra_kwargs` from `.call(func, **kwargs)` are unchanged.

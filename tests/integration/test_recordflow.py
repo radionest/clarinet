@@ -1402,12 +1402,14 @@ class TestTreeFilterContext:
         test_study: Study,
         record_types: dict[str, RecordType],
     ):
-        """Default 'single' strategy on multi-record context evaluates condition False.
+        """Default 'single' strategy on multi-record context skips the action.
 
-        Build a PATIENT-level trigger so the context contains both studies'
+        Build a PATIENT-level trigger so context contains both studies'
         first-checks. ``record('first-check').d.X`` (default single) raises
-        AmbiguousContextError; ``FlowCondition`` catches it under
-        ``on_missing='skip'`` (default for ``if_()``) → condition False.
+        :class:`AmbiguousContextError`. ``FlowCondition.evaluate`` re-raises
+        (its own ``on_missing`` defaults to ``"raise"``); the engine's broad
+        ``except Exception`` in ``_evaluate_and_run_condition`` then logs and
+        suppresses the action — sentinel record stays absent.
         """
         from clarinet.models.record import RecordType
 
@@ -1630,3 +1632,103 @@ class TestTreeFilterContext:
         all_first_checks = await clarinet_client.find_records(record_type_name="first-check")
         assert len(all_first_checks) == 2
         assert all(r.status == RecordStatus.pending for r in all_first_checks)
+
+    @pytest.mark.asyncio
+    async def test_series_trigger_excludes_sibling_series(
+        self,
+        clarinet_client: ClarinetClient,
+        flow_engine: RecordFlowEngine,
+        test_session: AsyncSession,
+        test_patient: Patient,
+        test_study: Study,
+        test_series: Series,
+        record_types: dict[str, RecordType],
+    ):
+        """SERIES trigger sees own series records only; sibling-series are out of scope."""
+        from clarinet.models import RecordCreate
+        from clarinet.models.record import RecordType
+        from clarinet.models.study import Series
+
+        # SERIES-level markup-meta (data carrier) + series-output (action sentinel).
+        meta_type = RecordType(
+            name="markup-meta",
+            level=DicomQueryLevel.SERIES,
+            unique_per_user=False,
+        )
+        output_type = RecordType(
+            name="series-output",
+            level=DicomQueryLevel.SERIES,
+            unique_per_user=False,
+        )
+        test_session.add_all([meta_type, output_type])
+        await test_session.commit()
+
+        # Sibling series under the same study.
+        series_b = Series(
+            study_uid=test_study.study_uid,
+            series_uid=f"{test_series.series_uid}.99",
+            series_number=2,
+            series_description="Sibling series",
+        )
+        test_session.add(series_b)
+        await test_session.commit()
+        await test_session.refresh(series_b)
+
+        # markup-meta on each series with different kind. Order matters: series_b's
+        # record gets the larger id (would win under the old last-by-id collapse).
+        async def _make_meta(series_uid: str, kind: str) -> None:
+            meta = await clarinet_client.create_record(
+                RecordCreate(
+                    record_type_name="markup-meta",
+                    patient_id=test_patient.id,
+                    study_uid=test_study.study_uid,
+                    series_uid=series_uid,
+                )
+            )
+            await clarinet_client.submit_record_data(meta.id, {"kind": kind})
+
+        await _make_meta(test_series.series_uid, "manual")
+        await _make_meta(series_b.series_uid, "auto")
+
+        # Flow: series-markup finishes → if own markup-meta.kind == "manual",
+        # create series-output (SERIES-level, inherits series_uid from trigger).
+        flow = FlowRecord("series-markup")
+        flow.on_status("finished").if_(FlowResult("markup-meta", ["kind"]) == "manual").add_record(
+            "series-output"
+        )
+        flow_engine.register_flow(flow)
+
+        # Trigger on series A — own markup-meta.kind == "manual" → True → output created.
+        # Without tree-filter: last-by-id picks series_b's "auto" → False → no output.
+        trigger_a = await clarinet_client.create_record(
+            RecordCreate(
+                record_type_name="series-markup",
+                patient_id=test_patient.id,
+                study_uid=test_study.study_uid,
+                series_uid=test_series.series_uid,
+            )
+        )
+        trigger_a = await clarinet_client.update_record_status(trigger_a.id, RecordStatus.finished)
+        await flow_engine.handle_record_status_change(trigger_a)
+
+        outputs_a = await clarinet_client.find_records(
+            record_type_name="series-output", series_uid=test_series.series_uid
+        )
+        assert len(outputs_a) == 1, "tree-filter must isolate series A's markup-meta"
+
+        # Trigger on series B — own markup-meta.kind == "auto" → False → no output.
+        trigger_b = await clarinet_client.create_record(
+            RecordCreate(
+                record_type_name="series-markup",
+                patient_id=test_patient.id,
+                study_uid=test_study.study_uid,
+                series_uid=series_b.series_uid,
+            )
+        )
+        trigger_b = await clarinet_client.update_record_status(trigger_b.id, RecordStatus.finished)
+        await flow_engine.handle_record_status_change(trigger_b)
+
+        outputs_b = await clarinet_client.find_records(
+            record_type_name="series-output", series_uid=series_b.series_uid
+        )
+        assert len(outputs_b) == 0
