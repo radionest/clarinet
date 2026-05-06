@@ -799,11 +799,12 @@ async def download_output_file(
 ) -> FileResponse:
     """Download a single OUTPUT file by ``FileDefinition.name``.
 
-    For ``multiple=True`` definitions, returns the first glob match — a
-    dedicated ZIP endpoint will be added when needed.
+    For ``multiple=True`` definitions returns the lexicographically first
+    glob match for deterministic behavior — a dedicated ZIP endpoint will
+    be added when serving the whole set is needed.
     """
     paths = await service.resolve_output_file(record_id, file_name)
-    file_path = paths[0]
+    file_path = sorted(paths)[0]
     safe_name = _UNSAFE_OUTPUT_FILENAME_RE.sub("_", file_path.name) or "file"
     media_type = mimetypes.guess_type(str(file_path))[0] or "application/octet-stream"
     return FileResponse(path=file_path, filename=safe_name, media_type=media_type)

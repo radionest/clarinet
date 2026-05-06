@@ -187,16 +187,17 @@ class TestDownloadOutputFileMultiple:
         return {"record": rec, "files": [first, second]}
 
     @pytest.mark.asyncio
-    async def test_download_multiple_glob_returns_one_match(self, client, multi_output_env):
+    async def test_download_multiple_glob_returns_first_lex(self, client, multi_output_env):
+        """``multiple=True``: endpoint deterministically serves the lex-first match."""
         rec = multi_output_env["record"]
-        files = multi_output_env["files"]
+        first = sorted(multi_output_env["files"])[0]
 
         resp = await client.get(f"{RECORDS_BASE}/{rec.id}/output-files/segments")
         assert resp.status_code == 200
-        assert resp.content in {f.read_bytes() for f in files}
+        assert resp.content == first.read_bytes()
         cd = resp.headers["content-disposition"]
         assert "attachment" in cd
-        assert any(f.name in cd for f in files)
+        assert first.name in cd
 
     @pytest.mark.asyncio
     async def test_download_multiple_no_matches_404(self, client, multi_output_env):

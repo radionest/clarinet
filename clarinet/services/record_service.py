@@ -6,7 +6,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from clarinet.exceptions.domain import BusinessRuleViolationError, RecordUniquePerUserError
+from clarinet.exceptions.domain import (
+    BusinessRuleViolationError,
+    RecordUniquePerUserError,
+)
 from clarinet.exceptions.domain import FileNotFoundError as DomainFileNotFoundError
 from clarinet.models import Record, RecordRead, RecordStatus
 from clarinet.models.file_schema import FileDefinitionRead, FileRole
@@ -20,6 +23,16 @@ if TYPE_CHECKING:
     from clarinet.repositories.record_repository import RecordRepository
     from clarinet.services.recordflow.engine import RecordFlowEngine
     from clarinet.types import RecordData
+
+
+def _filter_in_sandbox(paths: list[Path], sandbox: Path) -> list[Path]:
+    """Drop paths whose resolved location escapes the sandbox directory.
+
+    Both ``Path.resolve()`` calls hit the filesystem (symlink chasing), so
+    callers should run this through ``run_in_fs_thread``.
+    """
+    sandbox_resolved = sandbox.resolve()
+    return [p for p in paths if p.resolve().is_relative_to(sandbox_resolved)]
 
 
 class RecordService:
@@ -445,7 +458,6 @@ class RecordService:
             if file_def.level and file_def.level in working_dirs
             else working_dir
         )
-        target_resolved = target_dir.resolve()
 
         if file_def.multiple:
             candidates = await run_in_fs_thread(glob_file_paths, file_def, target_dir)
@@ -455,7 +467,7 @@ class RecordService:
                 return []
             candidates = [file_path]
 
-        return [p for p in candidates if p.resolve().is_relative_to(target_resolved)]
+        return await run_in_fs_thread(_filter_in_sandbox, candidates, target_dir)
 
     async def _collect_output_file_paths(
         self,
