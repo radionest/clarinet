@@ -80,13 +80,35 @@ class FlowRecord:
 
     @property
     def data(self) -> FlowResult:
-        """Get a FlowResult object for this record's data fields."""
+        """Get a FlowResult object for this record's data fields (single)."""
         return FlowResult(self.record_name)
 
     @property
     def d(self) -> FlowResult:
         """Shorthand for data property."""
         return self.data
+
+    def any(self) -> FlowResult:
+        """Return a FlowResult for this record type with ``any``-strategy.
+
+        Use when the context may contain multiple records of this type and
+        the comparison should succeed if any one of them matches.
+
+        Example:
+            record('first-check').any().d.is_good == True
+        """
+        return FlowResult(self.record_name, strategy="any")
+
+    def all(self) -> FlowResult:
+        """Return a FlowResult for this record type with ``all``-strategy.
+
+        Use when every record of this type in context must match. An empty
+        list yields ``False`` (no records ⇒ no match).
+
+        Example:
+            record('segment').all().d.status == "approved"
+        """
+        return FlowResult(self.record_name, strategy="all")
 
     def on_status(self, status: str | RecordStatus) -> FlowRecord:
         """Define which status change triggers this flow.
@@ -371,7 +393,10 @@ class FlowRecord:
 
         Args:
             record_name: The name of the record type to update.
-            **kwargs: Parameters to update (e.g., status='finished').
+            **kwargs: Parameters to update (``status``, ``strategy``).
+                ``strategy='single'`` (default): skip with error log if
+                context contains 0 or >1 records of this type.
+                ``strategy='all'``: apply update to every matching record.
 
         Returns:
             Self for method chaining.
@@ -379,6 +404,7 @@ class FlowRecord:
         action = UpdateRecordAction(
             record_name=record_name,
             status=kwargs.get("status"),  # type: ignore[arg-type]
+            strategy=kwargs.get("strategy", "single"),  # type: ignore[arg-type]
         )
 
         if self._current_condition:

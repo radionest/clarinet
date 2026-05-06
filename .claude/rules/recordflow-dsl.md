@@ -23,7 +23,7 @@ paths:
 - `.default()` — fallback branch; fires only when no case matched (and guard is True)
 - `.add_record('type', **kwargs)` → `CreateRecordAction` (supports `parent_record_id`, `inherit_user` kwargs)
 - `.create_record('type1', 'type2', inherit_user=False)` — convenience wrapper calling `.add_record()` for each name
-- `.update_record('name', status='new_status')` → `UpdateRecordAction`
+- `.update_record('name', status='new_status', strategy='single'|'all')` → `UpdateRecordAction`. `strategy='single'` (default): skip with error log if context contains 0 or >1 matching records. `strategy='all'`: apply to every match.
 - `.invalidate_records('type1', 'type2', mode='hard'|'soft', callback=fn)` → `InvalidateRecordsAction`
 - `.invalidate_all_records(...)` — alias for `.invalidate_records()`
 - `.pipeline('name', **extra_payload)` → `PipelineAction` (dispatches to pipeline service)
@@ -80,3 +80,34 @@ record("first_check")
 `on_missing="raise"`: missing fields → propagate error.
 
 Comparison operators: `==`, `!=`, `<`, `<=`, `>`, `>=`
+
+## Tree-filtered context
+
+When a record-trigger fires, the engine builds `record_context: dict[str, list[RecordRead]]`
+filtered by the **DICOM tree slice** of the trigger — `ancestors(trigger) ∪ subtree(trigger)`.
+Sibling branches are excluded:
+
+| Trigger.level | Records in context |
+|---|---|
+| `SERIES` | PATIENT-level (same `patient_id`) + STUDY-level (same `study_uid`) + SERIES-level (same `series_uid`) |
+| `STUDY` | PATIENT-level (same `patient_id`) + STUDY-level (same `study_uid`) + SERIES-level of any series in that study |
+| `PATIENT` | every record of the patient (entire subtree) |
+
+Multiple records of the same type may appear in one list (e.g. PATIENT-trigger sees one
+`first-check` per study). Use a strategy modifier on `record(...)`:
+
+```python
+# Default — single record expected; >1 raises AmbiguousContextError
+record('first-check').d.is_good == True
+
+# At least one record matches
+record('first-check').any().d.is_good == True
+
+# Every record matches (empty list ⇒ False)
+record('measurement').all().d.value > 100
+```
+
+Two multi-valued sides in one comparison (`record('a').any() == record('b').any()`)
+is unsupported — reduce one side to a single record or constant.
+
+`Field()` / `F.x` self-references always resolve to the trigger record (single).

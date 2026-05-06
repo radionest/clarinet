@@ -47,11 +47,16 @@ class UpdateRecordAction(_ActionBase):
     Args:
         record_name: Name of the record type to update in context.
         status: Optional new status value.
+        strategy: Selection strategy when context contains multiple records of
+            this type. ``"single"`` (default) skips with an error log if more
+            than one record is found — author must disambiguate. ``"all"``
+            applies the update to every record in the context list.
     """
 
     type: Literal["update_record"] = "update_record"
     record_name: str
     status: str | None = None
+    strategy: Literal["single", "all"] = "single"
 
 
 class CallFunctionAction(_ActionBase):

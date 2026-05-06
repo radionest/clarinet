@@ -49,7 +49,7 @@ class FlowCondition:
         """Add an action to execute when this condition is true."""
         self.actions.append(action)
 
-    def evaluate(self, record_context: dict[str, RecordRead]) -> bool:
+    def evaluate(self, record_context: dict[str, list[RecordRead]]) -> bool:
         """Evaluate whether this condition is true given the record context.
 
         When ``on_missing="skip"``, missing or None fields cause the condition
