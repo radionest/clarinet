@@ -550,6 +550,8 @@ fn render_record_execution(
     ]),
     // Slicer toolbar (only if record type has slicer_script)
     render_slicer_toolbar(model, record, shared.translate),
+    // Output files (only if record type defines any OUTPUT file_registry entries)
+    render_output_files(record),
     // Dynamic form based on record type's data_schema
     html.div([attribute.class("record-form-container card")], [
       case record.record_type {
@@ -654,6 +656,73 @@ fn render_slicer_toolbar(
         ],
       ),
     ]),
+  ])
+}
+
+fn render_output_files(record: Record) -> Element(Msg) {
+  let output_defs = case record.record_type {
+    Some(rt) ->
+      case rt.file_registry {
+        Some(defs) -> list.filter(defs, fn(d) { d.role == models.Output })
+        None -> []
+      }
+    None -> []
+  }
+
+  case output_defs {
+    [] -> element.none()
+    defs ->
+      html.div([attribute.class("output-files card")], [
+        html.h4([], [html.text("Output Files")]),
+        html.ul(
+          [attribute.class("output-files-list")],
+          list.map(defs, fn(file_def) { render_output_file_item(record, file_def) }),
+        ),
+      ])
+  }
+}
+
+fn render_output_file_item(
+  record: Record,
+  file_def: models.FileDefinition,
+) -> Element(Msg) {
+  let label = case file_def.description {
+    Some(desc) -> desc
+    None -> file_def.name
+  }
+
+  let link_lookup = case record.file_links {
+    Some(links) -> list.find(links, fn(l) { l.name == file_def.name })
+    None -> Error(Nil)
+  }
+
+  let action = case link_lookup, record.id {
+    Ok(file_link), Some(id) ->
+      html.a(
+        [
+          attribute.class("btn btn-sm btn-outline"),
+          attribute.href(records.output_file_download_url(
+            int.to_string(id),
+            file_def.name,
+          )),
+          attribute.attribute("download", file_link.filename),
+        ],
+        [html.text("Download")],
+      )
+    _, _ ->
+      html.span(
+        [
+          attribute.class("btn btn-sm btn-outline disabled"),
+          attribute.attribute("aria-disabled", "true"),
+          attribute.title("File not yet available"),
+        ],
+        [html.text("Not available")],
+      )
+  }
+
+  html.li([attribute.class("output-file-item")], [
+    html.span([attribute.class("output-file-name")], [html.text(label)]),
+    action,
   ])
 }
 

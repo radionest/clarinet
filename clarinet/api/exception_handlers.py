@@ -40,6 +40,7 @@ def setup_exception_handlers(app: FastAPI) -> None:
         SlicerError,
         ValidationError,
     )
+    from clarinet.exceptions.domain import FileNotFoundError as DomainFileNotFoundError
     from clarinet.utils.pagination import InvalidCursorError
 
     @app.exception_handler(EntityNotFoundError)
@@ -217,6 +218,16 @@ def setup_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(FileNotFoundError)
     async def handle_file_not_found(_: Request, exc: FileNotFoundError) -> JSONResponse:
         """Convert FileNotFoundError to 404 response."""
+        return JSONResponse(
+            status_code=status.HTTP_404_NOT_FOUND,
+            content={"detail": str(exc) if str(exc) else "Resource not found"},
+        )
+
+    @app.exception_handler(DomainFileNotFoundError)
+    async def handle_domain_file_not_found(
+        _: Request, exc: DomainFileNotFoundError
+    ) -> JSONResponse:
+        """Convert domain FileNotFoundError (not a builtin subclass) to 404."""
         return JSONResponse(
             status_code=status.HTTP_404_NOT_FOUND,
             content={"detail": str(exc) if str(exc) else "Resource not found"},

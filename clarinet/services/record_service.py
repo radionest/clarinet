@@ -6,9 +6,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from clarinet.exceptions.domain import BusinessRuleViolationError, RecordUniquePerUserError
+from clarinet.exceptions.domain import (
+    BusinessRuleViolationError,
+    FileNotFoundError,
+    RecordUniquePerUserError,
+)
 from clarinet.models import Record, RecordRead, RecordStatus
-from clarinet.models.file_schema import FileRole
+from clarinet.models.file_schema import FileDefinitionRead, FileRole
 from clarinet.services.file_validation import _build_working_dirs, validate_record_files
 from clarinet.utils.file_checksums import checksums_changed, compute_checksums
 from clarinet.utils.file_patterns import glob_file_paths, resolve_pattern
@@ -421,6 +425,41 @@ class RecordService:
         )
         return deleted_ids, files_removed
 
+    async def _resolve_paths_for_file_def(
+        self,
+        file_def: FileDefinitionRead,
+        record_read: RecordRead,
+        parent_read: RecordRead | None,
+    ) -> list[Path]:
+        """Resolve on-disk paths for one ``FileDefinition``, sandboxed to its target dir.
+
+        For ``multiple=True`` returns all glob matches inside the resolved
+        target directory; paths escaping via symlinks or ``..`` are filtered
+        out (defence in depth — patterns are admin-controlled but the guard
+        keeps this method safe for any caller).
+
+        For ``multiple=False`` returns a single-element list when the
+        resolved path exists on disk, else an empty list.
+        """
+        working_dir = Path(record_read.working_folder)
+        working_dirs = _build_working_dirs(record_read)
+        target_dir = (
+            working_dirs[file_def.level]
+            if file_def.level and file_def.level in working_dirs
+            else working_dir
+        )
+        target_resolved = target_dir.resolve()
+
+        if file_def.multiple:
+            candidates = await run_in_fs_thread(glob_file_paths, file_def, target_dir)
+        else:
+            file_path = target_dir / resolve_pattern(file_def.pattern, record_read, parent_read)
+            if not await run_in_fs_thread(file_path.is_file):
+                return []
+            candidates = [file_path]
+
+        return [p for p in candidates if p.resolve().is_relative_to(target_resolved)]
+
     async def _collect_output_file_paths(
         self,
         record_read: RecordRead,
@@ -436,21 +475,48 @@ class RecordService:
         if not output_defs:
             return []
 
-        working_dir = Path(record_read.working_folder)
-        working_dirs = _build_working_dirs(record_read)
-
         resolved: list[Path] = []
         for fd in output_defs:
-            target_dir = (
-                working_dirs[fd.level] if fd.level and fd.level in working_dirs else working_dir
-            )
-            if fd.multiple:
-                resolved.extend(await run_in_fs_thread(glob_file_paths, fd, target_dir))
-            else:
-                file_path = target_dir / resolve_pattern(fd.pattern, record_read, parent_read)
-                if await run_in_fs_thread(file_path.is_file):
-                    resolved.append(file_path)
+            resolved.extend(await self._resolve_paths_for_file_def(fd, record_read, parent_read))
         return resolved
+
+    async def resolve_output_file(self, record_id: int, file_name: str) -> list[Path]:
+        """Resolve OUTPUT file path(s) for a record by ``FileDefinition.name``.
+
+        Returns a list to support both ``multiple=False`` (single path) and
+        ``multiple=True`` (glob expansion) without changing the contract.
+
+        Raises:
+            FileNotFoundError: If the name is not an OUTPUT definition for
+                this record's type, or no matching files exist on disk.
+        """
+        record = await self.repo.get_with_relations(record_id)
+        record_read = RecordRead.model_validate(record)
+
+        file_def = next(
+            (
+                fd
+                for fd in (record_read.record_type.file_registry or [])
+                if fd.role == FileRole.OUTPUT and fd.name == file_name
+            ),
+            None,
+        )
+        if file_def is None:
+            raise FileNotFoundError(
+                f"Output file '{file_name}' is not defined for record {record_id}"
+            )
+
+        parent_read: RecordRead | None = None
+        if record.parent_record_id is not None:
+            parent = await self.repo.get_with_relations(record.parent_record_id)
+            parent_read = RecordRead.model_validate(parent)
+
+        paths = await self._resolve_paths_for_file_def(file_def, record_read, parent_read)
+        if not paths:
+            raise FileNotFoundError(
+                f"Output file '{file_name}' is not available on disk for record {record_id}"
+            )
+        return paths
 
     async def clear_output_files(self, record_id: int) -> tuple[list[str], int]:
         """Delete OUTPUT files from disk and their RecordFileLink rows.
