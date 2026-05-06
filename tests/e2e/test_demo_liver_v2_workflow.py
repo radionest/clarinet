@@ -394,14 +394,13 @@ def captured_pipelines():
     captures: list[tuple[str, PipelineMessage]] = []
 
     async def mock_run_pipeline(
-        self: RecordFlowEngine,
         action: Any,
         message: PipelineMessage,
         context: str,
     ) -> None:
         captures.append((action.pipeline_name, message))
 
-    with patch.object(RecordFlowEngine, "_run_pipeline", mock_run_pipeline):
+    with patch("clarinet.services.recordflow.action_handlers.run_pipeline", new=mock_run_pipeline):
         yield captures
 
 
