@@ -70,7 +70,7 @@ class SyncRecordQuery:
         series_uid: str | None = None,
         study_uid: str | None = None,
         patient_id: str | None = None,
-        status: Any | None = None,
+        status: RecordStatus | None = None,
         limit: int = 100,
     ) -> list[RecordRead]:
         """Find records by criteria (sync version of ``RecordQuery.find``)."""
@@ -94,7 +94,7 @@ class SyncRecordQuery:
         series_uid: str | None = None,
         study_uid: str | None = None,
         patient_id: str | None = None,
-        status: Any | None = None,
+        status: RecordStatus | None = None,
     ) -> Path:
         """Find a record and resolve a file path (sync version of ``RecordQuery.file_path``)."""
         return _call_async(
