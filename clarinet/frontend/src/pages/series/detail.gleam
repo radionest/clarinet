@@ -83,29 +83,30 @@ pub fn update(
       shared.Navigate(router.StudyDetail(study_uid)),
     ])
 
-    OpenAddRecord ->
-      case dict.get(shared.cache.series, model.series_uid) {
-        Ok(s) -> {
-          // Series.study is eager-loaded by `get_series`; if it's somehow
-          // missing we can't safely prefill the patient field.
+    OpenAddRecord -> {
+      // The Add Record button is rendered only inside `render_detail`, which
+      // runs only when both the cache entry and its eager-loaded `study`
+      // are present — so `dict.get` and `s.study` are unwrapped without a
+      // user-visible fallback. A silent no-op covers the unreachable race
+      // (cache cleared between view render and click).
+      let out_msgs = case dict.get(shared.cache.series, model.series_uid) {
+        Ok(s) ->
           case s.study {
-            Some(study) -> #(model, effect.none(), [
-              shared.OpenCreateRecordModal(shared.OpenCreateRecordModalArgs(
-                page_level: shared.SeriesLevel,
-                patient_id: study.patient_id,
-                study_uid: Some(s.study_uid),
-                series_uid: Some(s.series_uid),
-              )),
-            ])
-            None -> #(model, effect.none(), [
-              shared.ShowError("Series parent not loaded yet"),
-            ])
+            Some(study) -> [
+              shared.OpenCreateRecordModal(
+                shared.SeriesArgs(
+                  patient_id: study.patient_id,
+                  study_uid: s.study_uid,
+                  series_uid: s.series_uid,
+                ),
+              ),
+            ]
+            None -> []
           }
-        }
-        Error(_) -> #(model, effect.none(), [
-          shared.ShowError("Series not loaded yet"),
-        ])
+        Error(_) -> []
       }
+      #(model, effect.none(), out_msgs)
+    }
   }
 }
 

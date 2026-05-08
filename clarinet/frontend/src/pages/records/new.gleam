@@ -112,31 +112,33 @@ pub fn init_modal(
   args: shared.OpenCreateRecordModalArgs,
   _shared: Shared,
 ) -> #(Model, Effect(Msg), List(OutMsg)) {
-  let study_uid_str = case args.study_uid {
-    Some(uid) -> uid
-    None -> ""
-  }
-  let series_uid_str = case args.series_uid {
-    Some(uid) -> uid
-    None -> ""
+  let #(patient_id, study_uid_str, series_uid_str) = case args {
+    shared.PatientArgs(pid) -> #(pid, "", "")
+    shared.StudyArgs(pid, suid) -> #(pid, suid, "")
+    shared.SeriesArgs(pid, suid, seruid) -> #(pid, suid, seruid)
   }
   let form_data =
     record_form.RecordFormData(
       record_type_name: "",
-      patient_id: args.patient_id,
+      patient_id: patient_id,
       study_uid: study_uid_str,
       series_uid: series_uid_str,
       user_id: "",
       parent_record_id: "",
       context_info: "",
     )
-  let studies_eff = case args.patient_id {
-    "" -> effect.none()
-    pid -> load_studies_for_patient(1, pid)
+  // Studies list is only needed when the user can actually pick a study
+  // (i.e. the source page didn't already pin one). Otherwise the studies
+  // dropdown is replaced by a locked input, and an HTTP fetch would be wasted.
+  let studies_eff = case args {
+    shared.PatientArgs(pid) -> load_studies_for_patient(1, pid)
+    shared.StudyArgs(_, _) | shared.SeriesArgs(_, _, _) -> effect.none()
   }
-  let series_eff = case study_uid_str {
-    "" -> effect.none()
-    uid -> load_series_for_study(1, uid)
+  // Series list is only needed when a study is pinned but no series — i.e.
+  // the user is on a Study page picking a series-level RecordType.
+  let series_eff = case args {
+    shared.StudyArgs(_, suid) -> load_series_for_study(1, suid)
+    shared.PatientArgs(_) | shared.SeriesArgs(_, _, _) -> effect.none()
   }
   let model =
     Model(
@@ -149,9 +151,9 @@ pub fn init_modal(
       studies_request_id: 1,
       series_request_id: 1,
     )
-  // Modal flow is admin-only (gated by the caller), so we always need the
-  // user picker too — but the modal hides the field by default; loading users
-  // would be wasted. RecordTypes is the one universally required cache.
+  // The full-page form's `init` also reloads patients and (for admins) users;
+  // the modal hides those pickers entirely (`hidden_fields` in the view), so
+  // we skip the corresponding HTTP. RecordTypes remain mandatory.
   #(model, effect.batch([studies_eff, series_eff]), [shared.ReloadRecordTypes])
 }
 
@@ -171,12 +173,20 @@ pub fn update(
       // study_uid / series_uid). Restore them from `args` so a type swap
       // doesn't break a form whose disabled inputs still display the value.
       let new_data = case model.host_mode {
-        Modal(args) ->
+        Modal(shared.PatientArgs(pid)) ->
+          record_form.RecordFormData(..raw_new_data, patient_id: pid)
+        Modal(shared.StudyArgs(pid, suid)) ->
           record_form.RecordFormData(
             ..raw_new_data,
-            patient_id: args.patient_id,
-            study_uid: option.unwrap(args.study_uid, raw_new_data.study_uid),
-            series_uid: option.unwrap(args.series_uid, raw_new_data.series_uid),
+            patient_id: pid,
+            study_uid: suid,
+          )
+        Modal(shared.SeriesArgs(pid, suid, seruid)) ->
+          record_form.RecordFormData(
+            ..raw_new_data,
+            patient_id: pid,
+            study_uid: suid,
+            series_uid: seruid,
           )
         FullPage -> raw_new_data
       }
@@ -313,19 +323,12 @@ pub fn update(
           // Stay on the source page, refresh the records section for that
           // page's context (bucket for Patient/Study, get_series re-fetch
           // for Series since its records are nested in the Series object).
-          let invalidate = case args.page_level {
-            shared.PatientLevel ->
-              shared.InvalidateBucket(bucket.RecordsByPatient(args.patient_id))
-            shared.StudyLevel ->
-              case args.study_uid {
-                Some(uid) -> shared.InvalidateBucket(bucket.RecordsByStudy(uid))
-                None -> shared.InvalidateAllRecordBuckets
-              }
-            shared.SeriesLevel ->
-              case args.series_uid {
-                Some(uid) -> shared.ReloadSeries(uid)
-                None -> shared.InvalidateAllRecordBuckets
-              }
+          let invalidate = case args {
+            shared.PatientArgs(pid) ->
+              shared.InvalidateBucket(bucket.RecordsByPatient(pid))
+            shared.StudyArgs(_, suid) ->
+              shared.InvalidateBucket(bucket.RecordsByStudy(suid))
+            shared.SeriesArgs(_, _, seruid) -> shared.ReloadSeries(seruid)
           }
           #(Model(..model, loading: False), effect.none(), [
             shared.CacheRecord(record),
@@ -433,26 +436,24 @@ pub fn view(model: Model, shared: Shared) -> Element(Msg) {
   }
 }
 
-fn compute_locked_fields(host_mode: HostMode) -> List(String) {
+/// Compute which form fields render as read-only inputs.
+/// Public for unit testing — the body is a pure function of `host_mode`.
+pub fn compute_locked_fields(host_mode: HostMode) -> List(String) {
   case host_mode {
     FullPage -> []
-    Modal(args) -> {
-      // Patient is always known when the modal opens — the source page
-      // sits at or below patient level in the DICOM hierarchy.
-      let base = ["patient_id"]
-      let with_study = case args.study_uid {
-        Some(_) -> ["study_uid", ..base]
-        None -> base
-      }
-      case args.series_uid {
-        Some(_) -> ["series_uid", ..with_study]
-        None -> with_study
-      }
-    }
+    Modal(shared.PatientArgs(_)) -> ["patient_id"]
+    Modal(shared.StudyArgs(_, _)) -> ["study_uid", "patient_id"]
+    Modal(shared.SeriesArgs(_, _, _)) -> [
+      "series_uid",
+      "study_uid",
+      "patient_id",
+    ]
   }
 }
 
-fn compute_hidden_fields(host_mode: HostMode) -> List(String) {
+/// Compute which form fields are entirely omitted from the rendered form.
+/// Public for unit testing — the body is a pure function of `host_mode`.
+pub fn compute_hidden_fields(host_mode: HostMode) -> List(String) {
   case host_mode {
     FullPage -> []
     Modal(_) -> ["user_id", "parent_record_id"]

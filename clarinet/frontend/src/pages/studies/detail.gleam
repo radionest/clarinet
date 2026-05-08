@@ -118,12 +118,12 @@ pub fn update(
     OpenAddRecord ->
       case dict.get(shared.cache.studies, model.study_uid) {
         Ok(s) -> #(model, effect.none(), [
-          shared.OpenCreateRecordModal(shared.OpenCreateRecordModalArgs(
-            page_level: shared.StudyLevel,
-            patient_id: s.patient_id,
-            study_uid: Some(model.study_uid),
-            series_uid: None,
-          )),
+          shared.OpenCreateRecordModal(
+            shared.StudyArgs(
+              patient_id: s.patient_id,
+              study_uid: model.study_uid,
+            ),
+          ),
         ])
         Error(_) -> #(model, effect.none(), [
           shared.ShowError("Study not loaded yet"),

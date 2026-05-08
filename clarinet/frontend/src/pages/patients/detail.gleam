@@ -260,12 +260,7 @@ pub fn update(
     ])
 
     OpenAddRecord -> #(model, effect.none(), [
-      shared.OpenCreateRecordModal(shared.OpenCreateRecordModalArgs(
-        page_level: shared.PatientLevel,
-        patient_id: model.patient_id,
-        study_uid: None,
-        series_uid: None,
-      )),
+      shared.OpenCreateRecordModal(shared.PatientArgs(model.patient_id)),
     ])
   }
 }

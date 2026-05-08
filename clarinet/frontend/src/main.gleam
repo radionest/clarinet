@@ -1086,7 +1086,7 @@ fn render_create_record_modal(
     [
       html.div(
         [
-          attribute.class("modal modal-large"),
+          attribute.class("modal"),
           event.on_click(store.NoOp) |> event.stop_propagation,
         ],
         [

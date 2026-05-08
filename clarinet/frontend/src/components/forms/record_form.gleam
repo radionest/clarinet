@@ -271,7 +271,9 @@ fn is_hidden(name: String, hidden_fields: List(String)) -> Bool {
 }
 
 // Read-only input rendered in place of an interactive select for prefilled,
-// non-editable fields. The value is shown but cannot be changed.
+// non-editable fields. `readonly` blocks edits without the greyed-out visual
+// of `disabled` — the user is meant to see the field as "context from the
+// source page", not as "this field is broken".
 fn locked_input(name: String, display: String) -> Element(msg) {
   html.input([
     attribute.type_("text"),
@@ -279,7 +281,6 @@ fn locked_input(name: String, display: String) -> Element(msg) {
     attribute.name(name),
     attribute.value(display),
     attribute.class("form-input"),
-    attribute.disabled(True),
     attribute.readonly(True),
   ])
 }
