@@ -168,15 +168,24 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         effect.map(preload.stop_timer(model.preload), store.PreloadMsg)
       let cleanup_effect = effect.batch([page_cleanup, preload_cleanup])
       let was_preloading = preload.is_active(model.preload)
+      // Force-close the create-record modal on navigation: it carries a live
+      // record_new MVU instance with in-flight HTTP and is bound to the
+      // page that opened it. ConfirmDelete / FailRecordPrompt are stateless
+      // markers and are handled by the existing preload-only branch.
+      let has_create_record_modal = case model.modal_content {
+        store.CreateRecord(_) -> True
+        _ -> False
+      }
+      let should_close_modal = was_preloading || has_create_record_modal
       let new_model =
         store.Model(
           ..store.set_route(model, route),
           preload: preload.init(),
-          modal_open: case was_preloading {
+          modal_open: case should_close_modal {
             True -> False
             False -> model.modal_open
           },
-          modal_content: case was_preloading {
+          modal_content: case should_close_modal {
             True -> store.NoModal
             False -> model.modal_content
           },
@@ -339,6 +348,8 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     store.ClearSuccessMessage -> {
       #(store.Model(..model, success_message: None), effect.none())
     }
+
+    store.NoOp -> #(model, effect.none())
 
     // Cache delegation (all data loading, caches, auto-assign)
     store.CacheMsg(cmsg) -> delegate_cache(model, cmsg)
@@ -516,6 +527,27 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         store.RecordNewPage,
         store.RecordNewMsg,
       )
+
+    // Modal-hosted instance of record_new — same update fn, different
+    // storage slot (modal_content) and msg wrapper.
+    store.RecordNewModalMsg(page_msg) ->
+      case model.modal_content {
+        store.CreateRecord(pm) -> {
+          let #(new_pm, eff, out_msgs) =
+            record_new.update(pm, page_msg, build_shared(model))
+          let model_with_pm =
+            store.Model(..model, modal_content: store.CreateRecord(new_pm))
+          let #(model_after, out_effs) = apply_out_msgs(model_with_pm, out_msgs)
+          #(
+            model_after,
+            effect.batch([
+              effect.map(eff, store.RecordNewModalMsg),
+              out_effs,
+            ]),
+          )
+        }
+        _ -> #(model, effect.none())
+      }
 
     // Study/Series page delegation
     store.StudiesListMsg(page_msg) ->
@@ -839,6 +871,8 @@ fn apply_out_msgs(
           #(m, [dispatch_msg(store.CacheMsg(cache.LoadPatientDetail(id))), ..eff_list])
         shared.ReloadRecord(id) ->
           #(m, [dispatch_msg(store.CacheMsg(cache.LoadRecordDetail(id, m.user))), ..eff_list])
+        shared.ReloadSeries(uid) ->
+          #(m, [dispatch_msg(store.CacheMsg(cache.LoadSeriesDetail(uid))), ..eff_list])
         shared.OpenDeleteConfirm(resource, id) ->
           #(
             store.Model(..m, modal_open: True, modal_content: store.ConfirmDelete(resource, id)),
@@ -852,6 +886,29 @@ fn apply_out_msgs(
               modal_content: store.FailRecordPrompt(record_id),
               fail_reason: "",
             ),
+            eff_list,
+          )
+        shared.OpenCreateRecordModal(args) -> {
+          // Spawn an embedded record_new instance prefilled with the source
+          // page context. Its init OutMsgs (e.g. ReloadRecordTypes) are
+          // applied recursively via apply_out_msgs.
+          let #(modal_model, modal_eff, modal_out) =
+            record_new.init_modal(args, build_shared(m))
+          let #(m_after_inner, inner_eff) = apply_out_msgs(m, modal_out)
+          let new_m =
+            store.Model(
+              ..m_after_inner,
+              modal_open: True,
+              modal_content: store.CreateRecord(modal_model),
+            )
+          #(
+            new_m,
+            [effect.map(modal_eff, store.RecordNewModalMsg), inner_eff, ..eff_list],
+          )
+        }
+        shared.CloseRecordModal ->
+          #(
+            store.Model(..m, modal_open: False, modal_content: store.NoModal),
             eff_list,
           )
         shared.SetUser(user) ->
@@ -1008,8 +1065,42 @@ fn render_route_placeholder(route: Route) -> Element(Msg) {
 fn render_modal(model: Model) -> Element(Msg) {
   case model.modal_content {
     store.FailRecordPrompt(record_id) -> render_fail_modal(model, record_id)
+    store.CreateRecord(pm) -> render_create_record_modal(model, pm)
     _ -> render_confirm_modal(model)
   }
+}
+
+fn render_create_record_modal(
+  model: Model,
+  pm: record_new.Model,
+) -> Element(Msg) {
+  let shared = build_shared(model)
+  html.div(
+    [
+      attribute.class("modal-backdrop"),
+      // Click on the dark backdrop closes the modal. Clicks inside the
+      // `.modal` element below stop propagation via the `NoOp` handler so
+      // they don't bubble up to this listener.
+      event.on_click(store.CloseModal),
+    ],
+    [
+      html.div(
+        [
+          attribute.class("modal modal-large"),
+          event.on_click(store.NoOp) |> event.stop_propagation,
+        ],
+        [
+          html.div([attribute.class("modal-header")], [
+            html.h3([attribute.class("modal-title")], [html.text("New Record")]),
+          ]),
+          html.div(
+            [attribute.class("modal-body")],
+            [element.map(record_new.view(pm, shared), store.RecordNewModalMsg)],
+          ),
+        ],
+      ),
+    ],
+  )
 }
 
 fn render_fail_modal(model: Model, record_id: String) -> Element(Msg) {

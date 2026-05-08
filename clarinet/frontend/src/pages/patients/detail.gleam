@@ -25,6 +25,7 @@ import lustre/event
 import router
 import shared.{type OutMsg, type Shared}
 import utils/load_status.{type LoadStatus}
+import utils/permissions
 import utils/record_filters
 
 // --- Model ---
@@ -64,6 +65,7 @@ pub type Msg {
   // Navigation
   NavigateBack
   RequestDelete
+  OpenAddRecord
 }
 
 // --- Init ---
@@ -256,6 +258,15 @@ pub fn update(
     RequestDelete -> #(model, effect.none(), [
       shared.OpenDeleteConfirm("patient", model.patient_id),
     ])
+
+    OpenAddRecord -> #(model, effect.none(), [
+      shared.OpenCreateRecordModal(shared.OpenCreateRecordModalArgs(
+        page_level: shared.PatientLevel,
+        patient_id: model.patient_id,
+        study_uid: None,
+        series_uid: None,
+      )),
+    ])
   }
 }
 
@@ -291,6 +302,10 @@ fn render_detail(model: Model, shared: Shared, patient: Patient) -> Element(Msg)
       int.compare(option.unwrap(a.id, 0), option.unwrap(b.id, 0))
     })
 
+  let is_admin = case shared.user {
+    Some(u) -> permissions.is_admin_user(u)
+    None -> False
+  }
   html.div([attribute.class("container")], [
     html.div([attribute.class("page-header")], [
       html.h1([], [html.text("Patient: " <> patient.id)]),
@@ -302,6 +317,17 @@ fn render_detail(model: Model, shared: Shared, patient: Patient) -> Element(Msg)
           ],
           [html.text("Back to Patients")],
         ),
+        case is_admin {
+          True ->
+            html.button(
+              [
+                attribute.class("btn btn-primary"),
+                event.on_click(OpenAddRecord),
+              ],
+              [html.text("Add Record")],
+            )
+          False -> element.none()
+        },
         html.button(
           [
             attribute.class("btn btn-danger"),

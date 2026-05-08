@@ -20,6 +20,7 @@ import lustre/event
 import router
 import shared.{type OutMsg, type Shared}
 import utils/load_status.{type LoadStatus}
+import utils/permissions
 import utils/viewer
 
 // --- Model ---
@@ -37,6 +38,7 @@ pub type Msg {
   NavigateBack
   RequestDelete
   RetryLoad
+  OpenAddRecord
 }
 
 // --- Init ---
@@ -63,7 +65,7 @@ fn load_study_effect(study_uid: String) -> Effect(Msg) {
 pub fn update(
   model: Model,
   msg: Msg,
-  _shared: Shared,
+  shared: Shared,
 ) -> #(Model, Effect(Msg), List(OutMsg)) {
   case msg {
     StudyLoaded(Ok(study)) -> #(
@@ -112,6 +114,21 @@ pub fn update(
     RequestDelete -> #(model, effect.none(), [
       shared.OpenDeleteConfirm("study", model.study_uid),
     ])
+
+    OpenAddRecord ->
+      case dict.get(shared.cache.studies, model.study_uid) {
+        Ok(s) -> #(model, effect.none(), [
+          shared.OpenCreateRecordModal(shared.OpenCreateRecordModalArgs(
+            page_level: shared.StudyLevel,
+            patient_id: s.patient_id,
+            study_uid: Some(model.study_uid),
+            series_uid: None,
+          )),
+        ])
+        Error(_) -> #(model, effect.none(), [
+          shared.ShowError("Study not loaded yet"),
+        ])
+      }
   }
 }
 
@@ -150,6 +167,10 @@ fn render_detail(shared: Shared, study: Study) -> Element(Msg) {
       int.compare(option.unwrap(a.id, 0), option.unwrap(b.id, 0))
     })
 
+  let is_admin = case shared.user {
+    Some(u) -> permissions.is_admin_user(u)
+    None -> False
+  }
   html.div([attribute.class("container")], [
     html.div([attribute.class("page-header")], [
       html.h1([], [html.text("Study: " <> study.study_uid)]),
@@ -161,6 +182,17 @@ fn render_detail(shared: Shared, study: Study) -> Element(Msg) {
           ],
           [html.text("Back to Studies")],
         ),
+        case is_admin {
+          True ->
+            html.button(
+              [
+                attribute.class("btn btn-primary"),
+                event.on_click(OpenAddRecord),
+              ],
+              [html.text("Add Record")],
+            )
+          False -> element.none()
+        },
         html.button(
           [
             attribute.class("btn btn-danger"),

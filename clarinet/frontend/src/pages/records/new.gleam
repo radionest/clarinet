@@ -1,9 +1,17 @@
-// New record creation page — self-contained MVU module
+// New record creation page — self-contained MVU module.
+//
+// Hosts in two modes:
+//   * `FullPage` — `/records/new` standalone page (existing behaviour).
+//   * `Modal(args)` — embedded as a modal overlay on Patient/Study/Series
+//     detail pages with `args` carrying the prefilled context. The page
+//     model, update, and form view are reused; only `init`/submit-success/
+//     cancel branches differ between modes.
 import api/models.{type Record, type Series, type Study}
 import api/patients
 import api/records
 import api/studies
 import api/types.{type ApiError, AuthError}
+import cache/bucket
 import components/forms/record_form
 import gleam/bool
 import gleam/dict.{type Dict}
@@ -20,8 +28,16 @@ import utils/permissions
 
 // --- Model ---
 
+/// How this page is being hosted. Affects init prefill, view chrome, and
+/// the post-submit OutMsg sequence.
+pub type HostMode {
+  FullPage
+  Modal(args: shared.OpenCreateRecordModalArgs)
+}
+
 pub type Model {
   Model(
+    host_mode: HostMode,
     form_data: record_form.RecordFormData,
     form_errors: Dict(String, String),
     form_studies: List(Study),
@@ -52,6 +68,7 @@ pub type Msg {
 pub fn init(shared: Shared) -> #(Model, Effect(Msg), List(OutMsg)) {
   let model =
     Model(
+      host_mode: FullPage,
       form_data: record_form.init(),
       form_errors: dict.new(),
       form_studies: [],
@@ -78,6 +95,66 @@ pub fn init(shared: Shared) -> #(Model, Effect(Msg), List(OutMsg)) {
   #(model, effect.none(), out_msgs)
 }
 
+/// Initialize this page as the contents of the modal create-record overlay.
+/// Prefills the form with the locked context fields, eagerly loads the studies
+/// list for the patient (so the user can pick a Study/Series RecordType without
+/// extra clicks), and loads the series list when the source page already
+/// pinned a Study UID.
+///
+/// **Page Module Contract exception:** `.claude/rules/frontend.md` §1 lists
+/// only `init` / `update` / `view` / `cleanup` as public symbols of a page
+/// module. `init_modal` is an explicit exception — modal hosting requires a
+/// separate prefilled init path that `main.init_page_for_route` cannot
+/// reach (modals are opened by `OutMsg`, not by route). This is the only
+/// page in the codebase with this dual-init pattern; new modal-hosted
+/// pages should follow the same convention rather than inventing a new one.
+pub fn init_modal(
+  args: shared.OpenCreateRecordModalArgs,
+  _shared: Shared,
+) -> #(Model, Effect(Msg), List(OutMsg)) {
+  let study_uid_str = case args.study_uid {
+    Some(uid) -> uid
+    None -> ""
+  }
+  let series_uid_str = case args.series_uid {
+    Some(uid) -> uid
+    None -> ""
+  }
+  let form_data =
+    record_form.RecordFormData(
+      record_type_name: "",
+      patient_id: args.patient_id,
+      study_uid: study_uid_str,
+      series_uid: series_uid_str,
+      user_id: "",
+      parent_record_id: "",
+      context_info: "",
+    )
+  let studies_eff = case args.patient_id {
+    "" -> effect.none()
+    pid -> load_studies_for_patient(1, pid)
+  }
+  let series_eff = case study_uid_str {
+    "" -> effect.none()
+    uid -> load_series_for_study(1, uid)
+  }
+  let model =
+    Model(
+      host_mode: Modal(args),
+      form_data: form_data,
+      form_errors: dict.new(),
+      form_studies: [],
+      form_series: [],
+      loading: False,
+      studies_request_id: 1,
+      series_request_id: 1,
+    )
+  // Modal flow is admin-only (gated by the caller), so we always need the
+  // user picker too — but the modal hides the field by default; loading users
+  // would be wasted. RecordTypes is the one universally required cache.
+  #(model, effect.batch([studies_eff, series_eff]), [shared.ReloadRecordTypes])
+}
+
 // --- Update ---
 
 pub fn update(
@@ -88,7 +165,21 @@ pub fn update(
   case msg {
     UpdateForm(form_msg) -> {
       let old_data = model.form_data
-      let new_data = record_form.update(old_data, form_msg)
+      let raw_new_data = record_form.update(old_data, form_msg)
+      // In modal mode `record_form.update` would clear the prefilled,
+      // locked context fields on `UpdateRecordType` (which always resets
+      // study_uid / series_uid). Restore them from `args` so a type swap
+      // doesn't break a form whose disabled inputs still display the value.
+      let new_data = case model.host_mode {
+        Modal(args) ->
+          record_form.RecordFormData(
+            ..raw_new_data,
+            patient_id: args.patient_id,
+            study_uid: option.unwrap(args.study_uid, raw_new_data.study_uid),
+            series_uid: option.unwrap(args.series_uid, raw_new_data.series_uid),
+          )
+        FullPage -> raw_new_data
+      }
       let updated_model =
         Model(..model, form_data: new_data)
 
@@ -206,15 +297,44 @@ pub fn update(
     }
 
     SubmitResult(Ok(record)) -> {
-      let route = case record.id {
-        Some(id) -> router.RecordDetail(int.to_string(id))
-        None -> router.Records(dict.new())
+      case model.host_mode {
+        FullPage -> {
+          let route = case record.id {
+            Some(id) -> router.RecordDetail(int.to_string(id))
+            None -> router.Records(dict.new())
+          }
+          #(Model(..model, loading: False), effect.none(), [
+            shared.CacheRecord(record),
+            shared.ShowSuccess("Record created successfully"),
+            shared.Navigate(route),
+          ])
+        }
+        Modal(args) -> {
+          // Stay on the source page, refresh the records section for that
+          // page's context (bucket for Patient/Study, get_series re-fetch
+          // for Series since its records are nested in the Series object).
+          let invalidate = case args.page_level {
+            shared.PatientLevel ->
+              shared.InvalidateBucket(bucket.RecordsByPatient(args.patient_id))
+            shared.StudyLevel ->
+              case args.study_uid {
+                Some(uid) -> shared.InvalidateBucket(bucket.RecordsByStudy(uid))
+                None -> shared.InvalidateAllRecordBuckets
+              }
+            shared.SeriesLevel ->
+              case args.series_uid {
+                Some(uid) -> shared.ReloadSeries(uid)
+                None -> shared.InvalidateAllRecordBuckets
+              }
+          }
+          #(Model(..model, loading: False), effect.none(), [
+            shared.CacheRecord(record),
+            shared.ShowSuccess("Record created successfully"),
+            invalidate,
+            shared.CloseRecordModal,
+          ])
+        }
       }
-      #(Model(..model, loading: False), effect.none(), [
-        shared.CacheRecord(record),
-        shared.ShowSuccess("Record created successfully"),
-        shared.Navigate(route),
-      ])
     }
 
     SubmitResult(Error(err)) ->
@@ -225,7 +345,12 @@ pub fn update(
       )
 
     Cancel ->
-      #(model, effect.none(), [shared.Navigate(router.Records(dict.new()))])
+      case model.host_mode {
+        FullPage -> #(model, effect.none(), [
+          shared.Navigate(router.Records(dict.new())),
+        ])
+        Modal(_) -> #(model, effect.none(), [shared.CloseRecordModal])
+      }
   }
 }
 
@@ -234,7 +359,7 @@ pub fn update(
 fn handle_error(err: ApiError, fallback_msg: String) -> List(OutMsg) {
   case err {
     AuthError(_) -> [shared.Logout]
-    _ -> [shared.ShowError(fallback_msg)]
+    _ -> [shared.SetLoading(False), shared.ShowError(fallback_msg)]
   }
 }
 
@@ -282,18 +407,54 @@ fn load_series_for_study(request_id: Int, study_uid: String) -> Effect(Msg) {
 // --- View ---
 
 pub fn view(model: Model, shared: Shared) -> Element(Msg) {
-  html.div([attribute.class("container")], [
-    html.h1([], [html.text("New Record")]),
+  let locked = compute_locked_fields(model.host_mode)
+  let hidden = compute_hidden_fields(model.host_mode)
+  let form =
     record_form.view(
       data: model.form_data,
       studies: model.form_studies,
       series_list: model.form_series,
       errors: model.form_errors,
       loading: model.loading,
+      locked_fields: locked,
+      hidden_fields: hidden,
       shared: shared,
       on_update: fn(msg) { UpdateForm(msg) },
       on_submit: fn() { Submit },
       on_cancel: Cancel,
-    ),
-  ])
+    )
+  case model.host_mode {
+    FullPage ->
+      html.div([attribute.class("container")], [
+        html.h1([], [html.text("New Record")]),
+        form,
+      ])
+    Modal(_) -> form
+  }
+}
+
+fn compute_locked_fields(host_mode: HostMode) -> List(String) {
+  case host_mode {
+    FullPage -> []
+    Modal(args) -> {
+      // Patient is always known when the modal opens — the source page
+      // sits at or below patient level in the DICOM hierarchy.
+      let base = ["patient_id"]
+      let with_study = case args.study_uid {
+        Some(_) -> ["study_uid", ..base]
+        None -> base
+      }
+      case args.series_uid {
+        Some(_) -> ["series_uid", ..with_study]
+        None -> with_study
+      }
+    }
+  }
+}
+
+fn compute_hidden_fields(host_mode: HostMode) -> List(String) {
+  case host_mode {
+    FullPage -> []
+    Modal(_) -> ["user_id", "parent_record_id"]
+  }
 }

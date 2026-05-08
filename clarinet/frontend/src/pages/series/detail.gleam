@@ -18,6 +18,7 @@ import lustre/event
 import router
 import shared.{type OutMsg, type Shared}
 import utils/load_status.{type LoadStatus}
+import utils/permissions
 import utils/viewer
 
 // --- Model ---
@@ -32,6 +33,7 @@ pub type Msg {
   SeriesLoaded(Result(Series, ApiError))
   NavigateBack(study_uid: String)
   RetryLoad
+  OpenAddRecord
 }
 
 // --- Init ---
@@ -56,7 +58,7 @@ fn load_series_effect(series_uid: String) -> Effect(Msg) {
 pub fn update(
   model: Model,
   msg: Msg,
-  _shared: Shared,
+  shared: Shared,
 ) -> #(Model, Effect(Msg), List(OutMsg)) {
   case msg {
     SeriesLoaded(Ok(s)) -> #(
@@ -80,6 +82,30 @@ pub fn update(
     NavigateBack(study_uid) -> #(model, effect.none(), [
       shared.Navigate(router.StudyDetail(study_uid)),
     ])
+
+    OpenAddRecord ->
+      case dict.get(shared.cache.series, model.series_uid) {
+        Ok(s) -> {
+          // Series.study is eager-loaded by `get_series`; if it's somehow
+          // missing we can't safely prefill the patient field.
+          case s.study {
+            Some(study) -> #(model, effect.none(), [
+              shared.OpenCreateRecordModal(shared.OpenCreateRecordModalArgs(
+                page_level: shared.SeriesLevel,
+                patient_id: study.patient_id,
+                study_uid: Some(s.study_uid),
+                series_uid: Some(s.series_uid),
+              )),
+            ])
+            None -> #(model, effect.none(), [
+              shared.ShowError("Series parent not loaded yet"),
+            ])
+          }
+        }
+        Error(_) -> #(model, effect.none(), [
+          shared.ShowError("Series not loaded yet"),
+        ])
+      }
   }
 }
 
@@ -88,7 +114,7 @@ pub fn update(
 fn handle_error(err: ApiError, fallback_msg: String) -> List(OutMsg) {
   case err {
     AuthError(_) -> [shared.Logout]
-    _ -> [shared.ShowError(fallback_msg)]
+    _ -> [shared.SetLoading(False), shared.ShowError(fallback_msg)]
   }
 }
 
@@ -109,16 +135,33 @@ pub fn view(model: Model, shared: Shared) -> Element(Msg) {
 }
 
 fn render_detail(s: Series, shared: Shared) -> Element(Msg) {
+  let is_admin = case shared.user {
+    Some(u) -> permissions.is_admin_user(u)
+    None -> False
+  }
   html.div([attribute.class("container")], [
     html.div([attribute.class("page-header")], [
       html.h1([], [html.text("Series: " <> s.series_uid)]),
-      html.button(
-        [
-          attribute.class("btn btn-secondary"),
-          event.on_click(NavigateBack(s.study_uid)),
-        ],
-        [html.text("Back to Study")],
-      ),
+      html.div([], [
+        html.button(
+          [
+            attribute.class("btn btn-secondary"),
+            event.on_click(NavigateBack(s.study_uid)),
+          ],
+          [html.text("Back to Study")],
+        ),
+        case is_admin {
+          True ->
+            html.button(
+              [
+                attribute.class("btn btn-primary"),
+                event.on_click(OpenAddRecord),
+              ],
+              [html.text("Add Record")],
+            )
+          False -> element.none()
+        },
+      ]),
     ]),
     series_info_card(shared.viewers, s),
     parent_study_section(s),
