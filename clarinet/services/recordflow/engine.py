@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 from clarinet.models.base import DicomQueryLevel
 from clarinet.utils.logger import logger
 
+from .action_preview import ActionPreview, action_to_preview
 from .flow_action import (
     CallFunctionAction,
     CreateRecordAction,
@@ -255,6 +256,8 @@ class RecordFlowEngine:
         record: RecordRead,
         trigger_label: str,
         predicate: Callable[[FlowRecord], bool],
+        *,
+        plan_collector: list[ActionPreview] | None = None,
     ) -> None:
         """Dispatch matching flows for a record event.
 
@@ -265,6 +268,9 @@ class RecordFlowEngine:
             record: The record that triggered the event.
             trigger_label: Human-readable label for logging (e.g. "status change").
             predicate: Filter function selecting which flows to execute.
+            plan_collector: When provided, actions are *not* executed; instead
+                an :class:`ActionPreview` is appended for each dispatched
+                action. Used by ``plan_record_*`` for dry-run mode.
         """
         record_type_name = record.record_type.name
 
@@ -286,12 +292,16 @@ class RecordFlowEngine:
                 # Each flow gets its own shallow-copied dict so per-flow mutations
                 # in _execute_flow (trigger insertion, _SELF) don't leak across
                 # sibling flows registered on the same record type.
-                await self._execute_flow(flow, record, dict(record_context))
+                await self._execute_flow(
+                    flow, record, dict(record_context), plan_collector=plan_collector
+                )
 
     async def handle_record_status_change(
         self,
         record: RecordRead,
         old_status: RecordStatus | None = None,  # noqa: ARG002 - kept for future use
+        *,
+        plan_collector: list[ActionPreview] | None = None,
     ) -> None:
         """Handle a record status change and execute relevant flows.
 
@@ -301,6 +311,7 @@ class RecordFlowEngine:
         Args:
             record: The record that changed status.
             old_status: The previous status (optional).
+            plan_collector: Dry-run sink (see :meth:`_dispatch_flows`).
         """
         current_status = record.status.value if hasattr(record.status, "value") else record.status
 
@@ -311,9 +322,15 @@ class RecordFlowEngine:
                 not (f.data_update_trigger or f.file_change_trigger)
                 and (f.status_trigger is None or f.status_trigger == current_status)
             ),
+            plan_collector=plan_collector,
         )
 
-    async def handle_record_data_update(self, record: RecordRead) -> None:
+    async def handle_record_data_update(
+        self,
+        record: RecordRead,
+        *,
+        plan_collector: list[ActionPreview] | None = None,
+    ) -> None:
         """Handle a data update on a finished record.
 
         Only executes flows with data_update_trigger=True. This is called
@@ -321,10 +338,21 @@ class RecordFlowEngine:
 
         Args:
             record: The record whose data was updated.
+            plan_collector: Dry-run sink (see :meth:`_dispatch_flows`).
         """
-        await self._dispatch_flows(record, "data update", lambda f: f.data_update_trigger)
+        await self._dispatch_flows(
+            record,
+            "data update",
+            lambda f: f.data_update_trigger,
+            plan_collector=plan_collector,
+        )
 
-    async def handle_record_file_change(self, record: RecordRead) -> None:
+    async def handle_record_file_change(
+        self,
+        record: RecordRead,
+        *,
+        plan_collector: list[ActionPreview] | None = None,
+    ) -> None:
         """Handle a record file change and execute relevant flows.
 
         Only executes flows with file_change_trigger=True. This is called
@@ -332,8 +360,14 @@ class RecordFlowEngine:
 
         Args:
             record: The record whose files changed.
+            plan_collector: Dry-run sink (see :meth:`_dispatch_flows`).
         """
-        await self._dispatch_flows(record, "file change", lambda f: f.file_change_trigger)
+        await self._dispatch_flows(
+            record,
+            "file change",
+            lambda f: f.file_change_trigger,
+            plan_collector=plan_collector,
+        )
 
     async def handle_entity_created(
         self,
@@ -341,6 +375,8 @@ class RecordFlowEngine:
         patient_id: str,
         study_uid: str | None = None,
         series_uid: str | None = None,
+        *,
+        plan_collector: list[ActionPreview] | None = None,
     ) -> None:
         """Handle an entity creation event and execute relevant flows.
 
@@ -365,13 +401,15 @@ class RecordFlowEngine:
         ctx = FlowContext.for_entity(patient_id, study_uid, series_uid)
         for flow in self.entity_flows[entity_type]:
             for action in flow.actions:
-                await self._execute_action(action, ctx)
+                await self._execute_action(action, ctx, plan_collector=plan_collector)
 
     async def handle_file_update(
         self,
         file_name: str,
         patient_id: str,
         source_record: RecordRead | None = None,
+        *,
+        plan_collector: list[ActionPreview] | None = None,
     ) -> None:
         """Handle a project-level file change and execute relevant flows.
 
@@ -395,7 +433,69 @@ class RecordFlowEngine:
                 continue
             logger.info(f"Executing file flow for '{file_name}' (patient={patient_id})")
             for action in flow.actions:
-                await self._execute_action(action, ctx)
+                await self._execute_action(action, ctx, plan_collector=plan_collector)
+
+    # ── Plan-mode (dry-run) entry points ─────────────────────────────────
+
+    async def plan_record_status_change(
+        self,
+        record: RecordRead,
+        status_override: str | None = None,
+    ) -> list[ActionPreview]:
+        """Plan what would happen on a status-change trigger without executing.
+
+        If ``status_override`` is supplied, the planner pretends the record is
+        in that status (without mutating the input). Used by
+        ``POST /api/admin/workflow/dry-run`` to preview a transition that
+        hasn't been applied yet.
+        """
+        target_record = record
+        if status_override is not None and status_override != getattr(
+            record.status, "value", record.status
+        ):
+            target_record = record.model_copy(update={"status": status_override})
+        plan: list[ActionPreview] = []
+        await self.handle_record_status_change(target_record, plan_collector=plan)
+        return plan
+
+    async def plan_record_data_update(self, record: RecordRead) -> list[ActionPreview]:
+        """Plan what would happen on a data-update trigger without executing."""
+        plan: list[ActionPreview] = []
+        await self.handle_record_data_update(record, plan_collector=plan)
+        return plan
+
+    async def plan_record_file_change(self, record: RecordRead) -> list[ActionPreview]:
+        """Plan what would happen on a file-change trigger without executing."""
+        plan: list[ActionPreview] = []
+        await self.handle_record_file_change(record, plan_collector=plan)
+        return plan
+
+    async def plan_entity_created(
+        self,
+        entity_type: str,
+        patient_id: str,
+        study_uid: str | None = None,
+        series_uid: str | None = None,
+    ) -> list[ActionPreview]:
+        """Plan what would happen on an entity-creation trigger without executing."""
+        plan: list[ActionPreview] = []
+        await self.handle_entity_created(
+            entity_type, patient_id, study_uid, series_uid, plan_collector=plan
+        )
+        return plan
+
+    async def plan_file_update(
+        self,
+        file_name: str,
+        patient_id: str,
+        source_record: RecordRead | None = None,
+    ) -> list[ActionPreview]:
+        """Plan what would happen on a project-file update trigger without executing."""
+        plan: list[ActionPreview] = []
+        await self.handle_file_update(
+            file_name, patient_id, source_record=source_record, plan_collector=plan
+        )
+        return plan
 
     # ── Context helpers ───────────────────────────────────────────────────
 
@@ -509,6 +609,8 @@ class RecordFlowEngine:
         condition: FlowCondition,
         context: dict[str, list[RecordRead]],
         ctx: FlowContext,
+        *,
+        plan_collector: list[ActionPreview] | None = None,
     ) -> bool | None:
         """Evaluate a condition and run its actions.
 
@@ -522,7 +624,7 @@ class RecordFlowEngine:
             return None
         if met:
             for action in condition.actions:
-                await self._execute_action(action, ctx)
+                await self._execute_action(action, ctx, plan_collector=plan_collector)
         return met
 
     async def _execute_flow(
@@ -530,6 +632,8 @@ class RecordFlowEngine:
         flow: FlowRecord,
         record: RecordRead,
         context: dict[str, list[RecordRead]],
+        *,
+        plan_collector: list[ActionPreview] | None = None,
     ) -> None:
         """Execute a flow for a specific record.
 
@@ -537,6 +641,7 @@ class RecordFlowEngine:
             flow: The flow definition to execute.
             record: The triggering record.
             context: Tree-filtered map of record type names to record lists.
+            plan_collector: Dry-run sink (see :meth:`_dispatch_flows`).
         """
         # Ensure trigger is in context list (defensive — tree filter normally
         # already includes it). Clone the per-type list before mutating: the
@@ -553,7 +658,7 @@ class RecordFlowEngine:
 
         # Execute unconditional actions
         for action in flow.actions:
-            await self._execute_action(action, ctx)
+            await self._execute_action(action, ctx, plan_collector=plan_collector)
 
         # Evaluate and execute conditional actions
         previous_condition_met = False
@@ -578,7 +683,7 @@ class RecordFlowEngine:
                     should_fire = not previous_condition_met
                 if should_fire:
                     for action in condition.actions:
-                        await self._execute_action(action, ctx)
+                        await self._execute_action(action, ctx, plan_collector=plan_collector)
                 if group is None:
                     break
                 continue
@@ -587,7 +692,9 @@ class RecordFlowEngine:
             if group is not None and match_group_met.get(group, False):
                 continue
 
-            result = await self._evaluate_and_run_condition(condition, context, ctx)
+            result = await self._evaluate_and_run_condition(
+                condition, context, ctx, plan_collector=plan_collector
+            )
 
             if group is not None:
                 if result is True:
@@ -597,13 +704,29 @@ class RecordFlowEngine:
 
     # ── Unified action dispatcher ─────────────────────────────────────────
 
-    async def _execute_action(self, action: FlowAction, ctx: FlowContext) -> None:
+    async def _execute_action(
+        self,
+        action: FlowAction,
+        ctx: FlowContext,
+        *,
+        plan_collector: list[ActionPreview] | None = None,
+    ) -> None:
         """Execute a single action in the given context.
+
+        When ``plan_collector`` is supplied the action is recorded as an
+        :class:`ActionPreview` instead of being executed — the engine
+        becomes a pure planner for one trigger.
 
         Args:
             action: The action model instance.
             ctx: The unified flow context.
+            plan_collector: When non-None, the action is appended to this
+                list as an :class:`ActionPreview` and *not* executed.
         """
+        if plan_collector is not None:
+            plan_collector.append(action_to_preview(action, ctx))
+            return
+
         try:
             match action:
                 case CreateRecordAction():
