@@ -628,6 +628,35 @@ class TestMaskRecords:
         assert result.series is not None
         assert result.series.series_uid == "9.8.7.6.5.4.3.2.1"
 
+    def test_per_study_mode_with_anon_id_prefix_prepends_prefix(self) -> None:
+        """Per-study mode + non-empty anon_id_prefix: masked PatientID is f'{prefix}_{hash}'."""
+        user = _make_user(is_superuser=False)
+        record = _make_record_read(
+            patient_id="REAL_PAT_001",
+            patient_name="Real Patient Name",
+            anon_name="Anon Patient Name",
+            auto_id=42,
+            study_uid="1.2.3.4.5.6.7.8",
+            study_anon_uid="9.8.7.6.5.4.3.2",
+            series_uid="1.2.3.4.5.6.7.8.9",
+            series_anon_uid="9.8.7.6.5.4.3.2.1",
+        )
+
+        with patch("clarinet.api.masking.settings") as masking_settings:
+            masking_settings.anon_per_study_patient_id = True
+            masking_settings.anon_per_study_patient_id_hex_length = 8
+            masking_settings.anon_uid_salt = "test-salt"
+            masking_settings.anon_id_prefix = "NIR_LIVER"
+            result = mask_record_patient_data(record, user)
+
+        expected_hash = hashlib.sha256(b"test-salt:1.2.3.4.5.6.7.8").hexdigest()[:8]
+        expected_id = f"NIR_LIVER_{expected_hash}"
+        assert result.patient_id == expected_id
+        assert result.patient.id == expected_id
+        assert result.patient.name == expected_id
+        assert result.study is not None
+        assert result.study.patient_id == expected_id
+
     def test_per_study_mode_falls_back_until_study_anonymized(self) -> None:
         """Per-study mode + study.anon_uid=None: fall back to per-patient anon_id.
 

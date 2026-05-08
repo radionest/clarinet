@@ -36,10 +36,9 @@ def compute_per_study_patient_id(
     (16 hex = 64 bits drops collision probability to negligible levels at any
     realistic scale).
 
-    DICOM LO (64-char) constraint: callers must keep
-    ``len(prefix) + 1 + length <= 64``. With the default 8-char hex this leaves
-    up to 55 chars for the prefix, which covers any realistic project name.
-    Not enforced at runtime — operator responsibility.
+    DICOM LO (64-char) constraint: ``len(prefix) + 1 + length <= 64`` is
+    asserted to fail fast on misconfiguration; otherwise the PACS would
+    silently truncate the value.
 
     Args:
         salt: Salt for deterministic hashing.
@@ -53,6 +52,10 @@ def compute_per_study_patient_id(
     """
     digest = hashlib.sha256(f"{salt}:{study_uid}".encode()).hexdigest()[:length]
     if prefix:
+        assert len(prefix) + 1 + length <= 64, (
+            f"prefix '{prefix}' ({len(prefix)} chars) + 1 + {length}-hex hash "
+            "exceeds DICOM LO (64-char) limit"
+        )
         return f"{prefix}_{digest}"
     return digest
 
