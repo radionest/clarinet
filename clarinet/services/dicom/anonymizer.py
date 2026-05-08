@@ -12,13 +12,21 @@ from pydicom import Dataset
 from clarinet.utils.logger import logger
 
 
-def compute_per_study_patient_id(salt: str, study_uid: str, length: int = 8) -> str:
+def compute_per_study_patient_id(
+    salt: str,
+    study_uid: str,
+    length: int = 8,
+    prefix: str | None = None,
+) -> str:
     """Per-study deterministic PatientID/PatientName for DICOM anonymization.
 
-    sha256(f"{salt}:{study_uid}") -> first ``length`` hex characters. Same
-    study_uid + salt + length -> same hash (idempotent re-runs). Used when
+    sha256(f"{salt}:{study_uid}") -> first ``length`` hex characters, optionally
+    prefixed with ``f"{prefix}_"``. Same study_uid + salt + length + prefix ->
+    same result (idempotent re-runs). Used when
     ``settings.anon_per_study_patient_id`` is enabled to prevent PACS-side
-    correlation across studies of the same patient.
+    correlation across studies of the same patient. The ``prefix`` (typically
+    ``settings.anon_id_prefix``) makes anonymized studies identifiable as
+    belonging to the project on a shared PACS.
 
     Truncation rationale: short hex keeps the visible PatientID readable while
     staying well within DICOM LO (64) and PN (64 per component) limits. By the
@@ -27,8 +35,26 @@ def compute_per_study_patient_id(salt: str, study_uid: str, length: int = 8) -> 
     via ``settings.anon_per_study_patient_id_hex_length`` for larger projects
     (16 hex = 64 bits drops collision probability to negligible levels at any
     realistic scale).
+
+    DICOM LO (64-char) constraint: callers must keep
+    ``len(prefix) + 1 + length <= 64``. With the default 8-char hex this leaves
+    up to 55 chars for the prefix, which covers any realistic project name.
+    Not enforced at runtime — operator responsibility.
+
+    Args:
+        salt: Salt for deterministic hashing.
+        study_uid: Study Instance UID.
+        length: Hex slice length (default 8).
+        prefix: Optional project prefix; if None or empty, only the hash is
+            returned (backward-compatible default).
+
+    Returns:
+        ``f"{prefix}_{hash}"`` if prefix is set, else just the hash.
     """
-    return hashlib.sha256(f"{salt}:{study_uid}".encode()).hexdigest()[:length]
+    digest = hashlib.sha256(f"{salt}:{study_uid}".encode()).hexdigest()[:length]
+    if prefix:
+        return f"{prefix}_{digest}"
+    return digest
 
 
 class DicomAnonymizer:

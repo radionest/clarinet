@@ -158,6 +158,7 @@ class AnonymizationService:
                 settings.anon_uid_salt,
                 study_uid,
                 settings.anon_per_study_patient_id_hex_length,
+                prefix=settings.anon_id_prefix or None,
             )
             anon_patient_name = anon_patient_id
         else:

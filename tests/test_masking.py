@@ -613,6 +613,7 @@ class TestMaskRecords:
             masking_settings.anon_per_study_patient_id = True
             masking_settings.anon_per_study_patient_id_hex_length = 8
             masking_settings.anon_uid_salt = "test-salt"
+            masking_settings.anon_id_prefix = ""  # bare-hash backward-compat path
             result = mask_record_patient_data(record, user)
 
         expected_hash = hashlib.sha256(b"test-salt:1.2.3.4.5.6.7.8").hexdigest()[:8]
@@ -649,6 +650,7 @@ class TestMaskRecords:
         with patch("clarinet.api.masking.settings") as masking_settings:
             masking_settings.anon_per_study_patient_id = True
             masking_settings.anon_uid_salt = "test-salt"
+            masking_settings.anon_id_prefix = ""
             result = mask_record_patient_data(record, user)
 
         # Hash NOT applied — patient-level anon_id used instead.
@@ -686,6 +688,7 @@ class TestMaskRecords:
         with patch("clarinet.api.masking.settings") as masking_settings:
             masking_settings.anon_per_study_patient_id = True
             masking_settings.anon_uid_salt = "test-salt"
+            masking_settings.anon_id_prefix = ""
             result = mask_record_patient_data(record, user)
 
         # No study_uid -> per-study hash impossible; falls back to per-patient anon_id

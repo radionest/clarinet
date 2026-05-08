@@ -65,6 +65,7 @@ def mask_record_patient_data(record: RecordRead, user: User) -> RecordRead:
             settings.anon_uid_salt,
             record.study_uid,
             settings.anon_per_study_patient_id_hex_length,
+            prefix=settings.anon_id_prefix or None,
         )
         masked_name: str | None = masked_id
     else:

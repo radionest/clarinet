@@ -220,6 +220,7 @@ async def test_anonymize_study_succeeds_below_threshold() -> None:
     with patch("clarinet.services.anonymization_service.settings") as mock_settings:
         mock_settings.anon_save_to_disk = False
         mock_settings.anon_send_to_pacs = False
+        mock_settings.anon_per_study_patient_id = False
         mock_settings.anon_uid_salt = "test-salt"
         mock_settings.anon_failure_threshold = 0.5
         mock_settings.dicom_cget_max_retries = 1

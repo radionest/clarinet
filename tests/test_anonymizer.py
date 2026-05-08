@@ -355,3 +355,18 @@ class TestComputePerStudyPatientId:
         # Custom length is a prefix of the default — same hash, different slice.
         full = compute_per_study_patient_id("salt", "1.2.3.4", 64)
         assert full.startswith(compute_per_study_patient_id("salt", "1.2.3.4"))
+
+    def test_with_prefix_prepends_underscore(self) -> None:
+        bare = compute_per_study_patient_id("salt", "1.2.3.4")
+        prefixed = compute_per_study_patient_id("salt", "1.2.3.4", prefix="NIR_LIVER")
+        assert prefixed == f"NIR_LIVER_{bare}"
+
+    def test_empty_prefix_returns_bare_hash(self) -> None:
+        assert compute_per_study_patient_id(
+            "salt", "1.2.3.4", prefix=""
+        ) == compute_per_study_patient_id("salt", "1.2.3.4")
+
+    def test_none_prefix_returns_bare_hash(self) -> None:
+        assert compute_per_study_patient_id(
+            "salt", "1.2.3.4", prefix=None
+        ) == compute_per_study_patient_id("salt", "1.2.3.4")
