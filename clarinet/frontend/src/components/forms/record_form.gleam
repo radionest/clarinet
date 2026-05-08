@@ -77,13 +77,23 @@ pub fn update(data: RecordFormData, msg: RecordFormMsg) -> RecordFormData {
   }
 }
 
-// Main form view
+// Main form view.
+//
+// `locked_fields` — list of field names ("patient_id", "study_uid", "series_uid")
+// rendered as read-only text instead of an interactive select. Used by the
+// modal embedding when the field's value is fixed by the source page context.
+//
+// `hidden_fields` — list of field names completely omitted from the form.
+// Used by the modal embedding to drop optional `user_id` and `parent_record_id`
+// for the minimal create flow.
 pub fn view(
   data data: RecordFormData,
   studies studies: List(Study),
   series_list series_list: List(Series),
   errors errors: Dict(String, String),
   loading loading: Bool,
+  locked_fields locked_fields: List(String),
+  hidden_fields hidden_fields: List(String),
   shared shared: Shared,
   on_update on_update: fn(RecordFormMsg) -> msg,
   on_submit on_submit: fn() -> msg,
@@ -116,12 +126,20 @@ pub fn view(
     form.field(
       label: "Patient",
       name: "patient_id",
-      input: form.select(
-        name: "patient_id",
-        value: data.patient_id,
-        options: [#("", "Select patient..."), ..patient_options],
-        on_change: fn(value) { on_update(UpdatePatient(value)) },
-      ),
+      input: case is_locked("patient_id", locked_fields) {
+        True ->
+          locked_input(
+            "patient_id",
+            patient_label(data.patient_id, shared.cache.patients),
+          )
+        False ->
+          form.select(
+            name: "patient_id",
+            value: data.patient_id,
+            options: [#("", "Select patient..."), ..patient_options],
+            on_change: fn(value) { on_update(UpdatePatient(value)) },
+          )
+      },
       errors: errors,
       required: True,
     ),
@@ -131,12 +149,24 @@ pub fn view(
         form.field(
           label: "Study",
           name: "study_uid",
-          input: form.select(
-            name: "study_uid",
-            value: data.study_uid,
-            options: [#("", "Select study..."), ..study_options],
-            on_change: fn(value) { on_update(UpdateStudy(value)) },
-          ),
+          input: case is_locked("study_uid", locked_fields) {
+            True ->
+              locked_input(
+                "study_uid",
+                study_label(
+                  data.study_uid,
+                  studies,
+                  shared.cache.studies,
+                ),
+              )
+            False ->
+              form.select(
+                name: "study_uid",
+                value: data.study_uid,
+                options: [#("", "Select study..."), ..study_options],
+                on_change: fn(value) { on_update(UpdateStudy(value)) },
+              )
+          },
           errors: errors,
           required: True,
         )
@@ -148,46 +178,66 @@ pub fn view(
         form.field(
           label: "Series",
           name: "series_uid",
-          input: form.select(
-            name: "series_uid",
-            value: data.series_uid,
-            options: [#("", "Select series..."), ..series_options],
-            on_change: fn(value) { on_update(UpdateSeries(value)) },
-          ),
+          input: case is_locked("series_uid", locked_fields) {
+            True ->
+              locked_input(
+                "series_uid",
+                series_label(
+                  data.series_uid,
+                  series_list,
+                  shared.cache.series,
+                ),
+              )
+            False ->
+              form.select(
+                name: "series_uid",
+                value: data.series_uid,
+                options: [#("", "Select series..."), ..series_options],
+                on_change: fn(value) { on_update(UpdateSeries(value)) },
+              )
+          },
           errors: errors,
           required: True,
         )
       False -> html.text("")
     },
-    // Assigned User (optional)
-    form.field(
-      label: "Assign to User",
-      name: "user_id",
-      input: form.select(
-        name: "user_id",
-        value: data.user_id,
-        options: [#("", "No user (unassigned)"), ..user_options],
-        on_change: fn(value) { on_update(UpdateUser(value)) },
-      ),
-      errors: errors,
-      required: False,
-    ),
-    // Parent Record (optional)
-    form.field(
-      label: "Parent Record",
-      name: "parent_record_id",
-      input: form.select(
-        name: "parent_record_id",
-        value: data.parent_record_id,
-        options: [
-          #("", "No parent record"),
-          ..build_parent_record_options(data.patient_id, shared.cache.records)
-        ],
-        on_change: fn(value) { on_update(UpdateParentRecordId(value)) },
-      ),
-      errors: errors,
-      required: False,
-    ),
+    // Assigned User (optional, hidable)
+    case is_hidden("user_id", hidden_fields) {
+      True -> html.text("")
+      False ->
+        form.field(
+          label: "Assign to User",
+          name: "user_id",
+          input: form.select(
+            name: "user_id",
+            value: data.user_id,
+            options: [#("", "No user (unassigned)"), ..user_options],
+            on_change: fn(value) { on_update(UpdateUser(value)) },
+          ),
+          errors: errors,
+          required: False,
+        )
+    },
+    // Parent Record (optional, hidable)
+    case is_hidden("parent_record_id", hidden_fields) {
+      True -> html.text("")
+      False ->
+        form.field(
+          label: "Parent Record",
+          name: "parent_record_id",
+          input: form.select(
+            name: "parent_record_id",
+            value: data.parent_record_id,
+            options: [
+              #("", "No parent record"),
+              ..build_parent_record_options(data.patient_id, shared.cache.records)
+            ],
+            on_change: fn(value) { on_update(UpdateParentRecordId(value)) },
+          ),
+          errors: errors,
+          required: False,
+        )
+    },
     // Context Info (optional)
     form.field(
       label: "Context Info",
@@ -210,6 +260,90 @@ pub fn view(
     // Loading overlay
     form.loading_overlay(loading),
   ])
+}
+
+fn is_locked(name: String, locked_fields: List(String)) -> Bool {
+  list.contains(locked_fields, name)
+}
+
+fn is_hidden(name: String, hidden_fields: List(String)) -> Bool {
+  list.contains(hidden_fields, name)
+}
+
+// Read-only input rendered in place of an interactive select for prefilled,
+// non-editable fields. `readonly` blocks edits without the greyed-out visual
+// of `disabled` — the user is meant to see the field as "context from the
+// source page", not as "this field is broken".
+fn locked_input(name: String, display: String) -> Element(msg) {
+  html.input([
+    attribute.type_("text"),
+    attribute.id(name),
+    attribute.name(name),
+    attribute.value(display),
+    attribute.class("form-input"),
+    attribute.readonly(True),
+  ])
+}
+
+fn patient_label(id: String, patients: Dict(String, models.Patient)) -> String {
+  case dict.get(patients, id) {
+    Ok(p) ->
+      case p.name {
+        Some(name) -> id <> " — " <> name
+        None -> id
+      }
+    Error(_) -> id
+  }
+}
+
+fn study_label(
+  uid: String,
+  loaded: List(Study),
+  cache_studies: Dict(String, Study),
+) -> String {
+  case list.find(loaded, fn(s) { s.study_uid == uid }) {
+    Ok(s) -> format_study_label(s)
+    Error(_) ->
+      case dict.get(cache_studies, uid) {
+        Ok(s) -> format_study_label(s)
+        Error(_) -> uid
+      }
+  }
+}
+
+fn format_study_label(s: Study) -> String {
+  let base = case s.study_description {
+    Some(desc) -> s.study_uid <> " — " <> desc
+    None -> s.study_uid
+  }
+  base <> " (" <> s.date <> ")"
+}
+
+fn series_label(
+  uid: String,
+  loaded: List(Series),
+  cache_series: Dict(String, Series),
+) -> String {
+  case list.find(loaded, fn(s) { s.series_uid == uid }) {
+    Ok(s) -> format_series_label(s)
+    Error(_) ->
+      case dict.get(cache_series, uid) {
+        Ok(s) -> format_series_label(s)
+        Error(_) -> uid
+      }
+  }
+}
+
+fn format_series_label(s: Series) -> String {
+  let base = case s.series_description {
+    Some(desc) -> desc
+    None -> s.series_uid
+  }
+  let with_modality = case s.modality {
+    Some(mod) -> base <> " [" <> mod <> "]"
+    None -> base
+  }
+  with_modality <> " (#" <> int.to_string(s.series_number) <> ")"
 }
 
 // Validate form data

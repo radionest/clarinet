@@ -7,6 +7,7 @@ import api/models.{
 import api/patients
 import api/record_page.{type RecordPage}
 import api/records
+import api/series as series_api
 import api/studies
 import api/types.{type ApiError}
 import api/users
@@ -60,6 +61,8 @@ pub type Msg {
   )
   LoadPatientDetail(id: String)
   PatientDetailLoaded(Result(Patient, ApiError))
+  LoadSeriesDetail(uid: String)
+  SeriesDetailLoaded(Result(Series, ApiError))
 
   // Auto-assign follow-up (result of OutMsg.AutoAssign)
   AutoAssignResult(Result(Record, ApiError))
@@ -248,6 +251,27 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg), List(OutMsg)) {
 
     PatientDetailLoaded(Error(err)) -> #(model, effect.none(), [
       ApiFailure(err, "Failed to load patient"),
+    ])
+
+    // --- Series Detail ---
+    LoadSeriesDetail(uid) -> {
+      let eff = {
+        use dispatch <- effect.from
+        series_api.get_series(uid)
+        |> promise.tap(fn(result) { dispatch(SeriesDetailLoaded(result)) })
+        Nil
+      }
+      #(model, eff, [Loading(True)])
+    }
+
+    SeriesDetailLoaded(Ok(series_)) -> #(
+      put_series(model, series_),
+      effect.none(),
+      [Loading(False)],
+    )
+
+    SeriesDetailLoaded(Error(err)) -> #(model, effect.none(), [
+      ApiFailure(err, "Failed to load series"),
     ])
 
     // --- Auto-assign follow-up ---

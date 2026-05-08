@@ -84,6 +84,9 @@ pub type ModalContent {
   NoModal
   ConfirmDelete(resource: String, id: String)
   FailRecordPrompt(record_id: String)
+  /// Modal hosting the create-record form. Stores the embedded page model
+  /// so the modal MVU is delegated through `RecordNewModalMsg`.
+  CreateRecord(record_new_page.Model)
 }
 
 // Application messages
@@ -110,6 +113,9 @@ pub type Msg {
   RecordsListMsg(records_list_page.Msg)
   RecordExecuteMsg(record_execute_page.Msg)
   RecordNewMsg(record_new_page.Msg)
+  /// Same page module as RecordNewMsg, but delegated to the embedded
+  /// instance living inside `ModalContent.CreateRecord`.
+  RecordNewModalMsg(record_new_page.Msg)
 
   // Study/Series page delegation
   StudiesListMsg(studies_list_page.Msg)
@@ -132,6 +138,9 @@ pub type Msg {
   SetError(Option(String))
   ClearError
   ClearSuccessMessage
+  /// No-op message — used as the click handler on a modal's content
+  /// surface so clicks don't bubble to the backdrop close handler.
+  NoOp
 
   OpenModal(ModalContent)
   CloseModal

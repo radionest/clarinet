@@ -26,6 +26,17 @@ pub type Shared {
   )
 }
 
+/// Context for opening the create-record modal from a detail page. The
+/// constructor encodes which fields are auto-filled (and therefore
+/// read-only) vs. user-selectable: deeper variants carry more locked
+/// context. The user can still pick a parent strictly below the source
+/// page level via the modal's cascading picker.
+pub type OpenCreateRecordModalArgs {
+  PatientArgs(patient_id: String)
+  StudyArgs(patient_id: String, study_uid: String)
+  SeriesArgs(patient_id: String, study_uid: String, series_uid: String)
+}
+
 /// Commands from page modules back to main.
 /// Pages return List(OutMsg) from their update function
 /// to request global state changes.
@@ -50,8 +61,11 @@ pub type OutMsg {
   ReloadRecordTypeStats
   ReloadPatient(String)
   ReloadRecord(String)
+  ReloadSeries(series_uid: String)
   OpenDeleteConfirm(resource: String, id: String)
   OpenFailPrompt(record_id: String)
+  OpenCreateRecordModal(args: OpenCreateRecordModalArgs)
+  CloseRecordModal
   SetUser(User)
   Logout
   StartPreload(viewer_url: String, study_uid: String)
