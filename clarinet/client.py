@@ -8,7 +8,7 @@ supporting both low-level API calls and high-level convenience methods.
 import getpass
 from collections.abc import AsyncIterator
 from datetime import date
-from typing import Any, Literal, cast
+from typing import Any, Literal
 from uuid import UUID
 
 import httpx
@@ -341,7 +341,7 @@ class ClarinetClient:
             ClarinetAuthError: If not authenticated
         """
         response = await self._request("GET", "/auth/me")
-        return cast("UserRead", UserRead.model_validate(response.json()))
+        return UserRead.model_validate(response.json())
 
     async def validate_session(self) -> UserRead:
         """Validate current session.
@@ -353,7 +353,7 @@ class ClarinetClient:
             ClarinetAuthError: If session is invalid
         """
         response = await self._request("GET", "/auth/session/validate")
-        return cast("UserRead", UserRead.model_validate(response.json()))
+        return UserRead.model_validate(response.json())
 
     # ==================== Patient Management ====================
 
@@ -780,7 +780,7 @@ class ClarinetClient:
         Returns:
             Updated record.
         """
-        body: dict = {"mode": mode}
+        body: dict[str, Any] = {"mode": mode}
         if source_record_id is not None:
             body["source_record_id"] = source_record_id
         if reason is not None:

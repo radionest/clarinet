@@ -17,11 +17,21 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
-    from clarinet.models.file_schema import FileDefinitionRead
     from clarinet.models.record import RecordBase, RecordRead
+
+
+class _PatternedFile(Protocol):
+    """Duck-typed file definition with a placeholder pattern.
+
+    Both ``FileDefinitionRead`` (DB-backed DTO) and ``FileDef`` (config primitive)
+    satisfy this protocol — only ``pattern`` is required for globbing.
+    """
+
+    pattern: str
+
 
 PLACEHOLDER_REGEX = re.compile(r"\{([^}]+)\}")
 
@@ -151,7 +161,7 @@ def resolve_pattern(
 
 
 def glob_file_paths(
-    fd: FileDefinitionRead,
+    fd: _PatternedFile,
     working_dir: Path,
 ) -> list[Path]:
     """Glob collection file pattern, replacing placeholders with wildcards.

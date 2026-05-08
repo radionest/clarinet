@@ -1,6 +1,6 @@
 """DICOM client for query-retrieve operations."""
 
-from pynetdicom import _config as _pynetdicom_config  # type: ignore[import-not-found]
+from pynetdicom import _config as _pynetdicom_config
 
 from clarinet.services.dicom.anonymizer import DicomAnonymizer
 from clarinet.services.dicom.client import DicomClient

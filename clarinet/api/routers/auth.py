@@ -3,6 +3,7 @@ Simplified authentication router using fastapi-users.
 """
 
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Path, Request
 from pydantic import BaseModel
@@ -198,7 +199,7 @@ async def revoke_session(
     token_preview: str = Path(..., pattern=r"^.+\.\.\.$", min_length=4),
     user: User = Depends(current_active_user),
     session: AsyncSession = Depends(get_async_session),
-) -> dict:
+) -> dict[str, Any]:
     """Revoke a specific session.
 
     Allows users to manage their active sessions for security.

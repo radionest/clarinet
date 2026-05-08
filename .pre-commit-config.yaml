@@ -22,32 +22,16 @@ repos:
       # Run the formatter.
       - id: ruff-format
 
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.17.0
+  - repo: local
     hooks:
       - id: mypy
+        name: mypy (project venv)
+        entry: uv run mypy clarinet
+        language: system
+        pass_filenames: false
         files: ^clarinet/
-        additional_dependencies:
-          - fastapi
-          - sqlmodel
-          - pydantic>=2.0.0
-          - pydantic-settings>=2.0.0
-          - pydicom
-          - loguru
-          - alembic
-          - sqlalchemy
-          - httpx
-          - types-requests
-          - types-jsonschema
-          - types-aiofiles
-          - bcrypt
-          - python-jose
-          - aiofiles
-          - taskiq>=0.12.0
-          - taskiq-aio-pika>=0.6.0
-          - taskiq-redis>=1.0.0
-          - scipy-stubs
         exclude: ^tests/
+        types: [python]
 
   - repo: https://github.com/shellcheck-py/shellcheck-py
     rev: v0.11.0.1

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter
 
 from clarinet.api.dependencies import ViewerRegistryDep
@@ -11,7 +13,7 @@ router = APIRouter(tags=["Info"])
 
 
 @router.get("/info")
-async def get_project_info(registry: ViewerRegistryDep) -> dict:
+async def get_project_info(registry: ViewerRegistryDep) -> dict[str, Any]:
     """Return project branding and viewer configuration (public, no auth required)."""
     return {
         "project_name": settings.project_name,

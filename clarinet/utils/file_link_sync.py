@@ -54,7 +54,7 @@ async def sync_file_links(
         role = fd.role.value if hasattr(fd.role, "value") else str(fd.role)
         link = RecordTypeFileLink(
             record_type_name=record_type.name,
-            file_definition_id=file_def.id,  # type: ignore[arg-type]
+            file_definition_id=file_def.id,
             role=role,
             required=fd.required,
         )

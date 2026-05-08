@@ -64,7 +64,7 @@ class SQLModelUserDatabaseAsync(BaseUserDatabase[UP, ID]):
 
     async def get_by_email(self, email: str) -> UP | None:
         statement = select(self.user_model).where(
-            func.lower(self.user_model.email) == func.lower(email)  # type: ignore[attr-defined]
+            func.lower(self.user_model.email) == func.lower(email)
         )
         results = await self.session.execute(statement)
         obj = results.first()
@@ -84,7 +84,7 @@ class SQLModelUserDatabaseAsync(BaseUserDatabase[UP, ID]):
         results = await self.session.execute(statement)
         oauth_account = results.first()
         if oauth_account:
-            user = oauth_account[0].user  # type: ignore[attr-defined]
+            user = oauth_account[0].user
             return cast("UP", user)
         return None
 

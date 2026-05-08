@@ -172,7 +172,7 @@ class RecordTypeService:
         return data
 
 
-def _validate_json_schema(schema: dict) -> None:
+def _validate_json_schema(schema: dict[str, Any]) -> None:
     """Validate that a dict is a valid JSON Schema (Draft 2020-12).
 
     Raises:

@@ -8,7 +8,7 @@ from typing import Any, Literal, Self
 import numpy as np
 from skimage.measure import label, regionprops
 from skimage.measure._regionprops import _RegionProperties
-from skimage.morphology import (
+from skimage.morphology import (  # type: ignore[attr-defined]
     ball,
     binary_opening,
     dilation,
@@ -50,7 +50,7 @@ class Segmentation(Image):
         self._region_props: list[_RegionProperties] | None = None
         super().__init__(template=template, copy_data=copy_data, dtype=np.uint8)
 
-    @Image.img.setter  # type: ignore[misc, attr-defined, untyped-decorator]
+    @Image.img.setter  # type: ignore[attr-defined,untyped-decorator]
     def img(self, vol: np.ndarray) -> None:
         if self.autolabel:
             self._img = label(vol).astype(np.uint8)
@@ -226,7 +226,7 @@ class Segmentation(Image):
         Raises:
             ValueError: If an ROI in `other` overlaps multiple labels.
         """
-        other = self._align_other(other)  # type: ignore[assignment]
+        other = self._align_other(other)
         for region in regionprops(label(other.img)):
             coords = region.coords
             intersection = self.img[coords[:, 0], coords[:, 1], coords[:, 2]]

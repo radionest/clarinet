@@ -7,8 +7,13 @@ the machine's capabilities (GPU, DICOM) from settings.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from clarinet.settings import settings
 from clarinet.utils.logger import logger, reconfigure_for_worker
+
+if TYPE_CHECKING:
+    from taskiq import AsyncBroker
 
 
 def get_worker_queues() -> list[str]:
@@ -147,7 +152,7 @@ async def run_worker(
             raise
 
     receiver_tasks: list[asyncio.Task[None]] = []
-    brokers: list = []
+    brokers: list[AsyncBroker] = []
     try:
         load_task_modules()
 

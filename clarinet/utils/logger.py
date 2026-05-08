@@ -30,14 +30,14 @@ if TYPE_CHECKING:
 try:
     import orjson
 
-    def _json_dumps(data: dict) -> str:
+    def _json_dumps(data: dict[str, Any]) -> str:
         """Serialize dict to compact JSON string using orjson."""
         result: str = orjson.dumps(data, default=str).decode()
         return result
 
 except ImportError:
 
-    def _json_dumps(data: dict) -> str:
+    def _json_dumps(data: dict[str, Any]) -> str:
         """Serialize dict to compact JSON string using stdlib json."""
         return json.dumps(data, separators=(",", ":"), default=str)
 
@@ -145,7 +145,7 @@ def _json_format(record: Record) -> str:
     a loguru template that references it so curly braces in log messages
     don't conflict with loguru's ``{}`` interpolation.
     """
-    subset: dict = {
+    subset: dict[str, Any] = {
         "t": record["time"].strftime("%Y-%m-%dT%H:%M:%S.%f%z"),
         "l": record["level"].name,
         "mod": record["name"],

@@ -18,8 +18,8 @@ import threading
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from pynetdicom import AE, StoragePresentationContexts, evt  # type: ignore[import-not-found]
-from pynetdicom.sop_class import Verification  # type: ignore[import-not-found,attr-defined]
+from pynetdicom import AE, StoragePresentationContexts, evt
+from pynetdicom.sop_class import Verification  # type: ignore[attr-defined]
 
 from clarinet.utils.logger import logger
 

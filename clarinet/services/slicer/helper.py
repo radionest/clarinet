@@ -251,7 +251,7 @@ def count_segment_components(segmentation_node: Any, segment_name: str) -> int:
     Returns:
         Number of connected components. 0 if segment is empty or not found.
     """
-    from scipy.ndimage import label  # type: ignore[import-not-found]
+    from scipy.ndimage import label
 
     vtk_seg = segmentation_node.GetSegmentation()
     seg_id = _find_segment_id(vtk_seg, segment_name)
@@ -703,7 +703,7 @@ class PacsHelper:
                     )
 
         # 5. Load ONLY the retrieved series into the MRML scene
-        from DICOMLib import DICOMUtils  # type: ignore[import-not-found]
+        from DICOMLib import DICOMUtils
 
         loaded_node_ids: list[str] = DICOMUtils.loadSeriesByUID(retrieved_series_uids)
 
@@ -728,7 +728,7 @@ class PacsHelper:
         # 1. Check local Slicer DICOM database
         db = slicer.dicomDatabase
         if db and db.filesForSeries(series_instance_uid):
-            from DICOMLib import DICOMUtils  # type: ignore[import-not-found]
+            from DICOMLib import DICOMUtils
 
             _pacs_log.info(f"Series {series_instance_uid} found in local DICOM database")
             loaded: list[str] = DICOMUtils.loadSeriesByUID([series_instance_uid])
@@ -771,7 +771,7 @@ class PacsHelper:
 
         _pacs_log.info(f"Retrieved {len(files_after)} files for series {series_instance_uid}")
 
-        from DICOMLib import DICOMUtils  # type: ignore[import-not-found]
+        from DICOMLib import DICOMUtils
 
         loaded_node_ids: list[str] = DICOMUtils.loadSeriesByUID([series_instance_uid])
         return loaded_node_ids or []
@@ -1332,7 +1332,7 @@ class SlicerHelper:
 
         # Import into Slicer DICOM database (if running inside Slicer)
         try:
-            from DICOMLib import DICOMUtils  # type: ignore[import-not-found]
+            from DICOMLib import DICOMUtils
 
             DICOMUtils.importDicom(extract_dir)
         except ImportError:
@@ -1378,7 +1378,7 @@ class SlicerHelper:
             ``(R, A, S)`` centroid or ``None`` if the mask is empty.
         """
         import numpy as np
-        from vtk.util.numpy_support import vtk_to_numpy  # type: ignore[import-not-found]
+        from vtk.util.numpy_support import vtk_to_numpy
 
         scalars = image_data.GetPointData().GetScalars()
         if scalars is None:
@@ -1445,7 +1445,7 @@ class SlicerHelper:
         Returns:
             (R, A, S) centroid tuple, or None if the segment is empty.
         """
-        import vtkSegmentationCorePython as vtkSegCore  # type: ignore[import-not-found]
+        import vtkSegmentationCorePython as vtkSegCore
 
         node = self._unwrap_node(segmentation)
         vtk_seg = node.GetSegmentation()
@@ -1508,7 +1508,7 @@ class SlicerHelper:
         Returns:
             (R, A, S) centroid of the largest island, or None if empty.
         """
-        import vtkSegmentationCorePython as vtkSegCore  # type: ignore[import-not-found]
+        import vtkSegmentationCorePython as vtkSegCore
 
         node = self._unwrap_node(segmentation)
         vtk_seg = node.GetSegmentation()
@@ -1740,7 +1740,7 @@ class SlicerHelper:
         Returns:
             The output segmentation node (new node if output_name, else seg_a node).
         """
-        import numpy as np  # type: ignore[import-not-found]
+        import numpy as np
 
         node_a = self._unwrap_node(seg_a)
         node_b = self._unwrap_node(seg_b)
@@ -1822,7 +1822,7 @@ class SlicerHelper:
         Returns:
             A new vtkMRMLSegmentationNode with one segment per connected component.
         """
-        import numpy as np  # type: ignore[import-not-found]
+        import numpy as np
 
         node = self._unwrap_node(segmentation)
 
@@ -1890,7 +1890,7 @@ class SlicerHelper:
             pool_name: Name for the pool segment in the target.
             color: RGB color tuple (0-1 range) for the pool segment.
         """
-        import numpy as np  # type: ignore[import-not-found]
+        import numpy as np
 
         source_node = self._unwrap_node(source_seg)
         target_node = self._unwrap_node(target_seg)
@@ -1935,7 +1935,7 @@ class SlicerHelper:
         Returns:
             "Axial", "Sagittal", or "Coronal".
         """
-        import numpy as np  # type: ignore[import-not-found]
+        import numpy as np
 
         try:
             mat = vtk.vtkMatrix4x4()

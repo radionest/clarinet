@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from clarinet.exceptions.domain import PipelineStepError
-from clarinet.models.base import DicomQueryLevel
+from clarinet.models.base import DicomQueryLevel, RecordStatus
 from clarinet.settings import settings
 from clarinet.utils.file_patterns import PLACEHOLDER_REGEX, glob_file_paths, resolve_origin_type
 from clarinet.utils.logger import logger
@@ -293,7 +293,7 @@ class FileResolver:
         fd = self._lookup(file_def)
         level = fd.level or self._record_type_level
         working_dir = self._working_dirs[level]
-        paths = glob_file_paths(fd, working_dir)  # type: ignore[arg-type]
+        paths = glob_file_paths(fd, working_dir)
         if fd.name not in self._accessed_files:
             self._accessed_files[fd.name] = paths[0] if paths else working_dir
         return paths
@@ -351,7 +351,7 @@ class RecordQuery:
         series_uid: str | None = None,
         study_uid: str | None = None,
         patient_id: str | None = None,
-        status: Any | None = None,
+        status: RecordStatus | None = None,
         limit: int = 100,
     ) -> list[RecordRead]:
         """Find records by criteria.
@@ -384,7 +384,7 @@ class RecordQuery:
         series_uid: str | None = None,
         study_uid: str | None = None,
         patient_id: str | None = None,
-        status: Any | None = None,
+        status: RecordStatus | None = None,
     ) -> Path:
         """Find a record and resolve a file path from it.
 

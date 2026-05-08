@@ -52,7 +52,7 @@ class COCOAnnotation(BaseModel):
     area: float
     bbox: tuple[int, int, int, int]
     frameNumber: int
-    segmentation: list
+    segmentation: list[list[list[float]]]
 
 
 class COCODataset(BaseModel):

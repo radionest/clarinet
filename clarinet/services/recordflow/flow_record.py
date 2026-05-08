@@ -358,11 +358,11 @@ class FlowRecord:
         """
         action = CreateRecordAction(
             record_type_name=record_type_name,
-            series_uid=kwargs.get("series_uid"),  # type: ignore[arg-type]
-            user_id=kwargs.get("user_id"),  # type: ignore[arg-type]
-            parent_record_id=kwargs.get("parent_record_id"),  # type: ignore[arg-type]
-            inherit_user=kwargs.get("inherit_user", False),  # type: ignore[arg-type]
-            context_info=kwargs.get("context_info"),  # type: ignore[arg-type]
+            series_uid=kwargs.get("series_uid"),
+            user_id=kwargs.get("user_id"),
+            parent_record_id=kwargs.get("parent_record_id"),
+            inherit_user=kwargs.get("inherit_user", False),
+            context_info=kwargs.get("context_info"),
         )
 
         if self._current_condition:
@@ -403,8 +403,8 @@ class FlowRecord:
         """
         action = UpdateRecordAction(
             record_name=record_name,
-            status=kwargs.get("status"),  # type: ignore[arg-type]
-            strategy=kwargs.get("strategy", "single"),  # type: ignore[arg-type]
+            status=kwargs.get("status"),
+            strategy=kwargs.get("strategy", "single"),
         )
 
         if self._current_condition:
@@ -414,7 +414,7 @@ class FlowRecord:
 
         return self
 
-    def call(self, func: Callable, *args: object, **kwargs: object) -> FlowRecord:
+    def call(self, func: Callable[..., Any], *args: object, **kwargs: object) -> FlowRecord:
         """Add a custom function call action.
 
         The function will be called with the following keyword arguments
@@ -448,7 +448,7 @@ class FlowRecord:
         self,
         *record_type_names: str,
         mode: str = "hard",
-        callback: Callable | None = None,
+        callback: Callable[..., Any] | None = None,
     ) -> FlowRecord:
         """Add an invalidation action for records of specified types.
 
@@ -482,7 +482,7 @@ class FlowRecord:
         self,
         *record_type_names: str,
         mode: str = "hard",
-        callback: Callable | None = None,
+        callback: Callable[..., Any] | None = None,
     ) -> FlowRecord:
         """Alias for invalidate_records()."""
         return self.invalidate_records(*record_type_names, mode=mode, callback=callback)

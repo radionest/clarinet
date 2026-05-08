@@ -507,7 +507,7 @@ class DicomWebCache:
                 progress.update(status="fetching", received=0, total=None)
 
                 def on_progress(received: int, total: int | None) -> None:
-                    progress.update(status="fetching", received=received, total=total)  # type: ignore[union-attr]
+                    progress.update(status="fetching", received=received, total=total)
 
             cget_result = await client.get_study_to_memory(
                 study_uid=study_uid, peer=pacs, on_progress=on_progress

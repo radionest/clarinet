@@ -165,7 +165,7 @@ async def extend_session(
     return access_token
 
 
-async def get_session_stats(session: AsyncSession) -> dict:
+async def get_session_stats(session: AsyncSession) -> dict[str, Any]:
     """Get statistics about sessions.
 
     Args:
