@@ -133,6 +133,16 @@ URL constants live in `tests/utils/urls.py`. Status codes: 201 = POST create, 20
 | `/api/pipelines/{name}/definition` | GET | 200 | Pipeline definition |
 | `/api/pipelines/sync` | POST | 200 | Sync definitions |
 
+### Workflow visualization (`/api/admin/workflow`)
+
+Admin-only (`AdminUserDep`). 503 when `recordflow_enabled=False`.
+
+| URL | Method | Status | Description |
+|---|---|---|---|
+| `/api/admin/workflow/graph?record_id=&expanded=` | GET | 200 | Workflow graph (schema if no record_id, instance with firing history if set) |
+| `/api/admin/workflow/dry-run` | POST | 200 | Plan a trigger; returns `{plan, digest}`. Body: `{record_id, trigger_kind, status_override?}` |
+| `/api/admin/workflow/fire` | POST | 200 | Execute trigger after digest match (409 on mismatch). Body: `{record_id, trigger_kind, status_override?, plan_digest}` |
+
 ### Slicer (`/api/slicer`)
 
 | URL | Method | Status | Description |

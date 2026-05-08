@@ -31,6 +31,7 @@ from clarinet.api.routers import slicer  # slicer doesn't use database, no async
 from clarinet.api.routers import study as study
 from clarinet.api.routers import user as user
 from clarinet.api.routers import viewer as viewer
+from clarinet.api.routers import workflow as workflow
 from clarinet.exceptions.domain import RecordFlowError
 from clarinet.services.session_cleanup import session_cleanup_service
 from clarinet.settings import settings
@@ -464,6 +465,7 @@ def create_app(root_path: str = "") -> FastAPI:
     app.include_router(slicer.router, prefix="/api/slicer", tags=["Slicer"])
     app.include_router(admin.router, prefix="/api/admin", tags=["Admin"])
     app.include_router(reports.router, prefix="/api/admin/reports", tags=["Reports"])
+    app.include_router(workflow.router, prefix="/api/admin/workflow", tags=["Workflow"])
     app.include_router(dicom.router, prefix="/api/dicom", tags=["DICOM"])
     app.include_router(pipeline.router, prefix="/api/pipelines", tags=["Pipelines"])
     app.include_router(viewer.router, prefix="/api/records", tags=["Viewers"])
