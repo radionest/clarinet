@@ -16,7 +16,8 @@ decorator under a single namespace::
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Callable
+from typing import Any, cast, overload
 
 from clarinet.config.primitives import FileDef, FileRef, RecordDef
 from clarinet.services.pipeline import pipeline_task
@@ -36,7 +37,15 @@ __all__ = [
 ]
 
 
-def task(func: Any = None, /, **kwargs: Any) -> Any:
+@overload
+def task[F: Callable[..., Any]](func: F, /) -> F: ...
+@overload
+def task[F: Callable[..., Any]](func: None = None, /, **kwargs: Any) -> Callable[[F], F]: ...
+def task(
+    func: Callable[..., Any] | None = None,
+    /,
+    **kwargs: Any,
+) -> Callable[..., Any]:
     """Pipeline task decorator supporting both bare and parameterised forms.
 
     Usage::
@@ -52,5 +61,5 @@ def task(func: Any = None, /, **kwargs: Any) -> Any:
         async def gpu_task(msg, ctx): ...
     """
     if func is not None:
-        return pipeline_task(**kwargs)(func)
+        return cast("Callable[..., Any]", pipeline_task(**kwargs)(func))
     return pipeline_task(**kwargs)

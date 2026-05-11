@@ -16,7 +16,7 @@ compatibility.  Other projects get isolated queues like
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from clarinet.settings import settings
 from clarinet.utils.logger import logger
@@ -117,7 +117,7 @@ def create_broker(queue_name: str) -> AsyncBroker:
         try:
             from taskiq_redis import RedisAsyncResultBackend
 
-            backend: AsyncResultBackend = RedisAsyncResultBackend(
+            backend: AsyncResultBackend[Any] = RedisAsyncResultBackend(
                 settings.pipeline_result_backend_url
             )
             broker = broker.with_result_backend(backend)

@@ -109,19 +109,19 @@ def _unique_per_user_violation_filter(user_id: UUID) -> Any:
         select(literal(1))
         .select_from(inner_r)
         .where(
-            col(inner_r.user_id) == user_id,  # type: ignore[arg-type]
-            inner_r.record_type_name == Record.record_type_name,  # type: ignore[arg-type]
+            col(inner_r.user_id) == user_id,
+            inner_r.record_type_name == Record.record_type_name,
             or_(
                 and_(
-                    col(RecordType.level) == "SERIES",  # type: ignore[arg-type]
+                    col(RecordType.level) == "SERIES",
                     inner_r.series_uid == Record.series_uid,  # type: ignore[arg-type]
                 ),
                 and_(
-                    col(RecordType.level) == "STUDY",  # type: ignore[arg-type]
+                    col(RecordType.level) == "STUDY",
                     inner_r.study_uid == Record.study_uid,  # type: ignore[arg-type]
                 ),
                 and_(
-                    col(RecordType.level) == "PATIENT",  # type: ignore[arg-type]
+                    col(RecordType.level) == "PATIENT",
                     inner_r.patient_id == Record.patient_id,  # type: ignore[arg-type]
                 ),
             ),
@@ -130,7 +130,7 @@ def _unique_per_user_violation_filter(user_id: UUID) -> Any:
     )
     return ~and_(
         col(Record.user_id).is_(None),
-        col(RecordType.unique_per_user).is_(True),  # type: ignore[arg-type]
+        col(RecordType.unique_per_user).is_(True),
         exists(inner_subq),
     )
 
@@ -492,8 +492,8 @@ class RecordRepository(BaseRepository[Record]):
         for name, filename in matched_files.items():
             fd = fd_map[name]
             link = RecordFileLink(
-                record_id=record.id,  # type: ignore[arg-type]
-                file_definition_id=fd.id,  # type: ignore[arg-type]
+                record_id=record.id,
+                file_definition_id=fd.id,
                 filename=filename,
             )
             self.session.add(link)
@@ -962,7 +962,7 @@ class RecordRepository(BaseRepository[Record]):
         for query in queries:
             if query.comparison_operator is None:
                 continue
-            data_field = Record.data[query.result_name].as_string()  # type: ignore[union-attr, index]
+            data_field = Record.data[query.result_name].as_string()  # type: ignore[index]
             op_fn = _COMPARISON_OPS.get(
                 RecordFindResultComparisonOperator(query.comparison_operator)
             )

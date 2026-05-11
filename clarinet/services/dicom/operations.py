@@ -7,11 +7,11 @@ from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 
 from pydicom import Dataset
-from pynetdicom import AE, StoragePresentationContexts, build_role  # type: ignore[import-not-found]
-from pynetdicom.pdu_primitives import (  # type: ignore[import-not-found]
+from pynetdicom import AE, StoragePresentationContexts, build_role
+from pynetdicom.pdu_primitives import (
     SCP_SCU_RoleSelectionNegotiation,
 )
-from pynetdicom.sop_class import (  # type: ignore[import-not-found,attr-defined]
+from pynetdicom.sop_class import (  # type: ignore[attr-defined]
     PatientRootQueryRetrieveInformationModelFind,
     PatientRootQueryRetrieveInformationModelGet,
     PatientRootQueryRetrieveInformationModelMove,

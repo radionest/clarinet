@@ -54,7 +54,7 @@ class Image:
         self._source_path: Path | None = None
         self._filetype: FileType | None = None
         self._nifti_image: Any = None
-        self._nrrd_header: dict | None = None
+        self._nrrd_header: dict[str, Any] | None = None
         self.force_dtype: Any = dtype
 
         if template is not None:

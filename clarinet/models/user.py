@@ -95,7 +95,7 @@ class UserRead(schemas.BaseUser[UUID]):
             return v
 
 
-class UserCreate(schemas.BaseUserCreate, extra="forbid"):  # type: ignore[call-arg]
+class UserCreate(schemas.BaseUserCreate, extra="forbid"):
     """Pydantic model for creating a new user with password validation."""
 
     password: str = Field(min_length=8, max_length=18)

@@ -317,7 +317,7 @@ async def reconcile_config(
         # Validate that all referenced role_names exist in the DB
         referenced_roles = {item.role_name for item in all_items if item.role_name is not None}
         if referenced_roles:
-            all_roles_result = await session.execute(select(UserRole.name))  # type: ignore[arg-type]
+            all_roles_result = await session.execute(select(UserRole.name))
             all_db_roles = set(all_roles_result.scalars().all())
             missing = referenced_roles - all_db_roles
             if missing:

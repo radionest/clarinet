@@ -1,5 +1,7 @@
 """Health check endpoint for deployment verification."""
 
+from typing import Any
+
 from fastapi import APIRouter
 
 from clarinet.settings import settings
@@ -10,7 +12,7 @@ router = APIRouter(tags=["Health"])
 
 
 @router.get("/health")
-async def health_check() -> dict:
+async def health_check() -> dict[str, Any]:
     """Return system health status (public, no auth required).
 
     Checks database connectivity and pipeline broker availability.

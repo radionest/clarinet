@@ -33,7 +33,7 @@ class SessionCleanupService:
         self.cleanup_interval = cleanup_interval or settings.session_cleanup_interval
         self.batch_size = batch_size or settings.session_cleanup_batch_size
         self.is_running = False
-        self._task: asyncio.Task | None = None
+        self._task: asyncio.Task[None] | None = None
 
     async def start(self) -> None:
         """Start the cleanup service."""

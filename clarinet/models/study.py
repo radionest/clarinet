@@ -140,8 +140,8 @@ class SeriesFind(SeriesBase):
     series_uid: str | None = None
     series_description: str | None = None
     series_number: int | None = Field(default=None, gt=0, lt=100000)  # type: ignore
-    modality: str | None = None  # type: ignore
-    instance_count: InstanceCount | None = None  # type: ignore
+    modality: str | None = None
+    instance_count: InstanceCount | None = None
     anon_uid: str | None = None
     study_uid: str | None = None
     records: list["RecordFind"] = Field(default_factory=list)  # Will contain RecordFind objects

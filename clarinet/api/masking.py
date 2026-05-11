@@ -14,6 +14,7 @@ so the frontend stays consistent with OHIF and PACS.
 """
 
 from collections.abc import Sequence
+from typing import Any
 
 from clarinet.models import Record, RecordRead, User
 from clarinet.services.dicom.anonymizer import compute_per_study_patient_id
@@ -81,7 +82,7 @@ def mask_record_patient_data(record: RecordRead, user: User) -> RecordRead:
 
     masked_patient = record.patient.model_copy(update=patient_update)
 
-    updates: dict = {"patient": masked_patient}
+    updates: dict[str, Any] = {"patient": masked_patient}
     if masked_id is not None:
         updates["patient_id"] = masked_id
 
@@ -96,7 +97,7 @@ def mask_record_patient_data(record: RecordRead, user: User) -> RecordRead:
         # Also mask nested study.patient_id — otherwise the real patient ID
         # leaks through the study relation even though top-level patient_id
         # is anonymized.
-        study_nested_update: dict = {"study_uid": record.study.anon_uid}
+        study_nested_update: dict[str, Any] = {"study_uid": record.study.anon_uid}
         if masked_id is not None:
             study_nested_update["patient_id"] = masked_id
         updates["study"] = record.study.model_copy(update=study_nested_update)

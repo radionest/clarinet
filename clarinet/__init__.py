@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from types import ModuleType
 from typing import TYPE_CHECKING
 
 from clarinet.client import ClarinetClient as client
@@ -18,7 +19,7 @@ __all__ = [
 ]
 
 
-def __getattr__(name: str):  # type: ignore[no-untyped-def]
+def __getattr__(name: str) -> ModuleType:
     if name == "dicom":
         from clarinet.services import dicom
 

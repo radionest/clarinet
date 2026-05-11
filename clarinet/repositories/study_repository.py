@@ -12,7 +12,7 @@ from sqlalchemy.orm import selectinload
 from sqlmodel import select
 
 from clarinet.exceptions.domain import StudyNotFoundError
-from clarinet.models import Patient, Record, Study
+from clarinet.models import Patient, Record, Series, Study
 from clarinet.repositories.base import BaseRepository
 
 
@@ -101,7 +101,7 @@ class StudyRepository(BaseRepository[Study]):
         await self.session.refresh(study, ["patient"])
         return study.patient
 
-    async def get_series(self, study_id: str) -> list:
+    async def get_series(self, study_id: str) -> list[Series]:
         """Get all series for a study.
 
         Args:
@@ -195,8 +195,6 @@ class StudyRepository(BaseRepository[Study]):
         Returns:
             Number of series
         """
-        from clarinet.models import Series
-
         statement = select(func.count()).select_from(Series).where(Series.study_uid == study_id)
         result = await self.session.execute(statement)
         return result.scalar() or 0

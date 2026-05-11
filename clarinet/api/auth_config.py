@@ -84,13 +84,13 @@ class UserManager(BaseUserManager[User, UUID]):
 
 async def get_user_db(
     session: AsyncSession = Depends(get_async_session),
-) -> AsyncGenerator[SQLModelUserDatabaseAsync]:
+) -> AsyncGenerator[SQLModelUserDatabaseAsync[User, UUID]]:
     """Get user database."""
     yield SQLModelUserDatabaseAsync(session, User)
 
 
 async def get_user_manager(
-    user_db: SQLModelUserDatabaseAsync = Depends(get_user_db),
+    user_db: SQLModelUserDatabaseAsync[User, UUID] = Depends(get_user_db),
 ) -> AsyncGenerator[UserManager]:
     """Get user manager."""
     yield UserManager(user_db)
@@ -173,7 +173,7 @@ class DatabaseStrategy(Strategy[User, UUID]):
 
     async def read_token(
         self, token: str | None, user_manager: BaseUserManager[User, UUID]
-    ) -> User | None:  # type: ignore[override]
+    ) -> User | None:
         """Validate token with comprehensive checks and in-memory caching."""
         del user_manager  # Unused but required by interface
         if not token:
@@ -348,7 +348,7 @@ class DatabaseStrategy(Strategy[User, UUID]):
                 },
             )
 
-        return user  # type: ignore[return-value]
+        return user
 
     async def destroy_token(self, token: str, user: User) -> None:
         """Remove session token on logout."""

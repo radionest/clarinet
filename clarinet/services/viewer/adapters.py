@@ -123,7 +123,7 @@ class TemplateAdapter(ViewerAdapter):
     uri_scheme = "custom"
 
     def __init__(self, *, name: str, template: str) -> None:
-        self.name = name  # type: ignore[assignment]
+        self.name = name
         self.template = template
 
     def build_uri(

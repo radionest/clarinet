@@ -70,7 +70,7 @@ class PatientRepository(BaseRepository[Patient]):
         # SQLite fallback: counter table
         stmt = select(AutoIdCounter).where(AutoIdCounter.name == _COUNTER_NAME)
         counter_result = await self.session.execute(stmt)
-        counter: AutoIdCounter | None = counter_result.scalar_one_or_none()  # type: ignore[assignment]
+        counter: AutoIdCounter | None = counter_result.scalar_one_or_none()
 
         if counter is None:
             max_result = await self.session.execute(
@@ -97,7 +97,7 @@ class PatientRepository(BaseRepository[Patient]):
         # SQLite fallback
         stmt = select(AutoIdCounter).where(AutoIdCounter.name == _COUNTER_NAME)
         counter_result = await self.session.execute(stmt)
-        counter: AutoIdCounter | None = counter_result.scalar_one_or_none()  # type: ignore[assignment]
+        counter: AutoIdCounter | None = counter_result.scalar_one_or_none()
 
         if counter is None:
             max_result = await self.session.execute(

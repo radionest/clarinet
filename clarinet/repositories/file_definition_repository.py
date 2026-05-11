@@ -43,7 +43,7 @@ class FileDefinitionRepository(BaseRepository[FileDefinition]):
                 await self.session.flush()
             return existing
 
-        fd = FileDefinition(name=name, **kwargs)  # type: ignore[arg-type]
+        fd = FileDefinition(name=name, **kwargs)
         self.session.add(fd)
         await self.session.flush()
         return fd
