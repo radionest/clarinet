@@ -13,7 +13,7 @@ from clarinet.api.auth_config import (
     optional_current_user,
 )
 from clarinet.exceptions import ClarinetError
-from clarinet.exceptions.domain import AuthorizationError
+from clarinet.exceptions.domain import AuthorizationError, RecordFlowDisabledError
 from clarinet.models import Record, User
 from clarinet.repositories.file_definition_repository import FileDefinitionRepository
 from clarinet.repositories.patient_repository import PatientRepository
@@ -159,6 +159,20 @@ def get_recordflow_engine(request: Request) -> RecordFlowEngine | None:
     return getattr(request.app.state, "recordflow_engine", None)
 
 
+def _require_recordflow_engine(request: Request) -> RecordFlowEngine:
+    """Return the RecordFlow engine or raise ``RecordFlowDisabledError`` (→ 503).
+
+    Wrap routers that need a guaranteed non-None engine — services that can
+    cope with ``None`` should depend on :func:`get_recordflow_engine` instead.
+    """
+    engine = get_recordflow_engine(request)
+    if engine is None:
+        raise RecordFlowDisabledError(
+            "RecordFlow is disabled (set recordflow_enabled=True to enable)."
+        )
+    return engine
+
+
 async def get_user_service(user_repo: UserRepositoryDep) -> UserService:
     """Get user service instance with injected repository."""
     return UserService(user_repo)
@@ -219,6 +233,7 @@ RecordServiceDep = Annotated[RecordService, Depends(get_record_service)]
 RecordTypeServiceDep = Annotated[RecordTypeService, Depends(get_record_type_service)]
 AdminServiceDep = Annotated[AdminService, Depends(get_admin_service)]
 SlicerServiceDep = Annotated[SlicerService, Depends(get_slicer_service)]
+RecordFlowEngineDep = Annotated[RecordFlowEngine, Depends(_require_recordflow_engine)]
 
 
 # DICOM dependencies

@@ -394,6 +394,16 @@ class RecordFlowError(ClarinetError):
     """Base exception for RecordFlow workflow errors."""
 
 
+class RecordFlowDisabledError(RecordFlowError):
+    """Raised when an endpoint requires RecordFlow but the engine is not initialized.
+
+    Engine is None when ``recordflow_enabled=False`` or startup failed before
+    ``app.state.recordflow_engine`` was set.
+    """
+
+    error_code: ClassVar[str] = "RECORDFLOW_DISABLED"
+
+
 class FlowDefinitionError(RecordFlowError):
     """Raised when flow definition is invalid.
 

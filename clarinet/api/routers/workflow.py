@@ -17,12 +17,12 @@ from cachetools import TTLCache
 from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel, Field
 
-from clarinet.api.dependencies import AdminUserDep, RecordRepositoryDep
+from clarinet.api.dependencies import AdminUserDep, RecordFlowEngineDep, RecordRepositoryDep
 from clarinet.exceptions.domain import (
     WorkflowDigestAlreadyUsedError,
     WorkflowPlanDigestMismatchError,
 )
-from clarinet.exceptions.http import NOT_FOUND, SERVICE_UNAVAILABLE
+from clarinet.exceptions.http import NOT_FOUND
 from clarinet.models import RecordRead
 from clarinet.models.base import RecordStatus
 from clarinet.repositories.record_repository import RecordSearchCriteria
@@ -92,15 +92,6 @@ class FireRequest(DryRunRequest):
 
 class FireResponse(BaseModel):
     executed_actions: list[ActionPreview]
-
-
-def _require_engine(request: Request) -> RecordFlowEngine:
-    engine: RecordFlowEngine | None = getattr(request.app.state, "recordflow_engine", None)
-    if engine is None:
-        raise SERVICE_UNAVAILABLE.with_context(
-            "RecordFlow is disabled (set recordflow_enabled=True to enable)."
-        )
-    return engine
 
 
 def _get_used_digest_cache(request: Request) -> TTLCache[str, bool]:
@@ -187,9 +178,9 @@ async def _execute_trigger(
 
 @router.get("/graph", response_model=WorkflowGraph)
 async def get_graph(
-    request: Request,
     _admin: AdminUserDep,
     repo: RecordRepositoryDep,
+    engine: RecordFlowEngineDep,
     record_id: Annotated[int | None, Query(ge=1, le=2147483647)] = None,
     expanded: Annotated[
         str | None, Query(description="Comma-separated list of pipeline names to inline.")
@@ -202,7 +193,6 @@ async def get_graph(
     that ``parent_record_id`` lets us reconstruct (today: ``CreateRecord``
     edges only).
     """
-    engine = _require_engine(request)
     expanded_pipelines = _parse_expanded(expanded)
 
     audit_provider = None
@@ -227,9 +217,9 @@ async def get_graph(
 
 @router.post("/dry-run", response_model=DryRunResponse)
 async def dry_run(
-    request: Request,
     _admin: AdminUserDep,
     repo: RecordRepositoryDep,
+    engine: RecordFlowEngineDep,
     body: DryRunRequest,
 ) -> DryRunResponse:
     """Plan what would happen if a trigger fired — without executing.
@@ -237,7 +227,6 @@ async def dry_run(
     Returns the list of actions the engine would dispatch plus a stable
     ``digest`` the caller passes back to :func:`fire` to detect drift.
     """
-    engine = _require_engine(request)
     record_read = await _load_record_read(repo, body.record_id)
     plan = await _run_plan(engine, record_read, body)
     return DryRunResponse(plan=plan, digest=_compute_digest(plan))
@@ -248,6 +237,7 @@ async def fire(
     request: Request,
     admin: AdminUserDep,
     repo: RecordRepositoryDep,
+    engine: RecordFlowEngineDep,
     body: FireRequest,
 ) -> FireResponse:
     """Execute a previously-planned trigger after digest verification.
@@ -274,7 +264,6 @@ async def fire(
     accepted. Run a single admin worker, or migrate the cache to Redis
     if true multi-worker safety is required.
     """
-    engine = _require_engine(request)
     used_digests = _get_used_digest_cache(request)
 
     if body.plan_digest in used_digests:

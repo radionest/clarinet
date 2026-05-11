@@ -50,6 +50,7 @@ def setup_exception_handlers(app: FastAPI) -> None:
         EntityNotFoundError,
         InvalidCredentialsError,
         PipelineError,
+        RecordFlowDisabledError,
         RecordLimitReachedError,
         RecordUniquePerUserError,
         ReportQueryError,
@@ -158,6 +159,17 @@ def setup_exception_handlers(app: FastAPI) -> None:
             content={
                 "detail": str(exc) if str(exc) else "User already has a record of this type",
                 "code": RecordUniquePerUserError.error_code,
+            },
+        )
+
+    @app.exception_handler(RecordFlowDisabledError)
+    async def handle_recordflow_disabled(_: Request, exc: RecordFlowDisabledError) -> JSONResponse:
+        """Convert RecordFlowDisabledError to 503 (RecordFlow engine not initialized)."""
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={
+                "detail": str(exc) if str(exc) else "RecordFlow is disabled",
+                "code": RecordFlowDisabledError.error_code,
             },
         )
 
