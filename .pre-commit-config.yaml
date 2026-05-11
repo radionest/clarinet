@@ -45,10 +45,13 @@ repos:
       # Targets only the patterns that previously caused the UUID-not-JSON-serializable bug:
       # `orjson.dumps(...)` anywhere, and `json.dumps(..., default=...)` (the payload shape).
       # Plain `json.dumps(obj)` without default= (cursor tokens, file writers, tests) is fine.
+      # `[^()]*(?:\([^()]*\)[^()]*)*` allows one level of nested parens in the first arg,
+      # so `json.dumps(make_payload(x), default=str)` is caught. Multi-line `dumps(...)`
+      # and 2+ levels of nesting are an accepted gap — pygrep runs per-line, no (?s).
       - id: forbid-direct-payload-dumps
         name: payload dumps must go through clarinet.utils.serialization.json_dumps_bytes
         language: pygrep
-        entry: '\borjson\.dumps\(|\bjson\.dumps\([^)]*default='
+        entry: '\borjson\.dumps\(|\bjson\.dumps\([^()]*(?:\([^()]*\)[^()]*)*,\s*default='
         files: ^clarinet/.*\.py$
         exclude: ^clarinet/utils/(serialization|db_manager)\.py$
 
