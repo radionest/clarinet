@@ -1,6 +1,7 @@
 // Comprehensive unit tests for http_client.process_response function
 import api/http_client
 import api/types
+import gleam/dict
 import gleam/dynamic/decode
 import gleam/json
 import gleam/list
@@ -153,6 +154,38 @@ pub fn request_building_contract_test() {
   let _ = http_client.decode_response
 
   should.equal(True, True)
+}
+
+// Test ConflictError construction and destructuring — the variant used
+// when a 4xx response carries a structured {code, metadata} envelope.
+pub fn conflict_error_structure_test() {
+  let meta =
+    dict.new()
+    |> dict.insert("patient_id", "P001")
+    |> dict.insert("patient_name", "Иванов Иван")
+
+  let conflict_err =
+    types.ConflictError(
+      error_code: "PATIENT_ALREADY_EXISTS",
+      message: "Patient with ID 'P001' already exists",
+      metadata: meta,
+    )
+
+  let types.ConflictError(code, msg, md) = conflict_err
+  should.equal(code, "PATIENT_ALREADY_EXISTS")
+  should.equal(msg, "Patient with ID 'P001' already exists")
+  should.equal(dict.get(md, "patient_id"), Ok("P001"))
+  should.equal(dict.get(md, "patient_name"), Ok("Иванов Иван"))
+
+  // ConflictError with empty metadata — for ENTITY_ALREADY_EXISTS fallback.
+  let generic_conflict =
+    types.ConflictError(
+      error_code: "ENTITY_ALREADY_EXISTS",
+      message: "Resource already exists",
+      metadata: dict.new(),
+    )
+  let types.ConflictError(_, _, empty_md) = generic_conflict
+  should.equal(dict.size(empty_md), 0)
 }
 
 // Test validation error structure

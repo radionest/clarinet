@@ -5,6 +5,8 @@ This module maps domain exceptions to appropriate HTTP status codes
 and response formats for the API layer using FastAPI decorators.
 """
 
+from typing import Any
+
 from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 
@@ -55,10 +57,22 @@ def setup_exception_handlers(app: FastAPI) -> None:
     async def handle_entity_already_exists(
         _: Request, exc: EntityAlreadyExistsError
     ) -> JSONResponse:
-        """Convert EntityAlreadyExistsError to 409 response."""
+        """Convert EntityAlreadyExistsError to 409 response.
+
+        Response shape: ``{detail, code, metadata?}``. ``code`` is always
+        present (machine-readable discriminator); ``metadata`` is included
+        only when the concrete subclass supplies structured fields.
+        """
+        content: dict[str, Any] = {
+            "detail": str(exc) if str(exc) else "Resource already exists",
+            "code": exc.error_code,
+        }
+        meta = exc.metadata()
+        if meta:
+            content["metadata"] = meta
         return JSONResponse(
             status_code=status.HTTP_409_CONFLICT,
-            content={"detail": str(exc) if str(exc) else "Resource already exists"},
+            content=content,
         )
 
     @app.exception_handler(AuthenticationError)

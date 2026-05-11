@@ -562,6 +562,7 @@ fn api_error_msg(err: ApiError) -> String {
     types.ParseError(msg) -> msg
     types.AuthError(msg) -> msg
     types.ServerError(_, msg) -> msg
+    types.ConflictError(_, msg, _) -> msg
     types.ValidationError(_) -> "Validation error"
   }
 }

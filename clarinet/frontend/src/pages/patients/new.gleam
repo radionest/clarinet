@@ -1,11 +1,12 @@
 // New patient creation page — self-contained MVU module
 import api/models.{type Patient}
 import api/patients
-import api/types.{type ApiError, AuthError}
+import api/types.{type ApiError, AuthError, ConflictError}
 import clarinet_frontend/i18n
 import components/forms/patient_form
 import gleam/dict.{type Dict}
 import gleam/javascript/promise
+import gleam/result
 import lustre/attribute
 import lustre/effect.{type Effect}
 import lustre/element.{type Element}
@@ -95,7 +96,11 @@ pub fn update(
       ])
 
     SubmitResult(Error(err)) ->
-      #(Model(..model, loading: False), effect.none(), handle_error(err, shared.translate(i18n.PatientsMsgCreateFailed)))
+      #(
+        Model(..model, loading: False),
+        effect.none(),
+        handle_error(err, shared, shared.translate(i18n.PatientsMsgCreateFailed)),
+      )
 
     Cancel ->
       #(model, effect.none(), [shared.Navigate(router.Patients(dict.new()))])
@@ -104,9 +109,22 @@ pub fn update(
 
 // --- Helpers ---
 
-fn handle_error(err: ApiError, fallback_msg: String) -> List(OutMsg) {
+fn handle_error(
+  err: ApiError,
+  shared_ctx: Shared,
+  fallback_msg: String,
+) -> List(OutMsg) {
   case err {
     AuthError(_) -> [shared.Logout]
+    ConflictError("PATIENT_ALREADY_EXISTS", _, metadata) -> {
+      let id = dict.get(metadata, "patient_id") |> result.unwrap("")
+      let name = dict.get(metadata, "patient_name") |> result.unwrap("")
+      [
+        shared.ShowError(
+          shared_ctx.translate(i18n.PatientsMsgConflict(id, name)),
+        ),
+      ]
+    }
     _ -> [shared.ShowError(fallback_msg)]
   }
 }

@@ -26,6 +26,11 @@ class EntityNotFoundError(ClarinetError):
 class EntityAlreadyExistsError(ClarinetError):
     """Raised when trying to create an entity that already exists."""
 
+    error_code: ClassVar[str] = "ENTITY_ALREADY_EXISTS"
+
+    def metadata(self) -> dict[str, str]:
+        return {}
+
 
 class AuthenticationError(ClarinetError):
     """Raised when authentication fails."""
@@ -119,9 +124,20 @@ class PatientNotFoundError(EntityNotFoundError):
 class PatientAlreadyExistsError(EntityAlreadyExistsError):
     """Raised when trying to create a patient that already exists."""
 
-    def __init__(self, patient_id: str):
+    error_code: ClassVar[str] = "PATIENT_ALREADY_EXISTS"
+
+    def __init__(self, patient_id: str, patient_name: str | None = None):
         self.patient_id = patient_id
+        self.patient_name = patient_name
+        # PII: str(exc) intentionally omits patient_name — it lands in logs.
+        # patient_name travels only through metadata() into the HTTP body.
         super().__init__(f"Patient with ID '{patient_id}' already exists")
+
+    def metadata(self) -> dict[str, str]:
+        data = {"patient_id": self.patient_id}
+        if self.patient_name is not None:
+            data["patient_name"] = self.patient_name
+        return data
 
 
 class StudyNotFoundError(EntityNotFoundError):
