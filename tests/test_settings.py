@@ -3,7 +3,7 @@
 from pathlib import Path
 
 import pytest
-from pydantic import SecretStr
+from pydantic import SecretStr, ValidationError
 
 from clarinet.settings import Settings
 
@@ -94,3 +94,47 @@ class TestGetWorkerLogFile:
         s = Settings()
         assert s.worker_log_file == "from_env.log"
         assert s.get_worker_log_file() == tmp_path / "from_env.log"
+
+
+class TestAnonIdPrefixValidator:
+    """Settings-level validation for ``anon_id_prefix``.
+
+    Values come through env (CLARINET_ANON_ID_PREFIX) because
+    ``settings_customise_sources`` drops ``init_settings`` — kwargs to
+    ``Settings(...)`` are ignored.
+    """
+
+    def test_default_clarinet_is_valid(self) -> None:
+        assert Settings().anon_id_prefix == "CLARINET"
+
+    def test_empty_string_is_valid(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("CLARINET_ANON_ID_PREFIX", "")
+        assert Settings().anon_id_prefix == ""
+
+    def test_alphanumeric_with_separators_is_valid(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("CLARINET_ANON_ID_PREFIX", "NIR_LIVER-V2")
+        assert Settings().anon_id_prefix == "NIR_LIVER-V2"
+
+    def test_rejects_non_ascii(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("CLARINET_ANON_ID_PREFIX", "кириллица")
+        with pytest.raises(ValidationError, match="anon_id_prefix"):
+            Settings()
+
+    def test_rejects_whitespace(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("CLARINET_ANON_ID_PREFIX", "has space")
+        with pytest.raises(ValidationError, match="anon_id_prefix"):
+            Settings()
+
+    def test_rejects_special_chars(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("CLARINET_ANON_ID_PREFIX", "bad.dot")
+        with pytest.raises(ValidationError, match="anon_id_prefix"):
+            Settings()
+
+    def test_rejects_over_55_chars(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("CLARINET_ANON_ID_PREFIX", "A" * 56)
+        with pytest.raises(ValidationError, match="too long"):
+            Settings()
+
+    def test_55_chars_exactly_is_valid(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("CLARINET_ANON_ID_PREFIX", "A" * 55)
+        assert len(Settings().anon_id_prefix) == 55

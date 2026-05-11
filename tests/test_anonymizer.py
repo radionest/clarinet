@@ -370,3 +370,7 @@ class TestComputePerStudyPatientId:
         assert compute_per_study_patient_id(
             "salt", "1.2.3.4", prefix=None
         ) == compute_per_study_patient_id("salt", "1.2.3.4")
+
+    def test_raises_value_error_when_prefix_plus_hash_exceeds_dicom_lo(self) -> None:
+        with pytest.raises(ValueError, match="DICOM LO"):
+            compute_per_study_patient_id("salt", "1.2.3.4", length=8, prefix="X" * 60)

@@ -36,9 +36,18 @@ def compute_per_study_patient_id(
     (16 hex = 64 bits drops collision probability to negligible levels at any
     realistic scale).
 
-    DICOM LO (64-char) constraint: ``len(prefix) + 1 + length <= 64`` is
-    asserted to fail fast on misconfiguration; otherwise the PACS would
-    silently truncate the value.
+    Warning: ``prefix`` is part of the deterministic key alongside ``salt``
+    and ``length``. Changing ``anon_id_prefix`` after deployment produces
+    different PatientIDs for the same source ``study_uid`` — previously
+    anonymized studies on the PACS will no longer correlate with new runs.
+    Treat the prefix as immutable for the lifetime of an anonymization
+    project.
+
+    DICOM LO (64-char) constraint: ``len(prefix) + 1 + length <= 64`` raises
+    ``ValueError`` to fail fast on misconfiguration (survives ``python -O``,
+    unlike ``assert``). The Settings-level validator already caps
+    ``settings.anon_id_prefix`` at 55 chars; this re-check defends callers
+    that pass a custom ``length``.
 
     Args:
         salt: Salt for deterministic hashing.
@@ -49,13 +58,19 @@ def compute_per_study_patient_id(
 
     Returns:
         ``f"{prefix}_{hash}"`` if prefix is set, else just the hash.
+
+    Raises:
+        ValueError: when ``len(prefix) + 1 + length`` exceeds the DICOM LO
+            64-char limit.
     """
     digest = hashlib.sha256(f"{salt}:{study_uid}".encode()).hexdigest()[:length]
     if prefix:
-        assert len(prefix) + 1 + length <= 64, (
-            f"prefix '{prefix}' ({len(prefix)} chars) + 1 + {length}-hex hash "
-            "exceeds DICOM LO (64-char) limit"
-        )
+        total = len(prefix) + 1 + length
+        if total > 64:
+            raise ValueError(
+                f"prefix '{prefix}' ({len(prefix)} chars) + 1 + {length}-hex "
+                f"hash = {total} chars exceeds DICOM LO 64-char limit"
+            )
         return f"{prefix}_{digest}"
     return digest
 
