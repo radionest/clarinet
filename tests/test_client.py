@@ -726,3 +726,51 @@ class TestJSONSerialization:
 
         assert "content" not in captured
         assert captured["data"] == {"username": "u", "password": "p"}
+
+    @pytest.mark.asyncio
+    async def test_request_preserves_caller_headers(self) -> None:
+        """Caller-supplied headers (Authorization, custom Content-Type) must survive."""
+        captured: dict[str, object] = {}
+
+        async def mock_request(method, url, **kwargs):
+            captured.update(kwargs)
+            return httpx.Response(200, json={"ok": True})
+
+        client = ClarinetClient("http://test", auto_login=False)
+        client.client = AsyncMock()
+        client.client.request = mock_request
+
+        await client._request(
+            "POST",
+            "/records/42/data",
+            json={"k": "v"},
+            headers={"Authorization": "Bearer xxx", "Content-Type": "application/vnd.api+json"},
+        )
+
+        headers = captured["headers"]
+        assert headers["Authorization"] == "Bearer xxx"
+        assert headers["Content-Type"] == "application/vnd.api+json"
+
+    @pytest.mark.asyncio
+    async def test_request_adds_content_type_when_headers_lack_it(self) -> None:
+        """If caller passes headers without Content-Type, the client fills it in."""
+        captured: dict[str, object] = {}
+
+        async def mock_request(method, url, **kwargs):
+            captured.update(kwargs)
+            return httpx.Response(200, json={"ok": True})
+
+        client = ClarinetClient("http://test", auto_login=False)
+        client.client = AsyncMock()
+        client.client.request = mock_request
+
+        await client._request(
+            "POST",
+            "/records/42/data",
+            json={"k": "v"},
+            headers={"Authorization": "Bearer xxx"},
+        )
+
+        headers = captured["headers"]
+        assert headers["Authorization"] == "Bearer xxx"
+        assert headers["Content-Type"] == "application/json"
