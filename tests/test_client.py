@@ -7,8 +7,10 @@ using real FastAPI server and database.
 
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
+from uuid import uuid4
 
 import httpx
+import orjson
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -669,3 +671,196 @@ class TestRetryOn401:
             await client._request("GET", "/patients")
 
         mock_login.assert_called_once()
+
+
+class TestJSONSerialization:
+    """Regression: caller dicts with UUID/datetime must serialize without TypeError."""
+
+    @pytest.mark.asyncio
+    async def test_request_json_with_uuid_and_datetime(self) -> None:
+        """submit_record_data-shaped payloads with UUID / datetime / nested lists go through."""
+        captured: dict[str, bytes] = {}
+
+        async def mock_request(method, url, **kwargs):
+            captured["content"] = kwargs.get("content", b"")
+            captured["content_type"] = kwargs.get("headers", {}).get("Content-Type", "")
+            assert "json" not in kwargs, "client should not pass json= after orjson rewrite"
+            return httpx.Response(200, json={"ok": True})
+
+        client = ClarinetClient("http://test", auto_login=False)
+        client.client = AsyncMock()
+        client.client.request = mock_request
+
+        source_id = uuid4()
+        nested_id = uuid4()
+        when = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
+
+        await client._request(
+            "POST",
+            "/records/42/data",
+            json={"source_id": source_id, "items": [nested_id], "at": when},
+        )
+
+        assert captured["content_type"] == "application/json"
+        body = orjson.loads(captured["content"])
+        assert body == {
+            "source_id": str(source_id),
+            "items": [str(nested_id)],
+            "at": when.isoformat(),
+        }
+
+    @pytest.mark.asyncio
+    async def test_request_without_json_kwarg_untouched(self) -> None:
+        """When caller doesn't pass json=, the request goes through unchanged (e.g. form data)."""
+        captured: dict[str, object] = {}
+
+        async def mock_request(method, url, **kwargs):
+            captured.update(kwargs)
+            return httpx.Response(200, json={"ok": True})
+
+        client = ClarinetClient("http://test", auto_login=False)
+        client.client = AsyncMock()
+        client.client.request = mock_request
+
+        await client._request("POST", "/auth/login", data={"username": "u", "password": "p"})
+
+        assert "content" not in captured
+        assert captured["data"] == {"username": "u", "password": "p"}
+
+    @pytest.mark.asyncio
+    async def test_request_preserves_caller_headers(self) -> None:
+        """Caller-supplied headers (Authorization, custom Content-Type) must survive."""
+        captured: dict[str, object] = {}
+
+        async def mock_request(method, url, **kwargs):
+            captured.update(kwargs)
+            return httpx.Response(200, json={"ok": True})
+
+        client = ClarinetClient("http://test", auto_login=False)
+        client.client = AsyncMock()
+        client.client.request = mock_request
+
+        await client._request(
+            "POST",
+            "/records/42/data",
+            json={"k": "v"},
+            headers={"Authorization": "Bearer xxx", "Content-Type": "application/vnd.api+json"},
+        )
+
+        headers = captured["headers"]
+        assert headers["Authorization"] == "Bearer xxx"
+        assert headers["Content-Type"] == "application/vnd.api+json"
+
+    @pytest.mark.asyncio
+    async def test_request_adds_content_type_when_headers_lack_it(self) -> None:
+        """If caller passes headers without Content-Type, the client fills it in."""
+        captured: dict[str, object] = {}
+
+        async def mock_request(method, url, **kwargs):
+            captured.update(kwargs)
+            return httpx.Response(200, json={"ok": True})
+
+        client = ClarinetClient("http://test", auto_login=False)
+        client.client = AsyncMock()
+        client.client.request = mock_request
+
+        await client._request(
+            "POST",
+            "/records/42/data",
+            json={"k": "v"},
+            headers={"Authorization": "Bearer xxx"},
+        )
+
+        headers = captured["headers"]
+        assert headers["Authorization"] == "Bearer xxx"
+        assert headers["Content-Type"] == "application/json"
+
+    @pytest.mark.asyncio
+    async def test_request_headers_as_list_of_tuples(self) -> None:
+        """httpx accepts headers= as a list of tuples — _request must handle it."""
+        captured: dict[str, object] = {}
+
+        async def mock_request(method, url, **kwargs):
+            captured.update(kwargs)
+            return httpx.Response(200, json={"ok": True})
+
+        client = ClarinetClient("http://test", auto_login=False)
+        client.client = AsyncMock()
+        client.client.request = mock_request
+
+        await client._request(
+            "POST",
+            "/records/42/data",
+            json={"k": "v"},
+            headers=[("X-Trace", "abc")],
+        )
+
+        headers = captured["headers"]
+        assert headers["X-Trace"] == "abc"
+        assert headers["Content-Type"] == "application/json"
+
+    @pytest.mark.asyncio
+    async def test_request_headers_as_httpx_headers_instance(self) -> None:
+        """httpx.Headers instance from caller must be respected as-is."""
+        captured: dict[str, object] = {}
+
+        async def mock_request(method, url, **kwargs):
+            captured.update(kwargs)
+            return httpx.Response(200, json={"ok": True})
+
+        client = ClarinetClient("http://test", auto_login=False)
+        client.client = AsyncMock()
+        client.client.request = mock_request
+
+        await client._request(
+            "POST",
+            "/records/42/data",
+            json={"k": "v"},
+            headers=httpx.Headers({"X-Trace": "abc"}),
+        )
+
+        headers = captured["headers"]
+        assert headers["X-Trace"] == "abc"
+        assert headers["Content-Type"] == "application/json"
+
+    @pytest.mark.asyncio
+    async def test_request_rejects_simultaneous_json_and_content(self) -> None:
+        """httpx forbids json= + content= together; client must fail loudly, not overwrite."""
+        client = ClarinetClient("http://test", auto_login=False)
+        client.client = AsyncMock()
+        client.client.request = AsyncMock(return_value=httpx.Response(200, json={"ok": True}))
+
+        with pytest.raises(TypeError, match="either json= or content="):
+            await client._request(
+                "POST",
+                "/records/42/data",
+                json={"a": 1},
+                content=b"raw-binary",
+            )
+
+        client.client.request.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_request_caller_content_type_case_insensitive(self) -> None:
+        """A lowercase content-type from the caller must win over our default."""
+        captured: dict[str, object] = {}
+
+        async def mock_request(method, url, **kwargs):
+            captured.update(kwargs)
+            return httpx.Response(200, json={"ok": True})
+
+        client = ClarinetClient("http://test", auto_login=False)
+        client.client = AsyncMock()
+        client.client.request = mock_request
+
+        await client._request(
+            "POST",
+            "/records/42/data",
+            json={"k": "v"},
+            headers={"content-type": "application/xml"},
+        )
+
+        headers = captured["headers"]
+        # httpx.Headers normalizes to a single case-insensitive entry.
+        assert headers["Content-Type"] == "application/xml"
+        assert headers["content-type"] == "application/xml"

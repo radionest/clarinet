@@ -9,7 +9,6 @@ using loguru for powerful, flexible logging capabilities.
 from __future__ import annotations
 
 import inspect
-import json
 import logging
 import re
 import sys
@@ -21,25 +20,17 @@ import httpx
 from loguru import logger as _logger
 
 from ..settings import settings
+from .serialization import json_dumps_bytes
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from loguru import Record
 
-try:
-    import orjson
 
-    def _json_dumps(data: dict[str, Any]) -> str:
-        """Serialize dict to compact JSON string using orjson."""
-        result: str = orjson.dumps(data, default=str).decode()
-        return result
-
-except ImportError:
-
-    def _json_dumps(data: dict[str, Any]) -> str:
-        """Serialize dict to compact JSON string using stdlib json."""
-        return json.dumps(data, separators=(",", ":"), default=str)
+def _json_dumps(data: dict[str, Any]) -> str:
+    """Serialize dict to compact JSON string using the project orjson helper."""
+    return json_dumps_bytes(data).decode()
 
 
 _SENSITIVE_KEY = r"(?:password|token|secret|api[_-]?key|auth|credentials?|private[_-]?key)"

@@ -18,7 +18,6 @@ DeadLetterMiddleware routes permanently failed tasks to the dead letter queue.
 
 from __future__ import annotations
 
-import json
 from typing import TYPE_CHECKING, Any
 
 from taskiq import TaskiqMiddleware
@@ -27,6 +26,7 @@ from taskiq.middlewares import SmartRetryMiddleware as _SmartRetryMiddleware
 from clarinet.client import ClarinetAPIError, ClarinetClient
 from clarinet.settings import settings
 from clarinet.utils.logger import logger
+from clarinet.utils.serialization import json_dumps_bytes
 
 if TYPE_CHECKING:
     from aio_pika.abc import AbstractChannel, AbstractRobustConnection
@@ -109,7 +109,7 @@ class DLQPublisher:
 
         await self._channel.default_exchange.publish(
             aio_pika.Message(
-                body=json.dumps(payload, default=str).encode(),
+                body=json_dumps_bytes(payload),
                 content_type="application/json",
                 delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
             ),

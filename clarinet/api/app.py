@@ -12,16 +12,8 @@ from string import Template
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, ORJSONResponse
 from starlette.middleware.gzip import GZipMiddleware
-
-try:
-    import orjson  # noqa: F401
-    from fastapi.responses import ORJSONResponse
-
-    _default_response_class: type[ORJSONResponse] | None = ORJSONResponse
-except ImportError:
-    _default_response_class = None
 
 from clarinet.api.exception_handlers import setup_exception_handlers
 
@@ -435,7 +427,7 @@ def create_app(root_path: str = "") -> FastAPI:
         debug=settings.debug,
         lifespan=_lifespan_with_logging,
         root_path=root_path,
-        default_response_class=_default_response_class or JSONResponse,
+        default_response_class=ORJSONResponse,
     )
 
     # Configure CORS
