@@ -7,8 +7,10 @@ using real FastAPI server and database.
 
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
+from uuid import uuid4
 
 import httpx
+import orjson
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -669,3 +671,58 @@ class TestRetryOn401:
             await client._request("GET", "/patients")
 
         mock_login.assert_called_once()
+
+
+class TestJSONSerialization:
+    """Regression: caller dicts with UUID/datetime must serialize without TypeError."""
+
+    @pytest.mark.asyncio
+    async def test_request_json_with_uuid_and_datetime(self) -> None:
+        """submit_record_data-shaped payloads with UUID / datetime / nested lists go through."""
+        captured: dict[str, bytes] = {}
+
+        async def mock_request(method, url, **kwargs):
+            captured["content"] = kwargs.get("content", b"")
+            captured["content_type"] = kwargs.get("headers", {}).get("Content-Type", "")
+            assert "json" not in kwargs, "client should not pass json= after orjson rewrite"
+            return httpx.Response(200, json={"ok": True})
+
+        client = ClarinetClient("http://test", auto_login=False)
+        client.client = AsyncMock()
+        client.client.request = mock_request
+
+        source_id = uuid4()
+        nested_id = uuid4()
+        when = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
+
+        await client._request(
+            "POST",
+            "/records/42/data",
+            json={"source_id": source_id, "items": [nested_id], "at": when},
+        )
+
+        assert captured["content_type"] == "application/json"
+        body = orjson.loads(captured["content"])
+        assert body == {
+            "source_id": str(source_id),
+            "items": [str(nested_id)],
+            "at": when.isoformat(),
+        }
+
+    @pytest.mark.asyncio
+    async def test_request_without_json_kwarg_untouched(self) -> None:
+        """When caller doesn't pass json=, the request goes through unchanged (e.g. form data)."""
+        captured: dict[str, object] = {}
+
+        async def mock_request(method, url, **kwargs):
+            captured.update(kwargs)
+            return httpx.Response(200, json={"ok": True})
+
+        client = ClarinetClient("http://test", auto_login=False)
+        client.client = AsyncMock()
+        client.client.request = mock_request
+
+        await client._request("POST", "/auth/login", data={"username": "u", "password": "p"})
+
+        assert "content" not in captured
+        assert captured["data"] == {"username": "u", "password": "p"}

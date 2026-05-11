@@ -12,6 +12,7 @@ from typing import Any, Literal
 from uuid import UUID
 
 import httpx
+import orjson
 
 from clarinet.models import (
     Patient,
@@ -195,6 +196,12 @@ class ClarinetClient:
         """
         url = endpoint if endpoint.startswith("http") else f"{self.base_url}{endpoint}"
         self._log_request(method, url, **kwargs)
+
+        # Serialize JSON via orjson so UUID/datetime values from caller dicts
+        # don't crash on stdlib json's encoder (httpx default).
+        if "json" in kwargs:
+            kwargs["content"] = orjson.dumps(kwargs.pop("json"), default=str)
+            kwargs.setdefault("headers", {}).setdefault("Content-Type", "application/json")
 
         try:
             response = await self.client.request(method, url, **kwargs)

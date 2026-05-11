@@ -18,9 +18,9 @@ DeadLetterMiddleware routes permanently failed tasks to the dead letter queue.
 
 from __future__ import annotations
 
-import json
 from typing import TYPE_CHECKING, Any
 
+import orjson
 from taskiq import TaskiqMiddleware
 from taskiq.middlewares import SmartRetryMiddleware as _SmartRetryMiddleware
 
@@ -109,7 +109,7 @@ class DLQPublisher:
 
         await self._channel.default_exchange.publish(
             aio_pika.Message(
-                body=json.dumps(payload, default=str).encode(),
+                body=orjson.dumps(payload, default=str),
                 content_type="application/json",
                 delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
             ),

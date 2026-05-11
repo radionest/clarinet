@@ -572,7 +572,7 @@ wheels = [
 
 [[package]]
 name = "clarinet"
-version = "0.3.3"
+version = "0.4.0"
 source = { editable = "." }
 dependencies = [
     { name = "aiofiles" },
@@ -592,6 +592,7 @@ dependencies = [
     { name = "nibabel" },
     { name = "numpy" },
     { name = "openpyxl" },
+    { name = "orjson" },
     { name = "psycopg2-binary" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
@@ -618,7 +619,6 @@ docs = [
 ]
 performance = [
     { name = "httptools" },
-    { name = "orjson" },
     { name = "uvloop" },
 ]
 
@@ -666,7 +666,7 @@ requires-dist = [
     { name = "nibabel", specifier = ">=5.0.0" },
     { name = "numpy", specifier = ">=1.24.3" },
     { name = "openpyxl", specifier = ">=3.1" },
-    { name = "orjson", marker = "extra == 'performance'", specifier = ">=3.10.0" },
+    { name = "orjson", specifier = ">=3.10.0" },
     { name = "psycopg2-binary", specifier = ">=2.9" },
     { name = "pydantic", specifier = ">=2.12.0" },
     { name = "pydantic-settings", specifier = ">=2.0.0" },
