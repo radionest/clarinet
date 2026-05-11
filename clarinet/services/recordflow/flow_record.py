@@ -22,7 +22,7 @@ Example usage:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from .flow_action import (
     CallFunctionAction,
@@ -345,24 +345,36 @@ class FlowRecord:
         self.conditions.append(self._current_condition)
         return self
 
-    def add_record(self, record_type_name: str, **kwargs: object) -> FlowRecord:
+    def add_record(
+        self,
+        record_type_name: str,
+        *,
+        series_uid: str | None = None,
+        user_id: str | None = None,
+        parent_record_id: int | None = None,
+        inherit_user: bool = False,
+        context_info: str | None = None,
+    ) -> FlowRecord:
         """Add a record creation action.
 
         Args:
             record_type_name: The name of the record type to create.
-            **kwargs: Additional parameters for record creation
-                     (e.g., user_id, context_info, series_uid, inherit_user).
+            series_uid: Optional series UID override.
+            user_id: Optional user ID to assign.
+            parent_record_id: Optional explicit parent record ID.
+            inherit_user: If True, inherit user_id from triggering record.
+            context_info: Optional context information string.
 
         Returns:
             Self for method chaining.
         """
         action = CreateRecordAction(
             record_type_name=record_type_name,
-            series_uid=kwargs.get("series_uid"),
-            user_id=kwargs.get("user_id"),
-            parent_record_id=kwargs.get("parent_record_id"),
-            inherit_user=kwargs.get("inherit_user", False),
-            context_info=kwargs.get("context_info"),
+            series_uid=series_uid,
+            user_id=user_id,
+            parent_record_id=parent_record_id,
+            inherit_user=inherit_user,
+            context_info=context_info,
         )
 
         if self._current_condition:
@@ -388,23 +400,30 @@ class FlowRecord:
             self.add_record(name, inherit_user=inherit_user)
         return self
 
-    def update_record(self, record_name: str, **kwargs: object) -> FlowRecord:
+    def update_record(
+        self,
+        record_name: str,
+        *,
+        status: str | None = None,
+        strategy: Literal["single", "all"] = "single",
+    ) -> FlowRecord:
         """Add a record update action.
 
         Args:
             record_name: The name of the record type to update.
-            **kwargs: Parameters to update (``status``, ``strategy``).
-                ``strategy='single'`` (default): skip with error log if
-                context contains 0 or >1 records of this type.
-                ``strategy='all'``: apply update to every matching record.
+            status: Optional new status value.
+            strategy: Selection strategy when context contains multiple
+                records of this type. ``"single"`` (default): skip with
+                error log if context contains 0 or >1 matching records.
+                ``"all"``: apply the update to every matching record.
 
         Returns:
             Self for method chaining.
         """
         action = UpdateRecordAction(
             record_name=record_name,
-            status=kwargs.get("status"),
-            strategy=kwargs.get("strategy", "single"),
+            status=status,
+            strategy=strategy,
         )
 
         if self._current_condition:

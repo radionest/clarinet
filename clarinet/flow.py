@@ -38,11 +38,9 @@ __all__ = [
 
 
 @overload
-def task(func: Callable[..., Any], /) -> Callable[..., Any]: ...
+def task[F: Callable[..., Any]](func: F, /) -> F: ...
 @overload
-def task(
-    func: None = None, /, **kwargs: Any
-) -> Callable[[Callable[..., Any]], Callable[..., Any]]: ...
+def task[F: Callable[..., Any]](func: None = None, /, **kwargs: Any) -> Callable[[F], F]: ...
 def task(
     func: Callable[..., Any] | None = None,
     /,
