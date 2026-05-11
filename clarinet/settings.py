@@ -7,6 +7,7 @@ configuration from TOML files and environment variables.
 
 import locale
 import os
+import re
 from enum import Enum
 from functools import lru_cache
 from pathlib import Path
@@ -113,6 +114,33 @@ class Settings(BaseSettings):
     storage_path: str = str(Path.home() / "clarinet/data")
     storage_path_client: str | None = None
     anon_id_prefix: str = "CLARINET"
+
+    @field_validator("anon_id_prefix")
+    @classmethod
+    def validate_anon_id_prefix(cls, v: str) -> str:
+        """Validate prefix is DICOM-safe and reserves space for the hash suffix.
+
+        The prefix appears in DICOM LO/PN values (PatientID, PatientName) and
+        in f-strings like ``f"{prefix}_{auto_id}"``. PACS implementations
+        reject non-ASCII silently or substitute characters, breaking
+        correlation with previously anonymized studies. Restricting to
+        ``[A-Za-z0-9_-]`` avoids portability surprises.
+
+        Length cap (55) reserves 1 underscore + 8-hex hash within the
+        64-char DICOM LO limit at the default
+        ``anon_per_study_patient_id_hex_length``. Custom hex lengths are
+        re-checked at call time by ``compute_per_study_patient_id``.
+
+        Empty string is valid (legacy bare-hash mode for backward compat).
+        """
+        if v and not re.fullmatch(r"[A-Za-z0-9_-]+", v):
+            raise ValueError(f"anon_id_prefix must match [A-Za-z0-9_-]+, got {v!r}")
+        if len(v) > 55:
+            raise ValueError(
+                f"anon_id_prefix too long ({len(v)} chars); max 55 to fit "
+                "within DICOM LO (64) alongside '_' + 8-hex hash"
+            )
+        return v
 
     @field_validator("storage_path")
     @classmethod

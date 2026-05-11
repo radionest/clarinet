@@ -30,6 +30,7 @@ def mock_anon_settings() -> Generator[tuple[MagicMock, MagicMock], None, None]:
         anon_settings.anon_send_to_pacs = False
         anon_settings.anon_per_study_patient_id = False
         anon_settings.anon_per_study_patient_id_hex_length = 8
+        anon_settings.anon_id_prefix = "CLARINET"
         anon_settings.anon_failure_threshold = 0.5
         anon_settings.dicom_cget_max_retries = 1
         anon_settings.dicom_cget_retry_backoff = 0.0
@@ -1019,15 +1020,15 @@ async def test_anonymize_per_study_mode_writes_hash_into_dicom(
     data = response.json()
 
     expected_hash = hashlib.sha256(b"test-salt:1.2.4242.1").hexdigest()[:8]
-    assert data["anon_patient_id"] == expected_hash
-    assert len(data["anon_patient_id"]) == 8
-
-    # Hash, not the patient-level "CLARINET_701"
-    assert "CLARINET" not in data["anon_patient_id"]
+    expected_id = f"CLARINET_{expected_hash}"
+    assert data["anon_patient_id"] == expected_id
+    # Per-study hash with project prefix — NOT the patient-level "CLARINET_701"
+    assert data["anon_patient_id"].startswith("CLARINET_")
+    assert data["anon_patient_id"].endswith(expected_hash)
 
     # The DICOM dataset was mutated in-place by the anonymizer
-    assert mock_ds.PatientID == expected_hash
-    assert str(mock_ds.PatientName) == expected_hash
+    assert mock_ds.PatientID == expected_id
+    assert str(mock_ds.PatientName) == expected_id
 
 
 @pytest.mark.asyncio

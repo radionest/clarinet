@@ -12,13 +12,21 @@ from pydicom import Dataset
 from clarinet.utils.logger import logger
 
 
-def compute_per_study_patient_id(salt: str, study_uid: str, length: int = 8) -> str:
+def compute_per_study_patient_id(
+    salt: str,
+    study_uid: str,
+    length: int = 8,
+    prefix: str | None = None,
+) -> str:
     """Per-study deterministic PatientID/PatientName for DICOM anonymization.
 
-    sha256(f"{salt}:{study_uid}") -> first ``length`` hex characters. Same
-    study_uid + salt + length -> same hash (idempotent re-runs). Used when
+    sha256(f"{salt}:{study_uid}") -> first ``length`` hex characters, optionally
+    prefixed with ``f"{prefix}_"``. Same study_uid + salt + length + prefix ->
+    same result (idempotent re-runs). Used when
     ``settings.anon_per_study_patient_id`` is enabled to prevent PACS-side
-    correlation across studies of the same patient.
+    correlation across studies of the same patient. The ``prefix`` (typically
+    ``settings.anon_id_prefix``) makes anonymized studies identifiable as
+    belonging to the project on a shared PACS.
 
     Truncation rationale: short hex keeps the visible PatientID readable while
     staying well within DICOM LO (64) and PN (64 per component) limits. By the
@@ -27,8 +35,44 @@ def compute_per_study_patient_id(salt: str, study_uid: str, length: int = 8) -> 
     via ``settings.anon_per_study_patient_id_hex_length`` for larger projects
     (16 hex = 64 bits drops collision probability to negligible levels at any
     realistic scale).
+
+    Warning: ``prefix`` is part of the deterministic key alongside ``salt``
+    and ``length``. Changing ``anon_id_prefix`` after deployment produces
+    different PatientIDs for the same source ``study_uid`` — previously
+    anonymized studies on the PACS will no longer correlate with new runs.
+    Treat the prefix as immutable for the lifetime of an anonymization
+    project.
+
+    DICOM LO (64-char) constraint: ``len(prefix) + 1 + length <= 64`` raises
+    ``ValueError`` to fail fast on misconfiguration (survives ``python -O``,
+    unlike ``assert``). The Settings-level validator already caps
+    ``settings.anon_id_prefix`` at 55 chars; this re-check defends callers
+    that pass a custom ``length``.
+
+    Args:
+        salt: Salt for deterministic hashing.
+        study_uid: Study Instance UID.
+        length: Hex slice length (default 8).
+        prefix: Optional project prefix; if None or empty, only the hash is
+            returned (backward-compatible default).
+
+    Returns:
+        ``f"{prefix}_{hash}"`` if prefix is set, else just the hash.
+
+    Raises:
+        ValueError: when ``len(prefix) + 1 + length`` exceeds the DICOM LO
+            64-char limit.
     """
-    return hashlib.sha256(f"{salt}:{study_uid}".encode()).hexdigest()[:length]
+    digest = hashlib.sha256(f"{salt}:{study_uid}".encode()).hexdigest()[:length]
+    if prefix:
+        total = len(prefix) + 1 + length
+        if total > 64:
+            raise ValueError(
+                f"prefix '{prefix}' ({len(prefix)} chars) + 1 + {length}-hex "
+                f"hash = {total} chars exceeds DICOM LO 64-char limit"
+            )
+        return f"{prefix}_{digest}"
+    return digest
 
 
 class DicomAnonymizer:
