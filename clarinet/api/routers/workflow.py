@@ -13,12 +13,18 @@ import json
 from enum import Enum
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from cachetools import TTLCache
+from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel, Field
 
 from clarinet.api.dependencies import AdminUserDep, RecordRepositoryDep
+from clarinet.exceptions.domain import (
+    WorkflowDigestAlreadyUsedError,
+    WorkflowPlanDigestMismatchError,
+)
 from clarinet.exceptions.http import NOT_FOUND, SERVICE_UNAVAILABLE
 from clarinet.models import RecordRead
+from clarinet.models.base import RecordStatus
 from clarinet.repositories.record_repository import RecordSearchCriteria
 from clarinet.services.pipeline import get_all_pipelines
 from clarinet.services.recordflow import ActionPreview
@@ -30,6 +36,18 @@ from clarinet.services.workflow_graph import (
     build_graph,
 )
 from clarinet.utils.logger import logger
+
+# /fire idempotency: each fired plan digest is cached for this many seconds
+# so retries (network blips, double-clicks) are rejected with 409 rather
+# than re-creating records / re-dispatching pipelines. After the TTL the
+# admin is free to plan again from scratch.
+_USED_DIGEST_TTL_SECONDS = 300
+_USED_DIGEST_CACHE_MAX = 256
+
+# Upper bound on direct children loaded for the instance-mode audit
+# provider. Admin UIs aren't expected to need more than this; if the
+# limit is hit the provider just marks fewer edges as fired.
+_INSTANCE_CHILDREN_LIMIT = 1000
 
 router = APIRouter(
     responses={
@@ -54,7 +72,7 @@ class TriggerKindRequest(str, Enum):
 class DryRunRequest(BaseModel):
     record_id: int = Field(ge=1, le=2147483647)
     trigger_kind: TriggerKindRequest
-    status_override: str | None = Field(
+    status_override: RecordStatus | None = Field(
         default=None,
         description=(
             "When trigger_kind='status' — pretend the record is in this status "
@@ -85,8 +103,22 @@ def _require_engine(request: Request) -> RecordFlowEngine:
     return engine
 
 
+def _get_used_digest_cache(request: Request) -> TTLCache[str, bool]:
+    """Return (and lazily create) the per-app TTL cache of consumed digests."""
+    cache: TTLCache[str, bool] | None = getattr(request.app.state, "workflow_used_digests", None)
+    if cache is None:
+        cache = TTLCache(maxsize=_USED_DIGEST_CACHE_MAX, ttl=_USED_DIGEST_TTL_SECONDS)
+        request.app.state.workflow_used_digests = cache
+    return cache
+
+
 def _compute_digest(plan: list[ActionPreview]) -> str:
-    """Hash a plan for race detection between /dry-run and /fire."""
+    """Hash a plan for race detection between /dry-run and /fire.
+
+    The digest is stable only if the planner's output is itself stable —
+    discovery order of ``*_flow.py`` files matters. ``flow_loader.find_flow_files``
+    sorts its results so replicas converge on the same digest.
+    """
     payload = json.dumps(
         [p.model_dump(mode="json") for p in plan],
         sort_keys=True,
@@ -108,6 +140,11 @@ async def _load_record_read(repo: RecordRepositoryDep, record_id: int) -> Record
     return RecordRead.model_validate(record)
 
 
+def _status_override_value(body: DryRunRequest) -> str | None:
+    """Return the string value of ``status_override`` (or ``None`` if absent)."""
+    return body.status_override.value if body.status_override is not None else None
+
+
 async def _run_plan(
     engine: RecordFlowEngine,
     record_read: RecordRead,
@@ -116,7 +153,7 @@ async def _run_plan(
     match body.trigger_kind:
         case TriggerKindRequest.status:
             return await engine.plan_record_status_change(
-                record_read, status_override=body.status_override
+                record_read, status_override=_status_override_value(body)
             )
         case TriggerKindRequest.data_update:
             return await engine.plan_record_data_update(record_read)
@@ -131,9 +168,10 @@ async def _execute_trigger(
 ) -> None:
     match body.trigger_kind:
         case TriggerKindRequest.status:
+            override = _status_override_value(body)
             target = (
-                record_read.model_copy(update={"status": body.status_override})
-                if body.status_override is not None
+                record_read.model_copy(update={"status": override})
+                if override is not None
                 else record_read
             )
             await engine.handle_record_status_change(target)
@@ -166,7 +204,10 @@ async def get_graph(
     audit_provider = None
     if record_id is not None:
         record_read = await _load_record_read(repo, record_id)
-        children = await repo.find_by_criteria(RecordSearchCriteria(parent_record_id=record_id))
+        children = await repo.find_by_criteria(
+            RecordSearchCriteria(parent_record_id=record_id),
+            limit=_INSTANCE_CHILDREN_LIMIT,
+        )
         candidates = [RecordRead.model_validate(r) for r in children]
         audit_provider = ParentRecordAuditProvider(record_read, candidates)
 
@@ -211,27 +252,34 @@ async def fire(
     runs the real :meth:`RecordFlowEngine.handle_*` only on match. The
     returned ``executed_actions`` mirrors the validated plan so the UI can
     display exactly what was confirmed by the admin.
+
+    The router is intentionally NOT idempotent at the engine layer
+    (CreateRecord, PipelineAction etc. have no built-in dedup). Instead a
+    per-app TTL cache of consumed digests blocks replays for ~5 minutes —
+    enough to absorb double-clicks and HTTP retries.
     """
     engine = _require_engine(request)
+    used_digests = _get_used_digest_cache(request)
+
+    if body.plan_digest in used_digests:
+        raise WorkflowDigestAlreadyUsedError(body.plan_digest)
+
     record_read = await _load_record_read(repo, body.record_id)
 
     plan = await _run_plan(engine, record_read, body)
     actual_digest = _compute_digest(plan)
     if actual_digest != body.plan_digest:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "code": "WORKFLOW_PLAN_CHANGED",
-                "message": "Plan changed since dry-run; re-run dry-run before firing.",
-                "expected_digest": body.plan_digest,
-                "current_digest": actual_digest,
-            },
+        raise WorkflowPlanDigestMismatchError(
+            expected_digest=body.plan_digest, current_digest=actual_digest
         )
 
     logger.info(
         f"Admin {admin.id} firing workflow trigger "
         f"record_id={body.record_id} kind={body.trigger_kind.value} "
-        f"status_override={body.status_override} actions={len(plan)}"
+        f"status_override={_status_override_value(body)} actions={len(plan)}"
     )
     await _execute_trigger(engine, record_read, body)
+    # Mark digest as used only AFTER successful execution — failures
+    # leave the digest free so the caller can retry after fixing state.
+    used_digests[body.plan_digest] = True
     return FireResponse(executed_actions=plan)

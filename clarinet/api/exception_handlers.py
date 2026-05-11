@@ -56,6 +56,8 @@ def setup_exception_handlers(app: FastAPI) -> None:
         SlicerConnectionError,
         SlicerError,
         ValidationError,
+        WorkflowDigestAlreadyUsedError,
+        WorkflowPlanDigestMismatchError,
     )
     from clarinet.exceptions.domain import FileNotFoundError as DomainFileNotFoundError
     from clarinet.utils.pagination import InvalidCursorError
@@ -156,6 +158,35 @@ def setup_exception_handlers(app: FastAPI) -> None:
             content={
                 "detail": str(exc) if str(exc) else "User already has a record of this type",
                 "code": RecordUniquePerUserError.error_code,
+            },
+        )
+
+    @app.exception_handler(WorkflowPlanDigestMismatchError)
+    async def handle_workflow_plan_digest_mismatch(
+        _: Request, exc: WorkflowPlanDigestMismatchError
+    ) -> JSONResponse:
+        """Convert plan-digest drift to 409 with structured diagnostics."""
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content={
+                "detail": str(exc),
+                "code": WorkflowPlanDigestMismatchError.error_code,
+                "expected_digest": exc.expected_digest,
+                "current_digest": exc.current_digest,
+            },
+        )
+
+    @app.exception_handler(WorkflowDigestAlreadyUsedError)
+    async def handle_workflow_digest_already_used(
+        _: Request, exc: WorkflowDigestAlreadyUsedError
+    ) -> JSONResponse:
+        """Convert replayed plan-digest to 409 with the offending digest."""
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content={
+                "detail": str(exc),
+                "code": WorkflowDigestAlreadyUsedError.error_code,
+                "digest": exc.digest,
             },
         )
 

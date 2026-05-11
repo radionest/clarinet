@@ -312,7 +312,26 @@ class TestAuditProvider:
         assert len(edge.firings) == 1
         firing = edge.firings[0]
         assert firing.metadata["child_record_id"] == 11
-        assert edge.is_fired is True
+
+
+class TestBuilderCallFunction:
+    def test_call_function_action_emits_call_function_node(self, empty_engine):
+        """N1: `flow.call(fn)` produces a node of kind CALL_FUNCTION (not PIPELINE)."""
+
+        def my_callback(*_args, **_kwargs):
+            return None
+
+        flow = FlowRecord("trigger-type")
+        flow.on_status("finished")
+        flow.call(my_callback)
+        empty_engine.register_flow(flow)
+
+        graph = build_graph(engine=empty_engine, pipelines={})
+
+        call_node = next(n for n in graph.nodes if n.id == "call:my_callback")
+        assert call_node.kind == NodeKind.CALL_FUNCTION
+        # No pipeline nodes leak from CallFunction
+        assert all(n.kind != NodeKind.PIPELINE for n in graph.nodes)
 
 
 # ── Layout ──────────────────────────────────────────────────────────────

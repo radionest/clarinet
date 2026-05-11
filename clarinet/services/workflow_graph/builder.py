@@ -338,7 +338,7 @@ def _emit_action_edge(
             ctx.add_node(
                 Node(
                     id=target_id,
-                    kind=NodeKind.PIPELINE,  # render as a callable box
+                    kind=NodeKind.CALL_FUNCTION,
                     label=f"call {fname}",
                     metadata={
                         "function_name": fname,

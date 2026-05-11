@@ -24,6 +24,7 @@ class NodeKind(str, Enum):
     FILE = "file"
     PIPELINE = "pipeline"
     PIPELINE_STEP = "pipeline_step"
+    CALL_FUNCTION = "call_function"
 
 
 class EdgeKind(str, Enum):
@@ -120,10 +121,6 @@ class Edge(BaseModel):
     metadata: dict[str, Any] = {}
 
     firings: list[FiringRecord] = []
-
-    @property
-    def is_fired(self) -> bool:
-        return bool(self.firings)
 
 
 class WorkflowGraph(BaseModel):

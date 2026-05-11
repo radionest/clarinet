@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol
 
-from .models import FiringRecord, FiringSource
+from .models import EdgeKind, FiringRecord, FiringSource, make_record_type_id
 
 if TYPE_CHECKING:
     from clarinet.models import RecordRead
@@ -37,6 +37,13 @@ class ParentRecordAuditProvider:
     equals the trigger's id) become firings on the edge from the trigger's
     record-type to the child's record-type.
 
+    This is a **heuristic**, not a real audit trail: ``fired_at`` is the
+    child record's ``created_at``, and a record manually linked by
+    ``parent_record_id`` will also show up as a firing here. Consumers can
+    tell the source apart via ``FiringRecord.source ==
+    FiringSource.PARENT_RECORD_ID``. Replace with a dedicated
+    ``DbAuditProvider`` once an audit table exists.
+
     This does NOT cover Invalidate / Update / Pipeline firings — those don't
     leave a ``parent_record_id`` trail. They will arrive when an audit table
     is added.
@@ -53,8 +60,6 @@ class ParentRecordAuditProvider:
     def get_firings(self) -> dict[tuple[str, str, str], list[FiringRecord]]:
         if self._trigger.record_type is None or self._trigger.id is None:
             return {}
-
-        from .models import EdgeKind, make_record_type_id
 
         trigger_node = make_record_type_id(self._trigger.record_type.name)
         result: dict[tuple[str, str, str], list[FiringRecord]] = {}

@@ -112,11 +112,14 @@ def configured_engine():
     engine.register_flow(flow)
 
     previous = getattr(app.state, "recordflow_engine", None)
+    previous_cache = getattr(app.state, "workflow_used_digests", None)
     app.state.recordflow_engine = engine
+    app.state.workflow_used_digests = None  # let router rebuild a fresh cache
     try:
         yield engine
     finally:
         app.state.recordflow_engine = previous
+        app.state.workflow_used_digests = previous_cache
 
 
 @pytest.fixture
@@ -127,6 +130,53 @@ def disabled_engine():
         yield
     finally:
         app.state.recordflow_engine = previous
+
+
+@pytest.fixture
+def configured_engine_with_pipeline():
+    """Same as `configured_engine` but also registers a two-step Pipeline 'p1'.
+
+    The trigger flow dispatches that pipeline so build_graph sees it; passing
+    ``expanded=p1`` to /graph then must inline two PIPELINE_STEP nodes.
+    """
+    from clarinet.services.pipeline import get_broker_for
+    from clarinet.services.pipeline.chain import Pipeline
+
+    broker = get_broker_for("test_q")
+
+    @broker.task
+    async def step_a(_msg: dict) -> dict:
+        return {}
+
+    @broker.task
+    async def step_b(_msg: dict) -> dict:
+        return {}
+
+    # Mimic @pipeline_task(queue=...) — tests pass a plain @broker.task,
+    # but Pipeline.step() needs the bound-queue attribute.
+    step_a._pipeline_queue = "test_q"  # type: ignore[attr-defined]
+    step_b._pipeline_queue = "test_q"  # type: ignore[attr-defined]
+
+    Pipeline("p1").step(step_a).step(step_b)
+
+    mock_client = AsyncMock()
+    mock_client.find_records = AsyncMock(return_value=[])
+    engine = RecordFlowEngine(mock_client)
+
+    flow = FlowRecord("wf-parent")
+    flow.on_status("finished")
+    flow.pipeline("p1")
+    engine.register_flow(flow)
+
+    previous = getattr(app.state, "recordflow_engine", None)
+    previous_cache = getattr(app.state, "workflow_used_digests", None)
+    app.state.recordflow_engine = engine
+    app.state.workflow_used_digests = None
+    try:
+        yield engine
+    finally:
+        app.state.recordflow_engine = previous
+        app.state.workflow_used_digests = previous_cache
 
 
 # ── /graph ───────────────────────────────────────────────────────────────
@@ -181,6 +231,19 @@ class TestGraphEndpoint:
     async def test_instance_graph_404_when_record_missing(self, client, configured_engine):
         resp = await client.get(WORKFLOW_GRAPH, params={"record_id": 999_999})
         assert resp.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_expanded_pipeline_inlines_steps_via_query(
+        self, client, configured_engine_with_pipeline
+    ):
+        """N3: ?expanded=p1 inlines PIPELINE_STEP nodes for the named pipeline."""
+        resp = await client.get(WORKFLOW_GRAPH, params={"expanded": "p1"})
+        assert resp.status_code == 200
+        body = resp.json()
+        step_nodes = [n for n in body["nodes"] if n["kind"] == "pipeline_step"]
+        assert len(step_nodes) == 2
+        pipeline_node = next(n for n in body["nodes"] if n["id"] == "pipeline:p1")
+        assert pipeline_node["expanded"] is True
 
 
 # ── /dry-run and /fire ───────────────────────────────────────────────────
@@ -256,6 +319,7 @@ class TestDryRunAndFire:
     async def test_fire_with_wrong_digest_returns_409(
         self, client, configured_engine, workflow_env
     ):
+        """B2: wrong digest -> 409 with machine-readable `code` and diagnostics."""
         parent_id = workflow_env["parent"].id
         resp = await client.post(
             WORKFLOW_FIRE,
@@ -267,7 +331,58 @@ class TestDryRunAndFire:
             },
         )
         assert resp.status_code == 409
+        body = resp.json()
+        assert body["code"] == "WORKFLOW_PLAN_CHANGED"
+        assert body["expected_digest"] == "deadbeefdeadbeef"
+        assert isinstance(body["current_digest"], str) and len(body["current_digest"]) == 16
         configured_engine.clarinet_client.create_record.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_fire_replay_with_same_digest_returns_409(
+        self, client, configured_engine, workflow_env
+    ):
+        """B1: replaying /fire with the same digest is rejected (idempotency cache)."""
+        parent_id = workflow_env["parent"].id
+        dry = await client.post(
+            WORKFLOW_DRY_RUN,
+            json={
+                "record_id": parent_id,
+                "trigger_kind": "status",
+                "status_override": "finished",
+            },
+        )
+        digest = dry.json()["digest"]
+        payload = {
+            "record_id": parent_id,
+            "trigger_kind": "status",
+            "status_override": "finished",
+            "plan_digest": digest,
+        }
+        first = await client.post(WORKFLOW_FIRE, json=payload)
+        assert first.status_code == 200
+
+        second = await client.post(WORKFLOW_FIRE, json=payload)
+        assert second.status_code == 409
+        body = second.json()
+        assert body["code"] == "WORKFLOW_DIGEST_ALREADY_USED"
+        assert body["digest"] == digest
+        # Engine was called exactly once despite two POSTs
+        assert configured_engine.clarinet_client.create_record.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_dry_run_invalid_status_override_returns_422(
+        self, client, configured_engine, workflow_env
+    ):
+        """U4: status_override is validated against RecordStatus enum."""
+        resp = await client.post(
+            WORKFLOW_DRY_RUN,
+            json={
+                "record_id": workflow_env["parent"].id,
+                "trigger_kind": "status",
+                "status_override": "garbage",
+            },
+        )
+        assert resp.status_code == 422
 
 
 # ── Authorization ────────────────────────────────────────────────────────
