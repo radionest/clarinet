@@ -101,7 +101,7 @@ pub fn init(shared: Shared) -> #(Model, Effect(Msg), List(OutMsg)) {
 /// extra clicks), and loads the series list when the source page already
 /// pinned a Study UID.
 ///
-/// **Page Module Contract exception:** `.claude/rules/frontend.md` §1 lists
+/// **Page Module Contract exception:** `.claude/rules/frontend-page-contract.md` §1 lists
 /// only `init` / `update` / `view` / `cleanup` as public symbols of a page
 /// module. `init_modal` is an explicit exception — modal hosting requires a
 /// separate prefilled init path that `main.init_page_for_route` cannot

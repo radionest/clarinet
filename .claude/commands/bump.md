@@ -1,3 +1,11 @@
+---
+description: Bump project version (auto-increment or explicit), commit, tag, push to main
+argument-hint: "[version]"
+allowed-tools:
+  - Bash
+disable-model-invocation: true
+---
+
 Bump the project version, commit, tag, and push.
 
 ## Usage

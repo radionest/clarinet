@@ -1,5 +1,6 @@
 ---
-globs:
+description: CI/GitHub Actions debugging workflow — start with gh CLI external state, not code
+paths:
   - ".github/workflows/**"
 ---
 

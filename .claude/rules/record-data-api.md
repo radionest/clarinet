@@ -1,5 +1,7 @@
 ---
-globs: plan/workflows/**
+description: Record data API — submit/update/prefill flow and context_info markdown sidecar
+paths:
+  - "plan/workflows/**"
 ---
 # Record data API methods
 
@@ -35,7 +37,7 @@ Server-side:
 - No RecordFlow triggers fire. If you need behavior on context change, add a separate endpoint — do not piggyback on this one.
 
 Frontend:
-- Read `record.context_info_html` (already sanitized) and inject via `attribute.property("innerHTML", json.string(html_str))`. See `.claude/rules/frontend.md` §11.5 (Inserting Server-Sanitized HTML).
+- Read `record.context_info_html` (already sanitized) and inject via `attribute.property("innerHTML", json.string(html_str))`. See `.claude/rules/frontend-routing-forms.md` §11.5 (Inserting Server-Sanitized HTML).
 
 When **NOT** to use `context_info`:
 - Anything machine-readable / form-driven → goes into `record.data` via the methods above.

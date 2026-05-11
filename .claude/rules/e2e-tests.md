@@ -1,7 +1,7 @@
 ---
 description: E2E test context — frontend stack, VM sub-path, selectors
-globs:
-  - deploy/test/e2e/**
+paths:
+  - "deploy/test/e2e/**"
 ---
 
 ## Frontend stack
