@@ -15,7 +15,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class NodeKind(str, Enum):
@@ -74,7 +74,7 @@ class FiringRecord(BaseModel):
 
     fired_at: datetime
     source: FiringSource
-    metadata: dict[str, Any] = {}
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class Node(BaseModel):
@@ -90,8 +90,8 @@ class Node(BaseModel):
     id: str
     kind: NodeKind
     label: str
-    position: Position = Position()
-    metadata: dict[str, Any] = {}
+    position: Position = Field(default_factory=Position)
+    metadata: dict[str, Any] = Field(default_factory=dict)
     expandable: bool = False
     expanded: bool = False
 
@@ -118,9 +118,9 @@ class Edge(BaseModel):
     """One-line summary for tooltip/legend (e.g. condition pretty-print)."""
 
     condition_summary: str | None = None
-    metadata: dict[str, Any] = {}
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
-    firings: list[FiringRecord] = []
+    firings: list[FiringRecord] = Field(default_factory=list)
 
 
 class WorkflowGraph(BaseModel):

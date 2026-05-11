@@ -9,20 +9,20 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from clarinet.client import ClarinetClient
 from clarinet.models.base import DicomQueryLevel, RecordStatus
 from clarinet.models.patient import PatientBase
 from clarinet.models.record import RecordRead, RecordTypeBase
 from clarinet.models.study import StudyBase
 from clarinet.services.recordflow import (
-    ENTITY_REGISTRY,
-    FILE_REGISTRY,
-    RECORD_REGISTRY,
     ActionPreview,
     Field,
     FlowFileRecord,
     FlowRecord,
 )
 from clarinet.services.recordflow.engine import RecordFlowEngine
+
+pytestmark = pytest.mark.usefixtures("clear_recordflow_registries")
 
 
 def _make_record(
@@ -53,28 +53,24 @@ def _make_record(
     )
 
 
-@pytest.fixture(autouse=True)
-def _clear_registry():
-    """Clear flow registries before/after each test (mirrors test_recordflow_dsl)."""
-    from clarinet.services.pipeline.chain import _PIPELINE_REGISTRY, _TASK_REGISTRY
-
-    RECORD_REGISTRY.clear()
-    ENTITY_REGISTRY.clear()
-    FILE_REGISTRY.clear()
-    _PIPELINE_REGISTRY.clear()
-    _TASK_REGISTRY.clear()
-    yield
-    RECORD_REGISTRY.clear()
-    ENTITY_REGISTRY.clear()
-    FILE_REGISTRY.clear()
-    _PIPELINE_REGISTRY.clear()
-    _TASK_REGISTRY.clear()
-
-
 @pytest.fixture
 def mock_client():
-    client = AsyncMock()
-    client.find_records = AsyncMock(return_value=[])
+    """Spec-bound async double for :class:`ClarinetClient`.
+
+    ``spec=ClarinetClient`` blocks attribute drift — a misspelled assert
+    (``create_recrd``) would now fail at access time instead of silently
+    auto-creating a mock and reporting "not_called".
+
+    Instance-only attrs (`_authenticated`, `service_token`, nested
+    `client` httpx handle) aren't visible to `spec=Class`, so we set them
+    explicitly to satisfy `RecordFlowEngine._ensure_authenticated` and
+    `_ensure_api_reachable`.
+    """
+    client = AsyncMock(spec=ClarinetClient)
+    client.find_records.return_value = []
+    client._authenticated = True
+    client.service_token = None
+    client.client = AsyncMock()  # nested httpx-style mock for /health probe
     return client
 
 

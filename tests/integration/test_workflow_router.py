@@ -16,12 +16,8 @@ import pytest_asyncio
 from httpx import AsyncClient
 
 from clarinet.api.app import app
-from clarinet.services.recordflow import (
-    ENTITY_REGISTRY,
-    FILE_REGISTRY,
-    RECORD_REGISTRY,
-    FlowRecord,
-)
+from clarinet.client import ClarinetClient
+from clarinet.services.recordflow import FlowRecord
 from clarinet.services.recordflow.engine import RecordFlowEngine
 from tests.conftest import create_authenticated_client, create_mock_superuser
 from tests.utils.factories import (
@@ -33,48 +29,38 @@ from tests.utils.factories import (
 )
 from tests.utils.urls import WORKFLOW_DRY_RUN, WORKFLOW_FIRE, WORKFLOW_GRAPH
 
-
-@pytest.fixture(autouse=True)
-def _clear_registries():
-    from clarinet.services.pipeline.chain import _PIPELINE_REGISTRY, _TASK_REGISTRY
-
-    RECORD_REGISTRY.clear()
-    ENTITY_REGISTRY.clear()
-    FILE_REGISTRY.clear()
-    _PIPELINE_REGISTRY.clear()
-    _TASK_REGISTRY.clear()
-    yield
-    RECORD_REGISTRY.clear()
-    ENTITY_REGISTRY.clear()
-    FILE_REGISTRY.clear()
-    _PIPELINE_REGISTRY.clear()
-    _TASK_REGISTRY.clear()
+pytestmark = pytest.mark.usefixtures("clear_recordflow_registries")
 
 
 @pytest_asyncio.fixture
-async def workflow_env(test_session):
-    """Seed patient → study → record_type → user → finished record + a child record."""
+async def workflow_env(fresh_session):
+    """Seed patient → study → record_type → user → parent + child record.
+
+    Uses ``fresh_session`` so the suite exercises a clean identity map —
+    catches lazy-load / MissingGreenlet regressions that ``test_session``
+    would mask by serving relationships from its cache.
+    """
     pat = make_patient("WF_PAT", "Workflow Patient")
-    test_session.add(pat)
-    await test_session.commit()
+    fresh_session.add(pat)
+    await fresh_session.commit()
 
     study = make_study("WF_PAT", "1.2.3.7000")
-    test_session.add(study)
-    await test_session.commit()
+    fresh_session.add(study)
+    await fresh_session.commit()
 
     parent_rt = make_record_type("wf-parent")
     child_rt = make_record_type("wf-child")
-    test_session.add(parent_rt)
-    test_session.add(child_rt)
-    await test_session.commit()
+    fresh_session.add(parent_rt)
+    fresh_session.add(child_rt)
+    await fresh_session.commit()
 
     user = make_user()
-    test_session.add(user)
-    await test_session.commit()
-    await test_session.refresh(user)
+    fresh_session.add(user)
+    await fresh_session.commit()
+    await fresh_session.refresh(user)
 
     parent = await seed_record(
-        test_session,
+        fresh_session,
         patient_id="WF_PAT",
         study_uid="1.2.3.7000",
         series_uid=None,
@@ -82,7 +68,7 @@ async def workflow_env(test_session):
         user_id=user.id,
     )
     child = await seed_record(
-        test_session,
+        fresh_session,
         patient_id="WF_PAT",
         study_uid="1.2.3.7000",
         series_uid=None,
@@ -102,9 +88,15 @@ def configured_engine():
 
     Always restores the previous app.state value, so other tests aren't affected.
     """
-    mock_client = AsyncMock()
-    mock_client.find_records = AsyncMock(return_value=[])
+    mock_client = AsyncMock(spec=ClarinetClient)
+    mock_client.find_records.return_value = []
+    # Instance attrs invisible to spec=Class — set explicitly so the engine's
+    # auth/reachability probes short-circuit instead of raising.
+    mock_client._authenticated = True
+    mock_client.service_token = None
+    mock_client.client = AsyncMock()
     engine = RecordFlowEngine(mock_client)
+    engine._api_verified = True
 
     flow = FlowRecord("wf-parent")
     flow.on_status("finished")
@@ -159,9 +151,15 @@ def configured_engine_with_pipeline():
 
     Pipeline("p1").step(step_a).step(step_b)
 
-    mock_client = AsyncMock()
-    mock_client.find_records = AsyncMock(return_value=[])
+    mock_client = AsyncMock(spec=ClarinetClient)
+    mock_client.find_records.return_value = []
+    # Instance attrs invisible to spec=Class — set explicitly so the engine's
+    # auth/reachability probes short-circuit instead of raising.
+    mock_client._authenticated = True
+    mock_client.service_token = None
+    mock_client.client = AsyncMock()
     engine = RecordFlowEngine(mock_client)
+    engine._api_verified = True
 
     flow = FlowRecord("wf-parent")
     flow.on_status("finished")

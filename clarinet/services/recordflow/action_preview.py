@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from .flow_action import (
     CallFunctionAction,
@@ -52,7 +52,7 @@ class ActionPreview(BaseModel):
     summary: str
     target: str | None = None
 
-    details: dict[str, Any] = {}
+    details: dict[str, Any] = Field(default_factory=dict)
 
     trigger_record_id: int | None = None
     trigger_record_type: str | None = None
@@ -149,11 +149,9 @@ def action_to_preview(action: FlowAction, ctx: FlowContext) -> ActionPreview:
                 **common,
             )
         case _:
-            # Unreachable under FlowAction union, but keep a safe fallback.
-            return ActionPreview(
-                action_type="call_function",
-                summary=f"Unknown action: {type(action).__name__}",
-                target=None,
-                details={"raw_type": type(action).__name__},
-                **common,
+            # Fail loud so a missed FlowAction variant is caught in tests
+            # instead of mislabelled as call_function in the UI.
+            raise TypeError(
+                f"action_to_preview: unhandled FlowAction subtype "
+                f"{type(action).__name__!r}; extend the match statement."
             )

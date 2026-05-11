@@ -663,3 +663,30 @@ def create_disk_series(
     dummy.write_bytes(b"\x00" * file_size)
 
     return series_dir
+
+
+@pytest.fixture
+def clear_recordflow_registries():
+    """Clear all flow + pipeline registries before and after each test.
+
+    Opt-in via ``pytestmark = pytest.mark.usefixtures("clear_recordflow_registries")``
+    in any module that registers flows or pipelines. Keeps tests isolated
+    without polluting unrelated suites that do not touch these globals.
+    """
+    from clarinet.services.pipeline.chain import _PIPELINE_REGISTRY, _TASK_REGISTRY
+    from clarinet.services.recordflow import (
+        ENTITY_REGISTRY,
+        FILE_REGISTRY,
+        RECORD_REGISTRY,
+    )
+
+    def _clear() -> None:
+        RECORD_REGISTRY.clear()
+        ENTITY_REGISTRY.clear()
+        FILE_REGISTRY.clear()
+        _PIPELINE_REGISTRY.clear()
+        _TASK_REGISTRY.clear()
+
+    _clear()
+    yield
+    _clear()

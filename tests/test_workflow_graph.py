@@ -17,9 +17,6 @@ from clarinet.models.patient import PatientBase
 from clarinet.models.record import RecordRead, RecordTypeBase
 from clarinet.models.study import StudyBase
 from clarinet.services.recordflow import (
-    ENTITY_REGISTRY,
-    FILE_REGISTRY,
-    RECORD_REGISTRY,
     Field,
     FlowFileRecord,
     FlowRecord,
@@ -37,6 +34,8 @@ from clarinet.services.workflow_graph import (
     make_pipeline_step_id,
     make_record_type_id,
 )
+
+pytestmark = pytest.mark.usefixtures("clear_recordflow_registries")
 
 
 def _make_record(
@@ -67,23 +66,6 @@ def _make_record(
         series=None,
         record_type=RecordTypeBase(name=type_name, level=DicomQueryLevel.STUDY),
     )
-
-
-@pytest.fixture(autouse=True)
-def _clear_registry():
-    from clarinet.services.pipeline.chain import _PIPELINE_REGISTRY, _TASK_REGISTRY
-
-    RECORD_REGISTRY.clear()
-    ENTITY_REGISTRY.clear()
-    FILE_REGISTRY.clear()
-    _PIPELINE_REGISTRY.clear()
-    _TASK_REGISTRY.clear()
-    yield
-    RECORD_REGISTRY.clear()
-    ENTITY_REGISTRY.clear()
-    FILE_REGISTRY.clear()
-    _PIPELINE_REGISTRY.clear()
-    _TASK_REGISTRY.clear()
 
 
 @pytest.fixture
