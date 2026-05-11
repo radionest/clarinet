@@ -12,7 +12,6 @@ from typing import Any, Literal
 from uuid import UUID
 
 import httpx
-import orjson
 
 from clarinet.models import (
     Patient,
@@ -36,6 +35,7 @@ from clarinet.models import (
 )
 from clarinet.types import RecordData
 from clarinet.utils.logger import logger
+from clarinet.utils.serialization import json_dumps_bytes
 
 # Rebuild models to resolve forward references
 PatientRead.model_rebuild()
@@ -198,10 +198,14 @@ class ClarinetClient:
         self._log_request(method, url, **kwargs)
 
         # Serialize JSON via orjson so UUID/datetime values from caller dicts
-        # don't crash on stdlib json's encoder (httpx default).
+        # don't crash on stdlib json's encoder (httpx default). Normalize headers
+        # through httpx.Headers so list-of-tuples / httpx.Headers callers work and
+        # a caller-supplied Content-Type (any case) wins over our default.
         if "json" in kwargs:
-            kwargs["content"] = orjson.dumps(kwargs.pop("json"), default=str)
-            kwargs.setdefault("headers", {}).setdefault("Content-Type", "application/json")
+            kwargs["content"] = json_dumps_bytes(kwargs.pop("json"))
+            headers = httpx.Headers(kwargs.get("headers") or {})
+            headers.setdefault("Content-Type", "application/json")
+            kwargs["headers"] = headers
 
         try:
             response = await self.client.request(method, url, **kwargs)

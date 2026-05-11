@@ -774,3 +774,76 @@ class TestJSONSerialization:
         headers = captured["headers"]
         assert headers["Authorization"] == "Bearer xxx"
         assert headers["Content-Type"] == "application/json"
+
+    @pytest.mark.asyncio
+    async def test_request_headers_as_list_of_tuples(self) -> None:
+        """httpx accepts headers= as a list of tuples — _request must handle it."""
+        captured: dict[str, object] = {}
+
+        async def mock_request(method, url, **kwargs):
+            captured.update(kwargs)
+            return httpx.Response(200, json={"ok": True})
+
+        client = ClarinetClient("http://test", auto_login=False)
+        client.client = AsyncMock()
+        client.client.request = mock_request
+
+        await client._request(
+            "POST",
+            "/records/42/data",
+            json={"k": "v"},
+            headers=[("X-Trace", "abc")],
+        )
+
+        headers = captured["headers"]
+        assert headers["X-Trace"] == "abc"
+        assert headers["Content-Type"] == "application/json"
+
+    @pytest.mark.asyncio
+    async def test_request_headers_as_httpx_headers_instance(self) -> None:
+        """httpx.Headers instance from caller must be respected as-is."""
+        captured: dict[str, object] = {}
+
+        async def mock_request(method, url, **kwargs):
+            captured.update(kwargs)
+            return httpx.Response(200, json={"ok": True})
+
+        client = ClarinetClient("http://test", auto_login=False)
+        client.client = AsyncMock()
+        client.client.request = mock_request
+
+        await client._request(
+            "POST",
+            "/records/42/data",
+            json={"k": "v"},
+            headers=httpx.Headers({"X-Trace": "abc"}),
+        )
+
+        headers = captured["headers"]
+        assert headers["X-Trace"] == "abc"
+        assert headers["Content-Type"] == "application/json"
+
+    @pytest.mark.asyncio
+    async def test_request_caller_content_type_case_insensitive(self) -> None:
+        """A lowercase content-type from the caller must win over our default."""
+        captured: dict[str, object] = {}
+
+        async def mock_request(method, url, **kwargs):
+            captured.update(kwargs)
+            return httpx.Response(200, json={"ok": True})
+
+        client = ClarinetClient("http://test", auto_login=False)
+        client.client = AsyncMock()
+        client.client.request = mock_request
+
+        await client._request(
+            "POST",
+            "/records/42/data",
+            json={"k": "v"},
+            headers={"content-type": "application/xml"},
+        )
+
+        headers = captured["headers"]
+        # httpx.Headers normalizes to a single case-insensitive entry.
+        assert headers["Content-Type"] == "application/xml"
+        assert headers["content-type"] == "application/xml"

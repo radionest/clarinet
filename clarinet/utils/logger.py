@@ -17,10 +17,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import httpx
-import orjson
 from loguru import logger as _logger
 
 from ..settings import settings
+from .serialization import json_dumps_bytes
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -29,8 +29,8 @@ if TYPE_CHECKING:
 
 
 def _json_dumps(data: dict[str, Any]) -> str:
-    """Serialize dict to compact JSON string using orjson."""
-    return orjson.dumps(data, default=str).decode()
+    """Serialize dict to compact JSON string using the project orjson helper."""
+    return json_dumps_bytes(data).decode()
 
 
 _SENSITIVE_KEY = r"(?:password|token|secret|api[_-]?key|auth|credentials?|private[_-]?key)"

@@ -20,13 +20,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-import orjson
 from taskiq import TaskiqMiddleware
 from taskiq.middlewares import SmartRetryMiddleware as _SmartRetryMiddleware
 
 from clarinet.client import ClarinetAPIError, ClarinetClient
 from clarinet.settings import settings
 from clarinet.utils.logger import logger
+from clarinet.utils.serialization import json_dumps_bytes
 
 if TYPE_CHECKING:
     from aio_pika.abc import AbstractChannel, AbstractRobustConnection
@@ -109,7 +109,7 @@ class DLQPublisher:
 
         await self._channel.default_exchange.publish(
             aio_pika.Message(
-                body=orjson.dumps(payload, default=str),
+                body=json_dumps_bytes(payload),
                 content_type="application/json",
                 delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
             ),
