@@ -103,9 +103,14 @@ class StudyService:
         Raises:
             CONFLICT: If patient already exists
         """
-        # Check if patient exists
-        if await self.patient_repo.exists(id=patient_data["id"]):
-            raise PatientAlreadyExistsError(patient_data["id"])
+        # Load existing patient (if any) to surface its name in the conflict
+        # error metadata — frontend renders it in the localized message.
+        existing = await self.patient_repo.find_by_id(patient_data["id"])
+        if existing is not None:
+            raise PatientAlreadyExistsError(
+                patient_id=existing.id,
+                patient_name=existing.name,
+            )
 
         patient = Patient(**patient_data)
         result = await self.patient_repo.create(patient)

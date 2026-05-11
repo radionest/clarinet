@@ -483,7 +483,7 @@ class TestStudyServiceEntityTriggers:
         patient_mock.id = "PAT_001"
 
         patient_repo_mock = AsyncMock()
-        patient_repo_mock.exists.return_value = False
+        patient_repo_mock.find_by_id.return_value = None
         patient_repo_mock.create.return_value = patient_mock
 
         study_repo_mock = AsyncMock()
@@ -499,7 +499,7 @@ class TestStudyServiceEntityTriggers:
 
         result = await service.create_patient(patient_data)
 
-        patient_repo_mock.exists.assert_awaited_once_with(id="PAT_001")
+        patient_repo_mock.find_by_id.assert_awaited_once_with("PAT_001")
         patient_repo_mock.create.assert_awaited_once()
         study_repo_mock.session.commit.assert_awaited_once()
         engine_mock.handle_entity_created.assert_called_once_with("patient", "PAT_001")
@@ -514,7 +514,7 @@ class TestStudyServiceEntityTriggers:
         patient_mock.id = "PAT_001"
 
         patient_repo_mock = AsyncMock()
-        patient_repo_mock.exists.return_value = False
+        patient_repo_mock.find_by_id.return_value = None
         patient_repo_mock.create.return_value = patient_mock
 
         study_repo_mock = AsyncMock()
@@ -524,7 +524,7 @@ class TestStudyServiceEntityTriggers:
 
         result = await service.create_patient(patient_data)
 
-        patient_repo_mock.exists.assert_awaited_once_with(id="PAT_001")
+        patient_repo_mock.find_by_id.assert_awaited_once_with("PAT_001")
         patient_repo_mock.create.assert_awaited_once()
         assert result == patient_mock
 

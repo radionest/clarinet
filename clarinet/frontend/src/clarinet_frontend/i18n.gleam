@@ -141,6 +141,7 @@ pub type Key {
   PatientsNewTitle
   PatientsMsgCreated
   PatientsMsgCreateFailed
+  PatientsMsgConflict(patient_id: String, patient_name: String)
   PatientPrefix(id: String)
   PatientBackToPatients
   PatientBtnDelete
@@ -586,6 +587,10 @@ pub fn translate(locale: Locale, key: Key) -> String {
     Ru, PatientsMsgCreated -> "Пациент успешно создан"
     En, PatientsMsgCreateFailed -> "Failed to create patient"
     Ru, PatientsMsgCreateFailed -> "Не удалось создать пациента"
+    En, PatientsMsgConflict(id, name) ->
+      "Patient already exists. ID: " <> id <> ", Name: " <> name
+    Ru, PatientsMsgConflict(id, name) ->
+      "Такой пациент уже есть в базе. ID: " <> id <> ", ФИО: " <> name
     En, PatientPrefix(id) -> "Patient: " <> id
     Ru, PatientPrefix(id) -> "Пациент: " <> id
     En, PatientBackToPatients -> "Back to Patients"

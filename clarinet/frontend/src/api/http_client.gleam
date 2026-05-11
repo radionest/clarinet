@@ -5,6 +5,7 @@
 /// All requests automatically include JSON content-type headers and prefix paths with "/api".
 import api/types.{type ApiError}
 import config
+import gleam/dict.{type Dict}
 import gleam/dynamic.{type Dynamic}
 import gleam/dynamic/decode
 import gleam/fetch
@@ -98,12 +99,40 @@ pub fn process_response(
             Ok(msg) -> msg
             Error(_) -> "Server error"
           }
-          promise.resolve(Error(types.ServerError(code, detail)))
+          // Try to upgrade to StructuredError when the server provides a
+          // machine-readable `code` field (and optional `metadata`).
+          // Fires for any 4xx with a `code` envelope, not only 409.
+          // Falls back to ServerError when `code` is absent (e.g. raw
+          // HTTPException(409) in record/auth routers).
+          let err = case
+            json.parse(text_response.body, structured_payload_decoder())
+          {
+            Ok(#(error_code, metadata)) ->
+              types.StructuredError(error_code, detail, metadata)
+            Error(_) -> types.ServerError(code, detail)
+          }
+          promise.resolve(Error(err))
         }
         Error(_) -> promise.resolve(Error(types.ServerError(code, "Server error")))
       }
     }
   }
+}
+
+/// Decodes the optional `{code, metadata}` envelope used by structured
+/// 4xx responses (e.g. EntityAlreadyExistsError, RecordLimitReached).
+/// Succeeds only when `code` is present; otherwise callers fall back
+/// to ServerError.
+fn structured_payload_decoder() -> decode.Decoder(
+  #(String, Dict(String, String)),
+) {
+  use error_code <- decode.field("code", decode.string)
+  use metadata <- decode.optional_field(
+    "metadata",
+    dict.new(),
+    decode.dict(decode.string, decode.string),
+  )
+  decode.success(#(error_code, metadata))
 }
 
 /// Makes an HTTP request with optional JSON body.
