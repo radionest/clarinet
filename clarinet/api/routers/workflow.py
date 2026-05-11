@@ -118,11 +118,15 @@ def _compute_digest(plan: list[ActionPreview]) -> str:
     The digest is stable only if the planner's output is itself stable —
     discovery order of ``*_flow.py`` files matters. ``flow_loader.find_flow_files``
     sorts its results so replicas converge on the same digest.
+
+    No ``default=`` fallback: ``model_dump(mode="json")`` already produces a
+    JSON-compatible dict, so any non-JSON value reaching :func:`json.dumps`
+    is a programming error — we surface it loudly via ``TypeError`` rather
+    than silently stringify it into an unstable digest.
     """
     payload = json.dumps(
         [p.model_dump(mode="json") for p in plan],
         sort_keys=True,
-        default=str,
     )
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
 
@@ -257,29 +261,49 @@ async def fire(
     (CreateRecord, PipelineAction etc. have no built-in dedup). Instead a
     per-app TTL cache of consumed digests blocks replays for ~5 minutes —
     enough to absorb double-clicks and HTTP retries.
+
+    The digest is **reserved before** any DB / engine I/O so that two
+    concurrent /fire calls with the same digest cannot both pass the
+    "is in cache?" check. On digest mismatch or any exception during
+    execution the reservation is released; only a successful execution
+    keeps the digest in the cache.
+
+    **Multi-worker caveat**: the cache lives in the per-process
+    ``app.state``. With multiple uvicorn/gunicorn workers, replays
+    routed to different workers (within the 5-min TTL) will both be
+    accepted. Run a single admin worker, or migrate the cache to Redis
+    if true multi-worker safety is required.
     """
     engine = _require_engine(request)
     used_digests = _get_used_digest_cache(request)
 
     if body.plan_digest in used_digests:
         raise WorkflowDigestAlreadyUsedError(body.plan_digest)
-
-    record_read = await _load_record_read(repo, body.record_id)
-
-    plan = await _run_plan(engine, record_read, body)
-    actual_digest = _compute_digest(plan)
-    if actual_digest != body.plan_digest:
-        raise WorkflowPlanDigestMismatchError(
-            expected_digest=body.plan_digest, current_digest=actual_digest
-        )
-
-    logger.info(
-        f"Admin {admin.id} firing workflow trigger "
-        f"record_id={body.record_id} kind={body.trigger_kind.value} "
-        f"status_override={_status_override_value(body)} actions={len(plan)}"
-    )
-    await _execute_trigger(engine, record_read, body)
-    # Mark digest as used only AFTER successful execution — failures
-    # leave the digest free so the caller can retry after fixing state.
+    # Reserve before any await — closes the read-then-write race between
+    # concurrent /fire calls with the same digest.
     used_digests[body.plan_digest] = True
+
+    success = False
+    try:
+        record_read = await _load_record_read(repo, body.record_id)
+        plan = await _run_plan(engine, record_read, body)
+        actual_digest = _compute_digest(plan)
+        if actual_digest != body.plan_digest:
+            raise WorkflowPlanDigestMismatchError(
+                expected_digest=body.plan_digest, current_digest=actual_digest
+            )
+
+        logger.info(
+            f"Admin {admin.id} firing workflow trigger "
+            f"record_id={body.record_id} kind={body.trigger_kind.value} "
+            f"status_override={_status_override_value(body)} actions={len(plan)}"
+        )
+        await _execute_trigger(engine, record_read, body)
+        success = True
+    finally:
+        # Drop the reservation on mismatch / error so the caller can dry-run
+        # again with a fresh digest; keep it on success to block replays.
+        if not success:
+            used_digests.pop(body.plan_digest, None)
+
     return FireResponse(executed_actions=plan)

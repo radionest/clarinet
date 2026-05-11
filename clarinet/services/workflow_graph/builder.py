@@ -49,6 +49,12 @@ class _BuildContext:
     nodes: dict[str, Node] = field(default_factory=dict)
     edges: list[Edge] = field(default_factory=list)
     edge_id_counter: int = 0
+    emitted_pipeline_step_chains: set[str] = field(default_factory=set)
+    """Pipelines whose step chain has already been inlined.
+
+    Multiple flows can dispatch the same pipeline; we want to inline its
+    PIPELINE_STEP nodes / chain edges exactly once even if more than one
+    PipelineAction references the same name with ``expanded=True``."""
 
     def add_node(self, node: Node) -> None:
         existing = self.nodes.get(node.id)
@@ -334,7 +340,10 @@ def _emit_action_edge(
                 )
         case CallFunctionAction():
             fname = getattr(action.function, "__name__", repr(action.function))
-            target_id = f"call:{fname}"
+            fmodule = getattr(action.function, "__module__", None) or "?"
+            # Include module path in the node id so two functions sharing
+            # __name__ across modules don't collapse into one call-node.
+            target_id = f"call:{fmodule}.{fname}"
             ctx.add_node(
                 Node(
                     id=target_id,
@@ -342,7 +351,7 @@ def _emit_action_edge(
                     label=f"call {fname}",
                     metadata={
                         "function_name": fname,
-                        "function_module": getattr(action.function, "__module__", None),
+                        "function_module": fmodule,
                     },
                 )
             )
@@ -389,7 +398,12 @@ def _emit_action_edge(
                     condition_summary=condition_summary,
                 )
             )
-            if is_expanded and pipeline is not None:
+            if (
+                is_expanded
+                and pipeline is not None
+                and action.pipeline_name not in ctx.emitted_pipeline_step_chains
+            ):
+                ctx.emitted_pipeline_step_chains.add(action.pipeline_name)
                 _emit_pipeline_steps(pipeline, ctx)
 
 

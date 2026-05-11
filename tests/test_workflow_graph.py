@@ -286,6 +286,52 @@ class TestBuilderPipelineExpansion:
         first = next(e for e in chain_edges if e.from_node == make_pipeline_id("p1"))
         assert first.to_node == make_pipeline_step_id("p1", 0)
 
+    def test_pipeline_expanded_dedups_step_chain_across_flows(self, empty_engine):
+        """Two flows dispatching the same expanded pipeline must inline its
+        step chain only once — duplicating PIPELINE_STEP nodes and chain
+        edges leaks O(N * flows) noise into the graph for no reason.
+        """
+        from clarinet.services.pipeline import get_all_pipelines, get_broker_for
+        from clarinet.services.pipeline.chain import Pipeline
+
+        broker = get_broker_for("test_q")
+
+        @broker.task
+        async def step_a(_msg: dict) -> dict:
+            return {}
+
+        @broker.task
+        async def step_b(_msg: dict) -> dict:
+            return {}
+
+        step_a._pipeline_queue = "test_q"  # type: ignore[attr-defined]
+        step_b._pipeline_queue = "test_q"  # type: ignore[attr-defined]
+
+        Pipeline("p1").step(step_a).step(step_b)
+
+        flow_a = FlowRecord("rt_a")
+        flow_a.on_status("finished")
+        flow_a.pipeline("p1")
+        flow_b = FlowRecord("rt_b")
+        flow_b.on_status("finished")
+        flow_b.pipeline("p1")
+        empty_engine.register_flow(flow_a)
+        empty_engine.register_flow(flow_b)
+
+        graph = build_graph(
+            engine=empty_engine,
+            pipelines=get_all_pipelines(),
+            expanded_pipelines={"p1"},
+        )
+
+        step_nodes = [n for n in graph.nodes if n.kind == NodeKind.PIPELINE_STEP]
+        assert len(step_nodes) == 2  # not 4
+        chain_edges = [e for e in graph.edges if e.kind == EdgeKind.PIPELINE_STEP_CHAIN]
+        assert len(chain_edges) == 2  # not 4
+        # Two pipeline-dispatch edges (one per flow) still expected
+        dispatch_edges = [e for e in graph.edges if e.kind == EdgeKind.PIPELINE_DISPATCH]
+        assert len(dispatch_edges) == 2
+
 
 class TestAuditProvider:
     def test_parent_record_id_marks_create_edge_fired(self, empty_engine):
@@ -328,10 +374,49 @@ class TestBuilderCallFunction:
 
         graph = build_graph(engine=empty_engine, pipelines={})
 
-        call_node = next(n for n in graph.nodes if n.id == "call:my_callback")
-        assert call_node.kind == NodeKind.CALL_FUNCTION
+        call_nodes = [n for n in graph.nodes if n.kind == NodeKind.CALL_FUNCTION]
+        assert len(call_nodes) == 1
+        call_node = call_nodes[0]
+        # Id is module-qualified so callbacks from different modules can't collide.
+        assert call_node.id.startswith("call:")
+        assert call_node.id.endswith(".my_callback")
+        assert call_node.metadata["function_name"] == "my_callback"
         # No pipeline nodes leak from CallFunction
         assert all(n.kind != NodeKind.PIPELINE for n in graph.nodes)
+
+    def test_call_function_id_includes_module(self, empty_engine):
+        """Same __name__ from different modules must yield distinct call nodes."""
+
+        def _make(name: str, module: str):
+            def fn(*_a, **_k):
+                return None
+
+            fn.__name__ = name
+            fn.__module__ = module
+            return fn
+
+        same_name_a = _make("shared", "module_a")
+        same_name_b = _make("shared", "module_b")
+
+        flow_a = FlowRecord("trigger_a")
+        flow_a.on_status("finished")
+        flow_a.call(same_name_a)
+        flow_b = FlowRecord("trigger_b")
+        flow_b.on_status("finished")
+        flow_b.call(same_name_b)
+        empty_engine.register_flow(flow_a)
+        empty_engine.register_flow(flow_b)
+
+        graph = build_graph(engine=empty_engine, pipelines={})
+        call_nodes = sorted(
+            (n for n in graph.nodes if n.kind == NodeKind.CALL_FUNCTION),
+            key=lambda n: n.id,
+        )
+        assert len(call_nodes) == 2
+        assert {n.id for n in call_nodes} == {
+            "call:module_a.shared",
+            "call:module_b.shared",
+        }
 
 
 # ── Layout ──────────────────────────────────────────────────────────────

@@ -384,6 +384,65 @@ class TestDryRunAndFire:
         )
         assert resp.status_code == 422
 
+    @pytest.mark.asyncio
+    async def test_fire_concurrent_same_digest_executes_only_once(
+        self, client, configured_engine, workflow_env
+    ):
+        """Race: N concurrent /fire calls with the same digest — exactly one
+        wins, the others see 409 WORKFLOW_DIGEST_ALREADY_USED. The engine
+        handler runs exactly once even though we fired the requests in
+        parallel via asyncio.gather.
+        """
+        import asyncio
+
+        parent_id = workflow_env["parent"].id
+        dry = await client.post(
+            WORKFLOW_DRY_RUN,
+            json={
+                "record_id": parent_id,
+                "trigger_kind": "status",
+                "status_override": "finished",
+            },
+        )
+        digest = dry.json()["digest"]
+        payload = {
+            "record_id": parent_id,
+            "trigger_kind": "status",
+            "status_override": "finished",
+            "plan_digest": digest,
+        }
+
+        responses = await asyncio.gather(
+            *(client.post(WORKFLOW_FIRE, json=payload) for _ in range(5))
+        )
+        statuses = sorted(r.status_code for r in responses)
+        assert statuses == [200, 409, 409, 409, 409]
+
+        already_used = next(r for r in responses if r.status_code == 409).json()
+        assert already_used["code"] == "WORKFLOW_DIGEST_ALREADY_USED"
+        assert already_used["digest"] == digest
+
+        # Engine ran for the winner only — race on the cache reservation is closed.
+        assert configured_engine.clarinet_client.create_record.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_dry_run_digest_stable_across_calls(
+        self, client, configured_engine, workflow_env
+    ):
+        """Same input ⇒ same digest. Guards against accidental nondeterminism
+        in `_compute_digest` (e.g. unsorted dict keys, mutable defaults
+        leaking, or a `default=str` fallback masking exotic types).
+        """
+        parent_id = workflow_env["parent"].id
+        body = {
+            "record_id": parent_id,
+            "trigger_kind": "status",
+            "status_override": "finished",
+        }
+        d1 = (await client.post(WORKFLOW_DRY_RUN, json=body)).json()["digest"]
+        d2 = (await client.post(WORKFLOW_DRY_RUN, json=body)).json()["digest"]
+        assert d1 == d2
+
 
 # ── Authorization ────────────────────────────────────────────────────────
 
