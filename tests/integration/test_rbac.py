@@ -759,13 +759,35 @@ async def test_get_user_by_id_includes_role_names(admin_role_client, admin_role_
 
 
 @pytest.mark.asyncio
-async def test_dicom_endpoints_reject_admin_role_user(admin_role_client):
-    """DICOM ops stay superuser-only — admin role must NOT unlock /api/dicom/*.
+async def test_dicom_search_accepts_admin_role_user(admin_role_client):
+    """PACS search is open to admin-role users.
 
-    Pins the deliberate scope choice (see plan §B2 and api/CLAUDE.md): a future
-    accidental swap to AdminUserDep on dicom.py would break this test.
+    PACS may not be reachable in tests; we only assert the auth layer does
+    not reject (no 401/403).
     """
     response = await admin_role_client.get("/api/dicom/patient/UNKNOWN/studies")
+    assert response.status_code not in (401, 403)
+
+
+@pytest.mark.asyncio
+async def test_dicom_import_accepts_admin_role_user(admin_role_client):
+    """PACS import is open to admin-role users."""
+    response = await admin_role_client.post(
+        "/api/dicom/import-study",
+        json={"study_instance_uid": "1.2.unknown", "patient_id": "PUNK"},
+    )
+    assert response.status_code not in (401, 403)
+
+
+@pytest.mark.asyncio
+async def test_dicom_anonymize_rejects_admin_role_user(admin_role_client):
+    """Anonymization stays superuser-only — admin role must NOT unlock it.
+
+    Pins the deliberate scope choice (mass anonymization is sensitive):
+    a future accidental swap to AdminUserDep on anonymize_study would
+    break this test.
+    """
+    response = await admin_role_client.post("/api/dicom/studies/1.2.unknown/anonymize")
     assert response.status_code in (401, 403)
 
 

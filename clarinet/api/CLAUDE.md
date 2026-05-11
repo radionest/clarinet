@@ -15,7 +15,7 @@ Changing auth levels on routers has cascading impact on tests — check `tests/t
 | `user.py` | `AdminUserDep` | Admin-only mutations: is_superuser OR `admin` role; `/me` and `/me/roles` are open to any authenticated user |
 | `admin.py` | `AdminUserDep` | Admin-only: is_superuser OR `admin` role |
 | `reports.py` | `AdminUserDep` | Admin-only: is_superuser OR `admin` role |
-| `dicom.py` | `SuperUserDep` | Superuser-only — DICOM ops stay locked to is_superuser |
+| `dicom.py` | mixed | `search_patient_studies` + `import_study_from_pacs` use `AdminUserDep`; `anonymize_study` stays `SuperUserDep` |
 | `dicomweb.py` | `CurrentUserDep` | Any authenticated user |
 
 ## Application Lifespan (app.py)
