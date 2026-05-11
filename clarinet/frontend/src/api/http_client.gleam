@@ -99,14 +99,16 @@ pub fn process_response(
             Ok(msg) -> msg
             Error(_) -> "Server error"
           }
-          // Try to upgrade to ConflictError when the server provides a
+          // Try to upgrade to StructuredError when the server provides a
           // machine-readable `code` field (and optional `metadata`).
-          // Falls back to ServerError otherwise — full back-compat.
+          // Fires for any 4xx with a `code` envelope, not only 409.
+          // Falls back to ServerError when `code` is absent (e.g. raw
+          // HTTPException(409) in record/auth routers).
           let err = case
-            json.parse(text_response.body, conflict_payload_decoder())
+            json.parse(text_response.body, structured_payload_decoder())
           {
             Ok(#(error_code, metadata)) ->
-              types.ConflictError(error_code, detail, metadata)
+              types.StructuredError(error_code, detail, metadata)
             Error(_) -> types.ServerError(code, detail)
           }
           promise.resolve(Error(err))
@@ -118,9 +120,10 @@ pub fn process_response(
 }
 
 /// Decodes the optional `{code, metadata}` envelope used by structured
-/// 4xx responses (e.g. EntityAlreadyExistsError). Succeeds only when
-/// `code` is present; otherwise callers fall back to ServerError.
-fn conflict_payload_decoder() -> decode.Decoder(
+/// 4xx responses (e.g. EntityAlreadyExistsError, RecordLimitReached).
+/// Succeeds only when `code` is present; otherwise callers fall back
+/// to ServerError.
+fn structured_payload_decoder() -> decode.Decoder(
   #(String, Dict(String, String)),
 ) {
   use error_code <- decode.field("code", decode.string)

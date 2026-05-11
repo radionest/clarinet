@@ -8,10 +8,12 @@ pub type ApiError {
   ParseError(String)
   AuthError(String)
   ServerError(code: Int, message: String)
-  // Structured server error carrying a machine-readable code and metadata.
-  // Emitted when the response body contains a `code` field (currently 4xx
-  // conflicts from EntityAlreadyExistsError and friends).
-  ConflictError(
+  // Structured server error carrying a machine-readable code and optional
+  // metadata. Emitted on any 4xx response whose body contains a `code`
+  // field — not limited to 409 (e.g. a future 422 with `code` would land
+  // here too). Currently produced by EntityAlreadyExistsError handler and
+  // record-quota errors (RECORD_LIMIT_REACHED / UNIQUE_PER_USER).
+  StructuredError(
     error_code: String,
     message: String,
     metadata: Dict(String, String),

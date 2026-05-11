@@ -101,7 +101,7 @@ pub fn update(
         types.ValidationError(_) ->
           "Invalid registration data. Please check your inputs."
         types.AuthError(msg) -> msg
-        types.ConflictError(_, _, _) -> "Username or email already exists."
+        types.StructuredError(_, _, _) -> "Username or email already exists."
         types.ServerError(409, _) -> "Username or email already exists."
         types.NetworkError(msg) -> "Network error: " <> msg
         _ -> "Registration failed. Please try again."

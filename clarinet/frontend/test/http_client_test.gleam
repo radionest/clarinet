@@ -156,35 +156,35 @@ pub fn request_building_contract_test() {
   should.equal(True, True)
 }
 
-// Test ConflictError construction and destructuring — the variant used
+// Test StructuredError construction and destructuring — the variant used
 // when a 4xx response carries a structured {code, metadata} envelope.
-pub fn conflict_error_structure_test() {
+pub fn structured_error_structure_test() {
   let meta =
     dict.new()
     |> dict.insert("patient_id", "P001")
     |> dict.insert("patient_name", "Иванов Иван")
 
-  let conflict_err =
-    types.ConflictError(
+  let structured_err =
+    types.StructuredError(
       error_code: "PATIENT_ALREADY_EXISTS",
       message: "Patient with ID 'P001' already exists",
       metadata: meta,
     )
 
-  let types.ConflictError(code, msg, md) = conflict_err
+  let types.StructuredError(code, msg, md) = structured_err
   should.equal(code, "PATIENT_ALREADY_EXISTS")
   should.equal(msg, "Patient with ID 'P001' already exists")
   should.equal(dict.get(md, "patient_id"), Ok("P001"))
   should.equal(dict.get(md, "patient_name"), Ok("Иванов Иван"))
 
-  // ConflictError with empty metadata — for ENTITY_ALREADY_EXISTS fallback.
-  let generic_conflict =
-    types.ConflictError(
+  // StructuredError with empty metadata — for ENTITY_ALREADY_EXISTS fallback.
+  let generic_structured =
+    types.StructuredError(
       error_code: "ENTITY_ALREADY_EXISTS",
       message: "Resource already exists",
       metadata: dict.new(),
     )
-  let types.ConflictError(_, _, empty_md) = generic_conflict
+  let types.StructuredError(_, _, empty_md) = generic_structured
   should.equal(dict.size(empty_md), 0)
 }
 

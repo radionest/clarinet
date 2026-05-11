@@ -1,7 +1,7 @@
 // New patient creation page — self-contained MVU module
 import api/models.{type Patient}
 import api/patients
-import api/types.{type ApiError, AuthError, ConflictError}
+import api/types.{type ApiError, AuthError, StructuredError}
 import clarinet_frontend/i18n
 import components/forms/patient_form
 import gleam/dict.{type Dict}
@@ -116,7 +116,7 @@ fn handle_error(
 ) -> List(OutMsg) {
   case err {
     AuthError(_) -> [shared.Logout]
-    ConflictError("PATIENT_ALREADY_EXISTS", _, metadata) -> {
+    StructuredError("PATIENT_ALREADY_EXISTS", _, metadata) -> {
       let id = dict.get(metadata, "patient_id") |> result.unwrap("")
       let name = dict.get(metadata, "patient_name") |> result.unwrap("")
       [

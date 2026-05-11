@@ -427,7 +427,7 @@ pub fn update(
 
     DeleteResult(Error(err)) -> {
       let msg = case err {
-        types.ConflictError(_, _, _) ->
+        types.StructuredError(_, _, _) ->
           "Cannot delete: subtree contains records currently in work"
         types.ServerError(409, _) ->
           "Cannot delete: subtree contains records currently in work"

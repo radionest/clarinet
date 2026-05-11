@@ -9,8 +9,23 @@ from typing import Any
 
 from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
 from clarinet.utils.logger import logger
+
+
+class ConflictResponse(BaseModel):
+    """OpenAPI schema for 409 conflict responses.
+
+    Backward-compatible envelope: legacy 409 producers (raw
+    ``HTTPException(409, ...)`` in record/auth routers, ``IntegrityError``)
+    populate only ``detail``; ``EntityAlreadyExistsError`` and friends
+    additionally set ``code`` and may set ``metadata``.
+    """
+
+    detail: str
+    code: str | None = None
+    metadata: dict[str, str] | None = None
 
 
 def setup_exception_handlers(app: FastAPI) -> None:
