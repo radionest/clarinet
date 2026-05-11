@@ -47,7 +47,7 @@ AuthorizedRecordDep = Annotated[Record, Depends(authorize_record_access)]
 
 - `get_user_role_names(user)` — extracts `{role.name for role in user.roles}` with try/except
 - `authorize_record_access` — checks superuser -> role_name match -> raises `AuthorizationError`
-- `current_admin_user` — passes `is_superuser=True` OR membership in the built-in `admin` role; used by `admin.py`, `reports.py`, `study.py`, `user.py` (router-level on `study.py`, per-endpoint elsewhere). `dicom.py` stays `current_superuser`-only.
+- `current_admin_user` — passes `is_superuser=True` OR membership in the built-in `admin` role; used by `admin.py`, `reports.py`, `study.py`, `user.py` (router-level on `study.py`, per-endpoint elsewhere), and `dicom.py` (search/import only — `anonymize_study` stays `current_superuser`).
 - `mask_records(records, user)` — converts `Record` -> `RecordRead` + masks patient data for non-superusers
 
 ### Factory pattern for new repos/services

@@ -8,6 +8,7 @@ This module tests role-based filtering and authorization for records:
 - Admin endpoints require superuser access
 """
 
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
@@ -16,11 +17,12 @@ from httpx import ASGITransport, AsyncClient
 
 from clarinet.api.app import app
 from clarinet.api.auth_config import current_active_user, current_superuser
-from clarinet.api.dependencies import current_admin_user
+from clarinet.api.dependencies import current_admin_user, get_dicom_client, get_pacs_node
 from clarinet.models.record import Record, RecordType
 from clarinet.models.user import User, UserRole, UserRolesLink
 from clarinet.utils.auth import get_password_hash
 from clarinet.utils.database import get_async_session
+from tests.utils.urls import DICOM_BASE, DICOM_IMPORT_STUDY
 
 # Fixtures
 
@@ -758,14 +760,63 @@ async def test_get_user_by_id_includes_role_names(admin_role_client, admin_role_
     assert "admin" in body["role_names"]
 
 
-@pytest.mark.asyncio
-async def test_dicom_endpoints_reject_admin_role_user(admin_role_client):
-    """DICOM ops stay superuser-only — admin role must NOT unlock /api/dicom/*.
+@pytest_asyncio.fixture
+async def mock_pacs_dependencies():
+    """Override PACS-touching deps so auth-boundary tests don't hit the network.
 
-    Pins the deliberate scope choice (see plan §B2 and api/CLAUDE.md): a future
-    accidental swap to AdminUserDep on dicom.py would break this test.
+    Returns a mock DicomClient whose ``find_studies`` returns ``[]``. The
+    search endpoint then yields 200 + [], the import endpoint yields 404
+    (no study found). Both branches let us pin tight status assertions.
     """
-    response = await admin_role_client.get("/api/dicom/patient/UNKNOWN/studies")
+    mock_client = AsyncMock()
+    mock_client.find_studies = AsyncMock(return_value=[])
+    mock_client.find_series = AsyncMock(return_value=[])
+
+    app.dependency_overrides[get_dicom_client] = lambda: mock_client
+    app.dependency_overrides[get_pacs_node] = lambda: MagicMock()
+    try:
+        yield mock_client
+    finally:
+        app.dependency_overrides.pop(get_dicom_client, None)
+        app.dependency_overrides.pop(get_pacs_node, None)
+
+
+@pytest.mark.asyncio
+async def test_dicom_search_accepts_admin_role_user(admin_role_client, mock_pacs_dependencies):
+    """PACS search is open to admin-role users.
+
+    With ``find_studies`` mocked to ``[]`` the endpoint returns 200 + [];
+    a 401/403 here would mean the auth layer is rejecting admin role.
+    """
+    response = await admin_role_client.get(f"{DICOM_BASE}/patient/UNKNOWN/studies")
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+@pytest.mark.asyncio
+async def test_dicom_import_accepts_admin_role_user(admin_role_client, mock_pacs_dependencies):
+    """PACS import is open to admin-role users.
+
+    With ``find_studies`` mocked to ``[]`` the handler raises ``NOT_FOUND``
+    (study not in PACS) and FastAPI returns 404. A 401/403 would mean the
+    auth layer is rejecting admin role.
+    """
+    response = await admin_role_client.post(
+        DICOM_IMPORT_STUDY,
+        json={"study_instance_uid": "1.2.unknown", "patient_id": "PUNK"},
+    )
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_dicom_anonymize_rejects_admin_role_user(admin_role_client):
+    """Anonymization stays superuser-only — admin role must NOT unlock it.
+
+    Pins the deliberate scope choice (mass anonymization is sensitive):
+    a future accidental swap to AdminUserDep on anonymize_study would
+    break this test. No PACS mock needed — auth rejects before reaching it.
+    """
+    response = await admin_role_client.post(f"{DICOM_BASE}/studies/1.2.unknown/anonymize")
     assert response.status_code in (401, 403)
 
 

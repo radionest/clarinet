@@ -6,6 +6,7 @@ from fastapi import APIRouter, Query
 from fastapi.responses import JSONResponse
 
 from clarinet.api.dependencies import (
+    AdminUserDep,
     AnonymizationServiceDep,
     DicomClientDep,
     PacsNodeDep,
@@ -42,7 +43,7 @@ _background_tasks: set[asyncio.Task] = set()  # type: ignore[type-arg]
 @router.get("/patient/{patient_id}/studies", response_model=list[PacsStudyWithSeries])
 async def search_patient_studies(
     patient_id: str,
-    _user: SuperUserDep,
+    _user: AdminUserDep,
     client: DicomClientDep,
     pacs: PacsNodeDep,
     study_repo: StudyRepositoryDep,
@@ -51,7 +52,7 @@ async def search_patient_studies(
 
     Args:
         patient_id: Patient ID to search in PACS
-        _user: Authenticated superuser
+        _user: Authenticated superuser or admin-role user
         client: DICOM client
         pacs: PACS node configuration
         study_repo: Study repository for checking local existence
@@ -94,7 +95,7 @@ async def search_patient_studies(
 @router.post("/import-study", response_model=StudyRead)
 async def import_study_from_pacs(
     request: PacsImportRequest,
-    _user: SuperUserDep,
+    _user: AdminUserDep,
     client: DicomClientDep,
     pacs: PacsNodeDep,
     service: StudyServiceDep,
@@ -103,7 +104,7 @@ async def import_study_from_pacs(
 
     Args:
         request: Import request with study UID and patient ID
-        _user: Authenticated superuser
+        _user: Authenticated superuser or admin-role user
         client: DICOM client
         pacs: PACS node configuration
         service: Study service for creating studies and series

@@ -64,6 +64,9 @@ SLICER_PING = "/api/slicer/ping"
 
 # --- DICOM ---
 DICOM_BASE = "/api/dicom"
+DICOM_IMPORT_STUDY = "/api/dicom/import-study"
+# Dynamic: f"{DICOM_BASE}/patient/{patient_id}/studies"
+# Dynamic: f"{DICOM_BASE}/studies/{study_uid}/anonymize"
 
 # --- Health ---
 HEALTH = "/api/health"
