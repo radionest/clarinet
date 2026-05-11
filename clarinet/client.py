@@ -195,6 +195,9 @@ class ClarinetClient:
             ClarinetAuthError: On authentication errors
         """
         url = endpoint if endpoint.startswith("http") else f"{self.base_url}{endpoint}"
+        # Log BEFORE the orjson rewrite below — caller dicts are human-readable,
+        # the post-rewrite `content` is raw bytes that loguru would serialize
+        # opaquely.
         self._log_request(method, url, **kwargs)
 
         # Serialize JSON via orjson so UUID/datetime values from caller dicts
@@ -202,6 +205,10 @@ class ClarinetClient:
         # through httpx.Headers so list-of-tuples / httpx.Headers callers work and
         # a caller-supplied Content-Type (any case) wins over our default.
         if "json" in kwargs:
+            if "content" in kwargs:
+                # httpx forbids passing both — fail loudly instead of silently
+                # overwriting the caller's binary content with our JSON body.
+                raise TypeError("ClarinetClient._request: pass either json= or content=, not both")
             kwargs["content"] = json_dumps_bytes(kwargs.pop("json"))
             headers = httpx.Headers(kwargs.get("headers") or {})
             headers.setdefault("Content-Type", "application/json")

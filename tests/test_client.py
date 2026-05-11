@@ -824,6 +824,23 @@ class TestJSONSerialization:
         assert headers["Content-Type"] == "application/json"
 
     @pytest.mark.asyncio
+    async def test_request_rejects_simultaneous_json_and_content(self) -> None:
+        """httpx forbids json= + content= together; client must fail loudly, not overwrite."""
+        client = ClarinetClient("http://test", auto_login=False)
+        client.client = AsyncMock()
+        client.client.request = AsyncMock(return_value=httpx.Response(200, json={"ok": True}))
+
+        with pytest.raises(TypeError, match="either json= or content="):
+            await client._request(
+                "POST",
+                "/records/42/data",
+                json={"a": 1},
+                content=b"raw-binary",
+            )
+
+        client.client.request.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_request_caller_content_type_case_insensitive(self) -> None:
         """A lowercase content-type from the caller must win over our default."""
         captured: dict[str, object] = {}
