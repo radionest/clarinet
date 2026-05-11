@@ -141,10 +141,16 @@ fn report_row(report: ReportTemplate) -> Element(Msg) {
 }
 
 fn download_link(name: String, format: String, label: String) -> Element(Msg) {
+  // target="_blank" — modem.init's global click handler treats this anchor
+  // as external and skips preventDefault, letting the browser perform the
+  // native download. Without it, modem routes the API URL through the SPA
+  // router, which renders 404. The `download` attribute keeps the file
+  // saving — no new tab actually opens.
   html.a(
     [
       attribute.class("btn btn-sm btn-outline"),
       attribute.href(reports_api.download_url(name, format)),
+      attribute.target("_blank"),
       attribute.attribute("download", ""),
     ],
     [html.text(label)],

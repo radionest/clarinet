@@ -700,6 +700,11 @@ fn render_output_file_item(
 
   let action = case link_lookup, record.id {
     Ok(file_link), Some(id) ->
+      // target="_blank" — modem.init's global click handler treats this
+      // anchor as external and skips preventDefault, letting the browser
+      // perform the native download. Without it, modem routes the API URL
+      // through the SPA router, which renders 404. The `download`
+      // attribute keeps the file saving — no new tab actually opens.
       html.a(
         [
           attribute.class("btn btn-sm btn-outline"),
@@ -707,6 +712,7 @@ fn render_output_file_item(
             int.to_string(id),
             file_def.name,
           )),
+          attribute.target("_blank"),
           attribute.attribute("download", file_link.filename),
         ],
         [html.text("Download")],
