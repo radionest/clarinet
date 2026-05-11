@@ -28,7 +28,7 @@ from clarinet.exceptions.domain import (
     ValidationError,
 )
 from clarinet.models import Record
-from clarinet.models.base import RecordStatus
+from clarinet.models.base import DicomQueryLevel, RecordStatus
 from clarinet.models.file_schema import FileRole, RecordFileLink, RecordTypeFileLink
 from clarinet.models.patient import Patient
 from clarinet.models.record import RecordFindResult, RecordFindResultComparisonOperator, RecordType
@@ -694,7 +694,7 @@ class RecordRepository(BaseRepository[Record]):
         patient_id: str | None,
         study_uid: str | None,
         series_uid: str | None,
-        level: str,
+        level: DicomQueryLevel,
     ) -> int:
         """Count records matching type at the given DicomQueryLevel context.
 
@@ -708,7 +708,7 @@ class RecordRepository(BaseRepository[Record]):
             patient_id: Patient identifier (used for PATIENT level).
             study_uid: Study UID (used for STUDY level).
             series_uid: Series UID (used for SERIES level).
-            level: DicomQueryLevel value as string.
+            level: DicomQueryLevel selecting which column to scope by.
 
         Returns:
             Number of matching records.
@@ -719,11 +719,11 @@ class RecordRepository(BaseRepository[Record]):
             .where(RecordType.name == record_type_name)
         )
         match level:
-            case "PATIENT":
+            case DicomQueryLevel.PATIENT:
                 query = query.where(Record.patient_id == patient_id)
-            case "STUDY":
+            case DicomQueryLevel.STUDY:
                 query = query.where(Record.study_uid == study_uid)
-            case "SERIES":
+            case DicomQueryLevel.SERIES:
                 query = query.where(Record.series_uid == series_uid)
             case _:
                 raise ValueError(f"Unsupported level for record count: {level}")
@@ -924,6 +924,8 @@ class RecordRepository(BaseRepository[Record]):
         if level == "SERIES" and not series_uid:
             raise RecordConstraintViolationError("Records of level SERIES require series_uid")
 
+        # `max_records=0` is the deprecation sentinel — blocks any new records
+        # for retired RecordTypes while keeping the row in the registry.
         if record_type.max_records is not None:
             count = await self.count_by_type_and_context(
                 record_type_name=record_type_name,

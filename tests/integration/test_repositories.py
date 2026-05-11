@@ -12,7 +12,7 @@ from clarinet.exceptions.domain import (
     RecordTypeAlreadyExistsError,
     RecordTypeNotFoundError,
 )
-from clarinet.models.base import RecordStatus
+from clarinet.models.base import DicomQueryLevel, RecordStatus
 from clarinet.models.file_schema import FileDefinition, FileRole, RecordTypeFileLink
 from clarinet.models.record import RecordFind, RecordType
 from clarinet.models.study import SeriesFind
@@ -542,7 +542,7 @@ class TestRecordRepository:
             patient_id="RPAT",
             study_uid="1.2.3.300",
             series_uid="1.2.3.300.1",
-            level="SERIES",
+            level=DicomQueryLevel.SERIES,
         )
         assert count == 1
 
@@ -561,8 +561,6 @@ class TestRecordRepository:
     @pytest.mark.asyncio
     async def test_check_constraints_patient_level_per_patient(self, env):
         """PATIENT-level max_records=1 — лимит применяется отдельно к каждому пациенту."""
-        from clarinet.models.base import DicomQueryLevel
-
         rt = make_record_type(
             "patient-rt-limit",
             level=DicomQueryLevel.PATIENT,
@@ -592,8 +590,6 @@ class TestRecordRepository:
     @pytest.mark.asyncio
     async def test_check_constraints_patient_level_violation(self, env):
         """PATIENT-level max_records=1: вторая запись тому же пациенту — RecordLimitReachedError."""
-        from clarinet.models.base import DicomQueryLevel
-
         rt = make_record_type(
             "patient-rt-limit2",
             level=DicomQueryLevel.PATIENT,
@@ -621,8 +617,6 @@ class TestRecordRepository:
     @pytest.mark.asyncio
     async def test_check_constraints_study_level_isolation(self, env):
         """STUDY-level max_records=1 — лимит per-study, не глобальный."""
-        from clarinet.models.base import DicomQueryLevel
-
         rt = make_record_type(
             "study-rt-limit",
             level=DicomQueryLevel.STUDY,
@@ -659,6 +653,44 @@ class TestRecordRepository:
             )
 
     @pytest.mark.asyncio
+    async def test_check_constraints_series_level_isolation(self, env):
+        """SERIES-level max_records=1 — лимит per-series, не глобальный."""
+        rt = make_record_type(
+            "series-rt-limit",
+            level=DicomQueryLevel.SERIES,
+            max_records=1,
+        )
+        env["session"].add(rt)
+        series_b = make_series("1.2.3.300", "1.2.3.300.2", 2)
+        env["session"].add(series_b)
+        await env["session"].commit()
+
+        await seed_record(
+            env["session"],
+            patient_id="RPAT",
+            study_uid="1.2.3.300",
+            series_uid="1.2.3.300.1",
+            rt_name="series-rt-limit",
+        )
+
+        # Different series — should pass.
+        await env["repo"].check_constraints(
+            record_type_name="series-rt-limit",
+            series_uid="1.2.3.300.2",
+            study_uid="1.2.3.300",
+            patient_id="RPAT",
+        )
+
+        # Same series — RecordLimitReachedError.
+        with pytest.raises(RecordLimitReachedError):
+            await env["repo"].check_constraints(
+                record_type_name="series-rt-limit",
+                series_uid="1.2.3.300.1",
+                study_uid="1.2.3.300",
+                patient_id="RPAT",
+            )
+
+    @pytest.mark.asyncio
     async def test_find_by_criteria(self, env):
         criteria = RecordSearchCriteria(record_type_name="rec-rt-00001")
         records = await env["repo"].find_by_criteria(criteria)
@@ -667,8 +699,6 @@ class TestRecordRepository:
     @pytest.mark.asyncio
     async def test_find_by_criteria_patient_level_record(self, env):
         """PATIENT-level records (study_uid=NULL) must be found by patient_id."""
-        from clarinet.models.base import DicomQueryLevel
-
         rt = make_record_type("patient-level-rt", level=DicomQueryLevel.PATIENT)
         env["session"].add(rt)
         await env["session"].commit()
