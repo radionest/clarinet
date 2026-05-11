@@ -134,6 +134,24 @@ module = [
 disallow_untyped_calls = false
 
 [[tool.mypy.overrides]]
+# 3D Slicer runtime imports — only available inside Slicer's embedded Python.
+# SimpleITK has no published type stubs.
+module = [
+    "ctk",
+    "qt",
+    "slicer",
+    "slicer.*",
+    "vtk",
+    "vtk.*",
+    "vtkSegmentationCorePython",
+    "DICOMLib",
+    "DICOMLib.*",
+    "SimpleITK",
+    "SimpleITK.*",
+]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
 module = [
     "pydicom.*",
     "nibabel.*",

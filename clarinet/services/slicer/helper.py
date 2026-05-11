@@ -36,10 +36,10 @@ if TYPE_CHECKING:
     ctk: Any
 else:
     try:
-        import ctk  # type: ignore[import-not-found]
-        import qt  # type: ignore[import-not-found]
-        import slicer  # type: ignore[import-not-found]
-        import vtk  # type: ignore[import-not-found]
+        import ctk
+        import qt
+        import slicer
+        import vtk
     except ImportError:
 
         class _Dummy:
@@ -205,8 +205,8 @@ def _get_segment_mask(segmentation_node: Any, segment_id: str) -> Any | None:
         the VTK Fortran-order reshape convention, or ``None`` if the segment
         has no non-zero voxels.
     """
-    import vtkSegmentationCorePython as vtkSegCore  # type: ignore[import-not-found]
-    from vtk.util.numpy_support import vtk_to_numpy  # type: ignore[import-not-found]
+    import vtkSegmentationCorePython as vtkSegCore
+    from vtk.util.numpy_support import vtk_to_numpy
 
     labelmap = vtkSegCore.vtkOrientedImageData()
     segmentation_node.GetBinaryLabelmapRepresentation(segment_id, labelmap)
@@ -607,7 +607,7 @@ class PacsHelper:
         db = slicer.dicomDatabase
         local_series: list[str] = db.seriesForStudy(study_instance_uid) if db else []
         if local_series:
-            from DICOMLib import DICOMUtils  # type: ignore[import-not-found]
+            from DICOMLib import DICOMUtils
 
             _pacs_log.info(f"Study {study_instance_uid} found in local DICOM database")
             # list() required: db.seriesForStudy() returns QStringList (tuple in PythonQt),
