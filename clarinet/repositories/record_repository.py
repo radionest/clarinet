@@ -691,28 +691,42 @@ class RecordRepository(BaseRepository[Record]):
     async def count_by_type_and_context(
         self,
         record_type_name: str,
-        series_uid: str | None,
+        patient_id: str | None,
         study_uid: str | None,
+        series_uid: str | None,
+        level: str,
     ) -> int:
-        """Count records matching type and study/series context.
+        """Count records matching type at the given DicomQueryLevel context.
+
+        Context key depends on level:
+          - PATIENT: (record_type_name, patient_id)
+          - STUDY:   (record_type_name, study_uid)
+          - SERIES:  (record_type_name, series_uid)
 
         Args:
-            record_type_name: Record type name to filter by
-            series_uid: Series UID to filter by
-            study_uid: Study UID to filter by
+            record_type_name: Record type name to filter by.
+            patient_id: Patient identifier (used for PATIENT level).
+            study_uid: Study UID (used for STUDY level).
+            series_uid: Series UID (used for SERIES level).
+            level: DicomQueryLevel value as string.
 
         Returns:
-            Number of matching records
+            Number of matching records.
         """
         query = (
             select(func.count(col(Record.id)))
             .join(RecordType)
-            .where(
-                RecordType.name == record_type_name,
-                Record.series_uid == series_uid,
-                Record.study_uid == study_uid,
-            )
+            .where(RecordType.name == record_type_name)
         )
+        match level:
+            case "PATIENT":
+                query = query.where(Record.patient_id == patient_id)
+            case "STUDY":
+                query = query.where(Record.study_uid == study_uid)
+            case "SERIES":
+                query = query.where(Record.series_uid == series_uid)
+            case _:
+                raise ValueError(f"Unsupported level for record count: {level}")
         result = await self.session.execute(query)
         return result.scalar_one()
 
@@ -901,20 +915,27 @@ class RecordRepository(BaseRepository[Record]):
             RecordTypeNotFoundError: If record type doesn't exist.
             RecordConstraintViolationError: If any constraint is violated.
         """
-        count = await self.count_by_type_and_context(record_type_name, series_uid, study_uid)
         record_type = await self.get_record_type(record_type_name)
-
-        if record_type.max_records and count >= record_type.max_records:
-            raise RecordLimitReachedError(
-                f"The maximum records limit ({count} of {record_type.max_records}) is reached"
-            )
-
-        # Validate level-UID consistency
         level = record_type.level
+
+        # Validate level-UID consistency before counting
         if level in ("STUDY", "SERIES") and not study_uid:
             raise RecordConstraintViolationError(f"Records of level {level} require study_uid")
         if level == "SERIES" and not series_uid:
             raise RecordConstraintViolationError("Records of level SERIES require series_uid")
+
+        if record_type.max_records is not None:
+            count = await self.count_by_type_and_context(
+                record_type_name=record_type_name,
+                patient_id=patient_id,
+                study_uid=study_uid,
+                series_uid=series_uid,
+                level=level,
+            )
+            if count >= record_type.max_records:
+                raise RecordLimitReachedError(
+                    f"The maximum records limit ({count} of {record_type.max_records}) is reached"
+                )
 
         # Check unique_per_user constraint
         if user_id is not None and patient_id is not None and record_type.unique_per_user:

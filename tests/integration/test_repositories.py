@@ -7,6 +7,7 @@ from sqlalchemy.orm import selectinload
 from clarinet.exceptions.domain import (
     EntityNotFoundError,
     RecordConstraintViolationError,
+    RecordLimitReachedError,
     RecordNotFoundError,
     RecordTypeAlreadyExistsError,
     RecordTypeNotFoundError,
@@ -537,7 +538,11 @@ class TestRecordRepository:
     @pytest.mark.asyncio
     async def test_count_by_type_and_context(self, env):
         count = await env["repo"].count_by_type_and_context(
-            "rec-rt-00001", "1.2.3.300.1", "1.2.3.300"
+            record_type_name="rec-rt-00001",
+            patient_id="RPAT",
+            study_uid="1.2.3.300",
+            series_uid="1.2.3.300.1",
+            level="SERIES",
         )
         assert count == 1
 
@@ -552,6 +557,106 @@ class TestRecordRepository:
         await env["session"].commit()
         with pytest.raises(RecordConstraintViolationError):
             await env["repo"].check_constraints("rec-rt-00001", "1.2.3.300.1", "1.2.3.300")
+
+    @pytest.mark.asyncio
+    async def test_check_constraints_patient_level_per_patient(self, env):
+        """PATIENT-level max_records=1 — лимит применяется отдельно к каждому пациенту."""
+        from clarinet.models.base import DicomQueryLevel
+
+        rt = make_record_type(
+            "patient-rt-limit",
+            level=DicomQueryLevel.PATIENT,
+            max_records=1,
+        )
+        env["session"].add(rt)
+        pat_b = make_patient("RPAT2", "Second Patient")
+        env["session"].add(pat_b)
+        await env["session"].commit()
+
+        await seed_record(
+            env["session"],
+            patient_id="RPAT",
+            study_uid=None,
+            series_uid=None,
+            rt_name="patient-rt-limit",
+        )
+
+        # Для второго пациента check должен пройти — лимит per-patient, не глобальный.
+        await env["repo"].check_constraints(
+            record_type_name="patient-rt-limit",
+            series_uid=None,
+            study_uid=None,
+            patient_id="RPAT2",
+        )
+
+    @pytest.mark.asyncio
+    async def test_check_constraints_patient_level_violation(self, env):
+        """PATIENT-level max_records=1: вторая запись тому же пациенту — RecordLimitReachedError."""
+        from clarinet.models.base import DicomQueryLevel
+
+        rt = make_record_type(
+            "patient-rt-limit2",
+            level=DicomQueryLevel.PATIENT,
+            max_records=1,
+        )
+        env["session"].add(rt)
+        await env["session"].commit()
+
+        await seed_record(
+            env["session"],
+            patient_id="RPAT",
+            study_uid=None,
+            series_uid=None,
+            rt_name="patient-rt-limit2",
+        )
+
+        with pytest.raises(RecordLimitReachedError):
+            await env["repo"].check_constraints(
+                record_type_name="patient-rt-limit2",
+                series_uid=None,
+                study_uid=None,
+                patient_id="RPAT",
+            )
+
+    @pytest.mark.asyncio
+    async def test_check_constraints_study_level_isolation(self, env):
+        """STUDY-level max_records=1 — лимит per-study, не глобальный."""
+        from clarinet.models.base import DicomQueryLevel
+
+        rt = make_record_type(
+            "study-rt-limit",
+            level=DicomQueryLevel.STUDY,
+            max_records=1,
+        )
+        env["session"].add(rt)
+        study_b = make_study("RPAT", "1.2.3.301")
+        env["session"].add(study_b)
+        await env["session"].commit()
+
+        await seed_record(
+            env["session"],
+            patient_id="RPAT",
+            study_uid="1.2.3.300",
+            series_uid=None,
+            rt_name="study-rt-limit",
+        )
+
+        # Второй study — проверка должна пройти.
+        await env["repo"].check_constraints(
+            record_type_name="study-rt-limit",
+            series_uid=None,
+            study_uid="1.2.3.301",
+            patient_id="RPAT",
+        )
+
+        # Тот же study — RecordLimitReachedError.
+        with pytest.raises(RecordLimitReachedError):
+            await env["repo"].check_constraints(
+                record_type_name="study-rt-limit",
+                series_uid=None,
+                study_uid="1.2.3.300",
+                patient_id="RPAT",
+            )
 
     @pytest.mark.asyncio
     async def test_find_by_criteria(self, env):
