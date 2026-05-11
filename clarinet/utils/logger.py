@@ -339,7 +339,7 @@ def reconfigure_for_worker(log_file: str | None = None) -> None:
         remote_url=settings.log_remote_url,
         remote_auth=settings.log_remote_auth,
         remote_level=settings.log_remote_level,
-        remote_labels=settings.log_remote_labels,
+        remote_labels={**settings.log_remote_labels, "component": "worker"},
     )
 
 
@@ -357,7 +357,7 @@ setup_logging(
     remote_url=settings.log_remote_url,
     remote_auth=settings.log_remote_auth,
     remote_level=settings.log_remote_level,
-    remote_labels=settings.log_remote_labels,
+    remote_labels={**settings.log_remote_labels, "component": "api"},
 )
 
 # Apply the scrub patcher so every log call (regardless of sink) gets a
