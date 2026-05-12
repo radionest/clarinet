@@ -126,14 +126,6 @@ class RecordFlowEngine:
         self._background_tasks.add(task)
         task.add_done_callback(self._background_tasks.discard)
 
-    @staticmethod
-    async def maybe_await(func: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
-        """Call a function and await the result if it is a coroutine."""
-        result = func(*args, **kwargs)
-        if asyncio.iscoroutine(result):
-            return await result
-        return result
-
     def register_flow(self, flow: FlowRecord | FlowFileRecord) -> None:
         """Register a flow definition.
 
@@ -547,7 +539,7 @@ class RecordFlowEngine:
                 case CallFunctionAction():
                     await action_handlers.call_function(self, action, ctx)
                 case PipelineAction() if ctx.file_name is None:
-                    await action_handlers.dispatch_pipeline(action, ctx)
+                    await action_handlers.dispatch_pipeline(self, action, ctx)
                 case _:
                     logger.warning(f"Unsupported action type for context: {action.type}")
         except Exception as e:

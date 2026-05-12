@@ -7,9 +7,13 @@ authentication helpers, the action model, and the unified flow context.
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING, Any
 
+from clarinet.client import ClarinetAPIError
 from clarinet.exceptions.domain import RecordLimitReachedError, RecordUniquePerUserError
+from clarinet.models import RecordCreate, RecordStatus
+from clarinet.services.pipeline import PipelineMessage, get_pipeline
 from clarinet.utils.logger import logger
 
 from .flow_action import (
@@ -22,8 +26,9 @@ from .flow_action import (
 from .flow_context import FlowContext
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from clarinet.models import RecordRead
-    from clarinet.services.pipeline import PipelineMessage
 
     from .engine import RecordFlowEngine
 
@@ -38,10 +43,16 @@ _EXPECTED_CONFLICT_CODES = frozenset(
 )
 
 
+async def maybe_await(func: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+    """Call a function and await the result if it is a coroutine."""
+    result = func(*args, **kwargs)
+    if asyncio.iscoroutine(result):
+        return await result
+    return result
+
+
 def is_expected_conflict(exc: BaseException) -> bool:
     """Check if exception is a 409 with a known constraint violation code."""
-    from clarinet.client import ClarinetAPIError
-
     if not isinstance(exc, ClarinetAPIError) or exc.status_code != 409:
         return False
     detail = exc.detail
@@ -60,7 +71,6 @@ async def create_record(
     source record is present.
     """
     await engine.ensure_authenticated()
-    from clarinet.models import RecordCreate
 
     series_uid = action.series_uid or ctx.series_uid
     user_id = action.user_id
@@ -113,7 +123,6 @@ async def update_record(
     applies the update to every matching record.
     """
     await engine.ensure_authenticated()
-    from clarinet.models import RecordStatus
 
     context = ctx.record_context
     if context is None:
@@ -187,7 +196,7 @@ async def call_function(
     kwargs |= action.extra_kwargs
 
     try:
-        await engine.maybe_await(action.function, *action.args, **kwargs)
+        await maybe_await(action.function, *action.args, **kwargs)
     except Exception as e:
         if is_expected_conflict(e):
             logger.warning(f"Expected conflict in function {action.function.__name__}: {e}")
@@ -195,14 +204,16 @@ async def call_function(
             logger.error(f"Error calling function {action.function.__name__}: {e}")
 
 
-async def dispatch_pipeline(action: PipelineAction, ctx: FlowContext) -> None:
+async def dispatch_pipeline(
+    engine: RecordFlowEngine,  # noqa: ARG001 - kept for handler signature symmetry
+    action: PipelineAction,
+    ctx: FlowContext,
+) -> None:
     """Dispatch a task to a registered pipeline.
 
     Builds a PipelineMessage from the context and sends it to the named
     pipeline for distributed execution.
     """
-    from clarinet.services.pipeline import PipelineMessage
-
     message = PipelineMessage(
         patient_id=ctx.patient_id or "",
         study_uid=ctx.study_uid or "",
@@ -227,8 +238,6 @@ async def run_pipeline(
     context: str,
 ) -> None:
     """Look up and execute a registered pipeline."""
-    from clarinet.services.pipeline import get_pipeline
-
     pipeline = get_pipeline(action.pipeline_name)
     if pipeline is None:
         logger.error(
@@ -309,7 +318,7 @@ async def invalidate_from_record(
     if action.callback is None:
         return
     try:
-        await engine.maybe_await(
+        await maybe_await(
             action.callback,
             record=target,
             source_record=source_record,
@@ -351,7 +360,7 @@ async def invalidate_from_file(
     if action.callback is None:
         return
     try:
-        await engine.maybe_await(
+        await maybe_await(
             action.callback,
             record=target,
             source_record=ctx.source_record,
