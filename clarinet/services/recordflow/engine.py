@@ -131,6 +131,9 @@ class RecordFlowEngine:
         await engine.handle_record_status_change(record, old_status)
     """
 
+    # Class-level default so AsyncMock(spec=RecordFlowEngine) sees this attribute.
+    _api_verified: bool = False
+
     def __init__(self, clarinet_client: ClarinetClient):
         """Initialize the engine with a ClarinetClient.
 
@@ -142,7 +145,6 @@ class RecordFlowEngine:
         self.entity_flows: dict[str, list[FlowRecord]] = {}
         self.file_flows: dict[str, list[FlowFileRecord]] = {}
         self._background_tasks: set[asyncio.Task[None]] = set()
-        self._api_verified: bool = False
 
     async def _ensure_api_reachable(self) -> None:
         """One-time API connectivity check on first use (when api_base_url is set)."""

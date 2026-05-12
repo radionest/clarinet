@@ -98,6 +98,10 @@ class ClarinetClient:
         ```
     """
 
+    # Class-level defaults so AsyncMock(spec=ClarinetClient) sees these attributes.
+    _authenticated: bool = False
+    service_token: str | None = None
+
     def __init__(
         self,
         base_url: str,
