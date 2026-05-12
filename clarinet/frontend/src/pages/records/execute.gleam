@@ -6,9 +6,9 @@ import api/types.{type ApiError, AuthError}
 import api/workflow as wf_api
 import api/workflow_models.{
   type ActionPreview, type DryRunResponse, type FireResponse,
-  type TriggerKindRequest, type WorkflowGraph, type WorkflowNode,
-  DataUpdateTrigger, FileChangeTrigger, StatusTrigger, TriggerOnDataUpdate,
-  TriggerOnFileChange, TriggerOnStatus,
+  type TriggerKindRequest, type WorkflowGraph, DataUpdateTrigger,
+  FileChangeTrigger, StatusTrigger, TriggerOnDataUpdate, TriggerOnFileChange,
+  TriggerOnStatus,
 }
 import clarinet_frontend/i18n
 import components/status_badge
@@ -57,6 +57,9 @@ pub type Model {
     workflow_selected_node: Option(String),
     workflow_selected_edge: Option(String),
     plan_state: PlanState,
+    /// Generation counter — bumped on every workflow_load_effect dispatch
+    /// so late responses from rapid TogglePipeline clicks are dropped.
+    workflow_request_id: Int,
   )
 }
 
@@ -123,7 +126,7 @@ pub type Msg {
   Delete
   DeleteResult(Result(Nil, ApiError))
   // Admin workflow section
-  WorkflowGraphLoaded(Result(WorkflowGraph, ApiError))
+  WorkflowGraphLoaded(request_id: Int, result: Result(WorkflowGraph, ApiError))
   WorkflowRetryLoad
   WorkflowPanZoom(wf_renderer.ViewTransform)
   WorkflowTogglePipeline(String)
@@ -155,6 +158,7 @@ pub fn init(record_id: String, shared: Shared) -> #(Model, Effect(Msg), List(Out
       workflow_selected_node: None,
       workflow_selected_edge: None,
       plan_state: NoPlan,
+      workflow_request_id: 1,
     )
 
   // Start slicer ping timer + load hydrated schema
@@ -172,7 +176,7 @@ pub fn init(record_id: String, shared: Shared) -> #(Model, Effect(Msg), List(Out
   // GETs.
   let probe_eff = load_record_probe_effect(record_id)
   let workflow_eff =
-    workflow_load_effect_for_admin(shared, record_id, set.new())
+    workflow_load_effect_for_admin(shared, record_id, set.new(), 1)
 
   #(
     model,
@@ -183,22 +187,30 @@ pub fn init(record_id: String, shared: Shared) -> #(Model, Effect(Msg), List(Out
 
 /// Load the instance-mode workflow graph only when the current user is an
 /// admin. Non-admins never see the section, so we don't waste a request
-/// (the endpoint would 403 anyway).
+/// (the endpoint would 403 anyway). `request_id` lets late responses from
+/// rapid expand/collapse clicks be ignored on arrival.
 fn workflow_load_effect_for_admin(
   shared: Shared,
   record_id: String,
   expanded: Set(String),
+  request_id: Int,
 ) -> Effect(Msg) {
   case is_admin_user(shared), int.parse(record_id) {
-    True, Ok(rid) -> workflow_load_effect(rid, expanded)
+    True, Ok(rid) -> workflow_load_effect(rid, expanded, request_id)
     _, _ -> effect.none()
   }
 }
 
-fn workflow_load_effect(record_id: Int, expanded: Set(String)) -> Effect(Msg) {
+fn workflow_load_effect(
+  record_id: Int,
+  expanded: Set(String),
+  request_id: Int,
+) -> Effect(Msg) {
   use dispatch <- effect.from
   wf_api.get_graph(Some(record_id), set.to_list(expanded))
-  |> promise.tap(fn(result) { dispatch(WorkflowGraphLoaded(result)) })
+  |> promise.tap(fn(result) {
+    dispatch(WorkflowGraphLoaded(request_id, result))
+  })
   Nil
 }
 
@@ -531,7 +543,11 @@ pub fn update(
 
     // --- Workflow section (admin only) ---
 
-    WorkflowGraphLoaded(Ok(graph)) ->
+    WorkflowGraphLoaded(id, _) if id != model.workflow_request_id ->
+      // Stale response — superseded by a later TogglePipeline/Retry.
+      #(model, effect.none(), [])
+
+    WorkflowGraphLoaded(_, Ok(graph)) ->
       #(
         Model(
           ..model,
@@ -543,7 +559,7 @@ pub fn update(
         [],
       )
 
-    WorkflowGraphLoaded(Error(err)) -> {
+    WorkflowGraphLoaded(_, Error(err)) -> {
       let #(load_state, disabled) = wf_api.classify_load_error(err)
       let out = case err {
         AuthError(_) -> [shared.Logout]
@@ -560,20 +576,24 @@ pub fn update(
       )
     }
 
-    WorkflowRetryLoad ->
+    WorkflowRetryLoad -> {
+      let next_id = model.workflow_request_id + 1
       #(
         Model(
           ..model,
           workflow_load_status: load_status.Loading,
           workflow_service_disabled: False,
+          workflow_request_id: next_id,
         ),
         workflow_load_effect_for_admin(
           shared,
           model.record_id,
           model.workflow_expanded,
+          next_id,
         ),
         [],
       )
+    }
 
     WorkflowPanZoom(v) ->
       #(Model(..model, workflow_view: v), effect.none(), [])
@@ -583,13 +603,20 @@ pub fn update(
         True -> set.delete(model.workflow_expanded, name)
         False -> set.insert(model.workflow_expanded, name)
       }
+      let next_id = model.workflow_request_id + 1
       #(
         Model(
           ..model,
           workflow_expanded: new_expanded,
           workflow_load_status: load_status.Loading,
+          workflow_request_id: next_id,
         ),
-        workflow_load_effect_for_admin(shared, model.record_id, new_expanded),
+        workflow_load_effect_for_admin(
+          shared,
+          model.record_id,
+          new_expanded,
+          next_id,
+        ),
         [],
       )
     }
@@ -603,9 +630,9 @@ pub fn update(
         })
       {
         Some(node) ->
-          case node.expandable {
-            True -> dispatch_local(WorkflowTogglePipeline(node.label))
-            False -> effect.none()
+          case workflow_models.pipeline_name_from_id(node.id) {
+            Some(name) -> dispatch_local(WorkflowTogglePipeline(name))
+            None -> effect.none()
           }
         None -> effect.none()
       }
@@ -713,25 +740,28 @@ pub fn update(
     }
 
     FireResultReceived(Ok(_)) -> {
-      let reload_graph =
-        workflow_load_effect_for_admin(
-          shared,
-          model.record_id,
-          model.workflow_expanded,
-        )
       case model.plan_state {
-        PlanFiring(_, _) -> #(
-          Model(
-            ..model,
-            plan_state: NoPlan,
-            workflow_load_status: load_status.Loading,
-          ),
-          reload_graph,
-          [
-            shared.ShowSuccess("Workflow trigger fired."),
-            shared.ReloadRecord(model.record_id),
-          ],
-        )
+        PlanFiring(_, _) -> {
+          let next_id = model.workflow_request_id + 1
+          #(
+            Model(
+              ..model,
+              plan_state: NoPlan,
+              workflow_load_status: load_status.Loading,
+              workflow_request_id: next_id,
+            ),
+            workflow_load_effect_for_admin(
+              shared,
+              model.record_id,
+              model.workflow_expanded,
+              next_id,
+            ),
+            [
+              shared.ShowSuccess("Workflow trigger fired."),
+              shared.ReloadRecord(model.record_id),
+            ],
+          )
+        }
         _ -> #(model, effect.none(), [])
       }
     }
@@ -1446,7 +1476,8 @@ fn workflow_side_panel(model: Model, graph: WorkflowGraph) -> Element(Msg) {
       case model.workflow_selected_node, model.workflow_selected_edge {
         Some(node_id), _ ->
           case list.find(graph.nodes, fn(n) { n.id == node_id }) {
-            Ok(node) -> wf_renderer.node_panel(node, expand_hint(node))
+            Ok(node) ->
+              wf_renderer.node_panel(node, wf_renderer.expand_hint(node))
             Error(_) -> wf_renderer.empty_panel()
           }
         _, Some(edge_id) ->
@@ -1477,27 +1508,11 @@ fn workflow_side_panel(model: Model, graph: WorkflowGraph) -> Element(Msg) {
   ])
 }
 
-fn expand_hint(node: WorkflowNode) -> Element(Msg) {
-  case node.expandable {
-    True ->
-      html.p([attribute.class("text-muted")], [
-        html.text(
-          "Pipeline node — click to "
-          <> case node.expanded {
-            True -> "collapse"
-            False -> "expand"
-          },
-        ),
-      ])
-    False -> element.none()
-  }
-}
-
 fn fire_hint(kind: workflow_models.TriggerKind) -> Element(Msg) {
   case is_fireable_trigger(kind) {
     True ->
       html.p([attribute.class("text-muted")], [
-        html.text("Click the edge again to dry-run this trigger."),
+        html.text("Click the edge to dry-run this trigger."),
       ])
     False ->
       html.p([attribute.class("text-muted")], [

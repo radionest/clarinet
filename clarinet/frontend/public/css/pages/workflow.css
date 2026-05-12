@@ -209,7 +209,7 @@
 
 .workflow-side-panel-body dd {
     margin: 0 0 var(--spacing-xs);
-    word-break: break-word;
+    overflow-wrap: break-word;
 }
 
 /* --- Dry-run / fire panel --- */

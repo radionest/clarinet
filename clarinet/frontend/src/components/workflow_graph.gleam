@@ -73,9 +73,12 @@ pub fn render(
       attribute.class("workflow-svg"),
       attribute.attribute("viewBox", viewbox),
       attribute.attribute("preserveAspectRatio", "xMidYMid meet"),
-      event.on(
+      // Ctrl+wheel zooms (with preventDefault to suppress browser zoom);
+      // plain wheel falls through so the user can scroll the surrounding
+      // page past the canvas.
+      event.advanced(
         "wheel",
-        wheel_decoder(graph.width, graph.height, view, handlers.on_pan_zoom),
+        wheel_handler(graph.width, graph.height, view, handlers.on_pan_zoom),
       ),
       event.on("mousemove", drag_decoder(view, handlers.on_pan_zoom)),
     ],
@@ -271,12 +274,19 @@ fn transform_attr(view: ViewTransform) -> String {
 // as scale grows). True cursor-centered zoom needs `getBoundingClientRect`
 // to map clientX/Y into viewBox space, which we'd have to add via FFI —
 // deferred.
-fn wheel_decoder(
+//
+// Gating on `ctrlKey` lets the canvas coexist with normal page scrolling:
+// plain wheel → no zoom + no preventDefault → page scrolls;
+// Ctrl+wheel → zoom + preventDefault (to suppress the browser zoom that
+// Ctrl+wheel would otherwise trigger).
+fn wheel_handler(
   graph_width: Float,
   graph_height: Float,
   view: ViewTransform,
   on_pan_zoom: fn(ViewTransform) -> msg,
-) -> decode.Decoder(msg) {
+) -> decode.Decoder(event.Handler(msg)) {
+  use ctrl_key <- decode.field("ctrlKey", decode.bool)
+  use <- guard_decoder(ctrl_key, on_pan_zoom(view))
   use delta_y <- decode.field("deltaY", decode.float)
   let factor = case delta_y >. 0.0 {
     True -> wheel_factor_out
@@ -288,9 +298,35 @@ fn wheel_decoder(
   let pivot_y = graph_height /. 2.0
   let new_tx = pivot_x -. { pivot_x -. view.tx } *. ratio
   let new_ty = pivot_y -. { pivot_y -. view.ty } *. ratio
-  decode.success(
-    on_pan_zoom(ViewTransform(tx: new_tx, ty: new_ty, scale: new_scale)),
-  )
+  decode.success(event.handler(
+    dispatch: on_pan_zoom(
+      ViewTransform(tx: new_tx, ty: new_ty, scale: new_scale),
+    ),
+    prevent_default: True,
+    stop_propagation: False,
+  ))
+}
+
+// `decode.failure` short-circuits dispatch when the gate is False — without
+// it we'd compute a zoom transform even on plain wheels and rely on
+// Lustre to suppress dispatch separately.
+fn guard_decoder(
+  cond: Bool,
+  placeholder: msg,
+  body: fn() -> decode.Decoder(event.Handler(msg)),
+) -> decode.Decoder(event.Handler(msg)) {
+  case cond {
+    True -> body()
+    False ->
+      decode.failure(
+        event.handler(
+          dispatch: placeholder,
+          prevent_default: False,
+          stop_propagation: False,
+        ),
+        "gate closed",
+      )
+  }
 }
 
 // `MouseEvent.buttons` is a bitmask — LSB = primary button held.
@@ -379,6 +415,25 @@ pub fn empty_panel() -> Element(msg) {
       html.text("Click a node or edge to see details."),
     ]),
   ])
+}
+
+/// Footer hint for `node_panel` — explains the expand/collapse semantics
+/// of pipeline nodes. Both admin schema view and per-record instance view
+/// use the same wording, so it lives here.
+pub fn expand_hint(node: WorkflowNode) -> Element(msg) {
+  case node.expandable {
+    True ->
+      html.p([attribute.class("text-muted")], [
+        html.text(
+          "Pipeline node — click to "
+          <> case node.expanded {
+            True -> "collapse"
+            False -> "expand"
+          },
+        ),
+      ])
+    False -> element.none()
+  }
 }
 
 fn optional_dl_row(label: String, value: Option(String)) -> List(Element(msg)) {

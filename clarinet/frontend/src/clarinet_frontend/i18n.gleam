@@ -13,6 +13,7 @@ pub type Key {
   NavPatients
   NavRecordTypes
   NavReports
+  NavWorkflow
   NavAdmin
 
   // --- Common buttons ---
@@ -353,6 +354,8 @@ pub fn translate(locale: Locale, key: Key) -> String {
     Ru, NavRecordTypes -> "Типы записей"
     En, NavReports -> "Reports"
     Ru, NavReports -> "Отчёты"
+    En, NavWorkflow -> "Workflow"
+    Ru, NavWorkflow -> "Граф процессов"
     En, NavAdmin -> "Admin"
     Ru, NavAdmin -> "Админ"
 

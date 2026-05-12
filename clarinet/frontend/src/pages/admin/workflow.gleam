@@ -31,13 +31,17 @@ pub type Model {
     selected_node: Option(String),
     selected_edge: Option(String),
     service_disabled: Bool,
+    /// Generation counter — incremented on every load_graph_effect
+    /// dispatch. Late responses with a stale id are dropped to avoid
+    /// flicker when rapid TogglePipeline clicks queue multiple requests.
+    request_id: Int,
   )
 }
 
 // --- Msg ---
 
 pub type Msg {
-  GraphLoaded(Result(WorkflowGraph, ApiError))
+  GraphLoaded(request_id: Int, result: Result(WorkflowGraph, ApiError))
   RetryLoad
   TogglePipeline(String)
   PanZoom(wf_renderer.ViewTransform)
@@ -49,6 +53,7 @@ pub type Msg {
 // --- Init ---
 
 pub fn init(_shared: Shared) -> #(Model, Effect(Msg), List(OutMsg)) {
+  let initial_request_id = 1
   let model =
     Model(
       graph: None,
@@ -58,14 +63,15 @@ pub fn init(_shared: Shared) -> #(Model, Effect(Msg), List(OutMsg)) {
       selected_node: None,
       selected_edge: None,
       service_disabled: False,
+      request_id: initial_request_id,
     )
-  #(model, load_graph_effect(set.new()), [])
+  #(model, load_graph_effect(initial_request_id, set.new()), [])
 }
 
-fn load_graph_effect(expanded: Set(String)) -> Effect(Msg) {
+fn load_graph_effect(request_id: Int, expanded: Set(String)) -> Effect(Msg) {
   use dispatch <- effect.from
   wf_api.get_graph(None, set.to_list(expanded))
-  |> promise.tap(fn(result) { dispatch(GraphLoaded(result)) })
+  |> promise.tap(fn(result) { dispatch(GraphLoaded(request_id, result)) })
   Nil
 }
 
@@ -77,7 +83,11 @@ pub fn update(
   _shared: Shared,
 ) -> #(Model, Effect(Msg), List(OutMsg)) {
   case msg {
-    GraphLoaded(Ok(graph)) -> #(
+    GraphLoaded(id, _) if id != model.request_id ->
+      // Stale response from a superseded request — ignore.
+      #(model, effect.none(), [])
+
+    GraphLoaded(_, Ok(graph)) -> #(
       Model(
         ..model,
         graph: Some(graph),
@@ -88,7 +98,7 @@ pub fn update(
       [],
     )
 
-    GraphLoaded(Error(err)) -> {
+    GraphLoaded(_, Error(err)) -> {
       let #(load_state, service_disabled) = wf_api.classify_load_error(err)
       #(
         Model(..model, load_status: load_state, service_disabled: service_disabled),
@@ -97,24 +107,34 @@ pub fn update(
       )
     }
 
-    RetryLoad -> #(
-      Model(..model, load_status: load_status.Loading, service_disabled: False),
-      load_graph_effect(model.expanded_pipelines),
-      [],
-    )
+    RetryLoad -> {
+      let next_id = model.request_id + 1
+      #(
+        Model(
+          ..model,
+          load_status: load_status.Loading,
+          service_disabled: False,
+          request_id: next_id,
+        ),
+        load_graph_effect(next_id, model.expanded_pipelines),
+        [],
+      )
+    }
 
     TogglePipeline(name) -> {
       let new_expanded = case set.contains(model.expanded_pipelines, name) {
         True -> set.delete(model.expanded_pipelines, name)
         False -> set.insert(model.expanded_pipelines, name)
       }
+      let next_id = model.request_id + 1
       #(
         Model(
           ..model,
           expanded_pipelines: new_expanded,
           load_status: load_status.Loading,
+          request_id: next_id,
         ),
-        load_graph_effect(new_expanded),
+        load_graph_effect(next_id, new_expanded),
         [],
       )
     }
@@ -124,9 +144,9 @@ pub fn update(
     NodeClicked(node_id) -> {
       let toggle_pipeline_eff = case node_lookup(model.graph, node_id) {
         Some(node) ->
-          case node.expandable {
-            True -> dispatch_msg(TogglePipeline(node.label))
-            False -> effect.none()
+          case workflow_models.pipeline_name_from_id(node.id) {
+            Some(name) -> dispatch_msg(TogglePipeline(name))
+            None -> effect.none()
           }
         None -> effect.none()
       }
@@ -230,7 +250,7 @@ fn side_panel(model: Model, graph: WorkflowGraph) -> Element(Msg) {
   let body = case model.selected_node, model.selected_edge {
     Some(node_id), _ ->
       case list.find(graph.nodes, fn(n) { n.id == node_id }) {
-        Ok(node) -> wf_renderer.node_panel(node, expand_hint(node))
+        Ok(node) -> wf_renderer.node_panel(node, wf_renderer.expand_hint(node))
         Error(_) -> wf_renderer.empty_panel()
       }
     _, Some(edge_id) ->
@@ -257,22 +277,6 @@ fn side_panel(model: Model, graph: WorkflowGraph) -> Element(Msg) {
     ]),
     body,
   ])
-}
-
-fn expand_hint(node: workflow_models.WorkflowNode) -> Element(Msg) {
-  case node.expandable {
-    True ->
-      html.p([attribute.class("text-muted")], [
-        html.text(
-          "Pipeline node — click to "
-          <> case node.expanded {
-            True -> "collapse"
-            False -> "expand"
-          },
-        ),
-      ])
-    False -> element.none()
-  }
 }
 
 fn dry_run_hint() -> Element(Msg) {

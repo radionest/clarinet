@@ -7,7 +7,8 @@
 // dropped during decoding. Re-introduce when the UI actually consumes them.
 
 import gleam/dynamic/decode
-import gleam/option.{type Option, None}
+import gleam/option.{type Option, None, Some}
+import gleam/string
 
 // --- Enums ---
 
@@ -181,6 +182,20 @@ pub fn action_type_label(t: ActionType) -> String {
     InvalidateRecordsAction -> "Invalidate"
     CallFunctionAction -> "Call function"
     PipelineAction -> "Pipeline"
+  }
+}
+
+/// Extract the pipeline name from a `WorkflowNode.id`.
+///
+/// Backend `make_pipeline_id` (services/workflow_graph/models.py) emits
+/// `"pipeline:{name}"` for pipeline nodes. Using this prefix instead of
+/// `node.label` keeps expansion stable if a future change reshapes the
+/// label (e.g. adds a step count). Returns `None` for non-pipeline nodes
+/// so callers can no-op on stale clicks.
+pub fn pipeline_name_from_id(id: String) -> Option(String) {
+  case string.split_once(id, on: ":") {
+    Ok(#("pipeline", name)) -> Some(name)
+    _ -> None
   }
 }
 
