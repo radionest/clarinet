@@ -19,6 +19,7 @@ from clarinet.services.pipeline.tasks.cache_dicomweb import (
     _organize_to_cache,
     _prefetch_dicom_web_impl,
 )
+from tests.utils.session import PassThroughSession
 
 
 def _series_result(series_uid: str, study_uid: str = "STUDY1") -> MagicMock:
@@ -113,19 +114,6 @@ class TestHasDiskCache:
         assert _has_disk_cache(tmp_path, "1.2.3", "1.2.3.4") is True
 
 
-class _PassThroughSession:
-    """Adapter: wraps an existing AsyncSession to be used as ``async with``."""
-
-    def __init__(self, session) -> None:
-        self._session = session
-
-    async def __aenter__(self):
-        return self._session
-
-    async def __aexit__(self, *exc) -> None:
-        return None
-
-
 async def _seed_anonymized(
     test_session, *, patient_id: str, auto_id: int, study_uid: str, series_uid: str
 ):
@@ -166,7 +154,7 @@ class TestHasDcmAnon:
     async def test_no_series_in_db_returns_false(self, tmp_path: Path, test_session) -> None:
         """No Series row → can't resolve path → returns False without scanning disk."""
         with patch("clarinet.services.pipeline.tasks.cache_dicomweb.db_manager") as mock_dbm:
-            mock_dbm.async_session_factory = lambda: _PassThroughSession(test_session)
+            mock_dbm.async_session_factory = lambda: PassThroughSession(test_session)
             assert await _has_dcm_anon(tmp_path, "no.such.study", "no.such.series") is False
 
     @pytest.mark.asyncio
@@ -180,7 +168,7 @@ class TestHasDcmAnon:
             series_uid="1.2.8001.1.1",
         )
         with patch("clarinet.services.pipeline.tasks.cache_dicomweb.db_manager") as mock_dbm:
-            mock_dbm.async_session_factory = lambda: _PassThroughSession(test_session)
+            mock_dbm.async_session_factory = lambda: PassThroughSession(test_session)
             assert await _has_dcm_anon(tmp_path, "1.2.8001.1", "1.2.8001.1.1") is False
 
     @pytest.mark.asyncio
@@ -206,7 +194,7 @@ class TestHasDcmAnon:
         (series_dir / "dcm_anon").mkdir(parents=True)
 
         with patch("clarinet.services.pipeline.tasks.cache_dicomweb.db_manager") as mock_dbm:
-            mock_dbm.async_session_factory = lambda: _PassThroughSession(test_session)
+            mock_dbm.async_session_factory = lambda: PassThroughSession(test_session)
             assert await _has_dcm_anon(tmp_path, "1.2.8002.1", "1.2.8002.1.1") is False
 
     @pytest.mark.asyncio
@@ -234,7 +222,7 @@ class TestHasDcmAnon:
         (dcm_anon / "inst.dcm").write_bytes(b"placeholder")
 
         with patch("clarinet.services.pipeline.tasks.cache_dicomweb.db_manager") as mock_dbm:
-            mock_dbm.async_session_factory = lambda: _PassThroughSession(test_session)
+            mock_dbm.async_session_factory = lambda: PassThroughSession(test_session)
             assert await _has_dcm_anon(tmp_path, "1.2.8003.1", "1.2.8003.1.1") is True
 
 

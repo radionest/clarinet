@@ -24,6 +24,7 @@ from cachetools import TTLCache
 from clarinet.services.dicomweb.cache import DicomWebCache
 from clarinet.services.dicomweb.models import MemoryCachedSeries
 from tests.conftest import create_disk_series
+from tests.utils.session import PassThroughSession
 
 
 def _make_instances(count: int = 3) -> dict[str, Any]:
@@ -824,7 +825,7 @@ class TestResolveDcmAnonDir:
         # Build cache wired to the test session
         class _Factory:
             def __call__(self):
-                return _PassThroughSession(test_session)
+                return PassThroughSession(test_session)
 
         cache = DicomWebCache(
             base_dir=tmp_path / "dicomweb_cache",
@@ -840,7 +841,7 @@ class TestResolveDcmAnonDir:
 
         class _Factory:
             def __call__(self):
-                return _PassThroughSession(test_session)
+                return PassThroughSession(test_session)
 
         cache = DicomWebCache(
             base_dir=tmp_path / "dicomweb_cache",
@@ -861,16 +862,3 @@ class TestResolveDcmAnonDir:
             session_factory=None,
         )
         assert await cache._resolve_dcm_anon_dir("any", "any") is None
-
-
-class _PassThroughSession:
-    """Wrap an AsyncSession to be usable as ``async with factory() as session:``."""
-
-    def __init__(self, session) -> None:
-        self._session = session
-
-    async def __aenter__(self):
-        return self._session
-
-    async def __aexit__(self, *exc) -> None:
-        return None

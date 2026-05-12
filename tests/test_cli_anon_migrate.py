@@ -13,6 +13,7 @@ from clarinet.models.base import DicomQueryLevel
 from clarinet.models.study import Series, Study
 from clarinet.services.dicom.anon_path import build_context, render_working_folder
 from tests.utils.factories import make_patient
+from tests.utils.session import PassThroughSession
 
 
 @pytest.fixture
@@ -98,7 +99,7 @@ async def test_migrate_paths_dry_run_moves_nothing(
         patch("clarinet.cli.anon.settings") as mock_settings,
     ):
         mock_settings.storage_path = str(tmp_path)
-        mock_dbm.async_session_factory = lambda: _PassThroughSession(test_session)
+        mock_dbm.async_session_factory = lambda: PassThroughSession(test_session)
         await migrate_paths(args)
 
     assert old_dcm_anon.is_dir()
@@ -136,7 +137,7 @@ async def test_migrate_paths_moves_files(test_session: AsyncSession, tmp_path: P
         patch("clarinet.cli.anon.settings") as mock_settings,
     ):
         mock_settings.storage_path = str(tmp_path)
-        mock_dbm.async_session_factory = lambda: _PassThroughSession(test_session)
+        mock_dbm.async_session_factory = lambda: PassThroughSession(test_session)
         await migrate_paths(args)
 
     # New path layout
@@ -167,7 +168,7 @@ async def test_migrate_paths_identical_template_is_noop(
         patch("clarinet.cli.anon.settings") as mock_settings,
     ):
         mock_settings.storage_path = str(tmp_path)
-        mock_dbm.async_session_factory = lambda: _PassThroughSession(test_session)
+        mock_dbm.async_session_factory = lambda: PassThroughSession(test_session)
         await migrate_paths(args)
 
 
@@ -187,23 +188,5 @@ async def test_migrate_paths_rejects_invalid_template(
         pytest.raises(ValueError, match="unknown placeholder"),
     ):
         mock_settings.storage_path = str(tmp_path)
-        mock_dbm.async_session_factory = lambda: _PassThroughSession(test_session)
+        mock_dbm.async_session_factory = lambda: PassThroughSession(test_session)
         await migrate_paths(args)
-
-
-class _PassThroughSession:
-    """Adapter: wraps an existing AsyncSession to be used as ``async with``.
-
-    The migration CLI does ``async with db_manager.async_session_factory() as
-    session``; in tests we already have a session injected via the
-    ``test_session`` fixture, so we just yield it back and skip close/commit.
-    """
-
-    def __init__(self, session: AsyncSession) -> None:
-        self._session = session
-
-    async def __aenter__(self) -> AsyncSession:
-        return self._session
-
-    async def __aexit__(self, *exc) -> None:
-        return None
