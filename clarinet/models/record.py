@@ -467,6 +467,9 @@ class RecordRead(RecordBase):
             study=self.study,
             series=self.series,
         )
+        # Per-record override only lives on Record (Series has no
+        # clarinet_storage_path field). Series.working_folder always uses
+        # settings.storage_path — that's an intentional asymmetry, not a bug.
         storage = Path(self.clarinet_storage_path or settings.storage_path)
         return str(render_working_folder(settings.disk_path_template, level, ctx, storage))
 

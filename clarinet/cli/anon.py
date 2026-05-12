@@ -8,6 +8,7 @@ on disk are relocated.
 """
 
 import argparse
+import asyncio
 import shutil
 from collections.abc import Iterable
 from pathlib import Path
@@ -101,13 +102,13 @@ async def migrate_paths(args: argparse.Namespace) -> None:
             continue
 
         if args.dry_run:
-            print(f"  [dry-run] {old_dcm_anon} -> {new_dcm_anon}")
+            logger.info(f"[dry-run] {old_dcm_anon} -> {new_dcm_anon}")
             moved += 1
             continue
 
         try:
-            new_dcm_anon.parent.mkdir(parents=True, exist_ok=True)
-            shutil.move(str(old_dcm_anon), str(new_dcm_anon))
+            await asyncio.to_thread(new_dcm_anon.parent.mkdir, parents=True, exist_ok=True)
+            await asyncio.to_thread(shutil.move, str(old_dcm_anon), str(new_dcm_anon))
         except OSError as exc:
             logger.error(f"Failed to move {old_dcm_anon} -> {new_dcm_anon}: {exc}")
             failed += 1
@@ -121,11 +122,11 @@ async def migrate_paths(args: argparse.Namespace) -> None:
     )
 
     if args.cleanup_empty and not args.dry_run:
-        removed = _cleanup_empty_dirs(storage_path)
+        removed = await asyncio.to_thread(_cleanup_empty_dirs, storage_path)
         logger.info(f"Cleanup: removed {removed} empty parent directories under storage_path.")
 
     if not args.dry_run:
-        print(
+        logger.info(
             "Restart the API server (and pipeline workers) to invalidate "
             "in-memory _dcm_anon_path_cache."
         )

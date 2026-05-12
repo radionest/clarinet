@@ -120,6 +120,16 @@ class Settings(BaseSettings):
     # Supported placeholders are listed in
     # ``clarinet.services.dicom.anon_path.SUPPORTED_PLACEHOLDERS``.
     # Default reproduces the legacy hard-coded layout.
+    #
+    # "Shape" settings — not part of the template itself, but baked into
+    # the values its placeholders resolve to:
+    #   * anon_uid_salt
+    #   * anon_per_study_patient_id
+    #   * anon_per_study_patient_id_hex_length
+    # Changing any of these between anonymize and read invalidates resolved
+    # disk paths even when ``disk_path_template`` is unchanged. The
+    # ``clarinet anon migrate-paths`` CLI only handles template changes —
+    # not shape changes (it has no notion of the previous shape's values).
     disk_path_template: str = "{anon_patient_id}/{anon_study_uid}/{anon_series_uid}"
 
     @field_validator("anon_id_prefix")
