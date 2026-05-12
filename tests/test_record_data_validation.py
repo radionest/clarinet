@@ -246,6 +246,40 @@ class TestJsonSchemaErrors:
         assert err.path == "/score"
         assert err.code == "required"
 
+    def test_required_path_uses_structural_lookup_not_message_parsing(self):
+        """Regression: ``_required_property_path`` reads ``validator_value`` and
+        ``instance``, not the human-readable message. This stays stable when
+        jsonschema rewords its diagnostic strings between versions.
+        """
+        # Multiple required fields, none present — the first missing one wins.
+        schema = {
+            "type": "object",
+            "properties": {
+                "alpha": {"type": "string"},
+                "beta": {"type": "string"},
+            },
+            "required": ["alpha", "beta"],
+        }
+        with pytest.raises(RecordDataValidationError) as exc_info:
+            validate_json_by_schema({}, schema)
+        paths = {e.path for e in exc_info.value.errors}
+        # jsonschema may emit one or two ``required`` errors depending on
+        # version — either way, every reported error must name a real field.
+        assert paths.issubset({"/alpha", "/beta"})
+        assert paths  # at least one
+        assert all(e.code == "required" for e in exc_info.value.errors)
+
+    def test_required_path_with_special_chars_in_field_name(self):
+        """RFC 6901 escaping covers required-field names too."""
+        schema = {
+            "type": "object",
+            "properties": {"a/b": {"type": "string"}},
+            "required": ["a/b"],
+        }
+        with pytest.raises(RecordDataValidationError) as exc_info:
+            validate_json_by_schema({}, schema)
+        assert exc_info.value.errors[0].path == "/a~1b"
+
     def test_path_is_json_pointer(self):
         schema = {
             "type": "object",

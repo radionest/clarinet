@@ -37,24 +37,28 @@ def _required_property_path(error: Any) -> list[Any] | None:
     """Extract the missing property name from a jsonschema ``required`` error.
 
     jsonschema reports ``required`` failures with ``absolute_path`` pointing
-    at the *parent* object (often empty for the document root), leaving the
-    missing field name only in the message ``"'foo' is a required property"``.
-    Returning ``[..., "foo"]`` lets the frontend highlight the actual field
-    instead of pointing the user at the document root.
+    at the *parent* object (often empty for the document root). The missing
+    field name is structurally recoverable from ``error.validator_value``
+    (the ``required`` list at that point in the schema) and
+    ``error.instance`` (the object being validated): the first name in
+    ``validator_value`` that is absent from ``instance`` is the offender.
 
-    Returns ``None`` if the message does not match the expected shape, in
-    which case the caller should fall back to ``absolute_path``.
+    Using these attributes — instead of parsing ``error.message`` — keeps
+    the path enrichment stable across jsonschema versions, which freely
+    reword diagnostic strings.
+
+    Returns ``None`` when the error shape is unexpected (defensive — we
+    still want a valid 422 with a root-level path rather than a crash);
+    the caller falls back to ``absolute_path`` in that case.
     """
-    msg = getattr(error, "message", "")
-    if not msg.endswith("is a required property"):
+    required = getattr(error, "validator_value", None)
+    instance = getattr(error, "instance", None)
+    if not isinstance(required, list) or not isinstance(instance, dict):
         return None
-    # Format: ``'<name>' is a required property`` (single-quoted).
-    if len(msg) < 2 or msg[0] != "'":
-        return None
-    closing = msg.find("'", 1)
-    if closing <= 1:
-        return None
-    return [*error.absolute_path, msg[1:closing]]
+    for name in required:
+        if isinstance(name, str) and name not in instance:
+            return [*error.absolute_path, name]
+    return None
 
 
 def validate_json_by_schema(json_data: Any, json_schema: dict[str, Any]) -> None:

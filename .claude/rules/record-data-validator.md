@@ -119,6 +119,15 @@ current Gleam decoder.
    `logger.error` + skip. The user's submit does not crash, but the
    validation effectively does not run. Trade-off: silently accepting is
    unsafe; fail-fast already protects the normal path at startup.
+6. **Exception scope.** ``run_record_validators`` catches only
+   ``RecordDataValidationError`` from validators and aggregates the
+   ``FieldError`` list. **Any other exception propagates as a 500** —
+   that is intentional: ``KeyError`` / ``AttributeError`` / DB errors
+   inside a validator indicate a programmer bug or system failure, not
+   bad user input, and should surface as such. Do **not** wrap validator
+   bodies in defensive ``try/except`` to "convert" type errors into
+   ``FieldError`` — the JSON-Schema stage already guarantees the data
+   shape your validator sees, so type/key access on ``data`` is safe.
 
 ## HTTP 422 response
 
