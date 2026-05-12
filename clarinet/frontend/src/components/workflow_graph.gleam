@@ -199,10 +199,17 @@ fn render_edge(
     True -> with_state <> " workflow-edge--selected"
     False -> with_state
   }
+  let d = edge_path(from, to)
   svg.g([attribute.class(cls), event.on_click(on_click(edge.id))], [
     svg.title([], [element.text(edge_tooltip(edge))]),
+    // Invisible hit target — расширяет click-area без визуального утолщения.
+    // marker-end не ставим, иначе будет двойной arrowhead.
     svg.path([
-      attribute.attribute("d", edge_path(from, to)),
+      attribute.attribute("d", d),
+      attribute.class("workflow-edge-hitbox"),
+    ]),
+    svg.path([
+      attribute.attribute("d", d),
       attribute.attribute("marker-end", "url(#workflow-arrow)"),
     ]),
   ])
