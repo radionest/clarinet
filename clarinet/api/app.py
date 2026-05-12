@@ -330,6 +330,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
             storage_path=Path(settings.storage_path),
             disk_write_concurrency=settings.dicomweb_disk_write_concurrency,
             session_factory=db_manager.async_session_factory,
+            dcm_anon_path_cache_max_entries=(settings.dicomweb_dcm_anon_path_cache_max_entries),
+            dcm_anon_path_cache_ttl_seconds=(settings.dicomweb_dcm_anon_path_cache_ttl_seconds),
         )
         logger.info("DICOMweb cache initialized (two-tier: memory + disk)")
 

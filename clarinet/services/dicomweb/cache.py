@@ -45,6 +45,8 @@ class DicomWebCache:
         storage_path: Path | None = None,
         disk_write_concurrency: int = 4,
         session_factory: async_sessionmaker[AsyncSession] | None = None,
+        dcm_anon_path_cache_max_entries: int = 1000,
+        dcm_anon_path_cache_ttl_seconds: int = 300,
     ):
         """Initialize the cache.
 
@@ -61,6 +63,15 @@ class DicomWebCache:
                 ``settings.disk_path_template``. When ``None``, dcm_anon
                 lookups always miss — only safe for tests that never write
                 anonymized files.
+            dcm_anon_path_cache_max_entries: Maximum entries in the
+                dcm_anon path resolution cache (covers both hits and
+                misses). LRU eviction when full.
+            dcm_anon_path_cache_ttl_seconds: TTL for dcm_anon path cache
+                entries. Negative results (anonymize-pending series)
+                expire after this window so the next request re-checks
+                disk — without this, "first read precedes write" races
+                stick until process restart. Positive results are also
+                bounded, but the cost is one cheap re-resolve.
         """
         self._base_dir = base_dir
         self._storage_path = storage_path
@@ -72,7 +83,10 @@ class DicomWebCache:
             maxsize=memory_max_entries, ttl=memory_ttl_minutes * 60
         )
         self._disk_write_tasks: set[asyncio.Task[None]] = set()
-        self._dcm_anon_path_cache: dict[str, Path | None] = {}
+        self._dcm_anon_path_cache: TTLCache[str, Path | None] = TTLCache(
+            maxsize=dcm_anon_path_cache_max_entries,
+            ttl=dcm_anon_path_cache_ttl_seconds,
+        )
         self._disk_write_semaphore = asyncio.Semaphore(disk_write_concurrency)
         self._preload_progress: dict[str, dict[str, Any]] = {}
 
@@ -157,7 +171,8 @@ class DicomWebCache:
 
         cache_key = self._cache_key(study_uid, series_uid)
         if cache_key in self._dcm_anon_path_cache:
-            return self._dcm_anon_path_cache[cache_key]
+            cached: Path | None = self._dcm_anon_path_cache[cache_key]
+            return cached
 
         # Local imports avoid an import cycle (models -> services -> models)
         from clarinet.models.patient import Patient
@@ -195,6 +210,15 @@ class DicomWebCache:
         result = candidate if exists else None
         self._dcm_anon_path_cache[cache_key] = result
         return result
+
+    def invalidate_dcm_anon_path(self, study_uid: str, series_uid: str) -> None:
+        """Drop a single dcm_anon path cache entry.
+
+        Useful when anonymization just wrote files and the caller wants
+        the next read to re-check disk immediately without waiting for
+        the TTL window.
+        """
+        self._dcm_anon_path_cache.pop(self._cache_key(study_uid, series_uid), None)
 
     async def _load_from_dcm_anon(
         self, study_uid: str, series_uid: str

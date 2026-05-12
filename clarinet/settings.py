@@ -238,6 +238,11 @@ class Settings(BaseSettings):
     dicomweb_cache_cleanup_enabled: bool = True
     dicomweb_cache_cleanup_interval: int = 86400  # 24 hours in seconds
     dicomweb_disk_write_concurrency: int = 4  # Max concurrent background disk writes
+    # dcm_anon path resolution cache — caps the staleness window of negative
+    # entries (series whose dcm_anon dir didn't exist at first lookup) so
+    # "first read precedes anonymize" races recover without an API restart.
+    dicomweb_dcm_anon_path_cache_max_entries: int = 1000
+    dicomweb_dcm_anon_path_cache_ttl_seconds: int = 300
 
     # OHIF viewer settings
     ohif_enabled: bool = True

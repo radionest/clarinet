@@ -862,3 +862,48 @@ class TestResolveDcmAnonDir:
             session_factory=None,
         )
         assert await cache._resolve_dcm_anon_dir("any", "any") is None
+
+    @pytest.mark.asyncio
+    async def test_negative_entry_expires_via_ttl(self, tmp_path: Path, test_session) -> None:
+        """Negative result expires after TTL — guards against permanent
+        masking of "anonymize-after-first-read" races."""
+
+        class _Factory:
+            def __call__(self):
+                return PassThroughSession(test_session)
+
+        cache = DicomWebCache(
+            base_dir=tmp_path / "dicomweb_cache",
+            storage_path=tmp_path,
+            session_factory=_Factory(),
+            dcm_anon_path_cache_ttl_seconds=1,
+        )
+        assert await cache._resolve_dcm_anon_dir("no.such", "no.such.1") is None
+        assert "no.such/no.such.1" in cache._dcm_anon_path_cache
+
+        # Force expiration without sleeping: pass a far-future wall time
+        # to TTLCache.expire so every entry older than that is purged.
+        ttl_cache = cache._dcm_anon_path_cache
+        ttl_cache.expire(ttl_cache.timer() + ttl_cache.ttl + 1)
+        assert "no.such/no.such.1" not in cache._dcm_anon_path_cache
+
+    @pytest.mark.asyncio
+    async def test_invalidate_dcm_anon_path_drops_entry(self, tmp_path: Path, test_session) -> None:
+        """``invalidate_dcm_anon_path`` removes a single cached entry."""
+
+        class _Factory:
+            def __call__(self):
+                return PassThroughSession(test_session)
+
+        cache = DicomWebCache(
+            base_dir=tmp_path / "dicomweb_cache",
+            storage_path=tmp_path,
+            session_factory=_Factory(),
+        )
+        assert await cache._resolve_dcm_anon_dir("study.x", "series.x") is None
+        assert "study.x/series.x" in cache._dcm_anon_path_cache
+
+        cache.invalidate_dcm_anon_path("study.x", "series.x")
+        assert "study.x/series.x" not in cache._dcm_anon_path_cache
+        # Unknown key is a no-op (no KeyError).
+        cache.invalidate_dcm_anon_path("never.cached", "neither.have.you")
