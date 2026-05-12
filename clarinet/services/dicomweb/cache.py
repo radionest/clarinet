@@ -12,10 +12,18 @@ from typing import IO, Any
 import pydicom
 from cachetools import TTLCache
 from pydicom import Dataset
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from clarinet.models.base import DicomQueryLevel
+from clarinet.services.dicom.anon_path import (
+    AnonPathError,
+    build_context,
+    render_working_folder,
+)
 from clarinet.services.dicom.client import DicomClient
 from clarinet.services.dicom.models import DicomNode
 from clarinet.services.dicomweb.models import MemoryCachedSeries
+from clarinet.settings import settings
 from clarinet.utils.logger import logger
 
 
@@ -36,6 +44,7 @@ class DicomWebCache:
         memory_max_entries: int = 50,
         storage_path: Path | None = None,
         disk_write_concurrency: int = 4,
+        session_factory: async_sessionmaker[AsyncSession] | None = None,
     ):
         """Initialize the cache.
 
@@ -47,9 +56,15 @@ class DicomWebCache:
             memory_max_entries: Maximum number of series in the in-memory TTLCache
             storage_path: Base storage path for resolving dcm_anon folders
             disk_write_concurrency: Max concurrent background disk write operations
+            session_factory: Async session factory used to resolve the
+                dcm_anon path from Study/Patient/Series state via
+                ``settings.disk_path_template``. When ``None``, dcm_anon
+                lookups always miss — only safe for tests that never write
+                anonymized files.
         """
         self._base_dir = base_dir
         self._storage_path = storage_path
+        self._session_factory = session_factory
         self._ttl_seconds = ttl_hours * 3600
         self._max_size_bytes = int(max_size_gb * 1024**3)
         self._locks: dict[str, asyncio.Lock] = {}
@@ -120,11 +135,15 @@ class DicomWebCache:
         result: MemoryCachedSeries | None = self._memory_cache.get(key)
         return result
 
-    def _find_dcm_anon_dir(self, study_uid: str, series_uid: str) -> Path | None:
-        """Find dcm_anon directory for a given study/series UID.
+    async def _resolve_dcm_anon_dir(self, study_uid: str, series_uid: str) -> Path | None:
+        """Resolve the dcm_anon directory for a study/series pair.
 
-        Searches {storage_path}/*/study_uid/series_uid/dcm_anon/ across patient dirs.
-        Results are cached (both hits and misses).
+        Loads Study/Patient/Series from the DB (one shared session,
+        sequential queries — `AsyncSession` is not concurrency-safe) and
+        renders ``settings.disk_path_template`` at SERIES level, then
+        appends ``/dcm_anon``. The candidate path is checked for
+        existence; both hits and misses are cached in
+        ``_dcm_anon_path_cache``.
 
         Args:
             study_uid: Study Instance UID
@@ -133,29 +152,60 @@ class DicomWebCache:
         Returns:
             Path to dcm_anon directory if found, None otherwise
         """
-        if self._storage_path is None:
+        if self._storage_path is None or self._session_factory is None:
             return None
 
         cache_key = self._cache_key(study_uid, series_uid)
         if cache_key in self._dcm_anon_path_cache:
             return self._dcm_anon_path_cache[cache_key]
 
-        # Iterate patient directories looking for matching study/series/dcm_anon
-        for patient_dir in self._storage_path.iterdir():
-            if not patient_dir.is_dir():
-                continue
-            dcm_anon_dir = patient_dir / study_uid / series_uid / "dcm_anon"
-            if dcm_anon_dir.is_dir():
-                self._dcm_anon_path_cache[cache_key] = dcm_anon_dir
-                return dcm_anon_dir
+        # Local imports avoid an import cycle (models -> services -> models)
+        from clarinet.models.patient import Patient
+        from clarinet.models.study import Series, Study
 
-        self._dcm_anon_path_cache[cache_key] = None
-        return None
+        async with self._session_factory() as session:
+            series = await session.get(Series, series_uid)
+            if series is None:
+                self._dcm_anon_path_cache[cache_key] = None
+                return None
+            study = await session.get(Study, study_uid)
+            if study is None:
+                self._dcm_anon_path_cache[cache_key] = None
+                return None
+            patient = await session.get(Patient, study.patient_id)
+            if patient is None:
+                self._dcm_anon_path_cache[cache_key] = None
+                return None
 
-    def _load_from_dcm_anon(self, study_uid: str, series_uid: str) -> dict[str, Dataset] | None:
-        """Load series from dcm_anon directory (synchronous, call via to_thread).
+        try:
+            ctx = build_context(patient=patient, study=study, series=series)
+            series_dir = render_working_folder(
+                settings.disk_path_template,
+                DicomQueryLevel.SERIES,
+                ctx,
+                self._storage_path,
+            )
+        except AnonPathError as exc:
+            logger.warning(f"Cannot resolve dcm_anon dir for {study_uid}/{series_uid}: {exc}")
+            self._dcm_anon_path_cache[cache_key] = None
+            return None
 
-        Unlike _load_from_disk, this has no TTL check — dcm_anon files don't expire.
+        candidate = series_dir / "dcm_anon"
+        exists = await asyncio.to_thread(candidate.is_dir)
+        result = candidate if exists else None
+        self._dcm_anon_path_cache[cache_key] = result
+        return result
+
+    async def _load_from_dcm_anon(
+        self, study_uid: str, series_uid: str
+    ) -> dict[str, Dataset] | None:
+        """Load series from the dcm_anon directory.
+
+        Resolves the path via DB-backed template rendering and reads
+        ``*.dcm`` files from disk in a worker thread.
+
+        Unlike _load_from_disk, this has no TTL check — dcm_anon files
+        don't expire.
 
         Args:
             study_uid: Study Instance UID
@@ -164,10 +214,14 @@ class DicomWebCache:
         Returns:
             Dict of datasets keyed by SOPInstanceUID, or None if not found
         """
-        dcm_anon_dir = self._find_dcm_anon_dir(study_uid, series_uid)
+        dcm_anon_dir = await self._resolve_dcm_anon_dir(study_uid, series_uid)
         if dcm_anon_dir is None:
             return None
+        return await asyncio.to_thread(self._read_dcm_files, dcm_anon_dir)
 
+    @staticmethod
+    def _read_dcm_files(dcm_anon_dir: Path) -> dict[str, Dataset] | None:
+        """Read all DICOM files from a directory (synchronous, call via to_thread)."""
         dcm_files = sorted(dcm_anon_dir.glob("*.dcm"))
         if not dcm_files:
             return None
@@ -337,9 +391,7 @@ class DicomWebCache:
                 return cached
 
             # 2. dcm_anon hit (anonymized files — no TTL expiration)
-            anon_instances = await asyncio.to_thread(
-                self._load_from_dcm_anon, study_uid, series_uid
-            )
+            anon_instances = await self._load_from_dcm_anon(study_uid, series_uid)
             if anon_instances is not None:
                 logger.debug(
                     f"dcm_anon hit for series {series_uid} — "
@@ -441,9 +493,7 @@ class DicomWebCache:
                 continue
 
             # 2. dcm_anon hit
-            anon_instances = await asyncio.to_thread(
-                self._load_from_dcm_anon, study_uid, series_uid
-            )
+            anon_instances = await self._load_from_dcm_anon(study_uid, series_uid)
             if anon_instances is not None:
                 logger.info(
                     f"dcm_anon hit for series {series_uid} — "
@@ -590,7 +640,7 @@ class DicomWebCache:
     def clear_preload_progress(self, key: str) -> None:
         self._preload_progress.pop(key, None)
 
-    def read_instance_from_disk(
+    async def read_instance_from_disk(
         self, study_uid: str, series_uid: str, instance_uid: str
     ) -> Dataset | None:
         """Read a single DICOM instance from dcm_anon or disk cache.
@@ -606,23 +656,26 @@ class DicomWebCache:
             pydicom Dataset if found and readable, None otherwise
         """
         # Check dcm_anon first
-        dcm_anon_dir = self._find_dcm_anon_dir(study_uid, series_uid)
+        dcm_anon_dir = await self._resolve_dcm_anon_dir(study_uid, series_uid)
         if dcm_anon_dir is not None:
             anon_path = dcm_anon_dir / f"{instance_uid}.dcm"
-            if anon_path.exists():
-                try:
-                    return pydicom.dcmread(anon_path)
-                except Exception as e:
-                    logger.warning(f"Failed to read dcm_anon instance {anon_path}: {e}")
+            ds = await asyncio.to_thread(self._read_single_dcm, anon_path)
+            if ds is not None:
+                return ds
 
         # Fall back to dicomweb_cache
         dcm_path = self._series_dir(study_uid, series_uid) / f"{instance_uid}.dcm"
-        if not dcm_path.exists():
+        return await asyncio.to_thread(self._read_single_dcm, dcm_path)
+
+    @staticmethod
+    def _read_single_dcm(path: Path) -> Dataset | None:
+        """Read one DICOM file, return None when missing or unreadable."""
+        if not path.exists():
             return None
         try:
-            return pydicom.dcmread(dcm_path)
+            return pydicom.dcmread(path)
         except Exception as e:
-            logger.warning(f"Failed to read cached instance {dcm_path}: {e}")
+            logger.warning(f"Failed to read DICOM instance {path}: {e}")
             return None
 
     def _iter_cached_entries(self) -> Iterator[tuple[Path, float, Path]]:

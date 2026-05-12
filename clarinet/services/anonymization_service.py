@@ -10,13 +10,16 @@ from typing import TYPE_CHECKING
 from pydicom import Dataset
 
 if TYPE_CHECKING:
-    from clarinet.models.study import Series
+    from clarinet.models.patient import Patient
+    from clarinet.models.study import Series, Study
     from clarinet.services.dicom.models import RetrieveResult
 
 from clarinet.exceptions.domain import AnonymizationFailedError
+from clarinet.models.base import DicomQueryLevel
 from clarinet.repositories.patient_repository import PatientRepository
 from clarinet.repositories.series_repository import SeriesRepository
 from clarinet.repositories.study_repository import StudyRepository
+from clarinet.services.dicom.anon_path import build_context, render_working_folder
 from clarinet.services.dicom.anonymizer import DicomAnonymizer, compute_per_study_patient_id
 from clarinet.services.dicom.client import DicomClient
 from clarinet.services.dicom.models import AnonymizationResult, DicomNode, SkippedSeriesInfo
@@ -235,6 +238,9 @@ class AnonymizationService:
                 task = asyncio.create_task(
                     self._distribute_series(
                         anonymized,
+                        patient,
+                        study,
+                        series,
                         anon_patient_id,
                         anon_study_uid,
                         anon_series_uid,
@@ -296,6 +302,9 @@ class AnonymizationService:
     async def _distribute_series(
         self,
         datasets: list[Dataset],
+        patient: Patient,
+        study: Study,
+        series: Series,
         anon_patient_id: str,
         anon_study_uid: str,
         anon_series_uid: str,
@@ -306,6 +315,9 @@ class AnonymizationService:
 
         Args:
             datasets: Anonymized DICOM datasets for one series
+            patient: Patient entity (for template placeholders)
+            study: Study entity (for template placeholders)
+            series: Series entity (for template placeholders)
             anon_patient_id: Anonymized patient ID
             anon_study_uid: Anonymized study UID
             anon_series_uid: Anonymized series UID
@@ -320,7 +332,13 @@ class AnonymizationService:
             tasks.append(
                 asyncio.create_task(
                     self._save_series_to_disk(
-                        datasets, anon_patient_id, anon_study_uid, anon_series_uid
+                        datasets,
+                        patient,
+                        study,
+                        series,
+                        anon_patient_id,
+                        anon_study_uid,
+                        anon_series_uid,
                     )
                 )
             )
@@ -340,14 +358,24 @@ class AnonymizationService:
     async def _save_series_to_disk(
         self,
         datasets: list[Dataset],
+        patient: Patient,
+        study: Study,
+        series: Series,
         anon_patient_id: str,
         anon_study_uid: str,
         anon_series_uid: str,
     ) -> int:
         """Save all datasets for one series to disk.
 
+        Path is resolved from ``settings.disk_path_template`` at SERIES
+        level, then ``/dcm_anon`` is appended — so the anonymized output
+        always lives directly under the series' working folder.
+
         Args:
             datasets: Anonymized DICOM datasets
+            patient: Patient entity (template placeholders)
+            study: Study entity (template placeholders)
+            series: Series entity (template placeholders)
             anon_patient_id: Anonymized patient ID
             anon_study_uid: Anonymized study UID
             anon_series_uid: Anonymized series UID
@@ -355,13 +383,21 @@ class AnonymizationService:
         Returns:
             Always 0 (no send failures from disk save)
         """
-        output_path = (
-            Path(settings.storage_path)
-            / anon_patient_id
-            / anon_study_uid
-            / anon_series_uid
-            / "dcm_anon"
+        ctx = build_context(
+            patient=patient,
+            study=study,
+            series=series,
+            anon_patient_id=anon_patient_id,
+            anon_study_uid=anon_study_uid,
+            anon_series_uid=anon_series_uid,
         )
+        series_dir = render_working_folder(
+            settings.disk_path_template,
+            DicomQueryLevel.SERIES,
+            ctx,
+            Path(settings.storage_path),
+        )
+        output_path = series_dir / "dcm_anon"
         await asyncio.to_thread(output_path.mkdir, parents=True, exist_ok=True)
         save_tasks = [
             asyncio.to_thread(

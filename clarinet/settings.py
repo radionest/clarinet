@@ -115,6 +115,13 @@ class Settings(BaseSettings):
     storage_path_client: str | None = None
     anon_id_prefix: str = "CLARINET"
 
+    # On-disk path template for working folders + anonymized output.
+    # Exactly 3 '/'-separated segments → patient / study / series levels.
+    # Supported placeholders are listed in
+    # ``clarinet.services.dicom.anon_path.SUPPORTED_PLACEHOLDERS``.
+    # Default reproduces the legacy hard-coded layout.
+    disk_path_template: str = "{anon_patient_id}/{anon_study_uid}/{anon_series_uid}"
+
     @field_validator("anon_id_prefix")
     @classmethod
     def validate_anon_id_prefix(cls, v: str) -> str:
@@ -147,6 +154,19 @@ class Settings(BaseSettings):
     def resolve_storage_path(cls, v: str) -> str:
         """Resolve relative storage_path to absolute so external tools get correct paths."""
         return str(Path(v).resolve())
+
+    @field_validator("disk_path_template")
+    @classmethod
+    def validate_disk_path_template_setting(cls, v: str) -> str:
+        """Validate the 3-segment disk path template.
+
+        Delegates to ``clarinet.utils.path_template.validate_template`` —
+        a stdlib-only helper that the migration CLI also uses, so
+        settings-time and runtime-supplied templates share rules.
+        """
+        from clarinet.utils.path_template import validate_template
+
+        return validate_template(v)
 
     anon_names_list: str | None = None
 

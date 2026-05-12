@@ -1090,3 +1090,166 @@ async def test_anonymize_default_mode_returns_patient_anon_id(
     # patient.anon_id == f"{settings.anon_id_prefix}_{auto_id}"
     assert data["anon_patient_id"] == patient.anon_id
     assert data["anon_patient_id"] is not None and "_" in data["anon_patient_id"]
+
+
+@pytest.mark.asyncio
+async def test_anonymize_disk_layout_default_template(
+    client, test_session, mock_anon_settings, tmp_path
+) -> None:
+    """Default template lays files out as {anon_patient_id}/{anon_study_uid}/{anon_series_uid}."""
+    from datetime import UTC, datetime
+
+    from clarinet.models.study import Series, Study
+
+    patient = make_patient("LAYOUT_PAT_DEF", "Layout Default", auto_id=11)
+    test_session.add(patient)
+    await test_session.commit()
+
+    study = Study(
+        patient_id="LAYOUT_PAT_DEF",
+        study_uid="1.2.5151.1",
+        date=datetime.now(UTC).date(),
+        modalities_in_study="CT",
+    )
+    test_session.add(study)
+    await test_session.commit()
+
+    series = Series(
+        study_uid="1.2.5151.1",
+        series_uid="1.2.5151.1.1",
+        series_number=1,
+        modality="CT",
+    )
+    test_session.add(series)
+    await test_session.commit()
+
+    mock_ds = Dataset()
+    mock_ds.PatientID = "LAYOUT_PAT_DEF"
+    mock_ds.PatientName = "Layout Default"
+    mock_ds.StudyInstanceUID = "1.2.5151.1"
+    mock_ds.SeriesInstanceUID = "1.2.5151.1.1"
+    mock_ds.SOPInstanceUID = "1.2.5151.1.1.1"
+    mock_ds.SOPClassUID = "1.2.840.10008.5.1.4.1.1.2"
+    mock_ds.Modality = "CT"
+    file_meta = Dataset()
+    file_meta.MediaStorageSOPInstanceUID = "1.2.5151.1.1.1"
+    file_meta.MediaStorageSOPClassUID = "1.2.840.10008.5.1.4.1.1.2"
+    file_meta.TransferSyntaxUID = "1.2.840.10008.1.2.1"
+    mock_ds.file_meta = file_meta
+
+    anon_settings, _ = mock_anon_settings
+    anon_settings.anon_save_to_disk = True
+    anon_settings.storage_path = str(tmp_path)
+    anon_settings.disk_path_template = "{anon_patient_id}/{anon_study_uid}/{anon_series_uid}"
+
+    mock_retrieve_result = RetrieveResult(
+        status="success", num_completed=1, instances={"1.2.5151.1.1.1": mock_ds}
+    )
+
+    with patch(
+        "clarinet.services.dicom.client.DicomClient.get_series_to_memory",
+        new_callable=AsyncMock,
+        return_value=mock_retrieve_result,
+    ):
+        response = await client.post(
+            "/api/dicom/studies/1.2.5151.1/anonymize",
+            json={"save_to_disk": True, "send_to_pacs": False},
+        )
+
+    assert response.status_code == 200
+    data = response.json()
+    dcm_anons = list(tmp_path.rglob("dcm_anon"))
+    assert dcm_anons, f"No dcm_anon found under {tmp_path}"
+    dcm_anon = dcm_anons[0]
+    # Layout: {tmp}/{anon_patient_id}/{anon_study_uid}/{anon_series_uid}/dcm_anon
+    assert dcm_anon.parent.parent.parent.name == data["anon_patient_id"]
+    assert dcm_anon.parent.parent.name == data["anon_study_uid"]
+    dcm_files = list(dcm_anon.glob("*.dcm"))
+    assert dcm_files, f"No .dcm files in {dcm_anon}"
+
+
+@pytest.mark.asyncio
+async def test_anonymize_disk_layout_custom_template(
+    client, test_session, mock_anon_settings, tmp_path
+) -> None:
+    """Custom template ({patient_auto_id}/{study_modalities}_{study_date}/{anon_series_uid})
+    produces a disk layout that matches the resolver — single source of truth.
+    """
+    from datetime import UTC, datetime
+
+    from clarinet.models.study import Series, Study
+
+    patient = make_patient("LAYOUT_PAT_CUSTOM", "Layout Custom", auto_id=77)
+    test_session.add(patient)
+    await test_session.commit()
+
+    today = datetime.now(UTC).date()
+    study = Study(
+        patient_id="LAYOUT_PAT_CUSTOM",
+        study_uid="1.2.5252.1",
+        date=today,
+        modalities_in_study="CT\\PT",
+    )
+    test_session.add(study)
+    await test_session.commit()
+
+    series = Series(
+        study_uid="1.2.5252.1",
+        series_uid="1.2.5252.1.1",
+        series_number=1,
+        modality="CT",
+    )
+    test_session.add(series)
+    await test_session.commit()
+
+    mock_ds = Dataset()
+    mock_ds.PatientID = "LAYOUT_PAT_CUSTOM"
+    mock_ds.PatientName = "Layout Custom"
+    mock_ds.StudyInstanceUID = "1.2.5252.1"
+    mock_ds.SeriesInstanceUID = "1.2.5252.1.1"
+    mock_ds.SOPInstanceUID = "1.2.5252.1.1.1"
+    mock_ds.SOPClassUID = "1.2.840.10008.5.1.4.1.1.2"
+    mock_ds.Modality = "CT"
+    file_meta = Dataset()
+    file_meta.MediaStorageSOPInstanceUID = "1.2.5252.1.1.1"
+    file_meta.MediaStorageSOPClassUID = "1.2.840.10008.5.1.4.1.1.2"
+    file_meta.TransferSyntaxUID = "1.2.840.10008.1.2.1"
+    mock_ds.file_meta = file_meta
+
+    anon_settings, _ = mock_anon_settings
+    anon_settings.anon_save_to_disk = True
+    anon_settings.storage_path = str(tmp_path)
+    anon_settings.disk_path_template = (
+        "{patient_auto_id}/{study_modalities}_{study_date}/{anon_series_uid}"
+    )
+
+    mock_retrieve_result = RetrieveResult(
+        status="success", num_completed=1, instances={"1.2.5252.1.1.1": mock_ds}
+    )
+
+    with patch(
+        "clarinet.services.dicom.client.DicomClient.get_series_to_memory",
+        new_callable=AsyncMock,
+        return_value=mock_retrieve_result,
+    ):
+        response = await client.post(
+            "/api/dicom/studies/1.2.5252.1/anonymize",
+            json={"save_to_disk": True, "send_to_pacs": False},
+        )
+
+    assert response.status_code == 200
+    # study_modalities = sorted set of "CT\\PT" joined by "_" => "CT_PT".
+    # anon_series_uid is derived inside DicomAnonymizer, so inspect by walk:
+    # segment_1 = patient_auto_id (77), segment_2 = "CT_PT_YYYYMMDD",
+    # segment_3 = some anon_series_uid → contains dcm_anon/*.dcm.
+    patient_dir = tmp_path / "77"
+    assert patient_dir.is_dir(), f"patient_auto_id dir missing: {patient_dir}"
+    study_dirs = [p for p in patient_dir.iterdir() if p.is_dir()]
+    assert len(study_dirs) == 1
+    assert study_dirs[0].name == f"CT_PT_{today.strftime('%Y%m%d')}"
+    series_dirs = [p for p in study_dirs[0].iterdir() if p.is_dir()]
+    assert len(series_dirs) == 1
+    dcm_anon = series_dirs[0] / "dcm_anon"
+    assert dcm_anon.is_dir(), f"dcm_anon missing under {series_dirs[0]}"
+    dcm_files = list(dcm_anon.glob("*.dcm"))
+    assert len(dcm_files) == 1

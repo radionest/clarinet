@@ -113,26 +113,129 @@ class TestHasDiskCache:
         assert _has_disk_cache(tmp_path, "1.2.3", "1.2.3.4") is True
 
 
+class _PassThroughSession:
+    """Adapter: wraps an existing AsyncSession to be used as ``async with``."""
+
+    def __init__(self, session) -> None:
+        self._session = session
+
+    async def __aenter__(self):
+        return self._session
+
+    async def __aexit__(self, *exc) -> None:
+        return None
+
+
+async def _seed_anonymized(
+    test_session, *, patient_id: str, auto_id: int, study_uid: str, series_uid: str
+):
+    """Seed Patient/Study/Series with anon_uid set."""
+    from datetime import UTC, datetime
+
+    from clarinet.models.study import Series, Study
+    from tests.utils.factories import make_patient
+
+    patient = make_patient(patient_id, "Test", auto_id=auto_id)
+    test_session.add(patient)
+    await test_session.commit()
+    study = Study(
+        patient_id=patient_id,
+        study_uid=study_uid,
+        date=datetime.now(UTC).date(),
+        modalities_in_study="CT",
+        anon_uid="ANON_STUDY",
+    )
+    test_session.add(study)
+    await test_session.commit()
+    series = Series(
+        study_uid=study_uid,
+        series_uid=series_uid,
+        series_number=1,
+        modality="CT",
+        anon_uid="ANON_SERIES",
+    )
+    test_session.add(series)
+    await test_session.commit()
+    return patient, study, series
+
+
 class TestHasDcmAnon:
-    """Tests for the dcm_anon presence check."""
+    """Tests for the dcm_anon presence check (DB-aware via disk_path_template)."""
 
-    def test_missing_storage_returns_false(self, tmp_path: Path):
-        assert _has_dcm_anon(tmp_path / "missing", "1.2.3", "1.2.3.4") is False
+    @pytest.mark.asyncio
+    async def test_no_series_in_db_returns_false(self, tmp_path: Path, test_session) -> None:
+        """No Series row → can't resolve path → returns False without scanning disk."""
+        with patch("clarinet.services.pipeline.tasks.cache_dicomweb.db_manager") as mock_dbm:
+            mock_dbm.async_session_factory = lambda: _PassThroughSession(test_session)
+            assert await _has_dcm_anon(tmp_path, "no.such.study", "no.such.series") is False
 
-    def test_no_anon_dir_returns_false(self, tmp_path: Path):
-        (tmp_path / "PAT001" / "1.2.3" / "1.2.3.4").mkdir(parents=True)
-        assert _has_dcm_anon(tmp_path, "1.2.3", "1.2.3.4") is False
+    @pytest.mark.asyncio
+    async def test_no_anon_dir_returns_false(self, tmp_path: Path, test_session) -> None:
+        """Series in DB but dcm_anon dir missing on disk → False."""
+        await _seed_anonymized(
+            test_session,
+            patient_id="HAS_NO_ANON_DIR",
+            auto_id=501,
+            study_uid="1.2.8001.1",
+            series_uid="1.2.8001.1.1",
+        )
+        with patch("clarinet.services.pipeline.tasks.cache_dicomweb.db_manager") as mock_dbm:
+            mock_dbm.async_session_factory = lambda: _PassThroughSession(test_session)
+            assert await _has_dcm_anon(tmp_path, "1.2.8001.1", "1.2.8001.1.1") is False
 
-    def test_empty_anon_dir_returns_false(self, tmp_path: Path):
-        anon = tmp_path / "PAT001" / "1.2.3" / "1.2.3.4" / "dcm_anon"
-        anon.mkdir(parents=True)
-        assert _has_dcm_anon(tmp_path, "1.2.3", "1.2.3.4") is False
+    @pytest.mark.asyncio
+    async def test_empty_anon_dir_returns_false(self, tmp_path: Path, test_session) -> None:
+        """Series in DB, dcm_anon dir exists but empty → False (no .dcm files)."""
+        from clarinet.models.base import DicomQueryLevel
+        from clarinet.services.dicom.anon_path import build_context, render_working_folder
 
-    def test_finds_dcm_in_any_patient_dir(self, tmp_path: Path):
-        anon = tmp_path / "PAT042" / "1.2.3" / "1.2.3.4" / "dcm_anon"
-        anon.mkdir(parents=True)
-        (anon / "inst.dcm").write_bytes(b"fake")
-        assert _has_dcm_anon(tmp_path, "1.2.3", "1.2.3.4") is True
+        patient, study, series = await _seed_anonymized(
+            test_session,
+            patient_id="HAS_EMPTY_ANON",
+            auto_id=502,
+            study_uid="1.2.8002.1",
+            series_uid="1.2.8002.1.1",
+        )
+        ctx = build_context(patient=patient, study=study, series=series)
+        series_dir = render_working_folder(
+            "{anon_patient_id}/{anon_study_uid}/{anon_series_uid}",
+            DicomQueryLevel.SERIES,
+            ctx,
+            tmp_path,
+        )
+        (series_dir / "dcm_anon").mkdir(parents=True)
+
+        with patch("clarinet.services.pipeline.tasks.cache_dicomweb.db_manager") as mock_dbm:
+            mock_dbm.async_session_factory = lambda: _PassThroughSession(test_session)
+            assert await _has_dcm_anon(tmp_path, "1.2.8002.1", "1.2.8002.1.1") is False
+
+    @pytest.mark.asyncio
+    async def test_finds_dcm_via_resolved_path(self, tmp_path: Path, test_session) -> None:
+        """Series in DB + dcm_anon dir with .dcm files at template-resolved path → True."""
+        from clarinet.models.base import DicomQueryLevel
+        from clarinet.services.dicom.anon_path import build_context, render_working_folder
+
+        patient, study, series = await _seed_anonymized(
+            test_session,
+            patient_id="HAS_DCM_ANON",
+            auto_id=503,
+            study_uid="1.2.8003.1",
+            series_uid="1.2.8003.1.1",
+        )
+        ctx = build_context(patient=patient, study=study, series=series)
+        series_dir = render_working_folder(
+            "{anon_patient_id}/{anon_study_uid}/{anon_series_uid}",
+            DicomQueryLevel.SERIES,
+            ctx,
+            tmp_path,
+        )
+        dcm_anon = series_dir / "dcm_anon"
+        dcm_anon.mkdir(parents=True)
+        (dcm_anon / "inst.dcm").write_bytes(b"placeholder")
+
+        with patch("clarinet.services.pipeline.tasks.cache_dicomweb.db_manager") as mock_dbm:
+            mock_dbm.async_session_factory = lambda: _PassThroughSession(test_session)
+            assert await _has_dcm_anon(tmp_path, "1.2.8003.1", "1.2.8003.1.1") is True
 
 
 class TestOrganizeToCache:
@@ -234,6 +337,24 @@ class TestOrganizeToCache:
 class TestPrefetchDicomWebImpl:
     """Tests for the core prefetch logic."""
 
+    @pytest.fixture(autouse=True)
+    def _stub_has_dcm_anon(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Default to ``_has_dcm_anon`` → False.
+
+        ``_has_dcm_anon`` queries the DB via ``db_manager.async_session_factory``
+        to resolve the template-rendered path; without setting up a real DB
+        and Series row for every test, the query would fail. The dcm-anon-
+        skip flow has dedicated tests that override this stub.
+        """
+
+        async def _no_anon(*args, **kwargs):
+            return False
+
+        monkeypatch.setattr(
+            "clarinet.services.pipeline.tasks.cache_dicomweb._has_dcm_anon",
+            _no_anon,
+        )
+
     @pytest.mark.asyncio
     async def test_missing_study_uid_raises(self, tmp_path: Path):
         ctx = _build_ctx(tmp_path)
@@ -304,15 +425,19 @@ class TestPrefetchDicomWebImpl:
 
     @pytest.mark.asyncio
     async def test_skips_dcm_anon_by_default(self, tmp_path: Path, monkeypatch):
+        """When ``_has_dcm_anon`` says True, no C-GET is attempted."""
         monkeypatch.setattr("clarinet.settings.settings.storage_path", str(tmp_path))
+
+        async def _yes_anon(*args, **kwargs):
+            return True
+
+        monkeypatch.setattr(
+            "clarinet.services.pipeline.tasks.cache_dicomweb._has_dcm_anon",
+            _yes_anon,
+        )
 
         ctx = _build_ctx(tmp_path)
         msg = PipelineMessage(patient_id="PAT001", study_uid="STUDY1")
-
-        # Pre-populate dcm_anon for the only series
-        anon = tmp_path / "PAT001" / "STUDY1" / "SER1" / "dcm_anon"
-        anon.mkdir(parents=True)
-        (anon / "inst.dcm").write_bytes(b"fake")
 
         mock_client = AsyncMock()
         mock_client.find_series = AsyncMock(return_value=[_series_result("SER1")])

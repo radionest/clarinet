@@ -1240,6 +1240,40 @@ def main() -> None:
     # session cleanup-all
     session_subparsers.add_parser("cleanup-all", help="Remove ALL sessions (dangerous!)")
 
+    # anon command
+    anon_parser = subparsers.add_parser("anon", help="Anonymization helpers")
+    anon_subparsers = anon_parser.add_subparsers(dest="anon_command")
+
+    anon_migrate = anon_subparsers.add_parser(
+        "migrate-paths",
+        help=(
+            "Move anonymized dcm_anon directories from one disk_path_template "
+            "layout to another (no DB changes)"
+        ),
+    )
+    anon_migrate.add_argument(
+        "--from",
+        dest="from_template",
+        required=True,
+        help="Source template (e.g. '{anon_patient_id}/{anon_study_uid}/{anon_series_uid}')",
+    )
+    anon_migrate.add_argument(
+        "--to",
+        dest="to_template",
+        required=True,
+        help="Target template (must satisfy the same validation rules)",
+    )
+    anon_migrate.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print planned moves without touching the filesystem",
+    )
+    anon_migrate.add_argument(
+        "--cleanup-empty",
+        action="store_true",
+        help="Remove empty parent directories after a successful move",
+    )
+
     # deploy command
     deploy_parser = subparsers.add_parser("deploy", help="Generate deployment configurations")
     deploy_subparsers = deploy_parser.add_subparsers(dest="deploy_command")
@@ -1372,6 +1406,13 @@ def main() -> None:
                     print("Aborted.")
                     sys.exit(0)
             asyncio.run(_handle_session(args))
+    elif args.command == "anon":
+        if args.anon_command == "migrate-paths":
+            from clarinet.cli.anon import migrate_paths
+
+            asyncio.run(migrate_paths(args))
+        else:
+            anon_parser.print_help()
     elif args.command == "deploy":
         if args.deploy_command == "systemd":
             from clarinet.cli.deploy import generate_systemd

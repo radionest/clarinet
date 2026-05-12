@@ -759,3 +759,118 @@ class TestStudyUidValidation:
 
         # Failed validation must not leave a partial entry in memory
         assert cache._get_from_memory("anon_study", "series1") is None
+
+
+class TestResolveDcmAnonDir:
+    """DB-aware dcm_anon lookup via ``settings.disk_path_template``."""
+
+    @pytest.mark.asyncio
+    async def test_resolves_existing_dir_via_db(
+        self, tmp_path: Path, test_session, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from datetime import UTC, datetime
+
+        from clarinet.models.base import DicomQueryLevel
+        from clarinet.models.study import Series, Study
+        from clarinet.services.dicom.anon_path import build_context, render_working_folder
+        from tests.utils.factories import make_patient
+
+        patient = make_patient("RESOLVE_PAT_01", "Resolve", auto_id=303)
+        test_session.add(patient)
+        await test_session.commit()
+        study = Study(
+            patient_id="RESOLVE_PAT_01",
+            study_uid="1.2.7001.1",
+            date=datetime.now(UTC).date(),
+            modalities_in_study="CT",
+            anon_uid="2.25.701",
+        )
+        test_session.add(study)
+        await test_session.commit()
+        series = Series(
+            study_uid="1.2.7001.1",
+            series_uid="1.2.7001.1.1",
+            series_number=1,
+            modality="CT",
+            anon_uid="2.25.701.1",
+        )
+        test_session.add(series)
+        await test_session.commit()
+
+        # Create the dcm_anon dir at the path the resolver will compute
+        monkeypatch.setattr(
+            "clarinet.services.dicom.anon_path.settings.disk_path_template",
+            "{anon_patient_id}/{anon_study_uid}/{anon_series_uid}",
+        )
+        monkeypatch.setattr(
+            "clarinet.services.dicom.anon_path.settings.anon_per_study_patient_id",
+            False,
+        )
+        monkeypatch.setattr(
+            "clarinet.services.dicom.anon_path.settings.anon_id_prefix",
+            "CLARINET",
+        )
+        ctx = build_context(patient=patient, study=study, series=series)
+        series_dir = render_working_folder(
+            "{anon_patient_id}/{anon_study_uid}/{anon_series_uid}",
+            DicomQueryLevel.SERIES,
+            ctx,
+            tmp_path,
+        )
+        expected_dcm_anon = series_dir / "dcm_anon"
+        expected_dcm_anon.mkdir(parents=True)
+        (expected_dcm_anon / "x.dcm").write_bytes(b"placeholder")
+
+        # Build cache wired to the test session
+        class _Factory:
+            def __call__(self):
+                return _PassThroughSession(test_session)
+
+        cache = DicomWebCache(
+            base_dir=tmp_path / "dicomweb_cache",
+            storage_path=tmp_path,
+            session_factory=_Factory(),
+        )
+        resolved = await cache._resolve_dcm_anon_dir("1.2.7001.1", "1.2.7001.1.1")
+        assert resolved == expected_dcm_anon
+
+    @pytest.mark.asyncio
+    async def test_returns_none_when_db_missing(self, tmp_path: Path, test_session) -> None:
+        """Unknown series_uid → None, no exception, result cached."""
+
+        class _Factory:
+            def __call__(self):
+                return _PassThroughSession(test_session)
+
+        cache = DicomWebCache(
+            base_dir=tmp_path / "dicomweb_cache",
+            storage_path=tmp_path,
+            session_factory=_Factory(),
+        )
+        assert await cache._resolve_dcm_anon_dir("does.not.exist", "ne.either") is None
+        # Cached: second call doesn't re-query DB (would need session-tracking
+        # spy to assert that, but at minimum behavior must be deterministic).
+        assert await cache._resolve_dcm_anon_dir("does.not.exist", "ne.either") is None
+
+    @pytest.mark.asyncio
+    async def test_returns_none_when_no_session_factory(self, tmp_path: Path) -> None:
+        """No session factory → dcm_anon tier disabled (safe fallback)."""
+        cache = DicomWebCache(
+            base_dir=tmp_path / "dicomweb_cache",
+            storage_path=tmp_path,
+            session_factory=None,
+        )
+        assert await cache._resolve_dcm_anon_dir("any", "any") is None
+
+
+class _PassThroughSession:
+    """Wrap an AsyncSession to be usable as ``async with factory() as session:``."""
+
+    def __init__(self, session) -> None:
+        self._session = session
+
+    async def __aenter__(self):
+        return self._session
+
+    async def __aexit__(self, *exc) -> None:
+        return None

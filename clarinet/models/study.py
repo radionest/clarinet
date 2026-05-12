@@ -118,9 +118,29 @@ class SeriesRead(SeriesBase):
 
     @computed_field
     def working_folder(self) -> str:
-        """Get the full path to the working folder for this series."""
-        return self._format_path_strict(
-            "{clarinet_storage_path}/{patient_id}/{study_anon_uid}/{series_anon_uid}"
+        """Get the full path to the working folder for this series.
+
+        Rendered from ``settings.disk_path_template`` so the value stays
+        in sync with the anonymized-output layout written by
+        ``AnonymizationService``.
+        """
+        from pathlib import Path
+
+        from clarinet.models.base import DicomQueryLevel
+        from clarinet.services.dicom.anon_path import build_context, render_working_folder
+
+        ctx = build_context(
+            patient=self.study.patient,
+            study=self.study,
+            series=self,
+        )
+        return str(
+            render_working_folder(
+                settings.disk_path_template,
+                DicomQueryLevel.SERIES,
+                ctx,
+                Path(settings.storage_path),
+            )
         )
 
 
