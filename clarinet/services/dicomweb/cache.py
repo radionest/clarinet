@@ -170,8 +170,13 @@ class DicomWebCache:
             return None
 
         cache_key = self._cache_key(study_uid, series_uid)
-        if cache_key in self._dcm_anon_path_cache:
+        try:
+            # Single __getitem__ avoids a TOCTOU between `in` and `[]` —
+            # under TTL an entry can expire between the two.
             cached: Path | None = self._dcm_anon_path_cache[cache_key]
+        except KeyError:
+            pass
+        else:
             return cached
 
         # Local imports avoid an import cycle (models -> services -> models)
