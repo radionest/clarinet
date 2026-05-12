@@ -23,12 +23,38 @@ _MAX_SCHEMA_ERRORS = 10
 def _json_pointer(path: Iterable[Any]) -> str:
     """Build a JSON Pointer (RFC 6901) from a jsonschema ``absolute_path`` deque.
 
+    Each segment is escaped per RFC 6901 §4: ``~`` becomes ``~0`` and ``/``
+    becomes ``~1`` (in that order, so ``~/`` round-trips correctly).
     Returns ``""`` for an error at the document root (empty path).
     """
-    parts = [str(p) for p in path]
+    parts = [str(p).replace("~", "~0").replace("/", "~1") for p in path]
     if not parts:
         return ""
     return "/" + "/".join(parts)
+
+
+def _required_property_path(error: Any) -> list[Any] | None:
+    """Extract the missing property name from a jsonschema ``required`` error.
+
+    jsonschema reports ``required`` failures with ``absolute_path`` pointing
+    at the *parent* object (often empty for the document root), leaving the
+    missing field name only in the message ``"'foo' is a required property"``.
+    Returning ``[..., "foo"]`` lets the frontend highlight the actual field
+    instead of pointing the user at the document root.
+
+    Returns ``None`` if the message does not match the expected shape, in
+    which case the caller should fall back to ``absolute_path``.
+    """
+    msg = getattr(error, "message", "")
+    if not msg.endswith("is a required property"):
+        return None
+    # Format: ``'<name>' is a required property`` (single-quoted).
+    if len(msg) < 2 or msg[0] != "'":
+        return None
+    closing = msg.find("'", 1)
+    if closing <= 1:
+        return None
+    return [*error.absolute_path, msg[1:closing]]
 
 
 def validate_json_by_schema(json_data: Any, json_schema: dict[str, Any]) -> None:
@@ -67,14 +93,23 @@ def validate_json_by_schema(json_data: Any, json_schema: dict[str, Any]) -> None
     if not errors:
         return
 
-    field_errors = [
-        FieldError(
-            path=_json_pointer(e.absolute_path),
-            message=e.message,
-            code=e.validator or "schema",
+    field_errors = []
+    for err in errors:
+        # For ``required`` errors, jsonschema's absolute_path stops at the
+        # parent object — splice the missing property name onto the path so
+        # the frontend can highlight the actual field rather than the root.
+        if err.validator == "required":
+            required_path = _required_property_path(err)
+            path_parts = required_path if required_path is not None else err.absolute_path
+        else:
+            path_parts = err.absolute_path
+        field_errors.append(
+            FieldError(
+                path=_json_pointer(path_parts),
+                message=err.message,
+                code=err.validator or "schema",
+            )
         )
-        for e in errors
-    ]
     logger.error(
         f"JSON validation: {len(field_errors)} error(s) — first at "
         f"'{field_errors[0].path}': {field_errors[0].message}"

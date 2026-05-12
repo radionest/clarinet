@@ -19,6 +19,7 @@ worked example.
 """
 
 import importlib.util
+import inspect
 import sys
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
@@ -117,11 +118,19 @@ def record_validator(
 
     Raises:
         ValueError: If *name* is already registered (duplicate ``@record_validator``
-            decorator in the same ``plan/validators.py``). Bubbles up at import
-            time so the misconfig is caught at startup, not on submit.
+            decorator in the same ``plan/validators.py``), or if *func* is not an
+            ``async def`` coroutine function. Both surface at import time so
+            misconfigs are caught at startup, not on the first submit (where
+            awaiting a sync function would yield a confusing ``TypeError``).
     """
 
     def decorator(func: RecordValidatorFunc) -> RecordValidatorFunc:
+        if not inspect.iscoroutinefunction(func):
+            raise ValueError(
+                f"Record validator '{name}' must be ``async def`` — "
+                f"{func.__module__}.{func.__qualname__} is a regular function. "
+                f"``run_record_validators`` awaits the result."
+            )
         if name in _VALIDATOR_REGISTRY:
             existing = _VALIDATOR_REGISTRY[name].func
             raise ValueError(
@@ -220,20 +229,25 @@ def load_custom_validators(folder: str | Path) -> int:
     if added_parent:
         sys.path.insert(0, parent_str)
 
+    module_name = "clarinet_custom_validators"
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    if spec is None or spec.loader is None:
+        logger.error(f"Cannot create module spec for {path}")
+        if added_parent and parent_str in sys.path:
+            sys.path.remove(parent_str)
+        return 0
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    # Narrow try-scope per project guidance ("max two function calls; always
+    # log errors before handling"). Only the dynamic import call can raise
+    # validator-author bugs; setup above is fixed-shape and either succeeds or
+    # surfaces a logged early return. ``ValueError`` from
+    # ``@record_validator`` (duplicate name / non-async function) propagates
+    # so the lifespan crashes loudly instead of silently leaving a partial
+    # registry behind.
     try:
-        module_name = "clarinet_custom_validators"
-        spec = importlib.util.spec_from_file_location(module_name, path)
-        if spec is None or spec.loader is None:
-            logger.error(f"Cannot create module spec for {path}")
-            return 0
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[module_name] = module
         spec.loader.exec_module(module)
     except ValueError:
-        # Duplicate-name registration (``record_validator`` raises ValueError).
-        # Let it propagate so the lifespan crashes loudly with the offending
-        # name — silently swallowing would leave the first registration in
-        # place and hide the typo from the developer.
         raise
     except Exception:
         logger.exception(f"Error loading custom validators from {path}")

@@ -158,7 +158,7 @@ Adding `data_validators` to `RecordType` introduces a new nullable JSON column.
 Clarinet is a framework — alembic migrations are generated and applied in the
 downstream project. After upgrading Clarinet, run:
 
-```
+```sh
 make db-migration  # → alembic revision --autogenerate -m "add data_validators column"
 make db-upgrade
 ```

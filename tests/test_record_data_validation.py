@@ -238,12 +238,12 @@ class TestJsonSchemaErrors:
             "properties": {"score": {"type": "integer", "minimum": 0}},
             "required": ["score"],
         }
-        # Missing required field
+        # Missing required field — path is enriched with the missing property
+        # name (jsonschema's absolute_path stops at the parent object).
         with pytest.raises(RecordDataValidationError) as exc_info:
             validate_json_by_schema({}, schema)
         err = exc_info.value.errors[0]
-        # Empty path means "document root" — jsonschema reports missing-required at root
-        assert err.path == ""
+        assert err.path == "/score"
         assert err.code == "required"
 
     def test_path_is_json_pointer(self):
