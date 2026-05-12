@@ -480,6 +480,126 @@ async def test_reconcile_config_passes_with_valid_roles(
 
 
 @pytest.mark.asyncio
+async def test_reconcile_config_validates_data_validators_registered(
+    test_session: AsyncSession,
+) -> None:
+    """reconcile_config raises ConfigurationError when data_validators references
+    an unregistered validator name.
+
+    Mirrors the role-validation guard above — fail-fast at startup keeps a broken
+    config from silently bypassing submit-time validation.
+    """
+    from unittest.mock import AsyncMock, patch
+
+    from clarinet.services.record_data_validation import _VALIDATOR_REGISTRY
+    from clarinet.utils.bootstrap import reconcile_config
+
+    # Isolate registry so other tests' registrations don't bleed in.
+    saved_registry = dict(_VALIDATOR_REGISTRY)
+    _VALIDATOR_REGISTRY.clear()
+    try:
+        items = [
+            _make_config(
+                "rt-with-ghost-validator",
+                data_validators=["plan.nonexistent_validator"],
+            ),
+        ]
+
+        with (
+            patch(
+                "clarinet.config.python_loader.load_python_config",
+                new_callable=AsyncMock,
+                return_value=items,
+            ),
+            patch(
+                "clarinet.utils.bootstrap.db_manager.get_async_session_context",
+            ) as mock_ctx,
+            patch("clarinet.settings.settings") as mock_settings,
+        ):
+            mock_settings.config_mode = "python"
+            mock_settings.config_tasks_path = "/fake/path"
+            mock_settings.config_validators_file = "validators.py"
+            mock_settings.config_delete_orphans = False
+
+            ctx = AsyncMock()
+            ctx.__aenter__ = AsyncMock(return_value=test_session)
+            ctx.__aexit__ = AsyncMock(return_value=False)
+            mock_ctx.return_value = ctx
+
+            with pytest.raises(
+                ConfigurationError, match=r"plan\.nonexistent_validator"
+            ) as exc_info:
+                await reconcile_config(folder="/fake/path")
+
+        msg = str(exc_info.value)
+        assert "rt-with-ghost-validator" in msg
+        assert "plan/validators.py" in msg or "validators.py" in msg
+    finally:
+        _VALIDATOR_REGISTRY.clear()
+        _VALIDATOR_REGISTRY.update(saved_registry)
+
+
+@pytest.mark.asyncio
+async def test_reconcile_config_passes_with_registered_validator(
+    test_session: AsyncSession,
+) -> None:
+    """reconcile_config succeeds when every data_validators name is registered."""
+    from unittest.mock import AsyncMock, patch
+
+    from clarinet.services.record_data_validation import (
+        _VALIDATOR_REGISTRY,
+        record_validator,
+    )
+    from clarinet.utils.bootstrap import reconcile_config
+
+    saved_registry = dict(_VALIDATOR_REGISTRY)
+    _VALIDATOR_REGISTRY.clear()
+    try:
+
+        @record_validator("test.registered_validator")
+        async def _registered(record, data, ctx):
+            return None
+
+        items = [
+            _make_config(
+                "rt-with-registered-validator",
+                data_validators=["test.registered_validator"],
+            ),
+            _make_config("rt-without-validators"),  # data_validators=None
+        ]
+
+        with (
+            patch(
+                "clarinet.config.python_loader.load_python_config",
+                new_callable=AsyncMock,
+                return_value=items,
+            ),
+            patch(
+                "clarinet.utils.bootstrap.db_manager.get_async_session_context",
+            ) as mock_ctx,
+            patch("clarinet.settings.settings") as mock_settings,
+        ):
+            mock_settings.config_mode = "python"
+            mock_settings.config_tasks_path = "/fake/path"
+            mock_settings.config_validators_file = "validators.py"
+            mock_settings.config_delete_orphans = False
+
+            ctx = AsyncMock()
+            ctx.__aenter__ = AsyncMock(return_value=test_session)
+            ctx.__aexit__ = AsyncMock(return_value=False)
+            mock_ctx.return_value = ctx
+
+            result = await reconcile_config(folder="/fake/path")
+
+        assert result.errors == []
+        assert "rt-with-registered-validator" in result.created
+        assert "rt-without-validators" in result.created
+    finally:
+        _VALIDATOR_REGISTRY.clear()
+        _VALIDATOR_REGISTRY.update(saved_registry)
+
+
+@pytest.mark.asyncio
 async def test_error_message_lists_all_db_roles(
     test_session: AsyncSession,
 ) -> None:

@@ -5,7 +5,8 @@ These exceptions are used in repositories and services to represent
 business logic errors without coupling to HTTP status codes.
 """
 
-from typing import ClassVar, Self
+from dataclasses import dataclass, field
+from typing import Any, ClassVar, Self
 from uuid import UUID
 
 
@@ -42,6 +43,51 @@ class AuthorizationError(ClarinetError):
 
 class ValidationError(ClarinetError):
     """Raised when data validation fails."""
+
+
+@dataclass(slots=True)
+class FieldError:
+    """Single field-level validation error for structured 422 responses.
+
+    Attributes:
+        path: JSON Pointer (RFC 6901) — e.g. ``"/mappings/2/new_id"`` or
+            ``""`` for the document root.
+        message: Human-readable message. Authored by the validator;
+            framework does not translate.
+        code: Machine-readable tag for frontend filtering: ``"duplicate"``,
+            ``"required"``, ``"minimum"``, etc. Defaults to ``"invalid"``.
+        params: Optional extra context (e.g. ``{"value": 3, "first_seen": 0}``)
+            — surfaced in the 422 payload for diagnostics and future frontend
+            use. The current Gleam decoder does not parse this field yet.
+    """
+
+    path: str
+    message: str
+    code: str = "invalid"
+    params: dict[str, Any] = field(default_factory=dict)
+
+
+class RecordDataValidationError(ValidationError):
+    """Raised when RecordData fails one or more field-level checks.
+
+    Carries a structured list of :class:`FieldError` objects surfaced as the
+    ``errors`` array in the 422 response. Inherits from :class:`ValidationError`
+    so legacy ``except ValidationError`` blocks keep catching it; the HTTP
+    handler for the subclass is registered explicitly and takes precedence.
+
+    Invariant: ``errors`` must be non-empty. An empty list would produce a
+    misleading "Validation failed" 422 with no diagnostics — the caller
+    should not raise at all in that case.
+    """
+
+    def __init__(self, errors: list[FieldError]) -> None:
+        if not errors:
+            raise ValueError(
+                "RecordDataValidationError requires at least one FieldError; "
+                "do not raise when there are no errors to report."
+            )
+        self.errors = errors
+        super().__init__(f"Validation failed: {len(errors)} error(s)")
 
 
 class BusinessRuleViolationError(ClarinetError):

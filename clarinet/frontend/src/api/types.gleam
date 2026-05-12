@@ -2,6 +2,15 @@
 
 import gleam/dict.{type Dict}
 
+// Single field-level validation error from the backend.
+// Mirrors clarinet.exceptions.domain.FieldError:
+//   - path: JSON Pointer "/mappings/2/new_id" (or "" for the document root)
+//   - message: localized human-readable text (authored by the validator)
+//   - code: machine-readable tag (e.g. "duplicate", "minimum", "required")
+pub type FieldError {
+  FieldError(path: String, message: String, code: String)
+}
+
 // API Error types
 pub type ApiError {
   NetworkError(String)
@@ -18,7 +27,9 @@ pub type ApiError {
     message: String,
     metadata: Dict(String, String),
   )
-  ValidationError(errors: List(#(String, String)))
+  // 422 with an `errors` array (RecordDataValidationError handler).
+  // Empty list = 400-style placeholder (legacy code path in http_client).
+  ValidationError(errors: List(FieldError))
 }
 
 // Record status (matching backend RecordStatus enum)
