@@ -137,7 +137,6 @@ class ClarinetClient:
         self.client = httpx.AsyncClient(
             base_url=self.base_url, follow_redirects=True, verify=verify_ssl
         )
-        self._authenticated = False
 
         if service_token:
             self.client.headers["X-Internal-Token"] = service_token
