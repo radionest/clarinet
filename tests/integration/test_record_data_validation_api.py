@@ -14,21 +14,14 @@ import pytest_asyncio
 from clarinet.exceptions.domain import FieldError, RecordDataValidationError
 from clarinet.models.record import Record, RecordStatus, RecordType
 from clarinet.models.study import Study
-from clarinet.services.record_data_validation import (
-    _VALIDATOR_REGISTRY,
-    record_validator,
-)
+from clarinet.services.record_data_validation import record_validator
 from tests.utils.factories import make_patient
 from tests.utils.urls import RECORDS_BASE
 
 
 @pytest.fixture(autouse=True)
-def _clean_validator_registry():
-    """Save and restore the validator registry around each test."""
-    saved = dict(_VALIDATOR_REGISTRY)
-    yield
-    _VALIDATOR_REGISTRY.clear()
-    _VALIDATOR_REGISTRY.update(saved)
+def _clean_validator_registry(isolated_validator_registry):
+    """Apply ``isolated_validator_registry`` to every test in this file."""
 
 
 @pytest_asyncio.fixture

@@ -148,11 +148,12 @@ def setup_exception_handlers(app: FastAPI) -> None:
         )
 
     # NOTE: ``RecordDataValidationError`` is registered immediately below.
-    # FastAPI dispatches by exact ``type(exc)`` first and only walks the MRO if
-    # no exact match exists, so the subclass handler shadows this one for
-    # ``RecordDataValidationError`` instances. Do not reorder — moving the
-    # subclass before this generic handler is benign, but moving it AFTER
-    # this one with a deeper MRO walk could mask the structured response.
+    # Starlette dispatches handlers by walking the **exception's own MRO** —
+    # ``for cls in type(exc).__mro__: if cls in registered: return ...`` — so
+    # the subclass handler shadows this generic one whenever the exception is
+    # a ``RecordDataValidationError`` instance, regardless of registration
+    # order. Both handlers must remain registered: removing this one would
+    # break legacy ``raise ValidationError("text")`` call sites.
     @app.exception_handler(ValidationError)
     async def handle_validation_error(request: Request, exc: ValidationError) -> JSONResponse:
         """Convert ValidationError to 422 response."""

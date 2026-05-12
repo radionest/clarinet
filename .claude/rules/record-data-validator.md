@@ -186,8 +186,16 @@ async def test_duplicates_detected(record_factory, validator_ctx):
     assert exc_info.value.errors[0].code == "duplicate"
 ```
 
-For tests that exercise the registry — the `_clean_registry` autouse fixture
-in `tests/test_record_data_validation.py` (and `_clean_validator_registry`
-in `tests/integration/test_record_data_validation_api.py`) snapshots and
-restores `_VALIDATOR_REGISTRY` around each test. Copy that pattern into
-new test files that register validators.
+For tests that exercise the registry — request the
+`isolated_validator_registry` fixture from `tests/conftest.py`. Pair with a
+thin file-local autouse wrapper if every test in the file needs isolation:
+
+```python
+@pytest.fixture(autouse=True)
+def _clean(isolated_validator_registry):
+    pass
+```
+
+The fixture snapshots `_VALIDATOR_REGISTRY` before the test and restores it
+after, mirroring the same pattern used by `test_schema_hydration.py` and
+`test_slicer_context_hydration.py` for their respective registries.

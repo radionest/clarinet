@@ -139,7 +139,10 @@ class RecordTypeService:
         2. Custom Python validators listed in ``record_type.data_validators``,
            via :func:`run_record_validators`. Errors are aggregated.
 
-        Record must have ``record_type`` relation loaded.
+        Record must have the ``record_type`` relation eagerly loaded —
+        ``run_record_validators`` and ``hydrate_schema`` both touch
+        ``record.record_type``, which would raise ``MissingGreenlet`` on
+        lazy-load inside an async session.
 
         Args:
             record: Record with record_type loaded.
@@ -169,6 +172,11 @@ class RecordTypeService:
         ``run_on_partial=False`` are skipped — partial data may legitimately
         violate full-document invariants. Validators declared with
         ``run_on_partial=True`` still execute.
+
+        Record must have the ``record_type`` relation eagerly loaded —
+        ``run_record_validators`` and ``hydrate_schema`` both touch
+        ``record.record_type``, which would raise ``MissingGreenlet`` on
+        lazy-load inside an async session.
 
         Args:
             record: Record with record_type loaded.

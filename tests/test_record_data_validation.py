@@ -35,12 +35,8 @@ from clarinet.utils.validation import (
 
 
 @pytest.fixture(autouse=True)
-def _clean_registry():
-    """Save and restore the validator registry around each test."""
-    saved = dict(_VALIDATOR_REGISTRY)
-    yield
-    _VALIDATOR_REGISTRY.clear()
-    _VALIDATOR_REGISTRY.update(saved)
+def _clean_registry(isolated_validator_registry):
+    """Apply ``isolated_validator_registry`` to every test in this file."""
 
 
 def _make_record(validator_names: list[str] | None = None) -> MagicMock:
