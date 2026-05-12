@@ -28,6 +28,28 @@ class ConflictResponse(BaseModel):
     metadata: dict[str, str] | None = None
 
 
+class FieldErrorResponse(BaseModel):
+    """OpenAPI schema for a single field-level validation error."""
+
+    path: str
+    message: str
+    code: str
+    params: dict[str, Any] | None = None
+
+
+class RecordDataValidationErrorResponse(BaseModel):
+    """OpenAPI schema for structured 422 record-data validation responses.
+
+    Emitted by JSON-Schema failures and custom Python validators on
+    submit/update/prefill record-data endpoints. Legacy plain
+    ``ValidationError("text")`` still yields ``{"detail": "text"}`` (no
+    ``errors`` field) — frontend should treat ``errors`` as optional.
+    """
+
+    detail: str
+    errors: list[FieldErrorResponse]
+
+
 def setup_exception_handlers(app: FastAPI) -> None:
     """Setup exception handlers using decorators.
 
@@ -50,6 +72,7 @@ def setup_exception_handlers(app: FastAPI) -> None:
         EntityNotFoundError,
         InvalidCredentialsError,
         PipelineError,
+        RecordDataValidationError,
         RecordLimitReachedError,
         RecordUniquePerUserError,
         ReportQueryError,
@@ -124,6 +147,12 @@ def setup_exception_handlers(app: FastAPI) -> None:
             content={"detail": str(exc) if str(exc) else "Invalid pagination cursor"},
         )
 
+    # NOTE: ``RecordDataValidationError`` is registered immediately below.
+    # FastAPI dispatches by exact ``type(exc)`` first and only walks the MRO if
+    # no exact match exists, so the subclass handler shadows this one for
+    # ``RecordDataValidationError`` instances. Do not reorder — moving the
+    # subclass before this generic handler is benign, but moving it AFTER
+    # this one with a deeper MRO walk could mask the structured response.
     @app.exception_handler(ValidationError)
     async def handle_validation_error(request: Request, exc: ValidationError) -> JSONResponse:
         """Convert ValidationError to 422 response."""
@@ -133,6 +162,39 @@ def setup_exception_handlers(app: FastAPI) -> None:
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             content={"detail": str(exc) if str(exc) else "Validation failed"},
+        )
+
+    @app.exception_handler(RecordDataValidationError)
+    async def handle_record_data_validation_error(
+        request: Request, exc: RecordDataValidationError
+    ) -> JSONResponse:
+        """Convert RecordDataValidationError to 422 with structured ``errors`` list.
+
+        Subclass of ValidationError — see note on ``handle_validation_error``
+        above for ordering rationale. Response shape matches
+        :class:`RecordDataValidationErrorResponse`.
+
+        Logged at WARNING (no traceback): user filled the form incorrectly,
+        which is expected user feedback, not a server fault — mirrors the
+        409 conflict handlers that also avoid noisy traceback logging.
+        """
+        logger.warning(
+            f"422 RecordDataValidationError on {request.method} {request.url.path}: "
+            f"{len(exc.errors)} error(s)"
+        )
+        errors_payload: list[dict[str, Any]] = []
+        for e in exc.errors:
+            entry: dict[str, Any] = {
+                "path": e.path,
+                "message": e.message,
+                "code": e.code,
+            }
+            if e.params:
+                entry["params"] = e.params
+            errors_payload.append(entry)
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            content={"detail": "Validation failed", "errors": errors_payload},
         )
 
     @app.exception_handler(RecordLimitReachedError)

@@ -58,16 +58,16 @@ pub fn api_error_types_comprehensive_test() {
   let types.ValidationError(errors) = validation_err_empty
   should.equal(errors, [])
 
-  // Test ValidationError with errors
+  // Test ValidationError with errors (FieldError records: path, message, code)
   let validation_err_full =
     types.ValidationError([
-      #("username", "Username is required"),
-      #("email", "Invalid email format"),
+      types.FieldError("username", "Username is required", "required"),
+      types.FieldError("email", "Invalid email format", "format"),
     ])
   let types.ValidationError(errors) = validation_err_full
   should.equal(errors, [
-    #("username", "Username is required"),
-    #("email", "Invalid email format"),
+    types.FieldError("username", "Username is required", "required"),
+    types.FieldError("email", "Invalid email format", "format"),
   ])
 }
 
@@ -190,22 +190,26 @@ pub fn structured_error_structure_test() {
 
 // Test validation error structure
 pub fn validation_error_structure_test() {
-  // Test various validation error formats
-  let single_error = types.ValidationError([#("email", "Invalid email format")])
+  // Test various validation error formats — FieldError(path, message, code)
+  let single_error =
+    types.ValidationError([
+      types.FieldError("email", "Invalid email format", "format"),
+    ])
   let multiple_errors =
     types.ValidationError([
-      #("username", "Username too short"),
-      #("password", "Password must contain numbers"),
-      #("email", "Email is required"),
+      types.FieldError("username", "Username too short", "minLength"),
+      types.FieldError("password", "Password must contain numbers", "pattern"),
+      types.FieldError("email", "Email is required", "required"),
     ])
   let empty_errors = types.ValidationError([])
 
   // Verify structure
   let types.ValidationError(errors) = single_error
   should.equal(list.length(errors), 1)
-  let assert [#(field, message)] = errors
-  should.equal(field, "email")
+  let assert [types.FieldError(path, message, code)] = errors
+  should.equal(path, "email")
   should.equal(message, "Invalid email format")
+  should.equal(code, "format")
 
   let types.ValidationError(errors) = multiple_errors
   should.equal(list.length(errors), 3)

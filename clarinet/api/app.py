@@ -162,6 +162,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     await add_default_user_roles()
 
+    # Load custom record validators BEFORE reconcile — reconcile checks that
+    # every RecordType.data_validators name is registered in the registry,
+    # which is populated by the @record_validator decorators in this file.
+    # ``load_custom_validators`` logs the registered names itself; no need to
+    # log again here (matches the load_custom_hydrators pattern below).
+    from clarinet.services.record_data_validation import load_custom_validators
+
+    load_custom_validators(settings.config_tasks_path)
+
     # Reconcile RecordType definitions
     reconcile_result = await reconcile_config()
     app.state.config_mode = settings.config_mode

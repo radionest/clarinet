@@ -14,7 +14,13 @@ from sqlalchemy import String
 from sqlalchemy.sql import expression as sql_expression
 from sqlmodel import Column, Field, Relationship, SQLModel
 
-from clarinet.types import PortableJSON, RecordSchema, SlicerArgs, SlicerHydratorNames
+from clarinet.types import (
+    PortableJSON,
+    RecordSchema,
+    SlicerArgs,
+    SlicerHydratorNames,
+    ValidatorNames,
+)
 from clarinet.utils.validators import validate_json_safe, validate_slug
 
 from .base import DicomQueryLevel, ViewerMode
@@ -79,6 +85,7 @@ class RecordTypeBase(SQLModel):
 
     data_schema: RecordSchema | None = None
     slicer_context_hydrators: SlicerHydratorNames | None = None
+    data_validators: ValidatorNames | None = None
 
     # ``server_default`` is required so alembic autogenerate emits
     # ``ALTER TABLE recordtype ADD COLUMN ... NOT NULL DEFAULT true`` instead
@@ -138,6 +145,10 @@ class RecordType(RecordTypeBase, table=True):
     slicer_context_hydrators: SlicerHydratorNames | None = Field(
         default=None, sa_column=Column(PortableJSON)
     )
+    # Names of @record_validator-registered Python validators run after
+    # JSON-Schema validation. Nullable JSON column: ``None`` = no validators,
+    # ``[]`` and ``None`` are equivalent at the DB level for this feature.
+    data_validators: ValidatorNames | None = Field(default=None, sa_column=Column(PortableJSON))
 
     role_name: str | None = Field(foreign_key="userrole.name", default=None)
     constraint_role: UserRole | None = Relationship(back_populates="allowed_record_types")
@@ -256,6 +267,7 @@ class RecordTypeOptional(SQLModel):
     slicer_result_validator_args: SlicerArgs | None = None
     data_schema: RecordSchema | None = None
     slicer_context_hydrators: SlicerHydratorNames | None = None
+    data_validators: ValidatorNames | None = None
     mask_patient_data: bool | None = Field(default=None)
     viewer_mode: ViewerMode | None = None
 
@@ -273,6 +285,7 @@ class RecordTypeOptional(SQLModel):
         "slicer_script_args",
         "slicer_result_validator_args",
         "slicer_context_hydrators",
+        "data_validators",
         mode="before",
     )
     @classmethod

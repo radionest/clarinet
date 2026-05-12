@@ -296,6 +296,7 @@ class Settings(BaseSettings):
     config_files_catalog_file: str = "files_catalog.py"
     config_context_hydrators_file: str = "context_hydrators.py"
     config_schema_hydrators_file: str = "hydrators.py"
+    config_validators_file: str = "validators.py"
 
     # Reports settings (custom SQL reports, downloaded as CSV/XLSX by superusers)
     reports_path: str = "./review/"

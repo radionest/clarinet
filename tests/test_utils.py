@@ -61,15 +61,18 @@ class TestValidation:
         from clarinet.utils.validation import validate_json_by_schema
 
         schema = {"type": "object", "properties": {"name": {"type": "string"}}}
-        assert validate_json_by_schema({"name": "Alice"}, schema) is True
+        # validate_json_by_schema returns None on success (raises on failure)
+        validate_json_by_schema({"name": "Alice"}, schema)
 
     def test_validate_invalid_json(self):
-        from clarinet.exceptions.domain import ValidationError
+        from clarinet.exceptions.domain import RecordDataValidationError
         from clarinet.utils.validation import validate_json_by_schema
 
         schema = {"type": "object", "properties": {"age": {"type": "integer"}}, "required": ["age"]}
-        with pytest.raises(ValidationError, match="JSON validation failed"):
+        # Now raises the structured subclass with field-level errors.
+        with pytest.raises(RecordDataValidationError) as exc_info:
             validate_json_by_schema({}, schema)
+        assert exc_info.value.errors[0].code == "required"
 
     def test_validate_invalid_schema(self):
         from clarinet.exceptions.domain import ValidationError
