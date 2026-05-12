@@ -114,7 +114,7 @@ Avoid: direct loguru import (use `from clarinet.utils.logger import logger`), sy
 - `ExitWorktree(remove)` requires `discard_changes=true` if there are commits not in main (even if already pushed)
 - **`gh pr merge --delete-branch` from inside a worktree leaves it on a deleted branch** — `git status` later shows "no branch / detached". Run `gh pr merge` from main and then `ExitWorktree(remove, discard_changes=true)`, or skip `--delete-branch` and let `ExitWorktree(remove)` clean up locally
 - **For PRs in review prefer `ExitWorktree(keep)` until merge** — review cycles need the same branch back; `EnterWorktree` only creates new branches, so resuming after `remove` means manual `git worktree add` (awkward, easy to violate "no branch switch in root")
-- **`gh pr create` is gated by a pre-PR review hook** — before `gh pr create`, run `Agent(subagent_type=pr-diff-reviewer)` to satisfy the hook and surface real blockers
+- **`gh pr create` gated by pre-PR review hook — run `Agent(subagent_type=pr-diff-reviewer)` BEFORE the FIRST `gh pr create`, not before merge.** Issues found pre-create cost one review cycle; the same issues found mid-review cost N cycles (real incident: PR #257 issues 7/8). `SKIP_PR_REVIEW=1` is **forbidden** unless the user explicitly asks for it. Re-running before merge is only needed for substantive changes after review feedback — for ≤20 lines of edits to already-reviewed files the hook auto-updates the marker.
 - The Stop hook blocks session end in a worktree — ask the user to choose:
   1. **Push + PR**: commit all → `git push -u origin <branch>` → `Agent(pr-diff-reviewer)` → `gh pr create` → `ExitWorktree(keep)` (remove only after PR merges)
   2. **Keep**: `ExitWorktree(keep)` — worktree stays for later
@@ -126,6 +126,7 @@ Avoid: direct loguru import (use `from clarinet.utils.logger import logger`), sy
 - **After `make check` — `Read` files again before any further `Edit`**: `ruff format` may have rewritten the source (line wrap, trailing commas, import order), and stale `Edit` strings will fail with "old_string not found"
 - New untyped Python dependency → add it to a `[[tool.mypy.overrides]]` block with `ignore_missing_imports = true` in `pyproject.toml`. Otherwise `make typecheck` fails with `Library stubs not installed for "<pkg>"` after the first import
 - Tests written and passing
+- pr-diff-reviewer прогнан перед **первым** `gh pr create` (см. Worktree Workflow); не использовать `SKIP_PR_REVIEW=1` без явной просьбы пользователя
 - Docstrings on non-trivial public functions
 - No secrets in code
 - Conventional commit messages
