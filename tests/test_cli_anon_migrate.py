@@ -8,7 +8,7 @@ from unittest.mock import patch
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from clarinet.cli.anon import migrate_paths
+from clarinet.cli.anon import _cleanup_empty_dirs, migrate_paths
 from clarinet.models.base import DicomQueryLevel
 from clarinet.models.study import Series, Study
 from clarinet.services.dicom.anon_path import build_context, render_working_folder
@@ -190,3 +190,79 @@ async def test_migrate_paths_rejects_invalid_template(
         mock_settings.storage_path = str(tmp_path)
         mock_dbm.async_session_factory = lambda: PassThroughSession(test_session)
         await migrate_paths(args)
+
+
+@pytest.mark.asyncio
+async def test_migrate_paths_cleanup_empty_leaves_unrelated_dirs(
+    test_session: AsyncSession, tmp_path: Path
+) -> None:
+    """``--cleanup-empty`` only walks up from migrated paths, leaving
+    other empty directories under ``storage_path`` alone."""
+    old_template = "{anon_patient_id}/{anon_study_uid}/{anon_series_uid}"
+    new_template = "{patient_auto_id}/{study_modalities}_{study_date}/{anon_series_uid}"
+
+    patient, study, series = await _seed_anonymized_series(
+        test_session,
+        patient_id="MIG_CLEAN_01",
+        auto_id=303,
+        study_uid="1.2.6003.1",
+        series_uid="1.2.6003.1.1",
+        anon_study_uid="2.25.603",
+        anon_series_uid="2.25.603.1",
+    )
+    old_dcm_anon = _populate_old_path(tmp_path, patient, study, series, old_template)
+
+    # Stray empty dir under storage_path that has nothing to do with the migration
+    stray_dir = tmp_path / "stray" / "subdir"
+    stray_dir.mkdir(parents=True)
+
+    args = argparse.Namespace(
+        from_template=old_template,
+        to_template=new_template,
+        dry_run=False,
+        cleanup_empty=True,
+    )
+    with (
+        patch("clarinet.cli.anon.db_manager") as mock_dbm,
+        patch("clarinet.cli.anon.settings") as mock_settings,
+    ):
+        mock_settings.storage_path = str(tmp_path)
+        mock_dbm.async_session_factory = lambda: PassThroughSession(test_session)
+        await migrate_paths(args)
+
+    # Old series dir is gone — walked up and removed
+    assert not old_dcm_anon.is_dir()
+    assert not old_dcm_anon.parent.is_dir()  # series_uid level pruned
+    # Stray dir is untouched
+    assert stray_dir.is_dir()
+
+
+def test_cleanup_empty_dirs_stops_at_root(tmp_path: Path) -> None:
+    """``_cleanup_empty_dirs`` does not delete or escape past ``stop_at``."""
+    inner = tmp_path / "a" / "b" / "c"
+    inner.mkdir(parents=True)
+    sibling = tmp_path / "a" / "sibling"
+    sibling.mkdir()
+
+    removed = _cleanup_empty_dirs([inner], stop_at=tmp_path)
+
+    # c, b are removed; a stays because sibling is non-empty (still exists);
+    # tmp_path itself never touched.
+    assert removed == 2
+    assert not inner.exists()
+    assert not (tmp_path / "a" / "b").exists()
+    assert (tmp_path / "a").exists()  # sibling pinned it
+    assert sibling.exists()
+    assert tmp_path.exists()
+
+
+def test_cleanup_empty_dirs_refuses_to_escape(tmp_path: Path) -> None:
+    """A root outside ``stop_at`` is silently skipped, not walked."""
+    outside = tmp_path.parent / f"outside-{tmp_path.name}"
+    outside.mkdir()
+    try:
+        removed = _cleanup_empty_dirs([outside], stop_at=tmp_path)
+        assert removed == 0
+        assert outside.exists()
+    finally:
+        outside.rmdir()
