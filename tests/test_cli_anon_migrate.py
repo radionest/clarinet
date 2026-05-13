@@ -622,3 +622,15 @@ async def test_include_working_folder_cleanup_prunes_empty_parents(
     assert not old_series_dir.exists()
     assert not old_study_dir.exists()  # pruned via ``same`` cleanup branch
     assert not old_patient_dir.exists()
+
+    # No stray old-template subdirs should appear inside the new patient_dir
+    # (regression guard: ``_merge_dir`` used to propagate the bare
+    # ``old_anon_study_uid/`` left behind by the SERIES pass).
+    ctx = build_context(patient=patient, study=study, series=series)
+    new_patient_dir = render_working_folder(new_tmpl, DicomQueryLevel.PATIENT, ctx, tmp_path)
+    new_study_dir = render_working_folder(new_tmpl, DicomQueryLevel.STUDY, ctx, tmp_path)
+    assert new_patient_dir.is_dir()
+    new_children = sorted(p.name for p in new_patient_dir.iterdir())
+    assert new_children == [new_study_dir.name], (
+        f"stray children in {new_patient_dir}: {new_children}"
+    )

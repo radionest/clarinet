@@ -49,6 +49,33 @@ from clarinet.utils.logger import logger
 MoveOutcome = Literal["moved", "same", "missing", "collision", "failed"]
 
 
+def _is_deep_empty(path: Path) -> bool:
+    """True if ``path`` is a directory whose subtree holds no files/symlinks.
+
+    Used by :func:`_merge_dir` to spot SERIES-pass leftovers: after the
+    SERIES pass renames ``old_anon_study/old_anon_series/`` out from under
+    ``old_anon_patient/``, the bare ``old_anon_study/`` directory becomes
+    deep-empty. We must not propagate it into the new layout — otherwise
+    every new patient_dir gets a stray ``<old_anon_study_uid>/`` subdir.
+    """
+    if not path.is_dir():
+        return False
+    return not any(
+        descendant.is_file() or descendant.is_symlink() for descendant in path.rglob("*")
+    )
+
+
+def _remove_deep_empty(path: Path) -> None:
+    """Recursively ``rmdir`` an empty subtree rooted at ``path``. Best-effort."""
+    if not path.is_dir():
+        return
+    for child in list(path.iterdir()):
+        if child.is_dir():
+            _remove_deep_empty(child)
+    with contextlib.suppress(OSError):
+        path.rmdir()
+
+
 def _move_dir_atomic(old: Path, new: Path, dry_run: bool, *, label: str) -> MoveOutcome:
     """Atomically rename ``old`` to ``new``. Skip whole entry on collision.
 
@@ -125,6 +152,13 @@ def _merge_dir(old: Path, new: Path, dry_run: bool, *, label: str) -> MoveOutcom
             logger.warning(f"{label}: target {dest} exists; skipping {child.name}.")
             collided_any = True
             continue
+        if child.is_dir() and _is_deep_empty(child):
+            # SERIES-pass leftover: bare directory whose content has already
+            # moved. Drop it instead of propagating to the new layout.
+            logger.debug(f"{label}: dropping deep-empty {child.name}.")
+            if not dry_run:
+                _remove_deep_empty(child)
+            continue
         if dry_run:
             logger.info(f"[dry-run] {label}: {child} -> {dest}")
             moved_any = True
@@ -137,14 +171,18 @@ def _merge_dir(old: Path, new: Path, dry_run: bool, *, label: str) -> MoveOutcom
         logger.info(f"{label}: moved {child} -> {dest}")
         moved_any = True
 
-    if not dry_run and moved_any:
-        # Best-effort: drop ``old`` if it's now empty. Surviving children
-        # (collisions) keep ``old`` around, which is fine.
+    if not dry_run:
+        # Best-effort: drop ``old`` if it's now empty (deep-empty children
+        # dropped, real children moved, no surviving collisions).
         with contextlib.suppress(OSError):
             old.rmdir()
 
     if collided_any and not moved_any:
         return "collision"
+    if not moved_any:
+        # All children were dropped as deep-empty leftovers; effectively
+        # nothing was migrated for this record.
+        return "same"
     return "moved"
 
 
