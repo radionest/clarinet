@@ -23,6 +23,7 @@ from clarinet.models.study import Series, Study
 from clarinet.repositories.record_repository import RecordRepository
 from clarinet.services.file_validation import validate_record_files
 from clarinet.settings import settings
+from tests.utils.test_helpers import RecordFactory
 
 # ---------------------------------------------------------------------------
 # Local fixtures
@@ -326,17 +327,13 @@ async def test_working_folder_series_level(
     test_session, patient_with_anon, study_with_anon, series_with_anon, rt_series
 ):
     """SERIES level → storage_path/patient_id/study_anon/series_anon."""
-    record = await _create_record(
+    record_read = await RecordFactory.create_record_with_relations(
         test_session,
-        patient_id=patient_with_anon.id,
-        study_uid=study_with_anon.study_uid,
-        series_uid=series_with_anon.series_uid,
-        rt_name=rt_series.name,
+        patient=patient_with_anon,
+        study=study_with_anon,
+        series=series_with_anon,
+        record_type=rt_series,
     )
-
-    repo = RecordRepository(test_session)
-    loaded = await repo.get_with_relations(record.id)
-    record_read = RecordRead.model_validate(loaded)
 
     expected = str(
         Path(settings.storage_path)
@@ -352,17 +349,12 @@ async def test_working_folder_study_level(
     test_session, patient_with_anon, study_with_anon, rt_study
 ):
     """STUDY level → storage_path/patient_id/study_anon."""
-    record = await _create_record(
+    record_read = await RecordFactory.create_record_with_relations(
         test_session,
-        patient_id=patient_with_anon.id,
-        study_uid=study_with_anon.study_uid,
-        series_uid=None,
-        rt_name=rt_study.name,
+        patient=patient_with_anon,
+        study=study_with_anon,
+        record_type=rt_study,
     )
-
-    repo = RecordRepository(test_session)
-    loaded = await repo.get_with_relations(record.id)
-    record_read = RecordRead.model_validate(loaded)
 
     expected = str(Path(settings.storage_path) / f"{settings.anon_id_prefix}_42" / "ANON_STUDY_WF")
     assert record_read.working_folder == expected
@@ -371,17 +363,11 @@ async def test_working_folder_study_level(
 @pytest.mark.asyncio
 async def test_working_folder_patient_level(test_session, patient_with_anon, rt_patient):
     """PATIENT level → storage_path/patient_id."""
-    record = await _create_record(
+    record_read = await RecordFactory.create_record_with_relations(
         test_session,
-        patient_id=patient_with_anon.id,
-        study_uid=None,
-        series_uid=None,
-        rt_name=rt_patient.name,
+        patient=patient_with_anon,
+        record_type=rt_patient,
     )
-
-    repo = RecordRepository(test_session)
-    loaded = await repo.get_with_relations(record.id)
-    record_read = RecordRead.model_validate(loaded)
 
     expected = str(Path(settings.storage_path) / f"{settings.anon_id_prefix}_42")
     assert record_read.working_folder == expected

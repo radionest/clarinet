@@ -7,7 +7,7 @@ from typing import Any
 from sqlmodel import Session
 
 from clarinet.models.patient import Patient
-from clarinet.models.record import Record, RecordStatus, RecordType
+from clarinet.models.record import Record, RecordRead, RecordStatus, RecordType
 from clarinet.models.study import Series, Study
 from clarinet.models.user import User, UserRole
 from clarinet.utils.auth import get_password_hash
@@ -115,6 +115,43 @@ class RecordFactory:
         await session.commit()
         await session.refresh(record)
         return record
+
+    @staticmethod
+    async def create_record_with_relations(
+        session: Session,
+        *,
+        patient: Patient,
+        record_type: RecordType,
+        study: Study | None = None,
+        series: Series | None = None,
+        status: RecordStatus = RecordStatus.pending,
+        **record_kwargs: Any,
+    ) -> RecordRead:
+        """Persist a Record and return ``RecordRead`` with relationships eagerly loaded.
+
+        Mirrors the production code path: ``RecordRepository.get_with_relations()``
+        → ``RecordRead.model_validate(record)``. Use this in tests that touch
+        computed fields (``working_folder``, ``slicer_args_formatted``) and want
+        to avoid the eager-load + DTO-validate boilerplate. Tests that need the
+        raw ORM ``Record`` should keep using the local ``_create_record`` helper.
+        """
+        from clarinet.repositories.record_repository import RecordRepository
+
+        record = Record(
+            patient_id=patient.id,
+            study_uid=study.study_uid if study else None,
+            series_uid=series.series_uid if series else None,
+            record_type_name=record_type.name,
+            status=status,
+            **record_kwargs,
+        )
+        session.add(record)
+        await session.commit()
+        await session.refresh(record)
+
+        repo = RecordRepository(session)
+        loaded = await repo.get_with_relations(record.id)
+        return RecordRead.model_validate(loaded)
 
 
 class PatientFactory:

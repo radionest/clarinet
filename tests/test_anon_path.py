@@ -276,6 +276,22 @@ class TestValidateTemplate:
         with pytest.raises(ValueError, match="non-empty"):
             validate_template("")
 
+    def test_empty_placeholder_rejected(self) -> None:
+        with pytest.raises((ValueError, IndexError, KeyError)):
+            validate_template("{patient_id}/{}/{series_uid}")
+
+    def test_unclosed_brace_rejected(self) -> None:
+        with pytest.raises(ValueError):
+            validate_template("{patient_id/{study_uid}/{series_uid}")
+
+    def test_mixed_valid_invalid_in_segment(self) -> None:
+        with pytest.raises(ValueError, match="unknown placeholder"):
+            validate_template("{patient_id}_{bogus}/{study_uid}/{series_uid}")
+
+    def test_duplicate_placeholder_passes(self) -> None:
+        template = "{patient_id}_{patient_id}/{study_uid}/{series_uid}"
+        assert validate_template(template) == template
+
 
 class TestSeriesReadWorkingFolder:
     """SeriesRead.working_folder uses the resolver — no hardcoded layout."""
