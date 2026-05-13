@@ -7,8 +7,9 @@ import api/workflow as wf_api
 import api/workflow_models.{
   type ActionPreview, type DryRunResponse, type FireResponse,
   type TriggerKindRequest, type WorkflowGraph, type WorkflowNode,
-  DataUpdateTrigger, FileChangeTrigger, PipelineNode, RecordTypeNode,
-  StatusTrigger, TriggerOnDataUpdate, TriggerOnFileChange, TriggerOnStatus,
+  CallFunctionNode, DataUpdateTrigger, EntityNode, FileChangeTrigger, FileNode,
+  PipelineNode, PipelineStepNode, RecordTypeNode, StatusTrigger,
+  TriggerOnDataUpdate, TriggerOnFileChange, TriggerOnStatus,
 }
 import clarinet_frontend/i18n
 import components/status_badge
@@ -65,21 +66,13 @@ pub type Model {
   )
 }
 
-/// Where a dry-run/fire was initiated. Edge clicks remained as a legacy entry
-/// point from PR 1; PR 2 introduced node clicks (`Fire trigger…` on a
-/// record_type node). Carrying the discriminator on `PendingTrigger` lets the
-/// dry-run panel render an accurate "Dry-run: <label>" header and the Re-run
-/// button replay against the original source.
-pub type TriggerSource {
-  SourceEdge(edge_id: String)
-  SourceNode(node_id: String)
-}
-
 /// What `Fire` would dispatch — captured at `dry_run` time so the digest
 /// from the response matches the same parameters when the admin confirms.
+/// `node_id` is the record_type node the trigger was fired from; the panel
+/// uses it for the "Dry-run: <node label>" header and the Re-run button.
 pub type PendingTrigger {
   PendingTrigger(
-    source: TriggerSource,
+    node_id: String,
     trigger_kind: TriggerKindRequest,
     status_override: Option(String),
   )
@@ -680,7 +673,10 @@ pub fn update(
                 Some(name) -> dispatch_local(WorkflowTogglePipeline(name))
                 None -> effect.none()
               }
-            _ -> effect.none()
+            // Informational nodes — clicking only selects (no side effect).
+            // Exhaustive match so adding a new NodeKind is a compile error.
+            EntityNode | FileNode | PipelineStepNode | CallFunctionNode ->
+              effect.none()
           }
         None -> effect.none()
       }
@@ -773,7 +769,7 @@ pub fn update(
         PickerOpen(node_id, kind, status_override), Ok(rid) -> {
           let pending =
             PendingTrigger(
-              source: SourceNode(node_id),
+              node_id: node_id,
               trigger_kind: kind,
               status_override: status_override,
             )
@@ -956,17 +952,15 @@ pub fn available_kinds_from_node(
 pub fn default_trigger_kind(
   kinds: List(TriggerKindRequest),
 ) -> Option(TriggerKindRequest) {
-  case list.contains(kinds, StatusTrigger) {
-    True -> Some(StatusTrigger)
-    False ->
-      case list.contains(kinds, DataUpdateTrigger) {
-        True -> Some(DataUpdateTrigger)
-        False ->
-          case list.contains(kinds, FileChangeTrigger) {
-            True -> Some(FileChangeTrigger)
-            False -> None
-          }
-      }
+  case
+    list.contains(kinds, StatusTrigger),
+    list.contains(kinds, DataUpdateTrigger),
+    list.contains(kinds, FileChangeTrigger)
+  {
+    True, _, _ -> Some(StatusTrigger)
+    _, True, _ -> Some(DataUpdateTrigger)
+    _, _, True -> Some(FileChangeTrigger)
+    _, _, _ -> None
   }
 }
 
@@ -1638,7 +1632,7 @@ fn workflow_side_panel(model: Model, graph: WorkflowGraph) -> Element(Msg) {
             Some(node_id), _ ->
               case list.find(graph.nodes, fn(n) { n.id == node_id }) {
                 Ok(node) ->
-                  wf_renderer.node_panel(node, node_panel_footer(node))
+                  wf_renderer.node_panel(node, node_panel_footer(node, graph))
                 Error(_) -> wf_renderer.empty_panel()
               }
             _, Some(edge_id) ->
@@ -1684,19 +1678,28 @@ fn fire_hint(kind: workflow_models.TriggerKind) -> Element(Msg) {
 }
 
 /// Per-node footer rendered inside `wf_renderer.node_panel`. For record_type
-/// nodes we surface a "Fire trigger…" button that reopens the picker after
-/// it has been cancelled (the primary entry point — clicking the node on the
-/// canvas — is in `WorkflowNodeClicked`).
-fn node_panel_footer(node: WorkflowNode) -> Element(Msg) {
+/// nodes with at least one fireable outgoing edge we surface "Fire trigger…"
+/// (the picker's secondary entry point — clicking the node on the canvas is
+/// the primary one in `WorkflowNodeClicked`). When the record_type has no
+/// fireable triggers we say so explicitly instead of leaving the user puzzled
+/// by a non-reactive button.
+fn node_panel_footer(node: WorkflowNode, graph: WorkflowGraph) -> Element(Msg) {
   case node.kind {
     RecordTypeNode ->
-      html.button(
-        [
-          attribute.class("btn btn-primary btn-sm"),
-          event.on_click(WorkflowRecordTypeNodeClicked(node.id)),
-        ],
-        [html.text("Fire trigger…")],
-      )
+      case available_kinds_from_node(graph, node.id) {
+        [] ->
+          html.p([attribute.class("text-muted")], [
+            html.text("No fireable triggers for this record type."),
+          ])
+        _ ->
+          html.button(
+            [
+              attribute.class("btn btn-primary btn-sm"),
+              event.on_click(WorkflowRecordTypeNodeClicked(node.id)),
+            ],
+            [html.text("Fire trigger…")],
+          )
+      }
     _ -> wf_renderer.expand_hint(node)
   }
 }
@@ -1704,7 +1707,7 @@ fn node_panel_footer(node: WorkflowNode) -> Element(Msg) {
 fn dry_run_panel(model: Model, graph: WorkflowGraph) -> Element(Msg) {
   let trigger = current_trigger(model.plan_state)
   let label_text = case trigger {
-    Some(t) -> source_label(t.source, graph)
+    Some(t) -> node_label(graph, t.node_id)
     None -> ""
   }
   let body = case model.plan_state {
@@ -1726,20 +1729,13 @@ fn dry_run_panel(model: Model, graph: WorkflowGraph) -> Element(Msg) {
   ])
 }
 
-/// Human-friendly label for the dry-run panel header. Edges show their kind
-/// + id (the same wording as the side panel); nodes show their label + id.
-fn source_label(source: TriggerSource, graph: WorkflowGraph) -> String {
-  case source {
-    SourceEdge(edge_id) ->
-      case list.find(graph.edges, fn(e) { e.id == edge_id }) {
-        Ok(e) -> workflow_models.edge_kind_label(e.kind) <> " (" <> e.id <> ")"
-        Error(_) -> edge_id
-      }
-    SourceNode(node_id) ->
-      case list.find(graph.nodes, fn(n) { n.id == node_id }) {
-        Ok(n) -> n.label <> " (" <> node_id <> ")"
-        Error(_) -> node_id
-      }
+/// Human-friendly node label for the dry-run panel header — "<label> (<id>)",
+/// falling back to just the id when the node is no longer in the graph (e.g.
+/// after a schema change between dry-run and re-render).
+fn node_label(graph: WorkflowGraph, node_id: String) -> String {
+  case list.find(graph.nodes, fn(n) { n.id == node_id }) {
+    Ok(n) -> n.label <> " (" <> node_id <> ")"
+    Error(_) -> node_id
   }
 }
 
@@ -1801,7 +1797,10 @@ fn trigger_kind_radio(
         attribute.name("trigger-kind"),
         attribute.value(value_str),
         attribute.checked(kind == current),
-        event.on_check(fn(_) { PickerKindChanged(kind) }),
+        // `on_change` fires only when the radio becomes selected (browser
+        // suppresses change events on un-selection within the same group), so
+        // exactly one PickerKindChanged is dispatched per user click.
+        event.on_change(fn(_) { PickerKindChanged(kind) }),
       ]),
       html.text(" " <> trigger_kind_request_label(kind)),
     ],

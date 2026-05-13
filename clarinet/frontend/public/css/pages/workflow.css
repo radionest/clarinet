@@ -300,6 +300,31 @@
     color: var(--text-secondary);
 }
 
+/* --- Trigger picker (record_type node → choose trigger_kind) --- */
+
+.workflow-trigger-picker > h5 {
+    margin: 0 0 var(--spacing-sm);
+}
+
+.workflow-picker-kinds {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-xs);
+    margin-bottom: var(--spacing-md);
+}
+
+.workflow-picker-radio-label {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+    cursor: pointer;
+    user-select: none;
+}
+
+.workflow-picker-radio-label input[type="radio"] {
+    margin: 0;
+}
+
 @media (max-width: 900px) {
     .workflow-layout {
         grid-template-columns: 1fr;
