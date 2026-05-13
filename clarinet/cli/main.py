@@ -1255,13 +1255,16 @@ def main() -> None:
         "--from",
         dest="from_template",
         required=True,
-        help="Source template (e.g. '{anon_patient_id}/{anon_study_uid}/{anon_series_uid}')",
+        help=(
+            "Source template (e.g. '{anon_patient_id}/{anon_study_uid}/{anon_series_uid}'). "
+            "See SUPPORTED_PLACEHOLDERS in clarinet.utils.path_template for the full set."
+        ),
     )
     anon_migrate.add_argument(
         "--to",
         dest="to_template",
         required=True,
-        help="Target template (must satisfy the same validation rules)",
+        help="Target template (same placeholders and validation rules as --from)",
     )
     anon_migrate.add_argument(
         "--dry-run",
@@ -1272,6 +1275,15 @@ def main() -> None:
         "--cleanup-empty",
         action="store_true",
         help="Remove empty parent directories after a successful move",
+    )
+    anon_migrate.add_argument(
+        "--include-working-folder",
+        dest="include_working_folder",
+        action="store_true",
+        help=(
+            "Move full series_dir (incl. pipeline outputs) and STUDY/PATIENT-level "
+            "Record working_folders, not just dcm_anon. Three passes: SERIES, STUDY, PATIENT."
+        ),
     )
 
     # deploy command
