@@ -4,9 +4,10 @@
 // — keep them in sync if the backend Pydantic shape changes.
 
 import api/workflow_models.{
-  ActionPreview, CallFunctionAction, CreateRecordAction, CreateRecordEdge,
-  FiringRecord, ParentRecordIdSource, PipelineNode, Position, RecordTypeNode,
-  TriggerOnStatus, WorkflowEdge, WorkflowNode,
+  ActionPreview, CallFunctionAction, CallFunctionDispatch, CreateRecordAction,
+  CreateRecordEdge, DispatchPreview, FiringRecord, ParentRecordIdSource,
+  PipelineDispatch, PipelineNode, Position, RecordTypeNode, TriggerOnStatus,
+  WorkflowEdge, WorkflowNode,
 }
 import gleam/json
 import gleam/list
@@ -216,4 +217,76 @@ pub fn pipeline_name_from_id_test() {
     None,
   )
   should.equal(workflow_models.pipeline_name_from_id("plain"), None)
+}
+
+// --- dispatch_dry_run_decoder ---
+
+pub fn dispatch_dry_run_decoder_call_function_test() {
+  let json_str =
+    "{\"preview\":{\"kind\":\"call_function\","
+    <> "\"node_id\":\"call:tasks.scripts.foo.my_func\","
+    <> "\"label\":\"call my_func\","
+    <> "\"record_id\":42,"
+    <> "\"payload_preview\":{\"function_name\":\"my_func\"}},"
+    <> "\"digest\":\"abcdef0123456789\"}"
+
+  let assert Ok(resp) =
+    json.parse(json_str, workflow_models.dispatch_dry_run_decoder())
+  should.equal(resp.digest, "abcdef0123456789")
+  should.equal(
+    resp.preview,
+    DispatchPreview(
+      kind: CallFunctionDispatch,
+      node_id: "call:tasks.scripts.foo.my_func",
+      label: "call my_func",
+      record_id: 42,
+    ),
+  )
+}
+
+pub fn dispatch_dry_run_decoder_pipeline_test() {
+  let json_str =
+    "{\"preview\":{\"kind\":\"pipeline\","
+    <> "\"node_id\":\"pipeline:ct_seg\","
+    <> "\"label\":\"pipeline ct_seg\","
+    <> "\"record_id\":1,"
+    <> "\"payload_preview\":{\"pipeline_name\":\"ct_seg\",\"step_count\":3}},"
+    <> "\"digest\":\"1111111111111111\"}"
+
+  let assert Ok(resp) =
+    json.parse(json_str, workflow_models.dispatch_dry_run_decoder())
+  should.equal(resp.preview.kind, PipelineDispatch)
+  should.equal(resp.preview.node_id, "pipeline:ct_seg")
+  should.equal(resp.digest, "1111111111111111")
+}
+
+// --- dispatch_decoder ---
+
+pub fn dispatch_decoder_test() {
+  let json_str =
+    "{\"preview\":{\"kind\":\"pipeline\","
+    <> "\"node_id\":\"pipeline:p1\","
+    <> "\"label\":\"pipeline p1\","
+    <> "\"record_id\":7,"
+    <> "\"payload_preview\":{\"pipeline_name\":\"p1\",\"step_count\":2}},"
+    <> "\"task_id\":\"task-abc-123\"}"
+
+  let assert Ok(resp) = json.parse(json_str, workflow_models.dispatch_decoder())
+  should.equal(resp.task_id, "task-abc-123")
+  should.equal(resp.preview.kind, PipelineDispatch)
+}
+
+pub fn is_dispatchable_node_test() {
+  should.equal(workflow_models.is_dispatchable_node("call:mod.fn"), True)
+  should.equal(workflow_models.is_dispatchable_node("pipeline:p1"), True)
+  should.equal(
+    workflow_models.is_dispatchable_node("pipeline_step:p1::0"),
+    False,
+  )
+  should.equal(
+    workflow_models.is_dispatchable_node("record_type:foo"),
+    False,
+  )
+  should.equal(workflow_models.is_dispatchable_node("entity:series"), False)
+  should.equal(workflow_models.is_dispatchable_node("plain"), False)
 }

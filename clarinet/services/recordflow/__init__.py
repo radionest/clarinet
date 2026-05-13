@@ -21,6 +21,7 @@ Example usage:
     await engine.handle_record_status_change(record, old_status)
 """
 
+from . import call_function_registry
 from .action_preview import ActionPreview, action_to_preview
 from .engine import RecordFlowEngine
 from .flow_action import (
@@ -71,6 +72,7 @@ __all__ = [
     "RecordFlowEngine",
     "UpdateRecordAction",
     "action_to_preview",
+    "call_function_registry",
     "discover_and_load_flows",
     "file",
     "find_flow_files",

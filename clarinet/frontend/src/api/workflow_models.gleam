@@ -130,6 +130,39 @@ pub type FireResponse {
   FireResponse(executed_actions: List(ActionPreview))
 }
 
+/// Which kind of node `/dispatch-dry-run` / `/dispatch` is targeting.
+///
+/// Backend (clarinet/api/routers/workflow.py) currently emits only these two
+/// values. The graph also has `record_type`, `entity`, `file`, `pipeline_step`
+/// kinds, but those are not directly dispatchable.
+pub type DispatchKind {
+  CallFunctionDispatch
+  PipelineDispatch
+}
+
+/// Serializable preview of a planned direct-dispatch (input to the digest).
+///
+/// `payload_preview` is intentionally omitted from the gleam model: it carries
+/// type-varying values (function name, args list, pipeline step count) and the
+/// UI only needs `label` + `kind` to render the confirm panel. Re-introduce
+/// when the UI starts displaying payload details.
+pub type DispatchPreview {
+  DispatchPreview(
+    kind: DispatchKind,
+    node_id: String,
+    label: String,
+    record_id: Int,
+  )
+}
+
+pub type DispatchDryRunResponse {
+  DispatchDryRunResponse(preview: DispatchPreview, digest: String)
+}
+
+pub type DispatchResponse {
+  DispatchResponse(preview: DispatchPreview, task_id: String)
+}
+
 // --- Encoders ---
 
 pub fn trigger_kind_request_to_string(t: TriggerKindRequest) -> String {
@@ -185,6 +218,26 @@ pub fn action_type_label(t: ActionType) -> String {
   }
 }
 
+pub fn dispatch_kind_label(k: DispatchKind) -> String {
+  case k {
+    CallFunctionDispatch -> "Call function"
+    PipelineDispatch -> "Pipeline"
+  }
+}
+
+/// Is this node id dispatchable via `/dispatch-dry-run`?
+///
+/// Mirrors backend `_parse_node_id`: `call:*` and `pipeline:*` only. The
+/// `pipeline_step:*` prefix is intentionally NOT dispatchable (depends on
+/// previous step's output).
+pub fn is_dispatchable_node(id: String) -> Bool {
+  case string.split_once(id, on: ":") {
+    Ok(#("call", _)) -> True
+    Ok(#("pipeline", _)) -> True
+    _ -> False
+  }
+}
+
 /// Extract the pipeline name from a `WorkflowNode.id`.
 ///
 /// Backend `make_pipeline_id` (services/workflow_graph/models.py) emits
@@ -226,6 +279,40 @@ pub fn fire_decoder() -> decode.Decoder(FireResponse) {
     decode.list(action_preview_decoder()),
   )
   decode.success(FireResponse(executed_actions: executed_actions))
+}
+
+pub fn dispatch_dry_run_decoder() -> decode.Decoder(DispatchDryRunResponse) {
+  use preview <- decode.field("preview", dispatch_preview_decoder())
+  use digest <- decode.field("digest", decode.string)
+  decode.success(DispatchDryRunResponse(preview: preview, digest: digest))
+}
+
+pub fn dispatch_decoder() -> decode.Decoder(DispatchResponse) {
+  use preview <- decode.field("preview", dispatch_preview_decoder())
+  use task_id <- decode.field("task_id", decode.string)
+  decode.success(DispatchResponse(preview: preview, task_id: task_id))
+}
+
+fn dispatch_preview_decoder() -> decode.Decoder(DispatchPreview) {
+  use kind <- decode.field("kind", dispatch_kind_decoder())
+  use node_id <- decode.field("node_id", decode.string)
+  use label <- decode.field("label", decode.string)
+  use record_id <- decode.field("record_id", decode.int)
+  decode.success(DispatchPreview(
+    kind: kind,
+    node_id: node_id,
+    label: label,
+    record_id: record_id,
+  ))
+}
+
+fn dispatch_kind_decoder() -> decode.Decoder(DispatchKind) {
+  use raw <- decode.then(decode.string)
+  case raw {
+    "call_function" -> decode.success(CallFunctionDispatch)
+    "pipeline" -> decode.success(PipelineDispatch)
+    _ -> decode.failure(CallFunctionDispatch, "DispatchKind")
+  }
 }
 
 fn node_decoder() -> decode.Decoder(WorkflowNode) {

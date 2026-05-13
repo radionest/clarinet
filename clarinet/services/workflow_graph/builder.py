@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from clarinet.services.recordflow.call_function_registry import make_call_function_id
 from clarinet.services.recordflow.flow_action import (
     CallFunctionAction,
     CreateRecordAction,
@@ -343,7 +344,7 @@ def _emit_action_edge(
             fmodule = getattr(action.function, "__module__", None) or "?"
             # Include module path in the node id so two functions sharing
             # __name__ across modules don't collapse into one call-node.
-            target_id = f"call:{fmodule}.{fname}"
+            target_id = make_call_function_id(action.function)
             ctx.add_node(
                 Node(
                     id=target_id,

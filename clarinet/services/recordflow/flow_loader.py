@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 
 from clarinet.utils.logger import logger
 
+from . import call_function_registry
 from .engine import RecordFlowEngine
 from .flow_file import FILE_REGISTRY
 from .flow_record import ENTITY_REGISTRY, RECORD_REGISTRY
@@ -57,6 +58,7 @@ def load_flows_from_file(file_path: Path) -> list[FlowRecord | FlowFileRecord]:
     RECORD_REGISTRY.clear()
     ENTITY_REGISTRY.clear()
     FILE_REGISTRY.clear()
+    call_function_registry.reset()
 
     # Add parent directory to sys.path so sibling imports work
     parent_dir = file_path.parent

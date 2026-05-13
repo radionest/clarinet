@@ -6,8 +6,8 @@
 import api/http_client
 import api/types.{type ApiError}
 import api/workflow_models.{
-  type DryRunResponse, type FireResponse, type TriggerKindRequest,
-  type WorkflowGraph,
+  type DispatchDryRunResponse, type DispatchResponse, type DryRunResponse,
+  type FireResponse, type TriggerKindRequest, type WorkflowGraph,
 }
 import gleam/int
 import gleam/javascript/promise.{type Promise}
@@ -95,6 +95,43 @@ pub fn fire(
   })
 }
 
+/// Plan a direct enqueue of one `call:*` or `pipeline:*` node — returns
+/// preview + digest for `/dispatch`. 404 if the node id is unknown to the
+/// server (registry or pipeline map); 422 if the node kind is not
+/// dispatchable.
+pub fn dispatch_dry_run(
+  node_id: String,
+  record_id: Int,
+) -> Promise(Result(DispatchDryRunResponse, ApiError)) {
+  let body = dispatch_body(node_id, record_id, None)
+  http_client.post(base_path <> "/dispatch-dry-run", body)
+  |> promise.map(fn(res) {
+    result.try(res, http_client.decode_response(
+      _,
+      workflow_models.dispatch_dry_run_decoder(),
+      "Invalid dispatch-dry-run response",
+    ))
+  })
+}
+
+/// Enqueue the planned action into TaskIQ after digest verification.
+/// Same idempotency / replay caveats as `/fire`.
+pub fn dispatch(
+  node_id: String,
+  record_id: Int,
+  plan_digest: String,
+) -> Promise(Result(DispatchResponse, ApiError)) {
+  let body = dispatch_body(node_id, record_id, Some(plan_digest))
+  http_client.post(base_path <> "/dispatch", body)
+  |> promise.map(fn(res) {
+    result.try(res, http_client.decode_response(
+      _,
+      workflow_models.dispatch_decoder(),
+      "Invalid dispatch response",
+    ))
+  })
+}
+
 /// Classify a workflow-load error into a `(LoadStatus, service_disabled)`
 /// pair shared by the admin page and the in-record workflow section.
 /// 503 from `_require_engine` indicates `recordflow_enabled=False` —
@@ -127,6 +164,22 @@ fn trigger_body(
   let with_digest = case plan_digest {
     Some(d) -> [#("plan_digest", json.string(d)), ..with_status]
     None -> with_status
+  }
+  json.object(with_digest) |> json.to_string
+}
+
+fn dispatch_body(
+  node_id: String,
+  record_id: Int,
+  plan_digest: Option(String),
+) -> String {
+  let base = [
+    #("node_id", json.string(node_id)),
+    #("record_id", json.int(record_id)),
+  ]
+  let with_digest = case plan_digest {
+    Some(d) -> [#("plan_digest", json.string(d)), ..base]
+    None -> base
   }
   json.object(with_digest) |> json.to_string
 }

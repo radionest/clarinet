@@ -678,6 +678,7 @@ def clear_recordflow_registries():
         ENTITY_REGISTRY,
         FILE_REGISTRY,
         RECORD_REGISTRY,
+        call_function_registry,
     )
 
     def _clear() -> None:
@@ -686,6 +687,7 @@ def clear_recordflow_registries():
         FILE_REGISTRY.clear()
         _PIPELINE_REGISTRY.clear()
         _TASK_REGISTRY.clear()
+        call_function_registry.reset()
 
     _clear()
     yield

@@ -27,7 +27,13 @@ from tests.utils.factories import (
     make_user,
     seed_record,
 )
-from tests.utils.urls import WORKFLOW_DRY_RUN, WORKFLOW_FIRE, WORKFLOW_GRAPH
+from tests.utils.urls import (
+    WORKFLOW_DISPATCH,
+    WORKFLOW_DISPATCH_DRY_RUN,
+    WORKFLOW_DRY_RUN,
+    WORKFLOW_FIRE,
+    WORKFLOW_GRAPH,
+)
 
 pytestmark = pytest.mark.usefixtures("clear_recordflow_registries")
 
@@ -488,6 +494,269 @@ class TestDryRunAndFire:
         d1 = (await client.post(WORKFLOW_DRY_RUN, json=body)).json()["digest"]
         d2 = (await client.post(WORKFLOW_DRY_RUN, json=body)).json()["digest"]
         assert d1 == d2
+
+
+# ── /dispatch-dry-run and /dispatch ─────────────────────────────────────
+
+
+def dispatch_test_callback(record, context, client):
+    """Module-level callback so its (module, __name__) is stable across runs."""
+    return None
+
+
+@pytest.fixture
+def configured_engine_with_call():
+    """Engine with a flow that has a ``.call(dispatch_test_callback)`` action.
+
+    The DSL method auto-registers the callable into
+    :mod:`clarinet.services.recordflow.call_function_registry`, so
+    ``/dispatch-dry-run`` and ``/dispatch`` can look up the bound
+    :class:`CallFunctionAction` by its node id.
+    """
+    from clarinet.services.pipeline import get_broker_for
+    from clarinet.services.pipeline.chain import Pipeline
+
+    mock_client = AsyncMock(spec=ClarinetClient)
+    mock_client.find_records.return_value = []
+    mock_client._authenticated = True
+    mock_client.service_token = None
+    mock_client.client = AsyncMock()
+    engine = RecordFlowEngine(mock_client)
+    engine._api_verified = True
+
+    flow = FlowRecord("wf-parent")
+    flow.on_status("finished")
+    flow.call(dispatch_test_callback)
+    engine.register_flow(flow)
+
+    # Also register a pipeline so dispatching ``pipeline:p1`` is exercisable.
+    broker = get_broker_for("test_q")
+
+    @broker.task
+    async def dispatch_step(_msg: dict) -> dict:
+        return {}
+
+    dispatch_step._pipeline_queue = "test_q"  # type: ignore[attr-defined]
+    Pipeline("p1").step(dispatch_step)
+
+    previous_engine = getattr(app.state, "recordflow_engine", None)
+    previous_cache = getattr(app.state, "workflow_used_digests", None)
+    app.state.recordflow_engine = engine
+    app.state.workflow_used_digests = None
+    try:
+        yield engine
+    finally:
+        app.state.recordflow_engine = previous_engine
+        app.state.workflow_used_digests = previous_cache
+
+
+def _make_dispatch_kiq_mock(task_id: str = "fake-task-1"):
+    """Helper: AsyncMock-shaped task object returning ``.task_id``."""
+    return AsyncMock(return_value=type("FakeTask", (), {"task_id": task_id})())
+
+
+class TestDispatchDryRun:
+    @pytest.mark.asyncio
+    async def test_unknown_node_kind_returns_422(
+        self, client, configured_engine_with_call, workflow_env
+    ):
+        resp = await client.post(
+            WORKFLOW_DISPATCH_DRY_RUN,
+            json={"node_id": "record_type:wf-parent", "record_id": workflow_env["parent"].id},
+        )
+        assert resp.status_code == 422
+
+    @pytest.mark.asyncio
+    async def test_unknown_call_function_returns_404(
+        self, client, configured_engine_with_call, workflow_env
+    ):
+        resp = await client.post(
+            WORKFLOW_DISPATCH_DRY_RUN,
+            json={"node_id": "call:nope.fn", "record_id": workflow_env["parent"].id},
+        )
+        assert resp.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_unknown_pipeline_returns_404(
+        self, client, configured_engine_with_call, workflow_env
+    ):
+        resp = await client.post(
+            WORKFLOW_DISPATCH_DRY_RUN,
+            json={"node_id": "pipeline:does_not_exist", "record_id": workflow_env["parent"].id},
+        )
+        assert resp.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_call_function_returns_preview_and_digest(
+        self, client, configured_engine_with_call, workflow_env
+    ):
+        from clarinet.services.recordflow import call_function_registry
+
+        node_id = call_function_registry.make_call_function_id(dispatch_test_callback)
+        resp = await client.post(
+            WORKFLOW_DISPATCH_DRY_RUN,
+            json={"node_id": node_id, "record_id": workflow_env["parent"].id},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert isinstance(body["digest"], str) and len(body["digest"]) == 16
+        preview = body["preview"]
+        assert preview["kind"] == "call_function"
+        assert preview["node_id"] == node_id
+        assert preview["record_id"] == workflow_env["parent"].id
+        assert preview["payload_preview"]["function_name"] == "dispatch_test_callback"
+
+    @pytest.mark.asyncio
+    async def test_pipeline_returns_preview_and_digest(
+        self, client, configured_engine_with_call, workflow_env
+    ):
+        resp = await client.post(
+            WORKFLOW_DISPATCH_DRY_RUN,
+            json={"node_id": "pipeline:p1", "record_id": workflow_env["parent"].id},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["preview"]["kind"] == "pipeline"
+        assert body["preview"]["payload_preview"]["pipeline_name"] == "p1"
+        assert body["preview"]["payload_preview"]["step_count"] == 1
+
+    @pytest.mark.asyncio
+    async def test_digest_stable_across_calls(
+        self, client, configured_engine_with_call, workflow_env
+    ):
+        from clarinet.services.recordflow import call_function_registry
+
+        node_id = call_function_registry.make_call_function_id(dispatch_test_callback)
+        payload = {"node_id": node_id, "record_id": workflow_env["parent"].id}
+        d1 = (await client.post(WORKFLOW_DISPATCH_DRY_RUN, json=payload)).json()["digest"]
+        d2 = (await client.post(WORKFLOW_DISPATCH_DRY_RUN, json=payload)).json()["digest"]
+        assert d1 == d2
+
+
+class TestDispatch:
+    @pytest.mark.asyncio
+    async def test_dispatch_call_function_enqueues_and_returns_task_id(
+        self, client, configured_engine_with_call, workflow_env, monkeypatch
+    ):
+        from clarinet.services.recordflow import call_function_registry
+
+        node_id = call_function_registry.make_call_function_id(dispatch_test_callback)
+        kiq_mock = _make_dispatch_kiq_mock("task-abc")
+        monkeypatch.setattr(
+            "clarinet.api.routers.workflow.call_registered_callable.kiq",
+            kiq_mock,
+        )
+
+        dry = await client.post(
+            WORKFLOW_DISPATCH_DRY_RUN,
+            json={"node_id": node_id, "record_id": workflow_env["parent"].id},
+        )
+        digest = dry.json()["digest"]
+
+        resp = await client.post(
+            WORKFLOW_DISPATCH,
+            json={
+                "node_id": node_id,
+                "record_id": workflow_env["parent"].id,
+                "plan_digest": digest,
+            },
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["task_id"] == "task-abc"
+        assert body["preview"]["kind"] == "call_function"
+        kiq_mock.assert_awaited_once()
+        sent_msg = kiq_mock.await_args[0][0]
+        assert sent_msg["payload"]["call_function_id"] == node_id
+        assert sent_msg["record_id"] == workflow_env["parent"].id
+
+    @pytest.mark.asyncio
+    async def test_dispatch_pipeline_calls_run_and_returns_task_id(
+        self, client, configured_engine_with_call, workflow_env, monkeypatch
+    ):
+        from clarinet.services.pipeline.chain import Pipeline
+
+        run_mock = AsyncMock(return_value=type("FakeTask", (), {"task_id": "task-pipe-1"})())
+        monkeypatch.setattr(Pipeline, "run", run_mock)
+
+        dry = await client.post(
+            WORKFLOW_DISPATCH_DRY_RUN,
+            json={"node_id": "pipeline:p1", "record_id": workflow_env["parent"].id},
+        )
+        digest = dry.json()["digest"]
+
+        resp = await client.post(
+            WORKFLOW_DISPATCH,
+            json={
+                "node_id": "pipeline:p1",
+                "record_id": workflow_env["parent"].id,
+                "plan_digest": digest,
+            },
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["task_id"] == "task-pipe-1"
+        assert body["preview"]["kind"] == "pipeline"
+        run_mock.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_dispatch_wrong_digest_returns_409(
+        self, client, configured_engine_with_call, workflow_env, monkeypatch
+    ):
+        from clarinet.services.recordflow import call_function_registry
+
+        node_id = call_function_registry.make_call_function_id(dispatch_test_callback)
+        kiq_mock = _make_dispatch_kiq_mock()
+        monkeypatch.setattr(
+            "clarinet.api.routers.workflow.call_registered_callable.kiq",
+            kiq_mock,
+        )
+
+        resp = await client.post(
+            WORKFLOW_DISPATCH,
+            json={
+                "node_id": node_id,
+                "record_id": workflow_env["parent"].id,
+                "plan_digest": "deadbeefdeadbeef",
+            },
+        )
+        assert resp.status_code == 409
+        body = resp.json()
+        assert body["code"] == "WORKFLOW_PLAN_CHANGED"
+        kiq_mock.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_dispatch_replay_returns_409(
+        self, client, configured_engine_with_call, workflow_env, monkeypatch
+    ):
+        from clarinet.services.recordflow import call_function_registry
+
+        node_id = call_function_registry.make_call_function_id(dispatch_test_callback)
+        kiq_mock = _make_dispatch_kiq_mock("replay-task")
+        monkeypatch.setattr(
+            "clarinet.api.routers.workflow.call_registered_callable.kiq",
+            kiq_mock,
+        )
+
+        dry = await client.post(
+            WORKFLOW_DISPATCH_DRY_RUN,
+            json={"node_id": node_id, "record_id": workflow_env["parent"].id},
+        )
+        digest = dry.json()["digest"]
+        payload = {
+            "node_id": node_id,
+            "record_id": workflow_env["parent"].id,
+            "plan_digest": digest,
+        }
+        first = await client.post(WORKFLOW_DISPATCH, json=payload)
+        assert first.status_code == 200
+
+        second = await client.post(WORKFLOW_DISPATCH, json=payload)
+        assert second.status_code == 409
+        body = second.json()
+        assert body["code"] == "WORKFLOW_DIGEST_ALREADY_USED"
+        # Enqueue happened exactly once across both POSTs.
+        assert kiq_mock.await_count == 1
 
 
 # ── Authorization ────────────────────────────────────────────────────────

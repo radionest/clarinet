@@ -11,7 +11,6 @@ import asyncio
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from clarinet.models.base import DicomQueryLevel
 from clarinet.utils.logger import logger
 
 from .action_preview import ActionPreview, action_to_preview
@@ -499,73 +498,15 @@ class RecordFlowEngine:
 
     # ── Context helpers ───────────────────────────────────────────────────
 
-    @staticmethod
-    def _record_in_tree(
-        record: RecordRead,
-        trigger_level: DicomQueryLevel | None,
-        trigger_study_uid: str | None,
-        trigger_series_uid: str | None,
-    ) -> bool:
-        """Tree-filter: keep records on ancestors and subtree of trigger.
-
-        With ``trigger_level``:
-        - PATIENT trigger keeps every record of the patient (entire subtree).
-        - STUDY trigger keeps PATIENT-level + records of the same study (any
-          series_uid, since sibling series belong to the same subtree).
-        - SERIES trigger keeps PATIENT-level + STUDY-level of the same study
-          + SERIES-level of the same series. Sibling series are out of scope.
-
-        PATIENT-level records always pass — they are the topmost ancestor of
-        any trigger. STUDY-/SERIES-level records require the trigger to expose
-        the matching ``study_uid`` / ``series_uid``; if not (e.g. a malformed
-        trigger with ``record_type is None``) they are rejected defensively.
-        """
-        if record.record_type is None:
-            return False
-        record_level = record.record_type.level
-        if record_level == DicomQueryLevel.PATIENT:
-            return True
-        if record_level == DicomQueryLevel.STUDY:
-            if trigger_level == DicomQueryLevel.PATIENT:
-                return True
-            if trigger_study_uid is None:
-                return False
-            return record.study_uid == trigger_study_uid
-        if record_level == DicomQueryLevel.SERIES:
-            if trigger_level == DicomQueryLevel.PATIENT:
-                return True
-            if trigger_level == DicomQueryLevel.STUDY:
-                if trigger_study_uid is None:
-                    return False
-                return record.study_uid == trigger_study_uid
-            # SERIES trigger: keep only the same series.
-            if trigger_series_uid is None:
-                return False
-            return record.series_uid == trigger_series_uid
-        return False
-
     def _build_context_from_records(
         self,
         records: list[RecordRead],
         trigger: RecordRead,
     ) -> dict[str, list[RecordRead]]:
         """Filter and group records by type for the trigger's tree slice."""
-        trigger_level = trigger.record_type.level if trigger.record_type else None
-        trigger_study_uid = trigger.study_uid
-        trigger_series_uid = trigger.series_uid
+        from clarinet.services.recordflow.context_builder import build_record_context
 
-        context: dict[str, list[RecordRead]] = {}
-        for r in records:
-            if not (r.record_type and r.record_type.name):
-                continue
-            if not self._record_in_tree(r, trigger_level, trigger_study_uid, trigger_series_uid):
-                continue
-            context.setdefault(r.record_type.name, []).append(r)
-
-        # Stable order by id (helps deterministic picking when callers iterate).
-        for lst in context.values():
-            lst.sort(key=lambda x: x.id or 0)
-        return context
+        return build_record_context(records, trigger)
 
     async def _get_record_context(self, record: RecordRead) -> dict[str, list[RecordRead]]:
         """Build the evaluation context for a record-triggered flow.

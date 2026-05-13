@@ -142,6 +142,8 @@ Admin-only (`AdminUserDep`). 503 when `recordflow_enabled=False`.
 | `/api/admin/workflow/graph?record_id=&expanded=&scope=` | GET | 200 | Workflow graph. `scope=schema` (default) — project-wide graph; firings populated when `record_id` is set. `scope=instance` — subgraph centered on `record_id`'s record_type (parents + children + glue); requires `record_id` (422 otherwise) |
 | `/api/admin/workflow/dry-run` | POST | 200 | Plan a trigger; returns `{plan, digest}`. Body: `{record_id, trigger_kind, status_override?}` |
 | `/api/admin/workflow/fire` | POST | 200 | Execute trigger after digest match (409 on mismatch). Body: `{record_id, trigger_kind, status_override?, plan_digest}` |
+| `/api/admin/workflow/dispatch-dry-run` | POST | 200 | Plan a direct enqueue of one `call:*` or `pipeline:*` node; returns `{preview, digest}`. 404 if node unknown, 422 if node kind is not dispatchable. Body: `{node_id, record_id}` |
+| `/api/admin/workflow/dispatch` | POST | 200 | Enqueue the planned action into TaskIQ after digest match (409 on mismatch / replay). Returns `{preview, task_id}`. Body: `{node_id, record_id, plan_digest}` |
 
 ### Slicer (`/api/slicer`)
 

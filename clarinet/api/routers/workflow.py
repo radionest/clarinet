@@ -11,7 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 from enum import Enum
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from cachetools import TTLCache
 from fastapi import APIRouter, Query, Request
@@ -26,8 +26,15 @@ from clarinet.exceptions.http import NOT_FOUND, SERVICE_UNAVAILABLE, UNPROCESSAB
 from clarinet.models import RecordRead
 from clarinet.models.base import RecordStatus
 from clarinet.repositories.record_repository import RecordSearchCriteria
-from clarinet.services.pipeline import get_all_pipelines
-from clarinet.services.recordflow import ActionPreview
+from clarinet.services.pipeline import (
+    build_pipeline_message_from_record,
+    get_all_pipelines,
+    get_pipeline,
+)
+from clarinet.services.pipeline.tasks.call_registered_callable import (
+    call_registered_callable,
+)
+from clarinet.services.recordflow import ActionPreview, call_function_registry
 from clarinet.services.recordflow.engine import RecordFlowEngine
 from clarinet.services.workflow_graph import (
     ParentRecordAuditProvider,
@@ -332,3 +339,185 @@ async def fire(
             used_digests.pop(body.plan_digest, None)
 
     return FireResponse(executed_actions=plan)
+
+
+# ── Direct dispatch (call_function / pipeline nodes) ──────────────────────────
+
+
+class DispatchKind(str, Enum):
+    """Which node kind is being dispatched."""
+
+    call_function = "call_function"
+    pipeline = "pipeline"
+
+
+class DispatchDryRunRequest(BaseModel):
+    node_id: str = Field(
+        min_length=1, description="Graph node id (e.g. 'call:mod.fn' or 'pipeline:name')."
+    )
+    record_id: int = Field(ge=1, le=2147483647)
+
+
+class DispatchPreview(BaseModel):
+    """Serializable preview of a planned direct-dispatch — input to the digest."""
+
+    kind: DispatchKind
+    node_id: str
+    label: str
+    record_id: int
+    payload_preview: dict[str, Any]
+
+
+class DispatchDryRunResponse(BaseModel):
+    preview: DispatchPreview
+    digest: str = Field(description="Stable hash of `preview` for replay protection in /dispatch.")
+
+
+class DispatchRequest(DispatchDryRunRequest):
+    plan_digest: str = Field(
+        description="Digest from a prior /dispatch-dry-run for the same node + record."
+    )
+
+
+class DispatchResponse(BaseModel):
+    preview: DispatchPreview
+    task_id: str
+
+
+def _compute_dispatch_digest(preview: DispatchPreview) -> str:
+    """Hash a dispatch preview for race / replay detection (mirrors `_compute_digest`)."""
+    payload = json.dumps(preview.model_dump(mode="json"), sort_keys=True)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+
+
+def _parse_node_id(node_id: str) -> DispatchKind:
+    """Determine dispatch kind from the encoded node id.
+
+    Accepted prefixes:
+    - ``call:<module>.<name>`` → :attr:`DispatchKind.call_function`
+    - ``pipeline:<name>`` (but NOT ``pipeline_step:...``) → :attr:`DispatchKind.pipeline`
+    """
+    if node_id.startswith("call:"):
+        return DispatchKind.call_function
+    if node_id.startswith("pipeline:") and not node_id.startswith("pipeline_step:"):
+        return DispatchKind.pipeline
+    raise UNPROCESSABLE_ENTITY.with_context(
+        f"node_id '{node_id}' is not dispatchable — only 'call:*' and 'pipeline:*' "
+        f"nodes can be enqueued directly"
+    )
+
+
+def _build_dispatch_preview(
+    node_id: str,
+    record_read: RecordRead,
+) -> DispatchPreview:
+    """Resolve `node_id`, validate it exists, and return a serializable preview.
+
+    Raises 404 if the node is unknown to this process (registry or pipeline
+    map). Raises 422 if the prefix isn't one of the dispatchable kinds.
+    """
+    kind = _parse_node_id(node_id)
+    if kind is DispatchKind.call_function:
+        action = call_function_registry.get(node_id)
+        if action is None:
+            raise NOT_FOUND.with_context(
+                f"call_function node '{node_id}' is not registered; "
+                f"is the flow file loaded in this process?"
+            )
+        fn = action.function
+        label = f"call {getattr(fn, '__name__', repr(fn))}"
+        payload_preview = {
+            "function_module": getattr(fn, "__module__", None) or "?",
+            "function_name": getattr(fn, "__name__", repr(fn)),
+            "args": list(action.args),
+            "extra_kwargs": dict(action.extra_kwargs),
+        }
+    else:  # DispatchKind.pipeline
+        pipeline_name = node_id.removeprefix("pipeline:")
+        pipeline = get_pipeline(pipeline_name)
+        if pipeline is None:
+            raise NOT_FOUND.with_context(f"pipeline '{pipeline_name}' not found")
+        label = f"pipeline {pipeline_name}"
+        payload_preview = {
+            "pipeline_name": pipeline_name,
+            "step_count": len(pipeline.steps),
+        }
+
+    return DispatchPreview(
+        kind=kind,
+        node_id=node_id,
+        label=label,
+        record_id=record_read.id or 0,
+        payload_preview=payload_preview,
+    )
+
+
+@router.post("/dispatch-dry-run", response_model=DispatchDryRunResponse)
+async def dispatch_dry_run(
+    request: Request,
+    _admin: AdminUserDep,
+    repo: RecordRepositoryDep,
+    body: DispatchDryRunRequest,
+) -> DispatchDryRunResponse:
+    """Plan a direct enqueue without firing — returns preview + replay digest."""
+    _require_engine(request)  # gate on recordflow_enabled (consistent with /dry-run)
+    record_read = await _load_record_read(repo, body.record_id)
+    preview = _build_dispatch_preview(body.node_id, record_read)
+    return DispatchDryRunResponse(preview=preview, digest=_compute_dispatch_digest(preview))
+
+
+@router.post("/dispatch", response_model=DispatchResponse)
+async def dispatch(
+    request: Request,
+    admin: AdminUserDep,
+    repo: RecordRepositoryDep,
+    body: DispatchRequest,
+) -> DispatchResponse:
+    """Execute a previously-planned direct dispatch after digest verification.
+
+    Mirrors :func:`fire`'s idempotency model — the digest is reserved in the
+    same shared in-process TTL cache so that the same race-window guarantees
+    apply (5 min per-process). Multi-worker caveat applies identically.
+    """
+    _require_engine(request)
+    used_digests = _get_used_digest_cache(request)
+
+    if body.plan_digest in used_digests:
+        raise WorkflowDigestAlreadyUsedError(body.plan_digest)
+    used_digests[body.plan_digest] = True
+
+    success = False
+    try:
+        record_read = await _load_record_read(repo, body.record_id)
+        preview = _build_dispatch_preview(body.node_id, record_read)
+        actual_digest = _compute_dispatch_digest(preview)
+        if actual_digest != body.plan_digest:
+            raise WorkflowPlanDigestMismatchError(
+                expected_digest=body.plan_digest, current_digest=actual_digest
+            )
+
+        logger.info(
+            f"Admin {admin.id} dispatching {body.node_id} "
+            f"for record_id={body.record_id} kind={preview.kind.value}"
+        )
+
+        if preview.kind is DispatchKind.call_function:
+            message = build_pipeline_message_from_record(
+                record_read, payload={"call_function_id": body.node_id}
+            )
+            task = await call_registered_callable.kiq(message.model_dump())
+            task_id = task.task_id
+        else:  # DispatchKind.pipeline
+            pipeline_name = body.node_id.removeprefix("pipeline:")
+            pipeline = get_pipeline(pipeline_name)
+            # NOT_FOUND already raised in _build_dispatch_preview; narrow for mypy.
+            assert pipeline is not None
+            message = build_pipeline_message_from_record(record_read)
+            task = await pipeline.run(message)
+            task_id = task.task_id
+
+        success = True
+        return DispatchResponse(preview=preview, task_id=task_id)
+    finally:
+        if not success:
+            used_digests.pop(body.plan_digest, None)

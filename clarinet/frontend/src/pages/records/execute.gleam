@@ -5,11 +5,13 @@ import api/slicer
 import api/types.{type ApiError, AuthError}
 import api/workflow as wf_api
 import api/workflow_models.{
-  type ActionPreview, type DryRunResponse, type FireResponse,
+  type ActionPreview, type DispatchDryRunResponse, type DispatchKind,
+  type DispatchResponse, type DryRunResponse, type FireResponse,
   type TriggerKindRequest, type WorkflowGraph, type WorkflowNode,
-  CallFunctionNode, DataUpdateTrigger, EntityNode, FileChangeTrigger, FileNode,
-  PipelineNode, PipelineStepNode, RecordTypeNode, StatusTrigger,
-  TriggerOnDataUpdate, TriggerOnFileChange, TriggerOnStatus,
+  CallFunctionDispatch, CallFunctionNode, DataUpdateTrigger, EntityNode,
+  FileChangeTrigger, FileNode, PipelineDispatch, PipelineNode,
+  PipelineStepNode, RecordTypeNode, StatusTrigger, TriggerOnDataUpdate,
+  TriggerOnFileChange, TriggerOnStatus,
 }
 import clarinet_frontend/i18n
 import components/status_badge
@@ -60,6 +62,8 @@ pub type Model {
     workflow_selected_edge: Option(String),
     plan_state: PlanState,
     trigger_picker: TriggerPickerState,
+    dispatch_picker: DispatchPickerState,
+    dispatch_state: DispatchState,
     /// Generation counter — bumped on every workflow_load_effect dispatch
     /// so late responses from rapid TogglePipeline clicks are dropped.
     workflow_request_id: Int,
@@ -104,6 +108,32 @@ pub type PlanState {
   PlanReady(trigger: PendingTrigger, plan: DryRunResponse)
   PlanFiring(trigger: PendingTrigger, plan: DryRunResponse)
   PlanFailed(trigger: PendingTrigger, message: String)
+}
+
+/// What `/dispatch` would enqueue — captured at dry-run time so the digest
+/// matches when the admin confirms.
+pub type PendingDispatch {
+  PendingDispatch(node_id: String, kind: DispatchKind, label: String)
+}
+
+/// Dispatch confirm panel — opened by clicking a `call_function:*` or
+/// `pipeline:*` node (or the "Dispatch…" button in the node detail panel).
+/// Closed after the admin clicks Plan (→ DispatchLoading) or Cancel.
+pub type DispatchPickerState {
+  NoDispatchPicker
+  DispatchPickerOpen(pending: PendingDispatch)
+}
+
+/// Direct-dispatch state machine — parallel to :type:`PlanState`. The two
+/// flows share an admin TTLCache on the backend, but the frontend keeps them
+/// in independent fields so a fire-in-flight doesn't block a dispatch click
+/// (and vice versa).
+pub type DispatchState {
+  NoDispatch
+  DispatchLoading(pending: PendingDispatch)
+  DispatchReady(pending: PendingDispatch, preview: DispatchDryRunResponse)
+  DispatchFiring(pending: PendingDispatch, preview: DispatchDryRunResponse)
+  DispatchFailed(pending: PendingDispatch, message: String)
 }
 
 // --- Msg ---
@@ -161,6 +191,15 @@ pub type Msg {
   ConfirmFireClicked
   FireResultReceived(Result(FireResponse, ApiError))
   DismissPlan
+  // Direct dispatch (call_function / pipeline nodes)
+  WorkflowDispatchNodeClicked(node_id: String, kind: DispatchKind, label: String)
+  DispatchPlanClicked
+  DispatchDryRunReceived(Result(DispatchDryRunResponse, ApiError))
+  DispatchConfirmClicked
+  DispatchResultReceived(Result(DispatchResponse, ApiError))
+  DispatchCancelled
+  DispatchDismiss
+  RetryDispatchDryRun(PendingDispatch)
 }
 
 // --- Init ---
@@ -186,6 +225,8 @@ pub fn init(
       workflow_selected_edge: None,
       plan_state: NoPlan,
       trigger_picker: NoPicker,
+      dispatch_picker: NoDispatchPicker,
+      dispatch_state: NoDispatch,
       workflow_request_id: 1,
     )
 
@@ -673,10 +714,15 @@ pub fn update(
                 Some(name) -> dispatch_local(WorkflowTogglePipeline(name))
                 None -> effect.none()
               }
+            CallFunctionNode ->
+              dispatch_local(WorkflowDispatchNodeClicked(
+                node.id,
+                CallFunctionDispatch,
+                node.label,
+              ))
             // Informational nodes — clicking only selects (no side effect).
             // Exhaustive match so adding a new NodeKind is a compile error.
-            EntityNode | FileNode | PipelineStepNode | CallFunctionNode ->
-              effect.none()
+            EntityNode | FileNode | PipelineStepNode -> effect.none()
           }
         None -> effect.none()
       }
@@ -799,6 +845,8 @@ pub fn update(
         workflow_selected_edge: None,
         plan_state: NoPlan,
         trigger_picker: NoPicker,
+        dispatch_picker: NoDispatchPicker,
+        dispatch_state: NoDispatch,
       ),
       effect.none(),
       [],
@@ -893,6 +941,116 @@ pub fn update(
     }
 
     DismissPlan -> #(Model(..model, plan_state: NoPlan), effect.none(), [])
+
+    WorkflowDispatchNodeClicked(node_id, kind, label) -> #(
+      Model(
+        ..model,
+        workflow_selected_node: Some(node_id),
+        workflow_selected_edge: None,
+        dispatch_picker: DispatchPickerOpen(PendingDispatch(
+          node_id: node_id,
+          kind: kind,
+          label: label,
+        )),
+        dispatch_state: NoDispatch,
+      ),
+      effect.none(),
+      [],
+    )
+
+    DispatchPlanClicked ->
+      case model.dispatch_picker, int.parse(model.record_id) {
+        DispatchPickerOpen(pending), Ok(rid) -> #(
+          Model(
+            ..model,
+            dispatch_picker: NoDispatchPicker,
+            dispatch_state: DispatchLoading(pending),
+          ),
+          dispatch_dry_run_effect(rid, pending),
+          [],
+        )
+        _, _ -> #(model, effect.none(), [])
+      }
+
+    DispatchCancelled -> #(
+      Model(..model, dispatch_picker: NoDispatchPicker),
+      effect.none(),
+      [],
+    )
+
+    DispatchDryRunReceived(Ok(resp)) ->
+      case model.dispatch_state {
+        DispatchLoading(p) -> #(
+          Model(..model, dispatch_state: DispatchReady(p, resp)),
+          effect.none(),
+          [],
+        )
+        _ -> #(model, effect.none(), [])
+      }
+
+    DispatchDryRunReceived(Error(err)) -> {
+      let msg = error_detail(err, "Dispatch dry-run failed")
+      case model.dispatch_state {
+        DispatchLoading(p) -> #(
+          Model(..model, dispatch_state: DispatchFailed(p, msg)),
+          effect.none(),
+          handle_workflow_error(err, msg),
+        )
+        _ -> #(model, effect.none(), [])
+      }
+    }
+
+    RetryDispatchDryRun(pending) ->
+      case int.parse(model.record_id) {
+        Ok(rid) -> #(
+          Model(..model, dispatch_state: DispatchLoading(pending)),
+          dispatch_dry_run_effect(rid, pending),
+          [],
+        )
+        Error(_) -> #(model, effect.none(), [])
+      }
+
+    DispatchConfirmClicked ->
+      case model.dispatch_state, int.parse(model.record_id) {
+        DispatchReady(p, preview), Ok(rid) -> #(
+          Model(..model, dispatch_state: DispatchFiring(p, preview)),
+          dispatch_fire_effect(rid, p, preview.digest),
+          [],
+        )
+        _, _ -> #(model, effect.none(), [])
+      }
+
+    DispatchResultReceived(Ok(resp)) -> {
+      case model.dispatch_state {
+        DispatchFiring(_, _) -> #(
+          Model(..model, dispatch_state: NoDispatch),
+          effect.none(),
+          [
+            shared.ShowSuccess("Dispatched (task " <> resp.task_id <> ")."),
+            shared.ReloadRecord(model.record_id),
+          ],
+        )
+        _ -> #(model, effect.none(), [])
+      }
+    }
+
+    DispatchResultReceived(Error(err)) -> {
+      let msg = error_detail(err, "Dispatch failed")
+      case model.dispatch_state {
+        DispatchFiring(p, _) -> #(
+          Model(..model, dispatch_state: DispatchFailed(p, msg)),
+          effect.none(),
+          handle_workflow_error(err, msg),
+        )
+        _ -> #(model, effect.none(), [])
+      }
+    }
+
+    DispatchDismiss -> #(
+      Model(..model, dispatch_state: NoDispatch),
+      effect.none(),
+      [],
+    )
   }
 }
 
@@ -996,6 +1154,27 @@ fn fire_effect(
   use dispatch <- effect.from
   wf_api.fire(record_id, pending.trigger_kind, pending.status_override, digest)
   |> promise.tap(fn(result) { dispatch(FireResultReceived(result)) })
+  Nil
+}
+
+fn dispatch_dry_run_effect(
+  record_id: Int,
+  pending: PendingDispatch,
+) -> Effect(Msg) {
+  use dispatch <- effect.from
+  wf_api.dispatch_dry_run(pending.node_id, record_id)
+  |> promise.tap(fn(result) { dispatch(DispatchDryRunReceived(result)) })
+  Nil
+}
+
+fn dispatch_fire_effect(
+  record_id: Int,
+  pending: PendingDispatch,
+  digest: String,
+) -> Effect(Msg) {
+  use dispatch <- effect.from
+  wf_api.dispatch(pending.node_id, record_id, digest)
+  |> promise.tap(fn(result) { dispatch(DispatchResultReceived(result)) })
   Nil
 }
 
@@ -1621,10 +1800,23 @@ fn workflow_loaded_view(model: Model) -> Element(Msg) {
 }
 
 fn workflow_side_panel(model: Model, graph: WorkflowGraph) -> Element(Msg) {
-  let body = case model.plan_state {
-    PlanLoading(_) | PlanReady(_, _) | PlanFiring(_, _) | PlanFailed(_, _) ->
-      dry_run_panel(model, graph)
-    NoPlan ->
+  let body = case
+    model.plan_state,
+    model.dispatch_state,
+    model.dispatch_picker
+  {
+    PlanLoading(_), _, _
+    | PlanReady(_, _), _, _
+    | PlanFiring(_, _), _, _
+    | PlanFailed(_, _), _, _
+    -> dry_run_panel(model, graph)
+    _, DispatchLoading(_), _
+    | _, DispatchReady(_, _), _
+    | _, DispatchFiring(_, _), _
+    | _, DispatchFailed(_, _), _
+    -> dispatch_panel(model)
+    _, NoDispatch, DispatchPickerOpen(_) -> dispatch_picker_panel(model)
+    NoPlan, NoDispatch, NoDispatchPicker ->
       case model.trigger_picker {
         PickerOpen(_, _, _) -> render_picker_panel(model, graph)
         NoPicker ->
@@ -1683,6 +1875,11 @@ fn fire_hint(kind: workflow_models.TriggerKind) -> Element(Msg) {
 /// the primary one in `WorkflowNodeClicked`). When the record_type has no
 /// fireable triggers we say so explicitly instead of leaving the user puzzled
 /// by a non-reactive button.
+///
+/// For call_function and pipeline nodes the footer offers "Dispatch…" — the
+/// primary entry into the direct-dispatch flow. Click-on-canvas opens the
+/// picker for CallFunctionNode; for PipelineNode click toggles expand/collapse,
+/// so the dispatch action only reachable via this button.
 fn node_panel_footer(node: WorkflowNode, graph: WorkflowGraph) -> Element(Msg) {
   case node.kind {
     RecordTypeNode ->
@@ -1700,6 +1897,30 @@ fn node_panel_footer(node: WorkflowNode, graph: WorkflowGraph) -> Element(Msg) {
             [html.text("Fire trigger…")],
           )
       }
+    CallFunctionNode ->
+      html.button(
+        [
+          attribute.class("btn btn-primary btn-sm"),
+          event.on_click(WorkflowDispatchNodeClicked(
+            node.id,
+            CallFunctionDispatch,
+            node.label,
+          )),
+        ],
+        [html.text("Dispatch call…")],
+      )
+    PipelineNode ->
+      html.button(
+        [
+          attribute.class("btn btn-primary btn-sm"),
+          event.on_click(WorkflowDispatchNodeClicked(
+            node.id,
+            PipelineDispatch,
+            node.label,
+          )),
+        ],
+        [html.text("Dispatch pipeline…")],
+      )
     _ -> wf_renderer.expand_hint(node)
   }
 }
@@ -1933,4 +2154,143 @@ fn is_fireable_trigger(kind: workflow_models.TriggerKind) -> Bool {
     TriggerOnStatus | TriggerOnDataUpdate | TriggerOnFileChange -> True
     _ -> False
   }
+}
+
+fn dispatch_picker_panel(model: Model) -> Element(Msg) {
+  case model.dispatch_picker {
+    DispatchPickerOpen(pending) ->
+      html.div(
+        [attribute.class("workflow-side-panel-body workflow-picker-panel")],
+        [
+          html.h5([], [
+            html.text(
+              "Dispatch "
+              <> workflow_models.dispatch_kind_label(pending.kind)
+              <> ": "
+              <> pending.label,
+            ),
+          ]),
+          html.p([attribute.class("text-muted")], [
+            html.text(
+              "Enqueue this action for record #"
+              <> model.record_id
+              <> ". Skips trigger conditions — admin is responsible for "
+              <> "verifying this is appropriate.",
+            ),
+          ]),
+          html.div([attribute.class("workflow-plan-actions")], [
+            html.button(
+              [
+                attribute.class("btn btn-primary"),
+                event.on_click(DispatchPlanClicked),
+              ],
+              [html.text("Plan")],
+            ),
+            html.button(
+              [
+                attribute.class("btn btn-secondary"),
+                event.on_click(DispatchCancelled),
+              ],
+              [html.text("Cancel")],
+            ),
+          ]),
+        ],
+      )
+    NoDispatchPicker -> element.none()
+  }
+}
+
+fn dispatch_panel(model: Model) -> Element(Msg) {
+  let pending = current_dispatch_pending(model.dispatch_state)
+  let header = case pending {
+    Some(p) ->
+      "Dispatch "
+      <> workflow_models.dispatch_kind_label(p.kind)
+      <> ": "
+      <> p.label
+    None -> "Dispatch"
+  }
+  let body = case model.dispatch_state {
+    DispatchLoading(_) -> html.p([], [html.text("Planning dispatch...")])
+    DispatchReady(p, resp) ->
+      html.div([attribute.class("workflow-dispatch-preview")], [
+        html.p([], [html.text("Node: " <> p.node_id)]),
+        html.p([], [
+          html.text("Record: " <> int.to_string(resp.preview.record_id)),
+        ]),
+      ])
+    DispatchFiring(p, _) ->
+      html.div([attribute.class("workflow-dispatch-preview")], [
+        html.p([], [html.text("Enqueueing " <> p.node_id <> "...")]),
+      ])
+    DispatchFailed(_, msg) ->
+      html.div([attribute.class("error-container")], [
+        html.p([attribute.class("error-message")], [html.text(msg)]),
+      ])
+    NoDispatch -> element.none()
+  }
+  html.div(
+    [attribute.class("workflow-side-panel-body workflow-dispatch-panel")],
+    [
+      html.h5([], [html.text(header)]),
+      body,
+      html.div(
+        [attribute.class("workflow-plan-actions")],
+        dispatch_panel_buttons(model.dispatch_state),
+      ),
+    ],
+  )
+}
+
+fn current_dispatch_pending(state: DispatchState) -> Option(PendingDispatch) {
+  case state {
+    DispatchLoading(p)
+    | DispatchReady(p, _)
+    | DispatchFiring(p, _)
+    | DispatchFailed(p, _)
+    -> Some(p)
+    NoDispatch -> None
+  }
+}
+
+fn dispatch_panel_buttons(state: DispatchState) -> List(Element(Msg)) {
+  let cancel =
+    html.button(
+      [attribute.class("btn btn-secondary"), event.on_click(DispatchDismiss)],
+      [html.text("Cancel")],
+    )
+  let primary = case state {
+    DispatchReady(_, _) ->
+      html.button(
+        [
+          attribute.class("btn btn-primary"),
+          event.on_click(DispatchConfirmClicked),
+        ],
+        [html.text("Confirm and Dispatch")],
+      )
+    DispatchFiring(_, _) ->
+      html.button(
+        [attribute.class("btn btn-primary"), attribute.disabled(True)],
+        [html.text("Dispatching...")],
+      )
+    DispatchLoading(_) ->
+      html.button(
+        [attribute.class("btn btn-primary"), attribute.disabled(True)],
+        [html.text("Planning...")],
+      )
+    DispatchFailed(p, _) ->
+      html.button(
+        [
+          attribute.class("btn btn-primary"),
+          event.on_click(RetryDispatchDryRun(p)),
+        ],
+        [html.text("Re-run dispatch-dry-run")],
+      )
+    NoDispatch ->
+      html.button(
+        [attribute.class("btn btn-primary"), attribute.disabled(True)],
+        [html.text("Confirm and Dispatch")],
+      )
+  }
+  [primary, cancel]
 }
