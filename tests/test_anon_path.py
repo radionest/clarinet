@@ -331,7 +331,8 @@ class TestSeriesReadWorkingFolder:
             study=study,
             records=[],
         )
-        assert series_read.working_folder == "/storage/CLARINET_7/9.9.9/9.9.9.4"
+        expected = str(Path("/storage") / "CLARINET_7" / "9.9.9" / "9.9.9.4")
+        assert series_read.working_folder == expected
 
     def test_custom_template_uses_modalities_date(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from clarinet.models.patient import PatientInfo
@@ -369,7 +370,8 @@ class TestSeriesReadWorkingFolder:
             study=study,
             records=[],
         )
-        assert series_read.working_folder == "/storage/7/CT_PT_20260105/9.9.9.4"
+        expected = str(Path("/storage") / "7" / "CT_PT_20260105" / "9.9.9.4")
+        assert series_read.working_folder == expected
 
 
 def _full_ctx() -> dict[str, str]:
