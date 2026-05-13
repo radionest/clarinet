@@ -16,11 +16,6 @@ from tests.utils.factories import make_patient
 from tests.utils.session import PassThroughSession
 
 
-@pytest.fixture
-def anon_series(test_session: AsyncSession) -> None:
-    """Skeleton fixture — empty, real setup happens per-test (different patient ids)."""
-
-
 async def _seed_anonymized_series(
     test_session: AsyncSession,
     *,

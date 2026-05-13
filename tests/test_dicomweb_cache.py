@@ -888,6 +888,56 @@ class TestResolveDcmAnonDir:
         assert "no.such/no.such.1" not in cache._dcm_anon_path_cache
 
     @pytest.mark.asyncio
+    async def test_returns_none_on_study_series_mismatch(
+        self, tmp_path: Path, test_session
+    ) -> None:
+        """Series exists under a different Study → None (guard against
+        inconsistent context resolution)."""
+        from datetime import UTC, datetime
+
+        from clarinet.models.study import Series, Study
+        from tests.utils.factories import make_patient
+
+        patient = make_patient("MISMATCH_PAT", "Mismatch", auto_id=909)
+        test_session.add(patient)
+        await test_session.commit()
+        for uid, anon in (("STUDY.A", "2.25.A"), ("STUDY.B", "2.25.B")):
+            test_session.add(
+                Study(
+                    patient_id="MISMATCH_PAT",
+                    study_uid=uid,
+                    date=datetime.now(UTC).date(),
+                    modalities_in_study="CT",
+                    anon_uid=anon,
+                )
+            )
+        await test_session.commit()
+        # Series belongs to STUDY.A — querying for STUDY.B must be rejected.
+        test_session.add(
+            Series(
+                study_uid="STUDY.A",
+                series_uid="SER.X",
+                series_number=1,
+                modality="CT",
+                anon_uid="2.25.A.1",
+            )
+        )
+        await test_session.commit()
+
+        class _Factory:
+            def __call__(self):
+                return PassThroughSession(test_session)
+
+        cache = DicomWebCache(
+            base_dir=tmp_path / "dicomweb_cache",
+            storage_path=tmp_path,
+            session_factory=_Factory(),
+        )
+        assert await cache._resolve_dcm_anon_dir("STUDY.B", "SER.X") is None
+        # Result cached so subsequent calls don't re-query.
+        assert "STUDY.B/SER.X" in cache._dcm_anon_path_cache
+
+    @pytest.mark.asyncio
     async def test_invalidate_dcm_anon_path_drops_entry(self, tmp_path: Path, test_session) -> None:
         """``invalidate_dcm_anon_path`` removes a single cached entry."""
 

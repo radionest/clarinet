@@ -71,7 +71,7 @@ class TestSplitTemplate:
 
 class TestBuildContext:
     def test_default_per_patient_mode(self, patient: Patient, study: Study, series: Series) -> None:
-        with patch("clarinet.services.dicom.anon_path.settings") as mock_settings:
+        with patch("clarinet.services.dicom.anon_path.settings", spec_set=True) as mock_settings:
             mock_settings.anon_per_study_patient_id = False
             mock_settings.anon_id_prefix = "CLARINET"
             ctx = build_context(patient=patient, study=study, series=series)
@@ -88,7 +88,7 @@ class TestBuildContext:
         assert ctx["series_modality"] == "CT"
 
     def test_per_study_mode(self, patient: Patient, study: Study, series: Series) -> None:
-        with patch("clarinet.services.dicom.anon_path.settings") as mock_settings:
+        with patch("clarinet.services.dicom.anon_path.settings", spec_set=True) as mock_settings:
             mock_settings.anon_per_study_patient_id = True
             mock_settings.anon_per_study_patient_id_hex_length = 8
             mock_settings.anon_uid_salt = "salt"
@@ -100,7 +100,7 @@ class TestBuildContext:
         assert len(ctx["anon_patient_id"].split("_")[-1]) == 8
 
     def test_writer_overrides(self, patient: Patient, study: Study, series: Series) -> None:
-        with patch("clarinet.services.dicom.anon_path.settings") as mock_settings:
+        with patch("clarinet.services.dicom.anon_path.settings", spec_set=True) as mock_settings:
             mock_settings.anon_per_study_patient_id = False
             mock_settings.anon_id_prefix = "X"
             ctx = build_context(
@@ -116,7 +116,7 @@ class TestBuildContext:
         assert ctx["anon_series_uid"] == "OSS"
 
     def test_missing_entities_yield_unknown(self) -> None:
-        with patch("clarinet.services.dicom.anon_path.settings") as mock_settings:
+        with patch("clarinet.services.dicom.anon_path.settings", spec_set=True) as mock_settings:
             mock_settings.anon_per_study_patient_id = False
             mock_settings.anon_id_prefix = "X"
             ctx = build_context(patient=None, study=None, series=None)
@@ -131,21 +131,21 @@ class TestBuildContext:
 
 class TestDeriveAnonPatientId:
     def test_per_patient_uses_anon_id(self, patient: Patient, study: Study) -> None:
-        with patch("clarinet.services.dicom.anon_path.settings") as mock_settings:
+        with patch("clarinet.services.dicom.anon_path.settings", spec_set=True) as mock_settings:
             mock_settings.anon_per_study_patient_id = False
             mock_settings.anon_id_prefix = "CLARINET"
             result = derive_anon_patient_id(patient, study)
         assert result == "CLARINET_42"
 
     def test_per_study_uses_hash(self, patient: Patient, study: Study) -> None:
-        with patch("clarinet.services.dicom.anon_path.settings") as mock_settings:
+        with patch("clarinet.services.dicom.anon_path.settings", spec_set=True) as mock_settings:
             mock_settings.anon_per_study_patient_id = True
             mock_settings.anon_per_study_patient_id_hex_length = 8
             mock_settings.anon_uid_salt = "salt"
             mock_settings.anon_id_prefix = "P"
             result = derive_anon_patient_id(patient, study)
         # Same salt+study_uid+length+prefix must be deterministic across calls
-        with patch("clarinet.services.dicom.anon_path.settings") as mock_settings:
+        with patch("clarinet.services.dicom.anon_path.settings", spec_set=True) as mock_settings:
             mock_settings.anon_per_study_patient_id = True
             mock_settings.anon_per_study_patient_id_hex_length = 8
             mock_settings.anon_uid_salt = "salt"

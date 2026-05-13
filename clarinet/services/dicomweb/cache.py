@@ -192,6 +192,9 @@ class DicomWebCache:
             if study is None:
                 self._dcm_anon_path_cache[cache_key] = None
                 return None
+            if series.study_uid != study_uid:
+                self._dcm_anon_path_cache[cache_key] = None
+                return None
             patient = await session.get(Patient, study.patient_id)
             if patient is None:
                 self._dcm_anon_path_cache[cache_key] = None
