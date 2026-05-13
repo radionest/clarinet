@@ -86,6 +86,7 @@ uv run clarinet rabbitmq clean           # Delete orphaned test queues/exchanges
 uv run clarinet rabbitmq status          # Show queue statistics
 uv run clarinet ohif install             # Download/install OHIF Viewer (served at /ohif)
 uv run clarinet deploy systemd           # Generate systemd unit files
+uv run clarinet anon migrate-paths       # Relocate dcm_anon dirs after disk_path_template change
 ```
 
 ## Anti-patterns
