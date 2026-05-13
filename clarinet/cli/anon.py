@@ -33,6 +33,7 @@ from sqlalchemy.orm import selectinload
 from sqlmodel import select
 
 from clarinet.models.base import DicomQueryLevel
+from clarinet.models.patient import Patient
 from clarinet.models.record import Record
 from clarinet.models.record_type import RecordType
 from clarinet.models.study import Series, Study
@@ -77,11 +78,18 @@ def _remove_deep_empty(path: Path) -> None:
 
 
 def _move_dir_atomic(old: Path, new: Path, dry_run: bool, *, label: str) -> MoveOutcome:
-    """Atomically rename ``old`` to ``new``. Skip whole entry on collision.
+    """Rename ``old`` to ``new``. Skip whole entry on collision.
 
-    Used at SERIES level (leaf dir). Detects the silent ``shutil.move``
-    quirk where moving into an existing dir nests the source inside it
-    instead of failing — returns ``collision`` and logs WARNING.
+    Used at SERIES level (leaf dir). Two caveats:
+
+    1. **TOCTOU race**: there is a window between ``new.exists()`` and the
+       ``shutil.move`` call. Safe for the single-operator CLI use case
+       this command serves; not safe for concurrent invocations.
+    2. **Cross-filesystem**: ``shutil.move`` is atomic only when ``old`` and
+       ``new`` share a filesystem; otherwise it degrades to copy+unlink.
+       The silent ``shutil.move`` quirk of nesting source inside an
+       existing target dir is guarded by the explicit ``new.exists()``
+       check — collision is reported with a WARNING.
     """
     if old == new:
         return "same"
@@ -186,26 +194,31 @@ def _merge_dir(old: Path, new: Path, dry_run: bool, *, label: str) -> MoveOutcom
     return "moved"
 
 
-def _render_series_paths(
-    series: Series,
+def _render_old_new_dirs(
+    level: DicomQueryLevel,
+    *,
+    patient: Patient | None,
+    study: Study | None,
+    series: Series | None,
     from_template: str,
     to_template: str,
     storage_path: Path,
     counters: dict[str, int],
+    label: str,
 ) -> tuple[Path, Path] | None:
-    """Render old/new series dirs; on error bump ``failed`` and return ``None``."""
-    study = series.study
-    patient = study.patient if study else None
-    if study is None or patient is None:
-        logger.warning(f"Series {series.series_uid} has no Study/Patient eager-loaded; skipping.")
-        counters["failed"] += 1
-        return None
+    """Render ``(old_dir, new_dir)`` for ``level``.
+
+    On :exc:`AnonPathError`, logs and bumps ``counters['failed']`` then
+    returns ``None``. Callers handle ``None`` by ``continue``. Eager-load
+    validation for relations is the caller's responsibility — this helper
+    only renders.
+    """
     try:
         ctx = build_context(patient=patient, study=study, series=series)
-        old_dir = render_working_folder(from_template, DicomQueryLevel.SERIES, ctx, storage_path)
-        new_dir = render_working_folder(to_template, DicomQueryLevel.SERIES, ctx, storage_path)
+        old_dir = render_working_folder(from_template, level, ctx, storage_path)
+        new_dir = render_working_folder(to_template, level, ctx, storage_path)
     except AnonPathError as exc:
-        logger.error(f"Series {series.series_uid}: template render failed ({exc}); skipping.")
+        logger.error(f"{label}: template render failed ({exc}); skipping.")
         counters["failed"] += 1
         return None
     return old_dir, new_dir
@@ -246,7 +259,25 @@ async def _migrate_all_series(
     )
     result = await session.stream_scalars(stmt)
     async for series in result:
-        paths = _render_series_paths(series, from_template, to_template, storage_path, counters)
+        study = series.study
+        patient = study.patient if study else None
+        if study is None or patient is None:
+            logger.warning(
+                f"Series {series.series_uid} has no Study/Patient eager-loaded; skipping."
+            )
+            counters["failed"] += 1
+            continue
+        paths = _render_old_new_dirs(
+            DicomQueryLevel.SERIES,
+            patient=patient,
+            study=study,
+            series=series,
+            from_template=from_template,
+            to_template=to_template,
+            storage_path=storage_path,
+            counters=counters,
+            label=f"Series {series.series_uid}",
+        )
         if paths is None:
             continue
         old_series_dir, new_series_dir = paths
@@ -301,22 +332,27 @@ async def _migrate_records_by_level(
             )
             counters["failed"] += 1
             continue
-        try:
-            ctx = build_context(patient=patient, study=study, series=None)
-            old_dir = render_working_folder(from_template, level, ctx, storage_path)
-            new_dir = render_working_folder(to_template, level, ctx, storage_path)
-        except AnonPathError as exc:
-            logger.error(
-                f"Record {record.id} ({level.value}): template render failed ({exc}); skipping."
-            )
-            counters["failed"] += 1
+        label = f"Record {record.id} {level.value}"
+        paths = _render_old_new_dirs(
+            level,
+            patient=patient,
+            study=study,
+            series=None,
+            from_template=from_template,
+            to_template=to_template,
+            storage_path=storage_path,
+            counters=counters,
+            label=label,
+        )
+        if paths is None:
             continue
+        old_dir, new_dir = paths
         outcome = await asyncio.to_thread(
             _merge_dir,
             old_dir,
             new_dir,
             args.dry_run,
-            label=f"Record {record.id} {level.value}",
+            label=label,
         )
         counters[outcome] += 1
         if not args.dry_run:

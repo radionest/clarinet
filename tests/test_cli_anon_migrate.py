@@ -434,6 +434,72 @@ async def test_include_working_folder_study_record_moves_study_files(
 
 
 @pytest.mark.asyncio
+async def test_include_working_folder_study_per_file_collision_skips(
+    test_session: AsyncSession, tmp_path: Path
+) -> None:
+    """STUDY-level merge skips per-child collisions with a WARNING.
+
+    Covers the ``if dest.exists(): collided_any = True; continue`` branch
+    in ``_merge_dir``: a STUDY-level Record has a loose file in
+    ``old_study_dir`` whose name already exists in ``new_study_dir``;
+    the merge keeps the pre-existing target untouched and leaves the
+    source on the old path.
+    """
+    old_tmpl = "{anon_patient_id}/{anon_study_uid}/{anon_series_uid}"
+    new_tmpl = "{patient_auto_id}/{study_modalities}_{study_date}/{anon_series_uid}"
+
+    patient, study, series = await _seed_anonymized_series(
+        test_session,
+        patient_id="MIG_WF_STUDY_COLL",
+        auto_id=408,
+        study_uid="1.2.6408.1",
+        series_uid="1.2.6408.1.1",
+        anon_study_uid="2.25.648",
+        anon_series_uid="2.25.648.1",
+    )
+    await _seed_record_at_level(
+        test_session,
+        rt_name="rt-study-408",
+        level=DicomQueryLevel.STUDY,
+        patient_id=patient.id,
+        study_uid=study.study_uid,
+        series_uid=None,
+    )
+    # SERIES content (will be migrated normally by the SERIES pass).
+    _populate_series_dir_full(tmp_path, patient, study, series, old_tmpl)
+    # Loose STUDY-level file at the old location.
+    old_artifact = _populate_level_dir(
+        tmp_path,
+        patient,
+        study,
+        series,
+        old_tmpl,
+        DicomQueryLevel.STUDY,
+        filename="conflict.bin",
+    )
+    # Pre-create the same-named file at the new STUDY-dir target.
+    ctx = build_context(patient=patient, study=study, series=series)
+    new_study_dir = render_working_folder(new_tmpl, DicomQueryLevel.STUDY, ctx, tmp_path)
+    new_study_dir.mkdir(parents=True, exist_ok=True)
+    (new_study_dir / "conflict.bin").write_bytes(b"pre-existing")
+
+    args = argparse.Namespace(
+        from_template=old_tmpl,
+        to_template=new_tmpl,
+        dry_run=False,
+        cleanup_empty=False,
+        include_working_folder=True,
+    )
+    await _run_migrate(args, test_session, tmp_path)
+
+    # Source preserved (collision → skip).
+    assert old_artifact.exists()
+    assert old_artifact.read_bytes() == b"x"
+    # Pre-existing target preserved (not overwritten, not merged).
+    assert (new_study_dir / "conflict.bin").read_bytes() == b"pre-existing"
+
+
+@pytest.mark.asyncio
 async def test_include_working_folder_patient_record_moves_patient_files(
     test_session: AsyncSession, tmp_path: Path
 ) -> None:
@@ -620,7 +686,7 @@ async def test_include_working_folder_cleanup_prunes_empty_parents(
     await _run_migrate(args, test_session, tmp_path)
 
     assert not old_series_dir.exists()
-    assert not old_study_dir.exists()  # pruned via ``same`` cleanup branch
+    assert not old_study_dir.exists()  # removed by PATIENT pass ``_remove_deep_empty``
     assert not old_patient_dir.exists()
 
     # No stray old-template subdirs should appear inside the new patient_dir
