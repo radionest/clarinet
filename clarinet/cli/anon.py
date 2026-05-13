@@ -1,22 +1,40 @@
 """CLI helpers for anonymization-related operations.
 
-Currently provides ``clarinet anon migrate-paths`` — moves anonymized
-dcm_anon directories from a source template layout to a target template
-layout when ``settings.disk_path_template`` changes. The DB is not
-touched (paths are pure-derive from Study/Patient/Series); only files
-on disk are relocated.
+``clarinet anon migrate-paths`` relocates anonymized files when
+``settings.disk_path_template`` changes.
+
+Default mode moves only ``series_dir/dcm_anon/`` for each anonymized Series.
+
+With ``--include-working-folder`` it migrates the entire working_folder
+tree in bottom-up order (SERIES → STUDY → PATIENT):
+
+* SERIES pass: move full ``series_dir`` (pipeline outputs + dcm_anon).
+* STUDY pass: for each STUDY-level Record, merge remaining children of
+  ``old_study_dir`` into ``new_study_dir`` (which already contains
+  series_dirs from the SERIES pass).
+* PATIENT pass: same, for PATIENT-level Records.
+
+The DB is not touched — paths derive from Study/Patient/Series + RecordType.level.
+
+Supported placeholders for the ``--from``/``--to`` templates are listed in
+``SUPPORTED_PLACEHOLDERS`` in :mod:`clarinet.utils.path_template`.
 """
 
 import argparse
 import asyncio
+import contextlib
 import shutil
 from collections.abc import Iterable
 from pathlib import Path
+from typing import Literal
 
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlmodel import select
 
 from clarinet.models.base import DicomQueryLevel
+from clarinet.models.record import Record
+from clarinet.models.record_type import RecordType
 from clarinet.models.study import Series, Study
 from clarinet.services.dicom.anon_path import (
     AnonPathError,
@@ -28,19 +46,258 @@ from clarinet.settings import settings
 from clarinet.utils.db_manager import db_manager
 from clarinet.utils.logger import logger
 
+MoveOutcome = Literal["moved", "same", "missing", "collision", "failed"]
+
+
+def _move_dir_atomic(old: Path, new: Path, dry_run: bool, *, label: str) -> MoveOutcome:
+    """Atomically rename ``old`` to ``new``. Skip whole entry on collision.
+
+    Used at SERIES level (leaf dir). Detects the silent ``shutil.move``
+    quirk where moving into an existing dir nests the source inside it
+    instead of failing — returns ``collision`` and logs WARNING.
+    """
+    if old == new:
+        return "same"
+    if not old.is_dir():
+        logger.debug(f"{label}: source {old} missing; skipping.")
+        return "missing"
+    if new.exists():
+        logger.warning(f"{label}: target {new} already exists; skipping.")
+        return "collision"
+    if dry_run:
+        logger.info(f"[dry-run] {label}: {old} -> {new}")
+        return "moved"
+    try:
+        new.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(old), str(new))
+    except OSError as exc:
+        logger.error(f"{label}: failed to move {old} -> {new}: {exc}")
+        return "failed"
+    logger.info(f"{label}: moved {old} -> {new}")
+    return "moved"
+
+
+def _merge_dir(old: Path, new: Path, dry_run: bool, *, label: str) -> MoveOutcome:
+    """Move ``old`` into ``new``, merging per-child when ``new`` already exists.
+
+    Used at STUDY and PATIENT levels: the new dir is typically created
+    earlier in the bottom-up pass (by SERIES mkdir-parents), so the
+    entire dir cannot be renamed atomically — we move loose children
+    one-by-one. Per-child name collisions are skipped with WARNING.
+
+    Returns the dominant outcome for the level:
+      * ``same``       — ``old == new`` or ``old`` is empty
+      * ``missing``    — ``old`` doesn't exist on disk
+      * ``moved``      — at least one child moved (or whole dir renamed)
+      * ``collision``  — children all collided, nothing moved
+      * ``failed``     — OSError mid-flight
+    """
+    if old == new:
+        return "same"
+    if not old.is_dir():
+        logger.debug(f"{label}: source {old} missing; skipping.")
+        return "missing"
+
+    if not new.exists():
+        # Fast path: no merge needed.
+        if dry_run:
+            logger.info(f"[dry-run] {label}: {old} -> {new}")
+            return "moved"
+        try:
+            new.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(old), str(new))
+        except OSError as exc:
+            logger.error(f"{label}: failed to move {old} -> {new}: {exc}")
+            return "failed"
+        logger.info(f"{label}: moved {old} -> {new}")
+        return "moved"
+
+    children = list(old.iterdir())
+    if not children:
+        logger.debug(f"{label}: source {old} is empty; skipping.")
+        return "same"
+
+    moved_any = False
+    collided_any = False
+    for child in children:
+        dest = new / child.name
+        if dest.exists():
+            logger.warning(f"{label}: target {dest} exists; skipping {child.name}.")
+            collided_any = True
+            continue
+        if dry_run:
+            logger.info(f"[dry-run] {label}: {child} -> {dest}")
+            moved_any = True
+            continue
+        try:
+            shutil.move(str(child), str(dest))
+        except OSError as exc:
+            logger.error(f"{label}: failed to move {child} -> {dest}: {exc}")
+            return "failed"
+        logger.info(f"{label}: moved {child} -> {dest}")
+        moved_any = True
+
+    if not dry_run and moved_any:
+        # Best-effort: drop ``old`` if it's now empty. Surviving children
+        # (collisions) keep ``old`` around, which is fine.
+        with contextlib.suppress(OSError):
+            old.rmdir()
+
+    if collided_any and not moved_any:
+        return "collision"
+    return "moved"
+
+
+def _render_series_paths(
+    series: Series,
+    from_template: str,
+    to_template: str,
+    storage_path: Path,
+    counters: dict[str, int],
+) -> tuple[Path, Path] | None:
+    """Render old/new series dirs; on error bump ``failed`` and return ``None``."""
+    study = series.study
+    patient = study.patient if study else None
+    if study is None or patient is None:
+        logger.warning(f"Series {series.series_uid} has no Study/Patient eager-loaded; skipping.")
+        counters["failed"] += 1
+        return None
+    try:
+        ctx = build_context(patient=patient, study=study, series=series)
+        old_dir = render_working_folder(from_template, DicomQueryLevel.SERIES, ctx, storage_path)
+        new_dir = render_working_folder(to_template, DicomQueryLevel.SERIES, ctx, storage_path)
+    except AnonPathError as exc:
+        logger.error(f"Series {series.series_uid}: template render failed ({exc}); skipping.")
+        counters["failed"] += 1
+        return None
+    return old_dir, new_dir
+
+
+async def _migrate_all_series(
+    session: AsyncSession,
+    args: argparse.Namespace,
+    from_template: str,
+    to_template: str,
+    storage_path: Path,
+    counters: dict[str, int],
+    cleanup_candidates: set[Path],
+    *,
+    full_dir: bool,
+) -> None:
+    """Move SERIES-level dirs from old to new template.
+
+    Streams ``Series WHERE anon_uid IS NOT NULL`` and, depending on
+    ``full_dir``, moves either:
+
+    * ``full_dir=False`` — only ``series_dir/dcm_anon/`` (default mode).
+    * ``full_dir=True`` — the entire ``series_dir`` (working-folder mode,
+      bundles dcm_anon with pipeline outputs).
+
+    The cleanup root differs: for ``dcm_anon`` we collect the surviving
+    parent ``series_dir`` (which still holds other files); for the full
+    dir we collect ``series_dir.parent`` (study-level) so that
+    ``--cleanup-empty`` can prune now-empty study_dirs.
+    """
+    stmt = (
+        select(Series)
+        .where(Series.anon_uid.is_not(None))  # type: ignore[union-attr]
+        .options(
+            selectinload(Series.study).selectinload(Study.patient)  # type: ignore[arg-type]
+        )
+        .execution_options(yield_per=500)
+    )
+    result = await session.stream_scalars(stmt)
+    async for series in result:
+        paths = _render_series_paths(series, from_template, to_template, storage_path, counters)
+        if paths is None:
+            continue
+        old_series_dir, new_series_dir = paths
+        if full_dir:
+            old, new = old_series_dir, new_series_dir
+            label = f"Series {series.series_uid} working_folder"
+            cleanup_root = old_series_dir.parent
+        else:
+            old = old_series_dir / "dcm_anon"
+            new = new_series_dir / "dcm_anon"
+            label = f"Series {series.series_uid} dcm_anon"
+            cleanup_root = old_series_dir
+        outcome = await asyncio.to_thread(_move_dir_atomic, old, new, args.dry_run, label=label)
+        counters[outcome] += 1
+        if outcome == "moved" and not args.dry_run:
+            cleanup_candidates.add(cleanup_root)
+
+
+async def _migrate_records_by_level(
+    session: AsyncSession,
+    args: argparse.Namespace,
+    level: DicomQueryLevel,
+    from_template: str,
+    to_template: str,
+    storage_path: Path,
+    counters: dict[str, int],
+    cleanup_candidates: set[Path],
+) -> None:
+    """Move working_folder for each Record at the given STUDY or PATIENT level.
+
+    Uses merge semantics: the new parent dir typically exists from the
+    earlier SERIES pass, so loose study-/patient-level files are merged
+    in alongside the already-moved series_dirs.
+    """
+    options = [selectinload(Record.patient)]  # type: ignore[arg-type]
+    if level is DicomQueryLevel.STUDY:
+        options.append(selectinload(Record.study))  # type: ignore[arg-type]
+    stmt = (
+        select(Record)
+        .join(RecordType, Record.record_type_name == RecordType.name)  # type: ignore[arg-type]
+        .where(RecordType.level == level.value)
+        .options(*options)
+        .execution_options(yield_per=200)
+    )
+    result = await session.stream_scalars(stmt)
+    async for record in result:
+        patient = record.patient
+        study = record.study if level is DicomQueryLevel.STUDY else None
+        if patient is None or (level is DicomQueryLevel.STUDY and study is None):
+            logger.warning(
+                f"Record {record.id} ({level.value}) missing eager-loaded relations; skipping."
+            )
+            counters["failed"] += 1
+            continue
+        try:
+            ctx = build_context(patient=patient, study=study, series=None)
+            old_dir = render_working_folder(from_template, level, ctx, storage_path)
+            new_dir = render_working_folder(to_template, level, ctx, storage_path)
+        except AnonPathError as exc:
+            logger.error(
+                f"Record {record.id} ({level.value}): template render failed ({exc}); skipping."
+            )
+            counters["failed"] += 1
+            continue
+        outcome = await asyncio.to_thread(
+            _merge_dir,
+            old_dir,
+            new_dir,
+            args.dry_run,
+            label=f"Record {record.id} {level.value}",
+        )
+        counters[outcome] += 1
+        if not args.dry_run:
+            if outcome == "moved":
+                cleanup_candidates.add(old_dir.parent)
+            elif outcome == "same":
+                # ``old_dir`` may have been emptied by the SERIES pass; let
+                # cleanup walk up from it so ``--cleanup-empty`` can prune.
+                cleanup_candidates.add(old_dir)
+
 
 async def migrate_paths(args: argparse.Namespace) -> None:
-    """Move anonymized dcm_anon dirs from ``--from`` template to ``--to`` template.
+    """Move anonymized files from ``--from`` template layout to ``--to`` layout.
 
-    Workflow:
-        1. Validate both templates (same rules as ``settings``).
-        2. Stream all series with ``anon_uid IS NOT NULL`` from the DB
-           (``yield_per=500`` + eagerly-loaded Study/Patient) so memory
-           stays bounded on large databases.
-        3. For each: render both paths, compare, optionally move.
-        4. Optionally walk up from the parent of each successfully moved
-           ``dcm_anon`` and remove empty ancestor dirs (capped at
-           ``storage_path``). Stray empty dirs elsewhere are left alone.
+    Default mode moves only ``series_dir/dcm_anon/``. With
+    ``--include-working-folder``, performs three passes in bottom-up
+    order (SERIES → STUDY → PATIENT) so that nested dirs are handled
+    consistently. The DB is never modified — paths derive from
+    Study/Patient/Series + RecordType.level.
 
     Run with ``--dry-run`` first to inspect the plan.
     """
@@ -51,85 +308,52 @@ async def migrate_paths(args: argparse.Namespace) -> None:
         logger.info("--from and --to templates are identical; nothing to do.")
         return
 
+    include_wf = getattr(args, "include_working_folder", False)
     storage_path = Path(settings.storage_path)
-    moved = 0
-    skipped_missing = 0
-    skipped_same = 0
-    failed = 0
+    counters: dict[str, int] = {
+        "moved": 0,
+        "same": 0,
+        "missing": 0,
+        "collision": 0,
+        "failed": 0,
+    }
     cleanup_candidates: set[Path] = set()
 
     async with db_manager.async_session_factory() as session:
-        stmt = (
-            select(Series)
-            .where(Series.anon_uid.is_not(None))  # type: ignore[union-attr]
-            .options(
-                selectinload(Series.study).selectinload(Study.patient)  # type: ignore[arg-type]
-            )
-            .execution_options(yield_per=500)
+        # Bottom-up when include_wf=True: SERIES first so that new parent
+        # dirs exist for STUDY/PATIENT passes to merge into.
+        await _migrate_all_series(
+            session,
+            args,
+            from_template,
+            to_template,
+            storage_path,
+            counters,
+            cleanup_candidates,
+            full_dir=include_wf,
         )
-        result = await session.stream_scalars(stmt)
-        async for series in result:
-            study = series.study
-            patient = study.patient if study else None
-            if study is None or patient is None:
-                logger.warning(
-                    f"Series {series.series_uid} has no Study/Patient eager-loaded; skipping."
+        if include_wf:
+            for level in (DicomQueryLevel.STUDY, DicomQueryLevel.PATIENT):
+                await _migrate_records_by_level(
+                    session,
+                    args,
+                    level,
+                    from_template,
+                    to_template,
+                    storage_path,
+                    counters,
+                    cleanup_candidates,
                 )
-                failed += 1
-                continue
-
-            try:
-                ctx = build_context(patient=patient, study=study, series=series)
-                old_series_dir = render_working_folder(
-                    from_template, DicomQueryLevel.SERIES, ctx, storage_path
-                )
-                new_series_dir = render_working_folder(
-                    to_template, DicomQueryLevel.SERIES, ctx, storage_path
-                )
-            except AnonPathError as exc:
-                logger.error(
-                    f"Series {series.series_uid}: template render failed ({exc}); skipping."
-                )
-                failed += 1
-                continue
-
-            old_dcm_anon = old_series_dir / "dcm_anon"
-            new_dcm_anon = new_series_dir / "dcm_anon"
-
-            if old_dcm_anon == new_dcm_anon:
-                skipped_same += 1
-                continue
-            if not old_dcm_anon.is_dir():
-                logger.debug(
-                    f"Series {series.series_uid}: source {old_dcm_anon} missing; skipping."
-                )
-                skipped_missing += 1
-                continue
-
-            if args.dry_run:
-                logger.info(f"[dry-run] {old_dcm_anon} -> {new_dcm_anon}")
-                moved += 1
-                continue
-
-            try:
-                await asyncio.to_thread(new_dcm_anon.parent.mkdir, parents=True, exist_ok=True)
-                await asyncio.to_thread(shutil.move, str(old_dcm_anon), str(new_dcm_anon))
-            except OSError as exc:
-                logger.error(f"Failed to move {old_dcm_anon} -> {new_dcm_anon}: {exc}")
-                failed += 1
-                continue
-            logger.info(f"Moved {old_dcm_anon} -> {new_dcm_anon}")
-            moved += 1
-            cleanup_candidates.add(old_series_dir)
 
     logger.info(
-        f"Done. moved={moved}, skipped_same={skipped_same}, "
-        f"skipped_missing={skipped_missing}, failed={failed}"
+        f"Done. moved={counters['moved']}, skipped_same={counters['same']}, "
+        f"skipped_missing={counters['missing']}, "
+        f"skipped_collision={counters['collision']}, failed={counters['failed']}"
     )
 
     if args.cleanup_empty and not args.dry_run and cleanup_candidates:
         removed = await asyncio.to_thread(_cleanup_empty_dirs, cleanup_candidates, storage_path)
-        logger.info(f"Cleanup: removed {removed} empty directories left behind by migrated series.")
+        logger.info(f"Cleanup: removed {removed} empty directories left behind by migration.")
 
     if not args.dry_run:
         logger.info(
@@ -141,10 +365,10 @@ async def migrate_paths(args: argparse.Namespace) -> None:
 def _cleanup_empty_dirs(roots: Iterable[Path], stop_at: Path) -> int:
     """Remove empty dirs in ``roots`` and walk up while empty, stopping at ``stop_at``.
 
-    Only dirs that are ancestors of an actually-moved series are touched
-    — stray empty dirs elsewhere under ``stop_at`` are left alone.
-    Stops at the first non-empty ancestor and refuses to walk above
-    ``stop_at``.
+    Only dirs that are ancestors of an actually-moved series/record are
+    touched — stray empty dirs elsewhere under ``stop_at`` are left
+    alone. Stops at the first non-empty ancestor and refuses to walk
+    above ``stop_at``.
     """
     removed = 0
     stop_resolved = stop_at.resolve()
