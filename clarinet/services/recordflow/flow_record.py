@@ -455,6 +455,9 @@ class FlowRecord:
             args=args,
             extra_kwargs=dict(kwargs),
         )
+        from clarinet.services.recordflow import call_function_registry
+
+        call_function_registry.register(action)
 
         if self._current_condition:
             self._current_condition.add_action(action)

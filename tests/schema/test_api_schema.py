@@ -41,6 +41,11 @@ EXCLUDED_PATTERN = (
     # range which the server rejects (orjson limitation). Covered by Phase 3
     # test_create_record_type / test_update_record_type with excluded positive_data_acceptance.
     r"|^/api/records/types(/\{record_type_id\})?$"
+    # Admin workflow endpoints require recordflow_enabled=True; the schema-test
+    # fixture deliberately runs with it off, so every call returns a contractually
+    # valid 503 that schemathesis still treats as a server error. Behavioural
+    # coverage lives in tests/integration/test_workflow_router.py.
+    r"|^/api/admin/workflow/"
 )
 
 # Suppress common health checks for ASGI transport

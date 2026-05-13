@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 
 from clarinet.utils.logger import logger
 
+from . import call_function_registry
 from .engine import RecordFlowEngine
 from .flow_file import FILE_REGISTRY
 from .flow_record import ENTITY_REGISTRY, RECORD_REGISTRY
@@ -57,6 +58,7 @@ def load_flows_from_file(file_path: Path) -> list[FlowRecord | FlowFileRecord]:
     RECORD_REGISTRY.clear()
     ENTITY_REGISTRY.clear()
     FILE_REGISTRY.clear()
+    call_function_registry.reset()
 
     # Add parent directory to sys.path so sibling imports work
     parent_dir = file_path.parent
@@ -131,17 +133,22 @@ def find_flow_files(base_path: Path, pattern: str = "*_flow.py") -> list[Path]:
     """
     Find flow definition files in a directory.
 
+    Results are sorted by path so the engine sees flows in the same order
+    on every process / replica / filesystem. Without this, ``Path.glob``
+    yields filesystem order — different across OS/FS — which destabilises
+    both flow dispatch order and the ``/api/admin/workflow`` plan digest.
+
     Args:
         base_path: Base directory to search in.
         pattern: Glob pattern for flow files (default: *_flow.py).
 
     Returns:
-        List of paths to flow definition files.
+        List of paths to flow definition files, sorted lexicographically.
     """
     flow_files: list[Path] = []
 
     if base_path.exists() and base_path.is_dir():
-        flow_files = list(base_path.glob(pattern))
+        flow_files = sorted(base_path.glob(pattern))
         logger.info(f"Found {len(flow_files)} flow files in {base_path}")
 
     return flow_files

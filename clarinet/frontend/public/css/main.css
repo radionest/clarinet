@@ -21,6 +21,7 @@
 @import url("pages/dashboard.css") layer(pages);
 @import url("pages/records.css") layer(pages);
 @import url("pages/slicer.css") layer(pages);
+@import url("pages/workflow.css") layer(pages);
 
 /* Utilities & animations */
 @import url("utilities/helpers.css") layer(utilities);

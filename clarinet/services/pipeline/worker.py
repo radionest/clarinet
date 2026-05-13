@@ -107,6 +107,13 @@ def load_task_modules() -> None:
         except ImportError as e:
             logger.warning(f"Could not load built-in pipeline tasks: {e}")
 
+    try:
+        from clarinet.services.pipeline.tasks import call_registered_callable as _crc  # noqa: F401
+
+        logger.info("Loaded built-in pipeline task call_registered_callable")
+    except ImportError as e:
+        logger.warning(f"Could not load call_registered_callable task: {e}")
+
 
 async def run_worker(
     queues: list[str] | None = None,

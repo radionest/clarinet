@@ -4,9 +4,14 @@ Pydantic models for pipeline messages.
 PipelineMessage carries context through pipeline steps.
 """
 
-from typing import Any
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
+
+if TYPE_CHECKING:
+    from clarinet.models import RecordRead
 
 
 class PipelineMessage(BaseModel):
@@ -35,3 +40,28 @@ class PipelineMessage(BaseModel):
     payload: dict[str, Any] = Field(default_factory=dict)
     pipeline_id: str | None = None
     step_index: int = 0
+
+
+def build_pipeline_message_from_record(
+    record: RecordRead,
+    *,
+    payload: dict[str, Any] | None = None,
+) -> PipelineMessage:
+    """Build a :class:`PipelineMessage` from a hydrated :class:`RecordRead`.
+
+    Mirrors the mapping used by ``RecordFlowEngine._dispatch_pipeline``: the
+    patient / study / series identifiers and the record's type name are pulled
+    off the record's relations. ``patient_id`` and ``study_uid`` fall back to
+    empty strings because :class:`PipelineMessage` declares them as required
+    ``str`` for backward compatibility with older tasks that assert presence.
+    Callers that need stricter guarantees should validate the record before
+    constructing the message.
+    """
+    return PipelineMessage(
+        patient_id=record.patient_id or "",
+        study_uid=record.study_uid or "",
+        series_uid=record.series_uid,
+        record_id=record.id,
+        record_type_name=record.record_type.name if record.record_type else None,
+        payload=dict(payload) if payload else {},
+    )

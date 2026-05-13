@@ -1,0 +1,335 @@
+/* ============================
+   Workflow visualization (admin)
+   ============================ */
+
+.workflow-page {
+    padding-top: var(--spacing-lg);
+}
+
+.workflow-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 320px;
+    gap: var(--spacing-md);
+    align-items: stretch;
+    min-height: 500px;
+}
+
+.workflow-canvas {
+    background: var(--surface-color);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    min-height: 500px;
+    position: relative;
+}
+
+.workflow-svg {
+    display: block;
+    width: 100%;
+    height: 100%;
+    min-height: 500px;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+/* Pan affordance only while actually dragging — отдаём `cursor: grab`
+   в idle, иначе мигание `grab↔pointer` над hitbox edges. Hint
+   "Drag to pan" в UI выше графа компенсирует потерю static-affordance. */
+.workflow-svg:active {
+    cursor: grabbing;
+}
+
+/* --- Nodes --- */
+
+.workflow-node {
+    cursor: pointer;
+}
+
+.workflow-node rect {
+    fill: white;
+    stroke: var(--border-color);
+    stroke-width: 1;
+    transition: stroke 120ms ease, stroke-width 120ms ease;
+}
+
+.workflow-node text {
+    font-size: 13px;
+    font-weight: 500;
+    fill: var(--text-color);
+    pointer-events: none;
+}
+
+.workflow-node:hover rect {
+    stroke: var(--primary-color);
+}
+
+.workflow-node--record-type rect {
+    fill: #eef2ff;
+    stroke: #6366f1;
+}
+
+.workflow-node--entity rect {
+    fill: #ecfeff;
+    stroke: #06b6d4;
+}
+
+.workflow-node--file rect {
+    fill: #fef3c7;
+    stroke: #ca8a04;
+}
+
+.workflow-node--pipeline rect {
+    fill: #f5f3ff;
+    stroke: #7c3aed;
+}
+
+.workflow-node--pipeline-step rect {
+    fill: #faf5ff;
+    stroke: #7c3aed;
+    stroke-dasharray: 4 2;
+}
+
+.workflow-node--call-function rect {
+    fill: #f0fdf4;
+    stroke: #16a34a;
+}
+
+.workflow-node--expanded rect {
+    stroke-width: 2;
+}
+
+.workflow-node--selected rect {
+    stroke: var(--accent-color);
+    stroke-width: 2;
+}
+
+/* --- Edges --- */
+
+.workflow-edge {
+    cursor: pointer;
+}
+
+.workflow-edge path {
+    fill: none;
+    stroke: var(--secondary-color);
+    stroke-width: 1.5;
+    transition: stroke-width 120ms ease;
+}
+
+.workflow-edge:hover path {
+    stroke-width: 2.5;
+}
+
+.workflow-edge--potential path {
+    stroke-dasharray: 4 3;
+    opacity: 0.75;
+}
+
+.workflow-edge--fired path {
+    stroke-dasharray: none;
+    stroke-width: 2;
+    opacity: 1;
+}
+
+.workflow-edge--invalidate path {
+    stroke: var(--warning-color);
+}
+
+.workflow-edge--pipeline-dispatch path {
+    stroke: var(--info-color);
+}
+
+.workflow-edge--pipeline-step-chain path {
+    stroke: #7c3aed;
+}
+
+.workflow-edge--call-function path {
+    stroke: #16a34a;
+}
+
+.workflow-edge--selected path {
+    stroke: var(--accent-color);
+    stroke-width: 3;
+}
+
+.workflow-edge .workflow-edge-hitbox {
+    fill: none;
+    stroke: transparent;
+    stroke-width: 12;
+    pointer-events: stroke;
+}
+
+.workflow-edge-arrow {
+    fill: var(--secondary-color);
+}
+
+.workflow-edge--invalidate .workflow-edge-arrow {
+    fill: var(--warning-color);
+}
+
+.workflow-edge--pipeline-dispatch .workflow-edge-arrow {
+    fill: var(--info-color);
+}
+
+.workflow-edge-label {
+    fill: var(--text-muted, #6c757d);
+    font-size: 11px;
+    pointer-events: none;
+    user-select: none;
+    text-anchor: middle;
+}
+
+.workflow-edge-label--condition {
+    font-size: 10px;
+    font-style: italic;
+}
+
+.workflow-edge--selected .workflow-edge-label {
+    fill: var(--primary-color);
+}
+
+/* --- Side panel (schema + instance) --- */
+
+.workflow-side-panel {
+    background: white;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    padding: var(--spacing-md);
+    box-shadow: var(--shadow-sm);
+    min-width: 280px;
+    max-width: 360px;
+    overflow-y: auto;
+}
+
+.workflow-side-panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: var(--spacing-sm);
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: var(--spacing-sm);
+}
+
+.workflow-side-panel-header h3,
+.workflow-side-panel-header h4 {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 600;
+}
+
+.workflow-side-panel-body {
+    font-size: 0.9rem;
+    color: var(--text-color);
+}
+
+.workflow-side-panel-body dl {
+    margin: 0 0 var(--spacing-sm);
+}
+
+.workflow-side-panel-body dt {
+    font-weight: 600;
+    margin-top: var(--spacing-xs);
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+}
+
+.workflow-side-panel-body dd {
+    margin: 0 0 var(--spacing-xs);
+    overflow-wrap: break-word;
+}
+
+/* --- Dry-run / fire panel --- */
+
+.workflow-plan-panel h5 {
+    margin: 0 0 var(--spacing-sm);
+    font-size: 0.95rem;
+    font-weight: 600;
+}
+
+.workflow-plan-list {
+    list-style: decimal inside;
+    padding: 0;
+    margin: 0 0 var(--spacing-md);
+    max-height: 240px;
+    overflow-y: auto;
+}
+
+.workflow-plan-action {
+    padding: var(--spacing-xs) var(--spacing-sm);
+    border-left: 3px solid var(--primary-color);
+    margin-bottom: var(--spacing-xs);
+    background: var(--surface-color);
+    border-radius: var(--radius-sm);
+}
+
+.workflow-plan-action-type {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.workflow-plan-action-summary {
+    font-size: 0.9rem;
+    font-weight: 500;
+}
+
+.workflow-plan-actions {
+    display: flex;
+    gap: var(--spacing-sm);
+    margin-top: var(--spacing-md);
+}
+
+/* --- Inline section on the record page --- */
+
+.workflow-section {
+    margin-top: var(--spacing-md);
+}
+
+.workflow-section-header h3 {
+    margin: 0;
+}
+
+.workflow-section-header p {
+    margin: var(--spacing-xs) 0 var(--spacing-md);
+}
+
+.workflow-loading {
+    padding: var(--spacing-lg) 0;
+    text-align: center;
+    color: var(--text-secondary);
+}
+
+/* --- Trigger picker (record_type node → choose trigger_kind) --- */
+
+.workflow-trigger-picker > h5 {
+    margin: 0 0 var(--spacing-sm);
+}
+
+.workflow-picker-kinds {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-xs);
+    margin-bottom: var(--spacing-md);
+}
+
+.workflow-picker-radio-label {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+    cursor: pointer;
+    user-select: none;
+}
+
+.workflow-picker-radio-label input[type="radio"] {
+    margin: 0;
+}
+
+@media (max-width: 900px) {
+    .workflow-layout {
+        grid-template-columns: 1fr;
+    }
+    .workflow-side-panel {
+        max-width: none;
+    }
+}

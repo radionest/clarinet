@@ -58,6 +58,14 @@ ADMIN_RECORD_OUTPUT_FILES = "/api/admin/records"  # + /{id}/output-files
 # --- Reports ---
 ADMIN_REPORTS = "/api/admin/reports"  # GET list; + /{name}/download for file
 
+# --- Workflow visualization (admin) ---
+WORKFLOW_BASE = "/api/admin/workflow"
+WORKFLOW_GRAPH = "/api/admin/workflow/graph"
+WORKFLOW_DRY_RUN = "/api/admin/workflow/dry-run"
+WORKFLOW_FIRE = "/api/admin/workflow/fire"
+WORKFLOW_DISPATCH_DRY_RUN = "/api/admin/workflow/dispatch-dry-run"
+WORKFLOW_DISPATCH = "/api/admin/workflow/dispatch"
+
 # --- Slicer ---
 SLICER_BASE = "/api/slicer"
 SLICER_PING = "/api/slicer/ping"

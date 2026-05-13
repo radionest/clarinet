@@ -46,7 +46,7 @@ from .chain import (
     sync_pipeline_definitions,
 )
 from .context import FileResolver, RecordQuery, TaskContext, build_task_context
-from .message import PipelineMessage
+from .message import PipelineMessage, build_pipeline_message_from_record
 from .middleware import DeadLetterMiddleware, DLQPublisher
 from .sync_wrappers import SyncPipelineClient, SyncRecordQuery, SyncTaskContext
 from .task import pipeline_task
@@ -66,6 +66,7 @@ __all__ = [
     "SyncRecordQuery",
     "SyncTaskContext",
     "TaskContext",
+    "build_pipeline_message_from_record",
     "build_task_context",
     "create_broker",
     "get_all_brokers",

@@ -94,6 +94,9 @@ class FlowFileRecord:
             args=args,
             extra_kwargs=dict(kwargs),
         )
+        from clarinet.services.recordflow import call_function_registry
+
+        call_function_registry.register(action)
         self.actions.append(action)
         return self
 

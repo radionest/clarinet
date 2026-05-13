@@ -287,6 +287,36 @@ class RecordUniquePerUserError(RecordConstraintViolationError):
     error_code: ClassVar[str] = "UNIQUE_PER_USER"
 
 
+class WorkflowPlanDigestMismatchError(BusinessRuleViolationError):
+    """Plan digest sent to /fire does not match the live re-plan.
+
+    Indicates the underlying state changed between /dry-run and /fire
+    (record edited, flows reloaded). Caller must re-run /dry-run.
+    """
+
+    error_code: ClassVar[str] = "WORKFLOW_PLAN_CHANGED"
+
+    def __init__(self, expected_digest: str, current_digest: str):
+        super().__init__("Plan changed since dry-run; re-run dry-run before firing.")
+        self.expected_digest = expected_digest
+        self.current_digest = current_digest
+
+
+class WorkflowDigestAlreadyUsedError(BusinessRuleViolationError):
+    """The same plan digest has already been fired (within the TTL window).
+
+    Guards against double-clicks and network retries on /fire — actions
+    like CreateRecord and PipelineAction are not idempotent at the engine
+    layer, so the router rejects replayed digests outright.
+    """
+
+    error_code: ClassVar[str] = "WORKFLOW_DIGEST_ALREADY_USED"
+
+    def __init__(self, digest: str):
+        super().__init__("Plan digest already consumed; run /dry-run again to fire.")
+        self.digest = digest
+
+
 # Report exceptions (custom SQL reports)
 class ReportNotFoundError(EntityNotFoundError):
     """Raised when a report template name is not registered."""

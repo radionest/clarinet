@@ -33,6 +33,10 @@ clarinet/static/
 # Generated data
 examples/*/data/
 
+# Alembic setup is a downstream-project concern (see CLAUDE.md / memory)
+examples/*/alembic.ini
+examples/*/alembic/
+
 # DICOM
 **/dicomweb_cache
 **/test_dataset/**
