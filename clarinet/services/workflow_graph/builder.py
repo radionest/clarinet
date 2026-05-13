@@ -469,4 +469,71 @@ def _create_record_label(action: CreateRecordAction) -> str:
     return " ".join(parts)
 
 
-__all__ = ["build_graph"]
+# ── Subgraph filtering ────────────────────────────────────────────────────
+
+
+def subgraph_around_record_type(graph: WorkflowGraph, *, center_id: str) -> WorkflowGraph:
+    """Restrict a graph to nodes reachable from a RECORD_TYPE center.
+
+    Two-way BFS from ``center_id``. Intermediate kinds (ENTITY, FILE,
+    PIPELINE, PIPELINE_STEP, CALL_FUNCTION) are traversed transparently —
+    so all the "glue" between two record types is preserved. When BFS
+    reaches **another** RECORD_TYPE node, that node is included in the
+    result but its outgoing/incoming edges are NOT followed further — the
+    one-hop boundary is record_type → record_type.
+
+    ``center_id`` is always included even if it has no edges. If
+    ``center_id`` is not present in ``graph.nodes``, an empty
+    :class:`WorkflowGraph` is returned (no error).
+
+    The returned graph has zero-coordinates on nodes — the caller is
+    expected to re-apply :func:`apply_layout`.
+    """
+    node_by_id = {n.id: n for n in graph.nodes}
+    if center_id not in node_by_id:
+        return WorkflowGraph(nodes=[], edges=[])
+
+    out_edges: dict[str, list[Edge]] = {}
+    in_edges: dict[str, list[Edge]] = {}
+    for edge in graph.edges:
+        out_edges.setdefault(edge.from_node, []).append(edge)
+        in_edges.setdefault(edge.to_node, []).append(edge)
+
+    visited: set[str] = {center_id}
+    kept_edge_ids: set[str] = set()
+    kept_edges: list[Edge] = []
+    queue: list[str] = [center_id]
+
+    def _record_edge(edge: Edge) -> None:
+        if edge.id not in kept_edge_ids:
+            kept_edge_ids.add(edge.id)
+            kept_edges.append(edge)
+
+    def _enqueue(neighbor_id: str) -> None:
+        if neighbor_id in visited:
+            return
+        visited.add(neighbor_id)
+        neighbor = node_by_id.get(neighbor_id)
+        # Foreign record_type is a stop boundary: include, don't expand.
+        if (
+            neighbor is not None
+            and neighbor.kind == NodeKind.RECORD_TYPE
+            and neighbor_id != center_id
+        ):
+            return
+        queue.append(neighbor_id)
+
+    while queue:
+        current = queue.pop(0)
+        for edge in out_edges.get(current, []):
+            _record_edge(edge)
+            _enqueue(edge.to_node)
+        for edge in in_edges.get(current, []):
+            _record_edge(edge)
+            _enqueue(edge.from_node)
+
+    nodes = [node_by_id[nid] for nid in visited if nid in node_by_id]
+    return WorkflowGraph(nodes=nodes, edges=kept_edges)
+
+
+__all__ = ["build_graph", "subgraph_around_record_type"]

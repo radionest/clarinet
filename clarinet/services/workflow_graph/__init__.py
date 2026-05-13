@@ -19,7 +19,7 @@ from .audit import (
     ParentRecordAuditProvider,
     WorkflowAuditProvider,
 )
-from .builder import build_graph
+from .builder import build_graph, subgraph_around_record_type
 from .layout import apply_layout
 from .models import (
     Edge,
@@ -58,4 +58,5 @@ __all__ = [
     "make_pipeline_id",
     "make_pipeline_step_id",
     "make_record_type_id",
+    "subgraph_around_record_type",
 ]

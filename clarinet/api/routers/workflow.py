@@ -11,7 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 from enum import Enum
-from typing import Annotated
+from typing import Annotated, Literal
 
 from cachetools import TTLCache
 from fastapi import APIRouter, Query, Request
@@ -22,7 +22,7 @@ from clarinet.exceptions.domain import (
     WorkflowDigestAlreadyUsedError,
     WorkflowPlanDigestMismatchError,
 )
-from clarinet.exceptions.http import NOT_FOUND, SERVICE_UNAVAILABLE
+from clarinet.exceptions.http import NOT_FOUND, SERVICE_UNAVAILABLE, UNPROCESSABLE_ENTITY
 from clarinet.models import RecordRead
 from clarinet.models.base import RecordStatus
 from clarinet.repositories.record_repository import RecordSearchCriteria
@@ -34,6 +34,8 @@ from clarinet.services.workflow_graph import (
     WorkflowGraph,
     apply_layout,
     build_graph,
+    make_record_type_id,
+    subgraph_around_record_type,
 )
 from clarinet.utils.logger import logger
 
@@ -194,18 +196,34 @@ async def get_graph(
     expanded: Annotated[
         str | None, Query(description="Comma-separated list of pipeline names to inline.")
     ] = None,
+    scope: Annotated[
+        Literal["schema", "instance"],
+        Query(
+            description=(
+                "schema (default): project-wide graph. "
+                "instance: subgraph around record_id's record_type (requires record_id)."
+            ),
+        ),
+    ] = "schema",
 ) -> WorkflowGraph:
     """Build and return the workflow graph.
 
     Without ``record_id`` the response is the project-wide schema graph.
-    With ``record_id`` the graph carries firing-history annotations on edges
-    that ``parent_record_id`` lets us reconstruct (today: ``CreateRecord``
-    edges only).
+    With ``record_id`` (and default ``scope=schema``) the graph carries
+    firing-history annotations on edges that ``parent_record_id`` lets us
+    reconstruct (today: ``CreateRecord`` edges only).
+
+    With ``scope=instance`` (requires ``record_id``) the graph is restricted
+    to a subgraph centered on the record's record_type: parents (types that
+    can create it) + children (types it can create), with all intermediate
+    pipeline / call / entity / file nodes between them preserved. Firings
+    are still annotated when ``record_id`` is set.
     """
     engine = _require_engine(request)
     expanded_pipelines = _parse_expanded(expanded)
 
     audit_provider = None
+    record_read: RecordRead | None = None
     if record_id is not None:
         record_read = await _load_record_read(repo, record_id)
         children = await repo.find_by_criteria(
@@ -215,12 +233,19 @@ async def get_graph(
         candidates = [RecordRead.model_validate(r) for r in children]
         audit_provider = ParentRecordAuditProvider(record_read, candidates)
 
+    if scope == "instance" and record_read is None:
+        raise UNPROCESSABLE_ENTITY.with_context("scope=instance requires record_id")
+
     graph = build_graph(
         engine=engine,
         pipelines=get_all_pipelines(),
         audit_provider=audit_provider,
         expanded_pipelines=expanded_pipelines,
     )
+    if scope == "instance":
+        assert record_read is not None  # narrow for mypy; guarded above
+        center_id = make_record_type_id(record_read.record_type_name)
+        graph = subgraph_around_record_type(graph, center_id=center_id)
     apply_layout(graph)
     return graph
 

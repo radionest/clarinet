@@ -171,6 +171,23 @@
     fill: var(--info-color);
 }
 
+.workflow-edge-label {
+    fill: var(--text-muted, #6c757d);
+    font-size: 11px;
+    pointer-events: none;
+    user-select: none;
+    text-anchor: middle;
+}
+
+.workflow-edge-label--condition {
+    font-size: 10px;
+    font-style: italic;
+}
+
+.workflow-edge--selected .workflow-edge-label {
+    fill: var(--primary-color);
+}
+
 /* --- Side panel (schema + instance) --- */
 
 .workflow-side-panel {

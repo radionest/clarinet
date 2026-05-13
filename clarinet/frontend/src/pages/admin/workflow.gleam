@@ -70,7 +70,7 @@ pub fn init(_shared: Shared) -> #(Model, Effect(Msg), List(OutMsg)) {
 
 fn load_graph_effect(request_id: Int, expanded: Set(String)) -> Effect(Msg) {
   use dispatch <- effect.from
-  wf_api.get_graph(None, set.to_list(expanded))
+  wf_api.get_graph(None, set.to_list(expanded), wf_api.Schema)
   |> promise.tap(fn(result) { dispatch(GraphLoaded(request_id, result)) })
   Nil
 }

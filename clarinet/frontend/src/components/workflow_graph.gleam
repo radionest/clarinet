@@ -6,10 +6,12 @@
 // pure and free of internal state.
 
 import api/workflow_models.{
-  type EdgeKind, type NodeKind, type WorkflowEdge, type WorkflowGraph,
-  type WorkflowNode, CallFunctionEdge, CallFunctionNode, CreateRecordEdge,
-  EntityNode, FileNode, InvalidateEdge, PipelineDispatchEdge, PipelineNode,
-  PipelineStepChainEdge, PipelineStepNode, RecordTypeNode, UpdateRecordEdge,
+  type EdgeKind, type NodeKind, type TriggerKind, type WorkflowEdge,
+  type WorkflowGraph, type WorkflowNode, CallFunctionEdge, CallFunctionNode,
+  CreateRecordEdge, EntityNode, FileNode, InvalidateEdge, PipelineDispatchEdge,
+  PipelineNode, PipelineStepChainEdge, PipelineStepNode, RecordTypeNode,
+  TriggerOnCreated, TriggerOnDataUpdate, TriggerOnFileChange,
+  TriggerOnFileUpdate, TriggerOnStatus, TriggerNone, UpdateRecordEdge,
 }
 import gleam/dict.{type Dict}
 import gleam/dynamic/decode
@@ -212,7 +214,74 @@ fn render_edge(
       attribute.attribute("d", d),
       attribute.attribute("marker-end", "url(#workflow-arrow)"),
     ]),
+    edge_labels(edge, from, to),
   ])
+}
+
+fn edge_labels(
+  edge: WorkflowEdge,
+  from: WorkflowNode,
+  to: WorkflowNode,
+) -> Element(msg) {
+  let trigger = trigger_label_text(edge.trigger_kind, edge.trigger_value)
+  case trigger, edge.condition_summary {
+    "", None -> element.none()
+    _, _ -> {
+      let x1 = from.position.x +. node_width
+      let y1 = from.position.y +. node_height /. 2.0
+      let x2 = to.position.x
+      let y2 = to.position.y +. node_height /. 2.0
+      let mid_x = { x1 +. x2 } /. 2.0
+      let mid_y = { y1 +. y2 } /. 2.0 -. 8.0
+      let trigger_text = case trigger {
+        "" -> element.none()
+        t ->
+          svg.text(
+            [
+              attribute.attribute("x", float.to_string(mid_x)),
+              attribute.attribute("y", float.to_string(mid_y)),
+              attribute.class("workflow-edge-label"),
+            ],
+            t,
+          )
+      }
+      let condition_text = case edge.condition_summary {
+        Some(c) ->
+          svg.text(
+            [
+              attribute.attribute("x", float.to_string(mid_x)),
+              attribute.attribute("y", float.to_string(mid_y +. 12.0)),
+              attribute.class(
+                "workflow-edge-label workflow-edge-label--condition",
+              ),
+            ],
+            c,
+          )
+        None -> element.none()
+      }
+      svg.g([], [trigger_text, condition_text])
+    }
+  }
+}
+
+/// Human-readable label for a trigger kind / value pair, drawn over edges.
+/// Mirrors backend ``TriggerKind`` enum from
+/// ``clarinet/services/workflow_graph/models.py``. Empty string suppresses
+/// the label (used for ``TriggerNone`` — pipeline step chains carry no
+/// trigger semantics worth surfacing).
+fn trigger_label_text(kind: TriggerKind, value: Option(String)) -> String {
+  case kind {
+    TriggerOnStatus ->
+      case value {
+        Some(v) -> "on status: " <> v
+        None -> "on any status"
+      }
+    TriggerOnDataUpdate -> "on data update"
+    TriggerOnFileChange -> "on file change"
+    TriggerOnFileUpdate -> "on file update"
+    TriggerOnCreated -> "on created"
+    TriggerNone -> ""
+  }
 }
 
 // Right-edge of `from` to left-edge of `to`. Straight line; arrow via marker.

@@ -139,7 +139,7 @@ Admin-only (`AdminUserDep`). 503 when `recordflow_enabled=False`.
 
 | URL | Method | Status | Description |
 |---|---|---|---|
-| `/api/admin/workflow/graph?record_id=&expanded=` | GET | 200 | Workflow graph (schema if no record_id, instance with firing history if set) |
+| `/api/admin/workflow/graph?record_id=&expanded=&scope=` | GET | 200 | Workflow graph. `scope=schema` (default) — project-wide graph; firings populated when `record_id` is set. `scope=instance` — subgraph centered on `record_id`'s record_type (parents + children + glue); requires `record_id` (422 otherwise) |
 | `/api/admin/workflow/dry-run` | POST | 200 | Plan a trigger; returns `{plan, digest}`. Body: `{record_id, trigger_kind, status_override?}` |
 | `/api/admin/workflow/fire` | POST | 200 | Execute trigger after digest match (409 on mismatch). Body: `{record_id, trigger_kind, status_override?, plan_digest}` |
 

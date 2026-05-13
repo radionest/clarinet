@@ -243,6 +243,54 @@ class TestGraphEndpoint:
         pipeline_node = next(n for n in body["nodes"] if n["id"] == "pipeline:p1")
         assert pipeline_node["expanded"] is True
 
+    @pytest.mark.asyncio
+    async def test_default_scope_is_schema(self, client, configured_engine):
+        """No ?scope param → same shape as the legacy schema graph (back-compat)."""
+        resp_default = await client.get(WORKFLOW_GRAPH)
+        resp_explicit = await client.get(WORKFLOW_GRAPH, params={"scope": "schema"})
+        assert resp_default.status_code == 200
+        assert resp_explicit.status_code == 200
+        ids_default = {n["id"] for n in resp_default.json()["nodes"]}
+        ids_explicit = {n["id"] for n in resp_explicit.json()["nodes"]}
+        assert ids_default == ids_explicit
+
+    @pytest.mark.asyncio
+    async def test_instance_scope_returns_subgraph(self, client, configured_engine, workflow_env):
+        """scope=instance + record_id → subgraph around record's record_type.
+
+        Schema graph contains both wf-parent and wf-child. For a wf-parent
+        record, the subgraph centered on record_type:wf-parent must still
+        contain both (1-hop boundary along create_record edges).
+        """
+        # Add a third unrelated record_type to the engine so we can verify it's filtered out.
+        flow_unrelated = FlowRecord("wf-unrelated")
+        flow_unrelated.on_status("finished")
+        flow_unrelated.add_record("wf-other")
+        configured_engine.register_flow(flow_unrelated)
+
+        parent_id = workflow_env["parent"].id
+        resp = await client.get(
+            WORKFLOW_GRAPH, params={"scope": "instance", "record_id": parent_id}
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        node_ids = {n["id"] for n in body["nodes"]}
+        assert "record_type:wf-parent" in node_ids
+        assert "record_type:wf-child" in node_ids
+        # Unrelated record_types must not leak in
+        assert "record_type:wf-unrelated" not in node_ids
+        assert "record_type:wf-other" not in node_ids
+
+    @pytest.mark.asyncio
+    async def test_instance_scope_without_record_id_returns_422(self, client, configured_engine):
+        """scope=instance must reject calls that don't carry a record_id."""
+        resp = await client.get(WORKFLOW_GRAPH, params={"scope": "instance"})
+        assert resp.status_code == 422
+        body = resp.json()
+        # detail field exists and mentions record_id
+        detail = body.get("detail") or body.get("message", "")
+        assert "record_id" in str(detail).lower()
+
 
 # ── /dry-run and /fire ───────────────────────────────────────────────────
 

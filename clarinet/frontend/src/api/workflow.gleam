@@ -20,17 +20,32 @@ import utils/load_status.{type LoadStatus}
 
 const base_path = "/admin/workflow"
 
+/// Graph scope.
+///
+/// - `Schema`: project-wide graph (every record_type, entity, file flow).
+/// - `Instance`: subgraph centered on `record_id`'s record_type — parents
+///   (types that can create it) + children (types it can create) plus all
+///   intermediate pipeline / call / entity / file nodes between them.
+///   Requires `record_id` (backend returns 422 otherwise).
+pub type Scope {
+  Schema
+  Instance
+}
+
 /// Fetch the workflow graph.
 ///
-/// Without `record_id` returns the project-wide schema. With `record_id`,
-/// edges carry firing history reconstructed from `parent_record_id`.
-/// `expanded` is a list of pipeline names to inline as `PIPELINE_STEP`
-/// nodes — empty means all pipelines collapsed.
+/// `scope=Schema` (default for the admin page) returns the full graph;
+/// `scope=Instance` (used by the per-record execute page) returns the
+/// subgraph around the record's type. When `record_id` is set the edges
+/// always carry firing history reconstructed from `parent_record_id` —
+/// independently of `scope`. `expanded` is a list of pipeline names to
+/// inline as `PIPELINE_STEP` nodes (empty means all pipelines collapsed).
 pub fn get_graph(
   record_id: Option(Int),
   expanded: List(String),
+  scope: Scope,
 ) -> Promise(Result(WorkflowGraph, ApiError)) {
-  let path = base_path <> "/graph" <> build_query(record_id, expanded)
+  let path = base_path <> "/graph" <> build_query(record_id, expanded, scope)
   http_client.get(path)
   |> promise.map(fn(res) {
     result.try(res, http_client.decode_response(
@@ -119,7 +134,14 @@ fn trigger_body(
 fn build_query(
   record_id: Option(Int),
   expanded: List(String),
+  scope: Scope,
 ) -> String {
+  let scope_param = case scope {
+    Schema -> None
+    // Backend defaults to schema, so omit ?scope=schema to keep URLs
+    // backwards-compatible and avoid surprising the router on rollback.
+    Instance -> Some("scope=instance")
+  }
   let parts = [
     case record_id {
       Some(id) -> Some("record_id=" <> int.to_string(id))
@@ -129,6 +151,7 @@ fn build_query(
       [] -> None
       _ -> Some("expanded=" <> string.join(expanded, ","))
     },
+    scope_param,
   ]
   let kept =
     list.filter_map(parts, fn(p) {

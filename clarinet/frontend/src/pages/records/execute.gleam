@@ -207,7 +207,7 @@ fn workflow_load_effect(
   request_id: Int,
 ) -> Effect(Msg) {
   use dispatch <- effect.from
-  wf_api.get_graph(Some(record_id), set.to_list(expanded))
+  wf_api.get_graph(Some(record_id), set.to_list(expanded), wf_api.Instance)
   |> promise.tap(fn(result) {
     dispatch(WorkflowGraphLoaded(request_id, result))
   })

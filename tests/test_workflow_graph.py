@@ -24,15 +24,20 @@ from clarinet.services.recordflow import (
 from clarinet.services.recordflow.engine import RecordFlowEngine
 from clarinet.services.recordflow.flow_record import series
 from clarinet.services.workflow_graph import (
+    Edge,
     EdgeKind,
+    Node,
     NodeKind,
     ParentRecordAuditProvider,
     TriggerKind,
+    WorkflowGraph,
     apply_layout,
     build_graph,
+    make_entity_id,
     make_pipeline_id,
     make_pipeline_step_id,
     make_record_type_id,
+    subgraph_around_record_type,
 )
 
 pytestmark = pytest.mark.usefixtures("clear_recordflow_registries")
@@ -461,3 +466,133 @@ class TestLayout:
         assert a.position.x == b.position.x
         # Different rows => different y
         assert a.position.y != b.position.y
+
+
+# ── Subgraph filtering ───────────────────────────────────────────────────
+
+
+def _rt_node(name: str) -> Node:
+    return Node(id=make_record_type_id(name), kind=NodeKind.RECORD_TYPE, label=name)
+
+
+def _pipeline_node(name: str) -> Node:
+    return Node(id=make_pipeline_id(name), kind=NodeKind.PIPELINE, label=name)
+
+
+def _step_node(pipeline: str, idx: int) -> Node:
+    return Node(
+        id=make_pipeline_step_id(pipeline, idx),
+        kind=NodeKind.PIPELINE_STEP,
+        label=f"step{idx}",
+    )
+
+
+def _entity_node(kind: str) -> Node:
+    return Node(id=make_entity_id(kind), kind=NodeKind.ENTITY, label=f"{kind} (created)")
+
+
+def _edge(eid: str, src: str, dst: str, kind: EdgeKind = EdgeKind.CREATE_RECORD) -> Edge:
+    return Edge(id=eid, from_node=src, to_node=dst, kind=kind, trigger_kind=TriggerKind.NONE)
+
+
+class TestSubgraphAroundRecordType:
+    def test_simple_pair_forward(self):
+        a, b = _rt_node("a"), _rt_node("b")
+        e = _edge("e1", a.id, b.id)
+        graph = WorkflowGraph(nodes=[a, b], edges=[e])
+
+        sub = subgraph_around_record_type(graph, center_id=a.id)
+
+        assert {n.id for n in sub.nodes} == {a.id, b.id}
+        assert [edge.id for edge in sub.edges] == ["e1"]
+
+    def test_simple_pair_backward(self):
+        """Subgraph around B includes A — BFS traverses incoming edges too."""
+        a, b = _rt_node("a"), _rt_node("b")
+        e = _edge("e1", a.id, b.id)
+        graph = WorkflowGraph(nodes=[a, b], edges=[e])
+
+        sub = subgraph_around_record_type(graph, center_id=b.id)
+
+        assert {n.id for n in sub.nodes} == {a.id, b.id}
+        assert [edge.id for edge in sub.edges] == ["e1"]
+
+    def test_pipeline_glue_between_record_types(self):
+        """A → pipeline:p → step0 → step1 → B — all intermediates kept."""
+        a, b = _rt_node("a"), _rt_node("b")
+        p, s0, s1 = _pipeline_node("p"), _step_node("p", 0), _step_node("p", 1)
+        edges = [
+            _edge("e1", a.id, p.id, EdgeKind.PIPELINE_DISPATCH),
+            _edge("e2", p.id, s0.id, EdgeKind.PIPELINE_STEP_CHAIN),
+            _edge("e3", s0.id, s1.id, EdgeKind.PIPELINE_STEP_CHAIN),
+            _edge("e4", s1.id, b.id, EdgeKind.CREATE_RECORD),
+        ]
+        graph = WorkflowGraph(nodes=[a, b, p, s0, s1], edges=edges)
+
+        sub = subgraph_around_record_type(graph, center_id=a.id)
+
+        assert {n.id for n in sub.nodes} == {a.id, b.id, p.id, s0.id, s1.id}
+        assert {edge.id for edge in sub.edges} == {"e1", "e2", "e3", "e4"}
+
+    def test_unrelated_record_type_excluded(self):
+        a, b, c = _rt_node("a"), _rt_node("b"), _rt_node("c")
+        e_ab = _edge("e1", a.id, b.id)
+        # c is a standalone record_type with no edges connecting to A
+        graph = WorkflowGraph(nodes=[a, b, c], edges=[e_ab])
+
+        sub = subgraph_around_record_type(graph, center_id=a.id)
+
+        assert c.id not in {n.id for n in sub.nodes}
+        assert {n.id for n in sub.nodes} == {a.id, b.id}
+
+    def test_cycle_does_not_loop(self):
+        """A → B → A — BFS terminates and keeps both record_types."""
+        a, b = _rt_node("a"), _rt_node("b")
+        edges = [_edge("e1", a.id, b.id), _edge("e2", b.id, a.id)]
+        graph = WorkflowGraph(nodes=[a, b], edges=edges)
+
+        sub = subgraph_around_record_type(graph, center_id=a.id)
+
+        assert {n.id for n in sub.nodes} == {a.id, b.id}
+        assert {edge.id for edge in sub.edges} == {"e1", "e2"}
+
+    def test_three_record_types_stop_after_one_hop(self):
+        """A → B → C — subgraph(A) stops at B (foreign rt boundary), C excluded."""
+        a, b, c = _rt_node("a"), _rt_node("b"), _rt_node("c")
+        edges = [_edge("e1", a.id, b.id), _edge("e2", b.id, c.id)]
+        graph = WorkflowGraph(nodes=[a, b, c], edges=edges)
+
+        sub = subgraph_around_record_type(graph, center_id=a.id)
+
+        assert {n.id for n in sub.nodes} == {a.id, b.id}
+        assert {edge.id for edge in sub.edges} == {"e1"}
+
+    def test_center_not_in_graph_returns_empty(self):
+        a = _rt_node("a")
+        graph = WorkflowGraph(nodes=[a], edges=[])
+
+        sub = subgraph_around_record_type(graph, center_id=make_record_type_id("does-not-exist"))
+
+        assert sub.nodes == []
+        assert sub.edges == []
+
+    def test_entity_node_traversed_as_intermediate(self):
+        """series-entity → A creates 'series' branch backward; subgraph(A)
+        should include series entity (intermediate kind, not a stop)."""
+        a = _rt_node("a")
+        ent = _entity_node("series")
+        e = _edge("e1", ent.id, a.id, EdgeKind.CREATE_RECORD)
+        graph = WorkflowGraph(nodes=[a, ent], edges=[e])
+
+        sub = subgraph_around_record_type(graph, center_id=a.id)
+
+        assert {n.id for n in sub.nodes} == {a.id, ent.id}
+
+    def test_center_isolated_keeps_only_center(self):
+        a = _rt_node("a")
+        graph = WorkflowGraph(nodes=[a], edges=[])
+
+        sub = subgraph_around_record_type(graph, center_id=a.id)
+
+        assert {n.id for n in sub.nodes} == {a.id}
+        assert sub.edges == []
