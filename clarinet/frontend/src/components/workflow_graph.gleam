@@ -19,6 +19,7 @@ import gleam/float
 import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
+import gleam/result
 import lustre/attribute
 import lustre/element.{type Element}
 import lustre/element/html
@@ -65,6 +66,7 @@ pub fn render(
     list.fold(graph.nodes, dict.new(), fn(acc, n) {
       dict.insert(acc, n.id, n)
     })
+  let label_offsets = compute_edge_label_offsets(graph.edges)
   let viewbox =
     "0 0 "
     <> float.to_string(graph.width)
@@ -90,7 +92,15 @@ pub fn render(
         svg.g(
           [attribute.class("workflow-edges")],
           list.map(graph.edges, fn(e) {
-            edge_view(e, nodes_by_id, selected_edge_id, handlers.on_edge_click)
+            let offset =
+              dict.get(label_offsets, e.id) |> result.unwrap(0.0)
+            edge_view(
+              e,
+              nodes_by_id,
+              selected_edge_id,
+              handlers.on_edge_click,
+              offset,
+            )
           }),
         ),
         svg.g(
@@ -102,6 +112,27 @@ pub fn render(
       ]),
     ],
   )
+}
+
+/// Pre-compute per-edge vertical offset for edge labels so that parallel
+/// edges (multiple edges between the same `from→to` pair) don't render
+/// their labels on top of each other. First edge in a pair keeps `0.0`;
+/// each subsequent edge shifts down by `14px` (a touch over the 11px font
+/// size). Returns `dict[edge.id, offset_px]`.
+fn compute_edge_label_offsets(
+  edges: List(WorkflowEdge),
+) -> Dict(String, Float) {
+  let #(_, offsets) =
+    list.fold(edges, #(dict.new(), dict.new()), fn(acc, edge) {
+      let #(counts, offsets) = acc
+      let key = edge.from_node <> "→" <> edge.to_node
+      let current = dict.get(counts, key) |> result.unwrap(0)
+      let next_offsets =
+        dict.insert(offsets, edge.id, int.to_float(current) *. 14.0)
+      let next_counts = dict.insert(counts, key, current + 1)
+      #(next_counts, next_offsets)
+    })
+  offsets
 }
 
 fn defs_block() -> Element(msg) {
@@ -172,10 +203,12 @@ fn edge_view(
   nodes_by_id: Dict(String, WorkflowNode),
   selected_id: Option(String),
   on_click: fn(String) -> msg,
+  label_offset: Float,
 ) -> Element(msg) {
   case dict.get(nodes_by_id, edge.from_node), dict.get(nodes_by_id, edge.to_node)
   {
-    Ok(from), Ok(to) -> render_edge(edge, from, to, selected_id, on_click)
+    Ok(from), Ok(to) ->
+      render_edge(edge, from, to, selected_id, on_click, label_offset)
     _, _ -> element.none()
   }
 }
@@ -186,6 +219,7 @@ fn render_edge(
   to: WorkflowNode,
   selected_id: Option(String),
   on_click: fn(String) -> msg,
+  label_offset: Float,
 ) -> Element(msg) {
   let is_selected = selected_id == Some(edge.id)
   let is_fired = case edge.firings {
@@ -214,7 +248,7 @@ fn render_edge(
       attribute.attribute("d", d),
       attribute.attribute("marker-end", "url(#workflow-arrow)"),
     ]),
-    edge_labels(edge, from, to),
+    edge_labels(edge, from, to, label_offset),
   ])
 }
 
@@ -222,6 +256,7 @@ fn edge_labels(
   edge: WorkflowEdge,
   from: WorkflowNode,
   to: WorkflowNode,
+  label_offset: Float,
 ) -> Element(msg) {
   let trigger = trigger_label_text(edge.trigger_kind, edge.trigger_value)
   case trigger, edge.condition_summary {
@@ -232,25 +267,34 @@ fn edge_labels(
       let x2 = to.position.x
       let y2 = to.position.y +. node_height /. 2.0
       let mid_x = { x1 +. x2 } /. 2.0
-      let mid_y = { y1 +. y2 } /. 2.0 -. 8.0
+      // 8 px above the line; `label_offset` stacks parallel edges' labels
+      // (0 for the first, 14 for the second, etc.) so they don't overlap.
+      let base_y = { y1 +. y2 } /. 2.0 -. 8.0 +. label_offset
       let trigger_text = case trigger {
         "" -> element.none()
         t ->
           svg.text(
             [
               attribute.attribute("x", float.to_string(mid_x)),
-              attribute.attribute("y", float.to_string(mid_y)),
+              attribute.attribute("y", float.to_string(base_y)),
               attribute.class("workflow-edge-label"),
             ],
             t,
           )
+      }
+      // When the trigger is empty (e.g. pipeline step chain), pull the
+      // condition row back to the centerline instead of letting it sit
+      // 12 px below the would-be trigger row.
+      let condition_y = case trigger {
+        "" -> base_y
+        _ -> base_y +. 12.0
       }
       let condition_text = case edge.condition_summary {
         Some(c) ->
           svg.text(
             [
               attribute.attribute("x", float.to_string(mid_x)),
-              attribute.attribute("y", float.to_string(mid_y +. 12.0)),
+              attribute.attribute("y", float.to_string(condition_y)),
               attribute.class(
                 "workflow-edge-label workflow-edge-label--condition",
               ),
@@ -269,7 +313,7 @@ fn edge_labels(
 /// ``clarinet/services/workflow_graph/models.py``. Empty string suppresses
 /// the label (used for ``TriggerNone`` — pipeline step chains carry no
 /// trigger semantics worth surfacing).
-fn trigger_label_text(kind: TriggerKind, value: Option(String)) -> String {
+pub fn trigger_label_text(kind: TriggerKind, value: Option(String)) -> String {
   case kind {
     TriggerOnStatus ->
       case value {

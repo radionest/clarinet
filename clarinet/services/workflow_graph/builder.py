@@ -486,8 +486,10 @@ def subgraph_around_record_type(graph: WorkflowGraph, *, center_id: str) -> Work
     ``center_id`` is not present in ``graph.nodes``, an empty
     :class:`WorkflowGraph` is returned (no error).
 
-    The returned graph has zero-coordinates on nodes — the caller is
-    expected to re-apply :func:`apply_layout`.
+    Node objects are reused as-is from the input; their ``position`` is
+    inherited unchanged. Callers should re-apply :func:`apply_layout` so the
+    reduced graph gets its own layered layout — otherwise the surviving
+    nodes keep coordinates that were sized for the full graph.
     """
     node_by_id = {n.id: n for n in graph.nodes}
     if center_id not in node_by_id:
