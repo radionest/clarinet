@@ -28,7 +28,7 @@ from clarinet.utils.logger import logger
 
 from ..exceptions import ConfigurationError, ValidationError
 from ..settings import settings
-from .base import BaseModel, DicomUID, RecordStatus
+from .base import BaseModel, DicomQueryLevel, DicomUID, RecordStatus
 from .file_schema import RecordFileLink, RecordFileLinkRead
 from .patient import Patient, PatientInfo
 from .record_type import (
@@ -442,23 +442,36 @@ class RecordRead(RecordBase):
         return self._format_slicer_kwargs(self.record_type.slicer_result_validator_args, extra)
 
     def _get_working_folder(self) -> str:
-        """Get the working folder path for this record."""
-        match self.record_type.level:
-            case "SERIES":
-                return self._format_path_strict(
-                    f"{settings.storage_path}/{{patient_id}}/{{study_anon_uid}}/{{series_anon_uid}}"
-                )
-            case "STUDY":
-                return self._format_path_strict(
-                    f"{settings.storage_path}/{{patient_id}}/{{study_anon_uid}}"
-                )
-            case "PATIENT":
-                return self._format_path_strict(f"{settings.storage_path}/{{patient_id}}")
-            case _:
-                raise ConfigurationError(
-                    f"Unknown record type level '{self.record_type.level}' — "
-                    "expected SERIES, STUDY, or PATIENT."
-                )
+        """Get the working folder path for this record.
+
+        Rendered from ``settings.disk_path_template`` at the appropriate
+        DICOM level. The template segments are applied as follows::
+
+            PATIENT -> storage / <patient_segment>
+            STUDY   -> storage / <patient_segment> / <study_segment>
+            SERIES  -> storage / <patient_segment> / <study_segment> / <series_segment>
+        """
+        from pathlib import Path
+
+        from clarinet.services.dicom.anon_path import build_context, render_working_folder
+
+        try:
+            level = DicomQueryLevel(self.record_type.level)
+        except ValueError as exc:
+            raise ConfigurationError(
+                f"Unknown record type level '{self.record_type.level}' — "
+                "expected SERIES, STUDY, or PATIENT."
+            ) from exc
+        ctx = build_context(
+            patient=self.patient,
+            study=self.study,
+            series=self.series,
+        )
+        # Per-record override only lives on Record (Series has no
+        # clarinet_storage_path field). Series.working_folder always uses
+        # settings.storage_path — that's an intentional asymmetry, not a bug.
+        storage = Path(self.clarinet_storage_path or settings.storage_path)
+        return str(render_working_folder(settings.disk_path_template, level, ctx, storage))
 
     @computed_field  # type: ignore[prop-decorator]
     @property

@@ -36,6 +36,7 @@ _COMPARED_FIELDS: tuple[str, ...] = (
     "slicer_result_validator",
     "slicer_result_validator_args",
     "slicer_context_hydrators",
+    "data_validators",
     "data_schema",
     "mask_patient_data",
     "viewer_mode",

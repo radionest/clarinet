@@ -56,7 +56,7 @@ Beyond `BaseRepository`, `RecordRepository` has:
 |---|---|
 | `validate_parent_record(parent_id)` | Validate parent record exists and return it (for user_id inheritance) |
 | `check_constraints(record, record_type)` | Validate RecordType constraints |
-| `count_by_type_and_context(name, series_uid, study_uid)` | Count records matching type + DICOM context |
+| `count_by_type_and_context(name, patient_id, study_uid, series_uid, level)` | Count records matching type at the given DicomQueryLevel context (PATIENT → patient_id, STUDY → study_uid, SERIES → series_uid) |
 | `count_user_records_for_context(user_id, name, patient_id, study_uid, series_uid, level)` | Count user's records for unique-per-user constraint at given DicomQueryLevel |
 | `get_available_type_counts(user_id)` | Dict of available RecordType -> count (batch-loaded to avoid N+1) |
 | `get_status_counts()` | Global status counts |

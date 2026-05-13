@@ -24,6 +24,7 @@ from cachetools import TTLCache
 from clarinet.services.dicomweb.cache import DicomWebCache
 from clarinet.services.dicomweb.models import MemoryCachedSeries
 from tests.conftest import create_disk_series
+from tests.utils.session import PassThroughSession
 
 
 def _make_instances(count: int = 3) -> dict[str, Any]:
@@ -759,3 +760,200 @@ class TestStudyUidValidation:
 
         # Failed validation must not leave a partial entry in memory
         assert cache._get_from_memory("anon_study", "series1") is None
+
+
+class TestResolveDcmAnonDir:
+    """DB-aware dcm_anon lookup via ``settings.disk_path_template``."""
+
+    @pytest.mark.asyncio
+    async def test_resolves_existing_dir_via_db(
+        self, tmp_path: Path, test_session, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from datetime import UTC, datetime
+
+        from clarinet.models.base import DicomQueryLevel
+        from clarinet.models.study import Series, Study
+        from clarinet.services.dicom.anon_path import build_context, render_working_folder
+        from tests.utils.factories import make_patient
+
+        patient = make_patient("RESOLVE_PAT_01", "Resolve", auto_id=303)
+        test_session.add(patient)
+        await test_session.commit()
+        study = Study(
+            patient_id="RESOLVE_PAT_01",
+            study_uid="1.2.7001.1",
+            date=datetime.now(UTC).date(),
+            modalities_in_study="CT",
+            anon_uid="2.25.701",
+        )
+        test_session.add(study)
+        await test_session.commit()
+        series = Series(
+            study_uid="1.2.7001.1",
+            series_uid="1.2.7001.1.1",
+            series_number=1,
+            modality="CT",
+            anon_uid="2.25.701.1",
+        )
+        test_session.add(series)
+        await test_session.commit()
+
+        # Create the dcm_anon dir at the path the resolver will compute
+        monkeypatch.setattr(
+            "clarinet.services.dicom.anon_path.settings.disk_path_template",
+            "{anon_patient_id}/{anon_study_uid}/{anon_series_uid}",
+        )
+        monkeypatch.setattr(
+            "clarinet.services.dicom.anon_path.settings.anon_per_study_patient_id",
+            False,
+        )
+        monkeypatch.setattr(
+            "clarinet.services.dicom.anon_path.settings.anon_id_prefix",
+            "CLARINET",
+        )
+        ctx = build_context(patient=patient, study=study, series=series)
+        series_dir = render_working_folder(
+            "{anon_patient_id}/{anon_study_uid}/{anon_series_uid}",
+            DicomQueryLevel.SERIES,
+            ctx,
+            tmp_path,
+        )
+        expected_dcm_anon = series_dir / "dcm_anon"
+        expected_dcm_anon.mkdir(parents=True)
+        (expected_dcm_anon / "x.dcm").write_bytes(b"placeholder")
+
+        # Build cache wired to the test session
+        class _Factory:
+            def __call__(self):
+                return PassThroughSession(test_session)
+
+        cache = DicomWebCache(
+            base_dir=tmp_path / "dicomweb_cache",
+            storage_path=tmp_path,
+            session_factory=_Factory(),
+        )
+        resolved = await cache._resolve_dcm_anon_dir("1.2.7001.1", "1.2.7001.1.1")
+        assert resolved == expected_dcm_anon
+
+    @pytest.mark.asyncio
+    async def test_returns_none_when_db_missing(self, tmp_path: Path, test_session) -> None:
+        """Unknown series_uid → None, no exception, result cached."""
+
+        class _Factory:
+            def __call__(self):
+                return PassThroughSession(test_session)
+
+        cache = DicomWebCache(
+            base_dir=tmp_path / "dicomweb_cache",
+            storage_path=tmp_path,
+            session_factory=_Factory(),
+        )
+        assert await cache._resolve_dcm_anon_dir("does.not.exist", "ne.either") is None
+        # Cached: second call doesn't re-query DB (would need session-tracking
+        # spy to assert that, but at minimum behavior must be deterministic).
+        assert await cache._resolve_dcm_anon_dir("does.not.exist", "ne.either") is None
+
+    @pytest.mark.asyncio
+    async def test_returns_none_when_no_session_factory(self, tmp_path: Path) -> None:
+        """No session factory → dcm_anon tier disabled (safe fallback)."""
+        cache = DicomWebCache(
+            base_dir=tmp_path / "dicomweb_cache",
+            storage_path=tmp_path,
+            session_factory=None,
+        )
+        assert await cache._resolve_dcm_anon_dir("any", "any") is None
+
+    @pytest.mark.asyncio
+    async def test_negative_entry_expires_via_ttl(self, tmp_path: Path, test_session) -> None:
+        """Negative result expires after TTL — guards against permanent
+        masking of "anonymize-after-first-read" races."""
+
+        class _Factory:
+            def __call__(self):
+                return PassThroughSession(test_session)
+
+        cache = DicomWebCache(
+            base_dir=tmp_path / "dicomweb_cache",
+            storage_path=tmp_path,
+            session_factory=_Factory(),
+            dcm_anon_path_cache_ttl_seconds=1,
+        )
+        assert await cache._resolve_dcm_anon_dir("no.such", "no.such.1") is None
+        assert "no.such/no.such.1" in cache._dcm_anon_path_cache
+
+        # Force expiration without sleeping: pass a far-future wall time
+        # to TTLCache.expire so every entry older than that is purged.
+        ttl_cache = cache._dcm_anon_path_cache
+        ttl_cache.expire(ttl_cache.timer() + ttl_cache.ttl + 1)
+        assert "no.such/no.such.1" not in cache._dcm_anon_path_cache
+
+    @pytest.mark.asyncio
+    async def test_returns_none_on_study_series_mismatch(
+        self, tmp_path: Path, test_session
+    ) -> None:
+        """Series exists under a different Study → None (guard against
+        inconsistent context resolution)."""
+        from datetime import UTC, datetime
+
+        from clarinet.models.study import Series, Study
+        from tests.utils.factories import make_patient
+
+        patient = make_patient("MISMATCH_PAT", "Mismatch", auto_id=909)
+        test_session.add(patient)
+        await test_session.commit()
+        for uid, anon in (("STUDY.A", "2.25.A"), ("STUDY.B", "2.25.B")):
+            test_session.add(
+                Study(
+                    patient_id="MISMATCH_PAT",
+                    study_uid=uid,
+                    date=datetime.now(UTC).date(),
+                    modalities_in_study="CT",
+                    anon_uid=anon,
+                )
+            )
+        await test_session.commit()
+        # Series belongs to STUDY.A — querying for STUDY.B must be rejected.
+        test_session.add(
+            Series(
+                study_uid="STUDY.A",
+                series_uid="SER.X",
+                series_number=1,
+                modality="CT",
+                anon_uid="2.25.A.1",
+            )
+        )
+        await test_session.commit()
+
+        class _Factory:
+            def __call__(self):
+                return PassThroughSession(test_session)
+
+        cache = DicomWebCache(
+            base_dir=tmp_path / "dicomweb_cache",
+            storage_path=tmp_path,
+            session_factory=_Factory(),
+        )
+        assert await cache._resolve_dcm_anon_dir("STUDY.B", "SER.X") is None
+        # Result cached so subsequent calls don't re-query.
+        assert "STUDY.B/SER.X" in cache._dcm_anon_path_cache
+
+    @pytest.mark.asyncio
+    async def test_invalidate_dcm_anon_path_drops_entry(self, tmp_path: Path, test_session) -> None:
+        """``invalidate_dcm_anon_path`` removes a single cached entry."""
+
+        class _Factory:
+            def __call__(self):
+                return PassThroughSession(test_session)
+
+        cache = DicomWebCache(
+            base_dir=tmp_path / "dicomweb_cache",
+            storage_path=tmp_path,
+            session_factory=_Factory(),
+        )
+        assert await cache._resolve_dcm_anon_dir("study.x", "series.x") is None
+        assert "study.x/series.x" in cache._dcm_anon_path_cache
+
+        cache.invalidate_dcm_anon_path("study.x", "series.x")
+        assert "study.x/series.x" not in cache._dcm_anon_path_cache
+        # Unknown key is a no-op (no KeyError).
+        cache.invalidate_dcm_anon_path("never.cached", "neither.have.you")

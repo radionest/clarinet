@@ -22,8 +22,10 @@ Changing auth levels on routers has cascading impact on tests — check `tests/t
 
 Startup sequence:
 1. Database init (`db_manager.create_db_and_tables_async()`)
-2. Default roles + config reconciliation (`reconcile_config()`) → stores `app.state.config_mode`, `app.state.config_tasks_path`
-2b. Load project file registry + custom schema hydrators from tasks folder
+1b. Default roles (`add_default_user_roles()`)
+1c. Load custom record-data validators (`load_custom_validators()`) — must run BEFORE `reconcile_config` so the registry is populated when reconcile validates `RecordType.data_validators` names
+2. Config reconciliation (`reconcile_config()`) → stores `app.state.config_mode`, `app.state.config_tasks_path`; fail-fasts on unknown role_names or validator names
+2b. Load project file registry + custom schema hydrators + custom slicer context hydrators from tasks folder
 3. Admin user creation (`ensure_admin_exists()`)
 4. RecordFlow engine setup (if `recordflow_enabled`) → `app.state.recordflow_engine`
 5. Pipeline broker startup (if `pipeline_enabled`) → `app.state.pipeline_broker`; syncs pipeline definitions to DB

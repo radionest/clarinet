@@ -25,6 +25,36 @@ from clarinet.utils.database import get_async_session
 from clarinet.utils.logger import logger
 
 
+@pytest.fixture
+def isolated_validator_registry():
+    """Snapshot and restore ``_VALIDATOR_REGISTRY`` around a test.
+
+    Use in any test file that exercises ``@record_validator`` — pair with a
+    thin file-local ``autouse=True`` fixture if every test in the file needs
+    isolation:
+
+        @pytest.fixture(autouse=True)
+        def _clean(isolated_validator_registry):
+            pass
+
+    Mirrors the registry-isolation pattern already used by
+    ``tests/test_schema_hydration.py`` and
+    ``tests/test_slicer_context_hydration.py``; centralised here so the
+    contract is in one place across unit and integration test files.
+    """
+    from clarinet.services.record_data_validation import _VALIDATOR_REGISTRY
+
+    saved = dict(_VALIDATOR_REGISTRY)
+    # Empty the registry before the test so each test starts clean and
+    # cannot rely on (or be polluted by) registrations from earlier tests.
+    _VALIDATOR_REGISTRY.clear()
+    try:
+        yield
+    finally:
+        _VALIDATOR_REGISTRY.clear()
+        _VALIDATOR_REGISTRY.update(saved)
+
+
 @pytest.fixture(autouse=True, scope="session")
 def _suppress_pynetdicom_logging():
     """Prevent pynetdicom background threads from polluting test output.

@@ -12,6 +12,7 @@ from jsonschema import Draft202012Validator, SchemaError
 
 from clarinet.exceptions.domain import ValidationError
 from clarinet.models.record import RecordType
+from clarinet.services.record_data_validation import run_record_validators
 from clarinet.services.schema_hydration import hydrate_schema
 from clarinet.utils.file_link_sync import sync_file_links
 from clarinet.utils.validation import validate_json_by_schema, validate_json_by_schema_partial
@@ -128,32 +129,54 @@ class RecordTypeService:
         return await self.repo.get(record_type_id)
 
     async def validate_record_data(self, record: Record, data: RecordData) -> RecordData:
-        """Validate record data against its hydrated record type schema.
+        """Validate record data against schema + registered Python validators.
 
-        Resolves ``x-options`` markers to ``oneOf`` before validation.
-        Record must have ``record_type`` relation loaded.
+        Two-stage pipeline:
+
+        1. JSON Schema validation against ``record.record_type.data_schema``
+           (hydrated to resolve ``x-options`` → ``oneOf``). Failures yield a
+           structured :class:`RecordDataValidationError`.
+        2. Custom Python validators listed in ``record_type.data_validators``,
+           via :func:`run_record_validators`. Errors are aggregated.
+
+        Record must have the ``record_type`` relation eagerly loaded —
+        ``run_record_validators`` and ``hydrate_schema`` both touch
+        ``record.record_type``, which would raise ``MissingGreenlet`` on
+        lazy-load inside an async session.
 
         Args:
             record: Record with record_type loaded.
             data: Data to validate.
 
         Returns:
-            Validated data.
+            Validated data (unchanged — validators do not mutate).
 
         Raises:
-            ValidationError: If data does not match schema.
+            RecordDataValidationError: If schema or validator checks fail
+                (structured ``errors`` list in 422 payload).
+            ValidationError: If the schema itself is invalid.
         """
         if record.record_type.data_schema:
             hydrated = await hydrate_schema(record.record_type.data_schema, record, self.session)
             validate_json_by_schema(data, hydrated)
+
+        await run_record_validators(record, data, self.session, partial=False)
 
         return data
 
     async def validate_record_data_partial(self, record: Record, data: RecordData) -> RecordData:
         """Validate record data against schema with ``required`` constraints removed.
 
-        Same as :meth:`validate_record_data` but allows missing fields.
-        Use for prefill where data is intentionally incomplete.
+        Same as :meth:`validate_record_data` but for prefill, where data is
+        intentionally incomplete. Custom Python validators with the default
+        ``run_on_partial=False`` are skipped — partial data may legitimately
+        violate full-document invariants. Validators declared with
+        ``run_on_partial=True`` still execute.
+
+        Record must have the ``record_type`` relation eagerly loaded —
+        ``run_record_validators`` and ``hydrate_schema`` both touch
+        ``record.record_type``, which would raise ``MissingGreenlet`` on
+        lazy-load inside an async session.
 
         Args:
             record: Record with record_type loaded.
@@ -163,11 +186,14 @@ class RecordTypeService:
             Validated data.
 
         Raises:
-            ValidationError: If data violates type/format constraints.
+            RecordDataValidationError: If schema or validator checks fail.
+            ValidationError: If the schema itself is invalid.
         """
         if record.record_type.data_schema:
             hydrated = await hydrate_schema(record.record_type.data_schema, record, self.session)
             validate_json_by_schema_partial(data, hydrated)
+
+        await run_record_validators(record, data, self.session, partial=True)
 
         return data
 

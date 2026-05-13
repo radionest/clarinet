@@ -35,6 +35,7 @@ from clarinet.services.pipeline.context import TaskContext
 from clarinet.services.pipeline.message import PipelineMessage
 from clarinet.services.pipeline.task import pipeline_task
 from clarinet.settings import settings
+from clarinet.utils.db_manager import db_manager
 from clarinet.utils.logger import logger
 
 
@@ -52,25 +53,46 @@ def _has_disk_cache(cache_base: Path, study_uid: str, series_uid: str) -> bool:
     return any(series_dir.glob("*.dcm"))
 
 
-def _has_dcm_anon(storage_path: Path, study_uid: str, series_uid: str) -> bool:
+async def _has_dcm_anon(storage_path: Path, study_uid: str, series_uid: str) -> bool:
     """Check whether an anonymized copy of the series already exists.
 
-    Walks ``{storage_path}/*/{study_uid}/{series_uid}/dcm_anon/*.dcm``
-    across patient directories — same lookup that ``DicomWebCache`` uses
-    for its dcm_anon tier. Stricter than ``DicomWebCache._find_dcm_anon_dir``:
-    requires at least one ``*.dcm`` file to be present, so that an empty
-    ``dcm_anon/`` left by a failed anonymization run does not cause us
-    to skip a genuinely needed prefetch.
+    Renders ``settings.disk_path_template`` from DB state to compute the
+    expected ``dcm_anon`` directory — same logic
+    ``DicomWebCache._resolve_dcm_anon_dir`` uses. Stricter than the cache
+    reader: requires at least one ``*.dcm`` file inside, so an empty
+    ``dcm_anon/`` left by a failed anonymization run does not cause us to
+    skip a genuinely needed prefetch.
     """
-    if not storage_path.exists():
+    from clarinet.models.base import DicomQueryLevel
+    from clarinet.models.patient import Patient
+    from clarinet.models.study import Series, Study
+    from clarinet.services.dicom.anon_path import (
+        AnonPathError,
+        build_context,
+        render_working_folder,
+    )
+
+    async with db_manager.async_session_factory() as session:
+        series = await session.get(Series, series_uid)
+        study = await session.get(Study, study_uid) if series else None
+        patient = await session.get(Patient, study.patient_id) if study else None
+
+    if not (series and study and patient):
         return False
-    for patient_dir in storage_path.iterdir():
-        if not patient_dir.is_dir():
-            continue
-        dcm_anon = patient_dir / study_uid / series_uid / "dcm_anon"
-        if dcm_anon.is_dir() and any(dcm_anon.glob("*.dcm")):
-            return True
-    return False
+
+    try:
+        ctx = build_context(patient=patient, study=study, series=series)
+        series_dir = render_working_folder(
+            settings.disk_path_template, DicomQueryLevel.SERIES, ctx, storage_path
+        )
+    except AnonPathError as exc:
+        logger.warning(
+            f"prefetch_dicom_web: cannot resolve dcm_anon path for {study_uid}/{series_uid}: {exc}"
+        )
+        return False
+
+    dcm_anon = series_dir / "dcm_anon"
+    return await asyncio.to_thread(lambda: dcm_anon.is_dir() and any(dcm_anon.glob("*.dcm")))
 
 
 def _organize_to_cache(tmp_dir: Path, cache_base: Path, study_uid: str) -> dict[str, int]:
@@ -144,7 +166,7 @@ def _organize_to_cache(tmp_dir: Path, cache_base: Path, study_uid: str) -> dict[
     return grouped
 
 
-def _filter_series_to_fetch(
+async def _filter_series_to_fetch(
     series_uids: list[str],
     storage_path: Path,
     cache_base: Path,
@@ -153,10 +175,9 @@ def _filter_series_to_fetch(
 ) -> tuple[list[str], int, int]:
     """Partition series list into fetch / skip_cached / skip_anon.
 
-    Runs synchronous filesystem scans (``iterdir``, ``glob``) — must be
-    called via ``asyncio.to_thread`` from async code. Large deployments
-    may have thousands of patient directories, so walking them in the
-    event loop would block other worker coroutines.
+    Filesystem scans run in worker threads, DB lookups go through the
+    shared session factory (sequential — single ``AsyncSession`` per
+    series is fine and avoids the concurrency-safety constraints).
 
     Returns:
         Tuple of ``(series_to_fetch, skipped_cached, skipped_anon)``.
@@ -165,10 +186,10 @@ def _filter_series_to_fetch(
     skipped_cached = 0
     skipped_anon = 0
     for series_uid in series_uids:
-        if _has_disk_cache(cache_base, study_uid, series_uid):
+        if await asyncio.to_thread(_has_disk_cache, cache_base, study_uid, series_uid):
             skipped_cached += 1
             continue
-        if skip_if_anon and _has_dcm_anon(storage_path, study_uid, series_uid):
+        if skip_if_anon and await _has_dcm_anon(storage_path, study_uid, series_uid):
             skipped_anon += 1
             continue
         series_to_fetch.append(series_uid)
@@ -233,8 +254,7 @@ async def _prefetch_dicom_web_impl(msg: PipelineMessage, _ctx: TaskContext) -> N
     storage_path = Path(settings.storage_path)
     cache_base = storage_path / "dicomweb_cache"
 
-    series_to_fetch, skipped_cached, skipped_anon = await asyncio.to_thread(
-        _filter_series_to_fetch,
+    series_to_fetch, skipped_cached, skipped_anon = await _filter_series_to_fetch(
         series_uids,
         storage_path,
         cache_base,

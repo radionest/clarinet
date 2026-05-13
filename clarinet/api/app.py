@@ -163,6 +163,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     await add_default_user_roles()
 
+    # Load custom record validators BEFORE reconcile — reconcile checks that
+    # every RecordType.data_validators name is registered in the registry,
+    # which is populated by the @record_validator decorators in this file.
+    # ``load_custom_validators`` logs the registered names itself; no need to
+    # log again here (matches the load_custom_hydrators pattern below).
+    from clarinet.services.record_data_validation import load_custom_validators
+
+    load_custom_validators(settings.config_tasks_path)
+
     # Reconcile RecordType definitions
     reconcile_result = await reconcile_config()
     app.state.config_mode = settings.config_mode
@@ -330,6 +339,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
             memory_max_entries=settings.dicomweb_memory_cache_max_entries,
             storage_path=Path(settings.storage_path),
             disk_write_concurrency=settings.dicomweb_disk_write_concurrency,
+            session_factory=db_manager.async_session_factory,
+            dcm_anon_path_cache_max_entries=(settings.dicomweb_dcm_anon_path_cache_max_entries),
+            dcm_anon_path_cache_ttl_seconds=(settings.dicomweb_dcm_anon_path_cache_ttl_seconds),
         )
         logger.info("DICOMweb cache initialized (two-tier: memory + disk)")
 

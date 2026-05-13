@@ -26,7 +26,7 @@ from .flow_action import (
 )
 
 if TYPE_CHECKING:
-    from .engine import FlowContext
+    from .flow_context import FlowContext
 
 
 ActionType = Literal[

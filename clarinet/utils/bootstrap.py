@@ -334,6 +334,39 @@ async def reconcile_config(
                     f"Add missing roles to CLARINET_EXTRA_ROLES or fix the config."
                 )
 
+        # Validate that all referenced data_validators are registered.
+        # Relies on ``load_custom_validators`` running BEFORE reconcile_config
+        # in the lifespan — otherwise the registry is empty and every
+        # reference is flagged as missing.
+        from clarinet.services.record_data_validation import (
+            get_registered_validator_names,
+        )
+
+        referenced_validators: set[str] = set()
+        for item in all_items:
+            if item.data_validators:
+                referenced_validators.update(item.data_validators)
+        if referenced_validators:
+            registered = get_registered_validator_names()
+            missing_validators = referenced_validators - registered
+            if missing_validators:
+                bad_validator_items = [
+                    f"  - '{item.name}' references validator(s) "
+                    f"{[v for v in (item.data_validators or []) if v in missing_validators]}"
+                    for item in all_items
+                    if item.data_validators
+                    and any(v in missing_validators for v in item.data_validators)
+                ]
+                raise ConfigurationError(
+                    f"RecordType config references unregistered data validator(s): "
+                    f"{', '.join(sorted(missing_validators))}.\n"
+                    + "\n".join(bad_validator_items)
+                    + f"\nRegistered validators: {sorted(registered)}.\n"
+                    f"Register them in "
+                    f"{settings.config_tasks_path.rstrip('/')}/{settings.config_validators_file} "
+                    f"via the @record_validator('name') decorator."
+                )
+
         result = await reconcile_record_types(
             all_items,
             session,

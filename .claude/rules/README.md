@@ -21,6 +21,7 @@ When adding a new rule: pick a focused topic, set `paths:` to the directory or f
 | `pr-review.md` | Project-specific PR review checklist | used by `pr-diff-reviewer` subagent |
 | `project-setup.md` | Project init, settings, `plan/` structure | `settings.toml`, `plan/**` |
 | `record-data-api.md` | submit/update/prefill data flow + `context_info` markdown sidecar | `plan/workflows/**` |
+| `record-data-validator.md` | Python validators for cross-field/cross-element RecordData invariants | `plan/validators*.py` |
 | `record-repo.md` | Specialized methods, invalidation, auto_id | record repositories |
 | `recordflow-dsl.md` | Full RecordFlow DSL API reference | `recordflow/**`, `*_flow.py` |
 | `schema-hydration.md` | Dynamic field options resolver | `schema_hydration.py`, hydrators |

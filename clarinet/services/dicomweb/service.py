@@ -335,6 +335,4 @@ class DicomWebProxyService:
         Returns:
             pydicom Dataset or None if not found on disk
         """
-        return await asyncio.to_thread(
-            self._cache.read_instance_from_disk, study_uid, series_uid, instance_uid
-        )
+        return await self._cache.read_instance_from_disk(study_uid, series_uid, instance_uid)

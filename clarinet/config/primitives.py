@@ -129,6 +129,7 @@ class RecordDef(BaseModel):
     slicer_result_validator: str | None = None
     slicer_result_validator_args: dict[str, str] | None = None
     slicer_context_hydrators: list[str] | None = None
+    data_validators: list[str] | None = None
     mask_patient_data: bool = True
     viewer_mode: ViewerMode = ViewerMode.SINGLE_SERIES
 

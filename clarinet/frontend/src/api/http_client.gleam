@@ -88,6 +88,40 @@ pub fn process_response(
     403 -> promise.resolve(Error(types.AuthError("Forbidden")))
     404 -> promise.resolve(Error(types.ServerError(404, "Not Found")))
     400 -> promise.resolve(Error(types.ValidationError([])))
+    422 -> {
+      // RecordDataValidationError envelope: {"detail": "...", "errors": [...]}.
+      // Backwards-compatible: a legacy {"detail": "..."} (plain
+      // ValidationError) decodes as Error from field_errors_decoder and
+      // falls back to ServerError(422, detail). Empty `errors` list is also
+      // treated as the legacy shape — the server-side constructor for
+      // RecordDataValidationError forbids zero errors, so a real structured
+      // 422 always has at least one entry.
+      use body_result <- promise.await(fetch.read_text_body(response))
+      case body_result {
+        Ok(text_response) -> {
+          let err = case
+            json.parse(text_response.body, field_errors_decoder())
+          {
+            Ok(errors) if errors != [] -> types.ValidationError(errors)
+            _ -> {
+              let detail = case
+                json.parse(
+                  text_response.body,
+                  decode.at(["detail"], decode.string),
+                )
+              {
+                Ok(msg) -> msg
+                Error(_) -> "Validation failed"
+              }
+              types.ServerError(422, detail)
+            }
+          }
+          promise.resolve(Error(err))
+        }
+        Error(_) ->
+          promise.resolve(Error(types.ServerError(422, "Validation failed")))
+      }
+    }
     code -> {
       use body_result <- promise.await(fetch.read_text_body(response))
       case body_result {
@@ -133,6 +167,22 @@ fn structured_payload_decoder() -> decode.Decoder(
     decode.dict(decode.string, decode.string),
   )
   decode.success(#(error_code, metadata))
+}
+
+/// Decodes the `{errors: [{path, message, code}, ...]}` envelope emitted by
+/// RecordDataValidationError (422 with structured field-level errors).
+/// Succeeds only when the `errors` array is present; otherwise the legacy
+/// `{detail: "..."}` shape wins via the fallback in process_response.
+fn field_errors_decoder() -> decode.Decoder(List(types.FieldError)) {
+  decode.at(
+    ["errors"],
+    decode.list({
+      use path <- decode.field("path", decode.string)
+      use message <- decode.field("message", decode.string)
+      use code <- decode.field("code", decode.string)
+      decode.success(types.FieldError(path, message, code))
+    }),
+  )
 }
 
 /// Makes an HTTP request with optional JSON body.

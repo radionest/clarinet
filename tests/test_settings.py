@@ -138,3 +138,64 @@ class TestAnonIdPrefixValidator:
     def test_55_chars_exactly_is_valid(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("CLARINET_ANON_ID_PREFIX", "A" * 55)
         assert len(Settings().anon_id_prefix) == 55
+
+
+class TestDiskPathTemplateValidator:
+    """Settings-level validation for ``disk_path_template``.
+
+    Pydantic loads value from env, then ``validate_disk_path_template_setting``
+    delegates to ``services.dicom.anon_path.validate_template`` (the same
+    validator used by the migration CLI).
+    """
+
+    def test_default_is_valid(self) -> None:
+        assert (
+            Settings().disk_path_template == "{anon_patient_id}/{anon_study_uid}/{anon_series_uid}"
+        )
+
+    def test_modalities_date_template_is_valid(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv(
+            "CLARINET_DISK_PATH_TEMPLATE",
+            "{patient_auto_id}/{study_modalities}_{study_date}/{anon_series_uid}",
+        )
+        assert (
+            Settings().disk_path_template
+            == "{patient_auto_id}/{study_modalities}_{study_date}/{anon_series_uid}"
+        )
+
+    def test_rejects_unknown_placeholder(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv(
+            "CLARINET_DISK_PATH_TEMPLATE",
+            "{patient_auto_id}/{not_a_field}/{anon_series_uid}",
+        )
+        with pytest.raises(ValidationError, match="unknown placeholder"):
+            Settings()
+
+    def test_rejects_two_segments(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("CLARINET_DISK_PATH_TEMPLATE", "{patient_id}/{study_uid}")
+        with pytest.raises(ValidationError, match="exactly 3"):
+            Settings()
+
+    def test_rejects_four_segments(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv(
+            "CLARINET_DISK_PATH_TEMPLATE",
+            "{patient_id}/{study_uid}/{series_uid}/extra",
+        )
+        with pytest.raises(ValidationError, match="exactly 3"):
+            Settings()
+
+    def test_rejects_absolute(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv(
+            "CLARINET_DISK_PATH_TEMPLATE",
+            "/{patient_id}/{study_uid}/{series_uid}",
+        )
+        with pytest.raises(ValidationError, match="relative"):
+            Settings()
+
+    def test_rejects_dotdot(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv(
+            "CLARINET_DISK_PATH_TEMPLATE",
+            "../{study_uid}/{series_uid}",
+        )
+        with pytest.raises(ValidationError, match="'\\.\\.'"):
+            Settings()

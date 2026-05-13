@@ -8,11 +8,11 @@ changes and executes registered flows when their conditions are met.
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from clarinet.utils.logger import logger
 
+from . import action_handlers
 from .action_preview import ActionPreview, action_to_preview
 from .flow_action import (
     CallFunctionAction,
@@ -23,6 +23,7 @@ from .flow_action import (
     UpdateRecordAction,
 )
 from .flow_condition import FlowCondition
+from .flow_context import FlowContext
 from .flow_file import FlowFileRecord
 from .flow_record import FlowRecord
 from .flow_result import _SELF
@@ -32,31 +33,6 @@ if TYPE_CHECKING:
 
     from clarinet.client import ClarinetClient
     from clarinet.models import RecordRead, RecordStatus
-    from clarinet.services.pipeline import PipelineMessage
-
-
-# Machine-readable codes returned by the API for expected constraint violations.
-# Single source of truth: error_code attributes on domain exception classes.
-from clarinet.exceptions.domain import RecordLimitReachedError, RecordUniquePerUserError
-
-_EXPECTED_CONFLICT_CODES = frozenset(
-    {
-        RecordLimitReachedError.error_code,
-        RecordUniquePerUserError.error_code,
-    }
-)
-
-
-def _is_expected_conflict(exc: BaseException) -> bool:
-    """Check if exception is a 409 with a known constraint violation code."""
-    from clarinet.client import ClarinetAPIError
-
-    if not isinstance(exc, ClarinetAPIError) or exc.status_code != 409:
-        return False
-    detail = exc.detail
-    if isinstance(detail, dict):
-        return detail.get("code") in _EXPECTED_CONFLICT_CODES
-    return False
 
 
 def _is_ssl_error(exc: BaseException) -> bool:
@@ -69,52 +45,6 @@ def _is_ssl_error(exc: BaseException) -> bool:
             return True
         current = current.__cause__ or current.__context__
     return False
-
-
-@dataclass(frozen=True, slots=True)
-class FlowContext:
-    """Unified execution context for all flow trigger types."""
-
-    record: RecordRead | None = None
-    record_context: dict[str, list[RecordRead]] | None = None
-    patient_id: str | None = None
-    study_uid: str | None = None
-    series_uid: str | None = None
-    file_name: str | None = None
-    source_record: RecordRead | None = None
-
-    @staticmethod
-    def for_record(record: RecordRead, context: dict[str, list[RecordRead]]) -> FlowContext:
-        """Build context for a record-triggered flow."""
-        return FlowContext(
-            record=record,
-            record_context=context,
-            patient_id=record.patient.id,
-            study_uid=record.study.study_uid if record.study else None,
-            series_uid=record.series.series_uid if record.series else None,
-        )
-
-    @staticmethod
-    def for_entity(
-        patient_id: str,
-        study_uid: str | None = None,
-        series_uid: str | None = None,
-    ) -> FlowContext:
-        """Build context for an entity-creation flow."""
-        return FlowContext(patient_id=patient_id, study_uid=study_uid, series_uid=series_uid)
-
-    @staticmethod
-    def for_file(
-        file_name: str,
-        patient_id: str,
-        source_record: RecordRead | None = None,
-    ) -> FlowContext:
-        """Build context for a file-update flow."""
-        return FlowContext(
-            file_name=file_name,
-            patient_id=patient_id,
-            source_record=source_record,
-        )
 
 
 class RecordFlowEngine:
@@ -131,6 +61,9 @@ class RecordFlowEngine:
         await engine.handle_record_status_change(record, old_status)
     """
 
+    # Class-level default so AsyncMock(spec=RecordFlowEngine) sees this attribute.
+    _api_verified: bool = False
+
     def __init__(self, clarinet_client: ClarinetClient):
         """Initialize the engine with a ClarinetClient.
 
@@ -142,7 +75,6 @@ class RecordFlowEngine:
         self.entity_flows: dict[str, list[FlowRecord]] = {}
         self.file_flows: dict[str, list[FlowFileRecord]] = {}
         self._background_tasks: set[asyncio.Task[None]] = set()
-        self._api_verified: bool = False
 
     async def _ensure_api_reachable(self) -> None:
         """One-time API connectivity check on first use (when api_base_url is set)."""
@@ -174,7 +106,7 @@ class RecordFlowEngine:
         except httpx.HTTPError as e:
             logger.error(f"RecordFlow: API check failed for {settings.effective_api_base_url}: {e}")
 
-    async def _ensure_authenticated(self) -> None:
+    async def ensure_authenticated(self) -> None:
         """Lazily authenticate the ClarinetClient on first use."""
         await self._ensure_api_reachable()
         if self.clarinet_client._authenticated:
@@ -193,14 +125,6 @@ class RecordFlowEngine:
         task = asyncio.create_task(coro)
         self._background_tasks.add(task)
         task.add_done_callback(self._background_tasks.discard)
-
-    @staticmethod
-    async def _maybe_await(func: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
-        """Call a function and await the result if it is a coroutine."""
-        result = func(*args, **kwargs)
-        if asyncio.iscoroutine(result):
-            return await result
-        return result
 
     def register_flow(self, flow: FlowRecord | FlowFileRecord) -> None:
         """Register a flow definition.
@@ -522,7 +446,7 @@ class RecordFlowEngine:
         Returns:
             Dictionary mapping record type names to lists of matching records.
         """
-        await self._ensure_authenticated()
+        await self.ensure_authenticated()
 
         if not record.patient:
             # Records without a patient violate ``validate_record_level``;
@@ -671,355 +595,19 @@ class RecordFlowEngine:
         try:
             match action:
                 case CreateRecordAction():
-                    await self._create_record(action, ctx)
+                    await action_handlers.create_record(self, action, ctx)
                 case UpdateRecordAction() if ctx.record is not None:
-                    await self._update_record(action, ctx)
+                    await action_handlers.update_record(self, action, ctx)
                 case InvalidateRecordsAction():
-                    await self._invalidate_records(action, ctx)
+                    await action_handlers.invalidate_records(self, action, ctx)
                 case CallFunctionAction():
-                    await self._call_function(action, ctx)
+                    await action_handlers.call_function(self, action, ctx)
                 case PipelineAction() if ctx.file_name is None:
-                    await self._dispatch_pipeline(action, ctx)
+                    await action_handlers.dispatch_pipeline(self, action, ctx)
                 case _:
                     logger.warning(f"Unsupported action type for context: {action.type}")
         except Exception as e:
-            if _is_expected_conflict(e):
+            if action_handlers.is_expected_conflict(e):
                 logger.warning(f"Expected conflict in action {action.type}: {e}")
             else:
                 logger.error(f"Error executing action {action.type}: {e}")
-
-    # ── Action implementations ────────────────────────────────────────────
-
-    async def _create_record(self, action: CreateRecordAction, ctx: FlowContext) -> None:
-        """Create a new record.
-
-        Inherits ``user_id`` from the triggering record if not explicitly set
-        (record context only). ``parent_record_id`` is passed only when a
-        source record is present.
-
-        Args:
-            action: The CreateRecordAction with record details.
-            ctx: The unified flow context.
-        """
-        await self._ensure_authenticated()
-        from clarinet.models import RecordCreate
-
-        series_uid = action.series_uid or ctx.series_uid
-        user_id = action.user_id
-        parent_record_id = action.parent_record_id
-
-        if ctx.record is not None:
-            # Inherit user_id only if explicitly requested.
-            # Linked records get user_id via API-level parent inheritance.
-            if action.inherit_user and user_id is None and ctx.record.user_id is not None:
-                user_id = str(ctx.record.user_id)
-
-            default_info = (
-                f"Created by flow from record {ctx.record.record_type.name} (id={ctx.record.id})"
-            )
-        else:
-            default_info = (
-                f"Created by entity flow on "
-                f"{ctx.series_uid or ctx.study_uid or ctx.patient_id} creation"
-            )
-
-        try:
-            record_create = RecordCreate(
-                record_type_name=action.record_type_name,
-                patient_id=ctx.patient_id,
-                study_uid=ctx.study_uid,
-                series_uid=series_uid,
-                user_id=user_id,
-                parent_record_id=parent_record_id,
-                context_info=action.context_info or default_info,
-            )
-            result = await self.clarinet_client.create_record(record_create)
-            logger.info(
-                f"Created record '{action.record_type_name}' (id={result.id}) "
-                f"for {ctx.study_uid or ctx.patient_id}"
-            )
-        except Exception as e:
-            if _is_expected_conflict(e):
-                logger.warning(
-                    f"Record '{action.record_type_name}' skipped (expected constraint): {e}"
-                )
-            else:
-                logger.error(f"Failed to create record '{action.record_type_name}': {e}")
-
-    async def _update_record(self, action: UpdateRecordAction, ctx: FlowContext) -> None:
-        """Update existing records selected by ``strategy``.
-
-        ``strategy='single'``: requires exactly one record of the given type
-        in context — skips with an error log if 0 or >1. ``strategy='all'``:
-        applies the update to every matching record.
-        """
-        await self._ensure_authenticated()
-        from clarinet.models import RecordStatus
-
-        context = ctx.record_context
-        if context is None:
-            logger.warning(f"No record context for update_record('{action.record_name}')")
-            return
-
-        targets = context.get(action.record_name, [])
-        if not targets:
-            logger.warning(f"Record '{action.record_name}' not found in context for update")
-            return
-
-        if action.strategy == "single" and len(targets) > 1:
-            ids = [t.id for t in targets[:5]]
-            ids_suffix = ", ..." if len(targets) > 5 else ""
-            logger.error(
-                f"update_record('{action.record_name}', strategy='single') "
-                f"ambiguous: found {len(targets)} records in context "
-                f"(ids: {ids}{ids_suffix}). Use strategy='all' to update every match."
-            )
-            return
-
-        if action.status is None:
-            logger.warning(
-                f"update_record('{action.record_name}') has no status to apply — "
-                f"action is a no-op; remove it or pass status="
-            )
-            return
-
-        try:
-            status: str | RecordStatus = action.status
-            if isinstance(status, str):
-                status = RecordStatus(status)
-        except Exception as e:
-            logger.error(f"Invalid status for update_record: {e}")
-            return
-
-        for target in targets:
-            try:
-                await self.clarinet_client.update_record_status(target.id, status)
-                logger.info(
-                    f"Updated record '{action.record_name}' (id={target.id}) status to {status}"
-                )
-            except Exception as e:
-                logger.error(f"Failed to update record status: {e}")
-
-    async def _call_function(self, action: CallFunctionAction, ctx: FlowContext) -> None:
-        """Call a custom function with context-appropriate kwargs.
-
-        Args:
-            action: The CallFunctionAction with function, args, and kwargs.
-            ctx: The unified flow context.
-        """
-        if ctx.record is not None:
-            kwargs: dict[str, Any] = {
-                "record": ctx.record,
-                "context": ctx.record_context,
-                "client": self.clarinet_client,
-            }
-        elif ctx.file_name is not None:
-            kwargs = {
-                "file_name": ctx.file_name,
-                "patient_id": ctx.patient_id,
-                "source_record": ctx.source_record,
-                "client": self.clarinet_client,
-            }
-        else:
-            kwargs = {
-                "patient_id": ctx.patient_id,
-                "study_uid": ctx.study_uid,
-                "series_uid": ctx.series_uid,
-                "client": self.clarinet_client,
-            }
-        kwargs |= action.extra_kwargs
-
-        try:
-            await self._maybe_await(action.function, *action.args, **kwargs)
-        except Exception as e:
-            if _is_expected_conflict(e):
-                logger.warning(f"Expected conflict in function {action.function.__name__}: {e}")
-            else:
-                logger.error(f"Error calling function {action.function.__name__}: {e}")
-
-    async def _dispatch_pipeline(self, action: PipelineAction, ctx: FlowContext) -> None:
-        """Dispatch a task to a registered pipeline.
-
-        Builds a PipelineMessage from the context and sends it to the named
-        pipeline for distributed execution.
-
-        Args:
-            action: The PipelineAction with pipeline name and extra payload.
-            ctx: The unified flow context.
-        """
-        from clarinet.services.pipeline import PipelineMessage
-
-        message = PipelineMessage(
-            patient_id=ctx.patient_id or "",
-            study_uid=ctx.study_uid or "",
-            series_uid=ctx.series_uid,
-            record_id=ctx.record.id if ctx.record else None,
-            record_type_name=(
-                ctx.record.record_type.name if ctx.record and ctx.record.record_type else None
-            ),
-            payload=action.extra_payload,
-        )
-        label = (
-            f"record {ctx.record.id} ({ctx.record.record_type.name})"
-            if ctx.record
-            else f"entity (patient={ctx.patient_id})"
-        )
-        await self._run_pipeline(action, message, label)
-
-    async def _run_pipeline(
-        self,
-        action: PipelineAction,
-        message: PipelineMessage,
-        context: str,
-    ) -> None:
-        """Look up and execute a registered pipeline.
-
-        Args:
-            action: The PipelineAction with pipeline name.
-            message: Pre-built pipeline message.
-            context: Human-readable description for logging.
-        """
-        from clarinet.services.pipeline import get_pipeline
-
-        pipeline = get_pipeline(action.pipeline_name)
-        if pipeline is None:
-            logger.error(
-                f"Pipeline '{action.pipeline_name}' not found. "
-                f"Ensure it is registered before RecordFlow triggers it."
-            )
-            return
-
-        try:
-            await pipeline.run(message)
-            logger.info(f"Dispatched pipeline '{action.pipeline_name}' for {context}")
-        except Exception as e:
-            logger.error(f"Failed to dispatch pipeline '{action.pipeline_name}': {e}")
-
-    # ── Invalidation ──────────────────────────────────────────────────────
-
-    async def _invalidate_records(self, action: InvalidateRecordsAction, ctx: FlowContext) -> None:
-        """Invalidate records of specified types.
-
-        Unified entry point for record-triggered and file-triggered invalidation.
-        Searches by patient_id (broadest scope) to find ALL records of target
-        types, covering all hierarchy levels.
-
-        Args:
-            action: The InvalidateRecordsAction with target types, mode, and callback.
-            ctx: The unified flow context.
-        """
-        await self._ensure_authenticated()
-        for target_type_name in action.record_type_names:
-            try:
-                target_records = [
-                    r
-                    async for r in self.clarinet_client.iter_records(
-                        patient_id=ctx.patient_id,
-                        record_type_name=target_type_name,
-                    )
-                ]
-            except Exception as e:
-                logger.error(
-                    f"Failed to find records of type '{target_type_name}' "
-                    f"for patient {ctx.patient_id}: {e}"
-                )
-                continue
-
-            for target in target_records:
-                if ctx.record is not None:
-                    await self._invalidate_from_record(target, ctx.record, action)
-                elif ctx.file_name is not None:
-                    await self._invalidate_from_file(target, ctx, action)
-
-    async def _invalidate_from_record(
-        self,
-        target: RecordRead,
-        source_record: RecordRead,
-        action: InvalidateRecordsAction,
-    ) -> None:
-        """Invalidate a single target record triggered by another record.
-
-        Skips self-invalidation. Passes source_record_id to the API.
-
-        Args:
-            target: The record to invalidate.
-            source_record: The record that triggered the invalidation.
-            action: The InvalidateRecordsAction with mode and callback.
-        """
-        if target.id == source_record.id:
-            return
-
-        try:
-            await self.clarinet_client.invalidate_record(
-                record_id=target.id,
-                mode=action.mode,
-                source_record_id=source_record.id,
-            )
-            logger.info(
-                f"Invalidated record '{target.record_type.name}' (id={target.id}) "
-                f"mode='{action.mode}', triggered by record {source_record.id}"
-            )
-        except Exception as e:
-            logger.error(
-                f"Failed to invalidate record '{target.record_type.name}' (id={target.id}): {e}"
-            )
-            return
-
-        if action.callback is None:
-            return
-        try:
-            await self._maybe_await(
-                action.callback,
-                record=target,
-                source_record=source_record,
-                client=self.clarinet_client,
-            )
-        except Exception as e:
-            logger.error(f"Error in invalidation callback for record {target.id}: {e}")
-
-    async def _invalidate_from_file(
-        self,
-        target: RecordRead,
-        ctx: FlowContext,
-        action: InvalidateRecordsAction,
-    ) -> None:
-        """Invalidate a single target record triggered by a file change.
-
-        Passes ``source_record_id`` when available (from ``submit_data`` path),
-        otherwise uses a reason string only (from pipeline wrapper path).
-
-        Args:
-            target: The record to invalidate.
-            ctx: The file flow context (must have file_name, may have source_record).
-            action: The InvalidateRecordsAction with mode and callback.
-        """
-        source_record_id = ctx.source_record.id if ctx.source_record else None
-        try:
-            await self.clarinet_client.invalidate_record(
-                record_id=target.id,
-                mode=action.mode,
-                source_record_id=source_record_id,
-                reason=f"Invalidated by file change: {ctx.file_name}",
-            )
-            logger.info(
-                f"Invalidated record '{target.record_type.name}' (id={target.id}) "
-                f"mode='{action.mode}', triggered by file '{ctx.file_name}'"
-            )
-        except Exception as e:
-            logger.error(
-                f"Failed to invalidate record '{target.record_type.name}' (id={target.id}): {e}"
-            )
-            return
-
-        if action.callback is None:
-            return
-        try:
-            await self._maybe_await(
-                action.callback,
-                record=target,
-                source_record=ctx.source_record,
-                file_name=ctx.file_name,
-                client=self.clarinet_client,
-            )
-        except Exception as e:
-            logger.error(f"Error in file invalidation callback for record {target.id}: {e}")

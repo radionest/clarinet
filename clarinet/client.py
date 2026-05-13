@@ -98,6 +98,10 @@ class ClarinetClient:
         ```
     """
 
+    # Class-level defaults so AsyncMock(spec=ClarinetClient) sees these attributes.
+    _authenticated: bool = False
+    service_token: str | None = None
+
     def __init__(
         self,
         base_url: str,
@@ -133,7 +137,6 @@ class ClarinetClient:
         self.client = httpx.AsyncClient(
             base_url=self.base_url, follow_redirects=True, verify=verify_ssl
         )
-        self._authenticated = False
 
         if service_token:
             self.client.headers["X-Internal-Token"] = service_token

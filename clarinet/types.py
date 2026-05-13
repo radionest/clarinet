@@ -22,6 +22,7 @@ type SlicerResult = dict[str, Any]
 type RecordSchema = dict[str, Any]
 type RecordContextInfo = dict[str, str | int | float | "RecordContextInfo"]
 type SlicerHydratorNames = list[str]
+type ValidatorNames = list[str]
 
 # Authentication types
 type AuthResponse = dict[str, str]
