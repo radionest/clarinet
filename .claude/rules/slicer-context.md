@@ -23,7 +23,7 @@ paths:
 
 `build_slicer_context_async(record, session)` wraps the sync function and runs any `slicer_context_hydrators` registered on the record type.
 
-Uses `FileResolver` from `clarinet/services/pipeline/context.py` (100% sync, no DB dependencies).
+Uses `FileResolver` from `clarinet/services/common/file_resolver.py` (100% sync, no DB / pipeline / broker imports).
 
 ### Script variable naming convention
 

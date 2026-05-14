@@ -104,8 +104,10 @@ def working_dir(monkeypatch, tmp_path) -> Path:
     """Set storage_path to tmp_path and create the working directory tree.
 
     Patient dir uses anon_id (derived from _AUTO_ID) because Patient.auto_id
-    is NOT NULL — anon_id is always computed.  anon_uid fields for study/series
-    are None in SQLite tests, so _format_path_strict falls back to raw UIDs.
+    is NOT NULL — anon_id is always computed. ``study.anon_uid`` /
+    ``series.anon_uid`` are None in these tests; the ``RecordRead.working_folder``
+    computed field runs in UX mode (``fallback_to_unanonymized=True``) so the
+    rendered path uses the raw UIDs and matches this leaf layout.
     """
     from clarinet.settings import settings
 

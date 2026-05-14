@@ -13,7 +13,8 @@ from clarinet.exceptions.domain import (
 from clarinet.exceptions.domain import FileNotFoundError as DomainFileNotFoundError
 from clarinet.models import Record, RecordRead, RecordStatus
 from clarinet.models.file_schema import FileDefinitionRead, FileRole
-from clarinet.services.file_validation import _build_working_dirs, validate_record_files
+from clarinet.services.common.file_resolver import FileResolver
+from clarinet.services.file_validation import validate_record_files
 from clarinet.utils.file_checksums import checksums_changed, compute_checksums
 from clarinet.utils.file_patterns import glob_file_paths, resolve_pattern
 from clarinet.utils.fs import run_in_fs_thread
@@ -451,12 +452,16 @@ class RecordService:
         For ``multiple=False`` returns a single-element list when the
         resolved path exists on disk, else an empty list.
         """
-        working_dir = Path(record_read.working_folder)
-        working_dirs = _build_working_dirs(record_read)
+        # Admin/UI-triggered cascade — fall back to raw UIDs for records
+        # whose study/series has not been anonymized yet, otherwise the
+        # delete pipeline would 500 on legacy data.
+        working_dirs = FileResolver.build_working_dirs(record_read, fallback_to_unanonymized=True)
+        record_level = record_read.record_type.level
+        default_dir = working_dirs.get(record_level, Path(record_read.working_folder))
         target_dir = (
             working_dirs[file_def.level]
             if file_def.level and file_def.level in working_dirs
-            else working_dir
+            else default_dir
         )
 
         if file_def.multiple:

@@ -1,8 +1,13 @@
 """
 TaskContext system for pipeline tasks.
 
-Provides FileResolver (sync file ops), RecordQuery (async record lookup),
-and TaskContext (container) to eliminate boilerplate in pipeline tasks.
+Provides RecordQuery (async record lookup) and TaskContext (container) to
+eliminate boilerplate in pipeline tasks. The ``FileResolver`` class
+itself lives in ``clarinet.services.common.file_resolver`` so that
+non-pipeline callers (API routers, Slicer context builder, record
+service) can use it without dragging the broker / TaskIQ import chain.
+``FileResolver`` is re-exported here for backward-compat with existing
+``from clarinet.services.pipeline.context import FileResolver`` callers.
 
 Example:
     @pipeline_task()
@@ -19,317 +24,37 @@ Example:
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from clarinet.exceptions.domain import PipelineStepError
 from clarinet.models.base import DicomQueryLevel, RecordStatus
-from clarinet.settings import settings
-from clarinet.utils.file_patterns import PLACEHOLDER_REGEX, glob_file_paths, resolve_origin_type
+from clarinet.services.common.file_resolver import (
+    FileResolver,
+    resolve_pattern_from_dict,
+)
+from clarinet.utils.file_patterns import resolve_origin_type
 from clarinet.utils.logger import logger
+
+# Backward-compat alias — older code spells the helper with a leading underscore.
+_resolve_pattern_from_dict = resolve_pattern_from_dict
 
 if TYPE_CHECKING:
     from clarinet.client import ClarinetClient
-    from clarinet.config.primitives import FileDef
     from clarinet.models.file_schema import FileDefinitionRead
     from clarinet.models.record import RecordRead
-    from clarinet.models.study import SeriesRead, StudyRead
 
     from .message import PipelineMessage
 
-    type FileDefArg = FileDefinitionRead | FileDef | str
 
-
-def _resolve_pattern_from_dict(pattern: str, fields: dict[str, Any]) -> str:
-    """Replace {placeholder} tokens in *pattern* using a flat dict.
-
-    Supports dotted paths (``{data.BIRADS_R}``) by splitting the key on ``"."``
-    and walking nested dicts.
-
-    Args:
-        pattern: Pattern string with ``{field}`` placeholders.
-        fields: Flat or nested dict of replacement values.
-
-    Returns:
-        Pattern with all recognised placeholders replaced.
-        Unknown placeholders are left as-is.
-    """
-
-    def _replacer(match: re.Match[str]) -> str:
-        key = match.group(1)
-        parts = key.split(".")
-        obj: Any = fields
-        for part in parts:
-            if isinstance(obj, dict):
-                obj = obj.get(part)
-            else:
-                return match.group(0)
-            if obj is None:
-                return ""
-        return str(obj) if obj is not None else ""
-
-    return PLACEHOLDER_REGEX.sub(_replacer, pattern)
-
-
-class FileResolver:
-    """Sync-only file path resolver.
-
-    Pre-computes working directories for all DICOM levels from a ``RecordRead``
-    and resolves ``FileDefinitionRead`` patterns to absolute paths.
-
-    Args:
-        working_dirs: Pre-computed dirs keyed by ``DicomQueryLevel``.
-        record_type_level: Default DICOM level of the record type.
-        file_registry: File definitions from the record type.
-        fields: Placeholder values for pattern resolution.
-    """
-
-    def __init__(
-        self,
-        working_dirs: dict[DicomQueryLevel, Path],
-        record_type_level: DicomQueryLevel,
-        file_registry: list[FileDefinitionRead],
-        fields: dict[str, Any],
-    ) -> None:
-        self._working_dirs = working_dirs
-        self._record_type_level = record_type_level
-        self._registry: dict[str, FileDefinitionRead] = {fd.name: fd for fd in file_registry}
-        self._fields = fields
-        self._accessed_files: dict[str, Path] = {}
-
-    # ── Static factories (used by build_task_context & RecordQuery) ──
-
-    @staticmethod
-    def build_working_dirs(record: RecordRead) -> dict[DicomQueryLevel, Path]:
-        """Build working-directory map from a ``RecordRead``.
-
-        Replicates ``RecordRead._get_working_folder()`` logic for all three
-        DICOM levels so that cross-level file access is possible.
-
-        Args:
-            record: Fully-loaded record (patient, study, series relations).
-
-        Returns:
-            Dict mapping each available level to its ``Path``.
-        """
-        base = record.clarinet_storage_path or settings.storage_path
-        patient_dir_name = (
-            record.patient.anon_id if record.patient.anon_id is not None else record.patient_id
-        )
-        dirs: dict[DicomQueryLevel, Path] = {
-            DicomQueryLevel.PATIENT: Path(base) / patient_dir_name,
-        }
-
-        # STUDY directory — prefer relationship, fall back to record-level anon UID
-        study_dir_name: str | None = None
-        if record.study is not None:
-            study_dir_name = record.study.anon_uid or record.study_uid or ""
-        elif record.study_uid:
-            study_dir_name = record.study_anon_uid or record.study_uid
-
-        if study_dir_name:
-            dirs[DicomQueryLevel.STUDY] = dirs[DicomQueryLevel.PATIENT] / study_dir_name
-
-            # SERIES directory — same fallback pattern
-            series_dir_name: str | None = None
-            if record.series is not None:
-                series_dir_name = record.series.anon_uid or record.series_uid or ""
-            elif record.series_uid:
-                series_dir_name = record.series_anon_uid or record.series_uid
-
-            if series_dir_name:
-                dirs[DicomQueryLevel.SERIES] = dirs[DicomQueryLevel.STUDY] / series_dir_name
-
-        return dirs
-
-    @staticmethod
-    def build_working_dirs_from_series(series: SeriesRead) -> dict[DicomQueryLevel, Path]:
-        """Build working-directory map from a ``SeriesRead``.
-
-        Args:
-            series: Fully-loaded series (study, patient relations).
-
-        Returns:
-            Dict mapping each available level to its ``Path``.
-        """
-        base = settings.storage_path
-        patient = series.study.patient
-        patient_dir_name = patient.anon_id if patient.anon_id is not None else patient.id
-        study_dir_name: str = series.study.anon_uid or series.study.study_uid
-        series_dir_name: str = series.anon_uid or series.series_uid or ""
-        dirs: dict[DicomQueryLevel, Path] = {
-            DicomQueryLevel.PATIENT: Path(base) / patient_dir_name,
-        }
-        dirs[DicomQueryLevel.STUDY] = dirs[DicomQueryLevel.PATIENT] / study_dir_name
-        dirs[DicomQueryLevel.SERIES] = dirs[DicomQueryLevel.STUDY] / series_dir_name
-        return dirs
-
-    @staticmethod
-    def build_working_dirs_from_study(study: StudyRead) -> dict[DicomQueryLevel, Path]:
-        """Build working-directory map from a ``StudyRead``.
-
-        Args:
-            study: Fully-loaded study (patient relation).
-
-        Returns:
-            Dict mapping available levels to their ``Path``.
-        """
-        base = settings.storage_path
-        patient = study.patient
-        patient_dir_name = patient.anon_id if patient.anon_id is not None else patient.id
-        study_dir_name: str = study.anon_uid or study.study_uid
-        patient_path = Path(base) / patient_dir_name
-        dirs: dict[DicomQueryLevel, Path] = {
-            DicomQueryLevel.PATIENT: patient_path,
-            DicomQueryLevel.STUDY: patient_path / study_dir_name,
-        }
-        return dirs
-
-    @staticmethod
-    def build_fields(record: RecordRead) -> dict[str, Any]:
-        """Extract placeholder values from a ``RecordRead``.
-
-        Args:
-            record: Fully-loaded record.
-
-        Returns:
-            Flat dict suitable for ``_resolve_pattern_from_dict``.
-        """
-        fields: dict[str, Any] = {
-            "id": record.id,
-            "user_id": record.user_id,
-            "patient_id": record.patient_id,
-            "study_uid": record.study_uid,
-            "series_uid": record.series_uid,
-            "record_type": {"name": record.record_type.name},
-            "data": record.data or {},
-            "origin_type": record.record_type.name,
-        }
-        return fields
-
-    # ── Public methods ──
-
-    def dir(self, level: DicomQueryLevel | None = None) -> Path:
-        """Get working directory for the given DICOM level.
-
-        Args:
-            level: Target level (default: record type's level).
-
-        Returns:
-            Absolute directory path.
-
-        Raises:
-            KeyError: If the level is not available in working dirs.
-        """
-        level = level or self._record_type_level
-        return self._working_dirs[level]
-
-    def _lookup(self, file_def: FileDefArg) -> FileDefinitionRead | FileDef:
-        """Resolve a file definition by name or pass-through.
-
-        Accepts ``FileDefinitionRead``, ``FileDef`` (config primitive),
-        or a string name. Non-string objects are returned as-is, enabling
-        cross-record-type file access when passing ``FileDef`` objects
-        that are not in this record type's registry.
-
-        Args:
-            file_def: ``FileDefinitionRead``, ``FileDef``, or name string.
-
-        Returns:
-            The resolved file definition object.
-
-        Raises:
-            KeyError: If string name is not in the registry.
-        """
-        if isinstance(file_def, str):
-            return self._registry[file_def]
-        return file_def
-
-    def resolve(self, file_def: FileDefArg, **overrides: Any) -> Path:
-        """Resolve a file definition pattern to an absolute path.
-
-        Args:
-            file_def: ``FileDefinitionRead`` or its ``name``.
-            **overrides: Extra placeholder values merged on top of ``fields``.
-
-        Returns:
-            Absolute path to the resolved file.
-        """
-        fd = self._lookup(file_def)
-        level = fd.level or self._record_type_level
-        working_dir = self._working_dirs[level]
-        merged = {**self._fields, **overrides}
-        filename = _resolve_pattern_from_dict(fd.pattern, merged)
-        path = working_dir / filename
-        if fd.name not in self._accessed_files:
-            self._accessed_files[fd.name] = path
-        return path
-
-    def exists(self, file_def: FileDefArg, **overrides: Any) -> bool:
-        """Check whether a resolved file exists on disk.
-
-        Args:
-            file_def: ``FileDefinitionRead`` or its ``name``.
-            **overrides: Extra placeholder values.
-
-        Returns:
-            ``True`` if the file exists.
-        """
-        return self.resolve(file_def, **overrides).is_file()
-
-    def glob(self, file_def: FileDefArg) -> list[Path]:
-        """Glob a collection file definition (``multiple=True``).
-
-        Replaces all placeholders with ``*`` and globs in the working dir.
-
-        Args:
-            file_def: ``FileDefinitionRead`` or its ``name``.
-
-        Returns:
-            Sorted list of matching paths.
-        """
-        fd = self._lookup(file_def)
-        level = fd.level or self._record_type_level
-        working_dir = self._working_dirs[level]
-        paths = glob_file_paths(fd, working_dir)
-        if fd.name not in self._accessed_files:
-            self._accessed_files[fd.name] = paths[0] if paths else working_dir
-        return paths
-
-    @property
-    def accessed_files(self) -> dict[str, Path]:
-        """Return a copy of the accessed files mapping.
-
-        Returns:
-            Dict mapping file definition names to their resolved paths.
-        """
-        return dict(self._accessed_files)
-
-    async def snapshot_checksums(self) -> dict[str, str | None]:
-        """Compute checksums for all registered file definitions.
-
-        Iterates the file registry and resolves each file definition to a path
-        without tracking access. Used to capture pre-task state for change detection.
-
-        Returns:
-            Dict mapping file definition names to their SHA256 checksums (or None).
-        """
-        from clarinet.utils.file_checksums import compute_file_checksum
-
-        checksums: dict[str, str | None] = {}
-        for fd in self._registry.values():
-            try:
-                level = fd.level or self._record_type_level
-                working_dir = self._working_dirs[level]
-                merged = dict(self._fields)
-                filename = _resolve_pattern_from_dict(fd.pattern, merged)
-                path = working_dir / filename
-                checksums[fd.name] = await compute_file_checksum(path)
-            except (KeyError, ValueError):
-                checksums[fd.name] = None
-        return checksums
+__all__ = [
+    "FileResolver",
+    "RecordQuery",
+    "TaskContext",
+    "build_task_context",
+    "resolve_pattern_from_dict",
+]
 
 
 class RecordQuery:
@@ -444,7 +169,7 @@ class RecordQuery:
             )
         fd = fd_map[file]
         level = fd.level or record.record_type.level
-        filename = _resolve_pattern_from_dict(fd.pattern, fields)
+        filename = resolve_pattern_from_dict(fd.pattern, fields)
         return working_dirs[level] / filename
 
 

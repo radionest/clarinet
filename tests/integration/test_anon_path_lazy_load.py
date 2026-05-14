@@ -84,7 +84,15 @@ async def test_build_context_no_series_lazy_load(test_session, fresh_session):
         await fresh_session.execute(select(Series).where(Series.series_uid == series.series_uid))
     ).scalar_one()
 
-    ctx = build_context(patient=fresh_patient, study=fresh_study, series=fresh_series)
+    # The fixtures do not run anonymization — this test is about lazy-load
+    # behaviour, not about the anonymized-UID contract, so allow the
+    # legacy fallback to populate the placeholders.
+    ctx = build_context(
+        patient=fresh_patient,
+        study=fresh_study,
+        series=fresh_series,
+        fallback_to_unanonymized=True,
+    )
     assert ctx["study_modalities"] == "CT_PT"
 
     with pytest.raises(MissingGreenlet):

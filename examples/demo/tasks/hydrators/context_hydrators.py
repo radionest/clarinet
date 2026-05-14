@@ -1,6 +1,21 @@
 """Custom slicer context hydrators for the liver study v2.
 
 Loaded automatically at startup by ``load_custom_slicer_hydrators()``.
+
+Hydrator outputs flow into Slicer scripts that issue PACS C-GET/C-MOVE
+calls and address files on disk, so they MUST use anonymized UIDs.
+When an entity has not been anonymized yet, the hydrator skips it
+(``return {}``) and logs a warning — silent fallback to raw UIDs would
+make the script load the wrong dataset.
+
+**Consequence for downstream Slicer scripts:** if a hydrator returns
+``{}``, placeholders like ``{best_study_uid}`` / ``{best_series_uid}``
+in ``slicer_script_args`` remain unresolved. ``_resolve_custom_args`` in
+``clarinet/services/slicer/context.py`` skips the arg and logs a
+warning — your script must tolerate a missing variable (e.g. early
+``return`` when ``best_series_uid`` is absent) rather than crash on
+``NameError``. Downstream projects that prefer hard failure should
+raise from the hydrator instead of returning ``{}``.
 """
 
 import os
@@ -12,6 +27,7 @@ from clarinet.services.slicer.context_hydration import (
     SlicerHydrationContext,
     slicer_context_hydrator,
 )
+from clarinet.utils.logger import logger
 
 
 @slicer_context_hydrator("patient_first_study")
@@ -30,7 +46,12 @@ async def hydrate_patient_first_study(
         return {}
 
     first = sorted(studies, key=lambda s: s.date or "")[0]
-    return {"best_study_uid": first.anon_uid or first.study_uid}
+    if not first.anon_uid:
+        logger.warning(
+            f"patient_first_study: skipping — study {first.study_uid} not anonymized yet"
+        )
+        return {}
+    return {"best_study_uid": first.anon_uid}
 
 
 @slicer_context_hydrator("best_series_from_first_check")
@@ -69,7 +90,13 @@ async def hydrate_best_series_from_first_check(
 
     for series in study.series:
         if series.series_uid == best_series_original:
-            return {"best_series_uid": series.anon_uid or series.series_uid}
+            if not series.anon_uid:
+                logger.warning(
+                    f"best_series_from_first_check: skipping — series "
+                    f"{series.series_uid} not anonymized yet"
+                )
+                return {}
+            return {"best_series_uid": series.anon_uid}
 
     return {}
 
@@ -113,12 +140,23 @@ async def hydrate_model_series_for_projection(
 
     # Resolve study and series to anonymized UIDs
     study = await ctx.study_repo.get_with_series(ct_study_uid)
+    if not study.anon_uid:
+        logger.warning(
+            f"model_series_for_projection: skipping — study {study.study_uid} not anonymized yet"
+        )
+        return {}
 
     for series in study.series:
         if series.series_uid == best_series_original:
+            if not series.anon_uid:
+                logger.warning(
+                    f"model_series_for_projection: skipping — series "
+                    f"{series.series_uid} not anonymized yet"
+                )
+                return {}
             return {
-                "model_study_uid": study.anon_uid or study.study_uid,
-                "model_series_uid": series.anon_uid or series.series_uid,
+                "model_study_uid": study.anon_uid,
+                "model_series_uid": series.anon_uid,
             }
 
     return {}
@@ -171,14 +209,25 @@ async def hydrate_projection_for_update(
     if comp.study_uid is None:
         return {}
     study = await ctx.study_repo.get_with_series(comp.study_uid)
-    study_anon_uid = study.anon_uid or study.study_uid
+    if not study.anon_uid:
+        logger.warning(
+            f"projection_for_update: skipping — study {study.study_uid} not anonymized yet"
+        )
+        return {}
+    study_anon_uid = study.anon_uid
 
     # Find the target series
-    target_series_uid = None
+    target_series_uid: str | None = None
     if comp.series_uid:
         for series in study.series:
             if series.series_uid == comp.series_uid:
-                target_series_uid = series.anon_uid or series.series_uid
+                if not series.anon_uid:
+                    logger.warning(
+                        f"projection_for_update: skipping — series "
+                        f"{series.series_uid} not anonymized yet"
+                    )
+                    return {}
+                target_series_uid = series.anon_uid
                 break
 
     if target_series_uid is None:

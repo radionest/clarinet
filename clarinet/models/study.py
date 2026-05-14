@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 from pydantic import computed_field
 from sqlmodel import Field, Relationship
 
+from ..exceptions import AnonPathError
 from ..settings import settings
 from .base import BaseModel, DicomUID, InstanceCount
 from .patient import Patient, PatientInfo
@@ -97,21 +98,65 @@ class SeriesRead(SeriesBase):
     study: StudyRead
     records: list[Any] = Field(default_factory=list)  # Will contain RecordRead objects
 
-    def _format_path_strict(self, unformatted_path: str) -> str:
+    def _format_path_strict(
+        self,
+        unformatted_path: str,
+        *,
+        fallback_to_unanonymized: bool = False,
+    ) -> str:
         """Format a path with values from this series.
 
         Raises on failure — use for system templates where all placeholders
         are guaranteed to exist (e.g. working_folder).
+
+        Args:
+            unformatted_path: Template string with ``{placeholder}`` tokens.
+            fallback_to_unanonymized: If ``False`` (default — backend safe
+                mode), missing ``anon_id``/``anon_uid`` raise
+                ``AnonPathError`` instead of silently rendering against raw
+                identifiers.
         """
+        patient = self.study.patient
+        patient_id: str
+        if patient.anon_id is not None:
+            patient_id = patient.anon_id
+        elif fallback_to_unanonymized:
+            patient_id = patient.id
+        else:
+            raise AnonPathError(
+                f"Patient has no anon_id (patient_id={patient.id!r}); "
+                "pass fallback_to_unanonymized=True for UX call sites"
+            )
+
+        study_anon_uid: str
+        if self.study.anon_uid:
+            study_anon_uid = self.study.anon_uid
+        elif fallback_to_unanonymized:
+            study_anon_uid = self.study_uid or ""
+        else:
+            raise AnonPathError(
+                f"Study has no anon_uid (study_uid={self.study_uid!r}); "
+                "pass fallback_to_unanonymized=True for UX call sites"
+            )
+
+        series_anon_uid: str
+        if self.anon_uid:
+            series_anon_uid = self.anon_uid
+        elif fallback_to_unanonymized:
+            series_anon_uid = self.series_uid or ""
+        else:
+            raise AnonPathError(
+                f"Series has no anon_uid (series_uid={self.series_uid!r}); "
+                "pass fallback_to_unanonymized=True for UX call sites"
+            )
+
         return unformatted_path.format(
-            patient_id=self.study.patient.anon_id
-            if self.study.patient.anon_id is not None
-            else self.study.patient.id,
-            patient_anon_name=self.study.patient.anon_name,
+            patient_id=patient_id,
+            patient_anon_name=patient.anon_name,
             study_uid=self.study_uid,
-            study_anon_uid=self.study.anon_uid or self.study_uid,
+            study_anon_uid=study_anon_uid,
             series_uid=self.series_uid,
-            series_anon_uid=self.anon_uid or self.series_uid,
+            series_anon_uid=series_anon_uid,
             clarinet_storage_path=settings.storage_path,
         )
 
@@ -119,11 +164,12 @@ class SeriesRead(SeriesBase):
         """Format a path template, returning None on failure.
 
         Safe wrapper for user-defined templates where unknown placeholders
-        are expected.
+        are expected. Uses ``fallback_to_unanonymized=True`` because user
+        templates target the UX layer.
         """
         try:
-            return self._format_path_strict(unformatted_path)
-        except (AttributeError, KeyError):
+            return self._format_path_strict(unformatted_path, fallback_to_unanonymized=True)
+        except (AttributeError, KeyError, AnonPathError):
             return None
 
     @computed_field
@@ -132,7 +178,10 @@ class SeriesRead(SeriesBase):
 
         Rendered from ``settings.disk_path_template`` so the value stays
         in sync with the anonymized-output layout written by
-        ``AnonymizationService``.
+        ``AnonymizationService``. Serialised into API responses, so falls
+        back to raw UIDs for series that have not been anonymized yet —
+        backend code that needs the real on-disk path should call
+        ``FileResolver.build_working_dirs_from_series(series)`` instead.
         """
         from pathlib import Path
 
@@ -143,6 +192,7 @@ class SeriesRead(SeriesBase):
             patient=self.study.patient,
             study=self.study,
             series=self,
+            fallback_to_unanonymized=True,
         )
         return str(
             render_working_folder(

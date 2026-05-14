@@ -14,56 +14,13 @@ from typing import TYPE_CHECKING
 from clarinet.exceptions.domain import ValidationError
 from clarinet.models.base import DicomQueryLevel
 from clarinet.models.file_schema import FileRole
-from clarinet.settings import settings
+from clarinet.services.common.file_resolver import FileResolver
 from clarinet.utils.file_patterns import resolve_pattern
 from clarinet.utils.fs import run_in_fs_thread
 
 if TYPE_CHECKING:
     from clarinet.models.file_schema import FileDefinitionRead
     from clarinet.models.record import RecordBase, RecordRead
-
-
-def _build_working_dirs(record: RecordRead) -> dict[DicomQueryLevel, Path]:
-    """Build working-directory map from a ``RecordRead``.
-
-    Replicates ``FileResolver.build_working_dirs()`` logic from the pipeline
-    module to keep file_validation independent of the pipeline package.
-
-    Args:
-        record: Fully-loaded record (patient, study, series relations).
-
-    Returns:
-        Dict mapping each available level to its ``Path``.
-    """
-    base = record.clarinet_storage_path or settings.storage_path
-    patient_dir_name = (
-        record.patient.anon_id if record.patient.anon_id is not None else record.patient_id
-    )
-    dirs: dict[DicomQueryLevel, Path] = {
-        DicomQueryLevel.PATIENT: Path(base) / patient_dir_name,
-    }
-
-    # STUDY directory — prefer relationship, fall back to record-level anon UID
-    study_dir_name: str | None = None
-    if record.study is not None:
-        study_dir_name = record.study.anon_uid or record.study_uid or ""
-    elif record.study_uid:
-        study_dir_name = record.study_anon_uid or record.study_uid
-
-    if study_dir_name:
-        dirs[DicomQueryLevel.STUDY] = dirs[DicomQueryLevel.PATIENT] / study_dir_name
-
-        # SERIES directory — same fallback pattern
-        series_dir_name: str | None = None
-        if record.series is not None:
-            series_dir_name = record.series.anon_uid or record.series_uid or ""
-        elif record.series_uid:
-            series_dir_name = record.series_anon_uid or record.series_uid
-
-        if series_dir_name:
-            dirs[DicomQueryLevel.SERIES] = dirs[DicomQueryLevel.STUDY] / series_dir_name
-
-    return dirs
 
 
 @dataclass
@@ -203,7 +160,12 @@ async def validate_record_files(
         return None
 
     directory = Path(record.working_folder)
-    working_dirs = _build_working_dirs(record)
+    # Called both from `POST /records/{id}/validate-files` (admin UI) and
+    # from `RecordService.create_record` (during record creation, before
+    # any anonymization run). Fall back to raw UIDs so a record that has
+    # not been anonymized yet still gets a `valid/invalid` verdict instead
+    # of bubbling `AnonPathError` up to the caller.
+    working_dirs = FileResolver.build_working_dirs(record, fallback_to_unanonymized=True)
     validator = FileValidator(input_defs)
     result = await run_in_fs_thread(validator.validate, record, directory, working_dirs, parent)
     if not result.valid and raise_on_invalid:

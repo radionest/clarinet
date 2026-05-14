@@ -335,6 +335,16 @@ class ConfigurationError(ClarinetError):
     """Raised when there's a configuration problem."""
 
 
+class AnonPathError(ConfigurationError):
+    """Raised when an anonymized disk path cannot be safely resolved.
+
+    Typical cause: the backend tried to render a path against an entity
+    whose ``anon_uid`` / ``anon_id`` is missing (e.g. record predates an
+    asymmetric anonymization run). UX call sites can opt out by passing
+    ``fallback_to_unanonymized=True`` to the resolver.
+    """
+
+
 # Database errors
 class DatabaseError(ClarinetError):
     """Raised when there's a database operation error."""
