@@ -59,6 +59,27 @@ def _ds_int(ds: Dataset, attr: str) -> int | None:
     return int(val)
 
 
+def _ds_modalities(ds: Dataset) -> str | None:
+    """Get ``ModalitiesInStudy`` as a ``'-'``-joined string.
+
+    pydicom returns ``MultiValue`` for multi-valued CS tags. Plain
+    ``str(MultiValue([...]))`` yields a Python list repr
+    (``"['CT', 'SR']"``) which is unparseable downstream. Joining with
+    ``'-'`` gives clean DB strings (``"CT-SR"``) without backslash
+    escapes; ``anon_path._modalities_string`` and DICOMweb converter
+    split on ``'-'`` to recover the per-modality list.
+    """
+    val: Any = getattr(ds, "ModalitiesInStudy", None)
+    if val is None or val == "":
+        return None
+    if isinstance(val, str):
+        return val
+    try:
+        return "-".join(str(v) for v in val)
+    except TypeError:
+        return str(val)
+
+
 def _set_ds_fields(ds: Dataset, fields: dict[str, Any]) -> None:
     """Set DICOM dataset fields, using empty string for None values."""
     for attr, value in fields.items():
@@ -750,7 +771,7 @@ class DicomOperations:
             study_time=_ds_str(ds, "StudyTime"),
             study_description=_ds_str(ds, "StudyDescription"),
             accession_number=_ds_str(ds, "AccessionNumber"),
-            modalities_in_study=_ds_str(ds, "ModalitiesInStudy"),
+            modalities_in_study=_ds_modalities(ds),
             number_of_study_related_series=_ds_int(ds, "NumberOfStudyRelatedSeries"),
             number_of_study_related_instances=_ds_int(ds, "NumberOfStudyRelatedInstances"),
         )

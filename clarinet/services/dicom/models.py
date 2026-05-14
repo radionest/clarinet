@@ -57,7 +57,10 @@ class StudyResult(BaseModel):
     study_time: str | None = None
     study_description: str | None = None
     accession_number: str | None = None
-    modalities_in_study: str | None = None
+    modalities_in_study: str | None = Field(
+        default=None,
+        description="Modalities of the study, '-'-joined (e.g. 'CT-SR').",
+    )
     number_of_study_related_series: int | None = None
     number_of_study_related_instances: int | None = None
 

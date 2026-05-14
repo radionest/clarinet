@@ -25,6 +25,19 @@ def _fields_to_dicom_json(fields: list[tuple[str, str, Any]]) -> dict[str, Any]:
     return {tag: _tag_value(vr, val) for tag, vr, val in fields if val is not None}
 
 
+def _modalities_to_list(raw: str | None) -> list[str] | None:
+    """Split DB-stored ``'-'``-joined modalities back into a list.
+
+    DICOM JSON (PS3.18 Appendix F) requires multi-value CS tags to be
+    serialized as a JSON array of strings — passing the joined string
+    would surface in OHIF as a single bogus modality ``"CT-SR"``.
+    """
+    if not raw:
+        return None
+    parts = [p for p in raw.split("-") if p]
+    return parts or None
+
+
 def study_result_to_dicom_json(result: StudyResult) -> dict[str, Any]:
     return _fields_to_dicom_json(
         [
@@ -39,7 +52,7 @@ def study_result_to_dicom_json(result: StudyResult) -> dict[str, Any]:
             ("00080030", "TM", result.study_time),
             ("00081030", "LO", result.study_description),
             ("00080050", "SH", result.accession_number),
-            ("00080061", "CS", result.modalities_in_study),
+            ("00080061", "CS", _modalities_to_list(result.modalities_in_study)),
             ("00201206", "IS", result.number_of_study_related_series),
             ("00201208", "IS", result.number_of_study_related_instances),
         ]

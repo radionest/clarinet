@@ -62,7 +62,7 @@ async def test_build_context_no_series_lazy_load(test_session, fresh_session):
         study_uid="1.2.3.lazy2",
         patient_id=patient.id,
         date=datetime.now(UTC).date(),
-        modalities_in_study="CT\\PT",
+        modalities_in_study="CT-PT",
     )
     test_session.add(study)
     series = Series(

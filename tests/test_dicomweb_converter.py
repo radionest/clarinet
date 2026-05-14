@@ -8,7 +8,11 @@ cause frame retrieval to fail with 404.
 from pydicom import Dataset
 from pydicom.uid import ExplicitVRLittleEndian, SecondaryCaptureImageStorage
 
-from clarinet.services.dicomweb.converter import dataset_to_dicom_json
+from clarinet.services.dicom.models import StudyResult
+from clarinet.services.dicomweb.converter import (
+    dataset_to_dicom_json,
+    study_result_to_dicom_json,
+)
 
 
 def _make_dataset_with_pixel_data() -> Dataset:
@@ -78,3 +82,24 @@ def test_dataset_to_dicom_json_without_pixel_data() -> None:
     pixel_tag = json_obj.get("7FE00010")
     assert pixel_tag is not None
     assert "BulkDataURI" in pixel_tag
+
+
+def test_study_result_modalities_multi_value_splits_dash() -> None:
+    """ModalitiesInStudy stored as 'CT-SR' must serialize as a JSON array."""
+    result = StudyResult(study_instance_uid="1.2.3", modalities_in_study="CT-SR")
+    j = study_result_to_dicom_json(result)
+    assert j["00080061"] == {"vr": "CS", "Value": ["CT", "SR"]}
+
+
+def test_study_result_modalities_single_value() -> None:
+    """Single-modality studies serialize as a one-element array."""
+    result = StudyResult(study_instance_uid="1.2.3", modalities_in_study="CT")
+    j = study_result_to_dicom_json(result)
+    assert j["00080061"] == {"vr": "CS", "Value": ["CT"]}
+
+
+def test_study_result_modalities_missing_tag_omitted() -> None:
+    """Missing modalities → tag absent from JSON output."""
+    result = StudyResult(study_instance_uid="1.2.3", modalities_in_study=None)
+    j = study_result_to_dicom_json(result)
+    assert "00080061" not in j

@@ -1188,7 +1188,7 @@ async def test_anonymize_disk_layout_custom_template(
         patient_id="LAYOUT_PAT_CUSTOM",
         study_uid="1.2.5252.1",
         date=today,
-        modalities_in_study="CT\\PT",
+        modalities_in_study="CT-PT",
     )
     test_session.add(study)
     await test_session.commit()
@@ -1238,7 +1238,7 @@ async def test_anonymize_disk_layout_custom_template(
         )
 
     assert response.status_code == 200
-    # study_modalities = sorted set of "CT\\PT" joined by "_" => "CT_PT".
+    # study_modalities = sorted set of "CT-PT" joined by "_" => "CT_PT".
     # anon_series_uid is derived inside DicomAnonymizer, so inspect by walk:
     # segment_1 = patient_auto_id (77), segment_2 = "CT_PT_YYYYMMDD",
     # segment_3 = some anon_series_uid → contains dcm_anon/*.dcm.

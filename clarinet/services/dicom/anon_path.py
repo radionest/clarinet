@@ -81,17 +81,18 @@ def split_template(template: str) -> TemplateSegments:
 def _modalities_string(study: "Study | StudyBase | None") -> str:
     """Canonical join of a study's modalities (sorted, separator ``_``).
 
-    Reads ``study.modalities_in_study`` (a DICOM ``\\``-separated string).
-    Returns ``"unknown"`` when missing — does NOT lazy-load
-    ``study.series`` because callers reach this from ``computed_field``
-    properties on `*Read` DTOs where the relationship may not be eagerly
-    loaded; lazy-load on an async session raises ``MissingGreenlet``.
+    Reads ``study.modalities_in_study`` (a ``'-'``-separated string
+    written by ``operations._ds_modalities``). Returns ``"unknown"``
+    when missing — does NOT lazy-load ``study.series`` because callers
+    reach this from ``computed_field`` properties on ``*Read`` DTOs
+    where the relationship may not be eagerly loaded; lazy-load on an
+    async session raises ``MissingGreenlet``.
     """
     if study is None:
         return "unknown"
     raw = getattr(study, "modalities_in_study", None)
     if raw:
-        parts = sorted({p.strip() for p in raw.split("\\") if p.strip()})
+        parts = sorted({p.strip() for p in raw.split("-") if p.strip()})
         if parts:
             return "_".join(parts)
     return "unknown"
