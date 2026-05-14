@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import contextlib
-import os
 import socket
 from collections.abc import AsyncGenerator, Generator
 from pathlib import Path
@@ -17,24 +16,22 @@ from loguru import logger
 from clarinet.client import ClarinetClient
 from clarinet.services.slicer.client import SlicerClient
 from clarinet.services.slicer.service import SlicerService
+from tests.config import (
+    RABBITMQ_HOST,
+    RABBITMQ_MANAGEMENT_AUTH,
+    RABBITMQ_PORT,
+    RABBITMQ_URL,
+    SLICER_HOST,
+    SLICER_PORT,
+)
 
 # ─── Pipeline / RabbitMQ fixtures ────────────────────────────────────────────
-
-RABBITMQ_HOST = os.environ.get("CLARINET_TEST_RABBITMQ_HOST", "192.168.122.151")
-RABBITMQ_PORT = int(os.environ.get("CLARINET_TEST_RABBITMQ_PORT", "5672"))
-RABBITMQ_MANAGEMENT_PORT = int(os.environ.get("CLARINET_TEST_RABBITMQ_MANAGEMENT_PORT", "15672"))
-RABBITMQ_USER = os.environ.get("CLARINET_TEST_RABBITMQ_USER", "clarinet_test")
-RABBITMQ_PASS = os.environ.get("CLARINET_TEST_RABBITMQ_PASS", "clarinet_test")
-RABBITMQ_MANAGEMENT_AUTH = (
-    os.environ.get("CLARINET_TEST_RABBITMQ_MANAGEMENT_USER", "clarinet"),
-    os.environ.get("CLARINET_TEST_RABBITMQ_MANAGEMENT_PASS", "clarinet"),
-)
 
 
 @pytest.fixture(scope="session")
 def rabbitmq_url() -> str:
     """AMQP connection URL for RabbitMQ."""
-    return f"amqp://{RABBITMQ_USER}:{RABBITMQ_PASS}@{RABBITMQ_HOST}:{RABBITMQ_PORT}/"
+    return RABBITMQ_URL
 
 
 @pytest.fixture(scope="session")
@@ -254,7 +251,7 @@ async def _purge_test_queues(
 
     import httpx
 
-    management_url = f"http://{RABBITMQ_HOST}:{RABBITMQ_MANAGEMENT_PORT}"
+    from tests.config import RABBITMQ_MANAGEMENT_URL
 
     async def _purge() -> None:
         all_queue_names = list(test_queues.values())
@@ -264,7 +261,9 @@ async def _purge_test_queues(
             for queue_name in all_queue_names:
                 encoded = quote(queue_name, safe="")
                 with contextlib.suppress(Exception):
-                    await client.delete(f"{management_url}/api/queues/%2F/{encoded}/contents")
+                    await client.delete(
+                        f"{RABBITMQ_MANAGEMENT_URL}/api/queues/%2F/{encoded}/contents"
+                    )
 
     await _purge()
     yield
@@ -322,9 +321,6 @@ def _clear_pipeline_registries() -> Any:
 
 
 # ─── Slicer fixtures ────────────────────────────────────────────────────────
-
-SLICER_HOST = "localhost"
-SLICER_PORT = 2016
 
 
 @pytest.fixture(scope="session")

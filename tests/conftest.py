@@ -23,6 +23,7 @@ from clarinet.models.user import User
 from clarinet.settings import Settings
 from clarinet.utils.database import get_async_session
 from clarinet.utils.logger import logger
+from tests.utils.cookies import patch_cookie_forwarding
 
 
 @pytest.fixture
@@ -285,18 +286,7 @@ async def create_authenticated_client(
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url=base_url, cookies={}) as ac:
-        original_request = ac.request
-
-        async def request_with_cookies(method, url, **kwargs):
-            if ac.cookies:
-                headers = kwargs.get("headers") or {}
-                cookie_header = "; ".join([f"{k}={v}" for k, v in ac.cookies.items()])
-                if cookie_header:
-                    headers["Cookie"] = cookie_header
-                    kwargs["headers"] = headers
-            return await original_request(method, url, **kwargs)
-
-        ac.request = request_with_cookies
+        patch_cookie_forwarding(ac)
         yield ac
 
     app.dependency_overrides.clear()
@@ -338,18 +328,7 @@ async def unauthenticated_client(test_session, test_settings) -> AsyncGenerator[
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test", cookies={}) as ac:
-        original_request = ac.request
-
-        async def request_with_cookies(method, url, **kwargs):
-            if ac.cookies:
-                headers = kwargs.get("headers") or {}
-                cookie_header = "; ".join([f"{k}={v}" for k, v in ac.cookies.items()])
-                if cookie_header:
-                    headers["Cookie"] = cookie_header
-                    kwargs["headers"] = headers
-            return await original_request(method, url, **kwargs)
-
-        ac.request = request_with_cookies
+        patch_cookie_forwarding(ac)
         yield ac
 
     app.dependency_overrides.clear()
@@ -388,18 +367,7 @@ async def fresh_client(fresh_session, test_settings) -> AsyncGenerator[AsyncClie
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test", cookies={}) as ac:
-        original_request = ac.request
-
-        async def request_with_cookies(method, url, **kwargs):
-            if ac.cookies:
-                headers = kwargs.get("headers") or {}
-                cookie_header = "; ".join([f"{k}={v}" for k, v in ac.cookies.items()])
-                if cookie_header:
-                    headers["Cookie"] = cookie_header
-                    kwargs["headers"] = headers
-            return await original_request(method, url, **kwargs)
-
-        ac.request = request_with_cookies
+        patch_cookie_forwarding(ac)
         yield ac
 
     app.dependency_overrides.clear()
@@ -646,21 +614,7 @@ async def clarinet_client(test_session, test_settings):
 
     # Create real AsyncClient with /api base path and enable cookie jar
     real_client = AsyncClient(transport=transport, base_url="http://test/api", cookies={})
-
-    # Patch the client to properly handle cookies (same as in conftest.py for tests)
-    original_request = real_client.request
-
-    async def request_with_cookies(method, url, **kwargs):
-        # Always include cookies in headers
-        if real_client.cookies:
-            headers = kwargs.get("headers") or {}
-            cookie_header = "; ".join([f"{k}={v}" for k, v in real_client.cookies.items()])
-            if cookie_header:
-                headers["Cookie"] = cookie_header
-                kwargs["headers"] = headers
-        return await original_request(method, url, **kwargs)
-
-    real_client.request = request_with_cookies
+    patch_cookie_forwarding(real_client)
 
     # Patch httpx.AsyncClient to return our test client
     with patch("clarinet.client.httpx.AsyncClient", return_value=real_client):

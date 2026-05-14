@@ -29,8 +29,7 @@ make test-schema-verbose      # Verbose with tracebacks
 
 | Test | What it checks | Phase |
 |---|---|---|
-| `test_api_conformance` | Full schema conformance: response schema, status codes, content-type | Phase 1 |
-| `test_no_server_errors` | No 500 errors on any generated input (positive + negative) | Phase 1 |
+| `test_api_conformance` | Full schema conformance: response schema, status codes, content-type, no 500s (via `not_a_server_error` check in `call_and_validate`) | Phase 1 |
 | `test_record_read_endpoints` | GET records (list, my, pending, available_types, by ID, schema) | Phase 1b |
 | `test_record_type_read_endpoints` | GET record types (list, by ID) | Phase 1b |
 | `test_study_read_endpoints` | GET patients/studies/series | Phase 1b |
@@ -100,7 +99,7 @@ Schema loading:
 
 Stateful testing:
 - `schema.as_state_machine()` → `APIStateMachine` subclass — requires OpenAPI `links` in responses
-- `run_state_machine_as_test(sm, settings=)` from `schemathesis.generation.stateful`
+- `StateMachineSubclass.run(settings=)` — public API in 4.x (avoid the internal `run_state_machine_as_test` import)
 - Does NOT infer transitions from URL patterns — only explicit `links`
 
 Generation modes (via `schemathesis.toml`):

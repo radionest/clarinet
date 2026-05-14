@@ -24,15 +24,13 @@ import requests
 from clarinet.services.dicom import DicomClient, DicomNode, SeriesQuery, StudyResult
 from clarinet.services.dicom.models import SeriesResult
 from clarinet.services.dicom.scp import StorageSCP
+from tests.config import PACS_AET, PACS_DICOM_PORT, PACS_HOST, PACS_REST_URL
 
 # ---------------------------------------------------------------------------
 # Constants (same Orthanc as test_dicom_service.py)
 # ---------------------------------------------------------------------------
 
-PACS_HOST = os.environ.get("CLARINET_TEST_PACS_HOST", "192.168.122.151")
-PACS_PORT = int(os.environ.get("CLARINET_TEST_PACS_PORT", "4242"))
-PACS_AET = "ORTHANC"
-PACS_REST_URL = f"http://{PACS_HOST}:{os.environ.get('CLARINET_TEST_PACS_REST_PORT', '8042')}"
+PACS_PORT = PACS_DICOM_PORT
 # Per-worker AET so xdist workers don't clobber each other's modality
 # registration in Orthanc (which is keyed by AET name); a shared name
 # caused C-MOVE responses for one worker to flow into another worker's

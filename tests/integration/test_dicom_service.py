@@ -10,7 +10,6 @@ Run:
     uv run pytest -m "not dicom"   # exclude from CI
 """
 
-import os
 from pathlib import Path
 
 import pydicom
@@ -26,16 +25,13 @@ from clarinet.services.dicom import (
     StudyResult,
 )
 from clarinet.services.dicom.models import SeriesResult
+from tests.config import CALLING_AET, PACS_AET, PACS_DICOM_PORT, PACS_HOST, PACS_REST_URL
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 
-PACS_HOST = os.environ.get("CLARINET_TEST_PACS_HOST", "192.168.122.151")
-PACS_PORT = int(os.environ.get("CLARINET_TEST_PACS_PORT", "4242"))
-PACS_AET = "ORTHANC"
-PACS_REST_URL = f"http://{PACS_HOST}:{os.environ.get('CLARINET_TEST_PACS_REST_PORT', '8042')}"
-CALLING_AET = "CLARINET_TEST"
+PACS_PORT = PACS_DICOM_PORT
 
 
 # ---------------------------------------------------------------------------

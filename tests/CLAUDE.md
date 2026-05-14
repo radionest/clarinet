@@ -130,7 +130,7 @@ Use `tests/utils/urls.py` instead of hardcoded URL strings. Full endpoint table 
 | `make_record_type_config(name, level=)` | `factories.py` | sync, no DB | `RecordTypeCreate` | reconciler/config tests |
 | `seed_record(session, ...)` | `factories.py` | async, commits | `Record` | when a record must exist before the request under test |
 | `PatientFactory.create_patient(session, ...)` | `test_helpers.py` | async, commits | `Patient` | integration tests; can also create `Study`/`Series` |
-| `RecordFactory.create_record(session, user, record_type, ...)` | `test_helpers.py` | async, commits | `Record` | same |
+| `RecordFactory.create_record_with_relations(session, *, patient, record_type, ...)` | `test_helpers.py` | async, commits | `RecordRead` | persisted record with eager-loaded relations; mirrors `RecordRepository.get_with_relations()` |
 | `UserFactory.create_user(...)` | `test_helpers.py` | async, commits | `User` | persisted user with hashed password |
 | `create_mock_superuser(session, email=)` | `conftest.py` | async, commits + expunges | `User` | overriding `client` fixture in e2e/auth tests |
 | `create_authenticated_client(user, session, settings)` | `conftest.py` | async generator | `AsyncClient` | drop-in replacement for the `client` fixture |
@@ -144,11 +144,14 @@ async def test_admin_delete_record_rejects_non_superuser(test_session, test_sett
     user = await create_mock_superuser(test_session, email="x@test.com")
     user.is_superuser = False  # downgrade to a regular user
 
-    # Persist a RecordType (sync factory + manual commit) and a Record (async factory).
+    # Persist a Patient (sync helper) + a RecordType (sync factory) + Record (async factory).
+    patient = make_patient()
     rt = make_record_type(name="rt-perm-test")
-    test_session.add(rt)
+    test_session.add_all([patient, rt])
     await test_session.commit()
-    record = await RecordFactory.create_record(test_session, user=user, record_type=rt)
+    record = await RecordFactory.create_record_with_relations(
+        test_session, patient=patient, record_type=rt
+    )
 
     async for ac in create_authenticated_client(user, test_session, test_settings):
         resp = await ac.delete(f"/api/admin/records/{record.id}")
