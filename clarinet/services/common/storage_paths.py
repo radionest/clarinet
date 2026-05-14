@@ -43,6 +43,7 @@ from clarinet.exceptions.domain import AnonPathError
 from clarinet.models.base import DicomQueryLevel
 from clarinet.services.dicom.models import MODALITIES_SEPARATOR
 from clarinet.settings import settings
+from clarinet.utils.anon_resolve import require_anon_or_raw
 from clarinet.utils.path_template import (
     SUPPORTED_PLACEHOLDERS,
     StrictDict,
@@ -149,15 +150,12 @@ def derive_anon_patient_id(
         # PATIENT-level template rendering works without forcing the caller
         # to load a Patient just to render a study/series segment.
         return "unknown"
-    anon = getattr(patient, "anon_id", None)
-    if anon:
-        return str(anon)
-    if fallback_to_unanonymized:
-        raw = getattr(patient, "id", None)
-        return str(raw) if raw else "unknown"
-    raise AnonPathError(
-        f"Patient has no anon_id (patient_id={getattr(patient, 'id', None)!r}); "
-        "pass fallback_to_unanonymized=True for UX call sites"
+    raw_id = getattr(patient, "id", None)
+    return require_anon_or_raw(
+        anon=getattr(patient, "anon_id", None),
+        raw=str(raw_id) if raw_id else None,
+        level=DicomQueryLevel.PATIENT,
+        fallback_to_unanonymized=fallback_to_unanonymized,
     )
 
 
@@ -199,28 +197,24 @@ def build_context(
         # Caller did not supply a study — sentinel so PATIENT-level template
         # rendering succeeds (it will not reference {anon_study_uid} anyway).
         study_resolved = "unknown"
-    elif study.anon_uid:
-        study_resolved = study.anon_uid
-    elif fallback_to_unanonymized:
-        study_resolved = study.study_uid or "unknown"
     else:
-        raise AnonPathError(
-            f"Study has no anon_uid (study_uid={study.study_uid!r}); "
-            "pass fallback_to_unanonymized=True for UX call sites"
+        study_resolved = require_anon_or_raw(
+            anon=study.anon_uid,
+            raw=study.study_uid,
+            level=DicomQueryLevel.STUDY,
+            fallback_to_unanonymized=fallback_to_unanonymized,
         )
 
     if anon_series_uid:
         series_resolved = anon_series_uid
     elif series is None:
         series_resolved = "unknown"
-    elif series.anon_uid:
-        series_resolved = series.anon_uid
-    elif fallback_to_unanonymized:
-        series_resolved = series.series_uid or "unknown"
     else:
-        raise AnonPathError(
-            f"Series has no anon_uid (series_uid={series.series_uid!r}); "
-            "pass fallback_to_unanonymized=True for UX call sites"
+        series_resolved = require_anon_or_raw(
+            anon=series.anon_uid,
+            raw=series.series_uid,
+            level=DicomQueryLevel.SERIES,
+            fallback_to_unanonymized=fallback_to_unanonymized,
         )
 
     return {
