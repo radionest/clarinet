@@ -21,12 +21,12 @@ class TestParseStudyResult:
         result = DicomOperations(calling_aet="TEST")._parse_study_result(ds)
         assert result.modalities_in_study == "CT"
 
-    def test_modalities_multi_value_joins_with_dash(self) -> None:
+    def test_modalities_multi_value_joins_with_backslash(self) -> None:
         ds = Dataset()
         ds.StudyInstanceUID = "1.2.3"
         ds.ModalitiesInStudy = MultiValue(str, ["CT", "SR"])
         result = DicomOperations(calling_aet="TEST")._parse_study_result(ds)
-        assert result.modalities_in_study == "CT-SR"
+        assert result.modalities_in_study == "CT\\SR"
 
     def test_modalities_missing_yields_none(self) -> None:
         ds = Dataset()

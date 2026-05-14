@@ -30,7 +30,7 @@ def study(patient: Patient) -> Study:
         study_uid="1.2.3.4",
         date=date(2026, 4, 15),
         study_description="CT chest",
-        modalities_in_study="CT-SR",
+        modalities_in_study="CT\\SR",
         patient_id=patient.id,
         anon_uid="9.9.9.9",
     )
@@ -375,7 +375,7 @@ class TestSeriesReadWorkingFolder:
             study_uid="1.2.3",
             date=date(2026, 1, 5),
             patient_id="P1",
-            modalities_in_study="CT-PT",
+            modalities_in_study="CT\\PT",
             anon_uid="9.9.9",
             patient=patient,
             series=[],

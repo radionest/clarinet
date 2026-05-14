@@ -8,11 +8,17 @@ from pydantic import BaseModel, Field
 
 #: Separator used to join multi-value ``ModalitiesInStudy`` into a single
 #: string for ``Study.modalities_in_study`` / ``StudyResult.modalities_in_study``.
+#: This is the DICOM-standard value-multiplicity separator (PS3.5 §6.4):
+#: storing in this format keeps the DB value byte-identical to the wire
+#: representation, so re-serialising to DICOM / DICOMweb is a no-op rather
+#: than a join-then-split round-trip.
+#:
 #: Producers (``operations._ds_modalities``) and consumers
-#: (``anon_path._modalities_string``, ``dicomweb.converter._modalities_to_list``)
-#: must agree on this character. ``-`` is outside the DICOM CS allowed set
-#: ``[A-Z0-9_ ]``, so it never collides with a modality code.
-MODALITIES_SEPARATOR = "-"
+#: (``anon_path._modalities_string`` for filesystem paths,
+#: ``dicomweb.converter._modalities_to_list`` for DICOM JSON arrays) must
+#: agree on this character. Path rendering converts the joined value to
+#: ``_``-separated for filesystem safety (see ``_modalities_string``).
+MODALITIES_SEPARATOR = "\\"
 
 
 class QueryRetrieveLevel(str, Enum):
@@ -67,7 +73,10 @@ class StudyResult(BaseModel):
     accession_number: str | None = None
     modalities_in_study: str | None = Field(
         default=None,
-        description="Modalities of the study, '-'-joined (e.g. 'CT-SR').",
+        description=(
+            "Modalities of the study, DICOM-standard '\\'-joined "
+            "(e.g. 'CT\\SR'). See MODALITIES_SEPARATOR."
+        ),
     )
     number_of_study_related_series: int | None = None
     number_of_study_related_instances: int | None = None

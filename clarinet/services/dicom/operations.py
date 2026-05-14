@@ -61,14 +61,16 @@ def _ds_int(ds: Dataset, attr: str) -> int | None:
 
 
 def _ds_modalities(ds: Dataset) -> str | None:
-    """Get ``ModalitiesInStudy`` as a ``MODALITIES_SEPARATOR``-joined string.
+    """Get ``ModalitiesInStudy`` as a DICOM ``\\``-joined string.
 
     pydicom returns ``MultiValue`` for multi-valued CS tags. Plain
     ``str(MultiValue([...]))`` yields a Python list repr
     (``"['CT', 'SR']"``) which is unparseable downstream. Joining with
-    ``MODALITIES_SEPARATOR`` gives clean DB strings (``"CT-SR"``);
-    ``anon_path._modalities_string`` and DICOMweb converter split on
-    the same constant to recover the per-modality list.
+    ``MODALITIES_SEPARATOR`` (the DICOM PS3.5 §6.4 value-multiplicity
+    separator) keeps the DB value byte-identical to the wire form, so
+    DICOMweb re-serialisation is a free split. Filesystem path
+    rendering converts to ``_`` separately — see
+    ``anon_path._modalities_string``.
     """
     val: Any = getattr(ds, "ModalitiesInStudy", None)
     if val is None or val == "":
