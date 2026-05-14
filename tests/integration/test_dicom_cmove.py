@@ -24,13 +24,12 @@ import requests
 from clarinet.services.dicom import DicomClient, DicomNode, SeriesQuery, StudyResult
 from clarinet.services.dicom.models import SeriesResult
 from clarinet.services.dicom.scp import StorageSCP
-from tests.config import PACS_AET, PACS_DICOM_PORT, PACS_HOST, PACS_REST_URL
+from tests.config import PACS_AET, PACS_HOST, PACS_PORT, PACS_REST_URL
 
 # ---------------------------------------------------------------------------
 # Constants (same Orthanc as test_dicom_service.py)
 # ---------------------------------------------------------------------------
 
-PACS_PORT = PACS_DICOM_PORT
 # Per-worker AET so xdist workers don't clobber each other's modality
 # registration in Orthanc (which is keyed by AET name); a shared name
 # caused C-MOVE responses for one worker to flow into another worker's

@@ -50,7 +50,7 @@ RABBITMQ_MANAGEMENT_URL = f"http://{RABBITMQ_HOST}:{RABBITMQ_MANAGEMENT_PORT}"
 # ─── Orthanc PACS ────────────────────────────────────────────────────────────
 
 PACS_HOST = os.environ.get("CLARINET_TEST_PACS_HOST", "localhost")
-PACS_DICOM_PORT = int(os.environ.get("CLARINET_TEST_PACS_PORT", "4242"))
+PACS_PORT = int(os.environ.get("CLARINET_TEST_PACS_PORT", "4242"))
 PACS_REST_PORT = int(os.environ.get("CLARINET_TEST_PACS_REST_PORT", "8042"))
 PACS_REST_URL = f"http://{PACS_HOST}:{PACS_REST_PORT}"
 PACS_AET = os.environ.get("CLARINET_TEST_PACS_AET", "ORTHANC")

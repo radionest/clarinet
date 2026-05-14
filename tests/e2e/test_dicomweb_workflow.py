@@ -33,17 +33,11 @@ from clarinet.services.dicom import DicomClient, DicomNode
 from clarinet.services.dicomweb.cache import DicomWebCache
 from clarinet.services.dicomweb.service import DicomWebProxyService
 from clarinet.utils.database import get_async_session
-from tests.config import CALLING_AET, PACS_AET, PACS_DICOM_PORT, PACS_HOST, PACS_REST_URL
+from tests.config import CALLING_AET, PACS_AET, PACS_HOST, PACS_PORT, PACS_REST_URL
 from tests.utils.cookies import patch_cookie_forwarding
 from tests.utils.urls import DICOMWEB_BASE
 
 pytestmark = [pytest.mark.dicom]
-
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-
-PACS_PORT = PACS_DICOM_PORT
 
 DICOM_JSON_CT = "application/dicom+json"
 
