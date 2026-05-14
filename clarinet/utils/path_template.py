@@ -4,6 +4,42 @@ Kept dependency-free (stdlib only) so it can be imported by
 ``clarinet.settings.Settings`` validators without triggering the rest of
 the package graph. The richer rendering helpers — including DB-aware
 context building — live in ``clarinet.services.dicom.anon_path``.
+
+A template has exactly three ``/``-separated non-empty segments mapping
+to the PATIENT / STUDY / SERIES levels of the DICOM hierarchy. Each
+segment may reference any subset of ``SUPPORTED_PLACEHOLDERS`` below.
+Placeholders are interpolated via ``str.format_map`` against a context
+built by ``clarinet.services.dicom.anon_path.build_context``. Missing
+fields resolve to ``"unknown"`` rather than raising, so reader-side
+lookups stay non-fatal on incomplete data.
+
+Supported placeholders
+----------------------
+
+==================  =========================================  =====================  =============
+Placeholder         Source                                     Format                 Fallback
+==================  =========================================  =====================  =============
+anon_patient_id     ``patient.anon_id`` or per-study hash       string                 ``"unknown"``
+anon_study_uid      ``study.anon_uid`` → ``study.study_uid``    DICOM UID              ``"unknown"``
+anon_series_uid     ``series.anon_uid`` → ``series.series_uid`` DICOM UID              ``"unknown"``
+patient_id          DICOM PatientID (``patient.id``)            string                 ``"unknown"``
+patient_auto_id     ``patient.auto_id`` (monotonic counter)     integer                ``"unknown"``
+anon_id_prefix      ``settings.anon_id_prefix``                 string                 ``"anon"``
+study_uid           ``study.study_uid``                         DICOM UID              ``"unknown"``
+series_uid          ``series.series_uid``                       DICOM UID              ``"unknown"``
+study_date          ``study.date``                              ``YYYYMMDD``           ``"unknown"``
+study_modalities    ``study.modalities_in_study``               sorted, ``_``-joined   ``"unknown"``
+series_modality     ``series.modality``                         string                 ``"unknown"``
+series_num          ``series.series_number``                    zero-padded 5 digits   ``"unknown"``
+==================  =========================================  =====================  =============
+
+Example template::
+
+    {anon_patient_id}/{study_modalities}_{study_date}/{series_num}_{anon_series_uid}
+
+renders to::
+
+    CLARINET_42/CT_SR_20260415/00001_9.9.9.9.5
 """
 
 from pathlib import PurePosixPath
@@ -21,6 +57,7 @@ SUPPORTED_PLACEHOLDERS: frozenset[str] = frozenset(
         "study_date",
         "study_modalities",
         "series_modality",
+        "series_num",
     }
 )
 

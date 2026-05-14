@@ -187,6 +187,11 @@ def build_context(
         ),
         "study_modalities": _modalities_string(study),
         "series_modality": (series.modality if series and series.modality else "unknown"),
+        "series_num": (
+            f"{series.series_number:05d}"
+            if series and getattr(series, "series_number", None) is not None
+            else "unknown"
+        ),
     }
 
 

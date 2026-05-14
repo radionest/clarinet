@@ -86,6 +86,7 @@ class TestBuildContext:
         assert ctx["study_date"] == "20260415"
         assert ctx["study_modalities"] == "CT_SR"
         assert ctx["series_modality"] == "CT"
+        assert ctx["series_num"] == "00001"
 
     def test_per_study_mode(self, patient: Patient, study: Study, series: Series) -> None:
         with patch("clarinet.services.dicom.anon_path.settings", spec_set=True) as mock_settings:
@@ -127,6 +128,7 @@ class TestBuildContext:
         assert ctx["series_modality"] == "unknown"
         assert ctx["study_date"] == "unknown"
         assert ctx["patient_auto_id"] == "unknown"
+        assert ctx["series_num"] == "unknown"
 
 
 class TestDeriveAnonPatientId:
@@ -208,6 +210,16 @@ class TestRenderWorkingFolder:
         )
         assert result == Path("/data/42/CT_SR_20260415/9.9.9.5")
 
+    def test_template_with_series_num(self) -> None:
+        ctx = _full_ctx()
+        result = render_working_folder(
+            "{anon_patient_id}/{study_modalities}_{study_date}/{series_num}_{anon_series_uid}",
+            DicomQueryLevel.SERIES,
+            ctx,
+            Path("/data"),
+        )
+        assert result == Path("/data/CLARINET_42/CT_SR_20260415/00001_9.9.9.5")
+
     def test_unknown_placeholder_raises(self) -> None:
         ctx = _full_ctx()
         with pytest.raises(AnonPathError, match="unknown placeholder"):
@@ -251,6 +263,12 @@ class TestValidateTemplate:
             validate_template("{patient_auto_id}/{study_modalities}_{study_date}/{anon_series_uid}")
             == "{patient_auto_id}/{study_modalities}_{study_date}/{anon_series_uid}"
         )
+
+    def test_series_num_template_passes(self) -> None:
+        template = (
+            "{anon_patient_id}/{study_modalities}_{study_date}/{series_num}_{anon_series_uid}"
+        )
+        assert validate_template(template) == template
 
     def test_unknown_placeholder_rejected(self) -> None:
         with pytest.raises(ValueError, match="unknown placeholder"):
@@ -387,4 +405,5 @@ def _full_ctx() -> dict[str, str]:
         "study_date": "20260415",
         "study_modalities": "CT_SR",
         "series_modality": "CT",
+        "series_num": "00001",
     }
