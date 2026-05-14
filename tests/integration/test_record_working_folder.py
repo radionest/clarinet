@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 import pytest_asyncio
 
+from clarinet.exceptions.domain import AnonPathError
 from clarinet.models.base import DicomQueryLevel, RecordStatus
 from clarinet.models.file_schema import FileDefinition, FileRole, RecordTypeFileLink
 from clarinet.models.patient import Patient
@@ -424,6 +425,65 @@ async def test_format_path_strict_raises_on_invalid_template(
 
     with pytest.raises(KeyError):
         record_read._format_path_strict("{bad_placeholder}/path")
+
+
+@pytest.mark.asyncio
+async def test_format_path_strict_raises_when_study_not_anonymized(
+    test_session, test_patient, study_without_anon, series_without_anon, rt_series
+):
+    """Backend safe mode (default): missing study.anon_uid → AnonPathError."""
+    record = await _create_record(
+        test_session,
+        patient_id=test_patient.id,
+        study_uid=study_without_anon.study_uid,
+        series_uid=series_without_anon.series_uid,
+        rt_name=rt_series.name,
+    )
+
+    repo = RecordRepository(test_session)
+    loaded = await repo.get_with_relations(record.id)
+    record_read = RecordRead.model_validate(loaded)
+
+    with pytest.raises(AnonPathError, match="Study has no anon_uid"):
+        record_read._format_path_strict("{study_anon_uid}/file")
+
+
+@pytest.mark.asyncio
+async def test_format_path_strict_fallback_uses_raw_uids(
+    test_session, test_patient, study_without_anon, series_without_anon, rt_series
+):
+    """Explicit ``fallback_to_unanonymized=True`` substitutes raw UIDs instead."""
+    record = await _create_record(
+        test_session,
+        patient_id=test_patient.id,
+        study_uid=study_without_anon.study_uid,
+        series_uid=series_without_anon.series_uid,
+        rt_name=rt_series.name,
+    )
+
+    repo = RecordRepository(test_session)
+    loaded = await repo.get_with_relations(record.id)
+    record_read = RecordRead.model_validate(loaded)
+
+    rendered = record_read._format_path_strict(
+        "{study_anon_uid}/{series_anon_uid}", fallback_to_unanonymized=True
+    )
+    assert rendered == f"{study_without_anon.study_uid}/{series_without_anon.series_uid}"
+
+
+@pytest.mark.asyncio
+async def test_series_read_format_path_strict_raises_when_unanon(
+    test_session, study_without_anon, series_without_anon
+):
+    """SeriesRead._format_path_strict mirrors the RecordRead safe-by-default contract."""
+    from clarinet.models.study import SeriesRead
+    from clarinet.repositories.series_repository import SeriesRepository
+
+    repo = SeriesRepository(test_session)
+    loaded = await repo.get_with_relations(series_without_anon.series_uid)
+    series_read = SeriesRead.model_validate(loaded)
+    with pytest.raises(AnonPathError, match="Study has no anon_uid"):
+        series_read._format_path_strict("{study_anon_uid}/file")
 
 
 @pytest.mark.asyncio

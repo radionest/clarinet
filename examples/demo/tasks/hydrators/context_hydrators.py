@@ -7,6 +7,15 @@ calls and address files on disk, so they MUST use anonymized UIDs.
 When an entity has not been anonymized yet, the hydrator skips it
 (``return {}``) and logs a warning — silent fallback to raw UIDs would
 make the script load the wrong dataset.
+
+**Consequence for downstream Slicer scripts:** if a hydrator returns
+``{}``, placeholders like ``{best_study_uid}`` / ``{best_series_uid}``
+in ``slicer_script_args`` remain unresolved. ``_resolve_custom_args`` in
+``clarinet/services/slicer/context.py`` skips the arg and logs a
+warning — your script must tolerate a missing variable (e.g. early
+``return`` when ``best_series_uid`` is absent) rather than crash on
+``NameError``. Downstream projects that prefer hard failure should
+raise from the hydrator instead of returning ``{}``.
 """
 
 import os
