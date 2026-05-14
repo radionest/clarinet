@@ -12,7 +12,8 @@ from sqlmodel import Field, Relationship
 
 from ..exceptions import AnonPathError
 from ..settings import settings
-from .base import BaseModel, DicomUID, InstanceCount
+from ..utils.anon_resolve import require_anon_or_raw
+from .base import BaseModel, DicomQueryLevel, DicomUID, InstanceCount
 from .patient import Patient, PatientInfo
 
 if TYPE_CHECKING:
@@ -117,38 +118,24 @@ class SeriesRead(SeriesBase):
                 identifiers.
         """
         patient = self.study.patient
-        patient_id: str
-        if patient.anon_id is not None:
-            patient_id = patient.anon_id
-        elif fallback_to_unanonymized:
-            patient_id = patient.id
-        else:
-            raise AnonPathError(
-                f"Patient has no anon_id (patient_id={patient.id!r}); "
-                "pass fallback_to_unanonymized=True for UX call sites"
-            )
-
-        study_anon_uid: str
-        if self.study.anon_uid:
-            study_anon_uid = self.study.anon_uid
-        elif fallback_to_unanonymized:
-            study_anon_uid = self.study_uid or ""
-        else:
-            raise AnonPathError(
-                f"Study has no anon_uid (study_uid={self.study_uid!r}); "
-                "pass fallback_to_unanonymized=True for UX call sites"
-            )
-
-        series_anon_uid: str
-        if self.anon_uid:
-            series_anon_uid = self.anon_uid
-        elif fallback_to_unanonymized:
-            series_anon_uid = self.series_uid or ""
-        else:
-            raise AnonPathError(
-                f"Series has no anon_uid (series_uid={self.series_uid!r}); "
-                "pass fallback_to_unanonymized=True for UX call sites"
-            )
+        patient_id = require_anon_or_raw(
+            anon=patient.anon_id,
+            raw=patient.id,
+            level=DicomQueryLevel.PATIENT,
+            fallback_to_unanonymized=fallback_to_unanonymized,
+        )
+        study_anon_uid = require_anon_or_raw(
+            anon=self.study.anon_uid,
+            raw=self.study_uid,
+            level=DicomQueryLevel.STUDY,
+            fallback_to_unanonymized=fallback_to_unanonymized,
+        )
+        series_anon_uid = require_anon_or_raw(
+            anon=self.anon_uid,
+            raw=self.series_uid,
+            level=DicomQueryLevel.SERIES,
+            fallback_to_unanonymized=fallback_to_unanonymized,
+        )
 
         return unformatted_path.format(
             patient_id=patient_id,

@@ -24,6 +24,7 @@ from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlmodel import Column, Field, Relationship, SQLModel
 
 from clarinet.types import DbInt64, DbPositiveInt32, PortableJSON, RecordData, SlicerArgs
+from clarinet.utils.anon_resolve import require_anon_or_raw
 from clarinet.utils.logger import logger
 
 from ..exceptions import AnonPathError, ConfigurationError, ValidationError
@@ -400,39 +401,33 @@ class RecordRead(RecordBase):
         )
 
     def _resolve_patient_id_for_path(self, fallback_to_unanonymized: bool) -> str:
-        if self.patient.anon_id is not None:
-            return self.patient.anon_id
-        if fallback_to_unanonymized:
-            return self.patient_id
-        raise AnonPathError(
-            f"Patient has no anon_id (patient_id={self.patient_id!r}); "
-            "pass fallback_to_unanonymized=True for UX call sites"
+        return require_anon_or_raw(
+            anon=self.patient.anon_id,
+            raw=self.patient_id,
+            level=DicomQueryLevel.PATIENT,
+            fallback_to_unanonymized=fallback_to_unanonymized,
         )
 
     def _resolve_study_anon_uid_for_path(self, fallback_to_unanonymized: bool) -> str | None:
         if self.study_uid is None:
             return None  # PATIENT-level record — no study segment
         anon = self.study.anon_uid if self.study else self.study_anon_uid
-        if anon:
-            return anon
-        if fallback_to_unanonymized:
-            return self.study_uid
-        raise AnonPathError(
-            f"Study has no anon_uid (study_uid={self.study_uid!r}); "
-            "pass fallback_to_unanonymized=True for UX call sites"
+        return require_anon_or_raw(
+            anon=anon,
+            raw=self.study_uid,
+            level=DicomQueryLevel.STUDY,
+            fallback_to_unanonymized=fallback_to_unanonymized,
         )
 
     def _resolve_series_anon_uid_for_path(self, fallback_to_unanonymized: bool) -> str | None:
         if self.series_uid is None:
             return None  # PATIENT/STUDY-level record — no series segment
         anon = self.series.anon_uid if self.series else self.series_anon_uid
-        if anon:
-            return anon
-        if fallback_to_unanonymized:
-            return self.series_uid
-        raise AnonPathError(
-            f"Series has no anon_uid (series_uid={self.series_uid!r}); "
-            "pass fallback_to_unanonymized=True for UX call sites"
+        return require_anon_or_raw(
+            anon=anon,
+            raw=self.series_uid,
+            level=DicomQueryLevel.SERIES,
+            fallback_to_unanonymized=fallback_to_unanonymized,
         )
 
     def _format_path(self, unformatted_path: str, **extra: Any) -> str | None:
