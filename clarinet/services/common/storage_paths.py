@@ -10,6 +10,10 @@ by appending the corresponding number of segments to ``storage_path``.
 Anonymized DICOM files (``dcm_anon/``) live as a sub-directory of the
 SERIES-level working folder, so both ``AnonymizationService`` (writer)
 and ``DicomWebCache`` (reader) compute the same path from this template.
+All non-writer call sites (pipeline ``FileResolver``, Slicer context,
+file validation, computed-field ``working_folder``) reach the same
+path through ``render_all_levels`` — the single rendering point for
+storage directories.
 
 Supported placeholders are listed in ``SUPPORTED_PLACEHOLDERS``. Backend
 callers run with the default ``fallback_to_unanonymized=False`` and get
@@ -20,6 +24,15 @@ fall back to raw UIDs / ``"unknown"`` (legacy non-fatal behavior).
 
 The resolver is pure-sync — safe to call from Pydantic ``computed_field``
 properties (``SeriesRead.working_folder``, ``RecordRead.working_folder``).
+
+Lives in ``services/common`` because the same template engine is used by
+DICOM anonymization, computed-field path rendering, pipeline file
+resolution and Slicer context — semantically about storage paths, not
+about DICOM anonymization. The DICOM-anon-specific helper
+``derive_anon_patient_id`` is co-located because the same per-study /
+per-patient ID derivation feeds writer, reader, and UX placeholder
+rendering — keeping them apart would let writer and reader disagree on
+the directory name.
 """
 
 from dataclasses import dataclass
@@ -47,6 +60,7 @@ __all__ = [
     "TemplateSegments",
     "build_context",
     "derive_anon_patient_id",
+    "render_all_levels",
     "render_working_folder",
     "split_template",
     "validate_template",
@@ -269,3 +283,72 @@ def render_working_folder(
         return storage_path / patient_dir / study_dir
     series_dir = _safe_render(segs.series, context)
     return storage_path / patient_dir / study_dir / series_dir
+
+
+def render_all_levels(
+    *,
+    patient: "Patient | PatientInfo | None",
+    study: "Study | StudyBase | None",
+    series: "Series | SeriesBase | None",
+    storage_path: Path,
+    template: str | None = None,
+    fallback_to_unanonymized: bool = False,
+    anon_patient_id: str | None = None,
+    anon_study_uid: str | None = None,
+    anon_series_uid: str | None = None,
+) -> dict[DicomQueryLevel, Path]:
+    """Render PATIENT / STUDY / SERIES dirs from ``disk_path_template``.
+
+    Returns only those levels for which the corresponding entity is
+    present:
+
+    - ``patient`` → ``{PATIENT}``
+    - ``patient`` + ``study`` → ``{PATIENT, STUDY}``
+    - ``patient`` + ``study`` + ``series`` → ``{PATIENT, STUDY, SERIES}``
+
+    A ``None`` ``patient`` returns an empty mapping — without a patient
+    there is no anchor for the PATIENT segment. To render only a
+    deeper level (e.g. just SERIES) supply both ``patient`` and
+    ``study`` plus the override kwargs as needed.
+
+    ``template`` defaults to ``settings.disk_path_template``.
+
+    ``anon_*`` override kwargs are forwarded to ``build_context`` — used
+    by writer paths that need to embed the values they are about to
+    write into the DICOM tags (race-safety against DB-update lag).
+
+    Raises:
+        AnonPathError: when an anonymized identifier is missing and
+            ``fallback_to_unanonymized`` is False, or when the rendered
+            template contains an unsafe path segment.
+    """
+    if patient is None:
+        return {}
+
+    tmpl = template if template is not None else settings.disk_path_template
+    ctx = build_context(
+        patient=patient,
+        study=study,
+        series=series,
+        anon_patient_id=anon_patient_id,
+        anon_study_uid=anon_study_uid,
+        anon_series_uid=anon_series_uid,
+        fallback_to_unanonymized=fallback_to_unanonymized,
+    )
+
+    dirs: dict[DicomQueryLevel, Path] = {
+        DicomQueryLevel.PATIENT: render_working_folder(
+            tmpl, DicomQueryLevel.PATIENT, ctx, storage_path
+        )
+    }
+    if study is None:
+        return dirs
+    dirs[DicomQueryLevel.STUDY] = render_working_folder(
+        tmpl, DicomQueryLevel.STUDY, ctx, storage_path
+    )
+    if series is None:
+        return dirs
+    dirs[DicomQueryLevel.SERIES] = render_working_folder(
+        tmpl, DicomQueryLevel.SERIES, ctx, storage_path
+    )
+    return dirs

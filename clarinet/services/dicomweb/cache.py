@@ -15,7 +15,7 @@ from pydicom import Dataset
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from clarinet.models.base import DicomQueryLevel
-from clarinet.services.dicom.anon_path import (
+from clarinet.services.common.storage_paths import (
     AnonPathError,
     build_context,
     render_working_folder,

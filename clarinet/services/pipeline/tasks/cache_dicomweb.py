@@ -66,7 +66,7 @@ async def _has_dcm_anon(storage_path: Path, study_uid: str, series_uid: str) -> 
     from clarinet.models.base import DicomQueryLevel
     from clarinet.models.patient import Patient
     from clarinet.models.study import Series, Study
-    from clarinet.services.dicom.anon_path import (
+    from clarinet.services.common.storage_paths import (
         AnonPathError,
         build_context,
         render_working_folder,

@@ -1,4 +1,4 @@
-"""Regression tests: anon_path helpers must not lazy-load relationships in async context.
+"""Regression tests: storage_paths helpers must not lazy-load relationships in async context.
 
 Uses ``fresh_session`` (empty identity map, simulates a production request) so
 that any attempt to traverse ``Study.series`` from a non-eager-loaded Study
@@ -14,7 +14,7 @@ from sqlmodel import select
 
 from clarinet.models.patient import Patient
 from clarinet.models.study import Series, Study
-from clarinet.services.dicom.anon_path import _modalities_string, build_context
+from clarinet.services.common.storage_paths import _modalities_string, build_context
 
 
 @pytest.mark.asyncio

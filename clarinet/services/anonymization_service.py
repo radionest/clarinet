@@ -19,7 +19,7 @@ from clarinet.models.base import DicomQueryLevel
 from clarinet.repositories.patient_repository import PatientRepository
 from clarinet.repositories.series_repository import SeriesRepository
 from clarinet.repositories.study_repository import StudyRepository
-from clarinet.services.dicom.anon_path import build_context, render_working_folder
+from clarinet.services.common.storage_paths import build_context, render_working_folder
 from clarinet.services.dicom.anonymizer import DicomAnonymizer, compute_per_study_patient_id
 from clarinet.services.dicom.client import DicomClient
 from clarinet.services.dicom.models import AnonymizationResult, DicomNode, SkippedSeriesInfo

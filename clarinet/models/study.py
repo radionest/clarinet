@@ -186,7 +186,7 @@ class SeriesRead(SeriesBase):
         from pathlib import Path
 
         from clarinet.models.base import DicomQueryLevel
-        from clarinet.services.dicom.anon_path import build_context, render_working_folder
+        from clarinet.services.common.storage_paths import build_context, render_working_folder
 
         ctx = build_context(
             patient=self.study.patient,

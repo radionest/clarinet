@@ -37,7 +37,7 @@ from clarinet.models.patient import Patient
 from clarinet.models.record import Record
 from clarinet.models.record_type import RecordType
 from clarinet.models.study import Series, Study
-from clarinet.services.dicom.anon_path import (
+from clarinet.services.common.storage_paths import (
     AnonPathError,
     build_context,
     render_working_folder,
