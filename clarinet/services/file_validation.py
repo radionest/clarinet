@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 from clarinet.exceptions.domain import ValidationError
 from clarinet.models.base import DicomQueryLevel
 from clarinet.models.file_schema import FileRole
-from clarinet.services.pipeline.context import FileResolver
+from clarinet.services.common.file_resolver import FileResolver
 from clarinet.utils.file_patterns import resolve_pattern
 from clarinet.utils.fs import run_in_fs_thread
 

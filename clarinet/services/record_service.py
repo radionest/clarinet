@@ -13,8 +13,8 @@ from clarinet.exceptions.domain import (
 from clarinet.exceptions.domain import FileNotFoundError as DomainFileNotFoundError
 from clarinet.models import Record, RecordRead, RecordStatus
 from clarinet.models.file_schema import FileDefinitionRead, FileRole
+from clarinet.services.common.file_resolver import FileResolver
 from clarinet.services.file_validation import validate_record_files
-from clarinet.services.pipeline.context import FileResolver
 from clarinet.utils.file_checksums import checksums_changed, compute_checksums
 from clarinet.utils.file_patterns import glob_file_paths, resolve_pattern
 from clarinet.utils.fs import run_in_fs_thread

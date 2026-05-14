@@ -45,7 +45,13 @@ from .chain import (
     register_task,
     sync_pipeline_definitions,
 )
-from .context import FileResolver, RecordQuery, TaskContext, build_task_context
+from .context import RecordQuery, TaskContext, build_task_context
+
+# Note: ``FileResolver`` used to live here; it now lives in
+# ``clarinet.services.common.file_resolver`` so non-pipeline callers can
+# import it without booting the broker. Existing
+# ``from clarinet.services.pipeline.context import FileResolver`` callers
+# still work via a re-export in ``context.py``.
 from .message import PipelineMessage, build_pipeline_message_from_record
 from .middleware import DeadLetterMiddleware, DLQPublisher
 from .sync_wrappers import SyncPipelineClient, SyncRecordQuery, SyncTaskContext
@@ -55,7 +61,6 @@ from .worker import get_worker_queues, load_task_modules, run_worker
 __all__ = [
     "DLQPublisher",
     "DeadLetterMiddleware",
-    "FileResolver",
     "Pipeline",
     "PipelineConfigError",
     "PipelineError",

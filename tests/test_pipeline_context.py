@@ -160,7 +160,7 @@ class TestResolvePatternFromDict:
 class TestBuildWorkingDirs:
     """Tests for FileResolver.build_working_dirs."""
 
-    @patch("clarinet.services.pipeline.context.settings")
+    @patch("clarinet.services.common.file_resolver.settings")
     def test_series_level_record(self, mock_settings: MagicMock):
         mock_settings.storage_path = "/data"
         record = _make_record_read(level=DicomQueryLevel.SERIES)
@@ -174,7 +174,7 @@ class TestBuildWorkingDirs:
         assert dirs[DicomQueryLevel.STUDY] == Path("/data/CLARINET_1/9.8.7.6.5")
         assert dirs[DicomQueryLevel.SERIES] == Path("/data/CLARINET_1/9.8.7.6.5/9.8.7.6.5.4")
 
-    @patch("clarinet.services.pipeline.context.settings")
+    @patch("clarinet.services.common.file_resolver.settings")
     def test_study_level_record(self, mock_settings: MagicMock):
         mock_settings.storage_path = "/data"
         record = _make_record_read(level=DicomQueryLevel.STUDY)
@@ -187,7 +187,7 @@ class TestBuildWorkingDirs:
         assert DicomQueryLevel.STUDY in dirs
         assert DicomQueryLevel.SERIES not in dirs
 
-    @patch("clarinet.services.pipeline.context.settings")
+    @patch("clarinet.services.common.file_resolver.settings")
     def test_patient_level_record(self, mock_settings: MagicMock):
         mock_settings.storage_path = "/data"
         record = _make_record_read(level=DicomQueryLevel.PATIENT)
@@ -203,7 +203,7 @@ class TestBuildWorkingDirs:
         assert DicomQueryLevel.SERIES not in dirs
         assert dirs[DicomQueryLevel.PATIENT] == Path("/data/CLARINET_1")
 
-    @patch("clarinet.services.pipeline.context.settings")
+    @patch("clarinet.services.common.file_resolver.settings")
     def test_missing_patient_anon_raises_in_safe_mode(self, mock_settings: MagicMock):
         mock_settings.storage_path = "/data"
         record = _make_record_read()
@@ -212,7 +212,7 @@ class TestBuildWorkingDirs:
         with pytest.raises(AnonPathError, match="Patient has no anon_id"):
             FileResolver.build_working_dirs(record)
 
-    @patch("clarinet.services.pipeline.context.settings")
+    @patch("clarinet.services.common.file_resolver.settings")
     def test_missing_patient_anon_with_fallback_uses_raw(self, mock_settings: MagicMock):
         mock_settings.storage_path = "/data"
         record = _make_record_read()
@@ -222,7 +222,7 @@ class TestBuildWorkingDirs:
 
         assert dirs[DicomQueryLevel.PATIENT] == Path("/data/PAT001")
 
-    @patch("clarinet.services.pipeline.context.settings")
+    @patch("clarinet.services.common.file_resolver.settings")
     def test_missing_study_anon_raises_in_safe_mode(self, mock_settings: MagicMock):
         mock_settings.storage_path = "/data"
         record = _make_record_read()
@@ -231,7 +231,7 @@ class TestBuildWorkingDirs:
         with pytest.raises(AnonPathError, match="Study has no anon_uid"):
             FileResolver.build_working_dirs(record)
 
-    @patch("clarinet.services.pipeline.context.settings")
+    @patch("clarinet.services.common.file_resolver.settings")
     def test_missing_series_anon_raises_in_safe_mode(self, mock_settings: MagicMock):
         mock_settings.storage_path = "/data"
         record = _make_record_read()
@@ -240,7 +240,7 @@ class TestBuildWorkingDirs:
         with pytest.raises(AnonPathError, match="Series has no anon_uid"):
             FileResolver.build_working_dirs(record)
 
-    @patch("clarinet.services.pipeline.context.settings")
+    @patch("clarinet.services.common.file_resolver.settings")
     def test_custom_storage_path(self, mock_settings: MagicMock):
         mock_settings.storage_path = "/default"
         record = _make_record_read()
@@ -488,7 +488,7 @@ class TestRecordQuery:
         )
 
     @pytest.mark.asyncio
-    @patch("clarinet.services.pipeline.context.settings")
+    @patch("clarinet.services.common.file_resolver.settings")
     async def test_file_path_happy(self, mock_settings: MagicMock):
         mock_settings.storage_path = "/data"
         fd = _make_file_def(name="segmentation", pattern="seg.nrrd")
@@ -514,7 +514,7 @@ class TestRecordQuery:
             await rq.file_path("ct_seg", file="segmentation", series_uid="1.2.3")
 
     @pytest.mark.asyncio
-    @patch("clarinet.services.pipeline.context.settings")
+    @patch("clarinet.services.common.file_resolver.settings")
     async def test_file_path_uses_file_links(self, mock_settings: MagicMock):
         mock_settings.storage_path = "/data"
         fd = _make_file_def(name="segmentation", pattern="seg_{id}.nrrd")
@@ -539,7 +539,7 @@ class TestBuildTaskContext:
     """Tests for build_task_context."""
 
     @pytest.mark.asyncio
-    @patch("clarinet.services.pipeline.context.settings")
+    @patch("clarinet.services.common.file_resolver.settings")
     async def test_from_record_id(self, mock_settings: MagicMock):
         mock_settings.storage_path = "/data"
         fd = _make_file_def(name="seg", pattern="seg.nrrd")
@@ -559,7 +559,7 @@ class TestBuildTaskContext:
         assert ctx.msg is msg
 
     @pytest.mark.asyncio
-    @patch("clarinet.services.pipeline.context.settings")
+    @patch("clarinet.services.common.file_resolver.settings")
     async def test_from_series_uid(self, mock_settings: MagicMock):
         mock_settings.storage_path = "/data"
         series = MagicMock()
@@ -580,7 +580,7 @@ class TestBuildTaskContext:
         assert DicomQueryLevel.SERIES in ctx.files._working_dirs
 
     @pytest.mark.asyncio
-    @patch("clarinet.services.pipeline.context.settings")
+    @patch("clarinet.services.common.file_resolver.settings")
     async def test_from_study_uid(self, mock_settings: MagicMock):
         mock_settings.storage_path = "/data"
         study = MagicMock()
@@ -600,7 +600,7 @@ class TestBuildTaskContext:
         assert DicomQueryLevel.SERIES not in ctx.files._working_dirs
 
     @pytest.mark.asyncio
-    @patch("clarinet.services.pipeline.context.settings")
+    @patch("clarinet.services.common.file_resolver.settings")
     async def test_origin_type_from_parent(self, mock_settings: MagicMock):
         """origin_type is overridden from parent when parent_record_id is set."""
         mock_settings.storage_path = "/data"
@@ -619,7 +619,7 @@ class TestBuildTaskContext:
         assert ctx.files._fields["origin_type"] == "parent-seg"
 
     @pytest.mark.asyncio
-    @patch("clarinet.services.pipeline.context.settings")
+    @patch("clarinet.services.common.file_resolver.settings")
     async def test_origin_type_no_parent(self, mock_settings: MagicMock):
         """origin_type defaults to own type when no parent."""
         mock_settings.storage_path = "/data"
@@ -1064,7 +1064,7 @@ class TestSyncRecordQuery:
         )
 
     @pytest.mark.asyncio
-    @patch("clarinet.services.pipeline.context.settings")
+    @patch("clarinet.services.common.file_resolver.settings")
     async def test_file_path_delegates(self, mock_settings: MagicMock):
         mock_settings.storage_path = "/data"
 
