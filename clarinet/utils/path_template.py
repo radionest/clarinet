@@ -21,6 +21,7 @@ SUPPORTED_PLACEHOLDERS: frozenset[str] = frozenset(
         "study_date",
         "study_modalities",
         "series_modality",
+        "series_num",
     }
 )
 
