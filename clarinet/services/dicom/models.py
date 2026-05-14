@@ -6,6 +6,14 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+#: Separator used to join multi-value ``ModalitiesInStudy`` into a single
+#: string for ``Study.modalities_in_study`` / ``StudyResult.modalities_in_study``.
+#: Producers (``operations._ds_modalities``) and consumers
+#: (``anon_path._modalities_string``, ``dicomweb.converter._modalities_to_list``)
+#: must agree on this character. ``-`` is outside the DICOM CS allowed set
+#: ``[A-Z0-9_ ]``, so it never collides with a modality code.
+MODALITIES_SEPARATOR = "-"
+
 
 class QueryRetrieveLevel(str, Enum):
     """DICOM Query/Retrieve levels."""
@@ -57,7 +65,10 @@ class StudyResult(BaseModel):
     study_time: str | None = None
     study_description: str | None = None
     accession_number: str | None = None
-    modalities_in_study: str | None = None
+    modalities_in_study: str | None = Field(
+        default=None,
+        description="Modalities of the study, '-'-joined (e.g. 'CT-SR').",
+    )
     number_of_study_related_series: int | None = None
     number_of_study_related_instances: int | None = None
 

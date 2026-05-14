@@ -25,7 +25,16 @@ class StudyBase(BaseModel):
     date: date
     anon_uid: str | None = None
     study_description: str | None = Field(default=None, max_length=256)
-    modalities_in_study: str | None = Field(default=None, max_length=64)
+    modalities_in_study: str | None = Field(
+        default=None,
+        max_length=64,
+        description=(
+            "Modalities of the study, '-'-joined (e.g. 'CT-SR'). Written by "
+            "clarinet.services.dicom.operations._ds_modalities; split by "
+            "_modalities_string (path rendering) and _modalities_to_list "
+            "(DICOMweb JSON)."
+        ),
+    )
     patient_id: str
 
 
