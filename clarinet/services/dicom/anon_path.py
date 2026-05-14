@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING
 
 from clarinet.exceptions.domain import ConfigurationError
 from clarinet.models.base import DicomQueryLevel
+from clarinet.services.dicom.models import MODALITIES_SEPARATOR
 from clarinet.settings import settings
 from clarinet.utils.path_template import (
     SUPPORTED_PLACEHOLDERS,
@@ -81,8 +82,8 @@ def split_template(template: str) -> TemplateSegments:
 def _modalities_string(study: "Study | StudyBase | None") -> str:
     """Canonical join of a study's modalities (sorted, separator ``_``).
 
-    Reads ``study.modalities_in_study`` (a ``'-'``-separated string
-    written by ``operations._ds_modalities``). Returns ``"unknown"``
+    Reads ``study.modalities_in_study`` (a ``MODALITIES_SEPARATOR``-joined
+    string written by ``operations._ds_modalities``). Returns ``"unknown"``
     when missing — does NOT lazy-load ``study.series`` because callers
     reach this from ``computed_field`` properties on ``*Read`` DTOs
     where the relationship may not be eagerly loaded; lazy-load on an
@@ -92,7 +93,7 @@ def _modalities_string(study: "Study | StudyBase | None") -> str:
         return "unknown"
     raw = getattr(study, "modalities_in_study", None)
     if raw:
-        parts = sorted({p.strip() for p in raw.split("-") if p.strip()})
+        parts = sorted({p.strip() for p in raw.split(MODALITIES_SEPARATOR) if p.strip()})
         if parts:
             return "_".join(parts)
     return "unknown"

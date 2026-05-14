@@ -26,6 +26,7 @@ if TYPE_CHECKING:
 from clarinet.exceptions.http import CONFLICT
 from clarinet.services.dicom.handlers import create_store_handler
 from clarinet.services.dicom.models import (
+    MODALITIES_SEPARATOR,
     AssociationConfig,
     BatchStoreResult,
     ImageQuery,
@@ -60,14 +61,14 @@ def _ds_int(ds: Dataset, attr: str) -> int | None:
 
 
 def _ds_modalities(ds: Dataset) -> str | None:
-    """Get ``ModalitiesInStudy`` as a ``'-'``-joined string.
+    """Get ``ModalitiesInStudy`` as a ``MODALITIES_SEPARATOR``-joined string.
 
     pydicom returns ``MultiValue`` for multi-valued CS tags. Plain
     ``str(MultiValue([...]))`` yields a Python list repr
     (``"['CT', 'SR']"``) which is unparseable downstream. Joining with
-    ``'-'`` gives clean DB strings (``"CT-SR"``) without backslash
-    escapes; ``anon_path._modalities_string`` and DICOMweb converter
-    split on ``'-'`` to recover the per-modality list.
+    ``MODALITIES_SEPARATOR`` gives clean DB strings (``"CT-SR"``);
+    ``anon_path._modalities_string`` and DICOMweb converter split on
+    the same constant to recover the per-modality list.
     """
     val: Any = getattr(ds, "ModalitiesInStudy", None)
     if val is None or val == "":
@@ -75,7 +76,7 @@ def _ds_modalities(ds: Dataset) -> str | None:
     if isinstance(val, str):
         return val
     try:
-        return "-".join(str(v) for v in val)
+        return MODALITIES_SEPARATOR.join(str(v) for v in val)
     except TypeError:
         return str(val)
 

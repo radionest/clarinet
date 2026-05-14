@@ -6,6 +6,14 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+#: Separator used to join multi-value ``ModalitiesInStudy`` into a single
+#: string for ``Study.modalities_in_study`` / ``StudyResult.modalities_in_study``.
+#: Producers (``operations._ds_modalities``) and consumers
+#: (``anon_path._modalities_string``, ``dicomweb.converter._modalities_to_list``)
+#: must agree on this character. ``-`` is outside the DICOM CS allowed set
+#: ``[A-Z0-9_ ]``, so it never collides with a modality code.
+MODALITIES_SEPARATOR = "-"
+
 
 class QueryRetrieveLevel(str, Enum):
     """DICOM Query/Retrieve levels."""

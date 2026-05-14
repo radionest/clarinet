@@ -10,7 +10,12 @@ from typing import Any
 from pydicom import Dataset
 from pydicom.dataelem import DataElement
 
-from clarinet.services.dicom.models import ImageResult, SeriesResult, StudyResult
+from clarinet.services.dicom.models import (
+    MODALITIES_SEPARATOR,
+    ImageResult,
+    SeriesResult,
+    StudyResult,
+)
 from clarinet.utils.logger import logger
 
 
@@ -26,7 +31,7 @@ def _fields_to_dicom_json(fields: list[tuple[str, str, Any]]) -> dict[str, Any]:
 
 
 def _modalities_to_list(raw: str | None) -> list[str] | None:
-    """Split DB-stored ``'-'``-joined modalities back into a list.
+    """Split DB-stored ``MODALITIES_SEPARATOR``-joined modalities back into a list.
 
     DICOM JSON (PS3.18 Appendix F) requires multi-value CS tags to be
     serialized as a JSON array of strings — passing the joined string
@@ -34,7 +39,7 @@ def _modalities_to_list(raw: str | None) -> list[str] | None:
     """
     if not raw:
         return None
-    parts = [p for p in raw.split("-") if p]
+    parts = [p for p in raw.split(MODALITIES_SEPARATOR) if p]
     return parts or None
 
 
