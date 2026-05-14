@@ -1250,15 +1250,30 @@ def main() -> None:
             "Move anonymized dcm_anon directories from one disk_path_template "
             "layout to another (no DB changes)"
         ),
+        description=(
+            "Move anonymized dcm_anon directories from one disk_path_template "
+            "layout to another (no DB changes).\n\n"
+            "Supported placeholders (full reference in clarinet.utils.path_template):\n"
+            "  {anon_patient_id}   anonymized patient identifier\n"
+            "  {anon_study_uid}    anonymized study UID (or original if not set)\n"
+            "  {anon_series_uid}   anonymized series UID (or original if not set)\n"
+            "  {patient_id}        original DICOM PatientID\n"
+            "  {patient_auto_id}   monotonic per-patient counter\n"
+            "  {anon_id_prefix}    settings.anon_id_prefix (default 'anon')\n"
+            "  {study_uid}         original study UID\n"
+            "  {series_uid}        original series UID\n"
+            "  {study_date}        YYYYMMDD\n"
+            "  {study_modalities}  sorted modalities joined by '_' (e.g. CT_SR)\n"
+            "  {series_modality}   series modality\n"
+            "  {series_num}        DICOM SeriesNumber, zero-padded to 5 digits\n"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     anon_migrate.add_argument(
         "--from",
         dest="from_template",
         required=True,
-        help=(
-            "Source template (e.g. '{anon_patient_id}/{anon_study_uid}/{anon_series_uid}'). "
-            "See SUPPORTED_PLACEHOLDERS in clarinet.utils.path_template for the full set."
-        ),
+        help=("Source template, e.g. '{anon_patient_id}/{anon_study_uid}/{anon_series_uid}'"),
     )
     anon_migrate.add_argument(
         "--to",
