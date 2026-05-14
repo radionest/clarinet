@@ -535,6 +535,10 @@ class TestRenderAllLevels:
             "clarinet.services.common.storage_paths.settings.anon_per_study_patient_id",
             False,
         )
+        monkeypatch.setattr(
+            "clarinet.services.common.storage_paths.settings.anon_id_prefix",
+            "CLARINET",
+        )
 
         dirs = render_all_levels(
             patient=patient, study=None, series=None, storage_path=Path("/storage")
@@ -553,6 +557,10 @@ class TestRenderAllLevels:
         monkeypatch.setattr(
             "clarinet.services.common.storage_paths.settings.anon_per_study_patient_id",
             False,
+        )
+        monkeypatch.setattr(
+            "clarinet.services.common.storage_paths.settings.anon_id_prefix",
+            "CLARINET",
         )
 
         dirs = render_all_levels(
@@ -576,6 +584,10 @@ class TestRenderAllLevels:
         monkeypatch.setattr(
             "clarinet.services.common.storage_paths.settings.anon_per_study_patient_id",
             False,
+        )
+        monkeypatch.setattr(
+            "clarinet.services.common.storage_paths.settings.anon_id_prefix",
+            "CLARINET",
         )
 
         dirs = render_all_levels(
