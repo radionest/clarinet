@@ -29,7 +29,7 @@ def patch_cookie_forwarding(client: AsyncClient) -> AsyncClient:
             cookie_header = "; ".join(f"{k}={v}" for k, v in client.cookies.items())
             if cookie_header:
                 headers = kwargs.get("headers") or {}
-                headers.setdefault("Cookie", cookie_header)
+                headers["Cookie"] = cookie_header
                 kwargs["headers"] = headers
         return await original_request(method, url, **kwargs)
 
