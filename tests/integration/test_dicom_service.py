@@ -25,14 +25,7 @@ from clarinet.services.dicom import (
     StudyResult,
 )
 from clarinet.services.dicom.models import SeriesResult
-from tests.config import CALLING_AET, PACS_AET, PACS_DICOM_PORT, PACS_HOST, PACS_REST_URL
-
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-
-PACS_PORT = PACS_DICOM_PORT
-
+from tests.config import CALLING_AET, PACS_AET, PACS_HOST, PACS_PORT, PACS_REST_URL
 
 # ---------------------------------------------------------------------------
 # Fixtures

@@ -11,11 +11,11 @@ from uuid import uuid4
 
 import pytest
 import pytest_asyncio
-from loguru import logger
 
 from clarinet.client import ClarinetClient
 from clarinet.services.slicer.client import SlicerClient
 from clarinet.services.slicer.service import SlicerService
+from clarinet.utils.logger import logger
 from tests.config import (
     RABBITMQ_HOST,
     RABBITMQ_MANAGEMENT_AUTH,

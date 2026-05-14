@@ -48,7 +48,7 @@ async def _cleanup_orphaned_e2e_resources() -> AsyncGenerator[None]:
             auth=RABBITMQ_MANAGEMENT_AUTH,
         )
         if result["queues_deleted"] or result["exchanges_deleted"]:
-            from loguru import logger
+            from clarinet.utils.logger import logger
 
             logger.info(
                 f"Cleaned orphaned RabbitMQ resources: "

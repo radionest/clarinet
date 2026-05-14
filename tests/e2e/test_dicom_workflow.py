@@ -30,16 +30,10 @@ from clarinet.models.study import Series, Study
 from clarinet.services.dicom import DicomClient, DicomNode, StudyQuery
 from clarinet.settings import settings
 from clarinet.utils.database import get_async_session
-from tests.config import CALLING_AET, PACS_AET, PACS_DICOM_PORT, PACS_HOST, PACS_REST_URL
+from tests.config import CALLING_AET, PACS_AET, PACS_HOST, PACS_PORT, PACS_REST_URL
 from tests.utils.cookies import patch_cookie_forwarding
 
 pytestmark = [pytest.mark.dicom]
-
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-
-PACS_PORT = PACS_DICOM_PORT
 
 DICOM_BASE = "/api/dicom"
 

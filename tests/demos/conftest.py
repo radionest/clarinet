@@ -14,8 +14,8 @@ import requests
 from clarinet.services.slicer.service import SlicerService
 from tests.config import (
     PACS_AET,
-    PACS_DICOM_PORT,
     PACS_HOST,
+    PACS_PORT,
     PACS_REST_URL,
     SLICER_HOST,
     SLICER_PORT,
@@ -25,7 +25,6 @@ from tests.config import (
 # Constants (same as tests/e2e/test_slicer_pacs_workflow.py)
 # ---------------------------------------------------------------------------
 
-PACS_PORT = PACS_DICOM_PORT
 CALLING_AET = "SLICER_TEST"
 
 
