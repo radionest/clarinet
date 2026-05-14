@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from clarinet.exceptions.domain import PipelineStepError
+from clarinet.exceptions.domain import AnonPathError, PipelineStepError
 from clarinet.models.base import DicomQueryLevel, RecordStatus
 from clarinet.settings import settings
 from clarinet.utils.file_patterns import PLACEHOLDER_REGEX, glob_file_paths, resolve_origin_type
@@ -73,6 +73,82 @@ def _resolve_pattern_from_dict(pattern: str, fields: dict[str, Any]) -> str:
     return PLACEHOLDER_REGEX.sub(_replacer, pattern)
 
 
+def _resolve_patient_dir(
+    *,
+    anon_id: str | None,
+    raw_id: str,
+    fallback_to_unanonymized: bool,
+) -> str:
+    """Pick the patient directory name (``anon_id`` or raw id)."""
+    if anon_id is not None:
+        return anon_id
+    if fallback_to_unanonymized:
+        return raw_id
+    raise AnonPathError(
+        f"Patient has no anon_id (patient_id={raw_id!r}); "
+        "pass fallback_to_unanonymized=True for UX call sites"
+    )
+
+
+def _resolve_required_anon(
+    *,
+    anon: str | None,
+    raw: str | None,
+    kind: str,
+    fallback_to_unanonymized: bool,
+) -> str:
+    """Pick the anonymized UID when the entity is required (from_series / from_study)."""
+    if anon:
+        return anon
+    if fallback_to_unanonymized:
+        return raw or ""
+    raise AnonPathError(
+        f"{kind.capitalize()} has no anon_uid ({kind}_uid={raw!r}); "
+        "pass fallback_to_unanonymized=True for UX call sites"
+    )
+
+
+def _resolve_dir_with_snapshot(
+    *,
+    entity: Any,
+    snapshot_anon: str | None,
+    raw: str | None,
+    kind: str,
+    fallback_to_unanonymized: bool,
+) -> str | None:
+    """Pick a study/series dir for ``build_working_dirs``.
+
+    Returns ``None`` when the record lacks the corresponding raw UID
+    altogether (PATIENT-level → no study dir, STUDY-level → no series dir).
+
+    ``entity`` is the loaded relationship (``record.study`` /
+    ``record.series``) or ``None`` when the relation was not eager-loaded.
+    When loaded, its ``anon_uid`` is authoritative — the ``study_anon_uid``
+    snapshot column on the record is only consulted for the lazy-load case.
+    """
+    if entity is not None:
+        anon: str | None = entity.anon_uid
+        if anon:
+            return anon
+        if fallback_to_unanonymized:
+            return raw or None
+        raise AnonPathError(
+            f"{kind.capitalize()} has no anon_uid ({kind}_uid={raw!r}); "
+            "pass fallback_to_unanonymized=True for UX call sites"
+        )
+    # Relationship not loaded — consult the record-level snapshot, then raw
+    if raw is None:
+        return None
+    if snapshot_anon:
+        return snapshot_anon
+    if fallback_to_unanonymized:
+        return raw
+    raise AnonPathError(
+        f"{kind.capitalize()} has no anon_uid ({kind}_uid={raw!r}, snapshot=None); "
+        "pass fallback_to_unanonymized=True for UX call sites"
+    )
+
+
 class FileResolver:
     """Sync-only file path resolver.
 
@@ -102,7 +178,11 @@ class FileResolver:
     # ── Static factories (used by build_task_context & RecordQuery) ──
 
     @staticmethod
-    def build_working_dirs(record: RecordRead) -> dict[DicomQueryLevel, Path]:
+    def build_working_dirs(
+        record: RecordRead,
+        *,
+        fallback_to_unanonymized: bool = False,
+    ) -> dict[DicomQueryLevel, Path]:
         """Build working-directory map from a ``RecordRead``.
 
         Replicates ``RecordRead._get_working_folder()`` logic for all three
@@ -110,82 +190,121 @@ class FileResolver:
 
         Args:
             record: Fully-loaded record (patient, study, series relations).
+            fallback_to_unanonymized: If ``False`` (default — backend safe
+                mode), missing anonymized identifiers raise
+                ``AnonPathError`` instead of silently rendering a path
+                against raw UIDs. UX callers may pass ``True`` to keep the
+                legacy fallback.
 
         Returns:
             Dict mapping each available level to its ``Path``.
         """
         base = record.clarinet_storage_path or settings.storage_path
-        patient_dir_name = (
-            record.patient.anon_id if record.patient.anon_id is not None else record.patient_id
+        patient_dir_name = _resolve_patient_dir(
+            anon_id=record.patient.anon_id,
+            raw_id=record.patient_id,
+            fallback_to_unanonymized=fallback_to_unanonymized,
         )
         dirs: dict[DicomQueryLevel, Path] = {
             DicomQueryLevel.PATIENT: Path(base) / patient_dir_name,
         }
 
-        # STUDY directory — prefer relationship, fall back to record-level anon UID
-        study_dir_name: str | None = None
-        if record.study is not None:
-            study_dir_name = record.study.anon_uid or record.study_uid or ""
-        elif record.study_uid:
-            study_dir_name = record.study_anon_uid or record.study_uid
-
-        if study_dir_name:
+        study_dir_name = _resolve_dir_with_snapshot(
+            entity=record.study,
+            snapshot_anon=record.study_anon_uid,
+            raw=record.study_uid,
+            kind="study",
+            fallback_to_unanonymized=fallback_to_unanonymized,
+        )
+        if study_dir_name is not None:
             dirs[DicomQueryLevel.STUDY] = dirs[DicomQueryLevel.PATIENT] / study_dir_name
 
-            # SERIES directory — same fallback pattern
-            series_dir_name: str | None = None
-            if record.series is not None:
-                series_dir_name = record.series.anon_uid or record.series_uid or ""
-            elif record.series_uid:
-                series_dir_name = record.series_anon_uid or record.series_uid
-
-            if series_dir_name:
+            series_dir_name = _resolve_dir_with_snapshot(
+                entity=record.series,
+                snapshot_anon=record.series_anon_uid,
+                raw=record.series_uid,
+                kind="series",
+                fallback_to_unanonymized=fallback_to_unanonymized,
+            )
+            if series_dir_name is not None:
                 dirs[DicomQueryLevel.SERIES] = dirs[DicomQueryLevel.STUDY] / series_dir_name
 
         return dirs
 
     @staticmethod
-    def build_working_dirs_from_series(series: SeriesRead) -> dict[DicomQueryLevel, Path]:
+    def build_working_dirs_from_series(
+        series: SeriesRead,
+        *,
+        fallback_to_unanonymized: bool = False,
+    ) -> dict[DicomQueryLevel, Path]:
         """Build working-directory map from a ``SeriesRead``.
 
         Args:
             series: Fully-loaded series (study, patient relations).
+            fallback_to_unanonymized: see :meth:`build_working_dirs`.
 
         Returns:
             Dict mapping each available level to its ``Path``.
         """
         base = settings.storage_path
         patient = series.study.patient
-        patient_dir_name = patient.anon_id if patient.anon_id is not None else patient.id
-        study_dir_name: str = series.study.anon_uid or series.study.study_uid
-        series_dir_name: str = series.anon_uid or series.series_uid or ""
-        dirs: dict[DicomQueryLevel, Path] = {
-            DicomQueryLevel.PATIENT: Path(base) / patient_dir_name,
+        patient_dir_name = _resolve_patient_dir(
+            anon_id=patient.anon_id,
+            raw_id=patient.id,
+            fallback_to_unanonymized=fallback_to_unanonymized,
+        )
+        study_dir_name = _resolve_required_anon(
+            anon=series.study.anon_uid,
+            raw=series.study.study_uid,
+            kind="study",
+            fallback_to_unanonymized=fallback_to_unanonymized,
+        )
+        series_dir_name = _resolve_required_anon(
+            anon=series.anon_uid,
+            raw=series.series_uid,
+            kind="series",
+            fallback_to_unanonymized=fallback_to_unanonymized,
+        )
+        patient_path = Path(base) / patient_dir_name
+        return {
+            DicomQueryLevel.PATIENT: patient_path,
+            DicomQueryLevel.STUDY: patient_path / study_dir_name,
+            DicomQueryLevel.SERIES: patient_path / study_dir_name / series_dir_name,
         }
-        dirs[DicomQueryLevel.STUDY] = dirs[DicomQueryLevel.PATIENT] / study_dir_name
-        dirs[DicomQueryLevel.SERIES] = dirs[DicomQueryLevel.STUDY] / series_dir_name
-        return dirs
 
     @staticmethod
-    def build_working_dirs_from_study(study: StudyRead) -> dict[DicomQueryLevel, Path]:
+    def build_working_dirs_from_study(
+        study: StudyRead,
+        *,
+        fallback_to_unanonymized: bool = False,
+    ) -> dict[DicomQueryLevel, Path]:
         """Build working-directory map from a ``StudyRead``.
 
         Args:
             study: Fully-loaded study (patient relation).
+            fallback_to_unanonymized: see :meth:`build_working_dirs`.
 
         Returns:
             Dict mapping available levels to their ``Path``.
         """
         base = settings.storage_path
         patient = study.patient
-        patient_dir_name = patient.anon_id if patient.anon_id is not None else patient.id
-        study_dir_name: str = study.anon_uid or study.study_uid
+        patient_dir_name = _resolve_patient_dir(
+            anon_id=patient.anon_id,
+            raw_id=patient.id,
+            fallback_to_unanonymized=fallback_to_unanonymized,
+        )
+        study_dir_name = _resolve_required_anon(
+            anon=study.anon_uid,
+            raw=study.study_uid,
+            kind="study",
+            fallback_to_unanonymized=fallback_to_unanonymized,
+        )
         patient_path = Path(base) / patient_dir_name
-        dirs: dict[DicomQueryLevel, Path] = {
+        return {
             DicomQueryLevel.PATIENT: patient_path,
             DicomQueryLevel.STUDY: patient_path / study_dir_name,
         }
-        return dirs
 
     @staticmethod
     def build_fields(record: RecordRead) -> dict[str, Any]:

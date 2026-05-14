@@ -8,6 +8,7 @@ across different layers of the application.
 # Import domain exceptions for services and repositories
 from clarinet.exceptions.domain import (
     AlreadyAnonymizedError,
+    AnonPathError,
     AnonymizationFailedError,
     AuthenticationError,
     AuthorizationError,
@@ -92,6 +93,7 @@ __all__ = [
     "UNAUTHORIZED",
     "UNPROCESSABLE_ENTITY",
     "AlreadyAnonymizedError",
+    "AnonPathError",
     "AnonymizationFailedError",
     "AuthenticationError",
     "AuthorizationError",

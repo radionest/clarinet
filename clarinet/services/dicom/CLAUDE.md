@@ -96,6 +96,52 @@ The HTTP endpoint `POST /api/dicom/studies/{uid}/anonymize` resolves a tracking 
 
 `_run_orchestrator_in_process` accepts `record_id: int` (not `int | None`). Callers must `assert record.id is not None` after `_find_anonymize_record` to satisfy mypy — see `clarinet/models/CLAUDE.md` → "Primary keys after insert/get".
 
+## Anonymization contract: backend vs UX paths
+
+Studies may be anonymized mid-pipeline (PR #250 — asymmetric anonymization),
+so a `Record` created before the anonymization run carries
+`record.study_anon_uid = None` even though `study.anon_uid` has since been
+populated. Silently falling back to the raw UID in this window made backend
+tasks load the wrong dataset or address files that the writer no longer
+produces under that identifier.
+
+Resolvers therefore default to **safe-by-default** mode — when the
+anonymized identifier is missing they raise `AnonPathError`
+(`clarinet.exceptions.AnonPathError`) instead of returning the raw UID.
+UX call sites opt in to the legacy fallback via
+`fallback_to_unanonymized=True`.
+
+Backend (no fallback — default):
+- `AnonymizationService._save_series_to_disk` (the writer)
+- `DicomWebCache._resolve_dcm_anon_dir` (the reader; catches
+  `AnonPathError` and returns `None` so the cache simply misses)
+- `prefetch_dicom_web._has_dcm_anon` (anonymized cache lookup; same
+  catch pattern)
+- `clarinet anon migrate-paths` (per-record failures are logged and the
+  CLI moves on)
+- `FileResolver.build_working_dirs*` / pipeline `build_task_context`
+- `_get_working_folder` on `RecordRead` (default safe mode)
+- `RecordRead._format_path_strict` / `SeriesRead._format_path_strict` —
+  default safe mode
+
+UX (`fallback_to_unanonymized=True`):
+- `RecordRead.working_folder` / `SeriesRead.working_folder` computed
+  fields (serialised into API responses)
+- `RecordRead._format_path` → `_format_slicer_kwargs` → user-defined
+  Slicer script args (`slicer_script_args`)
+- `slicer_args_formatted` / `slicer_validator_args_formatted` /
+  `slicer_all_args_formatted` computed fields
+- `build_slicer_context` (Slicer is the UI layer — opens in-flight
+  records on the raw UID when anonymization has not propagated yet)
+- `build_template_vars` in `slicer/context.py` (renders the same
+  `{study_anon_uid}` placeholders for user-authored args)
+- `validate_record_files` / `RecordService._collect_output_file_paths`
+  (admin/UI endpoints — fail soft rather than 500)
+- `viewer.py` inline fallbacks for external viewer URIs
+
+If you add a new resolver call, pick the side first — the boolean lives
+in the call site, not in the entity.
+
 ## Key conventions
 
 - All I/O goes through `asyncio.to_thread()` because pynetdicom is synchronous

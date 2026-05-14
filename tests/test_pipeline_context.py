@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from clarinet.exceptions.domain import PipelineStepError
+from clarinet.exceptions.domain import AnonPathError, PipelineStepError
 from clarinet.models.base import DicomQueryLevel
 from clarinet.models.file_schema import FileDefinitionRead, FileRole, RecordFileLinkRead
 from clarinet.services.pipeline.context import (
@@ -204,14 +204,41 @@ class TestBuildWorkingDirs:
         assert dirs[DicomQueryLevel.PATIENT] == Path("/data/CLARINET_1")
 
     @patch("clarinet.services.pipeline.context.settings")
-    def test_fallback_to_patient_id_when_no_anon(self, mock_settings: MagicMock):
+    def test_missing_patient_anon_raises_in_safe_mode(self, mock_settings: MagicMock):
         mock_settings.storage_path = "/data"
         record = _make_record_read()
         record.patient.anon_id = None
 
-        dirs = FileResolver.build_working_dirs(record)
+        with pytest.raises(AnonPathError, match="Patient has no anon_id"):
+            FileResolver.build_working_dirs(record)
+
+    @patch("clarinet.services.pipeline.context.settings")
+    def test_missing_patient_anon_with_fallback_uses_raw(self, mock_settings: MagicMock):
+        mock_settings.storage_path = "/data"
+        record = _make_record_read()
+        record.patient.anon_id = None
+
+        dirs = FileResolver.build_working_dirs(record, fallback_to_unanonymized=True)
 
         assert dirs[DicomQueryLevel.PATIENT] == Path("/data/PAT001")
+
+    @patch("clarinet.services.pipeline.context.settings")
+    def test_missing_study_anon_raises_in_safe_mode(self, mock_settings: MagicMock):
+        mock_settings.storage_path = "/data"
+        record = _make_record_read()
+        record.study.anon_uid = None
+
+        with pytest.raises(AnonPathError, match="Study has no anon_uid"):
+            FileResolver.build_working_dirs(record)
+
+    @patch("clarinet.services.pipeline.context.settings")
+    def test_missing_series_anon_raises_in_safe_mode(self, mock_settings: MagicMock):
+        mock_settings.storage_path = "/data"
+        record = _make_record_read()
+        record.series.anon_uid = None
+
+        with pytest.raises(AnonPathError, match="Series has no anon_uid"):
+            FileResolver.build_working_dirs(record)
 
     @patch("clarinet.services.pipeline.context.settings")
     def test_custom_storage_path(self, mock_settings: MagicMock):
@@ -615,16 +642,33 @@ class TestBuildTaskContext:
         # Clear all optional fields
         msg = msg.model_copy(update={"series_uid": None, "record_id": None})
         # study_uid is present but record_id and series_uid are None
-        # so fallback to study_uid branch
+        # so fallback to study_uid branch — backend safe mode requires
+        # the study to be anonymized at this point, otherwise the resolver
+        # would have nowhere safe to write files for this task.
         study = MagicMock()
         study.study_uid = "1.2.3.4.5"
-        study.anon_uid = None
-        study.patient = _make_patient(anon_id=None)
+        study.anon_uid = "9.8.7.6.5"
+        study.patient = _make_patient(anon_id="CLARINET_1")
         client.get_study = AsyncMock(return_value=study)
 
         ctx = await build_task_context(msg, client)
 
         assert isinstance(ctx, TaskContext)
+
+    @pytest.mark.asyncio
+    async def test_unanon_study_raises(self):
+        """Building task context for a non-anonymized study must surface AnonPathError."""
+        client = AsyncMock()
+        msg = PipelineMessage(patient_id="PAT001", study_uid="1.2.3.4.5")
+        msg = msg.model_copy(update={"series_uid": None, "record_id": None})
+        study = MagicMock()
+        study.study_uid = "1.2.3.4.5"
+        study.anon_uid = None
+        study.patient = _make_patient(anon_id="CLARINET_1")
+        client.get_study = AsyncMock(return_value=study)
+
+        with pytest.raises(AnonPathError, match="Study has no anon_uid"):
+            await build_task_context(msg, client)
 
 
 # ── pipeline_task decorator ──────────────────────────────────────────────────

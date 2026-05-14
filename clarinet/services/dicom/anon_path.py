@@ -11,9 +11,12 @@ Anonymized DICOM files (``dcm_anon/``) live as a sub-directory of the
 SERIES-level working folder, so both ``AnonymizationService`` (writer)
 and ``DicomWebCache`` (reader) compute the same path from this template.
 
-Supported placeholders are listed in ``SUPPORTED_PLACEHOLDERS``. A given
-placeholder resolves to ``"unknown"`` when the underlying entity field
-is missing, so reader-side lookups remain non-fatal on incomplete data.
+Supported placeholders are listed in ``SUPPORTED_PLACEHOLDERS``. Backend
+callers run with the default ``fallback_to_unanonymized=False`` and get
+``AnonPathError`` when an entity is not anonymized yet — surfaces the
+asymmetric-anonymization race instead of silently rendering a path
+against raw UIDs. UX callers pass ``fallback_to_unanonymized=True`` to
+fall back to raw UIDs / ``"unknown"`` (legacy non-fatal behavior).
 
 The resolver is pure-sync — safe to call from Pydantic ``computed_field``
 properties (``SeriesRead.working_folder``, ``RecordRead.working_folder``).
@@ -23,7 +26,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from clarinet.exceptions.domain import ConfigurationError
+from clarinet.exceptions.domain import AnonPathError
 from clarinet.models.base import DicomQueryLevel
 from clarinet.services.dicom.models import MODALITIES_SEPARATOR
 from clarinet.settings import settings
@@ -48,10 +51,6 @@ __all__ = [
     "split_template",
     "validate_template",
 ]
-
-
-class AnonPathError(ConfigurationError):
-    """Raised when a disk path template cannot be safely resolved."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,6 +101,8 @@ def _modalities_string(study: "Study | StudyBase | None") -> str:
 def derive_anon_patient_id(
     patient: "Patient | PatientInfo | None",
     study: "Study | StudyBase | None",
+    *,
+    fallback_to_unanonymized: bool = False,
 ) -> str:
     """Derive the anonymized patient identifier for the current run mode.
 
@@ -110,10 +111,13 @@ def derive_anon_patient_id(
     patient land in different folders / DICOM tags. Otherwise it is the
     per-patient ``anon_id`` (``f"{prefix}_{auto_id}"``).
 
-    Falls back to ``patient.id`` (raw PatientID) when ``anon_id`` is not
-    available — preserves legacy working_folder behavior for records
-    that haven't been anonymized yet. Returns ``"unknown"`` only when
-    no patient is supplied at all.
+    Backend code (file paths, PACS lookups) must run with the default
+    ``fallback_to_unanonymized=False`` — raises ``AnonPathError`` when
+    anonymized identifiers are missing, surfacing the asymmetric
+    anonymization race instead of silently returning a non-anonymized
+    path. UX call sites (viewer URIs, Slicer template vars) should pass
+    ``fallback_to_unanonymized=True`` to preserve the legacy behavior of
+    falling back to ``patient.id`` (or ``"unknown"`` when no patient).
     """
     from clarinet.services.dicom.anonymizer import compute_per_study_patient_id
 
@@ -126,11 +130,21 @@ def derive_anon_patient_id(
                 settings.anon_per_study_patient_id_hex_length,
                 prefix=settings.anon_id_prefix,
             )
-    anon = getattr(patient, "anon_id", None) if patient else None
+    if patient is None:
+        # Caller did not supply a patient — keep the "unknown" sentinel so
+        # PATIENT-level template rendering works without forcing the caller
+        # to load a Patient just to render a study/series segment.
+        return "unknown"
+    anon = getattr(patient, "anon_id", None)
     if anon:
         return str(anon)
-    raw = getattr(patient, "id", None) if patient else None
-    return str(raw) if raw else "unknown"
+    if fallback_to_unanonymized:
+        raw = getattr(patient, "id", None)
+        return str(raw) if raw else "unknown"
+    raise AnonPathError(
+        f"Patient has no anon_id (patient_id={getattr(patient, 'id', None)!r}); "
+        "pass fallback_to_unanonymized=True for UX call sites"
+    )
 
 
 def build_context(
@@ -141,36 +155,58 @@ def build_context(
     anon_patient_id: str | None = None,
     anon_study_uid: str | None = None,
     anon_series_uid: str | None = None,
+    fallback_to_unanonymized: bool = False,
 ) -> dict[str, str]:
     """Build the placeholder dict for template rendering.
 
     ``anon_*`` kwargs let the writer pass the exact values it is about
     to embed in the DICOM tags (so the path matches the tags even when
     settings changed between runs). When omitted, the resolver derives
-    them from DB state (``anon_id``, ``anon_uid``) or falls back to the
-    underlying original UID / ``"unknown"``.
+    them from DB state (``anon_id``, ``anon_uid``).
+
+    Backend callers (file paths, dcm_anon lookups, anonymization writer)
+    keep the default ``fallback_to_unanonymized=False`` — missing
+    ``anon_uid`` then raises ``AnonPathError`` instead of silently
+    rendering a non-anonymized path. UX callers (viewer URIs, Slicer
+    template vars) pass ``fallback_to_unanonymized=True`` to fall back
+    to the raw UID / ``"unknown"`` so the UI keeps working on records
+    that have not been anonymized yet.
 
     All values are returned as ``str`` so ``str.format`` can interpolate
     them directly.
     """
-    pid_resolved = anon_patient_id or derive_anon_patient_id(patient, study)
+    pid_resolved = anon_patient_id or derive_anon_patient_id(
+        patient, study, fallback_to_unanonymized=fallback_to_unanonymized
+    )
 
     if anon_study_uid:
         study_resolved = anon_study_uid
+    elif study is None:
+        # Caller did not supply a study — sentinel so PATIENT-level template
+        # rendering succeeds (it will not reference {anon_study_uid} anyway).
+        study_resolved = "unknown"
+    elif study.anon_uid:
+        study_resolved = study.anon_uid
+    elif fallback_to_unanonymized:
+        study_resolved = study.study_uid or "unknown"
     else:
-        study_resolved = (
-            (study.anon_uid if study and study.anon_uid else None)
-            or (study.study_uid if study else None)
-            or "unknown"
+        raise AnonPathError(
+            f"Study has no anon_uid (study_uid={study.study_uid!r}); "
+            "pass fallback_to_unanonymized=True for UX call sites"
         )
 
     if anon_series_uid:
         series_resolved = anon_series_uid
+    elif series is None:
+        series_resolved = "unknown"
+    elif series.anon_uid:
+        series_resolved = series.anon_uid
+    elif fallback_to_unanonymized:
+        series_resolved = series.series_uid or "unknown"
     else:
-        series_resolved = (
-            (series.anon_uid if series and series.anon_uid else None)
-            or (series.series_uid if series else None)
-            or "unknown"
+        raise AnonPathError(
+            f"Series has no anon_uid (series_uid={series.series_uid!r}); "
+            "pass fallback_to_unanonymized=True for UX call sites"
         )
 
     return {

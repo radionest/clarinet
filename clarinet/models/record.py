@@ -26,7 +26,7 @@ from sqlmodel import Column, Field, Relationship, SQLModel
 from clarinet.types import DbInt64, DbPositiveInt32, PortableJSON, RecordData, SlicerArgs
 from clarinet.utils.logger import logger
 
-from ..exceptions import ConfigurationError, ValidationError
+from ..exceptions import AnonPathError, ConfigurationError, ValidationError
 from ..settings import settings
 from .base import BaseModel, DicomQueryLevel, DicomUID, RecordStatus
 from .file_schema import RecordFileLink, RecordFileLinkRead
@@ -363,7 +363,13 @@ class RecordRead(RecordBase):
             return f"radiant://?n=paet&v=PACS_PETROVA&n=pstv&v=0020000D&v={self.study.anon_uid}"
         return f"radiant://?n=paet&v=PACS_PETROVA&n=pstv&v=0020000D&v={self.study.study_uid}"
 
-    def _format_path_strict(self, unformatted_path: str, **extra: Any) -> str:
+    def _format_path_strict(
+        self,
+        unformatted_path: str,
+        *,
+        fallback_to_unanonymized: bool = False,
+        **extra: Any,
+    ) -> str:
         """Format a path template with values from this record.
 
         Raises on failure — use for system templates where all placeholders
@@ -371,37 +377,81 @@ class RecordRead(RecordBase):
 
         Args:
             unformatted_path: Template string with ``{placeholder}`` tokens.
+            fallback_to_unanonymized: If ``False`` (default — backend safe
+                mode), missing ``anon_id``/``anon_uid`` raise
+                ``AnonPathError`` instead of silently rendering against
+                raw identifiers. UX callers (e.g. user-defined slicer args)
+                pass ``True`` to keep the legacy fallback.
             **extra: Additional placeholder values (e.g. ``working_folder``).
         """
+        patient_id = self._resolve_patient_id_for_path(fallback_to_unanonymized)
+        study_anon_uid = self._resolve_study_anon_uid_for_path(fallback_to_unanonymized)
+        series_anon_uid = self._resolve_series_anon_uid_for_path(fallback_to_unanonymized)
         return unformatted_path.format(
-            patient_id=self.patient.anon_id
-            if self.patient.anon_id is not None
-            else self.patient_id,
+            patient_id=patient_id,
             patient_anon_name=self.patient.anon_name,
             study_uid=self.study_uid,
-            study_anon_uid=(self.study.anon_uid if self.study else self.study_anon_uid)
-            or self.study_uid,
+            study_anon_uid=study_anon_uid,
             series_uid=self.series_uid,
-            series_anon_uid=(self.series.anon_uid if self.series else self.series_anon_uid)
-            or self.series_uid,
+            series_anon_uid=series_anon_uid,
             user_id=self.user_id,
             clarinet_storage_path=self.clarinet_storage_path or settings.storage_path,
             **extra,
+        )
+
+    def _resolve_patient_id_for_path(self, fallback_to_unanonymized: bool) -> str:
+        if self.patient.anon_id is not None:
+            return self.patient.anon_id
+        if fallback_to_unanonymized:
+            return self.patient_id
+        raise AnonPathError(
+            f"Patient has no anon_id (patient_id={self.patient_id!r}); "
+            "pass fallback_to_unanonymized=True for UX call sites"
+        )
+
+    def _resolve_study_anon_uid_for_path(self, fallback_to_unanonymized: bool) -> str | None:
+        if self.study_uid is None:
+            return None  # PATIENT-level record — no study segment
+        anon = self.study.anon_uid if self.study else self.study_anon_uid
+        if anon:
+            return anon
+        if fallback_to_unanonymized:
+            return self.study_uid
+        raise AnonPathError(
+            f"Study has no anon_uid (study_uid={self.study_uid!r}); "
+            "pass fallback_to_unanonymized=True for UX call sites"
+        )
+
+    def _resolve_series_anon_uid_for_path(self, fallback_to_unanonymized: bool) -> str | None:
+        if self.series_uid is None:
+            return None  # PATIENT/STUDY-level record — no series segment
+        anon = self.series.anon_uid if self.series else self.series_anon_uid
+        if anon:
+            return anon
+        if fallback_to_unanonymized:
+            return self.series_uid
+        raise AnonPathError(
+            f"Series has no anon_uid (series_uid={self.series_uid!r}); "
+            "pass fallback_to_unanonymized=True for UX call sites"
         )
 
     def _format_path(self, unformatted_path: str, **extra: Any) -> str | None:
         """Format a path template, returning None on failure.
 
         Safe wrapper for user-defined templates (e.g. slicer kwargs)
-        where unknown placeholders are expected.
+        where unknown placeholders are expected. Uses ``fallback_to_unanonymized=True``
+        because user templates target the UX layer (Slicer scripts shown
+        to the doctor).
 
         Args:
             unformatted_path: Template string with ``{placeholder}`` tokens.
             **extra: Additional placeholder values (e.g. ``working_folder``).
         """
         try:
-            return self._format_path_strict(unformatted_path, **extra)
-        except (AttributeError, KeyError):
+            return self._format_path_strict(
+                unformatted_path, fallback_to_unanonymized=True, **extra
+            )
+        except (AttributeError, KeyError, AnonPathError):
             return None
 
     def _format_slicer_kwargs(
@@ -430,7 +480,7 @@ class RecordRead(RecordBase):
         """Get formatted Slicer script arguments."""
         if self.record_type.slicer_script_args is None:
             return None
-        extra = {"working_folder": self._get_working_folder()}
+        extra = {"working_folder": self._get_working_folder(fallback_to_unanonymized=True)}
         return self._format_slicer_kwargs(self.record_type.slicer_script_args, extra)
 
     @computed_field
@@ -438,10 +488,10 @@ class RecordRead(RecordBase):
         """Get formatted Slicer validator arguments."""
         if self.record_type.slicer_result_validator_args is None:
             return None
-        extra = {"working_folder": self._get_working_folder()}
+        extra = {"working_folder": self._get_working_folder(fallback_to_unanonymized=True)}
         return self._format_slicer_kwargs(self.record_type.slicer_result_validator_args, extra)
 
-    def _get_working_folder(self) -> str:
+    def _get_working_folder(self, *, fallback_to_unanonymized: bool = False) -> str:
         """Get the working folder path for this record.
 
         Rendered from ``settings.disk_path_template`` at the appropriate
@@ -450,6 +500,12 @@ class RecordRead(RecordBase):
             PATIENT -> storage / <patient_segment>
             STUDY   -> storage / <patient_segment> / <study_segment>
             SERIES  -> storage / <patient_segment> / <study_segment> / <series_segment>
+
+        Backend callers (file validation, anonymization writer) keep the
+        default ``fallback_to_unanonymized=False`` and surface
+        ``AnonPathError`` when the record has not been anonymized yet. The
+        ``working_folder`` computed field opts into the UX fallback so API
+        responses never 500 just because anonymization is still pending.
         """
         from pathlib import Path
 
@@ -466,6 +522,7 @@ class RecordRead(RecordBase):
             patient=self.patient,
             study=self.study,
             series=self.series,
+            fallback_to_unanonymized=fallback_to_unanonymized,
         )
         # Per-record override only lives on Record (Series has no
         # clarinet_storage_path field). Series.working_folder always uses
@@ -476,13 +533,20 @@ class RecordRead(RecordBase):
     @computed_field  # type: ignore[prop-decorator]
     @property
     def working_folder(self) -> str:
-        """Get the working folder path for this record."""
-        return self._get_working_folder()
+        """Get the working folder path for this record.
+
+        Serialised into API responses, so falls back to raw UIDs for
+        records that have not been anonymized yet — otherwise reads of an
+        in-flight study would 500. Backend callers should call
+        ``FileResolver.build_working_dirs(record)`` (or
+        ``_get_working_folder()`` with the default safe mode) instead.
+        """
+        return self._get_working_folder(fallback_to_unanonymized=True)
 
     @computed_field
     def slicer_all_args_formatted(self) -> SlicerArgs:
         """Get all formatted Slicer arguments."""
-        wf = self._get_working_folder()
+        wf = self._get_working_folder(fallback_to_unanonymized=True)
         extra = {"working_folder": wf}
         all_args: SlicerArgs = {"working_folder": wf}
 

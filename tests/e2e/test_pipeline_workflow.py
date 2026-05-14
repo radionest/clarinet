@@ -258,13 +258,17 @@ def _make_mock_study(
     patient_id: str = "TEST_PAT001",
     study_uid: str = "1.2.3",
 ) -> MagicMock:
-    """Create a mock StudyRead-like object for build_task_context."""
+    """Create a mock StudyRead-like object for build_task_context.
+
+    Pipeline tasks run in the backend safe-by-default mode, so the mock
+    must mirror a fully anonymized study (anon_uid / anon_id populated).
+    """
     mock_study = MagicMock()
     mock_study.study_uid = study_uid
-    mock_study.anon_uid = None
+    mock_study.anon_uid = f"anon_{study_uid}"
     mock_study.patient = MagicMock()
     mock_study.patient.id = patient_id
-    mock_study.patient.anon_id = None
+    mock_study.patient.anon_id = f"CLARINET_{patient_id}"
     return mock_study
 
 
@@ -678,7 +682,8 @@ class TestPipelineTaskDecorator:
             mock_client.close = AsyncMock()
             mock_client.notify_file_changes = AsyncMock()
 
-            # Mock get_record to return a RecordRead-like object
+            # Mock get_record to return a RecordRead-like object (fully
+            # anonymized — pipeline tasks run in backend safe-by-default mode).
             mock_record = MagicMock()
             mock_record.id = 42
             mock_record.patient_id = "TEST_PAT001"
@@ -693,11 +698,11 @@ class TestPipelineTaskDecorator:
             mock_record.user_id = None
             mock_record.parent_record_id = None
             mock_record.patient = MagicMock()
-            mock_record.patient.anon_id = None
+            mock_record.patient.anon_id = "CLARINET_TEST_PAT001"
             mock_record.study = MagicMock()
-            mock_record.study.anon_uid = None
+            mock_record.study.anon_uid = "anon_1.2.3"
             mock_record.series = MagicMock()
-            mock_record.series.anon_uid = None
+            mock_record.series.anon_uid = "anon_1.2.3.1"
             mock_client.get_record = AsyncMock(return_value=mock_record)
 
             raw_message = {"patient_id": "TEST_PAT001", "study_uid": "1.2.3", "record_id": 42}
@@ -1622,11 +1627,11 @@ class TestTaskContextIntegration:
         mock_record.record_type.level = DicomQueryLevel.SERIES
         mock_record.record_type.file_registry = []
         mock_record.patient = MagicMock()
-        mock_record.patient.anon_id = None
+        mock_record.patient.anon_id = "CLARINET_TEST_PAT001"
         mock_record.study = MagicMock()
-        mock_record.study.anon_uid = None
+        mock_record.study.anon_uid = "anon_1.2.3"
         mock_record.series = MagicMock()
-        mock_record.series.anon_uid = None
+        mock_record.series.anon_uid = "anon_1.2.3.1"
         mock_client.get_record = AsyncMock(return_value=mock_record)
 
         message = PipelineMessage(patient_id="TEST_PAT001", study_uid="1.2.3", record_id=42)
@@ -1666,11 +1671,11 @@ class TestTaskContextIntegration:
         mock_record.record_type.level = DicomQueryLevel.SERIES
         mock_record.record_type.file_registry = []
         mock_record.patient = MagicMock()
-        mock_record.patient.anon_id = None
+        mock_record.patient.anon_id = "CLARINET_TEST_PAT001"
         mock_record.study = MagicMock()
-        mock_record.study.anon_uid = None
+        mock_record.study.anon_uid = "anon_1.2.3"
         mock_record.series = MagicMock()
-        mock_record.series.anon_uid = None
+        mock_record.series.anon_uid = "anon_1.2.3.1"
         mock_client.get_record = AsyncMock(return_value=mock_record)
 
         message = PipelineMessage(patient_id="TEST_PAT001", study_uid="1.2.3", record_id=42)

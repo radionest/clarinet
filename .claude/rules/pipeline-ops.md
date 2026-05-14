@@ -67,6 +67,27 @@ exchange.  Each queue gets its own broker via `get_broker_for(queue_name)`; task
 bound to their broker at decoration time, so `task.kicker().kiq()` always publishes to
 the right queue.
 
+## Anonymized UID contract
+
+`FileResolver.build_working_dirs*` and the writer/reader helpers
+(`build_context` → `render_working_folder`) refuse to render a path
+against a raw UID. When `anon_uid` / `anon_id` is missing they raise
+`AnonPathError` (re-exported from `clarinet.exceptions`), which the
+retry middleware classifies as a 4xx-like business error — the task
+goes straight to DLQ instead of looping forever.
+
+This is desirable: an asymmetric anonymization run (PR #250) can flip
+a study from non-anon → anon mid-pipeline, and silently falling back
+to the raw UID made downstream tasks load files the writer no longer
+produces under that identifier. If the task genuinely needs to address
+the unanonymized layout — e.g. a UX-side preview generator — opt in
+explicitly with `FileResolver.build_working_dirs(record, fallback_to_unanonymized=True)`.
+
+Reading the `record.working_folder` field (computed on `RecordRead`)
+already uses the UX fallback so API responses keep serialising on
+non-anon records. Backend logic must NOT use that value; call
+`FileResolver.build_working_dirs(record)` directly.
+
 ## Built-in Tasks
 
 Registered in `clarinet/services/pipeline/tasks/` and `clarinet/services/dicom/pipeline.py` — imported at broker startup.

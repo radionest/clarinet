@@ -116,11 +116,13 @@ class TestBuildContext:
         assert ctx["anon_study_uid"] == "OS"
         assert ctx["anon_series_uid"] == "OSS"
 
-    def test_missing_entities_yield_unknown(self) -> None:
+    def test_missing_entities_yield_unknown_with_fallback(self) -> None:
         with patch("clarinet.services.dicom.anon_path.settings", spec_set=True) as mock_settings:
             mock_settings.anon_per_study_patient_id = False
             mock_settings.anon_id_prefix = "X"
-            ctx = build_context(patient=None, study=None, series=None)
+            ctx = build_context(
+                patient=None, study=None, series=None, fallback_to_unanonymized=True
+            )
         assert ctx["patient_id"] == "unknown"
         assert ctx["study_uid"] == "unknown"
         assert ctx["series_uid"] == "unknown"
@@ -129,6 +131,68 @@ class TestBuildContext:
         assert ctx["study_date"] == "unknown"
         assert ctx["patient_auto_id"] == "unknown"
         assert ctx["series_num"] == "unknown"
+
+    def test_missing_patient_anon_raises_in_default_safe_mode(self) -> None:
+        # Patient is supplied but has no anon_id — backend safe mode must
+        # surface the asymmetric-anonymization race instead of silently
+        # rendering the raw patient_id into a working folder.
+        unanon_patient = Patient(id="PAT001", name="John", auto_id=None)
+        with patch("clarinet.services.dicom.anon_path.settings", spec_set=True) as mock_settings:
+            mock_settings.anon_per_study_patient_id = False
+            mock_settings.anon_id_prefix = "CLARINET"
+            with pytest.raises(AnonPathError, match="Patient has no anon_id"):
+                build_context(patient=unanon_patient, study=None, series=None)
+
+    def test_missing_study_anon_raises_in_default_safe_mode(self, patient: Patient) -> None:
+        from clarinet.models.study import Study
+
+        unanon_study = Study(
+            study_uid="1.2.3.4",
+            date=date(2026, 4, 15),
+            patient_id=patient.id,
+            anon_uid=None,
+        )
+        with patch("clarinet.services.dicom.anon_path.settings", spec_set=True) as mock_settings:
+            mock_settings.anon_per_study_patient_id = False
+            mock_settings.anon_id_prefix = "CLARINET"
+            with pytest.raises(AnonPathError, match="Study has no anon_uid"):
+                build_context(patient=patient, study=unanon_study, series=None)
+
+    def test_missing_study_anon_with_fallback_uses_raw(self, patient: Patient) -> None:
+        from clarinet.models.study import Study
+
+        unanon_study = Study(
+            study_uid="1.2.3.4",
+            date=date(2026, 4, 15),
+            patient_id=patient.id,
+            anon_uid=None,
+        )
+        with patch("clarinet.services.dicom.anon_path.settings", spec_set=True) as mock_settings:
+            mock_settings.anon_per_study_patient_id = False
+            mock_settings.anon_id_prefix = "CLARINET"
+            ctx = build_context(
+                patient=patient,
+                study=unanon_study,
+                series=None,
+                fallback_to_unanonymized=True,
+            )
+        assert ctx["anon_study_uid"] == "1.2.3.4"
+
+    def test_missing_series_anon_raises_in_default_safe_mode(
+        self, patient: Patient, study: Study
+    ) -> None:
+        unanon_series = Series(
+            series_uid="1.2.3.4.5",
+            series_number=1,
+            modality="CT",
+            study_uid=study.study_uid,
+            anon_uid=None,
+        )
+        with patch("clarinet.services.dicom.anon_path.settings", spec_set=True) as mock_settings:
+            mock_settings.anon_per_study_patient_id = False
+            mock_settings.anon_id_prefix = "CLARINET"
+            with pytest.raises(AnonPathError, match="Series has no anon_uid"):
+                build_context(patient=patient, study=study, series=unanon_series)
 
 
 class TestDeriveAnonPatientId:
@@ -155,6 +219,22 @@ class TestDeriveAnonPatientId:
             result2 = derive_anon_patient_id(patient, study)
         assert result == result2
         assert result.startswith("P_")
+
+    def test_missing_anon_id_raises_in_default_safe_mode(self, study: Study) -> None:
+        unanon_patient = Patient(id="PAT001", name="John", auto_id=None)
+        with patch("clarinet.services.dicom.anon_path.settings", spec_set=True) as mock_settings:
+            mock_settings.anon_per_study_patient_id = False
+            mock_settings.anon_id_prefix = "CLARINET"
+            with pytest.raises(AnonPathError, match="Patient has no anon_id"):
+                derive_anon_patient_id(unanon_patient, study)
+
+    def test_missing_anon_id_with_fallback_uses_raw(self, study: Study) -> None:
+        unanon_patient = Patient(id="PAT001", name="John", auto_id=None)
+        with patch("clarinet.services.dicom.anon_path.settings", spec_set=True) as mock_settings:
+            mock_settings.anon_per_study_patient_id = False
+            mock_settings.anon_id_prefix = "CLARINET"
+            result = derive_anon_patient_id(unanon_patient, study, fallback_to_unanonymized=True)
+        assert result == "PAT001"
 
 
 class TestRenderWorkingFolder:

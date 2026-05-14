@@ -253,6 +253,39 @@ def test_standard_vars_patient_level(mock_settings):
 
 
 @patch("clarinet.services.slicer.context.settings")
+def test_study_level_falls_back_for_unanon_study(mock_settings):
+    """Slicer is the UI layer — open in-flight records under the raw UID
+    instead of refusing the request, so the doctor can review data that
+    has not been anonymized yet.
+    """
+    mock_settings.storage_path = "/storage"
+    mock_settings.storage_path_client = None
+
+    record = _make_record_read(level=DicomQueryLevel.STUDY, study_anon_uid=None)
+    ctx = build_slicer_context(record)
+
+    assert ctx["study_uid"] == "1.2.3.4"
+
+
+@patch("clarinet.services.slicer.context.settings")
+def test_series_level_falls_back_for_unanon_series(mock_settings):
+    """SERIES-level Slicer context falls back to the raw series UID too."""
+    mock_settings.storage_path = "/storage"
+    mock_settings.storage_path_client = None
+
+    record = _make_record_read(
+        level=DicomQueryLevel.SERIES,
+        study_uid="1.2.3.4",
+        study_anon_uid="ANON_STUDY",
+        series_uid="1.2.3.4.5",
+        series_anon_uid=None,
+    )
+    ctx = build_slicer_context(record)
+
+    assert ctx["series_uid"] == "1.2.3.4.5"
+
+
+@patch("clarinet.services.slicer.context.settings")
 def test_record_id_in_context(mock_settings):
     """record_id is always present in context regardless of DICOM level."""
     mock_settings.storage_path = "/storage"

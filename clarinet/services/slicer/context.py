@@ -32,6 +32,11 @@ def build_template_vars(record: RecordRead) -> dict[str, Any]:
     Provides the same set of placeholders as ``RecordRead._format_path_strict()``,
     so that ``{study_anon_uid}``, ``{patient_id}`` etc. work in custom args.
 
+    UX layer — falls back to raw UIDs when anonymization has not yet
+    propagated, so the Slicer UI keeps rendering text for the doctor
+    even on records that predate the anonymization run. Do **not** use
+    these values to address files on disk or to issue PACS queries.
+
     Args:
         record: Fully-loaded record with relations.
 
@@ -146,8 +151,12 @@ def build_slicer_context(
     file_registry = record.record_type.file_registry or []
 
     # -- Layer 1: Standard variables (by level) --
+    # Slicer is the UI layer for the radiologist — open a record even if
+    # anonymization has not propagated yet (PACS still answers under the
+    # raw UID in that window). Backend tasks must NOT mirror this — they
+    # use FileResolver.build_working_dirs in safe-by-default mode.
     context["record_id"] = record.id
-    working_dirs = FileResolver.build_working_dirs(record)
+    working_dirs = FileResolver.build_working_dirs(record, fallback_to_unanonymized=True)
     record_level = DicomQueryLevel(level) if isinstance(level, str) else level
     context["working_folder"] = str(working_dirs.get(record_level, ""))
 
@@ -158,6 +167,11 @@ def build_slicer_context(
     context["pacs_aet"] = settings.pacs_aet
     context["dicom_retrieve_mode"] = settings.dicom_retrieve_mode
 
+    # Layer 1 UIDs flow into PACS retrieve calls inside Slicer
+    # (`PacsHelper.retrieve_study(study_uid)` / `.retrieve_series(...)`).
+    # On anonymized studies the PACS holds them under ``anon_uid``; on a
+    # not-yet-anonymized study it still holds them under the raw UID.
+    # Fall back so the doctor can open in-flight records too.
     if record_level in (DicomQueryLevel.STUDY, DicomQueryLevel.SERIES):
         context["study_uid"] = (
             record.study.anon_uid if record.study else record.study_anon_uid
