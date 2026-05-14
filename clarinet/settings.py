@@ -118,7 +118,7 @@ class Settings(BaseSettings):
     # On-disk path template for working folders + anonymized output.
     # Exactly 3 '/'-separated segments → patient / study / series levels.
     # Supported placeholders are listed in
-    # ``clarinet.services.dicom.anon_path.SUPPORTED_PLACEHOLDERS``.
+    # ``clarinet.services.common.storage_paths.SUPPORTED_PLACEHOLDERS``.
     # Default reproduces the legacy hard-coded layout.
     #
     # "Shape" settings — not part of the template itself, but baked into

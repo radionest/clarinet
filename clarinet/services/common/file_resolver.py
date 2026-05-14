@@ -22,11 +22,12 @@ TaskIQ / aio-pika / broker initialisation for callers that only need
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from clarinet.exceptions.domain import AnonPathError
 from clarinet.models.base import DicomQueryLevel
+from clarinet.services.common.storage_paths import render_all_levels
 from clarinet.settings import settings
 from clarinet.utils.file_patterns import PLACEHOLDER_REGEX, glob_file_paths
 
@@ -40,6 +41,32 @@ if TYPE_CHECKING:
 
 
 __all__ = ["FileResolver", "resolve_pattern_from_dict"]
+
+
+@dataclass(frozen=True)
+class _StudyLazySnapshot:
+    """Lightweight stub for ``build_context`` when ``record.study`` is lazy.
+
+    Carries only the fields available from the record-level snapshot
+    columns (``study_uid``, ``study_anon_uid``). Template placeholders
+    that reference ``{study_date}`` or ``{study_modalities}`` render as
+    ``"unknown"``; eager-load ``record.study`` if you need them.
+    """
+
+    study_uid: str
+    anon_uid: str | None
+    date: object | None = None
+    modalities_in_study: str | None = None
+
+
+@dataclass(frozen=True)
+class _SeriesLazySnapshot:
+    """Lightweight stub for ``build_context`` when ``record.series`` is lazy."""
+
+    series_uid: str
+    anon_uid: str | None
+    modality: str | None = None
+    series_number: int | None = None
 
 
 def resolve_pattern_from_dict(pattern: str, fields: dict[str, Any]) -> str:
@@ -71,82 +98,6 @@ def resolve_pattern_from_dict(pattern: str, fields: dict[str, Any]) -> str:
         return str(obj) if obj is not None else ""
 
     return PLACEHOLDER_REGEX.sub(_replacer, pattern)
-
-
-def _resolve_patient_dir(
-    *,
-    anon_id: str | None,
-    raw_id: str,
-    fallback_to_unanonymized: bool,
-) -> str:
-    """Pick the patient directory name (``anon_id`` or raw id)."""
-    if anon_id is not None:
-        return anon_id
-    if fallback_to_unanonymized:
-        return raw_id
-    raise AnonPathError(
-        f"Patient has no anon_id (patient_id={raw_id!r}); "
-        "pass fallback_to_unanonymized=True for UX call sites"
-    )
-
-
-def _resolve_required_anon(
-    *,
-    anon: str | None,
-    raw: str | None,
-    kind: str,
-    fallback_to_unanonymized: bool,
-) -> str:
-    """Pick the anonymized UID when the entity is required (from_series / from_study)."""
-    if anon:
-        return anon
-    if fallback_to_unanonymized:
-        return raw or ""
-    raise AnonPathError(
-        f"{kind.capitalize()} has no anon_uid ({kind}_uid={raw!r}); "
-        "pass fallback_to_unanonymized=True for UX call sites"
-    )
-
-
-def _resolve_dir_with_snapshot(
-    *,
-    entity: Any,
-    snapshot_anon: str | None,
-    raw: str | None,
-    kind: str,
-    fallback_to_unanonymized: bool,
-) -> str | None:
-    """Pick a study/series dir for ``build_working_dirs``.
-
-    Returns ``None`` when the record lacks the corresponding raw UID
-    altogether (PATIENT-level → no study dir, STUDY-level → no series dir).
-
-    ``entity`` is the loaded relationship (``record.study`` /
-    ``record.series``) or ``None`` when the relation was not eager-loaded.
-    When loaded, its ``anon_uid`` is authoritative — the ``study_anon_uid``
-    snapshot column on the record is only consulted for the lazy-load case.
-    """
-    if entity is not None:
-        anon: str | None = entity.anon_uid
-        if anon:
-            return anon
-        if fallback_to_unanonymized:
-            return raw or None
-        raise AnonPathError(
-            f"{kind.capitalize()} has no anon_uid ({kind}_uid={raw!r}); "
-            "pass fallback_to_unanonymized=True for UX call sites"
-        )
-    # Relationship not loaded — consult the record-level snapshot, then raw
-    if raw is None:
-        return None
-    if snapshot_anon:
-        return snapshot_anon
-    if fallback_to_unanonymized:
-        return raw
-    raise AnonPathError(
-        f"{kind.capitalize()} has no anon_uid ({kind}_uid={raw!r}); "
-        "pass fallback_to_unanonymized=True for UX call sites"
-    )
 
 
 class FileResolver:
@@ -185,11 +136,26 @@ class FileResolver:
     ) -> dict[DicomQueryLevel, Path]:
         """Build working-directory map from a ``RecordRead``.
 
-        Replicates ``RecordRead._get_working_folder()`` logic for all three
-        DICOM levels so that cross-level file access is possible.
+        Renders ``settings.disk_path_template`` against the record's
+        patient/study/series for all three DICOM levels so that
+        cross-level file access is possible. Delegates to
+        :func:`clarinet.services.common.storage_paths.render_all_levels`
+        — the single rendering point shared with the writer and other
+        readers, so a custom ``disk_path_template`` yields one path
+        across the whole stack.
+
+        Lazy-load adapter: when ``record.study`` / ``record.series`` is
+        ``None`` (relationship not eager-loaded) but the raw UID column
+        is present, a lightweight stub is built from the record-level
+        snapshot columns (``study_anon_uid``, ``series_anon_uid``). The
+        stub only carries the identifier — template placeholders that
+        reference ``{study_date}`` / ``{study_modalities}`` /
+        ``{series_modality}`` will render as ``"unknown"`` (eager-load
+        the relation if you need them).
 
         Args:
-            record: Fully-loaded record (patient, study, series relations).
+            record: Record with patient eagerly loaded; study / series
+                may be eager or lazy.
             fallback_to_unanonymized: If ``False`` (default — backend safe
                 mode), missing anonymized identifiers raise
                 ``AnonPathError`` instead of silently rendering a path
@@ -200,36 +166,27 @@ class FileResolver:
             Dict mapping each available level to its ``Path``.
         """
         base = record.clarinet_storage_path or settings.storage_path
-        patient_dir_name = _resolve_patient_dir(
-            anon_id=record.patient.anon_id,
-            raw_id=record.patient_id,
-            fallback_to_unanonymized=fallback_to_unanonymized,
-        )
-        dirs: dict[DicomQueryLevel, Path] = {
-            DicomQueryLevel.PATIENT: Path(base) / patient_dir_name,
-        }
 
-        study_dir_name = _resolve_dir_with_snapshot(
-            entity=record.study,
-            snapshot_anon=record.study_anon_uid,
-            raw=record.study_uid,
-            kind="study",
-            fallback_to_unanonymized=fallback_to_unanonymized,
-        )
-        if study_dir_name is not None:
-            dirs[DicomQueryLevel.STUDY] = dirs[DicomQueryLevel.PATIENT] / study_dir_name
-
-            series_dir_name = _resolve_dir_with_snapshot(
-                entity=record.series,
-                snapshot_anon=record.series_anon_uid,
-                raw=record.series_uid,
-                kind="series",
-                fallback_to_unanonymized=fallback_to_unanonymized,
+        study = record.study
+        if study is None and record.study_uid is not None:
+            study = _StudyLazySnapshot(  # type: ignore[assignment]
+                study_uid=record.study_uid,
+                anon_uid=record.study_anon_uid,
             )
-            if series_dir_name is not None:
-                dirs[DicomQueryLevel.SERIES] = dirs[DicomQueryLevel.STUDY] / series_dir_name
+        series = record.series
+        if series is None and record.series_uid is not None:
+            series = _SeriesLazySnapshot(  # type: ignore[assignment]
+                series_uid=record.series_uid,
+                anon_uid=record.series_anon_uid,
+            )
 
-        return dirs
+        return render_all_levels(
+            patient=record.patient,
+            study=study,
+            series=series,
+            storage_path=Path(base),
+            fallback_to_unanonymized=fallback_to_unanonymized,
+        )
 
     @staticmethod
     def build_working_dirs_from_series(
@@ -239,6 +196,10 @@ class FileResolver:
     ) -> dict[DicomQueryLevel, Path]:
         """Build working-directory map from a ``SeriesRead``.
 
+        Delegates to
+        :func:`clarinet.services.common.storage_paths.render_all_levels`
+        (single rendering point).
+
         Args:
             series: Fully-loaded series (study, patient relations).
             fallback_to_unanonymized: see :meth:`build_working_dirs`.
@@ -246,31 +207,13 @@ class FileResolver:
         Returns:
             Dict mapping each available level to its ``Path``.
         """
-        base = settings.storage_path
-        patient = series.study.patient
-        patient_dir_name = _resolve_patient_dir(
-            anon_id=patient.anon_id,
-            raw_id=patient.id,
+        return render_all_levels(
+            patient=series.study.patient,
+            study=series.study,
+            series=series,
+            storage_path=Path(settings.storage_path),
             fallback_to_unanonymized=fallback_to_unanonymized,
         )
-        study_dir_name = _resolve_required_anon(
-            anon=series.study.anon_uid,
-            raw=series.study.study_uid,
-            kind="study",
-            fallback_to_unanonymized=fallback_to_unanonymized,
-        )
-        series_dir_name = _resolve_required_anon(
-            anon=series.anon_uid,
-            raw=series.series_uid,
-            kind="series",
-            fallback_to_unanonymized=fallback_to_unanonymized,
-        )
-        patient_path = Path(base) / patient_dir_name
-        return {
-            DicomQueryLevel.PATIENT: patient_path,
-            DicomQueryLevel.STUDY: patient_path / study_dir_name,
-            DicomQueryLevel.SERIES: patient_path / study_dir_name / series_dir_name,
-        }
 
     @staticmethod
     def build_working_dirs_from_study(
@@ -280,6 +223,10 @@ class FileResolver:
     ) -> dict[DicomQueryLevel, Path]:
         """Build working-directory map from a ``StudyRead``.
 
+        Delegates to
+        :func:`clarinet.services.common.storage_paths.render_all_levels`
+        (single rendering point).
+
         Args:
             study: Fully-loaded study (patient relation).
             fallback_to_unanonymized: see :meth:`build_working_dirs`.
@@ -287,24 +234,13 @@ class FileResolver:
         Returns:
             Dict mapping available levels to their ``Path``.
         """
-        base = settings.storage_path
-        patient = study.patient
-        patient_dir_name = _resolve_patient_dir(
-            anon_id=patient.anon_id,
-            raw_id=patient.id,
+        return render_all_levels(
+            patient=study.patient,
+            study=study,
+            series=None,
+            storage_path=Path(settings.storage_path),
             fallback_to_unanonymized=fallback_to_unanonymized,
         )
-        study_dir_name = _resolve_required_anon(
-            anon=study.anon_uid,
-            raw=study.study_uid,
-            kind="study",
-            fallback_to_unanonymized=fallback_to_unanonymized,
-        )
-        patient_path = Path(base) / patient_dir_name
-        return {
-            DicomQueryLevel.PATIENT: patient_path,
-            DicomQueryLevel.STUDY: patient_path / study_dir_name,
-        }
 
     @staticmethod
     def build_fields(record: RecordRead) -> dict[str, Any]:

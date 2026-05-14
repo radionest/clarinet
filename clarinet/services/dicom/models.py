@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 #: than a join-then-split round-trip.
 #:
 #: Producers (``operations._ds_modalities``) and consumers
-#: (``anon_path._modalities_string`` for filesystem paths,
+#: (``storage_paths._modalities_string`` for filesystem paths,
 #: ``dicomweb.converter._modalities_to_list`` for DICOM JSON arrays) must
 #: agree on this character. Path rendering converts the joined value to
 #: ``_``-separated for filesystem safety (see ``_modalities_string``).

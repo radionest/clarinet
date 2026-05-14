@@ -68,11 +68,13 @@ def _make_patient(
     patient_id: str = "PAT001",
     anon_id: str | None = "CLARINET_1",
     anon_name: str | None = "Anon Patient",
+    auto_id: int | None = 1,
 ) -> MagicMock:
     p = MagicMock()
     p.id = patient_id
     p.anon_id = anon_id
     p.anon_name = anon_name
+    p.auto_id = auto_id
     return p
 
 
@@ -80,11 +82,15 @@ def _make_study(
     study_uid: str = "1.2.3.4.5",
     anon_uid: str | None = "9.8.7.6.5",
     patient_id: str = "PAT001",
+    date: Any = None,
+    modalities_in_study: str | None = None,
 ) -> MagicMock:
     s = MagicMock()
     s.study_uid = study_uid
     s.anon_uid = anon_uid
     s.patient_id = patient_id
+    s.date = date
+    s.modalities_in_study = modalities_in_study
     return s
 
 
@@ -92,11 +98,15 @@ def _make_series(
     series_uid: str = "1.2.3.4.5.6",
     anon_uid: str | None = "9.8.7.6.5.4",
     study_uid: str = "1.2.3.4.5",
+    modality: str | None = None,
+    series_number: int | None = None,
 ) -> MagicMock:
     s = MagicMock()
     s.series_uid = series_uid
     s.anon_uid = anon_uid
     s.study_uid = study_uid
+    s.modality = modality
+    s.series_number = series_number
     return s
 
 
@@ -562,12 +572,8 @@ class TestBuildTaskContext:
     @patch("clarinet.services.common.file_resolver.settings")
     async def test_from_series_uid(self, mock_settings: MagicMock):
         mock_settings.storage_path = "/data"
-        series = MagicMock()
-        series.series_uid = "1.2.3.4.5.6"
-        series.anon_uid = "9.8.7.6.5.4"
-        series.study = MagicMock()
-        series.study.study_uid = "1.2.3.4.5"
-        series.study.anon_uid = "9.8.7.6.5"
+        series = _make_series(series_uid="1.2.3.4.5.6", anon_uid="9.8.7.6.5.4")
+        series.study = _make_study(study_uid="1.2.3.4.5", anon_uid="9.8.7.6.5")
         series.study.patient = _make_patient()
 
         client = AsyncMock()
@@ -583,9 +589,7 @@ class TestBuildTaskContext:
     @patch("clarinet.services.common.file_resolver.settings")
     async def test_from_study_uid(self, mock_settings: MagicMock):
         mock_settings.storage_path = "/data"
-        study = MagicMock()
-        study.study_uid = "1.2.3.4.5"
-        study.anon_uid = "9.8.7.6.5"
+        study = _make_study(study_uid="1.2.3.4.5", anon_uid="9.8.7.6.5")
         study.patient = _make_patient()
 
         client = AsyncMock()

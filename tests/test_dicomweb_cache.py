@@ -773,7 +773,7 @@ class TestResolveDcmAnonDir:
 
         from clarinet.models.base import DicomQueryLevel
         from clarinet.models.study import Series, Study
-        from clarinet.services.dicom.anon_path import build_context, render_working_folder
+        from clarinet.services.common.storage_paths import build_context, render_working_folder
         from tests.utils.factories import make_patient
 
         patient = make_patient("RESOLVE_PAT_01", "Resolve", auto_id=303)
@@ -800,15 +800,15 @@ class TestResolveDcmAnonDir:
 
         # Create the dcm_anon dir at the path the resolver will compute
         monkeypatch.setattr(
-            "clarinet.services.dicom.anon_path.settings.disk_path_template",
+            "clarinet.services.common.storage_paths.settings.disk_path_template",
             "{anon_patient_id}/{anon_study_uid}/{anon_series_uid}",
         )
         monkeypatch.setattr(
-            "clarinet.services.dicom.anon_path.settings.anon_per_study_patient_id",
+            "clarinet.services.common.storage_paths.settings.anon_per_study_patient_id",
             False,
         )
         monkeypatch.setattr(
-            "clarinet.services.dicom.anon_path.settings.anon_id_prefix",
+            "clarinet.services.common.storage_paths.settings.anon_id_prefix",
             "CLARINET",
         )
         ctx = build_context(patient=patient, study=study, series=series)

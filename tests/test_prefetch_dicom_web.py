@@ -175,7 +175,7 @@ class TestHasDcmAnon:
     async def test_empty_anon_dir_returns_false(self, tmp_path: Path, test_session) -> None:
         """Series in DB, dcm_anon dir exists but empty → False (no .dcm files)."""
         from clarinet.models.base import DicomQueryLevel
-        from clarinet.services.dicom.anon_path import build_context, render_working_folder
+        from clarinet.services.common.storage_paths import build_context, render_working_folder
 
         patient, study, series = await _seed_anonymized(
             test_session,
@@ -201,7 +201,7 @@ class TestHasDcmAnon:
     async def test_finds_dcm_via_resolved_path(self, tmp_path: Path, test_session) -> None:
         """Series in DB + dcm_anon dir with .dcm files at template-resolved path → True."""
         from clarinet.models.base import DicomQueryLevel
-        from clarinet.services.dicom.anon_path import build_context, render_working_folder
+        from clarinet.services.common.storage_paths import build_context, render_working_folder
 
         patient, study, series = await _seed_anonymized(
             test_session,

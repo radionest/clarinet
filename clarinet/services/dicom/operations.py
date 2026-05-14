@@ -70,7 +70,7 @@ def _ds_modalities(ds: Dataset) -> str | None:
     separator) keeps the DB value byte-identical to the wire form, so
     DICOMweb re-serialisation is a free split. Filesystem path
     rendering converts to ``_`` separately — see
-    ``anon_path._modalities_string``.
+    ``storage_paths._modalities_string``.
     """
     val: Any = getattr(ds, "ModalitiesInStudy", None)
     if val is None or val == "":

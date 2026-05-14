@@ -266,9 +266,12 @@ def _make_mock_study(
     mock_study = MagicMock()
     mock_study.study_uid = study_uid
     mock_study.anon_uid = f"anon_{study_uid}"
+    mock_study.date = None
+    mock_study.modalities_in_study = None
     mock_study.patient = MagicMock()
     mock_study.patient.id = patient_id
     mock_study.patient.anon_id = f"CLARINET_{patient_id}"
+    mock_study.patient.auto_id = None
     return mock_study
 
 
@@ -699,10 +702,15 @@ class TestPipelineTaskDecorator:
             mock_record.parent_record_id = None
             mock_record.patient = MagicMock()
             mock_record.patient.anon_id = "CLARINET_TEST_PAT001"
+            mock_record.patient.auto_id = None
             mock_record.study = MagicMock()
             mock_record.study.anon_uid = "anon_1.2.3"
+            mock_record.study.date = None
+            mock_record.study.modalities_in_study = None
             mock_record.series = MagicMock()
             mock_record.series.anon_uid = "anon_1.2.3.1"
+            mock_record.series.modality = None
+            mock_record.series.series_number = None
             mock_client.get_record = AsyncMock(return_value=mock_record)
 
             raw_message = {"patient_id": "TEST_PAT001", "study_uid": "1.2.3", "record_id": 42}
@@ -1628,10 +1636,15 @@ class TestTaskContextIntegration:
         mock_record.record_type.file_registry = []
         mock_record.patient = MagicMock()
         mock_record.patient.anon_id = "CLARINET_TEST_PAT001"
+        mock_record.patient.auto_id = None
         mock_record.study = MagicMock()
         mock_record.study.anon_uid = "anon_1.2.3"
+        mock_record.study.date = None
+        mock_record.study.modalities_in_study = None
         mock_record.series = MagicMock()
         mock_record.series.anon_uid = "anon_1.2.3.1"
+        mock_record.series.modality = None
+        mock_record.series.series_number = None
         mock_client.get_record = AsyncMock(return_value=mock_record)
 
         message = PipelineMessage(patient_id="TEST_PAT001", study_uid="1.2.3", record_id=42)
@@ -1672,10 +1685,15 @@ class TestTaskContextIntegration:
         mock_record.record_type.file_registry = []
         mock_record.patient = MagicMock()
         mock_record.patient.anon_id = "CLARINET_TEST_PAT001"
+        mock_record.patient.auto_id = None
         mock_record.study = MagicMock()
         mock_record.study.anon_uid = "anon_1.2.3"
+        mock_record.study.date = None
+        mock_record.study.modalities_in_study = None
         mock_record.series = MagicMock()
         mock_record.series.anon_uid = "anon_1.2.3.1"
+        mock_record.series.modality = None
+        mock_record.series.series_number = None
         mock_client.get_record = AsyncMock(return_value=mock_record)
 
         message = PipelineMessage(patient_id="TEST_PAT001", study_uid="1.2.3", record_id=42)

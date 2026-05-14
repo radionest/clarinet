@@ -98,6 +98,16 @@ The HTTP endpoint `POST /api/dicom/studies/{uid}/anonymize` resolves a tracking 
 
 ## Anonymization contract: backend vs UX paths
 
+Storage-path rendering itself lives in
+`clarinet.services.common.storage_paths` — the same template engine
+(`build_context` + `render_working_folder` + `render_all_levels` +
+`derive_anon_patient_id`) feeds the writer, every reader, the CLI
+migration tool, computed-field `working_folder` on `*Read` DTOs, and
+the pipeline `FileResolver` (which is a thin wrapper over
+`render_all_levels`). One rendering point means a custom
+`disk_path_template` produces the same path everywhere — there is no
+writer / reader divergence to worry about.
+
 Studies may be anonymized mid-pipeline (PR #250 — asymmetric anonymization),
 so a `Record` created before the anonymization run carries
 `record.study_anon_uid = None` even though `study.anon_uid` has since been

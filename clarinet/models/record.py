@@ -509,7 +509,7 @@ class RecordRead(RecordBase):
         """
         from pathlib import Path
 
-        from clarinet.services.dicom.anon_path import build_context, render_working_folder
+        from clarinet.services.common.storage_paths import build_context, render_working_folder
 
         try:
             level = DicomQueryLevel(self.record_type.level)

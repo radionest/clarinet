@@ -69,6 +69,16 @@ the right queue.
 
 ## Anonymized UID contract
 
+Storage-path rendering lives in
+`clarinet.services.common.storage_paths` — one template engine
+(`build_context` + `render_working_folder` + `render_all_levels`)
+feeds the writer (`AnonymizationService._save_series_to_disk`), every
+reader (`DicomWebCache`, `prefetch_dicom_web`), CLI `anon migrate-paths`,
+the computed-field `working_folder` on `*Read` DTOs, plus the pipeline
+`FileResolver.build_working_dirs*` (thin wrappers over
+`render_all_levels`). One rendering point means a custom
+`disk_path_template` produces the same path everywhere.
+
 `FileResolver.build_working_dirs*` and the writer/reader helpers
 (`build_context` → `render_working_folder`) refuse to render a path
 against a raw UID. When `anon_uid` / `anon_id` is missing they raise

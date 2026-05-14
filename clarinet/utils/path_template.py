@@ -3,13 +3,13 @@
 Kept dependency-free (stdlib only) so it can be imported by
 ``clarinet.settings.Settings`` validators without triggering the rest of
 the package graph. The richer rendering helpers — including DB-aware
-context building — live in ``clarinet.services.dicom.anon_path``.
+context building — live in ``clarinet.services.common.storage_paths``.
 
 A template has exactly three ``/``-separated non-empty segments mapping
 to the PATIENT / STUDY / SERIES levels of the DICOM hierarchy. Each
 segment may reference any subset of ``SUPPORTED_PLACEHOLDERS`` below.
 Placeholders are interpolated via ``str.format_map`` against a context
-built by ``clarinet.services.dicom.anon_path.build_context``. Missing
+built by ``clarinet.services.common.storage_paths.build_context``. Missing
 fields resolve to ``"unknown"`` rather than raising, so reader-side
 lookups stay non-fatal on incomplete data.
 

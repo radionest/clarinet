@@ -144,7 +144,7 @@ class TestDiskPathTemplateValidator:
     """Settings-level validation for ``disk_path_template``.
 
     Pydantic loads value from env, then ``validate_disk_path_template_setting``
-    delegates to ``services.dicom.anon_path.validate_template`` (the same
+    delegates to ``services.common.storage_paths.validate_template`` (the same
     validator used by the migration CLI).
     """
 

@@ -9,7 +9,7 @@ as a Python list repr (``"['CT', 'SR']"``) before the
 from pydicom import Dataset
 from pydicom.multival import MultiValue
 
-from clarinet.services.dicom.anon_path import _modalities_string
+from clarinet.services.common.storage_paths import _modalities_string
 from clarinet.services.dicom.operations import DicomOperations
 
 
