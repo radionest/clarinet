@@ -160,9 +160,11 @@ async def validate_record_files(
         return None
 
     directory = Path(record.working_folder)
-    # User-triggered validation (POST /records/{id}/validate-files) — falls
-    # back to raw UIDs on non-anonymized records so the endpoint reports
-    # "files missing" instead of 500ing the UI.
+    # Called both from `POST /records/{id}/validate-files` (admin UI) and
+    # from `RecordService.create_record` (during record creation, before
+    # any anonymization run). Fall back to raw UIDs so a record that has
+    # not been anonymized yet still gets a `valid/invalid` verdict instead
+    # of bubbling `AnonPathError` up to the caller.
     working_dirs = FileResolver.build_working_dirs(record, fallback_to_unanonymized=True)
     validator = FileValidator(input_defs)
     result = await run_in_fs_thread(validator.validate, record, directory, working_dirs, parent)

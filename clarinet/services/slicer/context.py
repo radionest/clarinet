@@ -29,13 +29,15 @@ from clarinet.utils.logger import logger
 def build_template_vars(record: RecordRead) -> dict[str, Any]:
     """Build template variables for custom slicer_script_args resolution.
 
-    Provides the same set of placeholders as ``RecordRead._format_path_strict()``,
-    so that ``{study_anon_uid}``, ``{patient_id}`` etc. work in custom args.
+    Provides the placeholder set accepted by ``RecordRead._format_path``
+    (UX mode) — ``{study_anon_uid}``, ``{patient_id}`` etc. — so that
+    custom Slicer script args resolve.
 
     UX layer — falls back to raw UIDs when anonymization has not yet
     propagated, so the Slicer UI keeps rendering text for the doctor
-    even on records that predate the anonymization run. Do **not** use
-    these values to address files on disk or to issue PACS queries.
+    even on records that predate the anonymization run. Backend tasks
+    that need a real anonymized path must use ``FileResolver`` /
+    ``build_context`` in safe-by-default mode instead.
 
     Args:
         record: Fully-loaded record with relations.

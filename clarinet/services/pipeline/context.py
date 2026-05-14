@@ -144,7 +144,7 @@ def _resolve_dir_with_snapshot(
     if fallback_to_unanonymized:
         return raw
     raise AnonPathError(
-        f"{kind.capitalize()} has no anon_uid ({kind}_uid={raw!r}, snapshot=None); "
+        f"{kind.capitalize()} has no anon_uid ({kind}_uid={raw!r}); "
         "pass fallback_to_unanonymized=True for UX call sites"
     )
 

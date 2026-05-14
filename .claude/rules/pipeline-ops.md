@@ -72,9 +72,12 @@ the right queue.
 `FileResolver.build_working_dirs*` and the writer/reader helpers
 (`build_context` → `render_working_folder`) refuse to render a path
 against a raw UID. When `anon_uid` / `anon_id` is missing they raise
-`AnonPathError` (re-exported from `clarinet.exceptions`), which the
-retry middleware classifies as a 4xx-like business error — the task
-goes straight to DLQ instead of looping forever.
+`AnonPathError` (re-exported from `clarinet.exceptions`). The
+`RetryMiddleware` 4xx skip only fires for `ClarinetAPIError`, so an
+`AnonPathError` from a worker is retried `pipeline_retry_count` times
+with exponential backoff before `DeadLetterMiddleware` routes it to
+the DLQ — usually the right shape, since the race window closes once
+the anonymization run finishes and a retry succeeds.
 
 This is desirable: an asymmetric anonymization run (PR #250) can flip
 a study from non-anon → anon mid-pipeline, and silently falling back
