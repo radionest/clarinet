@@ -31,11 +31,11 @@ def _fields_to_dicom_json(fields: list[tuple[str, str, Any]]) -> dict[str, Any]:
 
 
 def _modalities_to_list(raw: str | None) -> list[str] | None:
-    """Split DB-stored ``MODALITIES_SEPARATOR``-joined modalities back into a list.
+    """Split DB-stored DICOM ``\\``-joined modalities back into a list.
 
-    DICOM JSON (PS3.18 Appendix F) requires multi-value CS tags to be
-    serialized as a JSON array of strings — passing the joined string
-    would surface in OHIF as a single bogus modality ``"CT-SR"``.
+    The DB column stores the DICOM PS3.5 wire form (``"CT\\SR"``); DICOM
+    JSON (PS3.18 Appendix F) requires multi-value CS tags to be a JSON
+    array of strings (``["CT", "SR"]``), not a single joined token.
     """
     if not raw:
         return None

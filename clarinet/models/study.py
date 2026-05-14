@@ -29,10 +29,11 @@ class StudyBase(BaseModel):
         default=None,
         max_length=64,
         description=(
-            "Modalities of the study, '-'-joined (e.g. 'CT-SR'). Written by "
-            "clarinet.services.dicom.operations._ds_modalities; split by "
-            "_modalities_string (path rendering) and _modalities_to_list "
-            "(DICOMweb JSON)."
+            "Modalities of the study, DICOM-standard '\\'-joined (e.g. "
+            "'CT\\SR'); see clarinet.services.dicom.models.MODALITIES_SEPARATOR. "
+            "Written by clarinet.services.dicom.operations._ds_modalities; "
+            "consumed by _modalities_string (path rendering, converts to '_') "
+            "and _modalities_to_list (DICOMweb JSON, splits to array)."
         ),
     )
     patient_id: str

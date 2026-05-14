@@ -84,9 +84,9 @@ def test_dataset_to_dicom_json_without_pixel_data() -> None:
     assert "BulkDataURI" in pixel_tag
 
 
-def test_study_result_modalities_multi_value_splits_dash() -> None:
-    """ModalitiesInStudy stored as 'CT-SR' must serialize as a JSON array."""
-    result = StudyResult(study_instance_uid="1.2.3", modalities_in_study="CT-SR")
+def test_study_result_modalities_multi_value_splits_backslash() -> None:
+    r"""ModalitiesInStudy stored as 'CT\SR' must serialize as a JSON array."""
+    result = StudyResult(study_instance_uid="1.2.3", modalities_in_study="CT\\SR")
     j = study_result_to_dicom_json(result)
     assert j["00080061"] == {"vr": "CS", "Value": ["CT", "SR"]}
 
