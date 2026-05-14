@@ -30,6 +30,8 @@ from clarinet.models.study import Series, Study
 from clarinet.services.dicom import DicomClient, DicomNode, StudyQuery
 from clarinet.settings import settings
 from clarinet.utils.database import get_async_session
+from tests.config import CALLING_AET, PACS_AET, PACS_DICOM_PORT, PACS_HOST, PACS_REST_URL
+from tests.utils.cookies import patch_cookie_forwarding
 
 pytestmark = [pytest.mark.dicom]
 
@@ -37,11 +39,7 @@ pytestmark = [pytest.mark.dicom]
 # Constants
 # ---------------------------------------------------------------------------
 
-PACS_HOST = "192.168.122.151"
-PACS_PORT = 4242
-PACS_AET = "ORTHANC"
-PACS_REST_URL = "http://192.168.122.151:8042"
-CALLING_AET = "CLARINET_TEST"
+PACS_PORT = PACS_DICOM_PORT
 
 DICOM_BASE = "/api/dicom"
 
@@ -177,18 +175,7 @@ async def client(test_session, test_settings) -> AsyncGenerator[AsyncClient]:
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test", cookies={}) as ac:
-        original_request = ac.request
-
-        async def request_with_cookies(method, url, **kwargs):
-            if ac.cookies:
-                headers = kwargs.get("headers") or {}
-                cookie_header = "; ".join([f"{k}={v}" for k, v in ac.cookies.items()])
-                if cookie_header:
-                    headers["Cookie"] = cookie_header
-                    kwargs["headers"] = headers
-            return await original_request(method, url, **kwargs)
-
-        ac.request = request_with_cookies
+        patch_cookie_forwarding(ac)
         yield ac
 
     app.dependency_overrides.clear()

@@ -30,6 +30,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from clarinet.services.slicer.service import SlicerService
 from clarinet.utils.logger import logger
+from tests.config import (
+    PACS_AET,
+    PACS_DICOM_PORT,
+    PACS_HOST,
+    PACS_REST_URL,
+    SLICER_HOST,
+    SLICER_PORT,
+)
 
 pytestmark = [
     pytest.mark.slicer,
@@ -42,13 +50,7 @@ pytestmark = [
 # Constants
 # ---------------------------------------------------------------------------
 
-SLICER_HOST = "localhost"
-SLICER_PORT = 2016
-
-PACS_HOST = "192.168.122.151"
-PACS_PORT = 4242
-PACS_AET = "ORTHANC"
-PACS_REST_URL = f"http://{PACS_HOST}:8042"
+PACS_PORT = PACS_DICOM_PORT
 CALLING_AET = "SLICER_TEST"
 SLICER_SCP_PORT = 4006  # Slicer's internal C-STORE SCP port for receiving C-MOVE data
 

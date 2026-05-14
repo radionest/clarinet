@@ -33,6 +33,7 @@ from clarinet.models.patient import Patient
 from clarinet.services.dicom import DicomClient, DicomNode
 from clarinet.services.dicomweb.cache import DicomWebCache
 from clarinet.services.dicomweb.service import DicomWebProxyService
+from tests.config import CALLING_AET, PACS_AET, PACS_DICOM_PORT, PACS_HOST, PACS_REST_URL
 from tests.conftest import create_authenticated_client, create_mock_superuser
 from tests.utils.factories import make_patient
 from tests.utils.urls import DICOM_BASE, DICOMWEB_BASE
@@ -43,11 +44,7 @@ pytestmark = [pytest.mark.dicom]
 # Constants
 # ---------------------------------------------------------------------------
 
-PACS_HOST = "192.168.122.151"
-PACS_PORT = 4242
-PACS_AET = "ORTHANC"
-PACS_REST_URL = "http://192.168.122.151:8042"
-CALLING_AET = "CLARINET_TEST"
+PACS_PORT = PACS_DICOM_PORT
 
 PRELOAD_POLL_INTERVAL = 1.0  # seconds
 PRELOAD_TIMEOUT = 120.0  # seconds

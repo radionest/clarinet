@@ -77,7 +77,13 @@ def make_record_type(name: str = "test-rt-00001", **kw: object) -> RecordType:
 
 
 async def seed_record(session, patient_id, study_uid, series_uid, rt_name, **kw):
-    """Create a Record directly in the session (bypasses model validator)."""
+    """Create a Record directly in the session (bypasses model validator).
+
+    SQLite test engines enable ``PRAGMA foreign_keys=ON`` (conftest.py) and the
+    PostgreSQL test backend enforces FKs natively. Callers must persist the
+    referenced Patient / Study / Series / RecordType before calling this helper,
+    otherwise the INSERT fails with an FK violation.
+    """
     rec = Record(
         patient_id=patient_id,
         study_uid=study_uid,
