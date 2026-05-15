@@ -216,6 +216,23 @@ class TestFileRepositoryConstruction:
         with pytest.raises(TypeError, match="FileRepository accepts"):
             FileRepository(object())  # type: ignore[arg-type]
 
+    @patch("clarinet.services.common.file_resolver.settings")
+    def test_construct_record_fails_on_non_anonymized_series(
+        self, mock_settings: MagicMock
+    ) -> None:
+        """Non-anonymized RecordRead cannot construct FileRepository.
+
+        Confirms slicer_args is NOT a UX-fallback exception — strict mode
+        applies uniformly. UX-routers must catch AnonPathError per Phase 4.
+        """
+        mock_settings.storage_path = "/data"
+        record = _make_record_mock(level=DicomQueryLevel.SERIES)
+        record.series.anon_uid = None
+        record.series_anon_uid = None
+
+        with pytest.raises(AnonPathError, match="Series has no anon_uid"):
+            FileRepository(record)
+
 
 # ── resolve_file (RecordRead-only) ─────────────────────────────────────────
 

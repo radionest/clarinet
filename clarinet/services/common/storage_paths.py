@@ -183,6 +183,13 @@ def build_context(
     settings changed between runs). When omitted, the resolver derives
     them from DB state (``anon_id``, ``anon_uid``).
 
+    ``anon_*`` override kwargs are honored only when the corresponding
+    placeholder appears in ``template``. For a raw-UID template like
+    ``"{patient_id}/{study_uid}/{series_uid}"``, an ``anon_patient_id="X"``
+    argument is silently dropped — the rendered path follows the template,
+    not the override. Callers that need anonymized paths must use a template
+    that references ``{anon_*}``.
+
     Backend callers (file paths, dcm_anon lookups, anonymization writer)
     keep the default ``fallback_to_unanonymized=False`` — missing
     ``anon_uid`` then raises ``AnonPathError`` instead of silently

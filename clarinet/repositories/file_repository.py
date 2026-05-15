@@ -27,10 +27,15 @@ placeholders never invoke anon resolution, so no fallback flag is needed
 at the repository level. UX routers should catch ``AnonPathError`` on
 their side when serving non-anonymized records.
 
-``slicer_args`` is the exception: it inherits the UX fallback from the
-legacy ``RecordRead._format_slicer_kwargs`` (renders against raw UIDs
-when anon IDs are missing). Slicer scripts are user-facing — silently
-falling back is preferable to a 500 on an in-flight study.
+``slicer_args`` is also strict: it reads ``working_dir`` from this
+instance, which is computed at ``__init__`` in strict mode. A
+non-anonymized record cannot construct a ``FileRepository`` at all —
+``__init__`` raises ``AnonPathError`` before ``slicer_args`` can be
+called. This differs from the legacy ``RecordRead.slicer_*_args_formatted``
+computed fields, which use ``fallback_to_unanonymized=True``. The fallback
+is intentionally not preserved at the repository layer (see file-repo
+roadmap §4); UX routers (roadmap Phase 4) must catch ``AnonPathError``
+and serve ``null`` instead of degrading silently.
 """
 
 from pathlib import Path
@@ -140,6 +145,11 @@ class FileRepository:
         Delegates to ``RecordRead._format_slicer_kwargs`` to guarantee
         byte-for-byte equality with the legacy computed field. The
         ``working_folder`` placeholder is injected from ``self.working_dir``.
+
+        .. todo:: Move ``_format_slicer_kwargs`` logic into this module (or
+            ``FileResolver``) before file-repo roadmap Phase 3 — that phase
+            removes ``RecordRead._format_slicer_kwargs``, which Phase 5
+            ``build_slicer_context`` relies on through this method.
 
         Requires a ``RecordRead``.
         """
