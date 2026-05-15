@@ -68,7 +68,11 @@ class SlicerService:
             request_timeout: Optional HTTP timeout override (seconds).
 
         Returns:
-            JSON response from Slicer.
+            The script's ``__execResult`` dict (or ``{}`` if the script did not
+            assign one). When called from ``_process_submission`` for a
+            ``slicer_result_validator``, this dict is merged into ``record.data``
+            — see ``clarinet/services/slicer/CLAUDE.md`` →
+            "``__execResult`` Result-Merging Contract".
         """
         full_script = self._build_script(script, context)
         logger.debug(f"Sending script to Slicer at {slicer_url} ({len(full_script)} chars)")

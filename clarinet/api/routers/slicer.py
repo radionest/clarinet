@@ -169,6 +169,11 @@ async def open_record_in_slicer(
         raise NoScriptError(f"Record type has no slicer_script configured for record {record_id}")
 
     context = await build_slicer_context_async(record_read, record_repo.session)
+    # clarinet_api_url / clarinet_auth_cookie are injected here for out-of-band
+    # scripts that may call back to the Clarinet API. NOT injected on the
+    # submit path (_process_submission in record.py) — validators that need to
+    # write back into record.data should use __execResult merging instead.
+    # See clarinet/services/slicer/CLAUDE.md → "__execResult Result-Merging Contract".
     context["clarinet_api_url"] = str(request.base_url).rstrip("/")
     context["clarinet_auth_cookie"] = (
         f"{settings.cookie_name}={request.cookies.get(settings.cookie_name, '')}"
@@ -247,6 +252,9 @@ async def validate_record_in_slicer(
         )
 
     context = await build_slicer_context_async(record_read, record_repo.session)
+    # See note above in open_record_in_slicer — clarinet_api_url and
+    # clarinet_auth_cookie are out-of-band only; the submit path uses
+    # __execResult merging instead of HTTP callbacks.
     context["clarinet_api_url"] = str(request.base_url).rstrip("/")
     context["clarinet_auth_cookie"] = (
         f"{settings.cookie_name}={request.cookies.get(settings.cookie_name, '')}"

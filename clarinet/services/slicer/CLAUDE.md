@@ -107,3 +107,97 @@ Fallback: if context variables are absent (standalone/manual usage), `PacsHelper
 - Use `_pacs_helper_script_block()` for explicit PacsHelper params
 - Use `_monkey_patch_from_slicer_block()` for overriding `from_slicer()`
 - Use `_context_injection_block()` for Clarinet PACS context variables
+
+## `__execResult` Result-Merging Contract
+
+`slicer_result_validator` scripts can return extra fields via `__execResult = {...}`.
+Those keys are merged into `record.data` before the record is saved. This replaces
+HTTP callbacks from the validator (which are impossible in practice — see "Why
+HTTP-callbacks from validators are unsupported" below).
+
+### Flow
+
+1. Doctor edits in Slicer → `POST /api/records/{id}/submit` (or `POST /api/records/{id}/data`).
+2. `_process_submission` validates `data` against the record-type schema (pass 1).
+3. `slicer_result_validator` runs in Slicer. The script may:
+   - Raise → propagates as `SlicerError` → 422.
+   - Assign `__execResult = {field: value, ...}` to write fields into `record.data`.
+4. Framework merges `__execResult` over `validated_data` — **validator wins** on
+   key collisions.
+5. Framework re-runs `rt_service.validate_record_data()` on the merged dict
+   (pass 2). Validator-injected values pass through the same JSON Schema and
+   custom Python validators as user-submitted fields.
+6. Record is persisted.
+
+### Canonical use case — `x-widget: "hidden"`
+
+The formosh JSON Schema extension `"x-widget": "hidden"` excludes a field from
+the rendered form. The validator computes the value and provides it via
+`__execResult` — the framework merges it into `record.data` and re-validates.
+
+```json
+// plan/schemas/cropping-box.schema.json
+{
+  "type": "object",
+  "properties": {
+    "x_min": { "type": "number", "x-widget": "hidden" },
+    "x_max": { "type": "number", "x-widget": "hidden" },
+    "y_min": { "type": "number", "x-widget": "hidden" },
+    "y_max": { "type": "number", "x-widget": "hidden" },
+    "z_min": { "type": "number", "x-widget": "hidden" },
+    "z_max": { "type": "number", "x-widget": "hidden" }
+  }
+}
+```
+
+**Do not mark validator-filled fields as `required`** — the first validation
+pass runs against the (empty) submitted form, before Slicer runs. Required
+hidden fields would fail with `422: '...' is a required property` and the
+validator would never be invoked. If you want a presence guarantee, use a
+custom Python validator with `run_on_partial=False`, which runs on the
+merged dict during the second validation pass.
+
+```python
+# plan/validators/cropping_box_validator.py
+roi = slicer.util.getNodesByClass("vtkMRMLMarkupsROINode")[0]
+center, size = [0.0]*3, [0.0]*3
+roi.GetCenterWorld(center)
+roi.GetSizeWorld(size)
+__execResult = {
+    "x_min": center[0] - size[0] / 2.0, "x_max": center[0] + size[0] / 2.0,
+    "y_min": center[1] - size[1] / 2.0, "y_max": center[1] + size[1] / 2.0,
+    "z_min": center[2] - size[2] / 2.0, "z_max": center[2] + size[2] / 2.0,
+}
+```
+
+No HTTP callbacks, no `clarinet_api_url` / `clarinet_auth_cookie` injection.
+
+### Conflict policy
+
+On overlapping keys between `__execResult` and user-submitted `data` —
+**validator wins**. This is intentional: hidden fields are authoritative and
+not editable by the doctor. If a non-hidden key happens to collide, the
+validator override is still applied; if that's not desired, the validator
+should not return that key.
+
+### Error semantics
+
+- Validator raises `Exception` → Slicer returns 500 → `SlicerError` → 422.
+- `__execResult` carries a value that fails schema/custom validation →
+  `RecordDataValidationError` → 422 with structured `errors` (field paths
+  include validator-injected keys, just like form fields).
+- `__execResult` is empty / unset → merge is skipped; behaviour unchanged.
+
+### Why HTTP-callbacks from validators are unsupported
+
+The validator runs between two save phases: the record is `inwork`, and the
+`pending → finished` (or `inwork → finished`) transition has not happened yet.
+At that exact moment:
+
+- `POST/PUT/PATCH /data/prefill` rejects the record (requires `pending` /
+  `blocked`).
+- `PATCH /data` rejects (requires `finished`).
+- `POST /data` would succeed but recursively triggers another submission.
+
+`__execResult` merging is the only consistent path for a validator to write
+into `record.data`.
