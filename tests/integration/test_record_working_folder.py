@@ -552,6 +552,132 @@ async def test_slicer_all_args_always_has_working_folder(
     assert isinstance(all_args["working_folder"], str)
 
 
+# ===========================================================================
+# Group 5: per-record clarinet_storage_path override and custom disk_path_template
+#
+# Phase 0 safety net: these surfaces are silently exercised by production
+# (RecordRead._get_working_folder uses ``self.clarinet_storage_path or
+# settings.storage_path``; ``settings.disk_path_template`` drives the layout)
+# but had no regression test, so the upcoming FileRepository refactor could
+# drop them without detection. Added as parametrized matrix to detect any
+# divergence between RecordRead.working_folder and the underlying
+# render_working_folder() once the model-level computed field moves into
+# FileRepository.
+# ===========================================================================
+
+
+@pytest.mark.asyncio
+async def test_working_folder_uses_per_record_clarinet_storage_path_override(
+    test_session, patient_with_anon, study_with_anon, series_with_anon, rt_series
+):
+    """``Record.clarinet_storage_path`` overrides ``settings.storage_path``.
+
+    Per-record override exists only on ``RecordRead`` — ``SeriesRead.working_folder``
+    always uses ``settings.storage_path`` (intentional asymmetry).
+    """
+    custom_storage = "/custom/storage/root"
+    record_read = await RecordFactory.create_record_with_relations(
+        test_session,
+        patient=patient_with_anon,
+        study=study_with_anon,
+        series=series_with_anon,
+        record_type=rt_series,
+        clarinet_storage_path=custom_storage,
+    )
+
+    expected = str(
+        Path(custom_storage) / f"{settings.anon_id_prefix}_42" / "ANON_STUDY_WF" / "ANON_SERIES_WF"
+    )
+    assert record_read.working_folder == expected
+    # Settings-level storage_path must NOT be used when override is set.
+    assert not record_read.working_folder.startswith(str(settings.storage_path))
+
+
+@pytest.mark.asyncio
+async def test_working_folder_falls_back_to_settings_storage_path_when_override_none(
+    test_session, patient_with_anon, study_with_anon, series_with_anon, rt_series
+):
+    """Without per-record override, ``settings.storage_path`` is used."""
+    record_read = await RecordFactory.create_record_with_relations(
+        test_session,
+        patient=patient_with_anon,
+        study=study_with_anon,
+        series=series_with_anon,
+        record_type=rt_series,
+        # clarinet_storage_path intentionally omitted (None)
+    )
+
+    assert record_read.clarinet_storage_path is None
+    assert record_read.working_folder.startswith(str(settings.storage_path))
+
+
+@pytest.mark.parametrize(
+    ("template", "expected_segments"),
+    [
+        # Default template — anon_patient_id / anon_study_uid / anon_series_uid
+        (
+            "{anon_patient_id}/{anon_study_uid}/{anon_series_uid}",
+            ("CLARINET_42", "ANON_STUDY_WF", "ANON_SERIES_WF"),
+        ),
+        # Custom: series_modality prefix on the series segment (modality
+        # is None on the fixture → renders as "unknown").
+        (
+            "{anon_patient_id}/{anon_study_uid}/{series_modality}_{anon_series_uid}",
+            ("CLARINET_42", "ANON_STUDY_WF", "unknown_ANON_SERIES_WF"),
+        ),
+        # Custom: series_num prefix on the series segment
+        (
+            "{anon_patient_id}/{anon_study_uid}/{series_num}_{anon_series_uid}",
+            ("CLARINET_42", "ANON_STUDY_WF", "00001_ANON_SERIES_WF"),
+        ),
+        # Custom: anon_id_prefix + patient_auto_id, raw study_uid
+        (
+            "{anon_id_prefix}_{patient_auto_id}/{study_uid}/{anon_series_uid}",
+            ("CLARINET_42", "1.2.840.10008.1.1.1", "ANON_SERIES_WF"),
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_working_folder_respects_custom_disk_path_template(
+    test_session,
+    patient_with_anon,
+    study_with_anon,
+    series_with_anon,
+    rt_series,
+    monkeypatch,
+    template,
+    expected_segments,
+):
+    """``settings.disk_path_template`` controls the layout at SERIES level.
+
+    Four template variants exercise:
+    - Default layout (regression baseline).
+    - ``series_modality`` placeholder (renders ``"unknown"`` when None).
+    - ``series_num`` placeholder in the series segment.
+    - ``anon_id_prefix`` + ``patient_auto_id`` + raw ``study_uid`` (mix of anon
+      and raw placeholders).
+
+    Without this matrix the upcoming refactor could silently drop placeholder
+    substitution for any non-anon field (patient_auto_id, series_num,
+    series_modality, study_uid).
+    """
+    monkeypatch.setattr(
+        "clarinet.services.common.storage_paths.settings.disk_path_template",
+        template,
+    )
+
+    record_read = await RecordFactory.create_record_with_relations(
+        test_session,
+        patient=patient_with_anon,
+        study=study_with_anon,
+        series=series_with_anon,
+        record_type=rt_series,
+    )
+
+    expected = str(Path(settings.storage_path).joinpath(*expected_segments))
+    assert record_read.working_folder == expected
+
+
 @pytest.mark.asyncio
 async def test_slicer_args_working_folder_placeholder(
     test_session, patient_with_anon, study_with_anon
