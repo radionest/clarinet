@@ -261,6 +261,30 @@ class TestBuildWorkingDirs:
         assert str(dirs[DicomQueryLevel.PATIENT]).startswith(str(Path("/custom")))
 
 
+# ── FileResolver.build_working_dirs_from_patient ───────────────────────────
+
+
+class TestBuildWorkingDirsFromPatient:
+    """Tests for FileResolver.build_working_dirs_from_patient (Phase 1)."""
+
+    @patch("clarinet.services.common.file_resolver.settings")
+    def test_returns_patient_only(self, mock_settings: MagicMock):
+        mock_settings.storage_path = "/data"
+        patient = _make_patient()
+
+        dirs = FileResolver.build_working_dirs_from_patient(patient)
+
+        assert dirs == {DicomQueryLevel.PATIENT: Path("/data/CLARINET_1")}
+
+    @patch("clarinet.services.common.file_resolver.settings")
+    def test_strict_mode_raises_on_unanon(self, mock_settings: MagicMock):
+        mock_settings.storage_path = "/data"
+        patient = _make_patient(anon_id=None)
+
+        with pytest.raises(AnonPathError, match="Patient has no anon_id"):
+            FileResolver.build_working_dirs_from_patient(patient)
+
+
 # ── FileResolver.build_fields ───────────────────────────────────────────────
 
 

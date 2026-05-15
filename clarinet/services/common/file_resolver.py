@@ -34,6 +34,7 @@ from clarinet.utils.file_patterns import PLACEHOLDER_REGEX, glob_file_paths
 if TYPE_CHECKING:
     from clarinet.config.primitives import FileDef
     from clarinet.models.file_schema import FileDefinitionRead
+    from clarinet.models.patient import PatientRead
     from clarinet.models.record import RecordRead
     from clarinet.models.study import SeriesRead, StudyRead
 
@@ -237,6 +238,34 @@ class FileResolver:
         return render_all_levels(
             patient=study.patient,
             study=study,
+            series=None,
+            storage_path=Path(settings.storage_path),
+            fallback_to_unanonymized=fallback_to_unanonymized,
+        )
+
+    @staticmethod
+    def build_working_dirs_from_patient(
+        patient: PatientRead,
+        *,
+        fallback_to_unanonymized: bool = False,
+    ) -> dict[DicomQueryLevel, Path]:
+        """Build working-directory map from a ``PatientRead``.
+
+        Delegates to
+        :func:`clarinet.services.common.storage_paths.render_all_levels`
+        (single rendering point). Only the PATIENT-level directory is
+        returned, since no study anchor is available.
+
+        Args:
+            patient: Fully-loaded patient.
+            fallback_to_unanonymized: see :meth:`build_working_dirs`.
+
+        Returns:
+            Dict mapping ``DicomQueryLevel.PATIENT`` to its ``Path``.
+        """
+        return render_all_levels(
+            patient=patient,
+            study=None,
             series=None,
             storage_path=Path(settings.storage_path),
             fallback_to_unanonymized=fallback_to_unanonymized,
