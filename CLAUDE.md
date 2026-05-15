@@ -1,6 +1,6 @@
 # Clarinet — Code Style Guide
 
-Clarinet is a framework for clinical-radiological studies, built on FastAPI, SQLModel, and async architecture.
+Clarinet is an imaging-centric framework for clinical research, built on FastAPI, SQLModel, and async architecture.
 
 ## Architecture
 

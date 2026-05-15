@@ -5,7 +5,7 @@
 ![Python](https://raw.githubusercontent.com/radionest/clarinet/badges/python.svg)
 ![3D Slicer](https://raw.githubusercontent.com/radionest/clarinet/badges/slicer.svg)
 
-A framework for organizing clinical-radiological trials. You describe record types, data schemas, and workflow logic — run `clarinet run` — and get a web application with an admin panel, auto-generated forms, task management, and PACS integration.
+An imaging-centric framework for clinical research. You describe record types, data schemas, and workflow logic — run `clarinet run` — and get a web application with an admin panel, auto-generated forms, task management, and PACS integration.
 
 ## Why
 
