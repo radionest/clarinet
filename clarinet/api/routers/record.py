@@ -455,11 +455,18 @@ async def _process_submission(
             "validate_record_id(record_id)\n" + record_read.record_type.slicer_result_validator
         )
         slicer_url = f"http://{client_ip}:{settings.slicer_port}"
-        await slicer_service.execute(
+        exec_result = await slicer_service.execute(
             slicer_url,
             validator_script,
             context,
             request_timeout=60.0,
+        )
+
+        # If the validator returned __execResult, merge it into validated_data
+        # (validator wins on conflicts) and re-validate. See
+        # clarinet/services/slicer/CLAUDE.md → "__execResult Result-Merging Contract".
+        validated_data = await rt_service.apply_validator_result_merge(
+            record, validated_data, exec_result
         )
 
     if is_update:
