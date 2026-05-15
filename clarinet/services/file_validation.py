@@ -138,9 +138,11 @@ async def validate_record_files(
 ) -> FileValidationResult | None:
     """Validate input files for a record.
 
-    Accepts ``RecordRead`` (Pydantic) because ``working_folder`` and other
-    computed fields are defined on ``RecordRead``, not on the ORM ``Record``.
-    Callers should convert via ``RecordRead.model_validate(record)`` first.
+    Accepts ``RecordRead`` (Pydantic) so relationships (patient, study,
+    series, record_type) are eager-loaded — the path resolver needs them
+    immediately and lazy-loading would raise ``MissingGreenlet`` in async
+    contexts. Callers should convert via ``RecordRead.model_validate(record)``
+    first.
 
     The blocking ``FileValidator.validate()`` call is offloaded to a
     dedicated FS thread pool to avoid blocking the event loop.

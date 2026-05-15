@@ -100,9 +100,10 @@ def _modalities_string(study: "Study | StudyBase | None") -> str:
     Reads ``study.modalities_in_study`` (a ``MODALITIES_SEPARATOR``-joined
     string written by ``operations._ds_modalities``). Returns ``"unknown"``
     when missing — does NOT lazy-load ``study.series`` because callers
-    reach this from ``computed_field`` properties on ``*Read`` DTOs
-    where the relationship may not be eagerly loaded; lazy-load on an
-    async session raises ``MissingGreenlet``.
+    reach this from helper methods (``_get_working_folder``,
+    ``_format_path_strict``) and ``FileResolver`` where the relationship
+    may not be eagerly loaded; lazy-load on an async session raises
+    ``MissingGreenlet``.
     """
     if study is None:
         return "unknown"
