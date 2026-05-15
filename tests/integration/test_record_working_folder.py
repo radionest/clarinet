@@ -661,10 +661,16 @@ async def test_working_folder_respects_custom_disk_path_template(
     substitution for any non-anon field (patient_auto_id, series_num,
     series_modality, study_uid).
     """
-    monkeypatch.setattr(
-        "clarinet.services.common.storage_paths.settings.disk_path_template",
-        template,
-    )
+    # Patch the shared ``settings`` singleton directly — both
+    # ``clarinet.models.record`` and ``clarinet.services.common.storage_paths``
+    # import it by the same identity, so the mutation propagates regardless
+    # of which module the call site reads from.
+    monkeypatch.setattr(settings, "disk_path_template", template)
+
+    # series_with_anon is created without ``modality`` — pin the
+    # expectation so a future fixture tweak (e.g. setting modality="CT")
+    # doesn't silently shift the parametrized expected value.
+    assert series_with_anon.modality is None
 
     record_read = await RecordFactory.create_record_with_relations(
         test_session,

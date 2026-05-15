@@ -111,16 +111,36 @@ async def test_get_record_returns_working_folder_in_json(client, seeded_record):
 
 @pytest.mark.asyncio
 async def test_get_record_returns_slicer_args_formatted_in_json(client, seeded_record):
-    """``GET /api/records/{id}`` JSON contains all three slicer args fields."""
+    """``GET /api/records/{id}`` JSON returns all three slicer args fields as dicts.
+
+    Stronger than membership check — ``in body`` would still pass if the
+    refactor silently serialised the field as ``null``, which is exactly
+    the regression Phase 0 must catch. Asserting ``isinstance(dict)`` +
+    placeholder substitution (``{working_folder}`` resolved) closes that.
+    """
     response = await client.get(f"{RECORDS_BASE}/{seeded_record.id}")
 
     assert response.status_code == 200
     body = response.json()
-    assert "slicer_args_formatted" in body
-    assert "slicer_validator_args_formatted" in body
-    assert "slicer_all_args_formatted" in body
+
+    # All three computed slicer-args fields must be non-null dicts in the
+    # response — null would indicate the model-level computed field was
+    # dropped without an explicit router-side replacement.
+    assert isinstance(body["slicer_args_formatted"], dict)
+    assert isinstance(body["slicer_validator_args_formatted"], dict)
     assert isinstance(body["slicer_all_args_formatted"], dict)
+
+    # The RecordType fixture sets ``slicer_script_args = {"out":
+    # "{working_folder}/result.nrrd"}`` — confirm the {working_folder}
+    # placeholder was actually substituted, not passed through verbatim.
+    assert "out" in body["slicer_args_formatted"]
+    assert body["slicer_args_formatted"]["out"].endswith("/result.nrrd")
+    assert "{working_folder}" not in body["slicer_args_formatted"]["out"]
+
+    # slicer_all_args_formatted aggregates all args and always carries
+    # working_folder under that key.
     assert "working_folder" in body["slicer_all_args_formatted"]
+    assert isinstance(body["slicer_all_args_formatted"]["working_folder"], str)
 
 
 @pytest.mark.asyncio
@@ -144,3 +164,34 @@ async def test_get_series_returns_working_folder_in_json(client, anon_series):
     # downgrade it to ``null``.
     assert isinstance(body["working_folder"], str)
     assert body["working_folder"]
+
+
+@pytest.mark.asyncio
+async def test_series_working_folder_ignores_record_clarinet_storage_path(
+    client, test_session, anon_patient, anon_study, anon_series, rt_series_with_slicer_args
+):
+    """``SeriesRead.working_folder`` is invariant under ``Record.clarinet_storage_path``.
+
+    Asymmetry-by-design (see ``RecordRead._get_working_folder`` docstring):
+    per-record override exists only on Record, never on Series — so even
+    when a Record points at the same Series with a custom storage root,
+    ``GET /api/series/{uid}`` always returns ``settings.storage_path`` based
+    path. A future refactor must not "fix" the asymmetry by mistake.
+    """
+    custom_storage = "/custom/series-asymmetry/root"
+    await seed_record(
+        test_session,
+        patient_id=anon_patient.id,
+        study_uid=anon_study.study_uid,
+        series_uid=anon_series.series_uid,
+        rt_name=rt_series_with_slicer_args.name,
+        clarinet_storage_path=custom_storage,
+    )
+
+    response = await client.get(f"{SERIES_BASE}/{anon_series.series_uid}")
+    assert response.status_code == 200
+    body = response.json()
+    assert isinstance(body["working_folder"], str)
+    assert custom_storage not in body["working_folder"], (
+        "SeriesRead must NOT pick up Record.clarinet_storage_path — intentional asymmetry"
+    )
