@@ -202,3 +202,49 @@ async def test_submit_no_validator_skips_slicer(
 
     assert resp.status_code == 200, resp.text
     mock_slicer_service.execute.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_resubmit_patch_merges_execresult_into_data(
+    client, test_session, mock_slicer_service: AsyncMock
+):
+    """PATCH /submit (resubmit on finished) also merges __execResult into data."""
+    patient = make_patient("EXEC_PAT003", "ExecResult Patient 3")
+    test_session.add(patient)
+    await test_session.flush()
+
+    study = Study(
+        patient_id=patient.id,
+        study_uid="2.16.840.1.999.901.3",
+        date=datetime.now(UTC).date(),
+    )
+    test_session.add(study)
+    await test_session.flush()
+
+    rt = RecordType(
+        name="exec-resubmit-test",
+        level="STUDY",
+        data_schema=_BOUNDS_SCHEMA,
+        slicer_result_validator="__execResult = {}  # stub — mocked in tests",
+    )
+    test_session.add(rt)
+    await test_session.flush()
+
+    rec = Record(
+        record_type_name=rt.name,
+        patient_id=patient.id,
+        study_uid=study.study_uid,
+        status=RecordStatus.finished,
+    )
+    test_session.add(rec)
+    await test_session.commit()
+    await test_session.refresh(rec)
+
+    updated = {**_full_bounds(), "x_min": -1.0}
+    mock_slicer_service.execute.return_value = updated
+
+    resp = await client.patch(f"{RECORDS_BASE}/{rec.id}/submit", json={})
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["data"] == updated
+    mock_slicer_service.execute.assert_awaited_once()

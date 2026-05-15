@@ -178,7 +178,8 @@ On overlapping keys between `__execResult` and user-submitted `data` —
 **validator wins**. This is intentional: hidden fields are authoritative and
 not editable by the doctor. If a non-hidden key happens to collide, the
 validator override is still applied; if that's not desired, the validator
-should not return that key.
+should not return that key. The override is still subject to the second
+validation pass — see "Error semantics" below.
 
 ### Error semantics
 
