@@ -149,6 +149,32 @@ async def rt_patient(test_session):
 
 
 @pytest_asyncio.fixture
+async def rt_series_with_slicer_args(test_session):
+    """SERIES-level RecordType carrying both slicer arg variants — for parity
+    tests between FileRepository.slicer_args and RecordRead.slicer_*_args_formatted.
+    """
+    rt = RecordType(
+        name="parity-rt",
+        description="Parity test RT",
+        label="Parity RT",
+        level=DicomQueryLevel.SERIES,
+        slicer_script_args={
+            "input": "{working_folder}/input.nrrd",
+            "patient": "{patient_id}",
+            "study": "{study_uid}",
+        },
+        slicer_result_validator_args={
+            "check": "{working_folder}/check.json",
+            "series": "{series_uid}",
+        },
+    )
+    test_session.add(rt)
+    await test_session.commit()
+    await test_session.refresh(rt)
+    return rt
+
+
+@pytest_asyncio.fixture
 async def rt_with_input_files(test_session):
     """SERIES-level RecordType with input file definitions via M2M links."""
     rt = RecordType(
@@ -731,3 +757,59 @@ async def test_slicer_args_working_folder_placeholder(
     # Also verify in slicer_all_args_formatted
     all_args = record_read.slicer_all_args_formatted
     assert all_args["output_path"] == f"{expected_wf}/output.nrrd"
+
+
+# ===========================================================================
+# Group 6: FileRepository.slicer_args ≡ RecordRead.slicer_*_args_formatted
+#
+# Phase 1 acceptance criterion (file-repo roadmap): snapshot parity with the
+# legacy computed fields. Phase 3 removes them; Phase 5 builds slicer context
+# via FileRepository.slicer_args — without this parity proof, Phase 3 could
+# silently regress the slicer-arg surface.
+# ===========================================================================
+
+
+@pytest.mark.asyncio
+async def test_file_repository_slicer_args_matches_legacy_script_formatted(
+    test_session,
+    patient_with_anon,
+    study_with_anon,
+    series_with_anon,
+    rt_series_with_slicer_args,
+):
+    from clarinet.repositories import FileRepository
+    from tests.utils.test_helpers import RecordFactory
+
+    record_read = await RecordFactory.create_record_with_relations(
+        test_session,
+        patient=patient_with_anon,
+        study=study_with_anon,
+        series=series_with_anon,
+        record_type=rt_series_with_slicer_args,
+    )
+    legacy = record_read.slicer_args_formatted
+    new = FileRepository(record_read).slicer_args(validator=False)
+    assert new == legacy
+
+
+@pytest.mark.asyncio
+async def test_file_repository_slicer_args_matches_legacy_validator_formatted(
+    test_session,
+    patient_with_anon,
+    study_with_anon,
+    series_with_anon,
+    rt_series_with_slicer_args,
+):
+    from clarinet.repositories import FileRepository
+    from tests.utils.test_helpers import RecordFactory
+
+    record_read = await RecordFactory.create_record_with_relations(
+        test_session,
+        patient=patient_with_anon,
+        study=study_with_anon,
+        series=series_with_anon,
+        record_type=rt_series_with_slicer_args,
+    )
+    legacy = record_read.slicer_validator_args_formatted
+    new = FileRepository(record_read).slicer_args(validator=True)
+    assert new == legacy

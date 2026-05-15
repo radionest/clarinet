@@ -81,7 +81,12 @@ async def _has_dcm_anon(storage_path: Path, study_uid: str, series_uid: str) -> 
         return False
 
     try:
-        ctx = build_context(patient=patient, study=study, series=series)
+        ctx = build_context(
+            patient=patient,
+            study=study,
+            series=series,
+            template=settings.disk_path_template,
+        )
         series_dir = render_working_folder(
             settings.disk_path_template, DicomQueryLevel.SERIES, ctx, storage_path
         )

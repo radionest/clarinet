@@ -517,6 +517,7 @@ class RecordRead(RecordBase):
             patient=self.patient,
             study=self.study,
             series=self.series,
+            template=settings.disk_path_template,
             fallback_to_unanonymized=fallback_to_unanonymized,
         )
         # Per-record override only lives on Record (Series has no

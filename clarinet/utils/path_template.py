@@ -43,6 +43,7 @@ renders to::
 """
 
 from pathlib import PurePosixPath
+from string import Formatter
 
 SUPPORTED_PLACEHOLDERS: frozenset[str] = frozenset(
     {
@@ -71,6 +72,19 @@ class StrictDict(dict[str, str]):
 
     def __missing__(self, key: str) -> str:
         raise KeyError(key)
+
+
+def extract_placeholders(template: str) -> set[str]:
+    """Return the set of placeholder names referenced in ``template``.
+
+    Used by ``build_context`` to compute only the values that the template
+    actually references, so a raw-UID template (no ``{anon_*}``) never
+    triggers anonymized-UID resolution. The returned set may contain names
+    NOT in ``SUPPORTED_PLACEHOLDERS`` — call ``validate_template`` separately
+    if you need to enforce the catalogue. Unnamed positional fields (``{}``)
+    and escaped braces (``{{``/``}}``) are ignored.
+    """
+    return {field_name for _, field_name, _, _ in Formatter().parse(template) if field_name}
 
 
 def validate_template(template: str) -> str:

@@ -214,9 +214,12 @@ def _render_old_new_dirs(
     only renders.
     """
     try:
-        ctx = build_context(patient=patient, study=study, series=series)
-        old_dir = render_working_folder(from_template, level, ctx, storage_path)
-        new_dir = render_working_folder(to_template, level, ctx, storage_path)
+        ctx_from = build_context(
+            patient=patient, study=study, series=series, template=from_template
+        )
+        ctx_to = build_context(patient=patient, study=study, series=series, template=to_template)
+        old_dir = render_working_folder(from_template, level, ctx_from, storage_path)
+        new_dir = render_working_folder(to_template, level, ctx_to, storage_path)
     except AnonPathError as exc:
         logger.error(f"{label}: template render failed ({exc}); skipping.")
         counters["failed"] += 1

@@ -91,6 +91,7 @@ async def test_build_context_no_series_lazy_load(test_session, fresh_session):
         patient=fresh_patient,
         study=fresh_study,
         series=fresh_series,
+        template="{study_modalities}/x/y",
         fallback_to_unanonymized=True,
     )
     assert ctx["study_modalities"] == "CT_PT"

@@ -179,6 +179,7 @@ class SeriesRead(SeriesBase):
             patient=self.study.patient,
             study=self.study,
             series=self,
+            template=settings.disk_path_template,
             fallback_to_unanonymized=True,
         )
         return str(
