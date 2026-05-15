@@ -13,7 +13,7 @@ from clarinet.exceptions.domain import (
 from clarinet.exceptions.domain import FileNotFoundError as DomainFileNotFoundError
 from clarinet.models import Record, RecordRead, RecordStatus
 from clarinet.models.file_schema import FileDefinitionRead, FileRole
-from clarinet.services.common.file_resolver import FileResolver
+from clarinet.repositories.file_repository import FileRepository
 from clarinet.services.file_validation import validate_record_files
 from clarinet.utils.file_checksums import checksums_changed, compute_checksums
 from clarinet.utils.file_patterns import glob_file_paths, resolve_pattern
@@ -334,10 +334,11 @@ class RecordService:
             else:
                 return [], {}
 
+        _, working_dir = FileRepository.resolve_with_fallback(record_read)
         new_checksums = await compute_checksums(
             record_read.record_type.file_registry or [],
             record_read,
-            Path(record_read.working_folder),
+            working_dir,
         )
         old_checksums = {
             link.name: link.checksum for link in (record_read.file_links or []) if link.checksum
@@ -451,13 +452,12 @@ class RecordService:
 
         For ``multiple=False`` returns a single-element list when the
         resolved path exists on disk, else an empty list.
+
+        Records whose anonymized identifiers are missing fall back to raw
+        UIDs (admin/UI-triggered cascade keeps working on legacy data —
+        cf. ``FileRepository.resolve_with_fallback``).
         """
-        # Admin/UI-triggered cascade — fall back to raw UIDs for records
-        # whose study/series has not been anonymized yet, otherwise the
-        # delete pipeline would 500 on legacy data.
-        working_dirs = FileResolver.build_working_dirs(record_read, fallback_to_unanonymized=True)
-        record_level = record_read.record_type.level
-        default_dir = working_dirs.get(record_level, Path(record_read.working_folder))
+        working_dirs, default_dir = FileRepository.resolve_with_fallback(record_read)
         target_dir = (
             working_dirs[file_def.level]
             if file_def.level and file_def.level in working_dirs
@@ -651,7 +651,7 @@ class RecordService:
         if not output_defs:
             return
 
-        working_dir = Path(record_read.working_folder)
+        _, working_dir = FileRepository.resolve_with_fallback(record_read)
         try:
             new_checksums = await compute_checksums(output_defs, record_read, working_dir)
         except Exception as e:
