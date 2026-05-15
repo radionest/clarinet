@@ -387,6 +387,7 @@ class AnonymizationService:
             patient=patient,
             study=study,
             series=series,
+            template=settings.disk_path_template,
             anon_patient_id=anon_patient_id,
             anon_study_uid=anon_study_uid,
             anon_series_uid=anon_series_uid,

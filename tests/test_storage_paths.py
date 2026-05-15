@@ -17,6 +17,22 @@ from clarinet.services.common.storage_paths import (
     split_template,
     validate_template,
 )
+from clarinet.utils.path_template import extract_placeholders
+
+# Default disk_path_template (matches settings.toml). build_context() reads
+# settings.disk_path_template when template= is not passed; mock its value
+# explicitly because spec_set=True returns a MagicMock for attribute access.
+_DEFAULT_TEMPLATE = "{anon_patient_id}/{anon_study_uid}/{anon_series_uid}"
+
+# Template referencing every supported placeholder — used by tests that
+# assert the full context dict. (Not a valid disk_path_template — it does
+# not have 3 segments — but build_context() only parses placeholders.)
+_ALL_PLACEHOLDERS_TEMPLATE = (
+    "{anon_patient_id}_{anon_study_uid}_{anon_series_uid}"
+    "_{patient_id}_{patient_auto_id}_{anon_id_prefix}"
+    "_{study_uid}_{series_uid}_{study_date}"
+    "_{study_modalities}_{series_modality}_{series_num}"
+)
 
 
 @pytest.fixture
@@ -76,7 +92,12 @@ class TestBuildContext:
         ) as mock_settings:
             mock_settings.anon_per_study_patient_id = False
             mock_settings.anon_id_prefix = "CLARINET"
-            ctx = build_context(patient=patient, study=study, series=series)
+            ctx = build_context(
+                patient=patient,
+                study=study,
+                series=series,
+                template=_ALL_PLACEHOLDERS_TEMPLATE,
+            )
         # anon_patient_id derives from patient.anon_id (= "{prefix}_{auto_id}")
         assert ctx["anon_patient_id"].startswith("CLARINET_")
         assert ctx["anon_study_uid"] == "9.9.9.9"
@@ -98,6 +119,7 @@ class TestBuildContext:
             mock_settings.anon_per_study_patient_id_hex_length = 8
             mock_settings.anon_uid_salt = "salt"
             mock_settings.anon_id_prefix = "CLARINET"
+            mock_settings.disk_path_template = _DEFAULT_TEMPLATE
             ctx = build_context(patient=patient, study=study, series=series)
         # per-study hash is 8 hex chars + "CLARINET_" prefix
         assert ctx["anon_patient_id"].startswith("CLARINET_")
@@ -110,6 +132,7 @@ class TestBuildContext:
         ) as mock_settings:
             mock_settings.anon_per_study_patient_id = False
             mock_settings.anon_id_prefix = "X"
+            mock_settings.disk_path_template = _DEFAULT_TEMPLATE
             ctx = build_context(
                 patient=patient,
                 study=study,
@@ -129,7 +152,11 @@ class TestBuildContext:
             mock_settings.anon_per_study_patient_id = False
             mock_settings.anon_id_prefix = "X"
             ctx = build_context(
-                patient=None, study=None, series=None, fallback_to_unanonymized=True
+                patient=None,
+                study=None,
+                series=None,
+                template=_ALL_PLACEHOLDERS_TEMPLATE,
+                fallback_to_unanonymized=True,
             )
         assert ctx["patient_id"] == "unknown"
         assert ctx["study_uid"] == "unknown"
@@ -150,6 +177,7 @@ class TestBuildContext:
         ) as mock_settings:
             mock_settings.anon_per_study_patient_id = False
             mock_settings.anon_id_prefix = "CLARINET"
+            mock_settings.disk_path_template = _DEFAULT_TEMPLATE
             with pytest.raises(AnonPathError, match="Patient has no anon_id"):
                 build_context(patient=unanon_patient, study=None, series=None)
 
@@ -167,6 +195,7 @@ class TestBuildContext:
         ) as mock_settings:
             mock_settings.anon_per_study_patient_id = False
             mock_settings.anon_id_prefix = "CLARINET"
+            mock_settings.disk_path_template = _DEFAULT_TEMPLATE
             with pytest.raises(AnonPathError, match="Study has no anon_uid"):
                 build_context(patient=patient, study=unanon_study, series=None)
 
@@ -184,6 +213,7 @@ class TestBuildContext:
         ) as mock_settings:
             mock_settings.anon_per_study_patient_id = False
             mock_settings.anon_id_prefix = "CLARINET"
+            mock_settings.disk_path_template = _DEFAULT_TEMPLATE
             ctx = build_context(
                 patient=patient,
                 study=unanon_study,
@@ -207,6 +237,7 @@ class TestBuildContext:
         ) as mock_settings:
             mock_settings.anon_per_study_patient_id = False
             mock_settings.anon_id_prefix = "CLARINET"
+            mock_settings.disk_path_template = _DEFAULT_TEMPLATE
             with pytest.raises(AnonPathError, match="Series has no anon_uid"):
                 build_context(patient=patient, study=study, series=unanon_series)
 
@@ -672,3 +703,126 @@ class TestWriterFileResolverUnification:
             storage_path=Path("/storage"),
         )
         assert resolver_dirs[DicomQueryLevel.SERIES] == writer_path
+
+
+class TestExtractPlaceholders:
+    def test_default_template(self) -> None:
+        assert extract_placeholders("{anon_patient_id}/{anon_study_uid}/{anon_series_uid}") == {
+            "anon_patient_id",
+            "anon_study_uid",
+            "anon_series_uid",
+        }
+
+    def test_no_placeholders(self) -> None:
+        assert extract_placeholders("a/b/c") == set()
+
+    def test_repeated_placeholders_deduped(self) -> None:
+        assert extract_placeholders("{a}/{a}/{b}") == {"a", "b"}
+
+    def test_escaped_braces_ignored(self) -> None:
+        assert extract_placeholders("{{literal}}/{a}/{{x}}") == {"a"}
+
+
+class TestBuildContextPullBased:
+    """Phase 1.5: build_context resolves only placeholders present in template."""
+
+    def test_no_anon_template_skips_require_anon_or_raw(
+        self, patient: Patient, study: Study, series: Series
+    ) -> None:
+        """Raw-UID template must NOT invoke anon resolution, even with anon_uid=None."""
+        unanon_study = Study(
+            study_uid="1.2.3.4",
+            date=date(2026, 4, 15),
+            patient_id=patient.id,
+            anon_uid=None,
+        )
+        unanon_series = Series(
+            series_uid="1.2.3.4.5",
+            series_number=1,
+            modality="CT",
+            study_uid=unanon_study.study_uid,
+            anon_uid=None,
+        )
+        with (
+            patch("clarinet.services.common.storage_paths.require_anon_or_raw") as mock_raar,
+            patch(
+                "clarinet.services.common.storage_paths.settings", spec_set=True
+            ) as mock_settings,
+        ):
+            mock_settings.anon_per_study_patient_id = False
+            mock_settings.anon_id_prefix = "X"
+            ctx = build_context(
+                patient=patient,
+                study=unanon_study,
+                series=unanon_series,
+                template="{patient_id}/{study_uid}/{series_uid}",
+            )
+        mock_raar.assert_not_called()
+        assert ctx == {
+            "patient_id": "PAT001",
+            "study_uid": "1.2.3.4",
+            "series_uid": "1.2.3.4.5",
+        }
+
+    def test_anon_template_strict_raises_when_anon_missing(self, patient: Patient) -> None:
+        """Template with {anon_study_uid} + no anon_uid + strict → AnonPathError."""
+        unanon_study = Study(
+            study_uid="1.2.3.4",
+            date=date(2026, 4, 15),
+            patient_id=patient.id,
+            anon_uid=None,
+        )
+        with patch(
+            "clarinet.services.common.storage_paths.settings", spec_set=True
+        ) as mock_settings:
+            mock_settings.anon_per_study_patient_id = False
+            mock_settings.anon_id_prefix = "CLARINET"
+            with pytest.raises(AnonPathError, match="Study has no anon_uid"):
+                build_context(
+                    patient=patient,
+                    study=unanon_study,
+                    series=None,
+                    template="{anon_patient_id}/{anon_study_uid}/x",
+                )
+
+    def test_anon_template_fallback_returns_raw_uid(self, patient: Patient) -> None:
+        unanon_study = Study(
+            study_uid="1.2.3.4",
+            date=date(2026, 4, 15),
+            patient_id=patient.id,
+            anon_uid=None,
+        )
+        with patch(
+            "clarinet.services.common.storage_paths.settings", spec_set=True
+        ) as mock_settings:
+            mock_settings.anon_per_study_patient_id = False
+            mock_settings.anon_id_prefix = "CLARINET"
+            ctx = build_context(
+                patient=patient,
+                study=unanon_study,
+                series=None,
+                template="{anon_patient_id}/{anon_study_uid}/x",
+                fallback_to_unanonymized=True,
+            )
+        assert ctx["anon_study_uid"] == "1.2.3.4"
+
+    def test_template_none_defaults_to_settings(
+        self, patient: Patient, study: Study, series: Series
+    ) -> None:
+        """When template=None, falls back to settings.disk_path_template (default behavior)."""
+        with patch(
+            "clarinet.services.common.storage_paths.settings", spec_set=True
+        ) as mock_settings:
+            mock_settings.anon_per_study_patient_id = False
+            mock_settings.anon_id_prefix = "CLARINET"
+            mock_settings.disk_path_template = (
+                "{anon_patient_id}/{anon_study_uid}/{anon_series_uid}"
+            )
+            ctx = build_context(patient=patient, study=study, series=series)
+        # All three anon placeholders resolved (default template references them).
+        assert "anon_patient_id" in ctx
+        assert "anon_study_uid" in ctx
+        assert "anon_series_uid" in ctx
+        # Placeholders NOT in default template are absent.
+        assert "study_date" not in ctx
+        assert "series_num" not in ctx

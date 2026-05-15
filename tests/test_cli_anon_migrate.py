@@ -55,7 +55,7 @@ async def _seed_anonymized_series(
 
 def _populate_old_path(storage_path: Path, patient, study, series, old_template: str) -> Path:
     """Render old path and create a dummy ``foo.dcm`` inside ``dcm_anon``."""
-    ctx = build_context(patient=patient, study=study, series=series)
+    ctx = build_context(patient=patient, study=study, series=series, template=old_template)
     series_dir = render_working_folder(old_template, DicomQueryLevel.SERIES, ctx, storage_path)
     dcm_anon = series_dir / "dcm_anon"
     dcm_anon.mkdir(parents=True, exist_ok=True)
@@ -140,7 +140,7 @@ async def test_migrate_paths_moves_files(test_session: AsyncSession, tmp_path: P
     await _run_migrate(args, test_session, tmp_path)
 
     # New path layout
-    ctx = build_context(patient=patient, study=study, series=series)
+    ctx = build_context(patient=patient, study=study, series=series, template=new_template)
     new_series_dir = render_working_folder(new_template, DicomQueryLevel.SERIES, ctx, tmp_path)
     new_dcm_anon = new_series_dir / "dcm_anon"
 
@@ -258,7 +258,7 @@ def _populate_series_dir_full(
     storage_path: Path, patient, study, series, old_template: str
 ) -> tuple[Path, Path]:
     """Populate old series_dir with both ``dcm_anon/foo.dcm`` and a pipeline output."""
-    ctx = build_context(patient=patient, study=study, series=series)
+    ctx = build_context(patient=patient, study=study, series=series, template=old_template)
     series_dir = render_working_folder(old_template, DicomQueryLevel.SERIES, ctx, storage_path)
     dcm_anon = series_dir / "dcm_anon"
     dcm_anon.mkdir(parents=True, exist_ok=True)
@@ -277,7 +277,7 @@ def _populate_level_dir(
     filename: str = "artifact.bin",
 ) -> Path:
     """Populate a STUDY/PATIENT-level dir with a single file. Returns the file path."""
-    ctx = build_context(patient=patient, study=study, series=series)
+    ctx = build_context(patient=patient, study=study, series=series, template=template)
     level_dir = render_working_folder(template, level, ctx, storage_path)
     level_dir.mkdir(parents=True, exist_ok=True)
     artifact = level_dir / filename
@@ -341,7 +341,7 @@ async def test_include_working_folder_moves_full_series_dir(
     )
     await _run_migrate(args, test_session, tmp_path)
 
-    ctx = build_context(patient=patient, study=study, series=series)
+    ctx = build_context(patient=patient, study=study, series=series, template=new_tmpl)
     new_series_dir = render_working_folder(new_tmpl, DicomQueryLevel.SERIES, ctx, tmp_path)
     assert new_series_dir.is_dir()
     assert (new_series_dir / "dcm_anon" / "foo.dcm").exists()
@@ -427,7 +427,7 @@ async def test_include_working_folder_study_record_moves_study_files(
     )
     await _run_migrate(args, test_session, tmp_path)
 
-    ctx = build_context(patient=patient, study=study, series=series)
+    ctx = build_context(patient=patient, study=study, series=series, template=new_tmpl)
     new_study_dir = render_working_folder(new_tmpl, DicomQueryLevel.STUDY, ctx, tmp_path)
     assert (new_study_dir / "segmentation.seg.nrrd").exists()
     assert not old_study_artifact.exists()
@@ -478,7 +478,7 @@ async def test_include_working_folder_study_per_file_collision_skips(
         filename="conflict.bin",
     )
     # Pre-create the same-named file at the new STUDY-dir target.
-    ctx = build_context(patient=patient, study=study, series=series)
+    ctx = build_context(patient=patient, study=study, series=series, template=new_tmpl)
     new_study_dir = render_working_folder(new_tmpl, DicomQueryLevel.STUDY, ctx, tmp_path)
     new_study_dir.mkdir(parents=True, exist_ok=True)
     (new_study_dir / "conflict.bin").write_bytes(b"pre-existing")
@@ -544,7 +544,7 @@ async def test_include_working_folder_patient_record_moves_patient_files(
     )
     await _run_migrate(args, test_session, tmp_path)
 
-    ctx = build_context(patient=patient, study=study, series=series)
+    ctx = build_context(patient=patient, study=study, series=series, template=new_tmpl)
     new_patient_dir = render_working_folder(new_tmpl, DicomQueryLevel.PATIENT, ctx, tmp_path)
     assert (new_patient_dir / "liver.nii.gz").exists()
     assert not old_patient_artifact.exists()
@@ -570,7 +570,7 @@ async def test_include_working_folder_series_collision_skips(
     old_series_dir, _ = _populate_series_dir_full(tmp_path, patient, study, series, old_tmpl)
 
     # Pre-create the target as if a previous run already placed something there.
-    ctx = build_context(patient=patient, study=study, series=series)
+    ctx = build_context(patient=patient, study=study, series=series, template=new_tmpl)
     new_series_dir = render_working_folder(new_tmpl, DicomQueryLevel.SERIES, ctx, tmp_path)
     new_series_dir.mkdir(parents=True)
     (new_series_dir / "preexisting.txt").write_bytes(b"already here")
@@ -612,7 +612,7 @@ async def test_dcm_anon_default_mode_collision_skips(
     old_dcm_anon = _populate_old_path(tmp_path, patient, study, series, old_tmpl)
 
     # Pre-create the target dcm_anon to trigger collision.
-    ctx = build_context(patient=patient, study=study, series=series)
+    ctx = build_context(patient=patient, study=study, series=series, template=new_tmpl)
     new_series_dir = render_working_folder(new_tmpl, DicomQueryLevel.SERIES, ctx, tmp_path)
     new_dcm_anon = new_series_dir / "dcm_anon"
     new_dcm_anon.mkdir(parents=True)
@@ -692,7 +692,7 @@ async def test_include_working_folder_cleanup_prunes_empty_parents(
     # No stray old-template subdirs should appear inside the new patient_dir
     # (regression guard: ``_merge_dir`` used to propagate the bare
     # ``old_anon_study_uid/`` left behind by the SERIES pass).
-    ctx = build_context(patient=patient, study=study, series=series)
+    ctx = build_context(patient=patient, study=study, series=series, template=new_tmpl)
     new_patient_dir = render_working_folder(new_tmpl, DicomQueryLevel.PATIENT, ctx, tmp_path)
     new_study_dir = render_working_folder(new_tmpl, DicomQueryLevel.STUDY, ctx, tmp_path)
     assert new_patient_dir.is_dir()
