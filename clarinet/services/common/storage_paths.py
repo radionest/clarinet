@@ -11,9 +11,9 @@ Anonymized DICOM files (``dcm_anon/``) live as a sub-directory of the
 SERIES-level working folder, so both ``AnonymizationService`` (writer)
 and ``DicomWebCache`` (reader) compute the same path from this template.
 All non-writer call sites (pipeline ``FileResolver``, Slicer context,
-file validation, computed-field ``working_folder``) reach the same
-path through ``render_all_levels`` — the single rendering point for
-storage directories.
+file validation, the ``RecordRead._get_working_folder`` helper) reach
+the same path through ``render_all_levels`` — the single rendering
+point for storage directories.
 
 Supported placeholders are listed in ``SUPPORTED_PLACEHOLDERS``. Backend
 callers run with the default ``fallback_to_unanonymized=False`` and get
@@ -22,8 +22,8 @@ asymmetric-anonymization race instead of silently rendering a path
 against raw UIDs. UX callers pass ``fallback_to_unanonymized=True`` to
 fall back to raw UIDs / ``"unknown"`` (legacy non-fatal behavior).
 
-The resolver is pure-sync — safe to call from Pydantic ``computed_field``
-properties (``SeriesRead.working_folder``, ``RecordRead.working_folder``).
+The resolver is pure-sync — safe to call from Pydantic helper methods
+and from non-async backend code paths.
 
 Lives in ``services/common`` because the same template engine is used by
 DICOM anonymization, computed-field path rendering, pipeline file

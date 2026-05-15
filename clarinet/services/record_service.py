@@ -36,6 +36,22 @@ def _filter_in_sandbox(paths: list[Path], sandbox: Path) -> list[Path]:
     return [p for p in paths if p.resolve().is_relative_to(sandbox_resolved)]
 
 
+def _record_working_dir(record_read: RecordRead) -> Path:
+    """Resolve the working directory for ``record_read`` at its DICOM level.
+
+    Uses ``FileResolver`` with ``fallback_to_unanonymized=True`` so non-anon
+    records still produce a usable path (matches the legacy
+    ``RecordRead.working_folder`` semantics that backend services relied on).
+    """
+    from clarinet.models.base import DicomQueryLevel
+
+    working_dirs = FileResolver.build_working_dirs(record_read, fallback_to_unanonymized=True)
+    level = record_read.record_type.level
+    if isinstance(level, str):
+        level = DicomQueryLevel(level)
+    return working_dirs[level]
+
+
 class RecordService:
     """Service wrapping record mutations with automatic RecordFlow triggers.
 
@@ -334,10 +350,15 @@ class RecordService:
             else:
                 return [], {}
 
+        # Use FileResolver with fallback so a record whose study/series has
+        # not been anonymized yet still gets a checksum verdict instead of
+        # raising AnonPathError (matches the legacy `record.working_folder`
+        # behaviour, see file-repo roadmap §4 — strict-only repository
+        # tightening is deferred to its own PR).
         new_checksums = await compute_checksums(
             record_read.record_type.file_registry or [],
             record_read,
-            Path(record_read.working_folder),
+            _record_working_dir(record_read),
         )
         old_checksums = {
             link.name: link.checksum for link in (record_read.file_links or []) if link.checksum
@@ -457,7 +478,7 @@ class RecordService:
         # delete pipeline would 500 on legacy data.
         working_dirs = FileResolver.build_working_dirs(record_read, fallback_to_unanonymized=True)
         record_level = record_read.record_type.level
-        default_dir = working_dirs.get(record_level, Path(record_read.working_folder))
+        default_dir = working_dirs[record_level]
         target_dir = (
             working_dirs[file_def.level]
             if file_def.level and file_def.level in working_dirs
@@ -651,7 +672,7 @@ class RecordService:
         if not output_defs:
             return
 
-        working_dir = Path(record_read.working_folder)
+        working_dir = _record_working_dir(record_read)
         try:
             new_checksums = await compute_checksums(output_defs, record_read, working_dir)
         except Exception as e:

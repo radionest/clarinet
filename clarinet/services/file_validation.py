@@ -159,13 +159,16 @@ async def validate_record_files(
     if not input_defs:
         return None
 
-    directory = Path(record.working_folder)
     # Called both from `POST /records/{id}/validate-files` (admin UI) and
     # from `RecordService.create_record` (during record creation, before
     # any anonymization run). Fall back to raw UIDs so a record that has
     # not been anonymized yet still gets a `valid/invalid` verdict instead
     # of bubbling `AnonPathError` up to the caller.
     working_dirs = FileResolver.build_working_dirs(record, fallback_to_unanonymized=True)
+    record_level = record.record_type.level
+    if isinstance(record_level, str):
+        record_level = DicomQueryLevel(record_level)
+    directory = working_dirs[record_level]
     validator = FileValidator(input_defs)
     result = await run_in_fs_thread(validator.validate, record, directory, working_dirs, parent)
     if not result.valid and raise_on_invalid:

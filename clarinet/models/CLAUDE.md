@@ -19,23 +19,35 @@
 
 ## Computed Fields & Eager Loading
 
-Computed fields (`working_folder`, `radiant`, `slicer_args_formatted`, etc.) are defined on
-**`RecordRead`** (Pydantic), not on `RecordBase`/`Record` (ORM). This prevents `MissingGreenlet`
-errors from lazy-loading in async SQLAlchemy. Pattern (same as `SeriesRead.working_folder`):
+Computed fields (e.g. `radiant`, `context_info_html`) are defined on **`RecordRead`** (Pydantic),
+not on `RecordBase`/`Record` (ORM). This prevents `MissingGreenlet` errors from lazy-loading in
+async SQLAlchemy. Pattern:
 
 ```python
 record = await repo.get_with_relations(record_id)
 record_read = RecordRead.model_validate(record)
-record_read.working_folder  # safe — all data is plain Pydantic fields
+record_read.radiant  # safe — all data is plain Pydantic fields
 ```
 
-### Working Folder Contract
+### Path-resolution fields (Phase 4 of FileRepository refactor)
 
-`RecordRead.working_folder` and `SeriesRead.working_folder` return `str` (never `None`).
-Guaranteed by: exhaustive `DicomQueryLevel` enum, `validate_record_level` enforcing
-required UIDs per level, FK cascades preventing orphans, eager loading in all API paths.
+`RecordRead.working_folder` / `SeriesRead.working_folder` and the three
+`RecordRead.slicer_*_args_formatted` fields are now **plain `Optional` fields**
+(default `None`) — not computed_fields. Path resolution lives in
+`FileRepository` (`clarinet/repositories/file_repository.py`); routers and
+services compute paths through it explicitly:
 
-Two `_format_path` variants exist on `RecordRead` and `SeriesRead`:
+```python
+from clarinet.repositories import FileRepository
+working_dir = FileRepository(record_read).working_dir
+```
+
+Helper methods on `RecordRead` / `SeriesRead` (`_get_working_folder`,
+`_format_path_strict`, `_format_path`, `_format_slicer_kwargs`) remain as
+private building blocks — `build_slicer_context` and the parity tests use
+them. New code should prefer `FileRepository`.
+
+The two `_format_path` variants:
 - `_format_path_strict(template) -> str` — raises on failure (system templates)
 - `_format_path(template) -> str | None` — returns None on failure (user-defined slicer templates)
 

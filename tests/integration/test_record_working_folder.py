@@ -345,7 +345,9 @@ async def test_format_path_patient_anon_id_when_auto_id_set(
 
 
 # ===========================================================================
-# Group 2: _get_working_folder (underlying logic of working_folder computed field)
+# Group 2: _get_working_folder (underlying logic of the legacy
+# ``working_folder`` computed field — now exposed only as a helper method;
+# routers/services compute paths through ``FileRepository``).
 # ===========================================================================
 
 
@@ -368,7 +370,7 @@ async def test_working_folder_series_level(
         / "ANON_STUDY_WF"
         / "ANON_SERIES_WF"
     )
-    assert record_read.working_folder == expected
+    assert record_read._get_working_folder(fallback_to_unanonymized=True) == expected
 
 
 @pytest.mark.asyncio
@@ -384,7 +386,7 @@ async def test_working_folder_study_level(
     )
 
     expected = str(Path(settings.storage_path) / f"{settings.anon_id_prefix}_42" / "ANON_STUDY_WF")
-    assert record_read.working_folder == expected
+    assert record_read._get_working_folder(fallback_to_unanonymized=True) == expected
 
 
 @pytest.mark.asyncio
@@ -397,7 +399,7 @@ async def test_working_folder_patient_level(test_session, patient_with_anon, rt_
     )
 
     expected = str(Path(settings.storage_path) / f"{settings.anon_id_prefix}_42")
-    assert record_read.working_folder == expected
+    assert record_read._get_working_folder(fallback_to_unanonymized=True) == expected
 
 
 # ===========================================================================
@@ -522,7 +524,7 @@ async def test_working_folder_type_is_str(
     rt_study,
     rt_patient,
 ):
-    """working_folder returns str (not None) for all three levels."""
+    """``_get_working_folder`` returns ``str`` (not ``None``) for all three levels."""
     # SERIES level
     rec_series = await _create_record(
         test_session,
@@ -552,14 +554,20 @@ async def test_working_folder_type_is_str(
     for rec in (rec_series, rec_study, rec_patient):
         loaded = await repo.get_with_relations(rec.id)
         record_read = RecordRead.model_validate(loaded)
-        assert isinstance(record_read.working_folder, str)
+        assert isinstance(record_read._get_working_folder(fallback_to_unanonymized=True), str)
 
 
 @pytest.mark.asyncio
-async def test_slicer_all_args_always_has_working_folder(
+async def test_format_slicer_kwargs_includes_working_folder(
     test_session, patient_with_anon, study_with_anon, series_with_anon, rt_series
 ):
-    """slicer_all_args_formatted always contains 'working_folder' key."""
+    """``_format_slicer_kwargs`` resolves ``{working_folder}`` substitution.
+
+    The legacy ``slicer_all_args_formatted`` aggregator was removed with the
+    other path-related computed fields; the helper ``_format_slicer_kwargs``
+    is the building block ``build_slicer_context`` (and Phase 5
+    ``FileRepository.slicer_args``) rely on.
+    """
     record = await _create_record(
         test_session,
         patient_id=patient_with_anon.id,
@@ -572,23 +580,25 @@ async def test_slicer_all_args_always_has_working_folder(
     loaded = await repo.get_with_relations(record.id)
     record_read = RecordRead.model_validate(loaded)
 
-    all_args = record_read.slicer_all_args_formatted
-    assert isinstance(all_args, dict)
-    assert "working_folder" in all_args
-    assert isinstance(all_args["working_folder"], str)
+    wf = record_read._get_working_folder(fallback_to_unanonymized=True)
+    rendered = record_read._format_slicer_kwargs(
+        {"out": "{working_folder}/result.nrrd"},
+        {"working_folder": wf},
+    )
+    assert rendered["out"] == f"{wf}/result.nrrd"
 
 
 # ===========================================================================
 # Group 5: per-record clarinet_storage_path override and custom disk_path_template
 #
 # Phase 0 safety net: these surfaces are silently exercised by production
-# (RecordRead._get_working_folder uses ``self.clarinet_storage_path or
-# settings.storage_path``; ``settings.disk_path_template`` drives the layout)
-# but had no regression test, so the upcoming FileRepository refactor could
-# drop them without detection. Added as parametrized matrix to detect any
-# divergence between RecordRead.working_folder and the underlying
-# render_working_folder() once the model-level computed field moves into
-# FileRepository.
+# (``RecordRead._get_working_folder`` uses ``self.clarinet_storage_path or
+# settings.storage_path``; ``settings.disk_path_template`` drives the
+# layout) but had no regression test, so the FileRepository refactor could
+# drop them without detection. Parametrized matrix detects any divergence
+# between ``_get_working_folder`` and the underlying
+# ``render_working_folder()`` as the path-resolution surface keeps moving
+# into ``FileRepository``.
 # ===========================================================================
 
 
@@ -598,8 +608,8 @@ async def test_working_folder_uses_per_record_clarinet_storage_path_override(
 ):
     """``Record.clarinet_storage_path`` overrides ``settings.storage_path``.
 
-    Per-record override exists only on ``RecordRead`` — ``SeriesRead.working_folder``
-    always uses ``settings.storage_path`` (intentional asymmetry).
+    Per-record override exists only on ``RecordRead`` — ``SeriesRead`` paths
+    always use ``settings.storage_path`` (intentional asymmetry).
     """
     custom_storage = "/custom/storage/root"
     record_read = await RecordFactory.create_record_with_relations(
@@ -614,9 +624,10 @@ async def test_working_folder_uses_per_record_clarinet_storage_path_override(
     expected = str(
         Path(custom_storage) / f"{settings.anon_id_prefix}_42" / "ANON_STUDY_WF" / "ANON_SERIES_WF"
     )
-    assert record_read.working_folder == expected
+    rendered = record_read._get_working_folder(fallback_to_unanonymized=True)
+    assert rendered == expected
     # Settings-level storage_path must NOT be used when override is set.
-    assert not record_read.working_folder.startswith(str(settings.storage_path))
+    assert not rendered.startswith(str(settings.storage_path))
 
 
 @pytest.mark.asyncio
@@ -634,7 +645,8 @@ async def test_working_folder_falls_back_to_settings_storage_path_when_override_
     )
 
     assert record_read.clarinet_storage_path is None
-    assert record_read.working_folder.startswith(str(settings.storage_path))
+    rendered = record_read._get_working_folder(fallback_to_unanonymized=True)
+    assert rendered.startswith(str(settings.storage_path))
 
 
 @pytest.mark.parametrize(
@@ -707,14 +719,19 @@ async def test_working_folder_respects_custom_disk_path_template(
     )
 
     expected = str(Path(settings.storage_path).joinpath(*expected_segments))
-    assert record_read.working_folder == expected
+    assert record_read._get_working_folder(fallback_to_unanonymized=True) == expected
 
 
 @pytest.mark.asyncio
 async def test_slicer_args_working_folder_placeholder(
     test_session, patient_with_anon, study_with_anon
 ):
-    """slicer_script_args with {working_folder} placeholder resolves correctly."""
+    """``_format_slicer_kwargs`` substitutes ``{working_folder}`` placeholder.
+
+    Exercises the helper directly (since the legacy
+    ``slicer_args_formatted`` computed field is gone — Phase 5 will route
+    Slicer-context construction through ``FileRepository.slicer_args``).
+    """
     rt = RecordType(
         name="wf-test-slicer-args",
         description="Test working_folder in slicer args",
@@ -741,9 +758,10 @@ async def test_slicer_args_working_folder_placeholder(
     loaded = await repo.get_with_relations(record.id)
     record_read = RecordRead.model_validate(loaded)
 
-    # {working_folder} should be resolved in slicer_args_formatted
-    args = record_read.slicer_args_formatted
-    assert args is not None
+    wf = record_read._get_working_folder(fallback_to_unanonymized=True)
+    args = record_read._format_slicer_kwargs(
+        record_read.record_type.slicer_script_args, {"working_folder": wf}
+    )
     assert "output_path" in args
     expected_wf = str(
         Path(settings.storage_path) / f"{settings.anon_id_prefix}_42" / "ANON_STUDY_WF"
@@ -754,23 +772,21 @@ async def test_slicer_args_working_folder_placeholder(
     assert args["output_path"] == f"{expected_wf}/output.nrrd"
     assert args["study_uid"] == "ANON_STUDY_WF"
 
-    # Also verify in slicer_all_args_formatted
-    all_args = record_read.slicer_all_args_formatted
-    assert all_args["output_path"] == f"{expected_wf}/output.nrrd"
-
 
 # ===========================================================================
-# Group 6: FileRepository.slicer_args ≡ RecordRead.slicer_*_args_formatted
+# Group 6: FileRepository.slicer_args ≡ RecordRead._format_slicer_kwargs
 #
 # Phase 1 acceptance criterion (file-repo roadmap): snapshot parity with the
-# legacy computed fields. Phase 3 removes them; Phase 5 builds slicer context
-# via FileRepository.slicer_args — without this parity proof, Phase 3 could
-# silently regress the slicer-arg surface.
+# legacy computed fields. After Phase 4 those computed fields are gone, so
+# the parity check is now against the underlying ``_format_slicer_kwargs``
+# helper that ``build_slicer_context`` (and Phase 5
+# ``FileRepository.slicer_args``) both read from. Without this parity proof,
+# Phase 5 could silently regress the slicer-arg surface.
 # ===========================================================================
 
 
 @pytest.mark.asyncio
-async def test_file_repository_slicer_args_matches_legacy_script_formatted(
+async def test_file_repository_slicer_args_matches_format_slicer_kwargs_script(
     test_session,
     patient_with_anon,
     study_with_anon,
@@ -787,13 +803,16 @@ async def test_file_repository_slicer_args_matches_legacy_script_formatted(
         series=series_with_anon,
         record_type=rt_series_with_slicer_args,
     )
-    legacy = record_read.slicer_args_formatted
+    wf = str(FileRepository(record_read).working_dir)
+    legacy = record_read._format_slicer_kwargs(
+        record_read.record_type.slicer_script_args, {"working_folder": wf}
+    )
     new = FileRepository(record_read).slicer_args(validator=False)
     assert new == legacy
 
 
 @pytest.mark.asyncio
-async def test_file_repository_slicer_args_matches_legacy_validator_formatted(
+async def test_file_repository_slicer_args_matches_format_slicer_kwargs_validator(
     test_session,
     patient_with_anon,
     study_with_anon,
@@ -810,6 +829,9 @@ async def test_file_repository_slicer_args_matches_legacy_validator_formatted(
         series=series_with_anon,
         record_type=rt_series_with_slicer_args,
     )
-    legacy = record_read.slicer_validator_args_formatted
+    wf = str(FileRepository(record_read).working_dir)
+    legacy = record_read._format_slicer_kwargs(
+        record_read.record_type.slicer_result_validator_args, {"working_folder": wf}
+    )
     new = FileRepository(record_read).slicer_args(validator=True)
     assert new == legacy
