@@ -11,9 +11,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from clarinet.exceptions.domain import ValidationError
+from clarinet.exceptions.domain import AnonPathError, ValidationError
 from clarinet.models.base import DicomQueryLevel
 from clarinet.models.file_schema import FileRole
+from clarinet.repositories.file_repository import FileRepository
 from clarinet.services.common.file_resolver import FileResolver
 from clarinet.utils.file_patterns import resolve_pattern
 from clarinet.utils.fs import run_in_fs_thread
@@ -138,12 +139,17 @@ async def validate_record_files(
 ) -> FileValidationResult | None:
     """Validate input files for a record.
 
-    Accepts ``RecordRead`` (Pydantic) because ``working_folder`` and other
-    computed fields are defined on ``RecordRead``, not on the ORM ``Record``.
-    Callers should convert via ``RecordRead.model_validate(record)`` first.
+    Accepts ``RecordRead`` (Pydantic) — ``FileRepository`` requires the
+    eager-loaded relationships (patient/study/series/record_type) that
+    are populated on ``RecordRead`` via ``RecordRead.model_validate(record)``.
 
     The blocking ``FileValidator.validate()`` call is offloaded to a
     dedicated FS thread pool to avoid blocking the event loop.
+
+    For records that have not been anonymized yet, ``FileRepository``
+    raises ``AnonPathError``; we fall back to raw UIDs via
+    ``FileResolver.build_working_dirs(..., fallback_to_unanonymized=True)``
+    so validation still produces a verdict against the legacy path.
 
     Args:
         record: RecordRead instance with all relations populated
@@ -159,13 +165,20 @@ async def validate_record_files(
     if not input_defs:
         return None
 
-    directory = Path(record.working_folder)
-    # Called both from `POST /records/{id}/validate-files` (admin UI) and
-    # from `RecordService.create_record` (during record creation, before
-    # any anonymization run). Fall back to raw UIDs so a record that has
-    # not been anonymized yet still gets a `valid/invalid` verdict instead
-    # of bubbling `AnonPathError` up to the caller.
-    working_dirs = FileResolver.build_working_dirs(record, fallback_to_unanonymized=True)
+    try:
+        repo = FileRepository(record)
+        working_dirs = repo.working_dirs_all()
+        directory = repo.working_dir
+    except AnonPathError:
+        # Record predates anonymization (or anonymization is in flight) —
+        # fall back to raw UIDs so input files still get the same
+        # validity verdict the writer would land on. Strict mode in
+        # ``FileRepository`` keeps surfacing the asymmetric-anonymization
+        # race for backend writers; this graceful path is only for
+        # *readers* that must keep working through the legacy flow.
+        working_dirs = FileResolver.build_working_dirs(record, fallback_to_unanonymized=True)
+        directory = working_dirs[record.record_type.level]
+
     validator = FileValidator(input_defs)
     result = await run_in_fs_thread(validator.validate, record, directory, working_dirs, parent)
     if not result.valid and raise_on_invalid:

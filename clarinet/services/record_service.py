@@ -7,12 +7,15 @@ from typing import TYPE_CHECKING
 from uuid import UUID
 
 from clarinet.exceptions.domain import (
+    AnonPathError,
     BusinessRuleViolationError,
     RecordUniquePerUserError,
 )
 from clarinet.exceptions.domain import FileNotFoundError as DomainFileNotFoundError
 from clarinet.models import Record, RecordRead, RecordStatus
+from clarinet.models.base import DicomQueryLevel
 from clarinet.models.file_schema import FileDefinitionRead, FileRole
+from clarinet.repositories.file_repository import FileRepository
 from clarinet.services.common.file_resolver import FileResolver
 from clarinet.services.file_validation import validate_record_files
 from clarinet.utils.file_checksums import checksums_changed, compute_checksums
@@ -34,6 +37,25 @@ def _filter_in_sandbox(paths: list[Path], sandbox: Path) -> list[Path]:
     """
     sandbox_resolved = sandbox.resolve()
     return [p for p in paths if p.resolve().is_relative_to(sandbox_resolved)]
+
+
+def _resolve_working_dirs_with_fallback(
+    record_read: RecordRead,
+) -> tuple[dict[DicomQueryLevel, Path], Path]:
+    """Resolve a record's working dirs + record-level dir, with raw-UID fallback.
+
+    Backend writers use ``FileRepository`` strictly so the asymmetric-
+    anonymization race surfaces as ``AnonPathError``. Service-level
+    readers (cascade delete, output-file lookup, checksum compute) must
+    keep working through the legacy / pre-anon flow, so they fall back
+    to ``FileResolver.build_working_dirs(..., fallback_to_unanonymized=True)``.
+    """
+    try:
+        repo = FileRepository(record_read)
+        return repo.working_dirs_all(), repo.working_dir
+    except AnonPathError:
+        working_dirs = FileResolver.build_working_dirs(record_read, fallback_to_unanonymized=True)
+        return working_dirs, working_dirs[record_read.record_type.level]
 
 
 class RecordService:
@@ -334,10 +356,11 @@ class RecordService:
             else:
                 return [], {}
 
+        _, working_dir = _resolve_working_dirs_with_fallback(record_read)
         new_checksums = await compute_checksums(
             record_read.record_type.file_registry or [],
             record_read,
-            Path(record_read.working_folder),
+            working_dir,
         )
         old_checksums = {
             link.name: link.checksum for link in (record_read.file_links or []) if link.checksum
@@ -451,13 +474,12 @@ class RecordService:
 
         For ``multiple=False`` returns a single-element list when the
         resolved path exists on disk, else an empty list.
+
+        Records whose anonymized identifiers are missing fall back to raw
+        UIDs (admin/UI-triggered cascade keeps working on legacy data —
+        cf. ``_resolve_working_dirs_with_fallback``).
         """
-        # Admin/UI-triggered cascade — fall back to raw UIDs for records
-        # whose study/series has not been anonymized yet, otherwise the
-        # delete pipeline would 500 on legacy data.
-        working_dirs = FileResolver.build_working_dirs(record_read, fallback_to_unanonymized=True)
-        record_level = record_read.record_type.level
-        default_dir = working_dirs.get(record_level, Path(record_read.working_folder))
+        working_dirs, default_dir = _resolve_working_dirs_with_fallback(record_read)
         target_dir = (
             working_dirs[file_def.level]
             if file_def.level and file_def.level in working_dirs
@@ -651,7 +673,7 @@ class RecordService:
         if not output_defs:
             return
 
-        working_dir = Path(record_read.working_folder)
+        _, working_dir = _resolve_working_dirs_with_fallback(record_read)
         try:
             new_checksums = await compute_checksums(output_defs, record_read, working_dir)
         except Exception as e:

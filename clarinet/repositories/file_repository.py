@@ -25,7 +25,9 @@ Strict by default for path resolution (``working_dir``, ``working_dirs_all``,
 After Phase 1.5 (pull-based context), templates without ``{anon_*}``
 placeholders never invoke anon resolution, so no fallback flag is needed
 at the repository level. UX routers should catch ``AnonPathError`` on
-their side when serving non-anonymized records.
+their side when serving non-anonymized records, and reader-side backend
+services that must keep working through the legacy / pre-anon flow may
+do the same (cf. ``RecordService._resolve_working_dirs_with_fallback``).
 
 ``slicer_args`` is also strict: it reads ``working_dir`` from this
 instance, which is computed at ``__init__`` in strict mode. A
