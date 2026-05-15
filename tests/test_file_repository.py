@@ -273,8 +273,11 @@ class TestFileRepositorySlicerArgs:
         record = _make_record_mock(slicer_script_args=slicer_args)
 
         result = FileRepository(record).slicer_args(validator=False)
+        expected_input = str(
+            Path("/data") / "CLARINET_1" / "9.8.7.6.5" / "9.8.7.6.5.4" / "input.nrrd"
+        )
         assert result == {
-            "input": "/data/CLARINET_1/9.8.7.6.5/9.8.7.6.5.4/input.nrrd",
+            "input": expected_input,
             "patient": "CLARINET_1",
             "study": "1.2.3.4.5",
         }
@@ -290,8 +293,11 @@ class TestFileRepositorySlicerArgs:
         record = _make_record_mock(slicer_result_validator_args=validator_args)
 
         result = FileRepository(record).slicer_args(validator=True)
+        expected_check = str(
+            Path("/data") / "CLARINET_1" / "9.8.7.6.5" / "9.8.7.6.5.4" / "check.json"
+        )
         assert result == {
-            "check": "/data/CLARINET_1/9.8.7.6.5/9.8.7.6.5.4/check.json",
+            "check": expected_check,
             "series": "1.2.3.4.5.6",
         }
 
@@ -327,7 +333,7 @@ class TestFileRepositoryConfiguration:
         record = _make_record_mock(clarinet_storage_path="/custom")
 
         repo = FileRepository(record)
-        assert str(repo.working_dir).startswith("/custom")
+        assert repo.working_dir.is_relative_to(Path("/custom"))
 
     @patch("clarinet.services.common.storage_paths.settings")
     @patch("clarinet.services.common.file_resolver.settings")
