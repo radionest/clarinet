@@ -184,15 +184,24 @@ PYTEST_UNIT_MARKERS := not pipeline and not dicom and not slicer and not schema
 # Max xdist workers (override: PYTEST_WORKERS=4 make test-fast)
 PYTEST_WORKERS ?= 10
 
+# PostgreSQL backend for migration tests / test-all-stages stage 2b/6
+# Override hostnames/creds in your environment (see .env.test.example).
+CLARINET_TEST_PG_HOST ?= localhost
+CLARINET_TEST_PG_PORT ?= 5432
+CLARINET_TEST_PG_USER ?= clarinet_test
+CLARINET_TEST_PG_PASS ?= clarinet_test
+CLARINET_TEST_PG_MIGRATION_DB ?= clarinet_mig_base
+CLARINET_TEST_PG_URL := postgresql+asyncpg://$(CLARINET_TEST_PG_USER):$(CLARINET_TEST_PG_PASS)@$(CLARINET_TEST_PG_HOST):$(CLARINET_TEST_PG_PORT)/$(CLARINET_TEST_PG_MIGRATION_DB)
+
 .PHONY: test-migration
 test-migration: ## Run migration tests (SQLite; set CLARINET_TEST_DATABASE_URL for PG)
 	@echo "Running migration tests..."
 	@./scripts/run_tests.sh tests/migration/ -m migration -v
 
 .PHONY: test-migration-pg
-test-migration-pg: ## Run migration tests against klara PostgreSQL (needs SSH access)
-	@echo "Running migration tests against klara PostgreSQL..."
-	@CLARINET_TEST_DATABASE_URL="postgresql+asyncpg://clarinet_test:clarinet_test@192.168.122.151:5432/clarinet_mig_base" \
+test-migration-pg: ## Run migration tests against PostgreSQL (override CLARINET_TEST_PG_HOST)
+	@echo "Running migration tests against $(CLARINET_TEST_PG_HOST):$(CLARINET_TEST_PG_PORT)..."
+	@CLARINET_TEST_DATABASE_URL="$(CLARINET_TEST_PG_URL)" \
 		./scripts/run_tests.sh tests/migration/ -m migration -v
 
 .PHONY: test-py312
@@ -232,9 +241,9 @@ _test-all-stages-impl:
 	@if [ -n "$${CLARINET_TEST_DATABASE_URL}" ]; then \
 		echo "Using CLARINET_TEST_DATABASE_URL from env"; \
 		./scripts/run_tests.sh tests/migration/ -m migration -q; \
-	elif nc -z 192.168.122.151 5432 2>/dev/null; then \
-		echo "klara PG reachable — using it"; \
-		CLARINET_TEST_DATABASE_URL="postgresql+asyncpg://clarinet_test:clarinet_test@192.168.122.151:5432/clarinet_mig_base" \
+	elif nc -z $(CLARINET_TEST_PG_HOST) $(CLARINET_TEST_PG_PORT) 2>/dev/null; then \
+		echo "PG at $(CLARINET_TEST_PG_HOST):$(CLARINET_TEST_PG_PORT) reachable — using it"; \
+		CLARINET_TEST_DATABASE_URL="$(CLARINET_TEST_PG_URL)" \
 			./scripts/run_tests.sh tests/migration/ -m migration -q; \
 	else \
 		echo "⚠  No PG available — migration tests running on SQLite only (stage 6 will catch PG-specific bugs)"; \

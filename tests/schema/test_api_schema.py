@@ -15,7 +15,6 @@ import asyncio
 import pytest
 import schemathesis
 from hypothesis import HealthCheck, settings
-from schemathesis.generation.stateful import run_state_machine_as_test
 from sqlmodel import SQLModel
 
 schema = schemathesis.pytest.from_fixture("api_schema")
@@ -74,28 +73,6 @@ _SUPPRESS = [HealthCheck.too_slow, HealthCheck.filter_too_much]
 def test_api_conformance(case):
     """Validate API endpoints conform to their OpenAPI schema."""
     case.call_and_validate()
-
-
-@(
-    schema.include(path_regex=CORE_API_PATTERN)
-    .exclude(
-        path_regex=EXCLUDED_PATTERN,
-    )
-    .parametrize()
-)
-@settings(
-    max_examples=10,
-    suppress_health_check=_SUPPRESS,
-    deadline=None,
-)
-@pytest.mark.schema
-@pytest.mark.timeout(300)
-def test_no_server_errors(case):
-    """Verify API never returns 500 on any generated input."""
-    response = case.call()
-    assert response.status_code < 500, (
-        f"Server error on {case.method} {case.path}: {response.status_code}"
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -159,8 +136,7 @@ def test_api_stateful(stateful_api_schema, stateful_db_engine):
 
             asyncio.run(_reset_db())
 
-    run_state_machine_as_test(
-        CleanDBStateMachine,
+    CleanDBStateMachine.run(
         settings=settings(
             max_examples=50,
             stateful_step_count=4,

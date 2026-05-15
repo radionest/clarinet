@@ -1,6 +1,5 @@
 """Helper utilities for tests."""
 
-import json
 from datetime import UTC, datetime
 from typing import Any
 
@@ -64,57 +63,7 @@ class UserFactory:
 
 
 class RecordFactory:
-    """Factory for creating test records."""
-
-    @staticmethod
-    async def create_record_type(
-        session: Session,
-        name: str | None = None,
-        title: str | None = None,
-        record_type: str = "CLASSIFICATION",  # Changed from TaskType enum
-        schema: dict[str, Any] | None = None,
-    ) -> RecordType:
-        """Creates a record type."""
-        import uuid
-
-        unique_id = str(uuid.uuid4())[:8]
-
-        default_schema = {"type": "object", "properties": {"label": {"type": "string"}}}
-
-        record_type_obj = RecordType(
-            name=name or f"test-type-{unique_id}",
-            title=title or f"Test Type {unique_id}",
-            type=record_type,
-            schema=json.dumps(schema or default_schema),
-        )
-        session.add(record_type_obj)
-        await session.commit()
-        await session.refresh(record_type_obj)
-        return record_type_obj
-
-    @staticmethod
-    async def create_record(
-        session: Session,
-        user: User,
-        record_type: RecordType,
-        status: RecordStatus = RecordStatus.pending,
-        data: dict[str, Any] | None = None,
-    ) -> Record:
-        """Creates a record."""
-        record = Record(
-            user_id=user.id,
-            record_type_name=record_type.name,
-            status=status,
-            data=json.dumps(data) if data else None,
-        )
-
-        if status == RecordStatus.finished:
-            record.finished_at = datetime.now(UTC)
-
-        session.add(record)
-        await session.commit()
-        await session.refresh(record)
-        return record
+    """Factory for creating test records with eager-loaded relationships."""
 
     @staticmethod
     async def create_record_with_relations(
@@ -226,88 +175,6 @@ class PatientFactory:
         await session.commit()
         await session.refresh(series)
         return series
-
-
-class TestDataGenerator:
-    """Generator for complex test data."""
-
-    @staticmethod
-    async def create_full_test_environment(session: Session) -> dict[str, Any]:
-        """Creates a complete test environment with users, records and studies."""
-        # Create users
-        regular_user = await UserFactory.create_user(
-            session,
-            email="regular@test.com",  # Remove username parameter
-        )
-
-        admin_user = await UserFactory.create_user(
-            session,
-            email="admin@test.com",
-            roles=["admin"],  # Remove username parameter
-        )
-
-        # Create record types
-        classification_type = await RecordFactory.create_record_type(
-            session,
-            name="classification",
-            title="Classification Record",
-            record_type="CLASSIFICATION",
-        )
-
-        segmentation_type = await RecordFactory.create_record_type(
-            session,
-            name="segmentation",
-            title="Segmentation Record",
-            record_type="SEGMENTATION",
-        )
-
-        # Create records
-        records = []
-        for user in [regular_user, admin_user]:
-            for record_type in [classification_type, segmentation_type]:
-                record = await RecordFactory.create_record(
-                    session,
-                    user=user,
-                    record_type=record_type,
-                    status=RecordStatus.pending,
-                    data={"test": "data"},
-                )
-                records.append(record)
-
-        # Create patients and studies
-        patients = []
-        studies = []
-        series_list = []
-
-        for i in range(3):
-            patient = await PatientFactory.create_patient(
-                session, patient_id=f"TEST_PAT_{i}", patient_name=f"Test Patient {i}"
-            )
-            patients.append(patient)
-
-            # Create 2 studies for each patient
-            for _j in range(2):
-                study = await PatientFactory.create_study(session, patient=patient)
-                studies.append(study)
-
-                # Create 3 series for each study
-                for k in range(3):
-                    series = await PatientFactory.create_series(
-                        session, study=study, series_number=k + 1
-                    )
-                    series_list.append(series)
-
-        return {
-            "users": {"regular": regular_user, "admin": admin_user},
-            "record_types": {
-                "classification": classification_type,
-                "segmentation": segmentation_type,
-            },
-            "records": records,
-            "patients": patients,
-            "studies": studies,
-            "series": series_list,
-        }
 
 
 async def assert_user_exists(session: Session, email: str) -> User:
