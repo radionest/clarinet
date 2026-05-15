@@ -382,3 +382,48 @@ class TestFileRepositoryConfiguration:
 
         with pytest.raises(AnonPathError, match="Series has no anon_uid"):
             FileRepository(series)
+
+
+# ── resolve_with_fallback (Phase 2 helper) ─────────────────────────────────
+
+
+class TestFileRepositoryResolveWithFallback:
+    """Tests for ``FileRepository.resolve_with_fallback`` (Phase 2 helper)."""
+
+    @patch("clarinet.services.common.file_resolver.settings")
+    def test_anonymized_record_uses_strict_path(self, mock_settings: MagicMock) -> None:
+        """Anonymized record → strict FileRepository succeeds, no fallback."""
+        mock_settings.storage_path = "/data"
+        record = _make_record_mock(level=DicomQueryLevel.SERIES)
+
+        working_dirs, default_dir = FileRepository.resolve_with_fallback(record)
+        assert default_dir == Path("/data/CLARINET_1/9.8.7.6.5/9.8.7.6.5.4")
+        assert default_dir == working_dirs[DicomQueryLevel.SERIES]
+
+    @patch("clarinet.services.common.file_resolver.settings")
+    def test_unanonymized_record_falls_back_to_raw(self, mock_settings: MagicMock) -> None:
+        """Series without anon_uid → AnonPathError caught, fallback to raw UIDs."""
+        mock_settings.storage_path = "/data"
+        record = _make_record_mock(level=DicomQueryLevel.SERIES)
+        record.series.anon_uid = None
+        record.series_anon_uid = None
+
+        working_dirs, default_dir = FileRepository.resolve_with_fallback(record)
+        # Raw series_uid = "1.2.3.4.5.6" (vs anon "9.8.7.6.5.4" in strict mode)
+        assert default_dir == Path("/data/CLARINET_1/9.8.7.6.5/1.2.3.4.5.6")
+        assert default_dir == working_dirs[DicomQueryLevel.SERIES]
+
+    @patch("clarinet.services.common.file_resolver.settings")
+    @pytest.mark.parametrize(
+        "level",
+        [DicomQueryLevel.PATIENT, DicomQueryLevel.STUDY, DicomQueryLevel.SERIES],
+    )
+    def test_default_dir_matches_record_level(
+        self, mock_settings: MagicMock, level: DicomQueryLevel
+    ) -> None:
+        """Invariant: default_dir == working_dirs[record_type.level] (all levels)."""
+        mock_settings.storage_path = "/data"
+        record = _make_record_mock(level=level)
+
+        working_dirs, default_dir = FileRepository.resolve_with_fallback(record)
+        assert default_dir == working_dirs[level]
