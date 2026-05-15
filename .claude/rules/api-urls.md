@@ -63,6 +63,8 @@ URL constants live in `tests/utils/urls.py`. Status codes: 201 = POST create, 20
 | `/api/records/{id}/data/prefill` | POST | 200 | Prefill data (error if exists) |
 | `/api/records/{id}/data/prefill` | PUT | 200 | Replace prefill data |
 | `/api/records/{id}/data/prefill` | PATCH | 200 | Merge into prefill data |
+| `/api/records/{id}/submit` | POST | 200 | Submit + run `slicer_result_validator` if configured; merges `__execResult` into data on save |
+| `/api/records/{id}/submit` | PATCH | 200 | Re-submit a finished record (same Slicer-validator + `__execResult` merge as POST) |
 | `/api/records/{id}/validate-files` | POST | 200 | Validate files |
 | `/api/records/{id}/check-files` | POST | 200 | Check files |
 | `/api/records/{id}/output-files/{name}` | GET | 200 | Download a single OUTPUT file by `FileDefinition.name` (404 if not defined or not on disk). Auth: `AuthorizedRecordDep` |

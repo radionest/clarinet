@@ -15,6 +15,7 @@ from clarinet.models.record import RecordType
 from clarinet.services.record_data_validation import run_record_validators
 from clarinet.services.schema_hydration import hydrate_schema
 from clarinet.utils.file_link_sync import sync_file_links
+from clarinet.utils.logger import logger
 from clarinet.utils.validation import validate_json_by_schema, validate_json_by_schema_partial
 
 if TYPE_CHECKING:
@@ -163,6 +164,60 @@ class RecordTypeService:
         await run_record_validators(record, data, self.session, partial=False)
 
         return data
+
+    async def apply_validator_result_merge(
+        self,
+        record: Record,
+        validated_data: RecordData,
+        exec_result: Any,
+    ) -> RecordData:
+        """Merge a Slicer validator's ``__execResult`` into already-validated data.
+
+        Contract documented in ``clarinet/services/slicer/CLAUDE.md`` →
+        "``__execResult`` Result-Merging Contract":
+
+        * ``exec_result`` is the return value of ``SlicerService.execute()``.
+        * If it is a non-empty dict, its keys are merged over ``validated_data``
+          (validator wins on conflicts) and the merged dict is re-validated
+          through :meth:`validate_record_data` (schema + custom Python validators).
+        * If it is an empty dict / ``None``, the merge is skipped and
+          ``validated_data`` is returned unchanged.
+        * If it is any other type (e.g. ``list``, ``str``) the merge is skipped
+          and a warning is logged. This is a defensive guard — the Slicer helper
+          wrapper guarantees a dict, so a non-dict here means a downstream
+          script broke the contract.
+
+        Args:
+            record: Record with ``record_type`` loaded (used for re-validation).
+            validated_data: Output of an earlier :meth:`validate_record_data` call.
+            exec_result: Raw return of ``slicer_service.execute()``.
+
+        Returns:
+            ``validated_data`` if the merge is skipped, otherwise the merged and
+            re-validated data.
+
+        Raises:
+            RecordDataValidationError: If the merged data fails schema or
+                custom-validator checks.
+        """
+        if not isinstance(exec_result, dict):
+            if exec_result is not None:
+                logger.warning(
+                    f"slicer_validator_result_unexpected_type record_id={record.id} "
+                    f"type={type(exec_result).__name__!r}"
+                )
+            return validated_data
+
+        if not exec_result:
+            return validated_data
+
+        logger.info(
+            f"slicer_validator_merge record_id={record.id} "
+            f"keys={sorted(exec_result.keys())} "
+            f"overrides={sorted(set(exec_result) & set(validated_data))}"
+        )
+        merged = {**validated_data, **exec_result}
+        return await self.validate_record_data(record, merged)
 
     async def validate_record_data_partial(self, record: Record, data: RecordData) -> RecordData:
         """Validate record data against schema with ``required`` constraints removed.

@@ -75,7 +75,6 @@ from clarinet.services.schema_hydration import hydrate_schema
 from clarinet.services.slicer.context import build_slicer_context_async
 from clarinet.settings import settings
 from clarinet.types import RecordData
-from clarinet.utils.logger import logger
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -463,19 +462,12 @@ async def _process_submission(
             request_timeout=60.0,
         )
 
-        # Validator may return extra fields via __execResult — merge them into
-        # validated_data (validator wins on conflicts) and re-validate. Canonical
-        # use case: x-widget: "hidden" fields computed from the Slicer scene
-        # (e.g. ROI bounds). Contract: clarinet/services/slicer/CLAUDE.md →
-        # "__execResult Result-Merging Contract".
-        if exec_result:
-            merged = {**validated_data, **exec_result}
-            logger.info(
-                f"slicer_validator_merge record_id={record_id} "
-                f"keys={sorted(exec_result.keys())} "
-                f"overrides={sorted(set(exec_result) & set(validated_data))}"
-            )
-            validated_data = await rt_service.validate_record_data(record, merged)
+        # If the validator returned __execResult, merge it into validated_data
+        # (validator wins on conflicts) and re-validate. See
+        # clarinet/services/slicer/CLAUDE.md → "__execResult Result-Merging Contract".
+        validated_data = await rt_service.apply_validator_result_merge(
+            record, validated_data, exec_result
+        )
 
     if is_update:
         updated, _ = await service.update_data(record_id, validated_data)
