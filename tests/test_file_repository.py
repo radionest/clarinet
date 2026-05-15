@@ -290,11 +290,13 @@ class TestFileRepositorySlicerArgs:
         record = _make_record_mock(slicer_script_args=slicer_args)
 
         result = FileRepository(record).slicer_args(validator=False)
-        expected_input = str(
-            Path("/data") / "CLARINET_1" / "9.8.7.6.5" / "9.8.7.6.5.4" / "input.nrrd"
-        )
+        # ``{working_folder}/input.nrrd`` is a slicer template: the literal "/"
+        # is preserved by ``str.format`` (not joined via ``Path``), so on
+        # Windows the result is ``str(working_dir) + "/input.nrrd"`` with
+        # mixed separators. Build ``expected`` the same way for portability.
+        working_dir = str(Path("/data") / "CLARINET_1" / "9.8.7.6.5" / "9.8.7.6.5.4")
         assert result == {
-            "input": expected_input,
+            "input": f"{working_dir}/input.nrrd",
             "patient": "CLARINET_1",
             "study": "1.2.3.4.5",
         }
@@ -310,11 +312,9 @@ class TestFileRepositorySlicerArgs:
         record = _make_record_mock(slicer_result_validator_args=validator_args)
 
         result = FileRepository(record).slicer_args(validator=True)
-        expected_check = str(
-            Path("/data") / "CLARINET_1" / "9.8.7.6.5" / "9.8.7.6.5.4" / "check.json"
-        )
+        working_dir = str(Path("/data") / "CLARINET_1" / "9.8.7.6.5" / "9.8.7.6.5.4")
         assert result == {
-            "check": expected_check,
+            "check": f"{working_dir}/check.json",
             "series": "1.2.3.4.5.6",
         }
 
