@@ -20,11 +20,17 @@ The instance level (returned by ``working_dir``) is fixed per type:
 registry and Slicer kwargs live on ``record_type``). For other types they
 raise ``TypeError`` with a clear message.
 
-Strict by default: missing anonymized identifiers raise ``AnonPathError``.
+Strict by default for path resolution (``working_dir``, ``working_dirs_all``,
+``resolve_file``): missing anonymized identifiers raise ``AnonPathError``.
 After Phase 1.5 (pull-based context), templates without ``{anon_*}``
 placeholders never invoke anon resolution, so no fallback flag is needed
 at the repository level. UX routers should catch ``AnonPathError`` on
 their side when serving non-anonymized records.
+
+``slicer_args`` is the exception: it inherits the UX fallback from the
+legacy ``RecordRead._format_slicer_kwargs`` (renders against raw UIDs
+when anon IDs are missing). Slicer scripts are user-facing — silently
+falling back is preferable to a 500 on an in-flight study.
 """
 
 from pathlib import Path

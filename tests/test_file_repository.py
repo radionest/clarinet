@@ -261,36 +261,39 @@ class TestFileRepositoryResolveFile:
 
 class TestFileRepositorySlicerArgs:
     @patch("clarinet.services.common.file_resolver.settings")
-    def test_slicer_args_default_matches_legacy_script_formatted(
-        self, mock_settings: MagicMock
-    ) -> None:
-        """Snapshot: FileRepository.slicer_args(validator=False) matches the
-        legacy RecordRead.slicer_args_formatted byte-for-byte (we delegate
-        to the same _format_slicer_kwargs)."""
+    def test_slicer_args_default_renders_script_args(self, mock_settings: MagicMock) -> None:
+        """Literal snapshot: script-args templates render against
+        working_dir + record fields (patient_id, study/series UIDs, etc.)."""
         mock_settings.storage_path = "/data"
-        slicer_args = {"input": "{working_folder}/input.nrrd", "id": "{user_id}"}
+        slicer_args = {
+            "input": "{working_folder}/input.nrrd",
+            "patient": "{patient_id}",
+            "study": "{study_uid}",
+        }
         record = _make_record_mock(slicer_script_args=slicer_args)
 
-        repo = FileRepository(record)
-        # Inject the same `working_folder` as the legacy computed field.
-        expected = record._format_slicer_kwargs(
-            slicer_args, {"working_folder": str(repo.working_dir)}
-        )
-        assert repo.slicer_args(validator=False) == expected
+        result = FileRepository(record).slicer_args(validator=False)
+        assert result == {
+            "input": "/data/CLARINET_1/9.8.7.6.5/9.8.7.6.5.4/input.nrrd",
+            "patient": "CLARINET_1",
+            "study": "1.2.3.4.5",
+        }
 
     @patch("clarinet.services.common.file_resolver.settings")
-    def test_slicer_args_validator_matches_legacy_validator_formatted(
-        self, mock_settings: MagicMock
-    ) -> None:
+    def test_slicer_args_validator_renders_validator_args(self, mock_settings: MagicMock) -> None:
+        """Literal snapshot for validator branch."""
         mock_settings.storage_path = "/data"
-        validator_args = {"check": "{working_folder}/check.json"}
+        validator_args = {
+            "check": "{working_folder}/check.json",
+            "series": "{series_uid}",
+        }
         record = _make_record_mock(slicer_result_validator_args=validator_args)
 
-        repo = FileRepository(record)
-        expected = record._format_slicer_kwargs(
-            validator_args, {"working_folder": str(repo.working_dir)}
-        )
-        assert repo.slicer_args(validator=True) == expected
+        result = FileRepository(record).slicer_args(validator=True)
+        assert result == {
+            "check": "/data/CLARINET_1/9.8.7.6.5/9.8.7.6.5.4/check.json",
+            "series": "1.2.3.4.5.6",
+        }
 
     @patch("clarinet.services.common.file_resolver.settings")
     def test_slicer_args_none_when_record_type_has_no_args(self, mock_settings: MagicMock) -> None:
