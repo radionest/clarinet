@@ -185,30 +185,33 @@
     font-size: 0.875rem;
 }
 
-/* Formosh component overrides */
-.record-form-container .formosh-container {
+/* Formosh component overrides — formosh >= 0.6.0 renders inside Shadow DOM,
+   so external CSS must target via ::part() selectors. */
+.record-form-container formosh-form::part(container) {
     margin: 0;
     padding: 0;
 }
 
-.formosh-input,
-.formosh-textarea,
-.formosh-select {
+formosh-form::part(input),
+formosh-form::part(textarea),
+formosh-form::part(select) {
     width: 100%;
     padding: 0.5rem;
     border: 1px solid var(--border-color);
     border-radius: var(--radius-md);
     font-size: 1rem;
     transition: border-color 0.2s, box-shadow 0.2s;
-
-    &:focus {
-        outline: none;
-        border-color: var(--primary-color);
-        box-shadow: 0 0 0 3px rgba(30, 64, 175, 0.1);
-    }
 }
 
-.formosh-submit {
+formosh-form::part(input):focus,
+formosh-form::part(textarea):focus,
+formosh-form::part(select):focus {
+    outline: none;
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 3px rgba(30, 64, 175, 0.1);
+}
+
+formosh-form::part(submit) {
     display: inline-block;
     padding: 0.5rem 1rem;
     background-color: var(--primary-color);
@@ -219,46 +222,46 @@
     font-weight: 500;
     cursor: pointer;
     transition: background-color 0.2s;
-
-    &:hover {
-        background-color: #1e3a8a;
-    }
 }
 
-.formosh-field-error {
+formosh-form::part(submit):hover {
+    background-color: #1e3a8a;
+}
+
+formosh-form::part(error) {
     color: var(--danger-color);
     font-size: 0.875rem;
     margin-top: var(--spacing-xs);
 }
 
-.formosh-label {
+formosh-form::part(label) {
     display: block;
     font-weight: 500;
     margin-bottom: 0.5rem;
 }
 
-.formosh-radio-group {
+formosh-form::part(radio-group) {
     display: flex;
     flex-direction: column;
     gap: var(--spacing-sm);
 }
 
-.formosh-radio-item {
+formosh-form::part(radio-item) {
     display: flex;
     align-items: center;
     gap: var(--spacing-sm);
 }
 
-.formosh-header {
+formosh-form::part(header) {
     margin-bottom: var(--spacing-lg);
 }
 
-.formosh-title {
+formosh-form::part(title) {
     font-size: 1.25rem;
     font-weight: 600;
 }
 
-.formosh-description {
+formosh-form::part(description) {
     color: var(--text-secondary);
     font-size: 0.9rem;
     margin-top: var(--spacing-xs);
