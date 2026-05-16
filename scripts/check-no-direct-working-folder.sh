@@ -8,8 +8,13 @@
 # before merge.
 #
 # Exempt contexts (the regex below filters them):
-#   - lines that explicitly reference FileRepository (the canonical
-#     replacement)
+#   - lines that build the path through the canonical FileRepository
+#     API on the same line: `FileRepository(record).working_dir` /
+#     `.working_dirs_all` / `.resolve_file`, or the
+#     `FileRepository.resolve_with_fallback` staticmethod. A bare
+#     mention of `FileRepository` is NOT enough — otherwise
+#     `record.working_folder = FileRepository(rec).working_dir` would
+#     slip through even though the LHS is exactly what P29 forbids.
 #   - the in-Slicer-subprocess helper code (`SlicerHelper.working_folder`,
 #     `self.working_folder`) — those are different attributes living
 #     entirely inside the Slicer Python environment, not the model field
@@ -52,8 +57,21 @@ for path in "${SCAN_PATHS[@]}"; do
     line_no="${rest%%:*}"
     code="${rest#*:}"
 
-    # Skip exempt contexts
-    if echo "${code}" | grep -Eq 'FileRepository|# noqa: working_folder|self\.working_folder|SlicerHelper'; then
+    # Writing to `.working_folder` is always a regression (the field
+    # doesn't exist on the model anymore), even if the RHS uses the
+    # canonical FileRepository pattern. Only self/SlicerHelper writes
+    # or an explicit noqa hatch are allowed.
+    if echo "${code}" | grep -Eq '\.working_folder\s*='; then
+      if echo "${code}" | grep -Eq '# noqa: working_folder|self\.working_folder|SlicerHelper'; then
+        continue
+      fi
+      violations+="${file}:${line_no}:${code}"$'\n'
+      found_violations=1
+      continue
+    fi
+    # Read access — see header for the rationale of each exempt branch.
+    canonical_fr='FileRepository\([^)]*\)\.(working_dir|working_dirs_all|resolve_file)|FileRepository\.resolve_with_fallback'
+    if echo "${code}" | grep -Eq "# noqa: working_folder|self\.working_folder|SlicerHelper|${canonical_fr}"; then
       continue
     fi
     # Skip docstring mentions in pre-approved files
@@ -67,6 +85,7 @@ done
 
 if [[ "${found_violations}" -eq 1 ]]; then
   echo "ERROR: direct .working_folder access detected — use FileRepository(record).working_dir" >&2
+  echo "  (or add '# noqa: working_folder' on the line if the use is legitimate)" >&2
   echo "" >&2
   echo "${violations}" >&2
   echo "See P29 in .claude/rules/pr-review.md." >&2
