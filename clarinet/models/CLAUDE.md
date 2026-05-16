@@ -33,19 +33,29 @@ record_read.radiant  # safe — all data is plain Pydantic fields
 
 `RecordRead.working_folder` / `SeriesRead.working_folder` and the three
 `RecordRead.slicer_*_args_formatted` fields are now **plain `Optional` fields**
-(default `None`) — not computed_fields. Path resolution lives in
-`FileRepository` (`clarinet/repositories/file_repository.py`); routers and
-services compute paths through it explicitly:
+(default `None`) — not computed_fields. Path resolution lives outside the
+model. Two entry points cover the strict vs lenient split:
 
 ```python
+# Strict — raises AnonPathError on non-anon records. Use this for new
+# code paths that *require* the anonymized identifier (writer paths,
+# admin tooling that explicitly handles AnonPathError, etc.).
 from clarinet.repositories import FileRepository
 working_dir = FileRepository(record_read).working_dir
+
+# Lenient — falls back to raw UIDs when anonymization has not
+# propagated, matching the legacy `working_folder` semantics that
+# backend services relied on. Use from file validation, cascade delete,
+# output-file collection, and similar UX-side callers until a future
+# phase folds the lenient mode into FileRepository itself.
+from clarinet.services.common.file_resolver import FileResolver
+working_dir = FileResolver.lenient_working_dir(record_read)
 ```
 
 Helper methods on `RecordRead` / `SeriesRead` (`_get_working_folder`,
 `_format_path_strict`, `_format_path`, `_format_slicer_kwargs`) remain as
 private building blocks — `build_slicer_context` and the parity tests use
-them. New code should prefer `FileRepository`.
+them. New code should prefer one of the two entry points above.
 
 The two `_format_path` variants:
 - `_format_path_strict(template) -> str` — raises on failure (system templates)

@@ -271,6 +271,31 @@ class FileResolver:
             fallback_to_unanonymized=fallback_to_unanonymized,
         )
 
+    @classmethod
+    def lenient_working_dir(cls, record: RecordRead) -> Path:
+        """Working directory at the record's DICOM level, with UX fallback.
+
+        Mirrors the legacy ``RecordRead.working_folder`` semantics that
+        backend services relied on before Phase 4 of the FileRepository
+        refactor: resolves the path through ``build_working_dirs`` with
+        ``fallback_to_unanonymized=True`` so non-anon records still
+        produce a usable directory instead of bubbling ``AnonPathError``
+        to the user. ``record.record_type`` must be eager-loaded.
+
+        Use this from backend services (file validation, cascade delete,
+        output-file collection) where ``FileRepository.working_dir``
+        (strict by default) would crash on legacy records. Once a future
+        phase extends ``FileRepository`` with a lenient mode this helper
+        can be folded into it.
+
+        ``record.record_type.level`` is always a ``DicomQueryLevel`` enum
+        after ``RecordRead.model_validate`` (Pydantic coerces ``str → enum``
+        on the typed field), so no defensive ``isinstance`` check is
+        needed at call sites.
+        """
+        working_dirs = cls.build_working_dirs(record, fallback_to_unanonymized=True)
+        return working_dirs[record.record_type.level]
+
     @staticmethod
     def build_fields(record: RecordRead) -> dict[str, Any]:
         """Extract placeholder values from a ``RecordRead``.

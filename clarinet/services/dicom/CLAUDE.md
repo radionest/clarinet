@@ -152,8 +152,12 @@ After Phase 4 of the FileRepository refactor `RecordRead.working_folder`
 / `SeriesRead.working_folder` and the three `slicer_*_args_formatted`
 fields are plain `Optional` fields with default `None` — they are no
 longer auto-computed by the Pydantic model. Routers do not currently
-inject them; callers must construct paths via `FileRepository` (strict)
-or via the `_format_*` / `_get_working_folder` helpers (UX, with
+inject them; backend UX callers (file validation, cascade delete,
+output-file collection) use `FileResolver.lenient_working_dir(record)`
+— `FileRepository(record).working_dir` is strict-only and will raise
+``AnonPathError`` on legacy non-anon records until a future phase adds
+a lenient mode. Strict callers can keep using `FileRepository` directly,
+or rely on the `_format_*` / `_get_working_folder` helpers (UX, with
 fallback) explicitly.
 
 If you add a new resolver call, pick the side first — the boolean lives

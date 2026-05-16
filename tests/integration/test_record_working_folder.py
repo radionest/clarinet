@@ -782,6 +782,12 @@ async def test_slicer_args_working_folder_placeholder(
 # helper that ``build_slicer_context`` (and Phase 5
 # ``FileRepository.slicer_args``) both read from. Without this parity proof,
 # Phase 5 could silently regress the slicer-arg surface.
+#
+# NOTE: these tests are currently tautological — ``FileRepository.slicer_args``
+# delegates straight to ``_format_slicer_kwargs`` (see
+# ``clarinet/repositories/file_repository.py:168``). Kept as forward-compat
+# for when Phase 5 rewrites the slicer-arg builder inside the repository
+# itself; at that point the assertion stops being a no-op.
 # ===========================================================================
 
 
