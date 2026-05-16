@@ -41,11 +41,6 @@ pub fn series_base_decoder() -> decode.Decoder(Series) {
   )
   use anon_uid <- decode.optional_field("anon_uid", None, decode.optional(decode.string))
   use study_uid <- decode.field("study_uid", decode.string)
-  use working_folder <- decode.optional_field(
-    "working_folder",
-    None,
-    decode.optional(decode.string),
-  )
 
   decode.success(models.Series(
     series_uid: series_uid,
@@ -57,7 +52,6 @@ pub fn series_base_decoder() -> decode.Decoder(Series) {
     study_uid: study_uid,
     study: None,
     records: None,
-    working_folder: working_folder,
   ))
 }
 
@@ -82,11 +76,6 @@ fn series_detail_decoder() -> decode.Decoder(Series) {
   )
   use anon_uid <- decode.optional_field("anon_uid", None, decode.optional(decode.string))
   use study_uid <- decode.field("study_uid", decode.string)
-  use working_folder <- decode.optional_field(
-    "working_folder",
-    None,
-    decode.optional(decode.string),
-  )
   use study <- decode.optional_field(
     "study",
     None,
@@ -108,7 +97,6 @@ fn series_detail_decoder() -> decode.Decoder(Series) {
     study_uid: study_uid,
     study: study,
     records: records,
-    working_folder: working_folder,
   ))
 }
 
@@ -218,9 +206,5 @@ fn record_base_decoder() -> decode.Decoder(models.Record) {
     started_at: started_at,
     finished_at: finished_at,
     radiant: None,
-    working_folder: None,
-    slicer_args_formatted: None,
-    slicer_validator_args_formatted: None,
-    slicer_all_args_formatted: None,
   ))
 }

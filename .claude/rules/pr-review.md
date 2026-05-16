@@ -55,6 +55,18 @@ Project-specific checklist read by the global `pr-diff-reviewer` subagent. Appli
 - **P27.** f-string logging: `logger.info(f"user={user.id}")`, not `%` formatting.
 - **P28.** `print()` is forbidden for diagnostics — always `logger.<level>(...)`.
 
+## File path resolution
+
+- **P29.** File path resolution only through `FileRepository`
+  (`clarinet/repositories/file_repository.py`). Models are dumb data
+  containers — `.working_folder` / `_get_working_folder` /
+  `_format_path*` / `_format_slicer_kwargs` /
+  `slicer_*_args_formatted` no longer exist. Slicer-arg rendering is in
+  `clarinet.services.slicer.args.render_slicer_args`. Reader-side
+  services that need pre-anon fallback use
+  `FileRepository.resolve_with_fallback`, not ad-hoc `try/except` on
+  `AnonPathError`.
+
 ## Path-scoped rules to re-read
 
 When the diff touches these paths, open the corresponding rule file before finishing the review:

@@ -29,27 +29,29 @@ record_read = RecordRead.model_validate(record)
 record_read.radiant  # safe — all data is plain Pydantic fields
 ```
 
-### Path-resolution fields (Phase 4 of FileRepository refactor)
+### Path resolution lives in `FileRepository`
 
-`RecordRead.working_folder` / `SeriesRead.working_folder` and the three
-`RecordRead.slicer_*_args_formatted` fields are now **plain `Optional` fields**
-(default `None`) — not computed_fields. Path resolution lives in
-`FileRepository` (`clarinet/repositories/file_repository.py`); routers and
-services compute paths through it explicitly:
+`RecordRead` / `SeriesRead` / `StudyRead` / `PatientRead` are dumb data
+containers — they carry no path-resolution logic. Use
+`FileRepository(record).working_dir` (or `resolve_file(...)`) to compute
+on-disk paths. Slicer-arg rendering lives in
+`clarinet.services.slicer.args.render_slicer_args`.
 
 ```python
 from clarinet.repositories import FileRepository
+from clarinet.services.slicer.args import render_slicer_args
+
 working_dir = FileRepository(record_read).working_dir
+args = render_slicer_args(record_read)        # script args
+validator_args = render_slicer_args(record_read, validator=True)
 ```
 
-Helper methods on `RecordRead` / `SeriesRead` (`_get_working_folder`,
-`_format_path_strict`, `_format_path`, `_format_slicer_kwargs`) remain as
-private building blocks — `build_slicer_context` and the parity tests use
-them. New code should prefer `FileRepository`.
-
-The two `_format_path` variants:
-- `_format_path_strict(template) -> str` — raises on failure (system templates)
-- `_format_path(template) -> str | None` — returns None on failure (user-defined slicer templates)
+Strict by default — a record whose template needs `{anon_*}` but whose
+study/series is not yet anonymized raises `AnonPathError`. UX routers
+catch and serve `null`; reader-side backend services that must keep
+working through the pre-anon flow use
+`FileRepository.resolve_with_fallback` instead of catching the
+exception themselves.
 
 Always use `selectinload()` in repositories when fetching records for API responses:
 ```python

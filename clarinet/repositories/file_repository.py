@@ -1,9 +1,9 @@
 """File path resolution authority — thin wrapper over ``FileResolver``.
 
 Sole entry point for backend code to resolve on-disk paths for records,
-series, studies, patients, file definitions, and Slicer args. Replaces
-ad-hoc usage of ``RecordRead.working_folder`` / ``SeriesRead.working_folder``
-and the ``_format_path``/``_format_slicer_kwargs`` helpers on the models.
+series, studies, patients, and file definitions. Replaces the
+``working_folder`` field and ``_format_path`` helpers that used to live
+on ``RecordRead`` / ``SeriesRead``.
 
 Stateless utility (no DB session). Accepts any of ``RecordRead``,
 ``SeriesRead``, ``StudyRead``, ``PatientRead`` — relationships must be
@@ -16,12 +16,13 @@ The instance level (returned by ``working_dir``) is fixed per type:
 - ``StudyRead``   → ``STUDY``
 - ``PatientRead`` → ``PATIENT``
 
-``resolve_file`` and ``slicer_args`` require a ``RecordRead`` (the file
-registry and Slicer kwargs live on ``record_type``). For other types they
-raise ``TypeError`` with a clear message.
+``resolve_file`` requires a ``RecordRead`` (the file registry lives on
+``record_type``). For other types it raises ``TypeError``. Slicer-arg
+rendering lives in ``clarinet.services.slicer.args.render_slicer_args``
+— the Slicer concern is intentionally kept out of the path repository
+(see file-repo roadmap §5).
 
-Strict by default for path resolution (``working_dir``, ``working_dirs_all``,
-``resolve_file``): missing anonymized identifiers raise ``AnonPathError``.
+Strict by default: missing anonymized identifiers raise ``AnonPathError``.
 After Phase 1.5 (pull-based context), templates without ``{anon_*}``
 placeholders never invoke anon resolution, so no fallback flag is needed
 at the repository level. UX routers should catch ``AnonPathError`` on
@@ -29,16 +30,6 @@ their side when serving non-anonymized records. Reader-side backend
 services that must keep working through the legacy / pre-anon flow use
 ``FileRepository.resolve_with_fallback`` instead of catching the
 exception themselves.
-
-``slicer_args`` is also strict: it reads ``working_dir`` from this
-instance, which is computed at ``__init__`` in strict mode. A
-non-anonymized record cannot construct a ``FileRepository`` at all —
-``__init__`` raises ``AnonPathError`` before ``slicer_args`` can be
-called. This differs from the legacy ``RecordRead.slicer_*_args_formatted``
-computed fields, which use ``fallback_to_unanonymized=True``. The fallback
-is intentionally not preserved at the repository layer (see file-repo
-roadmap §4); UX routers (roadmap Phase 4) must catch ``AnonPathError``
-and serve ``null`` instead of degrading silently.
 """
 
 from pathlib import Path
@@ -54,7 +45,6 @@ if TYPE_CHECKING:
     from clarinet.models.patient import PatientRead
     from clarinet.models.record import RecordRead
     from clarinet.models.study import SeriesRead, StudyRead
-    from clarinet.types import SlicerArgs
 
 
 __all__ = ["FileRepository"]
@@ -62,13 +52,6 @@ __all__ = ["FileRepository"]
 
 class FileRepository:
     """Sole authority for file path resolution.
-
-    Replaces:
-
-    - ``RecordRead.working_folder``, ``SeriesRead.working_folder``
-    - ``RecordRead._get_working_folder``, ``_format_path``, ``_format_path_strict``
-    - ``RecordRead._format_slicer_kwargs`` and the three
-      ``slicer_*_args_formatted`` computed fields.
 
     Constructible from any of ``RecordRead``, ``SeriesRead``, ``StudyRead``,
     ``PatientRead`` — see module docstring for level semantics.
@@ -105,7 +88,8 @@ class FileRepository:
 
     @property
     def working_dir(self) -> Path:
-        """Path at the record's DICOM level (replaces ``.working_folder``)."""
+        """Path at the record's DICOM level (replaces the removed
+        ``working_folder`` model field)."""
         return self._working_dirs[self._level]
 
     def working_dirs_all(self) -> dict[DicomQueryLevel, Path]:
@@ -134,42 +118,6 @@ class FileRepository:
             fields=FileResolver.build_fields(self._record),
         )
         return resolver.resolve(file_def, **overrides)
-
-    # ── slicer args (RecordRead-only) ─────────────────────────────────
-
-    def slicer_args(self, *, validator: bool = False) -> "SlicerArgs | None":
-        """Formatted Slicer script arguments.
-
-        ``validator=False`` (default) → from ``record_type.slicer_script_args``.
-        ``validator=True``            → from ``record_type.slicer_result_validator_args``.
-
-        Returns ``None`` when the relevant args field is ``None`` on the
-        record type — matches legacy ``RecordRead.slicer_*_args_formatted``.
-
-        Delegates to ``RecordRead._format_slicer_kwargs`` to guarantee
-        byte-for-byte equality with the legacy computed field. The
-        ``working_folder`` placeholder is injected from ``self.working_dir``.
-
-        .. todo:: Move ``_format_slicer_kwargs`` logic into this module (or
-            ``FileResolver``) before file-repo roadmap Phase 3 — that phase
-            removes ``RecordRead._format_slicer_kwargs``, which Phase 5
-            ``build_slicer_context`` relies on through this method.
-
-        Requires a ``RecordRead``.
-        """
-        from clarinet.models.record import RecordRead
-
-        if not isinstance(self._record, RecordRead):
-            raise TypeError(f"slicer_args requires RecordRead, got {type(self._record).__name__}")
-        source = (
-            self._record.record_type.slicer_result_validator_args
-            if validator
-            else self._record.record_type.slicer_script_args
-        )
-        if source is None:
-            return None
-        extra = {"working_folder": str(self.working_dir)}
-        return self._record._format_slicer_kwargs(source, extra)
 
     # ── reader-side fallback ──────────────────────────────────────────
 

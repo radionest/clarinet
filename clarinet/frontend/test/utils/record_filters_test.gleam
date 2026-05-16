@@ -50,10 +50,6 @@ fn make_record(
     started_at: None,
     finished_at: None,
     radiant: None,
-    working_folder: None,
-    slicer_args_formatted: None,
-    slicer_validator_args_formatted: None,
-    slicer_all_args_formatted: None,
   )
 }
 

@@ -32,8 +32,15 @@ The generic `output_file` alias points to the first OUTPUT file — useful for s
 
 ### Helper: `build_template_vars(record)`
 
-Provides the same set of placeholders as `RecordRead._format_path_strict()`:
-`patient_id`, `patient_anon_name`, `study_uid`, `study_anon_uid`, `series_uid`, `series_anon_uid`, `user_id`, `clarinet_storage_path`.
+Provides the placeholder set for custom Slicer-arg resolution (UX layer
+— falls back to raw UIDs when anonymization has not yet propagated):
+`patient_id`, `patient_anon_name`, `study_uid`, `study_anon_uid`,
+`series_uid`, `series_anon_uid`, `user_id`, `clarinet_storage_path`.
+
+Backend callers that want strict semantics (raise on missing anon)
+should use `clarinet.services.slicer.args.render_slicer_args` instead
+— it relies on `FileRepository` for the working folder and refuses
+non-anonymized records.
 
 ## Context Hydration (`context_hydration.py`)
 

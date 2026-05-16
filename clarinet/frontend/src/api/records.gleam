@@ -219,7 +219,6 @@ fn series_base_decoder() -> decode.Decoder(models.Series) {
     study_uid: study_uid,
     study: None,
     records: None,
-    working_folder: None,
   ))
 }
 
@@ -392,10 +391,6 @@ pub fn record_decoder() -> decode.Decoder(Record) {
     started_at: started_at,
     finished_at: finished_at,
     radiant: None,
-    working_folder: None,
-    slicer_args_formatted: None,
-    slicer_validator_args_formatted: None,
-    slicer_all_args_formatted: None,
   ))
 }
 

@@ -1,10 +1,9 @@
-"""Unit tests for FileRepository (Phase 1 of file-repo refactor).
+"""Unit tests for FileRepository.
 
 Covers construction from all four supported types (RecordRead, SeriesRead,
 StudyRead, PatientRead), the level-semantics of ``working_dir``, the
-RecordRead-only methods (``resolve_file``, ``slicer_args``), snapshot
-parity with the legacy ``RecordRead.slicer_*_args_formatted`` computed
-fields, and storage-path / template configuration.
+RecordRead-only ``resolve_file`` method, and storage-path / template
+configuration.
 """
 
 from __future__ import annotations
@@ -122,25 +121,6 @@ def _make_record_mock(
         slicer_script_args=slicer_script_args,
         slicer_result_validator_args=slicer_result_validator_args,
     )
-
-    # Patch _format_slicer_kwargs to a callable we can verify (real method
-    # is on RecordRead; MagicMock spec exposes it but as a MagicMock too).
-    # We delegate to the real method to retain byte-for-byte parity, but
-    # _make_record_mock doesn't have access to the real RecordRead instance,
-    # so we wire in a passthrough that mimics the legacy behavior.
-    real_kwargs = RecordRead._format_slicer_kwargs
-    record._format_slicer_kwargs = lambda kw, extra: real_kwargs(record, kw, extra)
-    record._format_path = lambda p, **extra: RecordRead._format_path(record, p, **extra)
-    record._format_path_strict = lambda p, **kw: RecordRead._format_path_strict(record, p, **kw)
-    record._resolve_patient_id_for_path = lambda f: RecordRead._resolve_patient_id_for_path(
-        record, f
-    )
-    record._resolve_study_anon_uid_for_path = lambda f: RecordRead._resolve_study_anon_uid_for_path(
-        record, f
-    )
-    record._resolve_series_anon_uid_for_path = lambda f: (
-        RecordRead._resolve_series_anon_uid_for_path(record, f)
-    )
     return record
 
 
@@ -222,8 +202,8 @@ class TestFileRepositoryConstruction:
     ) -> None:
         """Non-anonymized RecordRead cannot construct FileRepository.
 
-        Confirms slicer_args is NOT a UX-fallback exception — strict mode
-        applies uniformly. UX-routers must catch AnonPathError per Phase 4.
+        Strict mode applies uniformly — UX routers must catch
+        ``AnonPathError`` and serve ``null`` when needed.
         """
         mock_settings.storage_path = "/data"
         record = _make_record_mock(level=DicomQueryLevel.SERIES)
@@ -271,73 +251,6 @@ class TestFileRepositoryResolveFile:
         repo = FileRepository(entity)
         with pytest.raises(TypeError, match="resolve_file requires RecordRead"):
             repo.resolve_file(fd)
-
-
-# ── slicer_args (RecordRead-only, snapshot parity) ─────────────────────────
-
-
-class TestFileRepositorySlicerArgs:
-    @patch("clarinet.services.common.file_resolver.settings")
-    def test_slicer_args_default_renders_script_args(self, mock_settings: MagicMock) -> None:
-        """Literal snapshot: script-args templates render against
-        working_dir + record fields (patient_id, study/series UIDs, etc.)."""
-        mock_settings.storage_path = "/data"
-        slicer_args = {
-            "input": "{working_folder}/input.nrrd",
-            "patient": "{patient_id}",
-            "study": "{study_uid}",
-        }
-        record = _make_record_mock(slicer_script_args=slicer_args)
-
-        result = FileRepository(record).slicer_args(validator=False)
-        # ``{working_folder}/input.nrrd`` is a slicer template: the literal "/"
-        # is preserved by ``str.format`` (not joined via ``Path``), so on
-        # Windows the result is ``str(working_dir) + "/input.nrrd"`` with
-        # mixed separators. Build ``expected`` the same way for portability.
-        working_dir = str(Path("/data") / "CLARINET_1" / "9.8.7.6.5" / "9.8.7.6.5.4")
-        assert result == {
-            "input": f"{working_dir}/input.nrrd",
-            "patient": "CLARINET_1",
-            "study": "1.2.3.4.5",
-        }
-
-    @patch("clarinet.services.common.file_resolver.settings")
-    def test_slicer_args_validator_renders_validator_args(self, mock_settings: MagicMock) -> None:
-        """Literal snapshot for validator branch."""
-        mock_settings.storage_path = "/data"
-        validator_args = {
-            "check": "{working_folder}/check.json",
-            "series": "{series_uid}",
-        }
-        record = _make_record_mock(slicer_result_validator_args=validator_args)
-
-        result = FileRepository(record).slicer_args(validator=True)
-        working_dir = str(Path("/data") / "CLARINET_1" / "9.8.7.6.5" / "9.8.7.6.5.4")
-        assert result == {
-            "check": f"{working_dir}/check.json",
-            "series": "1.2.3.4.5.6",
-        }
-
-    @patch("clarinet.services.common.file_resolver.settings")
-    def test_slicer_args_none_when_record_type_has_no_args(self, mock_settings: MagicMock) -> None:
-        mock_settings.storage_path = "/data"
-        record = _make_record_mock(slicer_script_args=None, slicer_result_validator_args=None)
-
-        repo = FileRepository(record)
-        assert repo.slicer_args(validator=False) is None
-        assert repo.slicer_args(validator=True) is None
-
-    @patch("clarinet.services.common.file_resolver.settings")
-    @pytest.mark.parametrize(
-        "factory",
-        [_make_series_mock, _make_study_mock, _make_patient_mock],
-    )
-    def test_slicer_args_rejects_non_record_inputs(self, mock_settings: MagicMock, factory) -> None:
-        mock_settings.storage_path = "/data"
-        entity = factory()
-        repo = FileRepository(entity)
-        with pytest.raises(TypeError, match="slicer_args requires RecordRead"):
-            repo.slicer_args()
 
 
 # ── Configuration ──────────────────────────────────────────────────────────

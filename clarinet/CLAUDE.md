@@ -98,6 +98,18 @@ Bootstrap uses `reconcile_config()` from `clarinet/utils/bootstrap.py` — dispa
 - API DI aliases and router patterns — see `api/CLAUDE.md`
 - Never query DB directly in routers; use repository/service layer
 
+## File path resolution
+
+`FileRepository` (`clarinet/repositories/file_repository.py`) is the
+sole authority for resolving on-disk paths. Models carry no path
+logic — use `FileRepository(record).working_dir` instead of any
+removed `working_folder` / `_get_working_folder` / `_format_path*`
+helpers. Slicer-arg formatting lives in
+`clarinet.services.slicer.args.render_slicer_args`. Strict by default
+(`AnonPathError` for not-yet-anonymized records); use
+`FileRepository.resolve_with_fallback` for reader-side services that
+must tolerate the pre-anon flow.
+
 ## Service Layer Overview
 
 Each service has its own CLAUDE.md — see `services/*/CLAUDE.md` for details.

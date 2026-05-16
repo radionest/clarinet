@@ -23,13 +23,10 @@ from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, Str
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlmodel import Column, Field, Relationship, SQLModel
 
-from clarinet.types import DbInt64, DbPositiveInt32, PortableJSON, RecordData, SlicerArgs
-from clarinet.utils.anon_resolve import require_anon_or_raw
-from clarinet.utils.logger import logger
+from clarinet.types import DbInt64, DbPositiveInt32, PortableJSON, RecordData
 
-from ..exceptions import AnonPathError, ConfigurationError, ValidationError
-from ..settings import settings
-from .base import BaseModel, DicomQueryLevel, DicomUID, RecordStatus
+from ..exceptions import ValidationError
+from .base import BaseModel, DicomUID, RecordStatus
 from .file_schema import RecordFileLink, RecordFileLinkRead
 from .patient import Patient, PatientInfo
 from .record_type import (
@@ -161,7 +158,8 @@ class RecordBase(BaseModel):
     # Parent record link
     parent_record_id: int | None = None
 
-    # Anon UIDs (used in working_folder)
+    # Anon UIDs — sibling-relationship snapshot used by FileRepository
+    # when the study/series relations are not eager-loaded.
     study_anon_uid: str | None = None
     series_anon_uid: str | None = None
 
@@ -320,15 +318,6 @@ class RecordRead(RecordBase):
     series: SeriesBase | None = None
     record_type: RecordTypeRead
 
-    # Path-resolution fields. Previously @computed_field; now plain optional
-    # fields (default ``None``). Path resolution is owned by ``FileRepository``;
-    # callers that need an on-disk path must construct it explicitly. Frontend
-    # already decodes these as ``Option`` and tolerates ``null``.
-    working_folder: str | None = None
-    slicer_args_formatted: SlicerArgs | None = None
-    slicer_validator_args_formatted: SlicerArgs | None = None
-    slicer_all_args_formatted: SlicerArgs | None = None
-
     @model_validator(mode="before")
     @classmethod
     def populate_files_from_links(cls, data: Any) -> Any:
@@ -372,150 +361,6 @@ class RecordRead(RecordBase):
         if self.study.anon_uid:
             return f"radiant://?n=paet&v=PACS_PETROVA&n=pstv&v=0020000D&v={self.study.anon_uid}"
         return f"radiant://?n=paet&v=PACS_PETROVA&n=pstv&v=0020000D&v={self.study.study_uid}"
-
-    def _format_path_strict(
-        self,
-        unformatted_path: str,
-        *,
-        fallback_to_unanonymized: bool = False,
-        **extra: Any,
-    ) -> str:
-        """Format a path template with values from this record.
-
-        Raises on failure — use for system templates where all placeholders
-        are guaranteed to exist (e.g. working_folder).
-
-        Args:
-            unformatted_path: Template string with ``{placeholder}`` tokens.
-            fallback_to_unanonymized: If ``False`` (default — backend safe
-                mode), missing ``anon_id``/``anon_uid`` raise
-                ``AnonPathError`` instead of silently rendering against
-                raw identifiers. UX callers (e.g. user-defined slicer args)
-                pass ``True`` to keep the legacy fallback.
-            **extra: Additional placeholder values (e.g. ``working_folder``).
-        """
-        patient_id = self._resolve_patient_id_for_path(fallback_to_unanonymized)
-        study_anon_uid = self._resolve_study_anon_uid_for_path(fallback_to_unanonymized)
-        series_anon_uid = self._resolve_series_anon_uid_for_path(fallback_to_unanonymized)
-        return unformatted_path.format(
-            patient_id=patient_id,
-            patient_anon_name=self.patient.anon_name,
-            study_uid=self.study_uid,
-            study_anon_uid=study_anon_uid,
-            series_uid=self.series_uid,
-            series_anon_uid=series_anon_uid,
-            user_id=self.user_id,
-            clarinet_storage_path=self.clarinet_storage_path or settings.storage_path,
-            **extra,
-        )
-
-    def _resolve_patient_id_for_path(self, fallback_to_unanonymized: bool) -> str:
-        return require_anon_or_raw(
-            anon=self.patient.anon_id,
-            raw=self.patient_id,
-            level=DicomQueryLevel.PATIENT,
-            fallback_to_unanonymized=fallback_to_unanonymized,
-        )
-
-    def _resolve_study_anon_uid_for_path(self, fallback_to_unanonymized: bool) -> str | None:
-        if self.study_uid is None:
-            return None  # PATIENT-level record — no study segment
-        anon = self.study.anon_uid if self.study else self.study_anon_uid
-        return require_anon_or_raw(
-            anon=anon,
-            raw=self.study_uid,
-            level=DicomQueryLevel.STUDY,
-            fallback_to_unanonymized=fallback_to_unanonymized,
-        )
-
-    def _resolve_series_anon_uid_for_path(self, fallback_to_unanonymized: bool) -> str | None:
-        if self.series_uid is None:
-            return None  # PATIENT/STUDY-level record — no series segment
-        anon = self.series.anon_uid if self.series else self.series_anon_uid
-        return require_anon_or_raw(
-            anon=anon,
-            raw=self.series_uid,
-            level=DicomQueryLevel.SERIES,
-            fallback_to_unanonymized=fallback_to_unanonymized,
-        )
-
-    def _format_path(self, unformatted_path: str, **extra: Any) -> str | None:
-        """Format a path template, returning None on failure.
-
-        Safe wrapper for user-defined templates (e.g. slicer kwargs)
-        where unknown placeholders are expected. Uses ``fallback_to_unanonymized=True``
-        because user templates target the UX layer (Slicer scripts shown
-        to the doctor).
-
-        Args:
-            unformatted_path: Template string with ``{placeholder}`` tokens.
-            **extra: Additional placeholder values (e.g. ``working_folder``).
-        """
-        try:
-            return self._format_path_strict(
-                unformatted_path, fallback_to_unanonymized=True, **extra
-            )
-        except (AttributeError, KeyError, AnonPathError):
-            return None
-
-    def _format_slicer_kwargs(
-        self, slicer_kwargs: SlicerArgs, extra_vars: dict[str, Any] | None = None
-    ) -> SlicerArgs:
-        """Format Slicer script arguments with values from this record.
-
-        Args:
-            slicer_kwargs: Dict of arg_name -> template string.
-            extra_vars: Additional placeholder values (e.g. ``working_folder``).
-        """
-        if slicer_kwargs is None:
-            return {}
-        extra = extra_vars or {}
-        result: SlicerArgs = {}
-        for k, v in slicer_kwargs.items():
-            formatted = self._format_path(v, **extra)
-            if formatted is not None:
-                result[k] = formatted
-            else:
-                logger.warning(f"Slicer arg '{k}': could not resolve template '{v}'")
-        return result
-
-    def _get_working_folder(self, *, fallback_to_unanonymized: bool = False) -> str:
-        """Get the working folder path for this record.
-
-        Rendered from ``settings.disk_path_template`` at the appropriate
-        DICOM level. The template segments are applied as follows::
-
-            PATIENT -> storage / <patient_segment>
-            STUDY   -> storage / <patient_segment> / <study_segment>
-            SERIES  -> storage / <patient_segment> / <study_segment> / <series_segment>
-
-        Kept as a private helper for ``build_slicer_context`` and the
-        legacy parity tests. New code should construct
-        ``FileRepository(record).working_dir`` instead.
-        """
-        from pathlib import Path
-
-        from clarinet.services.common.storage_paths import build_context, render_working_folder
-
-        try:
-            level = DicomQueryLevel(self.record_type.level)
-        except ValueError as exc:
-            raise ConfigurationError(
-                f"Unknown record type level '{self.record_type.level}' — "
-                "expected SERIES, STUDY, or PATIENT."
-            ) from exc
-        ctx = build_context(
-            patient=self.patient,
-            study=self.study,
-            series=self.series,
-            template=settings.disk_path_template,
-            fallback_to_unanonymized=fallback_to_unanonymized,
-        )
-        # Per-record override only lives on Record (Series has no
-        # clarinet_storage_path field). Series-derived paths always use
-        # settings.storage_path — that's an intentional asymmetry, not a bug.
-        storage = Path(self.clarinet_storage_path or settings.storage_path)
-        return str(render_working_folder(settings.disk_path_template, level, ctx, storage))
 
     @computed_field  # type: ignore[prop-decorator]
     @property

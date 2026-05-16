@@ -9,10 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 from sqlmodel import Field, Relationship
 
-from ..exceptions import AnonPathError
-from ..settings import settings
-from ..utils.anon_resolve import require_anon_or_raw
-from .base import BaseModel, DicomQueryLevel, DicomUID, InstanceCount
+from .base import BaseModel, DicomUID, InstanceCount
 from .patient import Patient, PatientInfo
 
 if TYPE_CHECKING:
@@ -97,72 +94,6 @@ class SeriesRead(SeriesBase):
 
     study: StudyRead
     records: list[Any] = Field(default_factory=list)  # Will contain RecordRead objects
-
-    # Path-resolution field. Previously @computed_field; now plain optional
-    # field (default ``None``). Callers that need an on-disk path must
-    # construct ``FileRepository(series).working_dir`` explicitly. Frontend
-    # decodes this as ``Option(String)`` and tolerates ``null``.
-    working_folder: str | None = None
-
-    def _format_path_strict(
-        self,
-        unformatted_path: str,
-        *,
-        fallback_to_unanonymized: bool = False,
-    ) -> str:
-        """Format a path with values from this series.
-
-        Raises on failure — use for system templates where all placeholders
-        are guaranteed to exist (e.g. working_folder).
-
-        Args:
-            unformatted_path: Template string with ``{placeholder}`` tokens.
-            fallback_to_unanonymized: If ``False`` (default — backend safe
-                mode), missing ``anon_id``/``anon_uid`` raise
-                ``AnonPathError`` instead of silently rendering against raw
-                identifiers.
-        """
-        patient = self.study.patient
-        patient_id = require_anon_or_raw(
-            anon=patient.anon_id,
-            raw=patient.id,
-            level=DicomQueryLevel.PATIENT,
-            fallback_to_unanonymized=fallback_to_unanonymized,
-        )
-        study_anon_uid = require_anon_or_raw(
-            anon=self.study.anon_uid,
-            raw=self.study_uid,
-            level=DicomQueryLevel.STUDY,
-            fallback_to_unanonymized=fallback_to_unanonymized,
-        )
-        series_anon_uid = require_anon_or_raw(
-            anon=self.anon_uid,
-            raw=self.series_uid,
-            level=DicomQueryLevel.SERIES,
-            fallback_to_unanonymized=fallback_to_unanonymized,
-        )
-
-        return unformatted_path.format(
-            patient_id=patient_id,
-            patient_anon_name=patient.anon_name,
-            study_uid=self.study_uid,
-            study_anon_uid=study_anon_uid,
-            series_uid=self.series_uid,
-            series_anon_uid=series_anon_uid,
-            clarinet_storage_path=settings.storage_path,
-        )
-
-    def _format_path(self, unformatted_path: str) -> str | None:
-        """Format a path template, returning None on failure.
-
-        Safe wrapper for user-defined templates where unknown placeholders
-        are expected. Uses ``fallback_to_unanonymized=True`` because user
-        templates target the UX layer.
-        """
-        try:
-            return self._format_path_strict(unformatted_path, fallback_to_unanonymized=True)
-        except (AttributeError, KeyError, AnonPathError):
-            return None
 
 
 class SeriesCreate(SeriesBase):
