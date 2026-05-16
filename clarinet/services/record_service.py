@@ -13,7 +13,7 @@ from clarinet.exceptions.domain import (
 from clarinet.exceptions.domain import FileNotFoundError as DomainFileNotFoundError
 from clarinet.models import Record, RecordRead, RecordStatus
 from clarinet.models.file_schema import FileDefinitionRead, FileRole
-from clarinet.services.common.file_resolver import FileResolver
+from clarinet.repositories.file_repository import FileRepository
 from clarinet.services.file_validation import validate_record_files
 from clarinet.utils.file_checksums import checksums_changed, compute_checksums
 from clarinet.utils.file_patterns import glob_file_paths, resolve_pattern
@@ -34,22 +34,6 @@ def _filter_in_sandbox(paths: list[Path], sandbox: Path) -> list[Path]:
     """
     sandbox_resolved = sandbox.resolve()
     return [p for p in paths if p.resolve().is_relative_to(sandbox_resolved)]
-
-
-def _record_working_dir(record_read: RecordRead) -> Path:
-    """Resolve the working directory for ``record_read`` at its DICOM level.
-
-    Uses ``FileResolver`` with ``fallback_to_unanonymized=True`` so non-anon
-    records still produce a usable path (matches the legacy
-    ``RecordRead.working_folder`` semantics that backend services relied on).
-    """
-    from clarinet.models.base import DicomQueryLevel
-
-    working_dirs = FileResolver.build_working_dirs(record_read, fallback_to_unanonymized=True)
-    level = record_read.record_type.level
-    if isinstance(level, str):
-        level = DicomQueryLevel(level)
-    return working_dirs[level]
 
 
 class RecordService:
@@ -350,15 +334,11 @@ class RecordService:
             else:
                 return [], {}
 
-        # Use FileResolver with fallback so a record whose study/series has
-        # not been anonymized yet still gets a checksum verdict instead of
-        # raising AnonPathError (matches the legacy `record.working_folder`
-        # behaviour, see file-repo roadmap §4 — strict-only repository
-        # tightening is deferred to its own PR).
+        _, working_dir = FileRepository.resolve_with_fallback(record_read)
         new_checksums = await compute_checksums(
             record_read.record_type.file_registry or [],
             record_read,
-            _record_working_dir(record_read),
+            working_dir,
         )
         old_checksums = {
             link.name: link.checksum for link in (record_read.file_links or []) if link.checksum
@@ -472,13 +452,12 @@ class RecordService:
 
         For ``multiple=False`` returns a single-element list when the
         resolved path exists on disk, else an empty list.
+
+        Records whose anonymized identifiers are missing fall back to raw
+        UIDs (admin/UI-triggered cascade keeps working on legacy data —
+        cf. ``FileRepository.resolve_with_fallback``).
         """
-        # Admin/UI-triggered cascade — fall back to raw UIDs for records
-        # whose study/series has not been anonymized yet, otherwise the
-        # delete pipeline would 500 on legacy data.
-        working_dirs = FileResolver.build_working_dirs(record_read, fallback_to_unanonymized=True)
-        record_level = record_read.record_type.level
-        default_dir = working_dirs[record_level]
+        working_dirs, default_dir = FileRepository.resolve_with_fallback(record_read)
         target_dir = (
             working_dirs[file_def.level]
             if file_def.level and file_def.level in working_dirs
@@ -672,7 +651,7 @@ class RecordService:
         if not output_defs:
             return
 
-        working_dir = _record_working_dir(record_read)
+        _, working_dir = FileRepository.resolve_with_fallback(record_read)
         try:
             new_checksums = await compute_checksums(output_defs, record_read, working_dir)
         except Exception as e:

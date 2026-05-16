@@ -25,7 +25,10 @@ Strict by default for path resolution (``working_dir``, ``working_dirs_all``,
 After Phase 1.5 (pull-based context), templates without ``{anon_*}``
 placeholders never invoke anon resolution, so no fallback flag is needed
 at the repository level. UX routers should catch ``AnonPathError`` on
-their side when serving non-anonymized records.
+their side when serving non-anonymized records. Reader-side backend
+services that must keep working through the legacy / pre-anon flow use
+``FileRepository.resolve_with_fallback`` instead of catching the
+exception themselves.
 
 ``slicer_args`` is also strict: it reads ``working_dir`` from this
 instance, which is computed at ``__init__`` in strict mode. A
@@ -41,6 +44,7 @@ and serve ``null`` instead of degrading silently.
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from clarinet.exceptions.domain import AnonPathError
 from clarinet.models.base import DicomQueryLevel
 from clarinet.services.common.file_resolver import FileResolver
 
@@ -166,3 +170,35 @@ class FileRepository:
             return None
         extra = {"working_folder": str(self.working_dir)}
         return self._record._format_slicer_kwargs(source, extra)
+
+    # ── reader-side fallback ──────────────────────────────────────────
+
+    @staticmethod
+    def resolve_with_fallback(
+        record: "RecordRead",
+    ) -> tuple[dict[DicomQueryLevel, Path], Path]:
+        """Resolve working dirs + record-level dir, with raw-UID fallback.
+
+        Strict ``FileRepository(record)`` first; on ``AnonPathError`` falls
+        back to ``FileResolver.build_working_dirs(..., fallback_to_unanonymized=True)``.
+
+        For reader-side backend services (cascade delete, output-file
+        lookup, checksum compute, input file validation) that must keep
+        working through the legacy / pre-anon flow. Writers stay strict
+        on bare ``FileRepository(record)`` so the asymmetric-anonymization
+        race surfaces: without strict mode, a writer racing ahead of the
+        anonymization step would silently render the path against raw
+        UIDs and land its file in a directory that the reader (using the
+        anonymized template) would never find. Detailed discussion:
+        ``clarinet/utils/anon_resolve.py``.
+
+        Returns ``(working_dirs, default_dir)`` so callers that need
+        cross-level dirs (eg. ``file_def.level`` lookups) and the
+        record-level dir get both in one call.
+        """
+        try:
+            repo = FileRepository(record)
+            return repo.working_dirs_all(), repo.working_dir
+        except AnonPathError:
+            working_dirs = FileResolver.build_working_dirs(record, fallback_to_unanonymized=True)
+            return working_dirs, working_dirs[record.record_type.level]
