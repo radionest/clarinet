@@ -451,8 +451,8 @@ class TestValidateTemplate:
 class TestSeriesReadWorkingFolder:
     """``FileRepository(series_read).working_dir`` uses the resolver — no hardcoded layout.
 
-    Phase 4 dropped ``SeriesRead.working_folder`` as a computed_field; the
-    canonical entry point for series paths is now ``FileRepository``.
+    ``SeriesRead.working_folder`` was removed entirely; the canonical
+    entry point for series paths is now ``FileRepository``.
     """
 
     def test_default_template_layout(self, monkeypatch: pytest.MonkeyPatch) -> None:

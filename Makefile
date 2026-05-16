@@ -91,6 +91,8 @@ format: ## Format code with ruff
 lint: ## Check code with ruff (with fixes)
 	@echo "Checking code with ruff..."
 	@uv run ruff check clarinet/ tests/ --fix
+	@echo "Checking for direct .working_folder access (P29)..."
+	@bash scripts/check-no-direct-working-folder.sh
 
 .PHONY: typecheck
 typecheck: ## Type check with mypy

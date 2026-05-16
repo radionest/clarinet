@@ -102,13 +102,13 @@ Storage-path rendering itself lives in
 `clarinet.services.common.storage_paths` — the same template engine
 (`build_context` + `render_working_folder` + `render_all_levels` +
 `derive_anon_patient_id`) feeds the writer, every reader, the CLI
-migration tool, the helper method `RecordRead._get_working_folder`, and
-the pipeline `FileResolver` (which is a thin wrapper over
-`render_all_levels`). One rendering point means a custom
+migration tool, and the pipeline `FileResolver` (which is a thin
+wrapper over `render_all_levels`). One rendering point means a custom
 `disk_path_template` produces the same path everywhere — there is no
-writer / reader divergence to worry about. Routers/services should call
-the path resolver through `FileRepository`
-(`clarinet/repositories/file_repository.py`).
+writer / reader divergence to worry about. Routers/services call the
+path resolver through `FileRepository`
+(`clarinet/repositories/file_repository.py`), which is the only entry
+point — models carry no path logic.
 
 Studies may be anonymized mid-pipeline (PR #250 — asymmetric anonymization),
 so a `Record` created before the anonymization run carries
@@ -132,29 +132,26 @@ Backend (no fallback — default):
 - `clarinet anon migrate-paths` (per-record failures are logged and the
   CLI moves on)
 - `FileResolver.build_working_dirs*` / pipeline `build_task_context`
-- `_get_working_folder` on `RecordRead` (default safe mode)
-- `RecordRead._format_path_strict` / `SeriesRead._format_path_strict` —
-  default safe mode
+- `FileRepository(record)` constructor (raises on missing anon —
+  routers catch and serve `null` for UX endpoints)
 
 UX (`fallback_to_unanonymized=True`):
-- `RecordRead._format_path` → `_format_slicer_kwargs` → user-defined
-  Slicer script args (`slicer_script_args`)
 - `build_slicer_context` (Slicer is the UI layer — opens in-flight
   records on the raw UID when anonymization has not propagated yet)
 - `build_template_vars` in `slicer/context.py` (renders the same
   `{study_anon_uid}` placeholders for user-authored args)
-- `validate_record_files` / `RecordService._collect_output_file_paths`
-  / `RecordService.check_files` (admin/UI endpoints — fail soft rather
-  than 500)
+- `FileRepository.resolve_with_fallback` for backend services that must
+  tolerate the pre-anon flow: `validate_record_files`,
+  `RecordService._collect_output_file_paths`,
+  `RecordService.check_files`, cascade delete
 - `viewer.py` inline fallbacks for external viewer URIs
 
-After Phase 4 of the FileRepository refactor `RecordRead.working_folder`
-/ `SeriesRead.working_folder` and the three `slicer_*_args_formatted`
-fields are plain `Optional` fields with default `None` — they are no
-longer auto-computed by the Pydantic model. Routers do not currently
-inject them; callers must construct paths via `FileRepository` (strict)
-or via the `_format_*` / `_get_working_folder` helpers (UX, with
-fallback) explicitly.
+`RecordRead` / `SeriesRead` / `StudyRead` / `PatientRead` carry no
+path-resolution logic — `working_folder` / `slicer_*_args_formatted`
+fields and the `_format_path` / `_get_working_folder` /
+`_format_slicer_kwargs` helpers were removed. Routers compose paths
+explicitly via `FileRepository` (or `resolve_with_fallback`); the
+frontend no longer decodes a `working_folder` key.
 
 If you add a new resolver call, pick the side first — the boolean lives
 in the call site, not in the entity.

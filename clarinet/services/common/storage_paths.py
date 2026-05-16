@@ -11,9 +11,9 @@ Anonymized DICOM files (``dcm_anon/``) live as a sub-directory of the
 SERIES-level working folder, so both ``AnonymizationService`` (writer)
 and ``DicomWebCache`` (reader) compute the same path from this template.
 All non-writer call sites (pipeline ``FileResolver``, Slicer context,
-file validation, the ``RecordRead._get_working_folder`` helper) reach
-the same path through ``render_all_levels`` — the single rendering
-point for storage directories.
+file validation, ``FileRepository``) reach the same path through
+``render_all_levels`` — the single rendering point for storage
+directories.
 
 Supported placeholders are listed in ``SUPPORTED_PLACEHOLDERS``. Backend
 callers run with the default ``fallback_to_unanonymized=False`` and get
@@ -25,14 +25,14 @@ fall back to raw UIDs / ``"unknown"`` (legacy non-fatal behavior).
 The resolver is pure-sync — safe to call from Pydantic helper methods
 and from non-async backend code paths.
 
-Lives in ``services/common`` because the same template engine is used by
-DICOM anonymization, the ``_get_working_folder`` helper on ``RecordRead``,
-pipeline file resolution and Slicer context — semantically about storage
-paths, not about DICOM anonymization. The DICOM-anon-specific helper
-``derive_anon_patient_id`` is co-located because the same per-study /
-per-patient ID derivation feeds writer, reader, and UX placeholder
-rendering — keeping them apart would let writer and reader disagree on
-the directory name.
+Lives in ``services/common`` because the same template engine is used
+by DICOM anonymization, ``FileRepository`` (the sole entry point for
+path resolution in services and routers), pipeline file resolution and
+Slicer context — semantically about storage paths, not about DICOM
+anonymization. The DICOM-anon-specific helper ``derive_anon_patient_id``
+is co-located because the same per-study / per-patient ID derivation
+feeds writer, reader, and UX placeholder rendering — keeping them
+apart would let writer and reader disagree on the directory name.
 """
 
 from dataclasses import dataclass
@@ -100,10 +100,9 @@ def _modalities_string(study: "Study | StudyBase | None") -> str:
     Reads ``study.modalities_in_study`` (a ``MODALITIES_SEPARATOR``-joined
     string written by ``operations._ds_modalities``). Returns ``"unknown"``
     when missing — does NOT lazy-load ``study.series`` because callers
-    reach this from helper methods (``_get_working_folder``,
-    ``_format_path_strict``) and ``FileResolver`` where the relationship
-    may not be eagerly loaded; lazy-load on an async session raises
-    ``MissingGreenlet``.
+    reach this from ``FileRepository`` / ``FileResolver`` where the
+    relationship may not be eagerly loaded; lazy-load on an async session
+    raises ``MissingGreenlet``.
     """
     if study is None:
         return "unknown"

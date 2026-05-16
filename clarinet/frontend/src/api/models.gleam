@@ -125,10 +125,6 @@ pub type Record {
     finished_at: Option(String),
     // Computed fields
     radiant: Option(String),
-    working_folder: Option(String),
-    slicer_args_formatted: Option(Dict(String, String)),
-    slicer_validator_args_formatted: Option(Dict(String, String)),
-    slicer_all_args_formatted: Option(Dict(String, String)),
   )
 }
 
@@ -159,8 +155,6 @@ pub type Series {
     study_uid: String,
     study: Option(Study),
     records: Option(List(Record)),
-    // Computed field
-    working_folder: Option(String),
   )
 }
 
@@ -289,7 +283,6 @@ pub type SeriesRead {
     study_uid: String,
     study: Study,
     records: List(RecordRead),
-    working_folder: Option(String),
   )
 }
 

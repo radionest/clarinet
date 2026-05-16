@@ -1,15 +1,19 @@
-"""API contract tests: ``working_folder`` and slicer-args fields appear in JSON.
+"""API contract tests: record/series GET endpoints stay healthy.
 
-Phase 4 contract: the fields are still part of the JSON shape (frontend
-decoders, OpenAPI schema), but their VALUES are now optional — routers no
-longer eagerly compute paths via ``RecordRead`` / ``SeriesRead``
-computed_fields, so the values are ``None`` until a router (or a future
-phase of the FileRepository refactor) populates them explicitly.
+The legacy ``working_folder`` / ``slicer_*_args_formatted`` JSON keys
+were removed from ``RecordRead`` / ``SeriesRead`` together with the
+helper methods (FileRepository refactor — Phase 3). The frontend
+already decodes these as ``Option(...)`` with ``decode.optional_field``
+which tolerates an absent key by returning ``None``.
 
-Asserting *membership* (key in body) catches the silent-removal regression
-the Phase 0 baseline guarded against. Asserting that the value is either
-``None`` or the expected concrete type ensures we don't accidentally
-re-introduce the legacy raw-UID fallback (which would mask anon issues).
+These tests guard against two specific regressions:
+
+1. The fields are gone from the response shape (catches silent re-
+   introduction of the old computed_field plumbing).
+2. Non-anonymized records do NOT 500 from the GET endpoints — the old
+   computed fields had a ``fallback_to_unanonymized=True`` UX shortcut
+   that masked anon issues. After Phase 3 the model is a dumb data
+   container and the router stays responsive.
 """
 
 from datetime import UTC, datetime
@@ -98,71 +102,42 @@ async def seeded_record(
 
 
 @pytest.mark.asyncio
-async def test_get_record_returns_working_folder_in_json(client, seeded_record):
-    """``GET /api/records/{id}`` JSON exposes the ``working_folder`` key.
-
-    Phase 4: the field is no longer eagerly computed by the model, so the
-    value is ``None`` until a router populates it. The key itself must
-    remain in the OpenAPI shape so downstream decoders (and any future
-    router-side injection) keep working.
-    """
+async def test_get_record_omits_working_folder_and_slicer_args(client, seeded_record):
+    """``GET /api/records/{id}`` no longer carries path-resolution keys."""
     response = await client.get(f"{RECORDS_BASE}/{seeded_record.id}")
 
     assert response.status_code == 200
     body = response.json()
-    assert "working_folder" in body, (
-        "working_folder must be in API response (frontend decodes it as Option)"
-    )
-    assert body["working_folder"] is None or isinstance(body["working_folder"], str)
-
-
-@pytest.mark.asyncio
-async def test_get_record_returns_slicer_args_formatted_in_json(client, seeded_record):
-    """``GET /api/records/{id}`` JSON exposes the three slicer-args keys.
-
-    Phase 4: same contract as ``working_folder`` — keys stay in the shape,
-    values are nullable. The legacy computed fields used the
-    ``fallback_to_unanonymized=True`` UX shortcut; the new contract refuses
-    that shortcut at the model layer and lets routers opt in (Phase 5+).
-    """
-    response = await client.get(f"{RECORDS_BASE}/{seeded_record.id}")
-
-    assert response.status_code == 200
-    body = response.json()
-
-    for key in (
+    for removed_key in (
+        "working_folder",
         "slicer_args_formatted",
         "slicer_validator_args_formatted",
         "slicer_all_args_formatted",
     ):
-        assert key in body, f"{key} must remain in API shape (Option(Dict) frontend)"
-        assert body[key] is None or isinstance(body[key], dict), (
-            f"{key} must be null or dict, got {type(body[key]).__name__}"
+        assert removed_key not in body, (
+            f"{removed_key} must not appear in the record response — it was "
+            "removed together with the model helpers in Phase 3."
         )
 
 
 @pytest.mark.asyncio
-async def test_get_series_returns_working_folder_in_json(client, anon_series):
-    """``GET /api/series/{uid}`` JSON exposes the ``working_folder`` key.
-
-    Phase 4: value is nullable (was computed_field with fallback to raw UIDs).
-    Frontend ``series/detail`` page renders ``"-"`` when the value is ``None``.
-    """
+async def test_get_series_omits_working_folder(client, anon_series):
+    """``GET /api/series/{uid}`` no longer carries ``working_folder``."""
     response = await client.get(f"{SERIES_BASE}/{anon_series.series_uid}")
 
     assert response.status_code == 200
     body = response.json()
-    assert "working_folder" in body, (
-        "working_folder must be in /api/series/{uid} response "
-        "(frontend Series detail page decodes it as Option)"
+    assert "working_folder" not in body, (
+        "working_folder must not appear in the series response — it was "
+        "removed together with the model helpers in Phase 3."
     )
-    assert body["working_folder"] is None or isinstance(body["working_folder"], str)
 
 
 # ---------------------------------------------------------------------------
 # Non-anonymized fixtures + regression tests: routers must NOT 500 on records
 # whose study/series has no anon_uid (the previous computed_field used
-# fallback_to_unanonymized=True; the new contract just leaves the field null).
+# fallback_to_unanonymized=True; the new model has no path logic at all, so
+# the GET endpoint stays healthy by construction).
 # ---------------------------------------------------------------------------
 
 
@@ -227,21 +202,12 @@ async def raw_seeded_record(
 
 @pytest.mark.asyncio
 async def test_get_record_unanonymized_does_not_500(client, raw_seeded_record):
-    """``GET /api/records/{id}`` for a non-anon record returns 200, not 500.
-
-    The legacy computed ``working_folder`` masked anon issues by silently
-    falling back to raw UIDs. After Phase 4 the field is plain Optional —
-    the router must not blow up just because ``anon_uid`` is missing.
-    """
+    """``GET /api/records/{id}`` for a non-anon record returns 200, not 500."""
     response = await client.get(f"{RECORDS_BASE}/{raw_seeded_record.id}")
 
     assert response.status_code == 200, (
         f"unanon record GET must succeed; got {response.status_code} {response.text}"
     )
-    body = response.json()
-    assert "working_folder" in body
-    # Field is nullable; until a router populates it, value is ``None``.
-    assert body["working_folder"] is None or isinstance(body["working_folder"], str)
 
 
 @pytest.mark.asyncio
@@ -252,6 +218,3 @@ async def test_get_series_unanonymized_does_not_500(client, raw_series):
     assert response.status_code == 200, (
         f"unanon series GET must succeed; got {response.status_code} {response.text}"
     )
-    body = response.json()
-    assert "working_folder" in body
-    assert body["working_folder"] is None or isinstance(body["working_folder"], str)

@@ -185,8 +185,6 @@ fn series_info_card(
       html.dd([], [html.text(int.to_string(s.series_number))]),
       html.dt([], [html.text("Anonymous UID:")]),
       html.dd([], [html.text(option.unwrap(s.anon_uid, "-"))]),
-      html.dt([], [html.text("Working Folder:")]),
-      html.dd([], [html.text(option.unwrap(s.working_folder, "-"))]),
       html.dt([], [html.text("Study UID:")]),
       html.dd([], [
         html.a(
