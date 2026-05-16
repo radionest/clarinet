@@ -153,8 +153,7 @@ path-resolution logic — `working_folder` / `slicer_*_args_formatted`
 fields and the `_format_path` / `_get_working_folder` /
 `_format_slicer_kwargs` helpers were removed. Routers compose paths
 explicitly via `FileRepository` (or `resolve_with_fallback`); the
-frontend's `Option(String) working_folder` decoder tolerates the
-missing key.
+frontend no longer decodes a `working_folder` key.
 
 If you add a new resolver call, pick the side first — the boolean lives
 in the call site, not in the entity.

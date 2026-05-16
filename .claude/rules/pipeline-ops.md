@@ -74,10 +74,10 @@ Storage-path rendering lives in
 (`build_context` + `render_working_folder` + `render_all_levels`)
 feeds the writer (`AnonymizationService._save_series_to_disk`), every
 reader (`DicomWebCache`, `prefetch_dicom_web`), CLI `anon migrate-paths`,
-the computed-field `working_folder` on `*Read` DTOs, plus the pipeline
-`FileResolver.build_working_dirs*` (thin wrappers over
-`render_all_levels`). One rendering point means a custom
-`disk_path_template` produces the same path everywhere.
+`FileRepository` (the sole entry point for path resolution in
+services and routers), plus the pipeline `FileResolver.build_working_dirs*`
+(thin wrappers over `render_all_levels`). One rendering point means a
+custom `disk_path_template` produces the same path everywhere.
 
 `FileResolver.build_working_dirs*` and the writer/reader helpers
 (`build_context` → `render_working_folder`) refuse to render a path
@@ -96,10 +96,11 @@ produces under that identifier. If the task genuinely needs to address
 the unanonymized layout — e.g. a UX-side preview generator — opt in
 explicitly with `FileResolver.build_working_dirs(record, fallback_to_unanonymized=True)`.
 
-Reading the `record.working_folder` field (computed on `RecordRead`)
-already uses the UX fallback so API responses keep serialising on
-non-anon records. Backend logic must NOT use that value; call
-`FileResolver.build_working_dirs(record)` directly.
+`RecordRead` carries no `working_folder` field — path resolution lives
+in `FileRepository` (strict). Pipeline tasks reach the same path via
+`FileResolver.build_working_dirs(record)` directly (already wired into
+`ctx.files` by `build_task_context`); user-facing routers compose paths
+through `FileRepository` and serve `null` on `AnonPathError`.
 
 ## Built-in Tasks
 

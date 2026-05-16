@@ -18,6 +18,7 @@ identically (when the record is anonymized).
 from typing import TYPE_CHECKING
 
 from clarinet.models.base import DicomQueryLevel
+from clarinet.repositories.file_repository import FileRepository
 from clarinet.settings import settings
 from clarinet.utils.anon_resolve import require_anon_or_raw
 from clarinet.utils.logger import logger
@@ -94,8 +95,6 @@ def render_slicer_args(record: "RecordRead", *, validator: bool = False) -> "Sli
             folder in strict mode (template needs ``{anon_*}`` but the
             record is not anonymized).
     """
-    from clarinet.repositories.file_repository import FileRepository
-
     source = (
         record.record_type.slicer_result_validator_args
         if validator
