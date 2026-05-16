@@ -1,14 +1,11 @@
-"""Tests for path resolution through ``FileRepository`` + ``render_slicer_args``.
+"""Tests for path resolution through ``FileRepository``.
 
 The legacy ``RecordRead._format_path*`` / ``_format_slicer_kwargs`` /
 ``_get_working_folder`` helpers were removed in the FileRepository
 refactor (Phase 3). This file now exercises the same path-resolution
-surface via:
-
-- ``FileRepository(record).working_dir`` (replaces ``_get_working_folder``)
-- ``clarinet.services.slicer.args.render_slicer_args`` (replaces
-  ``_format_slicer_kwargs``)
-- ``validate_record_files`` (unchanged — still the public API)
+surface via ``FileRepository(record).working_dir`` (replaces
+``_get_working_folder``) and ``validate_record_files`` (unchanged —
+still the public API).
 
 Covers SERIES/STUDY/PATIENT levels, per-record
 ``clarinet_storage_path`` override, and a small matrix of custom
@@ -30,7 +27,6 @@ from clarinet.models.study import Series, Study
 from clarinet.repositories import FileRepository
 from clarinet.repositories.record_repository import RecordRepository
 from clarinet.services.file_validation import validate_record_files
-from clarinet.services.slicer.args import render_slicer_args
 from clarinet.settings import settings
 from tests.utils.test_helpers import RecordFactory
 
@@ -415,147 +411,3 @@ async def test_working_dir_respects_custom_disk_path_template(
 
     expected = Path(settings.storage_path).joinpath(*expected_segments)
     assert FileRepository(record_read).working_dir == expected
-
-
-# ===========================================================================
-# Group 4: render_slicer_args — working_folder substitution
-# ===========================================================================
-
-
-@pytest.mark.asyncio
-async def test_render_slicer_args_substitutes_working_folder(
-    test_session, patient_with_anon, study_with_anon, series_with_anon
-):
-    """``render_slicer_args`` substitutes ``{working_folder}`` placeholder."""
-    rt = RecordType(
-        name="wf-test-slicer-args",
-        description="Test working_folder in slicer args",
-        label="WF Slicer Args",
-        level=DicomQueryLevel.STUDY,
-        slicer_script_args={
-            "output_path": "{working_folder}/output.nrrd",
-            "study_uid": "{study_anon_uid}",
-        },
-    )
-    test_session.add(rt)
-    await test_session.commit()
-    await test_session.refresh(rt)
-
-    record = await _create_record(
-        test_session,
-        patient_id=patient_with_anon.id,
-        study_uid=study_with_anon.study_uid,
-        series_uid=None,
-        rt_name=rt.name,
-    )
-
-    repo = RecordRepository(test_session)
-    loaded = await repo.get_with_relations(record.id)
-    record_read = RecordRead.model_validate(loaded)
-
-    args = render_slicer_args(record_read)
-    assert args is not None
-    expected_wf = str(
-        Path(settings.storage_path) / f"{settings.anon_id_prefix}_42" / "ANON_STUDY_WF"
-    )
-    # The "/" in "{working_folder}/output.nrrd" comes from the user-defined
-    # slicer kwarg template, not from a real filesystem join — it survives
-    # ``str.format`` verbatim, hence the literal "/" here (cross-platform OK).
-    assert args["output_path"] == f"{expected_wf}/output.nrrd"
-    assert args["study_uid"] == "ANON_STUDY_WF"
-
-
-@pytest.mark.asyncio
-async def test_render_slicer_args_validator_branch(
-    test_session, patient_with_anon, study_with_anon, series_with_anon
-):
-    """``validator=True`` reads ``slicer_result_validator_args``."""
-    rt = RecordType(
-        name="wf-test-validator-args",
-        description="Test validator branch",
-        label="WF Validator",
-        level=DicomQueryLevel.SERIES,
-        slicer_script_args={"out": "{working_folder}/result.nrrd"},
-        slicer_result_validator_args={"check": "{working_folder}/check.json"},
-    )
-    test_session.add(rt)
-    await test_session.commit()
-    await test_session.refresh(rt)
-
-    record = await _create_record(
-        test_session,
-        patient_id=patient_with_anon.id,
-        study_uid=study_with_anon.study_uid,
-        series_uid=series_with_anon.series_uid,
-        rt_name=rt.name,
-    )
-
-    repo = RecordRepository(test_session)
-    loaded = await repo.get_with_relations(record.id)
-    record_read = RecordRead.model_validate(loaded)
-
-    wf = str(FileRepository(record_read).working_dir)
-    script = render_slicer_args(record_read, validator=False)
-    validator = render_slicer_args(record_read, validator=True)
-
-    assert script == {"out": f"{wf}/result.nrrd"}
-    assert validator == {"check": f"{wf}/check.json"}
-
-
-@pytest.mark.asyncio
-async def test_render_slicer_args_empty_when_unset(
-    test_session, patient_with_anon, study_with_anon, series_with_anon, rt_series
-):
-    """``render_slicer_args`` returns ``{}`` for a record type with no args.
-
-    ``RecordType.slicer_script_args`` uses ``default_factory=dict`` so an
-    unset RT comes back as ``{}`` (not ``None``). The renderer iterates
-    the empty dict and returns ``{}`` — matches the legacy behaviour of
-    ``RecordRead._format_slicer_kwargs``.
-    """
-    record = await _create_record(
-        test_session,
-        patient_id=patient_with_anon.id,
-        study_uid=study_with_anon.study_uid,
-        series_uid=series_with_anon.series_uid,
-        rt_name=rt_series.name,
-    )
-
-    repo = RecordRepository(test_session)
-    loaded = await repo.get_with_relations(record.id)
-    record_read = RecordRead.model_validate(loaded)
-
-    assert render_slicer_args(record_read) == {}
-    assert render_slicer_args(record_read, validator=True) == {}
-
-
-@pytest.mark.asyncio
-async def test_render_slicer_args_strict_raises_on_unanon_record(
-    test_session, test_patient, study_without_anon, series_without_anon
-):
-    """Strict mode: non-anon record with anon template → AnonPathError."""
-    rt = RecordType(
-        name="wf-test-strict-args",
-        description="Strict mode test",
-        label="WF Strict",
-        level=DicomQueryLevel.SERIES,
-        slicer_script_args={"x": "{working_folder}/x.json"},
-    )
-    test_session.add(rt)
-    await test_session.commit()
-    await test_session.refresh(rt)
-
-    record = await _create_record(
-        test_session,
-        patient_id=test_patient.id,
-        study_uid=study_without_anon.study_uid,
-        series_uid=series_without_anon.series_uid,
-        rt_name=rt.name,
-    )
-
-    repo = RecordRepository(test_session)
-    loaded = await repo.get_with_relations(record.id)
-    record_read = RecordRead.model_validate(loaded)
-
-    with pytest.raises(AnonPathError):
-        render_slicer_args(record_read)

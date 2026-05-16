@@ -134,8 +134,6 @@ Backend (no fallback — default):
 - `FileResolver.build_working_dirs*` / pipeline `build_task_context`
 - `FileRepository(record)` constructor (raises on missing anon —
   routers catch and serve `null` for UX endpoints)
-- `clarinet.services.slicer.args.render_slicer_args` (strict
-  formatter for backend Slicer-arg consumers)
 
 UX (`fallback_to_unanonymized=True`):
 - `build_slicer_context` (Slicer is the UI layer — opens in-flight

@@ -17,10 +17,9 @@ The instance level (returned by ``working_dir``) is fixed per type:
 - ``PatientRead`` → ``PATIENT``
 
 ``resolve_file`` requires a ``RecordRead`` (the file registry lives on
-``record_type``). For other types it raises ``TypeError``. Slicer-arg
-rendering lives in ``clarinet.services.slicer.args.render_slicer_args``
-— the Slicer concern is intentionally kept out of the path repository
-(see file-repo roadmap §5).
+``record_type``). For other types it raises ``TypeError``. User-defined
+Slicer args are resolved inside ``build_slicer_context`` (layer 4/5);
+the Slicer-domain concern is intentionally kept out of this repository.
 
 Strict by default: missing anonymized identifiers raise ``AnonPathError``.
 After Phase 1.5 (pull-based context), templates without ``{anon_*}``

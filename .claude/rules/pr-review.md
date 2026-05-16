@@ -61,9 +61,9 @@ Project-specific checklist read by the global `pr-diff-reviewer` subagent. Appli
   (`clarinet/repositories/file_repository.py`). Models are dumb data
   containers — `.working_folder` / `_get_working_folder` /
   `_format_path*` / `_format_slicer_kwargs` /
-  `slicer_*_args_formatted` no longer exist. Slicer-arg rendering is in
-  `clarinet.services.slicer.args.render_slicer_args`. Reader-side
-  services that need pre-anon fallback use
+  `slicer_*_args_formatted` no longer exist. User-defined Slicer args
+  resolve inside `build_slicer_context` (layer 4/5, UX fallback).
+  Reader-side services that need pre-anon fallback use
   `FileRepository.resolve_with_fallback`, not ad-hoc `try/except` on
   `AnonPathError`.
 

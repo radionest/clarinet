@@ -104,11 +104,11 @@ Bootstrap uses `reconcile_config()` from `clarinet/utils/bootstrap.py` — dispa
 sole authority for resolving on-disk paths. Models carry no path
 logic — use `FileRepository(record).working_dir` instead of any
 removed `working_folder` / `_get_working_folder` / `_format_path*`
-helpers. Slicer-arg formatting lives in
-`clarinet.services.slicer.args.render_slicer_args`. Strict by default
-(`AnonPathError` for not-yet-anonymized records); use
-`FileRepository.resolve_with_fallback` for reader-side services that
-must tolerate the pre-anon flow.
+helpers. Strict by default (`AnonPathError` for not-yet-anonymized
+records); use `FileRepository.resolve_with_fallback` for reader-side
+services that must tolerate the pre-anon flow. User-defined Slicer
+script args are resolved inside `build_slicer_context`
+(`clarinet/services/slicer/context.py` — UX fallback).
 
 ## Service Layer Overview
 

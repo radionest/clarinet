@@ -34,17 +34,18 @@ record_read.radiant  # safe — all data is plain Pydantic fields
 `RecordRead` / `SeriesRead` / `StudyRead` / `PatientRead` are dumb data
 containers — they carry no path-resolution logic. Use
 `FileRepository(record).working_dir` (or `resolve_file(...)`) to compute
-on-disk paths. Slicer-arg rendering lives in
-`clarinet.services.slicer.args.render_slicer_args`.
+on-disk paths.
 
 ```python
 from clarinet.repositories import FileRepository
-from clarinet.services.slicer.args import render_slicer_args
 
 working_dir = FileRepository(record_read).working_dir
-args = render_slicer_args(record_read)        # script args
-validator_args = render_slicer_args(record_read, validator=True)
 ```
+
+Slicer-arg rendering for user-defined `slicer_script_args` /
+`slicer_result_validator_args` happens inside `build_slicer_context`
+(layer 4/5 in `clarinet/services/slicer/context.py`); it uses the UX
+fallback so the Slicer UI keeps rendering text for pre-anon records.
 
 Strict by default — a record whose template needs `{anon_*}` but whose
 study/series is not yet anonymized raises `AnonPathError`. UX routers

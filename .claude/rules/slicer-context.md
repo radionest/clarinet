@@ -37,9 +37,8 @@ Provides the placeholder set for custom Slicer-arg resolution (UX layer
 `patient_id`, `patient_anon_name`, `study_uid`, `study_anon_uid`,
 `series_uid`, `series_anon_uid`, `user_id`, `clarinet_storage_path`.
 
-Backend callers that want strict semantics (raise on missing anon)
-should use `clarinet.services.slicer.args.render_slicer_args` instead
-— it relies on `FileRepository` for the working folder and refuses
+Backend callers that want strict semantics resolve paths through
+`FileRepository` directly — it raises `AnonPathError` for
 non-anonymized records.
 
 ## Context Hydration (`context_hydration.py`)
