@@ -6,11 +6,13 @@ as a Python list repr (``"['CT', 'SR']"``) before the
 ``_ds_modalities`` fix.
 """
 
+import logging
+
 from pydicom import Dataset
 from pydicom.multival import MultiValue
 
 from clarinet.services.common.storage_paths import _modalities_string
-from clarinet.services.dicom.operations import DicomOperations
+from clarinet.services.dicom.operations import DicomOperations, _ds_modalities
 
 
 class TestParseStudyResult:
@@ -48,3 +50,21 @@ class TestParseStudyResult:
         study = StudyStub()
         study.modalities_in_study = result.modalities_in_study
         assert _modalities_string(study) == "CT_SR"
+
+    def test_ds_modalities_non_iterable_returns_none_and_warns(
+        self, caplog: logging.LogCaptureFixture
+    ) -> None:
+        """Non-iterable, non-string ModalitiesInStudy must return None.
+
+        Previously the function fell back to ``str(val)`` and poisoned the DB
+        with a Python list repr (``"['CT', 'SR']"``); now it logs a warning
+        and returns None so the downstream path renderer sees a clean value.
+        """
+
+        class Stub:
+            ModalitiesInStudy = object()  # non-iterable, non-str
+
+        with caplog.at_level(logging.WARNING):
+            result = _ds_modalities(Stub())  # type: ignore[arg-type]
+
+        assert result is None
