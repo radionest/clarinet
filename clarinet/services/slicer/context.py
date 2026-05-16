@@ -24,6 +24,7 @@ from clarinet.services.slicer.context_hydration import hydrate_slicer_context
 from clarinet.settings import settings
 from clarinet.utils.file_patterns import resolve_origin_type
 from clarinet.utils.logger import logger
+from clarinet.utils.path_template import RenderMode, render_template
 
 
 def build_template_vars(record: RecordRead) -> dict[str, Any]:
@@ -68,6 +69,11 @@ def _resolve_custom_args(
 ) -> dict[str, str]:
     """Resolve template placeholders in custom slicer args.
 
+    Delegates each value to the unified ``render_template`` (STRICT mode):
+    list-valued context vars join via ``"_"`` rather than rendering as a
+    Python repr, and unresolvable templates are logged and skipped (key
+    omitted from the returned dict).
+
     Args:
         args: Dict of arg_name -> template string (e.g. ``{study_anon_uid}``).
         format_vars: All available placeholder values.
@@ -80,8 +86,8 @@ def _resolve_custom_args(
     resolved: dict[str, str] = {}
     for key, template in args.items():
         try:
-            resolved[key] = template.format(**format_vars)
-        except (KeyError, AttributeError) as exc:
+            resolved[key] = render_template(template, format_vars, mode=RenderMode.STRICT)
+        except (KeyError, ValueError) as exc:
             logger.warning(f"Slicer arg '{key}': unresolved template '{template}' — {exc}")
     return resolved
 

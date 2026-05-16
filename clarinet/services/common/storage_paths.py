@@ -46,8 +46,9 @@ from clarinet.settings import settings
 from clarinet.utils.anon_resolve import require_anon_or_raw
 from clarinet.utils.path_template import (
     SUPPORTED_PLACEHOLDERS,
-    StrictDict,
+    RenderMode,
     extract_placeholders,
+    render_template,
     validate_template,
 )
 
@@ -268,11 +269,11 @@ def build_context(
 def _safe_render(segment: str, context: dict[str, str]) -> str:
     """Render a single template segment with context.
 
-    Validates the result is a single non-empty directory name without
-    embedded path separators or traversal tokens.
+    Delegates interpolation to the unified ``render_template`` (STRICT mode)
+    and applies a path-segment safety check on the result.
     """
     try:
-        out = segment.format_map(StrictDict(context))
+        out = render_template(segment, context, mode=RenderMode.STRICT)
     except KeyError as exc:
         raise AnonPathError(f"unknown placeholder {exc.args[0]!r} in segment {segment!r}") from exc
     if not out or "/" in out or "\\" in out or out in (".", "..") or out.startswith("."):

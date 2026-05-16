@@ -21,7 +21,6 @@ TaskIQ / aio-pika / broker initialisation for callers that only need
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -29,7 +28,8 @@ from typing import TYPE_CHECKING, Any
 from clarinet.models.base import DicomQueryLevel
 from clarinet.services.common.storage_paths import render_all_levels
 from clarinet.settings import settings
-from clarinet.utils.file_patterns import PLACEHOLDER_REGEX, glob_file_paths
+from clarinet.utils.file_patterns import glob_file_paths
+from clarinet.utils.path_template import RenderMode, render_template
 
 if TYPE_CHECKING:
     from clarinet.config.primitives import FileDef
@@ -71,34 +71,22 @@ class _SeriesLazySnapshot:
 
 
 def resolve_pattern_from_dict(pattern: str, fields: dict[str, Any]) -> str:
-    """Replace {placeholder} tokens in *pattern* using a flat dict.
+    """Replace ``{placeholder}`` tokens in *pattern* using a (possibly nested) dict.
 
-    Supports dotted paths (``{data.BIRADS_R}``) by splitting the key on ``"."``
-    and walking nested dicts.
+    Thin shim over ``render_template`` (LENIENT mode). Supports dotted paths
+    (``{data.BIRADS_R}``) by walking nested Mappings. List-valued fields are
+    coerced via ``'_'.join(sorted(...))`` instead of Python's ``str(list)``
+    repr — see ``render_template`` for the full coercion contract.
 
     Args:
         pattern: Pattern string with ``{field}`` placeholders.
         fields: Flat or nested dict of replacement values.
 
     Returns:
-        Pattern with all recognised placeholders replaced.
-        Unknown placeholders are left as-is.
+        Pattern with all recognised placeholders replaced. Missing keys
+        render as the empty string.
     """
-
-    def _replacer(match: re.Match[str]) -> str:
-        key = match.group(1)
-        parts = key.split(".")
-        obj: Any = fields
-        for part in parts:
-            if isinstance(obj, dict):
-                obj = obj.get(part)
-            else:
-                return match.group(0)
-            if obj is None:
-                return ""
-        return str(obj) if obj is not None else ""
-
-    return PLACEHOLDER_REGEX.sub(_replacer, pattern)
+    return render_template(pattern, fields, mode=RenderMode.LENIENT, missing="")
 
 
 class FileResolver:
