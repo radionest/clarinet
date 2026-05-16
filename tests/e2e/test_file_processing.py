@@ -105,9 +105,9 @@ def working_dir(monkeypatch, tmp_path) -> Path:
 
     Patient dir uses anon_id (derived from _AUTO_ID) because Patient.auto_id
     is NOT NULL — anon_id is always computed. ``study.anon_uid`` /
-    ``series.anon_uid`` are None in these tests; the ``RecordRead.working_folder``
-    computed field runs in UX mode (``fallback_to_unanonymized=True``) so the
-    rendered path uses the raw UIDs and matches this leaf layout.
+    ``series.anon_uid`` are ``None`` in these tests; the backend file
+    services call ``FileResolver`` with ``fallback_to_unanonymized=True`` so
+    the rendered path uses the raw UIDs and matches this leaf layout.
     """
     from clarinet.settings import settings
 

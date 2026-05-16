@@ -27,7 +27,6 @@ def mock_record() -> MagicMock:
     record.study_uid = "1.2.3.4.5"
     record.series_uid = "1.2.3.4.5.6"
     record.data = {}
-    record.working_folder = "/tmp/test"
     record.record_type = MagicMock()
     record.record_type.file_registry = [
         FileDefinitionRead(

@@ -130,9 +130,10 @@ class RecordFactory:
         """Persist a Record and return ``RecordRead`` with relationships eagerly loaded.
 
         Mirrors the production code path: ``RecordRepository.get_with_relations()``
-        → ``RecordRead.model_validate(record)``. Use this in tests that touch
-        computed fields (``working_folder``, ``slicer_args_formatted``) and want
-        to avoid the eager-load + DTO-validate boilerplate. Tests that need the
+        → ``RecordRead.model_validate(record)``. Use this in tests that need a
+        fully-hydrated ``RecordRead`` (e.g. for ``FileRepository`` /
+        ``_get_working_folder`` / ``_format_slicer_kwargs`` calls) and want to
+        avoid the eager-load + DTO-validate boilerplate. Tests that need the
         raw ORM ``Record`` should keep using the local ``_create_record`` helper.
         """
         from clarinet.repositories.record_repository import RecordRepository

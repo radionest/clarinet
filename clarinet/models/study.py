@@ -7,7 +7,6 @@ This module provides models for medical imaging studies and series.
 from datetime import date
 from typing import TYPE_CHECKING, Any
 
-from pydantic import computed_field
 from sqlmodel import Field, Relationship
 
 from ..exceptions import AnonPathError
@@ -99,6 +98,12 @@ class SeriesRead(SeriesBase):
     study: StudyRead
     records: list[Any] = Field(default_factory=list)  # Will contain RecordRead objects
 
+    # Path-resolution field. Previously @computed_field; now plain optional
+    # field (default ``None``). Callers that need an on-disk path must
+    # construct ``FileRepository(series).working_dir`` explicitly. Frontend
+    # decodes this as ``Option(String)`` and tolerates ``null``.
+    working_folder: str | None = None
+
     def _format_path_strict(
         self,
         unformatted_path: str,
@@ -158,38 +163,6 @@ class SeriesRead(SeriesBase):
             return self._format_path_strict(unformatted_path, fallback_to_unanonymized=True)
         except (AttributeError, KeyError, AnonPathError):
             return None
-
-    @computed_field
-    def working_folder(self) -> str:
-        """Get the full path to the working folder for this series.
-
-        Rendered from ``settings.disk_path_template`` so the value stays
-        in sync with the anonymized-output layout written by
-        ``AnonymizationService``. Serialised into API responses, so falls
-        back to raw UIDs for series that have not been anonymized yet —
-        backend code that needs the real on-disk path should call
-        ``FileResolver.build_working_dirs_from_series(series)`` instead.
-        """
-        from pathlib import Path
-
-        from clarinet.models.base import DicomQueryLevel
-        from clarinet.services.common.storage_paths import build_context, render_working_folder
-
-        ctx = build_context(
-            patient=self.study.patient,
-            study=self.study,
-            series=self,
-            template=settings.disk_path_template,
-            fallback_to_unanonymized=True,
-        )
-        return str(
-            render_working_folder(
-                settings.disk_path_template,
-                DicomQueryLevel.SERIES,
-                ctx,
-                Path(settings.storage_path),
-            )
-        )
 
 
 class SeriesCreate(SeriesBase):

@@ -320,6 +320,15 @@ class RecordRead(RecordBase):
     series: SeriesBase | None = None
     record_type: RecordTypeRead
 
+    # Path-resolution fields. Previously @computed_field; now plain optional
+    # fields (default ``None``). Path resolution is owned by ``FileRepository``;
+    # callers that need an on-disk path must construct it explicitly. Frontend
+    # already decodes these as ``Option`` and tolerates ``null``.
+    working_folder: str | None = None
+    slicer_args_formatted: SlicerArgs | None = None
+    slicer_validator_args_formatted: SlicerArgs | None = None
+    slicer_all_args_formatted: SlicerArgs | None = None
+
     @model_validator(mode="before")
     @classmethod
     def populate_files_from_links(cls, data: Any) -> Any:
@@ -470,22 +479,6 @@ class RecordRead(RecordBase):
                 logger.warning(f"Slicer arg '{k}': could not resolve template '{v}'")
         return result
 
-    @computed_field
-    def slicer_args_formatted(self) -> SlicerArgs | None:
-        """Get formatted Slicer script arguments."""
-        if self.record_type.slicer_script_args is None:
-            return None
-        extra = {"working_folder": self._get_working_folder(fallback_to_unanonymized=True)}
-        return self._format_slicer_kwargs(self.record_type.slicer_script_args, extra)
-
-    @computed_field
-    def slicer_validator_args_formatted(self) -> SlicerArgs | None:
-        """Get formatted Slicer validator arguments."""
-        if self.record_type.slicer_result_validator_args is None:
-            return None
-        extra = {"working_folder": self._get_working_folder(fallback_to_unanonymized=True)}
-        return self._format_slicer_kwargs(self.record_type.slicer_result_validator_args, extra)
-
     def _get_working_folder(self, *, fallback_to_unanonymized: bool = False) -> str:
         """Get the working folder path for this record.
 
@@ -496,11 +489,9 @@ class RecordRead(RecordBase):
             STUDY   -> storage / <patient_segment> / <study_segment>
             SERIES  -> storage / <patient_segment> / <study_segment> / <series_segment>
 
-        Backend callers (file validation, anonymization writer) keep the
-        default ``fallback_to_unanonymized=False`` and surface
-        ``AnonPathError`` when the record has not been anonymized yet. The
-        ``working_folder`` computed field opts into the UX fallback so API
-        responses never 500 just because anonymization is still pending.
+        Kept as a private helper for ``build_slicer_context`` and the
+        legacy parity tests. New code should construct
+        ``FileRepository(record).working_dir`` instead.
         """
         from pathlib import Path
 
@@ -521,40 +512,10 @@ class RecordRead(RecordBase):
             fallback_to_unanonymized=fallback_to_unanonymized,
         )
         # Per-record override only lives on Record (Series has no
-        # clarinet_storage_path field). Series.working_folder always uses
+        # clarinet_storage_path field). Series-derived paths always use
         # settings.storage_path — that's an intentional asymmetry, not a bug.
         storage = Path(self.clarinet_storage_path or settings.storage_path)
         return str(render_working_folder(settings.disk_path_template, level, ctx, storage))
-
-    @computed_field  # type: ignore[prop-decorator]
-    @property
-    def working_folder(self) -> str:
-        """Get the working folder path for this record.
-
-        Serialised into API responses, so falls back to raw UIDs for
-        records that have not been anonymized yet — otherwise reads of an
-        in-flight study would 500. Backend callers should call
-        ``FileResolver.build_working_dirs(record)`` (or
-        ``_get_working_folder()`` with the default safe mode) instead.
-        """
-        return self._get_working_folder(fallback_to_unanonymized=True)
-
-    @computed_field
-    def slicer_all_args_formatted(self) -> SlicerArgs:
-        """Get all formatted Slicer arguments."""
-        wf = self._get_working_folder(fallback_to_unanonymized=True)
-        extra = {"working_folder": wf}
-        all_args: SlicerArgs = {"working_folder": wf}
-
-        if self.record_type.slicer_script_args is not None:
-            all_args.update(self._format_slicer_kwargs(self.record_type.slicer_script_args, extra))
-
-        if self.record_type.slicer_result_validator_args is not None:
-            all_args.update(
-                self._format_slicer_kwargs(self.record_type.slicer_result_validator_args, extra)
-            )
-
-        return all_args
 
     @computed_field  # type: ignore[prop-decorator]
     @property

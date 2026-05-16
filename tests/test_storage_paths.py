@@ -449,11 +449,16 @@ class TestValidateTemplate:
 
 
 class TestSeriesReadWorkingFolder:
-    """SeriesRead.working_folder uses the resolver — no hardcoded layout."""
+    """``FileRepository(series_read).working_dir`` uses the resolver — no hardcoded layout.
+
+    Phase 4 dropped ``SeriesRead.working_folder`` as a computed_field; the
+    canonical entry point for series paths is now ``FileRepository``.
+    """
 
     def test_default_template_layout(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from clarinet.models.patient import PatientInfo
         from clarinet.models.study import SeriesRead, StudyRead
+        from clarinet.repositories import FileRepository
 
         monkeypatch.setattr(
             "clarinet.services.common.storage_paths.settings.storage_path", "/storage"
@@ -489,11 +494,12 @@ class TestSeriesReadWorkingFolder:
             records=[],
         )
         expected = str(Path("/storage") / "CLARINET_7" / "9.9.9" / "9.9.9.4")
-        assert series_read.working_folder == expected
+        assert str(FileRepository(series_read).working_dir) == expected
 
     def test_custom_template_uses_modalities_date(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from clarinet.models.patient import PatientInfo
         from clarinet.models.study import SeriesRead, StudyRead
+        from clarinet.repositories import FileRepository
 
         monkeypatch.setattr(
             "clarinet.services.common.storage_paths.settings.storage_path", "/storage"
@@ -530,7 +536,7 @@ class TestSeriesReadWorkingFolder:
             records=[],
         )
         expected = str(Path("/storage") / "7" / "CT_PT_20260105" / "9.9.9.4")
-        assert series_read.working_folder == expected
+        assert str(FileRepository(series_read).working_dir) == expected
 
 
 def _full_ctx() -> dict[str, str]:
