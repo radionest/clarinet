@@ -512,7 +512,7 @@ class RecordRead(RecordBase):
             fallback_to_unanonymized=fallback_to_unanonymized,
         )
         # Per-record override only lives on Record (Series has no
-        # clarinet_storage_path field). Series.working_folder always uses
+        # clarinet_storage_path field). Series-derived paths always use
         # settings.storage_path — that's an intentional asymmetry, not a bug.
         storage = Path(self.clarinet_storage_path or settings.storage_path)
         return str(render_working_folder(settings.disk_path_template, level, ctx, storage))

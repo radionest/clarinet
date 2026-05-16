@@ -26,9 +26,9 @@ The resolver is pure-sync — safe to call from Pydantic helper methods
 and from non-async backend code paths.
 
 Lives in ``services/common`` because the same template engine is used by
-DICOM anonymization, computed-field path rendering, pipeline file
-resolution and Slicer context — semantically about storage paths, not
-about DICOM anonymization. The DICOM-anon-specific helper
+DICOM anonymization, the ``_get_working_folder`` helper on ``RecordRead``,
+pipeline file resolution and Slicer context — semantically about storage
+paths, not about DICOM anonymization. The DICOM-anon-specific helper
 ``derive_anon_patient_id`` is co-located because the same per-study /
 per-patient ID derivation feeds writer, reader, and UX placeholder
 rendering — keeping them apart would let writer and reader disagree on
