@@ -71,6 +71,11 @@ def _ds_modalities(ds: Dataset) -> str | None:
     DICOMweb re-serialisation is a free split. Filesystem path
     rendering converts to ``_`` separately — see
     ``storage_paths._modalities_string``.
+
+    Returns ``None`` on a non-iterable, non-string value rather than
+    falling back to ``str(val)`` — the previous fallback wrote
+    ``"['CT', 'SR']"`` into the DB on edge-case pydicom values, poisoning
+    every downstream path renderer that splits on ``MODALITIES_SEPARATOR``.
     """
     val: Any = getattr(ds, "ModalitiesInStudy", None)
     if val is None or val == "":
@@ -80,7 +85,12 @@ def _ds_modalities(ds: Dataset) -> str | None:
     try:
         return MODALITIES_SEPARATOR.join(str(v) for v in val)
     except TypeError:
-        return str(val)
+        logger.warning(
+            f"_ds_modalities: ModalitiesInStudy is not iterable "
+            f"({type(val).__name__}); returning None to avoid Python-repr "
+            f"leak (value={val!r})"
+        )
+        return None
 
 
 def _set_ds_fields(ds: Dataset, fields: dict[str, Any]) -> None:
