@@ -8,6 +8,7 @@ as a Python list repr (``"['CT', 'SR']"``) before the
 
 import logging
 
+import pytest
 from pydicom import Dataset
 from pydicom.multival import MultiValue
 
@@ -52,7 +53,7 @@ class TestParseStudyResult:
         assert _modalities_string(study) == "CT_SR"
 
     def test_ds_modalities_non_iterable_returns_none_and_warns(
-        self, caplog: logging.LogCaptureFixture
+        self, caplog: pytest.LogCaptureFixture
     ) -> None:
         """Non-iterable, non-string ModalitiesInStudy must return None.
 
