@@ -37,6 +37,13 @@ examples/*/data/
 examples/*/alembic.ini
 examples/*/alembic/
 
+# Local alembic artifacts that `clarinet init-migrations` writes at the
+# repo root — only relevant when running the framework against a dev
+# SQLite DB (e.g. via scripts/seed_dev_data.py); the framework itself
+# does not ship migrations.
+/alembic.ini
+/alembic/
+
 # DICOM
 **/dicomweb_cache
 **/test_dataset/**
