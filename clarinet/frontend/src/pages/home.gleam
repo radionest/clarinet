@@ -30,14 +30,7 @@ pub type Msg {
 // --- Init ---
 
 pub fn init(shared: Shared) -> #(Model, Effect(Msg), List(OutMsg)) {
-  let bucket_key = case shared.user {
-    Some(u) ->
-      case permissions.is_admin_user(u) {
-        True -> bucket.RecordsAll
-        False -> bucket.RecordsMine(u.id)
-      }
-    None -> bucket.RecordsAll
-  }
+  let bucket_key = home_bucket_key(shared.user)
   let out_msgs = case shared.user {
     Some(u) ->
       case permissions.is_admin_user(u) {
@@ -51,6 +44,19 @@ pub fn init(shared: Shared) -> #(Model, Effect(Msg), List(OutMsg)) {
     None -> []
   }
   #(Model, effect.none(), out_msgs)
+}
+
+fn home_bucket_key(user: option.Option(models.User)) -> bucket.BucketKey {
+  let base = bucket.default_query()
+  let q = case user {
+    Some(u) ->
+      case permissions.is_admin_user(u) {
+        True -> base
+        False -> bucket.RecordsQuery(..base, user_id: Some(u.id))
+      }
+    None -> base
+  }
+  bucket.Records(q)
 }
 
 // --- Update ---
@@ -140,7 +146,7 @@ fn stats_section(shared: Shared) -> Element(Msg) {
                 label: t(i18n.HomeRecords),
                 count: list.length(cache.bucket_items(
                   shared.cache,
-                  bucket.RecordsAll,
+                  home_bucket_key(shared.user),
                 )),
                 color: "green",
                 route: router.Records(dict.new()),
@@ -152,7 +158,7 @@ fn stats_section(shared: Shared) -> Element(Msg) {
                 label: t(i18n.HomeMyRecords),
                 count: list.length(cache.bucket_items(
                   shared.cache,
-                  bucket.RecordsMine(u.id),
+                  home_bucket_key(shared.user),
                 )),
                 color: "green",
                 route: router.Records(dict.new()),

@@ -49,7 +49,7 @@ pub fn init(
 ) -> #(Model, Effect(Msg), List(OutMsg)) {
   let model = Model(study_uid: study_uid, load_status: load_status.Loading)
   #(model, load_study_effect(study_uid), [
-    shared.FetchBucket(bucket.RecordsByStudy(study_uid)),
+    shared.FetchBucket(bucket.Records(bucket.query_with_study(study_uid))),
   ])
 }
 
@@ -162,7 +162,10 @@ pub fn view(model: Model, shared: Shared) -> Element(Msg) {
 
 fn render_detail(shared: Shared, study: Study) -> Element(Msg) {
   let study_records =
-    cache.bucket_items(shared.cache, bucket.RecordsByStudy(study.study_uid))
+    cache.bucket_items(
+      shared.cache,
+      bucket.Records(bucket.query_with_study(study.study_uid)),
+    )
     |> list.sort(fn(a, b) {
       int.compare(option.unwrap(a.id, 0), option.unwrap(b.id, 0))
     })

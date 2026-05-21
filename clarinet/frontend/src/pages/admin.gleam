@@ -12,7 +12,6 @@ import gleam/int
 import gleam/javascript/promise
 import gleam/list
 import gleam/option.{type Option, None, Some}
-import gleam/order
 import gleam/string
 import lustre/attribute
 import lustre/effect.{type Effect}
@@ -24,8 +23,9 @@ import shared.{type OutMsg, type Shared}
 import utils/load_status.{type LoadStatus}
 import utils/record_filters
 import utils/records_list_state
+import utils/records_query
 import utils/status
-import utils/table_sort.{type SortDirection}
+import utils/table_sort
 
 // --- Model ---
 
@@ -102,7 +102,14 @@ pub fn init(
       load_effect(admin_api.get_role_matrix, RoleMatrixLoaded),
       filters_fx,
     ])
-  #(model, effects, [shared.FetchBucket(bucket.RecordsAll), shared.ReloadUsers])
+  #(model, effects, [
+    shared.FetchBucket(bucket_key_for(effective_filters)),
+    shared.ReloadUsers,
+  ])
+}
+
+fn bucket_key_for(filters: Dict(String, String)) -> bucket.BucketKey {
+  bucket.Records(records_query.from_filters(filters))
 }
 
 // --- Update ---
@@ -272,19 +279,25 @@ pub fn update(
 
     AddFilter(key, value) -> {
       let filters = dict.insert(model.active_filters, key, value)
-      #(Model(..model, active_filters: filters), sync_filters_effect(filters), [])
+      #(Model(..model, active_filters: filters), sync_filters_effect(filters), [
+        shared.FetchBucket(bucket_key_for(filters)),
+      ])
     }
 
     RemoveFilter(key) -> {
       let filters = dict.delete(model.active_filters, key)
-      #(Model(..model, active_filters: filters), sync_filters_effect(filters), [])
+      #(Model(..model, active_filters: filters), sync_filters_effect(filters), [
+        shared.FetchBucket(bucket_key_for(filters)),
+      ])
     }
 
     ClearFilters -> {
       // Clearing filters preserves the current sort selection — sorting
       // is independent from filtering (matches /records UX).
       let filters = record_filters.clear_user_filters(model.active_filters)
-      #(Model(..model, active_filters: filters), sync_filters_effect(filters), [])
+      #(Model(..model, active_filters: filters), sync_filters_effect(filters), [
+        shared.FetchBucket(bucket_key_for(filters)),
+      ])
     }
 
     ColumnHeaderClicked(col) -> {
@@ -298,7 +311,11 @@ pub fn update(
           new_dir,
           default_sort_col,
         )
-      #(Model(..model, active_filters: new_filters), sync_filters_effect(new_filters), [])
+      #(
+        Model(..model, active_filters: new_filters),
+        sync_filters_effect(new_filters),
+        [shared.FetchBucket(bucket_key_for(new_filters))],
+      )
     }
   }
 }
@@ -512,7 +529,19 @@ fn role_matrix_row(
 }
 
 fn records_section(model: Model, shared: Shared) -> Element(Msg) {
-  let all_records = cache.bucket_items(shared.cache, bucket.RecordsAll)
+  let key = bucket_key_for(model.active_filters)
+  let records = cache.bucket_items(shared.cache, key)
+  let status = cache.bucket_status(shared.cache, key)
+
+  let body = case status {
+    bucket.Cold | bucket.Loading ->
+      html.div([attribute.class("loading-indicator")], [
+        html.text(shared.translate(i18n.LblLoading)),
+      ])
+    bucket.Failed(msg) ->
+      html.p([attribute.class("text-error")], [html.text(msg)])
+    _ -> records_table(model, shared, records)
+  }
 
   html.div([attribute.class("dashboard-section")], [
     html.div([attribute.class("section-header")], [
@@ -525,8 +554,8 @@ fn records_section(model: Model, shared: Shared) -> Element(Msg) {
         [html.text("Create Record")],
       ),
     ]),
-    filter_bar(model, shared, all_records),
-    records_table(model, shared, all_records),
+    filter_bar(model, shared, records),
+    body,
   ])
 }
 
@@ -627,14 +656,12 @@ fn filter_bar(
 fn records_table(
   model: Model,
   shared: Shared,
-  all_records: List(models.Record),
+  records: List(models.Record),
 ) -> Element(Msg) {
+  // Sorting and filtering happen server-side via the bucket key; this
+  // function renders the page as-is.
   let #(sort_col, sort_dir) =
     table_sort.read_sort(model.active_filters, default_sort_col)
-  let cmp = record_comparator(sort_col, sort_dir, shared.cache.users)
-  let records =
-    record_filters.apply_filters(all_records, model.active_filters)
-    |> list.sort(cmp)
 
   case records {
     [] ->
@@ -690,43 +717,6 @@ fn records_table(
         ]),
       ])
   }
-}
-
-fn user_email(
-  user_id: Option(String),
-  users: Dict(String, models.User),
-) -> String {
-  case user_id {
-    Some(uid) ->
-      case dict.get(users, uid) {
-        Ok(user) -> user.email
-        Error(_) -> uid
-      }
-    None -> ""
-  }
-}
-
-fn record_comparator(
-  col: String,
-  dir: SortDirection,
-  users: Dict(String, models.User),
-) -> fn(models.Record, models.Record) -> order.Order {
-  let base = case records_list_state.common_comparator(col) {
-    Ok(cmp) -> cmp
-    Error(_) ->
-      case col {
-        "user" -> fn(a: models.Record, b: models.Record) {
-          string.compare(
-            user_email(a.user_id, users),
-            user_email(b.user_id, users),
-          )
-        }
-        _ -> fn(a: models.Record, b: models.Record) {
-          int.compare(option.unwrap(a.id, 0), option.unwrap(b.id, 0))
-        }
-      }
-  }
-  table_sort.with_direction(base, dir)
 }
 
 fn record_row(

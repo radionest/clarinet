@@ -84,7 +84,7 @@ pub fn init(
       active_filters: dict.new(),
     )
   #(model, load_patient_effect(patient_id), [
-    shared.FetchBucket(bucket.RecordsByPatient(patient_id)),
+    shared.FetchBucket(bucket.Records(bucket.query_with_patient(patient_id))),
   ])
 }
 
@@ -292,7 +292,10 @@ pub fn view(model: Model, shared: Shared) -> Element(Msg) {
 
 fn render_detail(model: Model, shared: Shared, patient: Patient) -> Element(Msg) {
   let patient_records =
-    cache.bucket_items(shared.cache, bucket.RecordsByPatient(patient.id))
+    cache.bucket_items(
+      shared.cache,
+      bucket.Records(bucket.query_with_patient(patient.id)),
+    )
     |> list.sort(fn(a, b) {
       int.compare(option.unwrap(a.id, 0), option.unwrap(b.id, 0))
     })

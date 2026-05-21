@@ -514,14 +514,36 @@ pub fn upsert_record_in_buckets(model: Model, record: Record) -> Model {
 // --- Private helpers ---
 
 fn bucket_key_to_filter(key: BucketKey) -> List(#(String, json.Json)) {
-  case key {
-    bucket.RecordsAll -> []
-    bucket.RecordsMine(uid) -> [#("user_id", json.string(uid))]
-    bucket.RecordsByPatient(pid) -> [#("patient_id", json.string(pid))]
-    bucket.RecordsByStudy(suid) -> [#("study_uid", json.string(suid))]
-    bucket.RecordsByRecordType(name) -> [
-      #("record_type_name", json.string(name)),
-    ]
+  let bucket.Records(q) = key
+  let base = [#("sort", json.string(bucket.sort_to_backend_string(q.sort)))]
+  base
+  |> append_optional("patient_id", q.patient_id)
+  |> append_optional("study_uid", q.study_uid)
+  |> append_optional("record_type_name", q.record_type_name)
+  |> append_optional("record_status", q.record_status)
+  |> append_user_filter(q.user_id, q.wo_user)
+}
+
+fn append_optional(
+  acc: List(#(String, json.Json)),
+  key: String,
+  value: Option(String),
+) -> List(#(String, json.Json)) {
+  case value {
+    Some(v) -> [#(key, json.string(v)), ..acc]
+    None -> acc
+  }
+}
+
+fn append_user_filter(
+  acc: List(#(String, json.Json)),
+  user_id: Option(String),
+  wo_user: Bool,
+) -> List(#(String, json.Json)) {
+  case wo_user, user_id {
+    True, _ -> [#("wo_user", json.bool(True)), ..acc]
+    False, Some(uid) -> [#("user_id", json.string(uid)), ..acc]
+    False, None -> acc
   }
 }
 
