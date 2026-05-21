@@ -140,6 +140,13 @@ applies it). Steps:
    describing the SQL column, ascending flag, nullability, and how to
    extract the cursor key from a record.
 
+For nullable columns the project uses **NULLS LAST in both ASC and DESC**
+(see `user_id` and `modality` in `_SORT_SPECS`) — this differs from
+PostgreSQL's default (NULLS FIRST in DESC) and is encoded into the cursor
+WHERE branch in `_keyset_where`. Don't fall back to `col.desc()` without
+`.nulls_last()` when adding a nullable sort column: it silently changes
+cursor semantics in the NULL zone.
+
 ## 10. Forms — formosh Integration
 
 `formosh` is a private Gleam web-component library (`git@github.com:radionest/gleam_formosh.git`). It is registered once in `main.init` via `formosh_component.register()`.

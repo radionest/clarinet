@@ -127,6 +127,13 @@ fn stat_card(
 
 fn stats_section(shared: Shared) -> Element(Msg) {
   let t = shared.translate
+  // Resolved once and reused for both admin and non-admin stat cards.
+  // home_bucket_key returns an admin-wide query for admins and a
+  // user-scoped one for everyone else, so the same value is correct
+  // in either branch below — don't inline-duplicate the call.
+  let records_bucket_key = home_bucket_key(shared.user)
+  let records_count =
+    list.length(cache.bucket_items(shared.cache, records_bucket_key))
   html.div([attribute.class("dashboard-section")], [
     html.h3([], [html.text(t(i18n.HomeOverview))]),
     html.div(
@@ -144,10 +151,7 @@ fn stats_section(shared: Shared) -> Element(Msg) {
               ),
               stat_card(
                 label: t(i18n.HomeRecords),
-                count: list.length(cache.bucket_items(
-                  shared.cache,
-                  home_bucket_key(shared.user),
-                )),
+                count: records_count,
                 color: "green",
                 route: router.Records(dict.new()),
                 link_text: t(i18n.HomeViewAll),
@@ -156,10 +160,7 @@ fn stats_section(shared: Shared) -> Element(Msg) {
             False -> [
               stat_card(
                 label: t(i18n.HomeMyRecords),
-                count: list.length(cache.bucket_items(
-                  shared.cache,
-                  home_bucket_key(shared.user),
-                )),
+                count: records_count,
                 color: "green",
                 route: router.Records(dict.new()),
                 link_text: t(i18n.HomeViewAll),

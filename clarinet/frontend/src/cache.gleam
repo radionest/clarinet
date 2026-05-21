@@ -513,15 +513,25 @@ pub fn upsert_record_in_buckets(model: Model, record: Record) -> Model {
 
 // --- Private helpers ---
 
+// Each (filters × sort) combination is a separate entry in
+// `Model.record_buckets`. TTL (60s) plus the stale → drop GC path keeps
+// this bounded under normal use, but adding many new sort columns or
+// filter dimensions amplifies the cardinality — keep that in mind before
+// piling on filters in the page Msg layer.
 fn bucket_key_to_filter(key: BucketKey) -> List(#(String, json.Json)) {
-  let bucket.Records(q) = key
-  let base = [#("sort", json.string(bucket.sort_to_backend_string(q.sort)))]
-  base
-  |> append_optional("patient_id", q.patient_id)
-  |> append_optional("study_uid", q.study_uid)
-  |> append_optional("record_type_name", q.record_type_name)
-  |> append_optional("record_status", q.record_status)
-  |> append_user_filter(q.user_id, q.wo_user)
+  case key {
+    bucket.Records(q) -> {
+      let base = [
+        #("sort", json.string(bucket.sort_to_backend_string(q.sort))),
+      ]
+      base
+      |> append_optional("patient_id", q.patient_id)
+      |> append_optional("study_uid", q.study_uid)
+      |> append_optional("record_type_name", q.record_type_name)
+      |> append_optional("record_status", q.record_status)
+      |> append_user_filter(q.user_id, q.wo_user)
+    }
+  }
 }
 
 fn append_optional(
