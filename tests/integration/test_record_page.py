@@ -494,20 +494,27 @@ class TestFindPageExtendedSort:
         assert names == sorted(names, reverse=True)
 
     @pytest.mark.asyncio
-    async def test_sort_by_status_asc(self, sort_env):
-        result = await sort_env["repo"].find_page(
+    async def test_sort_by_status_asc_desc_are_mirrored(self, sort_env):
+        """Status sort is DB-dependent (PostgreSQL native enum sorts by
+        definition order, SQLite TEXT sorts alphabetically), so the test
+        only verifies that ASC and DESC are mirror images of each other and
+        that all seeded records are returned."""
+        asc = await sort_env["repo"].find_page(
             RecordSearchCriteria(), cursor=None, limit=10, sort="status_asc"
         )
-        statuses = [r.status.value for r in result.records]
-        assert statuses == sorted(statuses)
-
-    @pytest.mark.asyncio
-    async def test_sort_by_status_desc(self, sort_env):
-        result = await sort_env["repo"].find_page(
+        desc = await sort_env["repo"].find_page(
             RecordSearchCriteria(), cursor=None, limit=10, sort="status_desc"
         )
-        statuses = [r.status.value for r in result.records]
-        assert statuses == sorted(statuses, reverse=True)
+        asc_ids = [r.id for r in asc.records]
+        desc_ids = [r.id for r in desc.records]
+        seeded_ids = {r.id for r in sort_env["records"]}
+
+        # All 5 seeded records present in both directions.
+        assert set(asc_ids) == seeded_ids
+        assert set(desc_ids) == seeded_ids
+        # All seeded records use distinct statuses, so no tie-break
+        # ambiguity — desc must be the exact reverse of asc.
+        assert asc_ids == desc_ids[::-1]
 
     @pytest.mark.asyncio
     async def test_sort_by_patient_asc(self, sort_env):
