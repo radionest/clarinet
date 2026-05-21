@@ -1,6 +1,6 @@
 // Unit tests for utils/records_query.
 import cache/bucket.{
-  ChangedAtDesc, ModalityDesc, PatientAsc, RecordTypeDesc, StatusAsc, UserDesc,
+  IdAsc, ModalityDesc, PatientAsc, RecordTypeDesc, StatusAsc, UserDesc,
 }
 import gleam/dict
 import gleam/option.{None, Some}
@@ -17,7 +17,9 @@ pub fn from_filters_empty_test() {
   q.record_status |> should.equal(None)
   q.user_id |> should.equal(None)
   q.wo_user |> should.equal(False)
-  q.sort |> should.equal(ChangedAtDesc)
+  // Defaults to IdAsc to match `default_sort_col = "id"` in the list pages,
+  // so the column the UI arrows-up matches the order the backend returns.
+  q.sort |> should.equal(IdAsc)
 }
 
 pub fn from_filters_status_test() {
@@ -69,9 +71,9 @@ pub fn from_filters_combined_test() {
 
 // --- parse_sort_from_filters: filter dict → SortOrder ---
 
-pub fn parse_sort_missing_defaults_to_changed_at_desc_test() {
+pub fn parse_sort_missing_defaults_to_id_asc_test() {
   records_query.parse_sort_from_filters(dict.new())
-  |> should.equal(ChangedAtDesc)
+  |> should.equal(IdAsc)
 }
 
 pub fn parse_sort_patient_asc_test() {
@@ -110,7 +112,7 @@ pub fn parse_sort_modality_desc_test() {
 pub fn parse_sort_unknown_column_falls_back_test() {
   let filters = dict.from_list([#("sort", "made_up_column")])
   records_query.parse_sort_from_filters(filters)
-  |> should.equal(ChangedAtDesc)
+  |> should.equal(IdAsc)
 }
 
 // --- with_user_scope: layers user filter on a query ---

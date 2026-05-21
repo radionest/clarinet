@@ -8,9 +8,9 @@
 // TanStack Query's `queryKey`.
 
 import cache/bucket.{
-  type RecordsQuery, type SortOrder, ChangedAtDesc, IdAsc, IdDesc, ModalityAsc,
-  ModalityDesc, PatientAsc, PatientDesc, RecordTypeAsc, RecordTypeDesc,
-  RecordsQuery, StatusAsc, StatusDesc, UserAsc, UserDesc,
+  type RecordsQuery, type SortOrder, IdAsc, IdDesc, ModalityAsc, ModalityDesc,
+  PatientAsc, PatientDesc, RecordTypeAsc, RecordTypeDesc, RecordsQuery,
+  StatusAsc, StatusDesc, UserAsc, UserDesc,
 }
 import gleam/dict.{type Dict}
 import gleam/option.{None, Some}
@@ -47,8 +47,13 @@ pub fn from_filters(filters: Dict(String, String)) -> RecordsQuery {
 }
 
 /// Read `sort`/`sort_dir` keys from a filter dict and convert them into the
-/// strongly-typed `SortOrder`. Unknown columns or missing keys fall back
-/// to `ChangedAtDesc`, matching the backend default.
+/// strongly-typed `SortOrder`. Missing or unknown keys fall back to
+/// `IdAsc` — matches the `default_sort_col = "id"` baseline that
+/// `table_sort.read_sort` uses in admin / records/list, so the column the
+/// UI highlights with an arrow agrees with the order the backend actually
+/// returns. (Defaulting to backend's `changed_at_desc` here would silently
+/// disagree with the UI arrow when `table_sort.write_sort` drops the
+/// sort keys as "default ASC on the default column".)
 pub fn parse_sort_from_filters(filters: Dict(String, String)) -> SortOrder {
   let col = dict.get(filters, "sort") |> option.from_result
   let dir = dict.get(filters, "sort_dir") |> option.from_result
@@ -94,7 +99,11 @@ pub fn parse_sort(
         True -> ModalityAsc
         False -> ModalityDesc
       }
-    _ -> ChangedAtDesc
+    _ ->
+      case ascending {
+        True -> IdAsc
+        False -> IdDesc
+      }
   }
 }
 
