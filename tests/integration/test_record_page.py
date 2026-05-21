@@ -18,6 +18,7 @@ from tests.utils.factories import (
     make_record_type,
     make_series,
     make_study,
+    make_user,
     seed_record,
 )
 from tests.utils.urls import RECORDS_FIND_RANDOM
@@ -373,3 +374,216 @@ class TestFindPageUniqueViolationFilter:
         ids = [r.id for r in result.records]
         assert finished.id in ids
         assert unassigned.id in ids
+
+
+@pytest_asyncio.fixture
+async def sort_env(test_session: AsyncSession):
+    """Seed records with deliberately varied (record_type, status, patient, user, modality)
+    so each sort order produces a distinguishable ordering."""
+    user_a = make_user(email="a_user@test.com")
+    user_b = make_user(email="b_user@test.com")
+    test_session.add_all([user_a, user_b])
+    await test_session.commit()
+
+    pat_a = make_patient("SORT_PAT_A")
+    pat_b = make_patient("SORT_PAT_B")
+    pat_c = make_patient("SORT_PAT_C")
+    test_session.add_all([pat_a, pat_b, pat_c])
+    await test_session.commit()
+
+    study_a = make_study("SORT_PAT_A", "1.2.3.910")
+    study_b = make_study("SORT_PAT_B", "1.2.3.911")
+    study_c = make_study("SORT_PAT_C", "1.2.3.912")
+    test_session.add_all([study_a, study_b, study_c])
+    await test_session.commit()
+
+    series_ct = make_series("1.2.3.910", "1.2.3.910.1", num=1)
+    series_ct.modality = "CT"
+    series_mr = make_series("1.2.3.911", "1.2.3.911.1", num=1)
+    series_mr.modality = "MR"
+    test_session.add_all([series_ct, series_mr])
+    await test_session.commit()
+
+    rt_alpha = make_record_type("sort-rt-alpha")
+    rt_beta = make_record_type("sort-rt-beta")
+    test_session.add_all([rt_alpha, rt_beta])
+    await test_session.commit()
+
+    base_time = datetime(2025, 6, 1, 12, 0, 0, tzinfo=UTC)
+    # Five records: each varies one dimension while sharing others, so any
+    # asc sort by that dimension yields a predictable order.
+    r1 = await seed_record(
+        test_session,
+        patient_id="SORT_PAT_A",
+        study_uid="1.2.3.910",
+        series_uid="1.2.3.910.1",
+        rt_name="sort-rt-alpha",
+        status=RecordStatus.failed,
+        user_id=user_a.id,
+        changed_at=base_time,
+    )
+    r2 = await seed_record(
+        test_session,
+        patient_id="SORT_PAT_A",
+        study_uid="1.2.3.910",
+        series_uid="1.2.3.910.1",
+        rt_name="sort-rt-beta",
+        status=RecordStatus.pending,
+        user_id=user_b.id,
+        changed_at=base_time + timedelta(hours=1),
+    )
+    r3 = await seed_record(
+        test_session,
+        patient_id="SORT_PAT_B",
+        study_uid="1.2.3.911",
+        series_uid="1.2.3.911.1",
+        rt_name="sort-rt-alpha",
+        status=RecordStatus.finished,
+        user_id=user_a.id,
+        changed_at=base_time + timedelta(hours=2),
+    )
+    r4 = await seed_record(
+        test_session,
+        patient_id="SORT_PAT_C",
+        study_uid="1.2.3.912",
+        series_uid=None,  # no series → modality NULL
+        rt_name="sort-rt-beta",
+        status=RecordStatus.inwork,
+        user_id=None,  # unassigned → user_id NULL
+        changed_at=base_time + timedelta(hours=3),
+    )
+    r5 = await seed_record(
+        test_session,
+        patient_id="SORT_PAT_C",
+        study_uid="1.2.3.912",
+        series_uid=None,
+        rt_name="sort-rt-beta",
+        status=RecordStatus.blocked,
+        user_id=user_b.id,
+        changed_at=base_time + timedelta(hours=4),
+    )
+
+    repo = RecordRepository(test_session)
+    return {
+        "repo": repo,
+        "records": [r1, r2, r3, r4, r5],
+        "users": {"a": user_a, "b": user_b},
+    }
+
+
+class TestFindPageExtendedSort:
+    """Server-side sort across non-id, non-changed_at columns."""
+
+    @pytest.mark.asyncio
+    async def test_sort_by_record_type_asc(self, sort_env):
+        result = await sort_env["repo"].find_page(
+            RecordSearchCriteria(), cursor=None, limit=10, sort="record_type_asc"
+        )
+        names = [r.record_type_name for r in result.records]
+        assert names == sorted(names)
+        # Within a single record_type, tie-break is Record.id ASC.
+        alphas = [r.id for r in result.records if r.record_type_name == "sort-rt-alpha"]
+        assert alphas == sorted(alphas)
+
+    @pytest.mark.asyncio
+    async def test_sort_by_record_type_desc(self, sort_env):
+        result = await sort_env["repo"].find_page(
+            RecordSearchCriteria(), cursor=None, limit=10, sort="record_type_desc"
+        )
+        names = [r.record_type_name for r in result.records]
+        assert names == sorted(names, reverse=True)
+
+    @pytest.mark.asyncio
+    async def test_sort_by_status_asc(self, sort_env):
+        result = await sort_env["repo"].find_page(
+            RecordSearchCriteria(), cursor=None, limit=10, sort="status_asc"
+        )
+        statuses = [r.status.value for r in result.records]
+        assert statuses == sorted(statuses)
+
+    @pytest.mark.asyncio
+    async def test_sort_by_status_desc(self, sort_env):
+        result = await sort_env["repo"].find_page(
+            RecordSearchCriteria(), cursor=None, limit=10, sort="status_desc"
+        )
+        statuses = [r.status.value for r in result.records]
+        assert statuses == sorted(statuses, reverse=True)
+
+    @pytest.mark.asyncio
+    async def test_sort_by_patient_asc(self, sort_env):
+        result = await sort_env["repo"].find_page(
+            RecordSearchCriteria(), cursor=None, limit=10, sort="patient_asc"
+        )
+        pats = [r.patient_id for r in result.records]
+        assert pats == sorted(pats)
+
+    @pytest.mark.asyncio
+    async def test_sort_by_patient_desc(self, sort_env):
+        result = await sort_env["repo"].find_page(
+            RecordSearchCriteria(), cursor=None, limit=10, sort="patient_desc"
+        )
+        pats = [r.patient_id for r in result.records]
+        assert pats == sorted(pats, reverse=True)
+
+    @pytest.mark.asyncio
+    async def test_sort_by_user_asc_nulls_last(self, sort_env):
+        """user_id sort puts NULL (unassigned) at the end in asc order."""
+        result = await sort_env["repo"].find_page(
+            RecordSearchCriteria(), cursor=None, limit=10, sort="user_asc"
+        )
+        # Trailing NULLs grouped together.
+        user_ids = [r.user_id for r in result.records]
+        non_null = [u for u in user_ids if u is not None]
+        nulls = [u for u in user_ids if u is None]
+        assert user_ids == non_null + nulls
+        assert non_null == sorted(non_null, key=str)
+
+    @pytest.mark.asyncio
+    async def test_sort_by_user_desc_nulls_last(self, sort_env):
+        result = await sort_env["repo"].find_page(
+            RecordSearchCriteria(), cursor=None, limit=10, sort="user_desc"
+        )
+        user_ids = [r.user_id for r in result.records]
+        non_null = [u for u in user_ids if u is not None]
+        nulls = [u for u in user_ids if u is None]
+        assert user_ids == non_null + nulls
+        assert non_null == sorted(non_null, key=str, reverse=True)
+
+    @pytest.mark.asyncio
+    async def test_sort_by_modality_asc_nulls_last(self, sort_env):
+        """Records without a series have NULL modality — must sort last in asc."""
+        result = await sort_env["repo"].find_page(
+            RecordSearchCriteria(), cursor=None, limit=10, sort="modality_asc"
+        )
+        modalities = [r.series.modality if r.series else None for r in result.records]
+        non_null = [m for m in modalities if m is not None]
+        nulls = [m for m in modalities if m is None]
+        assert modalities == non_null + nulls
+        assert non_null == sorted(non_null)
+
+    @pytest.mark.asyncio
+    async def test_sort_by_modality_desc_nulls_last(self, sort_env):
+        result = await sort_env["repo"].find_page(
+            RecordSearchCriteria(), cursor=None, limit=10, sort="modality_desc"
+        )
+        modalities = [r.series.modality if r.series else None for r in result.records]
+        non_null = [m for m in modalities if m is not None]
+        nulls = [m for m in modalities if m is None]
+        assert modalities == non_null + nulls
+        assert non_null == sorted(non_null, reverse=True)
+
+    @pytest.mark.asyncio
+    async def test_cursor_stability_extended_sort(self, sort_env):
+        """Paginating across two pages must yield each record exactly once."""
+        first = await sort_env["repo"].find_page(
+            RecordSearchCriteria(), cursor=None, limit=2, sort="patient_asc"
+        )
+        second = await sort_env["repo"].find_page(
+            RecordSearchCriteria(),
+            cursor=first.next_cursor,
+            limit=10,
+            sort="patient_asc",
+        )
+        all_ids = [r.id for r in first.records] + [r.id for r in second.records]
+        assert len(all_ids) == 5
+        assert len(set(all_ids)) == 5  # no duplicates

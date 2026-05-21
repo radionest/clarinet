@@ -73,6 +73,159 @@ class RecordPageResult:
     next_cursor: str | None
 
 
+# Sentinel object identifying the modality sort column. The actual SQL
+# alias for the outerjoined Series row is created per-query in `find_page`
+# and passed to `_SortSpec.column`.
+_MODALITY = object()
+
+
+@dataclass(frozen=True)
+class _SortSpec:
+    """How to materialize one SortOrder into ORDER BY / WHERE / cursor key."""
+
+    column_owner: Any
+    ascending: bool
+    nullable: bool
+    extract_key: Callable[[Record], Any]
+    cast_cursor: Callable[[Any], Any] = lambda raw: raw
+
+    def column(self, series_alias: Any) -> Any:
+        """Return the SQL column expression for ORDER BY / WHERE."""
+        if self.column_owner is None:
+            return None
+        if self.column_owner is _MODALITY:
+            return col(series_alias.modality)
+        return col(self.column_owner)
+
+
+_SORT_SPECS: dict[SortOrder, _SortSpec] = {
+    "changed_at_desc": _SortSpec(
+        column_owner=None,  # special-cased in find_page (legacy id DESC tie-break)
+        ascending=False,
+        nullable=False,
+        extract_key=lambda r: r.changed_at,
+    ),
+    "id_asc": _SortSpec(
+        column_owner=None,
+        ascending=True,
+        nullable=False,
+        extract_key=lambda _r: None,
+    ),
+    "id_desc": _SortSpec(
+        column_owner=None,
+        ascending=False,
+        nullable=False,
+        extract_key=lambda _r: None,
+    ),
+    "record_type_asc": _SortSpec(
+        column_owner=RecordType.name,
+        ascending=True,
+        nullable=False,
+        extract_key=lambda r: r.record_type_name,
+    ),
+    "record_type_desc": _SortSpec(
+        column_owner=RecordType.name,
+        ascending=False,
+        nullable=False,
+        extract_key=lambda r: r.record_type_name,
+    ),
+    "status_asc": _SortSpec(
+        column_owner=Record.status,
+        ascending=True,
+        nullable=False,
+        extract_key=lambda r: r.status,
+        cast_cursor=lambda raw: RecordStatus(raw),
+    ),
+    "status_desc": _SortSpec(
+        column_owner=Record.status,
+        ascending=False,
+        nullable=False,
+        extract_key=lambda r: r.status,
+        cast_cursor=lambda raw: RecordStatus(raw),
+    ),
+    "patient_asc": _SortSpec(
+        column_owner=Record.patient_id,
+        ascending=True,
+        nullable=False,
+        extract_key=lambda r: r.patient_id,
+    ),
+    "patient_desc": _SortSpec(
+        column_owner=Record.patient_id,
+        ascending=False,
+        nullable=False,
+        extract_key=lambda r: r.patient_id,
+    ),
+    "user_asc": _SortSpec(
+        column_owner=Record.user_id,
+        ascending=True,
+        nullable=True,
+        extract_key=lambda r: r.user_id,
+        cast_cursor=lambda raw: UUID(raw),
+    ),
+    "user_desc": _SortSpec(
+        column_owner=Record.user_id,
+        ascending=False,
+        nullable=True,
+        extract_key=lambda r: r.user_id,
+        cast_cursor=lambda raw: UUID(raw),
+    ),
+    "modality_asc": _SortSpec(
+        column_owner=_MODALITY,
+        ascending=True,
+        nullable=True,
+        extract_key=lambda r: r.series.modality if r.series else None,
+    ),
+    "modality_desc": _SortSpec(
+        column_owner=_MODALITY,
+        ascending=False,
+        nullable=True,
+        extract_key=lambda r: r.series.modality if r.series else None,
+    ),
+}
+
+
+def _keyset_where(
+    *,
+    sort: SortOrder,
+    sort_col: Any,
+    cursor_key: Any,
+    cursor_id: int,
+) -> Any:
+    """Build the keyset WHERE clause for paging past (cursor_key, cursor_id)."""
+    if sort == "changed_at_desc":
+        cursor_ts = datetime.fromisoformat(cursor_key) if cursor_key else None
+        return tuple_(col(Record.changed_at), col(Record.id)) < tuple_(
+            literal(cursor_ts), literal(cursor_id)
+        )
+    if sort == "id_asc":
+        return col(Record.id) > literal(cursor_id)
+    if sort == "id_desc":
+        return col(Record.id) < literal(cursor_id)
+
+    spec = _SORT_SPECS[sort]
+    ascending = spec.ascending
+    casted_key = spec.cast_cursor(cursor_key) if cursor_key is not None else None
+
+    if not spec.nullable:
+        cmp_op = sort_col > literal(casted_key) if ascending else sort_col < literal(casted_key)
+        return or_(
+            cmp_op,
+            and_(sort_col == literal(casted_key), col(Record.id) > literal(cursor_id)),
+        )
+
+    # Nullable column with NULLS LAST: NULL rows come after all non-NULL.
+    if casted_key is None:
+        # Cursor in NULL zone — only NULL rows past the id.
+        return and_(sort_col.is_(None), col(Record.id) > literal(cursor_id))
+
+    cmp_op = sort_col > literal(casted_key) if ascending else sort_col < literal(casted_key)
+    return or_(
+        cmp_op,
+        and_(sort_col == literal(casted_key), col(Record.id) > literal(cursor_id)),
+        sort_col.is_(None),
+    )
+
+
 _COMPARISON_OPS: dict[RecordFindResultComparisonOperator, Callable[..., Any]] = {
     RecordFindResultComparisonOperator.eq: lambda f, v: f == v,
     RecordFindResultComparisonOperator.gt: lambda f, v: f > v,
@@ -1122,30 +1275,47 @@ class RecordRepository(BaseRepository[Record]):
             raise ValidationError("random_one is incompatible with cursor pagination")
 
         statement = self._build_criteria_query(criteria)
+        sort_spec = _SORT_SPECS[sort]
 
-        # Sort order
-        match sort:
-            case "changed_at_desc":
-                statement = statement.order_by(col(Record.changed_at).desc(), col(Record.id).desc())
-            case "id_asc":
-                statement = statement.order_by(col(Record.id).asc())
-            case "id_desc":
-                statement = statement.order_by(col(Record.id).desc())
+        # Optional join for modality sort (Series may not be filtered elsewhere)
+        series_sort_alias: Any = None
+        if sort_spec.column_owner is _MODALITY:
+            series_sort_alias = aliased(Series)
+            statement = statement.outerjoin(
+                series_sort_alias,
+                col(Record.series_uid) == col(series_sort_alias.series_uid),
+            )
+
+        sort_col = sort_spec.column(series_sort_alias)
+        ascending = sort_spec.ascending
+
+        # Sort order: primary by sort column (NULLS LAST for nullable), tie-break by id.
+        if sort == "changed_at_desc":
+            # Preserve legacy ordering: changed_at DESC, id DESC (no NULLS handling
+            # because changed_at is non-nullable for any existing record).
+            statement = statement.order_by(col(Record.changed_at).desc(), col(Record.id).desc())
+        elif sort_col is None:
+            # id_asc / id_desc — single-column order.
+            statement = statement.order_by(
+                col(Record.id).asc() if ascending else col(Record.id).desc()
+            )
+        else:
+            order_expr = sort_col.asc() if ascending else sort_col.desc()
+            if sort_spec.nullable:
+                order_expr = order_expr.nulls_last()
+            statement = statement.order_by(order_expr, col(Record.id).asc())
 
         # Keyset WHERE from cursor
         if cursor:
             data = decode_cursor(cursor, sort)
-            match sort:
-                case "changed_at_desc":
-                    cursor_ts = datetime.fromisoformat(data["k"]) if data["k"] else None
-                    statement = statement.where(
-                        tuple_(col(Record.changed_at), col(Record.id))
-                        < tuple_(literal(cursor_ts), literal(data["i"]))
-                    )
-                case "id_asc":
-                    statement = statement.where(col(Record.id) > data["i"])
-                case "id_desc":
-                    statement = statement.where(col(Record.id) < data["i"])
+            statement = statement.where(
+                _keyset_where(
+                    sort=sort,
+                    sort_col=sort_col,
+                    cursor_key=data["k"],
+                    cursor_id=data["i"],
+                )
+            )
 
         # Fetch limit+1 to detect next page
         statement = statement.limit(limit + 1)
@@ -1155,7 +1325,7 @@ class RecordRepository(BaseRepository[Record]):
         if len(records) > limit:
             records = records[:limit]
             last = records[-1]
-            next_cursor = encode_cursor(sort, last.changed_at, last.id)  # type: ignore[arg-type]
+            next_cursor = encode_cursor(sort, sort_spec.extract_key(last), last.id)  # type: ignore[arg-type]
         else:
             next_cursor = None
 
