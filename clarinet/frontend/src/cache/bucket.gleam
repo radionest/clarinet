@@ -126,6 +126,15 @@ pub fn sort_to_backend_string(sort: SortOrder) -> String {
 /// a given `RecordsQuery` value — same filters produce the same topic.
 pub fn key_to_topic(key: BucketKey) -> String {
   let Records(q) = key
+  // wo_user is authoritative — when set, user_id is ignored on the request
+  // side (see `cache.append_user_filter`), so it must also be dropped from
+  // the topic to keep one logical query == one cache entry. Without this
+  // pairing, a `RecordsQuery(user_id: Some(uid), wo_user: True)` value
+  // would produce a topic distinct from the equivalent request payload.
+  let user_part = case q.wo_user {
+    True -> ""
+    False -> optional_part("user", q.user_id)
+  }
   let parts = [
     "records",
     "sort=" <> sort_to_backend_string(q.sort),
@@ -133,7 +142,7 @@ pub fn key_to_topic(key: BucketKey) -> String {
     optional_part("study", q.study_uid),
     optional_part("type", q.record_type_name),
     optional_part("status", q.record_status),
-    optional_part("user", q.user_id),
+    user_part,
     case q.wo_user {
       True -> "wo_user=1"
       False -> ""

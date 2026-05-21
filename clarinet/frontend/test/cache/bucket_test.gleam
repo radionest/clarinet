@@ -152,3 +152,19 @@ pub fn key_to_topic_differs_for_different_sort_test() {
     bucket.key_to_topic(Records(q1)) == bucket.key_to_topic(Records(q2))
   same |> should.be_false
 }
+
+pub fn key_to_topic_wo_user_drops_user_id_test() {
+  // wo_user is authoritative: when set, the request omits user_id, so the
+  // topic must match between (user_id: Some(uid), wo_user: True) and
+  // (user_id: None, wo_user: True).
+  let with_uid =
+    bucket.RecordsQuery(
+      ..bucket.default_query(),
+      user_id: Some("uid-1"),
+      wo_user: True,
+    )
+  let without_uid =
+    bucket.RecordsQuery(..bucket.default_query(), wo_user: True)
+  bucket.key_to_topic(Records(with_uid))
+  |> should.equal(bucket.key_to_topic(Records(without_uid)))
+}

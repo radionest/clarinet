@@ -594,3 +594,113 @@ class TestFindPageExtendedSort:
         all_ids = [r.id for r in first.records] + [r.id for r in second.records]
         assert len(all_ids) == 5
         assert len(set(all_ids)) == 5  # no duplicates
+
+    @pytest.mark.asyncio
+    async def test_cursor_stability_descending_sort(self, sort_env):
+        """Exercise the `sort_col < literal` branch of `_keyset_where` plus the
+        ascending Record.id tie-break used by every non-legacy DESC sort."""
+        first = await sort_env["repo"].find_page(
+            RecordSearchCriteria(), cursor=None, limit=2, sort="patient_desc"
+        )
+        second = await sort_env["repo"].find_page(
+            RecordSearchCriteria(),
+            cursor=first.next_cursor,
+            limit=10,
+            sort="patient_desc",
+        )
+        all_ids = [r.id for r in first.records] + [r.id for r in second.records]
+        assert len(all_ids) == 5
+        assert len(set(all_ids)) == 5  # no duplicates
+        # First page must hold the largest patient_id values.
+        first_patients = [r.patient_id for r in first.records]
+        second_patients = [r.patient_id for r in second.records]
+        assert max(second_patients) <= min(first_patients)
+
+
+@pytest_asyncio.fixture
+async def null_user_env(test_session: AsyncSession):
+    """Seed records with a mix of assigned and unassigned users so that paging
+    can stop *inside* the NULL zone — exercising the `cursor_key is None`
+    branch of `_keyset_where`."""
+    user_a = make_user(email="null_zone_a@test.com")
+    test_session.add(user_a)
+    await test_session.commit()
+
+    pat = make_patient("NULL_PAT")
+    test_session.add(pat)
+    await test_session.commit()
+
+    study = make_study("NULL_PAT", "1.2.3.920")
+    test_session.add(study)
+    await test_session.commit()
+
+    series = make_series("1.2.3.920", "1.2.3.920.1", num=1)
+    test_session.add(series)
+    await test_session.commit()
+
+    rt = make_record_type("null-user-rt")
+    test_session.add(rt)
+    await test_session.commit()
+
+    base_time = datetime(2025, 7, 1, 12, 0, 0, tzinfo=UTC)
+    records = []
+    # One record with a user, three without. ASC NULLS LAST → assigned record
+    # first, then three NULLs ordered by id.
+    records.append(
+        await seed_record(
+            test_session,
+            patient_id="NULL_PAT",
+            study_uid="1.2.3.920",
+            series_uid="1.2.3.920.1",
+            rt_name="null-user-rt",
+            user_id=user_a.id,
+            changed_at=base_time,
+        )
+    )
+    for i in range(3):
+        records.append(
+            await seed_record(
+                test_session,
+                patient_id="NULL_PAT",
+                study_uid="1.2.3.920",
+                series_uid="1.2.3.920.1",
+                rt_name="null-user-rt",
+                user_id=None,
+                changed_at=base_time + timedelta(hours=i + 1),
+            )
+        )
+
+    repo = RecordRepository(test_session)
+    return {"repo": repo, "records": records}
+
+
+class TestFindPageNullZoneCursor:
+    @pytest.mark.asyncio
+    async def test_user_asc_paginates_through_null_zone(self, null_user_env):
+        """First page ends on a NULL-user row, so the cursor encodes `k=None`
+        and the second page reads from the NULL-only branch of `_keyset_where`.
+        """
+        first = await null_user_env["repo"].find_page(
+            RecordSearchCriteria(), cursor=None, limit=2, sort="user_asc"
+        )
+        # Page 1: 1 assigned record + 1st NULL record. Cursor key is None
+        # because the last record on the page has user_id=None.
+        assert len(first.records) == 2
+        assert first.records[0].user_id is not None
+        assert first.records[1].user_id is None
+        assert first.next_cursor is not None
+
+        second = await null_user_env["repo"].find_page(
+            RecordSearchCriteria(),
+            cursor=first.next_cursor,
+            limit=10,
+            sort="user_asc",
+        )
+        # Page 2: the remaining two NULL-user rows, no duplicates.
+        assert len(second.records) == 2
+        assert all(r.user_id is None for r in second.records)
+        first_ids = {r.id for r in first.records}
+        second_ids = {r.id for r in second.records}
+        assert first_ids.isdisjoint(second_ids)
+        all_seeded = {r.id for r in null_user_env["records"]}
+        assert first_ids | second_ids == all_seeded

@@ -220,7 +220,21 @@ and sorting, so pages **never** call `record_filters.apply_filters` or
 When the user changes a filter or clicks a sortable header, emit
 `shared.FetchBucket(bucket.Records(new_query))` in the `update`'s OutMsg list
 so the cache initiates the request with the new server-side parameters.
-While `bucket_status` is `Cold` or `Loading`, show a spinner.
+While `bucket_status` is `Cold` or `Loading`, show a spinner. Reach the
+status via the public helpers in `cache.gleam`:
+
+```gleam
+let key = bucket.Records(records_query.from_filters(model.active_filters))
+let items = cache.bucket_items(shared.cache, key)
+let status = cache.bucket_status(shared.cache, key)
+case status {
+  bucket.Cold | bucket.Loading -> loading_spinner()
+  bucket.Failed(msg) -> error_banner(msg)
+  _ -> records_table(items, model, shared)
+}
+```
+
+The same pattern is used by `pages/admin.gleam` and `pages/records/list.gleam`.
 
 ## 6. Error Handling Idiom
 
