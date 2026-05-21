@@ -206,6 +206,22 @@ For detail pages, use `dict.get(shared.cache.patients, id)` inside the `on_loade
 
 Bulk loads go through `cache.LoadX` messages dispatched via `store.CacheMsg` — but you should **not** dispatch those from a page. Emit the corresponding `OutMsg` (`ReloadStudies` etc.) and let `main.apply_out_msgs` route it.
 
+### Records bucket (filtered + sorted via server)
+
+Records live in `shared.cache.record_buckets`, keyed by `cache.bucket.BucketKey`.
+Only **one** variant exists: `Records(RecordsQuery)`. Build the query with
+`utils/records_query.from_filters(filters)` (for list pages), or one of
+`bucket.query_with_patient(id)` / `query_with_study(uid)` /
+`query_with_record_type(name)` (for detail pages). The query is the cache key
+— same filters/sort → same cache entry — and the server applies filtering
+and sorting, so pages **never** call `record_filters.apply_filters` or
+`list.sort` on the items.
+
+When the user changes a filter or clicks a sortable header, emit
+`shared.FetchBucket(bucket.Records(new_query))` in the `update`'s OutMsg list
+so the cache initiates the request with the new server-side parameters.
+While `bucket_status` is `Cold` or `Loading`, show a spinner.
+
 ## 6. Error Handling Idiom
 
 Canonical helper — copy-paste into each page that hits the API:
