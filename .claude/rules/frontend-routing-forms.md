@@ -111,16 +111,41 @@ go through `record_filters.keep_serializable` — `router.filters_to_query`
 already does, the page-local `save_filters` must do the same. Otherwise
 transient model fields can leak into persistent state.
 
-**Adding a new filter dimension:**
+**Adding a new filter dimension:** filters are part of the bucket key
+(`cache.bucket.RecordsQuery`), so every step is needed for the cache to
+route the new filter to the server:
 
 1. Add the key to `record_filters.user_filter_keys` AND
    `record_filters.serializable_filter_keys` (same file, same change).
-2. Extend `apply_filters` with the new branch.
-3. Add a dropdown option builder if needed (`patient_options`-style).
-4. Wire the dropdown in the page's `view`.
+2. Add a field to `cache.bucket.RecordsQuery` and update `key_to_topic` to
+   include it in the serialized topic.
+3. Add a branch to `utils/records_query.from_filters` translating the new
+   dict key to the new `RecordsQuery` field.
+4. Add a branch to `cache.bucket_key_to_filter` mapping the field to the
+   backend body parameter for `POST /records/find`.
+5. Backend: add the corresponding field to `RecordSearchFilter`
+   (`clarinet/models/record.py`) and a `where(...)` branch in
+   `RecordRepository._build_criteria_query`.
+6. Add a dropdown option builder if needed (`patient_options`-style) and
+   wire the dropdown in the page's `view`.
 
-**Adding a new sort column:** see `utils/table_sort.gleam` — only the
-per-page `record_comparator` changes.
+**Adding a new sort column:** sort is also part of the bucket key (server
+applies it). Steps:
+
+1. Add the new variant to `cache.bucket.SortOrder` and a branch in
+   `bucket.sort_to_backend_string`.
+2. Add a case in `records_query.parse_sort` so column clicks translate.
+3. Backend: extend `clarinet.utils.pagination.SortOrder` (Literal), add an
+   entry to `_SORT_SPECS` in `clarinet/repositories/record_repository.py`
+   describing the SQL column, ascending flag, nullability, and how to
+   extract the cursor key from a record.
+
+For nullable columns the project uses **NULLS LAST in both ASC and DESC**
+(see `user_id` and `modality` in `_SORT_SPECS`) — this differs from
+PostgreSQL's default (NULLS FIRST in DESC) and is encoded into the cursor
+WHERE branch in `_keyset_where`. Don't fall back to `col.desc()` without
+`.nulls_last()` when adding a nullable sort column: it silently changes
+cursor semantics in the NULL zone.
 
 ## 10. Forms — formosh Integration
 

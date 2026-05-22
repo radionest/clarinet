@@ -325,9 +325,13 @@ pub fn update(
           // for Series since its records are nested in the Series object).
           let invalidate = case args {
             shared.PatientArgs(pid) ->
-              shared.InvalidateBucket(bucket.RecordsByPatient(pid))
+              shared.InvalidateBucket(
+                bucket.Records(bucket.query_with_patient(pid)),
+              )
             shared.StudyArgs(_, suid) ->
-              shared.InvalidateBucket(bucket.RecordsByStudy(suid))
+              shared.InvalidateBucket(
+                bucket.Records(bucket.query_with_study(suid)),
+              )
             shared.SeriesArgs(_, _, seruid) -> shared.ReloadSeries(seruid)
           }
           #(Model(..model, loading: False), effect.none(), [

@@ -24,6 +24,7 @@ from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlmodel import Column, Field, Relationship, SQLModel
 
 from clarinet.types import DbInt64, DbPositiveInt32, PortableJSON, RecordData
+from clarinet.utils.pagination import SortOrder
 
 from ..exceptions import ValidationError
 from .base import BaseModel, DicomUID, RecordStatus
@@ -404,7 +405,7 @@ class RecordSearchQuery(RecordSearchFilter):
 
     cursor: str | None = None
     limit: int = Field(default=100, ge=1, le=1000)
-    sort: Literal["changed_at_desc", "id_asc", "id_desc"] = "changed_at_desc"
+    sort: SortOrder = "changed_at_desc"
 
 
 class RecordPage(SQLModel):
@@ -415,7 +416,7 @@ class RecordPage(SQLModel):
     items: list[RecordRead]
     next_cursor: str | None = None
     limit: int
-    sort: Literal["changed_at_desc", "id_asc", "id_desc"] = "changed_at_desc"
+    sort: SortOrder = "changed_at_desc"
 
 
 SeriesFind.model_rebuild()

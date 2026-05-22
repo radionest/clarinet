@@ -34,7 +34,7 @@ pub fn init(
 ) -> #(Model, Effect(Msg), List(OutMsg)) {
   #(Model(name: name), effect.none(), [
     shared.ReloadRecordTypeStats,
-    shared.FetchBucket(bucket.RecordsByRecordType(name)),
+    shared.FetchBucket(bucket.Records(bucket.query_with_record_type(name))),
   ])
 }
 
@@ -67,7 +67,10 @@ fn find_stats(shared: Shared, name: String) -> option.Option(RecordTypeStats) {
 
 fn render_detail(shared: Shared, stat: RecordTypeStats) -> Element(Msg) {
   let type_records =
-    cache.bucket_items(shared.cache, bucket.RecordsByRecordType(stat.name))
+    cache.bucket_items(
+      shared.cache,
+      bucket.Records(bucket.query_with_record_type(stat.name)),
+    )
     |> list.sort(fn(a, b) {
       int.compare(option.unwrap(a.id, 0), option.unwrap(b.id, 0))
     })

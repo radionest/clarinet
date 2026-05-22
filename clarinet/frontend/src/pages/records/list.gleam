@@ -12,8 +12,6 @@ import gleam/int
 import gleam/javascript/promise
 import gleam/list
 import gleam/option.{None, Some}
-import gleam/order
-import gleam/string
 import lustre/attribute
 import lustre/effect.{type Effect}
 import lustre/element.{type Element}
@@ -24,7 +22,8 @@ import shared.{type OutMsg, type Shared}
 import utils/permissions
 import utils/record_filters
 import utils/records_list_state
-import utils/table_sort.{type SortDirection}
+import utils/records_query
+import utils/table_sort
 
 // --- Model ---
 
@@ -54,25 +53,32 @@ pub fn init(
   filters: Dict(String, String),
   shared: Shared,
 ) -> #(Model, Effect(Msg), List(OutMsg)) {
-  let key = bucket_key_for_user(shared.user)
   let #(effective_filters, init_fx) =
     records_list_state.resolve_initial_filters(
       filters,
       storage_key,
       router.Records,
     )
+  let key = bucket_key_for(effective_filters, shared.user)
   #(Model(active_filters: effective_filters), init_fx, [shared.FetchBucket(key)])
 }
 
-fn bucket_key_for_user(user: option.Option(User)) -> bucket.BucketKey {
-  case user {
+/// Bucket key for the records list. Non-admins see only their own records
+/// (the historical `RecordsMine(uid)` scope), admins see all records.
+fn bucket_key_for(
+  filters: Dict(String, String),
+  user: option.Option(User),
+) -> bucket.BucketKey {
+  let base = records_query.from_filters(filters)
+  let scoped = case user {
     Some(u) ->
       case permissions.is_admin_user(u) {
-        True -> bucket.RecordsAll
-        False -> bucket.RecordsMine(u.id)
+        True -> base
+        False -> records_query.with_user_scope(base, u.id)
       }
-    None -> bucket.RecordsAll
+    None -> base
   }
+  bucket.Records(scoped)
 }
 
 // --- Update ---
@@ -85,12 +91,16 @@ pub fn update(
   case msg {
     AddFilter(key, value) -> {
       let filters = dict.insert(model.active_filters, key, value)
-      #(Model(active_filters: filters), sync_filters_effect(filters), [])
+      #(Model(active_filters: filters), sync_filters_effect(filters), [
+        shared.FetchBucket(bucket_key_for(filters, shared.user)),
+      ])
     }
 
     RemoveFilter(key) -> {
       let filters = dict.delete(model.active_filters, key)
-      #(Model(active_filters: filters), sync_filters_effect(filters), [])
+      #(Model(active_filters: filters), sync_filters_effect(filters), [
+        shared.FetchBucket(bucket_key_for(filters, shared.user)),
+      ])
     }
 
     ClearFilters -> {
@@ -98,7 +108,9 @@ pub fn update(
       // is independent from filtering and resetting it on every "Clear"
       // would be surprising.
       let filters = record_filters.clear_user_filters(model.active_filters)
-      #(Model(active_filters: filters), sync_filters_effect(filters), [])
+      #(Model(active_filters: filters), sync_filters_effect(filters), [
+        shared.FetchBucket(bucket_key_for(filters, shared.user)),
+      ])
     }
 
     ColumnHeaderClicked(col) -> {
@@ -107,7 +119,9 @@ pub fn update(
       let #(new_col, new_dir) = table_sort.next_sort(cur_col, cur_dir, col)
       let new_filters =
         table_sort.write_sort(model.active_filters, new_col, new_dir, default_sort_col)
-      #(Model(active_filters: new_filters), sync_filters_effect(new_filters), [])
+      #(Model(active_filters: new_filters), sync_filters_effect(new_filters), [
+        shared.FetchBucket(bucket_key_for(new_filters, shared.user)),
+      ])
     }
 
     RequestFail(record_id) -> #(model, effect.none(), [
@@ -170,16 +184,23 @@ pub fn view(model: Model, shared: Shared) -> Element(Msg) {
     False -> t(i18n.RecordsTitle)
   }
 
+  let key = bucket_key_for(model.active_filters, shared.user)
+  let records = cache.bucket_items(shared.cache, key)
+  let status = cache.bucket_status(shared.cache, key)
+
+  let body = case status {
+    bucket.Cold | bucket.Loading ->
+      html.div([attribute.class("loading-indicator")], [
+        html.text(shared.translate(i18n.LblLoading)),
+      ])
+    bucket.Failed(msg) ->
+      html.p([attribute.class("text-error")], [html.text(msg)])
+    _ -> records_table(model, shared, records)
+  }
+
   html.div([attribute.class("container")], [
     html.h1([], [html.text(title)]),
-    {
-      let key = bucket_key_for_user(shared.user)
-      let all_records = cache.bucket_items(shared.cache, key)
-      html.div([], [
-        filter_bar(model, shared, all_records),
-        records_table(model, shared, all_records),
-      ])
-    },
+    html.div([], [filter_bar(model, shared, records), body]),
   ])
 }
 
@@ -257,14 +278,13 @@ fn filter_bar(model: Model, shared: Shared, all_records: List(Record)) -> Elemen
 fn records_table(
   model: Model,
   shared: Shared,
-  all_records: List(Record),
+  records: List(Record),
 ) -> Element(Msg) {
+  // Filtering and sorting are server-side via the bucket key. The
+  // (sort_col, sort_dir) pair is read only to render the arrow indicators
+  // on column headers.
   let #(sort_col, sort_dir) =
     table_sort.read_sort(model.active_filters, default_sort_col)
-  let cmp = record_comparator(sort_col, sort_dir)
-  let records =
-    record_filters.apply_filters(all_records, model.active_filters)
-    |> list.sort(cmp)
 
   case records {
     [] ->
@@ -306,25 +326,6 @@ fn record_modality_text(record: Record) -> String {
       }
   }
   option.unwrap(raw, "-")
-}
-
-fn record_comparator(
-  col: String,
-  dir: SortDirection,
-) -> fn(Record, Record) -> order.Order {
-  let base = case records_list_state.common_comparator(col) {
-    Ok(cmp) -> cmp
-    Error(_) ->
-      case col {
-        "modality" -> fn(a: Record, b: Record) {
-          string.compare(record_modality_text(a), record_modality_text(b))
-        }
-        _ -> fn(a: Record, b: Record) {
-          int.compare(option.unwrap(a.id, 0), option.unwrap(b.id, 0))
-        }
-      }
-  }
-  table_sort.with_direction(base, dir)
 }
 
 fn record_row(shared: Shared, record: Record) -> Element(Msg) {
