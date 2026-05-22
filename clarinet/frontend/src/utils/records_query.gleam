@@ -113,28 +113,3 @@ pub fn parse_sort(
 pub fn with_user_scope(query: RecordsQuery, user_id: String) -> RecordsQuery {
   RecordsQuery(..query, user_id: Some(user_id), wo_user: False)
 }
-
-/// Layer a patient_id scope on top of filters. Used by `/patients/{id}`.
-pub fn from_filters_for_patient(
-  filters: Dict(String, String),
-  patient_id: String,
-) -> RecordsQuery {
-  RecordsQuery(..from_filters(filters), patient_id: Some(patient_id))
-}
-
-/// Layer a study_uid scope on top of filters. Used by `/studies/{uid}`.
-pub fn from_filters_for_study(
-  filters: Dict(String, String),
-  study_uid: String,
-) -> RecordsQuery {
-  RecordsQuery(..from_filters(filters), study_uid: Some(study_uid))
-}
-
-/// Layer a record_type_name scope on top of filters. Used by
-/// `/record-types/{name}`.
-pub fn from_filters_for_record_type(
-  filters: Dict(String, String),
-  name: String,
-) -> RecordsQuery {
-  RecordsQuery(..from_filters(filters), record_type_name: Some(name))
-}

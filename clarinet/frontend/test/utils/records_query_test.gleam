@@ -130,20 +130,3 @@ pub fn with_user_scope_clears_wo_user_test() {
   scoped.wo_user |> should.equal(False)
   scoped.user_id |> should.equal(Some("user-42"))
 }
-
-// --- from_filters_for_X: scoped helpers for detail pages ---
-
-pub fn from_filters_for_patient_test() {
-  let q = records_query.from_filters_for_patient(dict.new(), "PAT99")
-  q.patient_id |> should.equal(Some("PAT99"))
-}
-
-pub fn from_filters_for_study_test() {
-  let q = records_query.from_filters_for_study(dict.new(), "1.2.3")
-  q.study_uid |> should.equal(Some("1.2.3"))
-}
-
-pub fn from_filters_for_record_type_test() {
-  let q = records_query.from_filters_for_record_type(dict.new(), "biopsy")
-  q.record_type_name |> should.equal(Some("biopsy"))
-}

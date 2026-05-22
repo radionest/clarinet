@@ -158,6 +158,10 @@ async def seed_users(session) -> list[User]:
 
 
 async def seed_patients(session, n: int = 60) -> list[Patient]:
+    """Seed `n` patients. Assumes a clean DB (use `--reset`); on a partial
+    state it would re-insert the same `DEV_PAT_000…` ids and trip the PK
+    constraint. The `existing >= n` short-circuit only covers the
+    "everything already seeded" case."""
     existing = (await session.execute(select(func.count(Patient.id)))).scalar_one()
     if existing >= n:
         print(f"  {existing} patients already exist — keeping them")

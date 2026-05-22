@@ -37,7 +37,12 @@ from clarinet.models.user import User, UserRolesLink
 from clarinet.repositories.base import BaseRepository
 from clarinet.types import RecordData
 from clarinet.utils.logger import logger
-from clarinet.utils.pagination import SortOrder, decode_cursor, encode_cursor
+from clarinet.utils.pagination import (
+    InvalidCursorError,
+    SortOrder,
+    decode_cursor,
+    encode_cursor,
+)
 
 
 @dataclass
@@ -76,6 +81,13 @@ class RecordPageResult:
 # Sentinel object identifying the modality sort column. The actual SQL
 # alias for the outerjoined Series row is created per-query in `find_page`
 # and passed to `_SortSpec.column`.
+#
+# `extract_key` for the modality specs reads `r.series.modality` from the
+# eager-loaded relationship, while ORDER BY reads from the outerjoin alias.
+# Both resolve to the same row inside a single transaction, but the cursor
+# extraction depends on `selectinload(Record.series)` staying in
+# `_build_criteria_query` — removing it would cause a `MissingGreenlet`
+# lazy-load in async context.
 _MODALITY = object()
 
 
@@ -204,6 +216,12 @@ def _keyset_where(
 
     spec = _SORT_SPECS[sort]
     ascending = spec.ascending
+    # Reject a tampered cursor that carries `k: null` for a non-nullable
+    # sort column — without the guard the SQL would collapse to `col > NULL`
+    # which is always NULL → zero rows returned silently. Surface the
+    # corruption to the API client instead of an empty page.
+    if cursor_key is None and not spec.nullable:
+        raise InvalidCursorError(f"Cursor for non-nullable sort '{sort}' carries a null key")
     casted_key = spec.cast_cursor(cursor_key) if cursor_key is not None else None
 
     if not spec.nullable:
