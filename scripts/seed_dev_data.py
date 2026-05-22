@@ -29,7 +29,6 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
 
-from sqlalchemy import func
 from sqlmodel import select
 
 # Hush the optional Slicer/PACS subsystems and provide default admin
@@ -80,6 +79,9 @@ def reset_database() -> None:
 
 
 def _run_cli(*args: str) -> None:
+    # `args` are hard-coded literals from this file (no user input flows
+    # in here), so the subprocess call is safe — silencing the generic
+    # opengrep "subprocess without static string" alert.
     cmd = ["uv", "run", "clarinet", *args]
     print(f"→ {' '.join(cmd[2:])} …")
     result = subprocess.run(cmd, check=False, capture_output=True, text=True)
@@ -158,20 +160,24 @@ async def seed_users(session) -> list[User]:
 
 
 async def seed_patients(session, n: int = 60) -> list[Patient]:
-    """Seed `n` patients. Assumes a clean DB (use `--reset`); on a partial
-    state it would re-insert the same `DEV_PAT_000…` ids and trip the PK
-    constraint. The `existing >= n` short-circuit only covers the
-    "everything already seeded" case."""
-    existing = (await session.execute(select(func.count(Patient.id)))).scalar_one()
-    if existing >= n:
-        print(f"  {existing} patients already exist — keeping them")
-        return list((await session.execute(select(Patient))).scalars().all())
+    """Seed `n` patients with deterministic `DEV_PAT_NNN` ids. Idempotent on
+    re-run: reuses existing `DEV_PAT_*` rows and only inserts the missing
+    indices, so the script works without `--reset` even on a partial run."""
+    existing_stmt = select(Patient).where(Patient.id.like("DEV_PAT_%"))  # type: ignore[attr-defined]
+    existing = list((await session.execute(existing_stmt)).scalars().all())
+    by_id = {p.id: p for p in existing}
     repo = PatientRepository(session)
     patients: list[Patient] = []
+    created = 0
     for i in range(n):
-        p = Patient(id=f"DEV_PAT_{i:03d}", name=f"Dev Patient {i}")
+        pid = f"DEV_PAT_{i:03d}"
+        if pid in by_id:
+            patients.append(by_id[pid])
+            continue
+        p = Patient(id=pid, name=f"Dev Patient {i}")
         patients.append(await repo.create(p))
-    print(f"  created {len(patients)} patients")
+        created += 1
+    print(f"  {len(patients)} patients ready ({created} created, {len(patients) - created} reused)")
     return patients
 
 
@@ -316,10 +322,11 @@ def print_summary(count: int) -> None:
     print("  make run-dev")
     print()
     print("Open http://127.0.0.1:8000 and log in:")
-    admin_pw = settings.admin_password
-    if hasattr(admin_pw, "get_secret_value"):
-        admin_pw = admin_pw.get_secret_value()
-    print(f"  admin:  {settings.admin_email} / {admin_pw}")
+    # Password redacted to keep CodeQL / static analysers happy. The script
+    # sets `CLARINET_ADMIN_PASSWORD=admin123` as a `setdefault` at the top
+    # of this file when the env var isn't already set; users who want a
+    # different password override that env var before invoking.
+    print(f"  admin:  {settings.admin_email} / (env CLARINET_ADMIN_PASSWORD)")
     print("  user:   dev1@clarinet.dev / dev123 (dev2…dev5 also work)")
     print()
     print("UI checklist:")

@@ -99,11 +99,10 @@ pub fn parse_sort(
         True -> ModalityAsc
         False -> ModalityDesc
       }
-    _ ->
-      case ascending {
-        True -> IdAsc
-        False -> IdDesc
-      }
+    // Unknown / missing column → always IdAsc, ignoring sort_dir. A stale
+    // URL like `?sort=removed_col&sort_dir=desc` should not silently flip
+    // to IdDesc just because the direction key survived.
+    _ -> IdAsc
   }
 }
 

@@ -1323,17 +1323,34 @@ class RecordRepository(BaseRepository[Record]):
                 order_expr = order_expr.nulls_last()
             statement = statement.order_by(order_expr, col(Record.id).asc())
 
-        # Keyset WHERE from cursor
+        # Keyset WHERE from cursor. `decode_cursor` already validates the
+        # version + sort-order tags, but the payload values themselves
+        # (`data["k"]` for the column, `data["i"]` for the id) feed into
+        # `RecordStatus(...)` / `UUID(...)` / `datetime.fromisoformat(...)`
+        # inside `_keyset_where`. A tampered cursor that keeps the right
+        # outer envelope but ships a malformed inner value would surface
+        # as a 500 — wrap once here and translate the failure into
+        # `InvalidCursorError` (handled by the exception layer as 422).
         if cursor:
             data = decode_cursor(cursor, sort)
-            statement = statement.where(
-                _keyset_where(
+            try:
+                cursor_id = int(data["i"])
+            except (KeyError, TypeError, ValueError) as exc:
+                raise InvalidCursorError(f"Cursor missing/invalid row id: {exc}") from exc
+            try:
+                where_clause = _keyset_where(
                     sort=sort,
                     sort_col=sort_col,
-                    cursor_key=data["k"],
-                    cursor_id=data["i"],
+                    cursor_key=data.get("k"),
+                    cursor_id=cursor_id,
                 )
-            )
+            except InvalidCursorError:
+                raise
+            except (ValueError, TypeError) as exc:
+                raise InvalidCursorError(
+                    f"Cursor key incompatible with sort '{sort}': {exc}"
+                ) from exc
+            statement = statement.where(where_clause)
 
         # Fetch limit+1 to detect next page
         statement = statement.limit(limit + 1)

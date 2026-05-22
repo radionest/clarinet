@@ -377,9 +377,16 @@ class TestFindPageUniqueViolationFilter:
 
 
 @pytest_asyncio.fixture
-async def sort_env(test_session: AsyncSession):
-    """Seed records with deliberately varied (record_type, status, patient, user, modality)
-    so each sort order produces a distinguishable ordering."""
+async def sort_env(test_session: AsyncSession, fresh_session: AsyncSession):
+    """Seed records with deliberately varied (record_type, status, patient,
+    user, modality) so each sort order produces a distinguishable ordering.
+
+    Seeding happens on `test_session`, but the `RecordRepository` returned
+    to the test uses `fresh_session` — that keeps the identity map empty
+    when `find_page()` runs, so any future regression that drops
+    `selectinload(Record.series)` would surface as a `MissingGreenlet`
+    in `extract_key`'s `r.series.modality` access rather than silently
+    succeeding off the cached relationship."""
     user_a = make_user(email="a_user@test.com")
     user_b = make_user(email="b_user@test.com")
     test_session.add_all([user_a, user_b])
@@ -463,7 +470,7 @@ async def sort_env(test_session: AsyncSession):
         changed_at=base_time + timedelta(hours=4),
     )
 
-    repo = RecordRepository(test_session)
+    repo = RecordRepository(fresh_session)
     return {
         "repo": repo,
         "records": [r1, r2, r3, r4, r5],
