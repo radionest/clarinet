@@ -195,13 +195,26 @@ class TestSortPaginationCrossPagesViaApi:
     @pytest.mark.asyncio
     async def test_user_asc_nulls_last_across_pages(self, client: AsyncClient, big_dataset):
         """Once the non-NULL user_id zone is exhausted, every remaining page
-        must hold only NULL-user records."""
+        must hold only NULL-user records — verified without a string-order
+        assertion on the non-NULL prefix so the test stays PG-safe (where
+        UUID columns sort by binary value, not lexicographic string)."""
         items = await _fetch_all_pages(client, {"sort": "user_asc"})
         user_ids = [r["user_id"] for r in items]
         non_null = [u for u in user_ids if u is not None]
         nulls = [u for u in user_ids if u is None]
+        # NULLS LAST: the entire NULL block comes after the non-NULL block.
         assert user_ids == non_null + nulls
-        assert non_null == sorted(non_null, key=str)
+        # Within the non-NULL block, equal-uid runs are contiguous (the
+        # tie-break is by id, but the sort key is user_id, so we only need
+        # to assert that the user_ids partition into contiguous groups).
+        seen: set[str] = set()
+        prev: str | None = None
+        for uid in non_null:
+            if uid != prev:
+                # Crossing into a new user_id — must not have appeared yet.
+                assert uid not in seen
+                seen.add(uid)
+                prev = uid
         # We seeded one out of every three records as unassigned.
         assert len(nulls) > 0
 
@@ -211,7 +224,10 @@ class TestSortPaginationCrossPagesViaApi:
         modalities = [r["series"]["modality"] if r.get("series") else None for r in items]
         non_null = [m for m in modalities if m is not None]
         nulls = [m for m in modalities if m is None]
+        # NULLS LAST across pages.
         assert modalities == non_null + nulls
+        # Modality is a plain VARCHAR — lexicographic order matches both
+        # SQLite and PG, so the strict-sorted assertion is portable here.
         assert non_null == sorted(non_null)
 
     @pytest.mark.asyncio

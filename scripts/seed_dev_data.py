@@ -280,9 +280,9 @@ async def seed_records(
             status=status,
             user_id=user_id,
         )
-        # The Record.status event listener fires `started_at`/`finished_at`
-        # on assignment, so override changed_at AFTER status to avoid being
-        # clobbered by the default factory.
+        # Set `changed_at` explicitly because the SA column has
+        # `server_default=func.now()` which would otherwise stamp it at
+        # flush time, collapsing every row onto the same timestamp.
         record.changed_at = changed_at
         if status == RecordStatus.inwork:
             record.started_at = changed_at
