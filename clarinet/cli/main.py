@@ -1306,7 +1306,8 @@ def main() -> None:
         action="store_true",
         help=(
             "Show DEBUG-level details on stderr: every rendered (old, new) path, "
-            "each Series/Record being checked, and 'source missing' reasons."
+            "each Series/Record being checked, and 'source missing' reasons. "
+            "May produce many lines on large datasets — pair with --dry-run for a preview."
         ),
     )
 

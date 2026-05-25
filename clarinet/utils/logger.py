@@ -303,28 +303,54 @@ def setup_logging(
     logging.basicConfig(handlers=[InterceptHandler()], level=0, force=True)
 
 
+def _settings_setup_kwargs(
+    component: str,
+    *,
+    console_level: str | None = None,
+    log_file: Path | str | None = None,
+) -> dict[str, Any]:
+    """Build :func:`setup_logging` kwargs from :mod:`clarinet.settings`.
+
+    Single source of truth for the kwargs threaded through the
+    module-init call, :func:`reconfigure_for_worker`, and
+    :func:`enable_verbose_console`. Callers override only what differs
+    from the global defaults (``console_level`` for verbose mode,
+    ``log_file`` for the worker process).
+    """
+    if log_file is None and settings.log_to_file:
+        log_file = settings.get_log_dir() / "clarinet.log"
+    return {
+        "level": settings.log_level,
+        "console_level": console_level or settings.log_console_level,
+        "format": settings.log_format,
+        "log_to_file": settings.log_to_file,
+        "log_file": log_file,
+        "rotation": settings.log_rotation,
+        "retention": settings.log_retention,
+        "serialize": settings.log_serialize,
+        "noisy_libraries": settings.log_noisy_libraries,
+        "remote_url": settings.log_remote_url,
+        "remote_auth": settings.log_remote_auth,
+        "remote_level": settings.log_remote_level,
+        "remote_labels": {**settings.log_remote_labels, "component": component},
+    }
+
+
 def enable_verbose_console() -> None:
     """Re-run :func:`setup_logging` with ``console_level='DEBUG'``.
 
     File and remote sinks keep their configured levels; only stderr is
     lowered. Intended for one-shot CLI commands that want detailed output
     on demand without flipping ``settings.log_console_level`` globally.
+
+    .. warning::
+
+       Calls :func:`setup_logging`, which does ``_logger.remove()`` — any
+       extra sinks added by callers (e.g. test fixtures) are wiped. In
+       tests, capture handler state before invoking and restore via
+       :func:`setup_logging` afterwards, or mock this helper out.
     """
-    setup_logging(
-        level=settings.log_level,
-        console_level="DEBUG",
-        format=settings.log_format,
-        log_to_file=settings.log_to_file,
-        log_file=settings.get_log_dir() / "clarinet.log" if settings.log_to_file else None,
-        rotation=settings.log_rotation,
-        retention=settings.log_retention,
-        serialize=settings.log_serialize,
-        noisy_libraries=settings.log_noisy_libraries,
-        remote_url=settings.log_remote_url,
-        remote_auth=settings.log_remote_auth,
-        remote_level=settings.log_remote_level,
-        remote_labels={**settings.log_remote_labels, "component": "cli"},
-    )
+    setup_logging(**_settings_setup_kwargs("api", console_level="DEBUG"))
 
 
 def reconfigure_for_worker(log_file: str | None = None) -> None:
@@ -342,38 +368,15 @@ def reconfigure_for_worker(log_file: str | None = None) -> None:
             :meth:`Settings.get_worker_log_file`.
     """
     setup_logging(
-        level=settings.log_level,
-        console_level=settings.log_console_level,
-        format=settings.log_format,
-        log_to_file=settings.log_to_file,
-        log_file=settings.get_worker_log_file(log_file),
-        rotation=settings.log_rotation,
-        retention=settings.log_retention,
-        serialize=settings.log_serialize,
-        noisy_libraries=settings.log_noisy_libraries,
-        remote_url=settings.log_remote_url,
-        remote_auth=settings.log_remote_auth,
-        remote_level=settings.log_remote_level,
-        remote_labels={**settings.log_remote_labels, "component": "worker"},
+        **_settings_setup_kwargs(
+            "worker",
+            log_file=settings.get_worker_log_file(log_file),
+        )
     )
 
 
 # Configure logging with settings from config
-setup_logging(
-    level=settings.log_level,
-    console_level=settings.log_console_level,
-    format=settings.log_format,
-    log_to_file=settings.log_to_file,
-    log_file=settings.get_log_dir() / "clarinet.log" if settings.log_to_file else None,
-    rotation=settings.log_rotation,
-    retention=settings.log_retention,
-    serialize=settings.log_serialize,
-    noisy_libraries=settings.log_noisy_libraries,
-    remote_url=settings.log_remote_url,
-    remote_auth=settings.log_remote_auth,
-    remote_level=settings.log_remote_level,
-    remote_labels={**settings.log_remote_labels, "component": "api"},
-)
+setup_logging(**_settings_setup_kwargs("api"))
 
 # Apply the scrub patcher so every log call (regardless of sink) gets a
 # sanitized message — defense in depth on top of explicit scrubbing in

@@ -45,7 +45,7 @@ from clarinet.services.common.storage_paths import (
 )
 from clarinet.settings import settings
 from clarinet.utils.db_manager import db_manager
-from clarinet.utils.logger import logger
+from clarinet.utils.logger import enable_verbose_console, logger
 
 MoveOutcome = Literal["moved", "same", "missing", "collision", "failed"]
 
@@ -381,9 +381,7 @@ async def migrate_paths(args: argparse.Namespace) -> None:
 
     Run with ``--dry-run`` first to inspect the plan.
     """
-    if getattr(args, "verbose", False):
-        from clarinet.utils.logger import enable_verbose_console
-
+    if args.verbose:
         enable_verbose_console()
 
     from_template = validate_template(args.from_template)
