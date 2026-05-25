@@ -591,7 +591,15 @@ class RecordService:
             patient_id: Patient whose files changed.
             changed_files: List of logical file names that changed.
             source_record: Record that caused the file change (for skip logic).
+
+        Raises:
+            InvalidPatientIdentifierError: If ``patient_id`` violates DICOM
+                format. Matches the trim-on-read contract used by
+                :class:`StudyService`.
         """
+        from clarinet.models.patient import validate_patient_id
+
+        patient_id = validate_patient_id(patient_id)
         if not self.engine:
             return
         for file_name in changed_files:

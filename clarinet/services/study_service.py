@@ -13,6 +13,7 @@ from clarinet.exceptions.domain import (
     StudyAlreadyExistsError,
 )
 from clarinet.models import Patient, Series, Study
+from clarinet.models.patient import validate_patient_id
 from clarinet.models.study import SeriesFind
 from clarinet.repositories.patient_repository import PatientRepository
 from clarinet.repositories.series_repository import SeriesRepository
@@ -87,8 +88,10 @@ class StudyService:
             Patient object with studies loaded
 
         Raises:
+            InvalidPatientIdentifierError: If the ID violates DICOM format.
             NOT_FOUND: If patient doesn't exist
         """
+        patient_id = validate_patient_id(patient_id)
         return await self.patient_repo.get_with_studies(patient_id)
 
     async def create_patient(self, patient_data: dict[str, Any]) -> Patient:
@@ -101,8 +104,15 @@ class StudyService:
             Created patient
 
         Raises:
+            InvalidPatientIdentifierError: If the ID violates DICOM format.
             CONFLICT: If patient already exists
         """
+        raw_id = patient_data.get("id")
+        if raw_id is None:
+            from clarinet.exceptions.domain import InvalidPatientIdentifierError
+
+            raise InvalidPatientIdentifierError("", "missing 'id' in payload")
+        patient_data["id"] = validate_patient_id(raw_id)
         # Load existing patient (if any) to surface its name in the conflict
         # error metadata — frontend renders it in the localized message.
         existing = await self.patient_repo.find_by_id(patient_data["id"])
@@ -130,9 +140,11 @@ class StudyService:
             Anonymized patient
 
         Raises:
+            InvalidPatientIdentifierError: If the ID violates DICOM format.
             NOT_FOUND: If patient doesn't exist
             CONFLICT: If patient already has anonymous name
         """
+        patient_id = validate_patient_id(patient_id)
         patient = await self.patient_repo.get(patient_id)
 
         # Check if already anonymized
@@ -225,9 +237,16 @@ class StudyService:
             Created study
 
         Raises:
+            InvalidPatientIdentifierError: If patient_id violates DICOM format.
             NOT_FOUND: If patient doesn't exist
             CONFLICT: If study already exists
         """
+        raw_patient_id = study_data.get("patient_id")
+        if raw_patient_id is None:
+            from clarinet.exceptions.domain import InvalidPatientIdentifierError
+
+            raise InvalidPatientIdentifierError("", "missing 'patient_id' in payload")
+        study_data["patient_id"] = validate_patient_id(raw_patient_id)
         # Check if patient exists
         patient = await self.patient_repo.get(study_data["patient_id"])
 
@@ -369,8 +388,10 @@ class StudyService:
             patient_id: Patient ID
 
         Raises:
+            InvalidPatientIdentifierError: If the ID violates DICOM format.
             EntityNotFoundError: If patient doesn't exist
         """
+        patient_id = validate_patient_id(patient_id)
         patient = await self.patient_repo.get(patient_id)
         await self.patient_repo.delete(patient)
 

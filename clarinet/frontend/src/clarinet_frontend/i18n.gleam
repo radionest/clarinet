@@ -320,6 +320,8 @@ pub type Key {
   FormPatientInfo
   FormPatientId
   FormPatientIdPlaceholder
+  FormPatientIdHint
+  FormPatientIdInvalid
   FormPatientName
   FormPatientNamePlaceholder
   FormBtnCreatePatient
@@ -946,6 +948,14 @@ pub fn translate(locale: Locale, key: Key) -> String {
     Ru, FormPatientId -> "ID пациента"
     En, FormPatientIdPlaceholder -> "Enter Patient ID"
     Ru, FormPatientIdPlaceholder -> "Введите ID пациента"
+    En, FormPatientIdHint ->
+      "Latin letters, digits, and . _ - ^ — up to 64 chars, no spaces"
+    Ru, FormPatientIdHint ->
+      "Латиница, цифры и . _ - ^ — до 64 символов, без пробелов"
+    En, FormPatientIdInvalid ->
+      "Patient ID must contain only Latin letters, digits and . _ - ^ (no spaces, max 64 chars)"
+    Ru, FormPatientIdInvalid ->
+      "ID пациента должен состоять только из латиницы, цифр и . _ - ^ (без пробелов, до 64 символов)"
     En, FormPatientName -> "Patient Name"
     Ru, FormPatientName -> "Имя пациента"
     En, FormPatientNamePlaceholder -> "Enter Patient Name"

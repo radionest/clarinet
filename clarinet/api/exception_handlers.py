@@ -71,6 +71,7 @@ def setup_exception_handlers(app: FastAPI) -> None:
         EntityAlreadyExistsError,
         EntityNotFoundError,
         InvalidCredentialsError,
+        InvalidPatientIdentifierError,
         PipelineError,
         RecordDataValidationError,
         RecordLimitReachedError,
@@ -165,6 +166,30 @@ def setup_exception_handlers(app: FastAPI) -> None:
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             content={"detail": str(exc) if str(exc) else "Validation failed"},
+        )
+
+    @app.exception_handler(InvalidPatientIdentifierError)
+    async def handle_invalid_patient_identifier(
+        request: Request, exc: InvalidPatientIdentifierError
+    ) -> JSONResponse:
+        """Convert InvalidPatientIdentifierError to structured 422.
+
+        PII guard: the raw patient_id never appears in the log line —
+        only the failure reason. The raw value travels exclusively
+        through ``metadata()`` into the HTTP body, matching the
+        :class:`PatientAlreadyExistsError` pattern.
+        """
+        logger.warning(
+            f"422 InvalidPatientIdentifierError on {request.method} {request.url.path}: "
+            f"{exc.reason}"
+        )
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            content={
+                "detail": str(exc),
+                "code": exc.error_code,
+                "metadata": exc.metadata(),
+            },
         )
 
     @app.exception_handler(RecordDataValidationError)

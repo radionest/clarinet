@@ -4,11 +4,13 @@ Patient-related models for the Clarinet framework.
 This module provides models for patients, studies, and series.
 """
 
-from typing import TYPE_CHECKING
+import re
+from typing import TYPE_CHECKING, Annotated, Any
 
-from pydantic import computed_field
+from pydantic import StringConstraints, computed_field, field_validator
 from sqlmodel import Column, Field, Integer, Relationship
 
+from ..exceptions.domain import InvalidPatientIdentifierError
 from ..settings import settings
 from .base import BaseModel
 
@@ -17,10 +19,52 @@ if TYPE_CHECKING:
     from .study import Study, StudyRead
 
 
+# DICOM PatientID (0010,0020), VR=LO. Allowed chars: A-Z a-z 0-9 . _ - ^
+# DICOM caps LO at 64 chars. Strict — no whitespace allowed; trim is the
+# client's responsibility (the Gleam form does this, and curl/CLI users
+# must strip explicitly).
+PATIENT_ID_REGEX = r"^[A-Za-z0-9._\-^]{1,64}$"
+PATIENT_ID_PATTERN = re.compile(PATIENT_ID_REGEX)
+
+# Annotated type — surfaces the pattern in JSON Schema / OpenAPI so
+# clients (and Schemathesis) see the real contract. Mirrors the
+# ``DicomUID`` pattern in ``base.py``.
+PatientID = Annotated[
+    str,
+    StringConstraints(min_length=1, max_length=64, pattern=PATIENT_ID_REGEX),
+]
+
+
+def validate_patient_id(raw: str) -> str:
+    """Validate a patient ID per DICOM LO PatientID format.
+
+    Used for path parameters and dict-input from non-Pydantic call
+    sites. Pydantic ``Field(regex=PATIENT_ID_REGEX)`` covers the
+    typed-DTO entry paths and raises the standard FastAPI 422; this
+    helper raises the domain-typed
+    :class:`InvalidPatientIdentifierError` so structured error bodies
+    stay consistent across path and body inputs.
+
+    Raises:
+        InvalidPatientIdentifierError: if the value is not a string,
+            is empty, or violates the DICOM character/length constraints.
+    """
+    if not isinstance(raw, str):
+        raise InvalidPatientIdentifierError(str(raw), "must be a string")
+    if not raw:
+        raise InvalidPatientIdentifierError(raw, "must not be empty")
+    if not PATIENT_ID_PATTERN.fullmatch(raw):
+        raise InvalidPatientIdentifierError(
+            raw,
+            "must match DICOM LO PatientID format (A-Z a-z 0-9 . _ - ^, max 64 chars)",
+        )
+    return raw
+
+
 class PatientBase(BaseModel):
     """Core patient fields — no auto_id (used by PatientSave)."""
 
-    id: str = Field(min_length=1, max_length=64)
+    id: PatientID
     name: str = Field(default=None, min_length=1, max_length=64)
     anon_name: str | None = Field(default=None, min_length=5, max_length=50, unique=True)
 
@@ -51,11 +95,7 @@ class PatientInfo(PatientBase):
 class Patient(PatientInfo, table=True):
     """Model representing a patient in the system."""
 
-    id: str = Field(
-        primary_key=True,
-        min_length=1,
-        max_length=64,
-    )
+    id: PatientID = Field(primary_key=True)
     studies: list["Study"] = Relationship(back_populates="patient", cascade_delete=True)
     auto_id: int | None = Field(
         default=None,
@@ -71,8 +111,19 @@ class Patient(PatientInfo, table=True):
 class PatientSave(PatientBase):
     """Pydantic model for creating a new patient."""
 
-    id: str = Field(min_length=1, max_length=64, alias="patient_id")
+    id: PatientID = Field(alias="patient_id")
     name: str = Field(min_length=1, max_length=64, alias="patient_name")
+
+    # Alias re-declaration drops the parent validator; re-attach so a
+    # whitespace-laden body produces the structured domain 422
+    # (``code=INVALID_PATIENT_IDENTIFIER``) instead of Pydantic's
+    # generic ``string_pattern_mismatch`` envelope.
+    @field_validator("id", mode="before")
+    @classmethod
+    def _validate_id(cls, v: Any) -> Any:
+        if v is None or not isinstance(v, str):
+            return v
+        return validate_patient_id(v)
 
 
 class PatientRead(PatientInfo):

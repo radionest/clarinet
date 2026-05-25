@@ -2,10 +2,38 @@
 import clarinet_frontend/i18n.{type Key}
 import components/forms/base as form
 import gleam/dict.{type Dict}
+import gleam/list
 import gleam/option.{None, Some}
+import gleam/string
 import lustre/attribute
 import lustre/element.{type Element}
 import lustre/element/html
+
+// DICOM PatientID (tag 0010,0020, VR=LO): A-Z a-z 0-9 . _ - ^, max 64 chars,
+// no whitespace. Mirrors clarinet/models/patient.py::PATIENT_ID_PATTERN.
+// Per-codepoint pattern-match — avoids false positives from grapheme
+// clusters that contain ASCII substrings (e.g. combining marks).
+fn is_allowed_codepoint(cp: Int) -> Bool {
+  // A-Z, a-z, 0-9, '.', '_', '-', '^'
+  { cp >= 65 && cp <= 90 }
+  || { cp >= 97 && cp <= 122 }
+  || { cp >= 48 && cp <= 57 }
+  || cp == 46
+  || cp == 95
+  || cp == 45
+  || cp == 94
+}
+
+fn is_valid_patient_id(value: String) -> Bool {
+  let len = string.length(value)
+  case len > 0 && len <= 64 {
+    False -> False
+    True ->
+      value
+      |> string.to_utf_codepoints
+      |> list.all(fn(cp) { is_allowed_codepoint(string.utf_codepoint_to_int(cp)) })
+  }
+}
 
 // Patient form data type for managing form state
 pub type PatientFormData {
@@ -36,8 +64,8 @@ pub fn view(
   form.form(on_submit, [
     html.h3([attribute.class("form-title")], [html.text(translate(i18n.FormPatientInfo))]),
 
-    // Patient ID field (required)
-    form.field(
+    // Patient ID field (required) + DICOM-format hint
+    form.field_with_hint(
       label: translate(i18n.FormPatientId),
       name: "patient_id",
       input: form.text_input(
@@ -48,6 +76,7 @@ pub fn view(
       ),
       errors: errors,
       required: True,
+      hint: Some(translate(i18n.FormPatientIdHint)),
     ),
 
     // Patient Name field (required)
@@ -75,15 +104,24 @@ pub fn view(
   ])
 }
 
-// Validate form data
+// Validate form data. Trims ``id`` before checking — leading/trailing
+// whitespace is corrected silently; inner whitespace and disallowed chars
+// fail with the localized DICOM-format message.
 pub fn validate(
   data: PatientFormData,
+  translate: fn(Key) -> String,
 ) -> Result(PatientFormData, Dict(String, String)) {
+  let trimmed_id = string.trim(data.id)
   let errors = dict.new()
 
-  let errors = case form.validate_required(value: data.id, field_name: "Patient ID") {
+  let errors = case form.validate_required(value: trimmed_id, field_name: "Patient ID") {
     Error(msg) -> dict.insert(errors, "patient_id", msg)
-    Ok(_) -> errors
+    Ok(_) ->
+      case is_valid_patient_id(trimmed_id) {
+        True -> errors
+        False ->
+          dict.insert(errors, "patient_id", translate(i18n.FormPatientIdInvalid))
+      }
   }
 
   let errors = case form.validate_required(value: data.name, field_name: "Patient Name") {
@@ -92,7 +130,7 @@ pub fn validate(
   }
 
   case dict.size(errors) {
-    0 -> Ok(data)
+    0 -> Ok(PatientFormData(id: trimmed_id, name: data.name))
     _ -> Error(errors)
   }
 }

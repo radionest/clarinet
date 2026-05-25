@@ -4,7 +4,9 @@ Async study router for the Clarinet framework.
 This module provides async API endpoints for managing medical imaging studies, series, and related data.
 """
 
-from fastapi import APIRouter, Body, Depends, status
+from typing import Annotated
+
+from fastapi import APIRouter, Body, Depends, Path, status
 
 from clarinet.api.dependencies import RecordServiceDep, StudyServiceDep, current_admin_user
 from clarinet.api.exception_handlers import ConflictResponse
@@ -18,8 +20,22 @@ from clarinet.models import (
     Study,
     StudyCreate,
 )
-from clarinet.models.patient import PatientRead
+from clarinet.models.patient import PATIENT_ID_REGEX, PatientRead
 from clarinet.models.study import SeriesFind, StudyRead
+
+# Annotated path-parameter that enforces the DICOM LO PatientID format
+# at the FastAPI/OpenAPI layer — schemathesis sees the pattern and
+# stops generating raw-unicode garbage, and clients hitting a malformed
+# URL get a deterministic 422 instead of a silent 404.
+PatientIdPath = Annotated[
+    str,
+    Path(
+        min_length=1,
+        max_length=64,
+        pattern=PATIENT_ID_REGEX,
+        description="DICOM PatientID (LO VR): letters, digits, and . _ - ^",
+    ),
+]
 
 router = APIRouter(
     responses={
@@ -50,7 +66,7 @@ async def get_all_patients(
 
 @router.get("/patients/{patient_id}", response_model=PatientRead)
 async def get_patient_details(
-    patient_id: str,
+    patient_id: PatientIdPath,
     service: StudyServiceDep,
 ) -> Patient:
     """Get patient details by ID with their studies."""
@@ -69,7 +85,7 @@ async def add_patient(
 
 @router.post("/patients/{patient_id}/anonymize", response_model=Patient)
 async def anonymize_patient(
-    patient_id: str,
+    patient_id: PatientIdPath,
     service: StudyServiceDep,
 ) -> Patient:
     """Anonymize a patient by assigning an anonymous name."""
@@ -78,7 +94,7 @@ async def anonymize_patient(
 
 @router.delete("/patients/{patient_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_patient(
-    patient_id: str,
+    patient_id: PatientIdPath,
     service: StudyServiceDep,
 ) -> None:
     """Delete a patient and all related studies, series, and records."""
@@ -87,7 +103,7 @@ async def delete_patient(
 
 @router.post("/patients/{patient_id}/file-events")
 async def notify_file_events(
-    patient_id: str,
+    patient_id: PatientIdPath,
     service: RecordServiceDep,
     changed_files: list[str] = Body(...),
 ) -> dict[str, list[str]]:

@@ -69,7 +69,7 @@ pub fn update(
     Submit -> {
       let form_data =
         patient_form.PatientFormData(id: model.form_id, name: model.form_name)
-      case patient_form.validate(form_data) {
+      case patient_form.validate(form_data, shared.translate) {
         Ok(data) -> {
           let eff = {
             use dispatch <- effect.from
