@@ -419,4 +419,18 @@ class RecordPage(SQLModel):
     sort: SortOrder = "changed_at_desc"
 
 
+class RecordFilterOptions(SQLModel):
+    """Distinct values for filter dropdowns on /records and /admin.
+
+    The ``users`` list is prefixed with ``"__unassigned__"`` when the
+    scope contains any record with ``user_id IS NULL``.
+    """
+
+    model_config = ConfigDict(extra="forbid")  # type: ignore[assignment]
+
+    patients: list[str]
+    record_types: list[str]
+    users: list[str]
+
+
 SeriesFind.model_rebuild()

@@ -78,6 +78,22 @@ class RecordPageResult:
     next_cursor: str | None
 
 
+@dataclass
+class RecordFilterScope:
+    """Distinct patient/record_type/user values within a search-criteria scope.
+
+    Used by ``RecordRepository.get_filter_options`` to populate filter
+    dropdowns. All ID lists contain raw values (no display labels) and
+    are pre-sorted; ``has_unassigned`` signals whether the scope contains
+    any record with ``user_id IS NULL``.
+    """
+
+    patients: list[str]
+    record_types: list[str]
+    users: list[str]
+    has_unassigned: bool
+
+
 # Sentinel object identifying the modality sort column. The actual SQL
 # alias for the outerjoined Series row is created per-query in `find_page`
 # and passed to `_SortSpec.column`.
@@ -1411,6 +1427,42 @@ class RecordRepository(BaseRepository[Record]):
         result = await self.session.execute(query)
         rows = result.all()
         return {type_name: count for type_name, count in rows}  # noqa: C416
+
+    async def get_filter_options(self, criteria: RecordSearchCriteria) -> RecordFilterScope:
+        """Get distinct patient/record_type/user values within criteria scope.
+
+        Used to populate filter dropdowns on /records and /admin. Caller
+        should leave user-driven UI filters (patient_id, record_type_name,
+        user_id, wo_user, ...) at their defaults — only the RBAC fields
+        (role_names, include_unassigned, exclude_unique_violations) should
+        be set, so the response reflects the user's full accessible scope.
+        """
+        base = self._build_criteria_query(criteria).options()
+        subq = base.with_only_columns(
+            col(Record.patient_id),
+            col(Record.record_type_name),
+            col(Record.user_id),
+        ).subquery()
+
+        patients_result = await self.session.execute(
+            select(distinct(subq.c.patient_id)).where(subq.c.patient_id.is_not(None))
+        )
+        types_result = await self.session.execute(
+            select(distinct(subq.c.record_type_name)).where(subq.c.record_type_name.is_not(None))
+        )
+        users_result = await self.session.execute(
+            select(distinct(subq.c.user_id)).where(subq.c.user_id.is_not(None))
+        )
+        unassigned_result = await self.session.execute(
+            select(func.count()).select_from(subq).where(subq.c.user_id.is_(None))
+        )
+
+        return RecordFilterScope(
+            patients=sorted(str(p) for p in patients_result.scalars().all()),
+            record_types=sorted(t for t in types_result.scalars().all()),
+            users=sorted(str(u) for u in users_result.scalars().all()),
+            has_unassigned=(unassigned_result.scalar() or 0) > 0,
+        )
 
     async def get_available_type_counts(
         self,
