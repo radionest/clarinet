@@ -425,3 +425,20 @@ async def test_lists_are_sorted(superuser_client: AsyncClient, diverse_scope):
     # users list: __unassigned__ first (inserted), then sorted UUIDs
     assert data["users"][0] == _UNASSIGNED
     assert data["users"][1:] == sorted(data["users"][1:])
+
+
+@pytest.mark.asyncio
+async def test_find_with_both_patient_id_and_patient_anon_id_does_not_error(
+    regular_a_client: AsyncClient, diverse_scope
+):
+    """Submitting both an anon-shaped patient_id and a separate patient_anon_id
+    must not crash SQLAlchemy with an ambiguous-column error. The auto-route
+    on patient_id is skipped when patient_anon_id is already set; the two
+    filters intersect via Record.patient_id.
+    """
+    p = diverse_scope["patients"][0]
+    resp = await regular_a_client.post(
+        "/api/records/find",
+        json={"patient_id": p.anon_id, "patient_anon_id": p.anon_id},
+    )
+    assert resp.status_code == 200

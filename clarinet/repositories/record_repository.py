@@ -1202,9 +1202,13 @@ class RecordRepository(BaseRepository[Record]):
         if criteria.patient_id:
             # If the value matches the anon_id pattern, route through the
             # patient_anon_id branch so non-superusers can filter by the
-            # masked identifier they see in /records/filter-options.
+            # masked identifier they see in /records/filter-options. Skip
+            # the auto-route when patient_anon_id is already set — the
+            # explicit branch below would re-join Patient and SQLAlchemy
+            # would error with "ambiguous column". The two filters AND
+            # together via Record.patient_id, which is enough.
             anon_prefix = f"{settings.anon_id_prefix}_"
-            if criteria.patient_id.startswith(anon_prefix):
+            if criteria.patient_id.startswith(anon_prefix) and not criteria.patient_anon_id:
                 suffix = criteria.patient_id[len(anon_prefix) :]
                 try:
                     auto_id = int(suffix)
