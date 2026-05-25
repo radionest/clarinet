@@ -107,7 +107,12 @@ class StudyService:
             InvalidPatientIdentifierError: If the ID violates DICOM format.
             CONFLICT: If patient already exists
         """
-        patient_data["id"] = normalize_patient_id(patient_data["id"])
+        raw_id = patient_data.get("id")
+        if raw_id is None:
+            from clarinet.exceptions.domain import InvalidPatientIdentifierError
+
+            raise InvalidPatientIdentifierError("", "missing 'id' in payload")
+        patient_data["id"] = normalize_patient_id(raw_id)
         # Load existing patient (if any) to surface its name in the conflict
         # error metadata — frontend renders it in the localized message.
         existing = await self.patient_repo.find_by_id(patient_data["id"])
@@ -236,7 +241,12 @@ class StudyService:
             NOT_FOUND: If patient doesn't exist
             CONFLICT: If study already exists
         """
-        study_data["patient_id"] = normalize_patient_id(study_data["patient_id"])
+        raw_patient_id = study_data.get("patient_id")
+        if raw_patient_id is None:
+            from clarinet.exceptions.domain import InvalidPatientIdentifierError
+
+            raise InvalidPatientIdentifierError("", "missing 'patient_id' in payload")
+        study_data["patient_id"] = normalize_patient_id(raw_patient_id)
         # Check if patient exists
         patient = await self.patient_repo.get(study_data["patient_id"])
 

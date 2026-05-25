@@ -89,12 +89,13 @@ URL constants live in `tests/utils/urls.py`. Status codes: 201 = POST create, 20
 | URL | Method | Status | Description |
 |---|---|---|---|
 | `/api/patients` | GET | 200 | List patients |
-| `/api/patients` | POST | 201 | Add patient |
-| `/api/patients/{id}` | GET | 200 | Patient details |
-| `/api/patients/{id}` | DELETE | 204 | Delete patient |
-| `/api/patients/{id}/anonymize` | POST | 200 | Anonymize patient |
+| `/api/patients` | POST | 201 | Add patient. **422**: malformed `patient_id` (`code=INVALID_PATIENT_IDENTIFIER`) |
+| `/api/patients/{id}` | GET | 200 | Patient details. **422**: malformed path id |
+| `/api/patients/{id}` | DELETE | 204 | Delete patient. **422**: malformed path id |
+| `/api/patients/{id}/anonymize` | POST | 200 | Anonymize patient. **422**: malformed path id |
+| `/api/patients/{id}/file-events` | POST | 200 | Notify file changes for patient. **422**: malformed path id |
 | `/api/studies` | GET | 200 | List studies |
-| `/api/studies` | POST | 201 | Add study |
+| `/api/studies` | POST | 201 | Add study. **422**: malformed `patient_id` |
 | `/api/studies/{uid}` | GET | 200 | Study details |
 | `/api/studies/{uid}` | DELETE | 204 | Delete study |
 | `/api/studies/{uid}/series` | GET | 200 | Study series |

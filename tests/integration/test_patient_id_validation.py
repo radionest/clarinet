@@ -85,7 +85,10 @@ async def test_create_patient_rejects_inner_whitespace(client):
         json={"patient_id": "PAT INNER", "patient_name": "Inner Space"},
     )
     assert response.status_code == 422
-    assert "DICOM" in response.json()["detail"]
+    body = response.json()
+    assert body["code"] == "INVALID_PATIENT_IDENTIFIER"
+    assert body["metadata"]["patient_id"] == "PAT INNER"
+    assert "DICOM" in body["metadata"]["reason"]
 
 
 @pytest.mark.asyncio
@@ -94,11 +97,10 @@ async def test_create_patient_rejects_empty_after_trim(client):
         PATIENTS_BASE,
         json={"patient_id": "   ", "patient_name": "Empty After Trim"},
     )
-    # PatientSave has min_length=1 → Pydantic 422 first when literally empty
-    # after whitespace stripping isn't applied. But our payload " " has length
-    # 3, so it passes Pydantic and hits normalize_patient_id, which raises
-    # InvalidPatientIdentifierError → 422.
     assert response.status_code == 422
+    body = response.json()
+    assert body["code"] == "INVALID_PATIENT_IDENTIFIER"
+    assert body["metadata"]["reason"] == "empty after trimming whitespace"
 
 
 @pytest.mark.asyncio
@@ -109,6 +111,20 @@ async def test_create_patient_rejects_invalid_chars(client):
             json={"patient_id": bad, "patient_name": "Bad ID"},
         )
         assert response.status_code == 422, f"Expected 422 for {bad!r}"
+        assert response.json()["code"] == "INVALID_PATIENT_IDENTIFIER"
+
+
+@pytest.mark.asyncio
+async def test_invalid_patient_id_response_excludes_pii_from_detail(client):
+    """``detail`` carries only the reason; PII (raw id) lives in metadata."""
+    response = await client.post(
+        PATIENTS_BASE,
+        json={"patient_id": "PAT@LEAK", "patient_name": "PII Check"},
+    )
+    assert response.status_code == 422
+    body = response.json()
+    assert "PAT@LEAK" not in body["detail"]
+    assert body["metadata"]["patient_id"] == "PAT@LEAK"
 
 
 @pytest.mark.asyncio
@@ -208,3 +224,27 @@ async def test_create_study_rejects_invalid_patient_id(client):
         },
     )
     assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_file_events_rejects_invalid_patient_id(client):
+    """RecordService.notify_file_updates shares the same trim+regex contract."""
+    response = await client.post(
+        f"{PATIENTS_BASE}/PAT@FILE/file-events",
+        json=["some_file.nii.gz"],
+    )
+    assert response.status_code == 422
+    assert response.json()["code"] == "INVALID_PATIENT_IDENTIFIER"
+
+
+def test_patient_save_pydantic_trims_id():
+    """PatientSave (API entry DTO) trims via the inherited field_validator.
+
+    Direct ``Patient(table=True)(id=...)`` construction is NOT covered —
+    SQLModel bypasses Pydantic ``__init__`` validators for table models.
+    All public paths reach this via the service layer instead.
+    """
+    from clarinet.models.patient import PatientSave
+
+    payload = PatientSave(patient_id=" PAT_DTO ", patient_name="DTO Direct")
+    assert payload.id == "PAT_DTO"

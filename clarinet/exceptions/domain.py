@@ -171,12 +171,21 @@ class InvalidPatientIdentifierError(ValidationError):
     """Raised when patient_id does not conform to DICOM PatientID format.
 
     Pattern: DICOM tag (0010,0020), VR=LO, max 64 chars.
+
+    PII guard: ``str(exc)`` intentionally omits the raw value (it lands
+    in ERROR-level logs). The raw value travels only via ``metadata()``
+    into the HTTP body, mirroring :class:`PatientAlreadyExistsError`.
     """
+
+    error_code: ClassVar[str] = "INVALID_PATIENT_IDENTIFIER"
 
     def __init__(self, patient_id: str, reason: str) -> None:
         self.patient_id = patient_id
         self.reason = reason
-        super().__init__(f"Invalid patient ID '{patient_id}': {reason}")
+        super().__init__(f"Invalid patient identifier: {reason}")
+
+    def metadata(self) -> dict[str, str]:
+        return {"patient_id": self.patient_id, "reason": self.reason}
 
 
 class PatientAlreadyExistsError(EntityAlreadyExistsError):

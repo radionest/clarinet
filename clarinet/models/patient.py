@@ -5,13 +5,14 @@ This module provides models for patients, studies, and series.
 """
 
 import re
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from pydantic import computed_field
+from pydantic import computed_field, field_validator
 from sqlmodel import Column, Field, Integer, Relationship
 
 from ..exceptions.domain import InvalidPatientIdentifierError
 from ..settings import settings
+from ..utils.logger import logger
 from .base import BaseModel
 
 if TYPE_CHECKING:
@@ -27,6 +28,10 @@ PATIENT_ID_PATTERN = re.compile(r"[A-Za-z0-9._\-^]{1,64}")
 def normalize_patient_id(raw: str) -> str:
     """Trim whitespace and validate a patient ID per DICOM LO PatientID format.
 
+    Logs at INFO when whitespace stripping changed the value — visible
+    asymmetry between client input and stored value otherwise hides
+    URL-builder bugs in callers.
+
     Raises:
         InvalidPatientIdentifierError: if the trimmed value is empty
             or violates the DICOM character/length constraints.
@@ -41,6 +46,10 @@ def normalize_patient_id(raw: str) -> str:
             raw,
             "must match DICOM LO PatientID format (A-Z a-z 0-9 . _ - ^, max 64 chars)",
         )
+    if cleaned != raw:
+        logger.info(
+            f"patient_id normalized: stripped whitespace (len {len(raw)} -> {len(cleaned)})"
+        )
     return cleaned
 
 
@@ -50,6 +59,16 @@ class PatientBase(BaseModel):
     id: str = Field(min_length=1, max_length=64)
     name: str = Field(default=None, min_length=1, max_length=64)
     anon_name: str | None = Field(default=None, min_length=5, max_length=50, unique=True)
+
+    @field_validator("id", mode="before")
+    @classmethod
+    def _normalize_id(cls, v: Any) -> Any:
+        """Defence-in-depth: any path that instantiates a Patient model
+        (direct ORM construction, fixtures, model_validate) gets the
+        same trim + DICOM-format check the service layer applies."""
+        if v is None or not isinstance(v, str):
+            return v
+        return normalize_patient_id(v)
 
 
 class PatientInfo(PatientBase):
@@ -94,12 +113,27 @@ class Patient(PatientInfo, table=True):
     )
     records: list["Record"] = Relationship(back_populates="patient", cascade_delete=True)
 
+    # Note: SQLModel ``table=True`` classes bypass Pydantic field
+    # validators in ``__init__``. The normalize check on this class only
+    # fires through ``Patient.model_validate(...)``; direct
+    # ``Patient(id=...)`` construction (tests, fixtures, low-level repo
+    # code) must call ``normalize_patient_id`` explicitly. All API paths
+    # already do so via :class:`StudyService` and ``PatientSave``.
+
 
 class PatientSave(PatientBase):
     """Pydantic model for creating a new patient."""
 
     id: str = Field(min_length=1, max_length=64, alias="patient_id")
     name: str = Field(min_length=1, max_length=64, alias="patient_name")
+
+    @field_validator("id", mode="before")
+    @classmethod
+    def _normalize_id(cls, v: Any) -> Any:
+        """Alias re-declaration drops the parent validator — re-attach."""
+        if v is None or not isinstance(v, str):
+            return v
+        return normalize_patient_id(v)
 
 
 class PatientRead(PatientInfo):

@@ -11,7 +11,18 @@ import lustre/element/html
 
 // DICOM PatientID (tag 0010,0020, VR=LO): A-Z a-z 0-9 . _ - ^, max 64 chars,
 // no whitespace. Mirrors clarinet/models/patient.py::PATIENT_ID_PATTERN.
-const patient_id_allowed_chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-^"
+// Per-codepoint pattern-match — avoids false positives from grapheme
+// clusters that contain ASCII substrings (e.g. combining marks).
+fn is_allowed_codepoint(cp: Int) -> Bool {
+  // A-Z, a-z, 0-9, '.', '_', '-', '^'
+  { cp >= 65 && cp <= 90 }
+  || { cp >= 97 && cp <= 122 }
+  || { cp >= 48 && cp <= 57 }
+  || cp == 46
+  || cp == 95
+  || cp == 45
+  || cp == 94
+}
 
 fn is_valid_patient_id(value: String) -> Bool {
   let len = string.length(value)
@@ -19,8 +30,8 @@ fn is_valid_patient_id(value: String) -> Bool {
     False -> False
     True ->
       value
-      |> string.to_graphemes
-      |> list.all(fn(c) { string.contains(patient_id_allowed_chars, c) })
+      |> string.to_utf_codepoints
+      |> list.all(fn(cp) { is_allowed_codepoint(string.utf_codepoint_to_int(cp)) })
   }
 }
 
@@ -54,23 +65,19 @@ pub fn view(
     html.h3([attribute.class("form-title")], [html.text(translate(i18n.FormPatientInfo))]),
 
     // Patient ID field (required) + DICOM-format hint
-    html.div([], [
-      form.field(
-        label: translate(i18n.FormPatientId),
+    form.field_with_hint(
+      label: translate(i18n.FormPatientId),
+      name: "patient_id",
+      input: form.text_input(
         name: "patient_id",
-        input: form.text_input(
-          name: "patient_id",
-          value: data.id,
-          placeholder: Some(translate(i18n.FormPatientIdPlaceholder)),
-          on_input: fn(value) { on_update(UpdatePatientId(value)) },
-        ),
-        errors: errors,
-        required: True,
+        value: data.id,
+        placeholder: Some(translate(i18n.FormPatientIdPlaceholder)),
+        on_input: fn(value) { on_update(UpdatePatientId(value)) },
       ),
-      html.small([attribute.class("form-hint")], [
-        html.text(translate(i18n.FormPatientIdHint)),
-      ]),
-    ]),
+      errors: errors,
+      required: True,
+      hint: Some(translate(i18n.FormPatientIdHint)),
+    ),
 
     // Patient Name field (required)
     form.field(

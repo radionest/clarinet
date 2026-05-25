@@ -15,6 +15,28 @@ pub fn field(
   errors errors: Dict(String, String),
   required required: Bool,
 ) -> Element(msg) {
+  field_with_hint(
+    label: label,
+    name: name,
+    input: input,
+    errors: errors,
+    required: required,
+    hint: None,
+  )
+}
+
+// Form field with optional hint text rendered between input and error.
+// Use this when the field needs format guidance (e.g. allowed character
+// set) so the hint stays inside the same .form-field container as the
+// input — keeps CSS contracts intact for focus/spacing/error layout.
+pub fn field_with_hint(
+  label label: String,
+  name name: String,
+  input input: Element(msg),
+  errors errors: Dict(String, String),
+  required required: Bool,
+  hint hint: Option(String),
+) -> Element(msg) {
   let class = case required {
     True -> "form-field required"
     False -> "form-field"
@@ -29,6 +51,10 @@ pub fn field(
       },
     ]),
     input,
+    case hint {
+      Some(h) -> html.small([attribute.class("form-hint")], [html.text(h)])
+      None -> html.text("")
+    },
     error_message(errors, name),
   ])
 }
