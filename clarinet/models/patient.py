@@ -4,17 +4,44 @@ Patient-related models for the Clarinet framework.
 This module provides models for patients, studies, and series.
 """
 
+import re
 from typing import TYPE_CHECKING
 
 from pydantic import computed_field
 from sqlmodel import Column, Field, Integer, Relationship
 
+from ..exceptions.domain import InvalidPatientIdentifierError
 from ..settings import settings
 from .base import BaseModel
 
 if TYPE_CHECKING:
     from .record import Record
     from .study import Study, StudyRead
+
+
+# DICOM PatientID (0010,0020), VR=LO. Allowed chars: A-Z a-z 0-9 . _ - ^
+# DICOM caps LO at 64 chars. Whitespace is stripped before this check.
+PATIENT_ID_PATTERN = re.compile(r"^[A-Za-z0-9._\-^]{1,64}$")
+
+
+def normalize_patient_id(raw: str) -> str:
+    """Trim whitespace and validate a patient ID per DICOM LO PatientID format.
+
+    Raises:
+        InvalidPatientIdentifierError: if the trimmed value is empty
+            or violates the DICOM character/length constraints.
+    """
+    if not isinstance(raw, str):
+        raise InvalidPatientIdentifierError(str(raw), "must be a string")
+    cleaned = raw.strip()
+    if not cleaned:
+        raise InvalidPatientIdentifierError(raw, "empty after trimming whitespace")
+    if not PATIENT_ID_PATTERN.match(cleaned):
+        raise InvalidPatientIdentifierError(
+            raw,
+            "must match DICOM LO PatientID format (A-Z a-z 0-9 . _ - ^, max 64 chars)",
+        )
+    return cleaned
 
 
 class PatientBase(BaseModel):

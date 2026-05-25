@@ -167,6 +167,18 @@ class PatientNotFoundError(EntityNotFoundError):
         super().__init__(f"Patient with ID '{patient_id}' not found")
 
 
+class InvalidPatientIdentifierError(ValidationError):
+    """Raised when patient_id does not conform to DICOM PatientID format.
+
+    Pattern: DICOM tag (0010,0020), VR=LO, max 64 chars.
+    """
+
+    def __init__(self, patient_id: str, reason: str) -> None:
+        self.patient_id = patient_id
+        self.reason = reason
+        super().__init__(f"Invalid patient ID '{patient_id}': {reason}")
+
+
 class PatientAlreadyExistsError(EntityAlreadyExistsError):
     """Raised when trying to create a patient that already exists."""
 

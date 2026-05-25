@@ -13,6 +13,7 @@ from clarinet.exceptions.domain import (
     StudyAlreadyExistsError,
 )
 from clarinet.models import Patient, Series, Study
+from clarinet.models.patient import normalize_patient_id
 from clarinet.models.study import SeriesFind
 from clarinet.repositories.patient_repository import PatientRepository
 from clarinet.repositories.series_repository import SeriesRepository
@@ -87,8 +88,10 @@ class StudyService:
             Patient object with studies loaded
 
         Raises:
+            InvalidPatientIdentifierError: If the ID violates DICOM format.
             NOT_FOUND: If patient doesn't exist
         """
+        patient_id = normalize_patient_id(patient_id)
         return await self.patient_repo.get_with_studies(patient_id)
 
     async def create_patient(self, patient_data: dict[str, Any]) -> Patient:
@@ -101,8 +104,10 @@ class StudyService:
             Created patient
 
         Raises:
+            InvalidPatientIdentifierError: If the ID violates DICOM format.
             CONFLICT: If patient already exists
         """
+        patient_data["id"] = normalize_patient_id(patient_data["id"])
         # Load existing patient (if any) to surface its name in the conflict
         # error metadata — frontend renders it in the localized message.
         existing = await self.patient_repo.find_by_id(patient_data["id"])
