@@ -709,6 +709,72 @@ async def test_include_working_folder_series_record_in_bottom_up_pass(
 
 
 @pytest.mark.asyncio
+async def test_include_working_folder_series_record_handles_no_anon_uid(
+    test_session: AsyncSession, tmp_path: Path
+) -> None:
+    """SERIES Record pass moves files for Series without ``anon_uid``.
+
+    The base ``_migrate_all_series`` filters by ``anon_uid IS NOT NULL``,
+    so a Record-SERIES bound to a non-anonymized Series would be orphaned
+    without the third pass. Uses raw-UID templates so the renderer
+    succeeds without an anon_uid placeholder.
+    """
+    old_tmpl = "{patient_id}/{study_uid}/{series_uid}"
+    new_tmpl = "{patient_auto_id}/{study_uid}/{series_uid}"
+
+    patient = make_patient("MIG_NOANON_01", "No Anon", auto_id=410)
+    test_session.add(patient)
+    await test_session.commit()
+    study = Study(
+        patient_id=patient.id,
+        study_uid="1.2.6410.1",
+        date=datetime.now(UTC).date(),
+        modalities_in_study="CT",
+        anon_uid=None,
+    )
+    test_session.add(study)
+    await test_session.commit()
+    series = Series(
+        study_uid=study.study_uid,
+        series_uid="1.2.6410.1.1",
+        series_number=1,
+        modality="CT",
+        anon_uid=None,
+    )
+    test_session.add(series)
+    await test_session.commit()
+
+    await _seed_record_at_level(
+        test_session,
+        rt_name="rt-series-410",
+        level=DicomQueryLevel.SERIES,
+        patient_id=patient.id,
+        study_uid=study.study_uid,
+        series_uid=series.series_uid,
+    )
+
+    ctx_old = build_context(patient=patient, study=study, series=series, template=old_tmpl)
+    old_series_dir = render_working_folder(old_tmpl, DicomQueryLevel.SERIES, ctx_old, tmp_path)
+    old_series_dir.mkdir(parents=True, exist_ok=True)
+    (old_series_dir / "annotation.json").write_bytes(b"{}")
+
+    args = argparse.Namespace(
+        from_template=old_tmpl,
+        to_template=new_tmpl,
+        dry_run=False,
+        cleanup_empty=False,
+        include_working_folder=True,
+        verbose=False,
+    )
+    await _run_migrate(args, test_session, tmp_path)
+
+    ctx_new = build_context(patient=patient, study=study, series=series, template=new_tmpl)
+    new_series_dir = render_working_folder(new_tmpl, DicomQueryLevel.SERIES, ctx_new, tmp_path)
+    assert (new_series_dir / "annotation.json").exists()
+    assert not old_series_dir.exists()
+
+
+@pytest.mark.asyncio
 async def test_include_working_folder_series_collision_skips(
     test_session: AsyncSession, tmp_path: Path
 ) -> None:
