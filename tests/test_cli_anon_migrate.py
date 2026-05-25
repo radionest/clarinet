@@ -103,12 +103,92 @@ async def test_migrate_paths_dry_run_moves_nothing(
         to_template=new_template,
         dry_run=True,
         cleanup_empty=False,
+        verbose=False,
     )
 
     await _run_migrate(args, test_session, tmp_path)
 
     assert old_dcm_anon.is_dir()
     assert (old_dcm_anon / "foo.dcm").exists()
+
+
+@pytest.mark.asyncio
+async def test_migrate_paths_verbose_emits_debug_path_details(
+    test_session: AsyncSession, tmp_path: Path
+) -> None:
+    """`--verbose` triggers DEBUG logs naming rendered (old, new) pairs.
+
+    Mocks ``enable_verbose_console`` to keep our capture sink alive
+    (``setup_logging`` calls ``_logger.remove()``). The real helper is
+    exercised separately by
+    ``test_enable_verbose_console_lowers_console_level``.
+    """
+    from clarinet.utils.logger import logger
+
+    old_template = "{anon_patient_id}/{anon_study_uid}/{anon_series_uid}"
+    new_template = "{patient_auto_id}/{study_modalities}_{study_date}/{anon_series_uid}"
+
+    patient, study, series = await _seed_anonymized_series(
+        test_session,
+        patient_id="MIG_VRB_01",
+        auto_id=151,
+        study_uid="1.2.6051.1",
+        series_uid="1.2.6051.1.1",
+        anon_study_uid="2.25.651",
+        anon_series_uid="2.25.651.1",
+    )
+    _populate_old_path(tmp_path, patient, study, series, old_template)
+
+    records: list[dict] = []
+    sink_id = logger.add(lambda msg: records.append(msg.record), level="DEBUG")
+    try:
+        # Patch the name as imported into anon.py (anon.py:48 binds the
+        # symbol at import time; patching the source module is ineffective).
+        with patch("clarinet.cli.anon.enable_verbose_console") as mock_enable:
+            args = argparse.Namespace(
+                from_template=old_template,
+                to_template=new_template,
+                dry_run=True,
+                cleanup_empty=False,
+                verbose=True,
+            )
+            await _run_migrate(args, test_session, tmp_path)
+            mock_enable.assert_called_once()
+    finally:
+        logger.remove(sink_id)
+
+    debug_msgs = [r["message"] for r in records if r["level"].name == "DEBUG"]
+    assert any("rendered old=" in m and " new=" in m for m in debug_msgs), debug_msgs
+    assert any(f"Series {series.series_uid}: checking" in m for m in debug_msgs), debug_msgs
+
+
+def test_enable_verbose_console_lowers_console_level() -> None:
+    """Real ``enable_verbose_console`` re-installs the stderr sink at DEBUG.
+
+    Walks the (internal) loguru handler table after reconfiguration and
+    asserts at least one handler has ``levelno <= 10`` (DEBUG=10). The
+    canonical module-init state is restored via the same
+    single-source-of-truth kwargs the module init uses — protecting
+    other tests in the session from sink leakage.
+    """
+    from loguru import logger as _loguru
+
+    from clarinet.utils.logger import (
+        _settings_setup_kwargs,
+        enable_verbose_console,
+        setup_logging,
+    )
+
+    try:
+        enable_verbose_console()
+        handlers = _loguru._core.handlers  # type: ignore[attr-defined]
+        levels = [h.levelno for h in handlers.values()]
+        assert any(lvl <= 10 for lvl in levels), (
+            f"expected at least one DEBUG (<=10) sink, got {levels}"
+        )
+    finally:
+        # Restore canonical module-init state regardless of test outcome.
+        setup_logging(**_settings_setup_kwargs("api"))
 
 
 @pytest.mark.asyncio
@@ -135,6 +215,7 @@ async def test_migrate_paths_moves_files(test_session: AsyncSession, tmp_path: P
         to_template=new_template,
         dry_run=False,
         cleanup_empty=False,
+        verbose=False,
     )
 
     await _run_migrate(args, test_session, tmp_path)
@@ -160,6 +241,7 @@ async def test_migrate_paths_identical_template_is_noop(
         to_template=template,
         dry_run=False,
         cleanup_empty=False,
+        verbose=False,
     )
     # Should not raise even with no DB / files setup beyond what's already there.
     await _run_migrate(args, test_session, tmp_path)
@@ -174,6 +256,7 @@ async def test_migrate_paths_rejects_invalid_template(
         to_template="{patient_auto_id}/{not_a_field}/{anon_series_uid}",
         dry_run=False,
         cleanup_empty=False,
+        verbose=False,
     )
     with pytest.raises(ValueError, match="unknown placeholder"):
         await _run_migrate(args, test_session, tmp_path)
@@ -208,6 +291,7 @@ async def test_migrate_paths_cleanup_empty_leaves_unrelated_dirs(
         to_template=new_template,
         dry_run=False,
         cleanup_empty=True,
+        verbose=False,
     )
     await _run_migrate(args, test_session, tmp_path)
 
@@ -338,6 +422,7 @@ async def test_include_working_folder_moves_full_series_dir(
         dry_run=False,
         cleanup_empty=False,
         include_working_folder=True,
+        verbose=False,
     )
     await _run_migrate(args, test_session, tmp_path)
 
@@ -375,6 +460,7 @@ async def test_include_working_folder_dry_run_does_not_move(
         dry_run=True,
         cleanup_empty=False,
         include_working_folder=True,
+        verbose=False,
     )
     await _run_migrate(args, test_session, tmp_path)
 
@@ -424,6 +510,7 @@ async def test_include_working_folder_study_record_moves_study_files(
         dry_run=False,
         cleanup_empty=False,
         include_working_folder=True,
+        verbose=False,
     )
     await _run_migrate(args, test_session, tmp_path)
 
@@ -489,6 +576,7 @@ async def test_include_working_folder_study_per_file_collision_skips(
         dry_run=False,
         cleanup_empty=False,
         include_working_folder=True,
+        verbose=False,
     )
     await _run_migrate(args, test_session, tmp_path)
 
@@ -541,6 +629,7 @@ async def test_include_working_folder_patient_record_moves_patient_files(
         dry_run=False,
         cleanup_empty=False,
         include_working_folder=True,
+        verbose=False,
     )
     await _run_migrate(args, test_session, tmp_path)
 
@@ -581,6 +670,7 @@ async def test_include_working_folder_series_collision_skips(
         dry_run=False,
         cleanup_empty=False,
         include_working_folder=True,
+        verbose=False,
     )
     await _run_migrate(args, test_session, tmp_path)
 
@@ -623,6 +713,7 @@ async def test_dcm_anon_default_mode_collision_skips(
         to_template=new_tmpl,
         dry_run=False,
         cleanup_empty=False,
+        verbose=False,
     )
     await _run_migrate(args, test_session, tmp_path)
 
@@ -682,6 +773,7 @@ async def test_include_working_folder_cleanup_prunes_empty_parents(
         dry_run=False,
         cleanup_empty=True,
         include_working_folder=True,
+        verbose=False,
     )
     await _run_migrate(args, test_session, tmp_path)
 

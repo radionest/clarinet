@@ -1300,6 +1300,16 @@ def main() -> None:
             "Record working_folders, not just dcm_anon. Three passes: SERIES, STUDY, PATIENT."
         ),
     )
+    anon_migrate.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help=(
+            "Show DEBUG-level details on stderr: every rendered (old, new) path, "
+            "each Series/Record being checked, and 'source missing' reasons. "
+            "May produce many lines on large datasets — pair with --dry-run for a preview."
+        ),
+    )
 
     # deploy command
     deploy_parser = subparsers.add_parser("deploy", help="Generate deployment configurations")

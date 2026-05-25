@@ -45,7 +45,7 @@ from clarinet.services.common.storage_paths import (
 )
 from clarinet.settings import settings
 from clarinet.utils.db_manager import db_manager
-from clarinet.utils.logger import logger
+from clarinet.utils.logger import enable_verbose_console, logger
 
 MoveOutcome = Literal["moved", "same", "missing", "collision", "failed"]
 
@@ -224,6 +224,7 @@ def _render_old_new_dirs(
         logger.error(f"{label}: template render failed ({exc}); skipping.")
         counters["failed"] += 1
         return None
+    logger.debug(f"{label}: rendered old={old_dir} new={new_dir}")
     return old_dir, new_dir
 
 
@@ -262,6 +263,7 @@ async def _migrate_all_series(
     )
     result = await session.stream_scalars(stmt)
     async for series in result:
+        logger.debug(f"Series {series.series_uid}: checking (anon_uid={series.anon_uid})")
         study = series.study
         patient = study.patient if study else None
         if study is None or patient is None:
@@ -327,6 +329,7 @@ async def _migrate_records_by_level(
     )
     result = await session.stream_scalars(stmt)
     async for record in result:
+        logger.debug(f"Record {record.id} ({level.value}): checking")
         patient = record.patient
         study = record.study if level is DicomQueryLevel.STUDY else None
         if patient is None or (level is DicomQueryLevel.STUDY and study is None):
@@ -378,6 +381,9 @@ async def migrate_paths(args: argparse.Namespace) -> None:
 
     Run with ``--dry-run`` first to inspect the plan.
     """
+    if args.verbose:
+        enable_verbose_console()
+
     from_template = validate_template(args.from_template)
     to_template = validate_template(args.to_template)
 
