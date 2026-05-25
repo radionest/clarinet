@@ -6,13 +6,19 @@
 Default mode moves only ``series_dir/dcm_anon/`` for each anonymized Series.
 
 With ``--include-working-folder`` it migrates the entire working_folder
-tree in bottom-up order (SERIES → STUDY → PATIENT):
+tree in bottom-up order:
 
-* SERIES pass: move full ``series_dir`` (pipeline outputs + dcm_anon).
-* STUDY pass: for each STUDY-level Record, merge remaining children of
-  ``old_study_dir`` into ``new_study_dir`` (which already contains
-  series_dirs from the SERIES pass).
-* PATIENT pass: same, for PATIENT-level Records.
+* base Series pass: move full ``series_dir`` (pipeline outputs + dcm_anon)
+  for every ``Series WHERE anon_uid IS NOT NULL``.
+* SERIES Record pass: iterate ``Record`` with ``RecordType.level == SERIES``.
+  In typical anon-template runs every series_dir was just moved upstream,
+  so this pass silently skips the already-migrated dirs (visible in
+  ``-v`` logs). It handles edge cases such as Series without ``anon_uid``
+  (skipped by the base pass) or raw-UID templates.
+* STUDY Record pass: for each STUDY-level Record, merge remaining children
+  of ``old_study_dir`` into ``new_study_dir`` (which already contains
+  series_dirs from the base Series pass).
+* PATIENT Record pass: same, for PATIENT-level Records.
 
 The DB is not touched — paths derive from Study/Patient/Series + RecordType.level.
 
@@ -311,15 +317,18 @@ async def _migrate_records_by_level(
     counters: dict[str, int],
     cleanup_candidates: set[Path],
 ) -> None:
-    """Move working_folder for each Record at the given STUDY or PATIENT level.
+    """Move working_folder for each Record at the given level.
 
-    Uses merge semantics: the new parent dir typically exists from the
-    earlier SERIES pass, so loose study-/patient-level files are merged
-    in alongside the already-moved series_dirs.
+    Supports SERIES, STUDY and PATIENT levels. Uses merge semantics:
+    the new parent dir typically exists from the earlier SERIES pass on
+    the base ``Series`` table, so loose record working_folders are
+    merged in alongside the already-moved series_dirs.
     """
     options = [selectinload(Record.patient)]  # type: ignore[arg-type]
-    if level is DicomQueryLevel.STUDY:
+    if level in (DicomQueryLevel.STUDY, DicomQueryLevel.SERIES):
         options.append(selectinload(Record.study))  # type: ignore[arg-type]
+    if level is DicomQueryLevel.SERIES:
+        options.append(selectinload(Record.series))  # type: ignore[arg-type]
     stmt = (
         select(Record)
         .join(RecordType, Record.record_type_name == RecordType.name)  # type: ignore[arg-type]
@@ -331,8 +340,13 @@ async def _migrate_records_by_level(
     async for record in result:
         logger.debug(f"Record {record.id} ({level.value}): checking")
         patient = record.patient
-        study = record.study if level is DicomQueryLevel.STUDY else None
-        if patient is None or (level is DicomQueryLevel.STUDY and study is None):
+        study = record.study if level in (DicomQueryLevel.STUDY, DicomQueryLevel.SERIES) else None
+        series = record.series if level is DicomQueryLevel.SERIES else None
+        if (
+            patient is None
+            or (level in (DicomQueryLevel.STUDY, DicomQueryLevel.SERIES) and study is None)
+            or (level is DicomQueryLevel.SERIES and series is None)
+        ):
             logger.warning(
                 f"Record {record.id} ({level.value}) missing eager-loaded relations; skipping."
             )
@@ -343,7 +357,7 @@ async def _migrate_records_by_level(
             level,
             patient=patient,
             study=study,
-            series=None,
+            series=series,
             from_template=from_template,
             to_template=to_template,
             storage_path=storage_path,
@@ -353,6 +367,15 @@ async def _migrate_records_by_level(
         if paths is None:
             continue
         old_dir, new_dir = paths
+        # SERIES-Record pass: the base Series pass normally moved this
+        # whole dir already. Silently skip without inflating ``missing``
+        # — that counter is reserved for genuine ``old_dir`` absences
+        # (e.g. STUDY/PATIENT loose files that never existed).
+        if level is DicomQueryLevel.SERIES and not old_dir.is_dir():
+            logger.debug(
+                f"{label}: series_dir absent (likely moved by base Series pass); skipping."
+            )
+            continue
         outcome = await asyncio.to_thread(
             _merge_dir,
             old_dir,
@@ -416,7 +439,7 @@ async def migrate_paths(args: argparse.Namespace) -> None:
             full_dir=include_wf,
         )
         if include_wf:
-            for level in (DicomQueryLevel.STUDY, DicomQueryLevel.PATIENT):
+            for level in (DicomQueryLevel.SERIES, DicomQueryLevel.STUDY, DicomQueryLevel.PATIENT):
                 await _migrate_records_by_level(
                     session,
                     args,
