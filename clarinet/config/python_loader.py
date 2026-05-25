@@ -195,6 +195,36 @@ async def _resolve_data_schema(rt_def: RecordDef, folder: Path) -> dict[str, Any
     return None
 
 
+async def _resolve_ui_schema(rt_def: RecordDef, folder: Path) -> dict[str, Any] | None:
+    """Resolve ui_schema from a RecordDef (optional — None when absent).
+
+    Resolution order mirrors ``_resolve_data_schema``:
+    1. dict — use as-is.
+    2. str ending with ``.json`` — read file relative to folder.
+    3. None — try sidecar ``{name}.ui_schema.json``.
+    """
+    schema = rt_def.ui_schema
+
+    if isinstance(schema, dict):
+        return schema
+
+    if isinstance(schema, str) and schema.endswith(".json"):
+        schema_path = folder / schema
+        async with aiofiles.open(schema_path) as f:
+            content = await f.read()
+        parsed: dict[str, Any] = json.loads(content)
+        return parsed
+
+    sidecar = folder / f"{rt_def.name}.ui_schema.json"
+    if sidecar.is_file():
+        async with aiofiles.open(sidecar) as f:
+            content = await f.read()
+        sidecar_parsed: dict[str, Any] = json.loads(content)
+        return sidecar_parsed
+
+    return None
+
+
 async def _resolve_script_field(value: str | None, folder: Path) -> str | None:
     """Resolve a .py file reference to inline content.
 
@@ -230,8 +260,9 @@ async def _to_record_type_create(
     Returns:
         Typed RecordTypeCreate ready for reconciliation.
     """
-    # Resolve data_schema
+    # Resolve data_schema and ui_schema
     data_schema = await _resolve_data_schema(rt_def, folder)
+    ui_schema = await _resolve_ui_schema(rt_def, folder)
 
     # Resolve script fields
     slicer_script = await _resolve_script_field(rt_def.slicer_script, folder)
@@ -277,6 +308,8 @@ async def _to_record_type_create(
         kwargs["viewer_mode"] = rt_def.viewer_mode
     if data_schema is not None:
         kwargs["data_schema"] = data_schema
+    if ui_schema is not None:
+        kwargs["ui_schema"] = ui_schema
     if file_registry is not None:
         kwargs["file_registry"] = file_registry
 

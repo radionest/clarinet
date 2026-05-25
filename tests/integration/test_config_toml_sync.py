@@ -158,11 +158,43 @@ async def test_delete_removes_files(tmp_path) -> None:
     # Create files
     (tmp_path / "del_target.toml").write_text("name = 'del_target'")
     (tmp_path / "del_target.schema.json").write_text("{}")
+    (tmp_path / "del_target.ui_schema.json").write_text("{}")
 
     deleted = await delete_record_type_files("del_target", tmp_path)
-    assert len(deleted) == 2
+    assert len(deleted) == 3
     assert not (tmp_path / "del_target.toml").exists()
     assert not (tmp_path / "del_target.schema.json").exists()
+    assert not (tmp_path / "del_target.ui_schema.json").exists()
+
+
+@pytest.mark.asyncio
+async def test_export_ui_schema_sidecar(tmp_path) -> None:
+    """ui_schema → {name}.ui_schema.json written."""
+    from clarinet.config.toml_exporter import export_ui_schema_sidecar
+
+    rt = RecordType(
+        name="ui-test",
+        description="UI export",
+        level="SERIES",
+        ui_schema={"ui:order": ["x"], "x": {"ui:widget": "textarea"}},
+    )
+
+    path = await export_ui_schema_sidecar(rt, tmp_path)
+    assert path is not None
+    assert path.name == "ui-test.ui_schema.json"
+
+    content = json.loads(path.read_text())
+    assert content == {"ui:order": ["x"], "x": {"ui:widget": "textarea"}}
+
+
+@pytest.mark.asyncio
+async def test_export_ui_schema_sidecar_skips_empty(tmp_path) -> None:
+    """ui_schema empty/None → no sidecar file written."""
+    from clarinet.config.toml_exporter import export_ui_schema_sidecar
+
+    rt = RecordType(name="empty-ui", level="SERIES", ui_schema={})
+    assert await export_ui_schema_sidecar(rt, tmp_path) is None
+    assert not (tmp_path / "empty-ui.ui_schema.json").exists()
 
 
 @pytest.mark.asyncio

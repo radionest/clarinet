@@ -168,6 +168,93 @@ class TestUpdateRecordType:
         assert data["slicer_script_args"] == {"arg1": "val1"}
 
 
+class TestUiSchemaField:
+    """Tests for the ui_schema field on RecordType (formosh presentation hints)."""
+
+    @pytest.mark.asyncio
+    async def test_get_returns_ui_schema_when_set(
+        self, client: AsyncClient, auth_headers, test_session
+    ):
+        """GET /types/{name} should include ui_schema in the response."""
+        rt = RecordType(
+            name="rt-ui-get",
+            data_schema={"type": "object"},
+            ui_schema={"ui:order": ["a", "b"]},
+        )
+        test_session.add(rt)
+        await test_session.commit()
+
+        response = await client.get(f"{BASE}/types/{rt.name}", headers=auth_headers)
+        assert response.status_code == 200
+        assert response.json()["ui_schema"] == {"ui:order": ["a", "b"]}
+
+    @pytest.mark.asyncio
+    async def test_patch_with_dict_ui_schema(
+        self, client: AsyncClient, auth_headers, sample_record_type
+    ):
+        """PATCH should accept ui_schema as a dict."""
+        ui = {"ui:order": ["field1"], "field1": {"ui:widget": "textarea"}}
+        response = await client.patch(
+            f"{BASE}/types/{sample_record_type.name}",
+            json={"ui_schema": ui},
+            headers=auth_headers,
+        )
+        assert response.status_code == 200
+        assert response.json()["ui_schema"] == ui
+
+    @pytest.mark.asyncio
+    async def test_patch_with_json_string_ui_schema(
+        self, client: AsyncClient, auth_headers, sample_record_type
+    ):
+        """PATCH should accept ui_schema as a JSON string (formosh textarea submission)."""
+        response = await client.patch(
+            f"{BASE}/types/{sample_record_type.name}",
+            json={"ui_schema": '{"ui:order": ["x"]}'},
+            headers=auth_headers,
+        )
+        assert response.status_code == 200
+        assert response.json()["ui_schema"] == {"ui:order": ["x"]}
+
+    @pytest.mark.asyncio
+    async def test_patch_invalid_ui_schema_json_string(
+        self, client: AsyncClient, auth_headers, sample_record_type
+    ):
+        """PATCH should reject malformed JSON in ui_schema with 422."""
+        response = await client.patch(
+            f"{BASE}/types/{sample_record_type.name}",
+            json={"ui_schema": "not valid json"},
+            headers=auth_headers,
+        )
+        assert response.status_code == 422
+
+    @pytest.mark.asyncio
+    async def test_patch_null_ui_schema_is_silently_dropped(
+        self, client: AsyncClient, auth_headers, test_session
+    ):
+        """PATCH with ``ui_schema: null`` does NOT clear the column.
+
+        Pre-existing service behavior (``model_dump(exclude_unset=True,
+        exclude_none=True)``) mirrors ``data_schema``: explicit ``null`` is
+        treated as "not set". To reset, send an empty dict ``{}`` instead.
+        """
+        rt = RecordType(
+            name="rt-ui-null",
+            data_schema={"type": "object"},
+            ui_schema={"ui:order": ["a"]},
+        )
+        test_session.add(rt)
+        await test_session.commit()
+
+        response = await client.patch(
+            f"{BASE}/types/{rt.name}",
+            json={"ui_schema": None},
+            headers=auth_headers,
+        )
+        assert response.status_code == 200
+        # ui_schema remains the original value — null was silently ignored.
+        assert response.json()["ui_schema"] == {"ui:order": ["a"]}
+
+
 class TestDeleteRecordType:
     """Tests for DELETE /types/{record_type_id}."""
 

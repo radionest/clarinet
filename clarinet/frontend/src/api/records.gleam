@@ -84,6 +84,11 @@ fn record_type_base_decoder() -> decode.Decoder(RecordType) {
     None,
     decode.optional(decode.dynamic),
   )
+  use ui_schema_dyn <- decode.optional_field(
+    "ui_schema",
+    None,
+    decode.optional(decode.dynamic),
+  )
   use slicer_script <- decode.optional_field(
     "slicer_script",
     None,
@@ -128,6 +133,11 @@ fn record_type_base_decoder() -> decode.Decoder(RecordType) {
     None -> None
   }
 
+  let ui_schema = case ui_schema_dyn {
+    Some(dyn) -> Some(json_utils.dynamic_to_string(dyn))
+    None -> None
+  }
+
   decode.success(models.RecordType(
     name: name,
     description: description,
@@ -137,6 +147,7 @@ fn record_type_base_decoder() -> decode.Decoder(RecordType) {
     slicer_result_validator: slicer_result_validator,
     slicer_result_validator_args: None,
     data_schema: data_schema,
+    ui_schema: ui_schema,
     role_name: role_name,
     max_records: None,
     min_records: None,
@@ -487,6 +498,11 @@ pub fn record_type_full_decoder() -> decode.Decoder(RecordType) {
     None,
     decode.optional(decode.dynamic),
   )
+  use ui_schema_dyn <- decode.optional_field(
+    "ui_schema",
+    None,
+    decode.optional(decode.dynamic),
+  )
   use role_name <- decode.optional_field(
     "role_name",
     None,
@@ -535,6 +551,11 @@ pub fn record_type_full_decoder() -> decode.Decoder(RecordType) {
     None -> None
   }
 
+  let ui_schema = case ui_schema_dyn {
+    Some(dyn) -> Some(json_utils.dynamic_to_string(dyn))
+    None -> None
+  }
+
   decode.success(models.RecordType(
     name: name,
     description: description,
@@ -544,6 +565,7 @@ pub fn record_type_full_decoder() -> decode.Decoder(RecordType) {
     slicer_result_validator: slicer_result_validator,
     slicer_result_validator_args: slicer_result_validator_args,
     data_schema: data_schema,
+    ui_schema: ui_schema,
     role_name: role_name,
     max_records: max_records,
     min_records: min_records,

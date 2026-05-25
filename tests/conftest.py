@@ -26,6 +26,26 @@ from clarinet.utils.logger import logger
 
 
 @pytest.fixture
+def caplog(caplog):
+    """Bridge loguru → pytest's ``caplog`` so ``caplog.records`` sees app logs.
+
+    The project's ``clarinet.utils.logger`` is a loguru instance; stdlib
+    ``logging`` calls go through an ``InterceptHandler``, but loguru's own
+    ``logger.warning(...)`` doesn't flow back into pytest's caplog without
+    this bridge. Pattern from loguru's caplog migration docs.
+    """
+    handler_id = logger.add(
+        caplog.handler,
+        format="{message}",
+        level=0,
+        filter=lambda record: record["level"].no >= caplog.handler.level,
+        enqueue=False,
+    )
+    yield caplog
+    logger.remove(handler_id)
+
+
+@pytest.fixture
 def isolated_validator_registry():
     """Snapshot and restore ``_VALIDATOR_REGISTRY`` around a test.
 

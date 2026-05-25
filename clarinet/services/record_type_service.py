@@ -62,7 +62,10 @@ class RecordTypeService:
             Created RecordType with file links eagerly loaded.
 
         Raises:
-            ValidationError: If data_schema is invalid JSON Schema.
+            ValidationError: If data_schema is invalid JSON Schema. ``ui_schema``
+                is a formosh presentation hint and is NOT JSON-Schema-validated
+                here — only ``validate_json_safe`` runs on it via the Pydantic
+                field validator.
             RecordTypeAlreadyExistsError: If name already taken.
             RecordTypeNotFoundError: If parent type doesn't exist.
         """
@@ -101,8 +104,14 @@ class RecordTypeService:
             Updated RecordType with file links eagerly loaded.
 
         Raises:
-            ValidationError: If data_schema is invalid JSON Schema.
+            ValidationError: If data_schema is invalid JSON Schema. ``ui_schema``
+                is a formosh presentation hint and is NOT JSON-Schema-validated.
             RecordTypeNotFoundError: If record type or parent doesn't exist.
+
+        Note:
+            ``update_data`` uses ``exclude_none=True``, so explicitly sending
+            ``{"ui_schema": null}`` (or ``data_schema: null``) is silently
+            ignored — the column is not cleared. Pass an empty dict to reset.
         """
         record_type = await self.repo.get(record_type_id)
 

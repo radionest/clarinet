@@ -183,6 +183,57 @@ async def test_schema_sidecar_loaded(
 
 
 @pytest.mark.asyncio
+async def test_ui_schema_inline_dict(
+    test_session: AsyncSession,
+    tmp_path,
+) -> None:
+    """RecordDef(ui_schema={...}) flows through to RecordTypeCreate."""
+    _write_record_types(
+        tmp_path,
+        """\
+        from clarinet.config.primitives import RecordDef
+
+        with_ui = RecordDef(
+            name="with-ui",
+            level="SERIES",
+            data_schema={"type": "object"},
+            ui_schema={"ui:order": ["a", "b"]},
+        )
+        """,
+    )
+
+    config_items = await load_python_config(tmp_path)
+    assert len(config_items) == 1
+    assert config_items[0].ui_schema == {"ui:order": ["a", "b"]}
+
+
+@pytest.mark.asyncio
+async def test_ui_schema_sidecar_loaded(
+    test_session: AsyncSession,
+    tmp_path,
+) -> None:
+    """{name}.ui_schema.json loaded in Python mode when ui_schema absent."""
+    _write_record_types(
+        tmp_path,
+        """\
+        from clarinet.config.primitives import RecordDef
+
+        sidecar_ui = RecordDef(
+            name="sidecar-ui",
+            level="SERIES",
+            data_schema={"type": "object"},
+        )
+        """,
+    )
+    ui = {"ui:order": ["x"], "x": {"ui:widget": "textarea"}}
+    (tmp_path / "sidecar-ui.ui_schema.json").write_text(json.dumps(ui))
+
+    config_items = await load_python_config(tmp_path)
+    assert len(config_items) == 1
+    assert config_items[0].ui_schema == ui
+
+
+@pytest.mark.asyncio
 async def test_reconcile_updates_on_change(
     test_session: AsyncSession,
     tmp_path,
