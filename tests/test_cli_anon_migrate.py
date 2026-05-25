@@ -112,6 +112,51 @@ async def test_migrate_paths_dry_run_moves_nothing(
 
 
 @pytest.mark.asyncio
+async def test_migrate_paths_verbose_emits_debug_path_details(
+    test_session: AsyncSession, tmp_path: Path
+) -> None:
+    """--verbose triggers DEBUG logs with rendered (old, new) pairs."""
+    from clarinet.utils.logger import logger
+
+    old_template = "{anon_patient_id}/{anon_study_uid}/{anon_series_uid}"
+    new_template = "{patient_auto_id}/{study_modalities}_{study_date}/{anon_series_uid}"
+
+    patient, study, series = await _seed_anonymized_series(
+        test_session,
+        patient_id="MIG_VRB_01",
+        auto_id=151,
+        study_uid="1.2.6051.1",
+        series_uid="1.2.6051.1.1",
+        anon_study_uid="2.25.651",
+        anon_series_uid="2.25.651.1",
+    )
+    _populate_old_path(tmp_path, patient, study, series, old_template)
+
+    records: list[dict] = []
+    sink_id = logger.add(lambda msg: records.append(msg.record), level="DEBUG")
+    try:
+        # Patch enable_verbose_console to a no-op so it does not nuke our sink
+        # via setup_logging()'s `_logger.remove()`. The flag → call wiring is
+        # verified separately by `mock_enable.assert_called_once()`.
+        with patch("clarinet.utils.logger.enable_verbose_console") as mock_enable:
+            args = argparse.Namespace(
+                from_template=old_template,
+                to_template=new_template,
+                dry_run=True,
+                cleanup_empty=False,
+                verbose=True,
+            )
+            await _run_migrate(args, test_session, tmp_path)
+            mock_enable.assert_called_once()
+    finally:
+        logger.remove(sink_id)
+
+    debug_msgs = [r["message"] for r in records if r["level"].name == "DEBUG"]
+    assert any("rendered old=" in m and " new=" in m for m in debug_msgs), debug_msgs
+    assert any(f"Series {series.series_uid}: checking" in m for m in debug_msgs), debug_msgs
+
+
+@pytest.mark.asyncio
 async def test_migrate_paths_moves_files(test_session: AsyncSession, tmp_path: Path) -> None:
     """Without --dry-run, dcm_anon directories are moved from old to new template."""
     old_template = "{anon_patient_id}/{anon_study_uid}/{anon_series_uid}"

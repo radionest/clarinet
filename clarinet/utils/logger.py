@@ -303,6 +303,30 @@ def setup_logging(
     logging.basicConfig(handlers=[InterceptHandler()], level=0, force=True)
 
 
+def enable_verbose_console() -> None:
+    """Re-run :func:`setup_logging` with ``console_level='DEBUG'``.
+
+    File and remote sinks keep their configured levels; only stderr is
+    lowered. Intended for one-shot CLI commands that want detailed output
+    on demand without flipping ``settings.log_console_level`` globally.
+    """
+    setup_logging(
+        level=settings.log_level,
+        console_level="DEBUG",
+        format=settings.log_format,
+        log_to_file=settings.log_to_file,
+        log_file=settings.get_log_dir() / "clarinet.log" if settings.log_to_file else None,
+        rotation=settings.log_rotation,
+        retention=settings.log_retention,
+        serialize=settings.log_serialize,
+        noisy_libraries=settings.log_noisy_libraries,
+        remote_url=settings.log_remote_url,
+        remote_auth=settings.log_remote_auth,
+        remote_level=settings.log_remote_level,
+        remote_labels={**settings.log_remote_labels, "component": "cli"},
+    )
+
+
 def reconfigure_for_worker(log_file: str | None = None) -> None:
     """Re-initialize logging for the pipeline worker.
 
