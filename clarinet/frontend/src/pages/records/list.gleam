@@ -60,7 +60,10 @@ pub fn init(
       router.Records,
     )
   let key = bucket_key_for(effective_filters, shared.user)
-  #(Model(active_filters: effective_filters), init_fx, [shared.FetchBucket(key)])
+  #(Model(active_filters: effective_filters), init_fx, [
+    shared.FetchBucket(key),
+    shared.ReloadFilterOptions,
+  ])
 }
 
 /// Bucket key for the records list. Non-admins see only their own records
@@ -200,11 +203,11 @@ pub fn view(model: Model, shared: Shared) -> Element(Msg) {
 
   html.div([attribute.class("container")], [
     html.h1([], [html.text(title)]),
-    html.div([], [filter_bar(model, shared, records), body]),
+    html.div([], [filter_bar(model, shared), body]),
   ])
 }
 
-fn filter_bar(model: Model, shared: Shared, all_records: List(Record)) -> Element(Msg) {
+fn filter_bar(model: Model, shared: Shared) -> Element(Msg) {
   let status_value =
     dict.get(model.active_filters, "status")
     |> option.from_result()
@@ -220,9 +223,15 @@ fn filter_bar(model: Model, shared: Shared, all_records: List(Record)) -> Elemen
     |> option.from_result()
     |> option.unwrap("")
 
+  let #(patient_values, type_values) = case shared.cache.filter_options {
+    Some(opts) -> #(opts.patients, opts.record_types)
+    None -> #([], [])
+  }
+
   let status_options = record_filters.status_options(shared.translate)
-  let type_options = record_filters.type_options(all_records, shared.translate)
-  let patient_options = record_filters.patient_options(all_records, shared.translate)
+  let type_options = record_filters.type_options(type_values, shared.translate)
+  let patient_options =
+    record_filters.patient_options(patient_values, shared.translate)
 
   let has_filters = record_filters.has_user_filters(model.active_filters)
 

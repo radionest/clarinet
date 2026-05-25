@@ -850,6 +850,7 @@ fn apply_out_msgs(
             |> cache.upsert_record_in_buckets(record)
           #(store.Model(..m, cache: new_cache), [
             dispatch_msg(store.CacheMsg(cache.InvalidateAllRecordBucketsMsg)),
+            dispatch_msg(store.CacheMsg(cache.InvalidateFilterOptions)),
             ..eff_list
           ])
         }
@@ -868,7 +869,11 @@ fn apply_out_msgs(
         shared.InvalidateBucket(key) ->
           #(m, [dispatch_msg(store.CacheMsg(cache.InvalidateBucketMsg(key))), ..eff_list])
         shared.InvalidateAllRecordBuckets ->
-          #(m, [dispatch_msg(store.CacheMsg(cache.InvalidateAllRecordBucketsMsg)), ..eff_list])
+          #(m, [
+            dispatch_msg(store.CacheMsg(cache.InvalidateAllRecordBucketsMsg)),
+            dispatch_msg(store.CacheMsg(cache.InvalidateFilterOptions)),
+            ..eff_list,
+          ])
         shared.ReloadStudies ->
           #(m, [dispatch_msg(store.CacheMsg(cache.LoadStudies)), ..eff_list])
         shared.ReloadUsers ->
@@ -879,6 +884,8 @@ fn apply_out_msgs(
           #(m, [dispatch_msg(store.CacheMsg(cache.LoadRecordTypes)), ..eff_list])
         shared.ReloadRecordTypeStats ->
           #(m, [dispatch_msg(store.CacheMsg(cache.LoadRecordTypeStats)), ..eff_list])
+        shared.ReloadFilterOptions ->
+          #(m, [dispatch_msg(store.CacheMsg(cache.LoadFilterOptions)), ..eff_list])
         shared.ReloadPatient(id) ->
           #(m, [dispatch_msg(store.CacheMsg(cache.LoadPatientDetail(id))), ..eff_list])
         shared.ReloadRecord(id) ->

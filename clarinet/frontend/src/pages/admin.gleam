@@ -105,6 +105,7 @@ pub fn init(
   #(model, effects, [
     shared.FetchBucket(bucket_key_for(effective_filters)),
     shared.ReloadUsers,
+    shared.ReloadFilterOptions,
   ])
 }
 
@@ -554,16 +555,12 @@ fn records_section(model: Model, shared: Shared) -> Element(Msg) {
         [html.text("Create Record")],
       ),
     ]),
-    filter_bar(model, shared, records),
+    filter_bar(model, shared),
     body,
   ])
 }
 
-fn filter_bar(
-  model: Model,
-  shared: Shared,
-  all_records: List(models.Record),
-) -> Element(Msg) {
+fn filter_bar(model: Model, shared: Shared) -> Element(Msg) {
   let status_value =
     dict.get(model.active_filters, "status")
     |> option.from_result()
@@ -584,12 +581,22 @@ fn filter_bar(
     |> option.from_result()
     |> option.unwrap("")
 
+  let #(patient_values, type_values, user_values) =
+    case shared.cache.filter_options {
+      Some(opts) -> #(opts.patients, opts.record_types, opts.users)
+      None -> #([], [], [])
+    }
+
   let status_options = record_filters.status_options(shared.translate)
-  let type_options = record_filters.type_options(all_records, shared.translate)
+  let type_options = record_filters.type_options(type_values, shared.translate)
   let patient_options =
-    record_filters.patient_options(all_records, shared.translate)
+    record_filters.patient_options(patient_values, shared.translate)
   let user_options =
-    record_filters.user_options(all_records, shared.cache.users, shared.translate)
+    record_filters.user_options(
+      user_values,
+      shared.cache.users,
+      shared.translate,
+    )
 
   let has_user_filters = record_filters.has_user_filters(model.active_filters)
 

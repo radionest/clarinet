@@ -59,6 +59,7 @@ pub type OutMsg {
   ReloadPatients
   ReloadRecordTypes
   ReloadRecordTypeStats
+  ReloadFilterOptions
   ReloadPatient(String)
   ReloadRecord(String)
   ReloadSeries(series_uid: String)

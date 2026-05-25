@@ -52,6 +52,7 @@ URL constants live in `tests/utils/urls.py`. Status codes: 201 = POST create, 20
 | `/api/records/find` | POST | 200 | Search records (cursor pagination, returns RecordPage) |
 | `/api/records/find/random` | POST | 200 | Find random record matching filters (RecordRead or null) |
 | `/api/records/available_types` | GET | 200 | Available record types for user |
+| `/api/records/filter-options` | POST | 200 | Distinct patient/record_type/user values for filter dropdowns (RBAC-scoped; body filters ignored) |
 | `/api/records/bulk/status` | PATCH | 204 | Bulk status update |
 | `/api/records/{id}` | GET | 200 | Get record |
 | `/api/records/{id}/schema` | GET | 200 | Hydrated JSON Schema (x-options → oneOf) |

@@ -58,6 +58,7 @@ from clarinet.models import (
     Record,
     RecordContextInfoUpdate,
     RecordCreate,
+    RecordFilterOptions,
     RecordOptional,
     RecordPage,
     RecordRead,
@@ -899,12 +900,64 @@ def _build_record_search_criteria(
     excludes = {"data_queries"}
     if extra_excludes:
         excludes |= extra_excludes
+    # ``data_queries`` is stripped from ``model_dump`` (it does not round-trip
+    # cleanly), then reattached from the source query — unless the caller
+    # explicitly asked to drop it via ``extra_excludes``.
+    data_queries = [] if extra_excludes and "data_queries" in extra_excludes else query.data_queries
     return RecordSearchCriteria(
         **query.model_dump(exclude=excludes),
-        data_queries=query.data_queries,
+        data_queries=data_queries,
         role_names=role_names,
         include_unassigned=is_regular_user,
         exclude_unique_violations=is_regular_user,
+    )
+
+
+# Distinct-value endpoint must ignore user-driven UI filters from the body
+# and return the user's full RBAC scope — same options regardless of
+# whether the UI has already applied a patient/type/user filter.
+_FILTER_OPTIONS_EXCLUDES = {
+    "patient_id",
+    "patient_anon_id",
+    "series_uid",
+    "anon_series_uid",
+    "study_uid",
+    "anon_study_uid",
+    "user_id",
+    "record_type_name",
+    "record_status",
+    "parent_record_id",
+    "wo_user",
+    "data_queries",
+}
+_UNASSIGNED_SENTINEL = "__unassigned__"
+
+
+@router.post("/filter-options", response_model=RecordFilterOptions)
+async def get_record_filter_options(
+    repo: RecordRepositoryDep,
+    user: CurrentUserDep,
+    query: RecordSearchFilter,
+) -> RecordFilterOptions:
+    """Distinct patient/record_type/user values within the caller's scope.
+
+    RBAC scope (role_names, unique_per_user) is applied; user-driven UI
+    filters in the body are IGNORED so the dropdowns always reflect the
+    user's full accessible scope. For non-superusers, anonymized
+    patient_ids are masked to their ``anon_id`` (see
+    ``RecordRepository._mask_patient_ids``). The ``users`` list is
+    prefixed with ``"__unassigned__"`` when scope contains any unassigned
+    record.
+    """
+    criteria = _build_record_search_criteria(query, user, extra_excludes=_FILTER_OPTIONS_EXCLUDES)
+    scope = await repo.get_filter_options(criteria, user)
+    users = list(scope.users)
+    if scope.has_unassigned:
+        users.insert(0, _UNASSIGNED_SENTINEL)
+    return RecordFilterOptions(
+        patients=scope.patients,
+        record_types=scope.record_types,
+        users=users,
     )
 
 

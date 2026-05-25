@@ -35,6 +35,7 @@ from clarinet.models.record import RecordFindResult, RecordFindResultComparisonO
 from clarinet.models.study import Series, Study
 from clarinet.models.user import User, UserRolesLink
 from clarinet.repositories.base import BaseRepository
+from clarinet.settings import settings
 from clarinet.types import RecordData
 from clarinet.utils.logger import logger
 from clarinet.utils.pagination import (
@@ -76,6 +77,22 @@ class RecordPageResult:
 
     records: Sequence[Record]
     next_cursor: str | None
+
+
+@dataclass
+class RecordFilterScope:
+    """Distinct patient/record_type/user values within a search-criteria scope.
+
+    Used by ``RecordRepository.get_filter_options`` to populate filter
+    dropdowns. All ID lists contain raw values (no display labels) and
+    are pre-sorted; ``has_unassigned`` signals whether the scope contains
+    any record with ``user_id IS NULL``.
+    """
+
+    patients: list[str]
+    record_types: list[str]
+    users: list[str]
+    has_unassigned: bool
 
 
 # Sentinel object identifying the modality sort column. The actual SQL
@@ -1183,7 +1200,34 @@ class RecordRepository(BaseRepository[Record]):
 
         # Patient filters
         if criteria.patient_id:
-            statement = statement.where(Record.patient_id == criteria.patient_id)
+            # If the value matches the anon_id pattern AND the caller is a
+            # non-superuser (role_names attached), route through the
+            # patient_anon_id branch so non-superusers can filter by the
+            # masked identifier they see in /records/filter-options.
+            # Superusers always see real patient_ids in dropdowns and
+            # tables, so their patient_id input is taken literally — this
+            # prevents a real PatientID that happens to start with
+            # ``{anon_id_prefix}_`` from being silently rerouted.
+            # The auto-route is also skipped when patient_anon_id is
+            # already set: the explicit branch below would re-join
+            # Patient and SQLAlchemy would error with "ambiguous column".
+            anon_prefix = f"{settings.anon_id_prefix}_"
+            use_auto_route = (
+                criteria.patient_id.startswith(anon_prefix)
+                and criteria.role_names is not None
+                and not criteria.patient_anon_id
+            )
+            if use_auto_route:
+                suffix = criteria.patient_id[len(anon_prefix) :]
+                try:
+                    auto_id = int(suffix)
+                except ValueError:
+                    auto_id = -1
+                statement = statement.join(
+                    Patient, col(Record.patient_id) == col(Patient.id)
+                ).where(Patient.auto_id == auto_id)
+            else:
+                statement = statement.where(Record.patient_id == criteria.patient_id)
 
         if criteria.patient_anon_id:
             _, _, suffix = criteria.patient_anon_id.rpartition("_")
@@ -1411,6 +1455,111 @@ class RecordRepository(BaseRepository[Record]):
         result = await self.session.execute(query)
         rows = result.all()
         return {type_name: count for type_name, count in rows}  # noqa: C416
+
+    async def get_filter_options(
+        self, criteria: RecordSearchCriteria, user: User
+    ) -> RecordFilterScope:
+        """Get distinct patient/record_type/user values within criteria scope.
+
+        Used to populate filter dropdowns on /records and /admin. Caller
+        should leave user-driven UI filters (patient_id, record_type_name,
+        user_id, wo_user, ...) at their defaults — only the RBAC fields
+        (role_names, include_unassigned, exclude_unique_violations) should
+        be set, so the response reflects the user's full accessible scope.
+
+        For non-superusers, patient_ids of anonymized patients (``anon_name``
+        set) are replaced with their ``anon_id`` — same masking guarantee
+        as ``mask_record_patient_data``. The per-RecordType
+        ``mask_patient_data=False`` opt-out is deliberately NOT honored
+        here, because the dropdown aggregates across record types and the
+        safest default is to never leak a real PatientID through a
+        filter-options surface. ``_build_criteria_query`` accepts anon_id
+        values in the ``patient_id`` filter and auto-routes them through
+        the anon branch, so the user's filter submission still resolves.
+        """
+        # ``with_only_columns`` rebuilds the projection so the
+        # selectinload options attached by ``_build_criteria_query``
+        # become inert; the resulting subquery is a thin SELECT of the
+        # three columns we actually distinct/group on below.
+        subq = (
+            self._build_criteria_query(criteria)
+            .with_only_columns(
+                col(Record.patient_id),
+                col(Record.record_type_name),
+                col(Record.user_id),
+            )
+            .subquery()
+        )
+
+        patients_result = await self.session.execute(
+            select(distinct(subq.c.patient_id)).where(subq.c.patient_id.is_not(None))
+        )
+        types_result = await self.session.execute(
+            select(distinct(subq.c.record_type_name)).where(subq.c.record_type_name.is_not(None))
+        )
+        users_result = await self.session.execute(
+            select(distinct(subq.c.user_id)).where(subq.c.user_id.is_not(None))
+        )
+        unassigned_result = await self.session.execute(
+            select(func.count()).select_from(subq).where(subq.c.user_id.is_(None))
+        )
+
+        raw_patient_ids = [str(p) for p in patients_result.scalars().all()]
+        patients = await self._mask_patient_ids(raw_patient_ids, user)
+
+        return RecordFilterScope(
+            patients=patients,
+            record_types=sorted(t for t in types_result.scalars().all()),
+            users=sorted(str(u) for u in users_result.scalars().all()),
+            has_unassigned=(unassigned_result.scalar() or 0) > 0,
+        )
+
+    async def _mask_patient_ids(self, patient_ids: list[str], user: User) -> list[str]:
+        """Replace real patient_ids with anon_ids for non-superusers.
+
+        Sorted output. Superusers pass through unchanged. Patients without
+        ``anon_name`` keep their real id (not anonymized yet, nothing to
+        mask).
+
+        When ``settings.anon_per_study_patient_id`` is enabled the row
+        layer masks each ``patient_id`` to a per-study hash, so a flat
+        ``anon_id``-based dropdown would not match what the user sees in
+        the table. In that mode anonymized patients are dropped from the
+        dropdown entirely (non-superusers can still filter by patients
+        not yet anonymized).
+        """
+        if user.is_superuser or not patient_ids:
+            return sorted(patient_ids)
+
+        result = await self.session.execute(
+            select(Patient.id, Patient.anon_name, Patient.auto_id).where(
+                col(Patient.id).in_(patient_ids)
+            )
+        )
+        per_study_mode = settings.anon_per_study_patient_id
+        # None ⇒ hide this patient from the dropdown
+        anon_map: dict[str, str | None] = {}
+        for pid, anon_name, auto_id in result.all():
+            if anon_name is None or auto_id is None:
+                continue
+            anon_map[pid] = None if per_study_mode else f"{settings.anon_id_prefix}_{auto_id}"
+
+        masked: set[str] = set()
+        collisions: list[str] = []
+        for pid in patient_ids:
+            mapped = anon_map.get(pid, pid)
+            if mapped is None:
+                continue
+            if mapped in masked:
+                collisions.append(pid)
+            masked.add(mapped)
+        if collisions:
+            logger.warning(
+                f"filter-options: distinct patient_ids collapsed after masking "
+                f"({len(collisions)} duplicate(s)); likely a real PatientID "
+                f"collides with anon_id_prefix={settings.anon_id_prefix!r}"
+            )
+        return sorted(masked)
 
     async def get_available_type_counts(
         self,

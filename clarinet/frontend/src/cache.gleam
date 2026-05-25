@@ -1,8 +1,8 @@
 // Cache module — self-contained MVU for global entity caches
 import api/admin
 import api/models.{
-  type Patient, type Record, type RecordType, type RecordTypeStats, type Series,
-  type Study, type User,
+  type Patient, type Record, type RecordFilterOptions, type RecordType,
+  type RecordTypeStats, type Series, type Study, type User,
 }
 import api/patients
 import api/record_page.{type RecordPage}
@@ -33,6 +33,10 @@ pub type Model {
     users: Dict(String, User),
     record_type_stats: Option(List(RecordTypeStats)),
     record_buckets: Dict(String, Bucket),
+    // Distinct values for filter dropdowns on /records and /admin.
+    // None = not yet loaded; cleared via InvalidateFilterOptions when
+    // records are mutated.
+    filter_options: Option(RecordFilterOptions),
   )
 }
 
@@ -74,6 +78,11 @@ pub type Msg {
   BucketMoreLoaded(key: BucketKey, result: Result(RecordPage, ApiError))
   InvalidateBucketMsg(key: BucketKey)
   InvalidateAllRecordBucketsMsg
+
+  // Filter dropdown options (RBAC-scoped distinct values from backend)
+  LoadFilterOptions
+  FilterOptionsLoaded(Result(RecordFilterOptions, ApiError))
+  InvalidateFilterOptions
 }
 
 // --- OutMsg ---
@@ -99,6 +108,7 @@ pub fn init() -> Model {
     users: dict.new(),
     record_type_stats: None,
     record_buckets: dict.new(),
+    filter_options: None,
   )
 }
 
@@ -441,6 +451,40 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg), List(OutMsg)) {
         })
       #(Model(..model, record_buckets: new_buckets), effect.none(), [])
     }
+
+    // --- Filter Options ---
+    // No-op when the slot is already populated — pages re-emit
+    // ReloadFilterOptions on every mount; without this guard navigating
+    // between /records and /admin would refetch the RBAC-scoped distinct
+    // values for nothing.
+    LoadFilterOptions -> {
+      case model.filter_options {
+        Some(_) -> #(model, effect.none(), [])
+        None -> #(
+          model,
+          load_effect(records.get_filter_options, FilterOptionsLoaded),
+          [Loading(True)],
+        )
+      }
+    }
+
+    FilterOptionsLoaded(Ok(options)) -> #(
+      Model(..model, filter_options: Some(options)),
+      effect.none(),
+      [Loading(False)],
+    )
+
+    FilterOptionsLoaded(Error(err)) -> #(model, effect.none(), [
+      ApiFailure(err, "Failed to load filter options"),
+    ])
+
+    // Invalidate + immediate reload: after a record mutation the dropdowns
+    // would otherwise collapse to empty until the next page init.
+    InvalidateFilterOptions -> #(
+      Model(..model, filter_options: None),
+      load_effect(records.get_filter_options, FilterOptionsLoaded),
+      [],
+    )
   }
 }
 

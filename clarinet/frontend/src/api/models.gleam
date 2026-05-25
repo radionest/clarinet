@@ -405,3 +405,15 @@ pub type RecordTypeStats {
     unique_users: Int,
   )
 }
+
+/// Distinct patient/record_type/user values returned by
+/// `POST /api/records/filter-options`. The `users` list is prefixed with
+/// `"__unassigned__"` when scope contains any record with no assigned
+/// user — matches the literal in `utils/record_filters.unassigned_user_value`.
+pub type RecordFilterOptions {
+  RecordFilterOptions(
+    patients: List(String),
+    record_types: List(String),
+    users: List(String),
+  )
+}
