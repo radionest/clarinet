@@ -102,71 +102,61 @@ pub fn status_options(translate: fn(Key) -> String) -> List(#(String, String)) {
   ]
 }
 
-/// Build dropdown options for the record type filter from the given records.
+/// Build dropdown options for the record type filter from a backend
+/// distinct list (POST /records/filter-options).
 pub fn type_options(
-  records: List(Record),
+  type_names: List(String),
   translate: fn(Key) -> String,
 ) -> List(#(String, String)) {
-  let types =
-    list.map(records, fn(r) { r.record_type_name })
-    |> list.unique()
-    |> list.sort(fn(a, b) { string.compare(a, b) })
-  [#("", translate(i18n.FilterAllTypes)), ..list.map(types, fn(t) { #(t, t) })]
+  [
+    #("", translate(i18n.FilterAllTypes)),
+    ..list.map(type_names, fn(t) { #(t, t) })
+  ]
 }
 
-/// Build dropdown options for the patient filter from the given records.
+/// Build dropdown options for the patient filter from a backend distinct
+/// list (POST /records/filter-options).
 pub fn patient_options(
-  records: List(Record),
+  patient_ids: List(String),
   translate: fn(Key) -> String,
 ) -> List(#(String, String)) {
-  let patients =
-    list.map(records, fn(r) { r.patient_id })
-    |> list.unique()
-    |> list.sort(fn(a, b) { string.compare(a, b) })
-  [#("", translate(i18n.FilterAllPatients)), ..list.map(patients, fn(p) { #(p, p) })]
+  [
+    #("", translate(i18n.FilterAllPatients)),
+    ..list.map(patient_ids, fn(p) { #(p, p) })
+  ]
 }
 
-/// Build dropdown options for the assigned-user filter.
-/// Includes only users actually referenced by `records` so the dropdown
-/// stays scoped to what the table can show. The "unassigned" entry is
-/// included whenever any record has no assigned user.
+/// Build dropdown options for the assigned-user filter from a backend
+/// distinct list. The list may include `unassigned_user_value` as the
+/// first element when scope has unassigned records; we render it with
+/// a localized label. Real user_ids are resolved against the `users`
+/// cache for display; on cache miss we fall back to the raw uid string.
 pub fn user_options(
-  records: List(Record),
+  user_values: List(String),
   users: Dict(String, User),
   translate: fn(Key) -> String,
 ) -> List(#(String, String)) {
-  let referenced_ids =
-    list.filter_map(records, fn(r) {
-      case r.user_id {
-        Some(uid) -> Ok(uid)
-        None -> Error(Nil)
+  let entries =
+    list.map(user_values, fn(uid) {
+      case uid == unassigned_user_value {
+        True -> #(uid, translate(i18n.FormNoUserUnassigned))
+        False -> {
+          let label = case dict.get(users, uid) {
+            Ok(user) -> user.email
+            Error(_) -> uid
+          }
+          #(uid, label)
+        }
       }
     })
-    |> list.unique()
+  [#("", translate(i18n.FilterAllUsers)), ..entries]
+}
 
-  let user_entries =
-    list.map(referenced_ids, fn(uid) {
-      let label = case dict.get(users, uid) {
-        Ok(user) -> user.email
-        Error(_) -> uid
-      }
-      #(uid, label)
-    })
-    |> list.sort(fn(a, b) { string.compare(a.1, b.1) })
-
-  let has_unassigned =
-    list.any(records, fn(r) {
-      case r.user_id {
-        None -> True
-        Some(_) -> False
-      }
-    })
-
-  let unassigned_entry = case has_unassigned {
-    True -> [#(unassigned_user_value, translate(i18n.FormNoUserUnassigned))]
-    False -> []
-  }
-
-  [#("", translate(i18n.FilterAllUsers)), ..unassigned_entry]
-  |> list.append(user_entries)
+/// Helper for callers (e.g. patient detail) that derive distinct type
+/// names from a local record list rather than the global filter-options
+/// cache — used where scope is intrinsically narrow (one patient).
+pub fn type_names_from_records(records: List(Record)) -> List(String) {
+  list.map(records, fn(r) { r.record_type_name })
+  |> list.unique()
+  |> list.sort(string.compare)
 }

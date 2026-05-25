@@ -518,7 +518,10 @@ fn records_filter_bar(model: Model, all_records: List(Record), translate: fn(Key
     base.select(
       name: "filter-record-type",
       value: type_value,
-      options: record_filters.type_options(all_records, translate),
+      options: record_filters.type_options(
+        record_filters.type_names_from_records(all_records),
+        translate,
+      ),
       on_change: fn(val) {
         case val {
           "" -> RemoveFilter("record_type")

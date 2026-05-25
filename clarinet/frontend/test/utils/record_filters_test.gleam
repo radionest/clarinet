@@ -197,26 +197,31 @@ pub fn clear_user_filters_preserves_sort_test() {
 }
 
 // --- user_options ---
+//
+// Backend returns distinct user_values (POST /records/filter-options);
+// the `__unassigned__` sentinel is prepended server-side when scope
+// contains unassigned records. Frontend's job is to resolve display
+// labels and prepend the "All Users" slot — these tests cover that.
 
-pub fn user_options_empty_records_returns_only_all_users_test() {
+pub fn user_options_empty_list_returns_only_all_users_test() {
   record_filters.user_options([], dict.new(), t)
   |> should.equal([#("", "")])
 }
 
 pub fn user_options_includes_unassigned_when_present_test() {
-  let records = [
-    make_record(1, types.Pending, "ct", "p1", None),
-    make_record(2, types.Pending, "ct", "p1", Some("uid-a")),
-  ]
   let users =
     dict.from_list([#("uid-a", make_user("uid-a", "alice@test"))])
-  let options = record_filters.user_options(records, users, t)
-  // First entry must be "All Users", with "" value.
+  // Backend places the sentinel at index 0 when applicable.
+  let options =
+    record_filters.user_options(
+      [record_filters.unassigned_user_value, "uid-a"],
+      users,
+      t,
+    )
   case options {
     [first, ..] -> first.0 |> should.equal("")
     [] -> should.fail()
   }
-  // The unassigned sentinel must be present.
   let values = list_values(options)
   values
   |> contains(record_filters.unassigned_user_value)
@@ -224,35 +229,40 @@ pub fn user_options_includes_unassigned_when_present_test() {
 }
 
 pub fn user_options_skips_unassigned_when_absent_test() {
-  let records = [make_record(1, types.Pending, "ct", "p1", Some("uid-a"))]
   let users =
     dict.from_list([#("uid-a", make_user("uid-a", "alice@test"))])
-  let values = record_filters.user_options(records, users, t) |> list_values
+  let values =
+    record_filters.user_options(["uid-a"], users, t) |> list_values
   values
   |> contains(record_filters.unassigned_user_value)
   |> should.equal(False)
 }
 
 pub fn user_options_falls_back_to_uid_when_user_missing_from_cache_test() {
-  // A record references a user that hasn't been loaded yet — we want
-  // the dropdown to still show *something*, not silently drop the entry.
-  let records = [make_record(1, types.Pending, "ct", "p1", Some("uid-stale"))]
-  let options = record_filters.user_options(records, dict.new(), t)
+  // A uid the backend returned isn't loaded into the users cache yet —
+  // we still want the dropdown to show *something*, not silently drop it.
+  let options = record_filters.user_options(["uid-stale"], dict.new(), t)
   let values = list_values(options)
   values |> contains("uid-stale") |> should.equal(True)
 }
 
-pub fn user_options_dedups_users_referenced_multiple_times_test() {
-  let records = [
-    make_record(1, types.Pending, "ct", "p1", Some("uid-a")),
-    make_record(2, types.Pending, "ct", "p2", Some("uid-a")),
-    make_record(3, types.Pending, "ct", "p3", Some("uid-a")),
-  ]
+pub fn user_options_preserves_backend_order_test() {
+  // Dedup happens server-side; frontend does not reorder. Backend returns
+  // sorted UUIDs; the frontend builds labels but keeps order intact.
   let users =
-    dict.from_list([#("uid-a", make_user("uid-a", "alice@test"))])
-  let values = record_filters.user_options(records, users, t) |> list_values
-  // Exactly one occurrence of uid-a expected — first slot is "" (All Users).
-  count(values, "uid-a") |> should.equal(1)
+    dict.from_list([
+      #("uid-a", make_user("uid-a", "alice@test")),
+      #("uid-b", make_user("uid-b", "bob@test")),
+    ])
+  let options =
+    record_filters.user_options(["uid-a", "uid-b"], users, t)
+  case options {
+    [_all, first, second] -> {
+      first.0 |> should.equal("uid-a")
+      second.0 |> should.equal("uid-b")
+    }
+    _ -> should.fail()
+  }
 }
 
 // --- helpers private to this test module ---
@@ -271,17 +281,6 @@ fn contains(items: List(String), target: String) -> Bool {
       case head == target {
         True -> True
         False -> contains(rest, target)
-      }
-  }
-}
-
-fn count(items: List(String), target: String) -> Int {
-  case items {
-    [] -> 0
-    [head, ..rest] ->
-      case head == target {
-        True -> 1 + count(rest, target)
-        False -> count(rest, target)
       }
   }
 }

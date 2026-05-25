@@ -1,6 +1,9 @@
 // Record API endpoints
 import api/http_client
-import api/models.{type FileDefinition, type Record, type RecordCreate, type RecordType}
+import api/models.{
+  type FileDefinition, type Record, type RecordCreate, type RecordFilterOptions,
+  type RecordType,
+}
 import api/record_page.{type RecordPage}
 import api/types.{type ApiError}
 import api/users
@@ -723,6 +726,34 @@ pub fn get_record_types() -> Promise(Result(List(RecordType), ApiError)) {
       "Invalid record types data",
     ))
   })
+}
+
+/// Distinct values for filter dropdowns on /records and /admin.
+/// Backend ignores any UI filters in the body and always returns the
+/// caller's full RBAC scope.
+pub fn get_filter_options() -> Promise(Result(RecordFilterOptions, ApiError)) {
+  http_client.post("/records/filter-options", "{}")
+  |> promise.map(fn(res) {
+    result.try(
+      res,
+      http_client.decode_response(
+        _,
+        filter_options_decoder(),
+        "Invalid filter options data",
+      ),
+    )
+  })
+}
+
+fn filter_options_decoder() -> decode.Decoder(RecordFilterOptions) {
+  use patients <- decode.field("patients", decode.list(decode.string))
+  use record_types <- decode.field("record_types", decode.list(decode.string))
+  use users <- decode.field("users", decode.list(decode.string))
+  decode.success(models.RecordFilterOptions(
+    patients: patients,
+    record_types: record_types,
+    users: users,
+  ))
 }
 
 /// Create a new record
