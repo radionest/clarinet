@@ -900,9 +900,13 @@ def _build_record_search_criteria(
     excludes = {"data_queries"}
     if extra_excludes:
         excludes |= extra_excludes
+    # ``data_queries`` is stripped from ``model_dump`` (it does not round-trip
+    # cleanly), then reattached from the source query — unless the caller
+    # explicitly asked to drop it via ``extra_excludes``.
+    data_queries = [] if extra_excludes and "data_queries" in extra_excludes else query.data_queries
     return RecordSearchCriteria(
         **query.model_dump(exclude=excludes),
-        data_queries=query.data_queries,
+        data_queries=data_queries,
         role_names=role_names,
         include_unassigned=is_regular_user,
         exclude_unique_violations=is_regular_user,

@@ -453,11 +453,20 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg), List(OutMsg)) {
     }
 
     // --- Filter Options ---
-    LoadFilterOptions -> #(
-      model,
-      load_effect(records.get_filter_options, FilterOptionsLoaded),
-      [Loading(True)],
-    )
+    // No-op when the slot is already populated — pages re-emit
+    // ReloadFilterOptions on every mount; without this guard navigating
+    // between /records and /admin would refetch the RBAC-scoped distinct
+    // values for nothing.
+    LoadFilterOptions -> {
+      case model.filter_options {
+        Some(_) -> #(model, effect.none(), [])
+        None -> #(
+          model,
+          load_effect(records.get_filter_options, FilterOptionsLoaded),
+          [Loading(True)],
+        )
+      }
+    }
 
     FilterOptionsLoaded(Ok(options)) -> #(
       Model(..model, filter_options: Some(options)),

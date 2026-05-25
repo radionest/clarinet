@@ -1200,15 +1200,24 @@ class RecordRepository(BaseRepository[Record]):
 
         # Patient filters
         if criteria.patient_id:
-            # If the value matches the anon_id pattern, route through the
+            # If the value matches the anon_id pattern AND the caller is a
+            # non-superuser (role_names attached), route through the
             # patient_anon_id branch so non-superusers can filter by the
-            # masked identifier they see in /records/filter-options. Skip
-            # the auto-route when patient_anon_id is already set — the
-            # explicit branch below would re-join Patient and SQLAlchemy
-            # would error with "ambiguous column". The two filters AND
-            # together via Record.patient_id, which is enough.
+            # masked identifier they see in /records/filter-options.
+            # Superusers always see real patient_ids in dropdowns and
+            # tables, so their patient_id input is taken literally — this
+            # prevents a real PatientID that happens to start with
+            # ``{anon_id_prefix}_`` from being silently rerouted.
+            # The auto-route is also skipped when patient_anon_id is
+            # already set: the explicit branch below would re-join
+            # Patient and SQLAlchemy would error with "ambiguous column".
             anon_prefix = f"{settings.anon_id_prefix}_"
-            if criteria.patient_id.startswith(anon_prefix) and not criteria.patient_anon_id:
+            use_auto_route = (
+                criteria.patient_id.startswith(anon_prefix)
+                and criteria.role_names is not None
+                and not criteria.patient_anon_id
+            )
+            if use_auto_route:
                 suffix = criteria.patient_id[len(anon_prefix) :]
                 try:
                     auto_id = int(suffix)
@@ -1468,12 +1477,19 @@ class RecordRepository(BaseRepository[Record]):
         values in the ``patient_id`` filter and auto-routes them through
         the anon branch, so the user's filter submission still resolves.
         """
-        base = self._build_criteria_query(criteria).options()
-        subq = base.with_only_columns(
-            col(Record.patient_id),
-            col(Record.record_type_name),
-            col(Record.user_id),
-        ).subquery()
+        # ``with_only_columns`` rebuilds the projection so the
+        # selectinload options attached by ``_build_criteria_query``
+        # become inert; the resulting subquery is a thin SELECT of the
+        # three columns we actually distinct/group on below.
+        subq = (
+            self._build_criteria_query(criteria)
+            .with_only_columns(
+                col(Record.patient_id),
+                col(Record.record_type_name),
+                col(Record.user_id),
+            )
+            .subquery()
+        )
 
         patients_result = await self.session.execute(
             select(distinct(subq.c.patient_id)).where(subq.c.patient_id.is_not(None))
@@ -1504,6 +1520,13 @@ class RecordRepository(BaseRepository[Record]):
         Sorted output. Superusers pass through unchanged. Patients without
         ``anon_name`` keep their real id (not anonymized yet, nothing to
         mask).
+
+        When ``settings.anon_per_study_patient_id`` is enabled the row
+        layer masks each ``patient_id`` to a per-study hash, so a flat
+        ``anon_id``-based dropdown would not match what the user sees in
+        the table. In that mode anonymized patients are dropped from the
+        dropdown entirely (non-superusers can still filter by patients
+        not yet anonymized).
         """
         if user.is_superuser or not patient_ids:
             return sorted(patient_ids)
@@ -1513,12 +1536,29 @@ class RecordRepository(BaseRepository[Record]):
                 col(Patient.id).in_(patient_ids)
             )
         )
-        anon_map: dict[str, str] = {}
+        per_study_mode = settings.anon_per_study_patient_id
+        # None ⇒ hide this patient from the dropdown
+        anon_map: dict[str, str | None] = {}
         for pid, anon_name, auto_id in result.all():
-            if anon_name is not None and auto_id is not None:
-                anon_map[pid] = f"{settings.anon_id_prefix}_{auto_id}"
+            if anon_name is None or auto_id is None:
+                continue
+            anon_map[pid] = None if per_study_mode else f"{settings.anon_id_prefix}_{auto_id}"
 
-        masked = {anon_map.get(pid, pid) for pid in patient_ids}
+        masked: set[str] = set()
+        collisions: list[str] = []
+        for pid in patient_ids:
+            mapped = anon_map.get(pid, pid)
+            if mapped is None:
+                continue
+            if mapped in masked:
+                collisions.append(pid)
+            masked.add(mapped)
+        if collisions:
+            logger.warning(
+                f"filter-options: distinct patient_ids collapsed after masking "
+                f"({len(collisions)} duplicate(s)); likely a real PatientID "
+                f"collides with anon_id_prefix={settings.anon_id_prefix!r}"
+            )
         return sorted(masked)
 
     async def get_available_type_counts(

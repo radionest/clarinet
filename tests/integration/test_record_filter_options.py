@@ -165,6 +165,9 @@ async def diverse_scope(
         test_session.add(p)
         await test_session.commit()
         await test_session.refresh(p)
+        # Sanity-check the auto_id counter: mask tests below assert on
+        # ``p.anon_id`` and silently pass if anon_id is None.
+        assert p.anon_id is not None, f"auto_id not assigned for {pid}"
         patients.append(p)
 
         study = Study(
@@ -425,6 +428,44 @@ async def test_lists_are_sorted(superuser_client: AsyncClient, diverse_scope):
     # users list: __unassigned__ first (inserted), then sorted UUIDs
     assert data["users"][0] == _UNASSIGNED
     assert data["users"][1:] == sorted(data["users"][1:])
+
+
+@pytest.mark.asyncio
+async def test_data_queries_in_body_are_ignored(superuser_client: AsyncClient, diverse_scope):
+    """data_queries was historically reattached after model_dump excluded it,
+    silently letting a client narrow the scope via data field comparisons.
+    Now ``_FILTER_OPTIONS_EXCLUDES`` zeroes data_queries — the response must
+    cover the full scope regardless of what was posted.
+    """
+    resp = await superuser_client.post(
+        RECORDS_FILTER_OPTIONS,
+        json={
+            "data_queries": [
+                {
+                    "result_name": "non_existent_field",
+                    "result_value": "no_such_value",
+                    "comparison_operator": "eq",
+                }
+            ]
+        },
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert set(data["patients"]) == {"PAT_FILT_A", "PAT_FILT_B", "PAT_FILT_C"}
+
+
+@pytest.mark.asyncio
+async def test_superuser_patient_id_treated_literally(superuser_client: AsyncClient, diverse_scope):
+    """Superusers always see real patient_ids in dropdowns and tables, so an
+    anon-shaped ``patient_id`` from a superuser must be matched literally —
+    not silently rerouted through the anon branch (which would shadow real
+    PatientIDs that happen to start with the anon prefix).
+    """
+    anon_shaped = diverse_scope["patients"][0].anon_id
+    # No real Record.patient_id equals the anon_id string → empty result.
+    resp = await superuser_client.post("/api/records/find", json={"patient_id": anon_shaped})
+    assert resp.status_code == 200
+    assert resp.json()["items"] == []
 
 
 @pytest.mark.asyncio
