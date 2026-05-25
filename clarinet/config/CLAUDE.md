@@ -100,12 +100,23 @@ tasks/
 ```python
 async def export_record_type_to_toml(rt: RecordType, folder: Path) -> Path
 async def export_data_schema_sidecar(rt: RecordType, folder: Path) -> Path | None
+async def export_ui_schema_sidecar(rt: RecordType, folder: Path) -> Path | None
 async def delete_record_type_files(name: str, folder: Path) -> list[Path]
 ```
 
 - Uses `tomli_w` for TOML serialization
 - `data_schema` → separate `{name}.schema.json` sidecar
+- `ui_schema` → separate `{name}.ui_schema.json` sidecar (formosh presentation hints)
 - `file_registry` → `[[file_registry]]` array of tables in TOML
+
+**TOML round-trip is sidecar-authoritative.** `_record_type_to_toml_dict`
+intentionally omits `data_schema` and `ui_schema` — when an admin edits a
+RecordType through the API in TOML mode, the rewritten `{name}.toml` carries
+scalars/file_registry only, and both schemas come from their sidecars.
+Operators who keep `data_schema = { ... }` or `ui_schema = { ... }` inline in
+TOML will see those inline values disappear from the body after the first API
+edit (the sidecar files now hold the canonical value). This mirrors the
+pre-existing behavior for `data_schema`.
 
 ## API Guards
 

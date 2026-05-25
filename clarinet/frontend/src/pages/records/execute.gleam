@@ -1575,9 +1575,16 @@ fn render_editable_form(
     event.on("formosh-submit", decode_form_submit()),
   ]
 
+  // Default-factory on the backend produces ui_schema="{}" for record types
+  // that don't set one. Skip the attribute in that case — formosh would parse
+  // {} into an empty UiSchema anyway, so emitting it adds noise without effect.
   let attrs_with_ui = case ui_schema_json {
     Some(ui) ->
-      list.append(base_attrs, [formosh_component.ui_schema_string(ui)])
+      case ui == "" || ui == "{}" {
+        True -> base_attrs
+        False ->
+          list.append(base_attrs, [formosh_component.ui_schema_string(ui)])
+      }
     None -> base_attrs
   }
 

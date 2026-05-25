@@ -134,3 +134,17 @@ class TestUiSchemaOnRecordTypeBase:
         dumped = model.model_dump()
         assert dumped["data_schema"] == {"type": "object"}
         assert dumped["ui_schema"] == ui
+
+    def test_validate_ui_schema_safe_rejects_int64_overflow(self):
+        """``validate_ui_schema_safe`` runs ``validate_json_safe`` — out-of-i64 ints are rejected."""
+        from clarinet.models.record_type import RecordTypeBase
+
+        with pytest.raises(ValidationError, match="exceeds 64-bit range"):
+            RecordTypeBase(name="rt-a", ui_schema={"x": {"ui:maxFileSize": 2**63}})
+
+    def test_validate_ui_schema_safe_accepts_i64_max(self):
+        """i64 boundary (2**63 - 1) is accepted."""
+        from clarinet.models.record_type import RecordTypeBase
+
+        model = RecordTypeBase(name="rt-a", ui_schema={"x": {"size": 2**63 - 1}})
+        assert model.ui_schema == {"x": {"size": 2**63 - 1}}

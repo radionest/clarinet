@@ -96,6 +96,16 @@ async def load_record_config(config_path: Path) -> dict[str, Any] | None:
     props = await _resolve_file_references(props, config_dir)
     resolved = await _resolve_data_schema(props, config_dir, config_path.stem)
     if resolved is None:
+        # Orphan ui_schema sidecar without a matching data_schema is almost
+        # certainly a misconfiguration (typo'd filename, deleted data sidecar,
+        # etc.) — surface it specifically so operators don't have to guess.
+        orphan_ui = config_dir / f"{config_path.stem}.ui_schema.json"
+        if orphan_ui.is_file():
+            logger.warning(
+                f"Orphan ui-schema sidecar {orphan_ui.name} found without a "
+                f"matching data_schema for {config_path.name}; "
+                f"add a data_schema or remove the sidecar"
+            )
         logger.warning(f"Cannot find schema for record type config {config_path.name}")
         return None
     await _resolve_ui_schema(resolved, config_dir, config_path.stem)

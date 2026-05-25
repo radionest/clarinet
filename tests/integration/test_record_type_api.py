@@ -227,6 +227,33 @@ class TestUiSchemaField:
         )
         assert response.status_code == 422
 
+    @pytest.mark.asyncio
+    async def test_patch_null_ui_schema_is_silently_dropped(
+        self, client: AsyncClient, auth_headers, test_session
+    ):
+        """PATCH with ``ui_schema: null`` does NOT clear the column.
+
+        Pre-existing service behavior (``model_dump(exclude_unset=True,
+        exclude_none=True)``) mirrors ``data_schema``: explicit ``null`` is
+        treated as "not set". To reset, send an empty dict ``{}`` instead.
+        """
+        rt = RecordType(
+            name="rt-ui-null",
+            data_schema={"type": "object"},
+            ui_schema={"ui:order": ["a"]},
+        )
+        test_session.add(rt)
+        await test_session.commit()
+
+        response = await client.patch(
+            f"{BASE}/types/{rt.name}",
+            json={"ui_schema": None},
+            headers=auth_headers,
+        )
+        assert response.status_code == 200
+        # ui_schema remains the original value — null was silently ignored.
+        assert response.json()["ui_schema"] == {"ui:order": ["a"]}
+
 
 class TestDeleteRecordType:
     """Tests for DELETE /types/{record_type_id}."""

@@ -338,6 +338,22 @@ class TestResolveUiSchema:
         assert result is not None
         assert "ui_schema" not in result
 
+    @pytest.mark.asyncio
+    async def test_orphan_ui_schema_sidecar_warning(self, tmp_path: Path, caplog) -> None:
+        """Orphan {stem}.ui_schema.json (no matching data_schema) logs a specific warning."""
+        (tmp_path / "task.ui_schema.json").write_text('{"ui:order": ["x"]}')
+
+        config = {"name": "test"}  # no data_schema, no inline ui_schema
+        (tmp_path / "task.json").write_text(json.dumps(config))
+
+        with caplog.at_level("WARNING"):
+            result = await load_record_config(tmp_path / "task.json")
+
+        assert result is None
+        messages = " ".join(record.message for record in caplog.records)
+        assert "Orphan ui-schema sidecar" in messages
+        assert "task.ui_schema.json" in messages
+
 
 class TestDiscoverConfigFilesSkipsUiSidecar:
     """The sidecar `{stem}.ui_schema.json` must not be picked up as a config."""
