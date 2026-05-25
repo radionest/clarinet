@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 
 # DICOM PatientID (0010,0020), VR=LO. Allowed chars: A-Z a-z 0-9 . _ - ^
 # DICOM caps LO at 64 chars. Whitespace is stripped before this check.
-PATIENT_ID_PATTERN = re.compile(r"^[A-Za-z0-9._\-^]{1,64}$")
+PATIENT_ID_PATTERN = re.compile(r"[A-Za-z0-9._\-^]{1,64}")
 
 
 def normalize_patient_id(raw: str) -> str:
@@ -36,7 +36,7 @@ def normalize_patient_id(raw: str) -> str:
     cleaned = raw.strip()
     if not cleaned:
         raise InvalidPatientIdentifierError(raw, "empty after trimming whitespace")
-    if not PATIENT_ID_PATTERN.match(cleaned):
+    if not PATIENT_ID_PATTERN.fullmatch(cleaned):
         raise InvalidPatientIdentifierError(
             raw,
             "must match DICOM LO PatientID format (A-Z a-z 0-9 . _ - ^, max 64 chars)",

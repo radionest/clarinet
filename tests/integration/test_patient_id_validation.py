@@ -144,3 +144,67 @@ async def test_get_patient_trims_path_whitespace(client):
 async def test_get_patient_rejects_invalid_path(client):
     response = await client.get(f"{PATIENTS_BASE}/PAT@INVALID")
     assert response.status_code == 422
+
+
+# --- Sibling endpoints share the same normalization ---
+
+
+@pytest.mark.asyncio
+async def test_delete_patient_trims_path_whitespace(client):
+    create = await client.post(
+        PATIENTS_BASE,
+        json={"patient_id": "PAT_DEL", "patient_name": "To Delete"},
+    )
+    assert create.status_code == 201
+
+    response = await client.delete(f"{PATIENTS_BASE}/PAT_DEL%20")
+    assert response.status_code == 204
+
+
+@pytest.mark.asyncio
+async def test_anonymize_patient_trims_path_whitespace(client):
+    create = await client.post(
+        PATIENTS_BASE,
+        json={"patient_id": "PAT_ANON", "patient_name": "To Anonymize"},
+    )
+    assert create.status_code == 201
+
+    response = await client.post(f"{PATIENTS_BASE}/PAT_ANON%20/anonymize")
+    assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_create_study_trims_patient_id(client):
+    create = await client.post(
+        PATIENTS_BASE,
+        json={"patient_id": "PAT_STUDY", "patient_name": "Study Owner"},
+    )
+    assert create.status_code == 201
+
+    from tests.utils.urls import STUDIES_BASE
+
+    response = await client.post(
+        STUDIES_BASE,
+        json={
+            "study_uid": "1.2.3.4.5.6.7.8.9",
+            "patient_id": " PAT_STUDY ",
+            "date": "2026-01-01",
+        },
+    )
+    assert response.status_code == 201
+    assert response.json()["patient_id"] == "PAT_STUDY"
+
+
+@pytest.mark.asyncio
+async def test_create_study_rejects_invalid_patient_id(client):
+    from tests.utils.urls import STUDIES_BASE
+
+    response = await client.post(
+        STUDIES_BASE,
+        json={
+            "study_uid": "1.2.3.4.5.6.7.8.10",
+            "patient_id": "PAT@STUDY",
+            "date": "2026-01-01",
+        },
+    )
+    assert response.status_code == 422

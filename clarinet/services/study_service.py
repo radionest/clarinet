@@ -135,9 +135,11 @@ class StudyService:
             Anonymized patient
 
         Raises:
+            InvalidPatientIdentifierError: If the ID violates DICOM format.
             NOT_FOUND: If patient doesn't exist
             CONFLICT: If patient already has anonymous name
         """
+        patient_id = normalize_patient_id(patient_id)
         patient = await self.patient_repo.get(patient_id)
 
         # Check if already anonymized
@@ -230,9 +232,11 @@ class StudyService:
             Created study
 
         Raises:
+            InvalidPatientIdentifierError: If patient_id violates DICOM format.
             NOT_FOUND: If patient doesn't exist
             CONFLICT: If study already exists
         """
+        study_data["patient_id"] = normalize_patient_id(study_data["patient_id"])
         # Check if patient exists
         patient = await self.patient_repo.get(study_data["patient_id"])
 
@@ -374,8 +378,10 @@ class StudyService:
             patient_id: Patient ID
 
         Raises:
+            InvalidPatientIdentifierError: If the ID violates DICOM format.
             EntityNotFoundError: If patient doesn't exist
         """
+        patient_id = normalize_patient_id(patient_id)
         patient = await self.patient_repo.get(patient_id)
         await self.patient_repo.delete(patient)
 
