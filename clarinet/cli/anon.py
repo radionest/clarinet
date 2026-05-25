@@ -311,15 +311,18 @@ async def _migrate_records_by_level(
     counters: dict[str, int],
     cleanup_candidates: set[Path],
 ) -> None:
-    """Move working_folder for each Record at the given STUDY or PATIENT level.
+    """Move working_folder for each Record at the given level.
 
-    Uses merge semantics: the new parent dir typically exists from the
-    earlier SERIES pass, so loose study-/patient-level files are merged
-    in alongside the already-moved series_dirs.
+    Supports SERIES, STUDY and PATIENT levels. Uses merge semantics:
+    the new parent dir typically exists from the earlier SERIES pass on
+    the base ``Series`` table, so loose record working_folders are
+    merged in alongside the already-moved series_dirs.
     """
     options = [selectinload(Record.patient)]  # type: ignore[arg-type]
-    if level is DicomQueryLevel.STUDY:
+    if level in (DicomQueryLevel.STUDY, DicomQueryLevel.SERIES):
         options.append(selectinload(Record.study))  # type: ignore[arg-type]
+    if level is DicomQueryLevel.SERIES:
+        options.append(selectinload(Record.series))  # type: ignore[arg-type]
     stmt = (
         select(Record)
         .join(RecordType, Record.record_type_name == RecordType.name)  # type: ignore[arg-type]
@@ -331,8 +334,14 @@ async def _migrate_records_by_level(
     async for record in result:
         logger.debug(f"Record {record.id} ({level.value}): checking")
         patient = record.patient
-        study = record.study if level is DicomQueryLevel.STUDY else None
-        if patient is None or (level is DicomQueryLevel.STUDY and study is None):
+        study = record.study if level in (DicomQueryLevel.STUDY, DicomQueryLevel.SERIES) else None
+        series = record.series if level is DicomQueryLevel.SERIES else None
+        relations_missing = patient is None
+        if level in (DicomQueryLevel.STUDY, DicomQueryLevel.SERIES) and study is None:
+            relations_missing = True
+        if level is DicomQueryLevel.SERIES and series is None:
+            relations_missing = True
+        if relations_missing:
             logger.warning(
                 f"Record {record.id} ({level.value}) missing eager-loaded relations; skipping."
             )
@@ -343,7 +352,7 @@ async def _migrate_records_by_level(
             level,
             patient=patient,
             study=study,
-            series=None,
+            series=series,
             from_template=from_template,
             to_template=to_template,
             storage_path=storage_path,
@@ -416,7 +425,7 @@ async def migrate_paths(args: argparse.Namespace) -> None:
             full_dir=include_wf,
         )
         if include_wf:
-            for level in (DicomQueryLevel.STUDY, DicomQueryLevel.PATIENT):
+            for level in (DicomQueryLevel.SERIES, DicomQueryLevel.STUDY, DicomQueryLevel.PATIENT):
                 await _migrate_records_by_level(
                     session,
                     args,

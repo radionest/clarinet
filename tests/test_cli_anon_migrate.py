@@ -640,6 +640,75 @@ async def test_include_working_folder_patient_record_moves_patient_files(
 
 
 @pytest.mark.asyncio
+async def test_include_working_folder_series_record_in_bottom_up_pass(
+    test_session: AsyncSession, tmp_path: Path
+) -> None:
+    """SERIES-level Records participate in the bottom-up Record pass.
+
+    Regression guard for the third pass being absent: previously
+    ``_migrate_records_by_level`` was only called for STUDY and PATIENT,
+    so SERIES Records never appeared in verbose logs and were silently
+    skipped. The actual series_dir relocation is performed by
+    ``_migrate_all_series(full_dir=True)`` upstream — this test asserts
+    that the follow-up SERIES Record pass still iterates the Records
+    (visible via the ``Record <id> (SERIES): checking`` debug line) and
+    that nothing inside the moved series_dir was lost.
+    """
+    from clarinet.utils.logger import logger
+
+    old_tmpl = "{anon_patient_id}/{anon_study_uid}/{anon_series_uid}"
+    new_tmpl = "{patient_auto_id}/{study_modalities}_{study_date}/{anon_series_uid}"
+
+    patient, study, series = await _seed_anonymized_series(
+        test_session,
+        patient_id="MIG_WF_SER",
+        auto_id=409,
+        study_uid="1.2.6409.1",
+        series_uid="1.2.6409.1.1",
+        anon_study_uid="2.25.649",
+        anon_series_uid="2.25.649.1",
+    )
+    rec = await _seed_record_at_level(
+        test_session,
+        rt_name="rt-series-409",
+        level=DicomQueryLevel.SERIES,
+        patient_id=patient.id,
+        study_uid=study.study_uid,
+        series_uid=series.series_uid,
+    )
+    old_series_dir, _ = _populate_series_dir_full(tmp_path, patient, study, series, old_tmpl)
+    rt_output_dir = old_series_dir / "rt-output"
+    rt_output_dir.mkdir()
+    (rt_output_dir / "measurement.json").write_bytes(b"{}")
+
+    debug_msgs: list[str] = []
+    sink_id = logger.add(
+        lambda msg: debug_msgs.append(msg.record["message"]),
+        level="DEBUG",
+    )
+    try:
+        with patch("clarinet.cli.anon.enable_verbose_console"):
+            args = argparse.Namespace(
+                from_template=old_tmpl,
+                to_template=new_tmpl,
+                dry_run=False,
+                cleanup_empty=False,
+                include_working_folder=True,
+                verbose=True,
+            )
+            await _run_migrate(args, test_session, tmp_path)
+    finally:
+        logger.remove(sink_id)
+
+    assert any(f"Record {rec.id} (SERIES): checking" in m for m in debug_msgs), debug_msgs
+
+    ctx = build_context(patient=patient, study=study, series=series, template=new_tmpl)
+    new_series_dir = render_working_folder(new_tmpl, DicomQueryLevel.SERIES, ctx, tmp_path)
+    assert (new_series_dir / "rt-output" / "measurement.json").exists()
+    assert not old_series_dir.exists()
+
+
+@pytest.mark.asyncio
 async def test_include_working_folder_series_collision_skips(
     test_session: AsyncSession, tmp_path: Path
 ) -> None:
