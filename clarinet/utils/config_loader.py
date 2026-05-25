@@ -45,8 +45,8 @@ def discover_config_files(folder: str, suffix_filter: str = "") -> list[Path]:
             continue
         if path.name in _EXCLUDED_NAMES:
             continue
-        # Skip schema sidecars
-        if path.name.endswith(".schema.json"):
+        # Skip schema and ui-schema sidecars
+        if path.name.endswith((".schema.json", ".ui_schema.json")):
             continue
 
         stem = path.stem
@@ -98,6 +98,7 @@ async def load_record_config(config_path: Path) -> dict[str, Any] | None:
     if resolved is None:
         logger.warning(f"Cannot find schema for record type config {config_path.name}")
         return None
+    await _resolve_ui_schema(resolved, config_dir, config_path.stem)
     return resolved
 
 
@@ -206,3 +207,36 @@ async def _resolve_data_schema(
 
     # 5. Nothing found
     return None
+
+
+async def _resolve_ui_schema(
+    props: dict[str, Any],
+    config_dir: Path,
+    stem: str,
+) -> None:
+    """Resolve the ui-schema from various sources (optional field).
+
+    Mirrors ``_resolve_data_schema`` but ui_schema is optional — absence is
+    fine and leaves ``props["ui_schema"]`` unset.
+
+    Resolution order:
+    1. ``ui_schema`` is a str ending ``.json`` — read and parse that file.
+    2. ``ui_schema`` is a dict — keep as-is.
+    3. Absent — try ``{stem}.ui_schema.json`` sidecar.
+    4. Nothing found — leave the key absent.
+    """
+    ui_schema = props.get("ui_schema")
+
+    if isinstance(ui_schema, str) and ui_schema.endswith(".json"):
+        schema_path = config_dir / ui_schema
+        async with aiofiles.open(schema_path) as f:
+            props["ui_schema"] = json.loads(await f.read())
+        return
+
+    if isinstance(ui_schema, dict):
+        return
+
+    sidecar = config_dir / f"{stem}.ui_schema.json"
+    if sidecar.is_file():
+        async with aiofiles.open(sidecar) as f:
+            props["ui_schema"] = json.loads(await f.read())

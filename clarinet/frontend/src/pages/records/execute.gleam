@@ -1494,7 +1494,13 @@ fn render_dynamic_form(
         permissions.can_fill_record(record, user)
         || permissions.can_edit_record(record, user)
       case can_edit {
-        True -> render_editable_form(schema_json, model.record_id, record)
+        True ->
+          render_editable_form(
+            schema_json,
+            record_type.ui_schema,
+            model.record_id,
+            record,
+          )
         False -> render_readonly_data(record)
       }
     }
@@ -1547,6 +1553,7 @@ fn render_dynamic_form(
 
 fn render_editable_form(
   schema_json: String,
+  ui_schema_json: Option(String),
   record_id: String,
   record: Record,
 ) -> Element(Msg) {
@@ -1568,10 +1575,18 @@ fn render_editable_form(
     event.on("formosh-submit", decode_form_submit()),
   ]
 
+  let attrs_with_ui = case ui_schema_json {
+    Some(ui) ->
+      list.append(base_attrs, [formosh_component.ui_schema_string(ui)])
+    None -> base_attrs
+  }
+
   let attrs = case record.data {
     Some(data) ->
-      list.append(base_attrs, [formosh_component.initial_values_string(data)])
-    None -> base_attrs
+      list.append(attrs_with_ui, [
+        formosh_component.initial_values_string(data),
+      ])
+    None -> attrs_with_ui
   }
 
   formosh_component.element(attrs)

@@ -50,6 +50,7 @@ from clarinet.config.toml_exporter import (
     delete_record_type_files,
     export_data_schema_sidecar,
     export_record_type_to_toml,
+    export_ui_schema_sidecar,
 )
 from clarinet.exceptions import CONFLICT, NOT_FOUND
 from clarinet.exceptions.domain import AuthorizationError
@@ -152,6 +153,7 @@ async def add_record_type(
         folder = Path(getattr(request.app.state, "config_tasks_path", "./tasks/"))
         background_tasks.add_task(export_record_type_to_toml, result, folder)
         background_tasks.add_task(export_data_schema_sidecar, result, folder)
+        background_tasks.add_task(export_ui_schema_sidecar, result, folder)
 
     return RecordTypeRead.model_validate(result)
 
@@ -179,6 +181,7 @@ async def update_record_type(
         folder = Path(getattr(request.app.state, "config_tasks_path", "./tasks/"))
         background_tasks.add_task(export_record_type_to_toml, result, folder)
         background_tasks.add_task(export_data_schema_sidecar, result, folder)
+        background_tasks.add_task(export_ui_schema_sidecar, result, folder)
 
     return RecordTypeRead.model_validate(result)
 

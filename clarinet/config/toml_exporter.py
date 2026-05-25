@@ -143,6 +143,26 @@ async def export_data_schema_sidecar(rt: RecordType, folder: Path) -> Path | Non
     return schema_path
 
 
+async def export_ui_schema_sidecar(rt: RecordType, folder: Path) -> Path | None:
+    """Write the ui_schema as a JSON sidecar file.
+
+    The file is named ``{rt.name}.ui_schema.json``. If ``ui_schema`` is
+    empty or None, no file is written.
+    """
+    if not rt.ui_schema:
+        return None
+
+    folder.mkdir(parents=True, exist_ok=True)
+
+    schema_path = folder / f"{rt.name}.ui_schema.json"
+    content = json.dumps(rt.ui_schema, indent=2, ensure_ascii=False)
+    async with aiofiles.open(schema_path, "w") as f:
+        await f.write(content)
+
+    logger.info(f"Exported ui schema for '{rt.name}' to {schema_path}")
+    return schema_path
+
+
 async def delete_record_type_files(name: str, folder: Path) -> list[Path]:
     """Delete TOML and schema sidecar files for a RecordType.
 
@@ -166,5 +186,11 @@ async def delete_record_type_files(name: str, folder: Path) -> list[Path]:
         schema_path.unlink()
         deleted.append(schema_path)
         logger.info(f"Deleted schema sidecar {schema_path}")
+
+    ui_schema_path = folder / f"{name}.ui_schema.json"
+    if ui_schema_path.is_file():
+        ui_schema_path.unlink()
+        deleted.append(ui_schema_path)
+        logger.info(f"Deleted ui schema sidecar {ui_schema_path}")
 
     return deleted

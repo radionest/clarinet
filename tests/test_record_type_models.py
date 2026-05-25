@@ -76,3 +76,61 @@ class TestParseJsonStrings:
         dumped = model.model_dump(exclude_unset=True)
         assert "data_schema" in dumped
         assert dumped["data_schema"] == {"type": "object"}
+
+    # --- ui_schema (formosh ui-schema) ---
+
+    def test_ui_schema_json_string_parsed_to_dict(self):
+        """JSON string for ui_schema should be parsed into a dict."""
+        model = RecordTypeOptional(ui_schema='{"ui:order": ["a", "b"]}')
+        assert model.ui_schema == {"ui:order": ["a", "b"]}
+
+    def test_ui_schema_dict_passed_through(self):
+        """Dict ui_schema should pass through unchanged."""
+        ui = {"ui:order": ["x"], "x": {"ui:widget": "textarea"}}
+        model = RecordTypeOptional(ui_schema=ui)
+        assert model.ui_schema == ui
+
+    def test_ui_schema_none_passed_through(self):
+        """None ui_schema should pass through unchanged."""
+        model = RecordTypeOptional(ui_schema=None)
+        assert model.ui_schema is None
+
+    def test_ui_schema_invalid_json_raises_validation_error(self):
+        """Invalid JSON string for ui_schema should raise ValidationError."""
+        with pytest.raises(ValidationError, match="Invalid JSON"):
+            RecordTypeOptional(ui_schema="not json at all")
+
+    def test_ui_schema_exclude_unset(self):
+        """ui_schema appears in exclude_unset dump when explicitly set."""
+        model = RecordTypeOptional(ui_schema={"ui:order": ["a"]})
+        dumped = model.model_dump(exclude_unset=True)
+        assert dumped == {"ui_schema": {"ui:order": ["a"]}}
+
+
+class TestUiSchemaOnRecordTypeBase:
+    """Tests that ui_schema flows through the inheritance hierarchy."""
+
+    def test_base_defaults_to_none(self):
+        """RecordTypeBase.ui_schema defaults to None."""
+        from clarinet.models.record_type import RecordTypeBase
+
+        model = RecordTypeBase(name="rt-a")
+        assert model.ui_schema is None
+
+    def test_create_accepts_ui_schema_dict(self):
+        """RecordTypeCreate accepts a ui_schema dict."""
+        from clarinet.models.record_type import RecordTypeCreate
+
+        ui = {"ui:order": ["x"], "x": {"ui:widget": "textarea"}}
+        model = RecordTypeCreate(name="rt-a", ui_schema=ui)
+        assert model.ui_schema == ui
+
+    def test_create_round_trip_via_model_dump(self):
+        """ui_schema round-trips through model_dump on RecordTypeCreate."""
+        from clarinet.models.record_type import RecordTypeCreate
+
+        ui = {"ui:order": ["x"]}
+        model = RecordTypeCreate(name="rt-a", data_schema={"type": "object"}, ui_schema=ui)
+        dumped = model.model_dump()
+        assert dumped["data_schema"] == {"type": "object"}
+        assert dumped["ui_schema"] == ui

@@ -77,6 +77,8 @@ pub type RecordType {
     slicer_result_validator_args: Option(Dict(String, String)),
     data_schema: Option(String),
     // JSON Schema string for dynamic form (formosh)
+    ui_schema: Option(String),
+    // formosh ui-schema string (presentation hints — widgets, ordering, placeholders)
     role_name: Option(String),
     max_records: Option(Int),
     min_records: Option(Int),

@@ -102,6 +102,8 @@ class RecordDef(BaseModel):
         max_records: Maximum number of records.
         files: List of FileRef bindings.
         data_schema: JSON Schema dict or path to .json file.
+        ui_schema: formosh ui-schema dict or path to .json file. Presentation hints
+            (widgets, ordering, placeholders) layered on top of data_schema.
         slicer_script: Inline script or path to .py file.
         slicer_script_args: Arguments for slicer script.
         slicer_result_validator: Inline validator or path to .py file.
@@ -124,6 +126,7 @@ class RecordDef(BaseModel):
     max_records: int | None = None
     files: list[FileRef] = []
     data_schema: dict[str, Any] | str | None = None
+    ui_schema: dict[str, Any] | str | None = None
     slicer_script: str | None = None
     slicer_script_args: dict[str, str] | None = None
     slicer_result_validator: str | None = None

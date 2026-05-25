@@ -38,6 +38,7 @@ _COMPARED_FIELDS: tuple[str, ...] = (
     "slicer_context_hydrators",
     "data_validators",
     "data_schema",
+    "ui_schema",
     "mask_patient_data",
     "viewer_mode",
 )

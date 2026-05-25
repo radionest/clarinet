@@ -84,6 +84,7 @@ class RecordTypeBase(SQLModel):
     level: DicomQueryLevel = Field(default=DicomQueryLevel.SERIES)
 
     data_schema: RecordSchema | None = None
+    ui_schema: RecordSchema | None = None
     slicer_context_hydrators: SlicerHydratorNames | None = None
     data_validators: ValidatorNames | None = None
 
@@ -124,6 +125,13 @@ class RecordTypeBase(SQLModel):
             validate_json_safe(v)
         return v
 
+    @field_validator("ui_schema", mode="after")
+    @classmethod
+    def validate_ui_schema_safe(cls, v: RecordSchema | None) -> RecordSchema | None:
+        if v is not None:
+            validate_json_safe(v)
+        return v
+
 
 class RecordType(RecordTypeBase, table=True):
     """Model representing a type of record that can be created.
@@ -135,6 +143,7 @@ class RecordType(RecordTypeBase, table=True):
 
     name: str = Field(primary_key=True)
     data_schema: RecordSchema | None = Field(default_factory=dict, sa_column=Column(PortableJSON))
+    ui_schema: RecordSchema | None = Field(default_factory=dict, sa_column=Column(PortableJSON))
 
     slicer_script_args: SlicerArgs | None = Field(
         default_factory=dict, sa_column=Column(PortableJSON)
@@ -238,6 +247,7 @@ class RecordTypeCreate(RecordTypeBase):
     """Pydantic model for creating a new record type."""
 
     data_schema: RecordSchema | None = None
+    ui_schema: RecordSchema | None = None
     file_registry: list[FileDefinitionRead] | None = None
 
 
@@ -266,6 +276,7 @@ class RecordTypeOptional(SQLModel):
     slicer_result_validator: str | None = None
     slicer_result_validator_args: SlicerArgs | None = None
     data_schema: RecordSchema | None = None
+    ui_schema: RecordSchema | None = None
     slicer_context_hydrators: SlicerHydratorNames | None = None
     data_validators: ValidatorNames | None = None
     mask_patient_data: bool | None = Field(default=None)
@@ -282,6 +293,7 @@ class RecordTypeOptional(SQLModel):
 
     @field_validator(
         "data_schema",
+        "ui_schema",
         "slicer_script_args",
         "slicer_result_validator_args",
         "slicer_context_hydrators",
@@ -301,6 +313,13 @@ class RecordTypeOptional(SQLModel):
     @field_validator("data_schema", mode="after")
     @classmethod
     def validate_data_schema_safe(cls, v: RecordSchema | None) -> RecordSchema | None:
+        if v is not None:
+            validate_json_safe(v)
+        return v
+
+    @field_validator("ui_schema", mode="after")
+    @classmethod
+    def validate_ui_schema_safe(cls, v: RecordSchema | None) -> RecordSchema | None:
         if v is not None:
             validate_json_safe(v)
         return v

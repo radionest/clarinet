@@ -276,6 +276,85 @@ class TestResolveDataSchema:
         assert result is None
 
 
+class TestResolveUiSchema:
+    """Tests for _resolve_ui_schema behavior via load_record_config."""
+
+    @pytest.mark.asyncio
+    async def test_inline_dict_preserved(self, tmp_path: Path) -> None:
+        """ui_schema dict in config stays as dict."""
+        ui = {"ui:order": ["a", "b"]}
+        config = {
+            "name": "test",
+            "data_schema": {"type": "object"},
+            "ui_schema": ui,
+        }
+        (tmp_path / "task.json").write_text(json.dumps(config))
+
+        result = await load_record_config(tmp_path / "task.json")
+
+        assert result is not None
+        assert result["ui_schema"] == ui
+
+    @pytest.mark.asyncio
+    async def test_json_ref_loaded(self, tmp_path: Path) -> None:
+        """ui_schema as string .json reference is parsed."""
+        ui = {"ui:order": ["x"], "x": {"ui:widget": "textarea"}}
+        (tmp_path / "ui.json").write_text(json.dumps(ui))
+
+        config = {
+            "name": "test",
+            "data_schema": {"type": "object"},
+            "ui_schema": "ui.json",
+        }
+        (tmp_path / "task.json").write_text(json.dumps(config))
+
+        result = await load_record_config(tmp_path / "task.json")
+
+        assert result is not None
+        assert result["ui_schema"] == ui
+
+    @pytest.mark.asyncio
+    async def test_sidecar_fallback(self, tmp_path: Path) -> None:
+        """{stem}.ui_schema.json loaded when ui_schema absent from config."""
+        ui = {"ui:order": ["y"]}
+        (tmp_path / "task.ui_schema.json").write_text(json.dumps(ui))
+
+        config = {"name": "test", "data_schema": {"type": "object"}}
+        (tmp_path / "task.json").write_text(json.dumps(config))
+
+        result = await load_record_config(tmp_path / "task.json")
+
+        assert result is not None
+        assert result["ui_schema"] == ui
+
+    @pytest.mark.asyncio
+    async def test_absent_ui_schema_is_optional(self, tmp_path: Path) -> None:
+        """Loading succeeds without ui_schema; key stays absent from props."""
+        config = {"name": "test", "data_schema": {"type": "object"}}
+        (tmp_path / "task.json").write_text(json.dumps(config))
+
+        result = await load_record_config(tmp_path / "task.json")
+
+        assert result is not None
+        assert "ui_schema" not in result
+
+
+class TestDiscoverConfigFilesSkipsUiSidecar:
+    """The sidecar `{stem}.ui_schema.json` must not be picked up as a config."""
+
+    def test_ui_schema_sidecar_excluded(self, tmp_path: Path) -> None:
+        from clarinet.utils.config_loader import discover_config_files
+
+        (tmp_path / "task.toml").write_text("name = 'task'\n")
+        (tmp_path / "task.ui_schema.json").write_text("{}")
+
+        files = discover_config_files(str(tmp_path))
+
+        names = [p.name for p in files]
+        assert "task.toml" in names
+        assert "task.ui_schema.json" not in names
+
+
 class TestLoadRecordConfig:
     """Tests for load_record_config function."""
 
