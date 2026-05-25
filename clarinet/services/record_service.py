@@ -597,9 +597,9 @@ class RecordService:
                 format. Matches the trim-on-read contract used by
                 :class:`StudyService`.
         """
-        from clarinet.models.patient import normalize_patient_id
+        from clarinet.models.patient import validate_patient_id
 
-        patient_id = normalize_patient_id(patient_id)
+        patient_id = validate_patient_id(patient_id)
         if not self.engine:
             return
         for file_name in changed_files:

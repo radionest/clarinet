@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 from sqlmodel import Field, Relationship
 
 from .base import BaseModel, DicomUID, InstanceCount
-from .patient import Patient, PatientInfo
+from .patient import Patient, PatientID, PatientInfo
 
 if TYPE_CHECKING:
     from .record import Record, RecordFind
@@ -34,14 +34,14 @@ class StudyBase(BaseModel):
             "and _modalities_to_list (DICOMweb JSON, splits to array)."
         ),
     )
-    patient_id: str
+    patient_id: PatientID
 
 
 class Study(StudyBase, table=True):
     """Model representing a medical imaging study in the system."""
 
     study_uid: DicomUID = Field(primary_key=True)
-    patient_id: str = Field(foreign_key="patient.id", ondelete="CASCADE")
+    patient_id: PatientID = Field(foreign_key="patient.id", ondelete="CASCADE")
     anon_uid: str | None = None
 
     patient: Patient = Relationship(back_populates="studies")
@@ -53,7 +53,7 @@ class StudyCreate(StudyBase):
     """Pydantic model for creating a new study."""
 
     study_uid: DicomUID = Field()
-    patient_id: str
+    patient_id: PatientID
 
 
 class StudyRead(StudyBase):
