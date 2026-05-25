@@ -469,9 +469,11 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg), List(OutMsg)) {
       ApiFailure(err, "Failed to load filter options"),
     ])
 
+    // Invalidate + immediate reload: after a record mutation the dropdowns
+    // would otherwise collapse to empty until the next page init.
     InvalidateFilterOptions -> #(
       Model(..model, filter_options: None),
-      effect.none(),
+      load_effect(records.get_filter_options, FilterOptionsLoaded),
       [],
     )
   }

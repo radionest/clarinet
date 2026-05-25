@@ -939,11 +939,14 @@ async def get_record_filter_options(
 
     RBAC scope (role_names, unique_per_user) is applied; user-driven UI
     filters in the body are IGNORED so the dropdowns always reflect the
-    user's full accessible scope. The ``users`` list is prefixed with
-    ``"__unassigned__"`` when scope contains any unassigned record.
+    user's full accessible scope. For non-superusers, anonymized
+    patient_ids are masked to their ``anon_id`` (see
+    ``RecordRepository._mask_patient_ids``). The ``users`` list is
+    prefixed with ``"__unassigned__"`` when scope contains any unassigned
+    record.
     """
     criteria = _build_record_search_criteria(query, user, extra_excludes=_FILTER_OPTIONS_EXCLUDES)
-    scope = await repo.get_filter_options(criteria)
+    scope = await repo.get_filter_options(criteria, user)
     users = list(scope.users)
     if scope.has_unassigned:
         users.insert(0, _UNASSIGNED_SENTINEL)

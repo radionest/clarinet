@@ -272,15 +272,71 @@ async def test_superuser_sees_all_distinct_values(superuser_client: AsyncClient,
 
 @pytest.mark.asyncio
 async def test_regular_user_scope_limited_by_role(regular_a_client: AsyncClient, diverse_scope):
-    """Regular user with role_a sees only the role_a record type and its records."""
+    """Regular user with role_a sees only the role_a record type and its records.
+
+    Patient_ids are masked (see ``test_anonymized_patient_ids_masked_for_non_superuser``);
+    we assert on the count + anon_id equivalence rather than raw patient_id.
+    """
     resp = await regular_a_client.post(RECORDS_FILTER_OPTIONS, json={})
     assert resp.status_code == 200
     data = resp.json()
     assert data["record_types"] == [diverse_scope["record_type_a"].name]
-    # Only patients with role_a records are visible (PAT_FILT_A assigned + PAT_FILT_B unassigned)
-    assert set(data["patients"]) == {"PAT_FILT_A", "PAT_FILT_B"}
-    # PAT_FILT_C has only a role_b record → hidden
-    assert "PAT_FILT_C" not in data["patients"]
+    # PAT_FILT_A (assigned) + PAT_FILT_B (unassigned) are in scope.
+    # PAT_FILT_C has only a role_b record → out of scope.
+    expected_visible = {
+        diverse_scope["patients"][0].anon_id,
+        diverse_scope["patients"][1].anon_id,
+    }
+    assert set(data["patients"]) == expected_visible
+    assert diverse_scope["patients"][2].anon_id not in data["patients"]
+
+
+@pytest.mark.asyncio
+async def test_anonymized_patient_ids_masked_for_non_superuser(
+    regular_a_client: AsyncClient, diverse_scope
+):
+    """Real patient_ids must never appear in the response for a non-superuser
+    when the patient has been anonymized (anon_name set).
+
+    Mirrors the guarantee provided by ``mask_record_patient_data`` for
+    every Record-returning endpoint.
+    """
+    resp = await regular_a_client.post(RECORDS_FILTER_OPTIONS, json={})
+    data = resp.json()
+    # None of the real PatientIDs from `diverse_scope` may appear.
+    for raw_pid in ("PAT_FILT_A", "PAT_FILT_B", "PAT_FILT_C"):
+        assert raw_pid not in data["patients"]
+    # Every value must be a valid anon_id of an in-scope patient.
+    in_scope_anon_ids = {p.anon_id for p in diverse_scope["patients"][:2]}
+    assert set(data["patients"]).issubset(in_scope_anon_ids)
+
+
+@pytest.mark.asyncio
+async def test_superuser_sees_real_patient_ids(superuser_client: AsyncClient, diverse_scope):
+    """Superusers always get real patient_ids — masking applies to non-superusers only."""
+    resp = await superuser_client.post(RECORDS_FILTER_OPTIONS, json={})
+    data = resp.json()
+    assert set(data["patients"]) == {"PAT_FILT_A", "PAT_FILT_B", "PAT_FILT_C"}
+
+
+@pytest.mark.asyncio
+async def test_filter_by_anon_patient_id_routes_through_anon_branch(
+    regular_a_client: AsyncClient, diverse_scope
+):
+    """A non-superuser selecting an anon_id from the dropdown submits it
+    back through ``/records/find`` as a ``patient_id``; the repository
+    auto-routes anon_id-shaped values through the patient_anon_id branch
+    so the records are actually found.
+    """
+    target_anon = diverse_scope["patients"][0].anon_id  # PAT_FILT_A → anon_id
+    resp = await regular_a_client.post("/api/records/find", json={"patient_id": target_anon})
+    assert resp.status_code == 200
+    items = resp.json()["items"]
+    assert len(items) >= 1
+    for item in items:
+        # Non-superuser sees the masked id; per-RecordType opt-out keeps
+        # the records but the mask layer rewrites patient_id.
+        assert item["patient_id"] == target_anon
 
 
 @pytest.mark.asyncio
