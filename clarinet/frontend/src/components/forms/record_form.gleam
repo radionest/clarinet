@@ -61,12 +61,7 @@ pub fn update(data: RecordFormData, msg: RecordFormMsg) -> RecordFormData {
         series_uid: "",
       )
     UpdatePatient(value) ->
-      RecordFormData(
-        ..data,
-        patient_id: value,
-        study_uid: "",
-        series_uid: "",
-      )
+      RecordFormData(..data, patient_id: value, study_uid: "", series_uid: "")
     UpdateStudy(value) ->
       RecordFormData(..data, study_uid: value, series_uid: "")
     UpdateSeries(value) -> RecordFormData(..data, series_uid: value)
@@ -155,11 +150,7 @@ pub fn view(
             True ->
               locked_input(
                 "study_uid",
-                study_label(
-                  data.study_uid,
-                  studies,
-                  shared.cache.studies,
-                ),
+                study_label(data.study_uid, studies, shared.cache.studies),
               )
             False ->
               form.select(
@@ -184,11 +175,7 @@ pub fn view(
             True ->
               locked_input(
                 "series_uid",
-                series_label(
-                  data.series_uid,
-                  series_list,
-                  shared.cache.series,
-                ),
+                series_label(data.series_uid, series_list, shared.cache.series),
               )
             False ->
               form.select(
@@ -232,7 +219,11 @@ pub fn view(
             value: data.parent_record_id,
             options: [
               #("", "No parent record"),
-              ..build_parent_record_options(data.patient_id, shared.cache.records)
+              ..build_parent_record_options(
+                data.patient_id,
+                data.study_uid,
+                shared.cache.records,
+              )
             ],
             on_change: fn(value) { on_update(UpdateParentRecordId(value)) },
           ),
@@ -256,7 +247,11 @@ pub fn view(
     ),
     // Form actions
     html.div([attribute.class("form-actions")], [
-      form.submit_button(text: "Create Record", disabled: loading, on_click: None),
+      form.submit_button(
+        text: "Create Record",
+        disabled: loading,
+        on_click: None,
+      ),
       form.cancel_button(text: "Cancel", on_click: on_cancel),
     ]),
     // Loading overlay
@@ -355,18 +350,19 @@ pub fn validate(
 ) -> Result(Nil, Dict(String, String)) {
   let errors = dict.new()
 
-  let errors = case form.validate_required(
-    value: data.record_type_name,
-    field_name: "Record Type",
-  ) {
+  let errors = case
+    form.validate_required(
+      value: data.record_type_name,
+      field_name: "Record Type",
+    )
+  {
     Error(msg) -> dict.insert(errors, "record_type_name", msg)
     Ok(_) -> errors
   }
 
-  let errors = case form.validate_required(
-    value: data.patient_id,
-    field_name: "Patient",
-  ) {
+  let errors = case
+    form.validate_required(value: data.patient_id, field_name: "Patient")
+  {
     Error(msg) -> dict.insert(errors, "patient_id", msg)
     Ok(_) -> errors
   }
@@ -375,10 +371,7 @@ pub fn validate(
 
   let errors = case needs_study(level) {
     True ->
-      case form.validate_required(
-        value: data.study_uid,
-        field_name: "Study",
-      ) {
+      case form.validate_required(value: data.study_uid, field_name: "Study") {
         Error(msg) -> dict.insert(errors, "study_uid", msg)
         Ok(_) -> errors
       }
@@ -387,10 +380,9 @@ pub fn validate(
 
   let errors = case needs_series(level) {
     True ->
-      case form.validate_required(
-        value: data.series_uid,
-        field_name: "Series",
-      ) {
+      case
+        form.validate_required(value: data.series_uid, field_name: "Series")
+      {
         Error(msg) -> dict.insert(errors, "series_uid", msg)
         Ok(_) -> errors
       }
@@ -502,6 +494,7 @@ fn build_series_options(series_list: List(Series)) -> List(#(String, String)) {
 
 fn build_parent_record_options(
   patient_id: String,
+  study_uid: String,
   records: Dict(String, Record),
 ) -> List(#(String, String)) {
   case patient_id {
@@ -510,6 +503,12 @@ fn build_parent_record_options(
       records
       |> dict.values
       |> list.filter(fn(r) { r.patient_id == pid })
+      |> list.filter(fn(r) {
+        case study_uid {
+          "" -> True
+          suid -> r.study_uid == Some(suid)
+        }
+      })
       |> list.sort(fn(a, b) {
         int.compare(option.unwrap(a.id, 0), option.unwrap(b.id, 0))
       })
@@ -519,8 +518,13 @@ fn build_parent_record_options(
           None -> "?"
         }
         let label =
-          "#" <> id_str <> " — " <> r.record_type_name
-          <> " (" <> status.display_text(r.status) <> ")"
+          "#"
+          <> id_str
+          <> " — "
+          <> r.record_type_name
+          <> " ("
+          <> status.display_text(r.status)
+          <> ")"
         #(id_str, label)
       })
   }
