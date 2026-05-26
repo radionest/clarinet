@@ -17,7 +17,7 @@ import gleam/bool
 import gleam/dict.{type Dict}
 import gleam/int
 import gleam/javascript/promise
-import gleam/option.{None, Some}
+import gleam/option.{type Option, None, Some}
 import lustre/attribute
 import lustre/effect.{type Effect}
 import lustre/element.{type Element}
@@ -112,10 +112,25 @@ pub fn init_modal(
   args: shared.OpenCreateRecordModalArgs,
   _shared: Shared,
 ) -> #(Model, Effect(Msg), List(OutMsg)) {
-  let #(patient_id, study_uid_str, series_uid_str) = case args {
-    shared.PatientArgs(pid) -> #(pid, "", "")
-    shared.StudyArgs(pid, suid) -> #(pid, suid, "")
-    shared.SeriesArgs(pid, suid, seruid) -> #(pid, suid, seruid)
+  // Project each args variant onto the flat prefill tuple consumed by
+  // RecordFormData. Adding a new variant only touches this match.
+  let #(
+    patient_id,
+    study_uid_str,
+    series_uid_str,
+    parent_record_id_str,
+    context_info_str,
+  ) = case args {
+    shared.PatientArgs(pid) -> #(pid, "", "", "", "")
+    shared.StudyArgs(pid, suid) -> #(pid, suid, "", "", "")
+    shared.SeriesArgs(pid, suid, seruid) -> #(pid, suid, seruid, "", "")
+    shared.RecordArgs(pid, suid, seruid, parent_id, prefill) -> #(
+      pid,
+      option.unwrap(suid, ""),
+      option.unwrap(seruid, ""),
+      int.to_string(parent_id),
+      prefill,
+    )
   }
   let form_data =
     record_form.RecordFormData(
@@ -124,21 +139,30 @@ pub fn init_modal(
       study_uid: study_uid_str,
       series_uid: series_uid_str,
       user_id: "",
-      parent_record_id: "",
-      context_info: "",
+      parent_record_id: parent_record_id_str,
+      context_info: context_info_str,
     )
   // Studies list is only needed when the user can actually pick a study
   // (i.e. the source page didn't already pin one). Otherwise the studies
   // dropdown is replaced by a locked input, and an HTTP fetch would be wasted.
+  // For RecordArgs we eagerly load when no study_uid is pinned.
   let studies_eff = case args {
     shared.PatientArgs(pid) -> load_studies_for_patient(1, pid)
-    shared.StudyArgs(_, _) | shared.SeriesArgs(_, _, _) -> effect.none()
+    shared.RecordArgs(pid, None, _, _, _) -> load_studies_for_patient(1, pid)
+    shared.StudyArgs(_, _)
+    | shared.SeriesArgs(_, _, _)
+    | shared.RecordArgs(_, Some(_), _, _, _) -> effect.none()
   }
   // Series list is only needed when a study is pinned but no series — i.e.
   // the user is on a Study page picking a series-level RecordType.
   let series_eff = case args {
     shared.StudyArgs(_, suid) -> load_series_for_study(1, suid)
-    shared.PatientArgs(_) | shared.SeriesArgs(_, _, _) -> effect.none()
+    shared.RecordArgs(_, Some(suid), None, _, _) ->
+      load_series_for_study(1, suid)
+    shared.PatientArgs(_)
+    | shared.SeriesArgs(_, _, _)
+    | shared.RecordArgs(_, None, _, _, _)
+    | shared.RecordArgs(_, _, Some(_), _, _) -> effect.none()
   }
   let model =
     Model(
@@ -187,6 +211,17 @@ pub fn update(
             patient_id: pid,
             study_uid: suid,
             series_uid: seruid,
+          )
+        // RecordArgs: study/series UIDs may be unset on the source Record;
+        // only restore them when present in args, otherwise leave whatever
+        // the user just selected so the cascading pickers keep working.
+        Modal(shared.RecordArgs(pid, suid_opt, seruid_opt, parent_id, _)) ->
+          record_form.RecordFormData(
+            ..raw_new_data,
+            patient_id: pid,
+            study_uid: option.unwrap(suid_opt, raw_new_data.study_uid),
+            series_uid: option.unwrap(seruid_opt, raw_new_data.series_uid),
+            parent_record_id: int.to_string(parent_id),
           )
         FullPage -> raw_new_data
       }
@@ -333,6 +368,11 @@ pub fn update(
                 bucket.Records(bucket.query_with_study(suid)),
               )
             shared.SeriesArgs(_, _, seruid) -> shared.ReloadSeries(seruid)
+            // Source-Record-keyed bucket doesn't exist (children-of-record
+            // isn't a server filter); invalidate all record buckets so any
+            // visible list refetches and shows the new child.
+            shared.RecordArgs(_, _, _, _, _) ->
+              shared.InvalidateAllRecordBuckets
           }
           #(Model(..model, loading: False), effect.none(), [
             shared.CacheRecord(record),
@@ -416,6 +456,7 @@ fn load_series_for_study(request_id: Int, study_uid: String) -> Effect(Msg) {
 pub fn view(model: Model, shared: Shared) -> Element(Msg) {
   let locked = compute_locked_fields(model.host_mode)
   let hidden = compute_hidden_fields(model.host_mode)
+  let expected_level = expected_level_for(model.host_mode)
   let form =
     record_form.view(
       data: model.form_data,
@@ -425,6 +466,7 @@ pub fn view(model: Model, shared: Shared) -> Element(Msg) {
       loading: model.loading,
       locked_fields: locked,
       hidden_fields: hidden,
+      expected_level: expected_level,
       shared: shared,
       on_update: fn(msg) { UpdateForm(msg) },
       on_submit: fn() { Submit },
@@ -436,12 +478,28 @@ pub fn view(model: Model, shared: Shared) -> Element(Msg) {
         html.h1([], [html.text("New Record")]),
         form,
       ])
+    Modal(shared.RecordArgs(_, _, _, parent_id, _)) ->
+      html.div([], [render_parent_pill(parent_id), form])
     Modal(_) -> form
   }
 }
 
+// Read-only header pill surfacing the source Record id in the create-from-
+// Record flow. The parent_record_id is also written to form_data but kept
+// hidden (see compute_hidden_fields) — this pill is the only visible cue
+// that the new Record will inherit a parent.
+fn render_parent_pill(parent_id: Int) -> Element(Msg) {
+  html.div([attribute.class("create-from-record-pill")], [
+    html.text("Created from Record #" <> int.to_string(parent_id)),
+  ])
+}
+
 /// Compute which form fields render as read-only inputs.
 /// Public for unit testing — the body is a pure function of `host_mode`.
+///
+/// For `RecordArgs` we only lock the UIDs that the source Record actually
+/// has — when `study_uid` / `series_uid` are `None`, the cascading picker
+/// stays interactive so the user can complete the missing context.
 pub fn compute_locked_fields(host_mode: HostMode) -> List(String) {
   case host_mode {
     FullPage -> []
@@ -452,14 +510,54 @@ pub fn compute_locked_fields(host_mode: HostMode) -> List(String) {
       "study_uid",
       "patient_id",
     ]
+    Modal(shared.RecordArgs(_, study_uid_opt, series_uid_opt, _, _)) -> {
+      let base = ["patient_id"]
+      let with_study = case study_uid_opt {
+        Some(_) -> ["study_uid", ..base]
+        None -> base
+      }
+      case series_uid_opt {
+        Some(_) -> ["series_uid", ..with_study]
+        None -> with_study
+      }
+    }
   }
 }
 
 /// Compute which form fields are entirely omitted from the rendered form.
 /// Public for unit testing — the body is a pure function of `host_mode`.
+///
+/// `user_id` is hidden in every modal mode. `parent_record_id` is hidden
+/// for the existing three variants (no parent context), but kept hidden
+/// for `RecordArgs` too — the value is preset from args and the source
+/// Record is surfaced via a read-only header pill instead of a picker.
 pub fn compute_hidden_fields(host_mode: HostMode) -> List(String) {
   case host_mode {
     FullPage -> []
     Modal(_) -> ["user_id", "parent_record_id"]
+  }
+}
+
+/// Derive the level the modal is "locked to" from the args variant. Used
+/// by `view` to disable record_type options whose level wouldn't match
+/// the locked UID context (else the backend `validate_record_level`
+/// rejects the create with 422).
+///
+/// For `RecordArgs` the level follows the deepest filled UID — same rule
+/// the backend uses to decide whether a payload is valid.
+pub fn expected_level_for(
+  host_mode: HostMode,
+) -> Option(types.DicomQueryLevel) {
+  case host_mode {
+    FullPage -> None
+    Modal(shared.PatientArgs(_)) -> Some(types.Patient)
+    Modal(shared.StudyArgs(_, _)) -> Some(types.Study)
+    Modal(shared.SeriesArgs(_, _, _)) -> Some(types.Series)
+    Modal(shared.RecordArgs(_, study_uid_opt, series_uid_opt, _, _)) ->
+      case series_uid_opt, study_uid_opt {
+        Some(_), _ -> Some(types.Series)
+        None, Some(_) -> Some(types.Study)
+        None, None -> Some(types.Patient)
+      }
   }
 }

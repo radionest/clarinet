@@ -94,12 +94,14 @@ pub fn view(
   loading loading: Bool,
   locked_fields locked_fields: List(String),
   hidden_fields hidden_fields: List(String),
+  expected_level expected_level: Option(types.DicomQueryLevel),
   shared shared: Shared,
   on_update on_update: fn(RecordFormMsg) -> msg,
   on_submit on_submit: fn() -> msg,
   on_cancel on_cancel: msg,
 ) -> Element(msg) {
-  let record_type_options = build_record_type_options(shared.cache.record_types)
+  let record_type_options =
+    build_record_type_options(shared.cache.record_types, expected_level)
   let patient_options = build_patient_options(shared.cache.patients)
   let study_options = build_study_options(studies)
   let series_options = build_series_options(series_list)
@@ -113,10 +115,10 @@ pub fn view(
     form.field(
       label: "Record Type",
       name: "record_type_name",
-      input: form.select(
+      input: form.select_with_disabled(
         name: "record_type_name",
         value: data.record_type_name,
-        options: [#("", "Select record type..."), ..record_type_options],
+        options: [#("", "Select record type...", False), ..record_type_options],
         on_change: fn(value) { on_update(UpdateRecordType(value)) },
       ),
       errors: errors,
@@ -429,9 +431,16 @@ fn needs_series(level: Option(types.DicomQueryLevel)) -> Bool {
 
 // --- Option builders ---
 
+// Builds dropdown options for record_type, optionally marking entries whose
+// level mismatches `expected_level` as `disabled`. The backend's post-init
+// `validate_record_level` (clarinet/models/record.py) rejects mismatched
+// payloads with 422 — disabling them client-side prevents the user from ever
+// reaching that failure path. `expected_level = None` leaves every option
+// enabled (used by the full-page form where no level is pinned).
 fn build_record_type_options(
   record_types: Dict(String, RecordType),
-) -> List(#(String, String)) {
+  expected_level: Option(types.DicomQueryLevel),
+) -> List(#(String, String, Bool)) {
   record_types
   |> dict.values
   |> list.sort(fn(a, b) { string.compare(a.name, b.name) })
@@ -440,7 +449,11 @@ fn build_record_type_options(
       Some(l) -> l <> " (" <> rt.name <> ")"
       None -> rt.name
     }
-    #(rt.name, label)
+    let disabled = case expected_level {
+      Some(lvl) -> rt.level != lvl
+      None -> False
+    }
+    #(rt.name, label, disabled)
   })
 }
 

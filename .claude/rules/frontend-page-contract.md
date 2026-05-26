@@ -94,6 +94,13 @@ Cache reloads (use when you need fresh data and don't have the entity in hand):
 Modals:
 - `OpenDeleteConfirm(resource, id)` — opens the generic confirm modal; `main.ConfirmModalAction` dispatches `PatientDetailMsg(Delete)` / `StudyDetailMsg(Delete)` depending on `resource` — extend that `case` arm when adding new resource types
 - `OpenFailPrompt(record_id)` — opens the "fail record" textarea modal (handled entirely in `main`)
+- `OpenCreateRecordModal(args)` — spawns an embedded `record_new` modal instance prefilled from `OpenCreateRecordModalArgs`. The args variant carries the locked context:
+  - `PatientArgs(patient_id)` — emitted from the Patient detail page; only `patient_id` is fixed.
+  - `StudyArgs(patient_id, study_uid)` — emitted from the Study detail page; patient + study locked.
+  - `SeriesArgs(patient_id, study_uid, series_uid)` — emitted from the Series detail page; all three UIDs locked.
+  - `RecordArgs(patient_id, study_uid?, series_uid?, parent_id, context_info_prefill)` — emitted from the Record detail page (admin-only). UIDs inherit from the source Record (`Option` because the source level may be PATIENT/STUDY/SERIES); a UID is locked only when present. `parent_record_id` is preset on the new Record (hidden picker, surfaced as a read-only header pill); `context_info` is prefilled with `"Created from {type} (id={N})"` and remains user-editable.
+
+  The record_type dropdown disables options whose level mismatches the args variant — the backend's `validate_record_level` would reject the mismatched create with 422 anyway.
 
 Auth:
 - `SetUser(User)` — after login / user update
