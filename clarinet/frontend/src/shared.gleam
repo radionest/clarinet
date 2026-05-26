@@ -31,10 +31,24 @@ pub type Shared {
 /// read-only) vs. user-selectable: deeper variants carry more locked
 /// context. The user can still pick a parent strictly below the source
 /// page level via the modal's cascading picker.
+///
+/// `RecordArgs` is the "from another Record" variant. Unlike
+/// `Patient/Study/SeriesArgs` (called from entity detail pages where
+/// the level is implicit in the page), `RecordArgs` carries the source
+/// Record's UIDs as `Option`s — the source level is derived from the
+/// deepest filled UID. `parent_record_id` and `context_info_prefill`
+/// let the new Record carry forward provenance.
 pub type OpenCreateRecordModalArgs {
   PatientArgs(patient_id: String)
   StudyArgs(patient_id: String, study_uid: String)
   SeriesArgs(patient_id: String, study_uid: String, series_uid: String)
+  RecordArgs(
+    patient_id: String,
+    study_uid: Option(String),
+    series_uid: Option(String),
+    parent_id: Int,
+    context_info_prefill: String,
+  )
 }
 
 /// Commands from page modules back to main.

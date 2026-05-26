@@ -173,6 +173,8 @@ pub type Msg {
   RequestDelete
   Delete
   DeleteResult(Result(Nil, ApiError))
+  // Admin: create a new Record inheriting this Record's UIDs and parent_id
+  OpenAddRecord
   // Admin workflow section
   WorkflowGraphLoaded(request_id: Int, result: Result(WorkflowGraph, ApiError))
   WorkflowRetryLoad
@@ -609,6 +611,38 @@ pub fn update(
         _ -> "Failed to delete record"
       }
       #(model, effect.none(), handle_error(err, msg))
+    }
+
+    // Create-from-Record: open the create-record modal prefilled with this
+    // Record's UIDs and a parent_record_id pointing back to it. The dialog's
+    // record_type dropdown disables types whose level doesn't match the
+    // source level (else the backend `validate_record_level` rejects with
+    // 422). The cache + view-level guards ensure this branch is reached only
+    // for an admin with a fully-loaded source Record carrying a `Some(id)`.
+    OpenAddRecord -> {
+      let opt_record =
+        dict.get(shared.cache.records, model.record_id)
+        |> option.from_result
+      case opt_record |> option.then(fn(r) { option.map(r.id, fn(id) { #(r, id) }) }) {
+        Some(#(record, rid)) -> {
+          let prefill =
+            "Created from "
+            <> record.record_type_name
+            <> " (id="
+            <> int.to_string(rid)
+            <> ")"
+          let args =
+            shared.RecordArgs(
+              patient_id: record.patient_id,
+              study_uid: record.study_uid,
+              series_uid: record.series_uid,
+              parent_id: rid,
+              context_info_prefill: prefill,
+            )
+          #(model, effect.none(), [shared.OpenCreateRecordModal(args)])
+        }
+        None -> #(model, effect.none(), [])
+      }
     }
 
     // --- Workflow section (admin only) ---
@@ -1311,6 +1345,17 @@ fn render_record_execution(
         ],
         [html.text("Back to Records")],
       ),
+      case is_admin_user(shared) && record.id != None {
+        True ->
+          html.button(
+            [
+              attribute.class("btn btn-primary"),
+              event.on_click(OpenAddRecord),
+            ],
+            [html.text("Add Record")],
+          )
+        False -> element.none()
+      },
       case permissions.can_fail_record(record, shared.user) {
         True ->
           html.button(

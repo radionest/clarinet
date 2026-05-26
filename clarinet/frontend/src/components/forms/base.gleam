@@ -204,6 +204,37 @@ pub fn select(
   )
 }
 
+// Select dropdown with per-option `disabled` flag. Used by the record-type
+// picker to grey out options whose level is incompatible with the caller's
+// locked UID context (e.g. `STUDY`-level type on a SERIES-pinned modal). The
+// plain `select` is unchanged so the other 4+ callers don't need updates.
+pub fn select_with_disabled(
+  name name: String,
+  value value: String,
+  options options: List(#(String, String, Bool)),
+  on_change on_change: fn(String) -> msg,
+) -> Element(msg) {
+  html.select(
+    [
+      attribute.id(name),
+      attribute.name(name),
+      attribute.class("form-select"),
+      event.on_change(on_change),
+    ],
+    list.map(options, fn(opt) {
+      let #(val, label, disabled) = opt
+      html.option(
+        [
+          attribute.value(val),
+          attribute.selected(val == value),
+          attribute.disabled(disabled),
+        ],
+        label,
+      )
+    }),
+  )
+}
+
 // Radio button group
 pub fn radio_group(
   name name: String,
