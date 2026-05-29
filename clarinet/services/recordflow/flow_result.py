@@ -68,8 +68,8 @@ class FieldComparison(ComparisonResult):
         self.operator = operator
 
     def evaluate(self, record_context: dict[str, list[RecordRead]]) -> bool:
-        left_strategy, left_values = self.left._resolve(record_context)
-        right_strategy, right_values = self.right._resolve(record_context)
+        left_strategy, left_values = self.left.resolve(record_context)
+        right_strategy, right_values = self.right.resolve(record_context)
 
         if left_strategy == "single" and right_strategy == "single":
             if not left_values:
@@ -204,15 +204,24 @@ class FlowResult:
                 raise ValueError(f"Cannot access field '{field}' in non-dict value")
         return value
 
-    def _resolve(self, record_context: dict[str, list[RecordRead]]) -> tuple[Strategy, list[Any]]:
-        """Return ``(strategy, values)`` for use by :class:`FieldComparison`.
+    def resolve(self, record_context: dict[str, list[RecordRead]]) -> tuple[Strategy, list[Any]]:
+        """Return ``(strategy, values)`` for the field against ``record_context``.
 
-        Empty list means the record type is absent from context. The caller
-        decides whether that is a hard error (single) or a soft False (any/all).
+        Public surface for consumers that need access to the underlying
+        records (:class:`FieldComparison`, action handlers, plan-mode
+        previewers). Empty list means the record type is absent from
+        context — the caller decides whether that is a hard error
+        (``single``) or a soft False (``any``/``all``).
 
         The runtime engine always passes ``list[RecordRead]`` per key. Unit
         tests and inspection helpers that synthesize a context dict by hand
         may pass a bare ``RecordRead`` — normalize defensively.
+
+        Raises:
+            AmbiguousContextError: ``strategy="single"`` and ``>1`` records
+                of ``record_name`` are present.
+            ValueError: A field in ``field_path`` is traversed through a
+                non-dict intermediate (typo or schema mismatch).
         """
         if self.record_name not in record_context:
             return self.strategy, []
@@ -228,7 +237,7 @@ class FlowResult:
 
     def _get_value(self, record_context: dict[str, list[RecordRead]]) -> Any:
         """Return a single value (legacy contract for tests/inspection)."""
-        strategy, values = self._resolve(record_context)
+        strategy, values = self.resolve(record_context)
         if not values:
             raise ValueError(f"Record '{self.record_name}' not found in context")
         if strategy != "single":
@@ -288,7 +297,7 @@ class ConstantFlowResult(FlowResult):
         super().__init__("", [], strategy="single")
         self.value = value
 
-    def _resolve(
+    def resolve(
         self,
         record_context: dict[str, list[RecordRead]],  # noqa: ARG002
     ) -> tuple[Strategy, list[Any]]:

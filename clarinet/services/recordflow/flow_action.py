@@ -9,7 +9,7 @@ dispatch in the engine.
 from collections.abc import Callable
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_serializer
 
 from .flow_result import FlowResult
 
@@ -43,6 +43,16 @@ class CreateRecordAction(_ActionBase):
     parent_record_id: int | None = None
     inherit_user: bool = False
     context_info: str | None = None
+
+    @field_serializer("series_uid")
+    def _serialize_series_uid(self, value: str | FlowResult | None) -> str | None:
+        # FlowResult is not JSON-encodable on its own; render it via repr() so
+        # `model_dump_json()` (used by plan-mode previews, audit logging, and
+        # any other consumer that ships the action across a wire) does not
+        # crash. Literal `str | None` values pass through unchanged.
+        if isinstance(value, FlowResult):
+            return repr(value)
+        return value
 
 
 class UpdateRecordAction(_ActionBase):
