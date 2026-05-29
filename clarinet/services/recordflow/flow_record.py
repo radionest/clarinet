@@ -349,7 +349,7 @@ class FlowRecord:
         self,
         record_type_name: str,
         *,
-        series_uid: str | None = None,
+        series_uid: str | FlowResult | None = None,
         user_id: str | None = None,
         parent_record_id: int | None = None,
         inherit_user: bool = False,
@@ -359,7 +359,10 @@ class FlowRecord:
 
         Args:
             record_type_name: The name of the record type to create.
-            series_uid: Optional series UID override.
+            series_uid: Optional series UID override. Accepts a literal string,
+                ``None``, or a :class:`FlowResult` (e.g. ``F.best_series``) that
+                is resolved at action-execution time against the triggering
+                record's context.
             user_id: Optional user ID to assign.
             parent_record_id: Optional explicit parent record ID.
             inherit_user: If True, inherit user_id from triggering record.

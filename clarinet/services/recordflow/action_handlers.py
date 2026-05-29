@@ -24,6 +24,7 @@ from .flow_action import (
     UpdateRecordAction,
 )
 from .flow_context import FlowContext
+from .flow_result import FlowResult
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -68,11 +69,26 @@ async def create_record(
 
     Inherits ``user_id`` from the triggering record if not explicitly set
     (record context only). ``parent_record_id`` is passed only when a
-    source record is present.
+    source record is present. When ``action.series_uid`` is a
+    :class:`FlowResult` (e.g. ``F.best_series``) it is resolved against
+    ``ctx.record_context``; an empty resolution falls back to
+    ``ctx.series_uid``, preserving the previous literal-only contract.
     """
     await engine.ensure_authenticated()
 
-    series_uid = action.series_uid or ctx.series_uid
+    series_uid_raw: Any = action.series_uid
+    if isinstance(series_uid_raw, FlowResult):
+        record_context = ctx.record_context or {}
+        _, values = series_uid_raw._resolve(record_context)
+        resolved = values[0] if values else None
+        if resolved is None:
+            logger.debug(
+                f"FlowResult series_uid for record "
+                f"'{series_uid_raw.record_name}' did not resolve; "
+                f"falling back to ctx.series_uid"
+            )
+        series_uid_raw = resolved
+    series_uid = series_uid_raw or ctx.series_uid
     user_id = action.user_id
     parent_record_id = action.parent_record_id
 

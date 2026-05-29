@@ -11,6 +11,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict
 
+from .flow_result import FlowResult
+
 
 class _ActionBase(BaseModel):
     """Shared configuration for all action models."""
@@ -23,7 +25,9 @@ class CreateRecordAction(_ActionBase):
 
     Args:
         record_type_name: Name of the record type to create.
-        series_uid: Optional series UID override.
+        series_uid: Optional series UID override. Accepts a literal string,
+            ``None``, or a :class:`FlowResult` resolved at action-execution
+            time against the triggering record's context (e.g. ``F.best_series``).
         user_id: Optional user ID to assign.
         parent_record_id: Optional explicit parent record ID.
         inherit_user: If True, inherit user_id from triggering record
@@ -34,7 +38,7 @@ class CreateRecordAction(_ActionBase):
 
     type: Literal["create_record"] = "create_record"
     record_type_name: str
-    series_uid: str | None = None
+    series_uid: str | FlowResult | None = None
     user_id: str | None = None
     parent_record_id: int | None = None
     inherit_user: bool = False
