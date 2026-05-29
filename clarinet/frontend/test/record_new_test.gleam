@@ -70,7 +70,7 @@ pub fn locked_fields_series_args_test() {
 // --- compute_hidden_fields ---
 
 pub fn hidden_fields_full_page_test() {
-  record_new.compute_hidden_fields(record_new.FullPage)
+  record_new.compute_hidden_fields(record_new.FullPage, False)
   |> should.equal([])
 }
 
@@ -78,11 +78,26 @@ pub fn hidden_fields_modal_test() {
   let hidden =
     record_new.compute_hidden_fields(
       record_new.Modal(shared.PatientArgs(patient_id: "P001")),
+      False,
     )
   // Modal hides the optional user picker and parent-record picker.
   should.be_true(list.contains(hidden, "user_id"))
   should.be_true(list.contains(hidden, "parent_record_id"))
   should.equal(list.length(hidden), 2)
+}
+
+pub fn hidden_fields_modal_parent_required_test() {
+  // When the selected RecordType demands a parent and the modal mode does
+  // not preset one (Patient/Study/Series context), the parent picker
+  // must surface — only `user_id` stays hidden.
+  let hidden =
+    record_new.compute_hidden_fields(
+      record_new.Modal(shared.PatientArgs(patient_id: "P001")),
+      True,
+    )
+  should.be_true(list.contains(hidden, "user_id"))
+  should.be_false(list.contains(hidden, "parent_record_id"))
+  should.equal(list.length(hidden), 1)
 }
 
 // --- init_modal ---
@@ -177,6 +192,8 @@ pub fn locked_fields_record_args_patient_test() {
 pub fn hidden_fields_record_args_test() {
   // parent_record_id stays hidden under RecordArgs — value is preset from
   // args, surfaced via the read-only header pill, never via a picker.
+  // ``parent_required=True`` does not override this: the parent is already
+  // pinned by args.
   let hidden =
     record_new.compute_hidden_fields(
       record_new.Modal(shared.RecordArgs(
@@ -186,6 +203,7 @@ pub fn hidden_fields_record_args_test() {
         parent_id: 42,
         context_info_prefill: "from #42",
       )),
+      True,
     )
   should.be_true(list.contains(hidden, "user_id"))
   should.be_true(list.contains(hidden, "parent_record_id"))

@@ -81,6 +81,12 @@ class RecordTypeBase(SQLModel):
         default=True,
         sa_column_kwargs={"server_default": sql_expression.false()},
     )
+    # See ``mask_patient_data`` below for the rationale on ``server_default`` and
+    # the dialect-aware ``sql_expression.false()`` literal.
+    parent_required: bool = Field(
+        default=False,
+        sa_column_kwargs={"server_default": sql_expression.false()},
+    )
     level: DicomQueryLevel = Field(default=DicomQueryLevel.SERIES)
 
     data_schema: RecordSchema | None = None
@@ -286,6 +292,7 @@ class RecordTypeOptional(SQLModel):
     max_records: int | None = Field(default=None)
     min_records: int | None = Field(default=None)
     unique_per_user: bool | None = Field(default=None)
+    parent_required: bool | None = Field(default=None)
     level: DicomQueryLevel | None = None
 
     # File schema fields

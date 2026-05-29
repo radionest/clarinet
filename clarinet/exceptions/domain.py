@@ -308,6 +308,14 @@ class RecordUniquePerUserError(RecordConstraintViolationError):
     error_code: ClassVar[str] = "UNIQUE_PER_USER"
 
 
+class RecordParentRequiredError(RecordConstraintViolationError):
+    """Raised when a RecordType declares ``parent_required=True`` but the
+    create payload has no ``parent_record_id``.
+    """
+
+    error_code: ClassVar[str] = "PARENT_REQUIRED"
+
+
 class WorkflowPlanDigestMismatchError(BusinessRuleViolationError):
     """Plan digest sent to /fire does not match the live re-plan.
 

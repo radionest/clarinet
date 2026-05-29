@@ -6,7 +6,7 @@
 //     detail pages with `args` carrying the prefilled context. The page
 //     model, update, and form view are reused; only `init`/submit-success/
 //     cancel branches differ between modes.
-import api/models.{type Record, type Series, type Study}
+import api/models.{type Record, type RecordType, type Series, type Study}
 import api/patients
 import api/records
 import api/studies
@@ -305,7 +305,32 @@ pub fn update(
     }
 
     Submit -> {
-      case record_form.validate(model.form_data, shared.cache.record_types) {
+      let base_result =
+        record_form.validate(model.form_data, shared.cache.record_types)
+      let parent_required =
+        record_type_requires_parent(
+          model.form_data.record_type_name,
+          shared.cache.record_types,
+        )
+      // Empty input and non-integer input both produce ``None`` on submit
+      // (see the ``int.parse`` branch below); both must trigger the guard.
+      let parent_id_valid = case model.form_data.parent_record_id {
+        "" -> False
+        v -> case int.parse(v) {
+          Ok(_) -> True
+          Error(_) -> False
+        }
+      }
+      let parent_missing = parent_required && !parent_id_valid
+      let parent_error = #("parent_record_id", "Parent record is required")
+      // Merge the parent-required guard into whatever record_form.validate
+      // returned so the form surfaces both classes of errors in one pass.
+      let result = case base_result, parent_missing {
+        _, False -> base_result
+        Ok(_), True -> Error(dict.from_list([parent_error]))
+        Error(errs), True -> Error(dict.insert(errs, parent_error.0, parent_error.1))
+      }
+      case result {
         Ok(_) -> {
           let data = model.form_data
           let record_create = models.RecordCreate(
@@ -455,7 +480,12 @@ fn load_series_for_study(request_id: Int, study_uid: String) -> Effect(Msg) {
 
 pub fn view(model: Model, shared: Shared) -> Element(Msg) {
   let locked = compute_locked_fields(model.host_mode)
-  let hidden = compute_hidden_fields(model.host_mode)
+  let parent_required =
+    record_type_requires_parent(
+      model.form_data.record_type_name,
+      shared.cache.record_types,
+    )
+  let hidden = compute_hidden_fields(model.host_mode, parent_required)
   let expected_level = expected_level_for(model.host_mode)
   let form =
     record_form.view(
@@ -525,16 +555,40 @@ pub fn compute_locked_fields(host_mode: HostMode) -> List(String) {
 }
 
 /// Compute which form fields are entirely omitted from the rendered form.
-/// Public for unit testing — the body is a pure function of `host_mode`.
+/// Public for unit testing — the body is a pure function of `host_mode`
+/// and the selected record_type's ``parent_required`` flag.
 ///
 /// `user_id` is hidden in every modal mode. `parent_record_id` is hidden
-/// for the existing three variants (no parent context), but kept hidden
-/// for `RecordArgs` too — the value is preset from args and the source
-/// Record is surfaced via a read-only header pill instead of a picker.
-pub fn compute_hidden_fields(host_mode: HostMode) -> List(String) {
+/// for the three context-only variants when the selected RecordType does
+/// not require a parent. When ``parent_required`` is set, the picker is
+/// revealed so the user can select one. Under `RecordArgs` the parent is
+/// always preset from args (surfaced via the read-only header pill), so
+/// the picker stays hidden regardless of ``parent_required``.
+pub fn compute_hidden_fields(
+  host_mode: HostMode,
+  parent_required: Bool,
+) -> List(String) {
   case host_mode {
     FullPage -> []
-    Modal(_) -> ["user_id", "parent_record_id"]
+    Modal(shared.RecordArgs(_, _, _, _, _)) -> ["user_id", "parent_record_id"]
+    Modal(_) ->
+      case parent_required {
+        True -> ["user_id"]
+        False -> ["user_id", "parent_record_id"]
+      }
+  }
+}
+
+/// Lookup whether the selected record_type has ``parent_required=True``.
+/// ``""`` (no type selected) and unknown names map to ``False`` so the
+/// hidden-fields / submit-validation paths default to the existing behaviour.
+pub fn record_type_requires_parent(
+  record_type_name: String,
+  record_types: Dict(String, RecordType),
+) -> Bool {
+  case dict.get(record_types, record_type_name) {
+    Ok(rt) -> rt.parent_required
+    Error(_) -> False
   }
 }
 

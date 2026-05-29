@@ -134,6 +134,7 @@ class RecordDef(BaseModel):
     slicer_context_hydrators: list[str] | None = None
     data_validators: list[str] | None = None
     mask_patient_data: bool = True
+    parent_required: bool = False
     viewer_mode: ViewerMode = ViewerMode.SINGLE_SERIES
 
     def __init__(self, *, role: str | None = None, **kwargs: Any) -> None:

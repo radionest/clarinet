@@ -304,6 +304,8 @@ async def _to_record_type_create(
     # absent from config — matching the contract of all other optional fields.
     if "mask_patient_data" in rt_def.model_fields_set:
         kwargs["mask_patient_data"] = rt_def.mask_patient_data
+    if "parent_required" in rt_def.model_fields_set:
+        kwargs["parent_required"] = rt_def.parent_required
     if "viewer_mode" in rt_def.model_fields_set:
         kwargs["viewer_mode"] = rt_def.viewer_mode
     if data_schema is not None:

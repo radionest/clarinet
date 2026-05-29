@@ -292,6 +292,7 @@ async def check_record_constraints(
         new_record.study_uid,
         patient_id=new_record.patient_id,
         user_id=new_record.user_id,
+        parent_record_id=new_record.parent_record_id,
     )
 
 
