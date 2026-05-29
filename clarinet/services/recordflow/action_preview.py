@@ -24,6 +24,7 @@ from .flow_action import (
     PipelineAction,
     UpdateRecordAction,
 )
+from .flow_result import FlowResult
 
 if TYPE_CHECKING:
     from .flow_context import FlowContext
@@ -81,13 +82,21 @@ def action_to_preview(action: FlowAction, ctx: FlowContext) -> ActionPreview:
 
     match action:
         case CreateRecordAction():
+            # FlowResult is not JSON-encodable — render lazily so the
+            # `POST /api/admin/workflow/dry-run` endpoint can return previews
+            # for flows that use `series_uid=F.<field>`.
+            preview_series_uid: str | None = (
+                repr(action.series_uid)
+                if isinstance(action.series_uid, FlowResult)
+                else action.series_uid
+            )
             return ActionPreview(
                 action_type="create_record",
                 summary=f"Create record '{action.record_type_name}'",
                 target=action.record_type_name,
                 details={
                     "record_type_name": action.record_type_name,
-                    "series_uid": action.series_uid,
+                    "series_uid": preview_series_uid,
                     "user_id": action.user_id,
                     "parent_record_id": action.parent_record_id,
                     "inherit_user": action.inherit_user,

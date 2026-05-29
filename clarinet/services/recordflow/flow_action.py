@@ -9,7 +9,9 @@ dispatch in the engine.
 from collections.abc import Callable
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_serializer
+
+from .flow_result import FlowResult
 
 
 class _ActionBase(BaseModel):
@@ -23,7 +25,9 @@ class CreateRecordAction(_ActionBase):
 
     Args:
         record_type_name: Name of the record type to create.
-        series_uid: Optional series UID override.
+        series_uid: Optional series UID override. Accepts a literal string,
+            ``None``, or a :class:`FlowResult` resolved at action-execution
+            time against the triggering record's context (e.g. ``F.best_series``).
         user_id: Optional user ID to assign.
         parent_record_id: Optional explicit parent record ID.
         inherit_user: If True, inherit user_id from triggering record
@@ -34,11 +38,21 @@ class CreateRecordAction(_ActionBase):
 
     type: Literal["create_record"] = "create_record"
     record_type_name: str
-    series_uid: str | None = None
+    series_uid: str | FlowResult | None = None
     user_id: str | None = None
     parent_record_id: int | None = None
     inherit_user: bool = False
     context_info: str | None = None
+
+    @field_serializer("series_uid")
+    def _serialize_series_uid(self, value: str | FlowResult | None) -> str | None:
+        # FlowResult is not JSON-encodable on its own; render it via repr() so
+        # `model_dump_json()` (used by plan-mode previews, audit logging, and
+        # any other consumer that ships the action across a wire) does not
+        # crash. Literal `str | None` values pass through unchanged.
+        if isinstance(value, FlowResult):
+            return repr(value)
+        return value
 
 
 class UpdateRecordAction(_ActionBase):

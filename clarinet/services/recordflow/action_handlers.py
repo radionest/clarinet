@@ -24,6 +24,13 @@ from .flow_action import (
     UpdateRecordAction,
 )
 from .flow_context import FlowContext
+from .flow_result import _SELF, FlowResult
+
+
+def _fr_log_name(fr: FlowResult) -> str:
+    """Human-friendly name for a FlowResult used in handler log messages."""
+    return "<trigger>" if fr.record_name == _SELF else fr.record_name
+
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -68,11 +75,37 @@ async def create_record(
 
     Inherits ``user_id`` from the triggering record if not explicitly set
     (record context only). ``parent_record_id`` is passed only when a
-    source record is present.
+    source record is present. When ``action.series_uid`` is a
+    :class:`FlowResult` (e.g. ``F.best_series``) it is resolved against
+    ``ctx.record_context`` at action time; if resolution yields no value
+    (empty list, ``None`` field, or any :class:`ValueError` raised by
+    ``resolve``) the handler falls back to ``ctx.series_uid`` — the same
+    fallback rule that applies to ``None`` and empty-string literals.
     """
     await engine.ensure_authenticated()
 
-    series_uid = action.series_uid or ctx.series_uid
+    series_uid_raw: Any = action.series_uid
+    if isinstance(series_uid_raw, FlowResult):
+        record_context = ctx.record_context or {}
+        try:
+            _, values = series_uid_raw.resolve(record_context)
+        except ValueError as e:
+            # AmbiguousContextError (subclass of ValueError) when strategy="single"
+            # meets >1 records in context; plain ValueError from _extract_value
+            # when a field_path step traverses a non-dict intermediate.
+            logger.warning(
+                f"FlowResult series_uid for '{_fr_log_name(series_uid_raw)}' "
+                f"could not be resolved ({e}); falling back to ctx.series_uid"
+            )
+            values = []
+        resolved = values[0] if values else None
+        if resolved is None:
+            logger.debug(
+                f"FlowResult series_uid for '{_fr_log_name(series_uid_raw)}' "
+                f"did not resolve; falling back to ctx.series_uid"
+            )
+        series_uid_raw = resolved
+    series_uid = series_uid_raw or ctx.series_uid
     user_id = action.user_id
     parent_record_id = action.parent_record_id
 

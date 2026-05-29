@@ -1084,6 +1084,329 @@ class TestEngineInheritUserAndParent:
         assert call_args.parent_record_id == 42
 
 
+class TestEngineSeriesUidFlowResult:
+    """``CreateRecordAction.series_uid`` accepts a FlowResult resolved at run time."""
+
+    @pytest.mark.asyncio
+    async def test_field_proxy_resolves_from_triggering_record_data(self):
+        """``F.best_series`` is resolved from the trigger record's data."""
+        from unittest.mock import AsyncMock
+
+        from clarinet.services.recordflow.engine import RecordFlowEngine
+
+        mock_client = AsyncMock()
+        mock_client.find_records = AsyncMock(return_value=[])
+        mock_client.create_record = AsyncMock(return_value=make_record_read("output", record_id=99))
+
+        engine = RecordFlowEngine(mock_client)
+
+        flow = FlowRecord("trigger-type")
+        flow.on_status("finished")
+        F = Field()
+        flow.add_record("output", series_uid=F.best_series)
+        engine.register_flow(flow)
+
+        test_record = make_record_read(
+            "trigger-type",
+            data={"best_series": "1.2.840.10008.99.1"},
+            record_id=10,
+            status=RecordStatus.finished,
+        )
+
+        await engine.handle_record_status_change(test_record)
+
+        assert mock_client.create_record.call_count == 1
+        call_args = mock_client.create_record.call_args[0][0]
+        assert call_args.series_uid == "1.2.840.10008.99.1"
+
+    @pytest.mark.asyncio
+    async def test_literal_series_uid_still_works(self):
+        """Plain string ``series_uid`` is preserved unchanged (regression)."""
+        from unittest.mock import AsyncMock
+
+        from clarinet.services.recordflow.engine import RecordFlowEngine
+
+        mock_client = AsyncMock()
+        mock_client.find_records = AsyncMock(return_value=[])
+        mock_client.create_record = AsyncMock(return_value=make_record_read("output", record_id=99))
+
+        engine = RecordFlowEngine(mock_client)
+
+        flow = FlowRecord("trigger-type")
+        flow.on_status("finished")
+        flow.add_record("output", series_uid="1.2.840.10008.99.2")
+        engine.register_flow(flow)
+
+        test_record = make_record_read("trigger-type", record_id=10, status=RecordStatus.finished)
+
+        await engine.handle_record_status_change(test_record)
+
+        assert mock_client.create_record.call_count == 1
+        call_args = mock_client.create_record.call_args[0][0]
+        assert call_args.series_uid == "1.2.840.10008.99.2"
+
+    @pytest.mark.asyncio
+    async def test_field_proxy_missing_field_falls_back_to_ctx(self):
+        """Missing ``F.best_series`` field falls back to ``ctx.series_uid``.
+
+        ``FlowResult._extract_value`` returns ``None`` when the field is absent
+        from ``data``; the handler then drops to the literal fallback.
+        ``ctx.series_uid`` is ``None`` for STUDY-level triggers, so the API
+        receives ``series_uid=None`` without raising.
+        """
+        from unittest.mock import AsyncMock
+
+        from clarinet.services.recordflow.engine import RecordFlowEngine
+
+        mock_client = AsyncMock()
+        mock_client.find_records = AsyncMock(return_value=[])
+        mock_client.create_record = AsyncMock(return_value=make_record_read("output", record_id=99))
+
+        engine = RecordFlowEngine(mock_client)
+
+        flow = FlowRecord("trigger-type")
+        flow.on_status("finished")
+        F = Field()
+        flow.add_record("output", series_uid=F.best_series)
+        engine.register_flow(flow)
+
+        test_record = make_record_read(
+            "trigger-type",
+            data={"other_field": "irrelevant"},
+            record_id=10,
+            status=RecordStatus.finished,
+        )
+
+        await engine.handle_record_status_change(test_record)
+
+        assert mock_client.create_record.call_count == 1
+        call_args = mock_client.create_record.call_args[0][0]
+        assert call_args.series_uid is None
+
+    @pytest.mark.asyncio
+    async def test_flowresult_for_absent_record_type_falls_back_to_ctx(self):
+        """``FlowResult`` pointing at a record type absent from the context resolves to nothing.
+
+        Handler must fall back to ``ctx.series_uid`` — protecting flow authors
+        who reference a record type that never enters the trigger's context
+        slice (e.g. due to a tree-filter mismatch).
+        """
+        from unittest.mock import AsyncMock
+
+        from clarinet.services.recordflow.engine import RecordFlowEngine
+
+        mock_client = AsyncMock()
+        mock_client.find_records = AsyncMock(return_value=[])
+        mock_client.create_record = AsyncMock(return_value=make_record_read("output", record_id=99))
+
+        engine = RecordFlowEngine(mock_client)
+
+        flow = FlowRecord("trigger-type")
+        flow.on_status("finished")
+        flow.add_record(
+            "output",
+            series_uid=FlowResult("never-loaded-type", ["best_series"]),
+        )
+        engine.register_flow(flow)
+
+        test_record = make_record_read(
+            "trigger-type",
+            data={"unrelated": "x"},
+            record_id=10,
+            status=RecordStatus.finished,
+        )
+
+        await engine.handle_record_status_change(test_record)
+
+        assert mock_client.create_record.call_count == 1
+        call_args = mock_client.create_record.call_args[0][0]
+        assert call_args.series_uid is None
+
+    def test_add_record_rejects_multi_valued_flowresult_strategy(self):
+        """``.any()`` / ``.all()`` on ``series_uid`` raise at DSL build time."""
+        flow = FlowRecord("trigger-type")
+        flow.on_status("finished")
+
+        with pytest.raises(ValueError, match="single-valued FlowResult"):
+            flow.add_record("output", series_uid=FlowResult("first-check", strategy="any"))
+
+        with pytest.raises(ValueError, match="single-valued FlowResult"):
+            flow.add_record("output", series_uid=FlowResult("first-check", strategy="all"))
+
+    @pytest.mark.asyncio
+    async def test_ambiguous_cross_record_flowresult_falls_back_to_ctx(self):
+        """Multiple matching records cause AmbiguousContextError → fallback + WARNING.
+
+        ``record("first-check").d.best_series`` uses the default
+        ``strategy="single"`` — when the trigger's tree slice contains two
+        ``first-check`` records (e.g. a PATIENT-level trigger covering several
+        studies), ``resolve`` raises. The handler must catch it and fall
+        back to ``ctx.series_uid`` rather than dropping the action.
+        """
+        from unittest.mock import AsyncMock
+
+        from clarinet.services.recordflow.action_handlers import create_record
+        from clarinet.services.recordflow.engine import RecordFlowEngine
+        from clarinet.services.recordflow.flow_context import FlowContext
+        from clarinet.services.recordflow.flow_result import _SELF as SELF
+
+        mock_client = AsyncMock()
+        mock_client.create_record = AsyncMock(return_value=make_record_read("output", record_id=99))
+
+        engine = RecordFlowEngine(mock_client)
+        engine.ensure_authenticated = AsyncMock()
+
+        trigger = make_record_read("trigger-type", record_id=10, status=RecordStatus.finished)
+        ambig_a = make_record_read("first-check", data={"best_series": "1.2.3.A"}, record_id=20)
+        ambig_b = make_record_read("first-check", data={"best_series": "1.2.3.B"}, record_id=21)
+
+        record_context = {
+            "first-check": [ambig_a, ambig_b],
+            SELF: [trigger],
+        }
+        ctx = FlowContext.for_record(trigger, record_context)
+
+        action = CreateRecordAction(
+            record_type_name="output",
+            series_uid=FlowResult("first-check", ["best_series"]),
+        )
+
+        await create_record(engine, action, ctx)
+
+        assert mock_client.create_record.call_count == 1
+        call_args = mock_client.create_record.call_args[0][0]
+        # ctx.series_uid is None for the STUDY-level trigger, so fallback to None.
+        assert call_args.series_uid is None
+
+    @pytest.mark.asyncio
+    async def test_field_proxy_resolves_inside_if_record_branch(self):
+        """FlowResult resolution works when ``add_record`` sits under a guard.
+
+        Locks the wiring between ``FlowCondition.actions`` and the resolution
+        path — previously only top-level ``flow.actions`` were exercised.
+        """
+        from unittest.mock import AsyncMock
+
+        from clarinet.services.recordflow.engine import RecordFlowEngine
+
+        mock_client = AsyncMock()
+        mock_client.find_records = AsyncMock(return_value=[])
+        mock_client.create_record = AsyncMock(return_value=make_record_read("output", record_id=99))
+
+        engine = RecordFlowEngine(mock_client)
+
+        flow = FlowRecord("trigger-type")
+        flow.on_status("finished")
+        F = Field()
+        flow.if_record(F.is_good == True).add_record(  # noqa: E712
+            "output", series_uid=F.best_series
+        )
+        engine.register_flow(flow)
+
+        test_record = make_record_read(
+            "trigger-type",
+            data={"is_good": True, "best_series": "1.2.840.10008.99.3"},
+            record_id=10,
+            status=RecordStatus.finished,
+        )
+
+        await engine.handle_record_status_change(test_record)
+
+        assert mock_client.create_record.call_count == 1
+        call_args = mock_client.create_record.call_args[0][0]
+        assert call_args.series_uid == "1.2.840.10008.99.3"
+
+    @pytest.mark.asyncio
+    async def test_flowresult_field_path_typo_falls_back_to_ctx(self):
+        """Plain ValueError from ``_extract_value`` (typo) → fallback, not drop.
+
+        ``F.best_series.nested`` walks one step into a non-dict value
+        (``"1.2.3.4"``), so ``_extract_value`` raises ``ValueError``. The
+        handler's broadened ``except ValueError`` keeps the action alive.
+        """
+        from unittest.mock import AsyncMock
+
+        from clarinet.services.recordflow.action_handlers import create_record
+        from clarinet.services.recordflow.engine import RecordFlowEngine
+        from clarinet.services.recordflow.flow_context import FlowContext
+        from clarinet.services.recordflow.flow_result import _SELF as SELF
+
+        mock_client = AsyncMock()
+        mock_client.create_record = AsyncMock(return_value=make_record_read("output", record_id=99))
+
+        engine = RecordFlowEngine(mock_client)
+        engine.ensure_authenticated = AsyncMock()
+
+        trigger = make_record_read(
+            "trigger-type",
+            data={"best_series": "1.2.3.4"},
+            record_id=10,
+            status=RecordStatus.finished,
+        )
+        ctx = FlowContext.for_record(trigger, {SELF: [trigger]})
+
+        action = CreateRecordAction(
+            record_type_name="output",
+            series_uid=FlowResult(SELF, ["best_series", "nested"]),
+        )
+
+        await create_record(engine, action, ctx)
+
+        assert mock_client.create_record.call_count == 1
+        call_args = mock_client.create_record.call_args[0][0]
+        assert call_args.series_uid is None
+
+    def test_create_record_action_serializes_flowresult_to_json(self):
+        """``model_dump_json`` succeeds when ``series_uid`` holds a FlowResult.
+
+        Without the ``@field_serializer``, Pydantic raises
+        ``PydanticSerializationError`` and any consumer that ships the
+        action across a wire (logging, plan-mode persistence, TaskIQ
+        message snapshots) crashes.
+        """
+        action = CreateRecordAction(
+            record_type_name="output",
+            series_uid=FlowResult("first-check", ["best_series"]),
+        )
+
+        data = action.model_dump_json()
+
+        assert "first-check" in data
+        assert "best_series" in data
+
+    def test_action_preview_for_flowresult_series_uid_is_json_serializable(self):
+        """``action_to_preview`` produces a JSON-serializable ActionPreview.
+
+        Covers the ``POST /api/admin/workflow/dry-run`` endpoint path:
+        without stringification in ``action_preview.py``, ActionPreview
+        carrying a raw FlowResult in ``details["series_uid"]`` would crash
+        ``model_dump_json`` with ``PydanticSerializationError`` and the
+        endpoint would return 500.
+        """
+        from clarinet.services.recordflow.action_preview import action_to_preview
+        from clarinet.services.recordflow.flow_context import FlowContext
+
+        trigger = make_record_read("trigger-type", record_id=10)
+        ctx = FlowContext.for_record(trigger, {})
+
+        action = CreateRecordAction(
+            record_type_name="output",
+            series_uid=FlowResult("first-check", ["best_series"]),
+        )
+
+        preview = action_to_preview(action, ctx)
+
+        # Preview must JSON-encode without error.
+        serialized = preview.model_dump_json()
+        assert "first-check" in serialized
+        # Plain literal still passes through as-is in details.
+        literal_action = CreateRecordAction(
+            record_type_name="output", series_uid="1.2.840.10008.99.4"
+        )
+        literal_preview = action_to_preview(literal_action, ctx)
+        assert literal_preview.details["series_uid"] == "1.2.840.10008.99.4"
+
+
 # ─── Entity creation flows — DSL + engine ──────────────────────────────────
 
 
