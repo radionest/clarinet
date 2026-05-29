@@ -1222,6 +1222,62 @@ class TestEngineSeriesUidFlowResult:
         call_args = mock_client.create_record.call_args[0][0]
         assert call_args.series_uid is None
 
+    def test_add_record_rejects_multi_valued_flowresult_strategy(self):
+        """``.any()`` / ``.all()`` on ``series_uid`` raise at DSL build time."""
+        flow = FlowRecord("trigger-type")
+        flow.on_status("finished")
+
+        with pytest.raises(ValueError, match="single-valued FlowResult"):
+            flow.add_record("output", series_uid=FlowResult("first-check", strategy="any"))
+
+        with pytest.raises(ValueError, match="single-valued FlowResult"):
+            flow.add_record("output", series_uid=FlowResult("first-check", strategy="all"))
+
+    @pytest.mark.asyncio
+    async def test_ambiguous_cross_record_flowresult_falls_back_to_ctx(self):
+        """Multiple matching records cause AmbiguousContextError → fallback + WARNING.
+
+        ``record("first-check").d.best_series`` uses the default
+        ``strategy="single"`` — when the trigger's tree slice contains two
+        ``first-check`` records (e.g. a PATIENT-level trigger covering several
+        studies), ``_resolve`` raises. The handler must catch it and fall
+        back to ``ctx.series_uid`` rather than dropping the action.
+        """
+        from unittest.mock import AsyncMock
+
+        from clarinet.services.recordflow.action_handlers import create_record
+        from clarinet.services.recordflow.engine import RecordFlowEngine
+        from clarinet.services.recordflow.flow_context import FlowContext
+        from clarinet.services.recordflow.flow_result import _SELF as SELF
+
+        mock_client = AsyncMock()
+        mock_client.create_record = AsyncMock(return_value=make_record_read("output", record_id=99))
+
+        engine = RecordFlowEngine(mock_client)
+        engine.ensure_authenticated = AsyncMock()
+
+        trigger = make_record_read("trigger-type", record_id=10, status=RecordStatus.finished)
+        ambig_a = make_record_read("first-check", data={"best_series": "1.2.3.A"}, record_id=20)
+        ambig_b = make_record_read("first-check", data={"best_series": "1.2.3.B"}, record_id=21)
+
+        record_context = {
+            "first-check": [ambig_a, ambig_b],
+            SELF: [trigger],
+        }
+        ctx = FlowContext.for_record(trigger, record_context)
+
+        action = CreateRecordAction(
+            record_type_name="output",
+            series_uid=FlowResult("first-check", ["best_series"]),
+        )
+
+        await create_record(engine, action, ctx)
+
+        assert mock_client.create_record.call_count == 1
+        call_args = mock_client.create_record.call_args[0][0]
+        # ctx.series_uid is None for the STUDY-level trigger, so fallback to None.
+        assert call_args.series_uid is None
+
 
 # ─── Entity creation flows — DSL + engine ──────────────────────────────────
 

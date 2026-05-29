@@ -24,7 +24,7 @@ from .flow_action import (
     UpdateRecordAction,
 )
 from .flow_context import FlowContext
-from .flow_result import FlowResult
+from .flow_result import _SELF, AmbiguousContextError, FlowResult
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -79,13 +79,22 @@ async def create_record(
     series_uid_raw: Any = action.series_uid
     if isinstance(series_uid_raw, FlowResult):
         record_context = ctx.record_context or {}
-        _, values = series_uid_raw._resolve(record_context)
+        name_for_log = (
+            "<trigger>" if series_uid_raw.record_name == _SELF else series_uid_raw.record_name
+        )
+        try:
+            _, values = series_uid_raw._resolve(record_context)
+        except AmbiguousContextError as e:
+            logger.warning(
+                f"FlowResult series_uid for '{name_for_log}' is ambiguous "
+                f"({e}); falling back to ctx.series_uid"
+            )
+            values = []
         resolved = values[0] if values else None
         if resolved is None:
             logger.debug(
-                f"FlowResult series_uid for record "
-                f"'{series_uid_raw.record_name}' did not resolve; "
-                f"falling back to ctx.series_uid"
+                f"FlowResult series_uid for '{name_for_log}' did not "
+                f"resolve; falling back to ctx.series_uid"
             )
         series_uid_raw = resolved
     series_uid = series_uid_raw or ctx.series_uid

@@ -360,9 +360,12 @@ class FlowRecord:
         Args:
             record_type_name: The name of the record type to create.
             series_uid: Optional series UID override. Accepts a literal string,
-                ``None``, or a :class:`FlowResult` (e.g. ``F.best_series``) that
-                is resolved at action-execution time against the triggering
-                record's context.
+                ``None``, or a single-valued :class:`FlowResult`
+                (e.g. ``F.best_series``) resolved at action-execution time
+                against the triggering record's context. Multi-valued
+                strategies (``.any()`` / ``.all()``) are rejected — a series
+                UID is intrinsically single-valued, so silently picking the
+                first element would hide author intent.
             user_id: Optional user ID to assign.
             parent_record_id: Optional explicit parent record ID.
             inherit_user: If True, inherit user_id from triggering record.
@@ -370,7 +373,18 @@ class FlowRecord:
 
         Returns:
             Self for method chaining.
+
+        Raises:
+            ValueError: If ``series_uid`` is a :class:`FlowResult` with a
+                multi-valued strategy.
         """
+        if isinstance(series_uid, FlowResult) and series_uid.strategy != "single":
+            raise ValueError(
+                f"add_record(series_uid=...) requires a single-valued "
+                f"FlowResult; got strategy='{series_uid.strategy}' on "
+                f"record '{series_uid.record_name}'. Use F.<field> or "
+                f"record('<type>').d.<field> (without .any()/.all())."
+            )
         action = CreateRecordAction(
             record_type_name=record_type_name,
             series_uid=series_uid,
