@@ -170,3 +170,32 @@ class TestCreateRecordApiParentRequired:
             },
         )
         assert resp.status_code == 201
+
+    @pytest.mark.asyncio
+    async def test_post_with_required_parent_not_existing_returns_404(
+        self,
+        client,
+        test_patient,
+        test_study,
+        test_series,
+        parent_required_type,
+    ):
+        # Regression test on separation of responsibilities:
+        # check_constraints only enforces NULL/non-NULL; existence of the
+        # referenced parent is enforced later by validate_parent_record.
+        # A non-NULL but missing parent_record_id must surface as 404
+        # (RecordNotFoundError), NOT 409 (PARENT_REQUIRED).
+        resp = await client.post(
+            f"{RECORDS_BASE}/",
+            json={
+                "patient_id": test_patient.id,
+                "study_uid": test_study.study_uid,
+                "series_uid": test_series.series_uid,
+                "record_type_name": parent_required_type.name,
+                "status": "pending",
+                "parent_record_id": 999_999,
+            },
+        )
+        assert resp.status_code == 404
+        body = resp.json()
+        assert body.get("code") != "PARENT_REQUIRED"
