@@ -75,6 +75,7 @@ def setup_exception_handlers(app: FastAPI) -> None:
         PipelineError,
         RecordDataValidationError,
         RecordLimitReachedError,
+        RecordParentRequiredError,
         RecordUniquePerUserError,
         ReportQueryError,
         SlicerConnectionError,
@@ -246,6 +247,19 @@ def setup_exception_handlers(app: FastAPI) -> None:
             content={
                 "detail": str(exc) if str(exc) else "User already has a record of this type",
                 "code": RecordUniquePerUserError.error_code,
+            },
+        )
+
+    @app.exception_handler(RecordParentRequiredError)
+    async def handle_record_parent_required(
+        _: Request, exc: RecordParentRequiredError
+    ) -> JSONResponse:
+        """Convert RecordParentRequiredError to 409 with machine-readable code."""
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content={
+                "detail": str(exc) if str(exc) else "Record type requires a parent record",
+                "code": RecordParentRequiredError.error_code,
             },
         )
 

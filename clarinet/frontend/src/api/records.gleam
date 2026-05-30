@@ -112,6 +112,11 @@ fn record_type_base_decoder() -> decode.Decoder(RecordType) {
     False,
     decode.bool,
   )
+  use parent_required <- decode.optional_field(
+    "parent_required",
+    False,
+    decode.bool,
+  )
   use viewer_mode <- decode.optional_field(
     "viewer_mode",
     "single_series",
@@ -155,6 +160,7 @@ fn record_type_base_decoder() -> decode.Decoder(RecordType) {
     max_records: None,
     min_records: None,
     unique_per_user: unique_per_user,
+    parent_required: parent_required,
     viewer_mode: viewer_mode,
     level: level,
     file_registry: file_registry,
@@ -526,6 +532,11 @@ pub fn record_type_full_decoder() -> decode.Decoder(RecordType) {
     False,
     decode.bool,
   )
+  use parent_required <- decode.optional_field(
+    "parent_required",
+    False,
+    decode.bool,
+  )
   use viewer_mode <- decode.optional_field(
     "viewer_mode",
     "single_series",
@@ -573,6 +584,7 @@ pub fn record_type_full_decoder() -> decode.Decoder(RecordType) {
     max_records: max_records,
     min_records: min_records,
     unique_per_user: unique_per_user,
+    parent_required: parent_required,
     viewer_mode: viewer_mode,
     level: level,
     file_registry: file_registry,

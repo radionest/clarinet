@@ -22,6 +22,7 @@ from clarinet.exceptions.domain import (
     RecordConstraintViolationError,
     RecordLimitReachedError,
     RecordNotFoundError,
+    RecordParentRequiredError,
     RecordTypeNotFoundError,
     RecordUniquePerUserError,
     UserNotFoundError,
@@ -1087,10 +1088,11 @@ class RecordRepository(BaseRepository[Record]):
         study_uid: str | None,
         patient_id: str | None = None,
         user_id: UUID | None = None,
+        parent_record_id: int | None = None,
     ) -> None:
         """Check if a new record can be created based on constraints.
 
-        Validates max_records and unique_per_user constraints.
+        Validates max_records, unique_per_user and parent_required constraints.
 
         Args:
             record_type_name: Record type name.
@@ -1098,6 +1100,8 @@ class RecordRepository(BaseRepository[Record]):
             study_uid: Study UID.
             patient_id: Patient ID (required for unique_per_user check).
             user_id: User UUID (triggers unique_per_user check when set).
+            parent_record_id: Proposed parent record id (used to enforce
+                ``parent_required`` on the RecordType).
 
         Raises:
             RecordTypeNotFoundError: If record type doesn't exist.
@@ -1111,6 +1115,11 @@ class RecordRepository(BaseRepository[Record]):
             raise RecordConstraintViolationError(f"Records of level {level} require study_uid")
         if level == "SERIES" and not series_uid:
             raise RecordConstraintViolationError("Records of level SERIES require series_uid")
+
+        if record_type.parent_required and parent_record_id is None:
+            raise RecordParentRequiredError(
+                f"Record type '{record_type_name}' requires a parent record"
+            )
 
         # `max_records=0` is the deprecation sentinel — blocks any new records
         # for retired RecordTypes while keeping the row in the registry.
