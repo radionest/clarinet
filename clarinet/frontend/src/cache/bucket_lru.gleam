@@ -1,29 +1,41 @@
 import cache/bucket.{type Bucket}
 import gleam/dict.{type Dict}
 import gleam/option.{type Option, None, Some}
+import gleam/order
+import gleam/string
 
 /// Upper bound on distinct entries in `cache.Model.record_buckets`.
 ///
-/// Each `(filters × sort)` combination produces a separate bucket, so a
-/// user rapidly clicking sortable headers under a heavy filter set can
-/// transiently inflate the dict beyond the 60 s TTL + stale-drop GC
-/// horizon. 20 covers typical filter+sort variety per page mount;
-/// anything beyond that falls back to the LRU policy in
-/// `insert_bounded`.
+/// Each `(filters × sort)` combination on `/records` produces a
+/// separate bucket. With ~5 filter dimensions × 13 sort orders the
+/// theoretical max is in the dozens, but normal usage (a couple of
+/// filters + a few sort experiments per page mount) stays well under
+/// 20. Bursts beyond that fall back to the eviction policy in
+/// `insert_bounded`. Frontend memory concern — not a deployment knob,
+/// tune here.
 pub const max_record_buckets: Int = 20
 
 /// Insert `b` under `topic`, then evict the oldest evictable entry if
 /// the dictionary now exceeds `max_record_buckets`.
 ///
-/// Eviction rules:
-/// - The just-inserted `topic` is protected — a burst of filter
-///   switches never drops the bucket the user is actively waiting on.
-/// - `Loading` / `LoadingMore` buckets are protected too: their
-///   responses are in flight; dropping them would either stall the UI
-///   (no `BucketLoaded` would update an evicted topic) or trigger a
-///   wasteful re-fetch the next time the user revisits the same filter.
-/// - Remaining candidates are ranked by `loaded_at_ms`; `Cold` and
-///   `Failed(_)` rank as 0 and evict before any timestamped entry.
+/// "LRU" here means **least-recently-loaded** — eviction priority is
+/// the `loaded_at_ms` carried by `Live` / `Stale`, NOT a view-access
+/// timestamp. A bucket the user is actively viewing can still be
+/// evicted if it loaded earlier than its neighbours; this is acceptable
+/// because each filter switch produces a fresh `BucketLoaded` event
+/// that refreshes the timestamp.
+///
+/// Eviction priorities (smallest evicts first):
+/// - `None` (skipped) — the just-inserted `topic`, or any `Loading` /
+///   `LoadingMore` bucket: dropping an in-flight response would either
+///   stall the UI or trigger a wasteful re-fetch.
+/// - `Some(0)` — `Cold` (no data at all).
+/// - `Some(1)` — `Failed(_)` (no fresh data, but may hold the user's
+///   last-good items via stale-while-revalidate).
+/// - `Some(loaded_at_ms)` — `Live` / `Stale`, ranked oldest-first.
+///
+/// Ties broken by lexicographic topic order — deterministic across the
+/// JS and Erlang targets, which disagree on `dict.fold` order.
 ///
 /// If every non-protected entry is in flight, the cap is temporarily
 /// exceeded — preferable to silently dropping an active request.
@@ -71,21 +83,34 @@ fn consider_for_oldest(
 ) -> Option(#(String, Int)) {
   case acc {
     None -> Some(#(key, at))
-    Some(#(_, best_at)) ->
-      case at < best_at {
+    Some(#(best_key, best_at)) ->
+      case prefers(at, key, best_at, best_key) {
         True -> Some(#(key, at))
         False -> acc
       }
   }
 }
 
+/// True iff candidate `(at_a, key_a)` should evict ahead of incumbent
+/// `(at_b, key_b)`. Ordered primarily by `at` (smaller wins), with
+/// lexicographic `key` as the tie-break for fold-order-independent
+/// deterministic eviction.
+fn prefers(at_a: Int, key_a: String, at_b: Int, key_b: String) -> Bool {
+  case at_a == at_b {
+    True -> string.compare(key_a, key_b) == order.Lt
+    False -> at_a < at_b
+  }
+}
+
 /// Eviction weight. `None` = in-flight, never evict. `Some(at)` —
-/// candidates ranked by ascending `at`; Cold / Failed sort as 0, Live /
-/// Stale by their `loaded_at_ms`.
+/// smaller evicts first. `Cold` = 0, `Failed(_)` = 1 (slightly above
+/// Cold to protect stale-while-revalidate items), `Live` / `Stale` use
+/// their `loaded_at_ms`.
 fn evictable_priority(b: Bucket) -> Option(Int) {
   case b.status {
     bucket.Loading | bucket.LoadingMore(_) -> None
     bucket.Live(at) | bucket.Stale(at) -> Some(at)
-    bucket.Cold | bucket.Failed(_) -> Some(0)
+    bucket.Failed(_) -> Some(1)
+    bucket.Cold -> Some(0)
   }
 }

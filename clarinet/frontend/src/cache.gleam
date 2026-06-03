@@ -335,8 +335,10 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg), List(OutMsg)) {
             Some(_cursor) -> {
               let updated =
                 bucket.Bucket(..b, status: bucket.LoadingMore(now_ms()))
+              // Key already exists (FetchMoreMsg fires from an Ok bucket),
+              // so insert can't grow the dict — plain insert is enough.
               let new_buckets =
-                bucket_lru.insert_bounded(model.record_buckets, topic, updated)
+                dict.insert(model.record_buckets, topic, updated)
               #(
                 Model(..model, record_buckets: new_buckets),
                 fetch_bucket_more_effect(key, b.next_cursor),
@@ -401,8 +403,9 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg), List(OutMsg)) {
               items: list.flatten([b.items, page.items]),
               next_cursor: page.next_cursor,
             )
+          // Existing key — plain insert keeps the dict size unchanged.
           let new_buckets =
-            bucket_lru.insert_bounded(model.record_buckets, topic, updated)
+            dict.insert(model.record_buckets, topic, updated)
           let new_records = upsert_records_dict(model.records, page.items)
           #(
             Model(..model, record_buckets: new_buckets, records: new_records),
@@ -418,11 +421,12 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg), List(OutMsg)) {
       let topic = bucket.key_to_topic(key)
       case dict.get(model.record_buckets, topic) {
         Ok(b) -> {
-          // Revert to Live status, keep existing items
+          // Revert to Live status, keep existing items.
+          // Existing key — plain insert keeps the dict size unchanged.
           let updated =
             bucket.Bucket(..b, status: bucket.Live(now_ms()))
           let new_buckets =
-            bucket_lru.insert_bounded(model.record_buckets, topic, updated)
+            dict.insert(model.record_buckets, topic, updated)
           #(
             Model(..model, record_buckets: new_buckets),
             effect.none(),
@@ -437,8 +441,9 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg), List(OutMsg)) {
       let topic = bucket.key_to_topic(key)
       case dict.get(model.record_buckets, topic) {
         Ok(b) -> {
+          // Status-only update on an existing key — no eviction needed.
           let new_buckets =
-            bucket_lru.insert_bounded(model.record_buckets, topic, bucket.mark_stale(b))
+            dict.insert(model.record_buckets, topic, bucket.mark_stale(b))
           #(Model(..model, record_buckets: new_buckets), effect.none(), [])
         }
         Error(_) -> #(model, effect.none(), [])
@@ -559,10 +564,10 @@ pub fn upsert_record_in_buckets(model: Model, record: Record) -> Model {
 // --- Private helpers ---
 
 // Each (filters × sort) combination is a separate entry in
-// `Model.record_buckets`. TTL (60s) plus the stale → drop GC path keeps
-// this bounded under normal use; `cache/bucket_lru.insert_bounded`
-// (cap `bucket_lru.max_record_buckets`) caps high-cardinality bursts
-// when a user rapidly cycles sortable headers under a heavy filter set.
+// `Model.record_buckets`. The 60 s TTL gates re-fetches on revisit;
+// `cache/bucket_lru.insert_bounded` (cap `bucket_lru.max_record_buckets`)
+// caps high-cardinality bursts when a user rapidly cycles sortable
+// headers under a heavy filter set.
 fn bucket_key_to_filter(key: BucketKey) -> List(#(String, json.Json)) {
   case key {
     bucket.Records(q) -> {

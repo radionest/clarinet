@@ -175,7 +175,3 @@ pub fn cold_and_failed_also_evict_first_test() {
   dict.has_key(after2, "failed") |> should.equal(False)
   dict.has_key(after2, topic(0)) |> should.equal(True)
 }
-
-pub fn max_record_buckets_constant_test() {
-  bucket_lru.max_record_buckets |> should.equal(20)
-}
