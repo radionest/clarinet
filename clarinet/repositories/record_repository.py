@@ -8,13 +8,14 @@ import random
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any
+from enum import Enum
+from typing import Any, assert_never
 from uuid import UUID
 
 from sqlalchemy import and_, distinct, exists, func, literal, or_, tuple_
 from sqlalchemy import delete as sa_delete
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import aliased, selectinload
+from sqlalchemy.orm import Mapped, aliased, selectinload
 from sqlmodel import col, select
 from sqlmodel.sql.expression import SelectOfScalar
 
@@ -96,117 +97,151 @@ class RecordFilterScope:
     has_unassigned: bool
 
 
-# Sentinel object identifying the modality sort column. The actual SQL
-# alias for the outerjoined Series row is created per-query in `find_page`
-# and passed to `_SortSpec.column`.
-#
-# `extract_key` for the modality specs reads `r.series.modality` from the
-# eager-loaded relationship, while ORDER BY reads from the outerjoin alias.
-# Both resolve to the same row inside a single transaction, but the cursor
-# extraction depends on `selectinload(Record.series)` staying in
-# `_build_criteria_query` — removing it would cause a `MissingGreenlet`
-# lazy-load in async context.
-_MODALITY = object()
+class _SortColumnKind(Enum):
+    """Discriminator for how `_SortSpec.column()` resolves into a SQL expression."""
+
+    NONE = "none"
+    """`id_asc` / `id_desc` / `changed_at_desc` — no auxiliary ORDER BY column."""
+
+    RECORD_COLUMN = "record_column"
+    """`column_attr` is an InstrumentedAttribute on `Record` / `RecordType`."""
+
+    MODALITY_ALIAS = "modality_alias"
+    """Resolves against the per-query `aliased(Series)` outerjoin created in
+    `find_page`. `extract_key` for the modality specs reads `r.series.modality`
+    from the eager-loaded relationship, while ORDER BY reads from the outerjoin
+    alias. Both resolve to the same row inside a single transaction, but the
+    cursor extraction depends on `selectinload(Record.series)` staying in
+    `_build_criteria_query` — removing it would cause a `MissingGreenlet`
+    lazy-load in async context."""
 
 
 @dataclass(frozen=True)
 class _SortSpec:
     """How to materialize one SortOrder into ORDER BY / WHERE / cursor key."""
 
-    column_owner: Any
+    kind: _SortColumnKind
+    column_attr: Any
     ascending: bool
     nullable: bool
     extract_key: Callable[[Record], Any]
     cast_cursor: Callable[[Any], Any] = lambda raw: raw
 
-    def column(self, series_alias: Any) -> Any:
+    def __post_init__(self) -> None:
+        # Pair the discriminator with its payload — guards against future
+        # _SORT_SPECS entries silently dropping a required column or carrying
+        # one for a kind that ignores it.
+        if self.kind is _SortColumnKind.RECORD_COLUMN:
+            if self.column_attr is None:
+                raise ValueError("RECORD_COLUMN sort spec requires column_attr")
+        elif self.column_attr is not None:
+            raise ValueError(f"{self.kind} sort spec must not carry column_attr")
+
+    def column(self, series_alias: Any) -> Mapped[Any] | None:
         """Return the SQL column expression for ORDER BY / WHERE."""
-        if self.column_owner is None:
-            return None
-        if self.column_owner is _MODALITY:
-            return col(series_alias.modality)
-        return col(self.column_owner)
+        match self.kind:
+            case _SortColumnKind.NONE:
+                return None
+            case _SortColumnKind.MODALITY_ALIAS:
+                return col(series_alias.modality)
+            case _SortColumnKind.RECORD_COLUMN:
+                return col(self.column_attr)
+            case _:
+                assert_never(self.kind)
 
 
 _SORT_SPECS: dict[SortOrder, _SortSpec] = {
     "changed_at_desc": _SortSpec(
-        column_owner=None,  # special-cased in find_page (legacy id DESC tie-break)
+        kind=_SortColumnKind.NONE,  # special-cased in find_page (legacy id DESC tie-break)
+        column_attr=None,
         ascending=False,
         nullable=False,
         extract_key=lambda r: r.changed_at,
     ),
     "id_asc": _SortSpec(
-        column_owner=None,
+        kind=_SortColumnKind.NONE,
+        column_attr=None,
         ascending=True,
         nullable=False,
         extract_key=lambda _r: None,
     ),
     "id_desc": _SortSpec(
-        column_owner=None,
+        kind=_SortColumnKind.NONE,
+        column_attr=None,
         ascending=False,
         nullable=False,
         extract_key=lambda _r: None,
     ),
     "record_type_asc": _SortSpec(
-        column_owner=RecordType.name,
+        kind=_SortColumnKind.RECORD_COLUMN,
+        column_attr=RecordType.name,
         ascending=True,
         nullable=False,
         extract_key=lambda r: r.record_type_name,
     ),
     "record_type_desc": _SortSpec(
-        column_owner=RecordType.name,
+        kind=_SortColumnKind.RECORD_COLUMN,
+        column_attr=RecordType.name,
         ascending=False,
         nullable=False,
         extract_key=lambda r: r.record_type_name,
     ),
     "status_asc": _SortSpec(
-        column_owner=Record.status,
+        kind=_SortColumnKind.RECORD_COLUMN,
+        column_attr=Record.status,
         ascending=True,
         nullable=False,
         extract_key=lambda r: r.status,
         cast_cursor=lambda raw: RecordStatus(raw),
     ),
     "status_desc": _SortSpec(
-        column_owner=Record.status,
+        kind=_SortColumnKind.RECORD_COLUMN,
+        column_attr=Record.status,
         ascending=False,
         nullable=False,
         extract_key=lambda r: r.status,
         cast_cursor=lambda raw: RecordStatus(raw),
     ),
     "patient_asc": _SortSpec(
-        column_owner=Record.patient_id,
+        kind=_SortColumnKind.RECORD_COLUMN,
+        column_attr=Record.patient_id,
         ascending=True,
         nullable=False,
         extract_key=lambda r: r.patient_id,
     ),
     "patient_desc": _SortSpec(
-        column_owner=Record.patient_id,
+        kind=_SortColumnKind.RECORD_COLUMN,
+        column_attr=Record.patient_id,
         ascending=False,
         nullable=False,
         extract_key=lambda r: r.patient_id,
     ),
     "user_asc": _SortSpec(
-        column_owner=Record.user_id,
+        kind=_SortColumnKind.RECORD_COLUMN,
+        column_attr=Record.user_id,
         ascending=True,
         nullable=True,
         extract_key=lambda r: r.user_id,
         cast_cursor=lambda raw: UUID(raw),
     ),
     "user_desc": _SortSpec(
-        column_owner=Record.user_id,
+        kind=_SortColumnKind.RECORD_COLUMN,
+        column_attr=Record.user_id,
         ascending=False,
         nullable=True,
         extract_key=lambda r: r.user_id,
         cast_cursor=lambda raw: UUID(raw),
     ),
     "modality_asc": _SortSpec(
-        column_owner=_MODALITY,
+        kind=_SortColumnKind.MODALITY_ALIAS,
+        column_attr=None,
         ascending=True,
         nullable=True,
         extract_key=lambda r: r.series.modality if r.series else None,
     ),
     "modality_desc": _SortSpec(
-        column_owner=_MODALITY,
+        kind=_SortColumnKind.MODALITY_ALIAS,
+        column_attr=None,
         ascending=False,
         nullable=True,
         extract_key=lambda r: r.series.modality if r.series else None,
@@ -1350,7 +1385,7 @@ class RecordRepository(BaseRepository[Record]):
 
         # Optional join for modality sort (Series may not be filtered elsewhere)
         series_sort_alias: Any = None
-        if sort_spec.column_owner is _MODALITY:
+        if sort_spec.kind is _SortColumnKind.MODALITY_ALIAS:
             series_sort_alias = aliased(Series)
             statement = statement.outerjoin(
                 series_sort_alias,
