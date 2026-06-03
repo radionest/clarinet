@@ -12,14 +12,21 @@ import gleam/option.{type Option, None, Some}
 /// `insert_bounded`.
 pub const max_record_buckets: Int = 20
 
-/// Insert `b` under `topic`, then evict the entry with the oldest
-/// `loaded_at_ms` if the dictionary now exceeds `max_record_buckets`.
+/// Insert `b` under `topic`, then evict the oldest evictable entry if
+/// the dictionary now exceeds `max_record_buckets`.
 ///
-/// The just-inserted `topic` is excluded from eviction candidates, so a
-/// burst of filter switches never drops the bucket the user is actively
-/// waiting on. Buckets without a loaded timestamp (Cold / Loading /
-/// Failed) sort as 0 and are evicted before any Live / Stale /
-/// LoadingMore entry.
+/// Eviction rules:
+/// - The just-inserted `topic` is protected — a burst of filter
+///   switches never drops the bucket the user is actively waiting on.
+/// - `Loading` / `LoadingMore` buckets are protected too: their
+///   responses are in flight; dropping them would either stall the UI
+///   (no `BucketLoaded` would update an evicted topic) or trigger a
+///   wasteful re-fetch the next time the user revisits the same filter.
+/// - Remaining candidates are ranked by `loaded_at_ms`; `Cold` and
+///   `Failed(_)` rank as 0 and evict before any timestamped entry.
+///
+/// If every non-protected entry is in flight, the cap is temporarily
+/// exceeded — preferable to silently dropping an active request.
 pub fn insert_bounded(
   buckets: Dict(String, Bucket),
   topic: String,
@@ -44,7 +51,11 @@ fn oldest_evictable_topic(
     use acc, key, b <- dict.fold(buckets, None)
     case key == protected {
       True -> acc
-      False -> consider_for_oldest(acc, key, bucket_loaded_at(b))
+      False ->
+        case evictable_priority(b) {
+          None -> acc
+          Some(at) -> consider_for_oldest(acc, key, at)
+        }
     }
   }
   case folded {
@@ -68,9 +79,13 @@ fn consider_for_oldest(
   }
 }
 
-fn bucket_loaded_at(b: Bucket) -> Int {
+/// Eviction weight. `None` = in-flight, never evict. `Some(at)` —
+/// candidates ranked by ascending `at`; Cold / Failed sort as 0, Live /
+/// Stale by their `loaded_at_ms`.
+fn evictable_priority(b: Bucket) -> Option(Int) {
   case b.status {
-    bucket.Live(at) | bucket.Stale(at) | bucket.LoadingMore(at) -> at
-    bucket.Cold | bucket.Loading | bucket.Failed(_) -> 0
+    bucket.Loading | bucket.LoadingMore(_) -> None
+    bucket.Live(at) | bucket.Stale(at) -> Some(at)
+    bucket.Cold | bucket.Failed(_) -> Some(0)
   }
 }
