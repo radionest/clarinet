@@ -9,13 +9,13 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any
+from typing import Any, assert_never
 from uuid import UUID
 
 from sqlalchemy import and_, distinct, exists, func, literal, or_, tuple_
 from sqlalchemy import delete as sa_delete
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import aliased, selectinload
+from sqlalchemy.orm import Mapped, aliased, selectinload
 from sqlmodel import col, select
 from sqlmodel.sql.expression import SelectOfScalar
 
@@ -121,13 +121,23 @@ class _SortSpec:
     """How to materialize one SortOrder into ORDER BY / WHERE / cursor key."""
 
     kind: _SortColumnKind
+    column_attr: Any
     ascending: bool
     nullable: bool
     extract_key: Callable[[Record], Any]
-    column_attr: Any = None
     cast_cursor: Callable[[Any], Any] = lambda raw: raw
 
-    def column(self, series_alias: Any) -> Any:
+    def __post_init__(self) -> None:
+        # Pair the discriminator with its payload — guards against future
+        # _SORT_SPECS entries silently dropping a required column or carrying
+        # one for a kind that ignores it.
+        if self.kind is _SortColumnKind.RECORD_COLUMN:
+            if self.column_attr is None:
+                raise ValueError("RECORD_COLUMN sort spec requires column_attr")
+        elif self.column_attr is not None:
+            raise ValueError(f"{self.kind} sort spec must not carry column_attr")
+
+    def column(self, series_alias: Any) -> Mapped[Any] | None:
         """Return the SQL column expression for ORDER BY / WHERE."""
         match self.kind:
             case _SortColumnKind.NONE:
@@ -136,23 +146,28 @@ class _SortSpec:
                 return col(series_alias.modality)
             case _SortColumnKind.RECORD_COLUMN:
                 return col(self.column_attr)
+            case _:
+                assert_never(self.kind)
 
 
 _SORT_SPECS: dict[SortOrder, _SortSpec] = {
     "changed_at_desc": _SortSpec(
         kind=_SortColumnKind.NONE,  # special-cased in find_page (legacy id DESC tie-break)
+        column_attr=None,
         ascending=False,
         nullable=False,
         extract_key=lambda r: r.changed_at,
     ),
     "id_asc": _SortSpec(
         kind=_SortColumnKind.NONE,
+        column_attr=None,
         ascending=True,
         nullable=False,
         extract_key=lambda _r: None,
     ),
     "id_desc": _SortSpec(
         kind=_SortColumnKind.NONE,
+        column_attr=None,
         ascending=False,
         nullable=False,
         extract_key=lambda _r: None,
@@ -219,12 +234,14 @@ _SORT_SPECS: dict[SortOrder, _SortSpec] = {
     ),
     "modality_asc": _SortSpec(
         kind=_SortColumnKind.MODALITY_ALIAS,
+        column_attr=None,
         ascending=True,
         nullable=True,
         extract_key=lambda r: r.series.modality if r.series else None,
     ),
     "modality_desc": _SortSpec(
         kind=_SortColumnKind.MODALITY_ALIAS,
+        column_attr=None,
         ascending=False,
         nullable=True,
         extract_key=lambda r: r.series.modality if r.series else None,
