@@ -26,6 +26,7 @@ import shutil
 import tempfile
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pydicom
 from pydicom.errors import InvalidDicomError
@@ -35,8 +36,12 @@ from clarinet.services.pipeline.context import TaskContext
 from clarinet.services.pipeline.message import PipelineMessage
 from clarinet.services.pipeline.task import pipeline_task
 from clarinet.settings import settings
-from clarinet.utils.db_manager import db_manager
 from clarinet.utils.logger import logger
+
+if TYPE_CHECKING:
+    from clarinet.client import ClarinetClient
+    from clarinet.models.patient import PatientInfo
+    from clarinet.models.study import SeriesBase, StudyBase
 
 
 def _has_disk_cache(cache_base: Path, study_uid: str, series_uid: str) -> bool:
@@ -53,32 +58,33 @@ def _has_disk_cache(cache_base: Path, study_uid: str, series_uid: str) -> bool:
     return any(series_dir.glob("*.dcm"))
 
 
-async def _has_dcm_anon(storage_path: Path, study_uid: str, series_uid: str) -> bool:
+async def _has_dcm_anon(
+    storage_path: Path,
+    patient: PatientInfo,
+    study: StudyBase,
+    series: SeriesBase,
+) -> bool:
     """Check whether an anonymized copy of the series already exists.
 
-    Renders ``settings.disk_path_template`` from DB state to compute the
-    expected ``dcm_anon`` directory — same logic
+    Renders ``settings.disk_path_template`` from pre-loaded entities to
+    compute the expected ``dcm_anon`` directory — same logic
     ``DicomWebCache._resolve_dcm_anon_dir`` uses. Stricter than the cache
     reader: requires at least one ``*.dcm`` file inside, so an empty
     ``dcm_anon/`` left by a failed anonymization run does not cause us to
     skip a genuinely needed prefetch.
+
+    Callers must pre-load Patient/Study/Series via the API
+    (``ctx.client.get_study()``) — this function performs no I/O beyond
+    the filesystem probe, keeping the worker off the Postgres network
+    surface that may not be reachable from every host (e.g. the Windows
+    DICOM worker).
     """
     from clarinet.models.base import DicomQueryLevel
-    from clarinet.models.patient import Patient
-    from clarinet.models.study import Series, Study
     from clarinet.services.common.storage_paths import (
         AnonPathError,
         build_context,
         render_working_folder,
     )
-
-    async with db_manager.async_session_factory() as session:
-        series = await session.get(Series, series_uid)
-        study = await session.get(Study, study_uid) if series else None
-        patient = await session.get(Patient, study.patient_id) if study else None
-
-    if not (series and study and patient):
-        return False
 
     try:
         ctx = build_context(
@@ -91,8 +97,13 @@ async def _has_dcm_anon(storage_path: Path, study_uid: str, series_uid: str) -> 
             settings.disk_path_template, DicomQueryLevel.SERIES, ctx, storage_path
         )
     except AnonPathError as exc:
-        logger.warning(
-            f"prefetch_dicom_web: cannot resolve dcm_anon path for {study_uid}/{series_uid}: {exc}"
+        # Race vs anonymization run: entity exists but anon_uid hasn't
+        # propagated yet. Symmetric with `DicomWebCache._resolve_dcm_anon_dir`
+        # (returns None silently) — we degrade to "no anon copy here, fetch
+        # it via C-GET", which is the safe default.
+        logger.debug(
+            f"prefetch_dicom_web: cannot resolve dcm_anon path for "
+            f"{study.study_uid}/{series.series_uid}: {exc}"
         )
         return False
 
@@ -177,16 +188,43 @@ async def _filter_series_to_fetch(
     cache_base: Path,
     study_uid: str,
     skip_if_anon: bool,
+    client: ClarinetClient,
 ) -> tuple[list[str], int, int]:
     """Partition series list into fetch / skip_cached / skip_anon.
 
-    Filesystem scans run in worker threads, DB lookups go through the
-    shared session factory (sequential — single ``AsyncSession`` per
-    series is fine and avoids the concurrency-safety constraints).
+    Filesystem scans run in worker threads. The dcm_anon shortcut needs
+    Patient/Study/Series metadata to render the storage template — one
+    ``client.get_study()`` HTTP call loads them all and feeds the
+    per-series fan-out, replacing what used to be N*3 direct DB queries.
+
+    Degradation paths (all safe — fall back to "fetch everything"):
+      * ``skip_if_anon`` is False → API call skipped entirely.
+      * ``client.get_study`` raises ``ClarinetAPIError`` (e.g. 404 —
+        legitimate race vs C-FIND on PACS, where series arrive before
+        the API row exists) → dcm_anon shortcut bypassed.
+      * A series listed by C-FIND is missing from ``study_read.series``
+        (e.g. filtered out by ``series_filter_*``) → that series goes
+        to fetch, matching the previous "DB lookup returned None" path.
 
     Returns:
         Tuple of ``(series_to_fetch, skipped_cached, skipped_anon)``.
     """
+    from clarinet.client import ClarinetAPIError
+
+    study_read = None
+    patient: PatientInfo | None = None
+    series_map: dict[str, SeriesBase] = {}
+    if skip_if_anon:
+        try:
+            study_read = await client.get_study(study_uid)
+            patient = study_read.patient
+            series_map = {s.series_uid: s for s in study_read.series if s.series_uid}
+        except ClarinetAPIError as exc:
+            logger.debug(
+                f"prefetch_dicom_web: study {study_uid} not available via API "
+                f"({exc}); skipping dcm_anon check, will C-GET all series"
+            )
+
     series_to_fetch: list[str] = []
     skipped_cached = 0
     skipped_anon = 0
@@ -194,20 +232,27 @@ async def _filter_series_to_fetch(
         if await asyncio.to_thread(_has_disk_cache, cache_base, study_uid, series_uid):
             skipped_cached += 1
             continue
-        if skip_if_anon and await _has_dcm_anon(storage_path, study_uid, series_uid):
-            skipped_anon += 1
-            continue
+        if skip_if_anon and study_read is not None and patient is not None:
+            series_obj = series_map.get(series_uid)
+            if series_obj is not None and await _has_dcm_anon(
+                storage_path, patient, study_read, series_obj
+            ):
+                skipped_anon += 1
+                continue
         series_to_fetch.append(series_uid)
     return series_to_fetch, skipped_cached, skipped_anon
 
 
-async def _prefetch_dicom_web_impl(msg: PipelineMessage, _ctx: TaskContext) -> None:
+async def _prefetch_dicom_web_impl(msg: PipelineMessage, ctx: TaskContext) -> None:
     """Core prefetch logic — testable without TaskIQ broker.
 
-    The ``TaskContext`` is intentionally unused: this task writes to a
-    storage-wide cache directory rather than to a record's working folder,
-    so it does not need ``ctx.files`` / ``ctx.records``. The parameter is
-    kept for ``pipeline_task`` wrapper compatibility.
+    This task writes files to a storage-wide cache directory rather than
+    a record's working folder, so ``ctx.files`` / ``ctx.records`` stay
+    unused. ``ctx.client`` IS used: ``_filter_series_to_fetch`` fetches
+    Study metadata via the API to decide which series can be skipped via
+    the ``dcm_anon`` shortcut. This keeps the worker off Postgres — a
+    deliberate choice so Windows workers (where ``5432`` is firewalled)
+    can run this task without ``WinError 1225``.
 
     Raises:
         PipelineStepError: If ``study_uid`` is missing or C-GET returns 0 instances.
@@ -265,6 +310,7 @@ async def _prefetch_dicom_web_impl(msg: PipelineMessage, _ctx: TaskContext) -> N
         cache_base,
         msg.study_uid,
         skip_if_anon,
+        ctx.client,
     )
 
     if not series_to_fetch:
