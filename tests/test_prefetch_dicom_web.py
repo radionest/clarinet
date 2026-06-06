@@ -218,6 +218,42 @@ class TestHasDcmAnon:
 
         assert await _has_dcm_anon(tmp_path, patient, study, series) is True
 
+    @pytest.mark.asyncio
+    async def test_accepts_dto_shape_from_api(self, tmp_path: Path) -> None:
+        """`_has_dcm_anon` works with DTOs (PatientInfo / StudyRead / SeriesBase).
+
+        Production passes whatever `ctx.client.get_study()` returns — DTO
+        shapes, not ORM rows. The other tests in this class build ORM
+        instances because the factory is convenient; this one validates
+        the DTO contract that `build_context` is actually fed at runtime.
+        """
+        from datetime import UTC, datetime
+
+        from clarinet.models.patient import PatientInfo
+        from clarinet.models.study import SeriesBase, StudyRead
+
+        patient = PatientInfo(id="DTO_PAT", name="Test", auto_id=801)
+        series = SeriesBase(
+            series_uid="1.2.8004.1.1",
+            series_number=1,
+            modality="CT",
+            anon_uid="ANON_DTO_SERIES",
+            study_uid="1.2.8004.1",
+        )
+        study = StudyRead(
+            study_uid="1.2.8004.1",
+            date=datetime.now(UTC).date(),
+            modalities_in_study="CT",
+            anon_uid="ANON_DTO_STUDY",
+            patient_id="DTO_PAT",
+            patient=patient,
+            series=[series],
+        )
+
+        # No dcm_anon dir on disk → False, but the call must complete
+        # without AttributeError on any DTO field `build_context` reads.
+        assert await _has_dcm_anon(tmp_path, patient, study, series) is False
+
 
 class TestFilterSeriesToFetch:
     """Tests for the fetch/skip partitioning of C-FIND results.
@@ -271,6 +307,35 @@ class TestFilterSeriesToFetch:
         assert skipped_anon == 0
         assert has_anon_calls == [], "dcm_anon shortcut must be bypassed on API failure"
         client.get_study.assert_awaited_once_with("STUDY1")
+
+    @pytest.mark.asyncio
+    async def test_non_404_api_error_propagates(self, tmp_path: Path) -> None:
+        """5xx / auth misconfig / non-404 errors must NOT silently degrade.
+
+        Swallowing those would mask config drift (e.g. broken
+        service_token) behind gigabytes of redundant PACS C-GET traffic.
+        Retry/DLQ should see them.
+        """
+        client = AsyncMock()
+        client.get_study = AsyncMock(
+            side_effect=ClarinetAPIError("internal server error", status_code=500)
+        )
+
+        with (
+            patch(
+                "clarinet.services.pipeline.tasks.cache_dicomweb._has_dcm_anon",
+                AsyncMock(return_value=False),
+            ),
+            pytest.raises(ClarinetAPIError, match="internal server error"),
+        ):
+            await _filter_series_to_fetch(
+                series_uids=["SER1"],
+                storage_path=tmp_path,
+                cache_base=tmp_path / "cache",
+                study_uid="STUDY1",
+                skip_if_anon=True,
+                client=client,
+            )
 
     @pytest.mark.asyncio
     async def test_skip_if_anon_disabled_skips_api_call(self, tmp_path: Path) -> None:

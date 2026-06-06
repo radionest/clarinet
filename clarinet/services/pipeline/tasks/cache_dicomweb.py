@@ -199,12 +199,14 @@ async def _filter_series_to_fetch(
 
     Degradation paths (all safe — fall back to "fetch everything"):
       * ``skip_if_anon`` is False → API call skipped entirely.
-      * ``client.get_study`` raises ``ClarinetAPIError`` (e.g. 404 —
-        legitimate race vs C-FIND on PACS, where series arrive before
-        the API row exists) → dcm_anon shortcut bypassed.
+      * ``client.get_study`` returns 404 → legitimate race vs C-FIND on
+        PACS, where series can arrive before the API row exists. The
+        dcm_anon shortcut is bypassed; other ``ClarinetAPIError``
+        statuses re-raise so retry/DLQ surfaces them.
       * A series listed by C-FIND is missing from ``study_read.series``
-        (e.g. filtered out by ``series_filter_*``) → that series goes
-        to fetch, matching the previous "DB lookup returned None" path.
+        (e.g. PACS reported a series the API hasn't imported yet) →
+        that series goes to fetch, matching the previous "DB lookup
+        returned None" path.
 
     Returns:
         Tuple of ``(series_to_fetch, skipped_cached, skipped_anon)``.
@@ -220,8 +222,15 @@ async def _filter_series_to_fetch(
             patient = study_read.patient
             series_map = {s.series_uid: s for s in study_read.series if s.series_uid}
         except ClarinetAPIError as exc:
+            # Only the 404 race is benign. Auth misconfig (401/403),
+            # 5xx, and httpx-wrapped transport failures must propagate
+            # to RetryMiddleware → DLQ — silently re-fetching the whole
+            # study on every failure would hide config drift behind
+            # gigabytes of redundant PACS traffic.
+            if exc.status_code != 404:
+                raise
             logger.debug(
-                f"prefetch_dicom_web: study {study_uid} not available via API "
+                f"prefetch_dicom_web: study {study_uid} not in API yet "
                 f"({exc}); skipping dcm_anon check, will C-GET all series"
             )
 
@@ -305,12 +314,12 @@ async def _prefetch_dicom_web_impl(msg: PipelineMessage, ctx: TaskContext) -> No
     cache_base = storage_path / "dicomweb_cache"
 
     series_to_fetch, skipped_cached, skipped_anon = await _filter_series_to_fetch(
-        series_uids,
-        storage_path,
-        cache_base,
-        msg.study_uid,
-        skip_if_anon,
-        ctx.client,
+        series_uids=series_uids,
+        storage_path=storage_path,
+        cache_base=cache_base,
+        study_uid=msg.study_uid,
+        skip_if_anon=skip_if_anon,
+        client=ctx.client,
     )
 
     if not series_to_fetch:
