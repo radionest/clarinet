@@ -8,18 +8,20 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from clarinet.client import ClarinetAPIError
 from clarinet.exceptions.domain import PipelineStepError
 from clarinet.models.base import DicomQueryLevel
 from clarinet.services.dicom.models import RetrieveResult, SeriesResult
 from clarinet.services.pipeline.context import FileResolver, RecordQuery, TaskContext
 from clarinet.services.pipeline.message import PipelineMessage
 from clarinet.services.pipeline.tasks.cache_dicomweb import (
+    _filter_series_to_fetch,
     _has_dcm_anon,
     _has_disk_cache,
     _organize_to_cache,
     _prefetch_dicom_web_impl,
 )
-from tests.utils.session import PassThroughSession
+from clarinet.settings import settings
 
 
 def _series_result(series_uid: str, study_uid: str = "STUDY1") -> MagicMock:
@@ -114,18 +116,26 @@ class TestHasDiskCache:
         assert _has_disk_cache(tmp_path, "1.2.3", "1.2.3.4") is True
 
 
-async def _seed_anonymized(
-    test_session, *, patient_id: str, auto_id: int, study_uid: str, series_uid: str
+def _make_anonymized_triple(
+    *,
+    patient_id: str,
+    auto_id: int,
+    study_uid: str,
+    series_uid: str,
 ):
-    """Seed Patient/Study/Series with anon_uid set."""
+    """Build Patient/Study/Series with anon_uid set — in memory only.
+
+    Matches the post-API contract of ``_has_dcm_anon``: the function now
+    takes already-loaded entities (originally from
+    ``ctx.client.get_study()``), so tests build objects directly without
+    touching the DB.
+    """
     from datetime import UTC, datetime
 
     from clarinet.models.study import Series, Study
     from tests.utils.factories import make_patient
 
     patient = make_patient(patient_id, "Test", auto_id=auto_id)
-    test_session.add(patient)
-    await test_session.commit()
     study = Study(
         patient_id=patient_id,
         study_uid=study_uid,
@@ -133,8 +143,6 @@ async def _seed_anonymized(
         modalities_in_study="CT",
         anon_uid="ANON_STUDY",
     )
-    test_session.add(study)
-    await test_session.commit()
     series = Series(
         study_uid=study_uid,
         series_uid=series_uid,
@@ -142,43 +150,35 @@ async def _seed_anonymized(
         modality="CT",
         anon_uid="ANON_SERIES",
     )
-    test_session.add(series)
-    await test_session.commit()
     return patient, study, series
 
 
 class TestHasDcmAnon:
-    """Tests for the dcm_anon presence check (DB-aware via disk_path_template)."""
+    """Tests for the dcm_anon presence check.
 
-    @pytest.mark.asyncio
-    async def test_no_series_in_db_returns_false(self, tmp_path: Path, test_session) -> None:
-        """No Series row → can't resolve path → returns False without scanning disk."""
-        with patch("clarinet.services.pipeline.tasks.cache_dicomweb.db_manager") as mock_dbm:
-            mock_dbm.async_session_factory = lambda: PassThroughSession(test_session)
-            assert await _has_dcm_anon(tmp_path, "no.such.study", "no.such.series") is False
+    ``_has_dcm_anon`` no longer touches the DB — it takes pre-loaded
+    Patient/Study/Series and renders the storage template against them.
+    The "study not in DB" path moved to ``TestFilterSeriesToFetch``
+    (it's the caller's responsibility now). The function is synchronous
+    (matches ``_has_disk_cache``); production wraps it in
+    ``asyncio.to_thread`` from ``_filter_series_to_fetch``.
+    """
 
-    @pytest.mark.asyncio
-    async def test_no_anon_dir_returns_false(self, tmp_path: Path, test_session) -> None:
-        """Series in DB but dcm_anon dir missing on disk → False."""
-        await _seed_anonymized(
-            test_session,
+    def test_no_anon_dir_returns_false(self, tmp_path: Path) -> None:
+        """Entities resolve a path, but dcm_anon dir missing on disk → False."""
+        patient, study, series = _make_anonymized_triple(
             patient_id="HAS_NO_ANON_DIR",
             auto_id=501,
             study_uid="1.2.8001.1",
             series_uid="1.2.8001.1.1",
         )
-        with patch("clarinet.services.pipeline.tasks.cache_dicomweb.db_manager") as mock_dbm:
-            mock_dbm.async_session_factory = lambda: PassThroughSession(test_session)
-            assert await _has_dcm_anon(tmp_path, "1.2.8001.1", "1.2.8001.1.1") is False
+        assert _has_dcm_anon(tmp_path, patient, study, series) is False
 
-    @pytest.mark.asyncio
-    async def test_empty_anon_dir_returns_false(self, tmp_path: Path, test_session) -> None:
-        """Series in DB, dcm_anon dir exists but empty → False (no .dcm files)."""
-        from clarinet.models.base import DicomQueryLevel
+    def test_empty_anon_dir_returns_false(self, tmp_path: Path) -> None:
+        """dcm_anon dir exists but contains no ``.dcm`` files → False."""
         from clarinet.services.common.storage_paths import build_context, render_working_folder
 
-        patient, study, series = await _seed_anonymized(
-            test_session,
+        patient, study, series = _make_anonymized_triple(
             patient_id="HAS_EMPTY_ANON",
             auto_id=502,
             study_uid="1.2.8002.1",
@@ -186,25 +186,20 @@ class TestHasDcmAnon:
         )
         ctx = build_context(patient=patient, study=study, series=series)
         series_dir = render_working_folder(
-            "{anon_patient_id}/{anon_study_uid}/{anon_series_uid}",
+            settings.disk_path_template,
             DicomQueryLevel.SERIES,
             ctx,
             tmp_path,
         )
         (series_dir / "dcm_anon").mkdir(parents=True)
 
-        with patch("clarinet.services.pipeline.tasks.cache_dicomweb.db_manager") as mock_dbm:
-            mock_dbm.async_session_factory = lambda: PassThroughSession(test_session)
-            assert await _has_dcm_anon(tmp_path, "1.2.8002.1", "1.2.8002.1.1") is False
+        assert _has_dcm_anon(tmp_path, patient, study, series) is False
 
-    @pytest.mark.asyncio
-    async def test_finds_dcm_via_resolved_path(self, tmp_path: Path, test_session) -> None:
-        """Series in DB + dcm_anon dir with .dcm files at template-resolved path → True."""
-        from clarinet.models.base import DicomQueryLevel
+    def test_finds_dcm_via_resolved_path(self, tmp_path: Path) -> None:
+        """dcm_anon dir with ``.dcm`` files at template-resolved path → True."""
         from clarinet.services.common.storage_paths import build_context, render_working_folder
 
-        patient, study, series = await _seed_anonymized(
-            test_session,
+        patient, study, series = _make_anonymized_triple(
             patient_id="HAS_DCM_ANON",
             auto_id=503,
             study_uid="1.2.8003.1",
@@ -212,7 +207,7 @@ class TestHasDcmAnon:
         )
         ctx = build_context(patient=patient, study=study, series=series)
         series_dir = render_working_folder(
-            "{anon_patient_id}/{anon_study_uid}/{anon_series_uid}",
+            settings.disk_path_template,
             DicomQueryLevel.SERIES,
             ctx,
             tmp_path,
@@ -221,9 +216,242 @@ class TestHasDcmAnon:
         dcm_anon.mkdir(parents=True)
         (dcm_anon / "inst.dcm").write_bytes(b"placeholder")
 
-        with patch("clarinet.services.pipeline.tasks.cache_dicomweb.db_manager") as mock_dbm:
-            mock_dbm.async_session_factory = lambda: PassThroughSession(test_session)
-            assert await _has_dcm_anon(tmp_path, "1.2.8003.1", "1.2.8003.1.1") is True
+        assert _has_dcm_anon(tmp_path, patient, study, series) is True
+
+    def test_accepts_dto_shape_from_api(self, tmp_path: Path) -> None:
+        """`_has_dcm_anon` works with DTOs (PatientInfo / StudyRead / SeriesBase).
+
+        Production passes whatever `ctx.client.get_study()` returns — DTO
+        shapes, not ORM rows. The other tests in this class build ORM
+        instances because the factory is convenient; this one validates
+        the DTO contract that `build_context` is actually fed at runtime.
+        """
+        from datetime import UTC, datetime
+
+        from clarinet.models.patient import PatientInfo
+        from clarinet.models.study import SeriesBase, StudyRead
+
+        patient = PatientInfo(id="DTO_PAT", name="Test", auto_id=801)
+        series = SeriesBase(
+            series_uid="1.2.8004.1.1",
+            series_number=1,
+            modality="CT",
+            anon_uid="ANON_DTO_SERIES",
+            study_uid="1.2.8004.1",
+        )
+        study = StudyRead(
+            study_uid="1.2.8004.1",
+            date=datetime.now(UTC).date(),
+            modalities_in_study="CT",
+            anon_uid="ANON_DTO_STUDY",
+            patient_id="DTO_PAT",
+            patient=patient,
+            series=[series],
+        )
+
+        # No dcm_anon dir on disk → False, but the call must complete
+        # without AttributeError on any DTO field `build_context` reads.
+        assert _has_dcm_anon(tmp_path, patient, study, series) is False
+
+
+class TestFilterSeriesToFetch:
+    """Tests for the fetch/skip partitioning of C-FIND results.
+
+    Covers the new responsibility added when the dcm_anon shortcut moved
+    off Postgres onto ``ctx.client.get_study()``: degradation paths
+    (404, missing series in Study) and the API call itself.
+    """
+
+    @staticmethod
+    def _mock_study_read(series_uids: list[str]) -> MagicMock:
+        """Build a ``StudyRead``-shaped mock with patient + listed series.
+
+        Uses ``spec=`` against the real model classes so a typo on the
+        production attribute access (e.g. ``study_read.serieses``) fails
+        the test instead of silently returning another MagicMock.
+        """
+        from clarinet.models.patient import PatientInfo
+        from clarinet.models.study import SeriesBase, StudyRead
+
+        patient = MagicMock(spec=PatientInfo)
+        series_mocks: list[MagicMock] = []
+        for suid in series_uids:
+            s = MagicMock(spec=SeriesBase)
+            s.series_uid = suid
+            series_mocks.append(s)
+        sr = MagicMock(spec=StudyRead)
+        sr.patient = patient
+        sr.series = series_mocks
+        sr.study_uid = "STUDY1"
+        return sr
+
+    @pytest.mark.asyncio
+    async def test_study_404_fetches_all_without_anon_check(self, tmp_path: Path) -> None:
+        """API 404 (race vs C-FIND on PACS) → every series goes to fetch."""
+        client = AsyncMock()
+        client.get_study = AsyncMock(
+            side_effect=ClarinetAPIError("study not found", status_code=404)
+        )
+
+        has_anon_calls: list[tuple] = []
+
+        def _spy(*args, **kwargs):
+            has_anon_calls.append(args)
+            return False
+
+        with patch("clarinet.services.pipeline.tasks.cache_dicomweb._has_dcm_anon", _spy):
+            to_fetch, skipped_cached, skipped_anon = await _filter_series_to_fetch(
+                series_uids=["SER1", "SER2"],
+                storage_path=tmp_path,
+                cache_base=tmp_path / "cache",
+                study_uid="STUDY1",
+                skip_if_anon=True,
+                client=client,
+            )
+
+        assert to_fetch == ["SER1", "SER2"]
+        assert skipped_cached == 0
+        assert skipped_anon == 0
+        assert has_anon_calls == [], "dcm_anon shortcut must be bypassed on API failure"
+        client.get_study.assert_awaited_once_with("STUDY1")
+
+    @pytest.mark.asyncio
+    async def test_non_404_api_error_propagates(self, tmp_path: Path) -> None:
+        """5xx / auth misconfig / non-404 errors must NOT silently degrade.
+
+        Swallowing those would mask config drift (e.g. broken
+        service_token) behind gigabytes of redundant PACS C-GET traffic.
+        Retry/DLQ should see them.
+        """
+        client = AsyncMock()
+        client.get_study = AsyncMock(
+            side_effect=ClarinetAPIError("internal server error", status_code=500)
+        )
+
+        with (
+            patch(
+                "clarinet.services.pipeline.tasks.cache_dicomweb._has_dcm_anon",
+                MagicMock(return_value=False),
+            ),
+            pytest.raises(ClarinetAPIError, match="internal server error"),
+        ):
+            await _filter_series_to_fetch(
+                series_uids=["SER1"],
+                storage_path=tmp_path,
+                cache_base=tmp_path / "cache",
+                study_uid="STUDY1",
+                skip_if_anon=True,
+                client=client,
+            )
+
+    @pytest.mark.asyncio
+    async def test_skip_if_anon_disabled_skips_api_call(self, tmp_path: Path) -> None:
+        """``skip_if_anon=False`` → no ``client.get_study()`` call at all."""
+        client = AsyncMock()
+        client.get_study = AsyncMock()
+
+        to_fetch, skipped_cached, skipped_anon = await _filter_series_to_fetch(
+            series_uids=["SER1", "SER2"],
+            storage_path=tmp_path,
+            cache_base=tmp_path / "cache",
+            study_uid="STUDY1",
+            skip_if_anon=False,
+            client=client,
+        )
+
+        assert to_fetch == ["SER1", "SER2"]
+        assert skipped_cached == 0
+        assert skipped_anon == 0
+        client.get_study.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_series_missing_from_study_goes_to_fetch(self, tmp_path: Path) -> None:
+        """C-FIND series absent from ``StudyRead.series`` → fetched, no anon check."""
+        client = AsyncMock()
+        client.get_study = AsyncMock(return_value=self._mock_study_read(series_uids=["SER1"]))
+
+        seen_series: list[str] = []
+
+        def _spy(_storage, _patient, _study, series):
+            seen_series.append(series.series_uid)
+            return False
+
+        with patch("clarinet.services.pipeline.tasks.cache_dicomweb._has_dcm_anon", _spy):
+            to_fetch, _, skipped_anon = await _filter_series_to_fetch(
+                series_uids=["SER1", "SER2"],
+                storage_path=tmp_path,
+                cache_base=tmp_path / "cache",
+                study_uid="STUDY1",
+                skip_if_anon=True,
+                client=client,
+            )
+
+        # SER2 is not in StudyRead.series → fetched directly, _has_dcm_anon never
+        # called for it. SER1 is in StudyRead.series → anon check ran (and said False).
+        assert to_fetch == ["SER1", "SER2"]
+        assert skipped_anon == 0
+        assert seen_series == ["SER1"]
+
+    @pytest.mark.asyncio
+    async def test_anon_shortcut_skips_listed_series(self, tmp_path: Path) -> None:
+        """When ``_has_dcm_anon`` says True for a series, it's counted in ``skipped_anon``."""
+        client = AsyncMock()
+        client.get_study = AsyncMock(
+            return_value=self._mock_study_read(series_uids=["SER1", "SER2"])
+        )
+
+        def _yes_for_ser1(_storage, _patient, _study, series):
+            return series.series_uid == "SER1"
+
+        with patch(
+            "clarinet.services.pipeline.tasks.cache_dicomweb._has_dcm_anon",
+            _yes_for_ser1,
+        ):
+            to_fetch, _, skipped_anon = await _filter_series_to_fetch(
+                series_uids=["SER1", "SER2"],
+                storage_path=tmp_path,
+                cache_base=tmp_path / "cache",
+                study_uid="STUDY1",
+                skip_if_anon=True,
+                client=client,
+            )
+
+        assert to_fetch == ["SER2"]
+        assert skipped_anon == 1
+
+    @pytest.mark.asyncio
+    async def test_disk_cache_skip_takes_precedence_over_anon_check(self, tmp_path: Path) -> None:
+        """Disk-cached series must be detected first — no anon check for them."""
+        cache_base = tmp_path / "cache"
+        series_dir = cache_base / "STUDY1" / "SER1"
+        series_dir.mkdir(parents=True)
+        (series_dir / ".cached_at").write_text(str(time.time()))
+        (series_dir / "inst.dcm").write_bytes(b"fake")
+
+        client = AsyncMock()
+        client.get_study = AsyncMock(return_value=self._mock_study_read(series_uids=["SER1"]))
+
+        anon_called = False
+
+        def _spy(*args, **kwargs):
+            nonlocal anon_called
+            anon_called = True
+            return True
+
+        with patch("clarinet.services.pipeline.tasks.cache_dicomweb._has_dcm_anon", _spy):
+            to_fetch, skipped_cached, skipped_anon = await _filter_series_to_fetch(
+                series_uids=["SER1"],
+                storage_path=tmp_path,
+                cache_base=cache_base,
+                study_uid="STUDY1",
+                skip_if_anon=True,
+                client=client,
+            )
+
+        assert to_fetch == []
+        assert skipped_cached == 1
+        assert skipped_anon == 0
+        assert anon_called is False
 
 
 class TestOrganizeToCache:
@@ -329,13 +557,14 @@ class TestPrefetchDicomWebImpl:
     def _stub_has_dcm_anon(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Default to ``_has_dcm_anon`` → False.
 
-        ``_has_dcm_anon`` queries the DB via ``db_manager.async_session_factory``
-        to resolve the template-rendered path; without setting up a real DB
-        and Series row for every test, the query would fail. The dcm-anon-
-        skip flow has dedicated tests that override this stub.
+        ``_has_dcm_anon`` is a sync function (production wraps it in
+        ``asyncio.to_thread`` from ``_filter_series_to_fetch``); the stub
+        is therefore sync as well. Keeps tests independent of template/
+        filesystem rendering and focuses each case on the C-GET branching.
+        The dcm-anon-skip flow has its own override below.
         """
 
-        async def _no_anon(*args, **kwargs):
+        def _no_anon(*args, **kwargs):
             return False
 
         monkeypatch.setattr(
@@ -414,9 +643,12 @@ class TestPrefetchDicomWebImpl:
     @pytest.mark.asyncio
     async def test_skips_dcm_anon_by_default(self, tmp_path: Path, monkeypatch):
         """When ``_has_dcm_anon`` says True, no C-GET is attempted."""
+        from clarinet.models.patient import PatientInfo
+        from clarinet.models.study import SeriesBase, StudyRead
+
         monkeypatch.setattr("clarinet.settings.settings.storage_path", str(tmp_path))
 
-        async def _yes_anon(*args, **kwargs):
+        def _yes_anon(*args, **kwargs):
             return True
 
         monkeypatch.setattr(
@@ -426,6 +658,16 @@ class TestPrefetchDicomWebImpl:
 
         ctx = _build_ctx(tmp_path)
         msg = PipelineMessage(patient_id="PAT001", study_uid="STUDY1")
+
+        # _filter_series_to_fetch looks SER1 up in StudyRead.series before
+        # asking _has_dcm_anon — a series absent from the StudyRead would
+        # short-circuit and head straight to fetch.
+        series_obj = MagicMock(spec=SeriesBase)
+        series_obj.series_uid = "SER1"
+        study_read = MagicMock(spec=StudyRead)
+        study_read.patient = MagicMock(spec=PatientInfo)
+        study_read.series = [series_obj]
+        ctx.client.get_study = AsyncMock(return_value=study_read)
 
         mock_client = AsyncMock()
         mock_client.find_series = AsyncMock(return_value=[_series_result("SER1")])
@@ -440,6 +682,10 @@ class TestPrefetchDicomWebImpl:
 
         mock_client.get_study.assert_not_called()
         mock_client.get_series.assert_not_called()
+        # The API-driven anon-skip path must actually fire — without this
+        # the test passes even if `_filter_series_to_fetch` stops calling
+        # `ctx.client.get_study`.
+        ctx.client.get_study.assert_awaited_once_with("STUDY1")
 
     @pytest.mark.asyncio
     async def test_skip_if_anon_false_forces_fetch(self, tmp_path: Path, monkeypatch):
