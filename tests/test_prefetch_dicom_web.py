@@ -21,6 +21,7 @@ from clarinet.services.pipeline.tasks.cache_dicomweb import (
     _organize_to_cache,
     _prefetch_dicom_web_impl,
 )
+from clarinet.settings import settings
 
 
 def _series_result(series_uid: str, study_uid: str = "STUDY1") -> MagicMock:
@@ -158,11 +159,12 @@ class TestHasDcmAnon:
     ``_has_dcm_anon`` no longer touches the DB — it takes pre-loaded
     Patient/Study/Series and renders the storage template against them.
     The "study not in DB" path moved to ``TestFilterSeriesToFetch``
-    (it's the caller's responsibility now).
+    (it's the caller's responsibility now). The function is synchronous
+    (matches ``_has_disk_cache``); production wraps it in
+    ``asyncio.to_thread`` from ``_filter_series_to_fetch``.
     """
 
-    @pytest.mark.asyncio
-    async def test_no_anon_dir_returns_false(self, tmp_path: Path) -> None:
+    def test_no_anon_dir_returns_false(self, tmp_path: Path) -> None:
         """Entities resolve a path, but dcm_anon dir missing on disk → False."""
         patient, study, series = _make_anonymized_triple(
             patient_id="HAS_NO_ANON_DIR",
@@ -170,10 +172,9 @@ class TestHasDcmAnon:
             study_uid="1.2.8001.1",
             series_uid="1.2.8001.1.1",
         )
-        assert await _has_dcm_anon(tmp_path, patient, study, series) is False
+        assert _has_dcm_anon(tmp_path, patient, study, series) is False
 
-    @pytest.mark.asyncio
-    async def test_empty_anon_dir_returns_false(self, tmp_path: Path) -> None:
+    def test_empty_anon_dir_returns_false(self, tmp_path: Path) -> None:
         """dcm_anon dir exists but contains no ``.dcm`` files → False."""
         from clarinet.services.common.storage_paths import build_context, render_working_folder
 
@@ -185,17 +186,16 @@ class TestHasDcmAnon:
         )
         ctx = build_context(patient=patient, study=study, series=series)
         series_dir = render_working_folder(
-            "{anon_patient_id}/{anon_study_uid}/{anon_series_uid}",
+            settings.disk_path_template,
             DicomQueryLevel.SERIES,
             ctx,
             tmp_path,
         )
         (series_dir / "dcm_anon").mkdir(parents=True)
 
-        assert await _has_dcm_anon(tmp_path, patient, study, series) is False
+        assert _has_dcm_anon(tmp_path, patient, study, series) is False
 
-    @pytest.mark.asyncio
-    async def test_finds_dcm_via_resolved_path(self, tmp_path: Path) -> None:
+    def test_finds_dcm_via_resolved_path(self, tmp_path: Path) -> None:
         """dcm_anon dir with ``.dcm`` files at template-resolved path → True."""
         from clarinet.services.common.storage_paths import build_context, render_working_folder
 
@@ -207,7 +207,7 @@ class TestHasDcmAnon:
         )
         ctx = build_context(patient=patient, study=study, series=series)
         series_dir = render_working_folder(
-            "{anon_patient_id}/{anon_study_uid}/{anon_series_uid}",
+            settings.disk_path_template,
             DicomQueryLevel.SERIES,
             ctx,
             tmp_path,
@@ -216,10 +216,9 @@ class TestHasDcmAnon:
         dcm_anon.mkdir(parents=True)
         (dcm_anon / "inst.dcm").write_bytes(b"placeholder")
 
-        assert await _has_dcm_anon(tmp_path, patient, study, series) is True
+        assert _has_dcm_anon(tmp_path, patient, study, series) is True
 
-    @pytest.mark.asyncio
-    async def test_accepts_dto_shape_from_api(self, tmp_path: Path) -> None:
+    def test_accepts_dto_shape_from_api(self, tmp_path: Path) -> None:
         """`_has_dcm_anon` works with DTOs (PatientInfo / StudyRead / SeriesBase).
 
         Production passes whatever `ctx.client.get_study()` returns — DTO
@@ -252,7 +251,7 @@ class TestHasDcmAnon:
 
         # No dcm_anon dir on disk → False, but the call must complete
         # without AttributeError on any DTO field `build_context` reads.
-        assert await _has_dcm_anon(tmp_path, patient, study, series) is False
+        assert _has_dcm_anon(tmp_path, patient, study, series) is False
 
 
 class TestFilterSeriesToFetch:
@@ -265,14 +264,22 @@ class TestFilterSeriesToFetch:
 
     @staticmethod
     def _mock_study_read(series_uids: list[str]) -> MagicMock:
-        """Build a ``StudyRead``-shaped mock with patient + listed series."""
-        patient = MagicMock()
+        """Build a ``StudyRead``-shaped mock with patient + listed series.
+
+        Uses ``spec=`` against the real model classes so a typo on the
+        production attribute access (e.g. ``study_read.serieses``) fails
+        the test instead of silently returning another MagicMock.
+        """
+        from clarinet.models.patient import PatientInfo
+        from clarinet.models.study import SeriesBase, StudyRead
+
+        patient = MagicMock(spec=PatientInfo)
         series_mocks: list[MagicMock] = []
         for suid in series_uids:
-            s = MagicMock()
+            s = MagicMock(spec=SeriesBase)
             s.series_uid = suid
             series_mocks.append(s)
-        sr = MagicMock()
+        sr = MagicMock(spec=StudyRead)
         sr.patient = patient
         sr.series = series_mocks
         sr.study_uid = "STUDY1"
@@ -288,7 +295,7 @@ class TestFilterSeriesToFetch:
 
         has_anon_calls: list[tuple] = []
 
-        async def _spy(*args, **kwargs):
+        def _spy(*args, **kwargs):
             has_anon_calls.append(args)
             return False
 
@@ -324,7 +331,7 @@ class TestFilterSeriesToFetch:
         with (
             patch(
                 "clarinet.services.pipeline.tasks.cache_dicomweb._has_dcm_anon",
-                AsyncMock(return_value=False),
+                MagicMock(return_value=False),
             ),
             pytest.raises(ClarinetAPIError, match="internal server error"),
         ):
@@ -365,7 +372,7 @@ class TestFilterSeriesToFetch:
 
         seen_series: list[str] = []
 
-        async def _spy(_storage, _patient, _study, series):
+        def _spy(_storage, _patient, _study, series):
             seen_series.append(series.series_uid)
             return False
 
@@ -393,7 +400,7 @@ class TestFilterSeriesToFetch:
             return_value=self._mock_study_read(series_uids=["SER1", "SER2"])
         )
 
-        async def _yes_for_ser1(_storage, _patient, _study, series):
+        def _yes_for_ser1(_storage, _patient, _study, series):
             return series.series_uid == "SER1"
 
         with patch(
@@ -426,7 +433,7 @@ class TestFilterSeriesToFetch:
 
         anon_called = False
 
-        async def _spy(*args, **kwargs):
+        def _spy(*args, **kwargs):
             nonlocal anon_called
             anon_called = True
             return True
@@ -550,14 +557,14 @@ class TestPrefetchDicomWebImpl:
     def _stub_has_dcm_anon(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Default to ``_has_dcm_anon`` → False.
 
-        ``_has_dcm_anon`` is invoked inside ``_filter_series_to_fetch``
-        for series that ``ctx.client.get_study()`` returned. The stub
-        keeps tests independent of template/filesystem rendering and
-        focuses each case on the C-GET branching logic. The dcm-anon-
-        skip flow has its own override below.
+        ``_has_dcm_anon`` is a sync function (production wraps it in
+        ``asyncio.to_thread`` from ``_filter_series_to_fetch``); the stub
+        is therefore sync as well. Keeps tests independent of template/
+        filesystem rendering and focuses each case on the C-GET branching.
+        The dcm-anon-skip flow has its own override below.
         """
 
-        async def _no_anon(*args, **kwargs):
+        def _no_anon(*args, **kwargs):
             return False
 
         monkeypatch.setattr(
@@ -636,9 +643,12 @@ class TestPrefetchDicomWebImpl:
     @pytest.mark.asyncio
     async def test_skips_dcm_anon_by_default(self, tmp_path: Path, monkeypatch):
         """When ``_has_dcm_anon`` says True, no C-GET is attempted."""
+        from clarinet.models.patient import PatientInfo
+        from clarinet.models.study import SeriesBase, StudyRead
+
         monkeypatch.setattr("clarinet.settings.settings.storage_path", str(tmp_path))
 
-        async def _yes_anon(*args, **kwargs):
+        def _yes_anon(*args, **kwargs):
             return True
 
         monkeypatch.setattr(
@@ -652,10 +662,10 @@ class TestPrefetchDicomWebImpl:
         # _filter_series_to_fetch looks SER1 up in StudyRead.series before
         # asking _has_dcm_anon — a series absent from the StudyRead would
         # short-circuit and head straight to fetch.
-        series_obj = MagicMock()
+        series_obj = MagicMock(spec=SeriesBase)
         series_obj.series_uid = "SER1"
-        study_read = MagicMock()
-        study_read.patient = MagicMock()
+        study_read = MagicMock(spec=StudyRead)
+        study_read.patient = MagicMock(spec=PatientInfo)
         study_read.series = [series_obj]
         ctx.client.get_study = AsyncMock(return_value=study_read)
 

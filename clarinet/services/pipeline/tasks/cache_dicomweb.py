@@ -58,7 +58,7 @@ def _has_disk_cache(cache_base: Path, study_uid: str, series_uid: str) -> bool:
     return any(series_dir.glob("*.dcm"))
 
 
-async def _has_dcm_anon(
+def _has_dcm_anon(
     storage_path: Path,
     patient: PatientInfo,
     study: StudyBase,
@@ -72,6 +72,11 @@ async def _has_dcm_anon(
     reader: requires at least one ``*.dcm`` file inside, so an empty
     ``dcm_anon/`` left by a failed anonymization run does not cause us to
     skip a genuinely needed prefetch.
+
+    Synchronous — only does template rendering and a filesystem probe,
+    matching the shape of ``_has_disk_cache``. Callers offload it to a
+    worker thread via ``asyncio.to_thread`` so the event loop stays
+    responsive when scanning many series.
 
     Callers must pre-load Patient/Study/Series via the API
     (``ctx.client.get_study()``) — this function performs no I/O beyond
@@ -108,7 +113,7 @@ async def _has_dcm_anon(
         return False
 
     dcm_anon = series_dir / "dcm_anon"
-    return await asyncio.to_thread(lambda: dcm_anon.is_dir() and any(dcm_anon.glob("*.dcm")))
+    return dcm_anon.is_dir() and any(dcm_anon.glob("*.dcm"))
 
 
 def _organize_to_cache(tmp_dir: Path, cache_base: Path, study_uid: str) -> dict[str, int]:
@@ -243,8 +248,8 @@ async def _filter_series_to_fetch(
             continue
         if skip_if_anon and study_read is not None and patient is not None:
             series_obj = series_map.get(series_uid)
-            if series_obj is not None and await _has_dcm_anon(
-                storage_path, patient, study_read, series_obj
+            if series_obj is not None and await asyncio.to_thread(
+                _has_dcm_anon, storage_path, patient, study_read, series_obj
             ):
                 skipped_anon += 1
                 continue
