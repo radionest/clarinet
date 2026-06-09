@@ -159,7 +159,8 @@ class QuartoReportService:
         for report_name in template.data_reports:
             if self._report_registry.get_sql(report_name) is None:
                 raise QuartoReportNotFoundError(
-                    f"{template.name}: required SQL report '{report_name}' not found"
+                    template.name,
+                    f"{template.name}: required SQL report '{report_name}' not found",
                 )
 
     async def _dispatch(

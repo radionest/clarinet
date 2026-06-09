@@ -367,9 +367,9 @@ class QuartoReportNotFoundError(EntityNotFoundError):
     not in the SQL report registry.
     """
 
-    def __init__(self, name: str) -> None:
+    def __init__(self, name: str, message: str | None = None) -> None:
         self.name = name
-        super().__init__(f"Quarto report '{name}' not found")
+        super().__init__(message or f"Quarto report '{name}' not found")
 
 
 class QuartoRenderNotFoundError(EntityNotFoundError):

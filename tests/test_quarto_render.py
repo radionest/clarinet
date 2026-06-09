@@ -230,6 +230,32 @@ async def test_request_render_fails_fast_on_empty_service_token(
     assert "service token" in (state.error or "")
 
 
+@pytest.mark.asyncio
+async def test_request_render_unknown_data_report_message_not_double_wrapped(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A missing ``clarinet.data`` report surfaces its own message, not a
+    re-wrapped "Quarto report '<sentence>' not found"."""
+    from clarinet.exceptions.domain import QuartoReportNotFoundError
+    from clarinet.models.quarto_report import QuartoReportTemplate
+    from clarinet.services.quarto_report_service import (
+        QuartoReportRegistry,
+        QuartoReportService,
+    )
+    from clarinet.services.report_service import ReportRegistry
+
+    qmd = _write_min_qmd(tmp_path)
+    template = QuartoReportTemplate(name="rep", title="T", description="", data_reports=["missing"])
+    service = QuartoReportService(QuartoReportRegistry([(template, qmd)]), ReportRegistry([]))
+    monkeypatch.setattr(settings, "quarto_output_path", str(tmp_path / "renders"))
+    monkeypatch.setattr(quarto_render, "resolve_quarto_executable", lambda: tmp_path / "quarto")
+
+    with pytest.raises(QuartoReportNotFoundError) as exc_info:
+        await service.request_render("rep", [QuartoReportFormat.DOCX])
+
+    assert str(exc_info.value) == "rep: required SQL report 'missing' not found"
+
+
 def test_render_dir_rejects_path_traversal() -> None:
     """name / render_id that escape the output root must raise, not resolve."""
     from clarinet.exceptions.domain import QuartoRenderNotFoundError
