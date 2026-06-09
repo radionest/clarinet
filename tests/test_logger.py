@@ -448,22 +448,43 @@ class TestNoisyFilter:
         assert noisy(self._record("clarinet.services.pipeline", 10)) is True
 
 
-class TestPydicomSuppression:
-    """setup_logging raises the pydicom stdlib logger to ERROR.
+class TestSilencedLibraries:
+    """setup_logging raises configured stdlib loggers to ERROR.
 
-    pydicom emits DICOM conformance warnings (WARNING level) for malformed
-    values from non-conformant PACS. Those are WARNING-level, so the noisy
-    filter (which keeps WARNING+) cannot drop them; setup_logging silences
-    them at the stdlib logger instead.
+    For libraries (e.g. pydicom) that emit unactionable noise at WARNING
+    through their own stdlib logger — which the level-based noisy filter
+    (it keeps WARNING+) cannot suppress.
     """
 
-    def test_setup_logging_sets_pydicom_to_error(self) -> None:
+    def test_setup_logging_raises_listed_logger_to_error(self) -> None:
         import logging
 
         from clarinet.utils.logger import setup_logging
 
-        logging.getLogger("pydicom").setLevel(logging.NOTSET)
-        setup_logging(level="DEBUG")
-        _logger.remove()
+        original = logging.getLogger("pydicom").level
+        try:
+            logging.getLogger("pydicom").setLevel(logging.NOTSET)
+            setup_logging(level="DEBUG", silenced_libraries=["pydicom"])
+            _logger.remove()
+            assert logging.getLogger("pydicom").level == logging.ERROR
+        finally:
+            logging.getLogger("pydicom").setLevel(original)
 
-        assert logging.getLogger("pydicom").level == logging.ERROR
+    def test_empty_list_leaves_logger_untouched(self) -> None:
+        import logging
+
+        from clarinet.utils.logger import setup_logging
+
+        original = logging.getLogger("pydicom").level
+        try:
+            logging.getLogger("pydicom").setLevel(logging.NOTSET)
+            setup_logging(level="DEBUG", silenced_libraries=[])
+            _logger.remove()
+            assert logging.getLogger("pydicom").level == logging.NOTSET
+        finally:
+            logging.getLogger("pydicom").setLevel(original)
+
+    def test_default_settings_silence_pydicom(self) -> None:
+        from clarinet.settings import settings
+
+        assert "pydicom" in settings.log_silenced_libraries

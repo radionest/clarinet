@@ -372,8 +372,10 @@ class Settings(BaseSettings):
         "aiormq",  # RabbitMQ frame writer — DEBUG frames dominate worker logs
         "aio_pika",
         "pamqp",
-        "asyncio",
     ]  # Suppress console/file INFO/DEBUG from these (WARNING+ still shown)
+    log_silenced_libraries: list[str] = [
+        "pydicom",  # VR conformance WARNINGs from non-conformant PACS — unactionable
+    ]  # Raise these stdlib loggers to ERROR (drops their WARNING noise too)
     worker_log_file: str | None = (
         None  # Override worker log path; None → "{log_dir}/clarinet_worker.log"
     )
