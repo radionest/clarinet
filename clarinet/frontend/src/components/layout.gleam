@@ -73,7 +73,14 @@ fn user_menu(model: Model) -> Element(Msg) {
   case model.user {
     Some(user) -> {
       html.div([attribute.class("navbar-user")], [
-        html.span([attribute.class("username")], [html.text(user.email)]),
+        html.a(
+          [
+            attribute.href(router.route_to_path(router.Settings)),
+            attribute.class("username"),
+            attribute.title("Settings"),
+          ],
+          [html.text(user.email)],
+        ),
         html.button(
           [
             attribute.class("btn-logout"),

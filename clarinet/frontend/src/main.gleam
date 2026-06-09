@@ -14,6 +14,7 @@ import gleam/option.{None, Some}
 import gleam/result
 import gleam/string
 import gleam/uri.{type Uri}
+import utils/client_settings
 import utils/logger
 import utils/permissions
 import utils/storage as app_storage
@@ -44,6 +45,7 @@ import pages/records/list as records_list
 import pages/records/new as record_new
 import pages/register
 import pages/series/detail as series_detail
+import pages/settings as settings_page
 import pages/studies/detail as study_detail
 import pages/studies/list as studies_list
 import router.{type Route}
@@ -325,7 +327,12 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         |> promise.tap(fn(_) { dispatch(store.LogoutComplete) })
         Nil
       }
-      let clear_storage = app_storage.clear_prefixed(app_storage.Local)
+      // Preserve per-device client settings (Slicer storage path is
+      // bound to this machine, not to the session) across logout.
+      let clear_storage =
+        app_storage.clear_prefixed_except(app_storage.Local, [
+          client_settings.settings_key,
+        ])
       let preload_cleanup =
         effect.map(preload.stop_timer(model.preload), store.PreloadMsg)
       #(
@@ -480,6 +487,15 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         fn(m, s) { admin_workflow_page.update(m, page_msg, s) },
         store.AdminWorkflowPage,
         store.AdminWorkflowMsg,
+      )
+
+    store.SettingsMsg(page_msg) ->
+      delegate_page_update(
+        model,
+        fn(p) { case p { store.SettingsPage(m) -> Ok(m) _ -> Error(Nil) } },
+        fn(m, s) { settings_page.update(m, page_msg, s) },
+        store.SettingsPage,
+        store.SettingsMsg,
       )
 
     // Patient page delegation
@@ -824,6 +840,8 @@ fn init_page_for_route(model: Model, route: Route) -> #(Model, Effect(Msg)) {
       init_page(model, admin_reports_page.init, store.AdminReportsPage, store.AdminReportsMsg)
     router.AdminWorkflow ->
       init_page(model, admin_workflow_page.init, store.AdminWorkflowPage, store.AdminWorkflowMsg)
+    router.Settings ->
+      init_page(model, settings_page.init, store.SettingsPage, store.SettingsMsg)
     _ -> #(store.Model(..model, page: store.NoPage), effect.none())
   }
 }
@@ -969,7 +987,12 @@ fn handle_api_error(
         |> store.set_loading(False)
         |> store.set_error(Some("Session expired. Please log in again."))
         |> store.set_route(router.Login)
-      let clear_storage = app_storage.clear_prefixed(app_storage.Local)
+      // Same preservation as in store.Logout — keep per-device Slicer
+      // settings across session-expiry logout.
+      let clear_storage =
+        app_storage.clear_prefixed_except(app_storage.Local, [
+          client_settings.settings_key,
+        ])
       #(
         new_model,
         effect.batch([
@@ -1037,6 +1060,8 @@ fn view_content(model: Model) -> Element(Msg) {
       element.map(admin_reports_page.view(pm, shared), store.AdminReportsMsg)
     store.AdminWorkflowPage(pm) ->
       element.map(admin_workflow_page.view(pm, shared), store.AdminWorkflowMsg)
+    store.SettingsPage(pm) ->
+      element.map(settings_page.view(pm, shared), store.SettingsMsg)
     store.NoPage -> render_route_placeholder(model.route)
   }
 

@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 
 from clarinet.api.dependencies import (
+    ClientStoragePathDep,
     CurrentUserDep,
     RecordRepositoryDep,
     SlicerServiceDep,
@@ -132,6 +133,7 @@ async def open_record_in_slicer(
     record_repo: RecordRepositoryDep,
     service: SlicerServiceDep,
     _current_user: CurrentUserDep,
+    client_storage_path: ClientStoragePathDep,
     client_ip: str = Depends(get_client_ip),
 ) -> dict[str, Any]:
     """Open a record's workspace in the user's local 3D Slicer.
@@ -168,7 +170,11 @@ async def open_record_in_slicer(
     if not record_read.record_type.slicer_script:
         raise NoScriptError(f"Record type has no slicer_script configured for record {record_id}")
 
-    context = await build_slicer_context_async(record_read, record_repo.session)
+    context = await build_slicer_context_async(
+        record_read,
+        record_repo.session,
+        client_storage_path=client_storage_path,
+    )
     # clarinet_api_url / clarinet_auth_cookie are injected here for out-of-band
     # scripts that may call back to the Clarinet API. NOT injected on the
     # submit path (_process_submission in record.py) — validators that need to
@@ -213,6 +219,7 @@ async def validate_record_in_slicer(
     record_repo: RecordRepositoryDep,
     service: SlicerServiceDep,
     _current_user: CurrentUserDep,
+    client_storage_path: ClientStoragePathDep,
     client_ip: str = Depends(get_client_ip),
 ) -> dict[str, Any]:
     """Run the result validation script for a record in 3D Slicer.
@@ -251,7 +258,11 @@ async def validate_record_in_slicer(
             f"Record type has no slicer_result_validator configured for record {record_id}"
         )
 
-    context = await build_slicer_context_async(record_read, record_repo.session)
+    context = await build_slicer_context_async(
+        record_read,
+        record_repo.session,
+        client_storage_path=client_storage_path,
+    )
     # See note above in open_record_in_slicer — clarinet_api_url and
     # clarinet_auth_cookie are out-of-band only; the submit path uses
     # __execResult merging instead of HTTP callbacks.

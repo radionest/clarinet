@@ -40,6 +40,7 @@ from clarinet.services.viewer import ViewerRegistry
 from clarinet.settings import settings
 from clarinet.utils.database import get_async_session
 from clarinet.utils.file_registry_resolver import FileRegistryEntry
+from clarinet.utils.logger import logger
 
 # Type aliases for common dependencies
 CurrentUserDep = Annotated[User, Depends(current_active_user)]
@@ -62,6 +63,51 @@ async def get_client_ip(request: Request) -> str:
         raise ClarinetError("Cant get client IP, because request.client is None!")
     client_host = request.client.host
     return client_host
+
+
+_CLIENT_STORAGE_PATH_MAX_LEN = 512
+
+
+async def get_client_storage_path(request: Request) -> str | None:
+    """Extract per-client storage path override from request header.
+
+    Reads ``X-Clarinet-Storage-Path-Client``, set by the frontend from
+    ``localStorage`` (managed via the ``/settings`` page). Returns ``None``
+    when the header is absent, blank, or rejected by validation — callers
+    then fall back to ``settings.storage_path_client`` (legacy global)
+    inside ``build_slicer_context_async``.
+
+    Validation (silent rejection, never raises — a bad header must not
+    break unrelated endpoints that all share this Depends):
+      * length <= 512 bytes — prevents oversized headers ending up in
+        access logs verbatim;
+      * printable ASCII only (0x20-0x7E) — HTTP headers are RFC 7230 latin-1,
+        Unicode rides over inconsistently across browsers/proxies. The
+        frontend already hints "ASCII only"; the backend enforces it.
+
+    The path *content* is not parsed (UNC, mounted POSIX, drive letter,
+    ``smb://...`` URI — all valid surfaces). Slicer on the client machine
+    is the authority on what works locally.
+    """
+    raw = request.headers.get("X-Clarinet-Storage-Path-Client")
+    if not raw:
+        return None
+    stripped = raw.strip()
+    if not stripped:
+        return None
+    if len(stripped) > _CLIENT_STORAGE_PATH_MAX_LEN:
+        logger.warning(
+            f"Rejected X-Clarinet-Storage-Path-Client: length "
+            f"{len(stripped)} > {_CLIENT_STORAGE_PATH_MAX_LEN}"
+        )
+        return None
+    if not all(0x20 <= ord(c) <= 0x7E for c in stripped):
+        logger.warning("Rejected X-Clarinet-Storage-Path-Client: non-printable-ASCII characters")
+        return None
+    return stripped
+
+
+ClientStoragePathDep = Annotated[str | None, Depends(get_client_storage_path)]
 
 
 async def get_application_url(request: Request) -> str:

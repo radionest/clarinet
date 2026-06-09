@@ -20,6 +20,7 @@ import gleam/uri
 import multipart_form
 import multipart_form/field.{type FormBody}
 import plinth/browser/window
+import utils/client_settings
 
 /// Creates a base request with origin resolution, method, path prefix, and accept header.
 fn base_request(method: http.Method, path: String) -> request.Request(String) {
@@ -46,6 +47,23 @@ fn build_request(
   case body {
     Some(json_body) -> request.set_body(req, json_body)
     None -> request.set_body(req, "")
+  }
+}
+
+/// Same as `build_request` but injects `X-Clarinet-Storage-Path-Client`
+/// from localStorage (managed by the `/settings` page) when set. Use only
+/// for endpoints that actually consume it (Slicer open/validate, record
+/// submit/resubmit) — sending the header to unrelated endpoints would
+/// leak the user's SMB/UNC topology into proxy access logs.
+fn build_slicer_request(
+  method method: http.Method,
+  path path: String,
+  body body: Option(String),
+) -> request.Request(String) {
+  let req = build_request(method:, path:, body:)
+  case client_settings.load_sync().storage_path_client {
+    Some(p) -> request.set_header(req, "x-clarinet-storage-path-client", p)
+    None -> req
   }
 }
 
@@ -222,6 +240,38 @@ pub fn get(path: String) -> Promise(Result(Dynamic, ApiError)) {
 /// Performs a POST request with a JSON body to the specified API path.
 pub fn post(path: String, body: String) -> Promise(Result(Dynamic, ApiError)) {
   request_with_body(method: http.Post, path: path, body: Some(body))
+}
+
+/// POST that additionally injects `X-Clarinet-Storage-Path-Client` from
+/// localStorage. Use only for endpoints that consume the header.
+pub fn post_with_slicer_context(
+  path: String,
+  body: String,
+) -> Promise(Result(Dynamic, ApiError)) {
+  let req = build_slicer_request(method: http.Post, path:, body: Some(body))
+  send_request(req)
+}
+
+/// PATCH that additionally injects `X-Clarinet-Storage-Path-Client` from
+/// localStorage. Use only for endpoints that consume the header.
+pub fn patch_with_slicer_context(
+  path: String,
+  body: String,
+) -> Promise(Result(Dynamic, ApiError)) {
+  let req = build_slicer_request(method: http.Patch, path:, body: Some(body))
+  send_request(req)
+}
+
+fn send_request(
+  req: request.Request(String),
+) -> Promise(Result(Dynamic, ApiError)) {
+  use resp_result <- promise.await(fetch.send(req))
+  case resp_result {
+    Error(fetch.NetworkError(msg)) ->
+      promise.resolve(Error(types.NetworkError(msg)))
+    Error(_) -> promise.resolve(Error(types.NetworkError("Request failed")))
+    Ok(response) -> process_response(response)
+  }
 }
 
 /// Performs a POST request with multipart/form-data to the specified API path.

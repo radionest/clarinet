@@ -31,7 +31,32 @@ Context builder and hydration details: `.claude/rules/slicer-context.md` (auto-l
 slicer_port: int = 2016          # Default Slicer web server port
 slicer_timeout: float = 10.0     # HTTP timeout (seconds)
 slicer_script_paths: list[str]   # Additional script directories (unused currently)
+storage_path_client: str | None  # Legacy global fallback for the prefix
+                                 # that replaces the server POSIX path in
+                                 # Slicer context. Overridden per-request
+                                 # by the X-Clarinet-Storage-Path-Client
+                                 # header (frontend ↔ `/settings` page →
+                                 # localStorage).
 ```
+
+### Per-client storage path override
+
+Slicer-bound endpoints (`/slicer/records/{id}/open`, `/slicer/records/{id}/validate`,
+`/records/{id}/submit`) accept an optional `X-Clarinet-Storage-Path-Client` header.
+The frontend stores the value in `localStorage` (`utils/client_settings.gleam`)
+and injects it on every request via `api/http_client.build_request`. Backend
+reads it through `ClientStoragePathDep` and forwards as
+`client_storage_path` to `build_slicer_context_async()`. Fallback order
+inside `build_slicer_context_async`:
+
+1. `client_storage_path` (from the header) — wins if set.
+2. `settings.storage_path_client` — global, legacy.
+3. `None` — no translation (server paths shipped verbatim).
+
+Set the header to whatever the user's Slicer can actually open: UNC
+(`//host/share`) on Windows, a mounted POSIX path or `smb://host/share`
+on Linux, drive letter, etc. The backend doesn't validate the value —
+Slicer is the authority on what works locally.
 
 ## Exceptions (`clarinet/exceptions/domain.py`)
 

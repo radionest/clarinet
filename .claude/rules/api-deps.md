@@ -37,6 +37,11 @@ DicomWebCacheDep, DicomWebProxyServiceDep
 
 # File registry
 ProjectFileRegistryDep  # dict | None from app.state
+
+# Slicer per-client override — value of the X-Clarinet-Storage-Path-Client
+# header set by the frontend from localStorage; None when absent or blank.
+# Consumed by build_slicer_context_async to override settings.storage_path_client.
+ClientStoragePathDep    # Annotated[str | None, Depends(get_client_storage_path)]
 ```
 
 ### RBAC Dependencies

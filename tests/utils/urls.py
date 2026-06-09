@@ -4,6 +4,12 @@ Constants match the router prefixes registered in ``src/api/app.py``.
 Dynamic paths stay as f-strings: ``f"{RECORDS_BASE}/{record_id}/status"``.
 """
 
+# --- Headers ---
+# Per-client Slicer storage path override. Set by the frontend from
+# localStorage; honored by /slicer/records/{id}/open, /slicer/records/{id}/validate,
+# and /records/{id}/submit (POST + PATCH). See clarinet/api/dependencies.py.
+X_CLARINET_STORAGE_PATH_HEADER = "X-Clarinet-Storage-Path-Client"
+
 # --- Auth ---
 AUTH_BASE = "/api/auth"
 AUTH_LOGIN = "/api/auth/login"
