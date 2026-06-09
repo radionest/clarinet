@@ -20,8 +20,8 @@ When adding a new rule: pick a focused topic, set `paths:` to the directory or f
 | `pipeline-ops.md` | Pipeline settings, testing, dependencies | `clarinet/services/pipeline/**` |
 | `pr-review.md` | Project-specific PR review checklist | used by `pr-diff-reviewer` subagent |
 | `project-setup.md` | Project init, settings, `plan/` structure | `settings.toml`, `plan/**` |
-| `record-data-api.md` | submit/update/prefill data flow + `context_info` markdown sidecar | `plan/workflows/**` |
-| `record-data-validator.md` | Python validators for cross-field/cross-element RecordData invariants | `plan/validators*.py` |
+| `record-data-api.md` | submit/update/prefill data flow + `context_info` markdown sidecar | `plan/workflows/**` (root + examples) |
+| `record-data-validator.md` | Python validators for cross-field/cross-element RecordData invariants | `plan/validators*` (root + examples) |
 | `record-repo.md` | Specialized methods, invalidation, auto_id | record repositories |
 | `recordflow-dsl.md` | Full RecordFlow DSL API reference | `recordflow/**`, `*_flow.py` |
 | `schema-hydration.md` | Dynamic field options resolver | `schema_hydration.py`, hydrators |
@@ -30,4 +30,4 @@ When adding a new rule: pick a focused topic, set `paths:` to the directory or f
 | `slicer-helper-api.md` | SlicerHelper full API + VTK pitfalls | `clarinet/services/slicer/helper.py` |
 | `test-debugging.md` | jq recipes for test/log analysis | `tests/**` |
 
-This README is not auto-loaded — it's a reference for humans (and Claude on demand) to locate the rule that owns a topic.
+This README has no `paths:` frontmatter, so it auto-loads into every session as a compact topic index — keep it short; detailed content belongs in the rule files. `pr-review.md` is the exception: self-scoped to its own path, it is read explicitly by the `pr-diff-reviewer` subagent rather than auto-loaded.

@@ -101,7 +101,7 @@ Avoid: direct loguru import (use `from clarinet.utils.logger import logger`), sy
 - Read related files in parallel (up to 5 Read calls in one message), not sequentially
 - Don't use TaskCreate/TaskUpdate to break work into phases — only when the user explicitly asks for progress tracking
 - **Edit existing files, Write only new ones.** `Write` on a path that already exists fails with `File has not been read yet` and forces an extra `Read` round-trip. For ≥3 sequential edits on one file, prefer a single `Read` + several `Edit`s over multiple `Write` rewrites
-- After a structural change (function signature, behaviour of a shared helper), `make test-fast -k <module>` BEFORE `make check` — type/lint pass doesn't catch behavioural regressions in tests that mocked the old contract
+- After a structural change (function signature, behaviour of a shared helper), `./scripts/run_tests.sh -k "<pattern>" -q` BEFORE `make check` (make test targets don't forward pytest args) — type/lint pass doesn't catch behavioural regressions in tests that mocked the old contract
 
 ## Worktree Workflow
 
@@ -110,7 +110,7 @@ Avoid: direct loguru import (use `from clarinet.utils.logger import logger`), sy
 - Quick fixes, typos, config changes — work directly in main, no worktree needed. **But** `require-worktree.sh` blocks `Edit`/`Write` on repo files when on main; `.claude/` is exempted (shared infra — edit in main), everything else under `clarinet/`, `tests/`, `alembic/`, `examples/` requires a worktree
 - To resume work in an existing worktree — use `EnterWorktree` with the same name. Never `cd` into worktree path directly
 - **"Goto worktree of branch X"** — first run `git worktree list`, find the worktree that has branch X, then `EnterWorktree(name=<worktree-name>)`. Do NOT pass a branch name to `EnterWorktree` — it creates a *new* worktree with prefix `worktree-{name}`, causing double-prefix bugs
-- Worktrees contain only git-tracked files. **Checked-in** under `.claude/` (whitelisted in `.gitignore`, visible in every worktree, edit normally + commit): `rules/`, `agents/`, `commands/`. **Shared** via `$CLAUDE_PROJECT_DIR/.claude/` (NOT in git, edit only via the main project path): `hooks/`, `settings.json`, `settings.local.json`, plus runtime dirs (`plans/`, `projects/`, `worktrees/`). Build artifacts (formosh) are not copied
+- Worktrees contain only git-tracked files. **Checked-in** under `.claude/` (whitelisted in `.gitignore`, visible in every worktree, edit normally + commit): `rules/`, `agents/`, `commands/`, `hooks/`, `settings.json`. Hooks always execute from `$CLAUDE_PROJECT_DIR/.claude/` (the main checkout) — worktree edits to `hooks/`/`settings.json` take effect only after merge to main. **Local-only** (NOT in git, edit via the main project path): `settings.local.json`, runtime dirs (`plans/`, `projects/`, `worktrees/`). Build artifacts (formosh) are not copied
 - **First `make`/`pytest`/`uv` command in a fresh worktree creates a new venv** — wrap with `timeout 300` (or omit `timeout` for the very first invocation). Subsequent runs share the venv and need only the usual `timeout 120`
 - `ExitWorktree(remove)` requires `discard_changes=true` if there are commits not in main (even if already pushed)
 - **`gh pr merge --delete-branch` from inside a worktree leaves it on a deleted branch** — `git status` later shows "no branch / detached". Run `gh pr merge` from main and then `ExitWorktree(remove, discard_changes=true)`, or skip `--delete-branch` and let `ExitWorktree(remove)` clean up locally
