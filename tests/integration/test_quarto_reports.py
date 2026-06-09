@@ -117,3 +117,14 @@ async def test_status_unknown_render_returns_404(quarto_client: AsyncClient) -> 
 async def test_download_unknown_render_returns_404(quarto_client: AsyncClient) -> None:
     resp = await quarto_client.get(admin_quarto_render_download("demo", "20260101_000000_000000"))
     assert resp.status_code == 404
+
+
+async def test_download_null_byte_in_path_returns_404(quarto_client: AsyncClient) -> None:
+    """A null byte in path params makes Path.resolve() raise ValueError; the
+    app-wide ValueError handler would answer 422 with a string detail that
+    violates the HTTPValidationError schema (schemathesis CI failure). Such a
+    name can never exist, so it must read as an unknown render instead."""
+    resp = await quarto_client.get(
+        admin_quarto_render_download("demo%00", "20260101_000000_000000")
+    )
+    assert resp.status_code == 404

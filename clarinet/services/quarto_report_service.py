@@ -278,9 +278,16 @@ class QuartoReportService:
     def _render_dir(self, name: str, render_id: str) -> Path:
         """Build the per-render directory, rejecting path-traversal in inputs."""
         base = settings.get_quarto_output_path().resolve()
-        target = (base / name / render_id).resolve()
+        invalid = QuartoRenderNotFoundError(f"Invalid render path for '{name}'/'{render_id}'")
+        try:
+            # resolve() raises ValueError on embedded null bytes; without this
+            # guard the app-wide ValueError handler turns it into a 422 whose
+            # string detail violates the declared HTTPValidationError schema.
+            target = (base / name / render_id).resolve()
+        except ValueError as exc:
+            raise invalid from exc
         if not target.is_relative_to(base):
-            raise QuartoRenderNotFoundError(f"Invalid render path for '{name}'/'{render_id}'")
+            raise invalid
         return target
 
     @staticmethod
