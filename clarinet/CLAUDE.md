@@ -105,8 +105,9 @@ sole authority for resolving on-disk paths. Models carry no path
 logic — use `FileRepository(record).working_dir` instead of any
 removed `working_folder` / `_get_working_folder` / `_format_path*`
 helpers. Strict by default (`AnonPathError` for not-yet-anonymized
-records); use `FileRepository.resolve_with_fallback` for reader-side
-services that must tolerate the pre-anon flow. User-defined Slicer
+records); UX routers catch it and serve `null`; reader-side services
+that must tolerate the pre-anon flow use
+`FileRepository.resolve_with_fallback`. User-defined Slicer
 script args are resolved inside `build_slicer_context`
 (`clarinet/services/slicer/context.py` — UX fallback).
 

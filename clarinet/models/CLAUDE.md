@@ -180,7 +180,7 @@ migration for values inexpressible as a single SQL literal.
 (metadata scan) and `tests/migration/test_data_preservation.py::TestAddNotNullBooleanRequiresServerDefault`
 (real `ALTER TABLE` on populated SQLite + PG; the PG leg = stage 6 of
 `make test-all-stages`, or `make test-migration` with `CLARINET_TEST_DATABASE_URL`
-pointing at any PG instance).
+pointing at any PG instance; see `tests/migration/conftest.py`).
 
 ## Type Aliases (`clarinet/types.py`)
 

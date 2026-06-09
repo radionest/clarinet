@@ -4,7 +4,7 @@
 
 - **pytest** + **pytest-asyncio** for async tests
 - Configuration in `tests/conftest.py`
-- Run: `make test-fast` (default), `make test-unit`, `make test`, `make test-cov`, `make test-integration`, `make test-schema`
+- Run: `make test-fast` (default); full target list in root `CLAUDE.md` → Essential Commands
 
 ## Structure
 
@@ -137,7 +137,8 @@ Downgrade a mock superuser (`user.is_superuser = False` after
 `create_mock_superuser`), persist a `RecordType` (sync factory + manual commit)
 and a `Record` (async factory), then assert through
 `create_authenticated_client(user, ...)` — e.g. `DELETE /api/admin/records/{id}`
-→ 403. Grep `rejects_non_superuser` in `tests/` for working examples.
+→ 403. Working examples: grep `is_superuser = False` in `tests/integration/`
+(e.g. `test_rbac.py`, `test_workflow_router.py`).
 
 Mix sync (`make_*`) and async (`*Factory.create_*`) freely — sync factories produce instances you `session.add()` yourself; async factories commit and refresh for you.
 
