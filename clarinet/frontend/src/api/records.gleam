@@ -116,6 +116,11 @@ fn record_type_base_decoder() -> decode.Decoder(RecordType) {
     False,
     decode.bool,
   )
+  use inherit_user_from_parent <- decode.optional_field(
+    "inherit_user_from_parent",
+    False,
+    decode.bool,
+  )
   use viewer_mode <- decode.optional_field(
     "viewer_mode",
     "single_series",
@@ -160,6 +165,7 @@ fn record_type_base_decoder() -> decode.Decoder(RecordType) {
     min_records: None,
     unique_per_user: unique_per_user,
     parent_required: parent_required,
+    inherit_user_from_parent: inherit_user_from_parent,
     viewer_mode: viewer_mode,
     level: level,
     file_registry: file_registry,
@@ -530,6 +536,11 @@ pub fn record_type_full_decoder() -> decode.Decoder(RecordType) {
     False,
     decode.bool,
   )
+  use inherit_user_from_parent <- decode.optional_field(
+    "inherit_user_from_parent",
+    False,
+    decode.bool,
+  )
   use viewer_mode <- decode.optional_field(
     "viewer_mode",
     "single_series",
@@ -578,6 +589,7 @@ pub fn record_type_full_decoder() -> decode.Decoder(RecordType) {
     min_records: min_records,
     unique_per_user: unique_per_user,
     parent_required: parent_required,
+    inherit_user_from_parent: inherit_user_from_parent,
     viewer_mode: viewer_mode,
     level: level,
     file_registry: file_registry,

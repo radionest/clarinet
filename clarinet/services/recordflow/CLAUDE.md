@@ -101,11 +101,16 @@ When a flow creates a child record from a record-triggered flow:
 
 3. **Explicit `user_id`** in `add_record()` always takes priority over `inherit_user`.
 
+Two independent inheritance axes — don't confuse them:
+- **`inherit_user` (RecordFlow)** — source is the *triggering* record; resolved by the engine, sent as explicit `user_id`.
+- **`RecordType.inherit_user_from_parent` (API)** — source is the *parent* record (`parent_record_id`); applied by `RecordService.create_record` only when the created type has the flag enabled and no explicit `user_id` arrived.
+
 ```python
-# Explicit parent link + user inheritance via API
+# Explicit parent link: user inheritance happens at the API level only if
+# child_type has RecordType.inherit_user_from_parent=True
 record("parent_type").on_finished().add_record("child_type", parent_record_id=42)
 
-# User inheritance without parent link
+# User inheritance from the triggering record, without parent link
 record("trigger").on_finished().add_record("unlinked_output", inherit_user=True)
 ```
 

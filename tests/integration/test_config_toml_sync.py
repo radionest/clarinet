@@ -311,3 +311,19 @@ async def test_export_includes_mask_patient_data_default(tmp_path) -> None:
     path = await export_record_type_to_toml(rt, tmp_path)
     content = tomllib.loads(path.read_text())
     assert content["mask_patient_data"] is True
+
+
+@pytest.mark.asyncio
+async def test_export_includes_inherit_user_from_parent(tmp_path) -> None:
+    """TOML export includes inherit_user_from_parent (explicit and default)."""
+    import tomllib
+
+    rt = RecordType(name="inherit-test", level="SERIES", inherit_user_from_parent=True)
+    path = await export_record_type_to_toml(rt, tmp_path)
+    content = tomllib.loads(path.read_text())
+    assert content["inherit_user_from_parent"] is True
+
+    rt_default = RecordType(name="inherit-default", level="SERIES")
+    path = await export_record_type_to_toml(rt_default, tmp_path)
+    content = tomllib.loads(path.read_text())
+    assert content["inherit_user_from_parent"] is False

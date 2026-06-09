@@ -82,8 +82,8 @@ Record supports optional parent-child links via `parent_record_id` — fully ind
 
 **Record**: `parent_record_id` (FK → `record.id`, ON DELETE SET NULL) links to a specific parent record.
 - Self-referencing FK with `Relationship` (parent_record / child_records)
-- Validated in `RecordRepository.validate_parent_record()`: parent must exist
-- `user_id` is inherited from parent if not explicitly set on child (API-level)
+- Parent existence validated in `RecordService.create_record()` (raises `RecordNotFoundError` → 404)
+- `user_id` is inherited from parent only when the child's `RecordType.inherit_user_from_parent` is `True` and no explicit `user_id` is given (applied in `RecordService.create_record`)
 
 **RecordFlow**: `CreateRecordAction` supports explicit `parent_record_id` kwarg and inherits `user_id` from the triggering record if `inherit_user=True`.
 

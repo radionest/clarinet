@@ -23,7 +23,7 @@ Beyond `BaseRepository`, `RecordRepository` has:
 | `find_by_criteria(criteria)` | Complex search via `RecordSearchCriteria` (legacy, offset pagination) |
 | `find_page(criteria, *, cursor, limit, sort)` | Cursor-based keyset pagination via `RecordSearchCriteria` |
 | `find_random(criteria)` | Single random record (`ORDER BY random() LIMIT 1`) matching criteria |
-| `get_record_type(name)` | RecordType by name with `file_links` eagerly loaded (raises `RecordTypeNotFoundError`) |
+| `get_record_type(name, *, with_files=True)` | RecordType by name with `file_links` eagerly loaded (raises `RecordTypeNotFoundError`). `with_files=False` → `session.get` by PK (identity-map hit, no eager `file_links` — scalars only) |
 
 ### Mutations
 
@@ -54,8 +54,8 @@ Beyond `BaseRepository`, `RecordRepository` has:
 
 | Method | Description |
 |---|---|
-| `validate_parent_record(parent_id)` | Validate parent record exists and return it (for user_id inheritance) |
-| `check_constraints(record, record_type)` | Validate RecordType constraints |
+| `check_constraints(record, record_type)` | Validate RecordType constraints (level-UID consistency, parent_required, max_records, unique_per_user) |
+| `ensure_unique_per_user(record_type, user_id, *, patient_id, study_uid, series_uid)` | Raise `RecordUniquePerUserError` if the user already has a record of this `unique_per_user` type in the context; no-op otherwise. Also re-run by `RecordService.create_record` after parent user_id inheritance |
 | `count_by_type_and_context(name, patient_id, study_uid, series_uid, level)` | Count records matching type at the given DicomQueryLevel context (PATIENT → patient_id, STUDY → study_uid, SERIES → series_uid) |
 | `count_user_records_for_context(user_id, name, patient_id, study_uid, series_uid, level)` | Count user's records for unique-per-user constraint at given DicomQueryLevel |
 | `get_available_type_counts(user_id)` | Dict of available RecordType -> count (batch-loaded to avoid N+1) |

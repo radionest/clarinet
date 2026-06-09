@@ -305,7 +305,6 @@ async def check_record_constraints(
 )
 async def add_record(
     new_record: RecordCreate,
-    repo: RecordRepositoryDep,
     service: RecordServiceDep,
 ) -> Record:
     """Create a new record.
@@ -313,14 +312,11 @@ async def add_record(
     If the RecordType defines required input files and they are not yet
     present, the record is created with ``blocked`` status instead of
     raising a validation error.
-    """
-    # Validate and inherit from parent record if specified
-    if new_record.parent_record_id is not None:
-        parent = await repo.validate_parent_record(new_record.parent_record_id)
-        # Inherit user_id from parent if not explicitly set
-        if new_record.user_id is None:
-            new_record.user_id = parent.user_id
 
+    When ``parent_record_id`` is set, ``user_id`` is inherited from the
+    parent record only if the RecordType has ``inherit_user_from_parent``
+    enabled and no explicit ``user_id`` is provided.
+    """
     record = Record(**new_record.model_dump())
     return await service.create_record(record)
 

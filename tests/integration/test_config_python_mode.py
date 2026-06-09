@@ -59,6 +59,30 @@ async def test_mask_patient_data_only_forwarded_when_explicit(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_inherit_user_from_parent_forwarded_when_explicit(tmp_path) -> None:
+    """``inherit_user_from_parent`` propagates from RecordDef only when set."""
+    _write_record_types(
+        tmp_path,
+        """\
+        from clarinet.config.primitives import RecordDef
+
+        # Explicit True — must be forwarded
+        child = RecordDef(name="child-rt", level="SERIES", inherit_user_from_parent=True)
+        # Default — must NOT be forwarded
+        plain = RecordDef(name="plain-rt", level="SERIES")
+        """,
+    )
+
+    config_items = await load_python_config(tmp_path)
+    by_name = {item.name: item for item in config_items}
+
+    assert "inherit_user_from_parent" in by_name["child-rt"].model_fields_set
+    assert by_name["child-rt"].inherit_user_from_parent is True
+
+    assert "inherit_user_from_parent" not in by_name["plain-rt"].model_fields_set
+
+
+@pytest.mark.asyncio
 async def test_bootstrap_loads_python_config(
     test_session: AsyncSession,
     tmp_path,

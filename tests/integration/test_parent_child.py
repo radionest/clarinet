@@ -2,17 +2,17 @@
 
 Covers:
 - detect_cycle() utility
-- RecordRepository.validate_parent_record() existence check
-- API endpoints: Record with parent_record_id
+- API endpoints: Record with parent_record_id (existence check lives in
+  ``RecordService.create_record``)
 - RecordSearchCriteria filtering by parent_record_id
-- user_id inheritance from parent record
+- user_id inheritance from parent record (gated by
+  ``RecordType.inherit_user_from_parent``)
 """
 
 import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from clarinet.exceptions.domain import RecordNotFoundError
 from clarinet.repositories.record_repository import RecordRepository, RecordSearchCriteria
 from clarinet.utils.graph_validation import detect_cycle
 from tests.utils.factories import (
@@ -74,61 +74,6 @@ class TestDetectCycle:
     def test_all_roots(self):
         edges = {"A": None, "B": None, "C": None}
         assert detect_cycle(edges) is None
-
-
-# ===================================================================
-# RecordRepository.validate_parent_record()
-# ===================================================================
-
-
-class TestRecordValidateParentRecord:
-    """Integration tests for parent record validation."""
-
-    @pytest_asyncio.fixture
-    async def env(self, test_session: AsyncSession):
-        pat = make_patient("VRPAT")
-        test_session.add(pat)
-        await test_session.commit()
-
-        study = make_study("VRPAT", "1.2.3.600")
-        test_session.add(study)
-        await test_session.commit()
-
-        series = make_series("1.2.3.600", "1.2.3.600.1")
-        test_session.add(series)
-        await test_session.commit()
-
-        rt_parent = make_record_type("vr-parent-type")
-        rt_child = make_record_type("vr-child-type")
-        test_session.add_all([rt_parent, rt_child])
-        await test_session.commit()
-
-        parent_rec = await seed_record(
-            test_session,
-            patient_id="VRPAT",
-            study_uid="1.2.3.600",
-            series_uid="1.2.3.600.1",
-            rt_name="vr-parent-type",
-        )
-
-        repo = RecordRepository(test_session)
-        return {
-            "repo": repo,
-            "session": test_session,
-            "parent_rec": parent_rec,
-        }
-
-    @pytest.mark.asyncio
-    async def test_valid_parent_record(self, env):
-        """Existing parent record is returned."""
-        parent = await env["repo"].validate_parent_record(env["parent_rec"].id)
-        assert parent.id == env["parent_rec"].id
-
-    @pytest.mark.asyncio
-    async def test_parent_record_not_found(self, env):
-        """Non-existent parent_record_id raises RecordNotFoundError."""
-        with pytest.raises(RecordNotFoundError):
-            await env["repo"].validate_parent_record(999999)
 
 
 # ===================================================================
@@ -234,8 +179,10 @@ class TestApiRecordParent:
         await test_session.commit()
 
         rt_parent = make_record_type("ar-parent-ty")
-        rt_child = make_record_type("ar-child-type")
-        test_session.add_all([rt_parent, rt_child])
+        # Opt-in: user_id inheritance from parent is gated by this flag
+        rt_child = make_record_type("ar-child-type", inherit_user_from_parent=True)
+        rt_noinherit = make_record_type("ar-noinherit-t")
+        test_session.add_all([rt_parent, rt_child, rt_noinherit])
         await test_session.commit()
 
         return {
@@ -324,6 +271,90 @@ class TestApiRecordParent:
         assert resp.status_code == 201
         child_data = resp.json()
         assert child_data["user_id"] == str(user.id)
+
+    @pytest.mark.asyncio
+    async def test_user_id_not_inherited_by_default(self, client, test_session, seed):
+        """Without inherit_user_from_parent on the type, user_id stays None."""
+        user = make_user()
+        test_session.add(user)
+        await test_session.commit()
+        await test_session.refresh(user)
+
+        resp = await client.post(
+            f"{RECORDS_BASE}/",
+            json={
+                "patient_id": seed["patient_id"],
+                "study_uid": seed["study_uid"],
+                "series_uid": seed["series_uid"],
+                "record_type_name": "ar-parent-ty",
+                "user_id": str(user.id),
+            },
+        )
+        assert resp.status_code == 201
+        parent_id = resp.json()["id"]
+
+        resp = await client.post(
+            f"{RECORDS_BASE}/",
+            json={
+                "patient_id": seed["patient_id"],
+                "study_uid": seed["study_uid"],
+                "series_uid": seed["series_uid"],
+                "record_type_name": "ar-noinherit-t",
+                "parent_record_id": parent_id,
+            },
+        )
+        assert resp.status_code == 201
+        assert resp.json()["user_id"] is None
+
+    @pytest.mark.asyncio
+    async def test_inherited_user_id_respects_unique_per_user(self, client, test_session, seed):
+        """Inheritance re-checks unique_per_user with the inherited user.
+
+        The route-level constraint check runs with the payload user_id
+        (None here) and cannot see the inherited one — the service must
+        re-check and reject with 409.
+        """
+        user = make_user()
+        test_session.add(user)
+        await test_session.commit()
+        await test_session.refresh(user)
+
+        # The user already owns a record of the child type in this series
+        # context (ar-child-type has unique_per_user=True by default).
+        await seed_record(
+            test_session,
+            patient_id=seed["patient_id"],
+            study_uid=seed["study_uid"],
+            series_uid=seed["series_uid"],
+            rt_name="ar-child-type",
+            user_id=user.id,
+        )
+
+        resp = await client.post(
+            f"{RECORDS_BASE}/",
+            json={
+                "patient_id": seed["patient_id"],
+                "study_uid": seed["study_uid"],
+                "series_uid": seed["series_uid"],
+                "record_type_name": "ar-parent-ty",
+                "user_id": str(user.id),
+            },
+        )
+        assert resp.status_code == 201
+        parent_id = resp.json()["id"]
+
+        # Inherited user would duplicate their existing child record → 409
+        resp = await client.post(
+            f"{RECORDS_BASE}/",
+            json={
+                "patient_id": seed["patient_id"],
+                "study_uid": seed["study_uid"],
+                "series_uid": seed["series_uid"],
+                "record_type_name": "ar-child-type",
+                "parent_record_id": parent_id,
+            },
+        )
+        assert resp.status_code == 409
 
     @pytest.mark.asyncio
     async def test_explicit_user_id_not_overridden(self, client, test_session, seed):
