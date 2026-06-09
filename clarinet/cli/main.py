@@ -16,6 +16,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import time
 import urllib.request
 from pathlib import Path
 
@@ -978,6 +979,34 @@ def uninstall_quarto() -> None:
     logger.info(f"Quarto removed from {quarto_dir}")
 
 
+def cleanup_quarto_renders(days: int) -> None:
+    """Delete rendered Quarto outputs older than ``days``.
+
+    Each render leaves a ``<name>/<render_id>/`` directory under the output
+    path (the ``.qmd`` copy, materialized CSVs — which may hold report data —
+    and the DOCX/PDF). They are not needed once downloaded; pruning them bounds
+    disk use and limits how long report data sits on disk.
+    """
+    output_path = settings.get_quarto_output_path()
+    if not output_path.is_dir():
+        print(f"No Quarto output directory at {output_path}; nothing to clean")
+        return
+    cutoff = time.time() - days * 86400
+    removed = 0
+    for report_dir in output_path.iterdir():
+        if not report_dir.is_dir():
+            continue
+        for render_dir in report_dir.iterdir():
+            if render_dir.is_dir() and render_dir.stat().st_mtime < cutoff:
+                shutil.rmtree(render_dir, ignore_errors=True)
+                removed += 1
+        with contextlib.suppress(OSError):
+            report_dir.rmdir()  # remove the report folder if now empty
+    logger.info(
+        f"Quarto cleanup: removed {removed} render(s) older than {days}d from {output_path}"
+    )
+
+
 def handle_quarto_command(args: argparse.Namespace) -> None:
     """Handle Quarto-related commands."""
     if args.quarto_command == "install":
@@ -986,6 +1015,8 @@ def handle_quarto_command(args: argparse.Namespace) -> None:
         quarto_status()
     elif args.quarto_command == "uninstall":
         uninstall_quarto()
+    elif args.quarto_command == "cleanup":
+        cleanup_quarto_renders(days=args.days)
     else:
         logger.error(f"Unknown quarto command: {args.quarto_command}")
         sys.exit(1)
@@ -1299,6 +1330,13 @@ def main() -> None:
         "status", help="Show Quarto installation status (runs 'quarto check')"
     )
     quarto_subparsers.add_parser("uninstall", help="Remove the installed Quarto CLI")
+
+    quarto_cleanup_parser = quarto_subparsers.add_parser(
+        "cleanup", help="Delete rendered Quarto outputs older than N days"
+    )
+    quarto_cleanup_parser.add_argument(
+        "--days", type=int, default=30, help="Retention in days (default: 30)"
+    )
 
     # worker command
     worker_parser = subparsers.add_parser("worker", help="Run pipeline task worker")

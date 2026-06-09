@@ -24,8 +24,10 @@ from typing import Any
 from clarinet.exceptions.domain import QuartoRenderError
 from clarinet.models.quarto_report import QuartoRenderStatus, QuartoReportFormat
 from clarinet.repositories.report_repository import ReportRepository
+from clarinet.services.report_service import ReportRegistry
 from clarinet.settings import settings
 from clarinet.utils.logger import logger
+from clarinet.utils.report_discovery import discover_report_templates
 from clarinet.utils.report_formatters import to_csv
 
 _STATUS_FILE = "status.json"
@@ -97,7 +99,7 @@ async def render_report(
     *,
     name: str,
     qmd_path: Path,
-    data_sql: dict[str, str],
+    data_reports: list[str],
     formats: list[QuartoReportFormat],
     render_dir: Path,
     quarto_executable: Path,
@@ -105,7 +107,7 @@ async def render_report(
 ) -> None:
     """Render ``qmd_path`` to ``formats`` inside ``render_dir``.
 
-    Materializes each ``data_sql`` query as ``data/<name>.csv`` (reusing the
+    Materializes each declared data report as ``data/<name>.csv`` (reusing the
     SQL-report read-only execution + CSV formatter), copies the ``.qmd`` into
     the render dir, then runs ``quarto render`` once per format. Progress and
     failures are recorded in the status sidecar; this coroutine never raises to
@@ -127,7 +129,7 @@ async def render_report(
 
     ready: dict[str, bool] = {f.value: False for f in formats}
     try:
-        await _materialize_data(data_sql, render_dir)
+        await _materialize_data(data_reports, render_dir)
         work_qmd = render_dir / qmd_path.name
         shutil.copy2(qmd_path, work_qmd)
         for fmt in formats:
@@ -170,19 +172,27 @@ async def render_report(
     logger.info(f"Quarto render '{name}' ({render_dir.name}) finished: {list(ready)}")
 
 
-async def _materialize_data(data_sql: dict[str, str], render_dir: Path) -> None:
-    """Execute each SQL report and write ``data/<name>.csv`` for the chunks.
+async def _materialize_data(data_reports: list[str], render_dir: Path) -> None:
+    """Execute each declared SQL report and write ``data/<name>.csv``.
 
-    Reuses :class:`ReportRepository` so the same read-only transaction,
-    ``SELECT``/``WITH`` validation and statement timeout apply. DB credentials
-    are never exposed to the rendered document — only these CSV files are.
+    The SQL text is resolved here (on the worker / in-process), not shipped in
+    the queue payload: a fresh :class:`ReportRegistry` is built from the same
+    ``*.sql`` files the API discovers. Reuses :class:`ReportRepository` so the
+    same read-only transaction, ``SELECT``/``WITH`` validation and statement
+    timeout apply — DB credentials never reach the rendered document.
     """
-    if not data_sql:
+    if not data_reports:
         return
+    registry = ReportRegistry(discover_report_templates(settings.get_reports_path()))
     data_dir = render_dir / "data"
     data_dir.mkdir(parents=True, exist_ok=True)
     repo = ReportRepository()
-    for report_name, sql in data_sql.items():
+    for report_name in data_reports:
+        sql = registry.get_sql(report_name)
+        if sql is None:
+            raise QuartoRenderError(
+                f"SQL report '{report_name}' declared in clarinet.data was not found"
+            )
         columns, rows = await repo.execute_report(sql)
         csv_buffer = to_csv(columns, rows)
         (data_dir / f"{report_name}.csv").write_bytes(csv_buffer.getvalue())

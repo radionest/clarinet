@@ -93,7 +93,7 @@ async def test_render_report_marks_failed_when_quarto_missing(
     await quarto_render.render_report(
         name="rep",
         qmd_path=_write_min_qmd(tmp_path),
-        data_sql={},
+        data_reports=[],
         formats=[QuartoReportFormat.DOCX],
         render_dir=tmp_path / "out",
         quarto_executable=bad,
@@ -103,6 +103,22 @@ async def test_render_report_marks_failed_when_quarto_missing(
     assert state is not None
     assert state["status"] == "failed"
     assert state["error"]
+
+
+def test_render_dir_rejects_path_traversal() -> None:
+    """name / render_id that escape the output root must raise, not resolve."""
+    from clarinet.exceptions.domain import QuartoRenderNotFoundError
+    from clarinet.services.quarto_report_service import (
+        QuartoReportRegistry,
+        QuartoReportService,
+    )
+    from clarinet.services.report_service import ReportRegistry
+
+    service = QuartoReportService(QuartoReportRegistry([]), ReportRegistry([]))
+    with pytest.raises(QuartoRenderNotFoundError):
+        service.get_render_state("../../etc", "passwd")
+    with pytest.raises(QuartoRenderNotFoundError):
+        service.get_output_file("..", "..", QuartoReportFormat.DOCX)
 
 
 def _write_min_qmd(tmp_path: Path) -> Path:

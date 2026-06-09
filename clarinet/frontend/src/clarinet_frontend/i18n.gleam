@@ -358,7 +358,7 @@ pub fn translate(locale: Locale, key: Key) -> String {
     En, NavReports -> "Reports"
     Ru, NavReports -> "Отчёты"
     En, NavQuartoReports -> "Quarto"
-    Ru, NavQuartoReports -> "Quarto"
+    Ru, NavQuartoReports -> "Quarto-отчёты"
     En, NavWorkflow -> "Workflow"
     Ru, NavWorkflow -> "Граф процессов"
     En, NavAdmin -> "Admin"

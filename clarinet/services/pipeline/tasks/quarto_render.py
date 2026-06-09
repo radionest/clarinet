@@ -33,7 +33,7 @@ async def render_quarto_report(msg: PipelineMessage, _ctx: TaskContext) -> None:
     name: str = payload["report_name"]
     qmd_path = Path(payload["qmd_path"])
     render_dir = Path(payload["render_dir"])
-    data_sql: dict[str, str] = payload.get("data_sql", {})
+    data_reports: list[str] = payload.get("data_reports", [])
     formats = [QuartoReportFormat(value) for value in payload.get("formats", ["docx"])]
 
     # Defense in depth: the write target comes from the queue payload. A
@@ -60,7 +60,7 @@ async def render_quarto_report(msg: PipelineMessage, _ctx: TaskContext) -> None:
     await render_report(
         name=name,
         qmd_path=qmd_path,
-        data_sql=data_sql,
+        data_reports=data_reports,
         formats=formats,
         render_dir=render_dir,
         quarto_executable=executable,

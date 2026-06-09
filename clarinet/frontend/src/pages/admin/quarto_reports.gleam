@@ -30,8 +30,13 @@ pub type RenderEntry {
     render_id: String,
     status: String,
     error: Option(String),
+    attempts: Int,
   )
 }
+
+// Cap on status polls per render (~10 min at the 3s interval, matching the
+// backend render timeout) so a render stuck in `running` cannot poll forever.
+const max_poll_attempts = 200
 
 pub type Model {
   Model(
@@ -112,6 +117,7 @@ pub fn update(
               render_id: "",
               status: "pending",
               error: None,
+              attempts: 0,
             )
           #(
             Model(..model, renders: dict.insert(model.renders, key, entry)),
@@ -142,13 +148,9 @@ pub fn update(
       case active_entries(model.renders) {
         [] -> #(Model(..model, polling: False), effect.none(), [])
         active -> {
-          let polls =
-            list.map(active, fn(pair) {
-              let #(key, entry) = pair
-              poll_effect(entry.name, entry.render_id, key)
-            })
+          let #(renders, polls) = bump_and_poll(model.renders, active)
           #(
-            Model(..model, polling: True),
+            Model(..model, renders: renders, polling: True),
             effect.batch([schedule_poll(), ..polls]),
             [],
           )
@@ -169,6 +171,31 @@ pub fn update(
 
 fn render_key(name: String, format: String) -> String {
   name <> "|" <> format
+}
+
+// Bump each active render's attempt count; poll those under the cap and mark
+// the rest failed, so a render stuck in `running` can't poll forever.
+fn bump_and_poll(
+  renders: Dict(String, RenderEntry),
+  active: List(#(String, RenderEntry)),
+) -> #(Dict(String, RenderEntry), List(Effect(Msg))) {
+  use acc, pair <- list.fold(active, #(renders, []))
+  let #(rs, effs) = acc
+  let #(key, entry) = pair
+  case entry.attempts >= max_poll_attempts {
+    True -> #(
+      dict.insert(
+        rs,
+        key,
+        RenderEntry(..entry, status: "failed", error: Some("Render timed out")),
+      ),
+      effs,
+    )
+    False -> #(
+      dict.insert(rs, key, RenderEntry(..entry, attempts: entry.attempts + 1)),
+      [poll_effect(entry.name, entry.render_id, key), ..effs],
+    )
+  }
 }
 
 fn update_entry(

@@ -74,7 +74,6 @@ def setup_exception_handlers(app: FastAPI) -> None:
         InvalidPatientIdentifierError,
         PipelineError,
         QuartoNotInstalledError,
-        QuartoRenderError,
         QuartoRenderNotReadyError,
         RecordDataValidationError,
         RecordLimitReachedError,
@@ -372,15 +371,6 @@ def setup_exception_handlers(app: FastAPI) -> None:
         return JSONResponse(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             content={"detail": str(exc) if str(exc) else "Quarto CLI not installed"},
-        )
-
-    @app.exception_handler(QuartoRenderError)
-    async def handle_quarto_render_error(_: Request, exc: QuartoRenderError) -> JSONResponse:
-        """Convert QuartoRenderError to 500 response (render failed)."""
-        logger.opt(exception=exc).error("Quarto render failed")
-        return JSONResponse(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={"detail": str(exc) if str(exc) else "Quarto render failed"},
         )
 
     @app.exception_handler(ConfigurationError)

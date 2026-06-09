@@ -70,6 +70,11 @@ table**. When `pipeline_enabled` is true the render runs on a pipeline worker;
 otherwise it runs in-process via `asyncio.create_task`. Either way the API and
 worker must share the storage filesystem (they already do for output files).
 
+Each render leaves a `<name>/<render_id>/` directory (the rendered file, the
+materialized CSVs, and intermediate Quarto files). Prune old ones with
+`clarinet quarto cleanup --days N` (default 30) — e.g. from a cron job — to
+bound disk use and limit how long report data sits on disk.
+
 ## Installing the Quarto CLI
 
 Quarto is **not** a pip package — it is a self-contained binary that bundles

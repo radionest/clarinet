@@ -81,7 +81,7 @@ class QuartoReportService:
         if resolve_quarto_executable() is None:
             raise QuartoNotInstalledError("quarto binary not found; run 'clarinet quarto install'")
 
-        data_sql = self._resolve_data_sql(template)
+        self._validate_data_reports(template)
 
         now = datetime.now(UTC)
         render_id = now.strftime("%Y%m%d_%H%M%S_%f")
@@ -95,7 +95,7 @@ class QuartoReportService:
             created_at=now.isoformat(),
         )
 
-        await self._dispatch(name, qmd_path, data_sql, formats, render_dir)
+        await self._dispatch(name, qmd_path, template.data_reports, formats, render_dir)
         return self.get_render_state(name, render_id)
 
     def get_render_state(self, name: str, render_id: str) -> QuartoRenderState:
@@ -122,27 +122,25 @@ class QuartoReportService:
             )
         return output_path
 
-    def _resolve_data_sql(self, template: QuartoReportTemplate) -> dict[str, str]:
-        """Map each declared data report name to its SQL text (404 if missing).
+    def _validate_data_reports(self, template: QuartoReportTemplate) -> None:
+        """Fail fast (404) when a declared ``clarinet.data`` report is unknown.
 
-        Resolving here — before dispatch — surfaces a typo in ``clarinet.data``
-        as an immediate 404 instead of a silent render failure later.
+        Validating here — before dispatch — surfaces a typo as an immediate 404
+        instead of a silent render failure later. The render itself re-resolves
+        the SQL text from disk (the worker has no ``app.state`` registry), so
+        only the report *names* travel through the queue.
         """
-        data_sql: dict[str, str] = {}
         for report_name in template.data_reports:
-            sql = self._report_registry.get_sql(report_name)
-            if sql is None:
+            if self._report_registry.get_sql(report_name) is None:
                 raise QuartoReportNotFoundError(
                     f"{template.name}: required SQL report '{report_name}' not found"
                 )
-            data_sql[report_name] = sql
-        return data_sql
 
     async def _dispatch(
         self,
         name: str,
         qmd_path: Path,
-        data_sql: dict[str, str],
+        data_reports: list[str],
         formats: list[QuartoReportFormat],
         render_dir: Path,
     ) -> None:
@@ -155,7 +153,7 @@ class QuartoReportService:
             "report_name": name,
             "qmd_path": str(qmd_path),
             "render_dir": str(render_dir),
-            "data_sql": data_sql,
+            "data_reports": data_reports,
             "formats": [f.value for f in formats],
         }
         if settings.pipeline_enabled:
@@ -176,7 +174,7 @@ class QuartoReportService:
                 render_report(
                     name=name,
                     qmd_path=qmd_path,
-                    data_sql=data_sql,
+                    data_reports=data_reports,
                     formats=formats,
                     render_dir=render_dir,
                     quarto_executable=executable,
