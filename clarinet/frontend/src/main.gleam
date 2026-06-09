@@ -44,6 +44,7 @@ import pages/records/list as records_list
 import pages/records/new as record_new
 import pages/register
 import pages/series/detail as series_detail
+import pages/settings as settings_page
 import pages/studies/detail as study_detail
 import pages/studies/list as studies_list
 import router.{type Route}
@@ -482,6 +483,15 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         store.AdminWorkflowMsg,
       )
 
+    store.SettingsMsg(page_msg) ->
+      delegate_page_update(
+        model,
+        fn(p) { case p { store.SettingsPage(m) -> Ok(m) _ -> Error(Nil) } },
+        fn(m, s) { settings_page.update(m, page_msg, s) },
+        store.SettingsPage,
+        store.SettingsMsg,
+      )
+
     // Patient page delegation
     store.PatientsListMsg(page_msg) ->
       delegate_page_update(
@@ -824,6 +834,8 @@ fn init_page_for_route(model: Model, route: Route) -> #(Model, Effect(Msg)) {
       init_page(model, admin_reports_page.init, store.AdminReportsPage, store.AdminReportsMsg)
     router.AdminWorkflow ->
       init_page(model, admin_workflow_page.init, store.AdminWorkflowPage, store.AdminWorkflowMsg)
+    router.Settings ->
+      init_page(model, settings_page.init, store.SettingsPage, store.SettingsMsg)
     _ -> #(store.Model(..model, page: store.NoPage), effect.none())
   }
 }
@@ -1037,6 +1049,8 @@ fn view_content(model: Model) -> Element(Msg) {
       element.map(admin_reports_page.view(pm, shared), store.AdminReportsMsg)
     store.AdminWorkflowPage(pm) ->
       element.map(admin_workflow_page.view(pm, shared), store.AdminWorkflowMsg)
+    store.SettingsPage(pm) ->
+      element.map(settings_page.view(pm, shared), store.SettingsMsg)
     store.NoPage -> render_route_placeholder(model.route)
   }
 

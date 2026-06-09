@@ -32,6 +32,7 @@ from starlette.responses import Response
 from clarinet.api.auth_config import current_active_user
 from clarinet.api.dependencies import (
     AuthorizedRecordDep,
+    ClientStoragePathDep,
     CurrentUserDep,
     MutableRecordDep,
     RecordRepositoryDep,
@@ -406,6 +407,7 @@ async def _process_submission(
     slicer_service: SlicerService | None = None,
     session: AsyncSession | None = None,
     client_ip: str | None = None,
+    client_storage_path: str | None = None,
 ) -> RecordRead:
     """Validate, optionally run Slicer, and persist record data.
 
@@ -423,6 +425,9 @@ async def _process_submission(
         slicer_service: Optional Slicer service for validation.
         session: DB session, required when *slicer_service* is provided.
         client_ip: Client IP, required when *slicer_service* is provided.
+        client_storage_path: Per-client Slicer storage prefix (from
+            ``X-Clarinet-Storage-Path-Client`` header). Forwarded to
+            ``build_slicer_context_async`` for the validator script.
 
     Returns:
         Masked ``RecordRead``.
@@ -454,6 +459,7 @@ async def _process_submission(
             record_read,
             session,
             parent=parent_read,
+            client_storage_path=client_storage_path,
         )
         # Prepend record_id check — ensures validation runs on the same record that was opened
         validator_script = (
@@ -647,6 +653,7 @@ async def submit_record_with_validation(
     slicer_service: SlicerServiceDep,
     session: SessionDep,
     user: CurrentUserDep,
+    client_storage_path: ClientStoragePathDep,
     client_ip: str = Depends(get_client_ip),
     data: RecordData = Body(default={}),
 ) -> RecordRead:
@@ -687,6 +694,7 @@ async def submit_record_with_validation(
         slicer_service=slicer_service,
         session=session,
         client_ip=client_ip,
+        client_storage_path=client_storage_path,
     )
 
 
@@ -700,6 +708,7 @@ async def resubmit_record_with_validation(
     slicer_service: SlicerServiceDep,
     session: SessionDep,
     user: CurrentUserDep,
+    client_storage_path: ClientStoragePathDep,
     client_ip: str = Depends(get_client_ip),
     data: RecordData = Body(default={}),
 ) -> RecordRead:
@@ -733,6 +742,7 @@ async def resubmit_record_with_validation(
         slicer_service=slicer_service,
         session=session,
         client_ip=client_ip,
+        client_storage_path=client_storage_path,
     )
 
 

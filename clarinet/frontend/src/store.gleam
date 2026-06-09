@@ -21,6 +21,7 @@ import pages/records/list as records_list_page
 import pages/records/new as record_new_page
 import pages/register as register_page
 import pages/series/detail as series_detail_page
+import pages/settings as settings_page
 import pages/studies/detail as study_detail_page
 import pages/studies/list as studies_list_page
 import preload
@@ -79,6 +80,7 @@ pub type PageModel {
   AdminReportsPage(admin_reports_page.Model)
   AdminWorkflowPage(admin_workflow_page.Model)
   HomePage(home_page.Model)
+  SettingsPage(settings_page.Model)
 }
 
 // Modal content types
@@ -136,6 +138,9 @@ pub type Msg {
   AdminMsg(admin_page.Msg)
   AdminReportsMsg(admin_reports_page.Msg)
   AdminWorkflowMsg(admin_workflow_page.Msg)
+
+  // Settings page delegation
+  SettingsMsg(settings_page.Msg)
 
   // UI Actions
   SetError(Option(String))

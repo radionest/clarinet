@@ -95,14 +95,19 @@ def _resolve_custom_args(
 def _translate_paths_for_client(
     context: dict[str, Any],
     server_base: str,
+    client_base: str | None,
 ) -> dict[str, Any]:
     """Replace server storage path prefix with client-accessible prefix.
 
-    Uses PurePosixPath.relative_to() for safe boundary matching —
-    prevents partial prefix hits (e.g. /mnt/vol vs /mnt/vol2).
-    Non-path values raise ValueError on relative_to() and pass through unchanged.
+    Pure function: ``client_base=None`` returns context unchanged. Callers
+    resolve their own fallback (per-request header, per-user setting, global
+    ``settings.storage_path_client``) and pass the result here.
+
+    Uses ``PurePosixPath.relative_to()`` for safe boundary matching —
+    prevents partial prefix hits (e.g. ``/mnt/vol`` vs ``/mnt/vol2``).
+    Non-path values raise ValueError on ``relative_to()`` and pass through
+    unchanged.
     """
-    client_base = settings.storage_path_client
     if not client_base:
         return context
 
@@ -242,6 +247,7 @@ async def build_slicer_context_async(
     session: AsyncSession,
     *,
     parent: RecordRead | None = None,
+    client_storage_path: str | None = None,
 ) -> dict[str, Any]:
     """Build Slicer context with optional async hydration.
 
@@ -254,6 +260,12 @@ async def build_slicer_context_async(
         parent: Optional pre-loaded parent record. When provided, skips the
             DB lookup. When ``None`` and ``record.parent_record_id`` is set,
             the parent is loaded via repository.
+        client_storage_path: Per-request override for the client-visible
+            storage prefix (sent by the frontend from localStorage via the
+            ``X-Clarinet-Storage-Path-Client`` header). Falls back to
+            ``settings.storage_path_client`` when ``None`` — that global
+            setting is preserved as a legacy fallback for deployments that
+            still configure it server-side.
 
     Returns:
         Context dict ready for injection into Slicer scripts.
@@ -273,8 +285,10 @@ async def build_slicer_context_async(
     if hydrator_names:
         context = await hydrate_slicer_context(context, record, session, hydrator_names)
 
-    # Path translation — after all layers including hydrators
+    # Path translation — after all layers including hydrators.
+    # Per-request override wins over the global settings fallback.
     server_base = record.clarinet_storage_path or settings.storage_path
-    context = _translate_paths_for_client(context, server_base)
+    effective_client_base = client_storage_path or settings.storage_path_client
+    context = _translate_paths_for_client(context, server_base, effective_client_base)
 
     return context

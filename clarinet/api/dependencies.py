@@ -64,6 +64,29 @@ async def get_client_ip(request: Request) -> str:
     return client_host
 
 
+async def get_client_storage_path(request: Request) -> str | None:
+    """Extract per-client storage path override from request header.
+
+    Reads ``X-Clarinet-Storage-Path-Client``, set by the frontend from
+    ``localStorage`` (managed via the ``/settings`` page). Returns ``None``
+    when the header is absent or blank — callers then fall back to
+    ``settings.storage_path_client`` (legacy global) inside
+    ``build_slicer_context_async``.
+
+    The path itself isn't validated server-side: Slicer (running on the
+    user's machine) is the authority on what works locally — UNC, mounted
+    POSIX path, drive letter, etc.
+    """
+    raw = request.headers.get("X-Clarinet-Storage-Path-Client")
+    if not raw:
+        return None
+    stripped = raw.strip()
+    return stripped or None
+
+
+ClientStoragePathDep = Annotated[str | None, Depends(get_client_storage_path)]
+
+
 async def get_application_url(request: Request) -> str:
     """
     Get the base URL of the application.

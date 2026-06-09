@@ -20,6 +20,7 @@ import gleam/uri
 import multipart_form
 import multipart_form/field.{type FormBody}
 import plinth/browser/window
+import utils/client_settings
 
 /// Creates a base request with origin resolution, method, path prefix, and accept header.
 fn base_request(method: http.Method, path: String) -> request.Request(String) {
@@ -34,6 +35,11 @@ fn base_request(method: http.Method, path: String) -> request.Request(String) {
 }
 
 /// Builds an HTTP request with JSON content-type and optional body.
+///
+/// Per-client Slicer storage path (when set in localStorage via the
+/// `/settings` page) is forwarded as the `X-Clarinet-Storage-Path-Client`
+/// header. The backend uses it only for Slicer-related endpoints; other
+/// routes silently ignore the header.
 fn build_request(
   method method: http.Method,
   path path: String,
@@ -42,10 +48,21 @@ fn build_request(
   let req =
     base_request(method, path)
     |> request.set_header("content-type", "application/json")
+    |> with_client_storage_path_header
 
   case body {
     Some(json_body) -> request.set_body(req, json_body)
     None -> request.set_body(req, "")
+  }
+}
+
+fn with_client_storage_path_header(
+  req: request.Request(String),
+) -> request.Request(String) {
+  case client_settings.load_sync().storage_path_client {
+    Some(path) ->
+      request.set_header(req, "x-clarinet-storage-path-client", path)
+    None -> req
   }
 }
 

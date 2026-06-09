@@ -632,6 +632,120 @@ async def test_client_path_translation_output_file(mock_settings):
     assert ctx["segmentation"] == ctx["output_file"]
 
 
+@_skip_windows
+@pytest.mark.asyncio
+@patch("clarinet.services.slicer.context.settings")
+async def test_client_path_translation_per_request_override(mock_settings):
+    """Per-request client_storage_path overrides settings.storage_path_client."""
+    mock_settings.storage_path = "/mnt/vol_storage"
+    mock_settings.storage_path_client = "//server/vol_storage"
+
+    record = _make_record_read(level=DicomQueryLevel.STUDY)
+    record = record.model_copy(update={"clarinet_storage_path": "/mnt/vol_storage"})
+
+    ctx = await build_slicer_context_async(
+        record, AsyncMock(), client_storage_path="/mnt/local_smb_mount"
+    )
+
+    assert ctx["working_folder"] == "/mnt/local_smb_mount/CLARINET_1/ANON_STUDY"
+
+
+@_skip_windows
+@pytest.mark.asyncio
+@patch("clarinet.services.slicer.context.settings")
+async def test_client_path_translation_per_request_with_no_global(mock_settings):
+    """Per-request client_storage_path works even when settings has none."""
+    mock_settings.storage_path = "/mnt/vol_storage"
+    mock_settings.storage_path_client = None
+
+    record = _make_record_read(level=DicomQueryLevel.STUDY)
+    record = record.model_copy(update={"clarinet_storage_path": "/mnt/vol_storage"})
+
+    ctx = await build_slicer_context_async(
+        record, AsyncMock(), client_storage_path="smb://host/share"
+    )
+
+    assert ctx["working_folder"] == "smb://host/share/CLARINET_1/ANON_STUDY"
+
+
+@_skip_windows
+@pytest.mark.asyncio
+@patch("clarinet.services.slicer.context.settings")
+async def test_client_path_translation_falls_back_to_settings(mock_settings):
+    """No client_storage_path argument → fall back to settings (legacy behavior)."""
+    mock_settings.storage_path = "/mnt/vol_storage"
+    mock_settings.storage_path_client = "//server/vol_storage"
+
+    record = _make_record_read(level=DicomQueryLevel.STUDY)
+    record = record.model_copy(update={"clarinet_storage_path": "/mnt/vol_storage"})
+
+    ctx = await build_slicer_context_async(record, AsyncMock())
+
+    assert ctx["working_folder"] == "//server/vol_storage/CLARINET_1/ANON_STUDY"
+
+
+@_skip_windows
+def test_translate_paths_for_client_pure_function():
+    """_translate_paths_for_client is pure: client_base=None returns unchanged context."""
+    from clarinet.services.slicer.context import _translate_paths_for_client
+
+    context = {
+        "working_folder": "/mnt/vol_storage/CLARINET_1/ANON_STUDY",
+        "study_uid": "ANON_STUDY",
+        "pacs_port": 4242,
+    }
+    out = _translate_paths_for_client(context, "/mnt/vol_storage", None)
+    assert out == context
+
+
+@_skip_windows
+def test_translate_paths_for_client_explicit_base():
+    """_translate_paths_for_client with explicit client_base does the substitution."""
+    from clarinet.services.slicer.context import _translate_paths_for_client
+
+    context = {
+        "working_folder": "/mnt/vol_storage/CLARINET_1/ANON_STUDY",
+        "study_uid": "ANON_STUDY",
+        "pacs_port": 4242,
+    }
+    out = _translate_paths_for_client(context, "/mnt/vol_storage", "//host/share")
+
+    assert out["working_folder"] == "//host/share/CLARINET_1/ANON_STUDY"
+    # Non-path strings without server prefix → pass through unchanged.
+    assert out["study_uid"] == "ANON_STUDY"
+    # Non-string values → pass through unchanged.
+    assert out["pacs_port"] == 4242
+
+
+@_skip_windows
+def test_translate_paths_for_client_empty_base_treated_as_disabled():
+    """Empty client_base string is treated like None (no translation)."""
+    from clarinet.services.slicer.context import _translate_paths_for_client
+
+    context = {"working_folder": "/mnt/vol_storage/CLARINET_1"}
+    out = _translate_paths_for_client(context, "/mnt/vol_storage", "")
+    assert out == context
+
+
+@_skip_windows
+def test_translate_paths_for_client_partial_prefix_not_matched():
+    """Partial-prefix match (/mnt/vol vs /mnt/vol2) must NOT trigger
+    substitution — `PurePosixPath.relative_to()` enforces segment-boundary
+    matching. Regression guard for the invariant called out in
+    `_translate_paths_for_client`'s docstring.
+    """
+    from clarinet.services.slicer.context import _translate_paths_for_client
+
+    context = {
+        "working_folder": "/mnt/vol2/data",
+        "other_path": "/mnt/vol_other/data",
+    }
+    out = _translate_paths_for_client(context, "/mnt/vol", "//host/share")
+    # Neither value should be touched — both fail relative_to("/mnt/vol")
+    # at segment boundaries.
+    assert out == context
+
+
 # ---------------------------------------------------------------------------
 # store_record_id / validate_record_id
 # ---------------------------------------------------------------------------

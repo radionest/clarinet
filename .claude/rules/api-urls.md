@@ -160,6 +160,8 @@ Admin-only (`AdminUserDep`). 503 when `recordflow_enabled=False`.
 | `/api/slicer/records/{id}/open` | POST | 200 | Open record in Slicer |
 | `/api/slicer/records/{id}/validate` | POST | 200 | Validate in Slicer |
 
+**Optional request header `X-Clarinet-Storage-Path-Client`** — per-client override for the storage prefix visible to the user's Slicer. Honored by `/slicer/records/{id}/open`, `/slicer/records/{id}/validate`, and `/records/{id}/submit` (POST and PATCH). Set by the frontend from `localStorage` (managed on the `/settings` page). When absent or blank, falls back to `settings.storage_path_client` (legacy global). Consumed via `ClientStoragePathDep` in `dependencies.py`.
+
 ### DICOMweb (`/dicom-web`)
 
 | URL | Method | Status | Description |

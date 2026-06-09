@@ -28,6 +28,7 @@ pub type Route {
   AdminRecordTypeEdit(name: String)
   AdminReports
   AdminWorkflow
+  Settings
   NotFound
 }
 
@@ -54,6 +55,7 @@ pub fn route_to_path(route: Route) -> String {
     AdminRecordTypeEdit(name) -> "/admin/record-types/" <> name <> "/edit"
     AdminReports -> "/admin/reports"
     AdminWorkflow -> "/admin/workflow"
+    Settings -> "/settings"
     NotFound -> "/404"
   }
   base <> path
@@ -92,6 +94,7 @@ pub fn parse_route(uri: Uri) -> Route {
     ["admin", "record-types"] -> AdminRecordTypes
     ["admin", "record-types", name, "edit"] -> AdminRecordTypeEdit(name)
     ["admin", "record-types", name] -> AdminRecordTypeDetail(name)
+    ["settings"] -> Settings
     _ -> NotFound
   }
 }
@@ -147,6 +150,7 @@ pub fn get_route_title(route: Route) -> String {
     AdminRecordTypeEdit(_) -> "Edit Record Type"
     AdminReports -> "Reports"
     AdminWorkflow -> "Workflow"
+    Settings -> "Settings"
     NotFound -> "Page Not Found"
   }
 }
@@ -165,6 +169,7 @@ fn section(route: Route) -> String {
     | AdminRecordTypeEdit(_)
     | AdminReports
     | AdminWorkflow -> "admin"
+    Settings -> "settings"
     NotFound -> "notfound"
   }
 }
