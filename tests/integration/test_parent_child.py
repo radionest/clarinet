@@ -234,8 +234,10 @@ class TestApiRecordParent:
         await test_session.commit()
 
         rt_parent = make_record_type("ar-parent-ty")
-        rt_child = make_record_type("ar-child-type")
-        test_session.add_all([rt_parent, rt_child])
+        # Opt-in: user_id inheritance from parent is gated by this flag
+        rt_child = make_record_type("ar-child-type", inherit_user_from_parent=True)
+        rt_noinherit = make_record_type("ar-noinherit-t")
+        test_session.add_all([rt_parent, rt_child, rt_noinherit])
         await test_session.commit()
 
         return {
@@ -324,6 +326,40 @@ class TestApiRecordParent:
         assert resp.status_code == 201
         child_data = resp.json()
         assert child_data["user_id"] == str(user.id)
+
+    @pytest.mark.asyncio
+    async def test_user_id_not_inherited_by_default(self, client, test_session, seed):
+        """Without inherit_user_from_parent on the type, user_id stays None."""
+        user = make_user()
+        test_session.add(user)
+        await test_session.commit()
+        await test_session.refresh(user)
+
+        resp = await client.post(
+            f"{RECORDS_BASE}/",
+            json={
+                "patient_id": seed["patient_id"],
+                "study_uid": seed["study_uid"],
+                "series_uid": seed["series_uid"],
+                "record_type_name": "ar-parent-ty",
+                "user_id": str(user.id),
+            },
+        )
+        assert resp.status_code == 201
+        parent_id = resp.json()["id"]
+
+        resp = await client.post(
+            f"{RECORDS_BASE}/",
+            json={
+                "patient_id": seed["patient_id"],
+                "study_uid": seed["study_uid"],
+                "series_uid": seed["series_uid"],
+                "record_type_name": "ar-noinherit-t",
+                "parent_record_id": parent_id,
+            },
+        )
+        assert resp.status_code == 201
+        assert resp.json()["user_id"] is None
 
     @pytest.mark.asyncio
     async def test_explicit_user_id_not_overridden(self, client, test_session, seed):

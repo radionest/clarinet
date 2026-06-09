@@ -31,8 +31,9 @@ class CreateRecordAction(_ActionBase):
         user_id: Optional user ID to assign.
         parent_record_id: Optional explicit parent record ID.
         inherit_user: If True, inherit user_id from triggering record
-            (for non-linked records). Linked records inherit user_id
-            via API-level parent inheritance automatically.
+            (for non-linked records). Linked records inherit user_id at
+            the API level only when the created RecordType has
+            ``inherit_user_from_parent`` enabled.
         context_info: Optional context information string.
     """
 

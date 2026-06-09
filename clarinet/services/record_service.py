@@ -57,19 +57,30 @@ class RecordService:
     async def create_record(self, record: Record) -> Record:
         """Create a record with file validation, blocking, and RecordFlow trigger.
 
+        When ``parent_record_id`` is set, the parent is validated to exist
+        (raises ``RecordNotFoundError`` otherwise). ``user_id`` is inherited
+        from the parent only when the record's type has
+        ``inherit_user_from_parent`` enabled and no explicit ``user_id`` was
+        provided.
+
         Args:
             record: Record ORM instance to persist.
 
         Returns:
             Created record with relations loaded.
         """
-        record = await self.repo.create_with_relations(record)
-
-        # Fetch parent for fallback pattern resolution
+        # Fetch parent up front: validates existence, drives opt-in user_id
+        # inheritance, and feeds fallback file-pattern resolution below.
         parent_read = None
         if record.parent_record_id is not None:
             parent = await self.repo.get_with_relations(record.parent_record_id)
             parent_read = RecordRead.model_validate(parent)
+            if record.user_id is None:
+                record_type = await self.repo.get_record_type(record.record_type_name)
+                if record_type.inherit_user_from_parent:
+                    record.user_id = parent.user_id
+
+        record = await self.repo.create_with_relations(record)
 
         # Validate input files
         record_read = RecordRead.model_validate(record)

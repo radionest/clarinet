@@ -84,6 +84,7 @@ pub type RecordType {
     min_records: Option(Int),
     unique_per_user: Bool,
     parent_required: Bool,
+    inherit_user_from_parent: Bool,
     viewer_mode: String,
     level: DicomQueryLevel,
     file_registry: Option(List(FileDefinition)),

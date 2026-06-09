@@ -1103,7 +1103,7 @@ class RecordRepository(BaseRepository[Record]):
         return collected
 
     async def validate_parent_record(self, parent_record_id: int) -> Record:
-        """Validate parent record exists and return it (for user_id inheritance).
+        """Validate parent record exists and return it.
 
         Args:
             parent_record_id: ID of the proposed parent record.

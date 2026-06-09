@@ -73,7 +73,8 @@ async def create_record(
 ) -> None:
     """Create a new record.
 
-    Inherits ``user_id`` from the triggering record if not explicitly set
+    Inherits ``user_id`` from the triggering record only when
+    ``action.inherit_user`` is set and no explicit ``user_id`` is given
     (record context only). ``parent_record_id`` is passed only when a
     source record is present. When ``action.series_uid`` is a
     :class:`FlowResult` (e.g. ``F.best_series``) it is resolved against
@@ -111,7 +112,8 @@ async def create_record(
 
     if ctx.record is not None:
         # Inherit user_id only if explicitly requested.
-        # Linked records get user_id via API-level parent inheritance.
+        # Linked records get user_id at the API level when the created
+        # RecordType has inherit_user_from_parent enabled.
         if action.inherit_user and user_id is None and ctx.record.user_id is not None:
             user_id = str(ctx.record.user_id)
 

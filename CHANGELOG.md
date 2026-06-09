@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.6.0 — Opt-in user_id inheritance from parent records
+
+### Breaking
+
+- `POST /api/records` no longer inherits `user_id` from the parent record
+  unconditionally. Inheritance now requires the created record's type to
+  have the new `RecordType.inherit_user_from_parent` flag enabled (and no
+  explicit `user_id` in the payload). Downstream projects relying on the
+  implicit behavior must set `inherit_user_from_parent = true` on the
+  affected record types in their config.
+- Schema change: new boolean column `recordtype.inherit_user_from_parent`
+  (NOT NULL, server default `false`) — downstream projects must generate
+  an alembic migration (`make db-migration && make db-upgrade`).
+
+### Notes
+
+- RecordFlow's `inherit_user` flag is unaffected — it inherits from the
+  *triggering* record (a separate axis from parent inheritance).
+- Parent existence validation and the inheritance decision moved from the
+  router into `RecordService.create_record`.
+
 ## 0.3.0 — Per-project queue namespacing
 
 ### Breaking
