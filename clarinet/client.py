@@ -1140,6 +1140,34 @@ class ClarinetClient:
         steps: list[dict[str, str]] = data.get("steps", [])
         return steps
 
+    async def download_report(
+        self,
+        name: str,
+        report_format: str = "csv",
+        request_timeout: float | None = None,
+    ) -> bytes:
+        """Download a custom SQL report executed server-side, as raw bytes.
+
+        Args:
+            name: Report name (the ``*.sql`` file stem).
+            report_format: ``csv`` (default) or ``xlsx``.
+            request_timeout: Per-request httpx timeout in seconds. Report SQL
+                may legally run up to the server's
+                ``reports_query_timeout_seconds`` (minutes), far beyond the
+                httpx default — pass a matching value.
+
+        Returns:
+            The serialized report body (CSV is UTF-8 with BOM).
+
+        Raises:
+            ClarinetAPIError: If the report is unknown (404) or execution fails.
+        """
+        kwargs: dict[str, Any] = {"params": {"format": report_format}}
+        if request_timeout is not None:
+            kwargs["timeout"] = request_timeout
+        response = await self._request("GET", f"/admin/reports/{name}/download", **kwargs)
+        return response.content
+
     async def create_series_batch(
         self, series_data: list[dict[str, Any] | SeriesCreate]
     ) -> list[Series]:

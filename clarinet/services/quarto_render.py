@@ -3,8 +3,11 @@ record progress in a ``status.json`` sidecar.
 
 This module is deliberately free of web/app state so it runs identically in the
 pipeline worker process and in the in-process fallback (``pipeline_enabled``
-False). Callers pass plain paths plus the already-resolved SQL text for each
-data report — the worker never touches ``app.state``.
+False). Callers pass plain paths plus an authenticated :class:`ClarinetClient`;
+data reports are fetched as CSV from the reports API, so the renderer host
+needs neither DB credentials nor the project's ``*.sql`` files. The ``.qmd``
+itself is copied into ``render_dir`` by the dispatching service, so the
+renderer host does not need the project's reports folder either.
 
 Security: the quarto subprocess runs with an environment built from scratch
 (:func:`_build_render_env`), so secrets (``CLARINET_*``, ``DATABASE_URL``,
@@ -21,14 +24,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from clarinet.client import ClarinetClient
 from clarinet.exceptions.domain import QuartoRenderError
 from clarinet.models.quarto_report import QuartoRenderStatus, QuartoReportFormat
-from clarinet.repositories.report_repository import ReportRepository
-from clarinet.services.report_service import ReportRegistry
 from clarinet.settings import settings
 from clarinet.utils.logger import logger
-from clarinet.utils.report_discovery import discover_report_templates
-from clarinet.utils.report_formatters import to_csv
 
 _STATUS_FILE = "status.json"
 
@@ -111,14 +111,17 @@ async def render_report(
     render_dir: Path,
     quarto_executable: Path,
     timeout_seconds: float,
+    client: ClarinetClient,
 ) -> None:
-    """Render ``qmd_path`` to ``formats`` inside ``render_dir``.
+    """Render the ``.qmd`` named by ``qmd_path`` to ``formats`` inside ``render_dir``.
 
-    Materializes each declared data report as ``data/<name>.csv`` (reusing the
-    SQL-report read-only execution + CSV formatter), copies the ``.qmd`` into
-    the render dir, then runs ``quarto render`` once per format. Progress and
-    failures are recorded in the status sidecar; this coroutine never raises to
-    its caller so a fire-and-forget dispatch cannot crash the worker loop.
+    Materializes each declared data report as ``data/<name>.csv`` by fetching
+    it from the reports API via ``client``, then runs ``quarto render`` once
+    per format. The ``.qmd`` must already be inside ``render_dir`` (the
+    dispatching service copies it there); only its file name is used. Progress
+    and failures are recorded in the status sidecar; this coroutine never
+    raises to its caller so a fire-and-forget dispatch cannot crash the worker
+    loop.
     """
     created_at = _now_iso()
     existing = read_status(render_dir)
@@ -136,9 +139,13 @@ async def render_report(
 
     ready: dict[str, bool] = {f.value: False for f in formats}
     try:
-        await _materialize_data(data_reports, render_dir)
+        # Only the file name from the payload is trusted: the .qmd must already
+        # sit inside render_dir (copied there by QuartoReportService), so a
+        # hostile qmd_path cannot make the renderer read an arbitrary file.
         work_qmd = render_dir / qmd_path.name
-        shutil.copy2(qmd_path, work_qmd)
+        if not work_qmd.is_file():
+            raise QuartoRenderError(f"template '{qmd_path.name}' not found in render dir")
+        await _materialize_data(data_reports, render_dir, client)
         for fmt in formats:
             await _run_quarto(work_qmd, fmt, render_dir, quarto_executable, timeout_seconds)
             ready[fmt.value] = True
@@ -179,30 +186,26 @@ async def render_report(
     logger.info(f"Quarto render '{name}' ({render_dir.name}) finished: {list(ready)}")
 
 
-async def _materialize_data(data_reports: list[str], render_dir: Path) -> None:
-    """Execute each declared SQL report and write ``data/<name>.csv``.
+async def _materialize_data(
+    data_reports: list[str], render_dir: Path, client: ClarinetClient
+) -> None:
+    """Fetch each declared SQL report as CSV from the API and write ``data/<name>.csv``.
 
-    The SQL text is resolved here (on the worker / in-process), not shipped in
-    the queue payload: a fresh :class:`ReportRegistry` is built from the same
-    ``*.sql`` files the API discovers. Reuses :class:`ReportRepository` so the
-    same read-only transaction, ``SELECT``/``WITH`` validation and statement
-    timeout apply — DB credentials never reach the rendered document.
+    The SQL executes server-side (``GET /admin/reports/{name}/download``) with
+    the same read-only transaction, ``SELECT``/``WITH`` validation and
+    statement timeout as a manual download — the renderer host needs neither
+    DB credentials nor the ``*.sql`` files. The per-request timeout mirrors
+    the server's SQL budget so a slow (but legal) report is not cut off by the
+    httpx default.
     """
     if not data_reports:
         return
-    registry = ReportRegistry(discover_report_templates(settings.get_reports_path()))
     data_dir = render_dir / "data"
     data_dir.mkdir(parents=True, exist_ok=True)
-    repo = ReportRepository()
+    timeout = settings.reports_query_timeout_seconds + 30
     for report_name in data_reports:
-        sql = registry.get_sql(report_name)
-        if sql is None:
-            raise QuartoRenderError(
-                f"SQL report '{report_name}' declared in clarinet.data was not found"
-            )
-        columns, rows = await repo.execute_report(sql)
-        csv_buffer = to_csv(columns, rows)
-        (data_dir / f"{report_name}.csv").write_bytes(csv_buffer.getvalue())
+        csv_bytes = await client.download_report(report_name, request_timeout=timeout)
+        (data_dir / f"{report_name}.csv").write_bytes(csv_bytes)
 
 
 async def _run_quarto(

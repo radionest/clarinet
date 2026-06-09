@@ -31,11 +31,12 @@ clarinet:
 ```
 
 Each name under `clarinet.data` must match a `*.sql` report in
-`settings.reports_path`. Before rendering, the backend executes each one
-(read-only, with the same `SELECT`/`WITH` validation and statement timeout as
-the SQL reports feature) and writes the result to `data/<name>.csv` in the
-render working directory. A typo here is reported as a `404` when the render is
-requested, not as a silent failure later.
+`settings.reports_path`. Before rendering, the renderer fetches each one from
+the reports API (`GET /api/admin/reports/{name}/download?format=csv` — the SQL
+executes on the API server, read-only, with the same `SELECT`/`WITH`
+validation and statement timeout as a manual download) and writes the result
+to `data/<name>.csv` in the render working directory. A typo here is reported
+as a `404` when the render is requested, not as a silent failure later.
 
 A Python chunk then reads the CSV like any local file:
 
@@ -67,8 +68,24 @@ All endpoints require admin (`is_superuser` or the `admin` role).
 Render state is stored as a `status.json` sidecar next to the output under
 `{storage_path}/quarto_renders/<name>/<render_id>/` — there is **no database
 table**. When `pipeline_enabled` is true the render runs on a pipeline worker;
-otherwise it runs in-process via `asyncio.create_task`. Either way the API and
-worker must share the storage filesystem (they already do for output files).
+otherwise it runs in-process via `asyncio.create_task` (using the same
+loopback API client as the worker, so both modes share one code path).
+
+### Worker host requirements
+
+A worker that picks up `render_quarto_report` needs only the standard pipeline
+worker profile:
+
+- the **shared storage filesystem** (`storage_path` — render dirs live there,
+  and the API copies the `.qmd` into the render dir before dispatch);
+- **RabbitMQ** access;
+- **HTTP access to the API** with a matching service token
+  (`internal_service_token`, or the same `admin_password` it derives from) —
+  data CSVs are fetched through `GET /api/admin/reports/{name}/download`;
+- the **quarto binary** and the Python deps (`uv sync --extra quarto`).
+
+It does **not** need database credentials, the project's `review/` folder, or
+any other project files.
 
 Each render leaves a `<name>/<render_id>/` directory (the rendered file, the
 materialized CSVs, and intermediate Quarto files). Prune old ones with
@@ -127,8 +144,9 @@ Mitigations the framework applies:
   credentials are **never** passed through. `HOME`/`XDG_*`/`TMPDIR` are
   redirected into the per-render directory.
 - Data reaches chunks only as pre-rendered CSV files; chunks have no DB access.
-- SQL data is read through the SQL-report repository (read-only transaction,
-  `SELECT`/`WITH`-only, statement timeout).
+- SQL data is fetched from the reports API and executes on the API server
+  (read-only transaction, `SELECT`/`WITH`-only, statement timeout) — the
+  renderer host holds no DB credentials at all.
 - The render is time-boxed by `settings.quarto_render_timeout_seconds`.
 
 Do **not** accept `.qmd` files from untrusted users. For stronger isolation,

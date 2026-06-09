@@ -8,12 +8,14 @@ renderer (see :mod:`clarinet.services.quarto_render`).
 
 import asyncio
 import secrets
+import shutil
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 
 from clarinet.exceptions.domain import (
     QuartoNotInstalledError,
+    QuartoRenderError,
     QuartoRenderNotFoundError,
     QuartoRenderNotReadyError,
     QuartoReportNotFoundError,
@@ -100,9 +102,14 @@ class QuartoReportService:
         )
 
         try:
-            await self._dispatch(name, qmd_path, template.data_reports, formats, render_dir)
+            # Copy the template into the (shared-storage) render dir before
+            # dispatch, so the worker host never needs the project's reports
+            # folder — it reads the .qmd from render_dir like everything else.
+            work_qmd = render_dir / qmd_path.name
+            shutil.copy2(qmd_path, work_qmd)
+            await self._dispatch(name, work_qmd, template.data_reports, formats, render_dir)
         except Exception as exc:
-            # A broker/enqueue failure must not leave the sidecar stuck on
+            # A copy/broker/enqueue failure must not leave the sidecar stuck on
             # PENDING — record it as failed so the UI stops polling.
             logger.opt(exception=exc).error(f"Quarto render '{name}' dispatch failed")
             write_status(
@@ -145,9 +152,9 @@ class QuartoReportService:
         """Fail fast (404) when a declared ``clarinet.data`` report is unknown.
 
         Validating here — before dispatch — surfaces a typo as an immediate 404
-        instead of a silent render failure later. The render itself re-resolves
-        the SQL text from disk (the worker has no ``app.state`` registry), so
-        only the report *names* travel through the queue.
+        instead of a silent render failure later. The render fetches each
+        report's CSV from the reports API at render time, so only the report
+        *names* travel through the queue.
         """
         for report_name in template.data_reports:
             if self._report_registry.get_sql(report_name) is None:
@@ -168,6 +175,15 @@ class QuartoReportService:
         Mirrors the dual strategy in ``dicom.py``: a TaskIQ kick when
         ``pipeline_enabled``, otherwise a tracked ``asyncio.create_task``.
         """
+        # Data CSVs are fetched through the reports API with the internal
+        # service token. An empty token (no admin_password and no
+        # internal_service_token) would only surface minutes later as a
+        # cryptic 401 in the sidecar — fail the dispatch immediately instead.
+        if data_reports and not settings.effective_service_token:
+            raise QuartoRenderError(
+                "data reports require API access, but the internal service token is "
+                "empty — set admin_password or internal_service_token"
+            )
         payload = {
             "report_name": name,
             "qmd_path": str(qmd_path),
@@ -185,21 +201,36 @@ class QuartoReportService:
             msg = PipelineMessage(patient_id="", study_uid="", payload=payload)
             await render_quarto_report.kicker().kiq(msg.model_dump())
         else:
+            from clarinet.client import ClarinetClient
             from clarinet.services.quarto_render import render_report, resolve_quarto_executable
 
             executable = resolve_quarto_executable()
             assert executable is not None  # guaranteed by request_render's check
-            task = asyncio.create_task(
-                render_report(
-                    name=name,
-                    qmd_path=qmd_path,
-                    data_reports=data_reports,
-                    formats=formats,
-                    render_dir=render_dir,
-                    quarto_executable=executable,
-                    timeout_seconds=settings.quarto_render_timeout_seconds,
+
+            async def _render_in_process() -> None:
+                # Same loopback-API client the pipeline worker gets from
+                # pipeline_task(), so the fallback exercises the exact data
+                # path production uses (cf. the RecordFlow engine in app.py).
+                client = ClarinetClient(
+                    base_url=settings.effective_api_base_url,
+                    service_token=settings.effective_service_token,
+                    verify_ssl=settings.api_verify_ssl,
                 )
-            )
+                try:
+                    await render_report(
+                        name=name,
+                        qmd_path=qmd_path,
+                        data_reports=data_reports,
+                        formats=formats,
+                        render_dir=render_dir,
+                        quarto_executable=executable,
+                        timeout_seconds=settings.quarto_render_timeout_seconds,
+                        client=client,
+                    )
+                finally:
+                    await client.close()
+
+            task = asyncio.create_task(_render_in_process())
             _background_tasks.add(task)
             task.add_done_callback(_background_tasks.discard)
 

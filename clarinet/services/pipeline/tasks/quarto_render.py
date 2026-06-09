@@ -2,8 +2,10 @@
 
 Triggered by ``POST /api/admin/quarto-reports/{name}/render`` (when
 ``pipeline_enabled``). All inputs travel in ``msg.payload`` because the worker
-has no access to the API's ``app.state`` registries — the router resolves the
-``.qmd`` path and the SQL text of each declared data report before dispatch.
+has no access to the API's ``app.state`` registries. The dispatching service
+copies the ``.qmd`` into ``render_dir`` (shared storage) before enqueueing,
+and the data CSVs are fetched from the reports API via ``ctx.client`` — the
+worker host needs no DB credentials and no project files.
 
 The actual work lives in :func:`clarinet.services.quarto_render.render_report`
 so the in-process fallback (``pipeline_enabled=False``) shares the same code.
@@ -23,11 +25,12 @@ from clarinet.utils.logger import logger
 
 
 @pipeline_task(queue=settings.default_queue_name)
-async def render_quarto_report(msg: PipelineMessage, _ctx: TaskContext) -> None:
+async def render_quarto_report(msg: PipelineMessage, ctx: TaskContext) -> None:
     """Render the Quarto report described by ``msg.payload``.
 
-    ``_ctx`` (the standard TaskContext) is unused: this task addresses files by
-    explicit paths from the payload, not via record/series working dirs.
+    Files are addressed by explicit paths from the payload (not via
+    record/series working dirs); ``ctx.client`` supplies the authenticated API
+    access used to materialize the data CSVs.
     """
     payload = msg.payload
     name: str = payload["report_name"]
@@ -77,4 +80,5 @@ async def render_quarto_report(msg: PipelineMessage, _ctx: TaskContext) -> None:
         render_dir=render_dir,
         quarto_executable=executable,
         timeout_seconds=settings.quarto_render_timeout_seconds,
+        client=ctx.client,
     )
