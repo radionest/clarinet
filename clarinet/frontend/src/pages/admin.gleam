@@ -115,12 +115,32 @@ fn bucket_key_for(filters: Dict(String, String)) -> bucket.BucketKey {
   bucket.Records(records_query.from_filters(filters))
 }
 
+// Shared success path for record mutations (assign/unassign/status change):
+// refresh admin stats — `unassigned_records`, `records_by_status` and similar
+// derived counts that the cards display become stale otherwise.
+fn mutation_success(
+  model: Model,
+  record: models.Record,
+  toast: String,
+) -> #(Model, Effect(Msg), List(OutMsg)) {
+  let stats_eff = load_effect(admin_api.get_admin_stats, AdminStatsLoaded)
+  #(
+    Model(..model, stats_status: load_status.Loading),
+    stats_eff,
+    [
+      shared.SetLoading(False),
+      shared.CacheRecord(record),
+      shared.ShowSuccess(toast),
+    ],
+  )
+}
+
 // --- Update ---
 
 pub fn update(
   model: Model,
   msg: Msg,
-  _shared: Shared,
+  shared: Shared,
 ) -> #(Model, Effect(Msg), List(OutMsg)) {
   case msg {
     AdminStatsLoaded(Ok(stats)) ->
@@ -166,20 +186,12 @@ pub fn update(
       ])
     }
 
-    AssignUserResult(Ok(record)) -> {
-      // Refresh admin stats — assigning a user can change `unassigned_records`
-      // and similar derived counts that the cards display.
-      let stats_eff = load_effect(admin_api.get_admin_stats, AdminStatsLoaded)
-      #(
-        Model(..model, stats_status: load_status.Loading),
-        stats_eff,
-        [
-          shared.SetLoading(False),
-          shared.CacheRecord(record),
-          shared.ShowSuccess("User assigned successfully"),
-        ],
+    AssignUserResult(Ok(record)) ->
+      mutation_success(
+        model,
+        record,
+        shared.translate(i18n.AdminMsgUserAssigned),
       )
-    }
 
     AssignUserResult(Error(err)) ->
       #(model, effect.none(), handle_error(err, "Failed to assign user to record"))
@@ -196,20 +208,12 @@ pub fn update(
       ])
     }
 
-    UnassignUserResult(Ok(record)) -> {
-      // Refresh admin stats — unassigning changes `unassigned_records`
-      // and similar derived counts that the cards display.
-      let stats_eff = load_effect(admin_api.get_admin_stats, AdminStatsLoaded)
-      #(
-        Model(..model, stats_status: load_status.Loading),
-        stats_eff,
-        [
-          shared.SetLoading(False),
-          shared.CacheRecord(record),
-          shared.ShowSuccess("User unassigned successfully"),
-        ],
+    UnassignUserResult(Ok(record)) ->
+      mutation_success(
+        model,
+        record,
+        shared.translate(i18n.AdminMsgUserUnassigned),
       )
-    }
 
     UnassignUserResult(Error(err)) ->
       #(
@@ -237,19 +241,12 @@ pub fn update(
       ])
     }
 
-    ChangeStatusResult(Ok(record)) -> {
-      // Refresh admin stats — `records_by_status` cards become stale otherwise.
-      let stats_eff = load_effect(admin_api.get_admin_stats, AdminStatsLoaded)
-      #(
-        Model(..model, stats_status: load_status.Loading),
-        stats_eff,
-        [
-          shared.SetLoading(False),
-          shared.CacheRecord(record),
-          shared.ShowSuccess("Status updated successfully"),
-        ],
+    ChangeStatusResult(Ok(record)) ->
+      mutation_success(
+        model,
+        record,
+        shared.translate(i18n.AdminMsgStatusUpdated),
       )
-    }
 
     ChangeStatusResult(Error(err)) ->
       #(
@@ -815,7 +812,7 @@ fn assign_cell(
   case is_editing {
     True ->
       html.div([attribute.class("assign-cell")], [
-        user_dropdown(shared, record_id, option.is_some(user_id)),
+        user_dropdown(shared, record_id, user_id),
       ])
     False ->
       case user_id {
@@ -848,11 +845,16 @@ fn assign_cell(
 fn user_dropdown(
   shared: Shared,
   record_id: Int,
-  has_user: Bool,
+  user_id: Option(String),
 ) -> Element(Msg) {
-  let unassign_option = case has_user {
-    True -> [html.option([attribute.value("__unassign__")], "— Unassign —")]
-    False -> []
+  let unassign_option = case user_id {
+    Some(_) -> [
+      html.option(
+        [attribute.value("__unassign__")],
+        shared.translate(i18n.AdminOptionUnassign),
+      ),
+    ]
+    None -> []
   }
   let user_options =
     dict.values(shared.cache.users)
@@ -873,7 +875,12 @@ fn user_dropdown(
         }),
       ],
       list.flatten([
-        [html.option([attribute.value("")], "Select user...")],
+        [
+          html.option(
+            [attribute.value("")],
+            shared.translate(i18n.AdminSelectUser),
+          ),
+        ],
         unassign_option,
         user_options,
       ]),
@@ -883,7 +890,7 @@ fn user_dropdown(
         attribute.class("btn btn-sm btn-outline"),
         event.on_click(ToggleAssignDropdown(None)),
       ],
-      [html.text("Cancel")],
+      [html.text(shared.translate(i18n.BtnCancel))],
     ),
   ])
 }

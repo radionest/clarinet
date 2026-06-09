@@ -439,6 +439,10 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           close_model,
           dispatch_msg(store.RecordExecuteMsg(record_execute.Delete)),
         )
+        store.ConfirmDelete("record-user", _id) -> #(
+          close_model,
+          dispatch_msg(store.RecordExecuteMsg(record_execute.UnassignUser)),
+        )
         _ -> #(close_model, effect.none())
       }
     }
@@ -1210,7 +1214,17 @@ fn render_confirm_modal(model: Model) -> Element(Msg) {
         <> id
         <> "? This will cascade-delete all child records and their OUTPUT files. This action cannot be undone.",
     )
+    store.ConfirmDelete("record-user", id) -> #(
+      "Unassign User",
+      "Are you sure you want to unassign the user from record #"
+        <> id
+        <> "? If the record is in work, its status will be reset to pending.",
+    )
     _ -> #("Confirm", "Are you sure?")
+  }
+  let confirm_label = case model.modal_content {
+    store.ConfirmDelete("record-user", _) -> "Unassign"
+    _ -> "Delete"
   }
 
   html.div([attribute.class("modal-backdrop")], [
@@ -1232,7 +1246,7 @@ fn render_confirm_modal(model: Model) -> Element(Msg) {
             attribute.class("btn btn-danger"),
             event.on_click(store.ConfirmModalAction),
           ],
-          [html.text("Delete")],
+          [html.text(confirm_label)],
         ),
       ]),
     ]),

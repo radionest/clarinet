@@ -175,8 +175,9 @@ pub type Msg {
   RequestDelete
   Delete
   DeleteResult(Result(Nil, ApiError))
-  // Admin: unassign user from this record
-  UnassignUser(record_id: Int)
+  // Admin: unassign user from this record (confirmed via modal)
+  RequestUnassign
+  UnassignUser
   UnassignUserResult(Result(Record, ApiError))
   // Admin: create a new Record inheriting this Record's UIDs and parent_id
   OpenAddRecord
@@ -589,21 +590,29 @@ pub fn update(
       handle_error(err, "Failed to restart record"),
     )
 
-    // Admin: unassign user
-    UnassignUser(record_id) -> {
-      let eff = {
-        use dispatch <- effect.from
-        admin_api.unassign_record_user(record_id)
-        |> promise.tap(fn(result) { dispatch(UnassignUserResult(result)) })
-        Nil
+    // Admin: unassign user — confirm via modal first (mirrors RequestDelete)
+    RequestUnassign -> #(model, effect.none(), [
+      shared.OpenDeleteConfirm("record-user", model.record_id),
+    ])
+
+    UnassignUser ->
+      case int.parse(model.record_id) {
+        Ok(record_id) -> {
+          let eff = {
+            use dispatch <- effect.from
+            admin_api.unassign_record_user(record_id)
+            |> promise.tap(fn(result) { dispatch(UnassignUserResult(result)) })
+            Nil
+          }
+          #(model, eff, [shared.SetLoading(True)])
+        }
+        Error(_) -> #(model, effect.none(), [])
       }
-      #(model, eff, [shared.SetLoading(True)])
-    }
 
     UnassignUserResult(Ok(record)) -> #(model, effect.none(), [
       shared.SetLoading(False),
       shared.CacheRecord(record),
-      shared.ShowSuccess("User unassigned successfully"),
+      shared.ShowSuccess(shared.translate(i18n.AdminMsgUserUnassigned)),
     ])
 
     UnassignUserResult(Error(err)) -> #(
@@ -1789,22 +1798,19 @@ fn render_record_metadata(record: Record, shared: Shared) -> Element(Msg) {
         True ->
           element.fragment([
             html.dt([], [html.text("Assigned to:")]),
-            html.dd([], case record.user_id, record.id {
-              Some(uid), Some(id) -> [
+            html.dd([], case record.user_id {
+              Some(uid) -> [
                 html.text(cache.user_email(shared.cache, uid)),
                 html.text(" "),
                 html.button(
                   [
                     attribute.class("btn btn-sm btn-outline"),
-                    event.on_click(UnassignUser(id)),
+                    event.on_click(RequestUnassign),
                   ],
-                  [html.text("Unassign")],
+                  [html.text(shared.translate(i18n.BtnUnassign))],
                 ),
               ]
-              Some(uid), None -> [
-                html.text(cache.user_email(shared.cache, uid)),
-              ]
-              None, _ -> [html.text("—")]
+              None -> [html.text("—")]
             }),
           ])
         False -> element.none()
