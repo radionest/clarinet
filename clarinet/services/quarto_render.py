@@ -102,6 +102,19 @@ def read_status(render_dir: Path) -> dict[str, Any] | None:
     return data if isinstance(data, dict) else None
 
 
+def status_mtime(render_dir: Path) -> float | None:
+    """Last modification time of the status sidecar; ``None`` when absent.
+
+    The renderer rewrites the sidecar at every attempt start and after each
+    completed format, so the mtime tracks liveness across multi-format renders
+    and pipeline retries — unlike ``created_at``, which is preserved.
+    """
+    try:
+        return (render_dir / _STATUS_FILE).stat().st_mtime
+    except OSError:
+        return None
+
+
 async def render_report(
     *,
     name: str,

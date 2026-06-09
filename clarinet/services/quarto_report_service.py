@@ -9,6 +9,7 @@ renderer (see :mod:`clarinet.services.quarto_render`).
 import asyncio
 import secrets
 import shutil
+import time
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
@@ -34,6 +35,40 @@ from clarinet.utils.quarto_discovery import DiscoveredQuartoReport
 # Fire-and-forget render tasks (pipeline-disabled fallback). Held in a module
 # set so they are not garbage-collected mid-flight; the done callback discards.
 _background_tasks: set[asyncio.Task[None]] = set()
+
+# Headroom on top of quarto_render_timeout_seconds before a silent sidecar is
+# presumed crashed: covers data-CSV materialization (runs before the first
+# per-format sidecar write) and pipeline retry backoff (max 120s by default).
+_STALE_GRACE_SECONDS = 300.0
+
+
+def _mark_failed_if_stale(state: QuartoRenderState, mtime: float | None) -> QuartoRenderState:
+    """Read-side crash guard: report a silent pending/running render as failed.
+
+    A worker that dies mid-render leaves the sidecar on pending/running
+    forever. Staleness is judged by the sidecar's mtime (see
+    :func:`~clarinet.services.quarto_render.status_mtime`), not ``created_at``.
+    No write-back: a live-but-slow worker can still finish and flip the
+    sidecar to done, which later reads will report as-is.
+    """
+    if state.status not in (QuartoRenderStatus.PENDING, QuartoRenderStatus.RUNNING):
+        return state
+    if mtime is None:
+        return state
+    age = time.time() - mtime
+    if age <= settings.quarto_render_timeout_seconds + _STALE_GRACE_SECONDS:
+        return state
+    logger.warning(
+        f"Quarto render '{state.name}' ({state.render_id}) presumed crashed: "
+        f"sidecar stuck on '{state.status.value}' for {int(age)}s"
+    )
+    return state.model_copy(
+        update={
+            "status": QuartoRenderStatus.FAILED,
+            "error": f"render presumed crashed: no status update for {int(age)}s",
+        },
+        deep=True,
+    )
 
 
 class QuartoReportRegistry:
@@ -134,7 +169,12 @@ class QuartoReportService:
         return state
 
     def get_output_file(self, name: str, render_id: str, fmt: QuartoReportFormat) -> Path:
-        """Resolve the rendered file path (409 if the render is not finished)."""
+        """Resolve the rendered file path (409 if the render is not finished).
+
+        A stale pending/running render (worker presumed crashed — see
+        :func:`_mark_failed_if_stale`) also reads as failed here, so the 409
+        message reports ``status: failed`` rather than an eternal ``running``.
+        """
         render_dir = self._render_dir(name, render_id)
         state = self._state_from_dir(render_dir)
         if state is None:
@@ -245,9 +285,10 @@ class QuartoReportService:
 
     @staticmethod
     def _state_from_dir(render_dir: Path) -> QuartoRenderState | None:
-        from clarinet.services.quarto_render import read_status
+        from clarinet.services.quarto_render import read_status, status_mtime
 
         raw = read_status(render_dir)
         if raw is None:
             return None
-        return QuartoRenderState.model_validate(raw)
+        state = QuartoRenderState.model_validate(raw)
+        return _mark_failed_if_stale(state, status_mtime(render_dir))

@@ -1,6 +1,8 @@
 """Unit tests for clarinet.services.quarto_render (status sidecar, env, resolve)."""
 
+import os
 import sys
+import time
 from pathlib import Path
 from unittest.mock import AsyncMock
 
@@ -270,6 +272,100 @@ def test_render_dir_rejects_path_traversal() -> None:
         service.get_render_state("../../etc", "passwd")
     with pytest.raises(QuartoRenderNotFoundError):
         service.get_output_file("..", "..", QuartoReportFormat.DOCX)
+
+
+def _write_sidecar(
+    renders_root: Path, status: QuartoRenderStatus, *, age_seconds: float = 0.0
+) -> Path:
+    """Write a ``rep``/``rid`` sidecar, optionally backdating its mtime."""
+    render_dir = renders_root / "rep" / "rid"
+    write_status(
+        render_dir,
+        name="rep",
+        render_id="rid",
+        status=status,
+        formats=[QuartoReportFormat.DOCX],
+        created_at="2026-01-01T00:00:00+00:00",
+    )
+    if age_seconds:
+        old = time.time() - age_seconds
+        os.utime(render_dir / "status.json", (old, old))
+    return render_dir
+
+
+@pytest.mark.parametrize("status", [QuartoRenderStatus.PENDING, QuartoRenderStatus.RUNNING])
+def test_get_render_state_reports_stale_render_as_failed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, status: QuartoRenderStatus
+) -> None:
+    """A sidecar silent for longer than render timeout + grace reads back as
+    failed (worker crash guard) — but the file itself is not rewritten."""
+    from clarinet.services.quarto_report_service import (
+        _STALE_GRACE_SECONDS,
+        QuartoReportRegistry,
+        QuartoReportService,
+    )
+    from clarinet.services.report_service import ReportRegistry
+
+    monkeypatch.setattr(settings, "quarto_output_path", str(tmp_path / "renders"))
+    render_dir = _write_sidecar(
+        tmp_path / "renders",
+        status,
+        age_seconds=settings.quarto_render_timeout_seconds + _STALE_GRACE_SECONDS + 60,
+    )
+    service = QuartoReportService(QuartoReportRegistry([]), ReportRegistry([]))
+
+    state = service.get_render_state("rep", "rid")
+
+    assert state.status is QuartoRenderStatus.FAILED
+    assert "presumed crashed" in (state.error or "")
+    # Read-only override: a live-but-slow worker can still flip the file to done.
+    raw = read_status(render_dir)
+    assert raw is not None
+    assert raw["status"] == status.value
+
+
+def test_get_render_state_keeps_fresh_running(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from clarinet.services.quarto_report_service import (
+        QuartoReportRegistry,
+        QuartoReportService,
+    )
+    from clarinet.services.report_service import ReportRegistry
+
+    monkeypatch.setattr(settings, "quarto_output_path", str(tmp_path / "renders"))
+    _write_sidecar(tmp_path / "renders", QuartoRenderStatus.RUNNING)
+    service = QuartoReportService(QuartoReportRegistry([]), ReportRegistry([]))
+
+    state = service.get_render_state("rep", "rid")
+
+    assert state.status is QuartoRenderStatus.RUNNING
+    assert state.error is None
+
+
+def test_get_render_state_ignores_staleness_for_terminal_status(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Old done/failed sidecars are history, not crashes — returned as-is."""
+    from clarinet.services.quarto_report_service import (
+        _STALE_GRACE_SECONDS,
+        QuartoReportRegistry,
+        QuartoReportService,
+    )
+    from clarinet.services.report_service import ReportRegistry
+
+    monkeypatch.setattr(settings, "quarto_output_path", str(tmp_path / "renders"))
+    _write_sidecar(
+        tmp_path / "renders",
+        QuartoRenderStatus.DONE,
+        age_seconds=settings.quarto_render_timeout_seconds + _STALE_GRACE_SECONDS + 60,
+    )
+    service = QuartoReportService(QuartoReportRegistry([]), ReportRegistry([]))
+
+    state = service.get_render_state("rep", "rid")
+
+    assert state.status is QuartoRenderStatus.DONE
+    assert state.error is None
 
 
 def _write_min_qmd(tmp_path: Path) -> Path:
