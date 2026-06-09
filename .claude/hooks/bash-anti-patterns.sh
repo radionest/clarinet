@@ -1,17 +1,17 @@
 #!/bin/bash
-# PreToolUse hook for Bash: блокирует три анти-паттерна.
-# 1. Команды, начинающиеся с '#' (комментарий не выполняется — потерянный round-trip).
-# 2. Leading `cat` / `grep` / `find` — у нас есть Read / Grep / Glob, они быстрее
-#    и не загружают результат stdout-выводом. Heredoc (`cat <<`) разрешён.
-# 3. Test-команды (pytest, make test*, uv run pytest) в pipe — буферизуют stdout,
-#    ломают run_in_background. Должны редиректиться в /tmp/test-<worktree>.txt.
+# PreToolUse hook for Bash: blocks three anti-patterns.
+# 1. Commands starting with '#' (the comment is not executed — a wasted round-trip).
+# 2. Leading `cat` / `grep` / `find` — Read / Grep / Glob tools are faster and
+#    don't flood the transcript with stdout. Heredoc (`cat <<`) is allowed.
+# 3. Test commands (pytest, make test*, uv run pytest) in a pipe — they buffer
+#    stdout and break run_in_background. Redirect to /tmp/test-<worktree>.txt instead.
 
 INPUT=$(cat)
 COMMAND=$(printf '%s' "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null)
 [ -z "$COMMAND" ] && exit 0
 
-# Escape-hatch: команда заканчивается на '# bash-ok' — пропускаем все проверки.
-# Использовать только когда действительно нет альтернативы через Read/Grep/Glob.
+# Escape hatch: command ends with '# bash-ok' — skip all checks.
+# Use only when Read/Grep/Glob genuinely cannot do the job.
 if printf '%s' "$COMMAND" | grep -qE '#[[:space:]]*bash-ok[[:space:]]*$'; then
   exit 0
 fi
@@ -26,7 +26,7 @@ EOF
 fi
 
 # --- 2. Leading cat/grep/find ---
-# Снимаем prefix'ы вроде `timeout 120`, `env X=Y`, `VAR=val`, `nohup`, `stdbuf -o0`, `time`.
+# Strip prefixes like `timeout 120`, `env X=Y`, `VAR=val`, `nohup`, `stdbuf -o0`, `time`.
 STRIPPED=$(printf '%s' "$COMMAND" | sed -E 's/^[[:space:]]+//')
 while :; do
   case "$STRIPPED" in
@@ -46,9 +46,8 @@ FIRST_WORD="${STRIPPED%% *}"
 
 case "$FIRST_WORD" in
   cat)
-    # Разрешаем heredoc: `cat << EOF`, `cat <<'EOF'`, `cat <<-EOF`.
-    if ! [[ "$STRIPPED" =~ ^cat[[:space:]]+\<\<- ]] && \
-       ! [[ "$STRIPPED" =~ ^cat[[:space:]]+\<\< ]]; then
+    # Allow any heredoc form: `cat << EOF`, `cat <<'EOF'`, `cat > file << 'EOF'`.
+    if ! [[ "$STRIPPED" =~ \<\< ]]; then
       cat >&2 <<'EOF'
 BLOCKED: leading `cat <file>` — у тебя есть лучшие альтернативы.
   `cat file | tail -N`  →  `tail -N file`   (leading tail не блокируется)
@@ -78,9 +77,11 @@ EOF
     ;;
 esac
 
-# --- 3. Test-команда в pipe ---
-# Ловим pytest / py.test / make test* / uv run pytest. Игнорируем `||` (boolean OR).
-if printf '%s' "$COMMAND" | grep -qE '(\b(pytest|py\.test)\b|\bmake[[:space:]]+test|\buv[[:space:]]+run[[:space:]]+pytest)'; then
+# --- 3. Test command in a pipe ---
+# Match pytest / py.test / make test* / uv run pytest only in command position
+# (start of line or after ; & | parenthesis, with optional env/timeout prefixes) —
+# a mere argument like `git log --grep=pytest` must not trigger. `||` is ignored (boolean OR).
+if printf '%s' "$COMMAND" | grep -qP '(^|[;&|(])\s*((timeout|env|nohup|time|stdbuf)\s+\S+\s+|\w+=\S*\s+)*(pytest\b|py\.test\b|uv\s+run\s+pytest\b|make\s+test)'; then
   CLEANED=$(printf '%s' "$COMMAND" | sed 's/||/__OR__/g')
   if printf '%s' "$CLEANED" | grep -q '|'; then
     cat >&2 <<'EOF'

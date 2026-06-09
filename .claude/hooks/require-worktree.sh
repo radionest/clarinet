@@ -1,20 +1,21 @@
 #!/bin/bash
-# PreToolUse hook: блокирует Edit/Write на ветке main.
-# Для любых изменений нужен worktree или feature-ветка.
-# Исключение: .claude/ — инфраструктурная конфигурация.
+# PreToolUse hook: blocks Edit/Write on the main branch.
+# Any change requires a worktree or a feature branch.
+# Exception: .claude/ — infrastructure configuration.
 
-# Проверяем, что мы в git-репозитории
+# Only act inside a git repository
 git rev-parse --is-inside-work-tree >/dev/null 2>&1 || exit 0
 
-# Пропускаем файлы вне репозитория (plan-файлы, глобальный .claude/ и т.д.)
+# Skip files outside the repository (plan files, global .claude/, etc.)
 INPUT=$(cat)
-FILE_PATH=$(echo "$INPUT" | grep -oP '"file_path"\s*:\s*"\K[^"]*' || true)
+# jq, not grep: grep-based extraction breaks on escaped quotes in the payload.
+FILE_PATH=$(printf '%s' "$INPUT" | jq -r '.tool_input.file_path // empty' 2>/dev/null)
 if [ -n "$FILE_PATH" ]; then
   REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null)
   case "$FILE_PATH" in
-    "$REPO_ROOT"/.claude/*) exit 0 ;;  # .claude/ инфраструктура — пропускаем
-    "$REPO_ROOT"/*) ;;                  # файл в репо — проверяем дальше
-    *) exit 0 ;;                        # файл вне репо — пропускаем
+    "$REPO_ROOT"/.claude/*) exit 0 ;;  # .claude/ infra — allowed on main
+    "$REPO_ROOT"/*) ;;                  # file in repo — keep checking
+    *) exit 0 ;;                        # file outside repo — skip
   esac
 fi
 

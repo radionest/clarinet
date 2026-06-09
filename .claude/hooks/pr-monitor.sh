@@ -5,22 +5,27 @@
 
 INPUT=$(cat)
 
-# Quick exit: not a gh pr create command
-echo "$INPUT" | grep -q "gh pr create" || exit 0
+# Match only the executed command — tool output that merely mentions
+# `gh pr create` (gh pr view, git log, reading docs) must not trigger.
+COMMAND=$(printf '%s' "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null)
+[ -z "$COMMAND" ] && exit 0
+printf '%s' "$COMMAND" | grep -q "gh pr create" || exit 0
 
-# Exclude dry-run, help, and list commands
-echo "$INPUT" | grep -qE "(--help|--dry-run|gh pr create\b.*\blist)" && exit 0
+# Exclude dry-run and help invocations
+printf '%s' "$COMMAND" | grep -qE -- '--help|--dry-run' && exit 0
 
-# Extract PR URL from output
-PR_URL=$(echo "$INPUT" | grep -oP 'https://github\.com/[^"]+/pull/\d+' | head -1)
+# Extract the PR URL from the command output, not from the whole payload
+PR_URL=$(printf '%s' "$INPUT" | jq -r '.tool_response | tostring' 2>/dev/null | grep -oP 'https://github\.com/[^/\s"\\]+/[^/\s"\\]+/pull/\d+' | head -1)
 [ -z "$PR_URL" ] && exit 0
 
 PR_NUM=$(echo "$PR_URL" | grep -oP '\d+$')
+# Pass owner/repo to the watcher: the detached process outlives this hook's cwd
+REPO=$(echo "$PR_URL" | grep -oP 'github\.com/\K[^/]+/[^/]+')
 REPORT="/tmp/pr-${PR_NUM}-report.md"
 HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 # Start background monitoring (self-contained, no Claude needed)
-nohup "$HOOK_DIR/pr-watch.sh" "$PR_NUM" 12 300 > /dev/null 2>&1 &
+nohup "$HOOK_DIR/pr-watch.sh" "$PR_NUM" 12 300 "$REPO" > /dev/null 2>&1 &
 
 # Inform Claude about the PR and report location
 cat >&2 <<EOF
