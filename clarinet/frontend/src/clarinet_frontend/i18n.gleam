@@ -13,6 +13,7 @@ pub type Key {
   NavPatients
   NavRecordTypes
   NavReports
+  NavQuartoReports
   NavWorkflow
   NavAdmin
 
@@ -356,6 +357,8 @@ pub fn translate(locale: Locale, key: Key) -> String {
     Ru, NavRecordTypes -> "Типы записей"
     En, NavReports -> "Reports"
     Ru, NavReports -> "Отчёты"
+    En, NavQuartoReports -> "Quarto"
+    Ru, NavQuartoReports -> "Quarto"
     En, NavWorkflow -> "Workflow"
     Ru, NavWorkflow -> "Граф процессов"
     En, NavAdmin -> "Admin"

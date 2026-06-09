@@ -337,6 +337,15 @@ class Settings(BaseSettings):
     reports_path: str = "./review/"
     reports_query_timeout_seconds: int = 300  # 5 minutes
 
+    # Quarto reports settings (*.qmd rendered to DOCX/PDF in the background)
+    quarto_reports_path: str = "./review/"  # *.qmd discovered here (alongside *.sql)
+    quarto_render_timeout_seconds: float = 600.0  # 10 minutes (kernel start + render)
+    # Conservative default for older glibc targets (e.g. Astra Linux SE 1.7);
+    # newer hosts can bump it. Used by `clarinet quarto install`.
+    quarto_default_version: str = "1.4.557"
+    quarto_executable: str | None = None  # explicit path; None → auto-resolve (install dir, PATH)
+    quarto_output_path: str | None = None  # None → {storage_path}/quarto_renders
+
     # RecordFlow settings
     recordflow_enabled: bool = False  # Enable RecordFlow workflow engine
     recordflow_paths: list[str] = []  # Directories containing *_flow.py files
@@ -590,6 +599,31 @@ class Settings(BaseSettings):
         if self.project_path is not None:
             return Path(self.project_path) / p
         return p
+
+    def get_quarto_reports_path(self) -> Path:
+        """Resolve :attr:`quarto_reports_path` to an absolute :class:`Path`.
+
+        Mirrors :meth:`get_reports_path`: relative paths are anchored to
+        ``project_path`` when set, so ``*.qmd`` discovery finds the folder
+        regardless of the process working directory (e.g. a systemd unit).
+        """
+        p = Path(self.quarto_reports_path)
+        if p.is_absolute():
+            return p
+        if self.project_path is not None:
+            return Path(self.project_path) / p
+        return p
+
+    @property
+    def quarto_install_path(self) -> Path:
+        """Directory where ``clarinet quarto install`` unpacks the Quarto CLI."""
+        return Path(self.storage_path) / "quarto"
+
+    def get_quarto_output_path(self) -> Path:
+        """Directory holding rendered Quarto outputs and their status sidecars."""
+        if self.quarto_output_path:
+            return Path(self.quarto_output_path)
+        return Path(self.storage_path) / "quarto_renders"
 
     @property
     def static_path(self) -> Path:

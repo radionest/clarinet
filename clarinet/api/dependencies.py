@@ -29,6 +29,7 @@ from clarinet.services.anonymization_service import AnonymizationService
 from clarinet.services.dicom import DicomClient
 from clarinet.services.dicom.models import DicomNode
 from clarinet.services.dicomweb import DicomWebCache, DicomWebProxyService
+from clarinet.services.quarto_report_service import QuartoReportRegistry, QuartoReportService
 from clarinet.services.record_service import RecordService
 from clarinet.services.record_type_service import RecordTypeService
 from clarinet.services.recordflow.engine import RecordFlowEngine
@@ -318,6 +319,32 @@ async def get_report_service(registry: ReportRegistryDep) -> ReportService:
 
 
 ReportServiceDep = Annotated[ReportService, Depends(get_report_service)]
+
+
+# Quarto report registry / service dependencies
+
+
+def get_quarto_report_registry(request: Request) -> QuartoReportRegistry:
+    """Get the Quarto report registry from app state.
+
+    Returns an empty registry when state is not initialized (e.g. schema tests
+    or fixtures that bypass lifespan).
+    """
+    return getattr(request.app.state, "quarto_report_registry", QuartoReportRegistry([]))
+
+
+QuartoReportRegistryDep = Annotated[QuartoReportRegistry, Depends(get_quarto_report_registry)]
+
+
+async def get_quarto_report_service(
+    registry: QuartoReportRegistryDep,
+    report_registry: ReportRegistryDep,
+) -> QuartoReportService:
+    """Get the Quarto report service (reuses the SQL report registry for data)."""
+    return QuartoReportService(registry, report_registry)
+
+
+QuartoReportServiceDep = Annotated[QuartoReportService, Depends(get_quarto_report_service)]
 
 
 # Viewer plugin dependencies
