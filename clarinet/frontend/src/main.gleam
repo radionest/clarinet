@@ -14,6 +14,7 @@ import gleam/option.{None, Some}
 import gleam/result
 import gleam/string
 import gleam/uri.{type Uri}
+import utils/client_settings
 import utils/logger
 import utils/permissions
 import utils/storage as app_storage
@@ -326,7 +327,12 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         |> promise.tap(fn(_) { dispatch(store.LogoutComplete) })
         Nil
       }
-      let clear_storage = app_storage.clear_prefixed(app_storage.Local)
+      // Preserve per-device client settings (Slicer storage path is
+      // bound to this machine, not to the session) across logout.
+      let clear_storage =
+        app_storage.clear_prefixed_except(app_storage.Local, [
+          client_settings.settings_key,
+        ])
       let preload_cleanup =
         effect.map(preload.stop_timer(model.preload), store.PreloadMsg)
       #(
@@ -981,7 +987,12 @@ fn handle_api_error(
         |> store.set_loading(False)
         |> store.set_error(Some("Session expired. Please log in again."))
         |> store.set_route(router.Login)
-      let clear_storage = app_storage.clear_prefixed(app_storage.Local)
+      // Same preservation as in store.Logout — keep per-device Slicer
+      // settings across session-expiry logout.
+      let clear_storage =
+        app_storage.clear_prefixed_except(app_storage.Local, [
+          client_settings.settings_key,
+        ])
       #(
         new_model,
         effect.batch([

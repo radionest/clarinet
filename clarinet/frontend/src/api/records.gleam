@@ -646,7 +646,10 @@ pub fn resubmit_record_data(
 pub fn submit_record(
   record_id: String,
 ) -> Promise(Result(Record, ApiError)) {
-  http_client.post("/records/" <> record_id <> "/submit", "{}")
+  http_client.post_with_slicer_context(
+    "/records/" <> record_id <> "/submit",
+    "{}",
+  )
   |> promise.map(fn(res) {
     result.try(res, http_client.decode_response(
       _,
@@ -660,7 +663,10 @@ pub fn submit_record(
 pub fn resubmit_record(
   record_id: String,
 ) -> Promise(Result(Record, ApiError)) {
-  http_client.patch("/records/" <> record_id <> "/submit", "{}")
+  http_client.patch_with_slicer_context(
+    "/records/" <> record_id <> "/submit",
+    "{}",
+  )
   |> promise.map(fn(res) {
     result.try(res, http_client.decode_response(
       _,

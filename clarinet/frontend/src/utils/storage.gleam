@@ -85,9 +85,20 @@ pub fn remove(backend: Backend, key: String) -> Effect(msg) {
 
 /// Remove all keys with the "clarinet:" prefix (for logout cleanup).
 pub fn clear_prefixed(backend: Backend) -> Effect(msg) {
+  clear_prefixed_except(backend, [])
+}
+
+/// Remove all keys with the "clarinet:" prefix EXCEPT the given keys
+/// (without prefix). Use for logout flows that need to preserve
+/// per-device settings (e.g. `client_settings` — Slicer storage path
+/// is bound to this machine, not to the session).
+pub fn clear_prefixed_except(
+  backend: Backend,
+  keep: List(String),
+) -> Effect(msg) {
   effect.from(fn(_dispatch) {
     case get_storage(backend) {
-      Ok(s) -> do_clear_prefixed(s)
+      Ok(s) -> do_clear_prefixed(s, keep)
       Error(_) -> Nil
     }
   })
@@ -102,24 +113,29 @@ fn get_storage(backend: Backend) -> Result(plinth_storage.Storage, Nil) {
 
 // Iterate storage keys in reverse order and remove those starting with prefix.
 // Reverse order avoids index shifting when removing items.
-fn do_clear_prefixed(s: plinth_storage.Storage) -> Nil {
+fn do_clear_prefixed(s: plinth_storage.Storage, keep: List(String)) -> Nil {
   let count = plinth_storage.length(s)
-  do_clear_prefixed_loop(s, count - 1)
+  let keep_full = list.map(keep, fn(k) { prefix <> k })
+  do_clear_prefixed_loop(s, count - 1, keep_full)
 }
 
-fn do_clear_prefixed_loop(s: plinth_storage.Storage, index: Int) -> Nil {
+fn do_clear_prefixed_loop(
+  s: plinth_storage.Storage,
+  index: Int,
+  keep_full: List(String),
+) -> Nil {
   case index < 0 {
     True -> Nil
     False -> {
       case plinth_storage.key(s, index) {
         Ok(k) ->
-          case starts_with_prefix(k) {
+          case starts_with_prefix(k) && !list.contains(keep_full, k) {
             True -> plinth_storage.remove_item(s, k)
             False -> Nil
           }
         Error(_) -> Nil
       }
-      do_clear_prefixed_loop(s, index - 1)
+      do_clear_prefixed_loop(s, index - 1, keep_full)
     }
   }
 }

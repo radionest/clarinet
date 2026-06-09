@@ -6,12 +6,18 @@ import gleam/javascript/promise.{type Promise}
 
 /// Open a record's workspace in the user's local 3D Slicer
 pub fn open_record(record_id: String) -> Promise(Result(Dynamic, ApiError)) {
-  http_client.post("/slicer/records/" <> record_id <> "/open", "{}")
+  http_client.post_with_slicer_context(
+    "/slicer/records/" <> record_id <> "/open",
+    "{}",
+  )
 }
 
 /// Run the result validation script for a record in 3D Slicer
 pub fn validate_record(record_id: String) -> Promise(Result(Dynamic, ApiError)) {
-  http_client.post("/slicer/records/" <> record_id <> "/validate", "{}")
+  http_client.post_with_slicer_context(
+    "/slicer/records/" <> record_id <> "/validate",
+    "{}",
+  )
 }
 
 /// Clear the current scene in the user's local 3D Slicer

@@ -11,7 +11,10 @@ import gleam/string
 import lustre/effect.{type Effect}
 import utils/storage
 
-const settings_key = "client_settings"
+/// localStorage key (without the `clarinet:` prefix) under which these
+/// per-device settings live. Exposed so the logout flow can preserve it
+/// while clearing the rest of the namespace.
+pub const settings_key = "client_settings"
 
 const storage_path_field = "storage_path_client"
 
@@ -37,12 +40,21 @@ pub fn load_sync() -> ClientSettings {
 }
 
 /// Persist settings to localStorage. Fire-and-forget effect.
+///
+/// When all fields are `None`, removes the key entirely instead of writing
+/// `{}` — avoids a "settings exist but are empty" sentinel that complicates
+/// future migrations and gives a false signal to consumers checking
+/// `load_sync()` against `default()`.
 pub fn save(settings: ClientSettings) -> Effect(msg) {
-  let entries = case settings.storage_path_client {
-    Some(p) -> [#(storage_path_field, p)]
-    None -> []
+  case settings.storage_path_client {
+    Some(p) ->
+      storage.save_dict(
+        storage.Local,
+        settings_key,
+        dict.from_list([#(storage_path_field, p)]),
+      )
+    None -> storage.remove(storage.Local, settings_key)
   }
-  storage.save_dict(storage.Local, settings_key, dict.from_list(entries))
 }
 
 /// Build `ClientSettings` carrying only `storage_path_client`. Whitespace is

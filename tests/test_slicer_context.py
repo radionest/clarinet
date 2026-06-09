@@ -772,6 +772,93 @@ def test_validate_record_id_mismatch():
         validate_record_id(99)
 
 
+# ---------------------------------------------------------------------------
+# get_client_storage_path dependency (X-Clarinet-Storage-Path-Client)
+# ---------------------------------------------------------------------------
+
+
+def _make_request_with_header(header_value: str | None):
+    """Build a minimal Starlette Request carrying (or omitting) the header.
+
+    We bypass FastAPI's full request pipeline and construct an ASGI scope by
+    hand — `get_client_storage_path` only reads `request.headers.get(...)`,
+    so the scope just needs a headers list.
+    """
+    from starlette.requests import Request
+
+    headers: list[tuple[bytes, bytes]] = []
+    if header_value is not None:
+        headers.append((b"x-clarinet-storage-path-client", header_value.encode("latin-1")))
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/",
+        "headers": headers,
+    }
+    return Request(scope)
+
+
+@pytest.mark.asyncio
+async def test_get_client_storage_path_header_absent():
+    """Missing header → None (fallback to settings.storage_path_client)."""
+    from clarinet.api.dependencies import get_client_storage_path
+
+    assert await get_client_storage_path(_make_request_with_header(None)) is None
+
+
+@pytest.mark.asyncio
+async def test_get_client_storage_path_header_blank_and_whitespace():
+    """Blank or whitespace-only header → None."""
+    from clarinet.api.dependencies import get_client_storage_path
+
+    assert await get_client_storage_path(_make_request_with_header("")) is None
+    assert await get_client_storage_path(_make_request_with_header("   ")) is None
+    assert await get_client_storage_path(_make_request_with_header("\t \t")) is None
+
+
+@pytest.mark.asyncio
+async def test_get_client_storage_path_valid_ascii_stripped():
+    """Valid ASCII value is returned trimmed."""
+    from clarinet.api.dependencies import get_client_storage_path
+
+    assert (
+        await get_client_storage_path(_make_request_with_header("  //host/share  "))
+        == "//host/share"
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_client_storage_path_oversize_rejected():
+    """Header >512 bytes is silently dropped (logged)."""
+    from clarinet.api.dependencies import get_client_storage_path
+
+    too_long = "/" + "a" * 600
+    assert await get_client_storage_path(_make_request_with_header(too_long)) is None
+
+
+@pytest.mark.asyncio
+async def test_get_client_storage_path_non_ascii_rejected():
+    """Non-printable-ASCII (Unicode, control chars) silently dropped."""
+    from clarinet.api.dependencies import get_client_storage_path
+
+    # Latin-1 decodes the byte but the result contains chars > 0x7E.
+    # The byte 0xE9 is "é" in latin-1, well outside printable ASCII.
+    assert await get_client_storage_path(_make_request_with_header("\xe9-share")) is None
+    # Control character (BEL).
+    assert await get_client_storage_path(_make_request_with_header("\x07evil")) is None
+
+
+@pytest.mark.asyncio
+async def test_get_client_storage_path_max_length_boundary():
+    """Exactly 512 chars passes; 513 fails."""
+    from clarinet.api.dependencies import get_client_storage_path
+
+    at_limit = "a" * 512
+    over_limit = "a" * 513
+    assert await get_client_storage_path(_make_request_with_header(at_limit)) == at_limit
+    assert await get_client_storage_path(_make_request_with_header(over_limit)) is None
+
+
 def test_validate_record_id_no_open():
     """validate_record_id raises when no record was opened."""
     # Clear any stored value from previous tests
