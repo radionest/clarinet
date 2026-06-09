@@ -327,3 +327,48 @@ async def test_export_includes_inherit_user_from_parent(tmp_path) -> None:
     path = await export_record_type_to_toml(rt_default, tmp_path)
     content = tomllib.loads(path.read_text())
     assert content["inherit_user_from_parent"] is False
+
+
+@pytest.mark.asyncio
+async def test_export_includes_unique_per_user(tmp_path) -> None:
+    """TOML export includes unique_per_user field."""
+    import tomllib
+
+    rt = RecordType(
+        name="unique-test",
+        level="SERIES",
+        unique_per_user=False,
+    )
+
+    path = await export_record_type_to_toml(rt, tmp_path)
+    content = tomllib.loads(path.read_text())
+    assert content["unique_per_user"] is False
+
+
+@pytest.mark.asyncio
+async def test_export_includes_parent_required(tmp_path) -> None:
+    """TOML export includes parent_required field."""
+    import tomllib
+
+    rt = RecordType(
+        name="parent-test",
+        level="SERIES",
+        parent_required=True,
+    )
+
+    path = await export_record_type_to_toml(rt, tmp_path)
+    content = tomllib.loads(path.read_text())
+    assert content["parent_required"] is True
+
+
+@pytest.mark.asyncio
+async def test_export_includes_constraint_flags_default(tmp_path) -> None:
+    """TOML export includes unique_per_user/parent_required with defaults."""
+    import tomllib
+
+    rt = RecordType(name="flags-default", level="SERIES")
+
+    path = await export_record_type_to_toml(rt, tmp_path)
+    content = tomllib.loads(path.read_text())
+    assert content["unique_per_user"] is True
+    assert content["parent_required"] is False

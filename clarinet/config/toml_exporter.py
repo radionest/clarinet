@@ -24,6 +24,8 @@ _SCALAR_FIELDS: tuple[str, ...] = (
     "role_name",
     "min_records",
     "max_records",
+    "unique_per_user",
+    "parent_required",
     "mask_patient_data",
     "inherit_user_from_parent",
     "viewer_mode",
