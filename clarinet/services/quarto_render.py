@@ -33,17 +33,24 @@ from clarinet.utils.report_formatters import to_csv
 _STATUS_FILE = "status.json"
 
 
+def _is_executable(path: Path) -> bool:
+    """True when ``path`` is a regular file with the execute bit set."""
+    return path.is_file() and os.access(path, os.X_OK)
+
+
 def resolve_quarto_executable() -> Path | None:
     """Locate the quarto binary: explicit setting → install dir → PATH.
 
-    Returns ``None`` when no binary is found so callers can raise a typed
-    :class:`~clarinet.exceptions.domain.QuartoNotInstalledError` (503).
+    Verifies the candidate is an executable file (not just present) so a stale
+    directory or a non-executable file does not slip through and fail later at
+    subprocess launch. Returns ``None`` when no binary is found so callers can
+    raise a typed :class:`~clarinet.exceptions.domain.QuartoNotInstalledError`.
     """
     if settings.quarto_executable:
         explicit = Path(settings.quarto_executable)
-        return explicit if explicit.exists() else None
+        return explicit if _is_executable(explicit) else None
     installed = settings.quarto_install_path / "bin" / "quarto"
-    if installed.exists():
+    if _is_executable(installed):
         return installed
     found = shutil.which("quarto")
     return Path(found) if found else None

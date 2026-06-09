@@ -34,7 +34,19 @@ async def render_quarto_report(msg: PipelineMessage, _ctx: TaskContext) -> None:
     qmd_path = Path(payload["qmd_path"])
     render_dir = Path(payload["render_dir"])
     data_reports: list[str] = payload.get("data_reports", [])
-    formats = [QuartoReportFormat(value) for value in payload.get("formats", ["docx"])]
+    try:
+        formats = [QuartoReportFormat(value) for value in payload.get("formats", ["docx"])]
+    except ValueError as exc:
+        logger.error(f"Quarto render '{name}': invalid formats in payload: {exc}")
+        write_status(
+            render_dir,
+            name=name,
+            render_id=render_dir.name,
+            status=QuartoRenderStatus.FAILED,
+            formats=[],
+            error=f"invalid formats: {exc}",
+        )
+        return
 
     # Defense in depth: the write target comes from the queue payload. A
     # legitimate message is produced by QuartoReportService (which validates the

@@ -64,6 +64,7 @@ def test_resolve_executable_explicit_setting(
 ) -> None:
     fake = tmp_path / "quarto"
     fake.write_text("#!/bin/sh\n")
+    fake.chmod(0o755)
     monkeypatch.setattr(settings, "quarto_executable", str(fake))
     assert resolve_quarto_executable() == fake
 
@@ -80,6 +81,7 @@ def test_resolve_executable_install_dir(monkeypatch: pytest.MonkeyPatch, tmp_pat
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     (bin_dir / "quarto").write_text("#!/bin/sh\n")
+    (bin_dir / "quarto").chmod(0o755)
     monkeypatch.setattr(type(settings), "quarto_install_path", property(lambda _self: tmp_path))
     assert resolve_quarto_executable() == bin_dir / "quarto"
 

@@ -7,6 +7,7 @@ renderer (see :mod:`clarinet.services.quarto_render`).
 """
 
 import asyncio
+import secrets
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
@@ -25,6 +26,7 @@ from clarinet.models.quarto_report import (
 )
 from clarinet.services.report_service import ReportRegistry
 from clarinet.settings import settings
+from clarinet.utils.logger import logger
 from clarinet.utils.quarto_discovery import DiscoveredQuartoReport
 
 # Fire-and-forget render tasks (pipeline-disabled fallback). Held in a module
@@ -84,7 +86,9 @@ class QuartoReportService:
         self._validate_data_reports(template)
 
         now = datetime.now(UTC)
-        render_id = now.strftime("%Y%m%d_%H%M%S_%f")
+        # Timestamp + random suffix: two concurrent renders of the same report
+        # in the same microsecond must not collide on the directory name.
+        render_id = f"{now.strftime('%Y%m%d_%H%M%S_%f')}_{secrets.token_hex(3)}"
         render_dir = self._render_dir(name, render_id)
         write_status(
             render_dir,
@@ -95,7 +99,22 @@ class QuartoReportService:
             created_at=now.isoformat(),
         )
 
-        await self._dispatch(name, qmd_path, template.data_reports, formats, render_dir)
+        try:
+            await self._dispatch(name, qmd_path, template.data_reports, formats, render_dir)
+        except Exception as exc:
+            # A broker/enqueue failure must not leave the sidecar stuck on
+            # PENDING — record it as failed so the UI stops polling.
+            logger.opt(exception=exc).error(f"Quarto render '{name}' dispatch failed")
+            write_status(
+                render_dir,
+                name=name,
+                render_id=render_id,
+                status=QuartoRenderStatus.FAILED,
+                formats=formats,
+                error=f"dispatch failed: {exc}",
+                created_at=now.isoformat(),
+                finished_at=datetime.now(UTC).isoformat(),
+            )
         return self.get_render_state(name, render_id)
 
     def get_render_state(self, name: str, render_id: str) -> QuartoRenderState:

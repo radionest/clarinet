@@ -987,6 +987,9 @@ def cleanup_quarto_renders(days: int) -> None:
     and the DOCX/PDF). They are not needed once downloaded; pruning them bounds
     disk use and limits how long report data sits on disk.
     """
+    if days < 1:
+        print("--days must be >= 1 (refusing to wipe all renders)")
+        sys.exit(1)
     output_path = settings.get_quarto_output_path()
     if not output_path.is_dir():
         print(f"No Quarto output directory at {output_path}; nothing to clean")
@@ -998,7 +1001,11 @@ def cleanup_quarto_renders(days: int) -> None:
             continue
         for render_dir in report_dir.iterdir():
             if render_dir.is_dir() and render_dir.stat().st_mtime < cutoff:
-                shutil.rmtree(render_dir, ignore_errors=True)
+                try:
+                    shutil.rmtree(render_dir)
+                except OSError as exc:
+                    logger.warning(f"Failed to remove {render_dir}: {exc}")
+                    continue
                 removed += 1
         with contextlib.suppress(OSError):
             report_dir.rmdir()  # remove the report folder if now empty

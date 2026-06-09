@@ -78,8 +78,8 @@ bound disk use and limit how long report data sits on disk.
 ## Installing the Quarto CLI
 
 Quarto is **not** a pip package — it is a self-contained binary that bundles
-its own pandoc and typst, so **no system pandoc and no LaTeX are required**
-(DOCX via the bundled pandoc, PDF via the bundled typst). Install it with the
+its own Pandoc and Typst, so **no system Pandoc and no LaTeX are required**
+(DOCX via the bundled Pandoc, PDF via the bundled Typst). Install it with the
 CLI, which mirrors `clarinet ohif install`:
 
 ```bash

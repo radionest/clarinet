@@ -620,9 +620,18 @@ class Settings(BaseSettings):
         return Path(self.storage_path) / "quarto"
 
     def get_quarto_output_path(self) -> Path:
-        """Directory holding rendered Quarto outputs and their status sidecars."""
+        """Directory holding rendered Quarto outputs and their status sidecars.
+
+        A relative ``quarto_output_path`` is anchored to ``project_path`` (when
+        set) so the API and a worker started from a different working directory
+        resolve the same directory. The default lives under the absolute
+        ``storage_path``.
+        """
         if self.quarto_output_path:
-            return Path(self.quarto_output_path)
+            p = Path(self.quarto_output_path)
+            if not p.is_absolute() and self.project_path is not None:
+                return Path(self.project_path) / p
+            return p
         return Path(self.storage_path) / "quarto_renders"
 
     @property
