@@ -39,6 +39,12 @@ _TABLE_FIELDS: tuple[str, ...] = (
     "slicer_result_validator_args",
 )
 
+# List fields exported as TOML arrays.
+_LIST_FIELDS: tuple[str, ...] = (
+    "slicer_context_hydrators",
+    "data_validators",
+)
+
 
 def _record_type_to_toml_dict(rt: RecordType) -> dict[str, Any]:
     """Convert a RecordType to a TOML-serializable dict.
@@ -63,6 +69,12 @@ def _record_type_to_toml_dict(rt: RecordType) -> dict[str, Any]:
 
     # Table fields (dicts)
     for field_name in _TABLE_FIELDS:
+        value = getattr(rt, field_name, None)
+        if value:
+            data[field_name] = value
+
+    # List fields (arrays of strings)
+    for field_name in _LIST_FIELDS:
         value = getattr(rt, field_name, None)
         if value:
             data[field_name] = value

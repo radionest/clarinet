@@ -372,3 +372,86 @@ async def test_export_includes_constraint_flags_default(tmp_path) -> None:
     content = tomllib.loads(path.read_text())
     assert content["unique_per_user"] is True
     assert content["parent_required"] is False
+
+
+@pytest.mark.asyncio
+async def test_export_includes_hydrators_and_validators(tmp_path) -> None:
+    """TOML export includes slicer_context_hydrators/data_validators arrays."""
+    import tomllib
+
+    rt = RecordType(
+        name="lists-test",
+        level="SERIES",
+        slicer_context_hydrators=["seg_labels"],
+        data_validators=["check_volume", "check_overlap"],
+    )
+
+    path = await export_record_type_to_toml(rt, tmp_path)
+    content = tomllib.loads(path.read_text())
+    assert content["slicer_context_hydrators"] == ["seg_labels"]
+    assert content["data_validators"] == ["check_volume", "check_overlap"]
+
+    rt_empty = RecordType(name="lists-empty", level="SERIES")
+    path = await export_record_type_to_toml(rt_empty, tmp_path)
+    content = tomllib.loads(path.read_text())
+    assert "slicer_context_hydrators" not in content
+    assert "data_validators" not in content
+
+
+@pytest.mark.asyncio
+async def test_constraint_flags_round_trip(
+    test_session: AsyncSession,
+    tmp_path,
+) -> None:
+    """TOML → DB → modified TOML → DB: constraint flags survive the update path."""
+    _write_toml(
+        tmp_path,
+        "flags-trip",
+        {
+            "name": "flags-trip",
+            "level": "SERIES",
+            "unique_per_user": False,
+            "parent_required": True,
+        },
+    )
+    _write_schema(tmp_path, "flags-trip", {"type": "object"})
+
+    config_files = discover_config_files(str(tmp_path))
+    items = [
+        RecordTypeCreate(**p)
+        for cf in config_files
+        if (p := await load_record_config(cf)) is not None
+    ]
+    await reconcile_record_types(items, test_session)
+
+    stmt = select(RecordType).where(RecordType.name == "flags-trip")
+    rt = (await test_session.execute(stmt)).scalar_one()
+    assert rt.unique_per_user is False
+    assert rt.parent_required is True
+
+    # Flip both flags in TOML → reconcile must apply them on UPDATE
+    _write_toml(
+        tmp_path,
+        "flags-trip",
+        {
+            "name": "flags-trip",
+            "level": "SERIES",
+            "unique_per_user": True,
+            "parent_required": False,
+        },
+    )
+    _write_schema(tmp_path, "flags-trip", {"type": "object"})
+    test_session.expire_all()
+
+    config_files = discover_config_files(str(tmp_path))
+    items = [
+        RecordTypeCreate(**p)
+        for cf in config_files
+        if (p := await load_record_config(cf)) is not None
+    ]
+    result = await reconcile_record_types(items, test_session)
+    assert "flags-trip" in result.updated
+
+    rt = (await test_session.execute(stmt)).scalar_one()
+    assert rt.unique_per_user is True
+    assert rt.parent_required is False
