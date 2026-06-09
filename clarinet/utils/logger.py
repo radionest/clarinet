@@ -224,6 +224,7 @@ def setup_logging(
     retention: str = "1 week",
     serialize: bool = False,
     noisy_libraries: list[str] | None = None,
+    silenced_libraries: list[str] | None = None,
     remote_url: str | None = None,
     remote_auth: str | None = None,
     remote_level: str | None = None,
@@ -243,6 +244,10 @@ def setup_logging(
         serialize: Whether to format file logs as JSON lines
         noisy_libraries: Library name prefixes to suppress on console and file sinks
             (DEBUG/INFO hidden, WARNING+ still shown). Pass empty list to disable.
+        silenced_libraries: Stdlib logger names raised to ERROR before records reach
+            loguru — for libraries (e.g. pydicom) that emit unactionable noise at
+            WARNING through their own logger, which the noisy filter (keeps WARNING+)
+            cannot suppress.
         remote_url: Loki-compatible push endpoint URL. None disables remote logging.
         remote_auth: Authorization header value for the remote endpoint.
         remote_level: Minimum level for remote sink (defaults to level).
@@ -302,6 +307,13 @@ def setup_logging(
     # Intercept standard library logging
     logging.basicConfig(handlers=[InterceptHandler()], level=0, force=True)
 
+    # Some libraries (e.g. pydicom) log unactionable noise — DICOM conformance
+    # violations from non-conformant PACS — at WARNING through their own stdlib
+    # logger, which the level-based noisy filter (it keeps WARNING+) can't quiet.
+    # Raise them to ERROR at the stdlib logger, before the record reaches loguru.
+    for library in silenced_libraries or []:
+        logging.getLogger(library).setLevel(logging.ERROR)
+
 
 def _settings_setup_kwargs(
     component: str,
@@ -329,6 +341,7 @@ def _settings_setup_kwargs(
         "retention": settings.log_retention,
         "serialize": settings.log_serialize,
         "noisy_libraries": settings.log_noisy_libraries,
+        "silenced_libraries": settings.log_silenced_libraries,
         "remote_url": settings.log_remote_url,
         "remote_auth": settings.log_remote_auth,
         "remote_level": settings.log_remote_level,
