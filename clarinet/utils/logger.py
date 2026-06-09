@@ -302,6 +302,13 @@ def setup_logging(
     # Intercept standard library logging
     logging.basicConfig(handlers=[InterceptHandler()], level=0, force=True)
 
+    # pydicom logs DICOM conformance violations (e.g. malformed `IS` values from
+    # non-conformant PACS) at WARNING through its own stdlib logger, so the
+    # level-based noisy filter — which keeps WARNING+ — can't quiet them. The
+    # source data can't be fixed, so raise the threshold to ERROR at the stdlib
+    # logger, before the record ever reaches loguru.
+    logging.getLogger("pydicom").setLevel(logging.ERROR)
+
 
 def _settings_setup_kwargs(
     component: str,

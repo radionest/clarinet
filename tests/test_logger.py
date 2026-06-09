@@ -3,6 +3,8 @@
 import json
 import sys
 from io import StringIO
+from types import SimpleNamespace
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import httpx
@@ -414,3 +416,54 @@ class TestSetupRemoteSink:
         # Console + remote = 2 handlers
         assert len(handlers) == 2
         _logger.remove()
+
+
+class TestNoisyFilter:
+    """Tests for _make_noisy_filter — the engine behind log_noisy_libraries."""
+
+    @staticmethod
+    def _record(name: str, level_no: int) -> dict[str, Any]:
+        """Build a minimal stand-in for a loguru record the filter inspects."""
+        return {"name": name, "level": SimpleNamespace(no=level_no)}
+
+    def test_suppresses_debug_and_info_for_listed_prefix(self) -> None:
+        from clarinet.utils.logger import _make_noisy_filter
+
+        noisy = _make_noisy_filter(["aiormq", "aio_pika", "pamqp"])
+        assert noisy(self._record("aiormq.connection", 10)) is False  # DEBUG
+        assert noisy(self._record("aio_pika.channel", 20)) is False  # INFO
+        assert noisy(self._record("pamqp.frame", 20)) is False  # INFO
+
+    def test_keeps_warning_and_above_for_listed_prefix(self) -> None:
+        from clarinet.utils.logger import _make_noisy_filter
+
+        noisy = _make_noisy_filter(["aiormq"])
+        assert noisy(self._record("aiormq.connection", 30)) is True  # WARNING
+        assert noisy(self._record("aiormq.connection", 40)) is True  # ERROR
+
+    def test_keeps_all_levels_for_unlisted_module(self) -> None:
+        from clarinet.utils.logger import _make_noisy_filter
+
+        noisy = _make_noisy_filter(["aiormq"])
+        assert noisy(self._record("clarinet.services.pipeline", 10)) is True
+
+
+class TestPydicomSuppression:
+    """setup_logging raises the pydicom stdlib logger to ERROR.
+
+    pydicom emits DICOM conformance warnings (WARNING level) for malformed
+    values from non-conformant PACS. Those are WARNING-level, so the noisy
+    filter (which keeps WARNING+) cannot drop them; setup_logging silences
+    them at the stdlib logger instead.
+    """
+
+    def test_setup_logging_sets_pydicom_to_error(self) -> None:
+        import logging
+
+        from clarinet.utils.logger import setup_logging
+
+        logging.getLogger("pydicom").setLevel(logging.NOTSET)
+        setup_logging(level="DEBUG")
+        _logger.remove()
+
+        assert logging.getLogger("pydicom").level == logging.ERROR

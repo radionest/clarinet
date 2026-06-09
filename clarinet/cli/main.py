@@ -200,7 +200,7 @@ secret_key = "change-this-secret-key-in-production"
 # log_retention = "1 week"
 # log_serialize = true
 # log_console_level = ""       # defaults to log_level
-# log_noisy_libraries = ["pynetdicom"]
+# log_noisy_libraries = ["pynetdicom", "aiormq", "aio_pika", "pamqp", "asyncio"]
 """
 
     settings_file = project_path / "settings.toml"

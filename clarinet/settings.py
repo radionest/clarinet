@@ -367,7 +367,13 @@ class Settings(BaseSettings):
     log_format: str | None = None  # Use default if None
     log_console_level: str | None = None  # If None, uses log_level
     log_serialize: bool = True  # JSON format for file logs
-    log_noisy_libraries: list[str] = ["pynetdicom"]  # Suppress console INFO/DEBUG from these
+    log_noisy_libraries: list[str] = [
+        "pynetdicom",
+        "aiormq",  # RabbitMQ frame writer — DEBUG frames dominate worker logs
+        "aio_pika",
+        "pamqp",
+        "asyncio",
+    ]  # Suppress console/file INFO/DEBUG from these (WARNING+ still shown)
     worker_log_file: str | None = (
         None  # Override worker log path; None → "{log_dir}/clarinet_worker.log"
     )
