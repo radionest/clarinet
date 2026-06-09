@@ -285,10 +285,6 @@ formosh-form::part(description) {
     border-bottom: 1px solid var(--border-color);
 }
 
-.array-item-index {
-    font-weight: 600;
-}
-
 .remove-array-item {
     margin-left: auto;
     color: var(--danger-color);
