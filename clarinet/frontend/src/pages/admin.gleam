@@ -52,6 +52,8 @@ pub type Msg {
   ToggleAssignDropdown(record_id: Option(Int))
   AssignUser(record_id: Int, user_id: String)
   AssignUserResult(Result(models.Record, types.ApiError))
+  UnassignUser(record_id: Int)
+  UnassignUserResult(Result(models.Record, types.ApiError))
   // Status change
   ToggleStatusDropdown(record_id: Option(Int))
   ChangeStatus(record_id: Int, status: String)
@@ -181,6 +183,40 @@ pub fn update(
 
     AssignUserResult(Error(err)) ->
       #(model, effect.none(), handle_error(err, "Failed to assign user to record"))
+
+    UnassignUser(record_id) -> {
+      let eff = {
+        use dispatch <- effect.from
+        admin_api.unassign_record_user(record_id)
+        |> promise.tap(fn(result) { dispatch(UnassignUserResult(result)) })
+        Nil
+      }
+      #(Model(..model, editing_record_id: None), eff, [
+        shared.SetLoading(True),
+      ])
+    }
+
+    UnassignUserResult(Ok(record)) -> {
+      // Refresh admin stats — unassigning changes `unassigned_records`
+      // and similar derived counts that the cards display.
+      let stats_eff = load_effect(admin_api.get_admin_stats, AdminStatsLoaded)
+      #(
+        Model(..model, stats_status: load_status.Loading),
+        stats_eff,
+        [
+          shared.SetLoading(False),
+          shared.CacheRecord(record),
+          shared.ShowSuccess("User unassigned successfully"),
+        ],
+      )
+    }
+
+    UnassignUserResult(Error(err)) ->
+      #(
+        model,
+        effect.none(),
+        handle_error(err, "Failed to unassign user from record"),
+      )
 
     ToggleStatusDropdown(record_id) ->
       #(
@@ -779,7 +815,7 @@ fn assign_cell(
   case is_editing {
     True ->
       html.div([attribute.class("assign-cell")], [
-        user_dropdown(shared, record_id),
+        user_dropdown(shared, record_id, option.is_some(user_id)),
       ])
     False ->
       case user_id {
@@ -809,7 +845,21 @@ fn assign_cell(
   }
 }
 
-fn user_dropdown(shared: Shared, record_id: Int) -> Element(Msg) {
+fn user_dropdown(
+  shared: Shared,
+  record_id: Int,
+  has_user: Bool,
+) -> Element(Msg) {
+  let unassign_option = case has_user {
+    True -> [html.option([attribute.value("__unassign__")], "— Unassign —")]
+    False -> []
+  }
+  let user_options =
+    dict.values(shared.cache.users)
+    |> list.sort(fn(a, b) { string.compare(a.email, b.email) })
+    |> list.map(fn(user) {
+      html.option([attribute.value(user.id)], user.email)
+    })
   html.div([attribute.class("assign-dropdown")], [
     html.select(
       [
@@ -817,18 +867,16 @@ fn user_dropdown(shared: Shared, record_id: Int) -> Element(Msg) {
         event.on_input(fn(value) {
           case value {
             "" -> ToggleAssignDropdown(None)
+            "__unassign__" -> UnassignUser(record_id)
             uid -> AssignUser(record_id, uid)
           }
         }),
       ],
-      [
-        html.option([attribute.value("")], "Select user..."),
-        ..dict.values(shared.cache.users)
-        |> list.sort(fn(a, b) { string.compare(a.email, b.email) })
-        |> list.map(fn(user) {
-          html.option([attribute.value(user.id)], user.email)
-        })
-      ],
+      list.flatten([
+        [html.option([attribute.value("")], "Select user...")],
+        unassign_option,
+        user_options,
+      ]),
     ),
     html.button(
       [

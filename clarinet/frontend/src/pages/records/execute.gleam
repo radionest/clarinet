@@ -1,4 +1,5 @@
 // Record execution page — self-contained MVU module
+import api/admin as admin_api
 import api/models.{type Record, type RecordType}
 import api/records
 import api/slicer
@@ -174,6 +175,9 @@ pub type Msg {
   RequestDelete
   Delete
   DeleteResult(Result(Nil, ApiError))
+  // Admin: unassign user from this record
+  UnassignUser(record_id: Int)
+  UnassignUserResult(Result(Record, ApiError))
   // Admin: create a new Record inheriting this Record's UIDs and parent_id
   OpenAddRecord
   // Admin workflow section
@@ -583,6 +587,29 @@ pub fn update(
       model,
       effect.none(),
       handle_error(err, "Failed to restart record"),
+    )
+
+    // Admin: unassign user
+    UnassignUser(record_id) -> {
+      let eff = {
+        use dispatch <- effect.from
+        admin_api.unassign_record_user(record_id)
+        |> promise.tap(fn(result) { dispatch(UnassignUserResult(result)) })
+        Nil
+      }
+      #(model, eff, [shared.SetLoading(True)])
+    }
+
+    UnassignUserResult(Ok(record)) -> #(model, effect.none(), [
+      shared.SetLoading(False),
+      shared.CacheRecord(record),
+      shared.ShowSuccess("User unassigned successfully"),
+    ])
+
+    UnassignUserResult(Error(err)) -> #(
+      model,
+      effect.none(),
+      handle_error(err, "Failed to unassign user"),
     )
 
     RequestFail -> #(model, effect.none(), [
@@ -1759,16 +1786,27 @@ fn render_record_metadata(record: Record, shared: Shared) -> Element(Msg) {
         None -> element.none()
       },
       case is_admin_user(shared) {
-        True -> {
-          let assignee = case record.user_id {
-            Some(uid) -> cache.user_email(shared.cache, uid)
-            None -> "—"
-          }
+        True ->
           element.fragment([
             html.dt([], [html.text("Assigned to:")]),
-            html.dd([], [html.text(assignee)]),
+            html.dd([], case record.user_id, record.id {
+              Some(uid), Some(id) -> [
+                html.text(cache.user_email(shared.cache, uid)),
+                html.text(" "),
+                html.button(
+                  [
+                    attribute.class("btn btn-sm btn-outline"),
+                    event.on_click(UnassignUser(id)),
+                  ],
+                  [html.text("Unassign")],
+                ),
+              ]
+              Some(uid), None -> [
+                html.text(cache.user_email(shared.cache, uid)),
+              ]
+              None, _ -> [html.text("—")]
+            }),
           ])
-        }
         False -> element.none()
       },
     ]),
