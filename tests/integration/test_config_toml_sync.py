@@ -13,12 +13,16 @@ from sqlmodel import select
 
 from clarinet.config.reconciler import reconcile_record_types
 from clarinet.config.toml_exporter import (
+    _LIST_FIELDS,
+    _SCALAR_FIELDS,
+    _TABLE_FIELDS,
     delete_record_type_files,
     export_data_schema_sidecar,
     export_record_type_to_toml,
 )
 from clarinet.models.file_schema import RecordTypeFileLink
 from clarinet.models.record import RecordType, RecordTypeCreate
+from clarinet.models.record_type import RecordTypeBase
 from clarinet.utils.config_loader import discover_config_files, load_record_config
 
 
@@ -455,3 +459,16 @@ async def test_constraint_flags_round_trip(
     rt = (await test_session.execute(stmt)).scalar_one()
     assert rt.unique_per_user is True
     assert rt.parent_required is False
+
+
+def test_exporter_covers_all_record_type_fields() -> None:
+    """Drift guard: every RecordTypeBase field is exported or excluded here.
+
+    A model field missing from the exporter tuples silently disappears from
+    the rewritten .toml on API edits — unique_per_user, parent_required and
+    inherit_user_from_parent all hit this before being added.
+    """
+    exported = set(_SCALAR_FIELDS) | set(_TABLE_FIELDS) | set(_LIST_FIELDS)
+    intentionally_excluded = {"data_schema", "ui_schema"}  # sidecar-authoritative
+    model_fields = set(RecordTypeBase.model_fields)
+    assert model_fields - exported - intentionally_excluded == set()
