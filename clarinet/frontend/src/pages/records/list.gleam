@@ -191,13 +191,8 @@ fn handle_error(err: ApiError, fallback_msg: String) -> List(OutMsg) {
 // --- View ---
 
 pub fn view(model: Model, shared: Shared) -> Element(Msg) {
-  let is_admin = case shared.user {
-    Some(u) -> permissions.is_admin_user(u)
-    None -> False
-  }
-
   let t = shared.translate
-  let title = case is_admin {
+  let title = case is_admin(shared.user) {
     True -> t(i18n.RecordsAllTitle)
     False -> t(i18n.RecordsTitle)
   }
@@ -408,11 +403,7 @@ fn record_modality_text(record: Record) -> String {
 /// cache, falling back to the raw id, or a dash when unassigned.
 fn user_cell_content(shared: Shared, record: Record) -> Element(Msg) {
   case record.user_id {
-    Some(uid) ->
-      case dict.get(shared.cache.users, uid) {
-        Ok(user) -> html.text(user.email)
-        Error(_) -> html.text(uid)
-      }
+    Some(uid) -> html.text(cache.user_email(shared.cache, uid))
     None -> html.text("—")
   }
 }

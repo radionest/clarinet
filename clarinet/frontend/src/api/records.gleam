@@ -6,7 +6,6 @@ import api/models.{
 }
 import api/record_page.{type RecordPage}
 import api/types.{type ApiError}
-import api/users
 import utils/status
 import gleam/dict
 import gleam/dynamic
@@ -314,11 +313,6 @@ pub fn record_decoder() -> decode.Decoder(Record) {
     None,
     decode.optional(record_type_base_decoder()),
   )
-  use user <- decode.optional_field(
-    "user",
-    None,
-    decode.optional(users.user_decoder()),
-  )
   use created_at <- decode.optional_field(
     "created_at",
     None,
@@ -404,7 +398,6 @@ pub fn record_decoder() -> decode.Decoder(Record) {
     study: study,
     series: series,
     record_type: record_type,
-    user: user,
     data: data,
     created_at: created_at,
     changed_at: changed_at,

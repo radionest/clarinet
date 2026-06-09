@@ -13,6 +13,7 @@ import api/workflow_models.{
   RecordTypeNode, StatusTrigger, TriggerOnDataUpdate, TriggerOnFileChange,
   TriggerOnStatus,
 }
+import cache
 import clarinet_frontend/i18n
 import components/status_badge
 import components/workflow_graph as wf_renderer
@@ -1760,11 +1761,7 @@ fn render_record_metadata(record: Record, shared: Shared) -> Element(Msg) {
       case is_admin_user(shared) {
         True -> {
           let assignee = case record.user_id {
-            Some(uid) ->
-              case dict.get(shared.cache.users, uid) {
-                Ok(user) -> user.email
-                Error(_) -> uid
-              }
+            Some(uid) -> cache.user_email(shared.cache, uid)
             None -> "—"
           }
           element.fragment([
