@@ -1,11 +1,13 @@
 """Unit tests for ``clarinet quarto install`` version-marker handling."""
 
+import contextlib
+import io
 import tarfile
 from pathlib import Path
 
 import pytest
 
-from clarinet.cli.main import _quarto_tarball_version, install_quarto
+from clarinet.cli.main import _download_file, _quarto_tarball_version, install_quarto
 from clarinet.settings import settings
 
 
@@ -79,3 +81,20 @@ def test_from_file_unversioned_falls_back_to_default(
     install_quarto(from_file=str(tarball))
     marker = (quarto_install_dir / ".quarto-version").read_text().strip()
     assert marker == "9.9.9"
+
+
+def test_download_file_sets_socket_timeout(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Guard against regressing to urlretrieve, which hangs on a dead network."""
+    captured: dict[str, float | None] = {}
+
+    @contextlib.contextmanager
+    def fake_urlopen(url: str, timeout: float | None = None):
+        captured["timeout"] = timeout
+        yield io.BytesIO(b"payload")
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    dest = tmp_path / "out.tgz"
+    _download_file("https://example.org/quarto.tar.gz", dest)
+    assert dest.read_bytes() == b"payload"
+    assert captured["timeout"] is not None
+    assert captured["timeout"] > 0

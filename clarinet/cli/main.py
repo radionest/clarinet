@@ -750,6 +750,20 @@ def _install_config_template(ohif_dir: Path) -> None:
         logger.warning("app-config.js template not found in package")
 
 
+_DOWNLOAD_TIMEOUT = 30.0
+
+
+def _download_file(url: str, dest: Path) -> None:
+    """Download ``url`` to ``dest`` with a socket timeout.
+
+    ``urllib.request.urlretrieve`` has no timeout and hangs forever on a dead
+    network. The timeout bounds each socket operation (connect/read), not the
+    total download time, so large but live downloads are unaffected.
+    """
+    with urllib.request.urlopen(url, timeout=_DOWNLOAD_TIMEOUT) as resp, dest.open("wb") as f:
+        shutil.copyfileobj(resp, f)
+
+
 def install_ohif(
     version: str | None = None,
     force_config: bool = False,
@@ -785,7 +799,7 @@ def install_ohif(
             logger.info(f"Downloading OHIF Viewer v{version} from npm...")
             tarball = tmp_path / "ohif.tgz"
             try:
-                urllib.request.urlretrieve(npm_url, tarball)
+                _download_file(npm_url, tarball)
             except Exception as e:
                 logger.error(f"Failed to download OHIF v{version}: {e}")
                 sys.exit(1)
@@ -939,7 +953,7 @@ def install_quarto(version: str | None = None, from_file: str | None = None) -> 
             logger.info(f"Downloading Quarto v{version} from {url} ...")
             tarball = tmp_path / "quarto.tar.gz"
             try:
-                urllib.request.urlretrieve(url, tarball)
+                _download_file(url, tarball)
             except Exception as e:
                 logger.error(f"Failed to download Quarto v{version}: {e}")
                 sys.exit(1)
