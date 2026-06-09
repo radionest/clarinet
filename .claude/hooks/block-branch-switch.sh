@@ -8,14 +8,14 @@ INPUT=$(cat)
 COMMAND=$(printf '%s' "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null)
 [ -z "$COMMAND" ] && exit 0
 
+# File-restore forms (`git checkout -- <file>`, `git checkout <ref> -- <file>`) are
+# allowed: strip them BEFORE detection so a compound command cannot hide a real
+# branch switch behind an innocent restore (`git checkout -- f && git checkout main`).
+SANS_RESTORE=$(printf '%s' "$COMMAND" | sed -E 's/(checkout|switch)[^|;&]*[[:space:]]--([[:space:]]|$)/restore-form /g')
+
 # Match checkout/switch only in git-subcommand position — pipes and arguments
 # like `git log --oneline | grep checkout` must not trigger.
-if ! printf '%s' "$COMMAND" | grep -qP '(^|[^[:alnum:]_./-])git\s+(-C\s+\S+\s+|-c\s+\S+\s+|--?[[:alnum:]-]+(=\S*)?\s+)*(checkout|switch)\b'; then
-  exit 0
-fi
-
-# Allow file restore from any ref: `git checkout -- <file>`, `git checkout <ref> -- <file>`
-if printf '%s' "$COMMAND" | grep -qP '(checkout|switch)\b[^|;&]*\s--(\s|$)'; then
+if ! printf '%s' "$SANS_RESTORE" | grep -qP '(^|[^[:alnum:]_./-])git\s+(-C\s+\S+\s+|-c\s+\S+\s+|--?[[:alnum:]-]+(=\S*)?\s+)*(checkout|switch)\b'; then
   exit 0
 fi
 

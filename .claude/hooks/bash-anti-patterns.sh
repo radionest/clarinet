@@ -81,7 +81,7 @@ esac
 # Match pytest / py.test / make test* / uv run pytest only in command position
 # (start of line or after ; & | parenthesis, with optional env/timeout prefixes) —
 # a mere argument like `git log --grep=pytest` must not trigger. `||` is ignored (boolean OR).
-if printf '%s' "$COMMAND" | grep -qP '(^|[;&|(])\s*((timeout|env|nohup|time|stdbuf)\s+\S+\s+|\w+=\S*\s+)*(pytest\b|py\.test\b|uv\s+run\s+pytest\b|make\s+test)'; then
+if printf '%s' "$COMMAND" | grep -qP '(^|[;&|(])\s*((timeout|env|nohup|time|stdbuf)\s+\S+\s+|\w+=\S*\s+)*(pytest\b|py\.test\b|uv\s+run\s+pytest\b|make\s+test\b)'; then
   CLEANED=$(printf '%s' "$COMMAND" | sed 's/||/__OR__/g')
   if printf '%s' "$CLEANED" | grep -q '|'; then
     cat >&2 <<'EOF'
