@@ -135,6 +135,7 @@ class RecordDef(BaseModel):
     data_validators: list[str] | None = None
     mask_patient_data: bool = True
     parent_required: bool = False
+    inherit_user_from_parent: bool = False
     viewer_mode: ViewerMode = ViewerMode.SINGLE_SERIES
 
     def __init__(self, *, role: str | None = None, **kwargs: Any) -> None:

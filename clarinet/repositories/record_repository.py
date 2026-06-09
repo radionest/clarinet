@@ -997,11 +997,15 @@ class RecordRepository(BaseRepository[Record]):
         result = await self.session.execute(query)
         return result.scalar_one()
 
-    async def get_record_type(self, name: str) -> RecordType:
+    async def get_record_type(self, name: str, *, with_files: bool = True) -> RecordType:
         """Get a RecordType by name with file_links eagerly loaded.
 
         Args:
             name: Record type name (primary key)
+            with_files: When False, resolve via ``session.get`` — an
+                identity-map hit (no extra SQL) if the type was already
+                loaded earlier in the request. ``file_links`` are NOT
+                eagerly loaded then; access only scalar fields.
 
         Returns:
             RecordType instance
@@ -1009,6 +1013,11 @@ class RecordRepository(BaseRepository[Record]):
         Raises:
             RecordTypeNotFoundError: If record type doesn't exist
         """
+        if not with_files:
+            record_type_by_pk = await self.session.get(RecordType, name)
+            if record_type_by_pk is None:
+                raise RecordTypeNotFoundError(name)
+            return record_type_by_pk
         stmt = (
             select(RecordType)
             .where(RecordType.name == name)
@@ -1102,20 +1111,6 @@ class RecordRepository(BaseRepository[Record]):
 
         return collected
 
-    async def validate_parent_record(self, parent_record_id: int) -> Record:
-        """Validate parent record exists and return it.
-
-        Args:
-            parent_record_id: ID of the proposed parent record.
-
-        Returns:
-            Parent record.
-
-        Raises:
-            RecordNotFoundError: If parent record doesn't exist.
-        """
-        return await self.get(parent_record_id)
-
     async def check_constraints(
         self,
         record_type_name: str,
@@ -1172,20 +1167,49 @@ class RecordRepository(BaseRepository[Record]):
                 )
 
         # Check unique_per_user constraint
-        if user_id is not None and patient_id is not None and record_type.unique_per_user:
-            user_count = await self.count_user_records_for_context(
-                user_id=user_id,
-                record_type_name=record_type_name,
+        if user_id is not None and patient_id is not None:
+            await self.ensure_unique_per_user(
+                record_type,
+                user_id,
                 patient_id=patient_id,
                 study_uid=study_uid,
                 series_uid=series_uid,
-                level=level,
             )
-            if user_count > 0:
-                raise RecordUniquePerUserError(
-                    f"User already has a record of type '{record_type.name}' "
-                    f"for this {level.lower()} context"
-                )
+
+    async def ensure_unique_per_user(
+        self,
+        record_type: RecordType,
+        user_id: UUID,
+        *,
+        patient_id: str,
+        study_uid: str | None,
+        series_uid: str | None,
+    ) -> None:
+        """Raise if the user already has a record of this unique-per-user type.
+
+        No-op when the type is not ``unique_per_user``. Also used by
+        ``RecordService.create_record`` to re-check after parent ``user_id``
+        inheritance, which happens after the route-level constraint check.
+
+        Raises:
+            RecordUniquePerUserError: If a record already exists for the user
+                in the given DICOM context.
+        """
+        if not record_type.unique_per_user:
+            return
+        user_count = await self.count_user_records_for_context(
+            user_id=user_id,
+            record_type_name=record_type.name,
+            patient_id=patient_id,
+            study_uid=study_uid,
+            series_uid=series_uid,
+            level=record_type.level,
+        )
+        if user_count > 0:
+            raise RecordUniquePerUserError(
+                f"User already has a record of type '{record_type.name}' "
+                f"for this {record_type.level.lower()} context"
+            )
 
     @staticmethod
     def _apply_anon_uid_filter(

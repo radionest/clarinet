@@ -20,6 +20,11 @@
   *triggering* record (a separate axis from parent inheritance).
 - Parent existence validation and the inheritance decision moved from the
   router into `RecordService.create_record`.
+- An inherited `user_id` is re-checked against `unique_per_user` (the
+  route-level constraint check runs before inheritance and cannot see it);
+  a duplicate now returns 409 `UNIQUE_PER_USER`.
+- The flag is settable in both config modes: TOML and Python
+  (`RecordDef(..., inherit_user_from_parent=True)`).
 
 ## 0.3.0 — Per-project queue namespacing
 

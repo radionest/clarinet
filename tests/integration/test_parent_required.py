@@ -6,7 +6,7 @@ Covers:
   pass a ``parent_record_id``.
 - ``check_constraints`` accepts the call when a ``parent_record_id`` is
   provided, regardless of whether the referenced record actually exists
-  (existence check lives in ``validate_parent_record`` at the router).
+  (existence check lives in ``RecordService.create_record``).
 - ``check_constraints`` is a no-op for the flag when ``parent_required=False``.
 - ``POST /api/records/`` returns 409 with ``code="PARENT_REQUIRED"`` when the
   body omits ``parent_record_id`` for a ``parent_required`` type.
@@ -100,7 +100,7 @@ class TestCheckConstraintsParentRequired:
     ):
         repo = RecordRepository(test_session)
         # check_constraints does not load the parent — existence is enforced
-        # later by ``validate_parent_record``. Any non-None id passes here.
+        # later by ``RecordService.create_record``. Any non-None id passes here.
         await repo.check_constraints(
             parent_required_type.name,
             series_uid=test_series.series_uid,
@@ -182,7 +182,7 @@ class TestCreateRecordApiParentRequired:
     ):
         # Regression test on separation of responsibilities:
         # check_constraints only enforces NULL/non-NULL; existence of the
-        # referenced parent is enforced later by validate_parent_record.
+        # referenced parent is enforced later by RecordService.create_record.
         # A non-NULL but missing parent_record_id must surface as 404
         # (RecordNotFoundError), NOT 409 (PARENT_REQUIRED).
         resp = await client.post(

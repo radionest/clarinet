@@ -76,8 +76,19 @@ class RecordService:
             parent = await self.repo.get_with_relations(record.parent_record_id)
             parent_read = RecordRead.model_validate(parent)
             if record.user_id is None:
-                record_type = await self.repo.get_record_type(record.record_type_name)
-                if record_type.inherit_user_from_parent:
+                record_type = await self.repo.get_record_type(
+                    record.record_type_name, with_files=False
+                )
+                if record_type.inherit_user_from_parent and parent.user_id is not None:
+                    # The route-level constraint check ran with user_id=None
+                    # and could not see the inherited user — re-check here.
+                    await self.repo.ensure_unique_per_user(
+                        record_type,
+                        parent.user_id,
+                        patient_id=record.patient_id,
+                        study_uid=record.study_uid,
+                        series_uid=record.series_uid,
+                    )
                     record.user_id = parent.user_id
 
         record = await self.repo.create_with_relations(record)

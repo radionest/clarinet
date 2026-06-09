@@ -135,6 +135,27 @@ async def test_mask_patient_data_change_triggers_update(
 
 
 @pytest.mark.asyncio
+async def test_inherit_user_from_parent_change_triggers_update(
+    test_session: AsyncSession,
+) -> None:
+    """Toggling ``inherit_user_from_parent`` between config versions is a diff."""
+    config_v1 = [_make_config("inherit-test", inherit_user_from_parent=False)]
+    result = await reconcile_record_types(config_v1, test_session)
+    assert "inherit-test" in result.created
+
+    # Clear cached state before re-reconciling
+    test_session.expire_all()
+
+    config_v2 = [_make_config("inherit-test", inherit_user_from_parent=True)]
+    result = await reconcile_record_types(config_v2, test_session)
+    assert "inherit-test" in result.updated
+
+    stmt = select(RecordType).where(RecordType.name == "inherit-test")
+    row = (await test_session.execute(stmt)).scalar_one()
+    assert row.inherit_user_from_parent is True
+
+
+@pytest.mark.asyncio
 async def test_orphan_detection(
     test_session: AsyncSession,
     seed_record_type: RecordType,
