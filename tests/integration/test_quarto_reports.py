@@ -92,6 +92,12 @@ async def test_render_unknown_report_returns_404(quarto_client: AsyncClient) -> 
     assert resp.status_code == 404
 
 
+async def test_render_empty_formats_returns_422(quarto_client: AsyncClient) -> None:
+    """Empty formats would render "into nothing": DONE with no files, download 409 forever."""
+    resp = await quarto_client.post(admin_quarto_render("demo"), json={"formats": []})
+    assert resp.status_code == 422
+
+
 async def test_render_returns_503_when_quarto_missing(
     quarto_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:

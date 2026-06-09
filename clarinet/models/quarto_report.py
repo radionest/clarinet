@@ -9,6 +9,7 @@ the output file, serialized here as :class:`QuartoRenderState`.
 from enum import Enum
 
 from pydantic import BaseModel as PydanticBaseModel
+from pydantic import Field
 
 
 class QuartoReportFormat(str, Enum):
@@ -62,7 +63,9 @@ class QuartoReportTemplate(PydanticBaseModel):
 class QuartoRenderRequest(PydanticBaseModel):
     """Body for ``POST /api/admin/quarto-reports/{name}/render``."""
 
-    formats: list[QuartoReportFormat] = [QuartoReportFormat.DOCX]
+    # min_length guards against rendering "into nothing": an empty list would
+    # complete as DONE with no output files, leaving download a permanent 409.
+    formats: list[QuartoReportFormat] = Field(default=[QuartoReportFormat.DOCX], min_length=1)
 
 
 class QuartoRenderState(PydanticBaseModel):
