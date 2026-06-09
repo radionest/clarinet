@@ -1,4 +1,5 @@
 // Record execution page — self-contained MVU module
+import api/admin as admin_api
 import api/models.{type Record, type RecordType}
 import api/records
 import api/slicer
@@ -174,6 +175,10 @@ pub type Msg {
   RequestDelete
   Delete
   DeleteResult(Result(Nil, ApiError))
+  // Admin: unassign user from this record (confirmed via modal)
+  RequestUnassign
+  UnassignUser
+  UnassignUserResult(Result(Record, ApiError))
   // Admin: create a new Record inheriting this Record's UIDs and parent_id
   OpenAddRecord
   // Admin workflow section
@@ -583,6 +588,37 @@ pub fn update(
       model,
       effect.none(),
       handle_error(err, "Failed to restart record"),
+    )
+
+    // Admin: unassign user — confirm via modal first (mirrors RequestDelete)
+    RequestUnassign -> #(model, effect.none(), [
+      shared.OpenDeleteConfirm("record-user", model.record_id),
+    ])
+
+    UnassignUser ->
+      case int.parse(model.record_id) {
+        Ok(record_id) -> {
+          let eff = {
+            use dispatch <- effect.from
+            admin_api.unassign_record_user(record_id)
+            |> promise.tap(fn(result) { dispatch(UnassignUserResult(result)) })
+            Nil
+          }
+          #(model, eff, [shared.SetLoading(True)])
+        }
+        Error(_) -> #(model, effect.none(), [])
+      }
+
+    UnassignUserResult(Ok(record)) -> #(model, effect.none(), [
+      shared.SetLoading(False),
+      shared.CacheRecord(record),
+      shared.ShowSuccess(shared.translate(i18n.AdminMsgUserUnassigned)),
+    ])
+
+    UnassignUserResult(Error(err)) -> #(
+      model,
+      effect.none(),
+      handle_error(err, "Failed to unassign user"),
     )
 
     RequestFail -> #(model, effect.none(), [
@@ -1759,16 +1795,24 @@ fn render_record_metadata(record: Record, shared: Shared) -> Element(Msg) {
         None -> element.none()
       },
       case is_admin_user(shared) {
-        True -> {
-          let assignee = case record.user_id {
-            Some(uid) -> cache.user_email(shared.cache, uid)
-            None -> "—"
-          }
+        True ->
           element.fragment([
             html.dt([], [html.text("Assigned to:")]),
-            html.dd([], [html.text(assignee)]),
+            html.dd([], case record.user_id {
+              Some(uid) -> [
+                html.text(cache.user_email(shared.cache, uid)),
+                html.text(" "),
+                html.button(
+                  [
+                    attribute.class("btn btn-sm btn-outline"),
+                    event.on_click(RequestUnassign),
+                  ],
+                  [html.text(shared.translate(i18n.BtnUnassign))],
+                ),
+              ]
+              None -> [html.text("—")]
+            }),
           ])
-        }
         False -> element.none()
       },
     ]),

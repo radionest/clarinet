@@ -22,6 +22,7 @@ pub type Key {
   BtnEdit
   BtnChange
   BtnCancel
+  BtnUnassign
   BtnDelete
   BtnBack
   BtnFail
@@ -253,7 +254,9 @@ pub type Key {
   AdminNoRecords
   AdminSelectUser
   AdminSelectStatus
+  AdminOptionUnassign
   AdminMsgUserAssigned
+  AdminMsgUserUnassigned
   AdminMsgUserAssignFailed
   AdminMsgStatusUpdated
   AdminMsgStatusUpdateFailed
@@ -372,6 +375,8 @@ pub fn translate(locale: Locale, key: Key) -> String {
     Ru, BtnChange -> "Изменить"
     En, BtnCancel -> "Cancel"
     Ru, BtnCancel -> "Отмена"
+    En, BtnUnassign -> "Unassign"
+    Ru, BtnUnassign -> "Снять назначение"
     En, BtnDelete -> "Delete"
     Ru, BtnDelete -> "Удалить"
     En, BtnBack -> "Back"
@@ -808,8 +813,12 @@ pub fn translate(locale: Locale, key: Key) -> String {
     Ru, AdminSelectUser -> "Выберите пользователя..."
     En, AdminSelectStatus -> "Select status..."
     Ru, AdminSelectStatus -> "Выберите статус..."
+    En, AdminOptionUnassign -> "— Unassign —"
+    Ru, AdminOptionUnassign -> "— Снять назначение —"
     En, AdminMsgUserAssigned -> "User assigned successfully"
     Ru, AdminMsgUserAssigned -> "Пользователь успешно назначен"
+    En, AdminMsgUserUnassigned -> "User unassigned successfully"
+    Ru, AdminMsgUserUnassigned -> "Назначение пользователя снято"
     En, AdminMsgUserAssignFailed -> "Failed to assign user to record"
     Ru, AdminMsgUserAssignFailed -> "Не удалось назначить пользователя"
     En, AdminMsgStatusUpdated -> "Status updated successfully"
