@@ -871,6 +871,26 @@ def handle_ohif_command(args: argparse.Namespace) -> None:
         sys.exit(1)
 
 
+def _quarto_tarball_version(tarball: Path) -> str | None:
+    """Read the Quarto version from the tarball's ``quarto-<version>/`` top dir.
+
+    Only the first few member headers are read — no full decompression.
+    Returns None when the archive layout is unexpected.
+    """
+    try:
+        with tarfile.open(tarball, "r:gz") as tf:
+            for _ in range(5):
+                member = tf.next()
+                if member is None:
+                    break
+                match = re.match(r"(?:\./)?quarto-(\d[^/]*)(?:/|$)", member.name)
+                if match:
+                    return match.group(1)
+    except (tarfile.TarError, OSError) as e:
+        logger.warning(f"Failed to inspect Quarto tarball {tarball}: {e}")
+    return None
+
+
 def install_quarto(version: str | None = None, from_file: str | None = None) -> None:
     """Install the Quarto CLI into the runtime directory.
 
@@ -883,6 +903,20 @@ def install_quarto(version: str | None = None, from_file: str | None = None) -> 
         version: Quarto version to install (default from settings).
         from_file: Path to a local ``quarto-*-linux-amd64.tar.gz`` (skip download).
     """
+    tarball = Path(from_file) if from_file else None
+    if tarball is not None:
+        if not tarball.exists():
+            logger.error(f"Quarto tarball not found: {from_file}")
+            sys.exit(1)
+        if version is None:
+            # Without this, the version marker would record the settings
+            # default instead of what the tarball actually contains.
+            version = _quarto_tarball_version(tarball)
+            if version is None:
+                logger.warning(
+                    f"Could not determine the Quarto version from {from_file}; "
+                    f"assuming default v{settings.quarto_default_version}"
+                )
     version = version or settings.quarto_default_version
     quarto_dir = settings.quarto_install_path
 
@@ -895,11 +929,7 @@ def install_quarto(version: str | None = None, from_file: str | None = None) -> 
     with tempfile.TemporaryDirectory() as tmp:
         tmp_path = Path(tmp)
 
-        if from_file:
-            tarball = Path(from_file)
-            if not tarball.exists():
-                logger.error(f"Quarto tarball not found: {from_file}")
-                sys.exit(1)
+        if tarball is not None:
             logger.info(f"Installing Quarto v{version} from {from_file}")
         else:
             url = (
