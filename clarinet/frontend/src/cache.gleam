@@ -546,6 +546,20 @@ pub fn bucket_status(model: Model, key: BucketKey) -> BucketStatus {
   }
 }
 
+/// Resolve a user's email from the loaded users cache: the email when the id
+/// is known, an ellipsis while the cache is still loading (empty), or the raw
+/// id as a last-resort fallback for an id missing from a populated cache.
+pub fn user_email(model: Model, uid: String) -> String {
+  case dict.get(model.users, uid) {
+    Ok(user) -> user.email
+    Error(_) ->
+      case dict.is_empty(model.users) {
+        True -> "…"
+        False -> uid
+      }
+  }
+}
+
 pub fn upsert_record_in_buckets(model: Model, record: Record) -> Model {
   let new_buckets =
     dict.map_values(model.record_buckets, fn(_k, b) {

@@ -119,7 +119,6 @@ pub type Record {
     study: Option(Study),
     series: Option(Series),
     record_type: Option(RecordType),
-    user: Option(User),
     data: Option(String),
     // RecordData as JSON string
     created_at: Option(String),

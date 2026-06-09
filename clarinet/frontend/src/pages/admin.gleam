@@ -784,10 +784,7 @@ fn assign_cell(
     False ->
       case user_id {
         Some(uid) -> {
-          let email = case dict.get(shared.cache.users, uid) {
-            Ok(user) -> user.email
-            Error(_) -> uid
-          }
+          let email = cache.user_email(shared.cache, uid)
           html.div([attribute.class("assign-cell")], [
             html.span([], [html.text(email)]),
             html.text(" "),

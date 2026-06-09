@@ -199,7 +199,6 @@ fn record_base_decoder() -> decode.Decoder(models.Record) {
     study: None,
     series: None,
     record_type: None,
-    user: None,
     data: None,
     created_at: created_at,
     changed_at: changed_at,

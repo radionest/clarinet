@@ -43,7 +43,6 @@ fn make_record(
     study: None,
     series: None,
     record_type: None,
-    user: None,
     data: None,
     created_at: None,
     changed_at: None,

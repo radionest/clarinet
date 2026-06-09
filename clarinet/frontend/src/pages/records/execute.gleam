@@ -9,10 +9,11 @@ import api/workflow_models.{
   type DispatchResponse, type DryRunResponse, type FireResponse,
   type TriggerKindRequest, type WorkflowGraph, type WorkflowNode,
   CallFunctionDispatch, CallFunctionNode, DataUpdateTrigger, EntityNode,
-  FileChangeTrigger, FileNode, PipelineDispatch, PipelineNode,
-  PipelineStepNode, RecordTypeNode, StatusTrigger, TriggerOnDataUpdate,
-  TriggerOnFileChange, TriggerOnStatus,
+  FileChangeTrigger, FileNode, PipelineDispatch, PipelineNode, PipelineStepNode,
+  RecordTypeNode, StatusTrigger, TriggerOnDataUpdate, TriggerOnFileChange,
+  TriggerOnStatus,
 }
+import cache
 import clarinet_frontend/i18n
 import components/status_badge
 import components/workflow_graph as wf_renderer
@@ -194,7 +195,11 @@ pub type Msg {
   FireResultReceived(Result(FireResponse, ApiError))
   DismissPlan
   // Direct dispatch (call_function / pipeline nodes)
-  WorkflowDispatchNodeClicked(node_id: String, kind: DispatchKind, label: String)
+  WorkflowDispatchNodeClicked(
+    node_id: String,
+    kind: DispatchKind,
+    label: String,
+  )
   DispatchPlanClicked
   DispatchDryRunReceived(Result(DispatchDryRunResponse, ApiError))
   DispatchConfirmClicked
@@ -249,9 +254,17 @@ pub fn init(
   let workflow_eff =
     workflow_load_effect_for_admin(shared, record_id, set.new(), 1)
 
-  #(model, effect.batch([ping_eff, schema_eff, probe_eff, workflow_eff]), [
-    shared.ReloadRecord(record_id),
-  ])
+  // The "Assigned to" row resolves the name from `shared.cache.users`,
+  // populated by the admin-only `GET /user/`. Load it for admins only.
+  let out_msgs = case is_admin_user(shared) {
+    True -> [shared.ReloadRecord(record_id), shared.ReloadUsers]
+    False -> [shared.ReloadRecord(record_id)]
+  }
+  #(
+    model,
+    effect.batch([ping_eff, schema_eff, probe_eff, workflow_eff]),
+    out_msgs,
+  )
 }
 
 /// Load the instance-mode workflow graph only when the current user is an
@@ -623,7 +636,10 @@ pub fn update(
       let opt_record =
         dict.get(shared.cache.records, model.record_id)
         |> option.from_result
-      case opt_record |> option.then(fn(r) { option.map(r.id, fn(id) { #(r, id) }) }) {
+      case
+        opt_record
+        |> option.then(fn(r) { option.map(r.id, fn(id) { #(r, id) }) })
+      {
         Some(#(record, rid)) -> {
           let prefill =
             "Created from "
@@ -1308,7 +1324,7 @@ fn render_record_execution(
           |> option.unwrap("Complete the record form below"),
         ),
       ]),
-      render_record_metadata(record),
+      render_record_metadata(record, shared),
       viewer.record_viewer_buttons(
         shared.viewers,
         record.study_uid,
@@ -1682,7 +1698,7 @@ fn format_series_label(
   }
 }
 
-fn render_record_metadata(record: Record) -> Element(Msg) {
+fn render_record_metadata(record: Record, shared: Shared) -> Element(Msg) {
   html.div([attribute.class("record-metadata")], [
     html.dl([], [
       html.dt([], [html.text("Patient:")]),
@@ -1742,13 +1758,18 @@ fn render_record_metadata(record: Record) -> Element(Msg) {
           ])
         None -> element.none()
       },
-      case record.user {
-        Some(user) ->
+      case is_admin_user(shared) {
+        True -> {
+          let assignee = case record.user_id {
+            Some(uid) -> cache.user_email(shared.cache, uid)
+            None -> "—"
+          }
           element.fragment([
             html.dt([], [html.text("Assigned to:")]),
-            html.dd([], [html.text(user.email)]),
+            html.dd([], [html.text(assignee)]),
           ])
-        None -> element.none()
+        }
+        False -> element.none()
       },
     ]),
     case record.context_info_html {
@@ -2314,8 +2335,7 @@ fn current_dispatch_pending(state: DispatchState) -> Option(PendingDispatch) {
     DispatchLoading(p)
     | DispatchReady(p, _)
     | DispatchFiring(p, _)
-    | DispatchFailed(p, _)
-    -> Some(p)
+    | DispatchFailed(p, _) -> Some(p)
     NoDispatch -> None
   }
 }

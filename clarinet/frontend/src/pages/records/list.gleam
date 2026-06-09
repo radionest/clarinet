@@ -60,10 +60,15 @@ pub fn init(
       router.Records,
     )
   let key = bucket_key_for(effective_filters, shared.user)
-  #(Model(active_filters: effective_filters), init_fx, [
-    shared.FetchBucket(key),
-    shared.ReloadFilterOptions,
-  ])
+  // The assigned-user column resolves names from `shared.cache.users`,
+  // populated by the admin-only `GET /user/`. Load it for admins only so
+  // regular users don't trigger a 403 on every visit.
+  let base_out = [shared.FetchBucket(key), shared.ReloadFilterOptions]
+  let out_msgs = case is_admin(shared.user) {
+    True -> [shared.ReloadUsers, ..base_out]
+    False -> base_out
+  }
+  #(Model(active_filters: effective_filters), init_fx, out_msgs)
 }
 
 /// Bucket key for the records list. Non-admins see only their own records
@@ -82,6 +87,15 @@ fn bucket_key_for(
     None -> base
   }
   bucket.Records(scoped)
+}
+
+/// The assigned-user column is admin-only: `shared.cache.users` is
+/// populated by the admin-only `GET /user/`.
+fn is_admin(user: option.Option(User)) -> Bool {
+  case user {
+    Some(u) -> permissions.is_admin_user(u)
+    None -> False
+  }
 }
 
 // --- Update ---
@@ -121,7 +135,12 @@ pub fn update(
         table_sort.read_sort(model.active_filters, default_sort_col)
       let #(new_col, new_dir) = table_sort.next_sort(cur_col, cur_dir, col)
       let new_filters =
-        table_sort.write_sort(model.active_filters, new_col, new_dir, default_sort_col)
+        table_sort.write_sort(
+          model.active_filters,
+          new_col,
+          new_dir,
+          default_sort_col,
+        )
       #(Model(active_filters: new_filters), sync_filters_effect(new_filters), [
         shared.FetchBucket(bucket_key_for(new_filters, shared.user)),
       ])
@@ -159,11 +178,7 @@ pub fn update(
 // --- Helpers ---
 
 fn sync_filters_effect(filters: Dict(String, String)) -> Effect(Msg) {
-  records_list_state.sync_filters_effect(
-    filters,
-    router.Records,
-    storage_key,
-  )
+  records_list_state.sync_filters_effect(filters, router.Records, storage_key)
 }
 
 fn handle_error(err: ApiError, fallback_msg: String) -> List(OutMsg) {
@@ -176,13 +191,8 @@ fn handle_error(err: ApiError, fallback_msg: String) -> List(OutMsg) {
 // --- View ---
 
 pub fn view(model: Model, shared: Shared) -> Element(Msg) {
-  let is_admin = case shared.user {
-    Some(u) -> permissions.is_admin_user(u)
-    None -> False
-  }
-
   let t = shared.translate
-  let title = case is_admin {
+  let title = case is_admin(shared.user) {
     True -> t(i18n.RecordsAllTitle)
     False -> t(i18n.RecordsTitle)
   }
@@ -294,27 +304,79 @@ fn records_table(
   // on column headers.
   let #(sort_col, sort_dir) =
     table_sort.read_sort(model.active_filters, default_sort_col)
+  let show_user = is_admin(shared.user)
 
   case records {
     [] ->
-      html.p([attribute.class("text-muted")], [html.text(shared.translate(i18n.RecordsNoFound))])
+      html.p([attribute.class("text-muted")], [
+        html.text(shared.translate(i18n.RecordsNoFound)),
+      ])
     _ ->
       html.div([attribute.class("table-responsive")], [
         html.table([attribute.class("table")], [
           html.thead([], [
-            html.tr([], [
-              table_sort.th_sortable(shared.translate(i18n.ThId), "id", sort_col, sort_dir, ColumnHeaderClicked),
-              table_sort.th_sortable(shared.translate(i18n.ThRecordType), "record_type", sort_col, sort_dir, ColumnHeaderClicked),
-              table_sort.th_sortable(shared.translate(i18n.ThStatus), "status", sort_col, sort_dir, ColumnHeaderClicked),
-              table_sort.th_sortable(shared.translate(i18n.ThPatient), "patient", sort_col, sort_dir, ColumnHeaderClicked),
-              table_sort.th_static(shared.translate(i18n.ThStudySeries)),
-              table_sort.th_sortable(shared.translate(i18n.ThModality), "modality", sort_col, sort_dir, ColumnHeaderClicked),
-              table_sort.th_static(shared.translate(i18n.ThActions)),
-            ]),
+            html.tr(
+              [],
+              list.flatten([
+                [
+                  table_sort.th_sortable(
+                    shared.translate(i18n.ThId),
+                    "id",
+                    sort_col,
+                    sort_dir,
+                    ColumnHeaderClicked,
+                  ),
+                  table_sort.th_sortable(
+                    shared.translate(i18n.ThRecordType),
+                    "record_type",
+                    sort_col,
+                    sort_dir,
+                    ColumnHeaderClicked,
+                  ),
+                  table_sort.th_sortable(
+                    shared.translate(i18n.ThStatus),
+                    "status",
+                    sort_col,
+                    sort_dir,
+                    ColumnHeaderClicked,
+                  ),
+                  table_sort.th_sortable(
+                    shared.translate(i18n.ThPatient),
+                    "patient",
+                    sort_col,
+                    sort_dir,
+                    ColumnHeaderClicked,
+                  ),
+                  table_sort.th_static(shared.translate(i18n.ThStudySeries)),
+                  table_sort.th_sortable(
+                    shared.translate(i18n.ThModality),
+                    "modality",
+                    sort_col,
+                    sort_dir,
+                    ColumnHeaderClicked,
+                  ),
+                ],
+                case show_user {
+                  True -> [
+                    table_sort.th_sortable(
+                      shared.translate(i18n.ThAssignedUser),
+                      "user",
+                      sort_col,
+                      sort_dir,
+                      ColumnHeaderClicked,
+                    ),
+                  ]
+                  False -> []
+                },
+                [table_sort.th_static(shared.translate(i18n.ThActions))],
+              ]),
+            ),
           ]),
           html.tbody(
             [],
-            list.map(records, fn(record) { record_row(shared, record) }),
+            list.map(records, fn(record) {
+              record_row(shared, show_user, record)
+            }),
           ),
         ]),
       ])
@@ -337,7 +399,16 @@ fn record_modality_text(record: Record) -> String {
   option.unwrap(raw, "-")
 }
 
-fn record_row(shared: Shared, record: Record) -> Element(Msg) {
+/// Resolve the assigned-user cell: email from the admin-loaded users
+/// cache, falling back to the raw id, or a dash when unassigned.
+fn user_cell_content(shared: Shared, record: Record) -> Element(Msg) {
+  case record.user_id {
+    Some(uid) -> html.text(cache.user_email(shared.cache, uid))
+    None -> html.text("—")
+  }
+}
+
+fn record_row(shared: Shared, show_user: Bool, record: Record) -> Element(Msg) {
   let record_id = option.unwrap(record.id, 0)
   let record_id_str = int.to_string(record_id)
 
@@ -351,70 +422,81 @@ fn record_row(shared: Shared, record: Record) -> Element(Msg) {
   let can_fail = permissions.can_fail_record(record, shared.user)
   let can_restart = permissions.can_restart_record(record, shared.user)
 
-  html.tr([], [
-    html.td([], [html.text(record_id_str)]),
-    html.td([], [html.text(type_label)]),
-    html.td([], [status_badge.render(record.status, shared.translate)]),
-    html.td([], [html.text(record.patient_id)]),
-    html.td([], [html.text(format_study_series_summary(record))]),
-    html.td([], [html.text(record_modality_text(record))]),
-    html.td([], [
-      case can_fill, can_edit {
-        True, _ ->
-          html.a(
-            [
-              attribute.href(
-                router.route_to_path(router.RecordDetail(record_id_str)),
-              ),
-              attribute.class("btn btn-sm btn-primary"),
-            ],
-            [html.text(shared.translate(i18n.BtnFill))],
-          )
-        _, True ->
-          html.a(
-            [
-              attribute.href(
-                router.route_to_path(router.RecordDetail(record_id_str)),
-              ),
-              attribute.class("btn btn-sm btn-secondary"),
-            ],
-            [html.text(shared.translate(i18n.BtnEdit))],
-          )
-        _, _ ->
-          html.a(
-            [
-              attribute.href(
-                router.route_to_path(router.RecordDetail(record_id_str)),
-              ),
-              attribute.class("btn btn-sm btn-outline"),
-            ],
-            [html.text(shared.translate(i18n.BtnView))],
-          )
+  html.tr(
+    [],
+    list.flatten([
+      [
+        html.td([], [html.text(record_id_str)]),
+        html.td([], [html.text(type_label)]),
+        html.td([], [status_badge.render(record.status, shared.translate)]),
+        html.td([], [html.text(record.patient_id)]),
+        html.td([], [html.text(format_study_series_summary(record))]),
+        html.td([], [html.text(record_modality_text(record))]),
+      ],
+      case show_user {
+        True -> [html.td([], [user_cell_content(shared, record)])]
+        False -> []
       },
-      case can_fail {
-        True ->
-          html.button(
-            [
-              attribute.class("btn btn-sm btn-danger"),
-              event.on_click(RequestFail(record_id_str)),
-            ],
-            [html.text(shared.translate(i18n.BtnFail))],
-          )
-        False -> element.none()
-      },
-      case can_restart {
-        True ->
-          html.button(
-            [
-              attribute.class("btn btn-sm btn-warning"),
-              event.on_click(Restart(record_id_str)),
-            ],
-            [html.text(shared.translate(i18n.BtnRestart))],
-          )
-        False -> element.none()
-      },
+      [
+        html.td([], [
+          case can_fill, can_edit {
+            True, _ ->
+              html.a(
+                [
+                  attribute.href(
+                    router.route_to_path(router.RecordDetail(record_id_str)),
+                  ),
+                  attribute.class("btn btn-sm btn-primary"),
+                ],
+                [html.text(shared.translate(i18n.BtnFill))],
+              )
+            _, True ->
+              html.a(
+                [
+                  attribute.href(
+                    router.route_to_path(router.RecordDetail(record_id_str)),
+                  ),
+                  attribute.class("btn btn-sm btn-secondary"),
+                ],
+                [html.text(shared.translate(i18n.BtnEdit))],
+              )
+            _, _ ->
+              html.a(
+                [
+                  attribute.href(
+                    router.route_to_path(router.RecordDetail(record_id_str)),
+                  ),
+                  attribute.class("btn btn-sm btn-outline"),
+                ],
+                [html.text(shared.translate(i18n.BtnView))],
+              )
+          },
+          case can_fail {
+            True ->
+              html.button(
+                [
+                  attribute.class("btn btn-sm btn-danger"),
+                  event.on_click(RequestFail(record_id_str)),
+                ],
+                [html.text(shared.translate(i18n.BtnFail))],
+              )
+            False -> element.none()
+          },
+          case can_restart {
+            True ->
+              html.button(
+                [
+                  attribute.class("btn btn-sm btn-warning"),
+                  event.on_click(Restart(record_id_str)),
+                ],
+                [html.text(shared.translate(i18n.BtnRestart))],
+              )
+            False -> element.none()
+          },
+        ]),
+      ],
     ]),
-  ])
+  )
 }
 
 fn format_study_series_summary(record: Record) -> String {
