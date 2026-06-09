@@ -168,3 +168,22 @@ jobs:
 
       - name: Run schema tests
         run: make test-schema
+
+  frontend-check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: false
+          gleam-version: '1.14.0'
+
+      # The formosh git dependency is pinned via an ssh remote; CI has no ssh
+      # key, so rewrite it to https (the repo is publicly readable).
+      - name: Rewrite ssh GitHub remotes to https
+        run: git config --global url."https://github.com/".insteadOf "git@github.com:"
+
+      - name: Type-check frontend
+        run: make frontend-check
