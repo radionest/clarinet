@@ -1,6 +1,11 @@
+---
+paths:
+  - ".claude/rules/pr-review.md"
+---
+
 # Clarinet PR review checklist
 
-Project-specific checklist read by the global `pr-diff-reviewer` subagent. Applied in addition to the universal checklist (C1–C10). Each check below is keyed `P<n>` to avoid collisions.
+Project-specific checklist read by the global `pr-diff-reviewer` subagent — explicitly, by path (the self-scoped `paths:` above keeps this file out of regular sessions). Applied in addition to the universal checklist (C1–C10). Each check below is keyed `P<n>` to avoid collisions.
 
 ## Architecture (see CLAUDE.md, `.claude/rules/`)
 

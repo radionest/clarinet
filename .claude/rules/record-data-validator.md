@@ -1,5 +1,9 @@
 ---
-paths: "plan/validators*.py"
+paths:
+  - "plan/validators*.py"
+  - "plan/validators/**"
+  - "examples/**/plan/validators*.py"
+  - "examples/**/plan/validators/**"
 ---
 
 # Record Data Validators — Python invariants beyond JSON Schema
