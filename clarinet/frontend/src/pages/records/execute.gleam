@@ -375,10 +375,22 @@ pub fn update(
         }
         _ -> effect.none()
       }
-      #(model, slicer_effect, [
+      let out = [
         shared.ShowSuccess("Record data submitted successfully"),
         shared.ReloadRecord(model.record_id),
-      ])
+      ]
+      // Auto-return only on a completing submit (POST). Editing an already
+      // finished record (PATCH, edit window) stays on the page — the cache
+      // still holds the pre-submit status at this point, so Finished here
+      // means the submit was an edit. Direct URL entries stay put too.
+      let out = case
+        record_was_finished(model.record_id, shared),
+        shared.previous_route
+      {
+        False, Some(prev) -> list.append(out, [shared.Navigate(prev)])
+        _, _ -> out
+      }
+      #(model, slicer_effect, out)
     }
 
     FormSubmitError(error) -> #(model, effect.none(), [shared.ShowError(error)])
@@ -399,12 +411,19 @@ pub fn update(
         Some(True) -> dispatch_local(SlicerClearScene)
         _ -> effect.none()
       }
-      #(model, slicer_eff, [
+      let out = [
         shared.SetLoading(False),
         shared.CacheRecord(record),
         shared.ShowSuccess("Record completed successfully"),
-        shared.ReloadRecord(model.record_id),
-      ])
+      ]
+      // When auto-returning, skip the refetch — the response is already
+      // cached and the user is leaving the page. When staying (direct URL
+      // entry), refetch to pick up server-side flow effects.
+      let out = case shared.previous_route {
+        Some(prev) -> list.append(out, [shared.Navigate(prev)])
+        None -> list.append(out, [shared.ReloadRecord(model.record_id)])
+      }
+      #(model, slicer_eff, out)
     }
 
     CompleteRecordResult(Error(err)) -> #(
@@ -563,7 +582,7 @@ pub fn update(
 
     // Navigation
     NavigateBack -> #(model, effect.none(), [
-      shared.Navigate(router.Records(dict.new())),
+      shared.Navigate(back_target(shared)),
     ])
 
     // Restart
@@ -648,7 +667,7 @@ pub fn update(
       shared.SetLoading(False),
       shared.InvalidateAllRecordBuckets,
       shared.ShowSuccess("Record deleted successfully"),
-      shared.Navigate(router.Records(dict.new())),
+      shared.Navigate(back_target(shared)),
     ])
 
     DeleteResult(Error(err)) -> {
@@ -1266,6 +1285,22 @@ fn dispatch_fire_effect(
 
 // --- Helpers ---
 
+/// Where "Back" / post-completion auto-return should lead: the page the
+/// user came from, or the Records list when entered by direct URL.
+fn back_target(shared: Shared) -> router.Route {
+  option.unwrap(shared.previous_route, router.Records(dict.new()))
+}
+
+/// Pre-submit status check: True when the cached record is already
+/// Finished, i.e. a form submit was an edit-window PATCH, not a
+/// completing POST (mirrors the method choice in render_editable_form).
+fn record_was_finished(record_id: String, shared: Shared) -> Bool {
+  case dict.get(shared.cache.records, record_id) {
+    Ok(record) -> record.status == types.Finished
+    Error(_) -> False
+  }
+}
+
 fn handle_error(err: ApiError, fallback_msg: String) -> List(OutMsg) {
   case err {
     AuthError(_) -> [shared.Logout]
@@ -1395,7 +1430,15 @@ fn render_record_execution(
           attribute.class("btn btn-secondary"),
           event.on_click(NavigateBack),
         ],
-        [html.text("Back to Records")],
+        [
+          html.text(case back_target(shared) {
+            router.Records(_) -> shared.translate(i18n.ExecBackToRecords)
+            router.PatientDetail(_) -> shared.translate(i18n.ExecBackToPatient)
+            router.StudyDetail(_) -> shared.translate(i18n.ExecBackToStudy)
+            router.SeriesDetail(_) -> shared.translate(i18n.ExecBackToSeries)
+            _ -> shared.translate(i18n.ExecBack)
+          }),
+        ],
       ),
       case is_admin_user(shared) && record.id != None {
         True ->

@@ -14,6 +14,7 @@ pub type Shared {
   Shared(
     user: Option(User),
     route: Route,
+    previous_route: Option(Route),
     project_name: String,
     project_description: String,
     // Global entity caches (studies/series/records/record_types/patients/users/record_type_stats)

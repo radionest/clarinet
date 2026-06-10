@@ -290,6 +290,10 @@ pub type Key {
   ExecLblAssigned
   ExecRecordTypeNotFound
   ExecBackToRecords
+  ExecBackToPatient
+  ExecBackToStudy
+  ExecBackToSeries
+  ExecBack
   ExecMsgSlicerOpened
   ExecMsgSlicerFailed
   ExecMsgValidationDone
@@ -890,6 +894,14 @@ pub fn translate(locale: Locale, key: Key) -> String {
     Ru, ExecRecordTypeNotFound -> "Тип записи не найден"
     En, ExecBackToRecords -> "Back to Records"
     Ru, ExecBackToRecords -> "К списку записей"
+    En, ExecBackToPatient -> "Back to Patient"
+    Ru, ExecBackToPatient -> "К пациенту"
+    En, ExecBackToStudy -> "Back to Study"
+    Ru, ExecBackToStudy -> "К исследованию"
+    En, ExecBackToSeries -> "Back to Series"
+    Ru, ExecBackToSeries -> "К серии"
+    En, ExecBack -> "Back"
+    Ru, ExecBack -> "Назад"
     En, ExecMsgSlicerOpened -> "Workspace opened in 3D Slicer"
     Ru, ExecMsgSlicerOpened -> "Рабочее пространство открыто в 3D Slicer"
     En, ExecMsgSlicerFailed -> "Failed to open record in Slicer"

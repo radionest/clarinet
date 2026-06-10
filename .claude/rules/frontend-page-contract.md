@@ -62,6 +62,10 @@ pub type Shared {
   Shared(
     user: Option(User),           // current session user; None if logged out
     route: Route,                 // current route (for active-tab highlighting etc.)
+    previous_route: Option(Route),// page the user came from; None on direct URL entry.
+                                  // Auth/404 pages, the create-record form and
+                                  // record→record hops never become previous_route;
+                                  // list routes are stored with empty filters
     project_name: String,         // branding, loaded from /api/info
     project_description: String,
     cache: cache.Model,           // entity caches — studies/series/records/record_types/patients/users/record_type_stats

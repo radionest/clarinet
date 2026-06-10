@@ -33,6 +33,7 @@ pub type Model {
   Model(
     // Navigation
     route: Route,
+    previous_route: Option(Route),
     // Authentication (using cookie-based auth)
     user: Option(User),
     checking_session: Bool,
@@ -179,6 +180,7 @@ pub type Msg {
 pub fn init() -> Model {
   Model(
     route: router.Home,
+    previous_route: None,
     user: None,
     checking_session: True,
     project_name: "Clarinet",
