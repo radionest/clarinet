@@ -43,6 +43,8 @@ _COMPARED_FIELDS: tuple[str, ...] = (
     "unique_per_user",
     "parent_required",
     "inherit_user_from_parent",
+    "editable",
+    "edit_window_days",
     "viewer_mode",
 )
 

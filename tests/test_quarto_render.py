@@ -258,7 +258,8 @@ async def test_request_render_unknown_data_report_message_not_double_wrapped(
     assert str(exc_info.value) == "rep: required SQL report 'missing' not found"
 
 
-def test_render_dir_rejects_path_traversal() -> None:
+@pytest.mark.asyncio
+async def test_render_dir_rejects_path_traversal() -> None:
     """name / render_id that escape the output root must raise, not resolve."""
     from clarinet.exceptions.domain import QuartoRenderNotFoundError
     from clarinet.services.quarto_report_service import (
@@ -269,9 +270,9 @@ def test_render_dir_rejects_path_traversal() -> None:
 
     service = QuartoReportService(QuartoReportRegistry([]), ReportRegistry([]))
     with pytest.raises(QuartoRenderNotFoundError):
-        service.get_render_state("../../etc", "passwd")
+        await service.get_render_state("../../etc", "passwd")
     with pytest.raises(QuartoRenderNotFoundError):
-        service.get_output_file("..", "..", QuartoReportFormat.DOCX)
+        await service.get_output_file("..", "..", QuartoReportFormat.DOCX)
 
 
 def _write_sidecar(
@@ -293,8 +294,9 @@ def _write_sidecar(
     return render_dir
 
 
+@pytest.mark.asyncio
 @pytest.mark.parametrize("status", [QuartoRenderStatus.PENDING, QuartoRenderStatus.RUNNING])
-def test_get_render_state_reports_stale_render_as_failed(
+async def test_get_render_state_reports_stale_render_as_failed(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, status: QuartoRenderStatus
 ) -> None:
     """A sidecar silent for longer than render timeout + grace reads back as
@@ -314,7 +316,7 @@ def test_get_render_state_reports_stale_render_as_failed(
     )
     service = QuartoReportService(QuartoReportRegistry([]), ReportRegistry([]))
 
-    state = service.get_render_state("rep", "rid")
+    state = await service.get_render_state("rep", "rid")
 
     assert state.status is QuartoRenderStatus.FAILED
     assert "presumed crashed" in (state.error or "")
@@ -324,7 +326,8 @@ def test_get_render_state_reports_stale_render_as_failed(
     assert raw["status"] == status.value
 
 
-def test_get_render_state_keeps_fresh_running(
+@pytest.mark.asyncio
+async def test_get_render_state_keeps_fresh_running(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     from clarinet.services.quarto_report_service import (
@@ -337,13 +340,14 @@ def test_get_render_state_keeps_fresh_running(
     _write_sidecar(tmp_path / "renders", QuartoRenderStatus.RUNNING)
     service = QuartoReportService(QuartoReportRegistry([]), ReportRegistry([]))
 
-    state = service.get_render_state("rep", "rid")
+    state = await service.get_render_state("rep", "rid")
 
     assert state.status is QuartoRenderStatus.RUNNING
     assert state.error is None
 
 
-def test_get_render_state_ignores_staleness_for_terminal_status(
+@pytest.mark.asyncio
+async def test_get_render_state_ignores_staleness_for_terminal_status(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Old done/failed sidecars are history, not crashes — returned as-is."""
@@ -362,7 +366,7 @@ def test_get_render_state_ignores_staleness_for_terminal_status(
     )
     service = QuartoReportService(QuartoReportRegistry([]), ReportRegistry([]))
 
-    state = service.get_render_state("rep", "rid")
+    state = await service.get_render_state("rep", "rid")
 
     assert state.status is QuartoRenderStatus.DONE
     assert state.error is None

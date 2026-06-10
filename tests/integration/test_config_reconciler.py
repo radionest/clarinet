@@ -156,6 +156,28 @@ async def test_inherit_user_from_parent_change_triggers_update(
 
 
 @pytest.mark.asyncio
+async def test_editable_flags_change_triggers_update(
+    test_session: AsyncSession,
+) -> None:
+    """Toggling ``editable`` / ``edit_window_days`` between config versions is a diff."""
+    config_v1 = [_make_config("editable-test", editable=True)]
+    result = await reconcile_record_types(config_v1, test_session)
+    assert "editable-test" in result.created
+
+    # Clear cached state before re-reconciling
+    test_session.expire_all()
+
+    config_v2 = [_make_config("editable-test", editable=False, edit_window_days=14)]
+    result = await reconcile_record_types(config_v2, test_session)
+    assert "editable-test" in result.updated
+
+    stmt = select(RecordType).where(RecordType.name == "editable-test")
+    row = (await test_session.execute(stmt)).scalar_one()
+    assert row.editable is False
+    assert row.edit_window_days == 14
+
+
+@pytest.mark.asyncio
 async def test_orphan_detection(
     test_session: AsyncSession,
     seed_record_type: RecordType,

@@ -334,6 +334,24 @@ async def test_export_includes_inherit_user_from_parent(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_export_includes_editable_flags(tmp_path) -> None:
+    """TOML export includes editable / edit_window_days; None window is omitted."""
+    import tomllib
+
+    rt = RecordType(name="editable-test", level="SERIES", editable=False, edit_window_days=14)
+    path = await export_record_type_to_toml(rt, tmp_path)
+    content = tomllib.loads(path.read_text())
+    assert content["editable"] is False
+    assert content["edit_window_days"] == 14
+
+    rt_default = RecordType(name="editable-default", level="SERIES")
+    path = await export_record_type_to_toml(rt_default, tmp_path)
+    content = tomllib.loads(path.read_text())
+    assert content["editable"] is True
+    assert "edit_window_days" not in content
+
+
+@pytest.mark.asyncio
 async def test_export_includes_unique_per_user(tmp_path) -> None:
     """TOML export includes unique_per_user field."""
     import tomllib

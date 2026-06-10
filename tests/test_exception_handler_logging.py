@@ -95,3 +95,29 @@ async def test_422_handler_logs_error_with_traceback(
     assert record["exception"] is not None
     # Method + path must appear in the message so operators can grep by route
     assert f"GET {route}" in record["message"]
+
+
+def test_no_deprecated_http_422_alias() -> None:
+    """Guard against reintroducing starlette's deprecated 422 alias.
+
+    ``HTTP_422_UNPROCESSABLE_ENTITY`` is deprecated in starlette >= 0.49 and
+    will be removed in a future major — at which point every import site would
+    crash. Clarinet must use ``HTTP_422_UNPROCESSABLE_CONTENT`` exclusively.
+    """
+    import warnings
+    from pathlib import Path
+
+    from starlette import status
+
+    import clarinet
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", DeprecationWarning)
+        assert status.HTTP_422_UNPROCESSABLE_CONTENT == 422
+
+    offenders = [
+        str(path)
+        for path in Path(clarinet.__file__).parent.rglob("*.py")
+        if "HTTP_422_UNPROCESSABLE_ENTITY" in path.read_text(encoding="utf-8")
+    ]
+    assert offenders == [], f"deprecated 422 alias still used in: {offenders}"

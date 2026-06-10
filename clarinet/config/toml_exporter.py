@@ -28,6 +28,8 @@ _SCALAR_FIELDS: tuple[str, ...] = (
     "parent_required",
     "mask_patient_data",
     "inherit_user_from_parent",
+    "editable",
+    "edit_window_days",
     "viewer_mode",
     "slicer_script",
     "slicer_result_validator",

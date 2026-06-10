@@ -6,6 +6,8 @@ from datetime import UTC, datetime
 import pytest
 from httpx import AsyncClient
 
+from clarinet.models import DicomQueryLevel
+from tests.utils.factories import make_record_type
 from tests.utils.test_helpers import PatientFactory, RecordFactory
 from tests.utils.urls import PIPELINE_RUNS, pipeline_run_url, record_runs_url
 
@@ -156,7 +158,9 @@ class TestRecordRunsEndpoint:
     @pytest.mark.asyncio
     async def test_lists_runs_for_record(self, client: AsyncClient, test_session):
         patient = await PatientFactory.create_patient(test_session)
-        record_type = await RecordFactory.create_record_type(test_session)
+        record_type = make_record_type(level=DicomQueryLevel.PATIENT)
+        test_session.add(record_type)
+        await test_session.commit()
         record = await RecordFactory.create_record_with_relations(
             test_session, patient=patient, record_type=record_type
         )

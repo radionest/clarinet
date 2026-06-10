@@ -1032,7 +1032,7 @@ def cleanup_quarto_renders(days: int) -> None:
     disk use and limits how long report data sits on disk.
     """
     if days < 1:
-        print("--days must be >= 1 (refusing to wipe all renders)")
+        logger.error("--days must be >= 1 (refusing to wipe all renders)")
         sys.exit(1)
     output_path = settings.get_quarto_output_path()
     if not output_path.is_dir():

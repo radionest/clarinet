@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "clarinet"
-version = "0.6.0"
+version = "0.7.1"
 description = "Clarinet — an imaging-centric framework for clinical research"
 readme = "README.md"
 authors = [
@@ -79,6 +79,14 @@ clarinet = "clarinet.cli.main:main"
 [project.urls]
 Repository = "https://github.com/radionest/clarinet"
 Issues = "https://github.com/radionest/clarinet/issues"
+
+[tool.uv]
+# Security floors for transitive deps (Dependabot alerts 11-13).
+# Keeps future `uv lock --upgrade` from resolving back into vulnerable ranges.
+constraint-dependencies = [
+    "aiohttp>=3.14.0",
+    "starlette>=1.0.1",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["clarinet"]
@@ -206,6 +214,7 @@ markers = [
     "migration: database migration tests (Alembic upgrade/downgrade)",
     "demo: interactive Slicer demos (not part of CI, requires Slicer + PACS)",
     "postgres_only: tests requiring real PostgreSQL backend (skipped on SQLite)",
+    "xdist_group: serialize tests sharing a resource (pytest-xdist)",
 ]
 filterwarnings = [
     # FastAPI + aiormq: asyncio.iscoroutinefunction deprecated in Python 3.14
@@ -225,6 +234,4 @@ filterwarnings = [
     "ignore:.*datetime.datetime.utcnow.*:DeprecationWarning:nrrd",
     # sqlmodel._compat: pydantic validator "deprecated" warning
     "ignore:deprecated:DeprecationWarning:sqlmodel._compat",
-    # starlette: HTTP_422_UNPROCESSABLE_ENTITY renamed to HTTP_422_UNPROCESSABLE_CONTENT
-    "ignore:.*HTTP_422_UNPROCESSABLE_ENTITY.*:DeprecationWarning",
 ]

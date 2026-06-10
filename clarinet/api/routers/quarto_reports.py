@@ -59,7 +59,7 @@ async def get_quarto_render_status(
     service: QuartoReportServiceDep,
 ) -> QuartoRenderState:
     """Poll the status sidecar of a render (404 when the render is unknown)."""
-    return service.get_render_state(name, render_id)
+    return await service.get_render_state(name, render_id)
 
 
 @router.get("/{name}/renders/{render_id}/download")
@@ -71,7 +71,7 @@ async def download_quarto_render(
     report_format: QuartoReportFormat = Query(default=QuartoReportFormat.DOCX, alias="format"),
 ) -> FileResponse:
     """Download a rendered file; 409 while the render is still pending/running."""
-    output_path = service.get_output_file(name, render_id, report_format)
+    output_path = await service.get_output_file(name, render_id, report_format)
     filename = _safe_filename(name, report_format.extension)
     return FileResponse(
         path=output_path,

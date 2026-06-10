@@ -16,6 +16,7 @@ import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
+import gleam/uri
 import utils/json_utils
 
 
@@ -121,6 +122,12 @@ fn record_type_base_decoder() -> decode.Decoder(RecordType) {
     False,
     decode.bool,
   )
+  use editable <- decode.optional_field("editable", True, decode.bool)
+  use edit_window_days <- decode.optional_field(
+    "edit_window_days",
+    None,
+    decode.optional(decode.int),
+  )
   use viewer_mode <- decode.optional_field(
     "viewer_mode",
     "single_series",
@@ -166,6 +173,8 @@ fn record_type_base_decoder() -> decode.Decoder(RecordType) {
     unique_per_user: unique_per_user,
     parent_required: parent_required,
     inherit_user_from_parent: inherit_user_from_parent,
+    editable: editable,
+    edit_window_days: edit_window_days,
     viewer_mode: viewer_mode,
     level: level,
     file_registry: file_registry,
@@ -374,6 +383,7 @@ pub fn record_decoder() -> decode.Decoder(Record) {
     None,
     decode.optional(decode.list(record_file_link_decoder())),
   )
+  use is_editable <- decode.optional_field("is_editable", True, decode.bool)
 
   let status = status.from_backend_string(status_str)
   let data = case data_dyn {
@@ -410,6 +420,7 @@ pub fn record_decoder() -> decode.Decoder(Record) {
     started_at: started_at,
     finished_at: finished_at,
     radiant: None,
+    is_editable: is_editable,
   ))
 }
 
@@ -541,6 +552,12 @@ pub fn record_type_full_decoder() -> decode.Decoder(RecordType) {
     False,
     decode.bool,
   )
+  use editable <- decode.optional_field("editable", True, decode.bool)
+  use edit_window_days <- decode.optional_field(
+    "edit_window_days",
+    None,
+    decode.optional(decode.int),
+  )
   use viewer_mode <- decode.optional_field(
     "viewer_mode",
     "single_series",
@@ -590,6 +607,8 @@ pub fn record_type_full_decoder() -> decode.Decoder(RecordType) {
     unique_per_user: unique_per_user,
     parent_required: parent_required,
     inherit_user_from_parent: inherit_user_from_parent,
+    editable: editable,
+    edit_window_days: edit_window_days,
     viewer_mode: viewer_mode,
     level: level,
     file_registry: file_registry,
@@ -818,7 +837,7 @@ fn json_nullable_string(value: Option(String)) -> json.Json {
 
 /// Get a single record type by name
 pub fn get_record_type(name: String) -> Promise(Result(RecordType, ApiError)) {
-  http_client.get("/records/types/" <> name)
+  http_client.get("/records/types/" <> uri.percent_encode(name))
   |> promise.map(fn(res) {
     result.try(res, http_client.decode_response(
       _,

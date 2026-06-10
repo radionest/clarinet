@@ -83,6 +83,33 @@ async def test_inherit_user_from_parent_forwarded_when_explicit(tmp_path) -> Non
 
 
 @pytest.mark.asyncio
+async def test_editable_flags_forwarded_when_explicit(tmp_path) -> None:
+    """``editable`` / ``edit_window_days`` propagate from RecordDef only when set."""
+    _write_record_types(
+        tmp_path,
+        """\
+        from clarinet.config.primitives import RecordDef
+
+        # Explicit values — must be forwarded
+        locked = RecordDef(name="locked-rt", level="SERIES", editable=False, edit_window_days=7)
+        # Defaults — must NOT be forwarded
+        plain = RecordDef(name="plain-rt", level="SERIES")
+        """,
+    )
+
+    config_items = await load_python_config(tmp_path)
+    by_name = {item.name: item for item in config_items}
+
+    assert "editable" in by_name["locked-rt"].model_fields_set
+    assert by_name["locked-rt"].editable is False
+    assert "edit_window_days" in by_name["locked-rt"].model_fields_set
+    assert by_name["locked-rt"].edit_window_days == 7
+
+    assert "editable" not in by_name["plain-rt"].model_fields_set
+    assert "edit_window_days" not in by_name["plain-rt"].model_fields_set
+
+
+@pytest.mark.asyncio
 async def test_bootstrap_loads_python_config(
     test_session: AsyncSession,
     tmp_path,

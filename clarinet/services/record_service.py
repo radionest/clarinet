@@ -8,10 +8,11 @@ from uuid import UUID
 
 from clarinet.exceptions.domain import (
     BusinessRuleViolationError,
+    RecordEditLockedError,
     RecordUniquePerUserError,
 )
 from clarinet.exceptions.domain import FileNotFoundError as DomainFileNotFoundError
-from clarinet.models import Record, RecordRead, RecordStatus
+from clarinet.models import Record, RecordRead, RecordStatus, is_record_editable
 from clarinet.models.file_schema import FileDefinitionRead, FileRole
 from clarinet.repositories.file_repository import FileRepository
 from clarinet.services.file_validation import validate_record_files
@@ -21,9 +22,37 @@ from clarinet.utils.fs import run_in_fs_thread
 from clarinet.utils.logger import logger
 
 if TYPE_CHECKING:
+    from clarinet.models import User
     from clarinet.repositories.record_repository import RecordRepository
     from clarinet.services.recordflow.engine import RecordFlowEngine
     from clarinet.types import RecordData
+
+
+def ensure_record_editable(record: Record, acting_user: User | None) -> None:
+    """Raise when *acting_user* may not change a submitted (finished) record.
+
+    Enforces ``RecordType.editable`` / ``RecordType.edit_window_days``.
+    ``acting_user=None`` marks a trusted caller — in-process service calls
+    (RecordFlow triggers, check-files auto-unblock) and admin endpoints that
+    deliberately bypass the lock. Superusers (including pipeline service
+    tokens) also bypass. Requires ``record.record_type`` to be loaded.
+
+    Raises:
+        RecordEditLockedError: 409 via the BusinessRuleViolationError handler.
+    """
+    if acting_user is None or acting_user.is_superuser:
+        return
+    if is_record_editable(record.status, record.finished_at, record.record_type):
+        return
+    if not record.record_type.editable:
+        raise RecordEditLockedError(
+            f"Record {record.id}: record type '{record.record_type_name}' "
+            f"does not allow changing submitted records."
+        )
+    raise RecordEditLockedError(
+        f"Record {record.id}: editing window of "
+        f"{record.record_type.edit_window_days} days after submission has passed."
+    )
 
 
 def _filter_in_sandbox(paths: list[Path], sandbox: Path) -> list[Path]:
@@ -110,17 +139,30 @@ class RecordService:
         return record
 
     async def update_status(
-        self, record_id: int, new_status: RecordStatus
+        self,
+        record_id: int,
+        new_status: RecordStatus,
+        *,
+        acting_user: User | None = None,
     ) -> tuple[Record, RecordStatus]:
         """Update record status and fire RecordFlow trigger if status changed.
 
         Args:
             record_id: Record ID.
             new_status: New status to set.
+            acting_user: API caller; ``None`` marks a trusted in-process call
+                that bypasses the post-submit edit lock.
 
         Returns:
             Tuple of (updated record, old status).
+
+        Raises:
+            RecordEditLockedError: If the record is finished and its type
+                locks submitted records for *acting_user*.
         """
+        if acting_user is not None and not acting_user.is_superuser:
+            record = await self.repo.get_with_relations(record_id)
+            ensure_record_editable(record, acting_user)
         record, old_status = await self.repo.update_status(record_id, new_status)
         if old_status != new_status:
             await self._fire_status_change(record, old_status)
@@ -230,16 +272,31 @@ class RecordService:
         """
         return await self.repo.update_data(record_id, data)
 
-    async def update_data(self, record_id: int, data: RecordData) -> tuple[Record, RecordStatus]:
+    async def update_data(
+        self,
+        record_id: int,
+        data: RecordData,
+        *,
+        acting_user: User | None = None,
+    ) -> tuple[Record, RecordStatus]:
         """Update record data (no status change) and fire data-update trigger.
 
         Args:
             record_id: Record ID.
             data: Validated record data.
+            acting_user: API caller; ``None`` marks a trusted in-process call
+                that bypasses the post-submit edit lock.
 
         Returns:
             Tuple of (updated record, old status).
+
+        Raises:
+            RecordEditLockedError: If the record is finished and its type
+                locks submitted records for *acting_user*.
         """
+        if acting_user is not None and not acting_user.is_superuser:
+            record = await self.repo.get_with_relations(record_id)
+            ensure_record_editable(record, acting_user)
         record, old_status = await self.repo.update_data(record_id, data)
         await self._fire_data_update(record)
         return record, old_status
@@ -252,18 +309,34 @@ class RecordService:
         """
         await self._fire_file_change(record)
 
-    async def bulk_update_status(self, record_ids: list[int], new_status: RecordStatus) -> None:
+    async def bulk_update_status(
+        self,
+        record_ids: list[int],
+        new_status: RecordStatus,
+        *,
+        acting_user: User | None = None,
+    ) -> None:
         """Update status for multiple records and fire triggers for each changed record.
 
         Args:
             record_ids: List of record IDs.
             new_status: New status to set.
+            acting_user: API caller; ``None`` marks a trusted in-process call
+                that bypasses the post-submit edit lock.
+
+        Raises:
+            RecordEditLockedError: If any target record is finished and its
+                type locks submitted records for *acting_user*. Raised before
+                any status is mutated.
         """
-        # Capture old statuses before bulk update
+        # Capture old statuses (and enforce the edit lock) before bulk update
         old_statuses: dict[int, RecordStatus] = {}
         for record_id in record_ids:
             record = await self.repo.get_optional(record_id)
             if record:
+                if acting_user is not None and not acting_user.is_superuser:
+                    with_type = await self.repo.get_with_relations(record_id)
+                    ensure_record_editable(with_type, acting_user)
                 old_statuses[record_id] = record.status
 
         await self.repo.bulk_update_status(record_ids, new_status)
@@ -280,6 +353,8 @@ class RecordService:
         mode: str,
         source_record_id: int | None = None,
         reason: str | None = None,
+        *,
+        acting_user: User | None = None,
     ) -> Record:
         """Invalidate a record and fire RecordFlow trigger on hard mode.
 
@@ -288,10 +363,21 @@ class RecordService:
             mode: "hard" resets to pending, "soft" only appends reason.
             source_record_id: ID of the triggering record.
             reason: Human-readable reason.
+            acting_user: API caller; ``None`` marks a trusted in-process call
+                that bypasses the post-submit edit lock. Only hard mode is
+                gated — soft mode never changes data or status.
 
         Returns:
             Updated record with relations.
+
+        Raises:
+            RecordEditLockedError: On hard mode, if the record is finished
+                and its type locks submitted records for *acting_user*.
         """
+        if mode == "hard" and acting_user is not None and not acting_user.is_superuser:
+            with_type = await self.repo.get_with_relations(record_id)
+            ensure_record_editable(with_type, acting_user)
+
         old_record = await self.repo.get(record_id)
         old_status = old_record.status
 
