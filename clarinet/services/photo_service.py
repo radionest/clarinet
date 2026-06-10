@@ -6,7 +6,7 @@ import mimetypes
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from clarinet.settings import settings
 from clarinet.utils.fs import run_in_fs_thread
@@ -91,7 +91,13 @@ class PhotoService:
             raise ValueError(msg)
         return content_type
 
-    async def save_photo(self, record_id: int, content: bytes, content_type: str) -> PhotoInfo:
+    async def save_photo(
+        self,
+        record_id: int,
+        content: bytes,
+        content_type: str,
+        user_id: UUID | None = None,
+    ) -> PhotoInfo:
         """Save photo to disk and return metadata.
 
         The extension derives from the validated ``content_type``; the
@@ -104,7 +110,9 @@ class PhotoService:
         await run_in_fs_thread(lambda: photo_dir.mkdir(parents=True, exist_ok=True))
         await run_in_fs_thread((photo_dir / filename).write_bytes, content)
 
-        logger.info(f"Photo uploaded: record={record_id} file={filename} size={len(content)}")
+        logger.info(
+            f"Photo uploaded: record={record_id} file={filename} size={len(content)} user={user_id}"
+        )
 
         return PhotoInfo(
             filename=filename,
@@ -149,7 +157,9 @@ class PhotoService:
     def guess_media_type(path: Path) -> str:
         return mimetypes.guess_type(str(path))[0] or "application/octet-stream"
 
-    async def delete_photo(self, record_id: int, filename: str) -> None:
+    async def delete_photo(
+        self, record_id: int, filename: str, user_id: UUID | None = None
+    ) -> None:
         """Delete a photo from disk.
 
         Raises:
@@ -162,7 +172,7 @@ class PhotoService:
             msg = f"Photo '{safe}' not found"
             raise FileNotFoundError(msg)
         await run_in_fs_thread(path.unlink)
-        logger.info(f"Photo deleted: record={record_id} file={safe}")
+        logger.info(f"Photo deleted: record={record_id} file={safe} user={user_id}")
 
     async def delete_record_photos(self, record_id: int) -> int:
         """Remove the record's entire photo directory (cascade-delete cleanup).

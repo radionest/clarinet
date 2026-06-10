@@ -2,7 +2,9 @@
 
 import pytest
 import pytest_asyncio
+from httpx import ASGITransport, AsyncClient
 
+from clarinet.api.app import app
 from clarinet.models.base import DicomQueryLevel
 from clarinet.settings import settings
 from tests.utils.factories import (
@@ -112,6 +114,22 @@ class TestPhotoEndpoints:
 
         resp = await client.get(f"{RECORDS_BASE}/{rid}/photos/{filename}")
         assert resp.headers["content-type"].startswith("image/png")
+
+    @pytest.mark.asyncio
+    async def test_photo_url_includes_deployment_root_path(self, client, photo_env):
+        # Sub-path deploys set the ASGI root_path; PhotoResponse.url must
+        # include it so direct API clients get a resolvable link. The `client`
+        # fixture is required for its auth dependency overrides on `app`.
+        rid = photo_env["record"].id
+        transport = ASGITransport(app=app, root_path="/sub")
+        async with AsyncClient(transport=transport, base_url="http://test") as sub_client:
+            resp = await sub_client.post(f"{RECORDS_BASE}/{rid}/photos", files=_upload_files())
+            assert resp.status_code == 201
+            body = resp.json()
+            assert body["url"] == f"/sub{RECORDS_BASE}/{rid}/photos/{body['filename']}"
+
+            listed = (await sub_client.get(f"{RECORDS_BASE}/{rid}/photos")).json()
+            assert [p["url"] for p in listed] == [body["url"]]
 
     @pytest.mark.asyncio
     async def test_serve_missing_photo_404(self, client, photo_env):
