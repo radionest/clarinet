@@ -20,7 +20,11 @@ from clarinet.repositories.patient_repository import PatientRepository
 from clarinet.repositories.series_repository import SeriesRepository
 from clarinet.repositories.study_repository import StudyRepository
 from clarinet.services.common.storage_paths import build_context, render_working_folder
-from clarinet.services.dicom.anonymizer import DicomAnonymizer, compute_per_study_patient_id
+from clarinet.services.dicom.anonymizer import (
+    DicomAnonymizer,
+    compute_per_study_patient_id,
+    find_invalid_vr_values,
+)
 from clarinet.services.dicom.client import DicomClient
 from clarinet.services.dicom.models import AnonymizationResult, DicomNode, SkippedSeriesInfo
 from clarinet.services.dicom.series_filter import SeriesFilter, SeriesFilterCriteria
@@ -232,6 +236,18 @@ class AnonymizationService:
                 except Exception:
                     logger.exception(f"Failed to anonymize instance {sop_uid}")
                     total_failed += 1
+
+            # Off the event loop: regex validators over every string element of
+            # every instance in the series.
+            invalid_values = await asyncio.to_thread(find_invalid_vr_values, anonymized)
+            for (tag, vr, value), count in invalid_values.items():
+                logger.warning(
+                    f"Non-conformant DICOM value after anonymization: tag=({tag}) VR={vr} "
+                    f"value={value!r} in {count}/{len(anonymized)} instances — "
+                    f"study {study_uid} -> {anon_study_uid}, "
+                    f"series {series.series_uid} -> {anon_series_uid}. "
+                    f"Strict DICOM JSON consumers (OHIF) may reject this series."
+                )
 
             # 3. Fire distribution as background task (overlaps with next C-GET)
             if anonymized and (do_save or do_send):

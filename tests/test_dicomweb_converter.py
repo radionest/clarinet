@@ -5,7 +5,9 @@ Ensures dataset_to_dicom_json never mutates the original pydicom Dataset
 cause frame retrieval to fail with 404.
 """
 
-from pydicom import Dataset
+from pydicom import Dataset, config
+from pydicom.dataelem import RawDataElement
+from pydicom.tag import Tag
 from pydicom.uid import ExplicitVRLittleEndian, SecondaryCaptureImageStorage
 
 from clarinet.services.dicom.models import StudyResult
@@ -82,6 +84,53 @@ def test_dataset_to_dicom_json_without_pixel_data() -> None:
     pixel_tag = json_obj.get("7FE00010")
     assert pixel_tag is not None
     assert "BulkDataURI" in pixel_tag
+
+
+def test_dataset_to_dicom_json_normalizes_invalid_is_value() -> None:
+    """Float-formatted IS values (Philips scanner output) serialize as integers.
+
+    Regression: ``to_json_dict(suppress_invalid_tags=True)`` wrapped serialization
+    in ``config.strict_reading()``, mutating the GLOBAL pydicom validation mode —
+    concurrent conversions raced and multi-study OHIF load failed with
+    "Invalid value for VR IS" instead of rendering.
+
+    The bad value MUST be a RawDataElement (production-faithful post-C-GET state):
+    under the old code strict RAISE fired during raw→DataElement conversion and the
+    tag was silently dropped, so this test fails on a revert. A pre-converted value
+    (``add_new``) would serialize fine under both implementations and pin nothing.
+    """
+    ds = Dataset()
+    ds.StudyInstanceUID = "1.2.3.4"
+    ds.SeriesInstanceUID = "1.2.3.4.5"
+    ds.SOPInstanceUID = "1.2.3.4.5.8"
+    # ImagesInAcquisition, float-formatted (14 chars > 12 max for IS)
+    ds._dict[Tag(0x00201002)] = RawDataElement(
+        Tag(0x00201002), "IS", 14, b"606.0000000000", 0, True, True
+    )
+
+    mode_before = config.settings._reading_validation_mode
+
+    json_obj = dataset_to_dicom_json(ds, "http://localhost/dicom-web")
+
+    assert json_obj["00201002"] == {"vr": "IS", "Value": [606]}
+    assert config.settings._reading_validation_mode == mode_before, (
+        "global pydicom validation mode must not be mutated"
+    )
+
+
+def test_dataset_to_dicom_json_skips_unconvertible_tag() -> None:
+    """A tag whose raw value cannot be converted at all is dropped, not raised."""
+    ds = Dataset()
+    ds.StudyInstanceUID = "1.2.3.4"
+    ds.SeriesInstanceUID = "1.2.3.4.5"
+    ds.SOPInstanceUID = "1.2.3.4.5.9"
+    # Simulate post-dcmread state: raw IS bytes that fail int/float conversion
+    ds._dict[Tag(0x00201002)] = RawDataElement(Tag(0x00201002), "IS", 4, b"abcd", 0, True, True)
+
+    json_obj = dataset_to_dicom_json(ds, "http://localhost/dicom-web")
+
+    assert "00201002" not in json_obj
+    assert json_obj["0020000D"] == {"vr": "UI", "Value": ["1.2.3.4"]}
 
 
 def test_study_result_modalities_multi_value_splits_backslash() -> None:

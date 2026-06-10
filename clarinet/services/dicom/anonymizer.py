@@ -5,11 +5,92 @@ hash-based UIDs for consistent anonymization (no history tracking needed).
 """
 
 import hashlib
+from collections.abc import Iterable, Sequence
 
 from dicomanonymizer import simpledicomanonymizer  # type: ignore[import-untyped]
 from pydicom import Dataset
+from pydicom.datadict import dictionary_VR
+from pydicom.multival import MultiValue
+from pydicom.sequence import Sequence as DicomSequence
+from pydicom.valuerep import VALIDATORS
 
 from clarinet.utils.logger import logger
+
+# Text VRs only: binary VRs are multi-valued without "\\" separators.
+_AUDIT_STRING_VRS = frozenset(
+    {"AE", "AS", "CS", "DA", "DS", "DT", "IS", "LO", "LT", "PN", "SH", "ST", "TM", "UI", "UR"}
+)
+# Cap reported values: an over-length LT/ST/UR violation can exceed 10 KiB, and
+# full free-text values do not belong in the worker log.
+_MAX_SHOWN_VALUE_LEN = 64
+
+
+def find_invalid_vr_values(datasets: Iterable[Dataset]) -> dict[tuple[str, str, str], int]:
+    """Count string-VR values violating DICOM VR constraints (length/charset).
+
+    Returns ``{(tag "GGGG,EEEE", vr, value): n_instances}`` — each dataset is
+    counted once per distinct violation, recursing into sequence items (Philips
+    enhanced multiframe keeps per-frame tags in functional-group sequences).
+    Catches scanner output (e.g. Philips float-formatted IS counters) that
+    strict DICOM JSON consumers later reject. Reported values are truncated to
+    ``_MAX_SHOWN_VALUE_LEN`` characters.
+    """
+    findings: dict[tuple[str, str, str], int] = {}
+    for ds in datasets:
+        violations: set[tuple[str, str, str]] = set()
+        _collect_invalid_vr_values(ds, violations)
+        for key in violations:
+            findings[key] = findings.get(key, 0) + 1
+    return findings
+
+
+def _collect_invalid_vr_values(ds: Dataset, violations: set[tuple[str, str, str]]) -> None:
+    for elem in ds.elements():  # yields elements as-is, without forcing conversion
+        tag = int(elem.tag)
+        vr = getattr(elem, "VR", None)
+        if vr in (None, "UN"):
+            try:
+                vr = dictionary_VR(tag)
+            except KeyError:
+                continue
+        vr = str(vr)
+        value = getattr(elem, "value", None)
+        if vr == "SQ":
+            # Recurse into converted sequence items; raw undecoded SQ bytes are
+            # skipped to preserve the no-forced-conversion design.
+            if isinstance(value, DicomSequence):
+                for item in value:
+                    _collect_invalid_vr_values(item, violations)
+            continue
+        if vr not in _AUDIT_STRING_VRS:
+            continue
+        validator = VALIDATORS.get(vr)
+        if validator is None:
+            continue
+        value = getattr(value, "original_string", value)
+        parts: Sequence[str | bytes]
+        if isinstance(value, str | bytes):
+            raw = value.rstrip(b"\x00 ") if isinstance(value, bytes) else value
+            parts = raw.split(b"\\") if isinstance(raw, bytes) else raw.split("\\")
+        elif isinstance(value, MultiValue):
+            # Converted multi-value element — the norm at the anonymization call
+            # site, where every raw element has been converted by the anonymizer
+            # walk. Each item retains its own original_string (IS/DS/PN).
+            parts = [
+                part
+                for part in (getattr(item, "original_string", item) for item in value)
+                if isinstance(part, str | bytes)
+            ]
+        else:
+            continue
+        for part in parts:
+            valid, _msg = validator(vr, part)
+            if valid:
+                continue
+            shown = part.decode(errors="replace") if isinstance(part, bytes) else part
+            if len(shown) > _MAX_SHOWN_VALUE_LEN:
+                shown = shown[:_MAX_SHOWN_VALUE_LEN] + "..."
+            violations.add((f"{tag >> 16:04X},{tag & 0xFFFF:04X}", vr, shown))
 
 
 def compute_per_study_patient_id(
