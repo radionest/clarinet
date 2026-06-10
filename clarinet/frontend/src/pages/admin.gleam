@@ -122,15 +122,11 @@ fn mutation_success(
   toast: String,
 ) -> #(Model, Effect(Msg), List(OutMsg)) {
   let stats_eff = load_effect(admin_api.get_admin_stats, AdminStatsLoaded)
-  #(
-    Model(..model, stats_status: load_status.Loading),
-    stats_eff,
-    [
-      shared.SetLoading(False),
-      shared.CacheRecord(record),
-      shared.ShowSuccess(toast),
-    ],
-  )
+  #(Model(..model, stats_status: load_status.Loading), stats_eff, [
+    shared.SetLoading(False),
+    shared.CacheRecord(record),
+    shared.ShowSuccess(toast),
+  ])
 }
 
 // --- Update ---
@@ -141,36 +137,32 @@ pub fn update(
   shared: Shared,
 ) -> #(Model, Effect(Msg), List(OutMsg)) {
   case msg {
-    AdminStatsLoaded(Ok(stats)) ->
-      #(
-        Model(
-          ..model,
-          admin_stats: Some(stats),
-          stats_status: load_status.Loaded,
-        ),
-        effect.none(),
-        [shared.SetLoading(False)],
-      )
+    AdminStatsLoaded(Ok(stats)) -> #(
+      Model(..model, admin_stats: Some(stats), stats_status: load_status.Loaded),
+      effect.none(),
+      [shared.SetLoading(False)],
+    )
 
-    AdminStatsLoaded(Error(err)) ->
-      #(
-        Model(
-          ..model,
-          stats_status: load_status.Failed("Failed to load admin statistics"),
-        ),
-        effect.none(),
-        handle_error(err, "Failed to load admin statistics"),
-      )
+    AdminStatsLoaded(Error(err)) -> #(
+      Model(
+        ..model,
+        stats_status: load_status.Failed("Failed to load admin statistics"),
+      ),
+      effect.none(),
+      handle_error(err, "Failed to load admin statistics"),
+    )
 
-    RetryLoadStats ->
-      #(
-        Model(..model, stats_status: load_status.Loading),
-        load_effect(admin_api.get_admin_stats, AdminStatsLoaded),
-        [],
-      )
+    RetryLoadStats -> #(
+      Model(..model, stats_status: load_status.Loading),
+      load_effect(admin_api.get_admin_stats, AdminStatsLoaded),
+      [],
+    )
 
-    ToggleAssignDropdown(record_id) ->
-      #(Model(..model, editing_record_id: record_id), effect.none(), [])
+    ToggleAssignDropdown(record_id) -> #(
+      Model(..model, editing_record_id: record_id),
+      effect.none(),
+      [],
+    )
 
     AssignUser(record_id, user_id) -> {
       let eff = {
@@ -191,8 +183,11 @@ pub fn update(
         shared.translate(i18n.AdminMsgUserAssigned),
       )
 
-    AssignUserResult(Error(err)) ->
-      #(model, effect.none(), handle_error(err, "Failed to assign user to record"))
+    AssignUserResult(Error(err)) -> #(
+      model,
+      effect.none(),
+      handle_error(err, "Failed to assign user to record"),
+    )
 
     UnassignUser(record_id) -> {
       let eff = {
@@ -213,19 +208,17 @@ pub fn update(
         shared.translate(i18n.AdminMsgUserUnassigned),
       )
 
-    UnassignUserResult(Error(err)) ->
-      #(
-        model,
-        effect.none(),
-        handle_error(err, "Failed to unassign user from record"),
-      )
+    UnassignUserResult(Error(err)) -> #(
+      model,
+      effect.none(),
+      handle_error(err, "Failed to unassign user from record"),
+    )
 
-    ToggleStatusDropdown(record_id) ->
-      #(
-        Model(..model, editing_status_record_id: record_id),
-        effect.none(),
-        [],
-      )
+    ToggleStatusDropdown(record_id) -> #(
+      Model(..model, editing_status_record_id: record_id),
+      effect.none(),
+      [],
+    )
 
     ChangeStatus(record_id, status_str) -> {
       let eff = {
@@ -246,40 +239,36 @@ pub fn update(
         shared.translate(i18n.AdminMsgStatusUpdated),
       )
 
-    ChangeStatusResult(Error(err)) ->
-      #(
-        model,
-        effect.none(),
-        handle_error(err, "Failed to update record status"),
-      )
+    ChangeStatusResult(Error(err)) -> #(
+      model,
+      effect.none(),
+      handle_error(err, "Failed to update record status"),
+    )
 
-    RoleMatrixLoaded(Ok(matrix)) ->
-      #(
-        Model(
-          ..model,
-          role_matrix: Some(matrix),
-          matrix_status: load_status.Loaded,
-        ),
-        effect.none(),
-        [shared.SetLoading(False)],
-      )
+    RoleMatrixLoaded(Ok(matrix)) -> #(
+      Model(
+        ..model,
+        role_matrix: Some(matrix),
+        matrix_status: load_status.Loaded,
+      ),
+      effect.none(),
+      [shared.SetLoading(False)],
+    )
 
-    RoleMatrixLoaded(Error(err)) ->
-      #(
-        Model(
-          ..model,
-          matrix_status: load_status.Failed("Failed to load role matrix"),
-        ),
-        effect.none(),
-        handle_error(err, "Failed to load role matrix"),
-      )
+    RoleMatrixLoaded(Error(err)) -> #(
+      Model(
+        ..model,
+        matrix_status: load_status.Failed("Failed to load role matrix"),
+      ),
+      effect.none(),
+      handle_error(err, "Failed to load role matrix"),
+    )
 
-    RetryLoadMatrix ->
-      #(
-        Model(..model, matrix_status: load_status.Loading),
-        load_effect(admin_api.get_role_matrix, RoleMatrixLoaded),
-        [],
-      )
+    RetryLoadMatrix -> #(
+      Model(..model, matrix_status: load_status.Loading),
+      load_effect(admin_api.get_role_matrix, RoleMatrixLoaded),
+      [],
+    )
 
     ToggleUserRole(user_id, role_name, add) -> {
       let eff = {
@@ -302,12 +291,11 @@ pub fn update(
       ])
     }
 
-    UserRoleToggled(Error(err)) ->
-      #(
-        Model(..model, role_toggling: None),
-        effect.none(),
-        handle_error(err, "Failed to update role"),
-      )
+    UserRoleToggled(Error(err)) -> #(
+      Model(..model, role_toggling: None),
+      effect.none(),
+      handle_error(err, "Failed to update role"),
+    )
 
     AddFilter(key, value) -> {
       let filters = dict.insert(model.active_filters, key, value)
@@ -430,17 +418,17 @@ fn overview_section(stats: models.AdminStats) -> Element(Msg) {
   html.div([attribute.class("dashboard-section")], [
     html.h3([], [html.text("System Overview")]),
     html.div([attribute.class("stats-grid")], [
-      admin_stat_card(label: "Studies", count: stats.total_studies, color: "blue"),
+      admin_stat_card(
+        label: "Studies",
+        count: stats.total_studies,
+        color: "blue",
+      ),
       admin_stat_card(
         label: "Records",
         count: stats.total_records,
         color: "green",
       ),
-      admin_stat_card(
-        label: "Users",
-        count: stats.total_users,
-        color: "purple",
-      ),
+      admin_stat_card(label: "Users", count: stats.total_users, color: "purple"),
       admin_stat_card(
         label: "Patients",
         count: stats.total_patients,
@@ -496,20 +484,19 @@ fn roles_section(model: Model) -> Element(Msg) {
                 html.div([attribute.class("table-responsive")], [
                   html.table([attribute.class("table")], [
                     html.thead([], [
-                      html.tr(
-                        [],
-                        [
-                          html.th([], [html.text("User")]),
-                          ..list.map(roles, fn(role) {
-                            html.th([], [html.text(role)])
-                          })
-                        ],
-                      ),
+                      html.tr([], [
+                        html.th([], [html.text("User")]),
+                        ..list.map(roles, fn(role) {
+                          html.th([], [html.text(role)])
+                        })
+                      ]),
                     ]),
                     html.tbody(
                       [],
                       matrix.users
-                        |> list.sort(fn(a, b) { string.compare(a.email, b.email) })
+                        |> list.sort(fn(a, b) {
+                          string.compare(a.email, b.email)
+                        })
                         |> list.map(fn(user) {
                           role_matrix_row(model, user, roles)
                         }),
@@ -595,6 +582,7 @@ fn records_section(model: Model, shared: Shared) -> Element(Msg) {
 /// as three columns (name / id / anon id) via `show_patient_columns`.
 fn records_config(model: Model, shared: Shared) -> records_list.Config(Msg) {
   records_list.Config(
+    show_type_filter: True,
     show_patient_filter: True,
     show_user_filter: True,
     show_patient_columns: True,
@@ -695,9 +683,7 @@ fn user_dropdown(
   let user_options =
     dict.values(shared.cache.users)
     |> list.sort(fn(a, b) { string.compare(a.email, b.email) })
-    |> list.map(fn(user) {
-      html.option([attribute.value(user.id)], user.email)
-    })
+    |> list.map(fn(user) { html.option([attribute.value(user.id)], user.email) })
   html.div([attribute.class("assign-dropdown")], [
     html.select(
       [
@@ -758,10 +744,7 @@ fn status_cell(
   }
 }
 
-fn status_dropdown(
-  record_id: Int,
-  translate: fn(Key) -> String,
-) -> Element(Msg) {
+fn status_dropdown(record_id: Int, translate: fn(Key) -> String) -> Element(Msg) {
   let statuses = status.all_statuses()
   html.div([attribute.class("assign-dropdown")], [
     html.select(

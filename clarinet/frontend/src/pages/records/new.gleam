@@ -225,8 +225,7 @@ pub fn update(
           )
         FullPage -> raw_new_data
       }
-      let updated_model =
-        Model(..model, form_data: new_data)
+      let updated_model = Model(..model, form_data: new_data)
 
       // Cascade: patient changed → load studies
       let patient_changed = old_data.patient_id != new_data.patient_id
@@ -235,8 +234,7 @@ pub fn update(
 
       // Reset studies/series on patient or type change
       let updated_model = case patient_changed || type_changed {
-        True ->
-          Model(..updated_model, form_studies: [], form_series: [])
+        True -> Model(..updated_model, form_studies: [], form_series: [])
         False -> updated_model
       }
 
@@ -316,10 +314,11 @@ pub fn update(
       // (see the ``int.parse`` branch below); both must trigger the guard.
       let parent_id_valid = case model.form_data.parent_record_id {
         "" -> False
-        v -> case int.parse(v) {
-          Ok(_) -> True
-          Error(_) -> False
-        }
+        v ->
+          case int.parse(v) {
+            Ok(_) -> True
+            Error(_) -> False
+          }
       }
       let parent_missing = parent_required && !parent_id_valid
       let parent_error = #("parent_record_id", "Parent record is required")
@@ -328,41 +327,43 @@ pub fn update(
       let result = case base_result, parent_missing {
         _, False -> base_result
         Ok(_), True -> Error(dict.from_list([parent_error]))
-        Error(errs), True -> Error(dict.insert(errs, parent_error.0, parent_error.1))
+        Error(errs), True ->
+          Error(dict.insert(errs, parent_error.0, parent_error.1))
       }
       case result {
         Ok(_) -> {
           let data = model.form_data
-          let record_create = models.RecordCreate(
-            record_type_name: data.record_type_name,
-            patient_id: data.patient_id,
-            status: types.Pending,
-            study_uid: optional_string(data.study_uid),
-            series_uid: optional_string(data.series_uid),
-            user_id: optional_string(data.user_id),
-            parent_record_id: case data.parent_record_id {
-              "" -> None
-              v -> case int.parse(v) {
-                Ok(id) -> Some(id)
-                Error(_) -> None
-              }
-            },
-            context_info: optional_string(data.context_info),
-          )
+          let record_create =
+            models.RecordCreate(
+              record_type_name: data.record_type_name,
+              patient_id: data.patient_id,
+              status: types.Pending,
+              study_uid: optional_string(data.study_uid),
+              series_uid: optional_string(data.series_uid),
+              user_id: optional_string(data.user_id),
+              parent_record_id: case data.parent_record_id {
+                "" -> None
+                v ->
+                  case int.parse(v) {
+                    Ok(id) -> Some(id)
+                    Error(_) -> None
+                  }
+              },
+              context_info: optional_string(data.context_info),
+            )
           let eff = {
             use dispatch <- effect.from
             records.create_record(record_create)
             |> promise.tap(fn(result) { dispatch(SubmitResult(result)) })
             Nil
           }
-          #(
-            Model(..model, loading: True, form_errors: dict.new()),
-            eff,
-            [],
-          )
+          #(Model(..model, loading: True, form_errors: dict.new()), eff, [])
         }
-        Error(errors) ->
-          #(Model(..model, form_errors: errors), effect.none(), [])
+        Error(errors) -> #(
+          Model(..model, form_errors: errors),
+          effect.none(),
+          [],
+        )
       }
     }
 
@@ -410,12 +411,11 @@ pub fn update(
       }
     }
 
-    SubmitResult(Error(err)) ->
-      #(
-        Model(..model, loading: False),
-        effect.none(),
-        handle_error(err, "Failed to create record"),
-      )
+    SubmitResult(Error(err)) -> #(
+      Model(..model, loading: False),
+      effect.none(),
+      handle_error(err, "Failed to create record"),
+    )
 
     Cancel ->
       case model.host_mode {
@@ -600,9 +600,7 @@ pub fn record_type_requires_parent(
 ///
 /// For `RecordArgs` the level follows the deepest filled UID — same rule
 /// the backend uses to decide whether a payload is valid.
-pub fn expected_level_for(
-  host_mode: HostMode,
-) -> Option(types.DicomQueryLevel) {
+pub fn expected_level_for(host_mode: HostMode) -> Option(types.DicomQueryLevel) {
   case host_mode {
     FullPage -> None
     Modal(shared.PatientArgs(_)) -> Some(types.Patient)

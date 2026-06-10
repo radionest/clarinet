@@ -220,6 +220,7 @@ pub fn view(model: Model, shared: Shared) -> Element(Msg) {
 fn list_config(shared: Shared) -> records_list.Config(Msg) {
   let show_user = is_admin(shared.user)
   records_list.Config(
+    show_type_filter: True,
     show_patient_filter: True,
     show_user_filter: False,
     show_patient_columns: True,

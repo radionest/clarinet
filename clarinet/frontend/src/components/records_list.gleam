@@ -4,6 +4,7 @@
 // callbacks plus the three cells that genuinely diverge between pages
 // (status, assigned-user, actions) through `Config`.
 import api/models.{type Record}
+import api/types
 import cache/bucket.{type BucketStatus}
 import clarinet_frontend/i18n.{type Key}
 import components/forms/base
@@ -31,6 +32,7 @@ pub const default_sort_col = "id"
 pub type Config(msg) {
   Config(
     // Filter bar
+    show_type_filter: Bool,
     show_patient_filter: Bool,
     show_user_filter: Bool,
     // Optional columns
@@ -122,14 +124,18 @@ fn filter_bar(
       record_filters.status_options(shared.translate),
       config,
     )
-  let type_select =
-    filter_select(
-      active_filters,
-      "record_type",
-      "filter-record-type",
-      record_filters.type_options(type_values, shared.translate),
-      config,
-    )
+  let type_select = case config.show_type_filter {
+    True -> [
+      filter_select(
+        active_filters,
+        "record_type",
+        "filter-record-type",
+        record_filters.type_options(type_values, shared.translate),
+        config,
+      ),
+    ]
+    False -> []
+  }
   let patient_select = case config.show_patient_filter {
     True -> [
       filter_select(
@@ -175,7 +181,8 @@ fn filter_bar(
   html.div(
     [attribute.class("filter-bar")],
     list.flatten([
-      [status_select, type_select],
+      [status_select],
+      type_select,
       patient_select,
       user_select,
       clear_button,
@@ -219,7 +226,7 @@ fn records_table(
       html.thead([], [header_row(sort_col, sort_dir, shared, config)]),
       html.tbody(
         [],
-        list.map(records, fn(record) { record_row(record, shared, config) }),
+        list.map(records, fn(record) { record_row(record, config) }),
       ),
     ]),
   ])
@@ -233,7 +240,13 @@ fn header_row(
 ) -> Element(msg) {
   let t = shared.translate
   let sortable = fn(label_key: Key, key: String) {
-    table_sort.th_sortable(t(label_key), key, sort_col, sort_dir, config.on_column_click)
+    table_sort.th_sortable(
+      t(label_key),
+      key,
+      sort_col,
+      sort_dir,
+      config.on_column_click,
+    )
   }
   html.tr(
     [],
@@ -268,11 +281,7 @@ fn header_row(
   )
 }
 
-fn record_row(
-  record: Record,
-  _shared: Shared,
-  config: Config(msg),
-) -> Element(msg) {
+fn record_row(record: Record, config: Config(msg)) -> Element(msg) {
   let record_id_str = int.to_string(option.unwrap(record.id, 0))
   let type_label = case record.record_type {
     Some(rt) -> option.unwrap(rt.label, rt.name)
@@ -295,7 +304,7 @@ fn record_row(
         False -> []
       },
       case config.show_study_series {
-        True -> [html.td([], [html.text(format_study_series_summary(record))])]
+        True -> [html.td([], [html.text(study_series_text(record))])]
         False -> []
       },
       case config.show_modality {
@@ -341,6 +350,19 @@ fn record_modality_text(record: Record) -> String {
       }
   }
   option.unwrap(raw, "-")
+}
+
+/// Study/Series column text. Patient-level records have no study by
+/// definition, so they always render "-" regardless of any joined study.
+fn study_series_text(record: Record) -> String {
+  case record.record_type {
+    Some(rt) ->
+      case rt.level {
+        types.Patient -> "-"
+        _ -> format_study_series_summary(record)
+      }
+    None -> format_study_series_summary(record)
+  }
 }
 
 fn format_study_series_summary(record: Record) -> String {

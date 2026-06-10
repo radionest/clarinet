@@ -37,9 +37,7 @@ pub fn clear_user_filters(filters: Dict(String, String)) -> Dict(String, String)
 /// Drop any keys not in `serializable_filter_keys` from `filters`. Apply
 /// before writing to URL or localStorage so transient model fields can't
 /// leak into persistent state.
-pub fn keep_serializable(
-  filters: Dict(String, String),
-) -> Dict(String, String) {
+pub fn keep_serializable(filters: Dict(String, String)) -> Dict(String, String) {
   dict.filter(filters, fn(k, _) { list.contains(serializable_filter_keys, k) })
 }
 

@@ -4,10 +4,10 @@ import api/models.{
   type PacsSeriesResult, type PacsStudyWithSeries, type Patient, type Record,
   type Study,
 }
-import cache
-import cache/bucket
 import api/patients
 import api/types.{type ApiError, AuthError}
+import cache
+import cache/bucket
 import clarinet_frontend/i18n
 import components/records_list
 import components/status_badge
@@ -299,7 +299,9 @@ pub fn update(
       ])
     }
 
-    NavigateBack -> #(model, effect.none(), [shared.Navigate(router.Patients(dict.new()))])
+    NavigateBack -> #(model, effect.none(), [
+      shared.Navigate(router.Patients(dict.new())),
+    ])
 
     RequestDelete -> #(model, effect.none(), [
       shared.OpenDeleteConfirm("patient", model.patient_id),
@@ -517,6 +519,10 @@ fn records_section(
 /// the record detail via the View action.
 fn records_config(shared: Shared) -> records_list.Config(Msg) {
   records_list.Config(
+    // Type filter hidden: filter_options is RBAC-scoped *globally*, so it
+    // would list record types this patient has none of. With server-side
+    // filtering there's no patient-scoped source for the dropdown.
+    show_type_filter: False,
     show_patient_filter: False,
     show_user_filter: False,
     show_patient_columns: False,
