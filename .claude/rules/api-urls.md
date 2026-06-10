@@ -71,6 +71,10 @@ URL constants live in `tests/utils/urls.py`. Status codes: 201 = POST create, 20
 | `/api/records/{id}/output-files/{name}` | GET | 200 | Download a single OUTPUT file by `FileDefinition.name` (404 if not defined or not on disk). Auth: `AuthorizedRecordDep` |
 | `/api/records/{id}/fail` | POST | 200 | Manually fail record |
 | `/api/records/{id}/invalidate` | POST | 200 | Invalidate record. Hard mode: **409** for non-superusers when the record is finished and its type locks submitted records |
+| `/api/records/{id}/photos` | POST | 201 | Upload photo (multipart) |
+| `/api/records/{id}/photos` | GET | 200 | List uploaded photos |
+| `/api/records/{id}/photos/{filename}` | GET | 200 | Serve photo file |
+| `/api/records/{id}/photos/{filename}` | DELETE | 204 | Delete photo |
 | `/api/records/{id}/viewers` | GET | 200 | List viewer URIs for all enabled viewers |
 | `/api/records/{id}/viewers/{name}` | GET | 200 | Get viewer URI for a specific viewer |
 
@@ -113,7 +117,7 @@ URL constants live in `tests/utils/urls.py`. Status codes: 201 = POST create, 20
 | URL | Method | Status | Description |
 |---|---|---|---|
 | `/api/admin/stats` | GET | 200 | Admin stats |
-| `/api/admin/records/{id}` | DELETE | 200 | Cascade-delete record + descendants + output files (admin; 409 if any inwork) |
+| `/api/admin/records/{id}` | DELETE | 200 | Cascade-delete record + descendants + output files + photos (admin; 409 if any inwork) |
 | `/api/admin/records/{id}/assign` | PATCH | 200 | Admin assign record |
 | `/api/admin/records/{id}/status` | PATCH | 200 | Admin set record status |
 | `/api/admin/records/{id}/user` | DELETE | 200 | Admin unassign record user |

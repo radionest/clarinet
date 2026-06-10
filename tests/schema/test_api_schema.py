@@ -45,6 +45,8 @@ EXCLUDED_PATTERN = (
     # valid 503 that schemathesis still treats as a server error. Behavioural
     # coverage lives in tests/integration/test_workflow_router.py.
     r"|^/api/admin/workflow/"
+    # Photo endpoints require multipart file upload — Schemathesis can't generate valid files
+    r"|^/api/records/\{record_id\}/photos"
 )
 
 # Suppress common health checks for ASGI transport
