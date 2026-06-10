@@ -103,18 +103,22 @@ class RecordService:
         new_value: dict[str, Any] | None = None,
         reason: str | None = None,
     ) -> None:
-        """Append an audit event next to a record mutation.
+        """Append an audit event right after a record mutation.
 
-        The event is flushed, not committed — it lands in the same
-        transaction as the surrounding mutation (repository mutation
-        methods commit; otherwise the request session commits on teardown).
-        No-op when auditing is disabled (``event_repo is None``).
+        The event is flushed immediately — before any RecordFlow dispatch,
+        so an engine failure cannot lose it — and committed by the next
+        commit on the shared session (request teardown). A process crash
+        between the mutation's own commit and teardown loses the event but
+        never the mutation (accepted trade-off; cascade delete is the one
+        path where events share the mutation's transaction). No-op when
+        auditing is disabled (``event_repo is None``).
         """
         if self.event_repo is None:
             return
         await self.event_repo.add(
             RecordEvent(
                 record_id=record_id,
+                record_key=record_id,
                 kind=kind,
                 actor_id=actor_id,
                 from_status=from_status.value if from_status else None,
@@ -177,9 +181,6 @@ class RecordService:
             elif not file_result.valid:
                 record, _ = await self.repo.update_status(record.id, RecordStatus.blocked)  # type: ignore[arg-type]
 
-        # Fire status-change trigger for the initial status
-        await self._fire_status_change(record, old_status=None)
-
         await self._record_event(
             record_id=record.id,
             kind="created",
@@ -187,6 +188,9 @@ class RecordService:
             to_status=record.status,
             new_value={"record_type_name": record.record_type_name},
         )
+
+        # Fire status-change trigger for the initial status
+        await self._fire_status_change(record, old_status=None)
 
         return record
 
@@ -219,7 +223,6 @@ class RecordService:
             ensure_record_editable(record, acting_user)
         record, old_status = await self.repo.update_status(record_id, new_status)
         if old_status != new_status:
-            await self._fire_status_change(record, old_status)
             await self._record_event(
                 record_id=record_id,
                 kind="status_changed",
@@ -227,6 +230,7 @@ class RecordService:
                 from_status=old_status,
                 to_status=new_status,
             )
+            await self._fire_status_change(record, old_status)
         return record, old_status
 
     async def assign_user(
@@ -248,8 +252,6 @@ class RecordService:
         record = await self.repo.get_with_record_type(record_id)
         await self._check_unique_per_user(user_id, record)
         record, old_status = await self.repo.assign_user(record_id, user_id)
-        if old_status != record.status:
-            await self._fire_status_change(record, old_status)
         await self._record_event(
             record_id=record_id,
             kind="assigned",
@@ -258,6 +260,8 @@ class RecordService:
             to_status=record.status,
             new_value={"user_id": str(user_id)},
         )
+        if old_status != record.status:
+            await self._fire_status_change(record, old_status)
         return record, old_status
 
     async def claim_record(
@@ -286,8 +290,7 @@ class RecordService:
             actor_id=actor_id,
             from_status=old_status,
             to_status=updated.status,
-            new_value={"user_id": str(user_id)},
-            reason="claim",
+            new_value={"user_id": str(user_id), "via": "claim"},
         )
         return updated
 
@@ -304,8 +307,6 @@ class RecordService:
             Tuple of (updated record, old status).
         """
         record, old_status = await self.repo.unassign_user(record_id)
-        if old_status != record.status:
-            await self._fire_status_change(record, old_status)
         await self._record_event(
             record_id=record_id,
             kind="unassigned",
@@ -313,6 +314,8 @@ class RecordService:
             from_status=old_status,
             to_status=record.status,
         )
+        if old_status != record.status:
+            await self._fire_status_change(record, old_status)
         return record, old_status
 
     async def submit_data(
@@ -345,10 +348,17 @@ class RecordService:
             record_check = await self.repo.get_with_record_type(record_id)
             if record_check.user_id is None:
                 await self._check_unique_per_user(user_id, record_check)
-            await self.repo.ensure_user_assigned(record_id, user_id)
+                await self.repo.ensure_user_assigned(record_id, user_id)
+                await self._record_event(
+                    record_id=record_id,
+                    kind="assigned",
+                    actor_id=actor_id,
+                    new_value={"user_id": str(user_id), "via": "submit"},
+                )
+            else:
+                await self.repo.ensure_user_assigned(record_id, user_id)
 
         record, old_status = await self.repo.update_data(record_id, data, new_status=new_status)
-        await self._fire_status_change(record, old_status)
         await self._record_event(
             record_id=record_id,
             kind="data_submitted",
@@ -357,6 +367,7 @@ class RecordService:
             to_status=record.status,
             new_value={"fields": sorted(data.keys())},
         )
+        await self._fire_status_change(record, old_status)
 
         # Detect output file changes and emit file events
         if new_status == RecordStatus.finished:
@@ -407,13 +418,13 @@ class RecordService:
             record = await self.repo.get_with_relations(record_id)
             ensure_record_editable(record, acting_user)
         record, old_status = await self.repo.update_data(record_id, data)
-        await self._fire_data_update(record)
         await self._record_event(
             record_id=record_id,
             kind="data_updated",
             actor_id=actor_id,
             new_value={"fields": sorted(data.keys())},
         )
+        await self._fire_data_update(record)
         return record, old_status
 
     async def notify_file_change(self, record: Record) -> None:
@@ -462,15 +473,15 @@ class RecordService:
         for record_id, old_status in old_statuses.items():
             if old_status != new_status:
                 updated = await self.repo.get_with_relations(record_id)
-                await self._fire_status_change(updated, old_status)
                 await self._record_event(
                     record_id=record_id,
                     kind="status_changed",
                     actor_id=actor_id,
                     from_status=old_status,
                     to_status=new_status,
-                    reason="bulk",
+                    new_value={"via": "bulk"},
                 )
+                await self._fire_status_change(updated, old_status)
 
     async def invalidate_record(
         self,
@@ -515,10 +526,6 @@ class RecordService:
             reason=reason,
         )
 
-        # Fire trigger on hard mode if status actually changed
-        if mode == "hard" and old_status != record.status:
-            await self._fire_status_change(record, old_status)
-
         status_changed = old_status != record.status
         await self._record_event(
             record_id=record_id,
@@ -529,6 +536,10 @@ class RecordService:
             new_value={"mode": mode, "source_record_id": source_record_id},
             reason=reason,
         )
+
+        # Fire trigger on hard mode if status actually changed
+        if mode == "hard" and status_changed:
+            await self._fire_status_change(record, old_status)
 
         return record
 
@@ -548,8 +559,6 @@ class RecordService:
         record, old_status = await self.repo.fail_record(record_id, reason)
         logger.info(f"Record {record_id} manually failed")
 
-        if old_status != record.status:
-            await self._fire_status_change(record, old_status)
         await self._record_event(
             record_id=record_id,
             kind="failed",
@@ -558,6 +567,8 @@ class RecordService:
             to_status=record.status,
             reason=reason,
         )
+        if old_status != record.status:
+            await self._fire_status_change(record, old_status)
 
         return record
 
@@ -691,7 +702,7 @@ class RecordService:
                     "user_id": str(snapshot.user_id) if snapshot.user_id else None,
                     "parent_record_id": snapshot.parent_record_id,
                 },
-                reason=f"cascade delete of record {record_id}",
+                new_value={"via": "cascade", "root_record_id": record_id},
             )
         # Keep the transaction open: commit only after we've issued the DELETE,
         # so the row locks acquired above cover the whole check-and-delete.

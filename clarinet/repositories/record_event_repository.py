@@ -12,9 +12,12 @@ from clarinet.repositories.base import BaseRepository
 class RecordEventRepository(BaseRepository[RecordEvent]):
     """Append-only access to the ``record_event`` audit table.
 
-    ``add()`` only flushes — the event commits together with the mutation
-    it describes (repository mutation methods commit, otherwise the request
-    session commits on teardown).
+    ``add()`` only flushes; the event is committed by the next commit on
+    the shared session — usually the request-teardown commit. For most
+    mutations the event therefore lands in the transaction *after* the
+    mutation's own commit: a process crash in that window loses the event
+    but never the mutation (accepted trade-off; only the cascade-delete
+    path flushes events inside the mutation's transaction).
     """
 
     def __init__(self, session: AsyncSession) -> None:

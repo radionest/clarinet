@@ -2,7 +2,6 @@
 Dependencies for FastAPI application with enhanced dependency injection.
 """
 
-import hmac
 from typing import Annotated
 from uuid import UUID
 
@@ -12,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from clarinet.api.auth_config import (
     current_active_user,
     current_superuser,
+    is_service_request,
     optional_current_user,
 )
 from clarinet.exceptions import ClarinetError
@@ -215,8 +215,7 @@ def get_audit_actor(request: Request, user: CurrentUserDep) -> UUID | None:
     ``X-Internal-Token`` (pipeline workers, RecordFlow engine) act as the
     admin user but must not be attributed to a human in the audit trail.
     """
-    header_token = request.headers.get("X-Internal-Token")
-    if header_token and hmac.compare_digest(header_token, settings.effective_service_token):
+    if is_service_request(request):
         return None
     return user.id
 

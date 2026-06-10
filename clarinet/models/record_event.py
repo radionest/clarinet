@@ -8,11 +8,11 @@ actor (``ondelete=SET NULL``), and ``deleted`` events carry a snapshot of
 the removed record in ``old_value``.
 """
 
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, Text
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, Text, func
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlmodel import Column, Field, SQLModel
 
@@ -44,9 +44,12 @@ class RecordEventBase(SQLModel):
             Integer,
             ForeignKey("record.id", ondelete="SET NULL"),
             nullable=True,
-            index=True,
         ),
     )
+    # Denormalized record id WITHOUT a FK: survives record deletion, so the
+    # full history of a deleted record stays correlatable (record_id goes
+    # NULL via SET NULL, record_key keeps the original value).
+    record_key: int | None = Field(default=None)
     kind: str = Field(max_length=32)
     actor_id: UUID | None = Field(
         default=None,
@@ -65,9 +68,11 @@ class RecordEventBase(SQLModel):
         default=None, sa_column=Column(PortableJSON, nullable=True)
     )
     reason: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
+    # DB clock, not app clock — multi-instance deployments must not produce
+    # audit timestamps that contradict insertion order.
     occurred_at: datetime = Field(
-        default_factory=lambda: datetime.now(UTC),
-        sa_column=Column(DateTime(timezone=True), nullable=False),
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=False, server_default=func.now()),
     )
 
 

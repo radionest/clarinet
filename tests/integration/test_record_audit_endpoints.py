@@ -35,6 +35,7 @@ class TestRecordEventsEndpoint:
         assert event["to_status"] == "inwork"
         assert event["actor_id"] is not None  # browser user, not system
         assert event["record_id"] == record.id
+        assert event["record_key"] == record.id  # survives deletion, unlike record_id
 
     @pytest.mark.asyncio
     async def test_context_info_update_is_audited(self, client: AsyncClient, test_session):
