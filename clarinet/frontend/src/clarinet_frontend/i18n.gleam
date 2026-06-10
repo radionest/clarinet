@@ -44,7 +44,6 @@ pub type Key {
   ThDate
   ThDescription
   ThModality
-  ThStudy
   ThStudySeries
   ThUser
   ThStudies
@@ -64,6 +63,8 @@ pub type Key {
   ThStudyUid
   ThSeriesUid
   ThAssignedUser
+  ThPatientName
+  ThPatientId
 
   // --- Common labels ---
   LblYes
@@ -418,8 +419,6 @@ pub fn translate(locale: Locale, key: Key) -> String {
     Ru, ThDescription -> "Описание"
     En, ThModality -> "Modality"
     Ru, ThModality -> "Модальность"
-    En, ThStudy -> "Study"
-    Ru, ThStudy -> "Исследование"
     En, ThStudySeries -> "Study / Series"
     Ru, ThStudySeries -> "Исследование / Серия"
     En, ThUser -> "User"
@@ -458,6 +457,10 @@ pub fn translate(locale: Locale, key: Key) -> String {
     Ru, ThSeriesUid -> "UID серии"
     En, ThAssignedUser -> "Assigned User"
     Ru, ThAssignedUser -> "Назначенный"
+    En, ThPatientName -> "Name"
+    Ru, ThPatientName -> "ФИО"
+    En, ThPatientId -> "Patient ID"
+    Ru, ThPatientId -> "ID пациента"
 
     // --- Common labels ---
     En, LblYes -> "Yes"
@@ -544,9 +547,12 @@ pub fn translate(locale: Locale, key: Key) -> String {
     Ru, RegisterPasswordMismatch -> "Пароли не совпадают"
     En, RegisterPasswordTooShort -> "Password must be at least 8 characters"
     Ru, RegisterPasswordTooShort -> "Пароль должен быть не менее 8 символов"
-    En, RegisterSuccess(project) -> "Registration successful! Welcome to " <> project
-    Ru, RegisterSuccess(project) -> "Регистрация успешна! Добро пожаловать в " <> project
-    En, RegisterInvalidData -> "Invalid registration data. Please check your inputs."
+    En, RegisterSuccess(project) ->
+      "Registration successful! Welcome to " <> project
+    Ru, RegisterSuccess(project) ->
+      "Регистрация успешна! Добро пожаловать в " <> project
+    En, RegisterInvalidData ->
+      "Invalid registration data. Please check your inputs."
     Ru, RegisterInvalidData -> "Неверные данные. Проверьте введённые поля."
     En, RegisterDuplicate -> "Username or email already exists."
     Ru, RegisterDuplicate -> "Пользователь с таким email уже существует."
@@ -665,7 +671,8 @@ pub fn translate(locale: Locale, key: Key) -> String {
     En, PatientMsgStudyImported -> "Study imported from PACS successfully"
     Ru, PatientMsgStudyImported -> "Исследование успешно импортировано из PACS"
     En, PatientMsgImportFailed -> "Failed to import study from PACS"
-    Ru, PatientMsgImportFailed -> "Не удалось импортировать исследование из PACS"
+    Ru, PatientMsgImportFailed ->
+      "Не удалось импортировать исследование из PACS"
     En, PatientMsgPacsSearchFailed -> "Failed to search PACS"
     Ru, PatientMsgPacsSearchFailed -> "Не удалось выполнить поиск в PACS"
     En, PatientLoading(id) -> "Loading patient " <> id
@@ -859,7 +866,8 @@ pub fn translate(locale: Locale, key: Key) -> String {
     En, ExecNoFormRequired -> "This record does not require form data."
     Ru, ExecNoFormRequired -> "Эта запись не требует заполнения формы."
     En, ExecRecordCompleted -> "Record completed. Re-submit after changes."
-    Ru, ExecRecordCompleted -> "Запись завершена. Повторно отправьте после изменений."
+    Ru, ExecRecordCompleted ->
+      "Запись завершена. Повторно отправьте после изменений."
     En, ExecNoFormDefined -> "This record does not have a data form defined."
     Ru, ExecNoFormDefined -> "Для этой записи не определена форма данных."
     En, ExecNoDataSubmitted -> "No data submitted."

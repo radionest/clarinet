@@ -112,3 +112,13 @@ pub fn parse_sort(
 pub fn with_user_scope(query: RecordsQuery, user_id: String) -> RecordsQuery {
   RecordsQuery(..query, user_id: Some(user_id), wo_user: False)
 }
+
+/// Pin an existing query to a single patient. Used by the patient detail
+/// page so its records list reuses the server-side filter/sort machinery
+/// while staying scoped to one patient (mirrors `with_user_scope`).
+pub fn with_patient_scope(
+  query: RecordsQuery,
+  patient_id: String,
+) -> RecordsQuery {
+  RecordsQuery(..query, patient_id: Some(patient_id))
+}
