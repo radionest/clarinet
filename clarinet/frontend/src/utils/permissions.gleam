@@ -28,11 +28,23 @@ pub fn can_fill_record(record: Record, user: Option(User)) -> Bool {
   }
 }
 
-/// Check if user can edit a finished record (Finished + permission)
+/// Check if user can edit a finished record (Finished + permission + the
+/// record type allows post-submit edits — `is_editable` is the server-side
+/// verdict on RecordType.editable / edit_window_days; superusers bypass it,
+/// mirroring the backend guard)
 pub fn can_edit_record(record: Record, user: Option(User)) -> Bool {
   case record.status {
-    types.Finished -> has_record_permission(user, record)
+    types.Finished ->
+      has_record_permission(user, record)
+      && { record.is_editable || is_superuser(user) }
     _ -> False
+  }
+}
+
+fn is_superuser(user: Option(User)) -> Bool {
+  case user {
+    Some(u) -> u.is_superuser
+    None -> False
   }
 }
 

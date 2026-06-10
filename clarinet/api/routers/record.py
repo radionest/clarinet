@@ -71,6 +71,7 @@ from clarinet.models import (
     RecordTypeOptional,
     RecordTypeRead,
     User,
+    is_record_editable,
 )
 from clarinet.repositories.record_repository import RecordSearchCriteria
 from clarinet.services.file_validation import FileValidationResult, validate_record_files
@@ -333,7 +334,11 @@ async def bulk_update_record_status(
     user: CurrentUserDep,
     repo: RecordRepositoryDep,
 ) -> None:
-    """Update status for multiple records at once."""
+    """Update status for multiple records at once.
+
+    409 when any target record is finished and its type locks submitted
+    records (``editable`` / ``edit_window_days``) — non-superusers only.
+    """
     if not user.is_superuser:
         user_roles = get_user_role_names(user)
         for rid in record_ids:
@@ -341,6 +346,7 @@ async def bulk_update_record_status(
             role_name = record.record_type.role_name
             if role_name is None or role_name not in user_roles:
                 raise AuthorizationError(f"Insufficient permissions to access record {rid}")
+            _ensure_record_editable(record, user)
     await service.bulk_update_status(record_ids, new_status)
 
 
@@ -349,10 +355,16 @@ async def update_record_status(
     record_id: int,
     record_status: RecordStatus,
     service: RecordServiceDep,
-    _authorized_record: MutableRecordDep,
+    authorized_record: MutableRecordDep,
     user: CurrentUserDep,
 ) -> RecordRead:
-    """Update a record's status."""
+    """Update a record's status.
+
+    409 when the record is finished and its type locks submitted records
+    (``editable`` / ``edit_window_days``) — re-opening would let the user
+    change the answer via a fresh POST (non-superusers only).
+    """
+    _ensure_record_editable(authorized_record, user)
     record, _ = await service.update_status(record_id, record_status)
     return mask_record_patient_data(RecordRead.model_validate(record), user)
 
@@ -499,6 +511,29 @@ async def _process_submission(
     return mask_record_patient_data(RecordRead.model_validate(updated), user)
 
 
+def _ensure_record_editable(record: Record, user: User) -> None:
+    """Raise 409 when the record's submitted data is locked for *user*.
+
+    Enforces ``RecordType.editable`` / ``RecordType.edit_window_days`` on
+    finished records for non-superusers — on every API path that can change
+    a submitted answer: PATCH /data, PATCH /submit, status changes off
+    ``finished`` (single and bulk), and hard invalidation. Superusers
+    (including pipeline service tokens) and in-process service calls
+    (RecordFlow triggers) bypass the lock.
+    """
+    if user.is_superuser:
+        return
+    if is_record_editable(record.status, record.finished_at, record.record_type):
+        return
+    if not record.record_type.editable:
+        raise CONFLICT.with_context(
+            f"Record type '{record.record_type_name}' does not allow changing submitted records."
+        )
+    raise CONFLICT.with_context(
+        f"Editing window of {record.record_type.edit_window_days} days after submission has passed."
+    )
+
+
 _SUBMIT_STATUSES = (RecordStatus.finished, RecordStatus.failed)
 
 
@@ -555,11 +590,17 @@ async def update_record_data(
     user: CurrentUserDep,
     data: RecordData = Body(),
 ) -> RecordRead:
-    """Update a record's data."""
+    """Update a record's data.
+
+    409 when the record type forbids post-submit edits (``editable=False``)
+    or the ``edit_window_days`` window has passed (non-superusers only).
+    """
     record = authorized_record
 
     if record.status != RecordStatus.finished:
         raise CONFLICT.with_context("Record is not finished yet. Use POST to submit record data.")
+
+    _ensure_record_editable(record, user)
 
     return await _process_submission(
         record_id=record_id,
@@ -726,6 +767,8 @@ async def resubmit_record_with_validation(
     if record.status != RecordStatus.finished:
         raise CONFLICT.with_context("Record is not finished yet. Use POST to submit record data.")
 
+    _ensure_record_editable(record, user)
+
     return await _process_submission(
         record_id=record_id,
         record=record,
@@ -860,8 +903,9 @@ async def fail_record(
 @router.post("/{record_id}/invalidate", response_model=RecordRead)
 async def invalidate_record(
     record_id: int,
-    _authorized_record: AuthorizedRecordDep,
+    authorized_record: AuthorizedRecordDep,
     service: RecordServiceDep,
+    user: CurrentUserDep,
     mode: str = Body(default="hard"),
     source_record_id: int | None = Body(default=None),
     reason: str | None = Body(default=None),
@@ -870,6 +914,9 @@ async def invalidate_record(
 
     Hard mode resets status to pending (keeps user assignment) and fires
     RecordFlow triggers. Soft mode only appends the reason to context_info.
+
+    Hard mode returns 409 for non-superusers when the record is finished and
+    its type locks submitted records (``editable`` / ``edit_window_days``).
 
     Args:
         record_id: ID of the record to invalidate.
@@ -880,6 +927,8 @@ async def invalidate_record(
     Returns:
         Updated record.
     """
+    if mode == "hard":
+        _ensure_record_editable(authorized_record, user)
     record = await service.invalidate_record(
         record_id=record_id,
         mode=mode,

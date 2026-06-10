@@ -173,6 +173,7 @@ fn record_base_decoder() -> decode.Decoder(models.Record) {
     None,
     decode.optional(decode.string),
   )
+  use is_editable <- decode.optional_field("is_editable", True, decode.bool)
 
   let status = status.from_backend_string(status_str)
 
@@ -205,5 +206,6 @@ fn record_base_decoder() -> decode.Decoder(models.Record) {
     started_at: started_at,
     finished_at: finished_at,
     radiant: None,
+    is_editable: is_editable,
   ))
 }

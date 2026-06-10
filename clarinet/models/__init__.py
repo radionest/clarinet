@@ -47,6 +47,7 @@ from .record import (
     RecordRead,
     RecordSearchFilter,
     RecordSearchQuery,
+    is_record_editable,
 )
 
 # Record type models
@@ -141,5 +142,6 @@ __all__ = [
     "UserRolesLink",
     "UserUpdate",
     "ViewerMode",
+    "is_record_editable",
     "patient_auto_id_seq",
 ]

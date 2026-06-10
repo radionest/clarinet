@@ -21,6 +21,12 @@ paths:
 
 Choose `method` based on `record.data`: use `PATCH` if data exists, `POST` otherwise.
 
+Post-submit locking: `RecordType.editable=False` (or an expired
+`RecordType.edit_window_days` window) makes PATCH on finished records return
+409 for non-superusers — same for status changes off `finished` and hard
+invalidation. Pipeline service tokens are superusers, so workflow code is
+unaffected.
+
 ## `record.context_info` — narrow markdown sidecar (NOT `record.data`)
 
 `context_info` is an **independent** field for free-form, human-readable context (markdown) — instructions, links, prior discussion that explain the record to a future user. It is **not** part of the structured `data` payload, has no schema, and does not gate workflow transitions.

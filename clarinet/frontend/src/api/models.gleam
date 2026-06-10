@@ -85,6 +85,8 @@ pub type RecordType {
     unique_per_user: Bool,
     parent_required: Bool,
     inherit_user_from_parent: Bool,
+    editable: Bool,
+    edit_window_days: Option(Int),
     viewer_mode: String,
     level: DicomQueryLevel,
     file_registry: Option(List(FileDefinition)),
@@ -128,6 +130,9 @@ pub type Record {
     finished_at: Option(String),
     // Computed fields
     radiant: Option(String),
+    // Server-side verdict: may the submitted data still be changed by
+    // non-superusers (RecordType.editable + edit_window_days)
+    is_editable: Bool,
   )
 }
 
