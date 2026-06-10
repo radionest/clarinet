@@ -62,6 +62,7 @@ __all__ = [
     "AnonPathError",
     "TemplateSegments",
     "build_context",
+    "compute_display_anon_id",
     "derive_anon_patient_id",
     "render_all_levels",
     "render_working_folder",
@@ -158,6 +159,39 @@ def derive_anon_patient_id(
         raw=str(raw_id) if raw_id else None,
         level=DicomQueryLevel.PATIENT,
         fallback_to_unanonymized=fallback_to_unanonymized,
+    )
+
+
+def compute_display_anon_id(
+    study_uid: str | None,
+    study_anon_uid: str | None,
+) -> str | None:
+    """Per-study anon ID for UI display, or None when not applicable.
+
+    Returns the per-study hash only when ``settings.anon_per_study_patient_id``
+    is enabled AND the study has been anonymized (``study_anon_uid`` set) —
+    the hash equals the PatientID written into the DICOM tags in PACS, so
+    showing it earlier would display an identifier that matches nothing in
+    PACS. Callers (``RecordRead`` validator → frontend ANON ID column,
+    ``mask_record_patient_data``) fall back to the per-patient ``anon_id``
+    when None is returned.
+
+    Gating intentionally differs from :func:`derive_anon_patient_id`, which
+    hashes as soon as the mode is on and ``study_uid`` is known: storage
+    paths must be deterministic before the anonymization run, while the
+    display ID must match PACS only after it. Do not unify the two.
+    """
+    if not settings.anon_per_study_patient_id:
+        return None
+    if study_uid is None or study_anon_uid is None:
+        return None
+    from clarinet.services.dicom.anonymizer import compute_per_study_patient_id
+
+    return compute_per_study_patient_id(
+        settings.anon_uid_salt,
+        study_uid,
+        settings.anon_per_study_patient_id_hex_length,
+        prefix=settings.anon_id_prefix,
     )
 
 

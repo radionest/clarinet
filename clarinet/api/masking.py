@@ -17,8 +17,6 @@ from collections.abc import Sequence
 from typing import Any
 
 from clarinet.models import Record, RecordRead, User
-from clarinet.services.dicom.anonymizer import compute_per_study_patient_id
-from clarinet.settings import settings
 from clarinet.utils.logger import logger
 
 
@@ -51,24 +49,14 @@ def mask_record_patient_data(record: RecordRead, user: User) -> RecordRead:
         return record
 
     # In per-study mode the masked PatientID/PatientName is the hash that was
-    # written into the DICOM tags in PACS. The hash is only correct after the
-    # study has been anonymized (study.anon_uid is set) — before that, PACS
-    # still holds the real PatientID, so returning the hash here would create
-    # a (hash patient_id, original study_uid) pair that does not match anything
-    # in PACS. Fall back to per-patient anon_id until the study is anonymized.
-    study_anon_uid = record.study.anon_uid if record.study is not None else None
-    if (
-        settings.anon_per_study_patient_id
-        and record.study_uid is not None
-        and study_anon_uid is not None
-    ):
-        masked_id: str | None = compute_per_study_patient_id(
-            settings.anon_uid_salt,
-            record.study_uid,
-            settings.anon_per_study_patient_id_hex_length,
-            prefix=settings.anon_id_prefix,
-        )
-        masked_name: str | None = masked_id
+    # written into the DICOM tags in PACS. The RecordRead validator has already
+    # computed it from the ORIGINAL study_uid: display_anon_id is non-None
+    # exactly when per-study mode applies and the study has been anonymized
+    # (see RecordRead.populate_display_anon_id). Before that, PACS still holds
+    # the real PatientID, so fall back to per-patient anon_id.
+    if record.display_anon_id is not None:
+        masked_id: str | None = record.display_anon_id
+        masked_name: str | None = record.display_anon_id
     else:
         masked_id = record.patient.anon_id
         masked_name = record.patient.anon_name

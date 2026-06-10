@@ -384,6 +384,11 @@ pub fn record_decoder() -> decode.Decoder(Record) {
     decode.optional(decode.list(record_file_link_decoder())),
   )
   use is_editable <- decode.optional_field("is_editable", True, decode.bool)
+  use display_anon_id <- decode.optional_field(
+    "display_anon_id",
+    None,
+    decode.optional(decode.string),
+  )
 
   let status = status.from_backend_string(status_str)
   let data = case data_dyn {
@@ -420,6 +425,7 @@ pub fn record_decoder() -> decode.Decoder(Record) {
     started_at: started_at,
     finished_at: finished_at,
     radiant: None,
+    display_anon_id: display_anon_id,
     is_editable: is_editable,
   ))
 }
