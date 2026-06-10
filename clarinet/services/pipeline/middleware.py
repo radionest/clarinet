@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime
+from functools import partial
 from typing import TYPE_CHECKING, Any
 
 from taskiq import TaskiqMiddleware
@@ -286,6 +287,10 @@ class AuditMiddleware(TaskiqMiddleware):
         self._client = client
         self._owns_client = client is None
         self._pending: set[asyncio.Task[None]] = set()
+        # POST task per task_id — _patch awaits it so the terminal PATCH
+        # never races ahead of the row insert (fast tasks would otherwise
+        # 404 on PATCH and stay 'running' forever).
+        self._start_tasks: dict[str, asyncio.Task[None]] = {}
 
     async def _ensure_client(self) -> ClarinetClient:
         """Lazily create the ClarinetClient with service token auth."""
@@ -299,11 +304,12 @@ class AuditMiddleware(TaskiqMiddleware):
         )
         return self._client
 
-    def _fire(self, coro: Coroutine[Any, Any, None]) -> None:
+    def _fire(self, coro: Coroutine[Any, Any, None]) -> asyncio.Task[None]:
         """Schedule *coro* fire-and-forget; hold a reference so GC can't drop it."""
         task = asyncio.create_task(coro)
         self._pending.add(task)
         task.add_done_callback(self._pending.discard)
+        return task
 
     async def shutdown(self) -> None:
         if self._pending:
@@ -346,8 +352,13 @@ class AuditMiddleware(TaskiqMiddleware):
             except Exception as e:
                 logger.warning(f"AuditMiddleware: failed to record start of '{task_id}': {e}")
 
-        self._fire(_post())
+        start_task = self._fire(_post())
+        self._start_tasks[task_id] = start_task
+        start_task.add_done_callback(partial(self._pop_start_task, task_id))
         return message
+
+    def _pop_start_task(self, task_id: str, _task: asyncio.Task[None]) -> None:
+        self._start_tasks.pop(task_id, None)
 
     async def post_execute(self, message: TaskiqMessage, result: TaskiqResult[Any]) -> None:
         """Record the terminal status of a task execution.
@@ -383,6 +394,9 @@ class AuditMiddleware(TaskiqMiddleware):
 
         async def _patch() -> None:
             try:
+                start_task = self._start_tasks.pop(task_id, None)
+                if start_task is not None:
+                    await start_task  # the row must exist before PATCH
                 client = await self._ensure_client()
                 await client.finish_pipeline_run(
                     task_id=task_id,

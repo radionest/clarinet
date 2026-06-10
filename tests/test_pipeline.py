@@ -1214,6 +1214,29 @@ class TestAuditMiddleware:
         await mw.shutdown()
         assert len(mw._pending) == 0
 
+    @pytest.mark.asyncio
+    async def test_patch_waits_for_post(self):
+        """Terminal PATCH must not race ahead of the row-creating POST."""
+        mw, mock_client = self._middleware()
+        order: list[str] = []
+
+        async def slow_post(**_kwargs):
+            await asyncio.sleep(0.01)
+            order.append("post")
+
+        async def fast_patch(**_kwargs):
+            order.append("patch")
+
+        mock_client.create_pipeline_run.side_effect = slow_post
+        mock_client.finish_pipeline_run.side_effect = fast_patch
+
+        msg = self._msg()
+        await mw.pre_execute(msg)
+        await mw.post_execute(msg, self._result(is_err=False))
+        await mw.shutdown()
+
+        assert order == ["post", "patch"]
+
     def test_broker_includes_audit_between_logging_and_dlq(self):
         """create_broker() wires Audit after Logging and before DeadLetter."""
         from clarinet.services.pipeline.middleware import (
