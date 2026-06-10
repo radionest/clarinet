@@ -1,37 +1,89 @@
 /* ============================
-   Tables
+   Tables — dense, registry-like
    ============================ */
 
 .table {
     width: 100%;
     border-collapse: collapse;
-    background: white;
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    font-size: 0.85rem;
 
     & th,
     & td {
-        padding: var(--spacing-md);
+        padding: 9px 12px;
         text-align: left;
-        border-bottom: 1px solid var(--border-color);
+        border-bottom: 1px solid var(--hairline);
+        vertical-align: middle;
     }
 
     & th {
-        background: var(--surface-color);
+        background: var(--surface-sunken);
         font-weight: 600;
-        color: var(--text-color);
-        font-size: 0.875rem;
+        color: var(--ink-soft);
+        font-size: 0.7rem;
         text-transform: uppercase;
-        letter-spacing: 0.02em;
+        letter-spacing: 0.07em;
+        border-bottom: 1px solid var(--hairline-strong);
+        white-space: nowrap;
+    }
+
+    & tbody tr {
+        transition: background-color 0.1s;
     }
 
     & tbody tr:hover {
-        background-color: #f9fafb;
+        background-color: var(--surface-sunken);
+    }
+
+    & tbody tr:last-child td {
+        border-bottom: none;
     }
 }
 
+/* border-radius on <table> needs separate borders trick; use a wrapper look instead */
 .table-responsive {
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
+    border-radius: var(--radius-lg);
+    min-width: 0;
 }
+
+/* --- Cell modifiers (set from Gleam views) --- */
+
+/* Identifiers, counters, dates — tabular mono */
+.cell-mono {
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+/* Long DICOM UIDs — mono, hard-truncated so rows never force h-scroll */
+.cell-uid {
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    max-width: 30ch;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--ink-soft);
+}
+
+/* Free-text descriptions — allowed to wrap, capped width */
+.cell-desc {
+    max-width: 36ch;
+    overflow-wrap: break-word;
+}
+
+/* Action buttons — keep on one line */
+.cell-actions {
+    white-space: nowrap;
+}
+
+/* --- Sortable headers --- */
 
 .table th.sortable {
     user-select: none;
@@ -43,7 +95,7 @@
 }
 
 .table th.sortable-active {
-    color: var(--primary-color);
+    color: var(--teal);
 }
 
 .table th.sortable .table-sort-trigger {
@@ -61,6 +113,6 @@
 }
 
 .table th.sortable .table-sort-trigger:focus-visible {
-    outline: 2px solid var(--primary-color);
+    outline: 2px solid var(--teal);
     outline-offset: 2px;
 }

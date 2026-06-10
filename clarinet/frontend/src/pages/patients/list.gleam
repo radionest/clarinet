@@ -52,7 +52,12 @@ pub fn update(
         table_sort.read_sort(model.active_filters, default_sort_col)
       let #(new_col, new_dir) = table_sort.next_sort(cur_col, cur_dir, col)
       let new_filters =
-        table_sort.write_sort(model.active_filters, new_col, new_dir, default_sort_col)
+        table_sort.write_sort(
+          model.active_filters,
+          new_col,
+          new_dir,
+          default_sort_col,
+        )
       #(Model(active_filters: new_filters), sync_url_effect(new_filters), [])
     }
   }
@@ -98,24 +103,53 @@ fn patients_table(
 ) -> Element(Msg) {
   case patients {
     [] ->
-      html.p([attribute.class("text-muted")], [html.text(translate(i18n.PatientsNoFound))])
+      html.p([attribute.class("text-muted")], [
+        html.text(translate(i18n.PatientsNoFound)),
+      ])
     _ ->
       html.div([attribute.class("table-responsive")], [
         html.table([attribute.class("table")], [
           html.thead([], [
             html.tr([], [
-              table_sort.th_sortable(translate(i18n.ThId), "id", sort_col, sort_dir, ColumnHeaderClicked),
-              table_sort.th_sortable(translate(i18n.ThName), "name", sort_col, sort_dir, ColumnHeaderClicked),
-              table_sort.th_sortable(translate(i18n.ThAnonId), "anon_id", sort_col, sort_dir, ColumnHeaderClicked),
-              table_sort.th_sortable(translate(i18n.ThAnonName), "anon_name", sort_col, sort_dir, ColumnHeaderClicked),
-              table_sort.th_sortable(translate(i18n.ThStudies), "studies_count", sort_col, sort_dir, ColumnHeaderClicked),
+              table_sort.th_sortable(
+                translate(i18n.ThId),
+                "id",
+                sort_col,
+                sort_dir,
+                ColumnHeaderClicked,
+              ),
+              table_sort.th_sortable(
+                translate(i18n.ThName),
+                "name",
+                sort_col,
+                sort_dir,
+                ColumnHeaderClicked,
+              ),
+              table_sort.th_sortable(
+                translate(i18n.ThAnonId),
+                "anon_id",
+                sort_col,
+                sort_dir,
+                ColumnHeaderClicked,
+              ),
+              table_sort.th_sortable(
+                translate(i18n.ThAnonName),
+                "anon_name",
+                sort_col,
+                sort_dir,
+                ColumnHeaderClicked,
+              ),
+              table_sort.th_sortable(
+                translate(i18n.ThStudies),
+                "studies_count",
+                sort_col,
+                sort_dir,
+                ColumnHeaderClicked,
+              ),
               table_sort.th_static(translate(i18n.ThActions)),
             ]),
           ]),
-          html.tbody(
-            [],
-            list.map(patients, patient_row(_, translate)),
-          ),
+          html.tbody([], list.map(patients, patient_row(_, translate))),
         ]),
       ])
   }
@@ -133,10 +167,7 @@ fn patient_comparator(
       string.compare(option.unwrap(a.name, ""), option.unwrap(b.name, ""))
     }
     "anon_id" -> fn(a: models.Patient, b: models.Patient) {
-      string.compare(
-        option.unwrap(a.anon_id, ""),
-        option.unwrap(b.anon_id, ""),
-      )
+      string.compare(option.unwrap(a.anon_id, ""), option.unwrap(b.anon_id, ""))
     }
     "anon_name" -> fn(a: models.Patient, b: models.Patient) {
       string.compare(
@@ -150,26 +181,31 @@ fn patient_comparator(
         list.length(option.unwrap(b.studies, [])),
       )
     }
-    _ -> fn(a: models.Patient, b: models.Patient) {
-      string.compare(a.id, b.id)
-    }
+    _ -> fn(a: models.Patient, b: models.Patient) { string.compare(a.id, b.id) }
   }
   table_sort.with_direction(base, dir)
 }
 
-fn patient_row(patient: models.Patient, translate: fn(Key) -> String) -> Element(Msg) {
+fn patient_row(
+  patient: models.Patient,
+  translate: fn(Key) -> String,
+) -> Element(Msg) {
   let studies_count = case patient.studies {
     Some(studies) -> int.to_string(list.length(studies))
     None -> "0"
   }
 
   html.tr([], [
-    html.td([], [html.text(patient.id)]),
+    html.td([attribute.class("cell-mono")], [html.text(patient.id)]),
     html.td([], [html.text(option.unwrap(patient.name, "-"))]),
-    html.td([], [html.text(option.unwrap(patient.anon_id, "-"))]),
-    html.td([], [html.text(option.unwrap(patient.anon_name, "-"))]),
-    html.td([], [html.text(studies_count)]),
-    html.td([], [
+    html.td([attribute.class("cell-mono")], [
+      html.text(option.unwrap(patient.anon_id, "-")),
+    ]),
+    html.td([attribute.class("cell-mono")], [
+      html.text(option.unwrap(patient.anon_name, "-")),
+    ]),
+    html.td([attribute.class("cell-mono")], [html.text(studies_count)]),
+    html.td([attribute.class("cell-actions")], [
       html.a(
         [
           attribute.href(router.route_to_path(router.PatientDetail(patient.id))),

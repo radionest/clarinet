@@ -52,7 +52,12 @@ pub fn update(
         table_sort.read_sort(model.active_filters, default_sort_col)
       let #(new_col, new_dir) = table_sort.next_sort(cur_col, cur_dir, col)
       let new_filters =
-        table_sort.write_sort(model.active_filters, new_col, new_dir, default_sort_col)
+        table_sort.write_sort(
+          model.active_filters,
+          new_col,
+          new_dir,
+          default_sort_col,
+        )
       #(Model(active_filters: new_filters), sync_url_effect(new_filters), [])
     }
   }
@@ -91,17 +96,49 @@ fn studies_table(
 ) -> Element(Msg) {
   case studies {
     [] ->
-      html.p([attribute.class("text-muted")], [html.text(translate(i18n.StudiesNoFound))])
+      html.p([attribute.class("text-muted")], [
+        html.text(translate(i18n.StudiesNoFound)),
+      ])
     _ ->
       html.div([attribute.class("table-responsive")], [
         html.table([attribute.class("table")], [
           html.thead([], [
             html.tr([], [
-              table_sort.th_sortable(translate(i18n.ThStudyUid), "study_uid", sort_col, sort_dir, ColumnHeaderClicked),
-              table_sort.th_sortable(translate(i18n.ThDate), "date", sort_col, sort_dir, ColumnHeaderClicked),
-              table_sort.th_sortable(translate(i18n.ThPatient), "patient_id", sort_col, sort_dir, ColumnHeaderClicked),
-              table_sort.th_sortable(translate(i18n.ThAnonUid), "anon_uid", sort_col, sort_dir, ColumnHeaderClicked),
-              table_sort.th_sortable(translate(i18n.ThSeries), "series_count", sort_col, sort_dir, ColumnHeaderClicked),
+              table_sort.th_sortable(
+                translate(i18n.ThStudyUid),
+                "study_uid",
+                sort_col,
+                sort_dir,
+                ColumnHeaderClicked,
+              ),
+              table_sort.th_sortable(
+                translate(i18n.ThDate),
+                "date",
+                sort_col,
+                sort_dir,
+                ColumnHeaderClicked,
+              ),
+              table_sort.th_sortable(
+                translate(i18n.ThPatient),
+                "patient_id",
+                sort_col,
+                sort_dir,
+                ColumnHeaderClicked,
+              ),
+              table_sort.th_sortable(
+                translate(i18n.ThAnonUid),
+                "anon_uid",
+                sort_col,
+                sort_dir,
+                ColumnHeaderClicked,
+              ),
+              table_sort.th_sortable(
+                translate(i18n.ThSeries),
+                "series_count",
+                sort_col,
+                sort_dir,
+                ColumnHeaderClicked,
+              ),
               table_sort.th_static(translate(i18n.ThActions)),
             ]),
           ]),
@@ -151,15 +188,25 @@ fn study_row(study: models.Study, translate: fn(Key) -> String) -> Element(Msg) 
   }
 
   html.tr([], [
-    html.td([], [html.text(study.study_uid)]),
-    html.td([], [html.text(study.date)]),
-    html.td([], [html.text(study.patient_id)]),
-    html.td([], [html.text(option.unwrap(study.anon_uid, "-"))]),
-    html.td([], [html.text(series_count)]),
-    html.td([], [
+    html.td([attribute.class("cell-uid"), attribute.title(study.study_uid)], [
+      html.text(study.study_uid),
+    ]),
+    html.td([attribute.class("cell-mono")], [html.text(study.date)]),
+    html.td([attribute.class("cell-mono")], [html.text(study.patient_id)]),
+    html.td(
+      [
+        attribute.class("cell-uid"),
+        attribute.title(option.unwrap(study.anon_uid, "-")),
+      ],
+      [html.text(option.unwrap(study.anon_uid, "-"))],
+    ),
+    html.td([attribute.class("cell-mono")], [html.text(series_count)]),
+    html.td([attribute.class("cell-actions")], [
       html.a(
         [
-          attribute.href(router.route_to_path(router.StudyDetail(study.study_uid))),
+          attribute.href(
+            router.route_to_path(router.StudyDetail(study.study_uid)),
+          ),
           attribute.class("btn btn-sm btn-outline"),
         ],
         [html.text(translate(i18n.BtnView))],

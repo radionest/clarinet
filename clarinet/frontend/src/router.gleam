@@ -168,13 +168,12 @@ fn section(route: Route) -> String {
     Studies(_) | StudyDetail(_) | StudyViewer(_) | SeriesDetail(_) -> "studies"
     Records(_) | RecordDetail(_) | RecordNew -> "records"
     Patients(_) | PatientDetail(_) | PatientNew -> "patients"
-    AdminDashboard(_)
-    | AdminRecordTypes
-    | AdminRecordTypeDetail(_)
-    | AdminRecordTypeEdit(_)
-    | AdminReports
-    | AdminQuartoReports
-    | AdminWorkflow -> "admin"
+    AdminDashboard(_) -> "admin"
+    AdminRecordTypes | AdminRecordTypeDetail(_) | AdminRecordTypeEdit(_) ->
+      "record-types"
+    AdminReports -> "reports"
+    AdminQuartoReports -> "quarto"
+    AdminWorkflow -> "workflow"
     Settings -> "settings"
     NotFound -> "notfound"
   }

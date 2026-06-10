@@ -3,8 +3,8 @@
    ============================ */
 
 .card {
-    background: white;
-    border: 1px solid var(--border-color);
+    background: var(--surface);
+    border: 1px solid var(--hairline);
     border-radius: var(--radius-lg);
     padding: var(--spacing-lg);
     margin-bottom: 1rem;
@@ -12,7 +12,7 @@
 }
 
 .card-title {
-    font-size: 1.25rem;
+    font-size: 1.1rem;
     font-weight: 600;
     margin-bottom: 0.75rem;
 }
