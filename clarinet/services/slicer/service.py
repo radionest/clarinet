@@ -152,25 +152,29 @@ class SlicerService:
         """Combine helper + context + user script.
 
         Helper definitions (SlicerHelper, PacsHelper, etc.) stay in globals.
-        Context variables and user script run inside ``_run()`` via inner
-        ``exec()`` in a flat namespace (single dict = both globals and locals).
+        The user script runs inside ``_run()`` via inner ``exec()`` in a flat
+        per-call namespace (``_ns``, single dict = both globals and locals).
         This eliminates ``UnboundLocalError`` when user scripts shadow helper
-        names (e.g. ``slicer = SlicerHelper(...)``), because a flat namespace
-        has no local-vs-global distinction — unlike a function scope where
-        any assignment marks the name as local for the entire body.
+        names (e.g. ``slicer = SlicerHelper(...)``), and lets the VTK C++
+        objects (~1-3 GB per volume) it creates be GC'd when ``_ns`` goes out
+        of scope, instead of accumulating in Slicer's reused exec() globals.
 
-        The ``_run()`` wrapper ensures VTK C++ objects (~1-3 GB per volume)
-        are GC'd when the namespace dict goes out of scope, instead of
-        accumulating in Slicer's reused exec() global namespace.
+        **Context variables go into the module globals, not ``_ns``.** Helper
+        functions such as ``_get_pacs_helper()`` read injected PACS params via
+        ``globals()`` — whose ``__globals__`` is this outer (helper) namespace,
+        NOT the per-call ``_ns`` the user script executes in. Injecting context
+        only into ``_ns`` left it invisible to those helpers, so PACS context
+        overrides silently fell back to ``from_slicer()``. ``_ns`` is built
+        *after* the injection, so the user script still sees the values too.
         """
         parts = [self._helper_source, ""]
 
         indent = "    "
         run_lines = ["def _run():"]
-        run_lines.append(f"{indent}_ns = dict(globals())")
         if context:
             for key, value in context.items():
-                run_lines.append(f"{indent}_ns[{key!r}] = {value!r}")
+                run_lines.append(f"{indent}globals()[{key!r}] = {value!r}")
+        run_lines.append(f"{indent}_ns = dict(globals())")
         run_lines.append(f"{indent}exec(compile({script!r}, '<slicer_script>', 'exec'), _ns)")
         run_lines.append(f"{indent}globals()['__execResult'] = _ns.get('__execResult', {{}})")
         run_lines.extend(["", "_run()", "del _run"])

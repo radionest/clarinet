@@ -132,6 +132,38 @@ def _require_slicer_and_pacs(_check_slicer: None, _check_pacs: None) -> None:
     """Auto-use: skip if either Slicer or PACS is unavailable."""
 
 
+@pytest.fixture(scope="session")
+def _slicer_shares_filesystem(_check_slicer: None) -> None:
+    """Skip when Slicer cannot read the test harness's filesystem.
+
+    Some tests write data to local disk (e.g. a backend C-MOVE) and then have
+    Slicer load that exact path — which only works when Slicer and the harness
+    share a filesystem. In a split topology (Slicer on Windows, tests in WSL;
+    or Slicer on a remote host) the path is invisible to Slicer, so those tests
+    are skipped rather than failed.
+    """
+    import os
+    import tempfile
+
+    fd, probe = tempfile.mkstemp(suffix=".slicerfs")
+    os.close(fd)
+    try:
+        script = f"import os\n__execResult = {{'visible': os.path.exists({probe!r})}}"
+        result = asyncio.get_event_loop().run_until_complete(
+            SlicerService().execute(
+                f"http://{SLICER_HOST}:{SLICER_PORT}", script, request_timeout=10.0
+            )
+        )
+        if not result.get("visible"):
+            pytest.skip(
+                "Slicer does not share the test harness filesystem "
+                "(e.g. Slicer on Windows, tests in WSL) — "
+                "C-MOVE-to-disk-then-load needs a shared filesystem"
+            )
+    finally:
+        os.unlink(probe)
+
+
 # ---------------------------------------------------------------------------
 # PACS data fixtures (session-scoped, fetched from Orthanc REST API)
 # ---------------------------------------------------------------------------
@@ -671,6 +703,7 @@ class TestBackendCmoveThenSlicer:
 
     async def test_backend_cmove_then_slicer_exec(
         self,
+        _slicer_shares_filesystem: None,
         slicer_service: SlicerService,
         slicer_url: str,
         pacs_study_uid: str,
@@ -678,7 +711,12 @@ class TestBackendCmoveThenSlicer:
         storage_scp: Any,
         tmp_path: Path,
     ) -> None:
-        """C-MOVE retrieves series to disk, then Slicer loads the .dcm files."""
+        """C-MOVE retrieves series to disk, then Slicer loads the .dcm files.
+
+        Requires Slicer to share the harness filesystem (see
+        ``_slicer_shares_filesystem``) — it loads the C-MOVE'd files by their
+        on-disk path.
+        """
         from clarinet.services.dicom.models import (
             AssociationConfig,
             QueryRetrieveLevel,
@@ -764,15 +802,17 @@ class TestGetPacsHelperContextVars:
         slicer_url: str,
     ) -> None:
         """Injected pacs_host/port/aet used for server; calling_aet/move_aet from QSettings."""
+        # Clarinet injects PACS params via the context= dict (build_slicer_context),
+        # which SlicerService places in the helper module globals that
+        # _get_pacs_helper() reads. Inline script assignments would land in the
+        # per-call _ns namespace the helper can't see — use the real path.
+        context = {
+            "pacs_host": "10.99.99.99",
+            "pacs_port": "9999",
+            "pacs_aet": "FAKE_PACS",
+            "dicom_retrieve_mode": "c-move",
+        }
         script = """
-
-
-# Simulate Clarinet context injection (fake server — only check params)
-pacs_host = "10.99.99.99"
-pacs_port = "9999"
-pacs_aet = "FAKE_PACS"
-dicom_retrieve_mode = "c-move"
-
 pacs = _get_pacs_helper()
 slicer_pacs = PacsHelper.from_slicer()
 
@@ -783,7 +823,9 @@ __execResult = {
     "slicer_aet": slicer_pacs.calling_aet,
 }
 """
-        result = await slicer_service.execute(slicer_url, script, request_timeout=10.0)
+        result = await slicer_service.execute(
+            slicer_url, script, context=context, request_timeout=10.0
+        )
         assert "host" in result, f"Unexpected result from Slicer: {result}"
         assert result["host"] == "10.99.99.99"
         assert result["port"] == 9999
