@@ -24,6 +24,8 @@ _SCALAR_FIELDS: tuple[str, ...] = (
     "role_name",
     "min_records",
     "max_records",
+    "unique_per_user",
+    "parent_required",
     "mask_patient_data",
     "inherit_user_from_parent",
     "viewer_mode",
@@ -35,6 +37,12 @@ _SCALAR_FIELDS: tuple[str, ...] = (
 _TABLE_FIELDS: tuple[str, ...] = (
     "slicer_script_args",
     "slicer_result_validator_args",
+)
+
+# List fields exported as TOML arrays.
+_LIST_FIELDS: tuple[str, ...] = (
+    "slicer_context_hydrators",
+    "data_validators",
 )
 
 
@@ -61,6 +69,12 @@ def _record_type_to_toml_dict(rt: RecordType) -> dict[str, Any]:
 
     # Table fields (dicts)
     for field_name in _TABLE_FIELDS:
+        value = getattr(rt, field_name, None)
+        if value:
+            data[field_name] = value
+
+    # List fields (arrays of strings)
+    for field_name in _LIST_FIELDS:
         value = getattr(rt, field_name, None)
         if value:
             data[field_name] = value

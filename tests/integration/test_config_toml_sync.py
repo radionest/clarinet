@@ -13,12 +13,16 @@ from sqlmodel import select
 
 from clarinet.config.reconciler import reconcile_record_types
 from clarinet.config.toml_exporter import (
+    _LIST_FIELDS,
+    _SCALAR_FIELDS,
+    _TABLE_FIELDS,
     delete_record_type_files,
     export_data_schema_sidecar,
     export_record_type_to_toml,
 )
 from clarinet.models.file_schema import RecordTypeFileLink
 from clarinet.models.record import RecordType, RecordTypeCreate
+from clarinet.models.record_type import RecordTypeBase
 from clarinet.utils.config_loader import discover_config_files, load_record_config
 
 
@@ -327,3 +331,144 @@ async def test_export_includes_inherit_user_from_parent(tmp_path) -> None:
     path = await export_record_type_to_toml(rt_default, tmp_path)
     content = tomllib.loads(path.read_text())
     assert content["inherit_user_from_parent"] is False
+
+
+@pytest.mark.asyncio
+async def test_export_includes_unique_per_user(tmp_path) -> None:
+    """TOML export includes unique_per_user field."""
+    import tomllib
+
+    rt = RecordType(
+        name="unique-test",
+        level="SERIES",
+        unique_per_user=False,
+    )
+
+    path = await export_record_type_to_toml(rt, tmp_path)
+    content = tomllib.loads(path.read_text())
+    assert content["unique_per_user"] is False
+
+
+@pytest.mark.asyncio
+async def test_export_includes_parent_required(tmp_path) -> None:
+    """TOML export includes parent_required field."""
+    import tomllib
+
+    rt = RecordType(
+        name="parent-test",
+        level="SERIES",
+        parent_required=True,
+    )
+
+    path = await export_record_type_to_toml(rt, tmp_path)
+    content = tomllib.loads(path.read_text())
+    assert content["parent_required"] is True
+
+
+@pytest.mark.asyncio
+async def test_export_includes_constraint_flags_default(tmp_path) -> None:
+    """TOML export includes unique_per_user/parent_required with defaults."""
+    import tomllib
+
+    rt = RecordType(name="flags-default", level="SERIES")
+
+    path = await export_record_type_to_toml(rt, tmp_path)
+    content = tomllib.loads(path.read_text())
+    assert content["unique_per_user"] is True
+    assert content["parent_required"] is False
+
+
+@pytest.mark.asyncio
+async def test_export_includes_hydrators_and_validators(tmp_path) -> None:
+    """TOML export includes slicer_context_hydrators/data_validators arrays."""
+    import tomllib
+
+    rt = RecordType(
+        name="lists-test",
+        level="SERIES",
+        slicer_context_hydrators=["seg_labels"],
+        data_validators=["check_volume", "check_overlap"],
+    )
+
+    path = await export_record_type_to_toml(rt, tmp_path)
+    content = tomllib.loads(path.read_text())
+    assert content["slicer_context_hydrators"] == ["seg_labels"]
+    assert content["data_validators"] == ["check_volume", "check_overlap"]
+
+    rt_empty = RecordType(name="lists-empty", level="SERIES")
+    path = await export_record_type_to_toml(rt_empty, tmp_path)
+    content = tomllib.loads(path.read_text())
+    assert "slicer_context_hydrators" not in content
+    assert "data_validators" not in content
+
+
+@pytest.mark.asyncio
+async def test_constraint_flags_round_trip(
+    test_session: AsyncSession,
+    tmp_path,
+) -> None:
+    """TOML → DB → modified TOML → DB: constraint flags survive the update path."""
+    _write_toml(
+        tmp_path,
+        "flags-trip",
+        {
+            "name": "flags-trip",
+            "level": "SERIES",
+            "unique_per_user": False,
+            "parent_required": True,
+        },
+    )
+    _write_schema(tmp_path, "flags-trip", {"type": "object"})
+
+    config_files = discover_config_files(str(tmp_path))
+    items = [
+        RecordTypeCreate(**p)
+        for cf in config_files
+        if (p := await load_record_config(cf)) is not None
+    ]
+    await reconcile_record_types(items, test_session)
+
+    stmt = select(RecordType).where(RecordType.name == "flags-trip")
+    rt = (await test_session.execute(stmt)).scalar_one()
+    assert rt.unique_per_user is False
+    assert rt.parent_required is True
+
+    # Flip both flags in TOML → reconcile must apply them on UPDATE
+    _write_toml(
+        tmp_path,
+        "flags-trip",
+        {
+            "name": "flags-trip",
+            "level": "SERIES",
+            "unique_per_user": True,
+            "parent_required": False,
+        },
+    )
+    _write_schema(tmp_path, "flags-trip", {"type": "object"})
+    test_session.expire_all()
+
+    config_files = discover_config_files(str(tmp_path))
+    items = [
+        RecordTypeCreate(**p)
+        for cf in config_files
+        if (p := await load_record_config(cf)) is not None
+    ]
+    result = await reconcile_record_types(items, test_session)
+    assert "flags-trip" in result.updated
+
+    rt = (await test_session.execute(stmt)).scalar_one()
+    assert rt.unique_per_user is True
+    assert rt.parent_required is False
+
+
+def test_exporter_covers_all_record_type_fields() -> None:
+    """Drift guard: every RecordTypeBase field is exported or excluded here.
+
+    A model field missing from the exporter tuples silently disappears from
+    the rewritten .toml on API edits — unique_per_user, parent_required and
+    inherit_user_from_parent all hit this before being added.
+    """
+    exported = set(_SCALAR_FIELDS) | set(_TABLE_FIELDS) | set(_LIST_FIELDS)
+    intentionally_excluded = {"data_schema", "ui_schema"}  # sidecar-authoritative
+    model_fields = set(RecordTypeBase.model_fields)
+    assert model_fields - exported - intentionally_excluded == set()
