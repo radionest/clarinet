@@ -6,7 +6,8 @@ from uuid import uuid4
 import pytest
 
 from clarinet.models import RecordStatus
-from clarinet.services.record_service import RecordService
+from clarinet.models.file_schema import FileDefinitionRead, FileRole, RecordFileLinkRead
+from clarinet.services.record_service import RecordService, _missing_output_links
 from clarinet.services.study_service import StudyService
 
 
@@ -154,7 +155,7 @@ class TestRecordServiceTriggers:
 
         with (
             patch("clarinet.services.record_service.RecordRead") as patched,
-            patch.object(service, "_emit_output_file_events", new_callable=AsyncMock) as emit_mock,
+            patch.object(service, "_sync_output_files", new_callable=AsyncMock) as sync_mock,
         ):
             patched.model_validate.return_value = record_read_mock
             result, result_old_status = await service.submit_data(1, data, RecordStatus.finished)
@@ -166,7 +167,7 @@ class TestRecordServiceTriggers:
             engine_mock.handle_record_status_change.assert_awaited_once_with(
                 record_read_mock, old_status
             )
-            emit_mock.assert_awaited_once_with(record_mock)
+            sync_mock.assert_awaited_once_with(record_mock)
             assert result == record_mock
             assert result_old_status == old_status
 
@@ -731,3 +732,73 @@ class TestStudyServiceEntityTriggers:
         series_repo_mock.exists.assert_awaited_once_with(series_uid="1.2.3.4.5")
         series_repo_mock.create_with_relations.assert_awaited_once()
         assert result == series_mock
+
+
+def _record_read_stub(
+    file_registry: list[FileDefinitionRead],
+    file_links: list[RecordFileLinkRead],
+) -> MagicMock:
+    record = MagicMock()
+    record.record_type.file_registry = file_registry
+    record.file_links = file_links
+    return record
+
+
+class TestMissingOutputLinks:
+    """Derivation of missing OUTPUT file links from computed checksums."""
+
+    def test_creates_link_for_unlinked_output(self) -> None:
+        record = _record_read_stub(
+            [FileDefinitionRead(name="output_mask", pattern="mask.nii.gz", role=FileRole.OUTPUT)],
+            [],
+        )
+
+        result = _missing_output_links(record, {"output_mask": "abc123"})
+
+        assert result == {"output_mask": "mask.nii.gz"}
+
+    def test_resolves_pattern_placeholders(self) -> None:
+        record = _record_read_stub(
+            [FileDefinitionRead(name="seg", pattern="seg_{id}.nrrd", role=FileRole.OUTPUT)],
+            [],
+        )
+        record.id = 7
+
+        result = _missing_output_links(record, {"seg": "abc123"})
+
+        assert result == {"seg": "seg_7.nrrd"}
+
+    def test_collection_takes_first_sorted_file(self) -> None:
+        record = _record_read_stub(
+            [
+                FileDefinitionRead(
+                    name="masks", pattern="mask_{id}.nii", role=FileRole.OUTPUT, multiple=True
+                )
+            ],
+            [],
+        )
+
+        result = _missing_output_links(record, {"masks:b.nii": "1", "masks:a.nii": "2"})
+
+        assert result == {"masks": "a.nii"}
+
+    def test_skips_linked_and_non_output_definitions(self) -> None:
+        record = _record_read_stub(
+            [
+                FileDefinitionRead(name="output_mask", pattern="mask.nii.gz", role=FileRole.OUTPUT),
+                FileDefinitionRead(name="input_nifti", pattern="scan.nii.gz", role=FileRole.INPUT),
+            ],
+            [RecordFileLinkRead(name="output_mask", filename="mask.nii.gz", checksum="old")],
+        )
+
+        result = _missing_output_links(record, {"output_mask": "abc123", "input_nifti": "def456"})
+
+        assert result == {}
+
+    def test_empty_checksums(self) -> None:
+        record = _record_read_stub(
+            [FileDefinitionRead(name="output_mask", pattern="mask.nii.gz", role=FileRole.OUTPUT)],
+            [],
+        )
+
+        assert _missing_output_links(record, {}) == {}

@@ -686,6 +686,46 @@ class RecordRepository(BaseRepository[Record]):
                 link.checksum = checksums[link.file_definition.name]
         await self.session.commit()
 
+    async def add_file_links(
+        self,
+        record: Record,
+        matched_files: dict[str, str],
+    ) -> None:
+        """Create RecordFileLink rows for definitions that have no link yet.
+
+        Additive counterpart of ``set_files`` — existing links (and their
+        checksums) stay untouched, so OUTPUT files discovered after record
+        creation can be registered without wiping INPUT links. Already-linked
+        definitions are detected with a direct SELECT (the eagerly loaded
+        ``record.file_links`` may be stale within a request). New links are
+        attached via relationship objects, so ``record.file_links`` reflects
+        them in memory and a follow-up ``update_checksums`` on the same
+        instance sees them without a re-fetch. Concurrent writers may race
+        on the (record_id, file_definition_id) PK — same trade-off as
+        ``set_files``.
+
+        Args:
+            record: Record with ``record_type.file_links`` and ``file_links``
+                eagerly loaded.
+            matched_files: Dict mapping file definition name to matched filename.
+        """
+        fd_map = {
+            link.file_definition.name: link.file_definition
+            for link in record.record_type.file_links
+        }
+        result = await self.session.execute(
+            select(RecordFileLink.file_definition_id).where(
+                col(RecordFileLink.record_id) == record.id
+            )
+        )
+        linked_ids = set(result.scalars())
+        for name, filename in matched_files.items():
+            fd = fd_map.get(name)
+            if fd is None or fd.id in linked_ids:
+                continue
+            self.session.add(RecordFileLink(record=record, file_definition=fd, filename=filename))
+        await self.session.commit()
+
     async def set_files(
         self,
         record: Record,

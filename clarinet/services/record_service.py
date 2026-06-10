@@ -65,6 +65,33 @@ def _filter_in_sandbox(paths: list[Path], sandbox: Path) -> list[Path]:
     return [p for p in paths if p.resolve().is_relative_to(sandbox_resolved)]
 
 
+def _missing_output_links(record: RecordRead, checksums: dict[str, str]) -> dict[str, str]:
+    """Derive OUTPUT file links to create from freshly computed checksums.
+
+    OUTPUT files appear on disk only after pipeline tasks or users produce
+    them, so creation-time matching (``set_files``) never sees them — without
+    this reconciliation no ``RecordFileLink`` would ever exist for outputs.
+    ``compute_checksums`` keys every found file by definition name (singular)
+    or ``"name:filename"`` (collections), so each key proves the file existed
+    on disk at scan time — no second filesystem scan is needed. Returns
+    name → filename for OUTPUT definitions that have no link yet; for
+    collections the lexicographically first file is stored, matching the
+    download endpoint's pick.
+    """
+    output_defs = {
+        fd.name: fd for fd in (record.record_type.file_registry or []) if fd.role == FileRole.OUTPUT
+    }
+    linked = {link.name for link in (record.file_links or [])}
+    missing: dict[str, str] = {}
+    for key in sorted(checksums):
+        name, _, collection_file = key.partition(":")
+        fd = output_defs.get(name)
+        if fd is None or name in linked or name in missing:
+            continue
+        missing[name] = collection_file or resolve_pattern(fd.pattern, record)
+    return missing
+
+
 class RecordService:
     """Service wrapping record mutations with automatic RecordFlow triggers.
 
@@ -251,9 +278,9 @@ class RecordService:
         record, old_status = await self.repo.update_data(record_id, data, new_status=new_status)
         await self._fire_status_change(record, old_status)
 
-        # Detect output file changes and emit file events
+        # Register output files that appeared on disk and emit file events
         if new_status == RecordStatus.finished:
-            await self._emit_output_file_events(record)
+            await self._sync_output_files(record)
 
         return record, old_status
 
@@ -416,7 +443,8 @@ class RecordService:
         """Check file status, auto-unblock if ready, compute & compare checksums.
 
         For blocked records: validates input files, transitions to pending if valid.
-        For non-blocked: computes checksums, updates DB, notifies on change.
+        For non-blocked: computes checksums, registers newly appeared OUTPUT
+        files as ``RecordFileLink`` rows, updates DB, notifies on change.
 
         Returns:
             Tuple of (changed file keys, current checksums).
@@ -452,6 +480,14 @@ class RecordService:
             link.name: link.checksum for link in (record_read.file_links or []) if link.checksum
         }
         changed = checksums_changed(old_checksums, new_checksums)
+
+        new_links = _missing_output_links(record_read, new_checksums)
+        if new_links:
+            await self.repo.add_file_links(record, new_links)
+            logger.info(
+                f"Record {record_id}: registered {len(new_links)} output file link(s): "
+                f"{sorted(new_links)}"
+            )
 
         await self.repo.update_checksums(record, new_checksums)
 
@@ -746,20 +782,19 @@ class RecordService:
                 f"for this {record_type.level.lower()} context"
             )
 
-    async def _emit_output_file_events(self, record: Record) -> None:
-        """Detect output file changes and emit project-level file events.
+    async def _sync_output_files(self, record: Record) -> None:
+        """Reconcile OUTPUT file state on disk with the DB after a submission.
 
-        Computes checksums on disk for OUTPUT files and compares against
-        stored checksums in ``file_links``. Emits file-update events for
-        any changed files so that downstream file flows (e.g. invalidation)
-        are triggered.
+        Computes checksums on disk for OUTPUT files, registers files that
+        appeared since the last sync as ``RecordFileLink`` rows, updates
+        stored checksums, and emits file-update events for any changed files
+        so that downstream file flows (e.g. invalidation) are triggered.
+        Link/checksum bookkeeping runs even without a RecordFlow engine —
+        only event emission requires it.
 
         Args:
             record: Record with relations loaded (must have record_type, patient).
         """
-        if not self.engine:
-            return
-
         record_read = RecordRead.model_validate(record)
         output_defs = [
             fd for fd in (record_read.record_type.file_registry or []) if fd.role == FileRole.OUTPUT
@@ -778,15 +813,28 @@ class RecordService:
             link.name: link.checksum for link in (record_read.file_links or []) if link.checksum
         }
 
+        # A file without a link has no stored checksum, so any link to create
+        # implies a non-empty changed set — safe to early-return here.
         changed = checksums_changed(old_checksums, new_checksums)
         if not changed:
             return
+
+        new_links = _missing_output_links(record_read, new_checksums)
+        if new_links:
+            await self.repo.add_file_links(record, new_links)
+            logger.info(
+                f"Record {record.id}: registered {len(new_links)} output file link(s): "
+                f"{sorted(new_links)}"
+            )
 
         # Update stored checksums in DB
         try:
             await self.repo.update_checksums(record, new_checksums)
         except Exception as e:
             logger.warning(f"Failed to update checksums for record {record.id}: {e}")
+
+        if not self.engine:
+            return
 
         # Extract logical file names (strip collection suffix "name:filename" → "name")
         changed_file_names = {key.split(":")[0] for key in changed}
