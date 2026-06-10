@@ -20,6 +20,7 @@ from clarinet.api.dependencies import (
 from clarinet.exceptions import NOT_FOUND
 from clarinet.models.pipeline_definition import PipelineDefinition, PipelineDefinitionRead
 from clarinet.models.pipeline_task_run import (
+    PipelineRunStatus,
     PipelineTaskRun,
     PipelineTaskRunCreate,
     PipelineTaskRunFind,
@@ -53,7 +54,7 @@ async def list_pipeline_runs(
     _user: AdminUserDep,
     repo: PipelineTaskRunRepositoryDep,
     pagination: PaginationDep,
-    status: str | None = None,
+    status: PipelineRunStatus | None = None,
     task_name: str | None = None,
     record_id: int | None = None,
     since: datetime | None = None,

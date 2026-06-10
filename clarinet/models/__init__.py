@@ -34,6 +34,7 @@ from .pipeline_definition import PipelineDefinition, PipelineDefinitionRead
 
 # Pipeline task run audit models
 from .pipeline_task_run import (
+    PipelineRunStatus,
     PipelineTaskRun,
     PipelineTaskRunCreate,
     PipelineTaskRunFind,
@@ -114,6 +115,7 @@ __all__ = [
     "PatientSave",
     "PipelineDefinition",
     "PipelineDefinitionRead",
+    "PipelineRunStatus",
     "PipelineTaskRun",
     "PipelineTaskRunCreate",
     "PipelineTaskRunFind",

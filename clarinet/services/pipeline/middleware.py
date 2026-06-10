@@ -40,6 +40,8 @@ if TYPE_CHECKING:
     from aio_pika.abc import AbstractChannel, AbstractRobustConnection
     from taskiq import TaskiqMessage, TaskiqResult
 
+    from clarinet.models.pipeline_task_run import PipelineRunStatus
+
 
 class DLQPublisher:
     """Shared AMQP publisher for the dead letter queue.
@@ -379,6 +381,7 @@ class AuditMiddleware(TaskiqMiddleware):
         finished_at = datetime.now(UTC)
         task_id = message.task_id
 
+        status: PipelineRunStatus
         error_status_code: int | None = None
         if not result.is_err:
             status = "succeeded"
@@ -394,7 +397,13 @@ class AuditMiddleware(TaskiqMiddleware):
             error = result.error
             error_type = type(error).__name__ if error else None
             error_message = str(error) if error else None
-            error_status_code = getattr(error, "status_code", None)
+            # status_code is duck-typed off arbitrary exceptions — normalize
+            # so a non-int value can't fail the Update payload validation.
+            raw_code = getattr(error, "status_code", None)
+            try:
+                error_status_code = int(raw_code) if raw_code is not None else None
+            except (TypeError, ValueError):
+                error_status_code = None
             return_value = None
 
         execution_time = result.execution_time

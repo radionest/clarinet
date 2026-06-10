@@ -6,12 +6,16 @@ HTTP API. Status values: ``running`` | ``succeeded`` | ``failed`` | ``retrying``
 """
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, func
 from sqlmodel import Column, Field, SQLModel
 
 from clarinet.types import PortableJSON
+
+# DB column stays a plain string (additive downstream migrations);
+# API payloads are constrained to these values.
+type PipelineRunStatus = Literal["running", "succeeded", "failed", "retrying"]
 
 
 class PipelineTaskRunBase(SQLModel):
@@ -110,7 +114,7 @@ class PipelineTaskRunCreate(SQLModel):
 class PipelineTaskRunUpdate(SQLModel):
     """Payload for ``PATCH /api/pipelines/runs/{task_id}`` (``post_execute``)."""
 
-    status: str = Field(min_length=1, max_length=20)
+    status: PipelineRunStatus
     finished_at: datetime
     execution_time: float | None = None
     retry_count: int | None = None
@@ -135,7 +139,7 @@ class PipelineTaskRunFind(SQLModel):
     by ``started_at``, newest first).
     """
 
-    status: str | None = None
+    status: PipelineRunStatus | None = None
     task_name: str | None = None
     record_id: int | None = None
     since: datetime | None = None
