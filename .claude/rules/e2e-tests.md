@@ -25,3 +25,19 @@ App is always deployed behind a sub-path prefix (e.g. `/liver_nir/`).
 make vm-e2e          # Playwright tests (requires running VM)
 make vm-acceptance   # pytest acceptance tests (requires running VM)
 ```
+
+## Quarto reports E2E
+
+`test_quarto_reports.py` covers `/admin/quarto-reports`:
+- `test_quarto_reports_page_loads` — always runs (page + sub-path prefix).
+- `test_quarto_render_to_docx` — full render → poll → download; **skips** unless
+  the VM is provisioned for Quarto rendering.
+
+To make the render test run (not skip), the test VM needs:
+- the `quarto` CLI — `clarinet quarto install` (or `--from-file <tarball>` offline);
+- the `quarto` pip extra in the app venv — `jupyter`, `ipykernel`, `pandas`;
+- a `*.qmd` in `settings.quarto_reports_path` (default `./review/`) whose
+  `clarinet.data` report names resolve to `*.sql` files in `settings.reports_path`.
+
+These are **not** in the standard production installer (Quarto is an optional,
+heavy feature) — provision them on the test VM only. See `docs/quarto-reports.md`.

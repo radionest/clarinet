@@ -864,3 +864,31 @@ class TestJSONSerialization:
         # httpx.Headers normalizes to a single case-insensitive entry.
         assert headers["Content-Type"] == "application/xml"
         assert headers["content-type"] == "application/xml"
+
+
+class TestDownloadReport:
+    """download_report fetches server-rendered SQL report bytes."""
+
+    @pytest.mark.asyncio
+    async def test_download_report_returns_bytes(self) -> None:
+        captured: dict[str, object] = {}
+
+        async def mock_request(method, url, **kwargs):
+            captured["method"] = method
+            captured["url"] = url
+            captured.update(kwargs)
+            return httpx.Response(200, content=b"\xef\xbb\xbfa,b\r\n1,2\r\n")
+
+        client = ClarinetClient("http://test/api", auto_login=False)
+        client.client = AsyncMock()
+        client.client.request = mock_request
+
+        data = await client.download_report("monthly_summary", request_timeout=330)
+
+        assert data == b"\xef\xbb\xbfa,b\r\n1,2\r\n"
+        assert captured["method"] == "GET"
+        assert str(captured["url"]).endswith("/admin/reports/monthly_summary/download")
+        assert captured["params"] == {"format": "csv"}
+        # The explicit per-request timeout must reach httpx (report SQL may
+        # run for minutes — far beyond the client default).
+        assert captured["timeout"] == 330

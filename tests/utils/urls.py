@@ -65,6 +65,23 @@ ADMIN_RECORD_OUTPUT_FILES = "/api/admin/records"  # + /{id}/output-files
 # --- Reports ---
 ADMIN_REPORTS = "/api/admin/reports"  # GET list; + /{name}/download for file
 
+# --- Quarto Reports ---
+# GET list; + /{name}/render (POST), /{name}/renders/{render_id}/status|download
+ADMIN_QUARTO_REPORTS = "/api/admin/quarto-reports"
+
+
+def admin_quarto_render(name: str) -> str:
+    return f"{ADMIN_QUARTO_REPORTS}/{name}/render"
+
+
+def admin_quarto_render_status(name: str, render_id: str) -> str:
+    return f"{ADMIN_QUARTO_REPORTS}/{name}/renders/{render_id}/status"
+
+
+def admin_quarto_render_download(name: str, render_id: str) -> str:
+    return f"{ADMIN_QUARTO_REPORTS}/{name}/renders/{render_id}/download"
+
+
 # --- Workflow visualization (admin) ---
 WORKFLOW_BASE = "/api/admin/workflow"
 WORKFLOW_GRAPH = "/api/admin/workflow/graph"

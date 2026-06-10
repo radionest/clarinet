@@ -73,6 +73,8 @@ def setup_exception_handlers(app: FastAPI) -> None:
         InvalidCredentialsError,
         InvalidPatientIdentifierError,
         PipelineError,
+        QuartoNotInstalledError,
+        QuartoRenderNotReadyError,
         RecordDataValidationError,
         RecordLimitReachedError,
         RecordParentRequiredError,
@@ -347,6 +349,28 @@ def setup_exception_handlers(app: FastAPI) -> None:
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content={"detail": str(exc) if str(exc) else "Report query failed"},
+        )
+
+    @app.exception_handler(QuartoRenderNotReadyError)
+    async def handle_quarto_render_not_ready(
+        _: Request, exc: QuartoRenderNotReadyError
+    ) -> JSONResponse:
+        """Convert QuartoRenderNotReadyError to 409 (download before render done)."""
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content={
+                "detail": str(exc) if str(exc) else "Render not ready",
+                "code": QuartoRenderNotReadyError.error_code,
+            },
+        )
+
+    @app.exception_handler(QuartoNotInstalledError)
+    async def handle_quarto_not_installed(_: Request, exc: QuartoNotInstalledError) -> JSONResponse:
+        """Convert QuartoNotInstalledError to 503 (quarto CLI missing on host)."""
+        logger.error(f"Quarto CLI unavailable: {exc}")
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={"detail": str(exc) if str(exc) else "Quarto CLI not installed"},
         )
 
     @app.exception_handler(ConfigurationError)

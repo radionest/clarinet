@@ -1,0 +1,288 @@
+"""Core Quarto rendering: materialize SQL data, run the ``quarto`` CLI, and
+record progress in a ``status.json`` sidecar.
+
+This module is deliberately free of web/app state so it runs identically in the
+pipeline worker process and in the in-process fallback (``pipeline_enabled``
+False). Callers pass plain paths plus an authenticated :class:`ClarinetClient`;
+data reports are fetched as CSV from the reports API, so the renderer host
+needs neither DB credentials nor the project's ``*.sql`` files. The ``.qmd``
+itself is copied into ``render_dir`` by the dispatching service, so the
+renderer host does not need the project's reports folder either.
+
+Security: the quarto subprocess runs with an environment built from scratch
+(:func:`_build_render_env`), so secrets (``CLARINET_*``, ``DATABASE_URL``,
+service token, AMQP credentials) never reach the Python code chunks Quarto
+executes. Data reaches chunks only as pre-rendered CSV files.
+"""
+
+import asyncio
+import json
+import os
+import shutil
+import sys
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+
+from clarinet.client import ClarinetClient
+from clarinet.exceptions.domain import QuartoRenderError
+from clarinet.models.quarto_report import QuartoRenderStatus, QuartoReportFormat
+from clarinet.settings import settings
+from clarinet.utils.logger import logger
+
+_STATUS_FILE = "status.json"
+
+
+def _is_executable(path: Path) -> bool:
+    """True when ``path`` is a regular file with the execute bit set."""
+    return path.is_file() and os.access(path, os.X_OK)
+
+
+def resolve_quarto_executable() -> Path | None:
+    """Locate the quarto binary: explicit setting → install dir → PATH.
+
+    Verifies the candidate is an executable file (not just present) so a stale
+    directory or a non-executable file does not slip through and fail later at
+    subprocess launch. Returns ``None`` when no binary is found so callers can
+    raise a typed :class:`~clarinet.exceptions.domain.QuartoNotInstalledError`.
+    """
+    if settings.quarto_executable:
+        explicit = Path(settings.quarto_executable)
+        return explicit if _is_executable(explicit) else None
+    installed = settings.quarto_install_path / "bin" / "quarto"
+    if _is_executable(installed):
+        return installed
+    found = shutil.which("quarto")
+    return Path(found) if found else None
+
+
+def _now_iso() -> str:
+    return datetime.now(UTC).isoformat()
+
+
+def write_status(
+    render_dir: Path,
+    *,
+    name: str,
+    render_id: str,
+    status: QuartoRenderStatus,
+    formats: list[QuartoReportFormat],
+    ready: dict[str, bool] | None = None,
+    error: str | None = None,
+    created_at: str | None = None,
+    finished_at: str | None = None,
+) -> None:
+    """Atomically write the status sidecar the API polls (write-temp + replace)."""
+    render_dir.mkdir(parents=True, exist_ok=True)
+    payload: dict[str, Any] = {
+        "name": name,
+        "render_id": render_id,
+        "status": status.value,
+        "formats": [f.value for f in formats],
+        "ready": ready if ready is not None else {f.value: False for f in formats},
+        "error": error,
+        "created_at": created_at or _now_iso(),
+        "finished_at": finished_at,
+    }
+    tmp = render_dir / f"{_STATUS_FILE}.tmp"
+    tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    tmp.replace(render_dir / _STATUS_FILE)
+
+
+def read_status(render_dir: Path) -> dict[str, Any] | None:
+    """Read and parse the status sidecar; ``None`` when absent or unreadable."""
+    status_path = render_dir / _STATUS_FILE
+    if not status_path.is_file():
+        return None
+    try:
+        data = json.loads(status_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.error(f"Failed to read Quarto status sidecar {status_path}: {exc}")
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def status_mtime(render_dir: Path) -> float | None:
+    """Last modification time of the status sidecar; ``None`` when absent.
+
+    The renderer rewrites the sidecar at every attempt start and after each
+    completed format, so the mtime tracks liveness across multi-format renders
+    and pipeline retries — unlike ``created_at``, which is preserved.
+    """
+    try:
+        return (render_dir / _STATUS_FILE).stat().st_mtime
+    except OSError:
+        return None
+
+
+async def render_report(
+    *,
+    name: str,
+    qmd_path: Path,
+    data_reports: list[str],
+    formats: list[QuartoReportFormat],
+    render_dir: Path,
+    quarto_executable: Path,
+    timeout_seconds: float,
+    client: ClarinetClient,
+) -> None:
+    """Render the ``.qmd`` named by ``qmd_path`` to ``formats`` inside ``render_dir``.
+
+    Materializes each declared data report as ``data/<name>.csv`` by fetching
+    it from the reports API via ``client``, then runs ``quarto render`` once
+    per format. The ``.qmd`` must already be inside ``render_dir`` (the
+    dispatching service copies it there); only its file name is used. Progress
+    and failures are recorded in the status sidecar; this coroutine never
+    raises to its caller so a fire-and-forget dispatch cannot crash the worker
+    loop.
+    """
+    created_at = _now_iso()
+    existing = read_status(render_dir)
+    if existing and existing.get("created_at"):
+        created_at = str(existing["created_at"])
+
+    write_status(
+        render_dir,
+        name=name,
+        render_id=render_dir.name,
+        status=QuartoRenderStatus.RUNNING,
+        formats=formats,
+        created_at=created_at,
+    )
+
+    ready: dict[str, bool] = {f.value: False for f in formats}
+    try:
+        # Only the file name from the payload is trusted: the .qmd must already
+        # sit inside render_dir (copied there by QuartoReportService), so a
+        # hostile qmd_path cannot make the renderer read an arbitrary file.
+        work_qmd = render_dir / qmd_path.name
+        if not work_qmd.is_file():
+            raise QuartoRenderError(f"template '{qmd_path.name}' not found in render dir")
+        await _materialize_data(data_reports, render_dir, client)
+        for fmt in formats:
+            await _run_quarto(work_qmd, fmt, render_dir, quarto_executable, timeout_seconds)
+            ready[fmt.value] = True
+            write_status(
+                render_dir,
+                name=name,
+                render_id=render_dir.name,
+                status=QuartoRenderStatus.RUNNING,
+                formats=formats,
+                ready=ready,
+                created_at=created_at,
+            )
+    except Exception as exc:
+        logger.opt(exception=exc).error(f"Quarto render '{name}' failed")
+        write_status(
+            render_dir,
+            name=name,
+            render_id=render_dir.name,
+            status=QuartoRenderStatus.FAILED,
+            formats=formats,
+            ready=ready,
+            error=f"{type(exc).__name__}: {exc}",
+            created_at=created_at,
+            finished_at=_now_iso(),
+        )
+        return
+
+    write_status(
+        render_dir,
+        name=name,
+        render_id=render_dir.name,
+        status=QuartoRenderStatus.DONE,
+        formats=formats,
+        ready=ready,
+        created_at=created_at,
+        finished_at=_now_iso(),
+    )
+    logger.info(f"Quarto render '{name}' ({render_dir.name}) finished: {list(ready)}")
+
+
+async def _materialize_data(
+    data_reports: list[str], render_dir: Path, client: ClarinetClient
+) -> None:
+    """Fetch each declared SQL report as CSV from the API and write ``data/<name>.csv``.
+
+    The SQL executes server-side (``GET /admin/reports/{name}/download``) with
+    the same read-only transaction, ``SELECT``/``WITH`` validation and
+    statement timeout as a manual download — the renderer host needs neither
+    DB credentials nor the ``*.sql`` files. The per-request timeout mirrors
+    the server's SQL budget so a slow (but legal) report is not cut off by the
+    httpx default.
+    """
+    if not data_reports:
+        return
+    data_dir = render_dir / "data"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    timeout = settings.reports_query_timeout_seconds + 30
+    for report_name in data_reports:
+        csv_bytes = await client.download_report(report_name, request_timeout=timeout)
+        (data_dir / f"{report_name}.csv").write_bytes(csv_bytes)
+
+
+async def _run_quarto(
+    qmd_path: Path,
+    fmt: QuartoReportFormat,
+    render_dir: Path,
+    quarto_executable: Path,
+    timeout_seconds: float,
+) -> None:
+    """Run ``quarto render`` for a single format; raise on non-zero / timeout."""
+    output_name = f"report.{fmt.extension}"
+    tmp_dir = render_dir / "tmp"
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    env = _build_render_env(render_dir, tmp_dir)
+    logger.info(f"Rendering {qmd_path.name} → {output_name} via quarto ({fmt.value})")
+
+    proc = await asyncio.create_subprocess_exec(
+        str(quarto_executable),
+        "render",
+        qmd_path.name,
+        "--to",
+        fmt.value,
+        "--output",
+        output_name,
+        cwd=str(render_dir),
+        env=env,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout_seconds)
+    except TimeoutError as exc:
+        proc.kill()
+        await proc.wait()
+        raise QuartoRenderError(
+            f"quarto render timed out after {timeout_seconds:.0f}s for format {fmt.value}"
+        ) from exc
+
+    if proc.returncode != 0:
+        detail = stderr.decode(errors="replace").strip() or stdout.decode(errors="replace").strip()
+        raise QuartoRenderError(
+            f"quarto render failed (exit {proc.returncode}) for {fmt.value}: {detail[:2000]}"
+        )
+    if not (render_dir / output_name).is_file():
+        raise QuartoRenderError(f"quarto produced no {output_name} for format {fmt.value}")
+
+
+def _build_render_env(render_dir: Path, tmp_dir: Path) -> dict[str, str]:
+    """Minimal environment for the quarto subprocess.
+
+    Built from scratch (not a copy of ``os.environ``) so DB URL, service token,
+    AMQP credentials and all ``CLARINET_*`` settings never reach the executed
+    Python chunks. ``QUARTO_PYTHON`` points at the current interpreter so the
+    report's Jupyter kernel uses this venv (pandas, etc.); ``HOME`` / ``XDG_*``
+    are redirected into the render dir so Jupyter writes nothing to the real
+    user home.
+    """
+    return {
+        "PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"),
+        "HOME": str(render_dir),
+        "TMPDIR": str(tmp_dir),
+        "XDG_CACHE_HOME": str(render_dir / ".cache"),
+        "XDG_DATA_HOME": str(render_dir / ".local" / "share"),
+        "LANG": os.environ.get("LANG", "C.UTF-8"),
+        "LC_ALL": os.environ.get("LC_ALL", "C.UTF-8"),
+        "QUARTO_PYTHON": sys.executable,
+    }

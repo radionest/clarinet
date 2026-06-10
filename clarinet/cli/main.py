@@ -16,6 +16,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import time
 import urllib.request
 from pathlib import Path
 
@@ -749,6 +750,20 @@ def _install_config_template(ohif_dir: Path) -> None:
         logger.warning("app-config.js template not found in package")
 
 
+_DOWNLOAD_TIMEOUT = 30.0
+
+
+def _download_file(url: str, dest: Path) -> None:
+    """Download ``url`` to ``dest`` with a socket timeout.
+
+    ``urllib.request.urlretrieve`` has no timeout and hangs forever on a dead
+    network. The timeout bounds each socket operation (connect/read), not the
+    total download time, so large but live downloads are unaffected.
+    """
+    with urllib.request.urlopen(url, timeout=_DOWNLOAD_TIMEOUT) as resp, dest.open("wb") as f:
+        shutil.copyfileobj(resp, f)
+
+
 def install_ohif(
     version: str | None = None,
     force_config: bool = False,
@@ -784,7 +799,7 @@ def install_ohif(
             logger.info(f"Downloading OHIF Viewer v{version} from npm...")
             tarball = tmp_path / "ohif.tgz"
             try:
-                urllib.request.urlretrieve(npm_url, tarball)
+                _download_file(npm_url, tarball)
             except Exception as e:
                 logger.error(f"Failed to download OHIF v{version}: {e}")
                 sys.exit(1)
@@ -867,6 +882,194 @@ def handle_ohif_command(args: argparse.Namespace) -> None:
         uninstall_ohif()
     else:
         logger.error(f"Unknown ohif command: {args.ohif_command}")
+        sys.exit(1)
+
+
+def _quarto_tarball_version(tarball: Path) -> str | None:
+    """Read the Quarto version from the tarball's ``quarto-<version>/`` top dir.
+
+    Only the first few member headers are read — no full decompression.
+    Returns None when the archive layout is unexpected.
+    """
+    try:
+        with tarfile.open(tarball, "r:gz") as tf:
+            for _ in range(5):
+                member = tf.next()
+                if member is None:
+                    break
+                match = re.match(r"(?:\./)?quarto-(\d[^/]*)(?:/|$)", member.name)
+                if match:
+                    return match.group(1)
+    except (tarfile.TarError, OSError) as e:
+        logger.warning(f"Failed to inspect Quarto tarball {tarball}: {e}")
+    return None
+
+
+def install_quarto(version: str | None = None, from_file: str | None = None) -> None:
+    """Install the Quarto CLI into the runtime directory.
+
+    Quarto is a self-contained tarball that bundles pandoc + typst, so neither
+    a system pandoc nor LaTeX is required. It is NOT a pip package — this
+    mirrors ``clarinet ohif install``: download from GitHub releases, or use a
+    local tarball (``from_file``) for air-gapped hosts (e.g. Astra Linux).
+
+    Args:
+        version: Quarto version to install (default from settings).
+        from_file: Path to a local ``quarto-*-linux-amd64.tar.gz`` (skip download).
+    """
+    tarball = Path(from_file) if from_file else None
+    if tarball is not None:
+        if not tarball.exists():
+            logger.error(f"Quarto tarball not found: {from_file}")
+            sys.exit(1)
+        if version is None:
+            # Without this, the version marker would record the settings
+            # default instead of what the tarball actually contains.
+            version = _quarto_tarball_version(tarball)
+            if version is None:
+                logger.warning(
+                    f"Could not determine the Quarto version from {from_file}; "
+                    f"assuming default v{settings.quarto_default_version}"
+                )
+    version = version or settings.quarto_default_version
+    quarto_dir = settings.quarto_install_path
+
+    # Idempotent: skip if already installed at this version.
+    version_file = quarto_dir / ".quarto-version"
+    if version_file.exists() and version_file.read_text().strip() == version:
+        logger.info(f"Quarto v{version} already installed at {quarto_dir}")
+        return
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+
+        if tarball is not None:
+            logger.info(f"Installing Quarto v{version} from {from_file}")
+        else:
+            url = (
+                "https://github.com/quarto-dev/quarto-cli/releases/download/"
+                f"v{version}/quarto-{version}-linux-amd64.tar.gz"
+            )
+            logger.info(f"Downloading Quarto v{version} from {url} ...")
+            tarball = tmp_path / "quarto.tar.gz"
+            try:
+                _download_file(url, tarball)
+            except Exception as e:
+                logger.error(f"Failed to download Quarto v{version}: {e}")
+                sys.exit(1)
+
+        with tarfile.open(tarball, "r:gz") as tf:
+            tf.extractall(tmp_path, filter="data")  # reject members escaping tmp_path
+
+        # The tarball's top-level directory is ``quarto-<version>/`` (bin/, share/).
+        extracted = next(
+            (p for p in tmp_path.iterdir() if p.is_dir() and p.name.startswith("quarto")),
+            None,
+        )
+        if extracted is None or not (extracted / "bin" / "quarto").exists():
+            logger.error("Could not find quarto/bin/quarto inside the tarball")
+            sys.exit(1)
+
+        if quarto_dir.exists():
+            shutil.rmtree(quarto_dir)
+        quarto_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(extracted, quarto_dir, dirs_exist_ok=True)
+
+    # Ensure the launcher is executable, then write the version marker.
+    (quarto_dir / "bin" / "quarto").chmod(0o755)
+    version_file.write_text(version)
+    logger.info(f"Quarto v{version} installed to {quarto_dir}")
+    logger.info("Run 'clarinet quarto status' to verify (runs 'quarto check').")
+
+
+def quarto_status() -> None:
+    """Show Quarto installation status and run ``quarto check``."""
+    from clarinet.services.quarto_render import resolve_quarto_executable
+
+    executable = resolve_quarto_executable()
+    if executable is None:
+        print("Quarto: not installed")
+        print(f"  Expected path: {settings.quarto_install_path / 'bin' / 'quarto'}")
+        print("  Run 'clarinet quarto install' (add '--from-file <tarball>' to install offline)")
+        return
+
+    print(f"Quarto executable: {executable}")
+    version_file = settings.quarto_install_path / ".quarto-version"
+    if version_file.exists():
+        print(f"  Installed version marker: {version_file.read_text().strip()}")
+
+    # `quarto check` reports the bundled pandoc/typst and the Python/Jupyter
+    # setup used to execute .qmd code chunks. On older hosts (e.g. Astra Linux
+    # SE 1.7) it surfaces glibc incompatibilities immediately.
+    try:
+        result = subprocess.run(
+            [str(executable), "check"], capture_output=True, text=True, timeout=120
+        )
+        print(result.stdout)
+        if result.returncode != 0:
+            print(result.stderr)
+            print("  Status: 'quarto check' reported problems (see above)")
+    except Exception as e:
+        print(f"  Status: failed to run 'quarto check': {e}")
+
+
+def uninstall_quarto() -> None:
+    """Remove the installed Quarto CLI."""
+    quarto_dir = settings.quarto_install_path
+    if not quarto_dir.exists():
+        print("Quarto: not installed")
+        return
+    shutil.rmtree(quarto_dir)
+    logger.info(f"Quarto removed from {quarto_dir}")
+
+
+def cleanup_quarto_renders(days: int) -> None:
+    """Delete rendered Quarto outputs older than ``days``.
+
+    Each render leaves a ``<name>/<render_id>/`` directory under the output
+    path (the ``.qmd`` copy, materialized CSVs — which may hold report data —
+    and the DOCX/PDF). They are not needed once downloaded; pruning them bounds
+    disk use and limits how long report data sits on disk.
+    """
+    if days < 1:
+        print("--days must be >= 1 (refusing to wipe all renders)")
+        sys.exit(1)
+    output_path = settings.get_quarto_output_path()
+    if not output_path.is_dir():
+        print(f"No Quarto output directory at {output_path}; nothing to clean")
+        return
+    cutoff = time.time() - days * 86400
+    removed = 0
+    for report_dir in output_path.iterdir():
+        if not report_dir.is_dir():
+            continue
+        for render_dir in report_dir.iterdir():
+            if render_dir.is_dir() and render_dir.stat().st_mtime < cutoff:
+                try:
+                    shutil.rmtree(render_dir)
+                except OSError as exc:
+                    logger.warning(f"Failed to remove {render_dir}: {exc}")
+                    continue
+                removed += 1
+        with contextlib.suppress(OSError):
+            report_dir.rmdir()  # remove the report folder if now empty
+    logger.info(
+        f"Quarto cleanup: removed {removed} render(s) older than {days}d from {output_path}"
+    )
+
+
+def handle_quarto_command(args: argparse.Namespace) -> None:
+    """Handle Quarto-related commands."""
+    if args.quarto_command == "install":
+        install_quarto(version=args.version, from_file=getattr(args, "from_file", None))
+    elif args.quarto_command == "status":
+        quarto_status()
+    elif args.quarto_command == "uninstall":
+        uninstall_quarto()
+    elif args.quarto_command == "cleanup":
+        cleanup_quarto_renders(days=args.days)
+    else:
+        logger.error(f"Unknown quarto command: {args.quarto_command}")
         sys.exit(1)
 
 
@@ -1157,6 +1360,35 @@ def main() -> None:
     # ohif uninstall
     ohif_subparsers.add_parser("uninstall", help="Remove OHIF Viewer runtime files")
 
+    # quarto command (Quarto CLI for *.qmd reports rendered to DOCX/PDF)
+    quarto_parser = subparsers.add_parser("quarto", help="Quarto CLI management commands")
+    quarto_subparsers = quarto_parser.add_subparsers(dest="quarto_command")
+
+    quarto_install_parser = quarto_subparsers.add_parser(
+        "install", help="Install the Quarto CLI (renders *.qmd reports to DOCX/PDF)"
+    )
+    quarto_install_parser.add_argument(
+        "--version", type=str, default=None, help="Quarto version (default: from settings)"
+    )
+    quarto_install_parser.add_argument(
+        "--from-file",
+        type=str,
+        default=None,
+        help="Path to a local quarto-*-linux-amd64.tar.gz (offline / air-gapped install)",
+    )
+
+    quarto_subparsers.add_parser(
+        "status", help="Show Quarto installation status (runs 'quarto check')"
+    )
+    quarto_subparsers.add_parser("uninstall", help="Remove the installed Quarto CLI")
+
+    quarto_cleanup_parser = quarto_subparsers.add_parser(
+        "cleanup", help="Delete rendered Quarto outputs older than N days"
+    )
+    quarto_cleanup_parser.add_argument(
+        "--days", type=int, default=30, help="Retention in days (default: 30)"
+    )
+
     # worker command
     worker_parser = subparsers.add_parser("worker", help="Run pipeline task worker")
     worker_parser.add_argument(
@@ -1434,6 +1666,8 @@ def main() -> None:
         handle_frontend_command(args)
     elif args.command == "ohif":
         handle_ohif_command(args)
+    elif args.command == "quarto":
+        handle_quarto_command(args)
     elif args.command == "session":
         if not args.session_command:
             session_parser.print_help()

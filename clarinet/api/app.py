@@ -25,6 +25,7 @@ from clarinet.api.routers import dicomweb as dicomweb
 from clarinet.api.routers import health as health
 from clarinet.api.routers import info as info
 from clarinet.api.routers import pipeline as pipeline
+from clarinet.api.routers import quarto_reports as quarto_reports
 from clarinet.api.routers import record as record
 from clarinet.api.routers import reports as reports
 from clarinet.api.routers import slicer  # slicer doesn't use database, no async version needed,
@@ -221,6 +222,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
                 "SELECT/WITH parser check protects mutating queries. "
                 "Use PostgreSQL for production."
             )
+
+    # Load Quarto report templates (*.qmd) from the project's reports folder
+    from clarinet.services.quarto_report_service import QuartoReportRegistry
+    from clarinet.utils.quarto_discovery import discover_quarto_templates
+
+    quarto_reports_path = settings.get_quarto_reports_path()
+    quarto_templates = discover_quarto_templates(quarto_reports_path)
+    app.state.quarto_report_registry = QuartoReportRegistry(quarto_templates)
+    if quarto_templates:
+        logger.info(
+            f"Loaded {len(quarto_templates)} Quarto report template(s) from {quarto_reports_path}"
+        )
 
     try:
         await ensure_admin_exists()
@@ -477,6 +490,9 @@ def create_app(root_path: str = "") -> FastAPI:
     app.include_router(slicer.router, prefix="/api/slicer", tags=["Slicer"])
     app.include_router(admin.router, prefix="/api/admin", tags=["Admin"])
     app.include_router(reports.router, prefix="/api/admin/reports", tags=["Reports"])
+    app.include_router(
+        quarto_reports.router, prefix="/api/admin/quarto-reports", tags=["Quarto Reports"]
+    )
     app.include_router(workflow.router, prefix="/api/admin/workflow", tags=["Workflow"])
     app.include_router(dicom.router, prefix="/api/dicom", tags=["DICOM"])
     app.include_router(pipeline.router, prefix="/api/pipelines", tags=["Pipelines"])
