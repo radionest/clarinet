@@ -34,7 +34,7 @@ paths:
 - `get_segment_names(segmentation)` → `list[str]`
 - `get_segment_centroid(segmentation, segment_name)` → `tuple[float,float,float] | None` — per-segment labelmap center via numpy
 - `count_segment_components(segmentation, segment_name)` → `int` — number of connected components via `scipy.ndimage.label` (6-connectivity); 0 if empty or not found
-- `get_largest_island_centroid(segmentation, segment_name)` → `tuple[float,float,float] | None` — largest connected component centroid via `vtkImageConnectivityFilter`; use for multi-island segments like `_pool`
+- `get_largest_island_centroid(segmentation, segment_name)` → `tuple[float,float,float] | None` — largest connected component centroid via `scipy.ndimage.label` (NOT `vtkImageConnectivityFilter` — see pitfall 6); use for multi-island segments like `_pool`
 - `copy_segments(source_seg, target_seg, segment_names=None, empty=False)`
 - `sync_segments(source_seg, target_seg, empty=False)` → `list[str]` — copy missing segments by name
 - `rename_segments(segmentation, prefix="NEW", color=None, start_from=1)` → `int`
@@ -66,6 +66,8 @@ paths:
    seg.SetReferenceImageGeometryParameterFromVolumeNode(volume)
    seg_logic.ExportAllSegmentsToLabelmapNode(seg, labelmap, 0)
    ```
+
+6. **`vtkImageConnectivityFilter` broken on VTK 9.5 / Slicer 5.10:** with `SetExtractionModeToLargestRegion()` it ignores the foreground `ScalarRange` and labels every voxel (background included) as a single region, so "largest region" spans the whole bounding box. Verified by probe (even on a clean two-island `vtkImageData`, output = entire extent, `n_regions=1`). Downstream a bbox centroid collapses onto the overall centroid (`dist==0`). Use **`scipy.ndimage.label`** instead (bundled with Slicer, already used by `count_segment_components`); pick the heaviest label via `np.bincount`. This is the implementation of `get_largest_island_centroid`.
 
 ## Slicer exec protocol
 

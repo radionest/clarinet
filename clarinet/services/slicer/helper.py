@@ -1352,51 +1352,36 @@ class SlicerHelper:
         return get_segment_names(self._unwrap_node(segmentation))
 
     @staticmethod
-    def _centroid_from_labelmap(
-        image_data: Any,
+    def _bbox_centroid_ras(
+        mask: Any,
         extent: tuple[int, int, int, int, int, int],
         image_to_world_source: Any,
     ) -> tuple[float, float, float] | None:
-        """Compute bounding-box centroid from a VTK labelmap in RAS coords.
+        """RAS bounding-box centroid of a boolean voxel *mask*.
 
         Uses ``np.any`` axis projections instead of ``np.nonzero`` to avoid
         allocating huge coordinate arrays (~10-50x faster, negligible memory).
 
-        VTK stores scalars in Fortran-contiguous order (i varies fastest),
-        so numpy reshape must be ``(k, j, i)`` = ``(dims[2], dims[1], dims[0])``.
-        Consequently ``np.any(mask, axis=(0, 1))`` collapses k and j, yielding
-        a 1-D boolean array along the i-axis, and so on for j and k.
+        *mask* must follow VTK's Fortran-order reshape
+        ``(k, j, i)`` = ``(dims[2], dims[1], dims[0])`` (i varies fastest), so
+        ``np.any(mask, axis=(0, 1))`` collapses k and j to a 1-D array along
+        the i-axis, and so on for j and k.
 
         Args:
-            image_data: ``vtkImageData`` whose scalars contain the mask.
+            mask: 3D boolean array in ``(k, j, i)`` order.
             extent: ``(xmin, xmax, ymin, ymax, zmin, zmax)`` of the labelmap.
             image_to_world_source: Image data to read the IJK→RAS matrix from.
-                May differ from *image_data* when ``vtkImageConnectivityFilter``
-                (or similar) strips orientation metadata from its output.
 
         Returns:
-            ``(R, A, S)`` centroid or ``None`` if the mask is empty.
+            ``(R, A, S)`` centroid or ``None`` if *mask* is all-False.
         """
         import numpy as np
-        from vtk.util.numpy_support import vtk_to_numpy
 
-        scalars = image_data.GetPointData().GetScalars()
-        if scalars is None:
-            return None
-
-        dims = image_data.GetDimensions()
-        arr = vtk_to_numpy(scalars).reshape(dims[2], dims[1], dims[0])
-        mask = arr > 0
-
-        i_any = np.any(mask, axis=(0, 1))
-        j_any = np.any(mask, axis=(0, 2))
-        k_any = np.any(mask, axis=(1, 2))
-
-        i_idx = np.where(i_any)[0]
+        i_idx = np.where(np.any(mask, axis=(0, 1)))[0]
         if len(i_idx) == 0:
             return None
-        j_idx = np.where(j_any)[0]
-        k_idx = np.where(k_any)[0]
+        j_idx = np.where(np.any(mask, axis=(0, 2)))[0]
+        k_idx = np.where(np.any(mask, axis=(1, 2)))[0]
 
         ci = (float(i_idx[0]) + float(i_idx[-1])) / 2.0 + extent[0]
         cj = (float(j_idx[0]) + float(j_idx[-1])) / 2.0 + extent[2]
@@ -1406,6 +1391,37 @@ class SlicerHelper:
         image_to_world_source.GetImageToWorldMatrix(mat)
         ras = mat.MultiplyPoint([ci, cj, ck, 1.0])
         return (ras[0], ras[1], ras[2])
+
+    @staticmethod
+    def _centroid_from_labelmap(
+        image_data: Any,
+        extent: tuple[int, int, int, int, int, int],
+        image_to_world_source: Any,
+    ) -> tuple[float, float, float] | None:
+        """Compute bounding-box centroid from a VTK labelmap in RAS coords.
+
+        Thin wrapper over :meth:`_bbox_centroid_ras`: turns the labelmap
+        scalars into a boolean mask, then delegates. ``image_to_world_source``
+        may differ from *image_data* when a filter strips orientation metadata
+        from its output.
+
+        Args:
+            image_data: ``vtkImageData`` whose scalars contain the mask.
+            extent: ``(xmin, xmax, ymin, ymax, zmin, zmax)`` of the labelmap.
+            image_to_world_source: Image data to read the IJK→RAS matrix from.
+
+        Returns:
+            ``(R, A, S)`` centroid or ``None`` if the mask is empty.
+        """
+        from vtk.util.numpy_support import vtk_to_numpy
+
+        scalars = image_data.GetPointData().GetScalars()
+        if scalars is None:
+            return None
+
+        dims = image_data.GetDimensions()
+        mask = vtk_to_numpy(scalars).reshape(dims[2], dims[1], dims[0]) > 0
+        return SlicerHelper._bbox_centroid_ras(mask, extent, image_to_world_source)
 
     def get_segment_centroid(
         self,
@@ -1494,11 +1510,11 @@ class SlicerHelper:
         """Compute the RAS centroid of the largest connected component in a segment.
 
         Like ``get_segment_centroid`` but isolates the largest island first
-        via ``vtkImageConnectivityFilter``. Useful for segments that contain
+        via ``scipy.ndimage.label``. Useful for segments that contain
         multiple disconnected regions (e.g. ``_pool`` in second_review) where
         the overall bounding-box center would fall in empty space.
 
-        Safe to call from observer callbacks — pure VTK + numpy, no event
+        Safe to call from observer callbacks — pure numpy + scipy, no event
         processing.
 
         Args:
@@ -1524,16 +1540,36 @@ class SlicerHelper:
         if extent[0] > extent[1]:
             return None
 
-        # Isolate the largest connected component.
-        # vtkOrientedImageData IS-A vtkImageData, so SetInputData accepts it.
-        conn = vtk.vtkImageConnectivityFilter()
-        conn.SetInputData(labelmap)
-        conn.SetExtractionModeToLargestRegion()
-        conn.Update()
+        # Isolate the largest connected component with scipy.ndimage.label.
+        #
+        # vtkImageConnectivityFilter is NOT usable here: in VTK 9.5 (Slicer
+        # 5.10) it ignores the foreground ScalarRange and labels every voxel —
+        # background included — as a single region, so "largest region" spans
+        # the whole bounding box and the centroid collapses onto
+        # get_segment_centroid (dist == 0). scipy is bundled with Slicer and
+        # already used by count_segment_components; ndimage.label is pure CPU
+        # (no Qt event processing), so it stays observer-callback-safe.
+        import numpy as np
+        from scipy.ndimage import label
+        from vtk.util.numpy_support import vtk_to_numpy
 
-        # Use filter output for scalars but ORIGINAL labelmap for the
-        # image-to-world matrix (filter output may lose orientation).
-        return self._centroid_from_labelmap(conn.GetOutput(), extent, labelmap)
+        scalars = labelmap.GetPointData().GetScalars()
+        if scalars is None:
+            return None
+
+        dims = labelmap.GetDimensions()
+        mask = vtk_to_numpy(scalars).reshape(dims[2], dims[1], dims[0]) > 0
+
+        labeled, num = label(mask)
+        if num == 0:
+            return None
+
+        # bincount index 0 is background; pick the heaviest foreground label.
+        sizes = np.bincount(labeled.ravel())
+        sizes[0] = 0
+        largest = labeled == int(sizes.argmax())
+
+        return self._bbox_centroid_ras(largest, extent, labelmap)
 
     def _apply_parent_transform(
         self,
