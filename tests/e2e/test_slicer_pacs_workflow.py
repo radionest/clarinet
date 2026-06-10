@@ -77,16 +77,6 @@ _test_pacs = PacsHelper(
 """
 
 
-def _context_injection_block(retrieve_mode: str = "c-move") -> str:
-    """Return a script block that injects Clarinet PACS context variables."""
-    return f"""
-pacs_host = "{PACS_HOST}"
-pacs_port = {PACS_PORT}
-pacs_aet = "{PACS_AET}"
-dicom_retrieve_mode = "{retrieve_mode}"
-"""
-
-
 def _monkey_patch_from_slicer_block() -> str:
     """Return a script block that monkey-patches PacsHelper.from_slicer.
 
@@ -130,6 +120,40 @@ def _check_slicer() -> None:
 @pytest.fixture(autouse=True)
 def _require_slicer_and_pacs(_check_slicer: None, _check_pacs: None) -> None:
     """Auto-use: skip if either Slicer or PACS is unavailable."""
+
+
+@pytest.fixture(scope="session")
+def _slicer_shares_filesystem(_check_slicer: None) -> None:
+    """Skip when Slicer cannot read the test harness's filesystem.
+
+    Some tests write data to local disk (e.g. a backend C-MOVE) and then have
+    Slicer load that exact path — which only works when Slicer and the harness
+    share a filesystem. In a split topology (Slicer on Windows, tests in WSL;
+    or Slicer on a remote host) the path is invisible to Slicer, so those tests
+    are skipped rather than failed.
+    """
+    import os
+    import tempfile
+
+    fd, probe = tempfile.mkstemp(suffix=".slicerfs")
+    os.close(fd)
+    try:
+        script = f"import os\n__execResult = {{'visible': os.path.exists({probe!r})}}"
+        result = asyncio.run(
+            SlicerService().execute(
+                f"http://{SLICER_HOST}:{SLICER_PORT}", script, request_timeout=10.0
+            )
+        )
+        if "visible" not in result:
+            pytest.fail(f"Filesystem probe returned no 'visible' key: {result}")
+        if not result["visible"]:
+            pytest.skip(
+                "Slicer does not share the test harness filesystem "
+                "(e.g. Slicer on Windows, tests in WSL) — "
+                "C-MOVE-to-disk-then-load needs a shared filesystem"
+            )
+    finally:
+        os.unlink(probe)
 
 
 # ---------------------------------------------------------------------------
@@ -671,6 +695,7 @@ class TestBackendCmoveThenSlicer:
 
     async def test_backend_cmove_then_slicer_exec(
         self,
+        _slicer_shares_filesystem: None,
         slicer_service: SlicerService,
         slicer_url: str,
         pacs_study_uid: str,
@@ -678,7 +703,12 @@ class TestBackendCmoveThenSlicer:
         storage_scp: Any,
         tmp_path: Path,
     ) -> None:
-        """C-MOVE retrieves series to disk, then Slicer loads the .dcm files."""
+        """C-MOVE retrieves series to disk, then Slicer loads the .dcm files.
+
+        Requires Slicer to share the harness filesystem (see
+        ``_slicer_shares_filesystem``) — it loads the C-MOVE'd files by their
+        on-disk path.
+        """
         from clarinet.services.dicom.models import (
             AssociationConfig,
             QueryRetrieveLevel,
@@ -754,8 +784,11 @@ class TestGetPacsHelperContextVars:
     The fix ensures that PACS server params (host/port/aet) come from Clarinet
     settings, while calling_aet/move_aet always come from Slicer's local config.
 
-    Context vars are set as module-level globals in the script (same as
-    build_slicer_context injects them via SlicerService._build_context_block).
+    Context vars are passed via ``execute(context=...)`` — the real Clarinet
+    path: ``SlicerService._build_script`` sets them as module-level globals on
+    the Slicer side, which is what ``_get_pacs_helper()`` reads. Inline
+    assignments in the script body would land in the per-call ``_ns``
+    namespace the helper can't see.
     """
 
     async def test_context_vars_override_server_not_aet(
@@ -764,15 +797,17 @@ class TestGetPacsHelperContextVars:
         slicer_url: str,
     ) -> None:
         """Injected pacs_host/port/aet used for server; calling_aet/move_aet from QSettings."""
+        # Clarinet injects PACS params via the context= dict (build_slicer_context),
+        # which SlicerService places in the helper module globals that
+        # _get_pacs_helper() reads. Inline script assignments would land in the
+        # per-call _ns namespace the helper can't see — use the real path.
+        context = {
+            "pacs_host": "10.99.99.99",
+            "pacs_port": "9999",
+            "pacs_aet": "FAKE_PACS",
+            "dicom_retrieve_mode": "c-move",
+        }
         script = """
-
-
-# Simulate Clarinet context injection (fake server — only check params)
-pacs_host = "10.99.99.99"
-pacs_port = "9999"
-pacs_aet = "FAKE_PACS"
-dicom_retrieve_mode = "c-move"
-
 pacs = _get_pacs_helper()
 slicer_pacs = PacsHelper.from_slicer()
 
@@ -783,7 +818,9 @@ __execResult = {
     "slicer_aet": slicer_pacs.calling_aet,
 }
 """
-        result = await slicer_service.execute(slicer_url, script, request_timeout=10.0)
+        result = await slicer_service.execute(
+            slicer_url, script, context=context, request_timeout=10.0
+        )
         assert "host" in result, f"Unexpected result from Slicer: {result}"
         assert result["host"] == "10.99.99.99"
         assert result["port"] == 9999
@@ -792,25 +829,60 @@ __execResult = {
         assert result["calling_aet"] == result["slicer_aet"]
         assert result["move_aet"] == result["slicer_aet"]
 
+    async def test_context_vars_do_not_leak_across_calls(
+        self,
+        slicer_service: SlicerService,
+        slicer_url: str,
+    ) -> None:
+        """Injected context is per-call: a later call without context sees none of it.
+
+        Slicer reuses one exec namespace for all calls — ``_build_script``
+        must pop its keys in ``finally``, otherwise this fake PACS host would
+        hijack every later ``_get_pacs_helper()`` call on this Slicer instance.
+        """
+        context = {
+            "pacs_host": "10.99.99.99",
+            "pacs_port": "9999",
+            "pacs_aet": "FAKE_PACS",
+            "dicom_retrieve_mode": "c-move",
+        }
+        first = await slicer_service.execute(
+            slicer_url,
+            "__execResult = {'host': _get_pacs_helper.__globals__['pacs_host']}",
+            context=context,
+            request_timeout=10.0,
+        )
+        assert first["host"] == "10.99.99.99"
+
+        script = """
+__execResult = {
+    "in_user_ns": "pacs_host" in globals(),
+    "in_helper_globals": "pacs_host" in _get_pacs_helper.__globals__,
+}
+"""
+        second = await slicer_service.execute(slicer_url, script, request_timeout=10.0)
+        assert second == {"in_user_ns": False, "in_helper_globals": False}
+
     async def test_move_aet_not_backend_aet_regression(
         self,
         slicer_service: SlicerService,
         slicer_url: str,
     ) -> None:
         """Regression: move_aet must NOT be backend's dicom_aet (the original bug)."""
+        context = {
+            "pacs_host": "10.99.99.99",
+            "pacs_port": "9999",
+            "pacs_aet": "FAKE_PACS",
+            "dicom_retrieve_mode": "c-move",
+        }
         script = """
-
-
-pacs_host = "10.99.99.99"
-pacs_port = "9999"
-pacs_aet = "FAKE_PACS"
-dicom_retrieve_mode = "c-move"
-
 pacs = _get_pacs_helper()
 
 __execResult = {"move_aet": pacs.move_aet}
 """
-        result = await slicer_service.execute(slicer_url, script, request_timeout=10.0)
+        result = await slicer_service.execute(
+            slicer_url, script, context=context, request_timeout=10.0
+        )
         assert "move_aet" in result, f"Unexpected result from Slicer: {result}"
         assert result["move_aet"] != "CLARINET", (
             f"REGRESSION: move_aet={result['move_aet']} should not be backend AET"
@@ -853,7 +925,7 @@ class TestCmoveWithContextVars:
 pacs = PacsHelper.from_slicer()
 __execResult = {"calling_aet": pacs.calling_aet}
 """
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             svc.execute(f"http://{SLICER_HOST}:{SLICER_PORT}", script, request_timeout=10.0)
         )
         return result["calling_aet"]
@@ -890,21 +962,30 @@ __execResult = {"calling_aet": pacs.calling_aet}
         pacs_series_uid: str,
     ) -> None:
         """C-MOVE via _get_pacs_helper() with injected PACS context loads real data."""
+        # Clarinet context — PACS server from settings, AET from Slicer QSettings.
+        # Must go through context= (module globals): inline script assignments
+        # land in the per-call _ns namespace _get_pacs_helper() can't see.
+        context = {
+            "pacs_host": PACS_HOST,
+            "pacs_port": str(PACS_PORT),
+            "pacs_aet": PACS_AET,
+            "dicom_retrieve_mode": "c-move",
+        }
         script = f"""
-
-
-# Inject Clarinet context — PACS server from settings, AET from Slicer QSettings
-pacs_host = "{PACS_HOST}"
-pacs_port = "{PACS_PORT}"
-pacs_aet = "{PACS_AET}"
-dicom_retrieve_mode = "c-move"
+# Drop the series from the local DICOM DB — the local-first lookup would
+# otherwise satisfy the request without ever exercising C-MOVE
+db = slicer.dicomDatabase
+if db and db.filesForSeries('{pacs_series_uid}'):
+    db.removeSeries('{pacs_series_uid}')
 
 s = SlicerHelper('/tmp/e2e_cmove_ctx')
 loaded = s.load_series_from_pacs('{pacs_study_uid}', '{pacs_series_uid}')
 assert len(loaded) > 0, f"No nodes loaded, got {{loaded}}"
 __execResult = {{"loaded": len(loaded)}}
 """
-        result = await slicer_service.execute(slicer_url, script, request_timeout=60.0)
+        result = await slicer_service.execute(
+            slicer_url, script, context=context, request_timeout=60.0
+        )
         assert "loaded" in result, f"Unexpected result from Slicer: {result}"
         assert result["loaded"] > 0
 
@@ -916,20 +997,19 @@ __execResult = {{"loaded": len(loaded)}}
         pacs_series_uid: str,
     ) -> None:
         """C-MOVE with unregistered move_aet fails — PACS can't deliver to unknown AET."""
+        context = {
+            "pacs_host": PACS_HOST,
+            "pacs_port": str(PACS_PORT),
+            "pacs_aet": PACS_AET,
+            "dicom_retrieve_mode": "c-move",
+        }
         script = f"""
-
-
 # Ensure series is NOT in local DB — force PACS retrieval path
 db = slicer.dicomDatabase
 if db and db.filesForSeries('{pacs_series_uid}'):
     db.removeSeries('{pacs_series_uid}')
 
 # Override from_slicer to return an AET not registered in Orthanc
-pacs_host = "{PACS_HOST}"
-pacs_port = "{PACS_PORT}"
-pacs_aet = "{PACS_AET}"
-dicom_retrieve_mode = "c-move"
-
 PacsHelper.from_slicer = classmethod(lambda cls, server_name=None: PacsHelper(
     host='{PACS_HOST}', port={PACS_PORT},
     called_aet='{PACS_AET}', calling_aet='NONEXISTENT_AET',
@@ -948,5 +1028,7 @@ except Exception:
 assert loaded == 0, f"Expected 0 loaded with wrong AET, got {{loaded}}"
 __execResult = {{"loaded": loaded, "move_aet": pacs.move_aet}}
 """
-        result = await slicer_service.execute(slicer_url, script, request_timeout=30.0)
+        result = await slicer_service.execute(
+            slicer_url, script, context=context, request_timeout=30.0
+        )
         assert result["loaded"] == 0
