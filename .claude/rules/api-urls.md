@@ -71,6 +71,7 @@ URL constants live in `tests/utils/urls.py`. Status codes: 201 = POST create, 20
 | `/api/records/{id}/output-files/{name}` | GET | 200 | Download a single OUTPUT file by `FileDefinition.name` (404 if not defined or not on disk). Auth: `AuthorizedRecordDep` |
 | `/api/records/{id}/fail` | POST | 200 | Manually fail record |
 | `/api/records/{id}/invalidate` | POST | 200 | Invalidate record |
+| `/api/records/{id}/runs` | GET | 200 | Pipeline task runs for this record, newest first. Auth: `AuthorizedRecordDep` |
 | `/api/records/{id}/viewers` | GET | 200 | List viewer URIs for all enabled viewers |
 | `/api/records/{id}/viewers/{name}` | GET | 200 | Get viewer URI for a specific viewer |
 
@@ -140,6 +141,10 @@ URL constants live in `tests/utils/urls.py`. Status codes: 201 = POST create, 20
 |---|---|---|---|
 | `/api/pipelines/{name}/definition` | GET | 200 | Pipeline definition |
 | `/api/pipelines/sync` | POST | 200 | Sync definitions |
+| `/api/pipelines/runs` | POST | 201 | Create task run audit row (CurrentUserDep; AuditMiddleware via service token). Idempotent on duplicate id |
+| `/api/pipelines/runs` | GET | 200 | List runs, filters: `status`, `task_name`, `record_id`, `since` + pagination (AdminUserDep) |
+| `/api/pipelines/runs/{task_id}` | GET | 200 | Get single run (AdminUserDep) |
+| `/api/pipelines/runs/{task_id}` | PATCH | 200 | Record terminal status (CurrentUserDep) |
 
 ### Workflow visualization (`/api/admin/workflow`)
 

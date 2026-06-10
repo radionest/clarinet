@@ -20,7 +20,7 @@ TaskIQ-based distributed task pipeline for long-running operations (GPU processi
 | `broker.py` | `get_broker_for(queue)` per-queue registry, `create_broker(queue)` factory, middlewares, result backend |
 | `message.py` | PipelineMessage (Pydantic model) |
 | `chain.py` | Pipeline chain builder DSL (step-by-step, task-bound queue routing) |
-| `middleware.py` | RetryMiddleware, DLQPublisher, PipelineChainMiddleware, PipelineLoggingMiddleware, DeadLetterMiddleware |
+| `middleware.py` | RetryMiddleware, DLQPublisher, PipelineChainMiddleware, PipelineLoggingMiddleware, DeadLetterMiddleware, AuditMiddleware |
 | `context.py` | TaskContext system: FileResolver (sync), RecordQuery (async), build_task_context() |
 | `sync_wrappers.py` | SyncRecordQuery, SyncPipelineClient, SyncTaskContext — sync wrappers for thread-based tasks |
 | `task.py` | `pipeline_task()` decorator factory — auto client lifecycle + TaskContext, sync/async auto-detect |
@@ -179,7 +179,19 @@ Task name collision: `register_task()` in `chain.py` prevents project tasks from
 - **`DeadLetterMiddleware`** routes terminal failures to DLQ after all retries are exhausted
 - `RetryMiddleware` sets `NoResultError` on retry; DeadLetterMiddleware skips those and only publishes real errors to DLQ
 - **`pipeline_ack_type`** controls when messages are acknowledged (default `when_executed` — message redelivered if worker crashes)
-- Middleware order: Retry → Logging → DeadLetter → Chain (DeadLetter must be before Chain so DLQPublisher is started before chain middleware needs it)
+- Middleware order: Retry → Logging → Audit → DeadLetter → Chain (DeadLetter must be before Chain so DLQPublisher is started before chain middleware needs it)
+
+## Task Run Audit
+
+**`AuditMiddleware`** records every task execution to the `pipeline_task_run` table
+(model: `clarinet/models/pipeline_task_run.py`, PK = TaskIQ `task_id`).
+`pre_execute` POSTs a `running` row; `post_execute` PATCHes the terminal status
+(`succeeded` / `failed` / `retrying` — NoResultError ⇒ retrying, same guard as DLQ).
+Writes go through `ClarinetClient` with the service token, fire-and-forget
+(`asyncio.create_task`); failures are logged and swallowed, pending writes are
+drained in `shutdown()`. Query via `GET /api/pipelines/runs` (admin) or
+`GET /api/records/{id}/runs` (record-scoped). Downstream projects need an
+alembic migration for the new table.
 
 ## TaskContext System
 

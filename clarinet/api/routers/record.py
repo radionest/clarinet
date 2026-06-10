@@ -35,6 +35,8 @@ from clarinet.api.dependencies import (
     ClientStoragePathDep,
     CurrentUserDep,
     MutableRecordDep,
+    PaginationDep,
+    PipelineTaskRunRepositoryDep,
     RecordRepositoryDep,
     RecordServiceDep,
     RecordTypeRepositoryDep,
@@ -56,6 +58,8 @@ from clarinet.config.toml_exporter import (
 from clarinet.exceptions import CONFLICT, NOT_FOUND
 from clarinet.exceptions.domain import AuthorizationError
 from clarinet.models import (
+    PipelineTaskRun,
+    PipelineTaskRunRead,
     Record,
     RecordContextInfoUpdate,
     RecordCreate,
@@ -800,6 +804,19 @@ async def check_record_files(
     """
     changed_files, checksums = await service.check_files(record_id)
     return FileCheckResult(changed_files=changed_files, checksums=checksums)
+
+
+@router.get("/{record_id}/runs", response_model=list[PipelineTaskRunRead])
+async def get_record_pipeline_runs(
+    record: AuthorizedRecordDep,
+    runs_repo: PipelineTaskRunRepositoryDep,
+    pagination: PaginationDep,
+) -> list[PipelineTaskRun]:
+    """Pipeline task runs linked to this record, newest first."""
+    assert record.id is not None  # SQLModel PK after get
+    return list(
+        await runs_repo.find_by_record(record.id, skip=pagination.skip, limit=pagination.limit)
+    )
 
 
 # Anything outside ``[A-Za-z0-9_.-]`` is replaced before going into the

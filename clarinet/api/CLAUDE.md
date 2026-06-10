@@ -46,12 +46,13 @@ See `clarinet/api/exception_handlers.py` for the full mapping.
 
 ## Pipeline Router (pipeline.py)
 
-Mounted at `/api/pipelines`, conditional on `pipeline_enabled`. Endpoints:
-- `GET /api/pipelines` — list all pipeline definitions from DB
-- `GET /api/pipelines/{name}/definition` — get definition by name (used by `PipelineChainMiddleware`)
-- `POST /api/pipelines/sync` — re-sync pipeline definitions to DB on demand
+Mounted at `/api/pipelines` (unconditionally). Endpoints:
+- `GET /api/pipelines/{name}/definition` — get definition by name (used by `PipelineChainMiddleware`); no auth (workers)
+- `POST /api/pipelines/sync` — re-sync pipeline definitions to DB on demand; no auth
+- `POST /api/pipelines/runs` / `PATCH /api/pipelines/runs/{task_id}` — task run audit rows written by `AuditMiddleware` (`CurrentUserDep`; service token authenticates as admin)
+- `GET /api/pipelines/runs[/{task_id}]` — list/get runs (`AdminUserDep`)
 
-Uses `PipelineDefinitionRepositoryDep`.
+Uses `PipelineDefinitionRepositoryDep` + `PipelineTaskRunRepositoryDep`. Record-scoped view: `GET /api/records/{id}/runs` in record.py (`AuthorizedRecordDep`).
 
 ## Config Mode Guards
 

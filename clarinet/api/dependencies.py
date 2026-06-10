@@ -18,6 +18,7 @@ from clarinet.models import Record, User
 from clarinet.repositories.file_definition_repository import FileDefinitionRepository
 from clarinet.repositories.patient_repository import PatientRepository
 from clarinet.repositories.pipeline_definition_repository import PipelineDefinitionRepository
+from clarinet.repositories.pipeline_task_run_repository import PipelineTaskRunRepository
 from clarinet.repositories.record_repository import RecordRepository
 from clarinet.repositories.record_type_repository import RecordTypeRepository
 from clarinet.repositories.report_repository import ReportRepository
@@ -184,6 +185,13 @@ async def get_pipeline_definition_repository(
     return PipelineDefinitionRepository(session)
 
 
+async def get_pipeline_task_run_repository(
+    session: SessionDep,
+) -> PipelineTaskRunRepository:
+    """Get pipeline task run repository instance."""
+    return PipelineTaskRunRepository(session)
+
+
 # Repository type aliases
 FileDefinitionRepositoryDep = Annotated[
     FileDefinitionRepository, Depends(get_file_definition_repository)
@@ -196,6 +204,9 @@ RecordRepositoryDep = Annotated[RecordRepository, Depends(get_record_repository)
 RecordTypeRepositoryDep = Annotated[RecordTypeRepository, Depends(get_record_type_repository)]
 PipelineDefinitionRepositoryDep = Annotated[
     PipelineDefinitionRepository, Depends(get_pipeline_definition_repository)
+]
+PipelineTaskRunRepositoryDep = Annotated[
+    PipelineTaskRunRepository, Depends(get_pipeline_task_run_repository)
 ]
 
 # Service factory functions

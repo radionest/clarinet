@@ -14,10 +14,15 @@ after each step and dispatches the next step in the pipeline.
 PipelineLoggingMiddleware logs task lifecycle events.
 
 DeadLetterMiddleware routes permanently failed tasks to the dead letter queue.
+
+AuditMiddleware records every task execution to the pipeline_task_run table
+via the HTTP API (fire-and-forget).
 """
 
 from __future__ import annotations
 
+import asyncio
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from taskiq import TaskiqMiddleware
@@ -29,6 +34,8 @@ from clarinet.utils.logger import logger
 from clarinet.utils.serialization import json_dumps_bytes
 
 if TYPE_CHECKING:
+    from collections.abc import Coroutine
+
     from aio_pika.abc import AbstractChannel, AbstractRobustConnection
     from taskiq import TaskiqMessage, TaskiqResult
 
@@ -254,6 +261,143 @@ class RetryMiddleware(_SmartRetryMiddleware):
                 )
                 return
         await super().on_error(message, result, exception)
+
+
+class AuditMiddleware(TaskiqMiddleware):
+    """Records pipeline task lifecycle to the ``pipeline_task_run`` table via HTTP API.
+
+    ``pre_execute`` posts a ``running`` row; ``post_execute`` patches the
+    terminal status (``succeeded`` / ``failed`` / ``retrying``).  HTTP calls
+    are fire-and-forget (``asyncio.create_task``) so the hot path never waits
+    on the API; failures are logged and swallowed — audit must not break task
+    execution.  Pending writes are drained in ``shutdown()``.
+
+    Client lifecycle mirrors ``PipelineChainMiddleware`` (lazy init +
+    ``_owns_client``): each per-queue broker gets its own middleware instance
+    with its own client.
+
+    Args:
+        client: Optional pre-configured ClarinetClient. If not provided,
+            one is created from settings on first use and closed on ``shutdown()``.
+    """
+
+    def __init__(self, client: ClarinetClient | None = None) -> None:
+        super().__init__()
+        self._client = client
+        self._owns_client = client is None
+        self._pending: set[asyncio.Task[None]] = set()
+
+    async def _ensure_client(self) -> ClarinetClient:
+        """Lazily create the ClarinetClient with service token auth."""
+        if self._client is not None:
+            return self._client
+
+        self._client = ClarinetClient(
+            base_url=settings.effective_api_base_url,
+            service_token=settings.effective_service_token,
+            verify_ssl=settings.api_verify_ssl,
+        )
+        return self._client
+
+    def _fire(self, coro: Coroutine[Any, Any, None]) -> None:
+        """Schedule *coro* fire-and-forget; hold a reference so GC can't drop it."""
+        task = asyncio.create_task(coro)
+        self._pending.add(task)
+        task.add_done_callback(self._pending.discard)
+
+    async def shutdown(self) -> None:
+        if self._pending:
+            await asyncio.gather(*self._pending, return_exceptions=True)
+        if self._owns_client and self._client is not None:
+            await self._client.close()
+            self._client = None
+
+    async def pre_execute(self, message: TaskiqMessage) -> TaskiqMessage:
+        # Capture timestamps and message fields synchronously — the deferred
+        # coroutine may run arbitrarily later and must not skew them.
+        started_at = datetime.now(UTC)
+        task_id = message.task_id
+        task_name = message.task_name
+        labels = message.labels
+        payload: dict[str, Any] = (
+            message.args[0] if message.args and isinstance(message.args[0], dict) else {}
+        )
+        step_index_label = labels.get("step_index")
+        try:
+            step_index = int(step_index_label) if step_index_label is not None else None
+        except (TypeError, ValueError):
+            step_index = None
+
+        async def _post() -> None:
+            try:
+                client = await self._ensure_client()
+                await client.create_pipeline_run(
+                    task_id=task_id,
+                    task_name=task_name,
+                    queue=str(labels.get("queue", "")),
+                    pipeline_id=labels.get("pipeline_id"),
+                    step_index=step_index,
+                    record_id=payload.get("record_id"),
+                    patient_id=payload.get("patient_id"),
+                    study_uid=payload.get("study_uid"),
+                    series_uid=payload.get("series_uid"),
+                    started_at=started_at,
+                )
+            except Exception as e:
+                logger.warning(f"AuditMiddleware: failed to record start of '{task_id}': {e}")
+
+        self._fire(_post())
+        return message
+
+    async def post_execute(self, message: TaskiqMessage, result: TaskiqResult[Any]) -> None:
+        """Record the terminal status of a task execution.
+
+        Args:
+            message: The executed task message.
+            result: The task execution result.
+        """
+        from taskiq.exceptions import NoResultError
+
+        finished_at = datetime.now(UTC)
+        task_id = message.task_id
+
+        error_status_code: int | None = None
+        if not result.is_err:
+            status = "succeeded"
+            error_type = error_message = None
+            return_value = result.return_value if isinstance(result.return_value, dict) else None
+        elif isinstance(result.error, NoResultError):
+            # SmartRetryMiddleware replaces error with NoResultError on retry
+            status = "retrying"
+            error_type = error_message = None
+            return_value = None
+        else:
+            status = "failed"
+            error = result.error
+            error_type = type(error).__name__ if error else None
+            error_message = str(error) if error else None
+            error_status_code = getattr(error, "status_code", None)
+            return_value = None
+
+        execution_time = result.execution_time
+
+        async def _patch() -> None:
+            try:
+                client = await self._ensure_client()
+                await client.finish_pipeline_run(
+                    task_id=task_id,
+                    status=status,
+                    finished_at=finished_at,
+                    execution_time=execution_time,
+                    error_type=error_type,
+                    error_message=error_message,
+                    error_status_code=error_status_code,
+                    result=return_value,
+                )
+            except Exception as e:
+                logger.warning(f"AuditMiddleware: failed to record finish of '{task_id}': {e}")
+
+        self._fire(_patch())
 
 
 class PipelineChainMiddleware(TaskiqMiddleware):
