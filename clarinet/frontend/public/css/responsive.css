@@ -13,7 +13,7 @@
     }
 
     .navbar-item {
-        padding: var(--spacing-xs) var(--spacing-sm);
+        padding: 0 var(--spacing-sm);
         font-size: 0.8rem;
     }
 
@@ -64,8 +64,12 @@
         flex-direction: column;
     }
 
-    /* Container */
-    .container {
-        padding: 0 var(--spacing-sm);
+    /* Tighter UID truncation on small screens */
+    .cell-uid {
+        max-width: 16ch;
+    }
+
+    .cell-desc {
+        max-width: 24ch;
     }
 }

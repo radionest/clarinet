@@ -4,65 +4,107 @@
 
 .btn {
     display: inline-block;
-    padding: 0.5rem 1rem;
-    border: none;
+    padding: 0.45rem 1rem;
+    border: 1px solid transparent;
     border-radius: var(--radius-md);
-    font-size: 1rem;
+    font-family: var(--font-sans);
+    font-size: 0.875rem;
     font-weight: 500;
+    line-height: 1.45;
     cursor: pointer;
-    transition: all 0.2s;
+    transition: background-color 0.15s, border-color 0.15s, color 0.15s, box-shadow 0.15s;
     text-decoration: none;
     text-align: center;
 
+    &:focus-visible {
+        outline: none;
+        box-shadow: var(--focus-ring);
+    }
+
     &:disabled,
-    &[disabled] {
+    &[disabled],
+    &.disabled {
         opacity: 0.5;
         cursor: not-allowed;
         pointer-events: none;
     }
 }
 
+/* Adjacent buttons rendered without a flex-gap wrapper (table action
+   cells, viewer links in the record card). Scoped — gap containers like
+   .modal-footer / .form-actions already space their children. */
+.cell-actions .btn + .btn,
+.record-info .btn + .btn {
+    margin-left: 6px;
+}
+
 .btn-primary {
-    background-color: var(--primary-color);
-    color: white;
+    background-color: var(--teal);
+    border-color: var(--teal);
+    color: #ffffff;
 
     &:hover {
-        background-color: #1e3a8a;
+        background-color: var(--teal-deep);
+        border-color: var(--teal-deep);
     }
 }
 
 .btn-secondary {
-    background-color: var(--secondary-color);
-    color: white;
+    background-color: var(--surface);
+    border-color: var(--hairline-strong);
+    color: var(--ink);
 
     &:hover {
-        background-color: #475569;
+        background-color: var(--surface-sunken);
+        border-color: var(--ink-faint);
     }
 }
 
 .btn-danger {
-    background-color: var(--danger-color);
-    color: white;
+    background-color: var(--red);
+    border-color: var(--red);
+    color: #ffffff;
 
     &:hover {
-        background-color: #b91c1c;
+        background-color: #96281e;
+        border-color: #96281e;
+    }
+}
+
+.btn-success {
+    background-color: var(--green);
+    border-color: var(--green);
+    color: #ffffff;
+
+    &:hover {
+        background-color: #25653f;
+        border-color: #25653f;
+    }
+}
+
+.btn-warning {
+    background-color: var(--surface);
+    border-color: var(--amber);
+    color: var(--amber);
+
+    &:hover {
+        background-color: var(--amber-wash);
     }
 }
 
 .btn-outline {
     background-color: transparent;
-    border: 1px solid var(--primary-color);
-    color: var(--primary-color);
+    border-color: var(--teal);
+    color: var(--teal);
 
     &:hover {
-        background-color: var(--primary-color);
-        color: white;
+        background-color: var(--teal-wash);
     }
 }
 
 .btn-sm {
-    padding: var(--spacing-xs) var(--spacing-sm);
-    font-size: 0.875rem;
+    padding: 0.2rem 0.6rem;
+    font-size: 0.8125rem;
 }
 
 .btn-block {

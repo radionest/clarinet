@@ -291,31 +291,45 @@ fn record_row(record: Record, config: Config(msg)) -> Element(msg) {
     [],
     list.flatten([
       [
-        html.td([], [html.text(record_id_str)]),
+        html.td([attribute.class("cell-id")], [html.text(record_id_str)]),
         html.td([], [html.text(type_label)]),
         html.td([], [config.status_cell(record)]),
       ],
       case config.show_patient_columns {
         True -> [
           html.td([], [html.text(patient_name(record))]),
-          html.td([], [html.text(record.patient_id)]),
-          html.td([], [html.text(patient_anon_id(record))]),
+          html.td([attribute.class("cell-id")], [
+            html.text(record.patient_id),
+          ]),
+          html.td([attribute.class("cell-id")], [
+            html.text(patient_anon_id(record)),
+          ]),
         ]
         False -> []
       },
       case config.show_study_series {
-        True -> [html.td([], [html.text(study_series_text(record))])]
+        True -> [
+          html.td([attribute.class("cell-desc")], [
+            html.text(study_series_text(record)),
+          ]),
+        ]
         False -> []
       },
       case config.show_modality {
-        True -> [html.td([], [html.text(record_modality_text(record))])]
+        True -> [
+          html.td([attribute.class("cell-code")], [
+            html.text(record_modality_text(record)),
+          ]),
+        ]
         False -> []
       },
       case config.user_cell {
         Some(render) -> [html.td([], [render(record)])]
         None -> []
       },
-      [html.td([], [config.actions_cell(record)])],
+      [
+        html.td([attribute.class("cell-actions")], [config.actions_cell(record)]),
+      ],
     ]),
   )
 }
