@@ -69,6 +69,7 @@ fn make_record() -> models.Record {
     started_at: None,
     finished_at: None,
     radiant: None,
+    display_anon_id: None,
     is_editable: True,
   )
 }

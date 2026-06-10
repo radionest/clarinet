@@ -726,6 +726,73 @@ class TestMaskRecords:
         assert result.patient.id == expected_anon_id
         assert result.patient.name == "Anon Patient Name"
 
+    def test_display_anon_id_per_patient_mode(self) -> None:
+        """Default mode: display_anon_id is the per-patient anon_id."""
+        record = _make_record_read(auto_id=42)
+
+        assert record.display_anon_id == f"{settings.anon_id_prefix}_42"
+
+    def test_display_anon_id_per_study_mode(self) -> None:
+        """Per-study mode + anonymized study: display_anon_id is the per-study hash."""
+        with patch("clarinet.models.record.settings") as model_settings:
+            model_settings.anon_per_study_patient_id = True
+            model_settings.anon_per_study_patient_id_hex_length = 8
+            model_settings.anon_uid_salt = "test-salt"
+            model_settings.anon_id_prefix = "NIR_LIVER"
+            record = _make_record_read(
+                auto_id=42,
+                study_uid="1.2.3.4.5.6.7.8",
+                study_anon_uid="9.8.7.6.5.4.3.2",
+            )
+
+        expected_hash = hashlib.sha256(b"test-salt:1.2.3.4.5.6.7.8").hexdigest()[:8]
+        assert record.display_anon_id == f"NIR_LIVER_{expected_hash}"
+
+    def test_display_anon_id_per_study_mode_falls_back_until_study_anonymized(self) -> None:
+        """Per-study mode + study.anon_uid=None: fall back to per-patient anon_id."""
+        with patch("clarinet.models.record.settings") as model_settings:
+            model_settings.anon_per_study_patient_id = True
+            model_settings.anon_per_study_patient_id_hex_length = 8
+            model_settings.anon_uid_salt = "test-salt"
+            model_settings.anon_id_prefix = "NIR_LIVER"
+            record = _make_record_read(auto_id=42, study_anon_uid=None)
+
+        assert record.display_anon_id == f"{settings.anon_id_prefix}_42"
+
+    def test_display_anon_id_survives_masking_and_revalidation(self) -> None:
+        """Masking + FastAPI response re-validation keep the original-UID hash.
+
+        Masking rewrites study_uid to the anon UID; if display_anon_id were
+        recomputed after that (FastAPI re-validates response models), the hash
+        would be taken from the anon UID and stop matching the PatientID in PACS.
+        """
+        user = _make_user(is_superuser=False)
+        with (
+            patch("clarinet.models.record.settings") as model_settings,
+            patch("clarinet.api.masking.settings") as masking_settings,
+        ):
+            for s in (model_settings, masking_settings):
+                s.anon_per_study_patient_id = True
+                s.anon_per_study_patient_id_hex_length = 8
+                s.anon_uid_salt = "test-salt"
+                s.anon_id_prefix = "NIR_LIVER"
+            record = _make_record_read(
+                auto_id=42,
+                study_uid="1.2.3.4.5.6.7.8",
+                study_anon_uid="9.8.7.6.5.4.3.2",
+            )
+
+            result = mask_record_patient_data(record, user)
+            revalidated = RecordRead.model_validate(result.model_dump())
+
+        expected_hash = hashlib.sha256(b"test-salt:1.2.3.4.5.6.7.8").hexdigest()[:8]
+        expected_id = f"NIR_LIVER_{expected_hash}"
+        # display matches the masked PatientID, not a hash of the anon study UID
+        assert result.display_anon_id == expected_id
+        assert result.patient_id == expected_id
+        assert result.study_uid == "9.8.7.6.5.4.3.2"
+        assert revalidated.display_anon_id == expected_id
+
     def test_mask_records_with_superuser(self) -> None:
         """mask_records with superuser returns unmasked data."""
         superuser = _make_user(is_superuser=True)

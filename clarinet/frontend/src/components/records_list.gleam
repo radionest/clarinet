@@ -330,9 +330,13 @@ fn patient_name(record: Record) -> String {
 }
 
 fn patient_anon_id(record: Record) -> String {
-  case record.patient {
-    Some(p) -> option.unwrap(p.anon_id, "—")
-    None -> "—"
+  case record.display_anon_id {
+    Some(id) -> id
+    None ->
+      case record.patient {
+        Some(p) -> option.unwrap(p.anon_id, "—")
+        None -> "—"
+      }
   }
 }
 

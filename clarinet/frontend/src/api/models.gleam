@@ -130,6 +130,10 @@ pub type Record {
     finished_at: Option(String),
     // Computed fields
     radiant: Option(String),
+    // Server-derived anon ID for display: per-study hash when
+    // anon_per_study_patient_id is enabled and the study is anonymized,
+    // otherwise the patient-level anon_id
+    display_anon_id: Option(String),
     // Server-side verdict: may the submitted data still be changed by
     // non-superusers (RecordType.editable + edit_window_days)
     is_editable: Bool,
