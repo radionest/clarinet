@@ -167,7 +167,7 @@ def setup_exception_handlers(app: FastAPI) -> None:
             f"422 ValidationError on {request.method} {request.url.path}: {exc}"
         )
         return JSONResponse(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             content={"detail": str(exc) if str(exc) else "Validation failed"},
         )
 
@@ -187,7 +187,7 @@ def setup_exception_handlers(app: FastAPI) -> None:
             f"{exc.reason}"
         )
         return JSONResponse(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             content={
                 "detail": str(exc),
                 "code": exc.error_code,
@@ -224,7 +224,7 @@ def setup_exception_handlers(app: FastAPI) -> None:
                 entry["params"] = e.params
             errors_payload.append(entry)
         return JSONResponse(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             content={"detail": "Validation failed", "errors": errors_payload},
         )
 
@@ -329,7 +329,7 @@ def setup_exception_handlers(app: FastAPI) -> None:
             f"422 SlicerError on {request.method} {request.url.path}: {exc}"
         )
         return JSONResponse(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             content={"detail": str(exc) if str(exc) else "Slicer operation failed"},
         )
 
@@ -437,7 +437,7 @@ def setup_exception_handlers(app: FastAPI) -> None:
             f"422 ArgumentError on {request.method} {request.url.path}: {exc}"
         )
         return JSONResponse(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             content={"detail": "Invalid query parameters"},
         )
 
@@ -450,7 +450,7 @@ def setup_exception_handlers(app: FastAPI) -> None:
             f"422 InvalidRequestError on {request.method} {request.url.path}: {exc}"
         )
         return JSONResponse(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             content={"detail": "Invalid query parameters"},
         )
 
@@ -461,7 +461,7 @@ def setup_exception_handlers(app: FastAPI) -> None:
             f"422 StatementError on {request.method} {request.url.path}: {exc.orig}"
         )
         return JSONResponse(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             content={"detail": "Invalid data for database operation"},
         )
 
@@ -472,7 +472,7 @@ def setup_exception_handlers(app: FastAPI) -> None:
             f"422 OverflowError on {request.method} {request.url.path}: {exc}"
         )
         return JSONResponse(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             content={"detail": "Numeric value out of range"},
         )
 
@@ -483,7 +483,7 @@ def setup_exception_handlers(app: FastAPI) -> None:
             f"422 ValueError on {request.method} {request.url.path}: {exc}"
         )
         return JSONResponse(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             content={"detail": str(exc)},
         )
 

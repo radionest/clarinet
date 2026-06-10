@@ -80,6 +80,14 @@ clarinet = "clarinet.cli.main:main"
 Repository = "https://github.com/radionest/clarinet"
 Issues = "https://github.com/radionest/clarinet/issues"
 
+[tool.uv]
+# Security floors for transitive deps (Dependabot alerts 11-13).
+# Keeps future `uv lock --upgrade` from resolving back into vulnerable ranges.
+constraint-dependencies = [
+    "aiohttp>=3.14.0",
+    "starlette>=1.0.1",
+]
+
 [tool.hatch.build.targets.wheel]
 packages = ["clarinet"]
 exclude = [
@@ -226,6 +234,4 @@ filterwarnings = [
     "ignore:.*datetime.datetime.utcnow.*:DeprecationWarning:nrrd",
     # sqlmodel._compat: pydantic validator "deprecated" warning
     "ignore:deprecated:DeprecationWarning:sqlmodel._compat",
-    # starlette: HTTP_422_UNPROCESSABLE_ENTITY renamed to HTTP_422_UNPROCESSABLE_CONTENT
-    "ignore:.*HTTP_422_UNPROCESSABLE_ENTITY.*:DeprecationWarning",
 ]
