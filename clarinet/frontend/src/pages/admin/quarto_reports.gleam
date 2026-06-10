@@ -303,6 +303,9 @@ fn poll_effect(name: String, render_id: String, key: String) -> Effect(Msg) {
   Nil
 }
 
+// The handle reaches the model via PollScheduled in the same synchronous
+// dispatch — long before the 3s timer can fire — so `cleanup` never observes
+// a missing handle for an armed timer.
 fn schedule_poll() -> Effect(Msg) {
   use dispatch <- effect.from
   let timer_id = global.set_timeout(3000, fn() { dispatch(PollTick) })
