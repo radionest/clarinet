@@ -71,6 +71,7 @@ URL constants live in `tests/utils/urls.py`. Status codes: 201 = POST create, 20
 | `/api/records/{id}/output-files/{name}` | GET | 200 | Download a single OUTPUT file by `FileDefinition.name` (404 if not defined or not on disk). Auth: `AuthorizedRecordDep` |
 | `/api/records/{id}/fail` | POST | 200 | Manually fail record |
 | `/api/records/{id}/invalidate` | POST | 200 | Invalidate record. Hard mode: **409** for non-superusers when the record is finished and its type locks submitted records |
+| `/api/records/{id}/events` | GET | 200 | Audit trail (RecordEvent), oldest first; `actor_id=null` = system action. Auth: `AuthorizedRecordDep` |
 | `/api/records/{id}/viewers` | GET | 200 | List viewer URIs for all enabled viewers |
 | `/api/records/{id}/viewers/{name}` | GET | 200 | Get viewer URI for a specific viewer |
 
@@ -118,6 +119,7 @@ URL constants live in `tests/utils/urls.py`. Status codes: 201 = POST create, 20
 | `/api/admin/records/{id}/status` | PATCH | 200 | Admin set record status |
 | `/api/admin/records/{id}/user` | DELETE | 200 | Admin unassign record user |
 | `/api/admin/records/{id}/output-files` | DELETE | 200 | Clear output files (admin) |
+| `/api/admin/records/events/deleted` | GET | 200 | Audit events of deleted records (snapshot in `old_value`), newest first |
 | `/api/admin/record-types/stats` | GET | 200 | Record type stats |
 | `/api/admin/reports` | GET | 200 | List custom SQL reports (`*.sql` from `settings.reports_path`) |
 | `/api/admin/reports/{name}/download?format=csv\|xlsx` | GET | 200 | Download report as CSV or XLSX (default: csv) |

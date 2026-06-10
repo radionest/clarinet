@@ -2,7 +2,9 @@
 Dependencies for FastAPI application with enhanced dependency injection.
 """
 
+import hmac
 from typing import Annotated
+from uuid import UUID
 
 from fastapi import Depends, HTTPException, Path, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,6 +20,7 @@ from clarinet.models import Record, User
 from clarinet.repositories.file_definition_repository import FileDefinitionRepository
 from clarinet.repositories.patient_repository import PatientRepository
 from clarinet.repositories.pipeline_definition_repository import PipelineDefinitionRepository
+from clarinet.repositories.record_event_repository import RecordEventRepository
 from clarinet.repositories.record_repository import RecordRepository
 from clarinet.repositories.record_type_repository import RecordTypeRepository
 from clarinet.repositories.report_repository import ReportRepository
@@ -184,6 +187,11 @@ async def get_pipeline_definition_repository(
     return PipelineDefinitionRepository(session)
 
 
+async def get_record_event_repository(session: SessionDep) -> RecordEventRepository:
+    """Get record event repository instance."""
+    return RecordEventRepository(session)
+
+
 # Repository type aliases
 FileDefinitionRepositoryDep = Annotated[
     FileDefinitionRepository, Depends(get_file_definition_repository)
@@ -197,6 +205,23 @@ RecordTypeRepositoryDep = Annotated[RecordTypeRepository, Depends(get_record_typ
 PipelineDefinitionRepositoryDep = Annotated[
     PipelineDefinitionRepository, Depends(get_pipeline_definition_repository)
 ]
+RecordEventRepositoryDep = Annotated[RecordEventRepository, Depends(get_record_event_repository)]
+
+
+def get_audit_actor(request: Request, user: CurrentUserDep) -> UUID | None:
+    """Resolve the audit actor for the current request.
+
+    ``None`` marks a system call: requests authenticated with a valid
+    ``X-Internal-Token`` (pipeline workers, RecordFlow engine) act as the
+    admin user but must not be attributed to a human in the audit trail.
+    """
+    header_token = request.headers.get("X-Internal-Token")
+    if header_token and hmac.compare_digest(header_token, settings.effective_service_token):
+        return None
+    return user.id
+
+
+AuditActorDep = Annotated[UUID | None, Depends(get_audit_actor)]
 
 # Service factory functions
 
@@ -225,10 +250,11 @@ async def get_study_service(
 
 async def get_record_service(
     record_repo: RecordRepositoryDep,
+    event_repo: RecordEventRepositoryDep,
     request: Request,
 ) -> RecordService:
-    """Get record service instance with injected repository and engine."""
-    return RecordService(record_repo, get_recordflow_engine(request))
+    """Get record service instance with injected repositories and engine."""
+    return RecordService(record_repo, get_recordflow_engine(request), event_repo=event_repo)
 
 
 async def get_record_type_service(
