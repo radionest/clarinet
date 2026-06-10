@@ -110,6 +110,13 @@ uv run clarinet quarto install --from-file ./quarto-1.4.557-linux-amd64.tar.gz
 uv run clarinet quarto status
 ```
 
+The deploy-bundle installer (`deploy/install/install-clarinet.sh`) picks the
+same pair up automatically: drop a `quarto-<version>-linux-amd64.tar.gz` next
+to the wheel in the bundle and the installer runs
+`clarinet quarto install --from-file` and installs the app with the `quarto`
+pip extra. Bundles without a tarball are unaffected. This is how the test-VM
+pipeline provisions Quarto, and it works for air-gapped production hosts too.
+
 The binary lands under `{storage_path}/quarto`. Resolution order at render
 time: `settings.quarto_executable` (explicit) → `{storage_path}/quarto/bin/quarto`
 → `quarto` on `PATH`.

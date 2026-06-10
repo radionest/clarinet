@@ -376,7 +376,8 @@ build-deps: ## Download dependency wheels for offline VM install
 	echo "Downloading dependency wheels for $$WHEEL..."; \
 	mkdir -p dist/deps; \
 	uv tool run --python 3.12 pip download \
-		-d dist/deps "$$WHEEL[performance]"
+		-d dist/deps "$$WHEEL[performance,quarto]"; \
+	echo "performance,quarto" > dist/deps/.extras  # cache marker — keep in sync with vm.sh deps_extras
 
 .PHONY: dev-setup
 dev-setup: ## Set up development environment

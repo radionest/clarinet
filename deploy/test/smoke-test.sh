@@ -110,6 +110,29 @@ else
     echo "  SKIP  Cannot read admin_password from VM"
 fi
 
+# Test 7: Quarto CLI (auto-provisioned on test VMs — see vm.sh cmd_deploy)
+echo "[7] Quarto CLI"
+SSH_VM=(ssh -o StrictHostKeyChecking=no -i "$SSH_KEY_PATH" "clarinet@${IP}")
+if "${SSH_VM[@]}" "test -x /var/lib/clarinet/data/quarto/bin/quarto" 2>/dev/null; then
+    # /opt/clarinet carries a downstream-style .env.example (e2e fixture), so a
+    # clean `quarto check` from there is the regression test for the
+    # neutral-cwd fix in quarto_status(). The CLI exits 0 even when the check
+    # reports problems — assert on the output, not just the exit code.
+    quarto_rc=0
+    quarto_out=$(timeout 150 "${SSH_VM[@]}" \
+        "cd /opt/clarinet && ./venv/bin/clarinet quarto status" 2>&1) || quarto_rc=$?
+    check "clarinet quarto status exits 0" "$quarto_rc" "0"
+    has_exe=$(echo "$quarto_out" | grep -c "Quarto executable:" || true)
+    check "quarto status reports executable" "$has_exe" "1"
+    has_problems=$(echo "$quarto_out" | grep -c "reported problems" || true)
+    check "quarto check is clean" "$has_problems" "0"
+    if [[ "$quarto_rc" != "0" || "$has_problems" != "0" ]]; then
+        echo "$quarto_out" | tail -15
+    fi
+else
+    echo "  SKIP  Quarto not installed on this deployment"
+fi
+
 echo "-------------------------------------------"
 echo "Results: ${passed}/${total} passed, ${failed} failed"
 

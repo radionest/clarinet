@@ -300,6 +300,25 @@ _download_latest_wheel() {
     echo "$wheel_path"
 }
 
+provision_quarto_fixtures() {
+    # Test-VM only: demo report templates + a downstream-style .env.example.
+    # Kept out of install-clarinet.sh so production bundles stay untouched.
+    # The API/worker restart picks up the templates (registry is built at
+    # startup) and the new venv extras.
+    local ssh_target="$1"
+    shift
+    local scp_opts=("$@")
+    local fixtures_dir="$DEPLOY_DIR/test/fixtures/quarto"
+
+    log "Provisioning Quarto e2e fixtures..."
+    ssh_vm "rm -rf /tmp/clarinet-deploy/quarto-fixtures"
+    scp "${scp_opts[@]}" -r "$fixtures_dir" "${ssh_target}:/tmp/clarinet-deploy/quarto-fixtures"
+    ssh_vm "sudo install -d -o clarinet -g clarinet /opt/clarinet/review && \
+        sudo install -o clarinet -g clarinet -m 644 /tmp/clarinet-deploy/quarto-fixtures/review/* /opt/clarinet/review/ && \
+        sudo install -o clarinet -g clarinet -m 644 /tmp/clarinet-deploy/quarto-fixtures/env.example /opt/clarinet/.env.example && \
+        sudo systemctl restart clarinet-api clarinet-worker@default"
+}
+
 cmd_deploy() {
     local wheel="${1:-}"
 
@@ -327,14 +346,19 @@ cmd_deploy() {
         log "Using wheel: $(basename "$wheel")"
     fi
 
-    # Download dependency wheels on host (fast internet) for offline install on VM
+    # Download dependency wheels on host (fast internet) for offline install on VM.
+    # The .extras marker invalidates caches built with a different extras set
+    # (a stale cache without e.g. the quarto wheels breaks --no-index install).
     local deps_dir="$PROJECT_DIR/dist/deps"
-    if [[ ! -d "$deps_dir" ]] || [[ -z "$(ls -A "$deps_dir" 2>/dev/null)" ]]; then
-        log "Downloading dependency wheels..."
+    local deps_extras="performance,quarto"
+    if [[ ! -f "$deps_dir/.extras" ]] || [[ "$(cat "$deps_dir/.extras")" != "$deps_extras" ]]; then
+        log "Downloading dependency wheels (extras: ${deps_extras})..."
+        rm -rf "$deps_dir"
         mkdir -p "$deps_dir"
         uv tool run --python 3.12 pip download \
             -d "$deps_dir" \
-            "${wheel}[performance]"
+            "${wheel}[${deps_extras}]"
+        echo "$deps_extras" > "$deps_dir/.extras"
     else
         log "Using cached dependency wheels from $deps_dir"
     fi
@@ -351,6 +375,23 @@ cmd_deploy() {
         log "Using cached OHIF tarball: $ohif_tarball"
     fi
 
+    # Download Quarto tarball on host (VM has no internet). Cached outside
+    # dist/ — the test pipeline wipes dist/ on every run. Shipping the tarball
+    # opts the deployment into Quarto (CLI + pip extra) — see install-clarinet.sh.
+    # Keep the version in sync with settings.quarto_default_version.
+    local quarto_version="1.4.557"
+    local quarto_cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/clarinet-deploy"
+    local quarto_tarball="${quarto_cache_dir}/quarto-${quarto_version}-linux-amd64.tar.gz"
+    if [[ ! -f "$quarto_tarball" ]]; then
+        log "Downloading Quarto v${quarto_version}..."
+        mkdir -p "$quarto_cache_dir"
+        curl -fSL --progress-bar \
+            "https://github.com/quarto-dev/quarto-cli/releases/download/v${quarto_version}/quarto-${quarto_version}-linux-amd64.tar.gz" \
+            -o "$quarto_tarball"
+    else
+        log "Using cached Quarto tarball: $quarto_tarball"
+    fi
+
     # Create remote staging directory
     ssh_vm "mkdir -p /tmp/clarinet-deploy"
 
@@ -359,6 +400,7 @@ cmd_deploy() {
     scp "${scp_opts[@]}" "$wheel" "${ssh_target}:/tmp/clarinet-deploy/"
     scp "${scp_opts[@]}" -r "$deps_dir" "${ssh_target}:/tmp/clarinet-deploy/"
     scp "${scp_opts[@]}" "$ohif_tarball" "${ssh_target}:/tmp/clarinet-deploy/"
+    scp "${scp_opts[@]}" "$quarto_tarball" "${ssh_target}:/tmp/clarinet-deploy/"
     scp "${scp_opts[@]}" -r "$DEPLOY_DIR/lib"     "${ssh_target}:/tmp/clarinet-deploy/"
     scp "${scp_opts[@]}" -r "$DEPLOY_DIR/install" "${ssh_target}:/tmp/clarinet-deploy/"
     scp "${scp_opts[@]}" -r "$DEPLOY_DIR/systemd" "${ssh_target}:/tmp/clarinet-deploy/"
@@ -373,6 +415,8 @@ cmd_deploy() {
         bash /tmp/clarinet-deploy/install/install-clarinet.sh \
         /tmp/clarinet-deploy/${wheel_name} \
         /tmp/clarinet-deploy"
+
+    provision_quarto_fixtures "$ssh_target" "${scp_opts[@]}"
 
     log "Deployment complete!"
     log "Access at: https://${ip}${PATH_PREFIX}"
