@@ -379,10 +379,16 @@ pub fn update(
         shared.ShowSuccess("Record data submitted successfully"),
         shared.ReloadRecord(model.record_id),
       ]
-      // Auto-return to the originating page; stay put on direct URL entry.
-      let out = case shared.previous_route {
-        Some(prev) -> list.append(out, [shared.Navigate(prev)])
-        None -> out
+      // Auto-return only on a completing submit (POST). Editing an already
+      // finished record (PATCH, edit window) stays on the page — the cache
+      // still holds the pre-submit status at this point, so Finished here
+      // means the submit was an edit. Direct URL entries stay put too.
+      let out = case
+        record_was_finished(model.record_id, shared),
+        shared.previous_route
+      {
+        False, Some(prev) -> list.append(out, [shared.Navigate(prev)])
+        _, _ -> out
       }
       #(model, slicer_effect, out)
     }
@@ -409,12 +415,13 @@ pub fn update(
         shared.SetLoading(False),
         shared.CacheRecord(record),
         shared.ShowSuccess("Record completed successfully"),
-        shared.ReloadRecord(model.record_id),
       ]
-      // Auto-return to the originating page; stay put on direct URL entry.
+      // When auto-returning, skip the refetch — the response is already
+      // cached and the user is leaving the page. When staying (direct URL
+      // entry), refetch to pick up server-side flow effects.
       let out = case shared.previous_route {
         Some(prev) -> list.append(out, [shared.Navigate(prev)])
-        None -> out
+        None -> list.append(out, [shared.ReloadRecord(model.record_id)])
       }
       #(model, slicer_eff, out)
     }
@@ -1284,6 +1291,16 @@ fn back_target(shared: Shared) -> router.Route {
   option.unwrap(shared.previous_route, router.Records(dict.new()))
 }
 
+/// Pre-submit status check: True when the cached record is already
+/// Finished, i.e. a form submit was an edit-window PATCH, not a
+/// completing POST (mirrors the method choice in render_editable_form).
+fn record_was_finished(record_id: String, shared: Shared) -> Bool {
+  case dict.get(shared.cache.records, record_id) {
+    Ok(record) -> record.status == types.Finished
+    Error(_) -> False
+  }
+}
+
 fn handle_error(err: ApiError, fallback_msg: String) -> List(OutMsg) {
   case err {
     AuthError(_) -> [shared.Logout]
@@ -1418,6 +1435,7 @@ fn render_record_execution(
             router.Records(_) -> shared.translate(i18n.ExecBackToRecords)
             router.PatientDetail(_) -> shared.translate(i18n.ExecBackToPatient)
             router.StudyDetail(_) -> shared.translate(i18n.ExecBackToStudy)
+            router.SeriesDetail(_) -> shared.translate(i18n.ExecBackToSeries)
             _ -> shared.translate(i18n.ExecBack)
           }),
         ],

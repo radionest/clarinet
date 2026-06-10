@@ -10,19 +10,29 @@ import cache
 import clarinet_frontend/i18n
 import gleam/dict
 import gleam/option.{type Option, None, Some}
+import gleam/string
 import gleeunit/should
+import lustre/element
 import pages/records/execute
 import router
 import shared
+import utils/load_status
 
 fn make_shared(previous_route: Option(router.Route)) -> shared.Shared {
+  make_shared_with_cache(previous_route, cache.init())
+}
+
+fn make_shared_with_cache(
+  previous_route: Option(router.Route),
+  c: cache.Model,
+) -> shared.Shared {
   shared.Shared(
     user: None,
     route: router.RecordDetail("42"),
     previous_route: previous_route,
     project_name: "",
     project_description: "",
-    cache: cache.init(),
+    cache: c,
     viewers: [],
     translate: fn(_) { "" },
     locale: i18n.En,
@@ -100,12 +110,12 @@ pub fn complete_ok_navigates_to_previous_route_test() {
       execute.CompleteRecordResult(Ok(record)),
       make_shared(Some(router.PatientDetail("p1"))),
     )
+  // No ReloadRecord when leaving: the response is already cached.
   out
   |> should.equal([
     shared.SetLoading(False),
     shared.CacheRecord(record),
     shared.ShowSuccess("Record completed successfully"),
-    shared.ReloadRecord("42"),
     shared.Navigate(router.PatientDetail("p1")),
   ])
 }
@@ -158,6 +168,28 @@ pub fn form_submit_success_without_previous_route_stays_test() {
   ])
 }
 
+pub fn form_submit_on_finished_record_stays_test() {
+  // Cached record is already Finished → the submit was an edit-window
+  // PATCH, not a completing POST: no auto-return even with previous_route.
+  let finished = models.Record(..make_record(), status: types.Finished)
+  let shared_ctx =
+    make_shared_with_cache(
+      Some(router.PatientDetail("p1")),
+      cache.put_record(cache.init(), finished),
+    )
+  let #(_model, _eff, out) =
+    execute.update(
+      make_execute_model("42"),
+      execute.FormSubmitSuccess,
+      shared_ctx,
+    )
+  out
+  |> should.equal([
+    shared.ShowSuccess("Record data submitted successfully"),
+    shared.ReloadRecord("42"),
+  ])
+}
+
 // --- DeleteResult ---
 
 pub fn delete_ok_navigates_to_previous_route_test() {
@@ -174,4 +206,63 @@ pub fn delete_ok_navigates_to_previous_route_test() {
     shared.ShowSuccess("Record deleted successfully"),
     shared.Navigate(router.PatientDetail("p1")),
   ])
+}
+
+pub fn delete_ok_without_previous_falls_back_to_records_test() {
+  let #(_model, _eff, out) =
+    execute.update(
+      make_execute_model("42"),
+      execute.DeleteResult(Ok(Nil)),
+      make_shared(None),
+    )
+  out
+  |> should.equal([
+    shared.SetLoading(False),
+    shared.InvalidateAllRecordBuckets,
+    shared.ShowSuccess("Record deleted successfully"),
+    shared.Navigate(router.Records(dict.new())),
+  ])
+}
+
+// --- Back button label ---
+
+fn render_back_button_html(previous_route: Option(router.Route)) -> String {
+  let shared_ctx =
+    shared.Shared(
+      ..make_shared_with_cache(
+        previous_route,
+        cache.put_record(cache.init(), make_record()),
+      ),
+      translate: i18n.translate(i18n.En, _),
+    )
+  let model =
+    execute.Model(
+      ..make_execute_model("42"),
+      record_load_status: load_status.Loaded,
+    )
+  element.to_string(execute.view(model, shared_ctx))
+}
+
+pub fn back_button_label_names_patient_target_test() {
+  render_back_button_html(Some(router.PatientDetail("p1")))
+  |> string.contains("Back to Patient")
+  |> should.be_true
+}
+
+pub fn back_button_label_names_series_target_test() {
+  render_back_button_html(Some(router.SeriesDetail("1.2.3.4")))
+  |> string.contains("Back to Series")
+  |> should.be_true
+}
+
+pub fn back_button_label_falls_back_to_records_test() {
+  render_back_button_html(None)
+  |> string.contains("Back to Records")
+  |> should.be_true
+}
+
+pub fn back_button_label_generic_for_other_routes_test() {
+  let html = render_back_button_html(Some(router.Home))
+  html |> string.contains("Back to") |> should.be_false
+  html |> string.contains(">Back<") |> should.be_true
 }

@@ -291,6 +291,7 @@ pub type Key {
   ExecBackToRecords
   ExecBackToPatient
   ExecBackToStudy
+  ExecBackToSeries
   ExecBack
   ExecMsgSlicerOpened
   ExecMsgSlicerFailed
@@ -889,6 +890,8 @@ pub fn translate(locale: Locale, key: Key) -> String {
     Ru, ExecBackToPatient -> "К пациенту"
     En, ExecBackToStudy -> "Back to Study"
     Ru, ExecBackToStudy -> "К исследованию"
+    En, ExecBackToSeries -> "Back to Series"
+    Ru, ExecBackToSeries -> "К серии"
     En, ExecBack -> "Back"
     Ru, ExecBack -> "Назад"
     En, ExecMsgSlicerOpened -> "Workspace opened in 3D Slicer"

@@ -8,6 +8,7 @@ import clarinet_frontend/i18n
 import components/layout
 import formosh/component as formosh_component
 import gleam/bool
+import gleam/dict
 import gleam/javascript/promise
 import gleam/list
 import gleam/option.{None, Some}
@@ -183,15 +184,17 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       let should_close_modal = was_preloading || has_create_record_modal
       // Track where the user came from so detail pages can navigate back.
       // Skip: echoes of the same route (redirect_to push-backs), auth/404
-      // pages, and record→record hops (parent/child navigation must not
-      // overwrite the originating container page).
+      // pages, the transient create-record form, and record→record hops
+      // (parent/child navigation must not overwrite the originating
+      // container page).
       let previous_route = case route == model.route, model.route {
         True, _ -> model.previous_route
         False, router.Login -> model.previous_route
         False, router.Register -> model.previous_route
         False, router.NotFound -> model.previous_route
+        False, router.RecordNew -> model.previous_route
         False, router.RecordDetail(_) -> model.previous_route
-        False, prev -> Some(prev)
+        False, prev -> Some(strip_stale_filters(prev))
       }
       let new_model =
         store.Model(
@@ -798,6 +801,20 @@ fn delegate_preload(model: Model, pmsg: preload.Msg) -> #(Model, Effect(Msg)) {
       }
     })
   #(model, effect.batch([effect.map(eff, store.PreloadMsg), ..out_effects]))
+}
+
+/// List-page filters change via url.replace_state without OnRouteChange,
+/// so the filters captured in model.route go stale and, replayed through
+/// Navigate's query string, would override the fresher localStorage copy.
+/// Store the route bare — the list page restores its own filters.
+fn strip_stale_filters(route: Route) -> Route {
+  case route {
+    router.Records(_) -> router.Records(dict.new())
+    router.Patients(_) -> router.Patients(dict.new())
+    router.Studies(_) -> router.Studies(dict.new())
+    router.AdminDashboard(_) -> router.AdminDashboard(dict.new())
+    other -> other
+  }
 }
 
 fn build_shared(model: Model) -> shared.Shared {
