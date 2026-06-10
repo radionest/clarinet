@@ -420,6 +420,147 @@ class TestFileCheckAndUnblock:
 
 
 # ---------------------------------------------------------------------------
+# Tests: output file link registration
+# ---------------------------------------------------------------------------
+
+
+class TestOutputFileLinks:
+    """OUTPUT files appearing after record creation get RecordFileLink rows."""
+
+    @pytest.mark.asyncio
+    async def test_check_files_creates_output_link(
+        self,
+        client: AsyncClient,
+        test_session: AsyncSession,
+        test_hierarchy: dict[str, str],
+        rt_with_files: dict,
+        working_dir: Path,
+    ):
+        """Output file appears after creation -> check-files registers its link."""
+        (working_dir / "scan.nii.gz").write_bytes(b"\x00" * 128)
+
+        record = await _create_record(client, "file-test", test_hierarchy)
+        assert record["status"] == "pending"
+
+        # Pipeline/task produces the output file later
+        (working_dir / "mask.nii.gz").write_bytes(b"\x01" * 64)
+        test_session.expire_all()  # simulate production per-request session
+
+        resp = await client.post(f"{RECORDS_BASE}/{record['id']}/check-files")
+        assert resp.status_code == 200
+        assert "output_mask" in resp.json()["changed_files"]
+
+        test_session.expire_all()
+        get_resp = await client.get(f"{RECORDS_BASE}/{record['id']}")
+        links = {link["name"]: link for link in get_resp.json()["file_links"]}
+        assert links["output_mask"]["filename"] == "mask.nii.gz"
+        assert links["output_mask"]["checksum"]
+        assert links["input_nifti"]["filename"] == "scan.nii.gz"
+
+    @pytest.mark.asyncio
+    async def test_check_files_output_link_idempotent(
+        self,
+        client: AsyncClient,
+        test_session: AsyncSession,
+        test_hierarchy: dict[str, str],
+        rt_with_files: dict,
+        working_dir: Path,
+    ):
+        """Second check-files reports no changes and creates no duplicate links."""
+        (working_dir / "scan.nii.gz").write_bytes(b"\x00" * 128)
+        (working_dir / "mask.nii.gz").write_bytes(b"\x01" * 64)
+
+        record = await _create_record(client, "file-test", test_hierarchy)
+        test_session.expire_all()
+
+        await client.post(f"{RECORDS_BASE}/{record['id']}/check-files")
+        test_session.expire_all()
+
+        resp2 = await client.post(f"{RECORDS_BASE}/{record['id']}/check-files")
+        assert resp2.status_code == 200
+        assert resp2.json()["changed_files"] == []
+
+        test_session.expire_all()
+        get_resp = await client.get(f"{RECORDS_BASE}/{record['id']}")
+        link_names = [link["name"] for link in get_resp.json()["file_links"]]
+        assert link_names.count("output_mask") == 1
+
+    @pytest.mark.asyncio
+    async def test_submit_creates_output_link(
+        self,
+        client: AsyncClient,
+        test_session: AsyncSession,
+        test_hierarchy: dict[str, str],
+        rt_with_files: dict,
+        working_dir: Path,
+    ):
+        """Submitting data registers output files even without RecordFlow engine."""
+        (working_dir / "scan.nii.gz").write_bytes(b"\x00" * 128)
+
+        record = await _create_record(client, "file-test", test_hierarchy)
+        (working_dir / "mask.nii.gz").write_bytes(b"\x01" * 64)
+        test_session.expire_all()
+
+        resp = await client.post(
+            f"{RECORDS_BASE}/{record['id']}/data",
+            json={"result": "ok"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "finished"
+
+        test_session.expire_all()
+        get_resp = await client.get(f"{RECORDS_BASE}/{record['id']}")
+        links = {link["name"]: link for link in get_resp.json()["file_links"]}
+        assert links["output_mask"]["filename"] == "mask.nii.gz"
+        assert links["output_mask"]["checksum"]
+
+    @pytest.mark.asyncio
+    async def test_collection_output_link_gets_checksum(
+        self,
+        client: AsyncClient,
+        test_session: AsyncSession,
+        test_hierarchy: dict[str, str],
+        working_dir: Path,
+    ):
+        """multiple=True output: link stores the file's checksum, second check is clean."""
+        payload = {
+            "name": "collection-test",
+            "description": "Record type with a collection output",
+            "label": "Collection Test",
+            "level": "SERIES",
+            "file_registry": [
+                {
+                    "name": "slices",
+                    "pattern": "slice_{id}.nii",
+                    "role": "output",
+                    "required": False,
+                    "multiple": True,
+                },
+            ],
+        }
+        resp = await client.post(RECORD_TYPES, json=payload)
+        assert resp.status_code == 201, resp.text
+
+        record = await _create_record(client, "collection-test", test_hierarchy)
+        (working_dir / "slice_1.nii").write_bytes(b"\x02" * 32)
+        test_session.expire_all()
+
+        resp1 = await client.post(f"{RECORDS_BASE}/{record['id']}/check-files")
+        assert resp1.status_code == 200
+        assert resp1.json()["changed_files"] == ["slices:slice_1.nii"]
+        test_session.expire_all()
+
+        resp2 = await client.post(f"{RECORDS_BASE}/{record['id']}/check-files")
+        assert resp2.json()["changed_files"] == []
+
+        test_session.expire_all()
+        get_resp = await client.get(f"{RECORDS_BASE}/{record['id']}")
+        links = {link["name"]: link for link in get_resp.json()["file_links"]}
+        assert links["slices"]["filename"] == "slice_1.nii"
+        assert links["slices"]["checksum"]
+
+
+# ---------------------------------------------------------------------------
 # Tests: data submission with files
 # ---------------------------------------------------------------------------
 
