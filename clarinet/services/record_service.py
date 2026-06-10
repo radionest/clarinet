@@ -16,6 +16,7 @@ from clarinet.models import Record, RecordRead, RecordStatus, is_record_editable
 from clarinet.models.file_schema import FileDefinitionRead, FileRole
 from clarinet.repositories.file_repository import FileRepository
 from clarinet.services.file_validation import validate_record_files
+from clarinet.services.photo_service import PhotoService
 from clarinet.utils.file_checksums import checksums_changed, compute_checksums
 from clarinet.utils.file_patterns import glob_file_paths, resolve_pattern
 from clarinet.utils.fs import run_in_fs_thread
@@ -461,7 +462,7 @@ class RecordService:
         return list(changed), new_checksums
 
     async def delete_record_cascade(self, record_id: int) -> tuple[list[int], int]:
-        """Delete a record, all its descendants, and their OUTPUT files.
+        """Delete a record, its descendants, their OUTPUT files and photos.
 
         Check-and-delete runs inside a single DB transaction with row locks
         on the whole subtree (``SELECT ... FOR UPDATE``), so a concurrent
@@ -538,6 +539,16 @@ class RecordService:
                 continue
             files_removed += 1
             logger.info(f"Deleted output file {p} during cascade delete of record {record_id}")
+
+        photo_service = PhotoService()
+        for rid in deleted_ids:
+            try:
+                files_removed += await photo_service.delete_record_photos(rid)
+            except OSError as exc:
+                logger.warning(
+                    f"Failed to delete photos of record {rid} during cascade delete "
+                    f"of record {record_id}: {exc}"
+                )
 
         logger.info(
             f"Cascade-deleted record {record_id}: {len(deleted_ids)} records, "

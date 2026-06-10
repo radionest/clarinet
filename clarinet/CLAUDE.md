@@ -111,6 +111,13 @@ that must tolerate the pre-anon flow use
 script args are resolved inside `build_slicer_context`
 (`clarinet/services/slicer/context.py` — UX fallback).
 
+Deliberate exception: record photos (`services/photo_service.py`) are
+UI artifacts stored under `{storage_path}/records/{record_id}/photos/`,
+keyed by the stable record id so they survive anonymization and
+`disk_path_template` migrations. `PhotoService` is the sole owner of
+that layout; cascade delete cleans up via
+`PhotoService.delete_record_photos()`.
+
 ## Service Layer Overview
 
 Each service has its own CLAUDE.md — see `services/*/CLAUDE.md` for details.

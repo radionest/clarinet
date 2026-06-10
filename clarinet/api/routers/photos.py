@@ -26,12 +26,14 @@ async def upload_photo(
 ) -> PhotoResponse:
     """Upload a photo for a record."""
     assert record.id is not None
-    content = await file.read()
+    # Read at most limit+1 bytes so an oversized body is rejected without
+    # materializing it in memory.
+    content = await file.read(service.max_upload_bytes() + 1)
     try:
-        service.validate_upload(file.content_type, len(content))
+        content_type = service.validate_upload(file.content_type, len(content))
     except ValueError as e:
         raise BAD_REQUEST.with_context(str(e)) from None
-    result = await service.save_photo(record.id, content, file.filename)
+    result = await service.save_photo(record.id, content, content_type)
     return PhotoResponse(filename=result.filename, url=result.url, size=result.size)
 
 
@@ -58,7 +60,11 @@ async def serve_photo(
         path = await service.get_photo_path(record.id, filename)
     except FileNotFoundError as e:
         raise NOT_FOUND.with_context(str(e)) from None
-    return FileResponse(path, media_type=service.guess_media_type(path))
+    return FileResponse(
+        path,
+        media_type=service.guess_media_type(path),
+        headers={"X-Content-Type-Options": "nosniff"},
+    )
 
 
 @router.delete("/{record_id}/photos/{filename}", status_code=204)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import mimetypes
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from uuid import uuid4
@@ -10,6 +11,16 @@ from uuid import uuid4
 from clarinet.settings import settings
 from clarinet.utils.fs import run_in_fs_thread
 from clarinet.utils.logger import logger
+
+# Extensions derive from the validated content type, never from the
+# client-supplied filename — a user-controlled extension would let
+# .html/.svg uploads come back as executable content (stored XSS).
+_EXTENSION_BY_TYPE = {
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/heic": ".heic",
+    "image/webp": ".webp",
+}
 
 
 @dataclass
@@ -27,6 +38,12 @@ class PhotoService:
     Photos are stored on the filesystem at
     ``{storage_path}/records/{record_id}/photos/``.
     No database interaction — purely filesystem-based.
+
+    Deliberately outside ``FileRepository``: photos are UI artifacts keyed
+    by the stable ``record_id``, so they survive anonymization and
+    ``disk_path_template`` migrations that relocate DICOM working dirs.
+    This class is the sole owner of the photo path layout — other code
+    (e.g. cascade delete) must call into it instead of rebuilding paths.
     """
 
     @staticmethod
@@ -45,33 +62,42 @@ class PhotoService:
             FileNotFoundError: If filename contains path separators or is empty.
         """
         safe = Path(filename).name
-        if not safe or safe != filename:
+        if not safe or safe != filename or safe == "..":
             msg = f"Photo '{filename}' not found"
             raise FileNotFoundError(msg)
         return safe
 
-    def validate_upload(self, content_type: str | None, size: int) -> None:
+    @staticmethod
+    def max_upload_bytes() -> int:
+        return settings.photos_max_size_mb * 1024 * 1024
+
+    def validate_upload(self, content_type: str | None, size: int) -> str:
         """Validate file type and size.
+
+        Returns:
+            The validated, non-None content type.
 
         Raises:
             ValueError: If content type is not allowed or file exceeds size limit.
         """
-        if content_type not in settings.photos_allowed_types:
+        if content_type is None or content_type not in settings.photos_allowed_types:
             msg = (
                 f"File type '{content_type}' is not allowed. "
                 f"Allowed: {', '.join(settings.photos_allowed_types)}"
             )
             raise ValueError(msg)
-        max_bytes = settings.photos_max_size_mb * 1024 * 1024
-        if size > max_bytes:
-            msg = f"File too large: {size / 1048576:.1f}MB (max {settings.photos_max_size_mb}MB)"
+        if size > self.max_upload_bytes():
+            msg = f"File too large: exceeds {settings.photos_max_size_mb}MB limit"
             raise ValueError(msg)
+        return content_type
 
-    async def save_photo(
-        self, record_id: int, content: bytes, original_filename: str | None
-    ) -> PhotoInfo:
-        """Save photo to disk and return metadata."""
-        ext = Path(original_filename or "photo").suffix.lower() or ".jpg"
+    async def save_photo(self, record_id: int, content: bytes, content_type: str) -> PhotoInfo:
+        """Save photo to disk and return metadata.
+
+        The extension derives from the validated ``content_type``; the
+        client-supplied filename is never trusted (stored-XSS vector).
+        """
+        ext = _EXTENSION_BY_TYPE.get(content_type) or mimetypes.guess_extension(content_type) or ""
         filename = f"{uuid4().hex}{ext}"
         photo_dir = self._photo_dir(record_id)
 
@@ -137,3 +163,26 @@ class PhotoService:
             raise FileNotFoundError(msg)
         await run_in_fs_thread(path.unlink)
         logger.info(f"Photo deleted: record={record_id} file={safe}")
+
+    async def delete_record_photos(self, record_id: int) -> int:
+        """Remove the record's entire photo directory (cascade-delete cleanup).
+
+        Returns:
+            Number of photo files removed; 0 if the directory doesn't exist.
+        """
+        photo_dir = self._photo_dir(record_id)
+
+        def _purge() -> int:
+            if not photo_dir.exists():
+                return 0
+            count = sum(1 for f in photo_dir.iterdir() if f.is_file())
+            shutil.rmtree(photo_dir)
+            record_dir = photo_dir.parent
+            if record_dir.exists() and not any(record_dir.iterdir()):
+                record_dir.rmdir()
+            return count
+
+        removed = await run_in_fs_thread(_purge)
+        if removed:
+            logger.info(f"Deleted {removed} photo(s) for record {record_id}")
+        return removed
