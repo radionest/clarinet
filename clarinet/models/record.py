@@ -320,6 +320,8 @@ def is_record_editable(
     if not record_type.editable:
         return False
     if record_type.edit_window_days is None or finished_at is None:
+        # finished_at is None only on legacy/imported rows (the status event
+        # listener always sets it) — fail open rather than lock them forever.
         return True
     if finished_at.tzinfo is None:
         # SQLite returns naive datetimes; stored values are UTC.

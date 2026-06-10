@@ -150,6 +150,8 @@ class TestEditableFalse:
         )
         resp = await editor_client.patch(f"{RECORDS_BULK_STATUS}?new_status=pending", json=[rec.id])
         assert resp.status_code == 409
+        # The error names the blocking record so multi-id calls are debuggable
+        assert f"Record {rec.id}" in resp.text
 
     @pytest.mark.asyncio
     async def test_invalidate_hard_locked_soft_allowed(
@@ -204,7 +206,7 @@ class TestEditWindow:
             f"{RECORDS_BASE}/{rec.id}/data", json={"answer": "changed"}
         )
         assert resp.status_code == 409
-        assert "Editing window of 3 days" in resp.text
+        assert "editing window of 3 days" in resp.text
 
     @pytest.mark.asyncio
     async def test_active_window_allows_patch_data(

@@ -112,6 +112,8 @@ class RecordTypeService:
             ``update_data`` uses ``exclude_none=True``, so explicitly sending
             ``{"ui_schema": null}`` (or ``data_schema: null``) is silently
             ignored — the column is not cleared. Pass an empty dict to reset.
+            ``edit_window_days`` is the exception: an explicit null clears the
+            time limit (null is its meaningful "no limit" value).
         """
         record_type = await self.repo.get(record_type_id)
 
@@ -125,9 +127,16 @@ class RecordTypeService:
             exclude_none=True,
             exclude={"file_registry"},
         )
+        # exclude_none drops an explicit null, but for edit_window_days null
+        # is meaningful (= remove the time limit) — restore it when sent.
+        if "edit_window_days" in update.model_fields_set and update.edit_window_days is None:
+            update_data["edit_window_days"] = None
 
         if update_data:
-            await self.repo.update(record_type, update_data)
+            # exclude_unset=False: update_data is already exclude_none-filtered,
+            # so a remaining None (edit_window_days) must reach the column —
+            # the repo's default would silently skip it.
+            await self.repo.update(record_type, update_data, exclude_unset=False)
 
         if file_defs is not None:
             current = await self.repo.get(record_type_id)

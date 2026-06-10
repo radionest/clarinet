@@ -23,9 +23,9 @@ Choose `method` based on `record.data`: use `PATCH` if data exists, `POST` other
 
 Post-submit locking: `RecordType.editable=False` (or an expired
 `RecordType.edit_window_days` window) makes PATCH on finished records return
-409 for non-superusers — same for status changes off `finished` and hard
-invalidation. Pipeline service tokens are superusers, so workflow code is
-unaffected.
+409 for non-superusers — same for any status change of a finished record and
+hard invalidation. Pipeline service tokens are superusers, so workflow code
+is unaffected.
 
 ## `record.context_info` — narrow markdown sidecar (NOT `record.data`)
 

@@ -7,10 +7,12 @@
 - `RecordType.editable` (bool, default `true`) — when `false`, finished
   records of the type cannot be changed by non-superusers. Every API path
   that could alter a submitted answer returns 409: `PATCH /data`,
-  `PATCH /submit`, status changes off `finished` (`PATCH /status`,
+  `PATCH /submit`, any status change of a finished record (`PATCH /status`,
   `PATCH /bulk/status`), and hard invalidation (`POST /invalidate`).
   Superusers (including pipeline service tokens) and in-process service
-  calls (RecordFlow triggers) bypass the lock.
+  calls (RecordFlow triggers) bypass the lock. Enforcement lives in
+  `RecordService` (`acting_user` parameter; `None` = trusted caller) and
+  raises `RecordEditLockedError` → 409.
 - `RecordType.edit_window_days` (int | null, default `null`) — bounds
   re-editing of finished records to N days after `finished_at`; `null`
   disables the limit, `0` locks immediately at submit. Applies only while
@@ -25,7 +27,7 @@
 
 - Schema change: new columns `recordtype.editable` (NOT NULL, server
   default `true`) and `recordtype.edit_window_days` (nullable) —
-  downstream projects must generate an alembic migration
+  downstream projects must generate an Alembic migration
   (`make db-migration && make db-upgrade`).
 - Defaults preserve current behavior; no action needed unless you want to
   lock answers after submission.
