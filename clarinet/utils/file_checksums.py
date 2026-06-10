@@ -52,6 +52,7 @@ async def compute_checksums(
     file_defs: list[FileDefinitionRead],
     record: RecordBase,
     working_dir: Path,
+    parent: RecordBase | None = None,
 ) -> dict[str, str]:
     """Compute checksums for all existing files in file definitions.
 
@@ -62,6 +63,8 @@ async def compute_checksums(
         file_defs: List of file definitions to compute checksums for
         record: Record for pattern placeholder resolution
         working_dir: Base directory where files are located
+        parent: Optional parent record for fallback pattern resolution
+            (e.g. ``{user_id}`` on auto-records without a user)
 
     Returns:
         Dict mapping file key to SHA256 hex string
@@ -77,7 +80,7 @@ async def compute_checksums(
                 if checksum is not None:
                     checksums[f"{fd.name}:{p.name}"] = checksum
         else:
-            path = working_dir / resolve_pattern(fd.pattern, record)
+            path = working_dir / resolve_pattern(fd.pattern, record, parent)
             checksum = await compute_file_checksum(path)
             if checksum is not None:
                 checksums[fd.name] = checksum

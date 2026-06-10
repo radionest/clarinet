@@ -514,6 +514,51 @@ class TestOutputFileLinks:
         assert links["output_mask"]["filename"] == "mask.nii.gz"
         assert links["output_mask"]["checksum"]
 
+    @pytest.mark.asyncio
+    async def test_collection_output_link_gets_checksum(
+        self,
+        client: AsyncClient,
+        test_session: AsyncSession,
+        test_hierarchy: dict[str, str],
+        working_dir: Path,
+    ):
+        """multiple=True output: link stores the file's checksum, second check is clean."""
+        payload = {
+            "name": "collection-test",
+            "description": "Record type with a collection output",
+            "label": "Collection Test",
+            "level": "SERIES",
+            "file_registry": [
+                {
+                    "name": "slices",
+                    "pattern": "slice_{id}.nii",
+                    "role": "output",
+                    "required": False,
+                    "multiple": True,
+                },
+            ],
+        }
+        resp = await client.post(RECORD_TYPES, json=payload)
+        assert resp.status_code == 201, resp.text
+
+        record = await _create_record(client, "collection-test", test_hierarchy)
+        (working_dir / "slice_1.nii").write_bytes(b"\x02" * 32)
+        test_session.expire_all()
+
+        resp1 = await client.post(f"{RECORDS_BASE}/{record['id']}/check-files")
+        assert resp1.status_code == 200
+        assert resp1.json()["changed_files"] == ["slices:slice_1.nii"]
+        test_session.expire_all()
+
+        resp2 = await client.post(f"{RECORDS_BASE}/{record['id']}/check-files")
+        assert resp2.json()["changed_files"] == []
+
+        test_session.expire_all()
+        get_resp = await client.get(f"{RECORDS_BASE}/{record['id']}")
+        links = {link["name"]: link for link in get_resp.json()["file_links"]}
+        assert links["slices"]["filename"] == "slice_1.nii"
+        assert links["slices"]["checksum"]
+
 
 # ---------------------------------------------------------------------------
 # Tests: data submission with files

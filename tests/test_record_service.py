@@ -1,5 +1,6 @@
 """Unit tests for RecordService and StudyService RecordFlow triggers."""
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
@@ -7,7 +8,11 @@ import pytest
 
 from clarinet.models import RecordStatus
 from clarinet.models.file_schema import FileDefinitionRead, FileRole, RecordFileLinkRead
-from clarinet.services.record_service import RecordService, _missing_output_links
+from clarinet.services.record_service import (
+    RecordService,
+    _missing_output_links,
+    _stored_checksums,
+)
 from clarinet.services.study_service import StudyService
 
 
@@ -737,11 +742,15 @@ class TestStudyServiceEntityTriggers:
 def _record_read_stub(
     file_registry: list[FileDefinitionRead],
     file_links: list[RecordFileLinkRead],
-) -> MagicMock:
-    record = MagicMock()
-    record.record_type.file_registry = file_registry
-    record.file_links = file_links
-    return record
+    **fields: object,
+) -> SimpleNamespace:
+    """Duck-typed RecordRead: honest ``hasattr`` (unlike MagicMock), so
+    unresolved pattern placeholders collapse to "" instead of a mock repr."""
+    return SimpleNamespace(
+        record_type=SimpleNamespace(file_registry=file_registry),
+        file_links=file_links,
+        **fields,
+    )
 
 
 class TestMissingOutputLinks:
@@ -761,12 +770,33 @@ class TestMissingOutputLinks:
         record = _record_read_stub(
             [FileDefinitionRead(name="seg", pattern="seg_{id}.nrrd", role=FileRole.OUTPUT)],
             [],
+            id=7,
         )
-        record.id = 7
 
         result = _missing_output_links(record, {"seg": "abc123"})
 
         assert result == {"seg": "seg_7.nrrd"}
+
+    def test_resolves_placeholder_from_parent_fallback(self) -> None:
+        record = _record_read_stub(
+            [FileDefinitionRead(name="seg", pattern="seg_{user_id}.nrrd", role=FileRole.OUTPUT)],
+            [],
+        )
+        parent = _record_read_stub([], [], user_id="u42")
+
+        result = _missing_output_links(record, {"seg": "abc123"}, parent)
+
+        assert result == {"seg": "seg_u42.nrrd"}
+
+    def test_unresolved_placeholder_stays_empty(self) -> None:
+        record = _record_read_stub(
+            [FileDefinitionRead(name="seg", pattern="seg_{user_id}.nrrd", role=FileRole.OUTPUT)],
+            [],
+        )
+
+        result = _missing_output_links(record, {"seg": "abc123"})
+
+        assert result == {"seg": "seg_.nrrd"}
 
     def test_collection_takes_first_sorted_file(self) -> None:
         record = _record_read_stub(
@@ -802,3 +832,23 @@ class TestMissingOutputLinks:
         )
 
         assert _missing_output_links(record, {}) == {}
+
+
+class TestStoredChecksums:
+    """Stored link checksums are keyed to match compute_checksums output."""
+
+    def test_emits_both_singular_and_collection_keys(self) -> None:
+        record = _record_read_stub(
+            [],
+            [RecordFileLinkRead(name="masks", filename="a.nii", checksum="X")],
+        )
+
+        assert _stored_checksums(record) == {"masks": "X", "masks:a.nii": "X"}
+
+    def test_skips_links_without_checksum(self) -> None:
+        record = _record_read_stub(
+            [],
+            [RecordFileLinkRead(name="masks", filename="a.nii")],
+        )
+
+        assert _stored_checksums(record) == {}

@@ -65,7 +65,11 @@ def _filter_in_sandbox(paths: list[Path], sandbox: Path) -> list[Path]:
     return [p for p in paths if p.resolve().is_relative_to(sandbox_resolved)]
 
 
-def _missing_output_links(record: RecordRead, checksums: dict[str, str]) -> dict[str, str]:
+def _missing_output_links(
+    record: RecordRead,
+    checksums: dict[str, str],
+    parent: RecordRead | None = None,
+) -> dict[str, str]:
     """Derive OUTPUT file links to create from freshly computed checksums.
 
     OUTPUT files appear on disk only after pipeline tasks or users produce
@@ -76,7 +80,8 @@ def _missing_output_links(record: RecordRead, checksums: dict[str, str]) -> dict
     on disk at scan time — no second filesystem scan is needed. Returns
     name → filename for OUTPUT definitions that have no link yet; for
     collections the lexicographically first file is stored, matching the
-    download endpoint's pick.
+    download endpoint's pick. ``parent`` must mirror the fallback passed to
+    ``compute_checksums`` so the stored filename matches the scanned path.
     """
     output_defs = {
         fd.name: fd for fd in (record.record_type.file_registry or []) if fd.role == FileRole.OUTPUT
@@ -88,8 +93,23 @@ def _missing_output_links(record: RecordRead, checksums: dict[str, str]) -> dict
         fd = output_defs.get(name)
         if fd is None or name in linked or name in missing:
             continue
-        missing[name] = collection_file or resolve_pattern(fd.pattern, record)
+        missing[name] = collection_file or resolve_pattern(fd.pattern, record, parent)
     return missing
+
+
+def _stored_checksums(record: RecordRead) -> dict[str, str]:
+    """Checksums stored on file links, keyed to match ``compute_checksums``.
+
+    Emits both ``name`` (singular definitions) and ``"name:filename"``
+    (collections) for every link — the irrelevant key of the pair never
+    collides with computed keys, so comparisons stay exact.
+    """
+    stored: dict[str, str] = {}
+    for link in record.file_links or []:
+        if link.checksum:
+            stored[link.name] = link.checksum
+            stored[f"{link.name}:{link.filename}"] = link.checksum
+    return stored
 
 
 class RecordService:
@@ -453,14 +473,15 @@ class RecordService:
         record = await self.repo.get_with_relations(record_id)
         record_read = RecordRead.model_validate(record)
 
+        # Fetch parent once — feeds fallback pattern resolution for both
+        # input validation (blocked records) and the OUTPUT checksum scan.
+        parent_read = None
+        if record.parent_record_id is not None:
+            parent = await self.repo.get_with_relations(record.parent_record_id)
+            parent_read = RecordRead.model_validate(parent)
+
         # Auto-unblock: if record is blocked, check whether input files are now present
         if record.status == RecordStatus.blocked:
-            # Fetch parent for fallback pattern resolution only when needed
-            parent_read = None
-            if record.parent_record_id is not None:
-                parent = await self.repo.get_with_relations(record.parent_record_id)
-                parent_read = RecordRead.model_validate(parent)
-
             file_result = await validate_record_files(record_read, parent=parent_read)
             if file_result is not None and file_result.valid:
                 if file_result.matched_files:
@@ -475,19 +496,12 @@ class RecordService:
             record_read.record_type.file_registry or [],
             record_read,
             working_dir,
+            parent=parent_read,
         )
-        old_checksums = {
-            link.name: link.checksum for link in (record_read.file_links or []) if link.checksum
-        }
+        old_checksums = _stored_checksums(record_read)
         changed = checksums_changed(old_checksums, new_checksums)
 
-        new_links = _missing_output_links(record_read, new_checksums)
-        if new_links:
-            await self.repo.add_file_links(record, new_links)
-            logger.info(
-                f"Record {record_id}: registered {len(new_links)} output file link(s): "
-                f"{sorted(new_links)}"
-            )
+        await self._register_output_links(record, record_read, new_checksums, parent_read)
 
         await self.repo.update_checksums(record, new_checksums)
 
@@ -782,6 +796,33 @@ class RecordService:
                 f"for this {record_type.level.lower()} context"
             )
 
+    async def _register_output_links(
+        self,
+        record: Record,
+        record_read: RecordRead,
+        checksums: dict[str, str],
+        parent: RecordRead | None = None,
+    ) -> None:
+        """Create links for OUTPUT files discovered by a checksum scan.
+
+        Never raises: link registration is bookkeeping on top of the caller's
+        main flow (submit / check-files) and must not fail it after the data
+        is already committed.
+        """
+        record_id = record.id
+        new_links = _missing_output_links(record_read, checksums, parent)
+        if not new_links:
+            return
+        try:
+            created = await self.repo.add_file_links(record, new_links)
+        except Exception as e:
+            logger.warning(f"Failed to register output file links for record {record_id}: {e}")
+            return
+        if created:
+            logger.info(
+                f"Record {record_id}: registered {created} output file link(s): {sorted(new_links)}"
+            )
+
     async def _sync_output_files(self, record: Record) -> None:
         """Reconcile OUTPUT file state on disk with the DB after a submission.
 
@@ -790,7 +831,9 @@ class RecordService:
         stored checksums, and emits file-update events for any changed files
         so that downstream file flows (e.g. invalidation) are triggered.
         Link/checksum bookkeeping runs even without a RecordFlow engine —
-        only event emission requires it.
+        only event emission requires it. The SHA256 scan adds I/O latency to
+        finished submissions proportional to output size — the same trade-off
+        the engine-enabled path has always had.
 
         Args:
             record: Record with relations loaded (must have record_type, patient).
@@ -802,16 +845,23 @@ class RecordService:
         if not output_defs:
             return
 
+        # Parent feeds fallback placeholder resolution, e.g. {user_id} on
+        # auto-records — must match the download path's resolution.
+        parent_read: RecordRead | None = None
+        if record.parent_record_id is not None:
+            parent = await self.repo.get_with_relations(record.parent_record_id)
+            parent_read = RecordRead.model_validate(parent)
+
         _, working_dir = FileRepository.resolve_with_fallback(record_read)
         try:
-            new_checksums = await compute_checksums(output_defs, record_read, working_dir)
+            new_checksums = await compute_checksums(
+                output_defs, record_read, working_dir, parent=parent_read
+            )
         except Exception as e:
             logger.warning(f"Failed to compute output checksums for record {record.id}: {e}")
             return
 
-        old_checksums = {
-            link.name: link.checksum for link in (record_read.file_links or []) if link.checksum
-        }
+        old_checksums = _stored_checksums(record_read)
 
         # A file without a link has no stored checksum, so any link to create
         # implies a non-empty changed set — safe to early-return here.
@@ -819,13 +869,7 @@ class RecordService:
         if not changed:
             return
 
-        new_links = _missing_output_links(record_read, new_checksums)
-        if new_links:
-            await self.repo.add_file_links(record, new_links)
-            logger.info(
-                f"Record {record.id}: registered {len(new_links)} output file link(s): "
-                f"{sorted(new_links)}"
-            )
+        await self._register_output_links(record, record_read, new_checksums, parent_read)
 
         # Update stored checksums in DB
         try:
