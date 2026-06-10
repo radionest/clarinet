@@ -3,10 +3,17 @@
 import hashlib
 
 import pytest
-from pydicom import Dataset
+from pydicom import Dataset, config
+from pydicom.dataelem import RawDataElement
+from pydicom.multival import MultiValue
+from pydicom.tag import Tag
 from pydicom.uid import ExplicitVRLittleEndian
 
-from clarinet.services.dicom.anonymizer import DicomAnonymizer, compute_per_study_patient_id
+from clarinet.services.dicom.anonymizer import (
+    DicomAnonymizer,
+    compute_per_study_patient_id,
+    find_invalid_vr_values,
+)
 
 
 @pytest.fixture
@@ -318,6 +325,67 @@ class TestAnonymizeDatasetEdgeCases:
         assert ds2.StudyInstanceUID == a2.generate_anon_uid("1.2.3.2")
         # Cross-check: UIDs differ between the two
         assert ds1.StudyInstanceUID != ds2.StudyInstanceUID
+
+
+class TestFindInvalidVrValues:
+    """Unit tests for find_invalid_vr_values helper."""
+
+    def test_detects_float_formatted_is_value(self) -> None:
+        """Philips-style float-formatted IS counter is reported once."""
+        ds = Dataset()
+        ds.StudyInstanceUID = "1.2.3.4"
+        with config.disable_value_validation():
+            ds.add_new(0x00201002, "IS", "606.0000000000")  # ImagesInAcquisition
+
+        findings = find_invalid_vr_values([ds])
+
+        assert findings == {("0020,1002", "IS", "606.0000000000"): 1}
+
+    def test_counts_across_instances(self) -> None:
+        """Same bad value in N datasets → count == N."""
+
+        def _make() -> Dataset:
+            ds = Dataset()
+            ds.StudyInstanceUID = "1.2.3.4"
+            with config.disable_value_validation():
+                ds.add_new(0x00201002, "IS", "606.0000000000")
+            return ds
+
+        findings = find_invalid_vr_values([_make(), _make()])
+
+        assert findings == {("0020,1002", "IS", "606.0000000000"): 2}
+
+    def test_raw_element_detected_without_conversion(self) -> None:
+        """RawDataElement (post-dcmread, never accessed) is validated too."""
+        ds = Dataset()
+        ds._dict[Tag(0x00201002)] = RawDataElement(
+            Tag(0x00201002), "IS", 14, b"606.0000000000", 0, True, True
+        )
+
+        findings = find_invalid_vr_values([ds])
+
+        assert findings == {("0020,1002", "IS", "606.0000000000"): 1}
+
+    def test_converted_multivalue_element_detected(self) -> None:
+        """Converted MultiValue elements (post-anonymization state) are audited per item.
+
+        The anonymizer walk converts every RawDataElement, so at the production
+        call site multi-value tags arrive as MultiValue — each item must still
+        be checked via its own original_string.
+        """
+        ds = Dataset()
+        with config.disable_value_validation():
+            # ImageOrientationPatient: first component is 19 chars > 16 max for DS
+            ds.add_new(0x00200037, "DS", ["0.99999999999999994", "0.0", "1.0"])
+        assert isinstance(ds[0x00200037].value, MultiValue)  # converted, not raw
+
+        findings = find_invalid_vr_values([ds])
+
+        assert findings == {("0020,0037", "DS", "0.99999999999999994"): 1}
+
+    def test_valid_dataset_yields_no_findings(self, sample_dataset: Dataset) -> None:
+        """Conformant dataset produces an empty report."""
+        assert find_invalid_vr_values([sample_dataset]) == {}
 
 
 class TestComputePerStudyPatientId:

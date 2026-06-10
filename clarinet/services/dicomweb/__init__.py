@@ -4,7 +4,7 @@ import pydicom.config as _pydicom_config
 
 # Vendor-specific private tags (e.g. Philips/Siemens (01F1,1026)) often have wrong-length
 # values that pydicom would otherwise log as ERROR on every dataset. Convert them to VR=UN
-# instead — `to_json_dict(suppress_invalid_tags=True)` already drops them from the response.
+# instead — `dataset_to_dicom_json` drops tags that fail JSON serialization anyway.
 _pydicom_config.convert_wrong_length_to_UN = True
 
 from clarinet.services.dicomweb.cache import DicomWebCache  # noqa: E402

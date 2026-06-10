@@ -119,10 +119,24 @@ def dataset_to_dicom_json(ds: Dataset, base_url: str) -> dict[str, Any]:
     Returns:
         DICOM JSON dict keyed by tag
     """
-    json_dict = ds.to_json_dict(
-        suppress_invalid_tags=True,
-        bulk_data_element_handler=_skip_bulk_data,
-    )
+    # Replicates Dataset.to_json_dict(suppress_invalid_tags=True) WITHOUT its
+    # config.strict_reading() wrapper: that context manager mutates the GLOBAL
+    # pydicom validation mode, so concurrent conversions in asyncio.to_thread
+    # (multi-study preload) race on it and can leave RAISE mode set process-wide.
+    # Lenient per-tag serialization normalizes sloppy-but-convertible values
+    # (e.g. IS '606.0000000000' → 606); truly unconvertible tags are skipped.
+    json_dict: dict[str, Any] = {}
+    # SIM118 is a false positive: iterating a Dataset directly yields DataElements
+    # (converting raw values OUTSIDE the try below), not keys.
+    for key in ds.keys():  # noqa: SIM118
+        json_key = f"{key:08X}"
+        try:
+            json_dict[json_key] = ds[key].to_json_dict(
+                bulk_data_element_handler=_skip_bulk_data,
+                bulk_data_threshold=1024,
+            )
+        except Exception as e:
+            logger.warning(f"Skipping non-serializable tag {json_key}: {e}")
 
     # Always set BulkDataURI for pixel data retrieval — even when PixelData
     # was stripped from the dataset before conversion (metadata endpoint) or

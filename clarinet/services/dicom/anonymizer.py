@@ -5,11 +5,70 @@ hash-based UIDs for consistent anonymization (no history tracking needed).
 """
 
 import hashlib
+from collections.abc import Iterable, Sequence
 
 from dicomanonymizer import simpledicomanonymizer  # type: ignore[import-untyped]
 from pydicom import Dataset
+from pydicom.datadict import dictionary_VR
+from pydicom.multival import MultiValue
+from pydicom.valuerep import VALIDATORS
 
 from clarinet.utils.logger import logger
+
+# Text VRs only: binary VRs are multi-valued without "\\" separators.
+_AUDIT_STRING_VRS = frozenset(
+    {"AE", "AS", "CS", "DA", "DS", "DT", "IS", "LO", "LT", "PN", "SH", "ST", "TM", "UI", "UR"}
+)
+
+
+def find_invalid_vr_values(datasets: Iterable[Dataset]) -> dict[tuple[str, str, str], int]:
+    """Count string-VR values violating DICOM VR constraints (length/charset).
+
+    Returns ``{(tag "GGGG,EEEE", vr, value): n_instances}``. Catches scanner
+    output (e.g. Philips float-formatted IS counters) that strict DICOM JSON
+    consumers later reject.
+    """
+    findings: dict[tuple[str, str, str], int] = {}
+    for ds in datasets:
+        for elem in ds.elements():  # yields elements as-is, without forcing conversion
+            tag = int(elem.tag)
+            vr = getattr(elem, "VR", None)
+            if vr in (None, "UN"):
+                try:
+                    vr = dictionary_VR(tag)
+                except KeyError:
+                    continue
+            vr = str(vr)
+            if vr not in _AUDIT_STRING_VRS:
+                continue
+            validator = VALIDATORS.get(vr)
+            if validator is None:
+                continue
+            value = getattr(elem, "value", None)
+            value = getattr(value, "original_string", value)
+            parts: Sequence[str | bytes]
+            if isinstance(value, str | bytes):
+                raw = value.rstrip(b"\x00 ") if isinstance(value, bytes) else value
+                parts = raw.split(b"\\") if isinstance(raw, bytes) else raw.split("\\")
+            elif isinstance(value, MultiValue):
+                # Converted multi-value element — the norm at the anonymization call
+                # site, where every raw element has been converted by the anonymizer
+                # walk. Each item retains its own original_string (IS/DS/PN).
+                parts = [
+                    part
+                    for part in (getattr(item, "original_string", item) for item in value)
+                    if isinstance(part, str | bytes)
+                ]
+            else:
+                continue
+            for part in parts:
+                valid, _msg = validator(vr, part)
+                if valid:
+                    continue
+                shown = part.decode(errors="replace") if isinstance(part, bytes) else part
+                key = (f"{tag >> 16:04X},{tag & 0xFFFF:04X}", vr, shown)
+                findings[key] = findings.get(key, 0) + 1
+    return findings
 
 
 def compute_per_study_patient_id(
