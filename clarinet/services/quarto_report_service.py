@@ -159,18 +159,23 @@ class QuartoReportService:
                 created_at=now.isoformat(),
                 finished_at=datetime.now(UTC).isoformat(),
             )
-        return self.get_render_state(name, render_id)
+        return await self.get_render_state(name, render_id)
 
-    def get_render_state(self, name: str, render_id: str) -> QuartoRenderState:
-        """Read the status sidecar for a render (404 when unknown)."""
-        state = self._state_from_dir(self._render_dir(name, render_id))
+    async def get_render_state(self, name: str, render_id: str) -> QuartoRenderState:
+        """Read the status sidecar for a render (404 when unknown).
+
+        The sidecar read runs in a thread: this is the hot polling path (the
+        frontend hits it every 3s per active render) and ``render_dir`` may
+        sit on shared/network storage.
+        """
+        state = await asyncio.to_thread(self._state_from_dir, self._render_dir(name, render_id))
         if state is None:
             raise QuartoRenderNotFoundError(
                 f"Render '{render_id}' for Quarto report '{name}' not found"
             )
         return state
 
-    def get_output_file(self, name: str, render_id: str, fmt: QuartoReportFormat) -> Path:
+    async def get_output_file(self, name: str, render_id: str, fmt: QuartoReportFormat) -> Path:
         """Resolve the rendered file path (409 if the render is not finished).
 
         A stale pending/running render (worker presumed crashed — see
@@ -178,13 +183,15 @@ class QuartoReportService:
         message reports ``status: failed`` rather than an eternal ``running``.
         """
         render_dir = self._render_dir(name, render_id)
-        state = self._state_from_dir(render_dir)
+        state = await asyncio.to_thread(self._state_from_dir, render_dir)
         if state is None:
             raise QuartoRenderNotFoundError(
                 f"Render '{render_id}' for Quarto report '{name}' not found"
             )
         output_path = render_dir / f"report.{fmt.extension}"
-        if state.status is not QuartoRenderStatus.DONE or not output_path.is_file():
+        if state.status is not QuartoRenderStatus.DONE or not await asyncio.to_thread(
+            output_path.is_file
+        ):
             raise QuartoRenderNotReadyError(
                 f"Render '{render_id}' ({fmt.value}) not ready (status: {state.status.value})"
             )

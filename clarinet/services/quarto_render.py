@@ -137,7 +137,7 @@ async def render_report(
     loop.
     """
     created_at = _now_iso()
-    existing = read_status(render_dir)
+    existing = await asyncio.to_thread(read_status, render_dir)
     if existing and existing.get("created_at"):
         created_at = str(existing["created_at"])
 
@@ -157,7 +157,7 @@ async def render_report(
         # sit inside render_dir (copied there by QuartoReportService), so a
         # hostile qmd_path cannot make the renderer read an arbitrary file.
         work_qmd = render_dir / qmd_path.name
-        if not work_qmd.is_file():
+        if not await asyncio.to_thread(work_qmd.is_file):
             raise QuartoRenderError(f"template '{qmd_path.name}' not found in render dir")
         await _materialize_data(data_reports, render_dir, client)
         for fmt in formats:
@@ -218,7 +218,7 @@ async def _materialize_data(
     if not data_reports:
         return
     data_dir = render_dir / "data"
-    data_dir.mkdir(parents=True, exist_ok=True)
+    await asyncio.to_thread(data_dir.mkdir, parents=True, exist_ok=True)
     timeout = settings.reports_query_timeout_seconds + 30
     for report_name in data_reports:
         csv_bytes = await client.download_report(report_name, request_timeout=timeout)
@@ -235,7 +235,7 @@ async def _run_quarto(
     """Run ``quarto render`` for a single format; raise on non-zero / timeout."""
     output_name = f"report.{fmt.extension}"
     tmp_dir = render_dir / "tmp"
-    tmp_dir.mkdir(parents=True, exist_ok=True)
+    await asyncio.to_thread(tmp_dir.mkdir, parents=True, exist_ok=True)
     env = _build_render_env(render_dir, tmp_dir)
     logger.info(f"Rendering {qmd_path.name} → {output_name} via quarto ({fmt.value})")
 
@@ -266,7 +266,7 @@ async def _run_quarto(
         raise QuartoRenderError(
             f"quarto render failed (exit {proc.returncode}) for {fmt.value}: {detail[:2000]}"
         )
-    if not (render_dir / output_name).is_file():
+    if not await asyncio.to_thread((render_dir / output_name).is_file):
         raise QuartoRenderError(f"quarto produced no {output_name} for format {fmt.value}")
 
 
