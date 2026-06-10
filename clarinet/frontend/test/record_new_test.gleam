@@ -15,6 +15,7 @@ fn make_shared() -> shared.Shared {
   shared.Shared(
     user: None,
     route: router.Home,
+    previous_route: None,
     project_name: "",
     project_description: "",
     cache: cache.init(),

@@ -375,10 +375,16 @@ pub fn update(
         }
         _ -> effect.none()
       }
-      #(model, slicer_effect, [
+      let out = [
         shared.ShowSuccess("Record data submitted successfully"),
         shared.ReloadRecord(model.record_id),
-      ])
+      ]
+      // Auto-return to the originating page; stay put on direct URL entry.
+      let out = case shared.previous_route {
+        Some(prev) -> list.append(out, [shared.Navigate(prev)])
+        None -> out
+      }
+      #(model, slicer_effect, out)
     }
 
     FormSubmitError(error) -> #(model, effect.none(), [shared.ShowError(error)])
@@ -399,12 +405,18 @@ pub fn update(
         Some(True) -> dispatch_local(SlicerClearScene)
         _ -> effect.none()
       }
-      #(model, slicer_eff, [
+      let out = [
         shared.SetLoading(False),
         shared.CacheRecord(record),
         shared.ShowSuccess("Record completed successfully"),
         shared.ReloadRecord(model.record_id),
-      ])
+      ]
+      // Auto-return to the originating page; stay put on direct URL entry.
+      let out = case shared.previous_route {
+        Some(prev) -> list.append(out, [shared.Navigate(prev)])
+        None -> out
+      }
+      #(model, slicer_eff, out)
     }
 
     CompleteRecordResult(Error(err)) -> #(
@@ -563,7 +575,7 @@ pub fn update(
 
     // Navigation
     NavigateBack -> #(model, effect.none(), [
-      shared.Navigate(router.Records(dict.new())),
+      shared.Navigate(back_target(shared)),
     ])
 
     // Restart
@@ -648,7 +660,7 @@ pub fn update(
       shared.SetLoading(False),
       shared.InvalidateAllRecordBuckets,
       shared.ShowSuccess("Record deleted successfully"),
-      shared.Navigate(router.Records(dict.new())),
+      shared.Navigate(back_target(shared)),
     ])
 
     DeleteResult(Error(err)) -> {
@@ -1266,6 +1278,12 @@ fn dispatch_fire_effect(
 
 // --- Helpers ---
 
+/// Where "Back" / post-completion auto-return should lead: the page the
+/// user came from, or the Records list when entered by direct URL.
+fn back_target(shared: Shared) -> router.Route {
+  option.unwrap(shared.previous_route, router.Records(dict.new()))
+}
+
 fn handle_error(err: ApiError, fallback_msg: String) -> List(OutMsg) {
   case err {
     AuthError(_) -> [shared.Logout]
@@ -1395,7 +1413,14 @@ fn render_record_execution(
           attribute.class("btn btn-secondary"),
           event.on_click(NavigateBack),
         ],
-        [html.text("Back to Records")],
+        [
+          html.text(case back_target(shared) {
+            router.Records(_) -> shared.translate(i18n.ExecBackToRecords)
+            router.PatientDetail(_) -> shared.translate(i18n.ExecBackToPatient)
+            router.StudyDetail(_) -> shared.translate(i18n.ExecBackToStudy)
+            _ -> shared.translate(i18n.ExecBack)
+          }),
+        ],
       ),
       case is_admin_user(shared) && record.id != None {
         True ->
