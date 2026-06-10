@@ -8,8 +8,8 @@ import cache
 import cache/bucket
 import api/patients
 import api/types.{type ApiError, AuthError}
-import clarinet_frontend/i18n.{type Key}
-import components/forms/base
+import clarinet_frontend/i18n
+import components/records_list
 import components/status_badge
 import gleam/dict.{type Dict}
 import gleam/int
@@ -27,6 +27,8 @@ import shared.{type OutMsg, type Shared}
 import utils/load_status.{type LoadStatus}
 import utils/permissions
 import utils/record_filters
+import utils/records_query
+import utils/table_sort
 
 // --- Model ---
 
@@ -58,10 +60,11 @@ pub type Msg {
   ImportPacs(study_uid: String)
   PacsImported(Result(Study, ApiError))
   ClearPacs
-  // Records filter
+  // Records filter / sort
   AddFilter(key: String, value: String)
   RemoveFilter(key: String)
   ClearFilters
+  ColumnHeaderClicked(column: String)
   // Navigation
   NavigateBack
   RequestDelete
@@ -84,8 +87,22 @@ pub fn init(
       active_filters: dict.new(),
     )
   #(model, load_patient_effect(patient_id), [
-    shared.FetchBucket(bucket.Records(bucket.query_with_patient(patient_id))),
+    shared.FetchBucket(bucket_key_for(model.active_filters, patient_id)),
+    shared.ReloadFilterOptions,
   ])
+}
+
+/// Bucket key for the patient's records list. Reuses the server-side
+/// filter/sort machinery (`records_query.from_filters`) but pins the query
+/// to this patient so the list stays scoped while gaining sorting.
+fn bucket_key_for(
+  filters: Dict(String, String),
+  patient_id: String,
+) -> bucket.BucketKey {
+  bucket.Records(records_query.with_patient_scope(
+    records_query.from_filters(filters),
+    patient_id,
+  ))
 }
 
 fn load_patient_effect(patient_id: String) -> Effect(Msg) {
@@ -237,21 +254,50 @@ pub fn update(
       [],
     )
 
+    // Filters/sort are kept in-memory only (effect.none()): the
+    // PatientDetail route carries no filters param, so there is no URL or
+    // localStorage round-trip here — by design, unlike the /records and
+    // admin list pages. Each mutation just re-fetches the scoped bucket.
     AddFilter(key, value) -> {
       let filters = dict.insert(model.active_filters, key, value)
-      #(Model(..model, active_filters: filters), effect.none(), [])
+      #(Model(..model, active_filters: filters), effect.none(), [
+        shared.FetchBucket(bucket_key_for(filters, model.patient_id)),
+      ])
     }
 
     RemoveFilter(key) -> {
       let filters = dict.delete(model.active_filters, key)
-      #(Model(..model, active_filters: filters), effect.none(), [])
+      #(Model(..model, active_filters: filters), effect.none(), [
+        shared.FetchBucket(bucket_key_for(filters, model.patient_id)),
+      ])
     }
 
-    ClearFilters -> #(
-      Model(..model, active_filters: dict.new()),
-      effect.none(),
-      [],
-    )
+    ClearFilters -> {
+      // Preserve sort selection (matches /records and admin UX).
+      let filters = record_filters.clear_user_filters(model.active_filters)
+      #(Model(..model, active_filters: filters), effect.none(), [
+        shared.FetchBucket(bucket_key_for(filters, model.patient_id)),
+      ])
+    }
+
+    ColumnHeaderClicked(col) -> {
+      let #(cur_col, cur_dir) =
+        table_sort.read_sort(
+          model.active_filters,
+          records_list.default_sort_col,
+        )
+      let #(new_col, new_dir) = table_sort.next_sort(cur_col, cur_dir, col)
+      let filters =
+        table_sort.write_sort(
+          model.active_filters,
+          new_col,
+          new_dir,
+          records_list.default_sort_col,
+        )
+      #(Model(..model, active_filters: filters), effect.none(), [
+        shared.FetchBucket(bucket_key_for(filters, model.patient_id)),
+      ])
+    }
 
     NavigateBack -> #(model, effect.none(), [shared.Navigate(router.Patients(dict.new()))])
 
@@ -291,14 +337,11 @@ pub fn view(model: Model, shared: Shared) -> Element(Msg) {
 }
 
 fn render_detail(model: Model, shared: Shared, patient: Patient) -> Element(Msg) {
-  let patient_records =
-    cache.bucket_items(
-      shared.cache,
-      bucket.Records(bucket.query_with_patient(patient.id)),
-    )
-    |> list.sort(fn(a, b) {
-      int.compare(option.unwrap(a.id, 0), option.unwrap(b.id, 0))
-    })
+  // Keyed by model.patient_id (the URL param) — the same value every
+  // FetchBucket in `update` writes with, so reads and writes never diverge.
+  let records_key = bucket_key_for(model.active_filters, model.patient_id)
+  let records = cache.bucket_items(shared.cache, records_key)
+  let records_status = cache.bucket_status(shared.cache, records_key)
 
   let is_admin = case shared.user {
     Some(u) -> permissions.is_admin_user(u)
@@ -338,7 +381,7 @@ fn render_detail(model: Model, shared: Shared, patient: Patient) -> Element(Msg)
     patient_info_card(patient),
     studies_section(patient.studies),
     pacs_section(model, patient),
-    records_section(model, patient_records, shared.translate),
+    records_section(model, records, records_status, shared),
   ])
 }
 
@@ -451,138 +494,52 @@ fn study_row(study: Study) -> Element(Msg) {
   ])
 }
 
-fn records_section(model: Model, records: List(Record), translate: fn(Key) -> String) -> Element(Msg) {
-  let filtered = record_filters.apply_filters(records, model.active_filters)
-
+fn records_section(
+  model: Model,
+  records: List(Record),
+  status: bucket.BucketStatus,
+  shared: Shared,
+) -> Element(Msg) {
   html.div([attribute.class("card")], [
     html.h3([], [html.text("Records")]),
-    case records {
-      [] ->
-        html.p([attribute.class("text-muted")], [
-          html.text("No records found for this patient."),
-        ])
-      _ ->
-        html.div([], [
-          records_filter_bar(model, records, translate),
-          case filtered {
-            [] ->
-              html.p([attribute.class("text-muted")], [
-                html.text("No records match the current filters."),
-              ])
-            _ ->
-              html.div([attribute.class("table-responsive")], [
-                html.table([attribute.class("table")], [
-                  html.thead([], [
-                    html.tr([], [
-                      html.th([], [html.text("ID")]),
-                      html.th([], [html.text("Type")]),
-                      html.th([], [html.text(translate(i18n.ThStudy))]),
-                      html.th([], [html.text("Status")]),
-                      html.th([], [html.text("Actions")]),
-                    ]),
-                  ]),
-                  html.tbody([], list.map(filtered, record_row(_, translate))),
-                ]),
-              ])
-          },
-        ])
-    },
+    records_list.view(
+      records,
+      status,
+      model.active_filters,
+      shared,
+      records_config(shared),
+    ),
   ])
 }
 
-fn records_filter_bar(model: Model, all_records: List(Record), translate: fn(Key) -> String) -> Element(Msg) {
-  let status_value =
-    dict.get(model.active_filters, "status")
-    |> option.from_result()
-    |> option.unwrap("")
-
-  let type_value =
-    dict.get(model.active_filters, "record_type")
-    |> option.from_result()
-    |> option.unwrap("")
-
-  let has_filters = !dict.is_empty(model.active_filters)
-
-  html.div([attribute.class("filter-bar")], [
-    base.select(
-      name: "filter-status",
-      value: status_value,
-      options: record_filters.status_options(translate),
-      on_change: fn(val) {
-        case val {
-          "" -> RemoveFilter("status")
-          _ -> AddFilter("status", val)
-        }
-      },
-    ),
-    base.select(
-      name: "filter-record-type",
-      value: type_value,
-      options: record_filters.type_options(
-        record_filters.type_names_from_records(all_records),
-        translate,
-      ),
-      on_change: fn(val) {
-        case val {
-          "" -> RemoveFilter("record_type")
-          _ -> AddFilter("record_type", val)
-        }
-      },
-    ),
-    case has_filters {
-      True ->
-        html.button(
-          [
-            attribute.type_("button"),
-            attribute.class("btn btn-sm btn-outline"),
-            event.on_click(ClearFilters),
-          ],
-          [html.text("Clear Filters")],
-        )
-      False -> html.text("")
+/// Shared-widget config for a patient's records. Scoped to one patient, so
+/// the patient columns and patient/user filters are hidden; rows drill into
+/// the record detail via the View action.
+fn records_config(shared: Shared) -> records_list.Config(Msg) {
+  records_list.Config(
+    show_patient_filter: False,
+    show_user_filter: False,
+    show_patient_columns: False,
+    show_study_series: True,
+    show_modality: False,
+    empty_message: "No records found for this patient.",
+    on_add_filter: AddFilter,
+    on_remove_filter: RemoveFilter,
+    on_clear_filters: ClearFilters,
+    on_column_click: ColumnHeaderClicked,
+    status_cell: fn(record) {
+      status_badge.render(record.status, shared.translate)
     },
-  ])
-}
-
-fn record_row(record: Record, translate: fn(Key) -> String) -> Element(Msg) {
-  let record_id = option.unwrap(record.id, 0)
-  let record_id_str = int.to_string(record_id)
-
-  let type_label = case record.record_type {
-    Some(rt) -> option.unwrap(rt.label, rt.name)
-    None -> record.record_type_name
-  }
-
-  let study_label = case record.record_type {
-    Some(rt) ->
-      case rt.level {
-        types.Patient -> "-"
-        _ ->
-          case record.study {
-            Some(study) -> option.unwrap(study.study_description, "-")
-            None -> "-"
-          }
-      }
-    None -> "-"
-  }
-
-  html.tr([], [
-    html.td([], [html.text(record_id_str)]),
-    html.td([], [html.text(type_label)]),
-    html.td([], [html.text(study_label)]),
-    html.td([], [status_badge.render(record.status, translate)]),
-    html.td([], [
-      html.a(
-        [
-          attribute.href(
-            router.route_to_path(router.RecordDetail(record_id_str)),
-          ),
-          attribute.class("btn btn-sm btn-outline"),
-        ],
-        [html.text("View")],
-      ),
-    ]),
-  ])
+    user_cell: None,
+    actions_cell: fn(record) {
+      records_list.detail_link(
+        record,
+        "btn btn-sm btn-outline",
+        i18n.BtnView,
+        shared.translate,
+      )
+    },
+  )
 }
 
 fn pacs_section(model: Model, patient: Patient) -> Element(Msg) {

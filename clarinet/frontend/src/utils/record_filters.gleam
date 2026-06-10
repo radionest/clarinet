@@ -4,7 +4,6 @@ import clarinet_frontend/i18n.{type Key}
 import gleam/dict.{type Dict}
 import gleam/list
 import gleam/option.{None, Some}
-import gleam/string
 import utils/status
 
 // User-controlled filter keys for the records list. Cleared by the
@@ -150,13 +149,4 @@ pub fn user_options(
       }
     })
   [#("", translate(i18n.FilterAllUsers)), ..entries]
-}
-
-/// Helper for callers (e.g. patient detail) that derive distinct type
-/// names from a local record list rather than the global filter-options
-/// cache — used where scope is intrinsically narrow (one patient).
-pub fn type_names_from_records(records: List(Record)) -> List(String) {
-  list.map(records, fn(r) { r.record_type_name })
-  |> list.unique()
-  |> list.sort(string.compare)
 }

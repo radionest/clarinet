@@ -5,7 +5,7 @@ import api/types
 import cache
 import cache/bucket
 import clarinet_frontend/i18n.{type Key}
-import components/forms/base
+import components/records_list
 import components/status_badge
 import gleam/dict.{type Dict}
 import gleam/int
@@ -69,8 +69,6 @@ pub type Msg {
   ClearFilters
   ColumnHeaderClicked(column: String)
 }
-
-const default_sort_col = "id"
 
 const storage_key = "admin.records.filters"
 
@@ -336,14 +334,17 @@ pub fn update(
 
     ColumnHeaderClicked(col) -> {
       let #(cur_col, cur_dir) =
-        table_sort.read_sort(model.active_filters, default_sort_col)
+        table_sort.read_sort(
+          model.active_filters,
+          records_list.default_sort_col,
+        )
       let #(new_col, new_dir) = table_sort.next_sort(cur_col, cur_dir, col)
       let new_filters =
         table_sort.write_sort(
           model.active_filters,
           new_col,
           new_dir,
-          default_sort_col,
+          records_list.default_sort_col,
         )
       #(
         Model(..model, active_filters: new_filters),
@@ -567,16 +568,6 @@ fn records_section(model: Model, shared: Shared) -> Element(Msg) {
   let records = cache.bucket_items(shared.cache, key)
   let status = cache.bucket_status(shared.cache, key)
 
-  let body = case status {
-    bucket.Cold | bucket.Loading ->
-      html.div([attribute.class("loading-indicator")], [
-        html.text(shared.translate(i18n.LblLoading)),
-      ])
-    bucket.Failed(msg) ->
-      html.p([attribute.class("text-error")], [html.text(msg)])
-    _ -> records_table(model, shared, records)
-  }
-
   html.div([attribute.class("dashboard-section")], [
     html.div([attribute.class("section-header")], [
       html.h3([], [html.text("Records")]),
@@ -588,219 +579,64 @@ fn records_section(model: Model, shared: Shared) -> Element(Msg) {
         [html.text("Create Record")],
       ),
     ]),
-    filter_bar(model, shared),
-    body,
+    records_list.view(
+      records,
+      status,
+      model.active_filters,
+      shared,
+      records_config(model, shared),
+    ),
   ])
 }
 
-fn filter_bar(model: Model, shared: Shared) -> Element(Msg) {
-  let status_value =
-    dict.get(model.active_filters, "status")
-    |> option.from_result()
-    |> option.unwrap("")
-
-  let type_value =
-    dict.get(model.active_filters, "record_type")
-    |> option.from_result()
-    |> option.unwrap("")
-
-  let patient_value =
-    dict.get(model.active_filters, "patient")
-    |> option.from_result()
-    |> option.unwrap("")
-
-  let user_value =
-    dict.get(model.active_filters, "user")
-    |> option.from_result()
-    |> option.unwrap("")
-
-  let #(patient_values, type_values, user_values) =
-    case shared.cache.filter_options {
-      Some(opts) -> #(opts.patients, opts.record_types, opts.users)
-      None -> #([], [], [])
-    }
-
-  let status_options = record_filters.status_options(shared.translate)
-  let type_options = record_filters.type_options(type_values, shared.translate)
-  let patient_options =
-    record_filters.patient_options(patient_values, shared.translate)
-  let user_options =
-    record_filters.user_options(
-      user_values,
-      shared.cache.users,
-      shared.translate,
-    )
-
-  let has_user_filters = record_filters.has_user_filters(model.active_filters)
-
-  html.div([attribute.class("filter-bar")], [
-    base.select(
-      name: "filter-status",
-      value: status_value,
-      options: status_options,
-      on_change: fn(val) {
-        case val {
-          "" -> RemoveFilter("status")
-          _ -> AddFilter("status", val)
-        }
-      },
-    ),
-    base.select(
-      name: "filter-record-type",
-      value: type_value,
-      options: type_options,
-      on_change: fn(val) {
-        case val {
-          "" -> RemoveFilter("record_type")
-          _ -> AddFilter("record_type", val)
-        }
-      },
-    ),
-    base.select(
-      name: "filter-patient",
-      value: patient_value,
-      options: patient_options,
-      on_change: fn(val) {
-        case val {
-          "" -> RemoveFilter("patient")
-          _ -> AddFilter("patient", val)
-        }
-      },
-    ),
-    base.select(
-      name: "filter-user",
-      value: user_value,
-      options: user_options,
-      on_change: fn(val) {
-        case val {
-          "" -> RemoveFilter("user")
-          _ -> AddFilter("user", val)
-        }
-      },
-    ),
-    case has_user_filters {
-      True ->
-        html.button(
-          [
-            attribute.type_("button"),
-            attribute.class("btn btn-sm btn-outline"),
-            event.on_click(ClearFilters),
-          ],
-          [html.text(shared.translate(i18n.BtnClearFilters))],
-        )
-      False -> html.text("")
-    },
-  ])
-}
-
-fn records_table(
-  model: Model,
-  shared: Shared,
-  records: List(models.Record),
-) -> Element(Msg) {
-  // Sorting and filtering happen server-side via the bucket key; this
-  // function renders the page as-is.
-  let #(sort_col, sort_dir) =
-    table_sort.read_sort(model.active_filters, default_sort_col)
-
-  case records {
-    [] ->
-      html.p([attribute.class("text-muted")], [
-        html.text(shared.translate(i18n.AdminNoRecords)),
-      ])
-    _ ->
-      html.div([attribute.class("table-responsive")], [
-        html.table([attribute.class("table")], [
-          html.thead([], [
-            html.tr([], [
-              table_sort.th_sortable(
-                shared.translate(i18n.ThId),
-                "id",
-                sort_col,
-                sort_dir,
-                ColumnHeaderClicked,
-              ),
-              table_sort.th_sortable(
-                shared.translate(i18n.ThRecordType),
-                "record_type",
-                sort_col,
-                sort_dir,
-                ColumnHeaderClicked,
-              ),
-              table_sort.th_sortable(
-                shared.translate(i18n.ThStatus),
-                "status",
-                sort_col,
-                sort_dir,
-                ColumnHeaderClicked,
-              ),
-              table_sort.th_sortable(
-                shared.translate(i18n.ThPatient),
-                "patient",
-                sort_col,
-                sort_dir,
-                ColumnHeaderClicked,
-              ),
-              table_sort.th_sortable(
-                shared.translate(i18n.ThAssignedUser),
-                "user",
-                sort_col,
-                sort_dir,
-                ColumnHeaderClicked,
-              ),
-            ]),
-          ]),
-          html.tbody(
-            [],
-            list.map(records, fn(record) { record_row(model, shared, record) }),
-          ),
-        ]),
-      ])
-  }
-}
-
-fn record_row(
-  model: Model,
-  shared: Shared,
-  record: models.Record,
-) -> Element(Msg) {
-  let record_id = case record.id {
-    Some(id) -> id
-    None -> 0
-  }
-
-  let is_editing = model.editing_record_id == Some(record_id)
-
-  html.tr([], [
-    html.td([], [html.text(int.to_string(record_id))]),
-    html.td([], [html.text(record.record_type_name)]),
-    html.td([], [
+/// Shared-widget config for the admin records list. The status and
+/// assigned-user cells keep the inline-edit affordances unique to admins;
+/// the Actions column adds drill-in to the record detail. Patient is shown
+/// as three columns (name / id / anon id) via `show_patient_columns`.
+fn records_config(model: Model, shared: Shared) -> records_list.Config(Msg) {
+  records_list.Config(
+    show_patient_filter: True,
+    show_user_filter: True,
+    show_patient_columns: True,
+    show_study_series: False,
+    show_modality: False,
+    empty_message: shared.translate(i18n.AdminNoRecords),
+    on_add_filter: AddFilter,
+    on_remove_filter: RemoveFilter,
+    on_clear_filters: ClearFilters,
+    on_column_click: ColumnHeaderClicked,
+    status_cell: fn(record) {
       status_cell(
         model: model,
-        record_id: record_id,
+        record_id: record_pk(record),
         status: record.status,
         translate: shared.translate,
-      ),
-    ]),
-    html.td([], [
-      html.text(case record.patient {
-        Some(patient) ->
-          case patient.name {
-            Some(name) -> name <> " (" <> record.patient_id <> ")"
-            None -> record.patient_id
-          }
-        None -> record.patient_id
-      }),
-    ]),
-    html.td([], [
+      )
+    },
+    user_cell: Some(fn(record) {
+      let rid = record_pk(record)
       assign_cell(
         shared: shared,
-        record_id: record_id,
+        record_id: rid,
         user_id: record.user_id,
-        is_editing: is_editing,
-      ),
-    ]),
-  ])
+        is_editing: model.editing_record_id == Some(rid),
+      )
+    }),
+    // Drill-in: open the record detail. Kept alongside the inline
+    // status/user controls rather than replacing them.
+    actions_cell: fn(record) {
+      records_list.detail_link(
+        record,
+        "btn btn-sm btn-outline",
+        i18n.BtnView,
+        shared.translate,
+      )
+    },
+  )
+}
+
+fn record_pk(record: models.Record) -> Int {
+  option.unwrap(record.id, 0)
 }
 
 fn assign_cell(

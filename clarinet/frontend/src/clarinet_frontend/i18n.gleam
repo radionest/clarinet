@@ -64,6 +64,8 @@ pub type Key {
   ThStudyUid
   ThSeriesUid
   ThAssignedUser
+  ThPatientName
+  ThPatientId
 
   // --- Common labels ---
   LblYes
@@ -458,6 +460,10 @@ pub fn translate(locale: Locale, key: Key) -> String {
     Ru, ThSeriesUid -> "UID серии"
     En, ThAssignedUser -> "Assigned User"
     Ru, ThAssignedUser -> "Назначенный"
+    En, ThPatientName -> "Name"
+    Ru, ThPatientName -> "ФИО"
+    En, ThPatientId -> "Patient ID"
+    Ru, ThPatientId -> "ID пациента"
 
     // --- Common labels ---
     En, LblYes -> "Yes"
