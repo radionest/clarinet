@@ -114,6 +114,13 @@ def load_task_modules() -> None:
     except ImportError as e:
         logger.warning(f"Could not load call_registered_callable task: {e}")
 
+    try:
+        from clarinet.services.pipeline.tasks import quarto_render as _qr  # noqa: F401
+
+        logger.info("Loaded built-in pipeline task render_quarto_report")
+    except ImportError as e:
+        logger.warning(f"Could not load quarto_render task: {e}")
+
 
 async def run_worker(
     queues: list[str] | None = None,

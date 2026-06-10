@@ -396,6 +396,22 @@ pub type ReportTemplate {
   ReportTemplate(name: String, title: String, description: String)
 }
 
+// Quarto report template (matches backend QuartoReportTemplate)
+pub type QuartoReportTemplate {
+  QuartoReportTemplate(
+    name: String,
+    title: String,
+    description: String,
+    data_reports: List(String),
+  )
+}
+
+// Quarto render state — subset of the backend status.json sidecar. A single
+// render targets one format, so `status == "done"` means that file is ready.
+pub type QuartoRenderState {
+  QuartoRenderState(render_id: String, status: String, error: Option(String))
+}
+
 // Record type with aggregate statistics
 pub type RecordTypeStats {
   RecordTypeStats(

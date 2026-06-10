@@ -8,7 +8,7 @@ import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 
-from clarinet.config.reconciler import reconcile_record_types
+from clarinet.config.reconciler import _COMPARED_FIELDS, reconcile_record_types
 from clarinet.exceptions.domain import ConfigurationError
 from clarinet.models.record import RecordType, RecordTypeCreate
 from clarinet.models.user import UserRole
@@ -685,3 +685,18 @@ async def test_error_message_lists_all_db_roles(
     assert "alpha-role" in msg
     assert "beta-role" in msg
     assert "missing-role" in msg
+
+
+def test_reconciler_compares_all_record_type_fields() -> None:
+    """Drift guard: every RecordTypeCreate field is compared or excluded here.
+
+    A field missing from _COMPARED_FIELDS is silently ignored on the update
+    path for existing RecordTypes — unique_per_user hit this before being
+    added.
+    """
+    intentionally_excluded = {
+        "name",  # identity key — used to match, never updated
+        "file_registry",  # compared separately via link diff
+    }
+    model_fields = set(RecordTypeCreate.model_fields)
+    assert model_fields - set(_COMPARED_FIELDS) - intentionally_excluded == set()

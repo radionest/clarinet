@@ -365,6 +365,37 @@ class ReportQueryError(ClarinetError):
     """Raised when a custom SQL report fails to execute or times out."""
 
 
+# Quarto report exceptions (Quarto *.qmd reports rendered to DOCX/PDF)
+class QuartoReportNotFoundError(EntityNotFoundError):
+    """Raised when a Quarto report template name is not registered.
+
+    Also raised when a report declares a ``clarinet.data`` SQL report that is
+    not in the SQL report registry.
+    """
+
+    def __init__(self, name: str, message: str | None = None) -> None:
+        self.name = name
+        super().__init__(message or f"Quarto report '{name}' not found")
+
+
+class QuartoRenderNotFoundError(EntityNotFoundError):
+    """Raised when a ``render_id`` for a Quarto report does not exist on disk."""
+
+
+class QuartoRenderNotReadyError(ClarinetError):
+    """Raised when a rendered file is requested before the render finished."""
+
+    error_code: ClassVar[str] = "QUARTO_RENDER_NOT_READY"
+
+
+class QuartoNotInstalledError(ClarinetError):
+    """Raised when the ``quarto`` CLI cannot be located on the host."""
+
+
+class QuartoRenderError(ClarinetError):
+    """Raised when the ``quarto`` CLI exits non-zero or the render times out."""
+
+
 # Configuration errors
 class ConfigurationError(ClarinetError):
     """Raised when there's a configuration problem."""

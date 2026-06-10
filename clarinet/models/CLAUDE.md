@@ -31,28 +31,10 @@ record_read.radiant  # safe — all data is plain Pydantic fields
 
 ### Path resolution lives in `FileRepository`
 
-`RecordRead` / `SeriesRead` / `StudyRead` / `PatientRead` are dumb data
-containers — they carry no path-resolution logic. Use
-`FileRepository(record).working_dir` (or `resolve_file(...)`) to compute
-on-disk paths.
-
-```python
-from clarinet.repositories import FileRepository
-
-working_dir = FileRepository(record_read).working_dir
-```
-
-Slicer-arg rendering for user-defined `slicer_script_args` /
-`slicer_result_validator_args` happens inside `build_slicer_context`
-(layer 4/5 in `clarinet/services/slicer/context.py`); it uses the UX
-fallback so the Slicer UI keeps rendering text for pre-anon records.
-
-Strict by default — a record whose template needs `{anon_*}` but whose
-study/series is not yet anonymized raises `AnonPathError`. UX routers
-catch and serve `null`; reader-side backend services that must keep
-working through the pre-anon flow use
-`FileRepository.resolve_with_fallback` instead of catching the
-exception themselves.
+`*Read` models are dumb data containers with no path logic. Use
+`FileRepository(record).working_dir` / `resolve_file(...)`. Strict by default —
+`AnonPathError` for not-yet-anonymized records. Full contract (Slicer-arg
+rendering, `resolve_with_fallback`): `clarinet/CLAUDE.md` → "File path resolution".
 
 Always use `selectinload()` in repositories when fetching records for API responses:
 ```python
@@ -102,19 +84,12 @@ f"{settings.anon_id_prefix}_{auto_id}"  # Returns None if auto_id is None
 **Do NOT remove `@property`** — without it mypy sees the return type as
 `Callable[[], str | None]` instead of `str | None` (upstream mypy bug, pydantic#11687).
 
-`Patient.auto_id` — unique non-PK integer, **NOT NULL** at the DB level.
-Auto-assigned by `PatientRepository.create()` via a **monotonic counter** that
-never decreases, even after patient deletion:
-- **PostgreSQL**: native `Sequence` (`patient_auto_id_seq`) — `nextval()`.
-- **SQLite**: `AutoIdCounter` table (single-row counter, lazy-seeded from `MAX(auto_id)`).
-
-When an explicit `auto_id` is provided, `_advance_counter()` advances the
-sequence/counter to at least that value, preventing future collisions.
-
-The Python type is `int | None` (default `None`) so that `PatientRepository.create()`
-can accept a `Patient` with `auto_id=None` and assign it before flush.
-Direct `session.add(Patient(...))` without `auto_id` will raise `IntegrityError` at flush.
-Test code creating patients directly must always provide an explicit `auto_id`.
+`Patient.auto_id` — unique non-PK integer, **NOT NULL** at the DB level, typed
+`int | None` in Python. Auto-assigned by `PatientRepository.create()` via a
+monotonic counter that never decreases (PG: `patient_auto_id_seq` sequence;
+SQLite: `AutoIdCounter` single-row table); explicit values advance the counter
+to prevent collisions. Direct `session.add(Patient(...))` without `auto_id`
+raises `IntegrityError` at flush — test code must provide it (or use factories).
 
 ## File Registry System
 
@@ -140,21 +115,16 @@ When changing `*Read`, `*Create`, or `*Optional` schemas — update correspondin
 
 ## Primary keys after insert/get — `int | None` typing
 
-All `*.id` fields on table models are typed `int | None` (SQLModel default — populated only after flush). Mypy will flag any call site that passes `record.id` to a parameter typed `int`:
-
-```text
-Argument 2 to "_run_orchestrator_in_process" has incompatible type "int | None"; expected "int"  [arg-type]
-```
-
-When the value is guaranteed by an upstream invariant (record came from a repository `get`/`find`, or has just been flushed), narrow with an explicit assert at the call site — do **not** weaken the callee's signature to `int | None`:
+All `*.id` fields on table models are typed `int | None` (populated only after
+flush), so mypy flags passing `record.id` where `int` is expected. When an
+upstream invariant guarantees the value (repository `get`/`find`, just flushed),
+narrow at the call site — do **not** weaken the callee's signature:
 
 ```python
-record = await record_repo.get(record_id)
 assert record.id is not None  # SQLModel PK after get
-_run_orchestrator_in_process(study_uid, record.id, ...)
 ```
 
-Real example: `clarinet/api/routers/dicom.py::_dispatch_background_anonymization` (mypy regression in PR #237).
+Real example: `clarinet/api/routers/dicom.py::_dispatch_background_anonymization` (PR #237).
 
 ## Pitfalls
 
@@ -173,11 +143,8 @@ Without it, SQLModel raises `ValueError: <class 'list'> has no matching SQLAlche
 because every inherited field becomes a DB column.
 
 **`SQLModel.Field()` uses `schema_extra`, not `json_schema_extra`.**
-SQLModel DTO classes (`table=False`, no `table=True`) still inherit from `SQLModel`, not
-`pydantic.BaseModel`. SQLModel's `Field()` accepts `schema_extra={"key": "value"}` for
-JSON Schema metadata, while Pydantic's `Field()` uses `json_schema_extra`. Using the wrong
-one silently does nothing. Rule: if the class inherits `SQLModel` → use `schema_extra`;
-if it inherits `pydantic.BaseModel` → use `json_schema_extra`.
+Classes inheriting `SQLModel` (even `table=False` DTOs) take `schema_extra={...}`;
+`json_schema_extra` is Pydantic's spelling. Using the wrong one silently does nothing.
 
 ## Additive migrations on populated tables
 
@@ -196,41 +163,24 @@ mask_patient_data: bool = Field(
     default=True,
     sa_column_kwargs={"server_default": sql_expression.true()},
 )
-unique_per_user: bool = Field(
-    default=False,
-    sa_column_kwargs={"server_default": sql_expression.false()},
-)
 ```
 
-Use `sql_expression.true()` / `sql_expression.false()` — these are the only
-**dialect-aware** Boolean literals in SQLAlchemy. They render as `true`/`false`
-on PostgreSQL (required — PG has no implicit int→bool cast, so `DEFAULT 1`
-fails even in `CREATE TABLE` on an empty DB with "default for column is of
-type integer") and as `1`/`0` on SQLite (which stores BOOLEAN as INTEGER).
+`sql_expression.true()` / `.false()` are the only **dialect-aware** Boolean
+literals: `true`/`false` on PG (no implicit int→bool cast — `DEFAULT 1` fails
+even in `CREATE TABLE`), `1`/`0` on SQLite. **Do NOT use:** `text("1")` (raw
+integer literal breaks PG — the PR #149 v1 trap, fixed in #150); `text("true")`
+(SQLite rejects it inside `ALTER TABLE` in some versions); plain `"1"` (works on
+PG via implicit cast but causes spurious alembic autogen diffs).
 
-**Do NOT use:**
-- `text("1")` / `text("0")` — bypasses the dialect visitor, emits raw integer
-  literal on PG, breaks both `CREATE TABLE` and `ALTER TABLE`. This was the
-  trap PR #149 v1 fell into; fixed in PR #150.
-- `text("true")` / `text("false")` — portable SQL keywords in theory but
-  SQLite rejects them inside `ALTER TABLE` in some versions.
-- `"1"` as plain string — quoted string literal `'1'` works on PG via implicit
-  cast but is indirect and produces a `DefaultClause` that alembic's autogen
-  compares poorly against existing column defaults, causing spurious diffs.
-
-**Alternatives (when `server_default` is not appropriate):**
-- Make the column nullable (`Optional[X]`) — only if `None` is meaningful at the
-  domain level, not just to bypass this check.
-- Hand-write a multi-step migration: add column nullable → backfill via
-  `op.execute("UPDATE ...")` → `alter_column(..., nullable=False)`. Reserve for
-  values that cannot be expressed as a single SQL literal.
+**Alternatives:** nullable `Optional[X]` — only if `None` is domain-meaningful;
+or a hand-written add-nullable → backfill → `alter_column(nullable=False)`
+migration for values inexpressible as a single SQL literal.
 
 **Regression tests:** `tests/migration/test_schema_integrity.py::TestServerDefaultsForAdditiveMigrations`
-(metadata scan — always runs) and `tests/migration/test_data_preservation.py::TestAddNotNullBooleanRequiresServerDefault`
-(real `ALTER TABLE` on populated SQLite + PostgreSQL via `db_backend`
-parametrization). The PG leg runs in stage 6 of `make test-all-stages`; to
-reproduce locally without the full VM, point `CLARINET_TEST_DATABASE_URL` at
-any PG instance and run `make test-migration` (see `tests/migration/conftest.py`).
+(metadata scan) and `tests/migration/test_data_preservation.py::TestAddNotNullBooleanRequiresServerDefault`
+(real `ALTER TABLE` on populated SQLite + PG; the PG leg = stage 6 of
+`make test-all-stages`, or `make test-migration` with `CLARINET_TEST_DATABASE_URL`
+pointing at any PG instance; see `tests/migration/conftest.py`).
 
 ## Type Aliases (`clarinet/types.py`)
 

@@ -52,6 +52,7 @@ dependencies = [
     "nh3>=0.2",
     "openpyxl>=3.1",
     "orjson>=3.10.0",
+    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]
@@ -63,6 +64,13 @@ docs = [
     "sphinx>=6.1.3",
     "sphinx-rtd-theme>=1.2.0",
     "myst-parser>=1.0.0"
+]
+quarto = [
+    # Python execution for *.qmd code chunks, run by the quarto CLI's Jupyter
+    # engine. The quarto binary itself is delivered via `clarinet quarto install`.
+    "jupyter>=1.0",
+    "ipykernel>=6.0",
+    "pandas>=2.0",
 ]
 
 [project.scripts]
@@ -167,6 +175,8 @@ module = [
     "markdown.*",
     "nh3",
     "nh3.*",
+    "yaml",
+    "yaml.*",
 ]
 ignore_missing_imports = true
 
@@ -196,6 +206,7 @@ markers = [
     "migration: database migration tests (Alembic upgrade/downgrade)",
     "demo: interactive Slicer demos (not part of CI, requires Slicer + PACS)",
     "postgres_only: tests requiring real PostgreSQL backend (skipped on SQLite)",
+    "xdist_group: serialize tests sharing a resource (pytest-xdist)",
 ]
 filterwarnings = [
     # FastAPI + aiormq: asyncio.iscoroutinefunction deprecated in Python 3.14

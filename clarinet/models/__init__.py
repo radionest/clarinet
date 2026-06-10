@@ -32,6 +32,15 @@ from .patient import Patient, PatientBase, PatientInfo, PatientRead, PatientSave
 # Pipeline definition models
 from .pipeline_definition import PipelineDefinition, PipelineDefinitionRead
 
+# Quarto report models (*.qmd rendered to DOCX/PDF)
+from .quarto_report import (
+    QuartoRenderRequest,
+    QuartoRenderState,
+    QuartoRenderStatus,
+    QuartoReportFormat,
+    QuartoReportTemplate,
+)
+
 # Record models (formerly Task)
 from .record import (
     Record,
@@ -97,6 +106,11 @@ __all__ = [
     "PatientSave",
     "PipelineDefinition",
     "PipelineDefinitionRead",
+    "QuartoRenderRequest",
+    "QuartoRenderState",
+    "QuartoRenderStatus",
+    "QuartoReportFormat",
+    "QuartoReportTemplate",
     "Record",
     "RecordBase",
     "RecordContextInfoUpdate",

@@ -9,6 +9,14 @@ import pytest
 import pytest_asyncio
 from httpx import AsyncClient
 
+from tests.config import (
+    RABBITMQ_HOST,
+    RABBITMQ_MANAGEMENT_AUTH,
+    RABBITMQ_MANAGEMENT_URL,
+    RABBITMQ_PORT,
+    RABBITMQ_URL,
+)
+
 
 @pytest_asyncio.fixture
 async def client(unauthenticated_client) -> AsyncGenerator[AsyncClient]:
@@ -18,14 +26,11 @@ async def client(unauthenticated_client) -> AsyncGenerator[AsyncClient]:
 
 # ─── Pipeline / RabbitMQ fixtures (shared with integration tests) ─────────────
 
-RABBITMQ_HOST = "192.168.122.151"  # klara VM
-RABBITMQ_PORT = 5672
-
 
 @pytest.fixture(scope="session")
 def rabbitmq_url() -> str:
-    """AMQP connection URL for RabbitMQ on klara."""
-    return f"amqp://clarinet_test:clarinet_test@{RABBITMQ_HOST}:{RABBITMQ_PORT}/"
+    """AMQP connection URL for RabbitMQ."""
+    return RABBITMQ_URL
 
 
 @pytest_asyncio.fixture(scope="session", autouse=True)
@@ -39,11 +44,11 @@ async def _cleanup_orphaned_e2e_resources() -> AsyncGenerator[None]:
         from clarinet.services.pipeline.rabbitmq_cleanup import cleanup_test_resources
 
         result = await cleanup_test_resources(
-            base_url=f"http://{RABBITMQ_HOST}:15672",
-            auth=("clarinet", "clarinet"),
+            base_url=RABBITMQ_MANAGEMENT_URL,
+            auth=RABBITMQ_MANAGEMENT_AUTH,
         )
         if result["queues_deleted"] or result["exchanges_deleted"]:
-            from loguru import logger
+            from clarinet.utils.logger import logger
 
             logger.info(
                 f"Cleaned orphaned RabbitMQ resources: "
@@ -56,7 +61,7 @@ async def _cleanup_orphaned_e2e_resources() -> AsyncGenerator[None]:
 
 @pytest.fixture(scope="session")
 def _check_rabbitmq() -> None:
-    """Skip all pipeline tests if RabbitMQ on klara is unreachable."""
+    """Skip all pipeline tests if RabbitMQ is unreachable."""
     try:
         sock = socket.create_connection((RABBITMQ_HOST, RABBITMQ_PORT), timeout=3)
         sock.close()

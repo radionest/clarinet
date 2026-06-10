@@ -37,11 +37,11 @@ dicom/
 
 Env vars use `CLARINET_` prefix (e.g. `CLARINET_PACS_HOST`).
 
-## Test PACS (Orthanc on klara)
+## Test PACS (Orthanc)
 
-- Host: `192.168.122.151`
+- Host: `localhost` by default; override via `CLARINET_TEST_PACS_HOST` (see `tests/config.py` and `.env.test.example`)
 - DICOM port: `4242`, AET: `ORTHANC`
-- REST API: `http://192.168.122.151:8042` (no auth)
+- REST API: `http://<host>:8042` (no auth)
 - All operations allowed: C-ECHO, C-FIND, C-GET, C-MOVE, C-STORE
 
 ## Usage
