@@ -125,7 +125,7 @@ Use `tests/utils/urls.py` instead of hardcoded URL strings. Full endpoint table 
 | `make_record_type_config(name, level=)` | `factories.py` | sync, no DB | `RecordTypeCreate` | reconciler/config tests |
 | `seed_record(session, ...)` | `factories.py` | async, commits | `Record` | when a record must exist before the request under test |
 | `PatientFactory.create_patient(session, ...)` | `test_helpers.py` | async, commits | `Patient` | integration tests; can also create `Study`/`Series` |
-| `RecordFactory.create_record(session, user, record_type, ...)` | `test_helpers.py` | async, commits | `Record` | same |
+| `RecordFactory.create_record_with_relations(session, *, patient, record_type, ...)` | `test_helpers.py` | async, commits | `RecordRead` | persisted record with eager-loaded relations; mirrors `RecordRepository.get_with_relations()` |
 | `UserFactory.create_user(...)` | `test_helpers.py` | async, commits | `User` | persisted user with hashed password |
 | `create_mock_superuser(session, email=)` | `conftest.py` | async, commits + expunges | `User` | overriding `client` fixture in e2e/auth tests |
 | `create_authenticated_client(user, session, settings)` | `conftest.py` | async generator | `AsyncClient` | drop-in replacement for the `client` fixture |
@@ -134,11 +134,13 @@ Use `tests/utils/urls.py` instead of hardcoded URL strings. Full endpoint table 
 #### Recipe: permission test
 
 Downgrade a mock superuser (`user.is_superuser = False` after
-`create_mock_superuser`), persist a `RecordType` (sync factory + manual commit)
-and a `Record` (async factory), then assert through
-`create_authenticated_client(user, ...)` — e.g. `DELETE /api/admin/records/{id}`
-→ 403. Working examples: grep `is_superuser = False` in `tests/integration/`
-(e.g. `test_rbac.py`, `test_workflow_router.py`).
+`create_mock_superuser`), persist a `Patient` + `RecordType` (sync factories +
+manual commit) and a `Record` via
+`RecordFactory.create_record_with_relations(session, patient=, record_type=)`,
+then assert through `create_authenticated_client(user, ...)` — e.g.
+`DELETE /api/admin/records/{id}` → 403. Working examples: grep
+`is_superuser = False` in `tests/integration/` (e.g. `test_rbac.py`,
+`test_workflow_router.py`).
 
 Mix sync (`make_*`) and async (`*Factory.create_*`) freely — sync factories produce instances you `session.add()` yourself; async factories commit and refresh for you.
 

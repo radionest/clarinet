@@ -13,6 +13,7 @@ pdm.lock
 # Testing
 .hypothesis
 .coverage
+.env.test
 
 # Build artifacts
 **/build/**

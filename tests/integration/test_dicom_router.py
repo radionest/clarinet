@@ -28,17 +28,12 @@ from clarinet.models.study import Series, Study
 from clarinet.services.dicom import DicomClient, DicomNode, SeriesQuery, StudyQuery
 from clarinet.services.dicom.models import StudyResult
 from clarinet.settings import settings
+from tests.config import CALLING_AET, PACS_AET, PACS_HOST, PACS_PORT, PACS_REST_URL
 from tests.utils.factories import make_patient
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-
-PACS_HOST = "192.168.122.151"
-PACS_PORT = 4242
-PACS_AET = "ORTHANC"
-PACS_REST_URL = "http://192.168.122.151:8042"
-CALLING_AET = "CLARINET_TEST"
 
 DICOM_BASE = "/api/dicom"
 
