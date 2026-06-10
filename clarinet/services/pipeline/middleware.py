@@ -280,12 +280,16 @@ class AuditMiddleware(TaskiqMiddleware):
     Args:
         client: Optional pre-configured ClarinetClient. If not provided,
             one is created from settings on first use and closed on ``shutdown()``.
+        queue_name: Queue of the broker this middleware is attached to.
+            Used as a fallback when the message has no ``queue`` label
+            (first pipeline step, direct ``kiq()``).
     """
 
-    def __init__(self, client: ClarinetClient | None = None) -> None:
+    def __init__(self, client: ClarinetClient | None = None, queue_name: str | None = None) -> None:
         super().__init__()
         self._client = client
         self._owns_client = client is None
+        self._queue_name = queue_name
         self._pending: set[asyncio.Task[None]] = set()
         # POST task per task_id — _patch awaits it so the terminal PATCH
         # never races ahead of the row insert (fast tasks would otherwise
@@ -340,7 +344,7 @@ class AuditMiddleware(TaskiqMiddleware):
                 await client.create_pipeline_run(
                     task_id=task_id,
                     task_name=task_name,
-                    queue=str(labels.get("queue", "")),
+                    queue=str(labels.get("queue") or self._queue_name or ""),
                     pipeline_id=labels.get("pipeline_id"),
                     step_index=step_index,
                     record_id=payload.get("record_id"),
@@ -357,8 +361,11 @@ class AuditMiddleware(TaskiqMiddleware):
         start_task.add_done_callback(partial(self._pop_start_task, task_id))
         return message
 
-    def _pop_start_task(self, task_id: str, _task: asyncio.Task[None]) -> None:
-        self._start_tasks.pop(task_id, None)
+    def _pop_start_task(self, task_id: str, task: asyncio.Task[None]) -> None:
+        # Identity check: a retry reuses the task_id, so a stale done-callback
+        # from attempt N must not evict attempt N+1's entry.
+        if self._start_tasks.get(task_id) is task:
+            self._start_tasks.pop(task_id, None)
 
     async def post_execute(self, message: TaskiqMessage, result: TaskiqResult[Any]) -> None:
         """Record the terminal status of a task execution.

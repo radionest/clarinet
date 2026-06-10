@@ -49,7 +49,7 @@ See `clarinet/api/exception_handlers.py` for the full mapping.
 Mounted at `/api/pipelines` (unconditionally). Endpoints:
 - `GET /api/pipelines/{name}/definition` — get definition by name (used by `PipelineChainMiddleware`); no auth (workers)
 - `POST /api/pipelines/sync` — re-sync pipeline definitions to DB on demand; no auth
-- `POST /api/pipelines/runs` / `PATCH /api/pipelines/runs/{task_id}` — task run audit rows written by `AuditMiddleware` (`CurrentUserDep`; service token authenticates as admin)
+- `POST /api/pipelines/runs` / `PATCH /api/pipelines/runs/{task_id}` — task run audit rows written by `AuditMiddleware` (`AdminUserDep`; service token resolves to admin — regular users must not forge audit)
 - `GET /api/pipelines/runs[/{task_id}]` — list/get runs (`AdminUserDep`)
 
 Uses `PipelineDefinitionRepositoryDep` + `PipelineTaskRunRepositoryDep`. Record-scoped view: `GET /api/records/{id}/runs` in record.py (`AuthorizedRecordDep`).

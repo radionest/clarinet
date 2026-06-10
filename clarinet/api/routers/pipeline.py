@@ -1,9 +1,10 @@
 """Pipeline definition and task run audit API router.
 
 Definition endpoints require no authentication — workers need
-unauthenticated access. Run audit endpoints authenticate via session
-cookie or ``X-Internal-Token`` (AuditMiddleware uses the service token);
-listing runs is admin-only.
+unauthenticated access. Run audit endpoints are admin-only for both
+read and write: AuditMiddleware authenticates with ``X-Internal-Token``,
+which resolves to the admin user, and regular users must not be able
+to forge or overwrite audit rows.
 """
 
 from datetime import datetime
@@ -12,7 +13,6 @@ from fastapi import APIRouter
 
 from clarinet.api.dependencies import (
     AdminUserDep,
-    CurrentUserDep,
     PaginationDep,
     PipelineDefinitionRepositoryDep,
     PipelineTaskRunRepositoryDep,
@@ -37,7 +37,7 @@ router = APIRouter(
 @router.post("/runs", response_model=PipelineTaskRunRead, status_code=201)
 async def create_pipeline_run(
     body: PipelineTaskRunCreate,
-    _user: CurrentUserDep,
+    _user: AdminUserDep,
     repo: PipelineTaskRunRepositoryDep,
 ) -> PipelineTaskRun:
     """Create an audit row for a started pipeline task.
@@ -88,7 +88,7 @@ async def get_pipeline_run(
 async def finish_pipeline_run(
     task_id: str,
     body: PipelineTaskRunUpdate,
-    _user: CurrentUserDep,
+    _user: AdminUserDep,
     repo: PipelineTaskRunRepositoryDep,
 ) -> PipelineTaskRun:
     """Record terminal status for a pipeline task run.

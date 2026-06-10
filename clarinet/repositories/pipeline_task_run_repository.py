@@ -2,9 +2,11 @@
 
 from collections.abc import Sequence
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col, select
 
+from clarinet.exceptions.domain import DatabaseIntegrityError
 from clarinet.models.pipeline_task_run import (
     PipelineTaskRun,
     PipelineTaskRunCreate,
@@ -12,6 +14,9 @@ from clarinet.models.pipeline_task_run import (
     PipelineTaskRunUpdate,
 )
 from clarinet.repositories.base import BaseRepository
+from clarinet.utils.logger import logger
+
+_TERMINAL_STATUSES = frozenset({"succeeded", "failed"})
 
 
 class PipelineTaskRunRepository(BaseRepository[PipelineTaskRun]):
@@ -25,18 +30,42 @@ class PipelineTaskRunRepository(BaseRepository[PipelineTaskRun]):
 
         Re-delivered messages (worker crash before ack) call this twice —
         the original row wins so the first ``started_at`` is preserved.
+        Concurrent inserts with the same id (redelivery to two workers)
+        are resolved by returning the winner's row.
         """
         existing = await self.get_optional(data.id)
         if existing is not None:
             return existing
-        return await self.create(PipelineTaskRun(**data.model_dump()))
+        try:
+            return await self.create(PipelineTaskRun(**data.model_dump()))
+        except IntegrityError as e:
+            await self.session.rollback()
+            existing = await self.get_optional(data.id)
+            if existing is not None:
+                return existing
+            # Not a duplicate-id race — e.g. FK violation (record deleted
+            # between message dispatch and audit write).
+            logger.error(f"pipeline_task_run insert failed for '{data.id}': {e}")
+            raise DatabaseIntegrityError(f"Cannot insert pipeline_task_run '{data.id}'") from e
 
     async def finish(self, task_id: str, data: PipelineTaskRunUpdate) -> PipelineTaskRun | None:
-        """Apply terminal-status fields; None when the start row never arrived."""
+        """Apply terminal-status fields; None when the start row never arrived.
+
+        A late fire-and-forget ``retrying`` PATCH (attempt N) must not
+        downgrade a terminal status already written by attempt N+1, so it
+        is ignored. ``None`` values are never applied — the audit flow only
+        adds information to a run row.
+        """
         run = await self.get_optional(task_id)
         if run is None:
             return None
-        return await self.update(run, data.model_dump(exclude_unset=True), exclude_unset=False)
+        if run.status in _TERMINAL_STATUSES and data.status == "retrying":
+            return run
+        return await self.update(
+            run,
+            data.model_dump(exclude_unset=True, exclude_none=True),
+            exclude_unset=False,
+        )
 
     async def find(self, criteria: PipelineTaskRunFind) -> Sequence[PipelineTaskRun]:
         """Return runs matching *criteria*, newest first."""
@@ -48,9 +77,9 @@ class PipelineTaskRunRepository(BaseRepository[PipelineTaskRun]):
         if criteria.record_id is not None:
             stmt = stmt.where(PipelineTaskRun.record_id == criteria.record_id)
         if criteria.since is not None:
-            stmt = stmt.where(col(PipelineTaskRun.created_at) >= criteria.since)
+            stmt = stmt.where(col(PipelineTaskRun.started_at) >= criteria.since)
         stmt = (
-            stmt.order_by(col(PipelineTaskRun.created_at).desc())
+            stmt.order_by(col(PipelineTaskRun.started_at).desc())
             .offset(criteria.skip)
             .limit(criteria.limit)
         )

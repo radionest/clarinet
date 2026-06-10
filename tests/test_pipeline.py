@@ -1237,6 +1237,44 @@ class TestAuditMiddleware:
 
         assert order == ["post", "patch"]
 
+    @pytest.mark.asyncio
+    async def test_pop_start_task_keeps_newer_entry(self):
+        """A stale done-callback (attempt N) must not evict attempt N+1's task."""
+        mw, _ = self._middleware()
+
+        async def noop():
+            pass
+
+        stale = asyncio.create_task(noop())
+        current = asyncio.create_task(noop())
+        await asyncio.gather(stale, current)
+
+        mw._start_tasks["tid"] = current
+        mw._pop_start_task("tid", stale)
+        assert mw._start_tasks["tid"] is current
+        mw._pop_start_task("tid", current)
+        assert "tid" not in mw._start_tasks
+
+    @pytest.mark.asyncio
+    async def test_queue_falls_back_to_broker_queue_name(self):
+        """Messages without a queue label get the broker's queue."""
+        from taskiq import TaskiqMessage
+
+        from clarinet.client import ClarinetClient
+        from clarinet.services.pipeline.middleware import AuditMiddleware
+
+        mock_client = AsyncMock(spec=ClarinetClient)
+        mw = AuditMiddleware(client=mock_client, queue_name=GPU_QUEUE)
+        msg = TaskiqMessage(
+            task_id="no-label", task_name="direct_task", labels={}, args=[], kwargs={}
+        )
+
+        await mw.pre_execute(msg)
+        await mw.shutdown()
+
+        kwargs = mock_client.create_pipeline_run.call_args.kwargs
+        assert kwargs["queue"] == GPU_QUEUE
+
     def test_broker_includes_audit_between_logging_and_dlq(self):
         """create_broker() wires Audit after Logging and before DeadLetter."""
         from clarinet.services.pipeline.middleware import (

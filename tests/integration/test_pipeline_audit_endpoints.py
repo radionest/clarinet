@@ -80,6 +80,47 @@ class TestPipelineRunEndpoints:
         assert body["result"] == {"score": 0.9}
 
     @pytest.mark.asyncio
+    async def test_patch_tolerates_explicit_nulls(self, client: AsyncClient):
+        """JSON nulls for optional fields (retry_count etc.) must not 500/409."""
+        tid = await _seed_run(client)
+        resp = await client.patch(
+            pipeline_run_url(tid),
+            json={
+                "status": "succeeded",
+                "finished_at": datetime.now(UTC).isoformat(),
+                "execution_time": 1.0,
+                "retry_count": None,
+                "error_type": None,
+                "error_message": None,
+                "error_status_code": None,
+                "result": None,
+            },
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["status"] == "succeeded"
+        assert body["retry_count"] == 0
+
+    @pytest.mark.asyncio
+    async def test_write_forbidden_for_non_admin(self, test_session, test_settings):
+        """Regular users must not be able to forge audit rows."""
+        from tests.conftest import create_authenticated_client, create_mock_superuser
+
+        user = await create_mock_superuser(test_session, email="runs_nonadmin@test.com")
+        user.is_superuser = False
+        async for nonadmin in create_authenticated_client(user, test_session, test_settings):
+            resp = await nonadmin.post(
+                PIPELINE_RUNS,
+                json={
+                    "id": str(uuid.uuid4()),
+                    "task_name": "forged",
+                    "queue": "clarinet.default",
+                    "started_at": datetime.now(UTC).isoformat(),
+                },
+            )
+            assert resp.status_code == 403
+
+    @pytest.mark.asyncio
     async def test_patch_unknown_id_returns_404(self, client: AsyncClient):
         resp = await client.patch(
             pipeline_run_url("nonexistent"),

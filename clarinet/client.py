@@ -1173,7 +1173,9 @@ class ClarinetClient:
             series_uid=series_uid,
             started_at=started_at,
         )
-        await self._request("POST", "/pipelines/runs", json=body.model_dump(mode="json"))
+        await self._request(
+            "POST", "/pipelines/runs", json=body.model_dump(mode="json", exclude_none=True)
+        )
 
     async def finish_pipeline_run(
         self,
@@ -1204,7 +1206,7 @@ class ClarinetClient:
         await self._request(
             "PATCH",
             f"/pipelines/runs/{task_id}",
-            json=body.model_dump(mode="json"),
+            json=body.model_dump(mode="json", exclude_none=True),
         )
 
     async def download_report(

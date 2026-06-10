@@ -188,10 +188,14 @@ Task name collision: `register_task()` in `chain.py` prevents project tasks from
 `pre_execute` POSTs a `running` row; `post_execute` PATCHes the terminal status
 (`succeeded` / `failed` / `retrying` — NoResultError ⇒ retrying, same guard as DLQ).
 Writes go through `ClarinetClient` with the service token, fire-and-forget
-(`asyncio.create_task`); failures are logged and swallowed, pending writes are
-drained in `shutdown()`. Query via `GET /api/pipelines/runs` (admin) or
-`GET /api/records/{id}/runs` (record-scoped). Downstream projects need an
-alembic migration for the new table.
+(`asyncio.create_task`); the PATCH awaits its task's POST (never races the
+row insert), a late `retrying` PATCH never downgrades a terminal status,
+failures are logged and swallowed, pending writes are drained in
+`shutdown()`. Queue falls back to the broker's `queue_name` when the
+message has no `queue` label (first step, direct `kiq()`). Query via
+`GET /api/pipelines/runs` (admin) or `GET /api/records/{id}/runs`
+(record-scoped, identifiers masked per record masking policy). Downstream
+projects need an alembic migration for the new table.
 
 ## TaskContext System
 

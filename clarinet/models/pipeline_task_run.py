@@ -72,7 +72,7 @@ class PipelineTaskRun(PipelineTaskRunBase, table=True):
 
     __tablename__ = "pipeline_task_run"
     __table_args__ = (
-        Index("ix_pipeline_task_run_status_created_at", "status", "created_at"),
+        Index("ix_pipeline_task_run_status_started_at", "status", "started_at"),
         Index("ix_pipeline_task_run_pipeline_id_step", "pipeline_id", "step_index"),
     )
 
@@ -129,7 +129,11 @@ class PipelineTaskRunRead(PipelineTaskRunBase):
 
 
 class PipelineTaskRunFind(SQLModel):
-    """Search filters for pipeline task runs (all optional)."""
+    """Search filters for pipeline task runs (all optional).
+
+    ``since`` is a lower bound on ``started_at`` (results are also ordered
+    by ``started_at``, newest first).
+    """
 
     status: str | None = None
     task_name: str | None = None
