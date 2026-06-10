@@ -37,6 +37,11 @@ def test_quarto_render_to_docx(auth_page: Page, base_url: str, path_prefix: str)
     _open_quarto_page(auth_page, base_url, path_prefix)
 
     render_btn = auth_page.get_by_role("button", name="Render DOCX")
+    empty_note = auth_page.get_by_text("No Quarto reports available")
+    # The template list loads asynchronously after networkidle and
+    # locator.count() does not wait — settle on a real state (render buttons
+    # or the empty note) first, or the test self-skips on slow VMs.
+    expect(render_btn.or_(empty_note).first).to_be_visible(timeout=15_000)
     if render_btn.count() == 0:
         pytest.skip("No Quarto reports configured on this deployment")
     render_btn.first.click()
