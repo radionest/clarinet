@@ -166,18 +166,30 @@ class SlicerService:
         only into ``_ns`` left it invisible to those helpers, so PACS context
         overrides silently fell back to ``from_slicer()``. ``_ns`` is built
         *after* the injection, so the user script still sees the values too.
+
+        **Injected keys are removed in ``finally``.** Slicer reuses the exec
+        namespace across calls, so without cleanup one call's context (record
+        UIDs, file_registry paths, PACS params) would silently bleed into every
+        later script — and into manual Slicer-console use, where the documented
+        ``from_slicer()`` fallback must stay reachable. Helpers only run while
+        the user script executes, so popping after ``exec`` loses nothing; the
+        ``finally`` keeps a crashing script from leaving stale context behind.
         """
-        parts = [self._helper_source, ""]
+        ctx_lines = "".join(
+            f"    globals()[{key!r}] = {value!r}\n" for key, value in (context or {}).items()
+        )
+        ctx_keys = tuple(context) if context else ()
+        runner = f"""\
+def _run():
+{ctx_lines}    _ns = dict(globals())
+    try:
+        exec(compile({script!r}, '<slicer_script>', 'exec'), _ns)
+        globals()['__execResult'] = _ns.get('__execResult', {{}})
+    finally:
+        for _k in {ctx_keys!r}:
+            globals().pop(_k, None)
 
-        indent = "    "
-        run_lines = ["def _run():"]
-        if context:
-            for key, value in context.items():
-                run_lines.append(f"{indent}globals()[{key!r}] = {value!r}")
-        run_lines.append(f"{indent}_ns = dict(globals())")
-        run_lines.append(f"{indent}exec(compile({script!r}, '<slicer_script>', 'exec'), _ns)")
-        run_lines.append(f"{indent}globals()['__execResult'] = _ns.get('__execResult', {{}})")
-        run_lines.extend(["", "_run()", "del _run"])
+_run()
+del _run"""
 
-        parts.append("\n".join(run_lines))
-        return "\n".join(parts)
+        return "\n".join([self._helper_source, "", runner])
