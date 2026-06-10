@@ -28,7 +28,6 @@ import lustre/event
 import modem
 import plinth/javascript/global
 import plinth/javascript/storage
-import plinth/browser/window
 import preload
 import pages/admin as admin_page
 import pages/admin/quarto_reports as admin_quarto_reports_page
@@ -170,7 +169,7 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       // Cleanup current page (e.g. slicer ping timer) + stop preload
       let page_cleanup = cleanup_current_page(model)
       let preload_cleanup =
-        effect.map(preload.stop_timer(model.preload), store.PreloadMsg)
+        effect.map(preload.cleanup(model.preload), store.PreloadMsg)
       let cleanup_effect = effect.batch([page_cleanup, preload_cleanup])
       let was_preloading = preload.is_active(model.preload)
       // Force-close the create-record modal on navigation: it carries a live
@@ -353,7 +352,7 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           client_settings.settings_key,
         ])
       let preload_cleanup =
-        effect.map(preload.stop_timer(model.preload), store.PreloadMsg)
+        effect.map(preload.cleanup(model.preload), store.PreloadMsg)
       #(
         store.reset_for_logout(model),
         effect.batch([logout_effect, clear_storage, preload_cleanup]),
@@ -788,13 +787,6 @@ fn delegate_preload(model: Model, pmsg: preload.Msg) -> #(Model, Effect(Msg)) {
   let out_effects =
     list.fold(out_msgs, [], fn(acc, out_msg) {
       case out_msg {
-        preload.OpenViewer(url) -> [
-          effect.from(fn(_dispatch) {
-            let _ = window.open(url, "_blank", "")
-            Nil
-          }),
-          ..acc
-        ]
         preload.ShowError(msg) -> {
           [dispatch_msg(store.SetError(Some(msg))), ..acc]
         }
@@ -1016,8 +1008,8 @@ fn apply_out_msgs(
           #(store.set_user(m, user), eff_list)
         shared.Logout ->
           #(m, [dispatch_msg(store.Logout), ..eff_list])
-        shared.StartPreload(viewer_url, study_uid) ->
-          #(m, [dispatch_msg(store.PreloadMsg(preload.Start(viewer_url, study_uid))), ..eff_list])
+        shared.StartPreload(viewer_url, study_uids) ->
+          #(m, [dispatch_msg(store.PreloadMsg(preload.Start(viewer_url, study_uids))), ..eff_list])
       }
     })
   #(final_model, effect.batch(list.reverse(effs)))

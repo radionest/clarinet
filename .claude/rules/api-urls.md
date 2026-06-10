@@ -177,3 +177,5 @@ Admin-only (`AdminUserDep`). 503 when `recordflow_enabled=False`.
 | `/dicom-web/studies/{uid}/series/{uid}/metadata` | GET | 200 | WADO-RS series metadata |
 | `/dicom-web/.../instances/{uid}/frames/{f}` | GET | 200 | WADO-RS pixel data |
 | `/dicom-web/studies/{uid}/series/{uid}/archive` | GET | 200 | Download series as ZIP |
+| `/dicom-web/preload` | POST | 200 | Start multi-study preload. Body `{"study_uids": [...]}` (1–20 UIDs). **422**: empty/oversized list |
+| `/dicom-web/preload/progress/{task_id}` | GET | 200 | Poll preload progress (`starting`/`fetching`/`ready`/`error`/`not_found`) |

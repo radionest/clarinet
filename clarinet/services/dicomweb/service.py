@@ -283,40 +283,69 @@ class DicomWebProxyService:
         logger.debug(f"WADO-RS frames: {len(frames)} frames for instance {instance_uid}")
         return body, content_type
 
-    async def start_preload(self, study_uid: str) -> str:
-        """Start background preloading of a study into cache.
+    async def start_preload(self, study_uids: list[str]) -> str:
+        """Start background preloading of one or more studies into cache.
 
+        Studies are fetched sequentially (same rationale as the study-level
+        C-GET: avoid overloading the PACS with concurrent associations).
         Returns a task_id that can be used to poll progress.
         """
-        task_id = f"preload_{study_uid}_{uuid4().hex[:8]}"
+        task_id = f"preload_{uuid4().hex[:12]}"
         self._cache.set_preload_progress(task_id, {"status": "starting", "received": 0})
-        task = asyncio.create_task(self._preload_worker(study_uid, task_id))
+        task = asyncio.create_task(self._preload_worker(study_uids, task_id))
         self._preload_tasks.add(task)
         task.add_done_callback(self._preload_tasks.discard)
         return task_id
 
-    async def _preload_worker(self, study_uid: str, task_id: str) -> None:
+    async def _preload_worker(self, study_uids: list[str], task_id: str) -> None:
+        """Sequentially cache each study, aggregating progress across all of them.
+
+        Fail-fast: an error on study N leaves studies 1..N-1 warm in cache and
+        reports status="error" — a retry resumes faster, no partial-success state.
+        """
+        progress = self._cache.get_preload_progress(task_id)
+        if progress is None:
+            return
+        total_received = 0
         try:
-            progress = self._cache.get_preload_progress(task_id)
-            if progress is None:
-                return
-
-            results = await self._client.find_series(
-                query=SeriesQuery(study_instance_uid=study_uid), peer=self._pacs
-            )
-            series_uids = [r.series_instance_uid for r in results if r.series_instance_uid]
-
-            if not series_uids:
-                self._cache.set_preload_progress(
-                    task_id, {"status": "ready", "received": 0, "total": 0}
+            for idx, study_uid in enumerate(study_uids, start=1):
+                progress.update(
+                    status="fetching",
+                    study_index=idx,
+                    study_count=len(study_uids),
+                    study_received=0,
+                    study_total=None,
                 )
-                return
+                results = await self._client.find_series(
+                    query=SeriesQuery(study_instance_uid=study_uid), peer=self._pacs
+                )
+                series_uids = [r.series_instance_uid for r in results if r.series_instance_uid]
+                if not series_uids:
+                    continue
 
-            await self._cache.ensure_study_cached(
-                study_uid, series_uids, self._client, self._pacs, progress=progress
-            )
+                # _base default binds the current value — a plain closure would
+                # late-bind and every callback would see the final total_received
+                def on_progress(
+                    received: int, total: int | None, _base: int = total_received
+                ) -> None:
+                    progress.update(
+                        status="fetching",
+                        received=_base + received,
+                        study_received=received,
+                        study_total=total,
+                    )
+
+                cached_map = await self._cache.ensure_study_cached(
+                    study_uid,
+                    series_uids,
+                    self._client,
+                    self._pacs,
+                    on_progress=on_progress,
+                )
+                total_received += sum(len(e.instances) for e in cached_map.values())
+            progress.update(status="ready", received=total_received, total=total_received)
         except Exception as e:
-            logger.error(f"Preload failed for study {study_uid}: {e}")
+            logger.error(f"Preload failed (task {task_id}): {e}")
             self._cache.set_preload_progress(task_id, {"status": "error", "error": str(e)})
 
     def get_preload_progress(self, task_id: str) -> dict[str, Any] | None:
