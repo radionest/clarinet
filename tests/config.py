@@ -61,15 +61,6 @@ CALLING_AET = os.environ.get("CLARINET_TEST_CALLING_AET", "CLARINET_TEST")
 SLICER_HOST = os.environ.get("CLARINET_TEST_SLICER_HOST", "localhost")
 SLICER_PORT = int(os.environ.get("CLARINET_TEST_SLICER_PORT", "2016"))
 
-# ─── PostgreSQL (migration / per-worker test DBs) ────────────────────────────
-
-PG_HOST = os.environ.get("CLARINET_TEST_PG_HOST", "localhost")
-PG_PORT = int(os.environ.get("CLARINET_TEST_PG_PORT", "5432"))
-PG_USER = os.environ.get("CLARINET_TEST_PG_USER", "clarinet_test")
-PG_PASS = os.environ.get("CLARINET_TEST_PG_PASS", "clarinet_test")
-PG_MIGRATION_DB = os.environ.get("CLARINET_TEST_PG_MIGRATION_DB", "clarinet_mig_base")
-
-
-def pg_url(database: str = PG_MIGRATION_DB) -> str:
-    """Build an asyncpg URL for a given test database name."""
-    return f"postgresql+asyncpg://{PG_USER}:{PG_PASS}@{PG_HOST}:{PG_PORT}/{database}"
+# PostgreSQL (CLARINET_TEST_PG_*) is consumed by the Makefile (test-migration-pg,
+# test-all-stages stage 2b), which reads the same env vars / .env.test and passes
+# a ready CLARINET_TEST_DATABASE_URL to the migration tests — no constants here.

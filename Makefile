@@ -187,12 +187,13 @@ PYTEST_UNIT_MARKERS := not pipeline and not dicom and not slicer and not schema
 PYTEST_WORKERS ?= 10
 
 # PostgreSQL backend for migration tests / test-all-stages stage 2b/6
-# Override hostnames/creds in your environment (see .env.test.example).
-CLARINET_TEST_PG_HOST ?= localhost
-CLARINET_TEST_PG_PORT ?= 5432
-CLARINET_TEST_PG_USER ?= clarinet_test
-CLARINET_TEST_PG_PASS ?= clarinet_test
-CLARINET_TEST_PG_MIGRATION_DB ?= clarinet_mig_base
+# Precedence: shell env > .env.test > default — same as tests/config.py.
+env_test_or = $(or $(shell sed -n 's/^$(1)=//p' .env.test 2>/dev/null | tail -n1),$(2))
+CLARINET_TEST_PG_HOST ?= $(call env_test_or,CLARINET_TEST_PG_HOST,localhost)
+CLARINET_TEST_PG_PORT ?= $(call env_test_or,CLARINET_TEST_PG_PORT,5432)
+CLARINET_TEST_PG_USER ?= $(call env_test_or,CLARINET_TEST_PG_USER,clarinet_test)
+CLARINET_TEST_PG_PASS ?= $(call env_test_or,CLARINET_TEST_PG_PASS,clarinet_test)
+CLARINET_TEST_PG_MIGRATION_DB ?= $(call env_test_or,CLARINET_TEST_PG_MIGRATION_DB,clarinet_mig_base)
 CLARINET_TEST_PG_URL := postgresql+asyncpg://$(CLARINET_TEST_PG_USER):$(CLARINET_TEST_PG_PASS)@$(CLARINET_TEST_PG_HOST):$(CLARINET_TEST_PG_PORT)/$(CLARINET_TEST_PG_MIGRATION_DB)
 
 .PHONY: test-migration

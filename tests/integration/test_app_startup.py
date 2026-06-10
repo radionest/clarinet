@@ -33,11 +33,10 @@ async def cleanup_startup_test_queues():
 
     import aio_pika
 
-    from tests.config import RABBITMQ_HOST, RABBITMQ_PASS, RABBITMQ_PORT, RABBITMQ_USER
+    from tests.config import RABBITMQ_URL
 
     try:
-        url = f"amqp://{RABBITMQ_USER}:{RABBITMQ_PASS}@{RABBITMQ_HOST}:{RABBITMQ_PORT}/"
-        connection = await aio_pika.connect(url, timeout=5)
+        connection = await aio_pika.connect(RABBITMQ_URL, timeout=5)
         async with connection:
             channel = await connection.channel()
             for name in [
