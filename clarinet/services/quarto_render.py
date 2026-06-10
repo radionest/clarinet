@@ -141,7 +141,8 @@ async def render_report(
     if existing and existing.get("created_at"):
         created_at = str(existing["created_at"])
 
-    write_status(
+    await asyncio.to_thread(
+        write_status,
         render_dir,
         name=name,
         render_id=render_dir.name,
@@ -162,7 +163,8 @@ async def render_report(
         for fmt in formats:
             await _run_quarto(work_qmd, fmt, render_dir, quarto_executable, timeout_seconds)
             ready[fmt.value] = True
-            write_status(
+            await asyncio.to_thread(
+                write_status,
                 render_dir,
                 name=name,
                 render_id=render_dir.name,
@@ -173,7 +175,8 @@ async def render_report(
             )
     except Exception as exc:
         logger.opt(exception=exc).error(f"Quarto render '{name}' failed")
-        write_status(
+        await asyncio.to_thread(
+            write_status,
             render_dir,
             name=name,
             render_id=render_dir.name,
@@ -186,7 +189,8 @@ async def render_report(
         )
         return
 
-    write_status(
+    await asyncio.to_thread(
+        write_status,
         render_dir,
         name=name,
         render_id=render_dir.name,
@@ -218,7 +222,7 @@ async def _materialize_data(
     timeout = settings.reports_query_timeout_seconds + 30
     for report_name in data_reports:
         csv_bytes = await client.download_report(report_name, request_timeout=timeout)
-        (data_dir / f"{report_name}.csv").write_bytes(csv_bytes)
+        await asyncio.to_thread((data_dir / f"{report_name}.csv").write_bytes, csv_bytes)
 
 
 async def _run_quarto(

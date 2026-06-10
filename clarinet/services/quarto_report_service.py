@@ -127,7 +127,8 @@ class QuartoReportService:
         # in the same microsecond must not collide on the directory name.
         render_id = f"{now.strftime('%Y%m%d_%H%M%S_%f')}_{secrets.token_hex(3)}"
         render_dir = self._render_dir(name, render_id)
-        write_status(
+        await asyncio.to_thread(
+            write_status,
             render_dir,
             name=name,
             render_id=render_id,
@@ -141,13 +142,14 @@ class QuartoReportService:
             # dispatch, so the worker host never needs the project's reports
             # folder — it reads the .qmd from render_dir like everything else.
             work_qmd = render_dir / qmd_path.name
-            shutil.copy2(qmd_path, work_qmd)
+            await asyncio.to_thread(shutil.copy2, qmd_path, work_qmd)
             await self._dispatch(name, work_qmd, template.data_reports, formats, render_dir)
         except Exception as exc:
             # A copy/broker/enqueue failure must not leave the sidecar stuck on
             # PENDING — record it as failed so the UI stops polling.
             logger.opt(exception=exc).error(f"Quarto render '{name}' dispatch failed")
-            write_status(
+            await asyncio.to_thread(
+                write_status,
                 render_dir,
                 name=name,
                 render_id=render_id,
