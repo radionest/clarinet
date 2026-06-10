@@ -74,6 +74,7 @@ from clarinet.models import (
 )
 from clarinet.repositories.record_repository import RecordSearchCriteria
 from clarinet.services.file_validation import FileValidationResult, validate_record_files
+from clarinet.services.record_service import ensure_record_editable
 from clarinet.services.schema_hydration import hydrate_schema
 from clarinet.services.slicer.context import build_slicer_context_async
 from clarinet.settings import settings
@@ -333,7 +334,11 @@ async def bulk_update_record_status(
     user: CurrentUserDep,
     repo: RecordRepositoryDep,
 ) -> None:
-    """Update status for multiple records at once."""
+    """Update status for multiple records at once.
+
+    409 when any target record is finished and its type locks submitted
+    records (``editable`` / ``edit_window_days``) — non-superusers only.
+    """
     if not user.is_superuser:
         user_roles = get_user_role_names(user)
         for rid in record_ids:
@@ -341,7 +346,7 @@ async def bulk_update_record_status(
             role_name = record.record_type.role_name
             if role_name is None or role_name not in user_roles:
                 raise AuthorizationError(f"Insufficient permissions to access record {rid}")
-    await service.bulk_update_status(record_ids, new_status)
+    await service.bulk_update_status(record_ids, new_status, acting_user=user)
 
 
 @router.patch("/{record_id}/status", response_model=RecordRead)
@@ -352,8 +357,13 @@ async def update_record_status(
     _authorized_record: MutableRecordDep,
     user: CurrentUserDep,
 ) -> RecordRead:
-    """Update a record's status."""
-    record, _ = await service.update_status(record_id, record_status)
+    """Update a record's status.
+
+    409 for non-superusers on any status change of a finished record whose
+    type locks submitted records (``editable`` / ``edit_window_days``) —
+    re-opening would let the user change the answer via a fresh POST.
+    """
+    record, _ = await service.update_status(record_id, record_status, acting_user=user)
     return mask_record_patient_data(RecordRead.model_validate(record), user)
 
 
@@ -477,7 +487,7 @@ async def _process_submission(
         )
 
     if is_update:
-        updated, _ = await service.update_data(record_id, validated_data)
+        updated, _ = await service.update_data(record_id, validated_data, acting_user=user)
     else:
         if not skip_validation:
             # Validate input files (raise on missing required files)
@@ -555,11 +565,17 @@ async def update_record_data(
     user: CurrentUserDep,
     data: RecordData = Body(),
 ) -> RecordRead:
-    """Update a record's data."""
+    """Update a record's data.
+
+    409 when the record type forbids post-submit edits (``editable=False``)
+    or the ``edit_window_days`` window has passed (non-superusers only).
+    """
     record = authorized_record
 
     if record.status != RecordStatus.finished:
         raise CONFLICT.with_context("Record is not finished yet. Use POST to submit record data.")
+
+    ensure_record_editable(record, user)
 
     return await _process_submission(
         record_id=record_id,
@@ -726,6 +742,10 @@ async def resubmit_record_with_validation(
     if record.status != RecordStatus.finished:
         raise CONFLICT.with_context("Record is not finished yet. Use POST to submit record data.")
 
+    # Fail fast — the service enforces the lock too, but only after the
+    # Slicer validator has already run in the user's Slicer instance.
+    ensure_record_editable(record, user)
+
     return await _process_submission(
         record_id=record_id,
         record=record,
@@ -862,6 +882,7 @@ async def invalidate_record(
     record_id: int,
     _authorized_record: AuthorizedRecordDep,
     service: RecordServiceDep,
+    user: CurrentUserDep,
     mode: str = Body(default="hard"),
     source_record_id: int | None = Body(default=None),
     reason: str | None = Body(default=None),
@@ -870,6 +891,9 @@ async def invalidate_record(
 
     Hard mode resets status to pending (keeps user assignment) and fires
     RecordFlow triggers. Soft mode only appends the reason to context_info.
+
+    Hard mode returns 409 for non-superusers when the record is finished and
+    its type locks submitted records (``editable`` / ``edit_window_days``).
 
     Args:
         record_id: ID of the record to invalidate.
@@ -885,6 +909,7 @@ async def invalidate_record(
         mode=mode,
         source_record_id=source_record_id,
         reason=reason,
+        acting_user=user,
     )
     return RecordRead.model_validate(record)
 

@@ -53,24 +53,24 @@ URL constants live in `tests/utils/urls.py`. Status codes: 201 = POST create, 20
 | `/api/records/find/random` | POST | 200 | Find random record matching filters (RecordRead or null) |
 | `/api/records/available_types` | GET | 200 | Available record types for user |
 | `/api/records/filter-options` | POST | 200 | Distinct patient/record_type/user values for filter dropdowns (RBAC-scoped; body filters ignored) |
-| `/api/records/bulk/status` | PATCH | 204 | Bulk status update |
+| `/api/records/bulk/status` | PATCH | 204 | Bulk status update. **409** for non-superusers when any target record is finished and its type locks submitted records (`editable=False` or expired `edit_window_days`) |
 | `/api/records/{id}` | GET | 200 | Get record |
 | `/api/records/{id}/schema` | GET | 200 | Hydrated JSON Schema (x-options → oneOf) |
-| `/api/records/{id}/status` | PATCH | 200 | Update status |
+| `/api/records/{id}/status` | PATCH | 200 | Update status. **409** for non-superusers when the record is finished and its type locks submitted records |
 | `/api/records/{id}/user` | PATCH | 200 | Assign user |
 | `/api/records/{id}/context-info` | PATCH | 200 | Replace context_info (markdown). Body: `{"context_info": str \| null}`. Auth: superuser/owner/unassigned |
 | `/api/records/{id}/data` | POST | 200 | Submit data |
-| `/api/records/{id}/data` | PATCH | 200 | Update data |
+| `/api/records/{id}/data` | PATCH | 200 | Update data. **409** for non-superusers when the type locks submitted records (`editable=False` or expired `edit_window_days`) |
 | `/api/records/{id}/data/prefill` | POST | 200 | Prefill data (error if exists) |
 | `/api/records/{id}/data/prefill` | PUT | 200 | Replace prefill data |
 | `/api/records/{id}/data/prefill` | PATCH | 200 | Merge into prefill data |
 | `/api/records/{id}/submit` | POST | 200 | Submit + run `slicer_result_validator` if configured; merges `__execResult` into data on save |
-| `/api/records/{id}/submit` | PATCH | 200 | Re-submit a finished record (same Slicer-validator + `__execResult` merge as POST) |
+| `/api/records/{id}/submit` | PATCH | 200 | Re-submit a finished record (same Slicer-validator + `__execResult` merge as POST). **409** for non-superusers when the type locks submitted records |
 | `/api/records/{id}/validate-files` | POST | 200 | Validate files |
 | `/api/records/{id}/check-files` | POST | 200 | Check files |
 | `/api/records/{id}/output-files/{name}` | GET | 200 | Download a single OUTPUT file by `FileDefinition.name` (404 if not defined or not on disk). Auth: `AuthorizedRecordDep` |
 | `/api/records/{id}/fail` | POST | 200 | Manually fail record |
-| `/api/records/{id}/invalidate` | POST | 200 | Invalidate record |
+| `/api/records/{id}/invalidate` | POST | 200 | Invalidate record. Hard mode: **409** for non-superusers when the record is finished and its type locks submitted records |
 | `/api/records/{id}/viewers` | GET | 200 | List viewer URIs for all enabled viewers |
 | `/api/records/{id}/viewers/{name}` | GET | 200 | Get viewer URI for a specific viewer |
 

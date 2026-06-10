@@ -316,6 +316,12 @@ class RecordParentRequiredError(RecordConstraintViolationError):
     error_code: ClassVar[str] = "PARENT_REQUIRED"
 
 
+class RecordEditLockedError(BusinessRuleViolationError):
+    """Raised when a non-superuser attempts to change a finished record whose
+    type forbids it (``editable=False`` or an elapsed ``edit_window_days``).
+    """
+
+
 class WorkflowPlanDigestMismatchError(BusinessRuleViolationError):
     """Plan digest sent to /fire does not match the live re-plan.
 

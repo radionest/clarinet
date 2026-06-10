@@ -6,7 +6,7 @@ RecordType models live in ``record_type.py`` and are re-exported here
 for backward compatibility.
 """
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from enum import Enum
 from typing import Annotated, Any, Literal, Optional
 from uuid import UUID
@@ -60,6 +60,7 @@ __all__ = [
     "RecordTypeOptional",
     "RecordTypeRead",
     "SlicerSettings",
+    "is_record_editable",
 ]
 
 
@@ -299,6 +300,35 @@ class RecordContextInfoUpdate(SQLModel):
     context_info: str | None = Field(default=None, max_length=3000)
 
 
+def is_record_editable(
+    status: RecordStatus,
+    finished_at: datetime | None,
+    record_type: RecordTypeBase,
+) -> bool:
+    """Whether a record's submitted data may still be changed by non-superusers.
+
+    Non-finished records are always editable — nothing has been submitted yet
+    (POST submission paths gate on status separately). For finished records
+    the verdict follows ``RecordType.editable`` and ``RecordType.edit_window_days``
+    counted from ``finished_at``.
+
+    Takes plain values (not a record object) so both ORM ``Record`` and
+    ``RecordRead`` callers can share it.
+    """
+    if status != RecordStatus.finished:
+        return True
+    if not record_type.editable:
+        return False
+    if record_type.edit_window_days is None or finished_at is None:
+        # finished_at is None only on legacy/imported rows (the status event
+        # listener always sets it) — fail open rather than lock them forever.
+        return True
+    if finished_at.tzinfo is None:
+        # SQLite returns naive datetimes; stored values are UTC.
+        finished_at = finished_at.replace(tzinfo=UTC)
+    return datetime.now(UTC) <= finished_at + timedelta(days=record_type.edit_window_days)
+
+
 class RecordRead(RecordBase):
     """Pydantic model for reading record data with related entities."""
 
@@ -370,6 +400,16 @@ class RecordRead(RecordBase):
         from clarinet.utils.markdown import markdown_to_safe_html
 
         return markdown_to_safe_html(self.context_info)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def is_editable(self) -> bool:
+        """Whether the submitted data may still be changed by non-superusers.
+
+        Server-side verdict for the frontend (form/Re-submit gating) — see
+        :func:`is_record_editable`. Superuser bypass is the client's concern.
+        """
+        return is_record_editable(self.status, self.finished_at, self.record_type)
 
 
 class RecordFind(SQLModel):

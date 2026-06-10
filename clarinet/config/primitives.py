@@ -136,6 +136,8 @@ class RecordDef(BaseModel):
     mask_patient_data: bool = True
     parent_required: bool = False
     inherit_user_from_parent: bool = False
+    editable: bool = True
+    edit_window_days: int | None = None
     viewer_mode: ViewerMode = ViewerMode.SINGLE_SERIES
 
     def __init__(self, *, role: str | None = None, **kwargs: Any) -> None:

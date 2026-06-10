@@ -58,6 +58,7 @@ fn make_record() -> models.Record {
     started_at: None,
     finished_at: None,
     radiant: None,
+    is_editable: True,
   )
 }
 

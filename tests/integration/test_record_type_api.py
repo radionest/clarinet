@@ -83,6 +83,27 @@ class TestUpdateRecordType:
         assert data["data_schema"]["properties"]["new_field"]["type"] == "integer"
 
     @pytest.mark.asyncio
+    async def test_update_edit_window_days_and_clear_with_null(
+        self, client: AsyncClient, auth_headers, sample_record_type
+    ):
+        """Explicit null clears edit_window_days (the exclude_none exception)."""
+        response = await client.patch(
+            f"{BASE}/types/{sample_record_type.name}",
+            json={"edit_window_days": 14},
+            headers=auth_headers,
+        )
+        assert response.status_code == 200
+        assert response.json()["edit_window_days"] == 14
+
+        response = await client.patch(
+            f"{BASE}/types/{sample_record_type.name}",
+            json={"edit_window_days": None},
+            headers=auth_headers,
+        )
+        assert response.status_code == 200
+        assert response.json()["edit_window_days"] is None
+
+    @pytest.mark.asyncio
     async def test_update_with_json_string_slicer_args(
         self, client: AsyncClient, auth_headers, sample_record_type
     ):

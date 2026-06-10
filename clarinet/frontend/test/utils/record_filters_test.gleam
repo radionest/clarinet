@@ -49,6 +49,7 @@ fn make_record(
     started_at: None,
     finished_at: None,
     radiant: None,
+    is_editable: True,
   )
 }
 

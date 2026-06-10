@@ -308,6 +308,10 @@ async def _to_record_type_create(
         kwargs["parent_required"] = rt_def.parent_required
     if "inherit_user_from_parent" in rt_def.model_fields_set:
         kwargs["inherit_user_from_parent"] = rt_def.inherit_user_from_parent
+    if "editable" in rt_def.model_fields_set:
+        kwargs["editable"] = rt_def.editable
+    if "edit_window_days" in rt_def.model_fields_set:
+        kwargs["edit_window_days"] = rt_def.edit_window_days
     if "viewer_mode" in rt_def.model_fields_set:
         kwargs["viewer_mode"] = rt_def.viewer_mode
     if data_schema is not None:
