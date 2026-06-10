@@ -93,8 +93,7 @@ pub fn viewer_buttons(
       element.fragment(
         list.filter_map(viewers, fn(v) {
           case build_uri(v, uid, series_uid) {
-            Some(url) ->
-              Ok(viewer_link(url, parse_kind(v.name), class))
+            Some(url) -> Ok(viewer_link(url, parse_kind(v.name), class))
             None -> Error(Nil)
           }
         }),
@@ -105,7 +104,8 @@ pub fn viewer_buttons(
 // --- Record viewer buttons (with preload support for OHIF) ---
 
 /// Render viewer buttons for a record based on its DicomQueryLevel.
-/// OHIF triggers on_view(url, study_uid) for preloading.
+/// OHIF triggers on_view(url, study_uids) for preloading every study
+/// in the link, not just the first one.
 /// Other viewers open directly via link.
 pub fn record_viewer_buttons(
   viewers: List(ViewerInfo),
@@ -116,7 +116,7 @@ pub fn record_viewer_buttons(
   level: Option(types.DicomQueryLevel),
   viewer_mode: String,
   class: String,
-  on_view: fn(String, String) -> msg,
+  on_view: fn(String, List(String)) -> msg,
 ) -> Element(msg) {
   case level, viewer_study_uids {
     Some(types.Patient), Some(uids) if uids != [] ->
@@ -234,7 +234,7 @@ fn ohif_record_button(
   level: Option(types.DicomQueryLevel),
   viewer_mode: String,
   class: String,
-  on_view: fn(String, String) -> msg,
+  on_view: fn(String, List(String)) -> msg,
 ) -> Element(msg) {
   let effective_series_uid = case viewer_mode {
     m if m == all_series_mode -> None
@@ -248,9 +248,7 @@ fn ohif_record_button(
     Some(uid_list) -> {
       let study_part = string.join(uid_list, "&StudyInstanceUIDs=")
       let url =
-        config.base_path()
-        <> "/ohif/viewer?StudyInstanceUIDs="
-        <> study_part
+        config.base_path() <> "/ohif/viewer?StudyInstanceUIDs=" <> study_part
       let series_part = case viewer_mode {
         m if m == all_series_mode -> ""
         _ ->
@@ -266,29 +264,27 @@ fn ohif_record_button(
           }
       }
       let url = url <> series_part
-      let primary_uid =
-        list.first(uid_list) |> option.from_result |> option.unwrap("")
       html.button(
-        [attribute.class(class), event.on_click(on_view(url, primary_uid))],
+        [attribute.class(class), event.on_click(on_view(url, uid_list))],
         [html.text("OHIF")],
       )
     }
     None -> {
-      let #(url, primary_uid) = case level, study_uid {
+      let #(url, study_uids) = case level, study_uid {
         Some(types.Series), Some(suid) -> #(
           ohif_url(suid, effective_series_uid),
-          suid,
+          [suid],
         )
-        _, Some(suid) -> #(ohif_url(suid, None), suid)
-        _, None -> #("", "")
+        _, Some(suid) -> #(ohif_url(suid, None), [suid])
+        _, None -> #("", [])
       }
-      case primary_uid {
-        "" -> element.none()
+      case study_uids {
+        [] -> element.none()
         _ ->
           html.button(
             [
               attribute.class(class),
-              event.on_click(on_view(url, primary_uid)),
+              event.on_click(on_view(url, study_uids)),
             ],
             [html.text("OHIF")],
           )

@@ -1,6 +1,12 @@
-// Preload module — self-contained MVU for OHIF study preloading
+// Preload module — self-contained MVU for OHIF study preloading.
+//
+// The viewer window is opened as a loading stub synchronously on Start (while
+// the click's transient user activation is still valid — opening later would
+// be popup-blocked), then navigated to the real viewer URL once preload
+// reports "ready".
 import api/dicomweb
 import api/types
+import config
 import gleam/dynamic
 import gleam/dynamic/decode
 import gleam/int
@@ -14,35 +20,42 @@ import lustre/element/html
 import lustre/event
 import plinth/javascript/global
 import utils/logger
+import utils/viewer_window
 
 // --- Model ---
 
 pub type Model {
-  Model(timer: Option(global.TimerID), progress: Option(ProgressState))
+  Model(
+    timer: Option(global.TimerID),
+    progress: Option(ProgressState),
+    window: Option(viewer_window.ViewerWindow),
+  )
 }
 
 pub type ProgressState {
   ProgressState(
     viewer_url: String,
     task_id: String,
-    study_uid: String,
     received: Int,
     total: Option(Int),
     status: String,
+    study_index: Option(Int),
+    study_count: Option(Int),
+    study_received: Option(Int),
+    study_total: Option(Int),
   )
 }
 
 // --- Msg ---
 
 pub type Msg {
-  Start(viewer_url: String, study_uid: String)
-  Started(viewer_url: String, task_id: String, study_uid: String)
+  Start(viewer_url: String, study_uids: List(String))
+  WindowOpened(Result(viewer_window.ViewerWindow, Nil))
+  Started(viewer_url: String, task_id: String)
   SetTimer(global.TimerID)
-  PollTick(task_id: String, viewer_url: String, study_uid: String)
+  PollTick(task_id: String)
   ProgressUpdate(
     task_id: String,
-    viewer_url: String,
-    study_uid: String,
     result: Result(dynamic.Dynamic, types.ApiError),
   )
   Cancel
@@ -51,14 +64,13 @@ pub type Msg {
 // --- OutMsg ---
 
 pub type OutMsg {
-  OpenViewer(url: String)
   ShowError(String)
 }
 
 // --- Init ---
 
 pub fn init() -> Model {
-  Model(timer: None, progress: None)
+  Model(timer: None, progress: None, window: None)
 }
 
 // --- Queries ---
@@ -67,78 +79,115 @@ pub fn is_active(model: Model) -> Bool {
   option.is_some(model.progress)
 }
 
+fn loading_url() -> String {
+  config.base_path() <> "/viewer_loading.html"
+}
+
+fn initial_progress(viewer_url: String, task_id: String) -> ProgressState {
+  ProgressState(
+    viewer_url: viewer_url,
+    task_id: task_id,
+    received: 0,
+    total: None,
+    status: "starting",
+    study_index: None,
+    study_count: None,
+    study_received: None,
+    study_total: None,
+  )
+}
+
 // --- Update ---
 
 pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg), List(OutMsg)) {
   case msg, model.progress {
     // Entry points — always handle regardless of progress state
-    Start(viewer_url, study_uid), _ -> {
-      let cleanup = stop_timer(model)
+    Start(viewer_url, study_uids), _ -> {
+      let cleanup = effect.batch([stop_timer(model), close_window(model)])
+      let open_eff = {
+        use dispatch <- effect.from
+        dispatch(WindowOpened(viewer_window.open(loading_url())))
+      }
       let preload_eff = {
         use dispatch <- effect.from
-        dicomweb.preload_study(study_uid)
+        dicomweb.preload_studies(study_uids)
         |> promise.tap(fn(result) {
-          dispatch(Started(viewer_url, case result {
-            Ok(data) ->
-              case decode.run(data, decode.at(["task_id"], decode.string)) {
-                Ok(tid) -> tid
-                Error(_) -> ""
-              }
-            Error(_) -> ""
-          }, study_uid))
+          dispatch(
+            Started(viewer_url, case result {
+              Ok(data) ->
+                case decode.run(data, decode.at(["task_id"], decode.string)) {
+                  Ok(tid) -> tid
+                  Error(_) -> ""
+                }
+              Error(_) -> ""
+            }),
+          )
         })
         Nil
       }
-      let progress =
-        ProgressState(
-          viewer_url: viewer_url,
-          task_id: "",
-          study_uid: study_uid,
-          received: 0,
-          total: None,
-          status: "starting",
-        )
       #(
-        Model(timer: None, progress: Some(progress)),
-        effect.batch([cleanup, preload_eff]),
+        Model(
+          timer: None,
+          progress: Some(initial_progress(viewer_url, "")),
+          window: None,
+        ),
+        effect.batch([cleanup, open_eff, preload_eff]),
         [],
       )
     }
 
     Cancel, _ -> {
-      let stop_eff = stop_timer(model)
-      #(Model(timer: None, progress: None), stop_eff, [])
+      let cleanup = effect.batch([stop_timer(model), close_window(model)])
+      #(init(), cleanup, [])
+    }
+
+    // Popup blocked: the user forbids pop-ups for the site — there is
+    // nowhere to navigate, so don't even start polling.
+    WindowOpened(Error(_)), _ -> {
+      let cleanup = stop_timer(model)
+      #(init(), cleanup, [
+        ShowError(
+          "Browser blocked the viewer window — allow pop-ups for this site",
+        ),
+      ])
+    }
+
+    // Window opened after the preload was already cancelled — close it
+    WindowOpened(Ok(win)), None -> {
+      #(model, effect.from(fn(_dispatch) { viewer_window.close(win) }), [])
+    }
+
+    WindowOpened(Ok(win)), Some(_) -> {
+      #(Model(..model, window: Some(win)), effect.none(), [])
     }
 
     // No active preload — drop stale messages
     _, None -> #(model, effect.none(), [])
 
     // Active preload handlers
-    Started(viewer_url, task_id, study_uid), Some(_) -> {
+    Started(viewer_url, task_id), Some(_) -> {
       case task_id {
-        "" ->
-          // Failed to start — just open viewer directly
-          #(Model(..model, progress: None), effect.none(), [OpenViewer(viewer_url)])
+        "" -> {
+          // POST failed — degrade: open the viewer without preload
+          let nav_eff = navigate_window(model, viewer_url)
+          #(init(), nav_eff, [])
+        }
         _ -> {
           let timer_effect = {
             use dispatch <- effect.from
             let timer_id =
-              global.set_interval(2000, fn() {
-                dispatch(PollTick(task_id, viewer_url, study_uid))
-              })
-            dispatch(PollTick(task_id, viewer_url, study_uid))
+              global.set_interval(2000, fn() { dispatch(PollTick(task_id)) })
+            dispatch(PollTick(task_id))
             dispatch(SetTimer(timer_id))
           }
-          let progress =
-            ProgressState(
-              viewer_url: viewer_url,
-              task_id: task_id,
-              study_uid: study_uid,
-              received: 0,
-              total: None,
-              status: "starting",
-            )
-          #(Model(..model, progress: Some(progress)), timer_effect, [])
+          #(
+            Model(
+              ..model,
+              progress: Some(initial_progress(viewer_url, task_id)),
+            ),
+            timer_effect,
+            [],
+          )
         }
       }
     }
@@ -147,15 +196,15 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg), List(OutMsg)) {
       #(Model(..model, timer: Some(timer_id)), effect.none(), [])
     }
 
-    PollTick(task_id, viewer_url, study_uid), Some(progress) -> {
+    PollTick(task_id), Some(progress) -> {
       case progress.task_id == task_id {
         False -> #(model, effect.none(), [])
         True -> {
           let poll_effect = {
             use dispatch <- effect.from
-            dicomweb.preload_progress(study_uid, task_id)
+            dicomweb.preload_progress(task_id)
             |> promise.tap(fn(result) {
-              dispatch(ProgressUpdate(task_id, viewer_url, study_uid, result))
+              dispatch(ProgressUpdate(task_id, result))
             })
             Nil
           }
@@ -164,7 +213,7 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg), List(OutMsg)) {
       }
     }
 
-    ProgressUpdate(task_id, viewer_url, study_uid, Ok(data)), Some(progress) -> {
+    ProgressUpdate(task_id, Ok(data)), Some(progress) -> {
       case progress.task_id == task_id {
         False -> #(model, effect.none(), [])
         True -> {
@@ -172,62 +221,61 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg), List(OutMsg)) {
             decode.run(data, decode.at(["status"], decode.string))
             |> option.from_result
             |> option.unwrap("unknown")
-          let received =
-            decode.run(data, decode.at(["received"], decode.int))
-            |> option.from_result
-            |> option.unwrap(0)
-          let total =
-            decode.run(data, decode.at(["total"], decode.int))
-            |> option.from_result
 
           case status {
             "ready" -> {
+              // A closed stub means the user changed their mind — silent cancel
               let stop_eff = stop_timer(model)
-              #(
-                Model(timer: None, progress: None),
-                stop_eff,
-                [OpenViewer(viewer_url)],
-              )
+              let nav_eff = navigate_window(model, progress.viewer_url)
+              #(init(), effect.batch([stop_eff, nav_eff]), [])
             }
             "error" -> {
-              let stop_eff = stop_timer(model)
+              let cleanup =
+                effect.batch([stop_timer(model), close_window(model)])
               let error_msg =
                 decode.run(data, decode.at(["error"], decode.string))
                 |> option.from_result
                 |> option.unwrap("Preload failed")
-              #(Model(timer: None, progress: None), stop_eff, [
-                ShowError(error_msg),
+              #(init(), cleanup, [ShowError(error_msg)])
+            }
+            // Progress entry fell out of the server-side TTL cache
+            "not_found" -> {
+              let cleanup =
+                effect.batch([stop_timer(model), close_window(model)])
+              #(init(), cleanup, [
+                ShowError("Preload status expired — please try again"),
               ])
             }
             _ -> {
+              let int_field = fn(key: String) {
+                decode.run(data, decode.at([key], decode.int))
+                |> option.from_result
+              }
               let new_progress =
                 ProgressState(
-                  viewer_url: viewer_url,
+                  viewer_url: progress.viewer_url,
                   task_id: task_id,
-                  study_uid: study_uid,
-                  received: received,
-                  total: total,
+                  received: int_field("received") |> option.unwrap(0),
+                  total: int_field("total"),
                   status: status,
+                  study_index: int_field("study_index"),
+                  study_count: int_field("study_count"),
+                  study_received: int_field("study_received"),
+                  study_total: int_field("study_total"),
                 )
-              #(
-                Model(..model, progress: Some(new_progress)),
-                effect.none(),
-                [],
-              )
+              #(Model(..model, progress: Some(new_progress)), effect.none(), [])
             }
           }
         }
       }
     }
 
-    ProgressUpdate(_, _, _, Error(err)), Some(_) -> {
+    ProgressUpdate(_, Error(err)), Some(_) -> {
       case err {
         types.AuthError(_) -> {
           logger.warn("preload", "Session expired during preload")
-          let stop_eff = stop_timer(model)
-          #(Model(timer: None, progress: None), stop_eff, [
-            ShowError("Session expired"),
-          ])
+          let cleanup = effect.batch([stop_timer(model), close_window(model)])
+          #(init(), cleanup, [ShowError("Session expired")])
         }
         _ -> {
           logger.warn(
@@ -251,29 +299,60 @@ pub fn stop_timer(model: Model) -> Effect(Msg) {
   }
 }
 
+pub fn close_window(model: Model) -> Effect(Msg) {
+  case model.window {
+    Some(win) -> effect.from(fn(_dispatch) { viewer_window.close(win) })
+    None -> effect.none()
+  }
+}
+
+/// Full cleanup for route change / logout: stop polling and close the stub.
+pub fn cleanup(model: Model) -> Effect(Msg) {
+  effect.batch([stop_timer(model), close_window(model)])
+}
+
+fn navigate_window(model: Model, viewer_url: String) -> Effect(Msg) {
+  case model.window {
+    Some(win) ->
+      effect.from(fn(_dispatch) {
+        case viewer_window.is_closed(win) {
+          // User closed the stub during preload — treat as silent cancel
+          True -> Nil
+          False -> viewer_window.navigate(win, viewer_url)
+        }
+      })
+    None -> effect.none()
+  }
+}
+
 // --- View ---
 
 pub fn view_modal(state: ProgressState) -> Element(Msg) {
   let progress_text = case state.status {
-    "checking_cache" -> "Checking cache..."
     "starting" -> "Starting preload..."
     "fetching" ->
-      case state.total {
-        Some(t) ->
-          "Received "
-          <> int.to_string(state.received)
-          <> " of ~"
-          <> int.to_string(t)
-        None ->
-          "Received " <> int.to_string(state.received) <> " images..."
+      case state.study_received, state.study_total {
+        Some(r), Some(t) ->
+          "Received " <> int.to_string(r) <> " of ~" <> int.to_string(t)
+        Some(r), None -> "Received " <> int.to_string(r) <> " images..."
+        None, _ -> "Received " <> int.to_string(state.received) <> " images..."
       }
     "ready" -> "Ready!"
     _ -> "Loading..."
   }
 
-  let progress_bar = case state.total {
+  let study_counter = case state.study_index, state.study_count {
+    Some(i), Some(n) if n > 1 ->
+      html.p([attribute.class("preload-study-counter")], [
+        html.text("Study " <> int.to_string(i) <> " of " <> int.to_string(n)),
+      ])
+    _, _ -> element.none()
+  }
+
+  let progress_bar = case state.study_total {
     Some(t) if t > 0 -> {
-      let pct = { state.received * 100 } / t
+      let received = option.unwrap(state.study_received, 0)
+      let pct = { received * 100 } / t
       let width = int.to_string(int.min(pct, 100)) <> "%"
       html.div([attribute.class("progress-bar-container")], [
         html.div(
@@ -301,6 +380,7 @@ pub fn view_modal(state: ProgressState) -> Element(Msg) {
           html.text("Loading images..."),
         ]),
       ]),
+      study_counter,
       html.p([], [html.text(progress_text)]),
       progress_bar,
       html.div([attribute.class("modal-footer")], [

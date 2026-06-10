@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Loading studies…</title>
+  <style>
+    html, body {
+      height: 100%;
+      margin: 0;
+      background: #0b0c0e;
+      color: #d8dadc;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    }
+    .wrap {
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 1.25rem;
+      text-align: center;
+      padding: 0 1.5rem;
+    }
+    .spinner {
+      width: 48px;
+      height: 48px;
+      border: 4px solid rgba(216, 218, 220, 0.2);
+      border-top-color: #4a9eda;
+      border-radius: 50%;
+      animation: spin 0.9s linear infinite;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    h1 {
+      font-size: 1.15rem;
+      font-weight: 500;
+      margin: 0;
+    }
+    p {
+      font-size: 0.9rem;
+      color: #8a8d91;
+      margin: 0;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="spinner"></div>
+    <h1>Loading studies…</h1>
+    <p>The viewer will open automatically. Do not close this tab.</p>
+  </div>
+</body>
+</html>

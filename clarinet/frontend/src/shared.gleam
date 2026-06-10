@@ -84,5 +84,5 @@ pub type OutMsg {
   CloseRecordModal
   SetUser(User)
   Logout
-  StartPreload(viewer_url: String, study_uid: String)
+  StartPreload(viewer_url: String, study_uids: List(String))
 }

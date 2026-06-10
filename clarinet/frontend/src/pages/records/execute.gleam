@@ -170,7 +170,7 @@ pub type Msg {
   Restart
   RestartResult(Result(Record, ApiError))
   RequestFail
-  RequestPreload(viewer_url: String, study_uid: String)
+  RequestPreload(viewer_url: String, study_uids: List(String))
   // Admin delete
   RequestDelete
   Delete
@@ -644,8 +644,8 @@ pub fn update(
       shared.OpenFailPrompt(model.record_id),
     ])
 
-    RequestPreload(viewer_url, study_uid) -> #(model, effect.none(), [
-      shared.StartPreload(viewer_url, study_uid),
+    RequestPreload(viewer_url, study_uids) -> #(model, effect.none(), [
+      shared.StartPreload(viewer_url, study_uids),
     ])
 
     // Admin delete: open confirm modal first
@@ -1406,7 +1406,7 @@ fn render_record_execution(
         option.map(record.record_type, fn(rt) { rt.viewer_mode })
           |> option.unwrap("single_series"),
         "btn btn-primary",
-        fn(url, study_uid) { RequestPreload(url, study_uid) },
+        fn(url, study_uids) { RequestPreload(url, study_uids) },
       ),
     ]),
     // Slicer toolbar (only if record type has slicer_script)
