@@ -384,10 +384,11 @@ pub fn update(
           // page's context (bucket for Patient/Study, get_series re-fetch
           // for Series since its records are nested in the Series object).
           let invalidate = case args {
-            shared.PatientArgs(pid) ->
-              shared.InvalidateBucket(
-                bucket.Records(bucket.query_with_patient(pid)),
-              )
+            // The patient detail records list is now a sortable/filterable
+            // bucket, so its exact key (which depends on the page's active
+            // sort/filter) isn't known here. Invalidate all record buckets —
+            // the new record also belongs in the global /records list anyway.
+            shared.PatientArgs(_) -> shared.InvalidateAllRecordBuckets
             shared.StudyArgs(_, suid) ->
               shared.InvalidateBucket(
                 bucket.Records(bucket.query_with_study(suid)),
