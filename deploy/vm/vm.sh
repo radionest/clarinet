@@ -378,8 +378,14 @@ cmd_deploy() {
     # Download Quarto tarball on host (VM has no internet). Cached outside
     # dist/ — the test pipeline wipes dist/ on every run. Shipping the tarball
     # opts the deployment into Quarto (CLI + pip extra) — see install-clarinet.sh.
-    # Keep the version in sync with settings.quarto_default_version.
-    local quarto_version="1.4.557"
+    # Single source of truth: settings.quarto_default_version.
+    local quarto_version
+    quarto_version=$(grep -oP 'quarto_default_version:\s*str\s*=\s*"\K[^"]+' \
+        "$PROJECT_DIR/clarinet/settings.py" || true)
+    if [[ -z "$quarto_version" ]]; then
+        err "Cannot parse quarto_default_version from clarinet/settings.py"
+        exit 1
+    fi
     local quarto_cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/clarinet-deploy"
     local quarto_tarball="${quarto_cache_dir}/quarto-${quarto_version}-linux-amd64.tar.gz"
     if [[ ! -f "$quarto_tarball" ]]; then

@@ -226,6 +226,7 @@ pub fn status_code_mapping_test() {
   // Success codes
   // 200 -> Ok(Dynamic) with parsed JSON
   // 201 -> Ok(Dynamic) with parsed JSON
+  // 202 -> Ok(Dynamic) with parsed JSON (pending state of a background job)
   // 204 -> Ok(Dynamic) with empty object {}
 
   // Client errors

@@ -117,6 +117,13 @@ to the wheel in the bundle and the installer runs
 pip extra. Bundles without a tarball are unaffected. This is how the test-VM
 pipeline provisions Quarto, and it works for air-gapped production hosts too.
 
+Two operational notes. `make build-deps` always includes the `quarto` extra
+wheels (~100 MB of the jupyter stack) in `dist/deps`, so a single deps cache
+serves both plain and Quarto bundles — the extra is *installed* only when a
+tarball ships. Conversely, a `deps/` folder built before the quarto extra
+existed lacks those wheels and the installer's offline `pip install` aborts —
+rebuild it with `make build-deps` when adding a tarball to an older bundle.
+
 The binary lands under `{storage_path}/quarto`. Resolution order at render
 time: `settings.quarto_executable` (explicit) → `{storage_path}/quarto/bin/quarto`
 → `quarto` on `PATH`.

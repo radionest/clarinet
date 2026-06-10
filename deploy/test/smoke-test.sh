@@ -112,8 +112,14 @@ fi
 
 # Test 7: Quarto CLI (auto-provisioned on test VMs — see vm.sh cmd_deploy)
 echo "[7] Quarto CLI"
-SSH_VM=(ssh -o StrictHostKeyChecking=no -i "$SSH_KEY_PATH" "clarinet@${IP}")
-if "${SSH_VM[@]}" "test -x /var/lib/clarinet/data/quarto/bin/quarto" 2>/dev/null; then
+SSH_VM=(ssh -o StrictHostKeyChecking=no \
+    -o "UserKnownHostsFile=${KNOWN_HOSTS_FILE:-$HOME/.ssh/known_hosts}" \
+    -i "$SSH_KEY_PATH" "clarinet@${IP}")
+# Resolve the Quarto location from the VM's settings (storage_path) instead of
+# hardcoding the default layout — a relocated storage must not turn into SKIP.
+VM_STORAGE=$("${SSH_VM[@]}" "python3 -c \"import tomllib; print(tomllib.load(open('/opt/clarinet/settings.toml','rb')).get('storage_path',''))\"" 2>/dev/null) || VM_STORAGE=""
+QUARTO_BIN="${VM_STORAGE:-/var/lib/clarinet/data}/quarto/bin/quarto"
+if "${SSH_VM[@]}" "test -x '${QUARTO_BIN}'" 2>/dev/null; then
     # /opt/clarinet carries a downstream-style .env.example (e2e fixture), so a
     # clean `quarto check` from there is the regression test for the
     # neutral-cwd fix in quarto_status(). The CLI exits 0 even when the check
@@ -130,7 +136,14 @@ if "${SSH_VM[@]}" "test -x /var/lib/clarinet/data/quarto/bin/quarto" 2>/dev/null
         echo "$quarto_out" | tail -15
     fi
 else
-    echo "  SKIP  Quarto not installed on this deployment"
+    # CLARINET_E2E_REQUIRE_QUARTO=1 (set by test-all-stages) turns a missing
+    # Quarto install into a failure — a silent SKIP would hide a provisioning
+    # regression behind a green pipeline.
+    if [[ "${CLARINET_E2E_REQUIRE_QUARTO:-0}" == "1" ]]; then
+        check "Quarto provisioned (required)" "missing" "present"
+    else
+        echo "  SKIP  Quarto not installed on this deployment"
+    fi
 fi
 
 echo "-------------------------------------------"
