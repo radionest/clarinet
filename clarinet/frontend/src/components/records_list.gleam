@@ -291,17 +291,17 @@ fn record_row(record: Record, config: Config(msg)) -> Element(msg) {
     [],
     list.flatten([
       [
-        html.td([attribute.class("cell-mono")], [html.text(record_id_str)]),
+        html.td([attribute.class("cell-id")], [html.text(record_id_str)]),
         html.td([], [html.text(type_label)]),
         html.td([], [config.status_cell(record)]),
       ],
       case config.show_patient_columns {
         True -> [
           html.td([], [html.text(patient_name(record))]),
-          html.td([attribute.class("cell-mono")], [
+          html.td([attribute.class("cell-id")], [
             html.text(record.patient_id),
           ]),
-          html.td([attribute.class("cell-mono")], [
+          html.td([attribute.class("cell-id")], [
             html.text(patient_anon_id(record)),
           ]),
         ]
@@ -309,19 +309,15 @@ fn record_row(record: Record, config: Config(msg)) -> Element(msg) {
       },
       case config.show_study_series {
         True -> [
-          html.td(
-            [
-              attribute.class("cell-desc"),
-              attribute.title(study_series_text(record)),
-            ],
-            [html.text(study_series_text(record))],
-          ),
+          html.td([attribute.class("cell-desc")], [
+            html.text(study_series_text(record)),
+          ]),
         ]
         False -> []
       },
       case config.show_modality {
         True -> [
-          html.td([attribute.class("cell-mono")], [
+          html.td([attribute.class("cell-code")], [
             html.text(record_modality_text(record)),
           ]),
         ]

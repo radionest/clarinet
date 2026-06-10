@@ -191,16 +191,16 @@ fn study_row(study: models.Study, translate: fn(Key) -> String) -> Element(Msg) 
     html.td([attribute.class("cell-uid"), attribute.title(study.study_uid)], [
       html.text(study.study_uid),
     ]),
-    html.td([attribute.class("cell-mono")], [html.text(study.date)]),
-    html.td([attribute.class("cell-mono")], [html.text(study.patient_id)]),
+    html.td([attribute.class("cell-date")], [html.text(study.date)]),
+    html.td([attribute.class("cell-id")], [html.text(study.patient_id)]),
     html.td(
-      [
-        attribute.class("cell-uid"),
-        attribute.title(option.unwrap(study.anon_uid, "-")),
-      ],
+      case study.anon_uid {
+        option.Some(uid) -> [attribute.class("cell-uid"), attribute.title(uid)]
+        option.None -> [attribute.class("cell-uid")]
+      },
       [html.text(option.unwrap(study.anon_uid, "-"))],
     ),
-    html.td([attribute.class("cell-mono")], [html.text(series_count)]),
+    html.td([attribute.class("cell-num")], [html.text(series_count)]),
     html.td([attribute.class("cell-actions")], [
       html.a(
         [

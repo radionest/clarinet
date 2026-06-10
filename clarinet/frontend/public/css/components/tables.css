@@ -53,8 +53,11 @@
 
 /* --- Cell modifiers (set from Gleam views) --- */
 
-/* Identifiers, counters, dates — tabular mono */
-.cell-mono {
+/* Identifiers, counters, dates, modality codes — tabular mono */
+.cell-id,
+.cell-num,
+.cell-date,
+.cell-code {
     font-family: var(--font-mono);
     font-size: 0.8rem;
     font-variant-numeric: tabular-nums;

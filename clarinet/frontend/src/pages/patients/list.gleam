@@ -196,15 +196,15 @@ fn patient_row(
   }
 
   html.tr([], [
-    html.td([attribute.class("cell-mono")], [html.text(patient.id)]),
+    html.td([attribute.class("cell-id")], [html.text(patient.id)]),
     html.td([], [html.text(option.unwrap(patient.name, "-"))]),
-    html.td([attribute.class("cell-mono")], [
+    html.td([attribute.class("cell-id")], [
       html.text(option.unwrap(patient.anon_id, "-")),
     ]),
-    html.td([attribute.class("cell-mono")], [
+    html.td([attribute.class("cell-id")], [
       html.text(option.unwrap(patient.anon_name, "-")),
     ]),
-    html.td([attribute.class("cell-mono")], [html.text(studies_count)]),
+    html.td([attribute.class("cell-num")], [html.text(studies_count)]),
     html.td([attribute.class("cell-actions")], [
       html.a(
         [

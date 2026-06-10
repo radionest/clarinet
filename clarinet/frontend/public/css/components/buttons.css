@@ -30,8 +30,11 @@
     }
 }
 
-/* Adjacent buttons rendered without a flex-gap wrapper */
-.btn + .btn {
+/* Adjacent buttons rendered without a flex-gap wrapper (table action
+   cells, viewer links in the record card). Scoped — gap containers like
+   .modal-footer / .form-actions already space their children. */
+.cell-actions .btn + .btn,
+.record-info .btn + .btn {
     margin-left: 6px;
 }
 
