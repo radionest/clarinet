@@ -46,6 +46,8 @@ pub type Model {
     renders: Dict(String, RenderEntry),
     // whether a poll timer chain is currently running (avoids duplicate timers)
     polling: Bool,
+    // pending poll timer, cancelled by `cleanup` when navigating away
+    poll_timer: Option(global.TimerID),
   )
 }
 
@@ -57,6 +59,7 @@ pub type Msg {
   TriggerRender(name: String, format: String)
   RenderTriggered(key: String, result: Result(QuartoRenderState, ApiError))
   PollTick
+  PollScheduled(global.TimerID)
   RenderPolled(key: String, result: Result(QuartoRenderState, ApiError))
 }
 
@@ -69,6 +72,7 @@ pub fn init(_shared: Shared) -> #(Model, Effect(Msg), List(OutMsg)) {
       load_status: load_status.Loading,
       renders: dict.new(),
       polling: False,
+      poll_timer: None,
     )
   #(model, load_reports_effect(), [])
 }
@@ -145,17 +149,28 @@ pub fn update(
       handle_error(err, "Failed to start render"),
     )
     PollTick ->
+      // The timer that delivered this tick has fired — drop its handle. The
+      // `active` branch re-arms via schedule_poll, which stores a fresh one.
       case active_entries(model.renders) {
-        [] -> #(Model(..model, polling: False), effect.none(), [])
+        [] -> #(
+          Model(..model, polling: False, poll_timer: None),
+          effect.none(),
+          [],
+        )
         active -> {
           let #(renders, polls) = bump_and_poll(model.renders, active)
           #(
-            Model(..model, renders: renders, polling: True),
+            Model(..model, renders: renders, polling: True, poll_timer: None),
             effect.batch([schedule_poll(), ..polls]),
             [],
           )
         }
       }
+    PollScheduled(timer_id) -> #(
+      Model(..model, poll_timer: Some(timer_id)),
+      effect.none(),
+      [],
+    )
     RenderPolled(key, Ok(state)) -> #(
       Model(..model, renders: update_entry(model.renders, key, state)),
       effect.none(),
@@ -247,12 +262,21 @@ fn active_entries(
 }
 
 // Arm the poll timer only when no chain is already running. The chain
-// self-terminates: a PollTick with no active renders stops re-arming, and a
-// stray tick after navigating away is dropped by delegate_page_update.
+// self-terminates: a PollTick with no active renders stops re-arming, and the
+// pending timer is cancelled by `cleanup` when navigating away.
 fn ensure_polling(polling: Bool) -> #(Bool, Effect(Msg)) {
   case polling {
     True -> #(True, effect.none())
     False -> #(True, schedule_poll())
+  }
+}
+
+/// Cancel the pending poll timer — called from main.gleam on route change.
+pub fn cleanup(model: Model) -> Effect(Msg) {
+  case model.poll_timer {
+    Some(timer_id) ->
+      effect.from(fn(_dispatch) { global.clear_timeout(timer_id) })
+    None -> effect.none()
   }
 }
 
@@ -281,7 +305,8 @@ fn poll_effect(name: String, render_id: String, key: String) -> Effect(Msg) {
 
 fn schedule_poll() -> Effect(Msg) {
   use dispatch <- effect.from
-  let _ = global.set_timeout(3000, fn() { dispatch(PollTick) })
+  let timer_id = global.set_timeout(3000, fn() { dispatch(PollTick) })
+  dispatch(PollScheduled(timer_id))
   Nil
 }
 
