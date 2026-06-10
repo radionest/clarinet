@@ -85,8 +85,9 @@ pub fn process_response(
   response: response.Response(fetch.FetchBody),
 ) -> Promise(Result(Dynamic, ApiError)) {
   case response.status {
-    200 | 201 -> {
-      // Success - parse JSON response body
+    200 | 201 | 202 -> {
+      // Success - parse JSON response body. 202 Accepted carries the pending
+      // state of a background job (quarto render, background anonymize).
       use body_result <- promise.map(fetch.read_text_body(response))
       case body_result {
         Ok(text_response) -> {
