@@ -54,7 +54,12 @@ def auth_page(page: Page, base_url: str, admin_email: str, admin_password: str) 
     page.fill('input[name="email"]', admin_email)
     page.fill('input[name="password"]', admin_password)
     page.click('button[type="submit"]')
-    page.wait_for_url(f"**{urlparse(base_url).path}/**")
+    # Wait for the real post-login redirect AWAY from /login. A glob like
+    # `**{prefix}/**` also matches `{prefix}/login`, so it returns immediately —
+    # before the session cookie lands — and the next hard navigation boots the
+    # SPA without a session, gets 401 on /api/auth/me, and bounces to /login
+    # (flaky failure surfaced by test_quarto_reports_page_loads).
+    page.wait_for_url(lambda url: not urlparse(url).path.rstrip("/").endswith("/login"))
     return page
 
 
