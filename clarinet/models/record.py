@@ -27,7 +27,6 @@ from clarinet.types import DbInt64, DbPositiveInt32, PortableJSON, RecordData
 from clarinet.utils.pagination import SortOrder
 
 from ..exceptions import ValidationError
-from ..settings import settings
 from .base import BaseModel, DicomUID, RecordStatus
 from .file_schema import RecordFileLink, RecordFileLinkRead
 from .patient import Patient, PatientInfo
@@ -388,36 +387,29 @@ class RecordRead(RecordBase):
 
     @model_validator(mode="after")
     def populate_display_anon_id(self) -> "RecordRead":
-        """Anon ID for table display: per-study hash when the option is enabled.
+        """Per-study anon ID for table display; None unless the mode applies.
 
-        Mirrors the masking rule in ``clarinet/api/masking.py`` — the hash is
-        only valid once the study has been anonymized (``study.anon_uid`` set);
-        until then fall back to the per-patient ``anon_id``.
+        Set only when ``anon_per_study_patient_id`` is enabled and the study
+        is anonymized (gating lives in ``compute_display_anon_id``); consumers
+        fall back to ``patient.anon_id`` when None.
 
-        Computed at validation time (not a ``computed_field``): masking rewrites
-        ``study_uid`` to the anon UID before FastAPI serializes the response, and
-        a hash of the anon UID would not match the PatientID written into PACS.
-        Skipped when already set — FastAPI re-validates response models after
-        masking has run.
+        Computed at validation time (not a ``computed_field``): masking
+        rewrites ``study_uid`` to the anon UID before FastAPI serializes the
+        response, and a hash of the anon UID would not match the PatientID
+        written into PACS. An already-set value is trusted (first-write-wins)
+        so FastAPI's response re-validation after masking keeps the
+        original-UID hash — safe only while ``RecordRead`` stays a
+        response-only model; revisit the guard if it ever accepts client
+        input.
         """
         if self.display_anon_id is not None:
             return self
-        if (
-            settings.anon_per_study_patient_id
-            and self.study_uid is not None
-            and self.study is not None
-            and self.study.anon_uid is not None
-        ):
-            from ..services.dicom.anonymizer import compute_per_study_patient_id
+        from ..services.common.storage_paths import compute_display_anon_id
 
-            self.display_anon_id = compute_per_study_patient_id(
-                settings.anon_uid_salt,
-                self.study_uid,
-                settings.anon_per_study_patient_id_hex_length,
-                prefix=settings.anon_id_prefix,
-            )
-        else:
-            self.display_anon_id = self.patient.anon_id
+        self.display_anon_id = compute_display_anon_id(
+            self.study_uid,
+            self.study.anon_uid if self.study is not None else None,
+        )
         return self
 
     @computed_field

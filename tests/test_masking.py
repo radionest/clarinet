@@ -469,6 +469,28 @@ class TestMaskRecordPatientData:
         assert "REAL_PAT_001" not in audit_msg
         assert "1.2.3.4.5.6.7.8" not in audit_msg
 
+    def test_record_type_opted_out_keeps_display_anon_id(self) -> None:
+        """Opt-out types still carry the per-study display ID next to real data.
+
+        Clinical roles (``mask_patient_data=False``) see real identifiers, but
+        the ANON ID column keeps showing the per-study hash so the row can
+        still be correlated with the anonymized study in PACS.
+        """
+        user = _make_user(is_superuser=False)
+        with patch("clarinet.services.common.storage_paths.settings") as sp_settings:
+            sp_settings.anon_per_study_patient_id = True
+            sp_settings.anon_per_study_patient_id_hex_length = 8
+            sp_settings.anon_uid_salt = "test-salt"
+            sp_settings.anon_id_prefix = "NIR_LIVER"
+            record = _make_record_read(auto_id=42, mask_patient_data=False)
+
+            result = mask_record_patient_data(record, user)
+
+        expected_hash = hashlib.sha256(b"test-salt:1.2.3.4.5.6.7.8").hexdigest()[:8]
+        assert result.patient_id == "REAL_PAT_001"
+        assert result.patient.name == "Real Patient Name"
+        assert result.display_anon_id == f"NIR_LIVER_{expected_hash}"
+
     def test_record_type_masked_explicit_default(self) -> None:
         """Explicit ``mask_patient_data=True`` behaves identically to the default."""
         user = _make_user(is_superuser=False)
@@ -598,22 +620,24 @@ class TestMaskRecords:
     def test_per_study_mode_replaces_patient_id_with_hash(self) -> None:
         """Per-study mode: masked PatientID is sha256(salt:study_uid)[:8], not anon_id."""
         user = _make_user(is_superuser=False)
-        record = _make_record_read(
-            patient_id="REAL_PAT_001",
-            patient_name="Real Patient Name",
-            anon_name="Anon Patient Name",
-            auto_id=42,
-            study_uid="1.2.3.4.5.6.7.8",
-            study_anon_uid="9.8.7.6.5.4.3.2",
-            series_uid="1.2.3.4.5.6.7.8.9",
-            series_anon_uid="9.8.7.6.5.4.3.2.1",
-        )
-
-        with patch("clarinet.api.masking.settings") as masking_settings:
-            masking_settings.anon_per_study_patient_id = True
-            masking_settings.anon_per_study_patient_id_hex_length = 8
-            masking_settings.anon_uid_salt = "test-salt"
-            masking_settings.anon_id_prefix = ""  # bare-hash backward-compat path
+        # The hash is computed by the RecordRead validator at construction time
+        # (masking just reuses display_anon_id), so the record must be built
+        # inside the settings patch.
+        with patch("clarinet.services.common.storage_paths.settings") as sp_settings:
+            sp_settings.anon_per_study_patient_id = True
+            sp_settings.anon_per_study_patient_id_hex_length = 8
+            sp_settings.anon_uid_salt = "test-salt"
+            sp_settings.anon_id_prefix = ""  # bare-hash backward-compat path
+            record = _make_record_read(
+                patient_id="REAL_PAT_001",
+                patient_name="Real Patient Name",
+                anon_name="Anon Patient Name",
+                auto_id=42,
+                study_uid="1.2.3.4.5.6.7.8",
+                study_anon_uid="9.8.7.6.5.4.3.2",
+                series_uid="1.2.3.4.5.6.7.8.9",
+                series_anon_uid="9.8.7.6.5.4.3.2.1",
+            )
             result = mask_record_patient_data(record, user)
 
         expected_hash = hashlib.sha256(b"test-salt:1.2.3.4.5.6.7.8").hexdigest()[:8]
@@ -631,22 +655,21 @@ class TestMaskRecords:
     def test_per_study_mode_with_anon_id_prefix_prepends_prefix(self) -> None:
         """Per-study mode + non-empty anon_id_prefix: masked PatientID is f'{prefix}_{hash}'."""
         user = _make_user(is_superuser=False)
-        record = _make_record_read(
-            patient_id="REAL_PAT_001",
-            patient_name="Real Patient Name",
-            anon_name="Anon Patient Name",
-            auto_id=42,
-            study_uid="1.2.3.4.5.6.7.8",
-            study_anon_uid="9.8.7.6.5.4.3.2",
-            series_uid="1.2.3.4.5.6.7.8.9",
-            series_anon_uid="9.8.7.6.5.4.3.2.1",
-        )
-
-        with patch("clarinet.api.masking.settings") as masking_settings:
-            masking_settings.anon_per_study_patient_id = True
-            masking_settings.anon_per_study_patient_id_hex_length = 8
-            masking_settings.anon_uid_salt = "test-salt"
-            masking_settings.anon_id_prefix = "NIR_LIVER"
+        with patch("clarinet.services.common.storage_paths.settings") as sp_settings:
+            sp_settings.anon_per_study_patient_id = True
+            sp_settings.anon_per_study_patient_id_hex_length = 8
+            sp_settings.anon_uid_salt = "test-salt"
+            sp_settings.anon_id_prefix = "NIR_LIVER"
+            record = _make_record_read(
+                patient_id="REAL_PAT_001",
+                patient_name="Real Patient Name",
+                anon_name="Anon Patient Name",
+                auto_id=42,
+                study_uid="1.2.3.4.5.6.7.8",
+                study_anon_uid="9.8.7.6.5.4.3.2",
+                series_uid="1.2.3.4.5.6.7.8.9",
+                series_anon_uid="9.8.7.6.5.4.3.2.1",
+            )
             result = mask_record_patient_data(record, user)
 
         expected_hash = hashlib.sha256(b"test-salt:1.2.3.4.5.6.7.8").hexdigest()[:8]
@@ -665,21 +688,20 @@ class TestMaskRecords:
         to anon_id until study.anon_uid is set.
         """
         user = _make_user(is_superuser=False)
-        record = _make_record_read(
-            patient_id="REAL_PAT_001",
-            patient_name="Real Patient Name",
-            anon_name="Anon Patient Name",
-            auto_id=42,
-            study_uid="1.2.3.4.5.6.7.8",
-            study_anon_uid=None,  # study not yet anonymized
-            series_uid="1.2.3.4.5.6.7.8.9",
-            series_anon_uid=None,
-        )
-
-        with patch("clarinet.api.masking.settings") as masking_settings:
-            masking_settings.anon_per_study_patient_id = True
-            masking_settings.anon_uid_salt = "test-salt"
-            masking_settings.anon_id_prefix = ""
+        with patch("clarinet.services.common.storage_paths.settings") as sp_settings:
+            sp_settings.anon_per_study_patient_id = True
+            sp_settings.anon_uid_salt = "test-salt"
+            sp_settings.anon_id_prefix = ""
+            record = _make_record_read(
+                patient_id="REAL_PAT_001",
+                patient_name="Real Patient Name",
+                anon_name="Anon Patient Name",
+                auto_id=42,
+                study_uid="1.2.3.4.5.6.7.8",
+                study_anon_uid=None,  # study not yet anonymized
+                series_uid="1.2.3.4.5.6.7.8.9",
+                series_anon_uid=None,
+            )
             result = mask_record_patient_data(record, user)
 
         # Hash NOT applied — patient-level anon_id used instead.
@@ -702,22 +724,21 @@ class TestMaskRecords:
             name="patient-type",
             level=DicomQueryLevel.PATIENT,
         )
-        record = RecordRead(
-            id=1,
-            patient_id="REAL_PAT_001",
-            study_uid=None,
-            series_uid=None,
-            record_type_name="patient-type",
-            patient=patient,
-            study=None,
-            series=None,
-            record_type=record_type,
-        )
-
-        with patch("clarinet.api.masking.settings") as masking_settings:
-            masking_settings.anon_per_study_patient_id = True
-            masking_settings.anon_uid_salt = "test-salt"
-            masking_settings.anon_id_prefix = ""
+        with patch("clarinet.services.common.storage_paths.settings") as sp_settings:
+            sp_settings.anon_per_study_patient_id = True
+            sp_settings.anon_uid_salt = "test-salt"
+            sp_settings.anon_id_prefix = ""
+            record = RecordRead(
+                id=1,
+                patient_id="REAL_PAT_001",
+                study_uid=None,
+                series_uid=None,
+                record_type_name="patient-type",
+                patient=patient,
+                study=None,
+                series=None,
+                record_type=record_type,
+            )
             result = mask_record_patient_data(record, user)
 
         # No study_uid -> per-study hash impossible; falls back to per-patient anon_id
@@ -726,19 +747,19 @@ class TestMaskRecords:
         assert result.patient.id == expected_anon_id
         assert result.patient.name == "Anon Patient Name"
 
-    def test_display_anon_id_per_patient_mode(self) -> None:
-        """Default mode: display_anon_id is the per-patient anon_id."""
+    def test_display_anon_id_none_in_per_patient_mode(self) -> None:
+        """Default mode: display_anon_id stays None (consumers use patient.anon_id)."""
         record = _make_record_read(auto_id=42)
 
-        assert record.display_anon_id == f"{settings.anon_id_prefix}_42"
+        assert record.display_anon_id is None
 
     def test_display_anon_id_per_study_mode(self) -> None:
         """Per-study mode + anonymized study: display_anon_id is the per-study hash."""
-        with patch("clarinet.models.record.settings") as model_settings:
-            model_settings.anon_per_study_patient_id = True
-            model_settings.anon_per_study_patient_id_hex_length = 8
-            model_settings.anon_uid_salt = "test-salt"
-            model_settings.anon_id_prefix = "NIR_LIVER"
+        with patch("clarinet.services.common.storage_paths.settings") as sp_settings:
+            sp_settings.anon_per_study_patient_id = True
+            sp_settings.anon_per_study_patient_id_hex_length = 8
+            sp_settings.anon_uid_salt = "test-salt"
+            sp_settings.anon_id_prefix = "NIR_LIVER"
             record = _make_record_read(
                 auto_id=42,
                 study_uid="1.2.3.4.5.6.7.8",
@@ -748,16 +769,16 @@ class TestMaskRecords:
         expected_hash = hashlib.sha256(b"test-salt:1.2.3.4.5.6.7.8").hexdigest()[:8]
         assert record.display_anon_id == f"NIR_LIVER_{expected_hash}"
 
-    def test_display_anon_id_per_study_mode_falls_back_until_study_anonymized(self) -> None:
-        """Per-study mode + study.anon_uid=None: fall back to per-patient anon_id."""
-        with patch("clarinet.models.record.settings") as model_settings:
-            model_settings.anon_per_study_patient_id = True
-            model_settings.anon_per_study_patient_id_hex_length = 8
-            model_settings.anon_uid_salt = "test-salt"
-            model_settings.anon_id_prefix = "NIR_LIVER"
+    def test_display_anon_id_none_until_study_anonymized(self) -> None:
+        """Per-study mode + study.anon_uid=None: display_anon_id stays None."""
+        with patch("clarinet.services.common.storage_paths.settings") as sp_settings:
+            sp_settings.anon_per_study_patient_id = True
+            sp_settings.anon_per_study_patient_id_hex_length = 8
+            sp_settings.anon_uid_salt = "test-salt"
+            sp_settings.anon_id_prefix = "NIR_LIVER"
             record = _make_record_read(auto_id=42, study_anon_uid=None)
 
-        assert record.display_anon_id == f"{settings.anon_id_prefix}_42"
+        assert record.display_anon_id is None
 
     def test_display_anon_id_survives_masking_and_revalidation(self) -> None:
         """Masking + FastAPI response re-validation keep the original-UID hash.
@@ -767,15 +788,11 @@ class TestMaskRecords:
         would be taken from the anon UID and stop matching the PatientID in PACS.
         """
         user = _make_user(is_superuser=False)
-        with (
-            patch("clarinet.models.record.settings") as model_settings,
-            patch("clarinet.api.masking.settings") as masking_settings,
-        ):
-            for s in (model_settings, masking_settings):
-                s.anon_per_study_patient_id = True
-                s.anon_per_study_patient_id_hex_length = 8
-                s.anon_uid_salt = "test-salt"
-                s.anon_id_prefix = "NIR_LIVER"
+        with patch("clarinet.services.common.storage_paths.settings") as sp_settings:
+            sp_settings.anon_per_study_patient_id = True
+            sp_settings.anon_per_study_patient_id_hex_length = 8
+            sp_settings.anon_uid_salt = "test-salt"
+            sp_settings.anon_id_prefix = "NIR_LIVER"
             record = _make_record_read(
                 auto_id=42,
                 study_uid="1.2.3.4.5.6.7.8",
