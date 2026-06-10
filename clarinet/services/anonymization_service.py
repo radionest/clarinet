@@ -237,7 +237,10 @@ class AnonymizationService:
                     logger.exception(f"Failed to anonymize instance {sop_uid}")
                     total_failed += 1
 
-            for (tag, vr, value), count in find_invalid_vr_values(anonymized).items():
+            # Off the event loop: regex validators over every string element of
+            # every instance in the series.
+            invalid_values = await asyncio.to_thread(find_invalid_vr_values, anonymized)
+            for (tag, vr, value), count in invalid_values.items():
                 logger.warning(
                     f"Non-conformant DICOM value after anonymization: tag=({tag}) VR={vr} "
                     f"value={value!r} in {count}/{len(anonymized)} instances — "

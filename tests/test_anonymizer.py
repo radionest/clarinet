@@ -383,6 +383,41 @@ class TestFindInvalidVrValues:
 
         assert findings == {("0020,0037", "DS", "0.99999999999999994"): 1}
 
+    def test_nested_sequence_items_audited(self) -> None:
+        """Bad values inside sequence items (enhanced multiframe) are found."""
+        item = Dataset()
+        with config.disable_value_validation():
+            # ImageOrientationPatient: first component is 19 chars > 16 max for DS
+            item.add_new(0x00200037, "DS", ["0.99999999999999994", "0.0"])
+        ds = Dataset()
+        ds.add_new(0x52009229, "SQ", [item])  # SharedFunctionalGroupsSequence
+
+        findings = find_invalid_vr_values([ds])
+
+        assert findings == {("0020,0037", "DS", "0.99999999999999994"): 1}
+
+    def test_duplicate_parts_in_one_instance_counted_once(self) -> None:
+        """n_instances semantics: identical bad parts within one dataset count as 1."""
+        raw = b"606.0000000000\\606.0000000000"
+        ds = Dataset()
+        ds._dict[Tag(0x00201002)] = RawDataElement(
+            Tag(0x00201002), "IS", len(raw), raw, 0, True, True
+        )
+
+        findings = find_invalid_vr_values([ds])
+
+        assert findings == {("0020,1002", "IS", "606.0000000000"): 1}
+
+    def test_long_value_truncated(self) -> None:
+        """Over-length values are truncated in the report (log/PII hygiene)."""
+        ds = Dataset()
+        with config.disable_value_validation():
+            ds.add_new(0x00081030, "LO", "x" * 100)  # StudyDescription, LO max 64
+
+        findings = find_invalid_vr_values([ds])
+
+        assert findings == {("0008,1030", "LO", "x" * 64 + "..."): 1}
+
     def test_valid_dataset_yields_no_findings(self, sample_dataset: Dataset) -> None:
         """Conformant dataset produces an empty report."""
         assert find_invalid_vr_values([sample_dataset]) == {}

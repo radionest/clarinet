@@ -94,8 +94,8 @@ def image_result_to_dicom_json(result: ImageResult) -> dict[str, Any]:
 def _skip_bulk_data(_data_element: DataElement) -> str:
     """Bulk data handler that skips encoding of large binary elements like PixelData.
 
-    Passed to ``Dataset.to_json_dict`` so that PixelData is never base64-encoded,
-    avoiding the need to copy or mutate the original dataset.
+    Passed to each ``DataElement.to_json_dict`` call so that PixelData is never
+    base64-encoded, avoiding the need to copy or mutate the original dataset.
 
     Args:
         _data_element: The pydicom data element being serialized (unused, required by API)
@@ -125,6 +125,7 @@ def dataset_to_dicom_json(ds: Dataset, base_url: str) -> dict[str, Any]:
     # (multi-study preload) race on it and can leave RAISE mode set process-wide.
     # Lenient per-tag serialization normalizes sloppy-but-convertible values
     # (e.g. IS '606.0000000000' → 606); truly unconvertible tags are skipped.
+    sop_uid = ds.get("SOPInstanceUID", "unknown")
     json_dict: dict[str, Any] = {}
     # SIM118 is a false positive: iterating a Dataset directly yields DataElements
     # (converting raw values OUTSIDE the try below), not keys.
@@ -136,7 +137,7 @@ def dataset_to_dicom_json(ds: Dataset, base_url: str) -> dict[str, Any]:
                 bulk_data_threshold=1024,
             )
         except Exception as e:
-            logger.warning(f"Skipping non-serializable tag {json_key}: {e}")
+            logger.warning(f"Skipping non-serializable tag {json_key} in instance {sop_uid}: {e}")
 
     # Always set BulkDataURI for pixel data retrieval — even when PixelData
     # was stripped from the dataset before conversion (metadata endpoint) or
