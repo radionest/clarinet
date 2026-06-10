@@ -5,6 +5,7 @@ import api/types.{type ApiError}
 import gleam/dynamic/decode
 import gleam/javascript/promise.{type Promise}
 import gleam/result
+import gleam/uri
 
 const reports_path = "/admin/reports"
 
@@ -24,7 +25,13 @@ pub fn list_reports() -> Promise(Result(List(ReportTemplate), ApiError)) {
 // Goes directly to the backend — the response's Content-Disposition header
 // triggers the native download flow without an intermediate Fetch call.
 pub fn download_url(name: String, format: String) -> String {
-  http_client.api_url(reports_path <> "/" <> name <> "/download?format=" <> format)
+  http_client.api_url(
+    reports_path
+    <> "/"
+    <> uri.percent_encode(name)
+    <> "/download?format="
+    <> uri.percent_encode(format),
+  )
 }
 
 fn report_template_decoder() -> decode.Decoder(ReportTemplate) {

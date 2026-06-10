@@ -16,6 +16,7 @@ import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
+import gleam/uri
 import utils/json_utils
 
 
@@ -836,7 +837,7 @@ fn json_nullable_string(value: Option(String)) -> json.Json {
 
 /// Get a single record type by name
 pub fn get_record_type(name: String) -> Promise(Result(RecordType, ApiError)) {
-  http_client.get("/records/types/" <> name)
+  http_client.get("/records/types/" <> uri.percent_encode(name))
   |> promise.map(fn(res) {
     result.try(res, http_client.decode_response(
       _,

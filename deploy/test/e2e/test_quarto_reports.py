@@ -1,10 +1,12 @@
 """E2E: the Quarto reports admin page — page load + full render→download flow.
 
 The render test exercises the real background pipeline (trigger → poll status →
-download the rendered DOCX). It **skips gracefully** when the deployed VM has no
-Quarto reports configured, or when the render fails because the `quarto` CLI /
-Jupyter kernel is not provisioned — mirroring how ``test_record_form`` skips
-when no records exist. To make it actually run, provision the VM with:
+download the rendered DOCX). It **skips** only on the precondition: no Quarto
+reports configured on the VM (mirroring how ``test_record_form`` skips when no
+records exist). Once a render is dispatched, a failure or timeout **fails** the
+test — a VM that is provisioned with ``*.qmd`` templates must also carry the
+``quarto`` CLI and Jupyter kernel, otherwise the feature is broken, not absent.
+To provision the VM:
 
 * ``clarinet quarto install`` (+ the ``quarto`` pip extra: jupyter/ipykernel/pandas)
 * a ``*.qmd`` in ``settings.quarto_reports_path`` whose ``clarinet.data`` reports
@@ -43,15 +45,21 @@ def test_quarto_render_to_docx(auth_page: Page, base_url: str, path_prefix: str)
     retry_btn = auth_page.get_by_role("button", name="Retry DOCX")
 
     # Poll the page (the backend polls its own status.json) until the render
-    # resolves one way or the other — up to ~90s for cold Jupyter-kernel start.
-    for _ in range(60):
+    # resolves one way or the other. Budget: 200 x 1.5s = 300s — generous for a
+    # cold Jupyter-kernel start on a slow VM, yet half the backend render
+    # budget (quarto_render_timeout_seconds = 600s) so a hung render does not
+    # stall CI for the full backend timeout.
+    for _ in range(200):
         if download_link.count() > 0:
             break
         if retry_btn.count() > 0:
-            pytest.skip("Quarto render failed — VM likely lacks quarto/jupyter")
+            # The retry button's tooltip carries the backend error from the
+            # status sidecar — surface it instead of sending readers to logs.
+            error = retry_btn.first.get_attribute("title") or "unknown error"
+            pytest.fail(f"Quarto render failed after dispatching the DOCX render: {error}")
         auth_page.wait_for_timeout(1500)
     else:
-        pytest.skip("Quarto render did not finish within the timeout")
+        pytest.fail("Quarto render did not finish within the timeout (300s)")
 
     with auth_page.expect_download() as download_info:
         download_link.first.click()

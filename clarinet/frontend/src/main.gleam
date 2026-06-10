@@ -803,6 +803,11 @@ fn cleanup_current_page(model: Model) -> Effect(Msg) {
   case model.page {
     store.RecordExecutePage(page_model) ->
       effect.map(record_execute.cleanup(page_model), store.RecordExecuteMsg)
+    store.AdminQuartoReportsPage(page_model) ->
+      effect.map(
+        admin_quarto_reports_page.cleanup(page_model),
+        store.AdminQuartoReportsMsg,
+      )
     _ -> effect.none()
   }
 }

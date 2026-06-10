@@ -6,6 +6,7 @@ import gleam/dynamic/decode
 import gleam/javascript/promise.{type Promise}
 import gleam/json
 import gleam/result
+import gleam/uri
 
 const quarto_path = "/admin/quarto-reports"
 
@@ -28,7 +29,10 @@ pub fn render_report(
   formats: List(String),
 ) -> Promise(Result(QuartoRenderState, ApiError)) {
   let body = json.object([#("formats", json.array(formats, json.string))])
-  http_client.post(quarto_path <> "/" <> name <> "/render", json.to_string(body))
+  http_client.post(
+    quarto_path <> "/" <> uri.percent_encode(name) <> "/render",
+    json.to_string(body),
+  )
   |> promise.map(fn(res) {
     result.try(res, http_client.decode_response(
       _,
@@ -44,7 +48,12 @@ pub fn get_render_status(
   render_id: String,
 ) -> Promise(Result(QuartoRenderState, ApiError)) {
   http_client.get(
-    quarto_path <> "/" <> name <> "/renders/" <> render_id <> "/status",
+    quarto_path
+    <> "/"
+    <> uri.percent_encode(name)
+    <> "/renders/"
+    <> uri.percent_encode(render_id)
+    <> "/status",
   )
   |> promise.map(fn(res) {
     result.try(res, http_client.decode_response(
@@ -62,11 +71,11 @@ pub fn download_url(name: String, render_id: String, format: String) -> String {
   http_client.api_url(
     quarto_path
     <> "/"
-    <> name
+    <> uri.percent_encode(name)
     <> "/renders/"
-    <> render_id
+    <> uri.percent_encode(render_id)
     <> "/download?format="
-    <> format,
+    <> uri.percent_encode(format),
   )
 }
 

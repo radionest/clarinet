@@ -30,8 +30,10 @@ make vm-acceptance   # pytest acceptance tests (requires running VM)
 
 `test_quarto_reports.py` covers `/admin/quarto-reports`:
 - `test_quarto_reports_page_loads` — always runs (page + sub-path prefix).
-- `test_quarto_render_to_docx` — full render → poll → download; **skips** unless
-  the VM is provisioned for Quarto rendering.
+- `test_quarto_render_to_docx` — full render → poll → download; **skips** only
+  when no `*.qmd` templates are configured on the VM. Once the render is
+  dispatched, a failure or timeout **fails** the test — templates without the
+  `quarto` CLI/Jupyter kernel means a misprovisioned VM, not an absent feature.
 
 To make the render test run (not skip), the test VM needs:
 - the `quarto` CLI — `clarinet quarto install` (or `--from-file <tarball>` offline);
