@@ -71,8 +71,8 @@ async def unauth_client(test_session, test_settings) -> AsyncGenerator[AsyncClie
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac
 
-    # Pop only what this fixture installed — clear() would wipe overrides
-    # installed by enclosing fixtures.
+    # Pop only what this fixture installed instead of clear(), so overrides
+    # installed by other active fixtures survive this teardown.
     app.dependency_overrides.pop(get_async_session, None)
     app.dependency_overrides.pop(get_quarto_report_registry, None)
 

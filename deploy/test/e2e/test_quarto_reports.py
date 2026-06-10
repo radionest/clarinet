@@ -45,15 +45,21 @@ def test_quarto_render_to_docx(auth_page: Page, base_url: str, path_prefix: str)
     retry_btn = auth_page.get_by_role("button", name="Retry DOCX")
 
     # Poll the page (the backend polls its own status.json) until the render
-    # resolves one way or the other — up to ~90s for cold Jupyter-kernel start.
-    for _ in range(60):
+    # resolves one way or the other. Budget: 200 x 1.5s = 300s — generous for a
+    # cold Jupyter-kernel start on a slow VM, yet half the backend render
+    # budget (quarto_render_timeout_seconds = 600s) so a hung render does not
+    # stall CI for the full backend timeout.
+    for _ in range(200):
         if download_link.count() > 0:
             break
         if retry_btn.count() > 0:
-            pytest.fail("Quarto render failed after dispatching the DOCX render")
+            # The retry button's tooltip carries the backend error from the
+            # status sidecar — surface it instead of sending readers to logs.
+            error = retry_btn.first.get_attribute("title") or "unknown error"
+            pytest.fail(f"Quarto render failed after dispatching the DOCX render: {error}")
         auth_page.wait_for_timeout(1500)
     else:
-        pytest.fail("Quarto render did not finish within the timeout")
+        pytest.fail("Quarto render did not finish within the timeout (300s)")
 
     with auth_page.expect_download() as download_info:
         download_link.first.click()
