@@ -15,6 +15,8 @@ To provision the VM:
 See ``docs/quarto-reports.md`` and ``.claude/rules/e2e-tests.md``.
 """
 
+import os
+
 import pytest
 from conftest import assert_url_has_prefix
 from playwright.sync_api import Page, expect
@@ -37,7 +39,17 @@ def test_quarto_render_to_docx(auth_page: Page, base_url: str, path_prefix: str)
     _open_quarto_page(auth_page, base_url, path_prefix)
 
     render_btn = auth_page.get_by_role("button", name="Render DOCX")
+    empty_note = auth_page.get_by_text("No Quarto reports available")
+    # The template list loads asynchronously after networkidle and
+    # locator.count() does not wait — settle on a real state (render buttons
+    # or the empty note) first, or the test self-skips on slow VMs.
+    expect(render_btn.or_(empty_note).first).to_be_visible(timeout=15_000)
     if render_btn.count() == 0:
+        if os.environ.get("CLARINET_E2E_REQUIRE_QUARTO") == "1":
+            pytest.fail(
+                "Quarto provisioning regressed: CLARINET_E2E_REQUIRE_QUARTO=1 "
+                "but no report templates are configured on this deployment"
+            )
         pytest.skip("No Quarto reports configured on this deployment")
     render_btn.first.click()
 

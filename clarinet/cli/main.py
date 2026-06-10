@@ -1002,9 +1002,17 @@ def quarto_status() -> None:
     # setup used to execute .qmd code chunks. On older hosts (e.g. Astra Linux
     # SE 1.7) it surfaces glibc incompatibilities immediately.
     try:
-        result = subprocess.run(
-            [str(executable), "check"], capture_output=True, text=True, timeout=120
-        )
+        # Quarto's startup dotenv loader reads .env/.env.example from the CWD
+        # and aborts when example vars are undefined — run the check from an
+        # empty temp dir so it never depends on the operator's project files.
+        with tempfile.TemporaryDirectory() as check_cwd:
+            result = subprocess.run(
+                [str(executable), "check"],
+                capture_output=True,
+                text=True,
+                timeout=120,
+                cwd=check_cwd,
+            )
         print(result.stdout)
         if result.returncode != 0:
             print(result.stderr)

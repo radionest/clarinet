@@ -1,0 +1,17 @@
+---
+title: "Demo Report"
+description: "Active users — Quarto e2e provisioning fixture."
+clarinet:
+  data:
+    - demo_records
+---
+
+# Users
+
+```{python}
+import pandas as pd
+
+df = pd.read_csv("data/demo_records.csv")
+print(f"Total users: {len(df)}")
+df
+```

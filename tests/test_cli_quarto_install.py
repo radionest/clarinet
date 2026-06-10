@@ -1,13 +1,19 @@
-"""Unit tests for ``clarinet quarto install`` version-marker handling."""
+"""Unit tests for ``clarinet quarto`` CLI subcommands."""
 
 import contextlib
 import io
+import subprocess
 import tarfile
 from pathlib import Path
 
 import pytest
 
-from clarinet.cli.main import _download_file, _quarto_tarball_version, install_quarto
+from clarinet.cli.main import (
+    _download_file,
+    _quarto_tarball_version,
+    install_quarto,
+    quarto_status,
+)
 from clarinet.settings import settings
 
 
@@ -98,3 +104,39 @@ def test_download_file_sets_socket_timeout(monkeypatch: pytest.MonkeyPatch, tmp_
     assert dest.read_bytes() == b"payload"
     assert captured["timeout"] is not None
     assert captured["timeout"] > 0
+
+
+def test_quarto_check_runs_from_neutral_cwd(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Quarto's startup dotenv loader reads .env/.env.example from the CWD and
+    aborts when example vars are undefined — ``quarto check`` must not inherit
+    the operator's project directory (downstream projects ship populated
+    ``.env.example`` files)."""
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / ".env.example").write_text("CLARINET_SECRET_KEY=\n")
+    monkeypatch.chdir(project)
+
+    exe = tmp_path / "bin" / "quarto"
+    exe.parent.mkdir(parents=True)
+    exe.write_text("#!/bin/sh\n")
+    exe.chmod(0o755)
+    monkeypatch.setattr("clarinet.services.quarto_render.resolve_quarto_executable", lambda: exe)
+
+    seen: dict[str, object] = {}
+
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        cwd = kwargs.get("cwd")
+        seen["cwd"] = cwd
+        seen["cwd_exists"] = cwd is not None and Path(str(cwd)).is_dir()
+        seen["cwd_has_env_example"] = cwd is not None and (Path(str(cwd)) / ".env.example").exists()
+        return subprocess.CompletedProcess(list(cmd), 0, stdout="ok", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    quarto_status()
+
+    assert seen["cwd"], "quarto check must run with an explicit neutral cwd"
+    assert Path(str(seen["cwd"])).resolve() != project.resolve()
+    assert seen["cwd_exists"] is True
+    assert seen["cwd_has_env_example"] is False

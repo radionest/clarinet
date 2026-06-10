@@ -323,7 +323,7 @@ _test-all-stages-impl:
 			echo "=========================================="; \
 			echo "  Stage 7/8: VM smoke + acceptance + e2e   "; \
 			echo "=========================================="; \
-			bash deploy/test/smoke-test.sh || { rc=$$?; echo "Stage 7 smoke FAILED (exit $$rc)"; EXIT_CODE=$$rc; }; \
+			CLARINET_E2E_REQUIRE_QUARTO=1 bash deploy/test/smoke-test.sh || { rc=$$?; echo "Stage 7 smoke FAILED (exit $$rc)"; EXIT_CODE=$$rc; }; \
 			VM_IP=$$(bash $(VM_SH) ip 2>/dev/null); \
 			. deploy/vm/vm.conf; \
 			ADMIN_PASS=$$(ssh -o StrictHostKeyChecking=no -i "$$SSH_KEY_PATH" clarinet@$$VM_IP \
@@ -334,6 +334,7 @@ _test-all-stages-impl:
 				|| { rc=$$?; echo "Stage 7 acceptance FAILED (exit $$rc)"; EXIT_CODE=$$rc; }; \
 			CLARINET_TEST_URL="https://$$VM_IP$${PATH_PREFIX}" \
 			CLARINET_TEST_ADMIN_PASSWORD="$$ADMIN_PASS" \
+			CLARINET_E2E_REQUIRE_QUARTO=1 \
 			uv run --group e2e pytest deploy/test/e2e/ -v --browser chromium \
 				|| { rc=$$?; echo "Stage 7 e2e FAILED (exit $$rc)"; EXIT_CODE=$$rc; }; \
 		fi; \
@@ -376,7 +377,8 @@ build-deps: ## Download dependency wheels for offline VM install
 	echo "Downloading dependency wheels for $$WHEEL..."; \
 	mkdir -p dist/deps; \
 	uv tool run --python 3.12 pip download \
-		-d dist/deps "$$WHEEL[performance]"
+		-d dist/deps "$$WHEEL[performance,quarto]" && \
+	echo "performance,quarto" > dist/deps/.extras  # cache marker — keep in sync with vm.sh deps_extras
 
 .PHONY: dev-setup
 dev-setup: ## Set up development environment
