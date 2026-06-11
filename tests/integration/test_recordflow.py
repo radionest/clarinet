@@ -1450,16 +1450,23 @@ class TestRecordFlowInvalidationRuntime:
         rec_read = await clarinet_client.get_record(rec.id)
 
         task1 = asyncio.create_task(flow_engine.handle_record_invalidation(rec_read, None))
-        await started.wait()  # task1 is now parked mid-cascade, rec.id on the stack
-        assert rec.id in flow_engine._active_invalidations
+        try:
+            # The engine swallows callback exceptions, so a broken parking_action
+            # would never set `started`; bound the wait so that turns into a fast
+            # failure instead of hanging the suite.
+            await asyncio.wait_for(started.wait(), timeout=5)
+            assert rec.id in flow_engine._active_invalidations
 
-        with caplog.at_level(logging.ERROR):
-            await flow_engine.handle_record_invalidation(rec_read, None)
-        assert "Invalidation cycle detected" in caplog.text
-        assert invocations == [rec.id]  # the parked flow ran once; the second skipped
+            with caplog.at_level(logging.ERROR):
+                await flow_engine.handle_record_invalidation(rec_read, None)
+            assert "Invalidation cycle detected" in caplog.text
+            assert invocations == [rec.id]  # the parked flow ran once; the second skipped
+        finally:
+            # Always unpark task1 (even if an assertion above failed) so it can
+            # finish and run its `finally: discard`, leaving no dangling task.
+            release.set()
+            await asyncio.wait_for(task1, timeout=5)
 
-        release.set()
-        await task1
         assert flow_engine._active_invalidations == set()  # finally released the guard
 
 
