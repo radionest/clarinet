@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "clarinet"
-version = "0.8.1"
+version = "0.8.2"
 description = "Clarinet — an imaging-centric framework for clinical research"
 readme = "README.md"
 authors = [
@@ -75,7 +75,7 @@ docs = [
     "sphinx-rtd-theme>=1.2.0",
     "myst-parser>=1.0.0"
 ]
-quarto = []  # kernel deps moved to base in 0.8.1; stub keeps `clarinet[quarto]` installs working
+quarto = []  # kernel deps moved to base; stub keeps `clarinet[quarto]` installs working (removal: #348)
 
 [project.scripts]
 clarinet = "clarinet.cli.main:main"

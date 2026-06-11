@@ -119,11 +119,13 @@ to the wheel in the bundle and the installer runs
 pip extra. Bundles without a tarball are unaffected. This is how the test-VM
 pipeline provisions Quarto, and it works for air-gapped production hosts too.
 
-One operational note. Since 0.8.1 the report kernel's Python dependencies are
-part of clarinet's **base** dependencies; the `quarto` pip extra is an empty
-stub kept for one release so existing `clarinet[quarto]` installs and bundles
-keep working. The `dist/deps` wheel cache already carried these wheels, so
-bundle contents do not change.
+One operational note. The report kernel's Python dependencies are part of
+clarinet's **base** dependencies; the `quarto` pip extra is an empty stub kept
+so existing `clarinet[quarto]` install lines and bundles keep working (its
+removal is tracked in [#348](https://github.com/radionest/clarinet/issues/348)).
+A freshly built `dist/deps` wheel cache **shrinks**: the old extra pulled the
+`jupyter` metapackage (jupyterlab, notebook — ~100 MB) that the slim base set
+no longer needs. Existing caches are a superset and keep working as-is.
 
 The binary lands under `{storage_path}/quarto`. Resolution order at render
 time: `settings.quarto_executable` (explicit) → `{storage_path}/quarto/bin/quarto`
@@ -143,8 +145,9 @@ version that runs on your host and verify with `clarinet quarto status`
 
 **`ModuleNotFoundError: No module named 'yaml'` (or `Jupyter is not
 available`) during render** — the worker's interpreter lacks the report kernel
-dependencies: either clarinet older than 0.8.1 installed without the `quarto`
-extra, or a broken installation. Fix: `pip install --upgrade clarinet` into
+dependencies: either a clarinet release from before the kernel deps moved into
+the base install (installed without the `quarto` extra), or a broken
+installation. Fix: `pip install --upgrade clarinet` into
 the interpreter that runs the worker (the render kernel always uses that
 interpreter). `clarinet quarto status` runs `quarto check` in the same minimal
 environment real renders use and prints the kernel interpreter, so a green

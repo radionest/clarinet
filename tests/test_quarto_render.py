@@ -91,6 +91,11 @@ def test_build_render_env_passes_pythonpath_when_set(
     assert env["PYTHONPATH"] == "/opt/extra-packages"
 
 
+_skip_windows = pytest.mark.skipif(
+    sys.platform == "win32", reason="fake executables are POSIX sh scripts"
+)
+
+
 def _write_fake_executable(path: Path, stderr_line: str) -> Path:
     """A stand-in binary that prints ``stderr_line`` to stderr and exits 1."""
     path.write_text(f'#!/bin/sh\necho "{stderr_line}" >&2\nexit 1\n')
@@ -98,6 +103,7 @@ def _write_fake_executable(path: Path, stderr_line: str) -> Path:
     return path
 
 
+@_skip_windows
 @pytest.mark.asyncio
 async def test_run_quarto_enriches_kernel_errors(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -132,6 +138,7 @@ async def test_run_quarto_enriches_kernel_errors(
     assert "pip install --upgrade clarinet" in message
 
 
+@_skip_windows
 @pytest.mark.asyncio
 async def test_run_quarto_no_enrichment_without_markers(tmp_path: Path) -> None:
     """Non-kernel failures (e.g. LaTeX) must not trigger the import probe."""
@@ -147,6 +154,35 @@ async def test_run_quarto_no_enrichment_without_markers(tmp_path: Path) -> None:
     message = str(exc_info.value)
     assert "LaTeX Error" in message
     assert "Kernel diagnostics" not in message
+
+
+@_skip_windows
+@pytest.mark.asyncio
+async def test_run_quarto_reports_imports_ok_when_probe_passes(tmp_path: Path) -> None:
+    """A kernel-shaped failure with a healthy interpreter (the dev venv — real
+    ``build_render_env``) points the reader away from the kernel."""
+    fake_quarto = _write_fake_executable(tmp_path / "quarto", "Jupyter is not available")
+    render_dir = tmp_path / "out"
+    render_dir.mkdir()
+
+    with pytest.raises(QuartoRenderError) as exc_info:
+        await quarto_render._run_quarto(
+            _write_min_qmd(render_dir), QuartoReportFormat.DOCX, render_dir, fake_quarto, 30.0
+        )
+
+    message = str(exc_info.value)
+    assert "Jupyter is not available" in message
+    assert "imports OK" in message
+    assert "the failure is elsewhere" in message
+
+
+@pytest.mark.asyncio
+async def test_kernel_diagnostics_swallows_probe_failure(tmp_path: Path) -> None:
+    """A probe that cannot even start must not mask the render error."""
+    result = await quarto_render._kernel_diagnostics(
+        {"QUARTO_PYTHON": str(tmp_path / "no-such-python")}
+    )
+    assert result == ""
 
 
 def test_resolve_executable_explicit_setting(

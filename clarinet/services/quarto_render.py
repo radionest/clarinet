@@ -290,7 +290,7 @@ async def _kernel_diagnostics(env: dict[str, str]) -> str:
         proc = await asyncio.create_subprocess_exec(
             interpreter,
             "-c",
-            "import yaml, nbformat, nbclient, jupyter_client, ipykernel",
+            "import yaml, nbformat, nbclient, jupyter_client, ipykernel, pandas",
             env=env,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
