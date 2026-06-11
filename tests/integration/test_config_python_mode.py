@@ -11,8 +11,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlmodel import select
 
+from clarinet.config.primitives import RecordDef
 from clarinet.config.python_loader import load_python_config
-from clarinet.config.reconciler import reconcile_record_types
+from clarinet.config.reconciler import _COMPARED_FIELDS, reconcile_record_types
 from clarinet.models.file_schema import RecordTypeFileLink
 from clarinet.models.record import RecordType
 
@@ -107,6 +108,92 @@ async def test_editable_flags_forwarded_when_explicit(tmp_path) -> None:
 
     assert "editable" not in by_name["plain-rt"].model_fields_set
     assert "edit_window_days" not in by_name["plain-rt"].model_fields_set
+
+
+@pytest.mark.asyncio
+async def test_unique_per_user_forwarded_when_explicit(tmp_path) -> None:
+    """``unique_per_user`` propagates from RecordDef only when set."""
+    _write_record_types(
+        tmp_path,
+        """\
+        from clarinet.config.primitives import RecordDef
+
+        # Explicit False — must be forwarded
+        shared = RecordDef(name="shared-rt", level="STUDY", unique_per_user=False)
+        # Default — must NOT be forwarded
+        plain = RecordDef(name="plain-rt", level="STUDY")
+        """,
+    )
+
+    config_items = await load_python_config(tmp_path)
+    by_name = {item.name: item for item in config_items}
+
+    assert "unique_per_user" in by_name["shared-rt"].model_fields_set
+    assert by_name["shared-rt"].unique_per_user is False
+
+    assert "unique_per_user" not in by_name["plain-rt"].model_fields_set
+
+
+def test_recorddef_exposes_exactly_synced_fields() -> None:
+    """Drift sentinel: RecordDef fields must match the reconciler's synced set.
+
+    ``_to_record_type_create`` maps RecordDef → RecordTypeCreate field-by-field,
+    so any field the reconciler syncs (``_COMPARED_FIELDS``) must exist on
+    RecordDef, and vice versa. This fails the moment the two diverge — e.g. a new
+    column added to ``RecordTypeBase`` + ``_COMPARED_FIELDS`` but not mirrored
+    onto RecordDef would silently be undriveable from Python config.
+    """
+    # name = identity (always forwarded, never "compared");
+    # files = list[FileRef] mapped to file_registry via fileref_to_file_definition,
+    #         synced by the M2M link diff rather than _COMPARED_FIELDS.
+    special = {"name", "files"}
+    assert set(RecordDef.model_fields) - special == set(_COMPARED_FIELDS)
+
+
+@pytest.mark.asyncio
+async def test_recorddef_forwards_every_synced_field(tmp_path) -> None:
+    """Drift sentinel: every synced field set on a RecordDef must reach RecordTypeCreate.
+
+    Guards ``_to_record_type_create`` against silently dropping a field that the
+    reconciler would otherwise sync. A new ``_COMPARED_FIELDS`` entry that is not
+    also forwarded surfaces here as a ``missing`` mismatch.
+    """
+    _write_record_types(
+        tmp_path,
+        """\
+        from clarinet.config.primitives import RecordDef
+
+        rt = RecordDef(
+            name="all-fields-rt",
+            level="PATIENT",
+            description="every synced field set",
+            label="All Fields",
+            role_name="some-role",
+            min_records=2,
+            max_records=5,
+            slicer_script="print('script')",
+            slicer_script_args={"a": "b"},
+            slicer_result_validator="print('validator')",
+            slicer_result_validator_args={"c": "d"},
+            slicer_context_hydrators=["hydrator_one"],
+            data_validators=["validator_one"],
+            data_schema={"type": "object"},
+            ui_schema={"name": {"ui:widget": "text"}},
+            mask_patient_data=False,
+            unique_per_user=False,
+            parent_required=True,
+            inherit_user_from_parent=True,
+            editable=False,
+            edit_window_days=7,
+            viewer_mode="all_series",
+        )
+        """,
+    )
+
+    [item] = await load_python_config(tmp_path)
+
+    missing = set(_COMPARED_FIELDS) - item.model_fields_set
+    assert not missing, f"_to_record_type_create dropped synced fields: {missing}"
 
 
 @pytest.mark.asyncio

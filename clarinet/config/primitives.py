@@ -134,6 +134,7 @@ class RecordDef(BaseModel):
     slicer_context_hydrators: list[str] | None = None
     data_validators: list[str] | None = None
     mask_patient_data: bool = True
+    unique_per_user: bool = True
     parent_required: bool = False
     inherit_user_from_parent: bool = False
     editable: bool = True

@@ -304,6 +304,8 @@ async def _to_record_type_create(
     # absent from config — matching the contract of all other optional fields.
     if "mask_patient_data" in rt_def.model_fields_set:
         kwargs["mask_patient_data"] = rt_def.mask_patient_data
+    if "unique_per_user" in rt_def.model_fields_set:
+        kwargs["unique_per_user"] = rt_def.unique_per_user
     if "parent_required" in rt_def.model_fields_set:
         kwargs["parent_required"] = rt_def.parent_required
     if "inherit_user_from_parent" in rt_def.model_fields_set:
