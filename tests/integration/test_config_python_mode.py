@@ -147,53 +147,74 @@ def test_recorddef_exposes_exactly_synced_fields() -> None:
     # files = list[FileRef] mapped to file_registry via fileref_to_file_definition,
     #         synced by the M2M link diff rather than _COMPARED_FIELDS.
     special = {"name", "files"}
-    assert set(RecordDef.model_fields) - special == set(_COMPARED_FIELDS)
+    recorddef_synced = set(RecordDef.model_fields) - special
+    compared = set(_COMPARED_FIELDS)
+    assert recorddef_synced == compared, (
+        "RecordDef syncable fields drifted from reconciler _COMPARED_FIELDS — "
+        f"RecordDef-only={recorddef_synced - compared}, "
+        f"reconciler-only={compared - recorddef_synced}. "
+        "Add the field to both RecordDef and _COMPARED_FIELDS (and forward it in "
+        "_to_record_type_create), or extend `special` if it is a new identity / "
+        "non-_COMPARED_FIELDS (e.g. M2M) field."
+    )
+
+
+# Every reconciler-synced field, set to a non-default value. Kept in lockstep
+# with _COMPARED_FIELDS so a newly-synced field forces a sample here (and thus a
+# real forwarding + value check). All values are plain dict/list/scalar so they
+# survive the resolvers unchanged; str-enums (level, viewer_mode) compare equal
+# to their value.
+_FORWARD_SAMPLES: dict[str, object] = {
+    "level": "PATIENT",
+    "description": "every synced field set",
+    "label": "All Fields",
+    "role_name": "some-role",
+    "min_records": 2,
+    "max_records": 5,
+    "slicer_script": "print('script')",
+    "slicer_script_args": {"a": "b"},
+    "slicer_result_validator": "print('validator')",
+    "slicer_result_validator_args": {"c": "d"},
+    "slicer_context_hydrators": ["hydrator_one"],
+    "data_validators": ["validator_one"],
+    "data_schema": {"type": "object"},
+    "ui_schema": {"name": {"ui:widget": "text"}},
+    "mask_patient_data": False,
+    "unique_per_user": False,
+    "parent_required": True,
+    "inherit_user_from_parent": True,
+    "editable": False,
+    "edit_window_days": 7,
+    "viewer_mode": "all_series",
+}
 
 
 @pytest.mark.asyncio
 async def test_recorddef_forwards_every_synced_field(tmp_path) -> None:
-    """Drift sentinel: every synced field set on a RecordDef must reach RecordTypeCreate.
+    """Drift sentinel: every synced field set on a RecordDef must reach
+    RecordTypeCreate *with its value intact*.
 
-    Guards ``_to_record_type_create`` against silently dropping a field that the
-    reconciler would otherwise sync. A new ``_COMPARED_FIELDS`` entry that is not
-    also forwarded surfaces here as a ``missing`` mismatch.
+    Guards ``_to_record_type_create`` against silently dropping or mangling a
+    field the reconciler syncs. A new ``_COMPARED_FIELDS`` entry that lacks a
+    sample, is not forwarded, or is forwarded with the wrong value fails here.
     """
+    # A newly-synced field with no sample below would slip the value check —
+    # force the sample set to track _COMPARED_FIELDS exactly.
+    assert set(_FORWARD_SAMPLES) == set(_COMPARED_FIELDS)
+
+    kwargs_src = "\n".join(f"    {name}={value!r}," for name, value in _FORWARD_SAMPLES.items())
     _write_record_types(
         tmp_path,
-        """\
-        from clarinet.config.primitives import RecordDef
-
-        rt = RecordDef(
-            name="all-fields-rt",
-            level="PATIENT",
-            description="every synced field set",
-            label="All Fields",
-            role_name="some-role",
-            min_records=2,
-            max_records=5,
-            slicer_script="print('script')",
-            slicer_script_args={"a": "b"},
-            slicer_result_validator="print('validator')",
-            slicer_result_validator_args={"c": "d"},
-            slicer_context_hydrators=["hydrator_one"],
-            data_validators=["validator_one"],
-            data_schema={"type": "object"},
-            ui_schema={"name": {"ui:widget": "text"}},
-            mask_patient_data=False,
-            unique_per_user=False,
-            parent_required=True,
-            inherit_user_from_parent=True,
-            editable=False,
-            edit_window_days=7,
-            viewer_mode="all_series",
-        )
-        """,
+        f"from clarinet.config.primitives import RecordDef\n\n"
+        f'rt = RecordDef(\n    name="all-fields-rt",\n{kwargs_src}\n)\n',
     )
 
     [item] = await load_python_config(tmp_path)
 
-    missing = set(_COMPARED_FIELDS) - item.model_fields_set
-    assert not missing, f"_to_record_type_create dropped synced fields: {missing}"
+    for name, expected in _FORWARD_SAMPLES.items():
+        assert name in item.model_fields_set, f"_to_record_type_create dropped synced field: {name}"
+        actual = getattr(item, name)
+        assert actual == expected, f"{name} forwarded as {actual!r}, expected {expected!r}"
 
 
 @pytest.mark.asyncio
