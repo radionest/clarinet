@@ -75,6 +75,7 @@ class RecordFlowEngine:
         self.entity_flows: dict[str, list[FlowRecord]] = {}
         self.file_flows: dict[str, list[FlowFileRecord]] = {}
         self._background_tasks: set[asyncio.Task[None]] = set()
+        self._active_invalidations: set[int] = set()
 
     async def _ensure_api_reachable(self) -> None:
         """One-time API connectivity check on first use (when api_base_url is set)."""
@@ -233,7 +234,9 @@ class RecordFlowEngine:
 
         Args:
             record: The record that changed status.
-            old_status: The previous status (optional).
+            old_status: The previous status (optional). May equal the current
+                status — hard re-invalidation legitimately fires pending →
+                pending, so future from→to logic must not skip old == new.
             plan_collector: Dry-run sink (see :meth:`_dispatch_flows`).
         """
         current_status = record.status.value if hasattr(record.status, "value") else record.status
@@ -247,6 +250,32 @@ class RecordFlowEngine:
             ),
             plan_collector=plan_collector,
         )
+
+    async def handle_record_invalidation(
+        self,
+        record: RecordRead,
+        old_status: RecordStatus | None = None,
+    ) -> None:
+        """Dispatch status flows for a hard-invalidated record with cycle protection.
+
+        Hard invalidation always re-fires status flows (even pending → pending),
+        so mutually-invalidating flows would otherwise recurse forever — each hop
+        is a nested HTTP self-call holding its own DB session. A record already
+        on the dispatch stack means the cascade looped back onto itself: its
+        invalidation is already persisted, only the flow dispatch is skipped.
+        """
+        if record.id in self._active_invalidations:
+            logger.error(
+                f"Invalidation cycle detected: record {record.id} "
+                f"({record.record_type.name}) is already mid-cascade — flows skipped. "
+                f"Check flows for mutual invalidate_records() loops."
+            )
+            return
+        self._active_invalidations.add(record.id)
+        try:
+            await self.handle_record_status_change(record, old_status)
+        finally:
+            self._active_invalidations.discard(record.id)
 
     async def handle_record_data_update(
         self,

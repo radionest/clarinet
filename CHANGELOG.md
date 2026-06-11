@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- Hard invalidation (`POST /records/{id}/invalidate`, RecordFlow
+  `invalidate_records()`) now always fires `on_status("pending")` flows —
+  even when the record was already `pending`. Previously an already-pending
+  record was reset silently and its flows never re-ran, so stale prefills
+  survived re-invalidation. Downstream impact: every action reachable from
+  `on_status("pending")` (and from flows without a status trigger) must be
+  idempotent — it re-runs on every hard re-invalidation.
+- The RecordFlow engine cuts invalidation cycles at runtime: a record whose
+  flows are already dispatching in the current cascade is still invalidated,
+  but its flows are skipped with an `Invalidation cycle detected` ERROR log.
+  Mutually-invalidating flows remain a configuration error.
+- `mode` on the invalidate endpoint and in `InvalidateRecordsAction` is now
+  validated as `"hard" | "soft"` — a typo returns 422 / fails at flow
+  definition instead of silently behaving like soft mode.
+
 ## 0.7.0 — Post-submit edit locking (RecordType.editable / edit_window_days)
 
 ### Added

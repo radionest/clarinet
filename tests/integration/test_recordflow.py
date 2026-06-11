@@ -3,11 +3,14 @@
 Uses clarinet_client fixture (real HTTP client → FastAPI app → in-memory SQLite).
 """
 
+import asyncio
+import logging
 from collections.abc import AsyncGenerator
 
 import pytest
 import pytest_asyncio
 from httpx import AsyncClient
+from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from clarinet.api.app import app
@@ -17,9 +20,11 @@ from clarinet.models.patient import Patient
 from clarinet.models.record import RecordCreate, RecordRead, RecordType
 from clarinet.models.study import Series, Study
 from clarinet.services.recordflow import FlowRecord, FlowResult, RecordFlowEngine
+from clarinet.services.recordflow.flow_action import InvalidateRecordsAction
 from clarinet.services.recordflow.flow_file import FILE_REGISTRY
 from clarinet.services.recordflow.flow_record import ENTITY_REGISTRY, RECORD_REGISTRY
 from clarinet.utils.logger import logger
+from tests.utils.urls import RECORDS_BASE
 
 
 @pytest.fixture(autouse=True)
@@ -85,6 +90,16 @@ async def record_types(test_session: AsyncSession) -> dict[str, RecordType]:
         rt = RecordType(name=name, level=DicomQueryLevel.SERIES, unique_per_user=False)
         test_session.add(rt)
         types[name] = rt
+    # Constrained type for idempotency tests: at most one per study, so a flow that
+    # re-fires add_record on every hard re-invalidation cannot create duplicates.
+    singleton = RecordType(
+        name="singleton-child",
+        level=DicomQueryLevel.STUDY,
+        unique_per_user=False,
+        max_records=1,
+    )
+    test_session.add(singleton)
+    types["singleton-child"] = singleton
     await test_session.commit()
     for rt in types.values():
         await test_session.refresh(rt)
@@ -842,7 +857,7 @@ class TestRecordFlowInvalidation:
 
 
 class TestRecordFlowInvalidationRuntime:
-    """Tests for invalidation triggered through API (PATCH /data → engine)."""
+    """Tests for invalidation triggered through API (PATCH /data, POST /invalidate)."""
 
     @pytest_asyncio.fixture
     async def app_with_engine(
@@ -924,6 +939,536 @@ class TestRecordFlowInvalidationRuntime:
         assert child_records[0].status == RecordStatus.pending
         assert "Invalidated by record" in (child_records[0].context_info or "")
 
+    @pytest.mark.asyncio
+    async def test_hard_invalidate_already_pending_refires_pending_flow(
+        self,
+        client: AsyncClient,
+        clarinet_client: ClarinetClient,
+        app_with_engine: RecordFlowEngine,
+        record_types: dict[str, RecordType],
+        test_patient: Patient,
+        test_study: Study,
+    ):
+        """Hard invalidation of an already-pending record re-fires on_status("pending")."""
+        pending_log: list[int] = []
+
+        async def on_pending(record, context, client, **kwargs):
+            pending_log.append(record.id)
+
+        flow = FlowRecord("child-analysis")
+        flow.on_status("pending").call(on_pending)
+        app_with_engine.register_flow(flow)
+
+        # Record stays pending (waits for a human) — never reaches finished
+        child = await _create_record_via_client(
+            clarinet_client,
+            "child-analysis",
+            test_patient.id,
+            test_study.study_uid,
+        )
+        pending_log.clear()  # drop the creation-time pending event
+
+        resp = await client.post(
+            f"{RECORDS_BASE}/{child.id}/invalidate",
+            json={"mode": "hard", "reason": "master model updated"},
+        )
+        assert resp.status_code == 200
+
+        assert pending_log == [child.id]
+
+    @pytest.mark.asyncio
+    async def test_hard_invalidate_finished_fires_exactly_one_event(
+        self,
+        client: AsyncClient,
+        clarinet_client: ClarinetClient,
+        app_with_engine: RecordFlowEngine,
+        record_types: dict[str, RecordType],
+        test_patient: Patient,
+        test_study: Study,
+    ):
+        """Hard invalidation of a finished record fires exactly one pending event."""
+        pending_log: list[int] = []
+
+        async def on_pending(record, context, client, **kwargs):
+            pending_log.append(record.id)
+
+        flow = FlowRecord("child-analysis")
+        flow.on_status("pending").call(on_pending)
+        app_with_engine.register_flow(flow)
+
+        child = await _create_record_via_client(
+            clarinet_client,
+            "child-analysis",
+            test_patient.id,
+            test_study.study_uid,
+            status=RecordStatus.finished,
+        )
+        pending_log.clear()
+
+        resp = await client.post(
+            f"{RECORDS_BASE}/{child.id}/invalidate",
+            json={"mode": "hard"},
+        )
+        assert resp.status_code == 200
+
+        assert pending_log == [child.id]
+
+    @pytest.mark.asyncio
+    async def test_soft_invalidate_fires_no_event(
+        self,
+        client: AsyncClient,
+        clarinet_client: ClarinetClient,
+        app_with_engine: RecordFlowEngine,
+        record_types: dict[str, RecordType],
+        test_patient: Patient,
+        test_study: Study,
+    ):
+        """Soft invalidation neither fires triggers nor changes status."""
+        pending_log: list[int] = []
+
+        async def on_pending(record, context, client, **kwargs):
+            pending_log.append(record.id)
+
+        flow = FlowRecord("child-analysis")
+        flow.on_status("pending").call(on_pending)
+        app_with_engine.register_flow(flow)
+
+        child = await _create_record_via_client(
+            clarinet_client,
+            "child-analysis",
+            test_patient.id,
+            test_study.study_uid,
+        )
+        pending_log.clear()
+
+        resp = await client.post(
+            f"{RECORDS_BASE}/{child.id}/invalidate",
+            json={"mode": "soft", "reason": "soft probe"},
+        )
+        assert resp.status_code == 200
+
+        assert pending_log == []
+        updated = await clarinet_client.get_record(child.id)
+        assert updated.status == RecordStatus.pending
+        assert "soft probe" in (updated.context_info or "")
+
+    @pytest.mark.asyncio
+    async def test_hard_invalidate_refires_any_status_flow(
+        self,
+        client: AsyncClient,
+        clarinet_client: ClarinetClient,
+        app_with_engine: RecordFlowEngine,
+        record_types: dict[str, RecordType],
+        test_patient: Patient,
+        test_study: Study,
+    ):
+        """Hard invalidation also re-fires flows without a status trigger."""
+        any_log: list[int] = []
+
+        async def on_any_status(record, context, client, **kwargs):
+            any_log.append(record.id)
+
+        flow = FlowRecord("child-analysis")
+        flow.call(on_any_status)  # no .on_status() — matches any status event
+        app_with_engine.register_flow(flow)
+
+        child = await _create_record_via_client(
+            clarinet_client,
+            "child-analysis",
+            test_patient.id,
+            test_study.study_uid,
+        )
+        any_log.clear()
+
+        resp = await client.post(
+            f"{RECORDS_BASE}/{child.id}/invalidate",
+            json={"mode": "hard"},
+        )
+        assert resp.status_code == 200
+
+        assert any_log == [child.id]
+
+    @pytest.mark.asyncio
+    async def test_mutual_invalidation_cycle_is_cut(
+        self,
+        client: AsyncClient,
+        clarinet_client: ClarinetClient,
+        app_with_engine: RecordFlowEngine,
+        record_types: dict[str, RecordType],
+        test_patient: Patient,
+        test_study: Study,
+    ):
+        """A hard-invalidation loop terminates: mid-cascade records skip their flows."""
+        # Create siblings before registering the flow so creation events don't fire it
+        first = await _create_record_via_client(
+            clarinet_client,
+            "parent-model",
+            test_patient.id,
+            test_study.study_uid,
+        )
+        second = await _create_record_via_client(
+            clarinet_client,
+            "parent-model",
+            test_patient.id,
+            test_study.study_uid,
+        )
+
+        # Pathological config: a pending parent-model hard-invalidates its siblings
+        flow = FlowRecord("parent-model")
+        flow.on_status("pending").invalidate_records("parent-model", mode="hard")
+        app_with_engine.register_flow(flow)
+
+        resp = await client.post(
+            f"{RECORDS_BASE}/{first.id}/invalidate",
+            json={"mode": "hard", "reason": "cycle probe"},
+        )
+        assert resp.status_code == 200
+
+        # first → second → first: the loop is cut when it re-enters `first`
+        records = await clarinet_client.find_records(
+            study_uid=test_study.study_uid,
+            record_type_name="parent-model",
+        )
+        by_id = {r.id: r for r in records}
+        assert by_id[first.id].status == RecordStatus.pending
+        assert by_id[second.id].status == RecordStatus.pending
+        assert f"Invalidated by record #{first.id}" in (by_id[second.id].context_info or "")
+        assert f"Invalidated by record #{second.id}" in (by_id[first.id].context_info or "")
+
+    @pytest.mark.asyncio
+    async def test_hard_invalidate_refires_on_repeated_calls(
+        self,
+        client: AsyncClient,
+        clarinet_client: ClarinetClient,
+        app_with_engine: RecordFlowEngine,
+        record_types: dict[str, RecordType],
+        test_patient: Patient,
+        test_study: Study,
+    ):
+        """Each hard re-invalidation re-fires the pending flow (idempotency contract)."""
+        pending_log: list[int] = []
+
+        async def on_pending(record, context, client, **kwargs):
+            pending_log.append(record.id)
+
+        flow = FlowRecord("child-analysis")
+        flow.on_status("pending").call(on_pending)
+        app_with_engine.register_flow(flow)
+
+        child = await _create_record_via_client(
+            clarinet_client,
+            "child-analysis",
+            test_patient.id,
+            test_study.study_uid,
+        )
+        pending_log.clear()  # drop the creation-time pending event
+
+        for _ in range(3):
+            resp = await client.post(
+                f"{RECORDS_BASE}/{child.id}/invalidate",
+                json={"mode": "hard"},
+            )
+            assert resp.status_code == 200
+
+        assert pending_log == [child.id, child.id, child.id]
+
+    @pytest.mark.asyncio
+    async def test_repeated_hard_invalidate_does_not_duplicate_record(
+        self,
+        client: AsyncClient,
+        clarinet_client: ClarinetClient,
+        app_with_engine: RecordFlowEngine,
+        record_types: dict[str, RecordType],
+        test_patient: Patient,
+        test_study: Study,
+    ):
+        """Re-fired add_record stays idempotent via a max_records=1 RecordType.
+
+        The pending flow creates a ``singleton-child`` on every re-invalidation;
+        the RecordType limit makes the second creation an expected 409 that the
+        engine swallows, so no duplicate is produced and the request still 200s.
+        """
+        # Create parent first, then register the flow, so the creation-time
+        # pending event doesn't fire add_record before the test invalidations.
+        parent = await _create_record_via_client(
+            clarinet_client,
+            "parent-model",
+            test_patient.id,
+            test_study.study_uid,
+        )
+
+        flow = FlowRecord("parent-model")
+        flow.on_status("pending").add_record("singleton-child")
+        app_with_engine.register_flow(flow)
+
+        for _ in range(2):
+            resp = await client.post(
+                f"{RECORDS_BASE}/{parent.id}/invalidate",
+                json={"mode": "hard"},
+            )
+            assert resp.status_code == 200
+
+        children = await clarinet_client.find_records(
+            study_uid=test_study.study_uid,
+            record_type_name="singleton-child",
+        )
+        assert len(children) == 1
+
+    @pytest.mark.asyncio
+    async def test_mutual_invalidation_cycle_logs_error(
+        self,
+        client: AsyncClient,
+        clarinet_client: ClarinetClient,
+        app_with_engine: RecordFlowEngine,
+        record_types: dict[str, RecordType],
+        test_patient: Patient,
+        test_study: Study,
+        caplog,
+    ):
+        """The loop is cut by the cycle guard specifically — it logs an ERROR."""
+        first = await _create_record_via_client(
+            clarinet_client,
+            "parent-model",
+            test_patient.id,
+            test_study.study_uid,
+        )
+        # A sibling must exist so the cascade can loop first → sibling → first.
+        await _create_record_via_client(
+            clarinet_client,
+            "parent-model",
+            test_patient.id,
+            test_study.study_uid,
+        )
+
+        flow = FlowRecord("parent-model")
+        flow.on_status("pending").invalidate_records("parent-model", mode="hard")
+        app_with_engine.register_flow(flow)
+
+        with caplog.at_level(logging.ERROR):
+            resp = await client.post(
+                f"{RECORDS_BASE}/{first.id}/invalidate",
+                json={"mode": "hard"},
+            )
+            assert resp.status_code == 200
+
+        # first → second → first: the cut happens when the cascade re-enters `first`
+        assert "Invalidation cycle detected" in caplog.text
+        assert f"record {first.id}" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_invalidation_guard_released_after_cascade(
+        self,
+        client: AsyncClient,
+        clarinet_client: ClarinetClient,
+        app_with_engine: RecordFlowEngine,
+        record_types: dict[str, RecordType],
+        test_patient: Patient,
+        test_study: Study,
+    ):
+        """`_active_invalidations` is emptied by the finally — a later call re-fires."""
+        fired: list[int] = []
+
+        async def counter(record, context, client, **kwargs):
+            fired.append(record.id)
+
+        first = await _create_record_via_client(
+            clarinet_client,
+            "parent-model",
+            test_patient.id,
+            test_study.study_uid,
+        )
+        second = await _create_record_via_client(
+            clarinet_client,
+            "parent-model",
+            test_patient.id,
+            test_study.study_uid,
+        )
+
+        flow = FlowRecord("parent-model")
+        flow.on_status("pending").call(counter).invalidate_records("parent-model", mode="hard")
+        app_with_engine.register_flow(flow)
+
+        resp = await client.post(
+            f"{RECORDS_BASE}/{first.id}/invalidate",
+            json={"mode": "hard"},
+        )
+        assert resp.status_code == 200
+        # The cascade unwound cleanly — nothing leaked into the guard set.
+        assert app_with_engine._active_invalidations == set()
+
+        # A second, independent invalidation must NOT be falsely treated as a
+        # cycle: the flow fires again for `first`.
+        fired.clear()
+        resp = await client.post(
+            f"{RECORDS_BASE}/{first.id}/invalidate",
+            json={"mode": "hard"},
+        )
+        assert resp.status_code == 200
+        assert first.id in fired
+        assert second.id in fired
+        assert app_with_engine._active_invalidations == set()
+
+    @pytest.mark.asyncio
+    async def test_fanout_invalidation_not_treated_as_cycle(
+        self,
+        client: AsyncClient,
+        clarinet_client: ClarinetClient,
+        app_with_engine: RecordFlowEngine,
+        record_types: dict[str, RecordType],
+        test_patient: Patient,
+        test_study: Study,
+        caplog,
+    ):
+        """Fan-out to distinct types (no back-edge) never trips the cycle guard."""
+        b_fired: list[int] = []
+        c_fired: list[int] = []
+
+        async def on_b(record, context, client, **kwargs):
+            b_fired.append(record.id)
+
+        async def on_c(record, context, client, **kwargs):
+            c_fired.append(record.id)
+
+        a = await _create_record_via_client(
+            clarinet_client, "parent-model", test_patient.id, test_study.study_uid
+        )
+        b = await _create_record_via_client(
+            clarinet_client, "child-analysis", test_patient.id, test_study.study_uid
+        )
+        c = await _create_record_via_client(
+            clarinet_client, "ai-analysis", test_patient.id, test_study.study_uid
+        )
+
+        flow_a = FlowRecord("parent-model")
+        flow_a.on_status("pending").invalidate_records("child-analysis", "ai-analysis", mode="hard")
+        flow_b = FlowRecord("child-analysis")
+        flow_b.on_status("pending").call(on_b)
+        flow_c = FlowRecord("ai-analysis")
+        flow_c.on_status("pending").call(on_c)
+        app_with_engine.register_flow(flow_a)
+        app_with_engine.register_flow(flow_b)
+        app_with_engine.register_flow(flow_c)
+
+        with caplog.at_level(logging.ERROR):
+            resp = await client.post(
+                f"{RECORDS_BASE}/{a.id}/invalidate",
+                json={"mode": "hard"},
+            )
+            assert resp.status_code == 200
+
+        assert b_fired == [b.id]
+        assert c_fired == [c.id]
+        assert "Invalidation cycle detected" not in caplog.text
+        assert app_with_engine._active_invalidations == set()
+
+    @pytest.mark.asyncio
+    async def test_three_hop_invalidation_cycle_is_cut(
+        self,
+        client: AsyncClient,
+        clarinet_client: ClarinetClient,
+        app_with_engine: RecordFlowEngine,
+        record_types: dict[str, RecordType],
+        test_patient: Patient,
+        test_study: Study,
+        caplog,
+    ):
+        """A ring longer than 2 (A→B→C→A) is also cut, exactly once, at A's re-entry."""
+        a = await _create_record_via_client(
+            clarinet_client, "parent-model", test_patient.id, test_study.study_uid
+        )
+        b = await _create_record_via_client(
+            clarinet_client, "child-analysis", test_patient.id, test_study.study_uid
+        )
+        c = await _create_record_via_client(
+            clarinet_client, "ai-analysis", test_patient.id, test_study.study_uid
+        )
+
+        flow_a = FlowRecord("parent-model")
+        flow_a.on_status("pending").invalidate_records("child-analysis", mode="hard")
+        flow_b = FlowRecord("child-analysis")
+        flow_b.on_status("pending").invalidate_records("ai-analysis", mode="hard")
+        flow_c = FlowRecord("ai-analysis")
+        flow_c.on_status("pending").invalidate_records("parent-model", mode="hard")
+        app_with_engine.register_flow(flow_a)
+        app_with_engine.register_flow(flow_b)
+        app_with_engine.register_flow(flow_c)
+
+        with caplog.at_level(logging.ERROR):
+            resp = await client.post(
+                f"{RECORDS_BASE}/{a.id}/invalidate",
+                json={"mode": "hard"},
+            )
+            assert resp.status_code == 200
+
+        for rec in (a, b, c):
+            updated = await clarinet_client.get_record(rec.id)
+            assert updated.status == RecordStatus.pending
+
+        # a → b → c → a: cut once, when the cascade loops back into `a`
+        assert caplog.text.count("Invalidation cycle detected") == 1
+        assert f"record {a.id}" in caplog.text
+        assert app_with_engine._active_invalidations == set()
+
+    @pytest.mark.asyncio
+    async def test_concurrent_invalidation_same_record_skips_second(
+        self,
+        clarinet_client: ClarinetClient,
+        flow_engine: RecordFlowEngine,
+        record_types: dict[str, RecordType],
+        test_patient: Patient,
+        test_study: Study,
+        caplog,
+    ):
+        """Two interleaved invalidations of one record: the second hits the guard.
+
+        Deterministically reproduces the ``add → await → discard`` window with an
+        ``asyncio.Event`` barrier instead of real request concurrency (forbidden
+        on the shared test session). While the first dispatch is parked inside the
+        flow — with the record on the active-invalidation stack — a second
+        ``handle_record_invalidation`` short-circuits at the cycle guard before any
+        DB access, so it never runs the flow and the guard is released afterwards.
+        """
+        started = asyncio.Event()
+        release = asyncio.Event()
+        invocations: list[int] = []
+
+        async def parking_action(record, context, client, **kwargs):
+            invocations.append(record.id)
+            started.set()
+            await release.wait()
+
+        flow = FlowRecord("child-analysis")
+        flow.on_status("pending").call(parking_action)
+        flow_engine.register_flow(flow)
+
+        rec = await _create_record_via_client(
+            clarinet_client,
+            "child-analysis",
+            test_patient.id,
+            test_study.study_uid,
+        )
+        rec_read = await clarinet_client.get_record(rec.id)
+
+        task1 = asyncio.create_task(flow_engine.handle_record_invalidation(rec_read, None))
+        try:
+            # The engine swallows callback exceptions, so a broken parking_action
+            # would never set `started`; bound the wait so that turns into a fast
+            # failure instead of hanging the suite.
+            await asyncio.wait_for(started.wait(), timeout=5)
+            assert rec.id in flow_engine._active_invalidations
+
+            with caplog.at_level(logging.ERROR):
+                await flow_engine.handle_record_invalidation(rec_read, None)
+            assert "Invalidation cycle detected" in caplog.text
+            assert invocations == [rec.id]  # the parked flow ran once; the second skipped
+        finally:
+            # Always unpark task1 (even if an assertion above failed) so it can
+            # finish and run its `finally: discard`, leaving no dangling task.
+            release.set()
+            await asyncio.wait_for(task1, timeout=5)
+
+        assert flow_engine._active_invalidations == set()  # finally released the guard
+
 
 class TestInvalidateEndpoint:
     """Tests for the direct POST /records/{id}/invalidate endpoint."""
@@ -999,6 +1544,45 @@ class TestInvalidateEndpoint:
         assert updated_record.status == RecordStatus.finished
         assert updated_record.context_info is not None
         assert "soft reason" in updated_record.context_info
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("bad_mode", ["bogus", "HARD", ""])
+    async def test_invalidate_endpoint_rejects_invalid_mode(
+        self,
+        client: AsyncClient,
+        clarinet_client: ClarinetClient,
+        record_types: dict[str, RecordType],
+        test_patient: Patient,
+        test_study: Study,
+        bad_mode: str,
+    ):
+        """A mode outside hard/soft returns 422 and leaves the record untouched."""
+        record = await _create_record_via_client(
+            clarinet_client,
+            "parent-model",
+            test_patient.id,
+            test_study.study_uid,
+            status=RecordStatus.finished,
+            data={"some": "data"},
+        )
+
+        resp = await client.post(
+            f"{RECORDS_BASE}/{record.id}/invalidate",
+            json={"mode": bad_mode},
+        )
+        assert resp.status_code == 422
+
+        unchanged = await clarinet_client.get_record(record.id)
+        assert unchanged.status == RecordStatus.finished
+
+    def test_invalidate_records_action_rejects_invalid_mode(self):
+        """An invalid mode fails at flow-definition time (pydantic), not silently."""
+        with pytest.raises(ValidationError):
+            InvalidateRecordsAction(record_type_names=["child-analysis"], mode="bogus")
+        with pytest.raises(ValidationError):
+            FlowRecord("parent-model").on_status("pending").invalidate_records(
+                "child-analysis", mode="bogus"
+            )
 
 
 class TestEntityFlowIntegration:

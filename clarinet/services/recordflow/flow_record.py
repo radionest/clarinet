@@ -486,7 +486,7 @@ class FlowRecord:
     def invalidate_records(
         self,
         *record_type_names: str,
-        mode: str = "hard",
+        mode: Literal["hard", "soft"] = "hard",
         callback: Callable[..., Any] | None = None,
     ) -> FlowRecord:
         """Add an invalidation action for records of specified types.
@@ -520,7 +520,7 @@ class FlowRecord:
     def invalidate_all_records(
         self,
         *record_type_names: str,
-        mode: str = "hard",
+        mode: Literal["hard", "soft"] = "hard",
         callback: Callable[..., Any] | None = None,
     ) -> FlowRecord:
         """Alias for invalidate_records()."""

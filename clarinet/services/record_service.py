@@ -405,6 +405,10 @@ class RecordService:
     ) -> Record:
         """Invalidate a record and fire RecordFlow trigger on hard mode.
 
+        Hard mode always fires the status trigger — even when the record was
+        already pending — so on_status("pending") flows re-run on every
+        re-invalidation. Soft mode never changes status and never fires.
+
         Args:
             record_id: ID of the record to invalidate.
             mode: "hard" resets to pending, "soft" only appends reason.
@@ -435,9 +439,11 @@ class RecordService:
             reason=reason,
         )
 
-        # Fire trigger on hard mode if status actually changed
-        if mode == "hard" and old_status != record.status:
-            await self._fire_status_change(record, old_status)
+        # Hard invalidation means "needs processing again" — fire even when the
+        # status didn't change (pending → pending), so on_status("pending")
+        # flows re-run. Handlers must be idempotent.
+        if mode == "hard":
+            await self._fire_invalidation(record, old_status)
 
         return record
 
@@ -895,6 +901,13 @@ class RecordService:
             return
         record_read = RecordRead.model_validate(record)
         await self.engine.handle_record_status_change(record_read, old_status)
+
+    async def _fire_invalidation(self, record: Record, old_status: RecordStatus | None) -> None:
+        """Convert record to RecordRead and fire the cycle-guarded invalidation dispatch."""
+        if not self.engine:
+            return
+        record_read = RecordRead.model_validate(record)
+        await self.engine.handle_record_invalidation(record_read, old_status)
 
     async def _fire_data_update(self, record: Record) -> None:
         """Convert record to RecordRead and fire data-update trigger."""

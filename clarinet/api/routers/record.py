@@ -10,7 +10,7 @@ from __future__ import annotations
 import mimetypes
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated
+from typing import TYPE_CHECKING, Annotated, Literal
 from uuid import UUID
 
 from fastapi import (
@@ -883,14 +883,16 @@ async def invalidate_record(
     _authorized_record: AuthorizedRecordDep,
     service: RecordServiceDep,
     user: CurrentUserDep,
-    mode: str = Body(default="hard"),
+    mode: Literal["hard", "soft"] = Body(default="hard"),
     source_record_id: int | None = Body(default=None),
     reason: str | None = Body(default=None),
 ) -> RecordRead:
     """Invalidate a record.
 
     Hard mode resets status to pending (keeps user assignment) and fires
-    RecordFlow triggers. Soft mode only appends the reason to context_info.
+    RecordFlow triggers — every call re-fires them, even when the record is
+    already pending, re-running the cascade. Soft mode only appends the
+    reason to context_info.
 
     Hard mode returns 409 for non-superusers when the record is finished and
     its type locks submitted records (``editable`` / ``edit_window_days``).
