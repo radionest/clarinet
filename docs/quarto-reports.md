@@ -82,7 +82,9 @@ worker profile:
 - **HTTP access to the API** with a matching service token
   (`internal_service_token`, or the same `admin_password` it derives from) —
   data CSVs are fetched through `GET /api/admin/reports/{name}/download`;
-- the **quarto binary** and the Python deps (`uv sync --extra quarto`).
+- the **quarto binary** — the Python kernel deps (nbformat, nbclient,
+  jupyter-client, ipykernel, pandas) ship with the base clarinet install, so
+  renders work wherever clarinet imports.
 
 It does **not** need database credentials, the project's `review/` folder, or
 any other project files.
@@ -117,23 +119,15 @@ to the wheel in the bundle and the installer runs
 pip extra. Bundles without a tarball are unaffected. This is how the test-VM
 pipeline provisions Quarto, and it works for air-gapped production hosts too.
 
-Two operational notes. `make build-deps` always includes the `quarto` extra
-wheels (~100 MB of the jupyter stack) in `dist/deps`, so a single deps cache
-serves both plain and Quarto bundles — the extra is *installed* only when a
-tarball ships. Conversely, a `deps/` folder built before the quarto extra
-existed lacks those wheels and the installer's offline `pip install` aborts —
-rebuild it with `make build-deps` when adding a tarball to an older bundle.
+One operational note. Since 0.8.1 the report kernel's Python dependencies are
+part of clarinet's **base** dependencies; the `quarto` pip extra is an empty
+stub kept for one release so existing `clarinet[quarto]` installs and bundles
+keep working. The `dist/deps` wheel cache already carried these wheels, so
+bundle contents do not change.
 
 The binary lands under `{storage_path}/quarto`. Resolution order at render
 time: `settings.quarto_executable` (explicit) → `{storage_path}/quarto/bin/quarto`
 → `quarto` on `PATH`.
-
-For the Python chunks to execute you also need a Jupyter kernel in the worker's
-environment:
-
-```bash
-uv sync --extra quarto      # installs jupyter + ipykernel + pandas
-```
 
 ### Astra Linux / older glibc
 
@@ -144,6 +138,22 @@ fail with `GLIBC_x.y not found`. The default
 version that runs on your host and verify with `clarinet quarto status`
 (it runs `quarto check`). Override the version per install with
 `--version`/`--from-file` or set `CLARINET_QUARTO_EXECUTABLE`.
+
+### Troubleshooting
+
+**`ModuleNotFoundError: No module named 'yaml'` (or `Jupyter is not
+available`) during render** — the worker's interpreter lacks the report kernel
+dependencies: either clarinet older than 0.8.1 installed without the `quarto`
+extra, or a broken installation. Fix: `pip install --upgrade clarinet` into
+the interpreter that runs the worker (the render kernel always uses that
+interpreter). `clarinet quarto status` runs `quarto check` in the same minimal
+environment real renders use and prints the kernel interpreter, so a green
+status means renders will find their kernel.
+
+Two Quarto features are deliberately **not** supported: `--execute-params`
+(papermill) and `cache: true` (jupyter-cache) — their packages are not
+installed. Caching would be pointless anyway: every render runs in a fresh
+directory.
 
 ## Security — trust boundary
 
@@ -156,7 +166,9 @@ Mitigations the framework applies:
 - The `quarto render` subprocess gets a **minimal environment built from
   scratch** — `CLARINET_*`, `DATABASE_URL`, the service token and AMQP
   credentials are **never** passed through. `HOME`/`XDG_*`/`TMPDIR` are
-  redirected into the per-render directory.
+  redirected into the per-render directory. Only `PYTHONUSERBASE` and (when
+  set) `PYTHONPATH` pass through — package search paths, not secrets — so the
+  kernel resolves the same packages as the worker process.
 - Data reaches chunks only as pre-rendered CSV files; chunks have no DB access.
 - SQL data is fetched from the reports API and executes on the API server
   (read-only transaction, `SELECT`/`WITH`-only, statement timeout) — the

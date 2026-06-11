@@ -10,7 +10,7 @@ itself is copied into ``render_dir`` by the dispatching service, so the
 renderer host does not need the project's reports folder either.
 
 Security: the quarto subprocess runs with an environment built from scratch
-(:func:`_build_render_env`), so secrets (``CLARINET_*``, ``DATABASE_URL``,
+(:func:`build_render_env`), so secrets (``CLARINET_*``, ``DATABASE_URL``,
 service token, AMQP credentials) never reach the Python code chunks Quarto
 executes. Data reaches chunks only as pre-rendered CSV files.
 """
@@ -18,7 +18,9 @@ executes. Data reaches chunks only as pre-rendered CSV files.
 import asyncio
 import json
 import os
+import re
 import shutil
+import site
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -31,6 +33,10 @@ from clarinet.settings import settings
 from clarinet.utils.logger import logger
 
 _STATUS_FILE = "status.json"
+
+# Render failures that smell like a broken/incomplete kernel interpreter — the
+# production class of errors `_kernel_diagnostics` can explain.
+_KERNEL_ERROR_MARKERS = re.compile(r"ModuleNotFoundError|Jupyter is not available")
 
 
 def _is_executable(path: Path) -> bool:
@@ -236,7 +242,7 @@ async def _run_quarto(
     output_name = f"report.{fmt.extension}"
     tmp_dir = render_dir / "tmp"
     await asyncio.to_thread(tmp_dir.mkdir, parents=True, exist_ok=True)
-    env = _build_render_env(render_dir, tmp_dir)
+    env = build_render_env(render_dir, tmp_dir)
     logger.info(f"Rendering {qmd_path.name} → {output_name} via quarto ({fmt.value})")
 
     proc = await asyncio.create_subprocess_exec(
@@ -263,14 +269,52 @@ async def _run_quarto(
 
     if proc.returncode != 0:
         detail = stderr.decode(errors="replace").strip() or stdout.decode(errors="replace").strip()
-        raise QuartoRenderError(
-            f"quarto render failed (exit {proc.returncode}) for {fmt.value}: {detail[:2000]}"
-        )
+        message = f"quarto render failed (exit {proc.returncode}) for {fmt.value}: {detail[:2000]}"
+        if _KERNEL_ERROR_MARKERS.search(detail):
+            message += await _kernel_diagnostics(env)
+        raise QuartoRenderError(message)
     if not await asyncio.to_thread((render_dir / output_name).is_file):
         raise QuartoRenderError(f"quarto produced no {output_name} for format {fmt.value}")
 
 
-def _build_render_env(render_dir: Path, tmp_dir: Path) -> dict[str, str]:
+async def _kernel_diagnostics(env: dict[str, str]) -> str:
+    """Probe the kernel interpreter for the imports quarto's jupyter engine needs.
+
+    Runs only after a render failed with a kernel-shaped error, with the same
+    environment the render used, so the probe sees exactly what the kernel saw.
+    Returns an actionable hint to append to the error message, or ``""`` when
+    the probe itself fails — a broken diagnostic must not mask the render error.
+    """
+    interpreter = env.get("QUARTO_PYTHON", sys.executable)
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            interpreter,
+            "-c",
+            "import yaml, nbformat, nbclient, jupyter_client, ipykernel",
+            env=env,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            _, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
+        except TimeoutError:
+            proc.kill()
+            await proc.wait()
+            return ""
+    except OSError:
+        return ""
+    if proc.returncode == 0:
+        return f"\nKernel diagnostics: imports OK in {interpreter}; the failure is elsewhere."
+    err_lines = stderr.decode(errors="replace").strip().splitlines()
+    reason = err_lines[-1] if err_lines else "import failed"
+    return (
+        f"\nKernel diagnostics: {interpreter} lacks report kernel dependencies ({reason})."
+        " The render kernel uses the worker's interpreter — reinstall clarinet into it"
+        " (`pip install --upgrade clarinet`)."
+    )
+
+
+def build_render_env(render_dir: Path, tmp_dir: Path) -> dict[str, str]:
     """Minimal environment for the quarto subprocess.
 
     Built from scratch (not a copy of ``os.environ``) so DB URL, service token,
@@ -280,7 +324,7 @@ def _build_render_env(render_dir: Path, tmp_dir: Path) -> dict[str, str]:
     are redirected into the render dir so Jupyter writes nothing to the real
     user home.
     """
-    return {
+    env = {
         "PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"),
         "HOME": str(render_dir),
         "TMPDIR": str(tmp_dir),
@@ -289,4 +333,15 @@ def _build_render_env(render_dir: Path, tmp_dir: Path) -> dict[str, str]:
         "LANG": os.environ.get("LANG", "C.UTF-8"),
         "LC_ALL": os.environ.get("LC_ALL", "C.UTF-8"),
         "QUARTO_PYTHON": sys.executable,
+        # HOME is redirected into render_dir (write isolation; ProtectHome=true
+        # on the shipped systemd units leaves no real home), which as a side
+        # effect would hide user-site (~/.local) — where pip --user deployments
+        # keep clarinet itself and its deps. Restore package visibility
+        # explicitly: the kernel must resolve the same packages as the worker.
+        "PYTHONUSERBASE": site.getuserbase(),
     }
+    # Same motivation: kernel package visibility == worker process visibility.
+    # These are search paths, not secrets.
+    if os.environ.get("PYTHONPATH"):
+        env["PYTHONPATH"] = os.environ["PYTHONPATH"]
+    return env
