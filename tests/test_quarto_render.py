@@ -1,6 +1,7 @@
 """Unit tests for clarinet.services.quarto_render (status sidecar, env, resolve)."""
 
 import os
+import site
 import sys
 import time
 from pathlib import Path
@@ -9,10 +10,11 @@ from unittest.mock import AsyncMock
 import pytest
 
 from clarinet.client import ClarinetAPIError, ClarinetClient
+from clarinet.exceptions.domain import QuartoRenderError
 from clarinet.models.quarto_report import QuartoRenderStatus, QuartoReportFormat
 from clarinet.services import quarto_render
 from clarinet.services.quarto_render import (
-    _build_render_env,
+    build_render_env,
     read_status,
     resolve_quarto_executable,
     write_status,
@@ -50,17 +52,137 @@ def test_build_render_env_strips_secrets(monkeypatch: pytest.MonkeyPatch, tmp_pa
     monkeypatch.setenv("CLARINET_SECRET_KEY", "shh")
     monkeypatch.setenv("DATABASE_URL", "postgresql://user:pw@host/db")
     monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    monkeypatch.delenv("PYTHONPATH", raising=False)
 
-    env = _build_render_env(tmp_path, tmp_path / "tmp")
+    env = build_render_env(tmp_path, tmp_path / "tmp")
 
     assert "CLARINET_DATABASE_PASSWORD" not in env
     assert "CLARINET_SECRET_KEY" not in env
     assert "DATABASE_URL" not in env
     # Only the explicitly-allowed keys are present.
+    assert set(env) == {
+        "PATH",
+        "HOME",
+        "TMPDIR",
+        "XDG_CACHE_HOME",
+        "XDG_DATA_HOME",
+        "LANG",
+        "LC_ALL",
+        "QUARTO_PYTHON",
+        "PYTHONUSERBASE",
+    }
     assert env["HOME"] == str(tmp_path)
     assert env["TMPDIR"] == str(tmp_path / "tmp")
     assert env["QUARTO_PYTHON"] == sys.executable
     assert env["PATH"] == "/usr/bin:/bin"
+    # Compare with the call, not a literal — Windows CI resolves %APPDATA%\Python.
+    assert env["PYTHONUSERBASE"] == site.getuserbase()
+
+
+def test_build_render_env_passes_pythonpath_when_set(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """PYTHONPATH is a package search path, not a secret — the kernel must
+    resolve the same packages as the worker process."""
+    monkeypatch.setenv("PYTHONPATH", "/opt/extra-packages")
+
+    env = build_render_env(tmp_path, tmp_path / "tmp")
+
+    assert env["PYTHONPATH"] == "/opt/extra-packages"
+
+
+_skip_windows = pytest.mark.skipif(
+    sys.platform == "win32", reason="fake executables are POSIX sh scripts"
+)
+
+
+def _write_fake_executable(path: Path, stderr_line: str) -> Path:
+    """A stand-in binary that prints ``stderr_line`` to stderr and exits 1."""
+    path.write_text(f'#!/bin/sh\necho "{stderr_line}" >&2\nexit 1\n')
+    path.chmod(0o755)
+    return path
+
+
+@_skip_windows
+@pytest.mark.asyncio
+async def test_run_quarto_enriches_kernel_errors(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A kernel-shaped quarto failure gets the import-probe hint appended.
+
+    ``QUARTO_PYTHON`` must point at a fake failing interpreter: in the dev venv
+    the real imports succeed, so the "lacks dependencies" branch would never run.
+    """
+    fake_quarto = _write_fake_executable(
+        tmp_path / "quarto", "ModuleNotFoundError: No module named 'yaml'"
+    )
+    fake_python = _write_fake_executable(
+        tmp_path / "python", "ModuleNotFoundError: No module named 'nbclient'"
+    )
+    monkeypatch.setattr(
+        quarto_render,
+        "build_render_env",
+        lambda render_dir, tmp_dir: {"QUARTO_PYTHON": str(fake_python)},
+    )
+    render_dir = tmp_path / "out"
+    render_dir.mkdir()
+
+    with pytest.raises(QuartoRenderError) as exc_info:
+        await quarto_render._run_quarto(
+            _write_min_qmd(render_dir), QuartoReportFormat.DOCX, render_dir, fake_quarto, 30.0
+        )
+
+    message = str(exc_info.value)
+    assert "No module named 'yaml'" in message
+    assert "No module named 'nbclient'" in message
+    assert "pip install --upgrade clarinet" in message
+
+
+@_skip_windows
+@pytest.mark.asyncio
+async def test_run_quarto_no_enrichment_without_markers(tmp_path: Path) -> None:
+    """Non-kernel failures (e.g. LaTeX) must not trigger the import probe."""
+    fake_quarto = _write_fake_executable(tmp_path / "quarto", "LaTeX Error: File not found")
+    render_dir = tmp_path / "out"
+    render_dir.mkdir()
+
+    with pytest.raises(QuartoRenderError) as exc_info:
+        await quarto_render._run_quarto(
+            _write_min_qmd(render_dir), QuartoReportFormat.DOCX, render_dir, fake_quarto, 30.0
+        )
+
+    message = str(exc_info.value)
+    assert "LaTeX Error" in message
+    assert "Kernel diagnostics" not in message
+
+
+@_skip_windows
+@pytest.mark.asyncio
+async def test_run_quarto_reports_imports_ok_when_probe_passes(tmp_path: Path) -> None:
+    """A kernel-shaped failure with a healthy interpreter (the dev venv — real
+    ``build_render_env``) points the reader away from the kernel."""
+    fake_quarto = _write_fake_executable(tmp_path / "quarto", "Jupyter is not available")
+    render_dir = tmp_path / "out"
+    render_dir.mkdir()
+
+    with pytest.raises(QuartoRenderError) as exc_info:
+        await quarto_render._run_quarto(
+            _write_min_qmd(render_dir), QuartoReportFormat.DOCX, render_dir, fake_quarto, 30.0
+        )
+
+    message = str(exc_info.value)
+    assert "Jupyter is not available" in message
+    assert "imports OK" in message
+    assert "the failure is elsewhere" in message
+
+
+@pytest.mark.asyncio
+async def test_kernel_diagnostics_swallows_probe_failure(tmp_path: Path) -> None:
+    """A probe that cannot even start must not mask the render error."""
+    result = await quarto_render._kernel_diagnostics(
+        {"QUARTO_PYTHON": str(tmp_path / "no-such-python")}
+    )
+    assert result == ""
 
 
 def test_resolve_executable_explicit_setting(

@@ -140,3 +140,29 @@ def test_quarto_check_runs_from_neutral_cwd(
     assert Path(str(seen["cwd"])).resolve() != project.resolve()
     assert seen["cwd_exists"] is True
     assert seen["cwd_has_env_example"] is False
+
+
+def test_quarto_status_uses_render_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """``quarto check`` must run in the same minimal env as real renders —
+    otherwise status is green in the operator's shell while renders fail."""
+    monkeypatch.setenv("CLARINET_SECRET_KEY", "shh")
+
+    exe = tmp_path / "bin" / "quarto"
+    exe.parent.mkdir(parents=True)
+    exe.write_text("#!/bin/sh\n")
+    exe.chmod(0o755)
+    monkeypatch.setattr("clarinet.services.quarto_render.resolve_quarto_executable", lambda: exe)
+
+    seen: dict[str, object] = {}
+
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        seen["env"] = kwargs.get("env")
+        return subprocess.CompletedProcess(list(cmd), 0, stdout="ok", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    quarto_status()
+
+    env = seen["env"]
+    assert isinstance(env, dict)
+    assert env["QUARTO_PYTHON"]
+    assert not any(key.startswith("CLARINET_") for key in env)
