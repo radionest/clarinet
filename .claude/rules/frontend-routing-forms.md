@@ -62,9 +62,9 @@ For a parameterised variant (`X(filters: Dict)`): match in **all six** functions
 
 ### Silent URL state sync — `utils/url.gleam`
 
-When a Msg already mutates the page `Model` locally (e.g. column-sort click, filter toggle) and the URL change must **not** trigger `OnRouteChange` → `init_page_for_route` → API refetch, use `utils/url.replace_state(path, query)`. It calls `history.replaceState` via FFI without dispatching modem's `on_url_change`.
+When a Msg already mutates the page `Model` locally (e.g. column-sort click, filter toggle) and the URL change must **not** trigger `OnRouteChange` → `init_page_for_route` → API refetch, use `utils/url.replace_route(route)`. It calls `history.replaceState` via FFI without dispatching modem's `on_url_change`.
 
-Use `modem.replace` / `modem.push` only when a full page re-init is the intended outcome (e.g. `Navigate` between sections). For SPA-internal state mirrored into the URL, prefer `url.replace_state`.
+Use `modem.replace` / `modem.push` only when a full page re-init is the intended outcome (e.g. `Navigate` between sections). For SPA-internal state mirrored into the URL, prefer `url.replace_route`.
 
 Reference: `pages/{studies,patients}/list.gleam` use it via `url.replace_route(route)`; sortable-table flow in `utils/table_sort.gleam` is the canonical example.
 
@@ -86,7 +86,7 @@ them in the page.
     (`router.parse_filters_from_query`) and outgoing writes
     (`router.filters_to_query`, page `save_filters`).
 - `utils/table_sort.gleam` — sortable column headers, URL-persisted sort.
-- `utils/url.gleam` — `replace_state` / `replace_route` for silent URL sync.
+- `utils/url.gleam` — `replace_route` for silent URL sync (serialises the route via `router.route_to_href`).
 - `utils/storage.gleam` — `save_dict` / `load_dict_sync` for localStorage.
 
 **Model field:**

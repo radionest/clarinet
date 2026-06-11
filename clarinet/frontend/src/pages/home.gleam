@@ -183,23 +183,23 @@ fn quick_actions_section(shared: Shared, user: models.User) -> Element(Msg) {
     html.h3([], [html.text(t(i18n.HomeQuickActions))]),
     html.div([attribute.class("quick-actions-grid")], [
       quick_action(
-        t(i18n.HomeActionInWork),
-        "qa-inwork",
-        router.Records(
+        label: t(i18n.HomeActionInWork),
+        modifier: "qa-inwork",
+        route: router.Records(
           dict.from_list([#("status", "inwork"), #("user", user.id)]),
         ),
       ),
       quick_action(
-        t(i18n.HomeActionMyPending),
-        "qa-pending",
-        router.Records(
+        label: t(i18n.HomeActionMyPending),
+        modifier: "qa-pending",
+        route: router.Records(
           dict.from_list([#("status", "pending"), #("user", user.id)]),
         ),
       ),
       quick_action(
-        t(i18n.HomeActionFreePending),
-        "qa-free",
-        router.Records(
+        label: t(i18n.HomeActionFreePending),
+        modifier: "qa-free",
+        route: router.Records(
           dict.from_list([
             #("status", "pending"),
             #("user", record_filters.unassigned_user_value),
@@ -211,9 +211,9 @@ fn quick_actions_section(shared: Shared, user: models.User) -> Element(Msg) {
 }
 
 fn quick_action(
-  label: String,
-  modifier: String,
-  route: router.Route,
+  label label: String,
+  modifier modifier: String,
+  route route: router.Route,
 ) -> Element(Msg) {
   html.a(
     [

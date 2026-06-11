@@ -34,7 +34,9 @@ pub type RecordsQuery {
     record_status: Option(String),
     user_id: Option(String),
     // Tri-state assigned-user constraint, mirrors backend `wo_user`:
-    // Some(True) — unassigned records only (user_id is ignored);
+    // Some(True) — unassigned records only; user_id may still be attached
+    // so the backend can apply caller-specific exclusions (unique_per_user
+    // violations require user_id);
     // Some(False) — assigned only, pins an explicit user filter so the
     // backend's include_unassigned widening for regular users does not
     // mix free records into "assigned to X";
@@ -133,16 +135,9 @@ pub fn sort_to_backend_string(sort: SortOrder) -> String {
 /// a given `RecordsQuery` value — same filters produce the same topic.
 pub fn key_to_topic(key: BucketKey) -> String {
   let Records(q) = key
-  // wo_user: Some(True) is authoritative — user_id is ignored on the
-  // request side (see `cache.append_user_filter`), so it must also be
-  // dropped from the topic to keep one logical query == one cache entry.
-  // Without this pairing, a `RecordsQuery(user_id: Some(uid),
-  // wo_user: Some(True))` value would produce a topic distinct from the
-  // equivalent request payload.
-  let user_part = case q.wo_user {
-    Some(True) -> ""
-    _ -> optional_part("user", q.user_id)
-  }
+  // user_id and wo_user serialize independently, exactly mirroring the
+  // request payload built by `cache.append_user_filter` — one logical
+  // query == one cache entry.
   let parts = [
     "records",
     "sort=" <> sort_to_backend_string(q.sort),
@@ -150,7 +145,7 @@ pub fn key_to_topic(key: BucketKey) -> String {
     optional_part("study", q.study_uid),
     optional_part("type", q.record_type_name),
     optional_part("status", q.record_status),
-    user_part,
+    optional_part("user", q.user_id),
     case q.wo_user {
       Some(True) -> "wo_user=1"
       Some(False) -> "wo_user=0"

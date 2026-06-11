@@ -795,7 +795,7 @@ fn delegate_preload(model: Model, pmsg: preload.Msg) -> #(Model, Effect(Msg)) {
   #(model, effect.batch([effect.map(eff, store.PreloadMsg), ..out_effects]))
 }
 
-/// List-page filters change via url.replace_state without OnRouteChange,
+/// List-page filters change via url.replace_route without OnRouteChange,
 /// so the filters captured in model.route go stale and, replayed through
 /// Navigate's query string, would override the fresher localStorage copy.
 /// Store the route bare — the list page restores its own filters.

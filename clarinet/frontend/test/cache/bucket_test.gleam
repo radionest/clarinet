@@ -167,18 +167,17 @@ pub fn key_to_topic_differs_for_different_sort_test() {
   same |> should.be_false
 }
 
-pub fn key_to_topic_wo_user_drops_user_id_test() {
-  // wo_user: Some(True) is authoritative: the request omits user_id, so
-  // the topic must match between (user_id: Some(uid), wo_user: Some(True))
-  // and (user_id: None, wo_user: Some(True)).
+pub fn key_to_topic_wo_user_keeps_user_id_test() {
+  // user_id and wo_user serialize independently (the free-tasks view sends
+  // both so the backend can apply unique-per-user exclusions), so the
+  // topic must distinguish (Some(uid), Some(True)) from (None, Some(True))
+  // — they are different requests.
   let with_uid =
     bucket.RecordsQuery(
       ..bucket.default_query(),
       user_id: Some("uid-1"),
       wo_user: Some(True),
     )
-  let without_uid =
-    bucket.RecordsQuery(..bucket.default_query(), wo_user: Some(True))
   bucket.key_to_topic(Records(with_uid))
-  |> should.equal(bucket.key_to_topic(Records(without_uid)))
+  |> should.equal("records|sort=changed_at_desc|user=uid-1|wo_user=1")
 }

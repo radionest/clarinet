@@ -590,12 +590,12 @@ pub fn translate(locale: Locale, key: Key) -> String {
     Ru, HomeNoRecentStudies -> "Нет недавних исследований."
     En, HomeQuickActions -> "My Tasks"
     Ru, HomeQuickActions -> "Мои задачи"
-    En, HomeActionInWork -> "In progress →"
-    Ru, HomeActionInWork -> "В работе →"
-    En, HomeActionMyPending -> "Assigned to me →"
-    Ru, HomeActionMyPending -> "Назначенные мне →"
-    En, HomeActionFreePending -> "Available tasks →"
-    Ru, HomeActionFreePending -> "Свободные задачи →"
+    En, HomeActionInWork -> "In progress"
+    Ru, HomeActionInWork -> "В работе"
+    En, HomeActionMyPending -> "Assigned to me"
+    Ru, HomeActionMyPending -> "Назначенные мне"
+    En, HomeActionFreePending -> "Available tasks"
+    Ru, HomeActionFreePending -> "Свободные задачи"
 
     // --- Records ---
     En, RecordsAllTitle -> "All Records"

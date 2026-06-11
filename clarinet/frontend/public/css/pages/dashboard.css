@@ -117,6 +117,10 @@
     color: var(--ink);
     transition: background-color 0.15s;
 
+    &::after {
+        content: " →";
+    }
+
     &:hover {
         background-color: var(--surface-sunken);
     }

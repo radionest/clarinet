@@ -117,6 +117,31 @@ pub fn with_user_scope(query: RecordsQuery, user_id: String) -> RecordsQuery {
   RecordsQuery(..query, user_id: Some(user_id), wo_user: None)
 }
 
+/// Scope a filter-derived query for a regular (non-admin) user on the
+/// /records page. An explicit `user` filter is honoured only within the
+/// caller's own scope:
+/// - their own id — strict "assigned to me" (`from_filters` already
+///   pinned `wo_user: Some(False)`);
+/// - `__unassigned__` — free records; the caller's id is attached so the
+///   backend's unique-per-user violation filter (which requires user_id)
+///   hides free records the caller can't actually claim;
+/// - any other id, or no user filter — clobbered by `with_user_scope`.
+pub fn scope_for_user(
+  query: RecordsQuery,
+  filters: Dict(String, String),
+  user_id: String,
+) -> RecordsQuery {
+  case dict.get(filters, "user") {
+    Ok(v) ->
+      case v == record_filters.unassigned_user_value, v == user_id {
+        True, _ -> RecordsQuery(..query, user_id: Some(user_id))
+        False, True -> query
+        False, False -> with_user_scope(query, user_id)
+      }
+    Error(_) -> with_user_scope(query, user_id)
+  }
+}
+
 /// Pin an existing query to a single patient. Used by the patient detail
 /// page so its records list reuses the server-side filter/sort machinery
 /// while staying scoped to one patient (mirrors `with_user_scope`).

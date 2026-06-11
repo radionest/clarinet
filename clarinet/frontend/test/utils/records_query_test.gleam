@@ -134,3 +134,45 @@ pub fn with_user_scope_clears_wo_user_test() {
   scoped.wo_user |> should.equal(None)
   scoped.user_id |> should.equal(Some("user-42"))
 }
+
+// --- scope_for_user: non-admin scope vs explicit user filter ---
+
+pub fn scope_for_user_own_id_passes_through_test() {
+  // "Assigned to me" quick action: the strict filter from from_filters
+  // (wo_user: Some(False)) must survive scoping.
+  let filters = dict.from_list([#("status", "pending"), #("user", "me-1")])
+  let q = records_query.from_filters(filters)
+  let scoped = records_query.scope_for_user(q, filters, "me-1")
+  scoped.user_id |> should.equal(Some("me-1"))
+  scoped.wo_user |> should.equal(Some(False))
+}
+
+pub fn scope_for_user_unassigned_attaches_caller_test() {
+  // Free-tasks view: the caller's id rides along with wo_user=Some(True)
+  // so the backend's unique-per-user violation filter (which requires
+  // user_id) hides free records the caller can't actually claim.
+  let filters =
+    dict.from_list([#("user", record_filters.unassigned_user_value)])
+  let q = records_query.from_filters(filters)
+  let scoped = records_query.scope_for_user(q, filters, "me-1")
+  scoped.user_id |> should.equal(Some("me-1"))
+  scoped.wo_user |> should.equal(Some(True))
+}
+
+pub fn scope_for_user_foreign_id_is_clobbered_test() {
+  // A non-admin must not browse another user's records via a crafted URL —
+  // any foreign id falls back to the caller's own scope.
+  let filters = dict.from_list([#("user", "someone-else")])
+  let q = records_query.from_filters(filters)
+  let scoped = records_query.scope_for_user(q, filters, "me-1")
+  scoped.user_id |> should.equal(Some("me-1"))
+  scoped.wo_user |> should.equal(None)
+}
+
+pub fn scope_for_user_no_filter_applies_own_scope_test() {
+  let filters = dict.new()
+  let q = records_query.from_filters(filters)
+  let scoped = records_query.scope_for_user(q, filters, "me-1")
+  scoped.user_id |> should.equal(Some("me-1"))
+  scoped.wo_user |> should.equal(None)
+}
