@@ -1038,6 +1038,89 @@ class TestRecordFlowInvalidationRuntime:
         assert updated.status == RecordStatus.pending
         assert "soft probe" in (updated.context_info or "")
 
+    @pytest.mark.asyncio
+    async def test_hard_invalidate_refires_any_status_flow(
+        self,
+        client: AsyncClient,
+        clarinet_client: ClarinetClient,
+        app_with_engine: RecordFlowEngine,
+        record_types: dict[str, RecordType],
+        test_patient: Patient,
+        test_study: Study,
+    ):
+        """Hard invalidation also re-fires flows without a status trigger."""
+        any_log: list[int] = []
+
+        async def on_any_status(record, context, client, **kwargs):
+            any_log.append(record.id)
+
+        flow = FlowRecord("child-analysis")
+        flow.call(on_any_status)  # no .on_status() — matches any status event
+        app_with_engine.register_flow(flow)
+
+        child = await _create_record_via_client(
+            clarinet_client,
+            "child-analysis",
+            test_patient.id,
+            test_study.study_uid,
+        )
+        any_log.clear()
+
+        resp = await client.post(
+            f"{RECORDS_BASE}/{child.id}/invalidate",
+            json={"mode": "hard"},
+        )
+        assert resp.status_code == 200
+
+        assert any_log == [child.id]
+
+    @pytest.mark.asyncio
+    async def test_mutual_invalidation_cycle_is_cut(
+        self,
+        client: AsyncClient,
+        clarinet_client: ClarinetClient,
+        app_with_engine: RecordFlowEngine,
+        record_types: dict[str, RecordType],
+        test_patient: Patient,
+        test_study: Study,
+    ):
+        """A hard-invalidation loop terminates: mid-cascade records skip their flows."""
+        # Create siblings before registering the flow so creation events don't fire it
+        first = await _create_record_via_client(
+            clarinet_client,
+            "parent-model",
+            test_patient.id,
+            test_study.study_uid,
+        )
+        second = await _create_record_via_client(
+            clarinet_client,
+            "parent-model",
+            test_patient.id,
+            test_study.study_uid,
+        )
+
+        # Pathological config: a pending parent-model hard-invalidates its siblings
+        flow = FlowRecord("parent-model")
+        flow.on_status("pending").invalidate_records("parent-model", mode="hard")
+        app_with_engine.register_flow(flow)
+
+        resp = await client.post(
+            f"{RECORDS_BASE}/{first.id}/invalidate",
+            json={"mode": "hard", "reason": "cycle probe"},
+        )
+        assert resp.status_code == 200
+
+        # first → second → first: the loop is cut when it re-enters `first`
+        records = await clarinet_client.find_records(
+            study_uid=test_study.study_uid,
+            record_type_name="parent-model",
+        )
+        by_id = {r.id: r for r in records}
+        assert by_id[first.id].status == RecordStatus.pending
+        assert by_id[second.id].status == RecordStatus.pending
+        assert f"Invalidated by record #{first.id}" in (by_id[second.id].context_info or "")
+        assert f"Invalidated by record #{second.id}" in (by_id[first.id].context_info or "")
+
 
 class TestInvalidateEndpoint:
     """Tests for the direct POST /records/{id}/invalidate endpoint."""

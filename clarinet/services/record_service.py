@@ -443,7 +443,7 @@ class RecordService:
         # status didn't change (pending → pending), so on_status("pending")
         # flows re-run. Handlers must be idempotent.
         if mode == "hard":
-            await self._fire_status_change(record, old_status)
+            await self._fire_invalidation(record, old_status)
 
         return record
 
@@ -901,6 +901,13 @@ class RecordService:
             return
         record_read = RecordRead.model_validate(record)
         await self.engine.handle_record_status_change(record_read, old_status)
+
+    async def _fire_invalidation(self, record: Record, old_status: RecordStatus | None) -> None:
+        """Convert record to RecordRead and fire the cycle-guarded invalidation dispatch."""
+        if not self.engine:
+            return
+        record_read = RecordRead.model_validate(record)
+        await self.engine.handle_record_invalidation(record_read, old_status)
 
     async def _fire_data_update(self, record: Record) -> None:
         """Convert record to RecordRead and fire data-update trigger."""
