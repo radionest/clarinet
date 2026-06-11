@@ -46,6 +46,12 @@ pub type Msg {
 
 const storage_key = "records.filters"
 
+// The user filter has no visible UI on this page (the dropdown is
+// admin-only and lives on /admin), so it must not persist to localStorage —
+// a dashboard quick action would otherwise silently resurrect on a later
+// plain /records visit. It still round-trips through the URL for deep links.
+const transient_filter_keys = ["user"]
+
 pub fn init(
   filters: Dict(String, String),
   shared: Shared,
@@ -55,6 +61,7 @@ pub fn init(
       filters,
       storage_key,
       router.Records,
+      transient_filter_keys,
     )
   let key = bucket_key_for(effective_filters, shared.user)
   // The assigned-user column resolves names from `shared.cache.users`,
@@ -70,6 +77,10 @@ pub fn init(
 
 /// Bucket key for the records list. Non-admins see only their own records
 /// (the historical `RecordsMine(uid)` scope), admins see all records.
+/// For non-admins an explicit `user` filter is resolved by
+/// `records_query.scope_for_user`: their own id and the unassigned
+/// sentinel are honoured (dashboard quick actions link here with those
+/// values), any other id is still clobbered.
 fn bucket_key_for(
   filters: Dict(String, String),
   user: option.Option(User),
@@ -79,7 +90,7 @@ fn bucket_key_for(
     Some(u) ->
       case permissions.is_admin_user(u) {
         True -> base
-        False -> records_query.with_user_scope(base, u.id)
+        False -> records_query.scope_for_user(base, filters, u.id)
       }
     None -> base
   }
@@ -178,7 +189,12 @@ pub fn update(
 // --- Helpers ---
 
 fn sync_filters_effect(filters: Dict(String, String)) -> Effect(Msg) {
-  records_list_state.sync_filters_effect(filters, router.Records, storage_key)
+  records_list_state.sync_filters_effect(
+    filters,
+    router.Records,
+    storage_key,
+    transient_filter_keys,
+  )
 }
 
 fn handle_error(err: ApiError, fallback_msg: String) -> List(OutMsg) {

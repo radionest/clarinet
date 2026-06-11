@@ -130,6 +130,10 @@ pub type Key {
   HomeViewAll
   HomeRecentStudies
   HomeNoRecentStudies
+  HomeQuickActions
+  HomeActionInWork
+  HomeActionMyPending
+  HomeActionFreePending
 
   // --- Records ---
   RecordsAllTitle
@@ -584,6 +588,14 @@ pub fn translate(locale: Locale, key: Key) -> String {
     Ru, HomeRecentStudies -> "Недавние исследования"
     En, HomeNoRecentStudies -> "No recent studies found."
     Ru, HomeNoRecentStudies -> "Нет недавних исследований."
+    En, HomeQuickActions -> "My Tasks"
+    Ru, HomeQuickActions -> "Мои задачи"
+    En, HomeActionInWork -> "In progress"
+    Ru, HomeActionInWork -> "В работе"
+    En, HomeActionMyPending -> "Assigned to me"
+    Ru, HomeActionMyPending -> "Назначенные мне"
+    En, HomeActionFreePending -> "Available tasks"
+    Ru, HomeActionFreePending -> "Свободные задачи"
 
     // --- Records ---
     En, RecordsAllTitle -> "All Records"

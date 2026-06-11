@@ -83,6 +83,7 @@ pub fn init(
       filters,
       storage_key,
       router.AdminDashboard,
+      [],
     )
 
   let model =
@@ -353,10 +354,12 @@ fn handle_error(err: types.ApiError, fallback_msg: String) -> List(OutMsg) {
 }
 
 fn sync_filters_effect(filters: Dict(String, String)) -> Effect(Msg) {
+  // No transient keys: every filter here has visible UI on the page.
   records_list_state.sync_filters_effect(
     filters,
     router.AdminDashboard,
     storage_key,
+    [],
   )
 }
 
