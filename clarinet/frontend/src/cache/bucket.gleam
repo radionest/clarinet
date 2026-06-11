@@ -33,7 +33,14 @@ pub type RecordsQuery {
     record_type_name: Option(String),
     record_status: Option(String),
     user_id: Option(String),
-    wo_user: Bool,
+    // Tri-state assigned-user constraint, mirrors backend `wo_user`:
+    // Some(True) — unassigned records only (user_id is ignored);
+    // Some(False) — assigned only, pins an explicit user filter so the
+    // backend's include_unassigned widening for regular users does not
+    // mix free records into "assigned to X";
+    // None — no constraint (default scope: the server decides, which for
+    // regular users means own + unassigned).
+    wo_user: Option(Bool),
     sort: SortOrder,
   )
 }
@@ -86,7 +93,7 @@ pub fn default_query() -> RecordsQuery {
     record_type_name: None,
     record_status: None,
     user_id: None,
-    wo_user: False,
+    wo_user: None,
     sort: ChangedAtDesc,
   )
 }
@@ -126,14 +133,15 @@ pub fn sort_to_backend_string(sort: SortOrder) -> String {
 /// a given `RecordsQuery` value — same filters produce the same topic.
 pub fn key_to_topic(key: BucketKey) -> String {
   let Records(q) = key
-  // wo_user is authoritative — when set, user_id is ignored on the request
-  // side (see `cache.append_user_filter`), so it must also be dropped from
-  // the topic to keep one logical query == one cache entry. Without this
-  // pairing, a `RecordsQuery(user_id: Some(uid), wo_user: True)` value
-  // would produce a topic distinct from the equivalent request payload.
+  // wo_user: Some(True) is authoritative — user_id is ignored on the
+  // request side (see `cache.append_user_filter`), so it must also be
+  // dropped from the topic to keep one logical query == one cache entry.
+  // Without this pairing, a `RecordsQuery(user_id: Some(uid),
+  // wo_user: Some(True))` value would produce a topic distinct from the
+  // equivalent request payload.
   let user_part = case q.wo_user {
-    True -> ""
-    False -> optional_part("user", q.user_id)
+    Some(True) -> ""
+    _ -> optional_part("user", q.user_id)
   }
   let parts = [
     "records",
@@ -144,8 +152,9 @@ pub fn key_to_topic(key: BucketKey) -> String {
     optional_part("status", q.record_status),
     user_part,
     case q.wo_user {
-      True -> "wo_user=1"
-      False -> ""
+      Some(True) -> "wo_user=1"
+      Some(False) -> "wo_user=0"
+      None -> ""
     },
   ]
   join_non_empty(parts, "|")

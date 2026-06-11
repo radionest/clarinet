@@ -18,10 +18,12 @@ import utils/record_filters
 
 /// Convert the page's filter dict into a `RecordsQuery`.
 ///
-/// `__unassigned__` for the user filter becomes `wo_user: True`. Status and
-/// patient/record_type values are passed through unchanged (they already
-/// match backend representations: status uses the backend string, the
-/// others are FK values).
+/// `__unassigned__` for the user filter becomes `wo_user: Some(True)`; an
+/// explicit user id also pins `wo_user: Some(False)` so the backend's
+/// include_unassigned widening for regular users can't mix free records
+/// into "assigned to X". Status and patient/record_type values are passed
+/// through unchanged (they already match backend representations: status
+/// uses the backend string, the others are FK values).
 pub fn from_filters(filters: Dict(String, String)) -> RecordsQuery {
   let record_status = dict.get(filters, "status") |> option.from_result
   let record_type_name = dict.get(filters, "record_type") |> option.from_result
@@ -30,10 +32,10 @@ pub fn from_filters(filters: Dict(String, String)) -> RecordsQuery {
   let #(user_id, wo_user) = case raw_user {
     Some(v) ->
       case v == record_filters.unassigned_user_value {
-        True -> #(None, True)
-        False -> #(Some(v), False)
+        True -> #(None, Some(True))
+        False -> #(Some(v), Some(False))
       }
-    None -> #(None, False)
+    None -> #(None, None)
   }
   RecordsQuery(
     patient_id: patient_id,
@@ -108,9 +110,11 @@ pub fn parse_sort(
 
 /// Layer a user_id scope on top of an existing query. Used by the
 /// `/records` page to restrict non-admins to their own records — the old
-/// `RecordsMine(uid)` bucket variant.
+/// `RecordsMine(uid)` bucket variant. `wo_user` is reset to None (no
+/// constraint) so the server-side default for regular users — own plus
+/// unassigned records — stays intact.
 pub fn with_user_scope(query: RecordsQuery, user_id: String) -> RecordsQuery {
-  RecordsQuery(..query, user_id: Some(user_id), wo_user: False)
+  RecordsQuery(..query, user_id: Some(user_id), wo_user: None)
 }
 
 /// Pin an existing query to a single patient. Used by the patient detail

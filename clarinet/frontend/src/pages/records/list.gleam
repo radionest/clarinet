@@ -70,6 +70,10 @@ pub fn init(
 
 /// Bucket key for the records list. Non-admins see only their own records
 /// (the historical `RecordsMine(uid)` scope), admins see all records.
+/// An explicit `user` filter that stays inside the caller's own scope —
+/// their id or the unassigned sentinel — is respected as-is, so dashboard
+/// quick actions can link to "assigned to me" / "free tasks" views. Any
+/// other user id is still clobbered by `with_user_scope`.
 fn bucket_key_for(
   filters: Dict(String, String),
   user: option.Option(User),
@@ -77,13 +81,20 @@ fn bucket_key_for(
   let base = records_query.from_filters(filters)
   let scoped = case user {
     Some(u) ->
-      case permissions.is_admin_user(u) {
+      case permissions.is_admin_user(u) || has_own_scope_filter(filters, u) {
         True -> base
         False -> records_query.with_user_scope(base, u.id)
       }
     None -> base
   }
   bucket.Records(scoped)
+}
+
+fn has_own_scope_filter(filters: Dict(String, String), u: User) -> Bool {
+  case dict.get(filters, "user") {
+    Ok(v) -> v == record_filters.unassigned_user_value || v == u.id
+    Error(_) -> False
+  }
 }
 
 /// The assigned-user column is admin-only: `shared.cache.users` is

@@ -16,7 +16,7 @@ pub fn from_filters_empty_test() {
   q.record_type_name |> should.equal(None)
   q.record_status |> should.equal(None)
   q.user_id |> should.equal(None)
-  q.wo_user |> should.equal(False)
+  q.wo_user |> should.equal(None)
   // Defaults to IdAsc to match `default_sort_col = "id"` in the list pages,
   // so the column the UI arrows-up matches the order the backend returns.
   q.sort |> should.equal(IdAsc)
@@ -40,20 +40,22 @@ pub fn from_filters_patient_test() {
 }
 
 pub fn from_filters_user_uuid_test() {
+  // An explicit user id pins wo_user=Some(False) so the backend's
+  // include_unassigned widening can't mix free records into the result.
   let q =
     records_query.from_filters(dict.from_list([#("user", "uid-xyz")]))
   q.user_id |> should.equal(Some("uid-xyz"))
-  q.wo_user |> should.equal(False)
+  q.wo_user |> should.equal(Some(False))
 }
 
 pub fn from_filters_user_unassigned_test() {
-  // "__unassigned__" must translate to wo_user=true, user_id=None.
+  // "__unassigned__" must translate to wo_user=Some(True), user_id=None.
   let q =
     records_query.from_filters(
       dict.from_list([#("user", record_filters.unassigned_user_value)]),
     )
   q.user_id |> should.equal(None)
-  q.wo_user |> should.equal(True)
+  q.wo_user |> should.equal(Some(True))
 }
 
 pub fn from_filters_combined_test() {
@@ -121,12 +123,14 @@ pub fn with_user_scope_overrides_user_id_test() {
   let scoped =
     records_query.with_user_scope(bucket.default_query(), "user-42")
   scoped.user_id |> should.equal(Some("user-42"))
-  scoped.wo_user |> should.equal(False)
+  scoped.wo_user |> should.equal(None)
 }
 
 pub fn with_user_scope_clears_wo_user_test() {
-  let q = bucket.RecordsQuery(..bucket.default_query(), wo_user: True)
+  // Scope reset leaves wo_user unconstrained (None), not Some(False) —
+  // regular users must keep seeing unassigned records in the default view.
+  let q = bucket.RecordsQuery(..bucket.default_query(), wo_user: Some(True))
   let scoped = records_query.with_user_scope(q, "user-42")
-  scoped.wo_user |> should.equal(False)
+  scoped.wo_user |> should.equal(None)
   scoped.user_id |> should.equal(Some("user-42"))
 }

@@ -217,3 +217,14 @@ pub fn route_to_query(route: Route) -> Option(String) {
     _ -> None
   }
 }
+
+/// Full href for a route: path plus serialized query string (if any).
+/// Use for anchor hrefs to filtered routes — `route_to_path` alone drops
+/// the filters.
+pub fn route_to_href(route: Route) -> String {
+  let path = route_to_path(route)
+  case route_to_query(route) {
+    Some(q) -> path <> "?" <> q
+    None -> path
+  }
+}

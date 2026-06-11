@@ -102,6 +102,38 @@
     }
 }
 
+/* One-click worklist entry points on the user dashboard */
+.quick-actions-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: var(--spacing-md);
+}
+
+.quick-action {
+    display: block;
+    padding: var(--spacing-md) var(--spacing-lg);
+    border-left: 3px solid var(--teal);
+    font-weight: 600;
+    color: var(--ink);
+    transition: background-color 0.15s;
+
+    &:hover {
+        background-color: var(--surface-sunken);
+    }
+
+    &.qa-inwork {
+        border-left-color: var(--brass-bright);
+    }
+
+    &.qa-pending {
+        border-left-color: var(--amber);
+    }
+
+    &.qa-free {
+        border-left-color: var(--plum);
+    }
+}
+
 .recent-list {
     display: flex;
     flex-direction: column;

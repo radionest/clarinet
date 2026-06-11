@@ -14,6 +14,7 @@ import lustre/element/html
 import router
 import shared.{type OutMsg, type Shared}
 import utils/permissions
+import utils/record_filters
 
 // --- Model ---
 
@@ -84,7 +85,7 @@ pub fn view(_model: Model, shared: Shared) -> Element(Msg) {
           stats_section(shared),
           case permissions.is_admin_user(user) {
             True -> recent_activity(shared)
-            False -> html.text("")
+            False -> quick_actions_section(shared, user)
           },
         ])
       }
@@ -171,6 +172,56 @@ fn stats_section(shared: Shared) -> Element(Msg) {
       },
     ),
   ])
+}
+
+/// One-click entry points into the user's worklist: records they are
+/// working on, pending records assigned to them, and free pending records
+/// they could claim — without touching the filter bar on /records.
+fn quick_actions_section(shared: Shared, user: models.User) -> Element(Msg) {
+  let t = shared.translate
+  html.div([attribute.class("dashboard-section")], [
+    html.h3([], [html.text(t(i18n.HomeQuickActions))]),
+    html.div([attribute.class("quick-actions-grid")], [
+      quick_action(
+        t(i18n.HomeActionInWork),
+        "qa-inwork",
+        router.Records(
+          dict.from_list([#("status", "inwork"), #("user", user.id)]),
+        ),
+      ),
+      quick_action(
+        t(i18n.HomeActionMyPending),
+        "qa-pending",
+        router.Records(
+          dict.from_list([#("status", "pending"), #("user", user.id)]),
+        ),
+      ),
+      quick_action(
+        t(i18n.HomeActionFreePending),
+        "qa-free",
+        router.Records(
+          dict.from_list([
+            #("status", "pending"),
+            #("user", record_filters.unassigned_user_value),
+          ]),
+        ),
+      ),
+    ]),
+  ])
+}
+
+fn quick_action(
+  label: String,
+  modifier: String,
+  route: router.Route,
+) -> Element(Msg) {
+  html.a(
+    [
+      attribute.href(router.route_to_href(route)),
+      attribute.class("quick-action card " <> modifier),
+    ],
+    [html.text(label)],
+  )
 }
 
 fn recent_activity(shared: Shared) -> Element(Msg) {

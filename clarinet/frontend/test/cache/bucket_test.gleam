@@ -56,7 +56,7 @@ pub fn default_query_all_none_test() {
   q.record_type_name |> should.equal(None)
   q.record_status |> should.equal(None)
   q.user_id |> should.equal(None)
-  q.wo_user |> should.equal(False)
+  q.wo_user |> should.equal(None)
   q.sort |> should.equal(ChangedAtDesc)
 }
 
@@ -96,10 +96,24 @@ pub fn key_to_topic_wo_user_flag_test() {
   let q =
     bucket.RecordsQuery(
       ..bucket.default_query(),
-      wo_user: True,
+      wo_user: Some(True),
     )
   let topic = bucket.key_to_topic(Records(q))
   topic |> should.equal("records|sort=changed_at_desc|wo_user=1")
+}
+
+pub fn key_to_topic_strict_user_filter_test() {
+  // An explicit user filter (wo_user: Some(False)) must produce a topic
+  // distinct from the unconstrained user scope (wo_user: None) — they are
+  // different requests and must not share a cache entry.
+  let q =
+    bucket.RecordsQuery(
+      ..bucket.default_query(),
+      user_id: Some("uid-1"),
+      wo_user: Some(False),
+    )
+  let topic = bucket.key_to_topic(Records(q))
+  topic |> should.equal("records|sort=changed_at_desc|user=uid-1|wo_user=0")
 }
 
 pub fn key_to_topic_user_id_test() {
@@ -122,7 +136,7 @@ pub fn key_to_topic_deterministic_test() {
       record_type_name: Some("rt"),
       record_status: Some("pending"),
       user_id: None,
-      wo_user: False,
+      wo_user: None,
       sort: IdAsc,
     )
   let q2 =
@@ -154,17 +168,17 @@ pub fn key_to_topic_differs_for_different_sort_test() {
 }
 
 pub fn key_to_topic_wo_user_drops_user_id_test() {
-  // wo_user is authoritative: when set, the request omits user_id, so the
-  // topic must match between (user_id: Some(uid), wo_user: True) and
-  // (user_id: None, wo_user: True).
+  // wo_user: Some(True) is authoritative: the request omits user_id, so
+  // the topic must match between (user_id: Some(uid), wo_user: Some(True))
+  // and (user_id: None, wo_user: Some(True)).
   let with_uid =
     bucket.RecordsQuery(
       ..bucket.default_query(),
       user_id: Some("uid-1"),
-      wo_user: True,
+      wo_user: Some(True),
     )
   let without_uid =
-    bucket.RecordsQuery(..bucket.default_query(), wo_user: True)
+    bucket.RecordsQuery(..bucket.default_query(), wo_user: Some(True))
   bucket.key_to_topic(Records(with_uid))
   |> should.equal(bucket.key_to_topic(Records(without_uid)))
 }
