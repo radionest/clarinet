@@ -37,6 +37,7 @@ RECORDS_BULK_STATUS = "/api/records/bulk/status"
 # Dynamic: f"{RECORDS_BASE}/{record_id}/data/prefill"
 # Dynamic: f"{RECORDS_BASE}/{record_id}/context-info"
 # Dynamic: f"{RECORDS_BASE}/{record_id}/output-files/{file_name}"
+# Dynamic: f"{RECORDS_BASE}/{record_id}/invalidate"
 
 # --- Record types ---
 RECORD_TYPES = "/api/records/types"

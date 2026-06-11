@@ -57,6 +57,19 @@ record("first_check").on_finished().if_record(F.is_good == True)
 
 File flows: `.on_update()` + `.invalidate_all_records()` / `.call()`. Event source: `@pipeline_task` wrapper checksums → `POST /patients/{id}/file-events`.
 
+## Invalidation Semantics
+
+Hard invalidation (`mode='hard'`) always fires `on_status('pending')` for the target record —
+**even when it was already `pending`** (pending → pending). Every re-invalidation re-runs all
+matching flows, including flows without a status trigger (those match any status event).
+
+- Handlers subscribed to `on_status('pending')` (`.do_task`, `.call`, prefill jobs) **must be
+  idempotent** — they may run multiple times for the same record.
+- Avoid mutual hard-invalidation cycles (A's `on_status('pending')` hard-invalidates B while B's
+  hard-invalidates A) — no status-equality guard breaks such a loop anymore.
+
+Soft invalidation (`mode='soft'`) never changes status and never fires triggers.
+
 ## Data Access
 
 Two patterns for referencing record data fields:

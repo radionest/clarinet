@@ -20,6 +20,7 @@ from clarinet.services.recordflow import FlowRecord, FlowResult, RecordFlowEngin
 from clarinet.services.recordflow.flow_file import FILE_REGISTRY
 from clarinet.services.recordflow.flow_record import ENTITY_REGISTRY, RECORD_REGISTRY
 from clarinet.utils.logger import logger
+from tests.utils.urls import RECORDS_BASE
 
 
 @pytest.fixture(autouse=True)
@@ -842,7 +843,7 @@ class TestRecordFlowInvalidation:
 
 
 class TestRecordFlowInvalidationRuntime:
-    """Tests for invalidation triggered through API (PATCH /data → engine)."""
+    """Tests for invalidation triggered through API (PATCH /data, POST /invalidate)."""
 
     @pytest_asyncio.fixture
     async def app_with_engine(
@@ -923,6 +924,119 @@ class TestRecordFlowInvalidationRuntime:
         assert len(child_records) == 1
         assert child_records[0].status == RecordStatus.pending
         assert "Invalidated by record" in (child_records[0].context_info or "")
+
+    @pytest.mark.asyncio
+    async def test_hard_invalidate_already_pending_refires_pending_flow(
+        self,
+        client: AsyncClient,
+        clarinet_client: ClarinetClient,
+        app_with_engine: RecordFlowEngine,
+        record_types: dict[str, RecordType],
+        test_patient: Patient,
+        test_study: Study,
+    ):
+        """Hard invalidation of an already-pending record re-fires on_status("pending")."""
+        pending_log: list[int] = []
+
+        async def on_pending(record, context, client, **kwargs):
+            pending_log.append(record.id)
+
+        flow = FlowRecord("child-analysis")
+        flow.on_status("pending").call(on_pending)
+        app_with_engine.register_flow(flow)
+
+        # Record stays pending (waits for a human) — never reaches finished
+        child = await _create_record_via_client(
+            clarinet_client,
+            "child-analysis",
+            test_patient.id,
+            test_study.study_uid,
+        )
+        pending_log.clear()  # drop the creation-time pending event
+
+        resp = await client.post(
+            f"{RECORDS_BASE}/{child.id}/invalidate",
+            json={"mode": "hard", "reason": "master model updated"},
+        )
+        assert resp.status_code == 200
+
+        assert pending_log == [child.id]
+
+    @pytest.mark.asyncio
+    async def test_hard_invalidate_finished_fires_exactly_one_event(
+        self,
+        client: AsyncClient,
+        clarinet_client: ClarinetClient,
+        app_with_engine: RecordFlowEngine,
+        record_types: dict[str, RecordType],
+        test_patient: Patient,
+        test_study: Study,
+    ):
+        """Hard invalidation of a finished record fires exactly one pending event."""
+        pending_log: list[int] = []
+
+        async def on_pending(record, context, client, **kwargs):
+            pending_log.append(record.id)
+
+        flow = FlowRecord("child-analysis")
+        flow.on_status("pending").call(on_pending)
+        app_with_engine.register_flow(flow)
+
+        child = await _create_record_via_client(
+            clarinet_client,
+            "child-analysis",
+            test_patient.id,
+            test_study.study_uid,
+            status=RecordStatus.finished,
+        )
+        pending_log.clear()
+
+        resp = await client.post(
+            f"{RECORDS_BASE}/{child.id}/invalidate",
+            json={"mode": "hard"},
+        )
+        assert resp.status_code == 200
+
+        assert pending_log == [child.id]
+
+    @pytest.mark.asyncio
+    async def test_soft_invalidate_fires_no_event(
+        self,
+        client: AsyncClient,
+        clarinet_client: ClarinetClient,
+        app_with_engine: RecordFlowEngine,
+        record_types: dict[str, RecordType],
+        test_patient: Patient,
+        test_study: Study,
+    ):
+        """Soft invalidation neither fires triggers nor changes status."""
+        pending_log: list[int] = []
+
+        async def on_pending(record, context, client, **kwargs):
+            pending_log.append(record.id)
+
+        flow = FlowRecord("child-analysis")
+        flow.on_status("pending").call(on_pending)
+        app_with_engine.register_flow(flow)
+
+        child = await _create_record_via_client(
+            clarinet_client,
+            "child-analysis",
+            test_patient.id,
+            test_study.study_uid,
+        )
+        pending_log.clear()
+
+        resp = await client.post(
+            f"{RECORDS_BASE}/{child.id}/invalidate",
+            json={"mode": "soft", "reason": "soft probe"},
+        )
+        assert resp.status_code == 200
+
+        assert pending_log == []
+        updated = await clarinet_client.get_record(child.id)
+        assert updated.status == RecordStatus.pending
+        assert "soft probe" in (updated.context_info or "")
 
 
 class TestInvalidateEndpoint:
