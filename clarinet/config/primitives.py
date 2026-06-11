@@ -108,6 +108,16 @@ class RecordDef(BaseModel):
         slicer_script_args: Arguments for slicer script.
         slicer_result_validator: Inline validator or path to .py file.
         slicer_result_validator_args: Arguments for result validator.
+        slicer_context_hydrators: Names of Slicer context hydrators to run.
+        data_validators: Names of cross-field RecordData validators to run.
+        mask_patient_data: Mask patient/study/series identifiers for non-superusers
+            once the patient is anonymized.
+        unique_per_user: Allow at most one record of this type per user.
+        parent_required: Require a parent record at creation.
+        inherit_user_from_parent: Child inherits user_id from its parent record.
+        editable: Whether non-superusers may change a submitted (finished) record.
+        edit_window_days: Days a finished record stays editable; None = no limit.
+        viewer_mode: How many series the viewer loads (single vs all series).
     """
 
     name: str
@@ -134,6 +144,7 @@ class RecordDef(BaseModel):
     slicer_context_hydrators: list[str] | None = None
     data_validators: list[str] | None = None
     mask_patient_data: bool = True
+    unique_per_user: bool = True
     parent_required: bool = False
     inherit_user_from_parent: bool = False
     editable: bool = True
