@@ -474,8 +474,9 @@ class TestFlowLoader:
 
     @pytest.mark.asyncio
     async def test_load_and_register_flows_aggregates_failures(self, tmp_path):
-        """Every broken flow file is reported in ONE error; valid files are
-        still attempted (no fix-restart-fix cycles)."""
+        """Every broken flow file is reported in ONE error (no fix-restart-fix
+        cycles), and when any file fails NOTHING is registered with the engine —
+        a broken file's partially-registered flows must not leak through."""
         from unittest.mock import MagicMock
 
         from clarinet.exceptions.domain import ConfigLoadError
@@ -495,8 +496,9 @@ class TestFlowLoader:
         with pytest.raises(ConfigLoadError, match="2 flow file"):
             load_and_register_flows(engine, [good_file, broken_one, broken_two])
 
-        # The valid file was processed before the aggregate raise
-        assert engine.register_flow.called
+        # Aggregate raises before registration — the good file's flows are not
+        # registered when the batch contains failures.
+        assert not engine.register_flow.called
 
 
 # ===================================================================

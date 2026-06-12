@@ -141,6 +141,13 @@ def load_and_register_flows(engine: RecordFlowEngine, flow_files: list[Path]) ->
             failures.append(e)
             continue
 
+    # Raise BEFORE registering: if any file failed, register nothing — a broken
+    # file may have registered some flows into the registry before crashing, and
+    # those must not reach the engine. (Startup crashes on the aggregate anyway,
+    # but this keeps "broken file ⇒ its flows don't register" exact.)
+    if failures:
+        raise ConfigLoadError.aggregate(failures, kind="flow file")
+
     total_flows = 0
     for flow in _collect_flows():
         try:
@@ -148,9 +155,6 @@ def load_and_register_flows(engine: RecordFlowEngine, flow_files: list[Path]) ->
             total_flows += 1
         except Exception as e:
             logger.error(f"Error registering flow {flow!r}: {e}")
-
-    if failures:
-        raise ConfigLoadError.aggregate(failures, kind="flow file")
 
     logger.info(f"Registered {total_flows} flows from {len(flow_files)} files")
     return total_flows

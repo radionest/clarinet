@@ -48,6 +48,7 @@ from pathlib import Path
 from types import ModuleType
 
 from clarinet.exceptions.domain import ConfigLoadError
+from clarinet.utils.logger import logger
 
 PLAN_PACKAGE = "clarinet_plan"
 
@@ -108,8 +109,14 @@ def activate_plan_package(root: str | Path) -> None:
 def ensure_plan_root(folder: str | Path) -> None:
     """Ensure the anchor is active and *folder* lives under its root.
 
-    * No anchor yet → ``activate_plan_package(folder)`` (self-activation for
-      direct test calls).
+    Called as the first line of every loader. In production the lifespan /
+    ``run_worker`` call ``activate_plan_package`` first, so this only validates
+    (no-op or raise). The self-activation branch exists for **direct test calls**
+    of a loader without a preceding ``activate_plan_package`` — it does not
+    relax the threading invariant: loaders run at startup / in test setup, never
+    from a request handler or background task.
+
+    * No anchor yet → ``activate_plan_package(folder)`` (self-activation, see above).
     * Anchor active and *folder* == root or a descendant of root → no-op, but
       ``importlib.invalidate_caches()`` **unconditionally** (a directory created
       after activation may carry a negative entry in
@@ -264,14 +271,19 @@ def import_plan_module(dotted: str, *, path_hint: Path | None = None) -> ModuleT
             ) from e
         # The file exec'd but an import inside it failed — a missing third-party
         # dependency, or a pre-migration sibling import. Wrap, hint if relevant.
+        # Log the traceback: this is a genuine exec failure, not a clean
+        # file-absent / name-collision config error.
+        logger.exception(f"Error importing plan module {dotted}")
         hint = _migration_hint(missing)
         message = f"failed to import {dotted}: {e!r}"
         if hint:
             message += "\n" + hint
         raise ConfigLoadError(message, path=path_hint) from e
     except ImportError as e:
+        logger.exception(f"Error importing plan module {dotted}")
         raise ConfigLoadError(f"failed to import {dotted}: {e!r}", path=path_hint) from e
     except Exception as e:
+        logger.exception(f"Error importing plan module {dotted}")
         raise ConfigLoadError(f"failed to import {dotted}: {e!r}", path=path_hint) from e
 
 
