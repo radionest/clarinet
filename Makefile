@@ -305,9 +305,16 @@ _test-all-stages-impl:
 	@echo "=========================================="
 	@echo "  Stage 5b/8: slicer tests (sequential)  "
 	@echo "=========================================="
+    # SLICER_PACS_SETUP: optional script run before the slicer tests (e.g.
+    # (re)apply the PACS env on a freshly reimaged VM). It runs as a child
+    # process, so it CANNOT export CLARINET_TEST_SLICER_HOST /
+    # CLARINET_TEST_PACS_HOST back into this make — set those in the environment
+    # that invokes `make`. A failing hook is non-fatal (slicer tests then skip),
+    # but its exit code is surfaced rather than swallowed.
 	@if [ -n "$${SLICER_PACS_SETUP}" ]; then \
 		echo "Running Slicer/PACS setup hook: $${SLICER_PACS_SETUP}"; \
-		bash "$${SLICER_PACS_SETUP}" || echo "⚠ Slicer/PACS setup hook failed — PACS-dependent slicer tests will skip"; \
+		bash "$${SLICER_PACS_SETUP}"; rc=$$?; \
+		[ $$rc -eq 0 ] || echo "⚠ Slicer/PACS setup hook exited $$rc — PACS-dependent slicer tests will skip"; \
 	fi
 	@$(MAKE) test-slicer
 	@if [ "$${SKIP_VM}" = "1" ]; then \

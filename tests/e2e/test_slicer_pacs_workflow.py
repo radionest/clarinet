@@ -971,31 +971,37 @@ __execResult = {"calling_aet": pacs.calling_aet}
             json={"AET": slicer_aet, "Host": SLICER_HOST, "Port": SLICER_SCP_PORT},
             timeout=5,
         ).raise_for_status()
+        # NB: this mutates the shared session DICOM DB — it removes the series to
+        # force a real C-MOVE (a local-first lookup would otherwise short-circuit
+        # the probe). Safe here: every test in this class removes the series first
+        # too. Poll bound (40 * 0.25s = 10s) + request_timeout are kept well under
+        # the test-slicer pytest --timeout=60 so a slow Slicer skips, not times out.
         probe = f"""
 import ctk, slicer, time
 db = slicer.dicomDatabase
-if db.filesForSeries('{pacs_series_uid}'):
-    db.removeSeries('{pacs_series_uid}')
-retr = ctk.ctkDICOMRetrieve()
-retr.callingAETitle = '{slicer_aet}'
-retr.calledAETitle = '{PACS_AET}'
-retr.host = '{PACS_HOST}'
-retr.port = {PACS_PORT}
-retr.setDatabase(db)
-retr.moveDestinationAETitle = '{slicer_aet}'
-retr.moveSeries('{pacs_study_uid}', '{pacs_series_uid}')
 indexed = False
-for _ in range(60):
+if db:
     if db.filesForSeries('{pacs_series_uid}'):
-        indexed = True
-        break
-    time.sleep(0.25)
+        db.removeSeries('{pacs_series_uid}')
+    retr = ctk.ctkDICOMRetrieve()
+    retr.callingAETitle = '{slicer_aet}'
+    retr.calledAETitle = '{PACS_AET}'
+    retr.host = '{PACS_HOST}'
+    retr.port = {PACS_PORT}
+    retr.setDatabase(db)
+    retr.moveDestinationAETitle = '{slicer_aet}'
+    retr.moveSeries('{pacs_study_uid}', '{pacs_series_uid}')
+    for _ in range(40):
+        if db.filesForSeries('{pacs_series_uid}'):
+            indexed = True
+            break
+        time.sleep(0.25)
 __execResult = {{"indexed": indexed}}
 """
         try:
             result = asyncio.run(
                 SlicerService().execute(
-                    f"http://{SLICER_HOST}:{SLICER_PORT}", probe, request_timeout=30.0
+                    f"http://{SLICER_HOST}:{SLICER_PORT}", probe, request_timeout=20.0
                 )
             )
         finally:
