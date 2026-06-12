@@ -73,6 +73,24 @@ RecordFlow triggers are dispatched via the **service layer**, not directly from 
 Invalidation (routes through RecordService):
 - `POST /records/{id}/invalidate` — body: `{mode, source_record_id, reason}`; hard mode fires RecordFlow triggers (enables auto task restart)
 
+## Record Audit Trail
+
+`RecordService` appends a `RecordEvent` row right after every mutation and
+**before** the RecordFlow dispatch (kinds: created / status_changed /
+data_submitted / data_updated / assigned / unassigned / failed / invalidated /
+context_info_updated / files_cleared / deleted with snapshot; machine markers
+like claim/bulk/cascade go into `new_value.via`, `reason` stays human text).
+The actor comes from `AuditActorDep` (`dependencies.py`, backed by
+`auth_config.is_service_request`): the current user's UUID, or `None` when
+the request authenticated via `X-Internal-Token` (pipeline workers,
+RecordFlow) — every mutating endpoint passes `actor_id=actor` into the
+service. `record_event.record_key` is a denormalized record id without FK —
+it keeps a deleted record's history correlatable after `record_id` goes NULL.
+Prefill writes are deliberately not audited (high-volume system noise).
+Read endpoints: `GET /records/{id}/events` (AuthorizedRecordDep, oldest
+first) and `GET /admin/records/events/deleted`. Downstream projects need an
+alembic migration for the `record_event` table.
+
 ## SPA Frontend Routing
 
 When `frontend_enabled=True`, catch-all `/{full_path:path}` serves:

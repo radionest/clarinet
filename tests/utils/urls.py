@@ -39,6 +39,11 @@ RECORDS_BULK_STATUS = "/api/records/bulk/status"
 # Dynamic: f"{RECORDS_BASE}/{record_id}/output-files/{file_name}"
 # Dynamic: f"{RECORDS_BASE}/{record_id}/invalidate"
 
+
+def record_events_url(record_id: int) -> str:
+    return f"{RECORDS_BASE}/{record_id}/events"
+
+
 # --- Record types ---
 RECORD_TYPES = "/api/records/types"
 RECORD_TYPES_FIND = "/api/records/types/find"
@@ -62,6 +67,7 @@ ADMIN_RECORDS = "/api/admin/records"  # + /{id} for cascade delete
 ADMIN_RECORD_STATUS = "/api/admin/records"  # + /{id}/status
 ADMIN_RECORD_USER = "/api/admin/records"  # + /{id}/user
 ADMIN_RECORD_OUTPUT_FILES = "/api/admin/records"  # + /{id}/output-files
+ADMIN_DELETED_RECORD_EVENTS = "/api/admin/records/events/deleted"
 
 # --- Reports ---
 ADMIN_REPORTS = "/api/admin/reports"  # GET list; + /{name}/download for file

@@ -433,25 +433,38 @@ fastapi_users = FastAPIUsers[User, UUID](
 _service_user_cache: TTLCache = TTLCache(maxsize=1, ttl=300)
 
 
-async def _get_service_user(request: Request, session: AsyncSession) -> User | None:
-    """Authenticate internal clients via X-Internal-Token header.
+def is_service_request(request: Request) -> bool:
+    """True when the request carries a valid ``X-Internal-Token``.
 
-    Returns the admin User when the header matches, bypassing cookie auth
-    and AccessToken creation entirely.
+    Single source of truth for service-token detection — used by auth
+    (``_get_service_user``) and audit actor resolution (``get_audit_actor``)
+    so the two cannot drift apart.
     """
     effective_token = settings.effective_service_token
     if not effective_token:
-        return None
+        return False
 
     header_token = request.headers.get("X-Internal-Token")
     if not header_token:
-        return None
+        return False
 
     if not hmac.compare_digest(header_token, effective_token):
         logger.warning(
             f"Invalid service token from {request.client.host if request.client else 'unknown'}",
             extra={"reason": "invalid_service_token"},
         )
+        return False
+
+    return True
+
+
+async def _get_service_user(request: Request, session: AsyncSession) -> User | None:
+    """Authenticate internal clients via X-Internal-Token header.
+
+    Returns the admin User when the header matches, bypassing cookie auth
+    and AccessToken creation entirely.
+    """
+    if not is_service_request(request):
         return None
 
     cache_key = "service_user"

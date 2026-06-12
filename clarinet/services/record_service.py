@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from clarinet.exceptions.domain import (
@@ -14,6 +14,7 @@ from clarinet.exceptions.domain import (
 from clarinet.exceptions.domain import FileNotFoundError as DomainFileNotFoundError
 from clarinet.models import Record, RecordRead, RecordStatus, is_record_editable
 from clarinet.models.file_schema import FileDefinitionRead, FileRole
+from clarinet.models.record_event import RecordEvent
 from clarinet.repositories.file_repository import FileRepository
 from clarinet.services.file_validation import validate_record_files
 from clarinet.utils.file_checksums import checksums_changed, compute_checksums
@@ -23,6 +24,8 @@ from clarinet.utils.logger import logger
 
 if TYPE_CHECKING:
     from clarinet.models import User
+    from clarinet.models.record_event import RecordEventKind
+    from clarinet.repositories.record_event_repository import RecordEventRepository
     from clarinet.repositories.record_repository import RecordRepository
     from clarinet.services.recordflow.engine import RecordFlowEngine
     from clarinet.types import RecordData
@@ -115,22 +118,67 @@ def _stored_checksums(record: RecordRead) -> dict[str, str]:
 class RecordService:
     """Service wrapping record mutations with automatic RecordFlow triggers.
 
+    When *event_repo* is provided, every mutation also appends a
+    :class:`RecordEvent` audit row (``actor_id=None`` marks system /
+    worker / RecordFlow calls — see ``get_audit_actor``).
+
     Args:
         record_repo: Record repository instance.
         engine: Optional RecordFlow engine (None when RecordFlow is disabled).
+        event_repo: Optional record event repository (None disables auditing).
     """
 
     def __init__(
         self,
         record_repo: RecordRepository,
         engine: RecordFlowEngine | None = None,
+        event_repo: RecordEventRepository | None = None,
     ):
         self.repo = record_repo
         self.engine = engine
+        self.event_repo = event_repo
+
+    async def _record_event(
+        self,
+        *,
+        record_id: int | None,
+        kind: RecordEventKind,
+        actor_id: UUID | None,
+        from_status: RecordStatus | None = None,
+        to_status: RecordStatus | None = None,
+        old_value: dict[str, Any] | None = None,
+        new_value: dict[str, Any] | None = None,
+        reason: str | None = None,
+    ) -> None:
+        """Append an audit event right after a record mutation.
+
+        The event is flushed immediately — before any RecordFlow dispatch,
+        so an engine failure cannot lose it — and committed by the next
+        commit on the shared session (request teardown). A process crash
+        between the mutation's own commit and teardown loses the event but
+        never the mutation (accepted trade-off; cascade delete is the one
+        path where events share the mutation's transaction). No-op when
+        auditing is disabled (``event_repo is None``).
+        """
+        if self.event_repo is None:
+            return
+        await self.event_repo.add(
+            RecordEvent(
+                record_id=record_id,
+                record_key=record_id,
+                kind=kind,
+                actor_id=actor_id,
+                from_status=from_status.value if from_status else None,
+                to_status=to_status.value if to_status else None,
+                old_value=old_value,
+                new_value=new_value,
+                reason=reason,
+            )
+        )
 
     # ── Public methods ───────────────────────────────────────────────────
 
-    async def create_record(self, record: Record) -> Record:
+    async def create_record(self, record: Record, *, actor_id: UUID | None = None) -> Record:
         """Create a record with file validation, blocking, and RecordFlow trigger.
 
         When ``parent_record_id`` is set, the parent is validated to exist
@@ -180,6 +228,14 @@ class RecordService:
             elif not file_result.valid and record.status != RecordStatus.preparing:
                 record, _ = await self.repo.update_status(record.id, RecordStatus.blocked)  # type: ignore[arg-type]
 
+        await self._record_event(
+            record_id=record.id,
+            kind="created",
+            actor_id=actor_id,
+            to_status=record.status,
+            new_value={"record_type_name": record.record_type_name},
+        )
+
         # Fire status-change trigger for the initial status
         await self._fire_status_change(record, old_status=None)
 
@@ -191,6 +247,7 @@ class RecordService:
         new_status: RecordStatus,
         *,
         acting_user: User | None = None,
+        actor_id: UUID | None = None,
     ) -> tuple[Record, RecordStatus]:
         """Update record status and fire RecordFlow trigger if status changed.
 
@@ -207,6 +264,7 @@ class RecordService:
             new_status: New status to set.
             acting_user: API caller; ``None`` marks a trusted in-process call
                 that bypasses the post-submit edit lock.
+            actor_id: Audit actor; ``None`` marks a system/worker call.
 
         Returns:
             Tuple of (updated record, old status). The record's final status
@@ -231,15 +289,25 @@ class RecordService:
             await self.repo.set_files(record, matched_files)
             record = await self.repo.get_with_relations(record_id)
         if old_status != record.status:
+            await self._record_event(
+                record_id=record_id,
+                kind="status_changed",
+                actor_id=actor_id,
+                from_status=old_status,
+                to_status=record.status,
+            )
             await self._fire_status_change(record, old_status)
         return record, old_status
 
-    async def assign_user(self, record_id: int, user_id: UUID) -> tuple[Record, RecordStatus]:
+    async def assign_user(
+        self, record_id: int, user_id: UUID, *, actor_id: UUID | None = None
+    ) -> tuple[Record, RecordStatus]:
         """Assign user to a record and fire RecordFlow trigger if status changed.
 
         Args:
             record_id: Record ID.
             user_id: User UUID.
+            actor_id: Audit actor; ``None`` marks a system/worker call.
 
         Returns:
             Tuple of (updated record, old status).
@@ -250,16 +318,27 @@ class RecordService:
         record = await self.repo.get_with_record_type(record_id)
         await self._check_unique_per_user(user_id, record)
         record, old_status = await self.repo.assign_user(record_id, user_id)
+        await self._record_event(
+            record_id=record_id,
+            kind="assigned",
+            actor_id=actor_id,
+            from_status=old_status,
+            to_status=record.status,
+            new_value={"user_id": str(user_id)},
+        )
         if old_status != record.status:
             await self._fire_status_change(record, old_status)
         return record, old_status
 
-    async def claim_record(self, record_id: int, user_id: UUID) -> Record:
+    async def claim_record(
+        self, record_id: int, user_id: UUID, *, actor_id: UUID | None = None
+    ) -> Record:
         """Claim a record for a user with uniqueness constraint check.
 
         Args:
             record_id: Record ID.
             user_id: User UUID claiming the record.
+            actor_id: Audit actor; ``None`` marks a system/worker call.
 
         Returns:
             Updated record with inwork status.
@@ -268,19 +347,39 @@ class RecordService:
             RecordConstraintViolationError: If unique_per_user is violated.
         """
         record = await self.repo.get_with_record_type(record_id)
+        old_status = record.status
         await self._check_unique_per_user(user_id, record)
-        return await self.repo.claim_record(record_id, user_id)
+        updated = await self.repo.claim_record(record_id, user_id)
+        await self._record_event(
+            record_id=record_id,
+            kind="assigned",
+            actor_id=actor_id,
+            from_status=old_status,
+            to_status=updated.status,
+            new_value={"user_id": str(user_id), "via": "claim"},
+        )
+        return updated
 
-    async def unassign_user(self, record_id: int) -> tuple[Record, RecordStatus]:
+    async def unassign_user(
+        self, record_id: int, *, actor_id: UUID | None = None
+    ) -> tuple[Record, RecordStatus]:
         """Remove user from a record and fire RecordFlow trigger if status changed.
 
         Args:
             record_id: Record ID.
+            actor_id: Audit actor; ``None`` marks a system/worker call.
 
         Returns:
             Tuple of (updated record, old status).
         """
         record, old_status = await self.repo.unassign_user(record_id)
+        await self._record_event(
+            record_id=record_id,
+            kind="unassigned",
+            actor_id=actor_id,
+            from_status=old_status,
+            to_status=record.status,
+        )
         if old_status != record.status:
             await self._fire_status_change(record, old_status)
         return record, old_status
@@ -291,6 +390,8 @@ class RecordService:
         data: RecordData,
         new_status: RecordStatus,
         user_id: UUID | None = None,
+        *,
+        actor_id: UUID | None = None,
     ) -> tuple[Record, RecordStatus]:
         """Submit record data with a status transition and fire RecordFlow trigger.
 
@@ -301,6 +402,7 @@ class RecordService:
             data: Validated record data.
             new_status: New status to set alongside data.
             user_id: Current user ID; assigned to the record when it has no user.
+            actor_id: Audit actor; ``None`` marks a system/worker call.
 
         Returns:
             Tuple of (updated record, old status).
@@ -312,9 +414,25 @@ class RecordService:
             record_check = await self.repo.get_with_record_type(record_id)
             if record_check.user_id is None:
                 await self._check_unique_per_user(user_id, record_check)
-            await self.repo.ensure_user_assigned(record_id, user_id)
+                await self.repo.ensure_user_assigned(record_id, user_id)
+                await self._record_event(
+                    record_id=record_id,
+                    kind="assigned",
+                    actor_id=actor_id,
+                    new_value={"user_id": str(user_id), "via": "submit"},
+                )
+            else:
+                await self.repo.ensure_user_assigned(record_id, user_id)
 
         record, old_status = await self.repo.update_data(record_id, data, new_status=new_status)
+        await self._record_event(
+            record_id=record_id,
+            kind="data_submitted",
+            actor_id=actor_id,
+            from_status=old_status,
+            to_status=record.status,
+            new_value={"fields": sorted(data.keys())},
+        )
         await self._fire_status_change(record, old_status)
 
         # Register output files that appeared on disk and emit file events
@@ -324,7 +442,7 @@ class RecordService:
         return record, old_status
 
     async def prefill_data(self, record_id: int, data: RecordData) -> tuple[Record, RecordStatus]:
-        """Write prefill data without firing RecordFlow triggers.
+        """Write prefill data without firing RecordFlow triggers or audit events.
 
         For pipeline tasks writing preliminary data to pending/blocked/preparing
         records.
@@ -345,6 +463,7 @@ class RecordService:
         data: RecordData,
         *,
         acting_user: User | None = None,
+        actor_id: UUID | None = None,
     ) -> tuple[Record, RecordStatus]:
         """Update record data (no status change) and fire data-update trigger.
 
@@ -353,6 +472,7 @@ class RecordService:
             data: Validated record data.
             acting_user: API caller; ``None`` marks a trusted in-process call
                 that bypasses the post-submit edit lock.
+            actor_id: Audit actor; ``None`` marks a system/worker call.
 
         Returns:
             Tuple of (updated record, old status).
@@ -365,6 +485,12 @@ class RecordService:
             record = await self.repo.get_with_relations(record_id)
             ensure_record_editable(record, acting_user)
         record, old_status = await self.repo.update_data(record_id, data)
+        await self._record_event(
+            record_id=record_id,
+            kind="data_updated",
+            actor_id=actor_id,
+            new_value={"fields": sorted(data.keys())},
+        )
         await self._fire_data_update(record)
         return record, old_status
 
@@ -382,6 +508,7 @@ class RecordService:
         new_status: RecordStatus,
         *,
         acting_user: User | None = None,
+        actor_id: UUID | None = None,
     ) -> None:
         """Update status for multiple records and fire triggers for each changed record.
 
@@ -394,6 +521,7 @@ class RecordService:
             new_status: New status to set.
             acting_user: API caller; ``None`` marks a trusted in-process call
                 that bypasses the post-submit edit lock.
+            actor_id: Audit actor; ``None`` marks a system/worker call.
 
         Raises:
             RecordEditLockedError: If any target record is finished and its
@@ -434,6 +562,14 @@ class RecordService:
         for record_id, old_status in old_statuses.items():
             if old_status != new_status:
                 updated = await self.repo.get_with_relations(record_id)
+                await self._record_event(
+                    record_id=record_id,
+                    kind="status_changed",
+                    actor_id=actor_id,
+                    from_status=old_status,
+                    to_status=new_status,
+                    new_value={"via": "bulk"},
+                )
                 await self._fire_status_change(updated, old_status)
 
     async def invalidate_record(
@@ -444,6 +580,7 @@ class RecordService:
         reason: str | None = None,
         *,
         acting_user: User | None = None,
+        actor_id: UUID | None = None,
     ) -> Record:
         """Invalidate a record and fire RecordFlow trigger on hard mode.
 
@@ -459,6 +596,7 @@ class RecordService:
             acting_user: API caller; ``None`` marks a trusted in-process call
                 that bypasses the post-submit edit lock. Only hard mode is
                 gated — soft mode never changes data or status.
+            actor_id: Audit actor; ``None`` marks a system/worker call.
 
         Returns:
             Updated record with relations.
@@ -481,6 +619,17 @@ class RecordService:
             reason=reason,
         )
 
+        status_changed = old_status != record.status
+        await self._record_event(
+            record_id=record_id,
+            kind="invalidated",
+            actor_id=actor_id,
+            from_status=old_status if status_changed else None,
+            to_status=record.status if status_changed else None,
+            new_value={"mode": mode, "source_record_id": source_record_id},
+            reason=reason,
+        )
+
         # Hard invalidation means "needs processing again" — fire even when the
         # status didn't change (pending → pending), so on_status("pending")
         # flows re-run. Handlers must be idempotent.
@@ -489,12 +638,15 @@ class RecordService:
 
         return record
 
-    async def fail_record(self, record_id: int, reason: str) -> Record:
+    async def fail_record(
+        self, record_id: int, reason: str, *, actor_id: UUID | None = None
+    ) -> Record:
         """Mark a record as failed with a reason and fire RecordFlow triggers.
 
         Args:
             record_id: ID of the record to fail.
             reason: Human-readable reason for failure.
+            actor_id: Audit actor; ``None`` marks a system/worker call.
 
         Returns:
             Updated record with relations.
@@ -502,12 +654,22 @@ class RecordService:
         record, old_status = await self.repo.fail_record(record_id, reason)
         logger.info(f"Record {record_id} manually failed")
 
+        await self._record_event(
+            record_id=record_id,
+            kind="failed",
+            actor_id=actor_id,
+            from_status=old_status,
+            to_status=record.status,
+            reason=reason,
+        )
         if old_status != record.status:
             await self._fire_status_change(record, old_status)
 
         return record
 
-    async def check_files(self, record_id: int) -> tuple[list[str], dict[str, str]]:
+    async def check_files(
+        self, record_id: int, *, actor_id: UUID | None = None
+    ) -> tuple[list[str], dict[str, str]]:
         """Check file status, auto-unblock if ready, compute & compare checksums.
 
         For preparing records: no-op — prefill / file generation is in flight,
@@ -539,7 +701,9 @@ class RecordService:
             if file_result is not None and file_result.valid:
                 if file_result.matched_files:
                     await self.repo.set_files(record, file_result.matched_files)
-                record, _ = await self.update_status(record_id, RecordStatus.pending)
+                record, _ = await self.update_status(
+                    record_id, RecordStatus.pending, actor_id=actor_id
+                )
                 record_read = RecordRead.model_validate(record)
             else:
                 return [], {}
@@ -563,7 +727,9 @@ class RecordService:
 
         return list(changed), new_checksums
 
-    async def delete_record_cascade(self, record_id: int) -> tuple[list[int], int]:
+    async def delete_record_cascade(
+        self, record_id: int, *, actor_id: UUID | None = None
+    ) -> tuple[list[int], int]:
         """Delete a record, all its descendants, and their OUTPUT files.
 
         Check-and-delete runs inside a single DB transaction with row locks
@@ -622,6 +788,25 @@ class RecordService:
         paths_to_unlink = list(dict.fromkeys(paths_to_unlink))
 
         deleted_ids = list(reads.keys())
+        # Audit snapshots flush in the same transaction as the DELETE; the
+        # FK's ON DELETE SET NULL detaches them from the removed rows.
+        for rid, snapshot in reads.items():
+            await self._record_event(
+                record_id=rid,
+                kind="deleted",
+                actor_id=actor_id,
+                from_status=snapshot.status,
+                old_value={
+                    "record_id": rid,
+                    "record_type_name": snapshot.record_type_name,
+                    "patient_id": snapshot.patient_id,
+                    "study_uid": snapshot.study_uid,
+                    "series_uid": snapshot.series_uid,
+                    "user_id": str(snapshot.user_id) if snapshot.user_id else None,
+                    "parent_record_id": snapshot.parent_record_id,
+                },
+                new_value={"via": "cascade", "root_record_id": record_id},
+            )
         # Keep the transaction open: commit only after we've issued the DELETE,
         # so the row locks acquired above cover the whole check-and-delete.
         await self.repo.delete_records(deleted_ids, commit=False)
@@ -743,7 +928,9 @@ class RecordService:
             )
         return paths
 
-    async def clear_output_files(self, record_id: int) -> tuple[list[str], int]:
+    async def clear_output_files(
+        self, record_id: int, *, actor_id: UUID | None = None
+    ) -> tuple[list[str], int]:
         """Delete OUTPUT files from disk and their RecordFileLink rows.
 
         Only allowed for records NOT in ``finished`` status. Intended for
@@ -784,11 +971,43 @@ class RecordService:
 
         deleted_links = await self.repo.delete_output_file_links(record)
 
+        await self._record_event(
+            record_id=record_id,
+            kind="files_cleared",
+            actor_id=actor_id,
+            new_value={"files": deleted_files, "links": deleted_links},
+        )
+
         logger.info(
             f"Cleared output files for record {record_id}: "
             f"{len(deleted_files)} files, {deleted_links} links"
         )
         return deleted_files, deleted_links
+
+    async def update_context_info(
+        self, record_id: int, context_info: str | None, *, actor_id: UUID | None = None
+    ) -> Record:
+        """Replace ``context_info`` on a record with an audit event.
+
+        Args:
+            record_id: Record ID.
+            context_info: New markdown source (``None`` clears the field).
+            actor_id: Audit actor; ``None`` marks a system/worker call.
+
+        Returns:
+            Updated record with relations loaded.
+        """
+        record = await self.repo.get(record_id)
+        old_value = record.context_info
+        updated = await self.repo.update_fields(record_id, {"context_info": context_info})
+        await self._record_event(
+            record_id=record_id,
+            kind="context_info_updated",
+            actor_id=actor_id,
+            old_value={"context_info": old_value},
+            new_value={"context_info": context_info},
+        )
+        return updated
 
     async def notify_file_updates(
         self,

@@ -31,12 +31,14 @@ from starlette.responses import Response
 
 from clarinet.api.auth_config import current_active_user
 from clarinet.api.dependencies import (
+    AuditActorDep,
     AuthorizedRecordDep,
     ClientStoragePathDep,
     CurrentUserDep,
     MutableRecordDep,
     PaginationDep,
     PipelineTaskRunRepositoryDep,
+    RecordEventRepositoryDep,
     RecordRepositoryDep,
     RecordServiceDep,
     RecordTypeRepositoryDep,
@@ -62,6 +64,7 @@ from clarinet.models import (
     Record,
     RecordContextInfoUpdate,
     RecordCreate,
+    RecordEventRead,
     RecordFilterOptions,
     RecordOptional,
     RecordPage,
@@ -310,6 +313,7 @@ async def check_record_constraints(
 async def add_record(
     new_record: RecordCreate,
     service: RecordServiceDep,
+    actor: AuditActorDep,
 ) -> Record:
     """Create a new record.
 
@@ -322,7 +326,7 @@ async def add_record(
     enabled and no explicit ``user_id`` is provided.
     """
     record = Record(**new_record.model_dump())
-    return await service.create_record(record)
+    return await service.create_record(record, actor_id=actor)
 
 
 @router.patch(
@@ -336,6 +340,7 @@ async def bulk_update_record_status(
     service: RecordServiceDep,
     user: CurrentUserDep,
     repo: RecordRepositoryDep,
+    actor: AuditActorDep,
 ) -> None:
     """Update status for multiple records at once.
 
@@ -349,7 +354,7 @@ async def bulk_update_record_status(
             role_name = record.record_type.role_name
             if role_name is None or role_name not in user_roles:
                 raise AuthorizationError(f"Insufficient permissions to access record {rid}")
-    await service.bulk_update_status(record_ids, new_status, acting_user=user)
+    await service.bulk_update_status(record_ids, new_status, acting_user=user, actor_id=actor)
 
 
 @router.patch("/{record_id}/status", response_model=RecordRead)
@@ -359,6 +364,7 @@ async def update_record_status(
     service: RecordServiceDep,
     _authorized_record: MutableRecordDep,
     user: CurrentUserDep,
+    actor: AuditActorDep,
 ) -> RecordRead:
     """Update a record's status.
 
@@ -366,7 +372,9 @@ async def update_record_status(
     type locks submitted records (``editable`` / ``edit_window_days``) —
     re-opening would let the user change the answer via a fresh POST.
     """
-    record, _ = await service.update_status(record_id, record_status, acting_user=user)
+    record, _ = await service.update_status(
+        record_id, record_status, acting_user=user, actor_id=actor
+    )
     return mask_record_patient_data(RecordRead.model_validate(record), user)
 
 
@@ -377,9 +385,10 @@ async def assign_record_to_user(
     service: RecordServiceDep,
     _authorized_record: AuthorizedRecordDep,
     user: CurrentUserDep,
+    actor: AuditActorDep,
 ) -> RecordRead:
     """Assign a record to a user."""
-    record, _ = await service.assign_user(record_id, user_id)
+    record, _ = await service.assign_user(record_id, user_id, actor_id=actor)
     return mask_record_patient_data(RecordRead.model_validate(record), user)
 
 
@@ -387,9 +396,10 @@ async def assign_record_to_user(
 async def update_record_context_info(
     record_id: int,
     body: RecordContextInfoUpdate,
-    repo: RecordRepositoryDep,
+    service: RecordServiceDep,
     _authorized_record: MutableRecordDep,
     user: CurrentUserDep,
+    actor: AuditActorDep,
 ) -> RecordRead:
     """Replace ``context_info`` (markdown source) on a record.
 
@@ -398,7 +408,7 @@ async def update_record_context_info(
     unassigned. Pass ``null`` to clear the field. The rendered HTML is
     available on the response as ``context_info_html``.
     """
-    record = await repo.update_fields(record_id, {"context_info": body.context_info})
+    record = await service.update_context_info(record_id, body.context_info, actor_id=actor)
     return mask_record_patient_data(RecordRead.model_validate(record), user)
 
 
@@ -417,6 +427,7 @@ async def _process_submission(
     session: AsyncSession | None = None,
     client_ip: str | None = None,
     client_storage_path: str | None = None,
+    actor_id: UUID | None = None,
 ) -> RecordRead:
     """Validate, optionally run Slicer, and persist record data.
 
@@ -490,7 +501,9 @@ async def _process_submission(
         )
 
     if is_update:
-        updated, _ = await service.update_data(record_id, validated_data, acting_user=user)
+        updated, _ = await service.update_data(
+            record_id, validated_data, acting_user=user, actor_id=actor_id
+        )
     else:
         if not skip_validation:
             # Validate input files (raise on missing required files)
@@ -507,6 +520,7 @@ async def _process_submission(
             validated_data,
             new_status,
             user_id=user.id,
+            actor_id=actor_id,
         )
 
     return mask_record_patient_data(RecordRead.model_validate(updated), user)
@@ -523,6 +537,7 @@ async def submit_record_data(
     service: RecordServiceDep,
     rt_service: RecordTypeServiceDep,
     user: CurrentUserDep,
+    actor: AuditActorDep,
     data: RecordData = Body(),
     submit_status: RecordStatus | None = Query(default=None, alias="status"),
 ) -> RecordRead:
@@ -558,6 +573,7 @@ async def submit_record_data(
         rt_service=rt_service,
         is_update=False,
         new_status=target_status,
+        actor_id=actor,
     )
 
 
@@ -569,6 +585,7 @@ async def update_record_data(
     service: RecordServiceDep,
     rt_service: RecordTypeServiceDep,
     user: CurrentUserDep,
+    actor: AuditActorDep,
     data: RecordData = Body(),
 ) -> RecordRead:
     """Update a record's data.
@@ -592,6 +609,7 @@ async def update_record_data(
         service=service,
         rt_service=rt_service,
         is_update=True,
+        actor_id=actor,
     )
 
 
@@ -671,6 +689,7 @@ async def submit_record_with_validation(
     slicer_service: SlicerServiceDep,
     session: SessionDep,
     user: CurrentUserDep,
+    actor: AuditActorDep,
     client_storage_path: ClientStoragePathDep,
     client_ip: str = Depends(get_client_ip),
     data: RecordData = Body(default={}),
@@ -716,6 +735,7 @@ async def submit_record_with_validation(
         session=session,
         client_ip=client_ip,
         client_storage_path=client_storage_path,
+        actor_id=actor,
     )
 
 
@@ -729,6 +749,7 @@ async def resubmit_record_with_validation(
     slicer_service: SlicerServiceDep,
     session: SessionDep,
     user: CurrentUserDep,
+    actor: AuditActorDep,
     client_storage_path: ClientStoragePathDep,
     client_ip: str = Depends(get_client_ip),
     data: RecordData = Body(default={}),
@@ -768,6 +789,7 @@ async def resubmit_record_with_validation(
         session=session,
         client_ip=client_ip,
         client_storage_path=client_storage_path,
+        actor_id=actor,
     )
 
 
@@ -821,14 +843,32 @@ async def check_record_files(
     record_id: int,
     _authorized_record: AuthorizedRecordDep,
     service: RecordServiceDep,
+    actor: AuditActorDep,
 ) -> FileCheckResult:
     """Compute current file checksums, compare with stored, trigger invalidation if changed.
 
     For ``blocked`` records, this endpoint also checks whether the required
     input files have appeared and auto-transitions to ``pending`` if so.
     """
-    changed_files, checksums = await service.check_files(record_id)
+    changed_files, checksums = await service.check_files(record_id, actor_id=actor)
     return FileCheckResult(changed_files=changed_files, checksums=checksums)
+
+
+@router.get("/{record_id}/events", response_model=list[RecordEventRead])
+async def get_record_events(
+    record: AuthorizedRecordDep,
+    events_repo: RecordEventRepositoryDep,
+    pagination: PaginationDep,
+) -> list[RecordEventRead]:
+    """Audit trail for this record, oldest first.
+
+    ``actor_id=null`` marks system actions (pipeline workers, RecordFlow).
+    """
+    assert record.id is not None  # SQLModel PK after get
+    events = await events_repo.list_for_record(
+        record.id, skip=pagination.skip, limit=pagination.limit
+    )
+    return [RecordEventRead.model_validate(e) for e in events]
 
 
 def _mask_run_identifier(value: str | None, raw: str | None, substitute: str | None) -> str | None:
@@ -914,6 +954,7 @@ async def fail_record(
     authorized_record: AuthorizedRecordDep,
     service: RecordServiceDep,
     user: CurrentUserDep,
+    actor: AuditActorDep,
     reason: str = Body(embed=True, min_length=1),
 ) -> RecordRead:
     """Manually mark a record as failed with a reason.
@@ -930,7 +971,7 @@ async def fail_record(
             f"Allowed: {', '.join(s.value for s in _MANUALLY_FAILABLE_STATUSES)}."
         )
 
-    updated = await service.fail_record(record_id, reason)
+    updated = await service.fail_record(record_id, reason, actor_id=actor)
     return mask_record_patient_data(RecordRead.model_validate(updated), user)
 
 
@@ -940,6 +981,7 @@ async def invalidate_record(
     _authorized_record: AuthorizedRecordDep,
     service: RecordServiceDep,
     user: CurrentUserDep,
+    actor: AuditActorDep,
     mode: Literal["hard", "soft"] = Body(default="hard"),
     source_record_id: int | None = Body(default=None),
     reason: str | None = Body(default=None),
@@ -969,6 +1011,7 @@ async def invalidate_record(
         source_record_id=source_record_id,
         reason=reason,
         acting_user=user,
+        actor_id=actor,
     )
     return RecordRead.model_validate(record)
 
@@ -1096,10 +1139,11 @@ async def find_records(
 async def assign_user_to_record(
     record_id: int,
     service: RecordServiceDep,
+    actor: AuditActorDep,
     user: User = Depends(current_active_user),
 ) -> Record:
     """Assign the current user to a record with uniqueness constraint check."""
-    return await service.claim_record(record_id, user.id)
+    return await service.claim_record(record_id, user.id, actor_id=actor)
 
 
 async def add_demo_records_for_user(

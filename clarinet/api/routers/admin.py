@@ -6,8 +6,15 @@ from uuid import UUID
 from fastapi import APIRouter
 from fastapi import Path as PathParam
 
-from clarinet.api.dependencies import AdminServiceDep, AdminUserDep, RecordServiceDep
-from clarinet.models import Record, RecordRead
+from clarinet.api.dependencies import (
+    AdminServiceDep,
+    AdminUserDep,
+    AuditActorDep,
+    PaginationDep,
+    RecordEventRepositoryDep,
+    RecordServiceDep,
+)
+from clarinet.models import Record, RecordEventRead, RecordRead
 from clarinet.models.admin import (
     AdminStats,
     ClearOutputFilesResult,
@@ -51,6 +58,7 @@ async def admin_assign_record_user(
     user_id: UUID,
     _current_user: AdminUserDep,
     service: RecordServiceDep,
+    actor: AuditActorDep,
 ) -> Record:
     """Assign a user to a record (admin only).
 
@@ -63,7 +71,7 @@ async def admin_assign_record_user(
     Returns:
         Updated record with all relations loaded.
     """
-    record, _ = await service.assign_user(record_id, user_id)
+    record, _ = await service.assign_user(record_id, user_id, actor_id=actor)
     return record
 
 
@@ -73,6 +81,7 @@ async def admin_update_record_status(
     record_status: RecordStatus,
     _current_user: AdminUserDep,
     service: RecordServiceDep,
+    actor: AuditActorDep,
 ) -> Record:
     """Set any status on a record (admin only).
 
@@ -85,7 +94,7 @@ async def admin_update_record_status(
     Returns:
         Updated record with all relations loaded.
     """
-    record, _ = await service.update_status(record_id, record_status)
+    record, _ = await service.update_status(record_id, record_status, actor_id=actor)
     return record
 
 
@@ -94,6 +103,7 @@ async def admin_unassign_record_user(
     record_id: Annotated[int, PathParam(ge=1, le=2147483647)],
     _current_user: AdminUserDep,
     service: RecordServiceDep,
+    actor: AuditActorDep,
 ) -> Record:
     """Remove user assignment from a record (admin only).
 
@@ -107,7 +117,7 @@ async def admin_unassign_record_user(
     Returns:
         Updated record with all relations loaded.
     """
-    record, _ = await service.unassign_user(record_id)
+    record, _ = await service.unassign_user(record_id, actor_id=actor)
     return record
 
 
@@ -120,12 +130,13 @@ async def delete_record_cascade(
     record_id: Annotated[int, PathParam(ge=1, le=2147483647)],
     _current_user: AdminUserDep,
     service: RecordServiceDep,
+    actor: AuditActorDep,
 ) -> DeleteRecordResult:
     """Delete a record with all descendants and their OUTPUT files (admin only).
 
     Aborts with 409 Conflict if any record in the subtree is in ``inwork`` status.
     """
-    deleted_ids, files_removed = await service.delete_record_cascade(record_id)
+    deleted_ids, files_removed = await service.delete_record_cascade(record_id, actor_id=actor)
     return DeleteRecordResult(deleted_ids=deleted_ids, files_removed=files_removed)
 
 
@@ -134,13 +145,29 @@ async def clear_record_output_files(
     record_id: Annotated[int, PathParam(ge=1, le=2147483647)],
     _current_user: AdminUserDep,
     service: RecordServiceDep,
+    actor: AuditActorDep,
 ) -> ClearOutputFilesResult:
     """Delete OUTPUT files from disk for a non-finished record (admin only).
 
     Intended for clearing stale output files before retrying a failed pipeline task.
     """
-    deleted_files, deleted_links = await service.clear_output_files(record_id)
+    deleted_files, deleted_links = await service.clear_output_files(record_id, actor_id=actor)
     return ClearOutputFilesResult(deleted_files=deleted_files, deleted_links=deleted_links)
+
+
+@router.get("/records/events/deleted", response_model=list[RecordEventRead])
+async def list_deleted_record_events(
+    _current_user: AdminUserDep,
+    events_repo: RecordEventRepositoryDep,
+    pagination: PaginationDep,
+) -> list[RecordEventRead]:
+    """Audit events of deleted records, newest first (admin only).
+
+    ``old_value`` carries a snapshot of the removed record; ``record_id``
+    is NULL because the FK was detached on delete.
+    """
+    events = await events_repo.list_deleted(skip=pagination.skip, limit=pagination.limit)
+    return [RecordEventRead.model_validate(e) for e in events]
 
 
 @router.get("/role-matrix", response_model=RoleMatrixResponse)

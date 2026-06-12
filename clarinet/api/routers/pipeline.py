@@ -30,7 +30,11 @@ from clarinet.models.pipeline_task_run import (
 
 router = APIRouter(
     responses={
+        400: {"description": "Bad request (malformed body)"},
+        401: {"description": "Not authenticated"},
+        403: {"description": "Forbidden"},
         404: {"description": "Not found"},
+        422: {"description": "Validation error"},
     },
 )
 
