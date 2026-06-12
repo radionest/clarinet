@@ -5,9 +5,10 @@ HTTP API. Status values: ``running`` | ``succeeded`` | ``failed`` | ``retrying``
 (plain strings — no DB enum, so downstream migrations stay additive).
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, Literal
 
+from pydantic import field_serializer
 from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, func
 from sqlmodel import Column, Field, SQLModel
 
@@ -130,6 +131,20 @@ class PipelineTaskRunRead(PipelineTaskRunBase):
     id: str
     created_at: datetime
     updated_at: datetime
+
+    @field_serializer("started_at", "finished_at", "created_at", "updated_at", when_used="json")
+    def _ensure_tz_aware(self, value: datetime | None) -> datetime | None:
+        """Re-attach UTC to naive timestamps so the response is RFC 3339 ``date-time``.
+
+        SQLite ``DateTime`` drops ``tzinfo`` on the read-back after insert, so a
+        freshly-created row serializes as ``2026-06-10T08:51:25`` (no offset),
+        which violates the OpenAPI ``format: date-time`` schema. PostgreSQL keeps
+        the offset; this only bites the SQLite-backed schema tests, but stored
+        timestamps are always UTC, so re-attaching it here is correct everywhere.
+        """
+        if value is not None and value.tzinfo is None:
+            return value.replace(tzinfo=UTC)
+        return value
 
 
 class PipelineTaskRunFind(SQLModel):

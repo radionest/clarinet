@@ -44,6 +44,26 @@ class TestPipelineRunEndpoints:
         assert body["finished_at"] is None
 
     @pytest.mark.asyncio
+    async def test_response_timestamps_are_tz_aware(self, client: AsyncClient):
+        """SQLite drops tzinfo on read-back; the response must stay RFC 3339.
+
+        Regression for the schemathesis ``format: date-time`` failure: a naive
+        ``2026-06-10T08:51:25`` violates the OpenAPI schema. All datetime fields
+        — including the input ``started_at`` echoed back — must carry an offset.
+        """
+        tid = await _seed_run(client)
+        resp = await client.patch(
+            pipeline_run_url(tid),
+            json={"status": "succeeded", "finished_at": datetime.now(UTC).isoformat()},
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        for field in ("started_at", "finished_at", "created_at", "updated_at"):
+            assert datetime.fromisoformat(body[field]).tzinfo is not None, (
+                f"{field}={body[field]!r} is not timezone-aware"
+            )
+
+    @pytest.mark.asyncio
     async def test_create_is_idempotent(self, client: AsyncClient):
         tid = await _seed_run(client, task_name="original")
         await _seed_run(client, task_id=tid, task_name="duplicate")
