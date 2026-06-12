@@ -56,6 +56,10 @@ Decorator-based registry for async context enrichment. Mirrors `clarinet/service
 
 `RecordType.slicer_context_hydrators: list[str] | None` (JSON column) — list of hydrator names to run.
 Set in `RecordDef` config: `slicer_context_hydrators=["patient_first_study"]`.
+Names are validated at startup: `reconcile_config` fail-fasts with `ConfigurationError`
+on any name missing from the registry (hydrators load before reconcile). Boundary:
+config-defined RecordTypes only — types mutated via the API (TOML mode) and orphaned
+DB rows are caught only by the runtime ERROR log in `hydrate_slicer_context`.
 
 ### Writing a hydrator
 

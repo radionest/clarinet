@@ -58,6 +58,16 @@ _SLICER_HYDRATOR_REGISTRY: CustomCodeRegistry[SlicerHydratorFunc] = CustomCodeRe
 )
 
 
+def get_registered_slicer_hydrator_names() -> frozenset[str]:
+    """Return the set of currently registered slicer hydrator names.
+
+    Public accessor for the module-private ``_SLICER_HYDRATOR_REGISTRY`` —
+    intended for reconcile-time validation in :func:`bootstrap.reconcile_config`
+    (mirrors ``record_data_validation.get_registered_validator_names``).
+    """
+    return _SLICER_HYDRATOR_REGISTRY.names()
+
+
 def slicer_context_hydrator(source_name: str) -> Callable[[SlicerHydratorFunc], SlicerHydratorFunc]:
     """Register a slicer context hydrator by name.
 
@@ -100,9 +110,10 @@ async def hydrate_slicer_context(
     for name in hydrator_names:
         hydrator = _SLICER_HYDRATOR_REGISTRY.get(name)
         if hydrator is None:
-            # A missing hydrator breaks the doctor's Slicer-open flow — this
-            # is a config error that should have failed startup, not a
-            # tolerable degradation.
+            # A missing hydrator breaks the doctor's Slicer-open flow.
+            # Reconcile fail-fasts on config-defined RecordTypes at startup,
+            # but types mutated via the API (TOML mode) and orphaned DB rows
+            # bypass that guard — this runtime error is their only signal.
             logger.error(f"Unknown slicer context hydrator '{name}' — skipping")
             continue
         try:
