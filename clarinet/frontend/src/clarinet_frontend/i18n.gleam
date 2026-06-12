@@ -72,6 +72,7 @@ pub type Key {
   LblLoading
 
   // --- Status badges ---
+  StatusPreparing
   StatusBlocked
   StatusPending
   StatusInProgress
@@ -479,6 +480,8 @@ pub fn translate(locale: Locale, key: Key) -> String {
     Ru, LblLoading -> "Загрузка..."
 
     // --- Status badges ---
+    En, StatusPreparing -> "Preparing"
+    Ru, StatusPreparing -> "Готовится"
     En, StatusBlocked -> "Blocked"
     Ru, StatusBlocked -> "Заблокирована"
     En, StatusPending -> "Pending"

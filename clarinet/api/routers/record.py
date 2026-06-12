@@ -539,6 +539,9 @@ async def submit_record_data(
     if record.status == RecordStatus.blocked:
         raise CONFLICT.with_context("Record is blocked — required input files are missing.")
 
+    if record.status == RecordStatus.preparing:
+        raise CONFLICT.with_context("Record is being prepared — preparation has not finished.")
+
     if record.status == RecordStatus.finished:
         raise CONFLICT.with_context("Record already finished. Use PATCH to update the record data.")
 
@@ -589,7 +592,7 @@ async def update_record_data(
     )
 
 
-_PREFILL_STATUSES = (RecordStatus.pending, RecordStatus.blocked)
+_PREFILL_STATUSES = (RecordStatus.pending, RecordStatus.blocked, RecordStatus.preparing)
 
 
 async def _do_prefill(
@@ -620,7 +623,7 @@ async def prefill_record_data_post(
     user: CurrentUserDep,
     data: RecordData = Body(),
 ) -> RecordRead:
-    """Set prefill data on a pending/blocked record. Errors if data already exists."""
+    """Set prefill data on a pending/blocked/preparing record. Errors if data already exists."""
     if authorized_record.data:
         raise CONFLICT.with_context(
             "Record already has data. Use PUT to replace or PATCH to merge."
@@ -637,7 +640,7 @@ async def prefill_record_data_put(
     user: CurrentUserDep,
     data: RecordData = Body(),
 ) -> RecordRead:
-    """Replace prefill data on a pending/blocked record."""
+    """Replace prefill data on a pending/blocked/preparing record."""
     return await _do_prefill(record_id, authorized_record, data, user, service, rt_service)
 
 
@@ -650,7 +653,7 @@ async def prefill_record_data_patch(
     user: CurrentUserDep,
     data: RecordData = Body(),
 ) -> RecordRead:
-    """Merge new data into existing prefill data on a pending/blocked record."""
+    """Merge new data into existing prefill data on a pending/blocked/preparing record."""
     merged = {**(authorized_record.data or {}), **data}
     return await _do_prefill(record_id, authorized_record, merged, user, service, rt_service)
 
@@ -690,6 +693,9 @@ async def submit_record_with_validation(
 
     if record.status == RecordStatus.blocked:
         raise CONFLICT.with_context("Record is blocked — required input files are missing.")
+
+    if record.status == RecordStatus.preparing:
+        raise CONFLICT.with_context("Record is being prepared — preparation has not finished.")
 
     if record.status == RecordStatus.finished:
         raise CONFLICT.with_context("Record already finished. Use PATCH to update the record data.")

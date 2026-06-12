@@ -11,6 +11,7 @@ pub fn render(
   translate: fn(Key) -> String,
 ) -> Element(msg) {
   let #(class_suffix, key) = case status {
+    types.Preparing -> #("badge-preparing", i18n.StatusPreparing)
     types.Blocked -> #("badge-blocked", i18n.StatusBlocked)
     types.Pending -> #("badge-pending", i18n.StatusPending)
     types.InWork -> #("badge-progress", i18n.StatusInProgress)

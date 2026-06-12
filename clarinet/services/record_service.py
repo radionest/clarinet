@@ -177,7 +177,7 @@ class RecordService:
             if file_result.valid and file_result.matched_files:
                 await self.repo.set_files(record, file_result.matched_files)
                 record = await self.repo.get_with_relations(record.id)  # type: ignore[arg-type]
-            elif not file_result.valid:
+            elif not file_result.valid and record.status != RecordStatus.preparing:
                 record, _ = await self.repo.update_status(record.id, RecordStatus.blocked)  # type: ignore[arg-type]
 
         # Fire status-change trigger for the initial status
@@ -194,6 +194,14 @@ class RecordService:
     ) -> tuple[Record, RecordStatus]:
         """Update record status and fire RecordFlow trigger if status changed.
 
+        When a record leaves ``preparing`` for ``pending``, input files are
+        re-validated *before* any status is written: an invalid file set sends
+        the record to ``blocked`` instead (check-files unblocks it later once
+        files appear), so the record is never observable as
+        pending-with-invalid-files. Direct ``preparing`` → ``inwork``/
+        ``finished`` transitions are rejected — a preparing record must exit
+        via ``pending``.
+
         Args:
             record_id: Record ID.
             new_status: New status to set.
@@ -201,17 +209,28 @@ class RecordService:
                 that bypasses the post-submit edit lock.
 
         Returns:
-            Tuple of (updated record, old status).
+            Tuple of (updated record, old status). The record's final status
+            may differ from ``new_status`` (see above).
 
         Raises:
             RecordEditLockedError: If the record is finished and its type
                 locks submitted records for *acting_user*.
+            BusinessRuleViolationError: On a direct preparing → inwork/finished
+                transition.
         """
         if acting_user is not None and not acting_user.is_superuser:
             record = await self.repo.get_with_relations(record_id)
             ensure_record_editable(record, acting_user)
-        record, old_status = await self.repo.update_status(record_id, new_status)
-        if old_status != new_status:
+        target_status = new_status
+        matched_files: dict[str, str] = {}
+        current = await self.repo.get(record_id)
+        if current.status == RecordStatus.preparing:
+            target_status, matched_files = await self._resolve_preparing_exit(record_id, new_status)
+        record, old_status = await self.repo.update_status(record_id, target_status)
+        if matched_files:
+            await self.repo.set_files(record, matched_files)
+            record = await self.repo.get_with_relations(record_id)
+        if old_status != record.status:
             await self._fire_status_change(record, old_status)
         return record, old_status
 
@@ -307,7 +326,8 @@ class RecordService:
     async def prefill_data(self, record_id: int, data: RecordData) -> tuple[Record, RecordStatus]:
         """Write prefill data without firing RecordFlow triggers.
 
-        For pipeline tasks writing preliminary data to pending/blocked records.
+        For pipeline tasks writing preliminary data to pending/blocked/preparing
+        records.
         Caller is responsible for status checks and data merging.
 
         Args:
@@ -365,6 +385,10 @@ class RecordService:
     ) -> None:
         """Update status for multiple records and fire triggers for each changed record.
 
+        ``preparing`` records are routed through :meth:`update_status` one by
+        one so the exit re-validation applies (preparing → pending may land in
+        ``blocked``) — the bulk repo path would bypass it.
+
         Args:
             record_ids: List of record IDs.
             new_status: New status to set.
@@ -375,18 +399,36 @@ class RecordService:
             RecordEditLockedError: If any target record is finished and its
                 type locks submitted records for *acting_user*. Raised before
                 any status is mutated.
+            BusinessRuleViolationError: If any target record is preparing and
+                ``new_status`` is inwork/finished. Raised before any status
+                is mutated.
         """
         # Capture old statuses (and enforce the edit lock) before bulk update
         old_statuses: dict[int, RecordStatus] = {}
+        preparing_ids: list[int] = []
         for record_id in record_ids:
             record = await self.repo.get_optional(record_id)
             if record:
                 if acting_user is not None and not acting_user.is_superuser:
                     with_type = await self.repo.get_with_relations(record_id)
                     ensure_record_editable(with_type, acting_user)
+                if record.status == RecordStatus.preparing:
+                    if new_status in (RecordStatus.inwork, RecordStatus.finished):
+                        raise BusinessRuleViolationError(
+                            f"Record {record_id} is still preparing — it must leave "
+                            f"via 'pending' (with file re-validation) before "
+                            f"'{new_status.value}'."
+                        )
+                    preparing_ids.append(record_id)
+                    continue
                 old_statuses[record_id] = record.status
 
-        await self.repo.bulk_update_status(record_ids, new_status)
+        await self.repo.bulk_update_status(list(old_statuses), new_status)
+
+        # Preparing records take the single-record path: exit re-validation
+        # applies and each fires its own trigger.
+        for record_id in preparing_ids:
+            await self.update_status(record_id, new_status, acting_user=acting_user)
 
         # Fire triggers for each record whose status actually changed
         for record_id, old_status in old_statuses.items():
@@ -468,16 +510,21 @@ class RecordService:
     async def check_files(self, record_id: int) -> tuple[list[str], dict[str, str]]:
         """Check file status, auto-unblock if ready, compute & compare checksums.
 
+        For preparing records: no-op — prefill / file generation is in flight,
+        so neither auto-unblock nor checksum bookkeeping may run.
         For blocked records: validates input files, transitions to pending if valid.
-        For non-blocked: computes checksums, registers newly appeared OUTPUT
+        For the rest: computes checksums, registers newly appeared OUTPUT
         files as ``RecordFileLink`` rows, updates DB, notifies on change.
 
         Returns:
             Tuple of (changed file keys, current checksums).
-            Empty tuple ([], {}) if record stays blocked.
+            Empty tuple ([], {}) if record stays blocked or is preparing.
         """
         record = await self.repo.get_with_relations(record_id)
         record_read = RecordRead.model_validate(record)
+
+        if record.status == RecordStatus.preparing:
+            return [], {}
 
         # Fetch parent once — feeds fallback pattern resolution for both
         # input validation (blocked records) and the OUTPUT checksum scan.
@@ -801,6 +848,46 @@ class RecordService:
                 f"User already has a record of type '{record_type.name}' "
                 f"for this {record_type.level.lower()} context"
             )
+
+    async def _resolve_preparing_exit(
+        self, record_id: int, new_status: RecordStatus
+    ) -> tuple[RecordStatus, dict[str, str]]:
+        """Resolve the target status for a record leaving ``preparing``.
+
+        Records created as ``preparing`` skip creation-time auto-blocking, so
+        missing input files are caught on exit instead. For the ``pending``
+        target the files are validated before any status is written; an
+        invalid set redirects the transition to ``blocked`` (check-files
+        unblocks it later). No file registry → pending. ``inwork`` and
+        ``finished`` are rejected — a preparing record must pass through
+        ``pending`` and its file re-validation first.
+
+        Returns:
+            Tuple of (resolved status, matched files for ``set_files``).
+
+        Raises:
+            BusinessRuleViolationError: On a direct preparing → inwork/finished
+                transition (→ 409).
+        """
+        if new_status in (RecordStatus.inwork, RecordStatus.finished):
+            raise BusinessRuleViolationError(
+                f"Record {record_id} is still preparing — it must leave via "
+                f"'pending' (with file re-validation) before '{new_status.value}'."
+            )
+        if new_status != RecordStatus.pending:
+            return new_status, {}
+        record = await self.repo.get_with_relations(record_id)
+        record_read = RecordRead.model_validate(record)
+        parent_read = None
+        if record.parent_record_id is not None:
+            parent = await self.repo.get_with_relations(record.parent_record_id)
+            parent_read = RecordRead.model_validate(parent)
+        file_result = await validate_record_files(record_read, parent=parent_read)
+        if file_result is None:
+            return RecordStatus.pending, {}
+        if not file_result.valid:
+            return RecordStatus.blocked, {}
+        return RecordStatus.pending, file_result.matched_files or {}
 
     async def _register_output_links(
         self,

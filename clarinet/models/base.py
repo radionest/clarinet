@@ -34,8 +34,15 @@ class BaseModel(SQLModel):
 
 
 class RecordStatus(str, enum.Enum):
-    """Enumeration of possible record status values."""
+    """Enumeration of possible record status values.
 
+    ``preparing`` — the system is still preparing the record (prefill,
+    file/context generation); released only by an explicit status update.
+    ``blocked`` — prerequisites not met (currently: required input files);
+    released automatically by check-files when prerequisites are satisfied.
+    """
+
+    preparing = "preparing"
     blocked = "blocked"
     pending = "pending"
     inwork = "inwork"

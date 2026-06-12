@@ -386,6 +386,7 @@ pub type RoleMatrix {
 // Per-status record counts for a record type
 pub type RecordTypeStatusCounts {
   RecordTypeStatusCounts(
+    preparing: Int,
     blocked: Int,
     pending: Int,
     inwork: Int,

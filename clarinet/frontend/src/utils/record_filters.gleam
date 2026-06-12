@@ -90,6 +90,7 @@ pub fn apply_filters(
 pub fn status_options(translate: fn(Key) -> String) -> List(#(String, String)) {
   [
     #("", translate(i18n.FilterAllStatuses)),
+    #("preparing", translate(i18n.StatusPreparing)),
     #("blocked", translate(i18n.StatusBlocked)),
     #("pending", translate(i18n.StatusPending)),
     #("inwork", translate(i18n.StatusInProgress)),

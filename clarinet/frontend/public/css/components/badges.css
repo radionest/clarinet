@@ -51,6 +51,11 @@
     color: var(--ink-soft);
 }
 
+.badge-preparing {
+    background: var(--teal-wash);
+    color: var(--teal);
+}
+
 .badge-paused {
     background: var(--plum-wash);
     color: var(--plum);
