@@ -734,7 +734,7 @@ class ClarinetClient:
         *,
         method: Literal["POST", "PUT", "PATCH"] = "POST",
     ) -> RecordRead:
-        """Write prefill data to a pending/blocked record without triggering flows.
+        """Write prefill data to a pending/blocked/preparing record without triggering flows.
 
         Args:
             record_id: Record ID.

@@ -237,7 +237,7 @@ class SyncPipelineClient:
         *,
         method: Literal["POST", "PUT", "PATCH"] = "POST",
     ) -> RecordRead:
-        """Prefill data on a pending/blocked record without triggering flows."""
+        """Prefill data on a pending/blocked/preparing record without triggering flows."""
         return _call_async(
             self._client.prefill_record_data(record_id, data, method=method),
             self._loop,

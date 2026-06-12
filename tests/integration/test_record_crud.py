@@ -614,3 +614,106 @@ async def test_prefill_partial_validation_rejects_type_errors(client, _pending_r
         json={"lesions": "not-an-array"},
     )
     assert response.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Preparing status tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_prefill_allows_preparing_record(client, test_session, _pending_record):
+    """Prefill works on preparing records without changing status."""
+    _pending_record.status = RecordStatus.preparing
+    test_session.add(_pending_record)
+    await test_session.commit()
+
+    response = await client.post(
+        f"/api/records/{_pending_record.id}/data/prefill",
+        json={"lesions": [{"lesion_num": 1}]},
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "preparing"
+
+
+@pytest.mark.asyncio
+async def test_submit_rejects_preparing_record(client, test_session, _pending_record):
+    """Submit returns 409 for a preparing record."""
+    _pending_record.status = RecordStatus.preparing
+    test_session.add(_pending_record)
+    await test_session.commit()
+
+    response = await client.post(
+        f"/api/records/{_pending_record.id}/data",
+        json={"lesions": []},
+    )
+    assert response.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_create_record_with_preparing_status(
+    client, test_patient, test_study, test_series, _prefill_record_type
+):
+    """POST /records with status=preparing creates the record in preparing status."""
+    response = await client.post(
+        "/api/records/",
+        json={
+            "patient_id": test_patient.id,
+            "study_uid": test_study.study_uid,
+            "series_uid": test_series.series_uid,
+            "record_type_name": _prefill_record_type.name,
+            "status": "preparing",
+        },
+    )
+    assert response.status_code == 201
+    assert response.json()["status"] == "preparing"
+
+
+@pytest.mark.asyncio
+async def test_status_update_preparing_to_pending(client, test_session, _pending_record):
+    """PATCH /status preparing → pending succeeds when the type has no file registry."""
+    _pending_record.status = RecordStatus.preparing
+    test_session.add(_pending_record)
+    await test_session.commit()
+
+    response = await client.patch(
+        f"/api/records/{_pending_record.id}/status",
+        params={"record_status": "pending"},
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "pending"
+
+
+@pytest.mark.asyncio
+async def test_check_files_does_not_touch_preparing_record(
+    client, test_session, test_series, _pending_record
+):
+    """check-files never changes a preparing record's status (auto-unblock is blocked-only)."""
+    # series_uid makes the record match its type's SERIES level — check-files
+    # resolves working dirs by that level (prefill tests never hit this path).
+    _pending_record.series_uid = test_series.series_uid
+    _pending_record.status = RecordStatus.preparing
+    test_session.add(_pending_record)
+    await test_session.commit()
+
+    response = await client.post(f"/api/records/{_pending_record.id}/check-files")
+    assert response.status_code == 200
+
+    await test_session.refresh(_pending_record)
+    assert _pending_record.status == RecordStatus.preparing
+
+
+@pytest.mark.asyncio
+async def test_assign_user_rejects_preparing_record(
+    client, test_session, test_user, _pending_record
+):
+    """Assigning a user to a preparing record fails with 422 (ValidationError)."""
+    _pending_record.status = RecordStatus.preparing
+    test_session.add(_pending_record)
+    await test_session.commit()
+
+    response = await client.patch(
+        f"/api/records/{_pending_record.id}/user",
+        params={"user_id": str(test_user.id)},
+    )
+    assert response.status_code == 422

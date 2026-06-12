@@ -554,7 +554,7 @@ class RecordRepository(BaseRepository[Record]):
     ) -> Sequence[Record]:
         """Find active (non-terminal) records assigned to a user with relations loaded.
 
-        Returns records that are not blocked, finished, failed, or paused.
+        Returns records that are not preparing, blocked, finished, failed, or paused.
 
         Args:
             user_id: User UUID to filter by
@@ -574,6 +574,7 @@ class RecordRepository(BaseRepository[Record]):
         needs_join = role_names is not None or exclude_unique_violations
         statement = select(Record).where(
             user_filter,
+            Record.status != RecordStatus.preparing,
             Record.status != RecordStatus.blocked,
             Record.status != RecordStatus.finished,
             Record.status != RecordStatus.failed,
@@ -828,11 +829,11 @@ class RecordRepository(BaseRepository[Record]):
         Raises:
             RecordNotFoundError: If record doesn't exist
             UserNotFoundError: If user doesn't exist
-            ValidationError: If record is blocked
+            ValidationError: If record is blocked or preparing
         """
         record = await self.get(record_id)
-        if record.status == RecordStatus.blocked:
-            raise ValidationError("Cannot assign user to a blocked record")
+        if record.status in (RecordStatus.blocked, RecordStatus.preparing):
+            raise ValidationError(f"Cannot assign user to a {record.status.value} record")
         user = await self.session.get(User, user_id)
         if not user:
             raise UserNotFoundError(user_id)

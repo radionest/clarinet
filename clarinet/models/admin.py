@@ -16,6 +16,7 @@ class AdminStats(PydanticBaseModel):
 class RecordTypeStatusCounts(PydanticBaseModel):
     """Per-status record counts for a record type."""
 
+    preparing: int = 0
     blocked: int = 0
     pending: int = 0
     inwork: int = 0

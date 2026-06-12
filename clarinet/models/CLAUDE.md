@@ -101,13 +101,35 @@ Key points:
 - All `RecordType`/`Record` queries must use `selectinload` for file links
 - `RecordRead.files`/`file_checksums` are **deprecated** — use `file_links` instead
 
-## Record Status: `blocked`
+## Record Statuses: `preparing` / `blocked`
 
-`RecordStatus.blocked` — record created but required input files not yet available.
+Three "record not available for work" statuses with distinct exit conditions:
+
+| Status | Why unavailable | Who releases it |
+|---|---|---|
+| `preparing` | system is preparing the record (prefill, file/context generation) | flow/pipeline, via explicit status update only |
+| `blocked` | prerequisites not met (currently: required input files) | automatic, via check-files |
+| `pause` | administrative decision | human |
+
+Lifecycle: `preparing → (blocked if files missing) → pending → inwork → finished/failed`.
+
+`blocked` contract: "prerequisites not met". Today the only prerequisite is
+required input files; completed sibling record types may be added later.
 - Records with missing required input files get `blocked` status on creation (instead of raising)
 - `POST /records/{id}/check-files` auto-unblocks when files appear → transitions to `pending`
-- Blocked records cannot be assigned to users or accept data submissions
-- `find_pending_by_user()` excludes blocked records
+
+`preparing` contract: "the system is actively preparing the record".
+- Set via `RecordCreate(status="preparing")` or `update_status` / RecordFlow `update_record(status='preparing')`
+- Creation-time auto-blocking is skipped for `preparing` records (files are checked on exit instead)
+- `check_files` never touches `preparing` records — this is what removes the
+  race between prefill and a concurrent check-files call
+- On the explicit `preparing → pending` transition, `RecordService.update_status`
+  re-validates input files: invalid → the record lands in `blocked`, not `pending`
+  (linearizes both waits: preparation → file wait → ready)
+- Prefill is allowed (like `blocked`); submit returns 409
+
+Both `preparing` and `blocked` records cannot be assigned to users or accept
+data submissions; `find_pending_by_user()` excludes both.
 
 ## Frontend Consistency
 

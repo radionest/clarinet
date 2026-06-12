@@ -177,7 +177,7 @@ class RecordService:
             if file_result.valid and file_result.matched_files:
                 await self.repo.set_files(record, file_result.matched_files)
                 record = await self.repo.get_with_relations(record.id)  # type: ignore[arg-type]
-            elif not file_result.valid:
+            elif not file_result.valid and record.status != RecordStatus.preparing:
                 record, _ = await self.repo.update_status(record.id, RecordStatus.blocked)  # type: ignore[arg-type]
 
         # Fire status-change trigger for the initial status
@@ -194,6 +194,10 @@ class RecordService:
     ) -> tuple[Record, RecordStatus]:
         """Update record status and fire RecordFlow trigger if status changed.
 
+        When a record leaves ``preparing`` for ``pending``, input files are
+        re-validated: an invalid file set sends the record to ``blocked``
+        instead (check-files unblocks it later once files appear).
+
         Args:
             record_id: Record ID.
             new_status: New status to set.
@@ -201,7 +205,8 @@ class RecordService:
                 that bypasses the post-submit edit lock.
 
         Returns:
-            Tuple of (updated record, old status).
+            Tuple of (updated record, old status). The record's final status
+            may differ from ``new_status`` (see above).
 
         Raises:
             RecordEditLockedError: If the record is finished and its type
@@ -211,7 +216,9 @@ class RecordService:
             record = await self.repo.get_with_relations(record_id)
             ensure_record_editable(record, acting_user)
         record, old_status = await self.repo.update_status(record_id, new_status)
-        if old_status != new_status:
+        if old_status == RecordStatus.preparing and new_status == RecordStatus.pending:
+            record = await self._resolve_pending_after_preparing(record)
+        if old_status != record.status:
             await self._fire_status_change(record, old_status)
         return record, old_status
 
@@ -307,7 +314,8 @@ class RecordService:
     async def prefill_data(self, record_id: int, data: RecordData) -> tuple[Record, RecordStatus]:
         """Write prefill data without firing RecordFlow triggers.
 
-        For pipeline tasks writing preliminary data to pending/blocked records.
+        For pipeline tasks writing preliminary data to pending/blocked/preparing
+        records.
         Caller is responsible for status checks and data merging.
 
         Args:
@@ -801,6 +809,38 @@ class RecordService:
                 f"User already has a record of type '{record_type.name}' "
                 f"for this {record_type.level.lower()} context"
             )
+
+    async def _resolve_pending_after_preparing(self, record: Record) -> Record:
+        """Re-validate input files when a record leaves ``preparing`` for ``pending``.
+
+        Records created as ``preparing`` skip creation-time auto-blocking, so
+        missing input files are caught here instead: an invalid file set sends
+        the record to ``blocked`` (check-files unblocks it later), valid
+        matches are registered as file links. No file registry → stays pending.
+
+        Args:
+            record: Record with relations loaded, already set to ``pending``.
+
+        Returns:
+            Record with relations loaded and the resolved status.
+        """
+        assert record.id is not None  # SQLModel PK after get
+        record_id = record.id
+        record_read = RecordRead.model_validate(record)
+        parent_read = None
+        if record.parent_record_id is not None:
+            parent = await self.repo.get_with_relations(record.parent_record_id)
+            parent_read = RecordRead.model_validate(parent)
+        file_result = await validate_record_files(record_read, parent=parent_read)
+        if file_result is None:
+            return record
+        if not file_result.valid:
+            record, _ = await self.repo.update_status(record_id, RecordStatus.blocked)
+            return record
+        if file_result.matched_files:
+            await self.repo.set_files(record, file_result.matched_files)
+            record = await self.repo.get_with_relations(record_id)
+        return record
 
     async def _register_output_links(
         self,
