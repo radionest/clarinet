@@ -344,7 +344,6 @@ def registry(monkeypatch):
     """
     reg: CustomCodeRegistry[object] = CustomCodeRegistry(
         filename_setting="config_validators_file",
-        module_name="clarinet_test_registry_module",
         label="test item",
     )
     monkeypatch.setattr(custom_registry_module, "_TEST_REGISTRY", reg, raising=False)
@@ -396,7 +395,7 @@ class TestCustomCodeRegistry:
         assert registry.load_from(tmp_path) == 0
         assert registry.load_from(tmp_path / "nonexistent") == 0
 
-    def test_load_from_registers_and_cleans_up(self, registry, tmp_path):
+    def test_load_from_registers_and_caches(self, registry, tmp_path):
         (tmp_path / "validators.py").write_text(_REGISTERING_FILE)
 
         sys_path_before = list(sys.path)
@@ -404,8 +403,9 @@ class TestCustomCodeRegistry:
 
         assert count == 2
         assert registry.names() == frozenset({"loaded.one", "loaded.two"})
+        # No sys.path mutation; the file is cached as a clarinet_plan submodule.
         assert sys.path == sys_path_before
-        assert "clarinet_test_registry_module" not in sys.modules
+        assert "clarinet_plan.validators" in sys.modules
 
     def test_load_from_counts_only_new_names(self, registry, tmp_path):
         registry.register("loaded.one", 0)
@@ -431,6 +431,38 @@ class TestCustomCodeRegistry:
 
         assert registry.load_from(tmp_path) == 0
         assert any("registered no new" in m for m in captured)
+
+    def test_load_from_cache_hit_empty_registry_warns(self, registry, tmp_path, monkeypatch):
+        """Cache hit against an EMPTY registry is the #352 silent-degradation
+        shape (a fixture cleared the registry while the module stayed cached)
+        — it must still warn."""
+        (tmp_path / "validators.py").write_text(_REGISTERING_FILE)
+        assert registry.load_from(tmp_path) == 2  # fresh import: populate + cache
+
+        registry.clear()  # registry emptied, module remains in sys.modules
+
+        captured: list[str] = []
+        monkeypatch.setattr(
+            custom_registry_module.logger,
+            "warning",
+            lambda msg, *a, **kw: captured.append(str(msg)),
+        )
+        assert registry.load_from(tmp_path) == 0  # cache hit, nothing re-runs
+        assert any("registered no new" in m for m in captured)
+
+    def test_load_from_cache_hit_nonempty_registry_silent(self, registry, tmp_path, monkeypatch):
+        """Cache hit against a NON-empty registry is benign — no warning."""
+        (tmp_path / "validators.py").write_text(_REGISTERING_FILE)
+        assert registry.load_from(tmp_path) == 2  # populate + cache
+
+        captured: list[str] = []
+        monkeypatch.setattr(
+            custom_registry_module.logger,
+            "warning",
+            lambda msg, *a, **kw: captured.append(str(msg)),
+        )
+        assert registry.load_from(tmp_path) == 0  # cache hit, registry still full
+        assert not captured
 
     def test_load_from_broken_file_raises(self, registry, tmp_path):
         (tmp_path / "validators.py").write_text("raise RuntimeError('import error')\n")
@@ -469,16 +501,16 @@ class TestLoadPythonConfigFailFast:
             await load_python_config(tmp_path)
 
     @pytest.mark.asyncio
-    async def test_files_catalog_in_custom_subdirectory_sibling_import(self, tmp_path, monkeypatch):
-        """files_catalog.py in its own subdirectory must be able to import its
-        siblings — the loader puts the catalog's parent on sys.path too."""
+    async def test_files_catalog_in_custom_subdirectory_package_import(self, tmp_path, monkeypatch):
+        """files_catalog.py in its own subdirectory imports a sibling via the
+        ``clarinet_plan.<subdir>`` package path — no sys.path entry needed."""
         from clarinet.settings import settings
 
         (tmp_path / "catalog").mkdir()
         (tmp_path / "catalog" / "helper_defs.py").write_text("PATTERN = 'seg.nrrd'\n")
         (tmp_path / "catalog" / "files_catalog.py").write_text(
             textwrap.dedent("""\
-            from helper_defs import PATTERN
+            from clarinet_plan.catalog.helper_defs import PATTERN
 
             from clarinet.config.primitives import FileDef
 
@@ -494,10 +526,7 @@ class TestLoadPythonConfigFailFast:
         )
 
         monkeypatch.setattr(settings, "config_files_catalog_file", "catalog/files_catalog.py")
-        monkeypatch.delitem(sys.modules, "helper_defs", raising=False)
-        try:
-            items = await load_python_config(tmp_path)
-        finally:
-            sys.modules.pop("helper_defs", None)
+        # The autouse _plan_package_sanitation fixture purges clarinet_plan.* afterwards.
+        items = await load_python_config(tmp_path)
 
         assert [item.name for item in items] == ["rt-catalog-subdir"]

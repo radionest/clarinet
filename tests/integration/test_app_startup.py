@@ -269,12 +269,10 @@ async def test_startup_loads_hydrators_before_reconcile(startup_settings, monkey
     """RecordType referencing a custom slicer hydrator passes reconcile.
 
     Reconcile validates ``slicer_context_hydrators`` names against the
-    registry, so the lifespan must load ``context_hydrators.py`` BEFORE
+    registry, so the lifespan must load ``slicer_hydrators.py`` BEFORE
     ``reconcile_config()`` — this lifespan would crash with
     ``ConfigurationError`` if the order regressed.
     """
-    import sys
-
     from clarinet.services.slicer.context_hydration import (
         _SLICER_HYDRATOR_REGISTRY,
         get_registered_slicer_hydrator_names,
@@ -282,7 +280,7 @@ async def test_startup_loads_hydrators_before_reconcile(startup_settings, monkey
 
     plan_dir = tmp_path / "plan"
     plan_dir.mkdir()
-    (plan_dir / "context_hydrators.py").write_text(
+    (plan_dir / "slicer_hydrators.py").write_text(
         "from clarinet.services.slicer.context_hydration import slicer_context_hydrator\n"
         "\n"
         "@slicer_context_hydrator('startup_order_probe')\n"
@@ -300,7 +298,7 @@ async def test_startup_loads_hydrators_before_reconcile(startup_settings, monkey
     )
     monkeypatch.setattr(settings, "config_mode", "python")
     monkeypatch.setattr(settings, "config_tasks_path", str(plan_dir))
-    monkeypatch.delitem(sys.modules, "record_types", raising=False)
+    # The autouse _plan_package_sanitation fixture purges clarinet_plan.* afterwards.
 
     saved = _SLICER_HYDRATOR_REGISTRY.snapshot()
     app = FastAPI(lifespan=lifespan)

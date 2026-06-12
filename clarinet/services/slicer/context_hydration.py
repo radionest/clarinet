@@ -53,7 +53,6 @@ type SlicerHydratorFunc = Callable[
 
 _SLICER_HYDRATOR_REGISTRY: CustomCodeRegistry[SlicerHydratorFunc] = CustomCodeRegistry(
     filename_setting="config_context_hydrators_file",
-    module_name="clarinet_custom_slicer_hydrators",
     label="slicer context hydrator",
 )
 

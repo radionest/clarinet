@@ -86,12 +86,34 @@ def _load_plan_registries() -> None:
     references (``data_validators``, ``slicer_context_hydrators``) against
     these registries. Each loader logs the registered names itself.
 
+    Clears the three registries first so a second lifespan in the same process
+    re-executes the plan files against an empty registry (otherwise
+    ``validators.py`` re-registers an already-present name and raises a
+    duplicate ``ValueError`` → bogus ``StartupError``). ``study_series`` is the
+    only built-in living in a registry; ``clear()`` drops it, so re-register the
+    built-ins right after.
+
     Raises:
         ConfigLoadError: If any of the plan files fails to import.
     """
-    from clarinet.services.record_data_validation import load_custom_validators
-    from clarinet.services.schema_hydration import load_custom_hydrators
-    from clarinet.services.slicer.context_hydration import load_custom_slicer_hydrators
+    from clarinet.services.record_data_validation import (
+        _VALIDATOR_REGISTRY,
+        load_custom_validators,
+    )
+    from clarinet.services.schema_hydration import (
+        _HYDRATOR_REGISTRY,
+        _register_builtin_hydrators,
+        load_custom_hydrators,
+    )
+    from clarinet.services.slicer.context_hydration import (
+        _SLICER_HYDRATOR_REGISTRY,
+        load_custom_slicer_hydrators,
+    )
+
+    _VALIDATOR_REGISTRY.clear()
+    _HYDRATOR_REGISTRY.clear()
+    _SLICER_HYDRATOR_REGISTRY.clear()
+    _register_builtin_hydrators()
 
     load_custom_validators(settings.config_tasks_path)
     load_custom_hydrators(settings.config_tasks_path)
@@ -212,6 +234,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     await add_default_user_roles()
 
     try:
+        # Anchor the clarinet_plan package at the config root, import record
+        # types (sets FileDef names before validators.py reads them), then load
+        # the validator/hydrator registries — all before reconcile.
+        from clarinet.config.plan_package import activate_plan_package
+        from clarinet.config.python_loader import _ensure_record_types_imported
+
+        activate_plan_package(settings.config_tasks_path)
+        _ensure_record_types_imported()
         _load_plan_registries()
     except ConfigLoadError as e:
         raise _config_startup_error(e) from e

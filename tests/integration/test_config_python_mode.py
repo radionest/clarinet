@@ -235,7 +235,7 @@ async def test_bootstrap_loads_python_config(
         tmp_path,
         """\
         from clarinet.config.primitives import RecordDef, FileRef
-        from files_catalog import seg_mask
+        from clarinet_plan.files_catalog import seg_mask
 
         lesion_seg = RecordDef(
             name="lesion-seg",
@@ -278,7 +278,7 @@ async def test_file_refs_resolved(
         """\
         from clarinet.config.primitives import RecordDef, FileRef
         from clarinet.models.file_schema import FileRole
-        from files_catalog import master_model
+        from clarinet_plan.files_catalog import master_model
 
         ai_analysis = RecordDef(
             name="ai-analysis",
@@ -430,6 +430,13 @@ async def test_reconcile_updates_on_change(
     )
     (tmp_path / "mutable_type.schema.json").write_text('{"type": "object"}')
 
+    # Re-reading a changed plan file means re-importing it — production does
+    # this by re-activating the anchor at each app start. Simulate a restart so
+    # the second load picks up Version 2 instead of the cached Version 1.
+    from clarinet.config.plan_package import deactivate_plan_package
+
+    deactivate_plan_package()
+
     config_items = await load_python_config(tmp_path)
     result = await reconcile_record_types(config_items, test_session)
     assert "mutable-type" in result.updated
@@ -462,7 +469,7 @@ async def test_file_level_persisted(
         tmp_path,
         """\
         from clarinet.config.primitives import RecordDef, FileRef
-        from files_catalog import patient_data
+        from clarinet_plan.files_catalog import patient_data
 
         cross_level = RecordDef(
             name="cross-level",
@@ -642,7 +649,7 @@ async def test_custom_files_catalog_path(
     (tmp_path / "definitions" / "record_types.py").write_text(
         textwrap.dedent("""\
         from clarinet.config.primitives import RecordDef, FileRef
-        from files_catalog import custom_file
+        from clarinet_plan.definitions.files_catalog import custom_file
 
         catalog_test = RecordDef(
             name="catalog-test",

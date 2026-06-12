@@ -343,6 +343,50 @@ async def _to_record_type_create(
     return RecordTypeCreate(**kwargs)
 
 
+def _ensure_record_types_imported(folder: Path | None = None) -> None:
+    """Import the catalog + ``record_types`` modules and set FileDef names.
+
+    Ordering is strict and matters:
+
+    1. import ``clarinet_plan.<files_catalog>`` (if the file exists);
+    2. set FileDef names from the catalog module;
+    3. import ``clarinet_plan.<record_types>`` (if the file exists);
+    4. single-file fallback — no catalog → set FileDef names from
+       ``record_types`` itself.
+
+    Idempotent: ``import_plan_module`` returns the cached module on re-entry,
+    and ``_set_file_names_from_module`` only fills *empty* names.
+
+    Must run after the anchor is active (it calls ``ensure_plan_root`` itself)
+    and **before** any plan file that transitively imports ``record_types``
+    (e.g. ``validators.py``) — otherwise module-level reads of ``FileDef.name``
+    would see ``""`` because the names are assigned here.
+
+    Args:
+        folder: Config root (defaults to ``settings.config_tasks_path``).
+
+    Raises:
+        ConfigLoadError: If the catalog or ``record_types`` file fails to import.
+    """
+    from clarinet.config.plan_package import ensure_plan_root, import_plan_module, module_name_for
+    from clarinet.settings import settings
+
+    root = Path(folder) if folder is not None else Path(settings.config_tasks_path)
+    ensure_plan_root(root)
+
+    catalog_file = root / settings.config_files_catalog_file
+    has_catalog = catalog_file.is_file()
+    if has_catalog:
+        catalog = import_plan_module(module_name_for(catalog_file), path_hint=catalog_file)
+        _set_file_names_from_module(catalog)
+
+    record_types_file = root / settings.config_record_types_file
+    if record_types_file.is_file():
+        rt = import_plan_module(module_name_for(record_types_file), path_hint=record_types_file)
+        if not has_catalog:
+            _set_file_names_from_module(rt)
+
+
 async def load_python_config(folder: Path) -> list[RecordTypeCreate]:
     """Load RecordType definitions from Python files in *folder*.
 
@@ -355,8 +399,9 @@ async def load_python_config(folder: Path) -> list[RecordTypeCreate]:
     If ``files_catalog.py`` is absent, FileDef instances in
     ``record_types.py`` get their names auto-derived (single-file mode).
 
-    ``record_types.py`` imports from ``files_catalog.py`` to reference
-    shared FileDef objects.
+    ``record_types.py`` imports from ``files_catalog.py`` via the
+    ``clarinet_plan.`` prefix (or a relative import) to reference shared FileDef
+    objects.
 
     Args:
         folder: Path to the folder containing Python config files.
@@ -369,6 +414,7 @@ async def load_python_config(folder: Path) -> list[RecordTypeCreate]:
             fails to import — a broken Python config must crash startup,
             not silently reconcile zero record types.
     """
+    from clarinet.config.plan_package import import_plan_module, module_name_for
     from clarinet.settings import settings
 
     record_types_file = folder / settings.config_record_types_file
@@ -376,51 +422,21 @@ async def load_python_config(folder: Path) -> list[RecordTypeCreate]:
         logger.warning(f"No {settings.config_record_types_file} found in {folder}")
         return []
 
-    files_catalog_file = folder / settings.config_files_catalog_file
-    has_catalog = files_catalog_file.is_file()
+    # Imports catalog + record_types and assigns FileDef names (idempotent).
+    _ensure_record_types_imported(folder)
 
-    # files_catalog may live in a different subdirectory than record_types —
-    # its parent must be importable too (record_types parent stays highest).
-    import_dirs = [folder]
-    if has_catalog:
-        import_dirs.append(files_catalog_file.parent)
-    import_dirs.append(record_types_file.parent)
+    module = import_plan_module(module_name_for(record_types_file), path_hint=record_types_file)
 
-    catalog_module_name: str | None = None
-    with config_sys_path(*import_dirs):
-        try:
-            # Load files_catalog first (if present) to set FileDef names.
-            # Keep it in sys.modules so record_types.py can import it.
-            if has_catalog:
-                catalog_module = load_module_from_file(
-                    files_catalog_file.stem, files_catalog_file, keep_in_sys=True
-                )
-                catalog_module_name = files_catalog_file.stem
-                _set_file_names_from_module(catalog_module)
+    rt_defs = _collect_named_instances(module, RecordDef)
+    if not rt_defs:
+        logger.warning(f"No RecordDef instances found in {record_types_file}")
+        return []
 
-            # Load record_types module (catalog is available for import)
-            module = load_module_from_file(record_types_file.stem, record_types_file)
+    logger.info(f"Found {len(rt_defs)} RecordDef(s) in {record_types_file}")
 
-            # Single-file mode: set file names from record_types.py itself
-            if not has_catalog:
-                _set_file_names_from_module(module)
+    result: list[RecordTypeCreate] = []
+    for _var_name, rt_def in rt_defs:
+        config_item = await _to_record_type_create(rt_def, folder)
+        result.append(config_item)
 
-            # Collect RecordDef instances
-            rt_defs = _collect_named_instances(module, RecordDef)
-            if not rt_defs:
-                logger.warning(f"No RecordDef instances found in {record_types_file}")
-                return []
-
-            logger.info(f"Found {len(rt_defs)} RecordDef(s) in {record_types_file}")
-
-            # Convert to RecordTypeCreate objects
-            result: list[RecordTypeCreate] = []
-            for _var_name, rt_def in rt_defs:
-                config_item = await _to_record_type_create(rt_def, folder)
-                result.append(config_item)
-
-            return result
-
-        finally:
-            if catalog_module_name:
-                sys.modules.pop(catalog_module_name, None)
+    return result
