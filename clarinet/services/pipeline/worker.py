@@ -42,27 +42,33 @@ def get_worker_queues() -> list[str]:
 def load_task_modules() -> None:
     """Import flow files to register pipeline tasks on per-queue brokers.
 
-    Discovers ``*_flow.py`` files from ``settings.recordflow_paths`` and
-    loads them via ``importlib.util`` so that ``@pipeline_task()`` and
+    Discovers ``*_flow.py`` files from ``settings.recordflow_paths`` and imports
+    each as a ``clarinet_plan.`` submodule so that ``@pipeline_task()`` and
     ``@broker.task()`` decorators populate the per-queue broker registry.
 
-    Before loading, adds the tasks directory to ``sys.path`` and pre-loads
-    ``record_types.py`` (if present) so that sibling imports like
-    ``from record_types import master_model`` work in flow files.
+    ``record_types`` is imported once via ``_ensure_record_types_imported`` (off
+    the same anchor root), so flow files reference record types through
+    ``from clarinet_plan.record_types import master_model``. Every
+    ``recordflow_path`` must live inside ``config_tasks_path`` — a path outside
+    the anchor root is reported as a ``ConfigLoadError``.
 
     Raises:
-        ConfigLoadError: Aggregated error when any flow file (or a path's
-            ``record_types.py``) fails to import — every path and file is
+        ConfigLoadError: Aggregated error when any flow file fails to import (or
+            a path lives outside the plan root) — every path and file is
             attempted first, so one crash reports all broken files.
     """
     from pathlib import Path
 
-    from clarinet.config.python_loader import (
-        config_sys_path,
-        load_module_from_file,
-        preload_record_types,
+    from clarinet.config.plan_package import (
+        ensure_plan_root,
+        import_plan_module,
+        module_name_for,
     )
+    from clarinet.config.python_loader import _ensure_record_types_imported
     from clarinet.services.recordflow.flow_loader import find_flow_files
+
+    # Anchor + record types (sets FileDef names) before importing any flow file.
+    _ensure_record_types_imported()
 
     failures: list[ConfigLoadError] = []
     for path_str in settings.recordflow_paths:
@@ -70,23 +76,20 @@ def load_task_modules() -> None:
         tasks_dir = path if path.is_dir() else path.parent
         flow_files = find_flow_files(path) if path.is_dir() else [path]
 
-        # Tasks dir on sys.path for sibling imports; record_types.py pre-loaded
         try:
-            with config_sys_path(tasks_dir), preload_record_types(tasks_dir):
-                for flow_file in flow_files:
-                    try:
-                        # keep_in_sys: flow files may import each other; a
-                        # re-execution would re-register @pipeline_task and
-                        # trip the task-name collision guard.
-                        load_module_from_file(flow_file.stem, flow_file, keep_in_sys=True)
-                    except ConfigLoadError as e:
-                        failures.append(e)
-                        continue
-                    logger.info(f"Loaded pipeline tasks from {flow_file}")
+            # Validates recordflow_path is inside config_tasks_path.
+            ensure_plan_root(tasks_dir)
         except ConfigLoadError as e:
-            # Broken record_types.py for this path — record it and keep
-            # probing the remaining paths so the aggregate lists everything.
             failures.append(e)
+            continue
+
+        for flow_file in flow_files:
+            try:
+                import_plan_module(module_name_for(flow_file), path_hint=flow_file)
+            except ConfigLoadError as e:
+                failures.append(e)
+                continue
+            logger.info(f"Loaded pipeline tasks from {flow_file}")
 
     if failures:
         raise ConfigLoadError.aggregate(failures, kind="pipeline task module")
@@ -173,6 +176,11 @@ async def run_worker(
     brokers: list[AsyncBroker] = []
     try:
         try:
+            from clarinet.config.plan_package import activate_plan_package
+
+            # Anchor the clarinet_plan package at the config root before
+            # importing any flow file (mirrors the API lifespan).
+            activate_plan_package(settings.config_tasks_path)
             load_task_modules()
         except ConfigLoadError as e:
             logger.error(f"Cannot start worker — project task modules failed to load: {e}")

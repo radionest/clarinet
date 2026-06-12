@@ -839,44 +839,70 @@ class TestLoadTaskModulesFailFast:
 
         (tmp_path / "a_broken_flow.py").write_text("raise RuntimeError('first failure')\n")
         (tmp_path / "b_broken_flow.py").write_text("raise RuntimeError('second failure')\n")
+        monkeypatch.setattr(settings, "config_tasks_path", str(tmp_path))
         monkeypatch.setattr(settings, "recordflow_paths", [str(tmp_path)])
         monkeypatch.setattr(settings, "have_dicom", False)
 
         with pytest.raises(ConfigLoadError, match="2 pipeline task module"):
             load_task_modules()
 
-    def test_broken_record_types_does_not_drop_other_failures(self, tmp_path, monkeypatch):
-        """A broken record_types.py in one path must not discard failures from
-        other paths — the aggregate lists every broken file at once."""
-        import sys
-
+    def test_aggregates_failures_across_paths(self, tmp_path, monkeypatch):
+        """Broken flows in different recordflow_paths are all reported in one
+        aggregate — every path is attempted."""
         from clarinet.exceptions.domain import ConfigLoadError
         from clarinet.services.pipeline.worker import load_task_modules
 
         dir_a = tmp_path / "a"
         dir_a.mkdir()
-        (dir_a / "record_types.py").write_text("raise RuntimeError('broken rt')\n")
+        (dir_a / "x_broken_flow.py").write_text("raise RuntimeError('broken a')\n")
         dir_b = tmp_path / "b"
         dir_b.mkdir()
-        (dir_b / "x_broken_flow.py").write_text("raise RuntimeError('broken flow')\n")
+        (dir_b / "y_broken_flow.py").write_text("raise RuntimeError('broken b')\n")
 
+        monkeypatch.setattr(settings, "config_tasks_path", str(tmp_path))
         monkeypatch.setattr(settings, "recordflow_paths", [str(dir_a), str(dir_b)])
         monkeypatch.setattr(settings, "have_dicom", False)
-        monkeypatch.delitem(sys.modules, "record_types", raising=False)
 
         with pytest.raises(ConfigLoadError, match="2 pipeline task module"):
             load_task_modules()
 
+    def test_broken_central_record_types_crashes(self, tmp_path, monkeypatch):
+        """A broken record_types.py at config_tasks_path crashes the worker —
+        record types are imported once, centrally, before any flow file."""
+        from clarinet.exceptions.domain import ConfigLoadError
+        from clarinet.services.pipeline.worker import load_task_modules
+
+        (tmp_path / "record_types.py").write_text("raise RuntimeError('broken rt')\n")
+        monkeypatch.setattr(settings, "config_tasks_path", str(tmp_path))
+        monkeypatch.setattr(settings, "recordflow_paths", [])
+        monkeypatch.setattr(settings, "have_dicom", False)
+
+        with pytest.raises(ConfigLoadError):
+            load_task_modules()
+
+    def test_recordflow_path_outside_config_root_raises(self, tmp_path, monkeypatch):
+        """A recordflow_path outside config_tasks_path is rejected — single
+        root means flow files must live under config_tasks_path."""
+        from clarinet.exceptions.domain import ConfigLoadError
+        from clarinet.services.pipeline.worker import load_task_modules
+
+        inside = tmp_path / "plan"
+        inside.mkdir()
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (outside / "x_flow.py").write_text("# flow\n")
+
+        monkeypatch.setattr(settings, "config_tasks_path", str(inside))
+        monkeypatch.setattr(settings, "recordflow_paths", [str(outside)])
+        monkeypatch.setattr(settings, "have_dicom", False)
+
+        with pytest.raises(ConfigLoadError, match="must live inside config_tasks_path"):
+            load_task_modules()
+
     def test_cross_flow_import_no_reexecution(self, tmp_path, monkeypatch):
-        """A flow file importing an earlier-loaded sibling must reuse the
-        cached module — re-execution would re-register @pipeline_task and trip
-        the task-name collision guard, killing the worker.
-
-        Flow files load in sorted order, so the imported file must sort before
-        the importer (``early`` < ``late``) — the supported cross-flow layout.
-        """
-        import sys
-
+        """A flow file importing a sibling must reuse the cached module —
+        re-execution would re-register @pipeline_task and trip the task-name
+        collision guard, killing the worker. Works in either sort direction."""
         from clarinet.services.pipeline.worker import load_task_modules
 
         (tmp_path / "early_cross_flow.py").write_text(
@@ -885,18 +911,45 @@ class TestLoadTaskModulesFailFast:
             "async def early_cross_task(msg, ctx):\n"
             "    return None\n"
         )
-        (tmp_path / "late_cross_flow.py").write_text("import early_cross_flow\n")
+        (tmp_path / "late_cross_flow.py").write_text("import clarinet_plan.early_cross_flow\n")
 
+        monkeypatch.setattr(settings, "config_tasks_path", str(tmp_path))
         monkeypatch.setattr(settings, "recordflow_paths", [str(tmp_path)])
         monkeypatch.setattr(settings, "have_dicom", False)
-        monkeypatch.delitem(sys.modules, "early_cross_flow", raising=False)
-        monkeypatch.delitem(sys.modules, "late_cross_flow", raising=False)
 
-        try:
-            load_task_modules()  # must not raise task-name collision
-        finally:
-            sys.modules.pop("early_cross_flow", None)
-            sys.modules.pop("late_cross_flow", None)
+        load_task_modules()  # must not raise task-name collision
+
+    def test_call_id_consistent_between_loaders(self, tmp_path, monkeypatch):
+        """flow_loader and the worker derive the SAME dotted module name for a
+        file, so a ``.call(func)`` gets the same ``call:`` node id in the API and
+        in the worker — cross-process dispatch depends on this."""
+        from clarinet.config.plan_package import deactivate_plan_package
+        from clarinet.services.pipeline.worker import load_task_modules
+        from clarinet.services.recordflow import call_function_registry
+        from clarinet.services.recordflow.flow_loader import load_flows_from_file
+
+        (tmp_path / "cc_flow.py").write_text(
+            "from clarinet.services.recordflow import record\n"
+            "async def cc_callback(record, context, client):\n"
+            "    return None\n"
+            "record('cc').on_finished().call(cc_callback)\n"
+        )
+
+        # flow_loader path (API side)
+        load_flows_from_file(tmp_path / "cc_flow.py")
+        ids_loader = call_function_registry.all_ids()
+
+        # worker path
+        deactivate_plan_package()
+        call_function_registry.reset()
+        monkeypatch.setattr(settings, "config_tasks_path", str(tmp_path))
+        monkeypatch.setattr(settings, "recordflow_paths", [str(tmp_path)])
+        monkeypatch.setattr(settings, "have_dicom", False)
+        load_task_modules()
+        ids_worker = call_function_registry.all_ids()
+
+        assert ids_loader == ids_worker
+        assert ids_loader and ids_loader[0].startswith("call:clarinet_plan.")
 
     @pytest.mark.asyncio
     async def test_run_worker_exits_nonzero_on_config_error(self):
