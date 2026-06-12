@@ -70,6 +70,15 @@ log "Creating test database '$TEST_DB' on VM..."
 ssh "${SSH_OPTS[@]}" "clarinet@$VM_IP" \
     "sudo -u postgres dropdb --if-exists $TEST_DB; sudo -u postgres createdb --owner=clarinet $TEST_DB"
 
+# Migration-test teardown drops scratch DBs with DROP DATABASE ... WITH (FORCE)
+# to evict lingering asyncpg/psycopg2 connections; that terminate needs the
+# pg_signal_backend role, which the plain `clarinet` login role lacks. Without
+# it teardown flakily errors with InsufficientPrivilege whenever a connection
+# outlives engine.dispose(). Grant it on the test VM only.
+# shellcheck disable=SC2029
+ssh "${SSH_OPTS[@]}" "clarinet@$VM_IP" \
+    "sudo -u postgres psql -qc 'GRANT pg_signal_backend TO clarinet;'"
+
 trap cleanup EXIT
 
 # Open SSH tunnel
