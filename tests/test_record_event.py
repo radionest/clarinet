@@ -6,7 +6,7 @@ from uuid import uuid4
 
 import pytest
 
-from clarinet.models import RecordStatus
+from clarinet.models import RecordStatus, RecordType
 from clarinet.models.record_event import RecordEvent
 from clarinet.services.record_service import RecordService
 
@@ -73,6 +73,7 @@ class TestRecordServiceAuditEvents:
         record_mock.status = RecordStatus.inwork
 
         prefetch = MagicMock()
+        prefetch.record_type = MagicMock(spec=RecordType)
         prefetch.record_type.unique_per_user = False
 
         repo_mock = AsyncMock()
@@ -111,6 +112,7 @@ class TestRecordServiceAuditEvents:
         user_id = uuid4()
         prefetch = MagicMock()
         prefetch.status = RecordStatus.pending
+        prefetch.record_type = MagicMock(spec=RecordType)
         prefetch.record_type.unique_per_user = False
         claimed = MagicMock()
         claimed.status = RecordStatus.inwork
@@ -192,6 +194,7 @@ class TestRecordServiceAuditEvents:
         user_id = uuid4()
         record_check = MagicMock()
         record_check.user_id = None
+        record_check.record_type = MagicMock(spec=RecordType)
         record_check.record_type.unique_per_user = False
         record_mock = MagicMock()
         record_mock.status = RecordStatus.finished

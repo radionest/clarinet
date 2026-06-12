@@ -6,7 +6,12 @@ from httpx import AsyncClient
 from clarinet.models import DicomQueryLevel
 from tests.utils.factories import make_record_type
 from tests.utils.test_helpers import PatientFactory, RecordFactory
-from tests.utils.urls import ADMIN_DELETED_RECORD_EVENTS, RECORDS_BASE, record_events_url
+from tests.utils.urls import (
+    ADMIN_DELETED_RECORD_EVENTS,
+    ADMIN_RECORDS,
+    RECORDS_BASE,
+    record_events_url,
+)
 
 
 async def _seed_record(session):
@@ -91,7 +96,7 @@ class TestDeletedRecordEvents:
     async def test_cascade_delete_keeps_snapshot(self, client: AsyncClient, test_session):
         record = await _seed_record(test_session)
 
-        resp = await client.delete(f"/api/admin/records/{record.id}")
+        resp = await client.delete(f"{ADMIN_RECORDS}/{record.id}")
         assert resp.status_code == 200, resp.text
 
         events = (await client.get(ADMIN_DELETED_RECORD_EVENTS)).json()
