@@ -107,6 +107,16 @@ HEALTH = "/api/health"
 # --- Pipelines ---
 PIPELINES_BASE = "/api/pipelines"
 PIPELINES_SYNC = "/api/pipelines/sync"
+PIPELINE_RUNS = "/api/pipelines/runs"
+
+
+def pipeline_run_url(task_id: str) -> str:
+    return f"{PIPELINE_RUNS}/{task_id}"
+
+
+def record_runs_url(record_id: int) -> str:
+    return f"{RECORDS_BASE}/{record_id}/runs"
+
 
 # --- Viewers ---
 # Dynamic: f"{RECORDS_BASE}/{record_id}/viewers"

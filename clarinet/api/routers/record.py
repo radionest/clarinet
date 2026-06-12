@@ -35,6 +35,8 @@ from clarinet.api.dependencies import (
     ClientStoragePathDep,
     CurrentUserDep,
     MutableRecordDep,
+    PaginationDep,
+    PipelineTaskRunRepositoryDep,
     RecordRepositoryDep,
     RecordServiceDep,
     RecordTypeRepositoryDep,
@@ -56,6 +58,7 @@ from clarinet.config.toml_exporter import (
 from clarinet.exceptions import CONFLICT, NOT_FOUND
 from clarinet.exceptions.domain import AuthorizationError
 from clarinet.models import (
+    PipelineTaskRunRead,
     Record,
     RecordContextInfoUpdate,
     RecordCreate,
@@ -826,6 +829,54 @@ async def check_record_files(
     """
     changed_files, checksums = await service.check_files(record_id)
     return FileCheckResult(changed_files=changed_files, checksums=checksums)
+
+
+def _mask_run_identifier(value: str | None, raw: str | None, substitute: str | None) -> str | None:
+    """Mask one patient/study/series identifier on a pipeline run row.
+
+    ``raw`` is the record's real identifier, ``substitute`` its masked
+    counterpart from :func:`mask_record_patient_data`. When masking is not
+    active (``substitute == raw``) the value passes through unchanged; when
+    it is active, the record's own identifier is substituted and any other
+    raw identifier is dropped instead of leaked.
+    """
+    if value is None or substitute == raw:
+        return value
+    return substitute if value == raw else None
+
+
+@router.get("/{record_id}/runs", response_model=list[PipelineTaskRunRead])
+async def get_record_pipeline_runs(
+    record: AuthorizedRecordDep,
+    user: CurrentUserDep,
+    runs_repo: PipelineTaskRunRepositoryDep,
+    pagination: PaginationDep,
+) -> list[PipelineTaskRunRead]:
+    """Pipeline task runs linked to this record, newest first.
+
+    Patient/study/series identifiers are masked with the same policy as
+    the record itself — raw identifiers of an anonymized patient never
+    reach non-superusers.
+    """
+    assert record.id is not None  # SQLModel PK after get
+    runs = await runs_repo.find_by_record(record.id, skip=pagination.skip, limit=pagination.limit)
+    masked = mask_record_patient_data(RecordRead.model_validate(record), user)
+    return [
+        PipelineTaskRunRead.model_validate(run).model_copy(
+            update={
+                "patient_id": _mask_run_identifier(
+                    run.patient_id, record.patient_id, masked.patient_id
+                ),
+                "study_uid": _mask_run_identifier(
+                    run.study_uid, record.study_uid, masked.study_uid
+                ),
+                "series_uid": _mask_run_identifier(
+                    run.series_uid, record.series_uid, masked.series_uid
+                ),
+            }
+        )
+        for run in runs
+    ]
 
 
 # Anything outside ``[A-Za-z0-9_.-]`` is replaced before going into the

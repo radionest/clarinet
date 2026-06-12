@@ -7,7 +7,7 @@ supporting both low-level API calls and high-level convenience methods.
 
 import getpass
 from collections.abc import AsyncIterator
-from datetime import date
+from datetime import date, datetime
 from typing import Any, Literal
 from uuid import UUID
 
@@ -17,6 +17,9 @@ from clarinet.models import (
     Patient,
     PatientRead,
     PatientSave,
+    PipelineRunStatus,
+    PipelineTaskRunCreate,
+    PipelineTaskRunUpdate,
     RecordCreate,
     RecordPage,
     RecordRead,
@@ -1139,6 +1142,73 @@ class ClarinetClient:
         data: dict[str, Any] = response.json()
         steps: list[dict[str, str]] = data.get("steps", [])
         return steps
+
+    async def create_pipeline_run(
+        self,
+        *,
+        task_id: str,
+        task_name: str,
+        queue: str,
+        pipeline_id: str | None = None,
+        step_index: int | None = None,
+        record_id: int | None = None,
+        patient_id: str | None = None,
+        study_uid: str | None = None,
+        series_uid: str | None = None,
+        started_at: datetime,
+    ) -> None:
+        """Create a pipeline run audit row (used by AuditMiddleware.pre_execute).
+
+        Raises:
+            ClarinetAPIError: If the request fails.
+        """
+        body = PipelineTaskRunCreate(
+            id=task_id,
+            task_name=task_name,
+            queue=queue,
+            pipeline_id=pipeline_id,
+            step_index=step_index,
+            record_id=record_id,
+            patient_id=patient_id,
+            study_uid=study_uid,
+            series_uid=series_uid,
+            started_at=started_at,
+        )
+        await self._request(
+            "POST", "/pipelines/runs", json=body.model_dump(mode="json", exclude_none=True)
+        )
+
+    async def finish_pipeline_run(
+        self,
+        *,
+        task_id: str,
+        status: PipelineRunStatus,
+        finished_at: datetime,
+        execution_time: float | None = None,
+        error_type: str | None = None,
+        error_message: str | None = None,
+        error_status_code: int | None = None,
+        result: dict[str, Any] | None = None,
+    ) -> None:
+        """Record terminal status on a pipeline run audit row (post_execute).
+
+        Raises:
+            ClarinetAPIError: If the run is unknown (404) or the request fails.
+        """
+        body = PipelineTaskRunUpdate(
+            status=status,
+            finished_at=finished_at,
+            execution_time=execution_time,
+            error_type=error_type,
+            error_message=error_message,
+            error_status_code=error_status_code,
+            result=result,
+        )
+        await self._request(
+            "PATCH",
+            f"/pipelines/runs/{task_id}",
+            json=body.model_dump(mode="json", exclude_none=True),
+        )
 
     async def download_report(
         self,
