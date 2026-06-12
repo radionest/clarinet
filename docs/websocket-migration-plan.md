@@ -26,12 +26,21 @@ JWT сократил бы код только при полной миграци
 - ревалидация каждые `ws_revalidate_seconds` (default 300): повторный `read_token`; если сессия истекла/отозвана — сервер шлёт `{"type":"auth_expired"}` и закрывает с кодом 4401; клиент делает `Logout` (существующий flow);
 - protocol-ping uvicorn (default 20 с) удерживает соединение живым сквозь nginx `proxy_read_timeout 300s`.
 
-### Клиентская библиотека: `lustre_websocket` ~> 0.9 (FFI писать не нужно)
+### Клиентский транспорт: свой FFI-модуль `utils/websocket.gleam` (без новых Gleam-зависимостей)
+
+Нативной поддержки клиентских WebSocket в Lustre 5.x нет (проверено по 5.7): официальный гайд по side effects относит их к «effects with multiple dispatch» и предлагает писать через `effect.from` + FFI. Тип `WebSocket` в `lustre/server_component` — это вариант `TransportMethod` для server components (update/view исполняются на Gleam-сервере, по проводу ходит внутренний протокол DOM-патчей) — с FastAPI-бэкендом неприменимо.
 
 Исследование экосистемы:
-- **`lustre_websocket` 0.9.0** (hex, апрель 2025, репозиторий codeberg.org/kero/lustre_websocket) — требование `lustre ~> 4.0 or ~> 5.0`, совместимо с нашим lustre 5.6; зависимости только `gleam_stdlib` + `lustre`. API: `ws.init(path, wrapper) -> Effect(msg)` (относительный путь достраивается до `ws(s)://host/...` от текущего location — sub-path деплой работает через `config.base_path() <> "/api/ws"`), события `OnOpen(WebSocket) | OnTextMessage(String) | OnBinaryMessage(BitArray) | OnClose(reason) | InvalidUrl`, `ws.send(socket, text)`, `ws.close(socket)`. **Выбрано.**
+- **`lustre_websocket` 0.9.0** (hex, апрель 2025, codeberg.org/kero/lustre_websocket) — совместим с lustre 5.x, но выглядит заброшенным (один мейнтейнер, TODO-список не движется); внутри ~50 строк той же обвязки `effect.from` + FFI, которую пишем сами. Не берём.
 - `omnimessage_lustre` / `omnimessage_server` — обмен типизированными Lustre-сообщениями клиент↔сервер, но серверная часть рассчитана на Gleam-бэкенд; для Python/FastAPI ценности не добавляет, версия 0.1.x. Не берём.
 - `plinth` (уже в зависимостях) WebSocket-биндингов не содержит.
+
+**Выбрано: собственный `src/utils/websocket.gleam` + `src/utils/websocket.ffi.mjs`.** Паттерн идентичен `modem` (официальный пакет lustre-labs: публичная функция принимает `to_msg`-обёртку → `use dispatch <- effect.from` → приватные `do_*` externals с колбэками) и конвенции проекта (`utils/viewer_window.gleam` + `.ffi.mjs`):
+- opaque `pub type WebSocket`; события `Connected(WebSocket) | MessageReceived(String) | Closed(code: Int)`; бинарные кадры игнорируются осознанно (протокол текстовый JSON);
+- `connect(url, to_msg) -> Effect(msg)` — один эффект, колбэки живут всю жизнь сокета и диспатчат многократно; `send(socket, text)` и `close(socket)` — эффекты с игнорируемым dispatch;
+- первой строкой `connect` — guard `use <- bool.guard(!lustre.is_browser(), Nil)` (как в modem): защита gleeunit-тестов от `new WebSocket` вне браузера;
+- резолв относительного пути в `ws(s)://host/...` от `location` — в FFI; sub-path деплой работает через `config.base_path() <> "/api/ws"`;
+- `Closed(code)` отдаёт close-код наружу: `ws.gleam` различает 4401 (auth — Logout, без reconnect) и остальные коды (reconnect с backoff).
 
 Бэкенд: WebSocket-роуты — это штатный Starlette/FastAPI; нужна лишь зависимость `websockets` (сейчас в pyproject голый `uvicorn>=0.21.1` без extra `[standard]`, ws-протокол не установлен).
 
@@ -108,12 +117,12 @@ flowchart LR
 
 ## Изменения: фронтенд
 
-**`gleam.toml`** — `lustre_websocket = "~> 0.9"`.
+**Новый `src/utils/websocket.gleam` + `src/utils/websocket.ffi.mjs`** — низкоуровневый транспорт (API и устройство — см. «Клиентский транспорт» выше). FFI: `connect(url, onOpen, onMessage, onClose)` вешает обработчики и зовёт колбэки на каждое событие; `send`/`closeSocket` — однострочники; текст/бинарь различается через `typeof event.data === "string"` (не-строки дропаются).
 
-**Новый `src/ws.gleam`** — самодостаточный MVU-модуль по образцу `preload.gleam`:
-- `Model`: `Disconnected | Connecting | Connected(ws.WebSocket)` + `attempt: Int` + `reconnect_timer`, `watchdog_timer: Option(global.TimerID)`, `last_msg_ms`;
-- `connect()` → `ws.init(config.base_path() <> "/api/ws", WsEvent)`;
-- `OnOpen` → OutMsg `Connected` (main запускает resync); `OnTextMessage` → decode (`src/api/ws_events.gleam` — декодер wire-формата на `gleam/dynamic/decode`) → OutMsg `EntityEvent(...)` / `TaskProgress(...)` / `AuthExpired`; `OnClose`/`InvalidUrl` → reconnect с экспоненциальным backoff (1s→2s→…→cap 30s, сброс счётчика после успешного open);
+**Новый `src/ws.gleam`** — самодостаточный MVU-модуль по образцу `preload.gleam` (поверх `utils/websocket`):
+- `Model`: `Disconnected | Connecting | Connected(websocket.WebSocket)` + `attempt: Int` + `reconnect_timer`, `watchdog_timer: Option(global.TimerID)`, `last_msg_ms`;
+- `connect()` → `websocket.connect(config.base_path() <> "/api/ws", WsEvent)`;
+- `Connected(socket)` → OutMsg `Connected` (main запускает resync); `MessageReceived(text)` → decode (`src/api/ws_events.gleam` — декодер wire-формата на `gleam/dynamic/decode`) → OutMsg `EntityEvent(...)` / `TaskProgress(...)` / `AuthExpired`; `Closed(4401)` → OutMsg `AuthExpired` (без reconnect); `Closed(_)` → reconnect с экспоненциальным backoff (1s→2s→…→cap 30s, сброс счётчика после успешного open);
 - heartbeat-watchdog: если ни одного кадра (включая ping) за 90 с — принудительный close + reconnect;
 - `AuthExpired` → OutMsg, main транслирует в существующий `store.Logout`.
 
@@ -138,7 +147,7 @@ flowchart LR
 
 1. **Зависимости + настройки**: pyproject (`websockets`), settings, `/api/info`.
 2. **Бэкенд**: `services/events/` (bus, capture, models) → `authenticate_websocket` → `routers/ws.py` → lifespan/app wiring → тесты.
-3. **Фронтенд-ядро**: `gleam.toml`, `api/ws_events.gleam`, `ws.gleam`, wiring в store/main, `cache.WsEntityEvent` + дебаунс-рефетч + resync.
+3. **Фронтенд-ядро**: `utils/websocket.gleam` + `websocket.ffi.mjs`, `api/ws_events.gleam`, `ws.gleam`, wiring в store/main, `cache.WsEntityEvent` + дебаунс-рефетч + resync.
 4. **Прогресс задач**: publish в dicomweb preload и quarto write_status; consume в `preload.gleam` и `quarto_reports.gleam`; поллинг переводится в fallback-режим.
 
 ## Верификация
