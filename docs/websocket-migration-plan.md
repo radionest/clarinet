@@ -50,9 +50,29 @@ JWT сократил бы код только при полной миграци
 - `after_flush`: для наблюдаемых моделей (`Record`, `Patient`, `Study`, `Series`, `RecordType`, `User`) из `session.new/dirty/deleted` собрать «тонкие» события `{entity, action, id}` (+ для Record — колонки `record_type_name`, `user_id`, доступные без lazy-load) в `session.info["pending_ws_events"]`;
 - `after_commit`: передать накопленное в bus; `after_rollback`: очистить.
 
-Это перехватывает **все** пути мутаций в одном месте. RecordFlow и pipeline-воркеры мутируют через HTTP API (`ClarinetClient`) → коммиты происходят в том же uvicorn-процессе (он один: `uvicorn.run` в `cli/main.py` без workers) → события не теряются. В процессах TaskIQ-воркеров слушатель срабатывает вхолостую (bus без подключений) — no-op.
+Это перехватывает в одной точке **все ORM-мутации** (`session.add/delete`, изменение атрибутов загруженных объектов) — независимо от того, выполнил их сервис, прямой `repo.*` или роутер. RecordFlow и pipeline-воркеры мутируют через HTTP API (`ClarinetClient`) → коммиты происходят в том же uvicorn-процессе (он один: `uvicorn.run` в `cli/main.py` без workers) → события не теряются. В процессах TaskIQ-воркеров слушатель срабатывает вхолостую (bus без подключений) — no-op. Три класса мутаций UoW **не** видит — для них точечный явный publish (см. «Границы перехвата» ниже).
 
 События «тонкие» намеренно: ни одного поля данных по WS не передаётся — клиент дотягивает изменённое существующими REST-эндпоинтами под своим RBAC. Это исключает утечку маскируемых данных (`mask_records`) через WS и убирает сериализацию/авторизацию полных объектов.
+
+#### Границы перехвата: что UoW-слушатель НЕ видит
+
+`after_flush` отслеживает только ORM Unit of Work (`session.new/dirty/deleted`). Мутации в обход ORM его минуют — для них **точечный явный publish в data-access слое** (в репозиториях, не в сервисах: «один источник на слой данных» сохраняется, publish не размазывается по бизнес-логике). ORM-каскадов в моделях нет вообще — все FK заданы `ondelete=` на уровне БД, поэтому каскады исполняет СУБД, а не ORM, и для слушателя они невидимы.
+
+| Класс мутации | Пример в коде | Почему невидимо | Обход |
+|---|---|---|---|
+| **DB-cascade `ON DELETE CASCADE`** | `Patient→Study→Series→Record→RecordFileLink` (`study.py:44/86`, `record.py:191/194/198`, `file_schema.py`) | `session.delete(patient)` эмитит только `DELETE patient`; детей сносит СУБД, в `session.deleted` их нет | explicit `emit_entity(...)` `deleted` для затронутых Study/Series/Record в методах удаления Patient/Study/Series |
+| **DB-cascade `ON DELETE SET NULL`** | `Record.parent_record_id` (`record.py:205`) | у дочерних записей `parent_record_id` обнуляется СУБД молча | при необходимости — explicit `record/updated` для осиротевших детей (минорно: parent редко влияет на UI) |
+| **Core-bulk DML** | `RecordRepository.delete_many` → `sa_delete(Record).where(id.in_(...))` (`record_repository.py:1124`) | Core-`DELETE`, объекты не проходят через `session.deleted`. Выбрано осознанно — обходит UoW-ordering для self-referential строк | explicit `emit_entity(...)` `record/deleted` прямо в `delete_many` (ids уже на входе) |
+| **Raw SQL** | `session.execute(text(...))` (`report_repository.py:83`) | минует ORM целиком | не требуется: отчёты `READ ONLY`, мутаций нет |
+
+Помечать такие call-sites комментарием-маркером `# ws-capture: explicit emit, UoW-invisible`, чтобы новый bulk/каскадный путь не оставался без события молча.
+
+#### Корректность слушателя
+
+- **Savepoint.** `PatientRepository.create` оборачивает вставку в `session.begin_nested()` (retry auto_id, `patient_repository.py:42`). Публиковать **только на внешнем commit**; `after_rollback` чистит **лишь** события своего scope. Иначе откат savepoint при retry либо опубликует несостоявшуюся вставку, либо затрёт легитимные события сессии. Обязателен тест на savepoint-путь.
+- **publish не роняет commit.** Тело `after_commit` — в `try/except` с логированием: COMMIT уже состоялся, сбой шины не должен всплыть как ошибка бизнес-операции.
+- **Идемпотентность за запрос.** `session.info["pending_ws_events"]` очищается после emit — несколько commit в одной сессии не дублируют события.
+- **Только column-атрибуты** в `after_flush` — обращение к relationship даёт `MissingGreenlet`.
 
 ### RBAC-фильтрация на сервере (per-connection)
 
@@ -96,7 +116,8 @@ flowchart LR
 **Новый модуль `clarinet/services/events/`:**
 - `models.py` — Pydantic-модели событий (`EntityEvent`, `TaskProgressEvent`) + сериализация в wire-формат.
 - `bus.py` — `EventBus`: `register(connection) -> asyncio.Queue` / `unregister`; `publish(event)` (итерация по подключениям, RBAC-предикат, `put_nowait`; переполнение очереди → закрыть соединение как slow consumer — клиент переподключится и сделает resync); `publish_threadsafe(event)` через `loop.call_soon_threadsafe` (для `write_status`, вызываемого из `asyncio.to_thread`). Хранит loop, создаётся в lifespan → `app.state.event_bus`. Shutdown по паттерну re-creatable (см. `clarinet/CLAUDE.md` Lifespan Shutdown Pattern).
-- `capture.py` — слушатели `after_flush`/`after_commit`/`after_rollback` (регистрация однократная, идемпотентная), карта наблюдаемых моделей → имя сущности + извлечение колонок. Только column-атрибуты, никаких обращений к relationship (MissingGreenlet).
+- `capture.py` — слушатели `after_flush`/`after_commit`/`after_rollback` (регистрация однократная, идемпотентная), карта наблюдаемых моделей → имя сущности + извлечение колонок. Только column-атрибуты, никаких обращений к relationship (MissingGreenlet). `after_commit` публикует только на внешней транзакции и обёрнут в `try/except`; буфер `session.info` чистится после emit (см. «Корректность слушателя»). Экспортирует хелпер `emit_entity(bus, entity, action, ids)` для явного publish из репозиториев.
+- **Явный emit в репозиториях (UoW-invisible пути, см. «Границы перехвата»):** `RecordRepository.delete_many` (`sa_delete`) и методы удаления Patient/Study/Series (DB-каскад) вызывают `emit_entity(...)` после успешного commit, помечены комментарием-маркером. Без этого каскадные/bulk-удаления молча не дают событий.
 
 **Новый роутер `clarinet/api/routers/ws.py`** — `websocket("/ws")`, монтируется в `app.py` под `/api` (рядом с `health`), условно по `settings.ws_enabled`:
 - auth до `accept()` через новый helper `authenticate_websocket()` в `auth_config.py` (читает cookie, переиспользует `DatabaseStrategy.read_token`; сессию БД берёт через `db_manager.get_async_session_context()` и закрывает сразу после валидации — не держать AsyncSession на всё время жизни соединения);
@@ -152,7 +173,7 @@ flowchart LR
 
 ## Верификация
 
-- **Бэкенд-тесты** (`tests/test_ws_*.py`, `tests/integration/`): `starlette.testclient.TestClient(app).websocket_connect("/api/ws")` (httpx ASGITransport WS не умеет; sync TestClient — штатный путь): подключение с валидной cookie / отказ без неё; capture: flush Record → событие с правильными `entity/action/id/record_type_name`; rollback → нет событий; RBAC: обычный пользователь не получает событие чужого типа записи, получает своё/админ получает всё; slow consumer → close.
+- **Бэкенд-тесты** (`tests/test_ws_*.py`, `tests/integration/`): `starlette.testclient.TestClient(app).websocket_connect("/api/ws")` (httpx ASGITransport WS не умеет; sync TestClient — штатный путь): подключение с валидной cookie / отказ без неё; capture: flush Record → событие с правильными `entity/action/id/record_type_name`; rollback → нет событий; **каскадное удаление Patient → события `deleted` для дочерних Study/Series/Record** (явный emit, не UoW); **bulk `delete_many` → `record/deleted`**; **savepoint-retry в `PatientRepository.create` → ровно одно `patient/created`, без ложного на откаченной попытке**; RBAC: обычный пользователь не получает событие чужого типа записи, получает своё/админ получает всё; slow consumer → close.
 - **Фронтенд**: `gleam test` — декодер `ws_events`, чистые функции `cache.update` на `WsEntityEvent` (mark_stale, удаление, дебаунс-переходы); `make frontend-check`.
 - **Ручная проверка**: `make run-dev`, два окна браузера → смена статуса записи в одном видна во втором без перезагрузки; preload OHIF показывает прогресс без запросов поллинга (вкладка Network); рестарт сервера → фронт переподключается и resync'ается.
 - **Прогон**: `./scripts/run_tests.sh -k "ws" -q` → `make check` → `make test-unit`.
@@ -162,4 +183,6 @@ flowchart LR
 
 - Один uvicorn-процесс — in-process bus достаточен; при переходе на несколько воркеров потребуется внешний fan-out (RabbitMQ уже есть в стеке) — вне рамок, отметить в docstring `bus.py`.
 - `after_flush` не должен трогать relationships (MissingGreenlet) — только column-атрибуты.
+- **UoW-слепые пятна** (DB-cascade, Core-bulk `sa_delete`, `SET NULL`) закрываются явным `emit_entity` в репозиториях, не слушателем. Регресс-риск: новый bulk/каскадный путь без явного emit молча не даст события — митигация: комментарий-маркер на call-sites + тест на каскадное/bulk-удаление.
+- Savepoint (`begin_nested` в `PatientRepository.create`) — публикация только на внешнем commit, иначе ложные/потерянные события.
 - Тонкие события раскрывают факт изменения (id) записей вне роли пользователя только в пределах его отфильтрованных типов — фильтрация по `available_types` это закрывает.
