@@ -114,7 +114,7 @@ segment_ct = RecordDef(
 |---|---|
 | `slicer_script="scripts/X.py"` | Файл в `plan/scripts/` |
 | `slicer_result_validator="validators/X.py"` | Файл в `plan/validators/` |
-| `slicer_context_hydrators=["name"]` | Декоратор `@slicer_context_hydrator("name")` в `plan/hydrators/context_hydrators.py` |
+| `slicer_context_hydrators=["name"]` | Декоратор `@slicer_context_hydrator("name")` в `plan/slicer_hydrators.py` |
 | `data_schema="schemas/X.schema.json"` | Файл в `plan/schemas/` |
 | `files=[FileRef(file_def, ...)]` | `FileDef`, объявленный выше в `record_types.py` |
 | `role="custom_role"` | Должна быть в `extra_roles` в `settings.toml` |

@@ -23,7 +23,7 @@ Changing auth levels on routers has cascading impact on tests — check `tests/t
 Startup sequence:
 1. Database init (`db_manager.create_db_and_tables_async()`)
 1b. Default roles (`add_default_user_roles()`)
-1c. Load custom record-data validators + schema hydrators + slicer context hydrators (`load_custom_validators()`, `load_custom_hydrators()`, `load_custom_slicer_hydrators()`) — must run BEFORE `reconcile_config` so the registries are populated when reconcile validates `RecordType.data_validators` and `RecordType.slicer_context_hydrators` names
+1c. Anchor the `clarinet_plan` package + load registries: `activate_plan_package(config_tasks_path)` → `_ensure_record_types_imported()` (imports record types, sets FileDef names before validators read them) → `_load_plan_registries()` (clears the 3 registries + `_register_builtin_hydrators()`, then `load_custom_validators/hydrators/slicer_hydrators`). Must run BEFORE `reconcile_config` so the registries are populated when reconcile validates `RecordType.data_validators` and `RecordType.slicer_context_hydrators` names. Loading contract: `.claude/rules/custom-code-loading.md`
 2. Config reconciliation (`reconcile_config()`) → stores `app.state.config_mode`, `app.state.config_tasks_path`; fail-fasts on unknown role_names, validator names, and slicer-hydrator names
 2b. Load project file registry from tasks folder
 3. Admin user creation (`ensure_admin_exists()`)

@@ -34,7 +34,7 @@ frontend_enabled = true     # serve the SPA
 config_mode = "python"
 config_tasks_path = "./plan/"
 config_record_types_file = "definitions/record_types.py"
-config_context_hydrators_file = "hydrators/context_hydrators.py"
+# config_context_hydrators_file defaults to "slicer_hydrators.py" (plan root)
 recordflow_paths = ["./plan/workflows"]
 
 # ── External Viewers ─────────────────────────────────

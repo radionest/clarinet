@@ -1,6 +1,6 @@
 ---
 paths:
-  - "plan/hydrators/**"
+  - "plan/slicer_hydrators.py"
   - "plan/scripts/**"
   - "plan/validators/**"
 ---
@@ -10,16 +10,16 @@ paths:
 Эти три раздела объединены, потому что они тесно связаны через **inject vars** — переменные, которые фреймворк передаёт в окружение Slicer-скрипта и валидатора. Hydrator вычисляет переменную; скрипт её использует; валидатор тоже её видит.
 
 ```
-hydrators/  →  context_hydrators.py             # вычисляют inject vars
+slicer_hydrators.py  →  вычисляют inject vars (plan root)
 scripts/    →  *.py (исполняются в 3D Slicer)   # используют inject vars
 validators/ →  *_validator.py                   # запускаются после скрипта, видят те же vars
 ```
 
 ---
 
-## Часть A — Hydrators (`plan/hydrators/`)
+## Часть A — Hydrators (`plan/slicer_hydrators.py`)
 
-Async-функции, которые перед запуском Slicer-скрипта обращаются к БД и возвращают словарь переменных, инжектируемых в Slicer. Один файл — `context_hydrators.py`, путь зашит в `settings.toml` (`config_context_hydrators_file`).
+Async-функции, которые перед запуском Slicer-скрипта обращаются к БД и возвращают словарь переменных, инжектируемых в Slicer. Один файл — `slicer_hydrators.py` (дефолт `config_context_hydrators_file`), лежит в корне `plan/`.
 
 ### Декоратор и сигнатура
 

@@ -161,9 +161,10 @@ In `settings.toml` (filename defaults to `validators.py`):
 config_validators_file = "validators.py"   # optional, default
 ```
 
-The file must live in `config_tasks_path` (commonly `./plan/`). It is loaded
-**before** `reconcile_config` in the app lifespan
-(`clarinet/api/app.py`) so that reconcile can validate every reference.
+The file must live in `config_tasks_path` (commonly `./plan/`). It is imported
+as the `clarinet_plan.validators` submodule (no `sys.path` mutation) **before**
+`reconcile_config` in the app lifespan (`clarinet/api/app.py`) so that reconcile
+can validate every reference. Loading contract: `.claude/rules/custom-code-loading.md`.
 
 ## Database migration
 
@@ -183,12 +184,25 @@ new Clarinet version.
 
 ## Testing
 
+Validators import as `clarinet_plan.validators`, so a downstream test must
+anchor the plan package once before importing them (e.g. an autouse conftest
+fixture pointing at the project's `plan/` dir):
+
+```python
+# tests/conftest.py (downstream project)
+from pathlib import Path
+from clarinet.config.plan_package import activate_plan_package
+
+PLAN_DIR = Path(__file__).resolve().parent.parent / "plan"
+activate_plan_package(PLAN_DIR)   # then `from clarinet_plan.validators import ...` works
+```
+
 Unit-test the validator in isolation:
 
 ```python
 import pytest
 from clarinet.exceptions.domain import RecordDataValidationError
-from plan.validators import validate_unique_new_id
+from clarinet_plan.validators import validate_unique_new_id
 
 async def test_duplicates_detected(record_factory, validator_ctx):
     record = await record_factory(type_name="map-lesion-numbers")
