@@ -63,6 +63,31 @@ setup_services() {
     init_logging "install"
 }
 
+# --- Step 5b: Downstream project (optional) ---
+install_project() {
+    local bundle="${CLARINET_PROJECT_BUNDLE:-}"
+    [[ -z "$bundle" ]] && return
+    if [[ ! -d "$bundle/plan" || ! -f "$bundle/settings.toml" ]]; then
+        err "Project bundle incomplete: $bundle (need plan/ and settings.toml)"
+        exit 1
+    fi
+
+    log "Installing downstream project from $bundle..."
+    rm -rf "${INSTALL_DIR}/plan"
+    cp -r "$bundle/plan" "${INSTALL_DIR}/plan"
+    # The project's settings.toml becomes the base config; stand-specific
+    # values are layered on top via settings.custom.toml (generate-settings.sh
+    # overlay mode) — settings.custom.toml has higher priority in clarinet.
+    cp "$bundle/settings.toml" "${INSTALL_DIR}/settings.toml"
+    if [[ -d "$bundle/review" ]]; then
+        mkdir -p "${INSTALL_DIR}/review"
+        cp -r "$bundle/review/." "${INSTALL_DIR}/review/"
+    fi
+    chown -R clarinet:clarinet "$INSTALL_DIR"
+    export CLARINET_SETTINGS_OVERLAY=1
+    log "Downstream project installed (plan/, settings.toml$([[ -d "$bundle/review" ]] && echo ', review/'))"
+}
+
 # --- Step 6: Settings ---
 generate_settings() {
     # Compute root_url from PATH_PREFIX (strip trailing slash for FastAPI root_path)
@@ -185,6 +210,7 @@ setup_user
 install_python
 install_wheel
 setup_services
+install_project
 generate_settings
 init_database
 install_ohif

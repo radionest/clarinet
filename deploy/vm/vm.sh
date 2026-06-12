@@ -412,12 +412,31 @@ cmd_deploy() {
     scp "${scp_opts[@]}" -r "$DEPLOY_DIR/systemd" "${ssh_target}:/tmp/clarinet-deploy/"
     scp "${scp_opts[@]}" -r "$DEPLOY_DIR/nginx"   "${ssh_target}:/tmp/clarinet-deploy/"
 
+    # Ship the downstream project (plan/ + settings.toml + review/) if configured
+    local project_dir="${CLARINET_PROJECT_SOURCE_DIR:-${PROJECT_SOURCE_DIR:-}}"
+    local project_bundle_env=""
+    if [[ -n "$project_dir" ]]; then
+        if [[ ! -d "$project_dir/plan" || ! -f "$project_dir/settings.toml" ]]; then
+            err "PROJECT_SOURCE_DIR must contain plan/ and settings.toml: $project_dir"
+            exit 1
+        fi
+        log "Uploading downstream project from $project_dir..."
+        ssh_vm "rm -rf /tmp/clarinet-deploy/project && mkdir -p /tmp/clarinet-deploy/project"
+        scp "${scp_opts[@]}" -r "$project_dir/plan" "${ssh_target}:/tmp/clarinet-deploy/project/"
+        scp "${scp_opts[@]}" "$project_dir/settings.toml" "${ssh_target}:/tmp/clarinet-deploy/project/"
+        if [[ -d "$project_dir/review" ]]; then
+            scp "${scp_opts[@]}" -r "$project_dir/review" "${ssh_target}:/tmp/clarinet-deploy/project/"
+        fi
+        project_bundle_env="CLARINET_PROJECT_BUNDLE='/tmp/clarinet-deploy/project'"
+    fi
+
     # Run install script
     local wheel_name
     wheel_name="$(basename "$wheel")"
     log "Running installer on VM..."
     ssh_vm "sudo CLARINET_PATH_PREFIX='${PATH_PREFIX}' \
         CLARINET_PACS_HOST='${PACS_HOST:-localhost}' \
+        ${project_bundle_env} \
         bash /tmp/clarinet-deploy/install/install-clarinet.sh \
         /tmp/clarinet-deploy/${wheel_name} \
         /tmp/clarinet-deploy"

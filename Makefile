@@ -505,8 +505,8 @@ vm-smoke: ## Run smoke tests against running VM
 vm-acceptance: ## Run acceptance tests (pytest) against running VM
 	@VM_IP=$$(bash $(VM_SH) ip 2>/dev/null); \
 	. deploy/vm/vm.conf; \
-	ADMIN_PASS=$$(ssh -o StrictHostKeyChecking=no clarinet@$$VM_IP \
-		"python3 -c \"import tomllib; print(tomllib.load(open('/opt/clarinet/settings.toml','rb'))['admin_password'])\""); \
+	ADMIN_PASS=$$(ssh -o StrictHostKeyChecking=no -o "UserKnownHostsFile=$$KNOWN_HOSTS_FILE" -i "$$SSH_KEY_PATH" clarinet@$$VM_IP \
+		"python3 -c \"import tomllib,os;m={};[m.update(tomllib.load(open(p,'rb'))) for p in ('/opt/clarinet/settings.toml','/opt/clarinet/settings.custom.toml') if os.path.exists(p)];print(m.get('admin_password',''))\""); \
 	CLARINET_TEST_URL="https://$$VM_IP$${PATH_PREFIX}" \
 	CLARINET_TEST_ADMIN_PASSWORD="$$ADMIN_PASS" \
 	uv run pytest deploy/test/acceptance/ -v
@@ -515,8 +515,8 @@ vm-acceptance: ## Run acceptance tests (pytest) against running VM
 vm-e2e: ## Run Playwright E2E tests against running VM
 	@VM_IP=$$(bash $(VM_SH) ip 2>/dev/null); \
 	. deploy/vm/vm.conf; \
-	ADMIN_PASS=$$(ssh -o StrictHostKeyChecking=no clarinet@"$$VM_IP" \
-		"grep '^admin_password' /opt/clarinet/settings.toml | head -1 | sed 's/.*= *\"//;s/\".*//'" 2>/dev/null); \
+	ADMIN_PASS=$$(ssh -o StrictHostKeyChecking=no -o "UserKnownHostsFile=$$KNOWN_HOSTS_FILE" -i "$$SSH_KEY_PATH" clarinet@"$$VM_IP" \
+		"python3 -c \"import tomllib,os;m={};[m.update(tomllib.load(open(p,'rb'))) for p in ('/opt/clarinet/settings.toml','/opt/clarinet/settings.custom.toml') if os.path.exists(p)];print(m.get('admin_password',''))\"" 2>/dev/null); \
 	CLARINET_TEST_URL="https://$$VM_IP$${PATH_PREFIX}" \
 	CLARINET_TEST_ADMIN_PASSWORD="$$ADMIN_PASS" \
 	uv run --group e2e pytest deploy/test/e2e/ -v --browser chromium
