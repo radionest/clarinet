@@ -73,6 +73,23 @@ JWT сократил бы код только при полной миграци
 - **publish не роняет commit.** Тело `after_commit` — в `try/except` с логированием: COMMIT уже состоялся, сбой шины не должен всплыть как ошибка бизнес-операции.
 - **Идемпотентность за запрос.** `session.info["pending_ws_events"]` очищается после emit — несколько commit в одной сессии не дублируют события.
 - **Только column-атрибуты** в `after_flush` — обращение к relationship даёт `MissingGreenlet`.
+- **Детектор рассинхрона аудита.** uow-событие `record`, не покрытое audit-событием в той же транзакции (см. «Совместимость с audit») **и** затронувшее аудируемую колонку (`status`, `user_id`, `data`, `context_info`, факт создания/удаления — производные `started_at`/`finished_at`/`checksum`/`anon_*` НЕ считаются; расширение набора — отдельный PR), означает мутацию мимо `_record_event`. Прод: `logger.warning` (в `try/except`, COMMIT уже состоялся). Тесты: strict-режим `CLARINET_WS_AUDIT_STRICT=1` копит «осиротевшие» события для `assert orphans == []` — забытый эмиттер валит CI.
+
+#### Совместимость с audit-журналами (PR #332 `record_event`, #330 `pipeline_task_run`)
+
+Аудит и WS — один поток изменений, перехваченный на трёх слоях (record_event = Service-layer, pipeline_task_run = TaskIQ-middleware, capture = UoW). Источник делаем **трёхслойным — audit поверх UoW, а не вместо**, чтобы WS не зависел от полноты эмиттеров аудита:
+
+1. **UoW-слой (страховка).** `after_flush` на наблюдаемых моделях даёт тонкое событие при ЛЮБОЙ ORM-мутации — даже если эмиттер аудита забыт.
+2. **Audit-обогащение (приоритет).** В `session.new` ловятся вставки `record_event` → `record`-событие с `actor_id` и точным `kind`; вставки/обновления `pipeline_task_run` → `task_progress` для pipeline-задач. Маппинг `kind → action`: `created→created`, `deleted→deleted`, прочее → `updated`; `actor_id → user_id` для RBAC.
+3. **Детектор рассинхрона** (см. «Корректность слушателя») — ловит мутации мимо аудита.
+
+**Дедуп (per-transaction).** `record_event` пишется `add()` (flush-only) в **той же** транзакции, что мутация → audit- и uow-событие лягут в один commit. На `after_commit` дедуп по `(entity, id)` (матчинг `record_event.record_key == Record.id`): есть audit → uow-дубль выбрасывается (audit богаче); запись мимо аудита оставляет тонкое uow-событие (+ warning детектора).
+
+**Покрытие.** Трёхслойность — только для `record` (есть и журнал, и ORM-мутация). `pipeline_task_run` наблюдается напрямую (единственный ORM-носитель статуса задачи, fallback-дихотомии нет). `preload`/`quarto` не-ORM → только explicit publish. `patient/study/series/record_type/user` журнала не имеют → чистый UoW.
+
+**Бонусы #332/#330.** `kind="context_info_updated"` и cascade-delete со снапшотом (`delete_record_cascade`) уже инструментированы — слепые пятна «context_info мимо сервиса» и каскадного удаления закрыты на audit-слое (для `record`) без отдельного `emit_entity`. Журналы durable → resync при reconnect может быть точечным catch-up (`record_event` since `<last_id>` вместо InvalidateAll) — опционально, отдельной итерацией.
+
+**Связанность и порядок мержа.** Оба аудита не опциональны в #332/#330, но uow-страховка делает WS работоспособным и без них. Мержить #330/#332 → main первыми, WS-ветка ребейзится поверх; общая поверхность правок — `models/__init__.py`, `api/dependencies.py`, `api/routers/record.py`, `api/CLAUDE.md`, `.claude/rules/api-urls.md`, `tests/utils/urls.py`.
 
 ### RBAC-фильтрация на сервере (per-connection)
 
@@ -118,6 +135,7 @@ flowchart LR
 - `bus.py` — `EventBus`: `register(connection) -> asyncio.Queue` / `unregister`; `publish(event)` (итерация по подключениям, RBAC-предикат, `put_nowait`; переполнение очереди → закрыть соединение как slow consumer — клиент переподключится и сделает resync); `publish_threadsafe(event)` через `loop.call_soon_threadsafe` (для `write_status`, вызываемого из `asyncio.to_thread`). Хранит loop, создаётся в lifespan → `app.state.event_bus`. Shutdown по паттерну re-creatable (см. `clarinet/CLAUDE.md` Lifespan Shutdown Pattern).
 - `capture.py` — слушатели `after_flush`/`after_commit`/`after_rollback` (регистрация однократная, идемпотентная), карта наблюдаемых моделей → имя сущности + извлечение колонок. Только column-атрибуты, никаких обращений к relationship (MissingGreenlet). `after_commit` публикует только на внешней транзакции и обёрнут в `try/except`; буфер `session.info` чистится после emit (см. «Корректность слушателя»). Экспортирует хелпер `emit_entity(bus, entity, action, ids)` для явного publish из репозиториев.
 - **Явный emit в репозиториях (UoW-invisible пути, см. «Границы перехвата»):** `RecordRepository.delete_many` (`sa_delete`) и методы удаления Patient/Study/Series (DB-каскад) вызывают `emit_entity(...)` после успешного commit, помечены комментарием-маркером. Без этого каскадные/bulk-удаления молча не дают событий.
+- **Dual-source (см. «Совместимость с audit»):** наблюдает `record_event`/`pipeline_task_run` (audit-обогащение) поверх наблюдаемых ORM-моделей (uow-страховка); дедуп по `(entity, id)` на `after_commit` с приоритетом audit; детектор рассинхрона пишет warning/strict при мутации аудируемой колонки мимо `record_event`.
 
 **Новый роутер `clarinet/api/routers/ws.py`** — `websocket("/ws")`, монтируется в `app.py` под `/api` (рядом с `health`), условно по `settings.ws_enabled`:
 - auth до `accept()` через новый helper `authenticate_websocket()` в `auth_config.py` (читает cookie, переиспользует `DatabaseStrategy.read_token`; сессию БД берёт через `db_manager.get_async_session_context()` и закрывает сразу после валидации — не держать AsyncSession на всё время жизни соединения);
@@ -173,7 +191,7 @@ flowchart LR
 
 ## Верификация
 
-- **Бэкенд-тесты** (`tests/test_ws_*.py`, `tests/integration/`): `starlette.testclient.TestClient(app).websocket_connect("/api/ws")` (httpx ASGITransport WS не умеет; sync TestClient — штатный путь): подключение с валидной cookie / отказ без неё; capture: flush Record → событие с правильными `entity/action/id/record_type_name`; rollback → нет событий; **каскадное удаление Patient → события `deleted` для дочерних Study/Series/Record** (явный emit, не UoW); **bulk `delete_many` → `record/deleted`**; **savepoint-retry в `PatientRepository.create` → ровно одно `patient/created`, без ложного на откаченной попытке**; RBAC: обычный пользователь не получает событие чужого типа записи, получает своё/админ получает всё; slow consumer → close.
+- **Бэкенд-тесты** (`tests/test_ws_*.py`, `tests/integration/`): `starlette.testclient.TestClient(app).websocket_connect("/api/ws")` (httpx ASGITransport WS не умеет; sync TestClient — штатный путь): подключение с валидной cookie / отказ без неё; capture: flush Record → событие с правильными `entity/action/id/record_type_name`; rollback → нет событий; **каскадное удаление Patient → события `deleted` для дочерних Study/Series/Record** (явный emit, не UoW); **bulk `delete_many` → `record/deleted`**; **savepoint-retry в `PatientRepository.create` → ровно одно `patient/created`, без ложного на откаченной попытке**; **dual-source A (fallback): мутация аудируемой колонки мимо `RecordService` (`repo.update_fields`) → `record`-событие всё равно приходит**; **B (детектор): тот же путь → WARNING (`caplog`) / strict-список непуст**; **C (дедуп): мутация через `RecordService` → ровно одно событие с `actor_id`, без дубля**; RBAC: обычный пользователь не получает событие чужого типа записи, получает своё/админ получает всё; slow consumer → close.
 - **Фронтенд**: `gleam test` — декодер `ws_events`, чистые функции `cache.update` на `WsEntityEvent` (mark_stale, удаление, дебаунс-переходы); `make frontend-check`.
 - **Ручная проверка**: `make run-dev`, два окна браузера → смена статуса записи в одном видна во втором без перезагрузки; preload OHIF показывает прогресс без запросов поллинга (вкладка Network); рестарт сервера → фронт переподключается и resync'ается.
 - **Прогон**: `./scripts/run_tests.sh -k "ws" -q` → `make check` → `make test-unit`.
@@ -185,4 +203,5 @@ flowchart LR
 - `after_flush` не должен трогать relationships (MissingGreenlet) — только column-атрибуты.
 - **UoW-слепые пятна** (DB-cascade, Core-bulk `sa_delete`, `SET NULL`) закрываются явным `emit_entity` в репозиториях, не слушателем. Регресс-риск: новый bulk/каскадный путь без явного emit молча не даст события — митигация: комментарий-маркер на call-sites + тест на каскадное/bulk-удаление.
 - Savepoint (`begin_nested` в `PatientRepository.create`) — публикация только на внешнем commit, иначе ложные/потерянные события.
+- **Связанность WS↔audit:** `record`-обогащение и `task_progress` зависят от `record_event`/`pipeline_task_run` (оба не опциональны в #332/#330); uow-страховка + детектор рассинхрона делают WS устойчивым к забытым эмиттерам аудита. Порядок мержа: #330/#332 → main → WS поверх.
 - Тонкие события раскрывают факт изменения (id) записей вне роли пользователя только в пределах его отфильтрованных типов — фильтрация по `available_types` это закрывает.
