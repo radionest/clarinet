@@ -947,6 +947,72 @@ __execResult = {"calling_aet": pacs.calling_aet}
         yield
         requests.delete(modality_url, timeout=5)
 
+    @pytest.fixture(scope="session")
+    def _cmove_indexing_works(
+        self,
+        _cmove_available: None,
+        slicer_aet: str,
+        pacs_study_uid: str,
+        pacs_series_uid: str,
+    ) -> None:
+        """Skip when Slicer's DICOMListener does not index C-MOVE deliveries.
+
+        C-MOVE has Orthanc push the data to Slicer's storescp; DICOMListener then
+        indexes the incoming files into the DICOM database by parsing storescp's
+        stdout. On a headless Slicer (Xvfb) those QProcess stdout signals are
+        unreliable, so delivered files may never get indexed and
+        ``retrieve_series()`` sees 0 files even though C-MOVE succeeded. On a GUI
+        Slicer this works. Probe once per session: register Slicer's AET, C-MOVE a
+        known series, poll the DB, and skip if it never indexes.
+        """
+        modality_url = f"{PACS_REST_URL}/modalities/{slicer_aet}"
+        requests.put(
+            modality_url,
+            json={"AET": slicer_aet, "Host": SLICER_HOST, "Port": SLICER_SCP_PORT},
+            timeout=5,
+        ).raise_for_status()
+        # NB: this mutates the shared session DICOM DB — it removes the series to
+        # force a real C-MOVE (a local-first lookup would otherwise short-circuit
+        # the probe). Safe here: every test in this class removes the series first
+        # too. Poll bound (40 * 0.25s = 10s) + request_timeout are kept well under
+        # the test-slicer pytest --timeout=60 so a slow Slicer skips, not times out.
+        probe = f"""
+import ctk, slicer, time
+db = slicer.dicomDatabase
+indexed = False
+if db:
+    if db.filesForSeries('{pacs_series_uid}'):
+        db.removeSeries('{pacs_series_uid}')
+    retr = ctk.ctkDICOMRetrieve()
+    retr.callingAETitle = '{slicer_aet}'
+    retr.calledAETitle = '{PACS_AET}'
+    retr.host = '{PACS_HOST}'
+    retr.port = {PACS_PORT}
+    retr.setDatabase(db)
+    retr.moveDestinationAETitle = '{slicer_aet}'
+    retr.moveSeries('{pacs_study_uid}', '{pacs_series_uid}')
+    for _ in range(40):
+        if db.filesForSeries('{pacs_series_uid}'):
+            indexed = True
+            break
+        time.sleep(0.25)
+__execResult = {{"indexed": indexed}}
+"""
+        try:
+            result = asyncio.run(
+                SlicerService().execute(
+                    f"http://{SLICER_HOST}:{SLICER_PORT}", probe, request_timeout=20.0
+                )
+            )
+        finally:
+            requests.delete(modality_url, timeout=5)
+        if not result.get("indexed"):
+            pytest.skip(
+                "Slicer DICOMListener does not index C-MOVE deliveries "
+                "(headless/Xvfb storescp stdout limitation) — C-GET works, but "
+                "Slicer-as-C-MOVE-destination retrieval needs a GUI Slicer"
+            )
+
     async def test_slicer_aet_registered_in_orthanc(self, slicer_aet: str) -> None:
         """Orthanc must register CALLING_AET for C-MOVE delivery."""
         assert slicer_aet == CALLING_AET, (
@@ -956,6 +1022,7 @@ __execResult = {"calling_aet": pacs.calling_aet}
 
     async def test_cmove_retrieval_with_context_vars(
         self,
+        _cmove_indexing_works: None,
         slicer_service: SlicerService,
         slicer_url: str,
         pacs_study_uid: str,

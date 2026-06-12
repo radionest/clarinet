@@ -221,15 +221,26 @@ test-all-stages: ## Full pipeline: lint → unit → schema‖VM → fast → PG
 _test-all-stages-impl:
 	@echo ""
 	@echo "=========================================="
-	@echo "  Stage 1/8: lint + typecheck + frontend  "
+	@echo "  Stage 1/8: lint + typecheck + frontend + headless Slicer  "
 	@echo "=========================================="
+    # Launch the headless Slicer alongside lint/typecheck/frontend and fail the
+    # whole run EARLY (before the ~10 min VM provision) if it can't come up.
+    # SKIP_SLICER=1 bypasses it — the slicer stage then auto-skips as before.
 	@$(MAKE) lint & LINT_PID=$$!; \
 	$(MAKE) typecheck & TC_PID=$$!; \
 	$(MAKE) frontend-test & FE_PID=$$!; \
+	if [ "$${SKIP_SLICER}" = "1" ]; then \
+		echo "SKIP_SLICER=1 — headless Slicer not launched; slicer tests will skip"; SLICER_PID=""; \
+	else \
+		bash deploy/test/slicer/run-headless.sh & SLICER_PID=$$!; \
+	fi; \
 	FAIL=0; \
 	wait $$LINT_PID || FAIL=1; \
 	wait $$TC_PID || FAIL=1; \
 	wait $$FE_PID || FAIL=1; \
+	if [ -n "$$SLICER_PID" ]; then \
+		wait $$SLICER_PID || { echo "Stage 1 FAILED: cannot launch headless Slicer (set SKIP_SLICER=1 to bypass)"; FAIL=1; }; \
+	fi; \
 	if [ $$FAIL -ne 0 ]; then echo "Stage 1 FAILED"; exit 1; fi
 	@echo ""
 	@echo "=========================================="
@@ -305,6 +316,17 @@ _test-all-stages-impl:
 	@echo "=========================================="
 	@echo "  Stage 5b/8: slicer tests (sequential)  "
 	@echo "=========================================="
+    # SLICER_PACS_SETUP: optional script run before the slicer tests (e.g.
+    # (re)apply the PACS env on a freshly reimaged VM). It runs as a child
+    # process, so it CANNOT export CLARINET_TEST_SLICER_HOST /
+    # CLARINET_TEST_PACS_HOST back into this make — set those in the environment
+    # that invokes `make`. A failing hook is non-fatal (slicer tests then skip),
+    # but its exit code is surfaced rather than swallowed.
+	@if [ -n "$${SLICER_PACS_SETUP}" ]; then \
+		echo "Running Slicer/PACS setup hook: $${SLICER_PACS_SETUP}"; \
+		bash "$${SLICER_PACS_SETUP}"; rc=$$?; \
+		[ $$rc -eq 0 ] || echo "⚠ Slicer/PACS setup hook exited $$rc — PACS-dependent slicer tests will skip"; \
+	fi
 	@$(MAKE) test-slicer
 	@if [ "$${SKIP_VM}" = "1" ]; then \
 		echo ""; \
@@ -347,6 +369,7 @@ _test-all-stages-impl:
 		else \
 			bash $(VM_SH) destroy || { rc=$$?; echo "VM destroy failed (exit $$rc)"; if [ $$EXIT_CODE -eq 0 ]; then EXIT_CODE=$$rc; fi; }; \
 		fi; \
+		if [ "$${SKIP_SLICER}" != "1" ]; then bash deploy/test/slicer/run-headless.sh --stop 2>/dev/null || true; fi; \
 		if [ $$EXIT_CODE -ne 0 ]; then \
 			echo ""; \
 			echo "=========================================="; \
@@ -355,6 +378,7 @@ _test-all-stages-impl:
 			exit $$EXIT_CODE; \
 		fi; \
 	fi
+	@if [ "$${SKIP_SLICER}" != "1" ]; then bash deploy/test/slicer/run-headless.sh --stop 2>/dev/null || true; fi
 	@echo ""
 	@echo "=========================================="
 	@echo "  All stages passed!                      "
