@@ -59,6 +59,7 @@ def init_project(path: str, template: str | None = None) -> None:
 # ── Project ──────────────────────────────────────────
 project_name = "My Project"
 # project_description = "Medical Imaging Framework"
+# project_title = "My Project"  # browser tab <title>; defaults to project_name
 
 # ── Server ───────────────────────────────────────────
 port = 8000

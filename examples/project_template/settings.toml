@@ -4,6 +4,7 @@
 # ── Project ──────────────────────────────────────────
 project_name = "TODO: Project Name"
 project_description = "TODO: short description of the research"
+# project_title = "TODO: browser tab title"  # defaults to project_name
 root_url = "/my_project"
 api_base_url = "http://127.0.0.1:8111/my_project/api"
 
