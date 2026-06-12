@@ -199,3 +199,18 @@ class TestDiskPathTemplateValidator:
         )
         with pytest.raises(ValidationError, match="'\\.\\.'"):
             Settings()
+
+
+class TestBrowserTitle:
+    """`browser_title` controls the SPA <title>; falls back to project_name."""
+
+    def test_falls_back_to_project_name(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("CLARINET_PROJECT_NAME", "nir_liver")
+        s = Settings()
+        assert s.project_title is None
+        assert s.browser_title == "nir_liver"
+
+    def test_explicit_title_overrides_project_name(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("CLARINET_PROJECT_NAME", "nir_liver")
+        monkeypatch.setenv("CLARINET_PROJECT_TITLE", "НИР Артериография печени")
+        assert Settings().browser_title == "НИР Артериография печени"

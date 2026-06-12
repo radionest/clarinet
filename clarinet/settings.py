@@ -408,10 +408,16 @@ class Settings(BaseSettings):
     # Project branding
     project_name: str = "Clarinet"
     project_description: str = "Medical Imaging Framework"
+    project_title: str | None = None  # Browser tab <title>; falls back to project_name
 
     # Project customization
     project_path: Path | None = None
     project_static_path: Path | None = None
+
+    @property
+    def browser_title(self) -> str:
+        """Title shown in the browser tab. Falls back to ``project_name``."""
+        return self.project_title or self.project_name
 
     @property
     def pipeline_task_namespace(self) -> str:

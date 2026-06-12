@@ -5,6 +5,7 @@ This module creates and configures the FastAPI application with all routers,
 middleware, and static files.
 """
 
+import html
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
@@ -605,11 +606,14 @@ def create_app(root_path: str = "") -> FastAPI:
         _index_html_cache: dict[str, str] = {}
 
         def _render_index(index_path: Path) -> str:
-            """Read index.html, substitute $BASE_PATH template variable, cache result."""
+            """Read index.html, substitute $BASE_PATH/$PROJECT_TITLE, cache result."""
             key = str(index_path)
             if key not in _index_html_cache:
                 tmpl = Template(index_path.read_text(encoding="utf-8"))
-                _index_html_cache[key] = tmpl.safe_substitute(BASE_PATH=root_path)
+                _index_html_cache[key] = tmpl.safe_substitute(
+                    BASE_PATH=root_path,
+                    PROJECT_TITLE=html.escape(settings.browser_title),
+                )
             return _index_html_cache[key]
 
         # Serve index.html for all non-API routes (SPA support)
