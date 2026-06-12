@@ -6,6 +6,7 @@ import pytest
 from sqlmodel import select
 
 from clarinet.models.record import Record, RecordStatus, RecordType
+from tests.utils.urls import RECORDS_BASE
 
 
 @pytest.mark.asyncio
@@ -629,7 +630,7 @@ async def test_prefill_allows_preparing_record(client, test_session, _pending_re
     await test_session.commit()
 
     response = await client.post(
-        f"/api/records/{_pending_record.id}/data/prefill",
+        f"{RECORDS_BASE}/{_pending_record.id}/data/prefill",
         json={"lesions": [{"lesion_num": 1}]},
     )
     assert response.status_code == 200
@@ -644,7 +645,7 @@ async def test_submit_rejects_preparing_record(client, test_session, _pending_re
     await test_session.commit()
 
     response = await client.post(
-        f"/api/records/{_pending_record.id}/data",
+        f"{RECORDS_BASE}/{_pending_record.id}/data",
         json={"lesions": []},
     )
     assert response.status_code == 409
@@ -656,7 +657,7 @@ async def test_create_record_with_preparing_status(
 ):
     """POST /records with status=preparing creates the record in preparing status."""
     response = await client.post(
-        "/api/records/",
+        f"{RECORDS_BASE}/",
         json={
             "patient_id": test_patient.id,
             "study_uid": test_study.study_uid,
@@ -677,7 +678,7 @@ async def test_status_update_preparing_to_pending(client, test_session, _pending
     await test_session.commit()
 
     response = await client.patch(
-        f"/api/records/{_pending_record.id}/status",
+        f"{RECORDS_BASE}/{_pending_record.id}/status",
         params={"record_status": "pending"},
     )
     assert response.status_code == 200
@@ -696,7 +697,7 @@ async def test_check_files_does_not_touch_preparing_record(client, test_session,
     test_session.add(_pending_record)
     await test_session.commit()
 
-    response = await client.post(f"/api/records/{_pending_record.id}/check-files")
+    response = await client.post(f"{RECORDS_BASE}/{_pending_record.id}/check-files")
     assert response.status_code == 200
     assert response.json() == {"changed_files": [], "checksums": {}}
 
@@ -712,7 +713,7 @@ async def test_status_update_preparing_to_inwork_conflict(client, test_session, 
     await test_session.commit()
 
     response = await client.patch(
-        f"/api/records/{_pending_record.id}/status",
+        f"{RECORDS_BASE}/{_pending_record.id}/status",
         params={"record_status": "inwork"},
     )
     assert response.status_code == 409
@@ -731,7 +732,7 @@ async def test_assign_user_rejects_preparing_record(
     await test_session.commit()
 
     response = await client.patch(
-        f"/api/records/{_pending_record.id}/user",
+        f"{RECORDS_BASE}/{_pending_record.id}/user",
         params={"user_id": str(test_user.id)},
     )
     assert response.status_code == 422
