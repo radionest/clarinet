@@ -49,20 +49,8 @@ check() {
 
 vm_setting() {
     # vm_setting <key> — read a setting from the VM with the same layering
-    # clarinet uses: settings.custom.toml (stand overlay, written for
-    # downstream-project deployments) overrides settings.toml.
-    local key="$1"
-    ssh -o StrictHostKeyChecking=no \
-        -o "UserKnownHostsFile=${KNOWN_HOSTS_FILE:-$HOME/.ssh/known_hosts}" \
-        -i "$SSH_KEY_PATH" "clarinet@${IP}" \
-        "python3 -c \"
-import tomllib, pathlib
-m = {}
-for p in ('/opt/clarinet/settings.toml', '/opt/clarinet/settings.custom.toml'):
-    f = pathlib.Path(p)
-    if f.is_file():
-        m.update(tomllib.load(f.open('rb')))
-print(m.get('${key}', ''))\"" 2>/dev/null
+    # clarinet uses (settings.custom.toml overrides settings.toml).
+    bash "${SCRIPT_DIR}/../lib/vm-setting.sh" "$IP" "$1"
 }
 
 echo "Smoke testing: ${BASE_URL}"

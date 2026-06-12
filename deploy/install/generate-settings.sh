@@ -17,15 +17,6 @@ fi
 DATA_DIR="/var/lib/clarinet/data"
 LOG_DIR="/var/log/clarinet"
 
-# Bare mode on a reused machine: drop a stale stand overlay left by a previous
-# project deploy — clarinet loads it with higher priority than the freshly
-# generated settings.toml. Only the auto-generated overlay is removed (matched
-# by its header signature); operator-managed custom files are left untouched.
-CUSTOM_FILE="${SETTINGS_DIR}/settings.custom.toml"
-if [[ -z "$OVERLAY" && -f "$CUSTOM_FILE" ]] && head -1 "$CUSTOM_FILE" | grep -q "Clarinet stand overrides"; then
-    rm -f "$CUSTOM_FILE"
-fi
-
 DB_USER="${CLARINET_DB_USER:-clarinet}"
 DB_NAME="${CLARINET_DB_NAME:-clarinet}"
 DB_PASS="${CLARINET_DB_PASS:-changeme}"
@@ -36,16 +27,32 @@ RABBIT_PASS="${CLARINET_RABBIT_PASS:-changeme}"
 SECRET_KEY="${CLARINET_SECRET_KEY:-$(openssl rand -hex 32)}"
 ANON_SALT="${CLARINET_ANON_SALT:-$(openssl rand -hex 16)}"
 
-# Preserve existing admin_password on reruns (idempotent)
+# Preserve existing admin_password on reruns (idempotent). The DB keeps the
+# old hash (db init never updates an existing admin), so the password must
+# survive mode switches: read it from the effective layering — the overlay
+# wins over the base file — BEFORE the stale-overlay cleanup below.
 EXISTING_ADMIN_PASSWORD=""
-if [[ -f "$SETTINGS_FILE" ]] && [[ -z "${CLARINET_ADMIN_PASSWORD:-}" ]]; then
+if [[ -z "${CLARINET_ADMIN_PASSWORD:-}" ]]; then
     EXISTING_ADMIN_PASSWORD=$(python3 -c "
-import tomllib, sys
-with open(sys.argv[1], 'rb') as f:
-    print(tomllib.load(f).get('admin_password', ''))
-" "$SETTINGS_FILE" 2>/dev/null) || EXISTING_ADMIN_PASSWORD=""
+import sys, tomllib, pathlib
+m = {}
+for name in ('settings.toml', 'settings.custom.toml'):
+    f = pathlib.Path(sys.argv[1]) / name
+    if f.is_file():
+        m.update(tomllib.load(f.open('rb')))
+print(m.get('admin_password', ''))
+" "$SETTINGS_DIR" 2>/dev/null) || EXISTING_ADMIN_PASSWORD=""
 fi
 ADMIN_PASSWORD="${CLARINET_ADMIN_PASSWORD:-${EXISTING_ADMIN_PASSWORD:-$(openssl rand -hex 8)}}"
+
+# Bare mode on a reused machine: drop a stale stand overlay left by a previous
+# project deploy — clarinet loads it with higher priority than the freshly
+# generated settings.toml. Only the auto-generated overlay is removed (matched
+# by its header signature); operator-managed custom files are left untouched.
+CUSTOM_FILE="${SETTINGS_DIR}/settings.custom.toml"
+if [[ -z "$OVERLAY" && -f "$CUSTOM_FILE" ]] && head -1 "$CUSTOM_FILE" | grep -q "Clarinet stand overrides"; then
+    rm -f "$CUSTOM_FILE"
+fi
 
 ROOT_URL="${CLARINET_ROOT_URL:-}"
 

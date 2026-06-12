@@ -421,12 +421,14 @@ cmd_deploy() {
             exit 1
         fi
         log "Uploading downstream project from $project_dir..."
-        ssh_vm "rm -rf /tmp/clarinet-deploy/project && mkdir -p /tmp/clarinet-deploy/project"
-        scp "${scp_opts[@]}" -r "$project_dir/plan" "${ssh_target}:/tmp/clarinet-deploy/project/"
-        scp "${scp_opts[@]}" "$project_dir/settings.toml" "${ssh_target}:/tmp/clarinet-deploy/project/"
-        if [[ -d "$project_dir/review" ]]; then
-            scp "${scp_opts[@]}" -r "$project_dir/review" "${ssh_target}:/tmp/clarinet-deploy/project/"
-        fi
+        local project_items=(plan settings.toml)
+        [[ -d "$project_dir/review" ]] && project_items+=(review)
+        # tar instead of scp -r: keeps checkout noise (__pycache__, *.pyc)
+        # out of the bundle that lands in /opt/clarinet.
+        tar -C "$project_dir" --exclude='__pycache__' --exclude='*.pyc' \
+            -czf - "${project_items[@]}" \
+            | ssh "${scp_opts[@]}" "$ssh_target" \
+                "rm -rf /tmp/clarinet-deploy/project && mkdir -p /tmp/clarinet-deploy/project && tar -xzf - -C /tmp/clarinet-deploy/project"
         project_bundle_env="CLARINET_PROJECT_BUNDLE='/tmp/clarinet-deploy/project'"
     fi
 
