@@ -388,6 +388,41 @@ class TestFlowLoader:
         assert engine.register_flow.called
 
     @pytest.mark.asyncio
+    async def test_cross_flow_import_no_reexecution(self, tmp_path, monkeypatch):
+        """A flow file importing a sibling flow file must reuse the cached
+        module — re-execution would register the sibling's flows a second time
+        (count would be 3 instead of 2)."""
+        import sys
+        from unittest.mock import MagicMock
+
+        from clarinet.services.recordflow.flow_loader import load_and_register_flows
+
+        (tmp_path / "alpha_cross_flow.py").write_text(
+            "from clarinet.services.recordflow import record\n"
+            "SHARED = 1\n"
+            "record('cross-a').on_status('finished').add_record('cross-a2')\n"
+        )
+        (tmp_path / "beta_cross_flow.py").write_text(
+            "from alpha_cross_flow import SHARED\n"
+            "from clarinet.services.recordflow import record\n"
+            "record('cross-b').on_status('finished').add_record('cross-b2')\n"
+        )
+        monkeypatch.delitem(sys.modules, "alpha_cross_flow", raising=False)
+        monkeypatch.delitem(sys.modules, "beta_cross_flow", raising=False)
+
+        engine = MagicMock()
+        try:
+            count = load_and_register_flows(
+                engine,
+                [tmp_path / "alpha_cross_flow.py", tmp_path / "beta_cross_flow.py"],
+            )
+        finally:
+            sys.modules.pop("alpha_cross_flow", None)
+            sys.modules.pop("beta_cross_flow", None)
+
+        assert count == 2
+
+    @pytest.mark.asyncio
     async def test_load_and_register_flows_aggregates_failures(self, tmp_path):
         """Every broken flow file is reported in ONE error; valid files are
         still attempted (no fix-restart-fix cycles)."""

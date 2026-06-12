@@ -51,9 +51,9 @@ def load_task_modules() -> None:
     ``from record_types import master_model`` work in flow files.
 
     Raises:
-        ConfigLoadError: Aggregated error when any flow file fails to
-            import (every file is attempted first). A broken
-            ``record_types.py`` raises immediately.
+        ConfigLoadError: Aggregated error when any flow file (or a path's
+            ``record_types.py``) fails to import — every path and file is
+            attempted first, so one crash reports all broken files.
     """
     from pathlib import Path
 
@@ -71,14 +71,22 @@ def load_task_modules() -> None:
         flow_files = find_flow_files(path) if path.is_dir() else [path]
 
         # Tasks dir on sys.path for sibling imports; record_types.py pre-loaded
-        with config_sys_path(tasks_dir), preload_record_types(tasks_dir):
-            for flow_file in flow_files:
-                try:
-                    load_module_from_file(flow_file.stem, flow_file)
-                except ConfigLoadError as e:
-                    failures.append(e)
-                    continue
-                logger.info(f"Loaded pipeline tasks from {flow_file}")
+        try:
+            with config_sys_path(tasks_dir), preload_record_types(tasks_dir):
+                for flow_file in flow_files:
+                    try:
+                        # keep_in_sys: flow files may import each other; a
+                        # re-execution would re-register @pipeline_task and
+                        # trip the task-name collision guard.
+                        load_module_from_file(flow_file.stem, flow_file, keep_in_sys=True)
+                    except ConfigLoadError as e:
+                        failures.append(e)
+                        continue
+                    logger.info(f"Loaded pipeline tasks from {flow_file}")
+        except ConfigLoadError as e:
+            # Broken record_types.py for this path — record it and keep
+            # probing the remaining paths so the aggregate lists everything.
+            failures.append(e)
 
     if failures:
         raise ConfigLoadError.aggregate(failures, kind="pipeline task module")

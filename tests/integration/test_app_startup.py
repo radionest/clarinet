@@ -250,9 +250,15 @@ async def test_startup_broken_plan_file_raises_config_startup_error(
 
     app = FastAPI(lifespan=lifespan)
 
-    with pytest.raises(StartupError, match="Config"):
+    with pytest.raises(StartupError, match="Config") as exc_info:
         async with lifespan(app):
             pass
+
+    # Config is mandatory — the banner must not suggest a nonexistent
+    # CLARINET_CONFIG_ENABLED switch, and should name the failing file.
+    banner = str(exc_info.value)
+    assert "Disable the component" not in banner
+    assert "validators.py" in banner
 
 
 # ── Test 6: RecordFlow must not perform eager health check ───────────────────

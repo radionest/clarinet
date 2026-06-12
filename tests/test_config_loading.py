@@ -205,6 +205,23 @@ class TestCustomCodeRegistry:
 
         assert count == 1  # "loaded.one" was already present
 
+    def test_load_from_zero_new_registrations_warns(self, registry, tmp_path, monkeypatch):
+        """A file that imports cleanly but registers nothing (missing decorator)
+        is the same silent-degradation class as a swallowed import error."""
+        registry.register("loaded.one", 0)
+        registry.register("loaded.two", 0)
+        (tmp_path / "validators.py").write_text(_REGISTERING_FILE)
+
+        captured: list[str] = []
+        monkeypatch.setattr(
+            custom_registry_module.logger,
+            "warning",
+            lambda msg, *a, **kw: captured.append(str(msg)),
+        )
+
+        assert registry.load_from(tmp_path) == 0
+        assert any("registered no new" in m for m in captured)
+
     def test_load_from_broken_file_raises(self, registry, tmp_path):
         (tmp_path / "validators.py").write_text("raise RuntimeError('import error')\n")
 
@@ -240,3 +257,37 @@ class TestLoadPythonConfigFailFast:
 
         with pytest.raises(ConfigLoadError):
             await load_python_config(tmp_path)
+
+    @pytest.mark.asyncio
+    async def test_files_catalog_in_custom_subdirectory_sibling_import(self, tmp_path, monkeypatch):
+        """files_catalog.py in its own subdirectory must be able to import its
+        siblings — the loader puts the catalog's parent on sys.path too."""
+        from clarinet.settings import settings
+
+        (tmp_path / "catalog").mkdir()
+        (tmp_path / "catalog" / "helper_defs.py").write_text("PATTERN = 'seg.nrrd'\n")
+        (tmp_path / "catalog" / "files_catalog.py").write_text(
+            textwrap.dedent("""\
+            from helper_defs import PATTERN
+
+            from clarinet.config.primitives import FileDef
+
+            seg = FileDef(pattern=PATTERN, level="SERIES")
+            """)
+        )
+        (tmp_path / "record_types.py").write_text(
+            textwrap.dedent("""\
+            from clarinet.config.primitives import RecordDef
+
+            rt = RecordDef(name="rt-catalog-subdir", level="SERIES")
+            """)
+        )
+
+        monkeypatch.setattr(settings, "config_files_catalog_file", "catalog/files_catalog.py")
+        monkeypatch.delitem(sys.modules, "helper_defs", raising=False)
+        try:
+            items = await load_python_config(tmp_path)
+        finally:
+            sys.modules.pop("helper_defs", None)
+
+        assert [item.name for item in items] == ["rt-catalog-subdir"]

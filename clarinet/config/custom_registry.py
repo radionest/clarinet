@@ -71,6 +71,14 @@ class CustomCodeRegistry[T]:
         added = set(self._items) - before
         if added:
             logger.info(f"Loaded {len(added)} {self._label}(s): {', '.join(sorted(added))}")
+        else:
+            # The file imported cleanly but added nothing — likely a missing
+            # decorator. The same class of silent degradation as a swallowed
+            # import error, so make it visible.
+            logger.warning(
+                f"{path} imported successfully but registered no new {self._label}(s) — "
+                f"check that the decorators are present"
+            )
         return len(added)
 
     def get(self, name: str) -> T | None:

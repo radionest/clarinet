@@ -32,15 +32,28 @@ duration of the import: the config root AND the file's parent. Use
 inserted at position 0, so the last argument wins lookup). Entries already
 on `sys.path` are skipped and left in place; only inserted ones are removed.
 
+The priority order is **per call**, not global: nested `config_sys_path`
+contexts stack on top of outer ones. E.g. the flow loaders put the flow dir
+on the path first, then `preload_record_types` inserts the config root and
+the `record_types.py` parent *above* it — on a name collision between the
+flow dir and the config root, the config root wins (matches the pre-refactor
+behavior).
+
 ## Primitives (`python_loader.py`)
 
 - `config_sys_path(*dirs)` — context manager described above.
 - `load_module_from_file(name, path, *, keep_in_sys=False)` — importlib
   spec → module → `sys.modules[name]` → exec. **Raises `ConfigLoadError`**
   on any failure and pops the half-initialized module from `sys.modules`
-  (prevents cross-test contamination). `keep_in_sys=True` only when sibling
-  files must import the module afterwards (e.g. `record_types.py` while flow
-  files load).
+  (prevents cross-test contamination). `keep_in_sys=True` when sibling files
+  must import the module afterwards: `record_types.py` while flow files
+  load, AND **the flow files themselves** — flow files may import each
+  other, and without the cache entry Python re-executes the file from disk,
+  double-registering its flows / `@pipeline_task`s (task-name collision
+  kills the worker). Limitation (same as pre-refactor): flow files load in
+  sorted order, so a flow file may only import siblings that sort **before**
+  it — importing a later-sorted flow file re-executes it transitively and
+  still collides.
 
 ## `CustomCodeRegistry[T]` (`custom_registry.py`)
 
@@ -66,8 +79,12 @@ A broken plan file must crash startup, never degrade silently:
 - loaders raise `ConfigLoadError` (`clarinet/exceptions/domain.py`,
   subclass of `ConfigurationError`; original error in `__cause__`)
 - multi-file loaders (`load_and_register_flows`, `worker.load_task_modules`)
-  attempt every file, then raise one `ConfigLoadError.aggregate(...)`
-- `app.py` lifespan converts `ConfigLoadError` → `StartupError(component="Config")`
+  attempt every file/path, then raise one `ConfigLoadError.aggregate(...)`
+  (individual errors kept on `.failures`)
+- a file that imports cleanly but registers nothing logs a WARNING
+  (missing decorator — same silent-degradation class)
+- `app.py` lifespan converts `ConfigLoadError` → `StartupError(component="Config",
+  disableable=False)` — no bogus "disable the component" hint
 - `worker.run_worker` converts it → `SystemExit(1)`
 
 ## Test sanitation

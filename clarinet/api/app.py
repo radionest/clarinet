@@ -48,31 +48,50 @@ from clarinet.utils.logger import logger
 
 
 class StartupError(SystemExit):
-    """Raised when an enabled component fails to initialize at startup."""
+    """Raised when an enabled component fails to initialize at startup.
 
-    def __init__(self, component: str, reason: str, hint: str) -> None:
+    ``disableable=False`` is for mandatory subsystems (e.g. project config)
+    that have no ``CLARINET_*_ENABLED`` switch — the banner then offers only
+    the fix step instead of suggesting a nonexistent setting.
+    """
+
+    def __init__(self, component: str, reason: str, hint: str, *, disableable: bool = True) -> None:
         self.component = component
         self.reason = reason
         self.hint = hint
+        if disableable:
+            fix_block = (
+                f"To fix, either:\n"
+                f"  1. {hint}\n"
+                f"  2. Disable the component: "
+                f"set CLARINET_{component.upper().replace(' ', '_')}_ENABLED=false\n"
+            )
+        else:
+            fix_block = f"To fix: {hint}\n"
         message = (
             f"\n{'=' * 60}\n"
             f"STARTUP FAILED: {component}\n"
             f"{'=' * 60}\n"
             f"Reason: {reason}\n\n"
-            f"To fix, either:\n"
-            f"  1. {hint}\n"
-            f"  2. Disable the component: set CLARINET_{component.upper().replace(' ', '_')}_ENABLED=false\n"
+            f"{fix_block}"
             f"{'=' * 60}\n"
         )
         super().__init__(message)
 
 
 def _config_startup_error(e: ConfigLoadError) -> StartupError:
-    """Uniform startup banner for plan/ custom-code import failures."""
+    """Uniform startup banner for project custom-code import failures.
+
+    Flow/pipeline modules may live outside plan/ (``recordflow_paths``), so
+    the hint points at the failing file when known instead of hardcoding a
+    folder name.
+    """
+    target = e.path or "the project's custom Python files"
     return StartupError(
         component="Config",
         reason=str(e),
-        hint="Fix the import error in the plan/ file, then restart",
+        hint=f"Fix the import error in {target}, then restart",
+        disableable=False,
     )
 
 
@@ -199,8 +218,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         f"{len(reconcile_result.orphaned)} orphaned"
     )
 
-    # Load project file registry for API use
-    app.state.project_file_registry = await load_project_file_registry(settings.config_tasks_path)
+    # Load project file registry for API use; parse/validation errors get the
+    # same Config banner as broken plan/ code instead of a raw traceback
+    try:
+        app.state.project_file_registry = await load_project_file_registry(
+            settings.config_tasks_path
+        )
+    except Exception as e:
+        raise StartupError(
+            component="Config",
+            reason=f"Failed to load project file registry: {e}",
+            hint="Fix file_registry.toml / file_registry.json in the config folder, then restart",
+            disableable=False,
+        ) from e
 
     # Load custom schema + slicer context hydrators from tasks folder
     # (each loader logs the registered names itself)

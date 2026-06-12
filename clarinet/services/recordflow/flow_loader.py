@@ -72,7 +72,10 @@ def load_flows_from_file(file_path: Path) -> list[FlowRecord | FlowFileRecord]:
     # Parent dir on sys.path for sibling imports; record_types.py pre-loaded
     parent_dir = file_path.parent
     with config_sys_path(parent_dir), preload_record_types(parent_dir):
-        load_module_from_file(file_path.stem, file_path)
+        # keep_in_sys: later flow files may ``import`` this one (cross-flow
+        # imports). Without the cache entry Python would re-execute the file
+        # from disk and its flows would register a second time.
+        load_module_from_file(file_path.stem, file_path, keep_in_sys=True)
 
         # Return only active flows (filter out reference-only FlowRecords
         # created for data access like record('type').data.field)

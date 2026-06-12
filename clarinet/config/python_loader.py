@@ -4,7 +4,10 @@ Discovers ``record_types.py`` in a given folder and collects all
 ``RecordDef`` instances from its module namespace, converting them
 to ``RecordTypeCreate`` objects for the reconciler.
 
-Reuses the importlib pattern from ``clarinet/services/recordflow/flow_loader.py``.
+Also home of the shared loading primitives (``config_sys_path``,
+``load_module_from_file``) used by every custom-code loader —
+``CustomCodeRegistry``, the RecordFlow loader, the pipeline worker.
+Contract: ``.claude/rules/custom-code-loading.md``.
 """
 
 import importlib.util
@@ -373,13 +376,21 @@ async def load_python_config(folder: Path) -> list[RecordTypeCreate]:
         logger.warning(f"No {settings.config_record_types_file} found in {folder}")
         return []
 
+    files_catalog_file = folder / settings.config_files_catalog_file
+    has_catalog = files_catalog_file.is_file()
+
+    # files_catalog may live in a different subdirectory than record_types —
+    # its parent must be importable too (record_types parent stays highest).
+    import_dirs = [folder]
+    if has_catalog:
+        import_dirs.append(files_catalog_file.parent)
+    import_dirs.append(record_types_file.parent)
+
     catalog_module_name: str | None = None
-    with config_sys_path(folder, record_types_file.parent):
+    with config_sys_path(*import_dirs):
         try:
             # Load files_catalog first (if present) to set FileDef names.
             # Keep it in sys.modules so record_types.py can import it.
-            files_catalog_file = folder / settings.config_files_catalog_file
-            has_catalog = files_catalog_file.is_file()
             if has_catalog:
                 catalog_module = load_module_from_file(
                     files_catalog_file.stem, files_catalog_file, keep_in_sys=True

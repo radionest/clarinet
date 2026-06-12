@@ -845,6 +845,59 @@ class TestLoadTaskModulesFailFast:
         with pytest.raises(ConfigLoadError, match="2 pipeline task module"):
             load_task_modules()
 
+    def test_broken_record_types_does_not_drop_other_failures(self, tmp_path, monkeypatch):
+        """A broken record_types.py in one path must not discard failures from
+        other paths — the aggregate lists every broken file at once."""
+        import sys
+
+        from clarinet.exceptions.domain import ConfigLoadError
+        from clarinet.services.pipeline.worker import load_task_modules
+
+        dir_a = tmp_path / "a"
+        dir_a.mkdir()
+        (dir_a / "record_types.py").write_text("raise RuntimeError('broken rt')\n")
+        dir_b = tmp_path / "b"
+        dir_b.mkdir()
+        (dir_b / "x_broken_flow.py").write_text("raise RuntimeError('broken flow')\n")
+
+        monkeypatch.setattr(settings, "recordflow_paths", [str(dir_a), str(dir_b)])
+        monkeypatch.setattr(settings, "have_dicom", False)
+        monkeypatch.delitem(sys.modules, "record_types", raising=False)
+
+        with pytest.raises(ConfigLoadError, match="2 pipeline task module"):
+            load_task_modules()
+
+    def test_cross_flow_import_no_reexecution(self, tmp_path, monkeypatch):
+        """A flow file importing an earlier-loaded sibling must reuse the
+        cached module — re-execution would re-register @pipeline_task and trip
+        the task-name collision guard, killing the worker.
+
+        Flow files load in sorted order, so the imported file must sort before
+        the importer (``early`` < ``late``) — the supported cross-flow layout.
+        """
+        import sys
+
+        from clarinet.services.pipeline.worker import load_task_modules
+
+        (tmp_path / "early_cross_flow.py").write_text(
+            "from clarinet.services.pipeline import pipeline_task\n"
+            "@pipeline_task()\n"
+            "async def early_cross_task(msg, ctx):\n"
+            "    return None\n"
+        )
+        (tmp_path / "late_cross_flow.py").write_text("import early_cross_flow\n")
+
+        monkeypatch.setattr(settings, "recordflow_paths", [str(tmp_path)])
+        monkeypatch.setattr(settings, "have_dicom", False)
+        monkeypatch.delitem(sys.modules, "early_cross_flow", raising=False)
+        monkeypatch.delitem(sys.modules, "late_cross_flow", raising=False)
+
+        try:
+            load_task_modules()  # must not raise task-name collision
+        finally:
+            sys.modules.pop("early_cross_flow", None)
+            sys.modules.pop("late_cross_flow", None)
+
     @pytest.mark.asyncio
     async def test_run_worker_exits_nonzero_on_config_error(self):
         from clarinet.exceptions.domain import ConfigLoadError
