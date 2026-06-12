@@ -602,7 +602,7 @@ def create_app(root_path: str = "") -> FastAPI:
             # Should not happen: _check_frontend() in lifespan catches this.
             logger.error("No static directories found after startup")
 
-        # Cache rendered index.html with $BASE_PATH substituted
+        # Cache rendered index.html with $BASE_PATH / $PROJECT_TITLE substituted
         _index_html_cache: dict[str, str] = {}
 
         def _render_index(index_path: Path) -> str:
@@ -662,6 +662,10 @@ def create_app(root_path: str = "") -> FastAPI:
                 except ValueError:
                     continue
                 if candidate.is_file():
+                    # index.html carries $BASE_PATH/$PROJECT_TITLE placeholders —
+                    # render it instead of serving the raw template.
+                    if candidate.name == "index.html":
+                        return HTMLResponse(_render_index(candidate))
                     return FileResponse(candidate)
 
             # Serve index.html for all other routes (SPA routing)
