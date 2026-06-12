@@ -10,8 +10,6 @@ can be loaded from a ``hydrators.py`` file in the tasks folder.
 from __future__ import annotations
 
 import copy
-import importlib.util
-import sys
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from pathlib import Path
@@ -19,6 +17,7 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from clarinet.config.custom_registry import CustomCodeRegistry
 from clarinet.models.record import Record
 from clarinet.repositories.study_repository import StudyRepository
 from clarinet.repositories.user_repository import UserRepository
@@ -54,7 +53,11 @@ type HydratorFunc = Callable[
     Coroutine[Any, Any, list[dict[str, Any]]],
 ]
 
-_HYDRATOR_REGISTRY: dict[str, HydratorFunc] = {}
+_HYDRATOR_REGISTRY: CustomCodeRegistry[HydratorFunc] = CustomCodeRegistry(
+    filename_setting="config_schema_hydrators_file",
+    module_name="clarinet_custom_hydrators",
+    label="schema hydrator",
+)
 
 
 def schema_hydrator(source_name: str) -> Callable[[HydratorFunc], HydratorFunc]:
@@ -68,7 +71,7 @@ def schema_hydrator(source_name: str) -> Callable[[HydratorFunc], HydratorFunc]:
     """
 
     def decorator(func: HydratorFunc) -> HydratorFunc:
-        _HYDRATOR_REGISTRY[source_name] = func
+        _HYDRATOR_REGISTRY.register(source_name, func)
         return func
 
     return decorator
@@ -217,49 +220,18 @@ async def _hydrate_field(
 
 
 def load_custom_hydrators(folder: str | Path) -> int:
-    """Load ``hydrators.py`` from *folder* via importlib.
+    """Load ``hydrators.py`` (``settings.config_schema_hydrators_file``) from *folder*.
 
     Decorators in the loaded file auto-register into ``_HYDRATOR_REGISTRY``.
     Built-in hydrators are never cleared.
 
     Args:
-        folder: Directory that may contain a ``hydrators.py`` file.
+        folder: Config root that may contain the hydrators file.
 
     Returns:
         Number of *new* hydrators added (0 if file not found).
+
+    Raises:
+        ConfigLoadError: If the file exists but fails to import.
     """
-    from clarinet.settings import settings
-
-    path = Path(folder) / settings.config_schema_hydrators_file
-    if not path.exists():
-        return 0
-
-    before = set(_HYDRATOR_REGISTRY)
-
-    # If hydrators file is in a subdirectory, add its parent to sys.path
-    folder_str = str(Path(folder).resolve())
-    parent_str = str(path.parent.resolve())
-    added_parent = parent_str != folder_str and parent_str not in sys.path
-    if added_parent:
-        sys.path.insert(0, parent_str)
-
-    try:
-        module_name = "clarinet_custom_hydrators"
-        spec = importlib.util.spec_from_file_location(module_name, path)
-        if spec is None or spec.loader is None:
-            logger.error(f"Cannot create module spec for {path}")
-            return 0
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[module_name] = module
-        spec.loader.exec_module(module)
-    except Exception:
-        logger.exception(f"Error loading custom hydrators from {path}")
-        return 0
-    finally:
-        if added_parent and parent_str in sys.path:
-            sys.path.remove(parent_str)
-
-    added = set(_HYDRATOR_REGISTRY) - before
-    if added:
-        logger.info(f"Loaded {len(added)} custom hydrator(s): {', '.join(sorted(added))}")
-    return len(added)
+    return _HYDRATOR_REGISTRY.load_from(folder)

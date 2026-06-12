@@ -33,7 +33,7 @@ from clarinet.api.routers import study as study
 from clarinet.api.routers import user as user
 from clarinet.api.routers import viewer as viewer
 from clarinet.api.routers import workflow as workflow
-from clarinet.exceptions.domain import RecordFlowError
+from clarinet.exceptions.domain import ConfigLoadError, RecordFlowError
 from clarinet.services.session_cleanup import session_cleanup_service
 from clarinet.settings import settings
 from clarinet.utils.admin import ensure_admin_exists
@@ -48,23 +48,51 @@ from clarinet.utils.logger import logger
 
 
 class StartupError(SystemExit):
-    """Raised when an enabled component fails to initialize at startup."""
+    """Raised when an enabled component fails to initialize at startup.
 
-    def __init__(self, component: str, reason: str, hint: str) -> None:
+    ``disableable=False`` is for mandatory subsystems (e.g. project config)
+    that have no ``CLARINET_*_ENABLED`` switch — the banner then offers only
+    the fix step instead of suggesting a nonexistent setting.
+    """
+
+    def __init__(self, component: str, reason: str, hint: str, *, disableable: bool = True) -> None:
         self.component = component
         self.reason = reason
         self.hint = hint
+        if disableable:
+            fix_block = (
+                f"To fix, either:\n"
+                f"  1. {hint}\n"
+                f"  2. Disable the component: "
+                f"set CLARINET_{component.upper().replace(' ', '_')}_ENABLED=false\n"
+            )
+        else:
+            fix_block = f"To fix: {hint}\n"
         message = (
             f"\n{'=' * 60}\n"
             f"STARTUP FAILED: {component}\n"
             f"{'=' * 60}\n"
             f"Reason: {reason}\n\n"
-            f"To fix, either:\n"
-            f"  1. {hint}\n"
-            f"  2. Disable the component: set CLARINET_{component.upper().replace(' ', '_')}_ENABLED=false\n"
+            f"{fix_block}"
             f"{'=' * 60}\n"
         )
         super().__init__(message)
+
+
+def _config_startup_error(e: ConfigLoadError) -> StartupError:
+    """Uniform startup banner for project custom-code import failures.
+
+    Flow/pipeline modules may live outside plan/ (``recordflow_paths``), so
+    the hint points at the failing file when known instead of hardcoding a
+    folder name.
+    """
+    target = e.path or "the project's custom Python files"
+    return StartupError(
+        component="Config",
+        reason=str(e),
+        hint=f"Fix the import error in {target}, then restart",
+        disableable=False,
+    )
 
 
 def _check_frontend() -> None:
@@ -171,10 +199,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # log again here (matches the load_custom_hydrators pattern below).
     from clarinet.services.record_data_validation import load_custom_validators
 
-    load_custom_validators(settings.config_tasks_path)
+    try:
+        load_custom_validators(settings.config_tasks_path)
+    except ConfigLoadError as e:
+        raise _config_startup_error(e) from e
 
     # Reconcile RecordType definitions
-    reconcile_result = await reconcile_config()
+    try:
+        reconcile_result = await reconcile_config()
+    except ConfigLoadError as e:
+        raise _config_startup_error(e) from e
     app.state.config_mode = settings.config_mode
     app.state.config_tasks_path = settings.config_tasks_path
     logger.info(
@@ -184,22 +218,30 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         f"{len(reconcile_result.orphaned)} orphaned"
     )
 
-    # Load project file registry for API use
-    app.state.project_file_registry = await load_project_file_registry(settings.config_tasks_path)
+    # Load project file registry for API use; parse/validation errors get the
+    # same Config banner as broken plan/ code instead of a raw traceback
+    try:
+        app.state.project_file_registry = await load_project_file_registry(
+            settings.config_tasks_path
+        )
+    except Exception as e:
+        raise StartupError(
+            component="Config",
+            reason=f"Failed to load project file registry: {e}",
+            hint="Fix file_registry.toml / file_registry.json in the config folder, then restart",
+            disableable=False,
+        ) from e
 
-    # Load custom schema hydrators from tasks folder
+    # Load custom schema + slicer context hydrators from tasks folder
+    # (each loader logs the registered names itself)
     from clarinet.services.schema_hydration import load_custom_hydrators
-
-    hydrator_count = load_custom_hydrators(settings.config_tasks_path)
-    if hydrator_count:
-        logger.info(f"Loaded {hydrator_count} custom schema hydrator(s)")
-
-    # Load custom slicer context hydrators from tasks folder
     from clarinet.services.slicer.context_hydration import load_custom_slicer_hydrators
 
-    slicer_hydrator_count = load_custom_slicer_hydrators(settings.config_tasks_path)
-    if slicer_hydrator_count:
-        logger.info(f"Loaded {slicer_hydrator_count} custom slicer context hydrator(s)")
+    try:
+        load_custom_hydrators(settings.config_tasks_path)
+        load_custom_slicer_hydrators(settings.config_tasks_path)
+    except ConfigLoadError as e:
+        raise _config_startup_error(e) from e
 
     # Load custom SQL report templates from project's reports folder
     from clarinet.services.report_service import ReportRegistry
@@ -263,6 +305,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     if settings.recordflow_enabled:
         try:
             await _init_recordflow(app)
+        except ConfigLoadError as e:
+            raise _config_startup_error(e) from e
         except Exception as e:
             raise StartupError(
                 component="RecordFlow",
@@ -307,6 +351,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
             count = await sync_pipeline_definitions()
             logger.info(f"Synced {count} pipeline definition(s) to database")
+        except ConfigLoadError as e:
+            raise _config_startup_error(e) from e
         except Exception as e:
             raise StartupError(
                 component="Pipeline",

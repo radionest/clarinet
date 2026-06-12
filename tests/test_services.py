@@ -337,13 +337,14 @@ class TestFlowLoader:
         assert len(flows) >= 1
 
     @pytest.mark.asyncio
-    async def test_load_flows_syntax_error(self, tmp_path):
+    async def test_load_flows_syntax_error_raises(self, tmp_path):
+        from clarinet.exceptions.domain import ConfigLoadError
         from clarinet.services.recordflow.flow_loader import load_flows_from_file
 
         flow_file = tmp_path / "bad_flow.py"
         flow_file.write_text("def broken(\n")
-        flows = load_flows_from_file(flow_file)
-        assert flows == []
+        with pytest.raises(ConfigLoadError):
+            load_flows_from_file(flow_file)
 
     @pytest.mark.asyncio
     async def test_load_flows_file_not_found(self, tmp_path):
@@ -384,6 +385,67 @@ class TestFlowLoader:
         engine = MagicMock()
         count = load_and_register_flows(engine, [flow_file])
         assert count >= 1
+        assert engine.register_flow.called
+
+    @pytest.mark.asyncio
+    async def test_cross_flow_import_no_reexecution(self, tmp_path, monkeypatch):
+        """A flow file importing a sibling flow file must reuse the cached
+        module — re-execution would register the sibling's flows a second time
+        (count would be 3 instead of 2)."""
+        import sys
+        from unittest.mock import MagicMock
+
+        from clarinet.services.recordflow.flow_loader import load_and_register_flows
+
+        (tmp_path / "alpha_cross_flow.py").write_text(
+            "from clarinet.services.recordflow import record\n"
+            "SHARED = 1\n"
+            "record('cross-a').on_status('finished').add_record('cross-a2')\n"
+        )
+        (tmp_path / "beta_cross_flow.py").write_text(
+            "from alpha_cross_flow import SHARED\n"
+            "from clarinet.services.recordflow import record\n"
+            "record('cross-b').on_status('finished').add_record('cross-b2')\n"
+        )
+        monkeypatch.delitem(sys.modules, "alpha_cross_flow", raising=False)
+        monkeypatch.delitem(sys.modules, "beta_cross_flow", raising=False)
+
+        engine = MagicMock()
+        try:
+            count = load_and_register_flows(
+                engine,
+                [tmp_path / "alpha_cross_flow.py", tmp_path / "beta_cross_flow.py"],
+            )
+        finally:
+            sys.modules.pop("alpha_cross_flow", None)
+            sys.modules.pop("beta_cross_flow", None)
+
+        assert count == 2
+
+    @pytest.mark.asyncio
+    async def test_load_and_register_flows_aggregates_failures(self, tmp_path):
+        """Every broken flow file is reported in ONE error; valid files are
+        still attempted (no fix-restart-fix cycles)."""
+        from unittest.mock import MagicMock
+
+        from clarinet.exceptions.domain import ConfigLoadError
+        from clarinet.services.recordflow.flow_loader import load_and_register_flows
+
+        good_file = tmp_path / "a_good_flow.py"
+        good_file.write_text(
+            "from clarinet.services.recordflow import record\n"
+            "record('test-agg-1').on_status('finished').add_record('test-agg-2')\n"
+        )
+        broken_one = tmp_path / "b_broken_flow.py"
+        broken_one.write_text("raise RuntimeError('first failure')\n")
+        broken_two = tmp_path / "c_broken_flow.py"
+        broken_two.write_text("raise RuntimeError('second failure')\n")
+
+        engine = MagicMock()
+        with pytest.raises(ConfigLoadError, match="2 flow file"):
+            load_and_register_flows(engine, [good_file, broken_one, broken_two])
+
+        # The valid file was processed before the aggregate raise
         assert engine.register_flow.called
 
 

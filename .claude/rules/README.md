@@ -11,6 +11,7 @@ When adding a new rule: pick a focused topic, set `paths:` to the directory or f
 | `api-deps.md` | DI aliases, RBAC, factory patterns, DICOMweb endpoints | `clarinet/api/dependencies.py`, `clarinet/api/routers/**` |
 | `api-urls.md` | Full endpoint URL table with status codes and auth | routers, tests |
 | `ci-debugging.md` | gh CLI / GitHub Actions debugging workflow | `.github/workflows/**` |
+| `custom-code-loading.md` | plan/ custom-code loading: sys.path contract, CustomCodeRegistry, fail-fast | `python_loader.py`, `custom_registry.py`, registry modules, `flow_loader.py`, pipeline `worker.py` |
 | `e2e-tests.md` | Frontend stack, VM sub-path, Playwright selectors | `deploy/test/e2e/**` |
 | `file-registry.md` | File definition M2M system | `file_schema.py`, file definition repo |
 | `frontend-page-contract.md` | MVU page contract, Shared/OutMsg, effects, LoadStatus, cache, errors | `clarinet/frontend/src/**/*.gleam`, test |

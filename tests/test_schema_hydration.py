@@ -1,15 +1,18 @@
 """Unit tests for schema hydration service."""
 
 import copy
+import textwrap
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from clarinet.exceptions.domain import ConfigLoadError
 from clarinet.services.schema_hydration import (
     _HYDRATOR_REGISTRY,
     HydrationContext,
     hydrate_schema,
     hydrate_study_series,
+    load_custom_hydrators,
     schema_hydrator,
 )
 
@@ -17,10 +20,9 @@ from clarinet.services.schema_hydration import (
 @pytest.fixture(autouse=True)
 def _clean_registry():
     """Save and restore hydrator registry between tests."""
-    original = dict(_HYDRATOR_REGISTRY)
+    original = _HYDRATOR_REGISTRY.snapshot()
     yield
-    _HYDRATOR_REGISTRY.clear()
-    _HYDRATOR_REGISTRY.update(original)
+    _HYDRATOR_REGISTRY.restore(original)
 
 
 def _make_record(study_uid: str | None = "1.2.3") -> MagicMock:
@@ -53,8 +55,7 @@ class TestSchemaHydrator:
         async def my_hydrator(record, options, ctx):
             return []
 
-        assert "test_source" in _HYDRATOR_REGISTRY
-        assert _HYDRATOR_REGISTRY["test_source"] is my_hydrator
+        assert _HYDRATOR_REGISTRY.get("test_source") is my_hydrator
 
     def test_overwrites_existing(self):
         @schema_hydrator("overwrite_me")
@@ -65,7 +66,38 @@ class TestSchemaHydrator:
         async def second(record, options, ctx):
             return []
 
-        assert _HYDRATOR_REGISTRY["overwrite_me"] is second
+        assert _HYDRATOR_REGISTRY.get("overwrite_me") is second
+
+
+# ---------------------------------------------------------------------------
+# load_custom_hydrators (mirrors test_slicer_context_hydration loader tests)
+# ---------------------------------------------------------------------------
+
+
+class TestLoadCustomHydrators:
+    def test_folder_without_file_returns_zero(self, tmp_path):
+        assert load_custom_hydrators(tmp_path) == 0
+
+    def test_loads_valid_file(self, tmp_path):
+        (tmp_path / "hydrators.py").write_text(
+            textwrap.dedent("""\
+            from clarinet.services.schema_hydration import schema_hydrator
+
+            @schema_hydrator("loaded_schema_source")
+            async def loaded_schema_source(record, options, ctx):
+                return []
+            """)
+        )
+
+        count = load_custom_hydrators(tmp_path)
+        assert count == 1
+        assert _HYDRATOR_REGISTRY.get("loaded_schema_source") is not None
+
+    def test_broken_file_raises(self, tmp_path):
+        (tmp_path / "hydrators.py").write_text("raise RuntimeError('import error')")
+
+        with pytest.raises(ConfigLoadError):
+            load_custom_hydrators(tmp_path)
 
 
 # ---------------------------------------------------------------------------
