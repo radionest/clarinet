@@ -275,7 +275,10 @@ async def test_startup_loads_hydrators_before_reconcile(startup_settings, monkey
     """
     import sys
 
-    from clarinet.services.slicer.context_hydration import _SLICER_HYDRATOR_REGISTRY
+    from clarinet.services.slicer.context_hydration import (
+        _SLICER_HYDRATOR_REGISTRY,
+        get_registered_slicer_hydrator_names,
+    )
 
     plan_dir = tmp_path / "plan"
     plan_dir.mkdir()
@@ -303,7 +306,10 @@ async def test_startup_loads_hydrators_before_reconcile(startup_settings, monkey
     app = FastAPI(lifespan=lifespan)
     try:
         async with lifespan(app):
-            pass
+            # Not vacuous: the probe must actually have been loaded from the
+            # plan file — otherwise a removed reconcile guard would let this
+            # lifespan pass without exercising the order at all.
+            assert "startup_order_probe" in get_registered_slicer_hydrator_names()
     finally:
         _SLICER_HYDRATOR_REGISTRY.restore(saved)
 

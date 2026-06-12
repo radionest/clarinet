@@ -79,6 +79,25 @@ class StartupError(SystemExit):
         super().__init__(message)
 
 
+def _load_plan_registries() -> None:
+    """Populate the validator/hydrator registries from the project's config folder.
+
+    Must run BEFORE ``reconcile_config`` — reconcile validates RecordType
+    references (``data_validators``, ``slicer_context_hydrators``) against
+    these registries. Each loader logs the registered names itself.
+
+    Raises:
+        ConfigLoadError: If any of the plan files fails to import.
+    """
+    from clarinet.services.record_data_validation import load_custom_validators
+    from clarinet.services.schema_hydration import load_custom_hydrators
+    from clarinet.services.slicer.context_hydration import load_custom_slicer_hydrators
+
+    load_custom_validators(settings.config_tasks_path)
+    load_custom_hydrators(settings.config_tasks_path)
+    load_custom_slicer_hydrators(settings.config_tasks_path)
+
+
 def _config_startup_error(e: ConfigLoadError) -> StartupError:
     """Uniform startup banner for project custom-code import failures.
 
@@ -192,18 +211,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     await add_default_user_roles()
 
-    # Load custom validators and hydrators BEFORE reconcile — reconcile
-    # validates RecordType references (``data_validators``,
-    # ``slicer_context_hydrators``) against the registries these loaders
-    # populate. Each loader logs the registered names itself.
-    from clarinet.services.record_data_validation import load_custom_validators
-    from clarinet.services.schema_hydration import load_custom_hydrators
-    from clarinet.services.slicer.context_hydration import load_custom_slicer_hydrators
-
     try:
-        load_custom_validators(settings.config_tasks_path)
-        load_custom_hydrators(settings.config_tasks_path)
-        load_custom_slicer_hydrators(settings.config_tasks_path)
+        _load_plan_registries()
     except ConfigLoadError as e:
         raise _config_startup_error(e) from e
 

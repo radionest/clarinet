@@ -110,9 +110,10 @@ async def hydrate_slicer_context(
     for name in hydrator_names:
         hydrator = _SLICER_HYDRATOR_REGISTRY.get(name)
         if hydrator is None:
-            # A missing hydrator breaks the doctor's Slicer-open flow — this
-            # is a config error that should have failed startup, not a
-            # tolerable degradation.
+            # A missing hydrator breaks the doctor's Slicer-open flow.
+            # Reconcile fail-fasts on config-defined RecordTypes at startup,
+            # but types mutated via the API (TOML mode) and orphaned DB rows
+            # bypass that guard — this runtime error is their only signal.
             logger.error(f"Unknown slicer context hydrator '{name}' — skipping")
             continue
         try:

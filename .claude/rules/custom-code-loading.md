@@ -84,9 +84,11 @@ A broken plan file must crash startup, never degrade silently:
 - a file that imports cleanly but registers nothing logs a WARNING
   (missing decorator — same silent-degradation class)
 - `reconcile_config` (`bootstrap.py`) validates RecordType references against
-  the populated registries — `data_validators` and `slicer_context_hydrators`
-  raise `ConfigurationError` on unknown names; loaders therefore run BEFORE
-  reconcile in the lifespan
+  the populated registries via `_validate_registry_refs` — `data_validators`
+  and `slicer_context_hydrators` raise `ConfigurationError` on unknown names;
+  loaders therefore run BEFORE reconcile in the lifespan. Boundary: the guard
+  covers config-defined RecordTypes only — types mutated via the API (TOML
+  mode) and orphaned DB rows are caught only by the runtime ERROR log
 - `app.py` lifespan converts `ConfigLoadError` → `StartupError(component="Config",
   disableable=False)` — no bogus "disable the component" hint
 - `worker.run_worker` converts it → `SystemExit(1)`
