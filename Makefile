@@ -305,6 +305,10 @@ _test-all-stages-impl:
 	@echo "=========================================="
 	@echo "  Stage 5b/8: slicer tests (sequential)  "
 	@echo "=========================================="
+	@if [ -n "$${SLICER_PACS_SETUP}" ]; then \
+		echo "Running Slicer/PACS setup hook: $${SLICER_PACS_SETUP}"; \
+		bash "$${SLICER_PACS_SETUP}" || echo "⚠ Slicer/PACS setup hook failed — PACS-dependent slicer tests will skip"; \
+	fi
 	@$(MAKE) test-slicer
 	@if [ "$${SKIP_VM}" = "1" ]; then \
 		echo ""; \
