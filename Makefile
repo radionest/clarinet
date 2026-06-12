@@ -369,6 +369,7 @@ _test-all-stages-impl:
 		else \
 			bash $(VM_SH) destroy || { rc=$$?; echo "VM destroy failed (exit $$rc)"; if [ $$EXIT_CODE -eq 0 ]; then EXIT_CODE=$$rc; fi; }; \
 		fi; \
+		if [ "$${SKIP_SLICER}" != "1" ]; then bash deploy/test/slicer/run-headless.sh --stop 2>/dev/null || true; fi; \
 		if [ $$EXIT_CODE -ne 0 ]; then \
 			echo ""; \
 			echo "=========================================="; \

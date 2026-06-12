@@ -81,5 +81,7 @@ make test-all-stages
 - The Web Server binds `0.0.0.0`, so a PACS on another host can C-MOVE back to
   `CLARINET_TEST_SLICER_HOST:<SCP_PORT>`.
 - C-MOVE-to-Slicer retrieval (`DICOMListener` indexing of storescp deliveries)
-  is unreliable under Xvfb; that one test self-skips on a headless Slicer. C-GET
-  retrieval is unaffected.
+  is unreliable under Xvfb. The `_cmove_indexing_works` fixture in
+  `tests/e2e/test_slicer_pacs_workflow.py` probes this and self-skips that one
+  test when indexing doesn't work (i.e. on a headless Slicer); C-GET retrieval
+  and a GUI Slicer are unaffected.
