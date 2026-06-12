@@ -10,7 +10,7 @@ See `.claude/rules/workflows.md` for the full reference.
 
 from __future__ import annotations
 
-from record_types import example_segmentation
+from clarinet_plan.definitions.record_types import example_segmentation
 
 from clarinet.services.pipeline import (
     PipelineMessage,

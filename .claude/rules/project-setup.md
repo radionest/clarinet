@@ -31,17 +31,19 @@ my_project/
   settings.custom.toml       # Prod template (env var references)
   .env.example               # Copy to .env for secrets
   .gitignore
-  plan/                      # Python config mode directory
+  plan/                      # Python config mode dir (= clarinet_plan package root)
     definitions/
       record_types.py        # RecordDef instances
-    hydrators/
-      context_hydrators.py   # Slicer context hydrators
+    slicer_hydrators.py      # Slicer context hydrators (config_context_hydrators_file default)
     validators/              # Slicer result validators
     schemas/                 # JSON Schema files for record data
     scripts/                 # 3D Slicer scripts
     workflows/
       pipeline_flow.py       # RecordFlow DSL
 ```
+
+Every plan file imports as a `clarinet_plan.` submodule off this single root
+(no `sys.path`). See `.claude/rules/custom-code-loading.md`.
 
 ## Key Settings (`settings.toml`)
 
@@ -54,8 +56,8 @@ extra_roles = ["doctor", "surgeon"]             # Custom roles beyond admin/user
 config_mode = "python"                          # "toml" (default) or "python"
 config_tasks_path = "./plan/"                   # Root for config files
 config_record_types_file = "definitions/record_types.py"
-config_context_hydrators_file = "hydrators/context_hydrators.py"
-recordflow_paths = ["./plan/workflows"]         # RecordFlow DSL dirs
+# config_context_hydrators_file defaults to "slicer_hydrators.py" (plan root)
+recordflow_paths = ["./plan/workflows"]         # RecordFlow DSL dirs (inside config_tasks_path)
 recordflow_enabled = true
 pipeline_enabled = true                         # Requires RabbitMQ
 frontend_enabled = true

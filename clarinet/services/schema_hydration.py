@@ -55,7 +55,6 @@ type HydratorFunc = Callable[
 
 _HYDRATOR_REGISTRY: CustomCodeRegistry[HydratorFunc] = CustomCodeRegistry(
     filename_setting="config_schema_hydrators_file",
-    module_name="clarinet_custom_hydrators",
     label="schema hydrator",
 )
 
@@ -82,7 +81,6 @@ def schema_hydrator(source_name: str) -> Callable[[HydratorFunc], HydratorFunc]:
 # ---------------------------------------------------------------------------
 
 
-@schema_hydrator("study_series")
 async def hydrate_study_series(
     record: Record,
     _options: dict[str, Any],
@@ -117,6 +115,21 @@ async def hydrate_study_series(
         result.append({"const": s.series_uid, "title": title})
 
     return result
+
+
+def _register_builtin_hydrators() -> None:
+    """(Re)register built-in hydrators into ``_HYDRATOR_REGISTRY``.
+
+    Called at import time (so the registry is populated for normal use) and
+    again from the app lifespan right after ``_HYDRATOR_REGISTRY.clear()`` — the
+    clear() drops ``study_series`` (the only built-in), so without re-registering
+    it a second lifespan in one process would lose it. ``register`` replaces, so
+    repeat calls are idempotent.
+    """
+    _HYDRATOR_REGISTRY.register("study_series", hydrate_study_series)
+
+
+_register_builtin_hydrators()
 
 
 # ---------------------------------------------------------------------------

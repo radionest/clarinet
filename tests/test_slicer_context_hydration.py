@@ -7,7 +7,7 @@ Covers:
 - Hydrator exceptions are caught and skipped
 - Empty hydrator_names is a no-op
 - load_custom_slicer_hydrators loads from file, fails fast on broken files,
-  and puts the config root on sys.path (package-import regression)
+  and imports it as a clarinet_plan submodule (package-import regression)
 """
 
 import sys
@@ -160,14 +160,14 @@ def test_load_from_missing_folder(tmp_path):
 
 
 def test_load_from_folder_without_file(tmp_path):
-    """Folder without context_hydrators.py returns 0."""
+    """Folder without slicer_hydrators.py returns 0."""
     count = load_custom_slicer_hydrators(tmp_path)
     assert count == 0
 
 
 def test_load_valid_hydrator(tmp_path):
-    """Valid context_hydrators.py registers hydrators."""
-    hydrator_file = tmp_path / "context_hydrators.py"
+    """Valid slicer_hydrators.py registers hydrators."""
+    hydrator_file = tmp_path / "slicer_hydrators.py"
     hydrator_file.write_text(
         textwrap.dedent("""\
         from clarinet.services.slicer.context_hydration import slicer_context_hydrator
@@ -186,14 +186,15 @@ def test_load_valid_hydrator(tmp_path):
 def test_load_broken_file(tmp_path):
     """Broken file fails fast — a silent 0 would start the server without
     hydrators and break Slicer-open at runtime."""
-    hydrator_file = tmp_path / "context_hydrators.py"
+    hydrator_file = tmp_path / "slicer_hydrators.py"
     hydrator_file.write_text("raise RuntimeError('import error')")
 
     with pytest.raises(ConfigLoadError) as exc_info:
         load_custom_slicer_hydrators(tmp_path)
 
     assert isinstance(exc_info.value.__cause__, RuntimeError)
-    assert "clarinet_custom_slicer_hydrators" not in sys.modules
+    # Python removes the half-initialized module; it must not leak.
+    assert "clarinet_plan.slicer_hydrators" not in sys.modules
 
 
 # ---------------------------------------------------------------------------
@@ -236,20 +237,19 @@ def test_load_from_subdirectory(tmp_path):
 
 
 def test_load_with_package_import_from_config_root(tmp_path, monkeypatch):
-    """Regression (nir_liver incident): hydrators file in a subdirectory
-    imports a package from the plan/ root.
+    """Regression (nir_liver incident): a hydrators file in a subdirectory
+    imports a package from the plan/ root via the ``clarinet_plan.`` prefix.
 
-    The loader must put the config root — not just the file's parent — on
-    ``sys.path``, otherwise ``from utils.study_type import ...`` raises
-    ``ModuleNotFoundError`` and the server starts without hydrators.
+    No ``sys.path`` entry, no stdlib shadowing — the import resolves off the
+    single anchor root. The autouse ``_plan_package_sanitation`` fixture purges
+    the ``clarinet_plan.*`` submodules afterwards.
     """
     (tmp_path / "utils").mkdir()
-    (tmp_path / "utils" / "__init__.py").write_text("")
     (tmp_path / "utils" / "helper.py").write_text("VALUE = 42\n")
     (tmp_path / "hydrators").mkdir()
-    (tmp_path / "hydrators" / "context_hydrators.py").write_text(
+    (tmp_path / "hydrators" / "slicer_hydrators.py").write_text(
         textwrap.dedent("""\
-        from utils.helper import VALUE
+        from clarinet_plan.utils.helper import VALUE
 
         from clarinet.services.slicer.context_hydration import slicer_context_hydrator
 
@@ -261,16 +261,10 @@ def test_load_with_package_import_from_config_root(tmp_path, monkeypatch):
 
     from clarinet.settings import settings
 
-    monkeypatch.setattr(settings, "config_context_hydrators_file", "hydrators/context_hydrators.py")
-    monkeypatch.delitem(sys.modules, "utils", raising=False)
-    monkeypatch.delitem(sys.modules, "utils.helper", raising=False)
+    monkeypatch.setattr(settings, "config_context_hydrators_file", "hydrators/slicer_hydrators.py")
 
     sys_path_before = list(sys.path)
-    try:
-        count = load_custom_slicer_hydrators(tmp_path)
-    finally:
-        sys.modules.pop("utils.helper", None)
-        sys.modules.pop("utils", None)
+    count = load_custom_slicer_hydrators(tmp_path)
 
     assert count == 1
     assert _SLICER_HYDRATOR_REGISTRY.get("uses_package_import") is not None

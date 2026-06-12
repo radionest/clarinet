@@ -87,7 +87,6 @@ class ValidatorSpec:
 
 _VALIDATOR_REGISTRY: CustomCodeRegistry[ValidatorSpec] = CustomCodeRegistry(
     filename_setting="config_validators_file",
-    module_name="clarinet_custom_validators",
     label="record validator",
 )
 

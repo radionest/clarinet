@@ -14,9 +14,14 @@ config_delete_orphans: bool = False
 # Config file locations (relative to config_tasks_path)
 config_record_types_file: str = "record_types.py"
 config_files_catalog_file: str = "files_catalog.py"
-config_context_hydrators_file: str = "context_hydrators.py"  # slicer context hydrators
-config_schema_hydrators_file: str = "hydrators.py"           # schema hydrators
+config_context_hydrators_file: str = "slicer_hydrators.py"  # slicer context hydrators
+config_schema_hydrators_file: str = "schema_hydrators.py"   # schema hydrators
+config_validators_file: str = "validators.py"              # record-data validators
 ```
+
+All paths are relative to `config_tasks_path` and are imported as
+`clarinet_plan.`-prefixed submodules off that single root — never via `sys.path`.
+See `.claude/rules/custom-code-loading.md`.
 
 ## Primitives (`primitives.py`)
 
@@ -90,17 +95,21 @@ tasks/
         record_types.py     # config_record_types_file = "definitions/record_types.py"
 ```
 
-- Built on the shared loading primitives `config_sys_path` + `load_module_from_file`
-  (used by all plan/ loaders — full contract: `.claude/rules/custom-code-loading.md`)
+- Imports through the `clarinet_plan` anchor (`plan_package.py`) — catalog +
+  `record_types` via `_ensure_record_types_imported(folder)`, no `sys.path`
+  (full contract: `.claude/rules/custom-code-loading.md`)
 - Fail-fast: a broken `record_types.py`/`files_catalog.py` raises `ConfigLoadError`
   (→ `StartupError` in lifespan) instead of silently reconciling zero record types
-- `files_catalog.py` kept in `sys.modules` while `record_types.py` loads (for imports)
+- `files_catalog.py` imports as a `clarinet_plan.` submodule, cached so
+  `record_types.py` can import it (e.g. `from clarinet_plan.files_catalog import seg`)
 - File names auto-derived from variable names (in `files_catalog.py` or `record_types.py`)
 - Resolves `data_schema`: dict as-is, `.json` path, or `{name}.schema.json` sidecar
 
-`custom_registry.py` — `CustomCodeRegistry[T]`: single owner for the three
-decorator registries (schema hydrators, slicer context hydrators, record
-validators). See `.claude/rules/custom-code-loading.md`.
+`plan_package.py` — the `clarinet_plan` anchor machinery (activate/ensure/
+deactivate, `module_name_for`, `import_plan_module`). `custom_registry.py` —
+`CustomCodeRegistry[T]`: single owner for the three decorator registries (schema
+hydrators, slicer context hydrators, record validators). See
+`.claude/rules/custom-code-loading.md`.
 
 ## TOML Exporter (`toml_exporter.py`)
 

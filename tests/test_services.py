@@ -388,11 +388,10 @@ class TestFlowLoader:
         assert engine.register_flow.called
 
     @pytest.mark.asyncio
-    async def test_cross_flow_import_no_reexecution(self, tmp_path, monkeypatch):
-        """A flow file importing a sibling flow file must reuse the cached
-        module — re-execution would register the sibling's flows a second time
-        (count would be 3 instead of 2)."""
-        import sys
+    async def test_cross_flow_import_no_reexecution(self, tmp_path):
+        """A flow file importing a sibling flow file reuses the cached module —
+        re-execution would register the sibling's flows a second time (count
+        would be 3 instead of 2)."""
         from unittest.mock import MagicMock
 
         from clarinet.services.recordflow.flow_loader import load_and_register_flows
@@ -403,29 +402,81 @@ class TestFlowLoader:
             "record('cross-a').on_status('finished').add_record('cross-a2')\n"
         )
         (tmp_path / "beta_cross_flow.py").write_text(
-            "from alpha_cross_flow import SHARED\n"
+            "from clarinet_plan.alpha_cross_flow import SHARED\n"
             "from clarinet.services.recordflow import record\n"
             "record('cross-b').on_status('finished').add_record('cross-b2')\n"
         )
-        monkeypatch.delitem(sys.modules, "alpha_cross_flow", raising=False)
-        monkeypatch.delitem(sys.modules, "beta_cross_flow", raising=False)
 
         engine = MagicMock()
-        try:
-            count = load_and_register_flows(
-                engine,
-                [tmp_path / "alpha_cross_flow.py", tmp_path / "beta_cross_flow.py"],
-            )
-        finally:
-            sys.modules.pop("alpha_cross_flow", None)
-            sys.modules.pop("beta_cross_flow", None)
-
+        count = load_and_register_flows(
+            engine,
+            [tmp_path / "alpha_cross_flow.py", tmp_path / "beta_cross_flow.py"],
+        )
         assert count == 2
 
     @pytest.mark.asyncio
+    async def test_cross_flow_import_reverse_direction(self, tmp_path):
+        """Mirror of the above: an EARLIER-sorted file importing a LATER one now
+        works too — the native module cache removes the old sorted-order limit."""
+        from unittest.mock import MagicMock
+
+        from clarinet.services.recordflow.flow_loader import load_and_register_flows
+
+        # a_flow sorts before z_flow yet imports it.
+        (tmp_path / "a_early_flow.py").write_text(
+            "from clarinet_plan.z_late_flow import SHARED\n"
+            "from clarinet.services.recordflow import record\n"
+            "record('rev-a').on_status('finished').add_record('rev-a2')\n"
+        )
+        (tmp_path / "z_late_flow.py").write_text(
+            "from clarinet.services.recordflow import record\n"
+            "SHARED = 9\n"
+            "record('rev-z').on_status('finished').add_record('rev-z2')\n"
+        )
+
+        engine = MagicMock()
+        count = load_and_register_flows(
+            engine,
+            [tmp_path / "a_early_flow.py", tmp_path / "z_late_flow.py"],
+        )
+        assert count == 2
+
+    @pytest.mark.asyncio
+    async def test_call_callbacks_survive_across_files(self, tmp_path):
+        """Two flow files each with ``.call()`` — both callbacks remain in the
+        call registry. The old per-file ``call_function_registry.reset()`` erased
+        earlier files' callbacks (latent multi-file bug); now cleared once per
+        cycle."""
+        from unittest.mock import MagicMock
+
+        from clarinet.services.recordflow import call_function_registry
+        from clarinet.services.recordflow.flow_loader import load_and_register_flows
+
+        (tmp_path / "a_call_flow.py").write_text(
+            "from clarinet.services.recordflow import record\n"
+            "async def cb_a(record, context, client):\n"
+            "    return None\n"
+            "record('ca').on_finished().call(cb_a)\n"
+        )
+        (tmp_path / "b_call_flow.py").write_text(
+            "from clarinet.services.recordflow import record\n"
+            "async def cb_b(record, context, client):\n"
+            "    return None\n"
+            "record('cb').on_finished().call(cb_b)\n"
+        )
+
+        engine = MagicMock()
+        load_and_register_flows(engine, [tmp_path / "a_call_flow.py", tmp_path / "b_call_flow.py"])
+
+        ids = call_function_registry.all_ids()
+        assert any(i.endswith(".cb_a") for i in ids), ids
+        assert any(i.endswith(".cb_b") for i in ids), ids
+
+    @pytest.mark.asyncio
     async def test_load_and_register_flows_aggregates_failures(self, tmp_path):
-        """Every broken flow file is reported in ONE error; valid files are
-        still attempted (no fix-restart-fix cycles)."""
+        """Every broken flow file is reported in ONE error (no fix-restart-fix
+        cycles), and when any file fails NOTHING is registered with the engine —
+        a broken file's partially-registered flows must not leak through."""
         from unittest.mock import MagicMock
 
         from clarinet.exceptions.domain import ConfigLoadError
@@ -445,8 +496,9 @@ class TestFlowLoader:
         with pytest.raises(ConfigLoadError, match="2 flow file"):
             load_and_register_flows(engine, [good_file, broken_one, broken_two])
 
-        # The valid file was processed before the aggregate raise
-        assert engine.register_flow.called
+        # Aggregate raises before registration — the good file's flows are not
+        # registered when the batch contains failures.
+        assert not engine.register_flow.called
 
 
 # ===================================================================

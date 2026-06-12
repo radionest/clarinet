@@ -22,7 +22,7 @@ from clarinet.services.pipeline import (
 )
 from clarinet.services.recordflow import Field, file, record, study
 from clarinet.utils.logger import logger
-from record_types import segmentation, master_model  # из ../definitions/
+from clarinet_plan.definitions.record_types import segmentation, master_model
 
 F = Field()
 
@@ -38,7 +38,7 @@ async def my_callback(record, context, client): ...
 (record("bar").on_finished().call(my_callback))
 ```
 
-`record_types.py` импортируется напрямую — `plan/` добавляется в `sys.path` фреймворком при загрузке конфига.
+`plan/` доступен как пакет `clarinet_plan` (единственный корень — `config_tasks_path`); импортируйте record types через `clarinet_plan.definitions.record_types`. Внутри `workflows/` допустимы относительные импорты (`from .tasks import ...`). `sys.path` не используется. Кросс-flow импорты работают в любом порядке файлов.
 
 ---
 

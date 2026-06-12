@@ -8,10 +8,10 @@ register callables by name.  ``CustomCodeRegistry`` owns that lifecycle —
 per-domain modules keep only their decorator signatures.
 """
 
+import sys
 from collections.abc import Mapping
 from pathlib import Path
 
-from clarinet.config.python_loader import config_sys_path, load_module_from_file
 from clarinet.utils.logger import logger
 
 
@@ -22,13 +22,11 @@ class CustomCodeRegistry[T]:
         filename_setting: Name of the ``settings`` attribute holding the
             file location relative to the config folder
             (e.g. ``"config_validators_file"``).
-        module_name: ``sys.modules`` name used while importing the file.
         label: Human-readable singular label for log/error messages.
     """
 
-    def __init__(self, *, filename_setting: str, module_name: str, label: str) -> None:
+    def __init__(self, *, filename_setting: str, label: str) -> None:
         self._filename_setting = filename_setting
-        self._module_name = module_name
         self._label = label
         self._items: dict[str, T] = {}
 
@@ -47,34 +45,49 @@ class CustomCodeRegistry[T]:
     def load_from(self, folder: str | Path) -> int:
         """Import the registry's plan/ file from *folder*, fail-fast on errors.
 
-        Puts *folder* (the config root) and the file's parent on ``sys.path``
-        for the duration of the import, so the file can use both package
-        imports from the root (``from utils.x import y``) and sibling
-        imports — regardless of which subdirectory it lives in.
+        The file is imported as a ``clarinet_plan.`` submodule off the active
+        anchor root — no ``sys.path`` mutation. Decorators in the file register
+        callables into this registry as a side effect of the import.
 
         Returns:
             Number of *new* names registered (0 if the file is absent).
 
         Raises:
-            ConfigLoadError: If the file exists but fails to import.
+            ConfigLoadError: If the file exists but fails to import, or lives
+                outside the active plan root.
         """
+        from clarinet.config.plan_package import (
+            ensure_plan_root,
+            import_plan_module,
+            module_name_for,
+        )
         from clarinet.settings import settings
 
         path = Path(folder) / getattr(settings, self._filename_setting)
         if not path.exists():
             return 0
 
+        ensure_plan_root(folder)
+        dotted = module_name_for(path)
+
         before = set(self._items)
-        with config_sys_path(Path(folder), path.parent):
-            load_module_from_file(self._module_name, path)
+        # A cached module returns without re-running decorators — expected to add
+        # nothing. Distinguishing this from a genuinely decorator-less file lets
+        # us suppress the warning only when it is truly benign (see below).
+        cache_hit = dotted in sys.modules
+        import_plan_module(dotted, path_hint=path)
 
         added = set(self._items) - before
         if added:
             logger.info(f"Loaded {len(added)} {self._label}(s): {', '.join(sorted(added))}")
+        elif cache_hit and self._items:
+            # Re-import of an already-cached module that has already populated
+            # this registry: no new names is correct, not degradation.
+            pass
         else:
-            # The file imported cleanly but added nothing — likely a missing
-            # decorator. The same class of silent degradation as a swallowed
-            # import error, so make it visible.
+            # The file imported cleanly (fresh import, or a cache hit against an
+            # *empty* registry — exactly the #352 silent-degradation shape) yet
+            # added nothing. Likely a missing decorator — make it visible.
             logger.warning(
                 f"{path} imported successfully but registered no new {self._label}(s) — "
                 f"check that the decorators are present"

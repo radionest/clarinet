@@ -79,7 +79,7 @@ class TestLoadCustomHydrators:
         assert load_custom_hydrators(tmp_path) == 0
 
     def test_loads_valid_file(self, tmp_path):
-        (tmp_path / "hydrators.py").write_text(
+        (tmp_path / "schema_hydrators.py").write_text(
             textwrap.dedent("""\
             from clarinet.services.schema_hydration import schema_hydrator
 
@@ -94,7 +94,7 @@ class TestLoadCustomHydrators:
         assert _HYDRATOR_REGISTRY.get("loaded_schema_source") is not None
 
     def test_broken_file_raises(self, tmp_path):
-        (tmp_path / "hydrators.py").write_text("raise RuntimeError('import error')")
+        (tmp_path / "schema_hydrators.py").write_text("raise RuntimeError('import error')")
 
         with pytest.raises(ConfigLoadError):
             load_custom_hydrators(tmp_path)
