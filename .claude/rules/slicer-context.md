@@ -50,7 +50,7 @@ Decorator-based registry for async context enrichment. Mirrors `clarinet/service
 - `SlicerHydrationContext(frozen dataclass)` — holds `StudyRepository` and `RecordRepository`; created via `.from_session(session)`
 - `@slicer_context_hydrator("name")` — registers an async function that returns `dict[str, Any]` to merge into context
 - `hydrate_slicer_context(context, record, session, names)` — runs named hydrators sequentially, merges results
-- `load_custom_slicer_hydrators(folder)` — loads `context_hydrators.py` from tasks folder at startup
+- `load_custom_slicer_hydrators(folder)` — loads `context_hydrators.py` from tasks folder at startup; raises `ConfigLoadError` on a broken file (loading contract: `.claude/rules/custom-code-loading.md`)
 
 ### RecordType field
 

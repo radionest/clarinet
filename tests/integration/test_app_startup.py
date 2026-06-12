@@ -228,6 +228,33 @@ async def test_startup_ohif_missing(startup_settings, monkeypatch, tmp_path):
             pass
 
 
+# ── Test 5b: broken plan/ file fails startup with a Config banner ────────────
+
+
+@pytest.mark.asyncio
+async def test_startup_broken_plan_file_raises_config_startup_error(
+    startup_settings, monkeypatch, tmp_path, isolated_validator_registry
+):
+    """A plan/ file with an import error crashes startup via StartupError(Config).
+
+    Regression for the silent-degradation incident: a broken
+    ``validators.py``/``context_hydrators.py`` used to be swallowed by the
+    loader, and the server started without the custom code.
+    """
+    from clarinet.api.app import StartupError
+
+    plan_dir = tmp_path / "plan"
+    plan_dir.mkdir()
+    (plan_dir / "validators.py").write_text("from utils.nonexistent import nothing\n")
+    monkeypatch.setattr(settings, "config_tasks_path", str(plan_dir))
+
+    app = FastAPI(lifespan=lifespan)
+
+    with pytest.raises(StartupError, match="Config"):
+        async with lifespan(app):
+            pass
+
+
 # ── Test 6: RecordFlow must not perform eager health check ───────────────────
 
 

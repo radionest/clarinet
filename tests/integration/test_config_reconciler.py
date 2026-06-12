@@ -538,7 +538,7 @@ async def test_reconcile_config_validates_data_validators_registered(
     from clarinet.utils.bootstrap import reconcile_config
 
     # Isolate registry so other tests' registrations don't bleed in.
-    saved_registry = dict(_VALIDATOR_REGISTRY)
+    saved_registry = _VALIDATOR_REGISTRY.snapshot()
     _VALIDATOR_REGISTRY.clear()
     try:
         items = [
@@ -578,8 +578,7 @@ async def test_reconcile_config_validates_data_validators_registered(
         assert "rt-with-ghost-validator" in msg
         assert "plan/validators.py" in msg or "validators.py" in msg
     finally:
-        _VALIDATOR_REGISTRY.clear()
-        _VALIDATOR_REGISTRY.update(saved_registry)
+        _VALIDATOR_REGISTRY.restore(saved_registry)
 
 
 @pytest.mark.asyncio
@@ -595,7 +594,7 @@ async def test_reconcile_config_passes_with_registered_validator(
     )
     from clarinet.utils.bootstrap import reconcile_config
 
-    saved_registry = dict(_VALIDATOR_REGISTRY)
+    saved_registry = _VALIDATOR_REGISTRY.snapshot()
     _VALIDATOR_REGISTRY.clear()
     try:
 
@@ -638,8 +637,7 @@ async def test_reconcile_config_passes_with_registered_validator(
         assert "rt-with-registered-validator" in result.created
         assert "rt-without-validators" in result.created
     finally:
-        _VALIDATOR_REGISTRY.clear()
-        _VALIDATOR_REGISTRY.update(saved_registry)
+        _VALIDATOR_REGISTRY.restore(saved_registry)
 
 
 @pytest.mark.asyncio

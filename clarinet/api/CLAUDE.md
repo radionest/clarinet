@@ -32,6 +32,10 @@ Startup sequence:
 6. Session cleanup service start (if `session_cleanup_enabled`)
 7. DICOMweb cache init (if `dicomweb_enabled`) → `app.state.dicomweb_cache`; cleanup service → `app.state.dicomweb_cleanup`
 
+Any `ConfigLoadError` from steps 1c/2/2b/4/5 (a broken plan/ `.py` file) is converted to
+`StartupError(component="Config")` — the server refuses to start instead of running without
+custom validators/hydrators/flows. Loading contract: `.claude/rules/custom-code-loading.md`.
+
 Shutdown (reverse order): stop DICOMweb cleanup → flush DICOMweb cache → stop session cleanup → shutdown pipeline broker → close RecordFlow client → close DB.
 
 ## Middleware (middleware.py)

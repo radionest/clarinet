@@ -33,7 +33,7 @@ from clarinet.api.routers import study as study
 from clarinet.api.routers import user as user
 from clarinet.api.routers import viewer as viewer
 from clarinet.api.routers import workflow as workflow
-from clarinet.exceptions.domain import RecordFlowError
+from clarinet.exceptions.domain import ConfigLoadError, RecordFlowError
 from clarinet.services.session_cleanup import session_cleanup_service
 from clarinet.settings import settings
 from clarinet.utils.admin import ensure_admin_exists
@@ -65,6 +65,15 @@ class StartupError(SystemExit):
             f"{'=' * 60}\n"
         )
         super().__init__(message)
+
+
+def _config_startup_error(e: ConfigLoadError) -> StartupError:
+    """Uniform startup banner for plan/ custom-code import failures."""
+    return StartupError(
+        component="Config",
+        reason=str(e),
+        hint="Fix the import error in the plan/ file, then restart",
+    )
 
 
 def _check_frontend() -> None:
@@ -171,10 +180,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # log again here (matches the load_custom_hydrators pattern below).
     from clarinet.services.record_data_validation import load_custom_validators
 
-    load_custom_validators(settings.config_tasks_path)
+    try:
+        load_custom_validators(settings.config_tasks_path)
+    except ConfigLoadError as e:
+        raise _config_startup_error(e) from e
 
     # Reconcile RecordType definitions
-    reconcile_result = await reconcile_config()
+    try:
+        reconcile_result = await reconcile_config()
+    except ConfigLoadError as e:
+        raise _config_startup_error(e) from e
     app.state.config_mode = settings.config_mode
     app.state.config_tasks_path = settings.config_tasks_path
     logger.info(
@@ -187,19 +202,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # Load project file registry for API use
     app.state.project_file_registry = await load_project_file_registry(settings.config_tasks_path)
 
-    # Load custom schema hydrators from tasks folder
+    # Load custom schema + slicer context hydrators from tasks folder
+    # (each loader logs the registered names itself)
     from clarinet.services.schema_hydration import load_custom_hydrators
-
-    hydrator_count = load_custom_hydrators(settings.config_tasks_path)
-    if hydrator_count:
-        logger.info(f"Loaded {hydrator_count} custom schema hydrator(s)")
-
-    # Load custom slicer context hydrators from tasks folder
     from clarinet.services.slicer.context_hydration import load_custom_slicer_hydrators
 
-    slicer_hydrator_count = load_custom_slicer_hydrators(settings.config_tasks_path)
-    if slicer_hydrator_count:
-        logger.info(f"Loaded {slicer_hydrator_count} custom slicer context hydrator(s)")
+    try:
+        load_custom_hydrators(settings.config_tasks_path)
+        load_custom_slicer_hydrators(settings.config_tasks_path)
+    except ConfigLoadError as e:
+        raise _config_startup_error(e) from e
 
     # Load custom SQL report templates from project's reports folder
     from clarinet.services.report_service import ReportRegistry
@@ -263,6 +275,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     if settings.recordflow_enabled:
         try:
             await _init_recordflow(app)
+        except ConfigLoadError as e:
+            raise _config_startup_error(e) from e
         except Exception as e:
             raise StartupError(
                 component="RecordFlow",
@@ -307,6 +321,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
             count = await sync_pipeline_definitions()
             logger.info(f"Synced {count} pipeline definition(s) to database")
+        except ConfigLoadError as e:
+            raise _config_startup_error(e) from e
         except Exception as e:
             raise StartupError(
                 component="Pipeline",

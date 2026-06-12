@@ -826,6 +826,43 @@ class TestRetryMiddleware:
             mock_super.assert_called_once_with(msg, result, exc)
 
 
+# ─── Worker task-module loading (fail-fast) ──────────────────────────────────
+
+
+class TestLoadTaskModulesFailFast:
+    """Broken flow files must crash the worker at startup, not degrade silently."""
+
+    def test_aggregates_failures_across_files(self, tmp_path, monkeypatch):
+        from clarinet.exceptions.domain import ConfigLoadError
+        from clarinet.services.pipeline.worker import load_task_modules
+        from clarinet.settings import settings
+
+        (tmp_path / "a_broken_flow.py").write_text("raise RuntimeError('first failure')\n")
+        (tmp_path / "b_broken_flow.py").write_text("raise RuntimeError('second failure')\n")
+        monkeypatch.setattr(settings, "recordflow_paths", [str(tmp_path)])
+        monkeypatch.setattr(settings, "have_dicom", False)
+
+        with pytest.raises(ConfigLoadError, match="2 pipeline task module"):
+            load_task_modules()
+
+    @pytest.mark.asyncio
+    async def test_run_worker_exits_nonzero_on_config_error(self):
+        from clarinet.exceptions.domain import ConfigLoadError
+        from clarinet.services.pipeline.worker import run_worker
+
+        with (
+            patch("clarinet.services.pipeline.worker.reconfigure_for_worker"),
+            patch(
+                "clarinet.services.pipeline.worker.load_task_modules",
+                side_effect=ConfigLoadError("broken flow file"),
+            ),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            await run_worker(queues=[DEFAULT_QUEUE])
+
+        assert exc_info.value.code == 1
+
+
 # ─── Worker signal handling (Windows regression) ─────────────────────────────
 
 

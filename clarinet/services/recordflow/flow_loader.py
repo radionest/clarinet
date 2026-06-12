@@ -7,11 +7,10 @@ Python files, enabling dynamic flow configuration.
 
 from __future__ import annotations
 
-import importlib.util
-import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from clarinet.exceptions.domain import ConfigLoadError
 from clarinet.utils.logger import logger
 
 from . import call_function_registry
@@ -42,6 +41,10 @@ def load_flows_from_file(file_path: Path) -> list[FlowRecord | FlowFileRecord]:
     Returns:
         List of FlowRecord instances found in the file.
 
+    Raises:
+        ConfigLoadError: If the flow file (or its ``record_types.py``
+            dependency) fails to import.
+
     Example file content:
         from clarinet.services.recordflow import record
 
@@ -60,47 +63,28 @@ def load_flows_from_file(file_path: Path) -> list[FlowRecord | FlowFileRecord]:
     FILE_REGISTRY.clear()
     call_function_registry.reset()
 
-    # Add parent directory to sys.path so sibling imports work
+    from clarinet.config.python_loader import (
+        config_sys_path,
+        load_module_from_file,
+        preload_record_types,
+    )
+
+    # Parent dir on sys.path for sibling imports; record_types.py pre-loaded
     parent_dir = file_path.parent
-    parent_dir_str = str(parent_dir.resolve())
-    added_to_path = parent_dir_str not in sys.path
-    if added_to_path:
-        sys.path.insert(0, parent_dir_str)
+    with config_sys_path(parent_dir), preload_record_types(parent_dir):
+        load_module_from_file(file_path.stem, file_path)
 
-    # Pre-load record_types.py and set up sys.path for sibling imports
-    from clarinet.config.python_loader import preload_record_types
+        # Return only active flows (filter out reference-only FlowRecords
+        # created for data access like record('type').data.field)
+        # Entity flows always have entity_trigger set, so they pass is_active_flow()
+        record_flows = [f for f in RECORD_REGISTRY if f.is_active_flow()]
+        entity_flows = list(ENTITY_REGISTRY)
+        file_flows = [f for f in FILE_REGISTRY if f.is_active_flow()]
+        flows: list[FlowRecord | FlowFileRecord] = record_flows + entity_flows + file_flows
+        for flow in flows:
+            logger.info(f"Loaded flow: {flow!r}")
 
-    try:
-        with preload_record_types(parent_dir):
-            module_name = file_path.stem
-            spec = importlib.util.spec_from_file_location(module_name, file_path)
-            if spec is None or spec.loader is None:
-                logger.error(f"Cannot create module spec for {file_path}")
-                return []
-
-            module = importlib.util.module_from_spec(spec)
-            sys.modules[module_name] = module
-            spec.loader.exec_module(module)
-
-            # Return only active flows (filter out reference-only FlowRecords
-            # created for data access like record('type').data.field)
-            # Entity flows always have entity_trigger set, so they pass is_active_flow()
-            record_flows = [f for f in RECORD_REGISTRY if f.is_active_flow()]
-            entity_flows = list(ENTITY_REGISTRY)
-            file_flows = [f for f in FILE_REGISTRY if f.is_active_flow()]
-            flows: list[FlowRecord | FlowFileRecord] = record_flows + entity_flows + file_flows
-            for flow in flows:
-                logger.info(f"Loaded flow: {flow!r}")
-
-            return flows
-
-    except Exception:
-        logger.exception(f"Error loading flows from {file_path}")
-        return []
-
-    finally:
-        if added_to_path and parent_dir_str in sys.path:
-            sys.path.remove(parent_dir_str)
+        return flows
 
 
 def load_and_register_flows(engine: RecordFlowEngine, flow_files: list[Path]) -> int:
@@ -113,17 +97,30 @@ def load_and_register_flows(engine: RecordFlowEngine, flow_files: list[Path]) ->
 
     Returns:
         Total number of flows registered.
+
+    Raises:
+        ConfigLoadError: Aggregated error when any flow file fails to
+            import. Every file is attempted first, so one startup crash
+            reports all broken files at once.
     """
     total_flows = 0
+    failures: list[ConfigLoadError] = []
 
     for file_path in flow_files:
-        flows = load_flows_from_file(file_path)
+        try:
+            flows = load_flows_from_file(file_path)
+        except ConfigLoadError as e:
+            failures.append(e)
+            continue
         for flow in flows:
             try:
                 engine.register_flow(flow)
                 total_flows += 1
             except Exception as e:
                 logger.error(f"Error registering flow {flow!r}: {e}")
+
+    if failures:
+        raise ConfigLoadError.aggregate(failures, kind="flow file")
 
     logger.info(f"Registered {total_flows} flows from {len(flow_files)} files")
     return total_flows

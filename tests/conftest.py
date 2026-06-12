@@ -65,15 +65,14 @@ def isolated_validator_registry():
     """
     from clarinet.services.record_data_validation import _VALIDATOR_REGISTRY
 
-    saved = dict(_VALIDATOR_REGISTRY)
+    saved = _VALIDATOR_REGISTRY.snapshot()
     # Empty the registry before the test so each test starts clean and
     # cannot rely on (or be polluted by) registrations from earlier tests.
     _VALIDATOR_REGISTRY.clear()
     try:
         yield
     finally:
-        _VALIDATOR_REGISTRY.clear()
-        _VALIDATOR_REGISTRY.update(saved)
+        _VALIDATOR_REGISTRY.restore(saved)
 
 
 @pytest.fixture(autouse=True, scope="session")

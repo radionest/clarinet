@@ -90,10 +90,17 @@ tasks/
         record_types.py     # config_record_types_file = "definitions/record_types.py"
 ```
 
-- Uses `importlib.util.spec_from_file_location()` (same pattern as RecordFlow loader)
+- Built on the shared loading primitives `config_sys_path` + `load_module_from_file`
+  (used by all plan/ loaders — full contract: `.claude/rules/custom-code-loading.md`)
+- Fail-fast: a broken `record_types.py`/`files_catalog.py` raises `ConfigLoadError`
+  (→ `StartupError` in lifespan) instead of silently reconciling zero record types
 - `files_catalog.py` kept in `sys.modules` while `record_types.py` loads (for imports)
 - File names auto-derived from variable names (in `files_catalog.py` or `record_types.py`)
 - Resolves `data_schema`: dict as-is, `.json` path, or `{name}.schema.json` sidecar
+
+`custom_registry.py` — `CustomCodeRegistry[T]`: single owner for the three
+decorator registries (schema hydrators, slicer context hydrators, record
+validators). See `.claude/rules/custom-code-loading.md`.
 
 ## TOML Exporter (`toml_exporter.py`)
 

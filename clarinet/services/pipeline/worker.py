@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from clarinet.exceptions.domain import ConfigLoadError
 from clarinet.settings import settings
 from clarinet.utils.logger import logger, reconfigure_for_worker
 
@@ -48,44 +49,39 @@ def load_task_modules() -> None:
     Before loading, adds the tasks directory to ``sys.path`` and pre-loads
     ``record_types.py`` (if present) so that sibling imports like
     ``from record_types import master_model`` work in flow files.
+
+    Raises:
+        ConfigLoadError: Aggregated error when any flow file fails to
+            import (every file is attempted first). A broken
+            ``record_types.py`` raises immediately.
     """
-    import importlib.util
-    import sys
     from pathlib import Path
 
-    from clarinet.config.python_loader import preload_record_types
+    from clarinet.config.python_loader import (
+        config_sys_path,
+        load_module_from_file,
+        preload_record_types,
+    )
     from clarinet.services.recordflow.flow_loader import find_flow_files
 
+    failures: list[ConfigLoadError] = []
     for path_str in settings.recordflow_paths:
         path = Path(path_str)
         tasks_dir = path if path.is_dir() else path.parent
         flow_files = find_flow_files(path) if path.is_dir() else [path]
 
-        # Add tasks directory to sys.path so sibling imports work
-        tasks_dir_str = str(tasks_dir.resolve())
-        added_to_path = tasks_dir_str not in sys.path
-        if added_to_path:
-            sys.path.insert(0, tasks_dir_str)
+        # Tasks dir on sys.path for sibling imports; record_types.py pre-loaded
+        with config_sys_path(tasks_dir), preload_record_types(tasks_dir):
+            for flow_file in flow_files:
+                try:
+                    load_module_from_file(flow_file.stem, flow_file)
+                except ConfigLoadError as e:
+                    failures.append(e)
+                    continue
+                logger.info(f"Loaded pipeline tasks from {flow_file}")
 
-        try:
-            with preload_record_types(tasks_dir):
-                for flow_file in flow_files:
-                    module_name = flow_file.stem
-                    try:
-                        spec = importlib.util.spec_from_file_location(module_name, flow_file)
-                        if spec is None or spec.loader is None:
-                            logger.error(f"Cannot create module spec for {flow_file}")
-                            continue
-
-                        module = importlib.util.module_from_spec(spec)
-                        sys.modules[module_name] = module
-                        spec.loader.exec_module(module)
-                        logger.info(f"Loaded pipeline tasks from {flow_file}")
-                    except Exception as e:
-                        logger.error(f"Failed to load tasks from {flow_file}: {e}")
-        finally:
-            if added_to_path and tasks_dir_str in sys.path:
-                sys.path.remove(tasks_dir_str)
+    if failures:
+        raise ConfigLoadError.aggregate(failures, kind="pipeline task module")
 
     if settings.have_dicom:
         try:
@@ -168,7 +164,11 @@ async def run_worker(
     receiver_tasks: list[asyncio.Task[None]] = []
     brokers: list[AsyncBroker] = []
     try:
-        load_task_modules()
+        try:
+            load_task_modules()
+        except ConfigLoadError as e:
+            logger.error(f"Cannot start worker — project task modules failed to load: {e}")
+            raise SystemExit(1) from e
 
         if queues is None:
             queues = get_worker_queues()
