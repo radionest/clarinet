@@ -4,90 +4,24 @@ Discovers ``record_types.py`` in a given folder and collects all
 ``RecordDef`` instances from its module namespace, converting them
 to ``RecordTypeCreate`` objects for the reconciler.
 
-Also home of the shared loading primitives (``config_sys_path``,
-``load_module_from_file``) used by every custom-code loader —
-``CustomCodeRegistry``, the RecordFlow loader, the pipeline worker.
+Imports go through the ``clarinet_plan`` anchor package
+(``clarinet/config/plan_package.py``) — no ``sys.path`` manipulation.
 Contract: ``.claude/rules/custom-code-loading.md``.
 """
 
-import importlib.util
 import json
-import sys
 import types
-from collections.abc import Generator
-from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
 import aiofiles
 
 from clarinet.config.primitives import FileDef, RecordDef, fileref_to_file_definition
-from clarinet.exceptions.domain import ConfigLoadError
 from clarinet.models.record import RecordTypeCreate
 from clarinet.utils.logger import logger
 
 # Fields whose values can reference external .py files
 _SCRIPT_FIELDS = ("slicer_script", "slicer_result_validator")
-
-
-@contextmanager
-def config_sys_path(*dirs: Path) -> Generator[None]:
-    """Temporarily put *dirs* on ``sys.path`` for config-file imports.
-
-    Pass directories lowest-priority first (config root, then the file's
-    parent): each is inserted at position 0, so the last argument wins
-    module lookup. Directories already on ``sys.path`` are skipped — and
-    left in place on exit; only the entries inserted here are removed.
-    """
-    added: list[str] = []
-    for d in dirs:
-        d_str = str(Path(d).resolve())
-        if d_str not in sys.path:
-            sys.path.insert(0, d_str)
-            added.append(d_str)
-    try:
-        yield
-    finally:
-        for d_str in added:
-            if d_str in sys.path:
-                sys.path.remove(d_str)
-
-
-def load_module_from_file(name: str, path: Path, *, keep_in_sys: bool = False) -> types.ModuleType:
-    """Import *path* as module *name*, failing loudly.
-
-    The module is registered in ``sys.modules`` during execution so sibling
-    imports work. On failure it is popped again — a half-initialized module
-    must not leak into later imports (test processes run many loads).
-
-    Args:
-        name: ``sys.modules`` key (e.g. the file stem for sibling imports,
-            or a ``clarinet_custom_*`` namespace for plan/ registries).
-        path: Path to the Python file.
-        keep_in_sys: If True, leave the module in ``sys.modules`` after
-            loading so other modules can import it.
-
-    Raises:
-        ConfigLoadError: If the spec cannot be built or executing the file
-            raises. The original exception is preserved as ``__cause__``.
-    """
-    spec = importlib.util.spec_from_file_location(name, path)
-    if spec is None or spec.loader is None:
-        raise ConfigLoadError(f"Cannot create module spec for {path}", path=path)
-
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    try:
-        spec.loader.exec_module(module)
-    except Exception as e:
-        sys.modules.pop(name, None)
-        logger.exception(f"Error loading module {path}")
-        raise ConfigLoadError(f"Failed to import {path}: {e!r}", path=path) from e
-
-    if not keep_in_sys:
-        sys.modules.pop(name, None)
-
-    return module
 
 
 def _collect_named_instances(module: types.ModuleType, cls: type[Any]) -> list[tuple[str, Any]]:
@@ -121,57 +55,6 @@ def _set_file_names_from_module(module: types.ModuleType) -> None:
     for attr_name, file_obj in _collect_named_instances(module, FileDef):
         if not file_obj.name:
             file_obj.name = attr_name
-
-
-@contextmanager
-def preload_record_types(flow_dir: Path) -> Generator[None]:
-    """Resolve and pre-load ``record_types.py`` for flow file imports.
-
-    Puts the config root and the ``record_types.py`` parent on ``sys.path``
-    (so flow files can use both ``from record_types import ...`` and
-    package-style imports like ``from utils.seg_utils import ...``) and
-    pre-loads the module.  On exit, removes the added paths and the module
-    from ``sys.modules``.
-
-    The caller is still responsible for adding/removing *flow_dir* itself
-    from ``sys.path``.
-
-    Resolution order for ``record_types.py``:
-    1. ``flow_dir / "record_types.py"``
-    2. ``settings.config_tasks_path / settings.config_record_types_file``
-
-    Args:
-        flow_dir: Directory containing flow files.
-
-    Raises:
-        ConfigLoadError: If ``record_types.py`` exists but fails to import.
-    """
-    from clarinet.settings import settings
-
-    config_dir = Path(settings.config_tasks_path)
-
-    # Resolve record_types.py: check flow_dir first, then settings fallback
-    record_types_file = flow_dir / "record_types.py"
-    if not record_types_file.is_file():
-        candidate = config_dir.resolve() / settings.config_record_types_file
-        if candidate.is_file():
-            record_types_file = candidate
-
-    with config_sys_path(config_dir, record_types_file.parent):
-        # Pre-load the module so ``from record_types import X`` works
-        rt_module_name: str | None = None
-        if record_types_file.is_file() and record_types_file.stem not in sys.modules:
-            rt_module = load_module_from_file(
-                record_types_file.stem, record_types_file, keep_in_sys=True
-            )
-            rt_module_name = record_types_file.stem
-            _set_file_names_from_module(rt_module)
-
-        try:
-            yield
-        finally:
-            if rt_module_name:
-                sys.modules.pop(rt_module_name, None)
 
 
 async def _resolve_data_schema(rt_def: RecordDef, folder: Path) -> dict[str, Any] | None:

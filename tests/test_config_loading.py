@@ -1,8 +1,7 @@
-"""Tests for plan/ custom-code loading primitives and CustomCodeRegistry.
+"""Tests for plan/ custom-code loading and CustomCodeRegistry.
 
 Covers:
-- config_sys_path: insertion order, dedup against existing entries, restore
-- load_module_from_file: fail-fast ConfigLoadError, sys.modules hygiene
+- plan_package: anchor activate/ensure/deactivate, name derivation, imports
 - CustomCodeRegistry: register/get/names/clear, replace=False, load_from
 - load_python_config: broken record_types.py / files_catalog.py crash startup
 """
@@ -14,11 +13,7 @@ import pytest
 
 import clarinet.config.custom_registry as custom_registry_module
 from clarinet.config.custom_registry import CustomCodeRegistry
-from clarinet.config.python_loader import (
-    config_sys_path,
-    load_module_from_file,
-    load_python_config,
-)
+from clarinet.config.python_loader import load_python_config
 from clarinet.exceptions.domain import ConfigLoadError
 
 # ---------------------------------------------------------------------------
@@ -229,104 +224,6 @@ class TestPlanPackage:
         assert pp.plan_root() is None
         assert "clarinet_plan" not in sys.modules
         assert "clarinet_plan.utils" not in sys.modules
-
-
-# ---------------------------------------------------------------------------
-# config_sys_path
-# ---------------------------------------------------------------------------
-
-
-class TestConfigSysPath:
-    def test_inserts_and_restores(self, tmp_path):
-        a = tmp_path / "a"
-        b = tmp_path / "b"
-        a.mkdir()
-        b.mkdir()
-        a_str, b_str = str(a.resolve()), str(b.resolve())
-
-        before = list(sys.path)
-        with config_sys_path(a, b):
-            assert a_str in sys.path
-            assert b_str in sys.path
-            # Args are low-priority-first: the last one wins module lookup
-            assert sys.path.index(b_str) < sys.path.index(a_str)
-        assert sys.path == before
-
-    def test_existing_entry_not_duplicated_or_removed(self, tmp_path, monkeypatch):
-        d = tmp_path / "d"
-        d.mkdir()
-        d_str = str(d.resolve())
-        monkeypatch.syspath_prepend(d_str)
-
-        before = list(sys.path)
-        with config_sys_path(d):
-            assert sys.path.count(d_str) == 1
-        # Entry owned by the caller survives the context manager
-        assert sys.path == before
-
-    def test_duplicate_args_inserted_once(self, tmp_path):
-        d = tmp_path / "d"
-        d.mkdir()
-        d_str = str(d.resolve())
-
-        with config_sys_path(d, d):
-            assert sys.path.count(d_str) == 1
-        assert d_str not in sys.path
-
-    def test_restores_on_exception(self, tmp_path):
-        d = tmp_path / "d"
-        d.mkdir()
-        d_str = str(d.resolve())
-
-        with pytest.raises(RuntimeError), config_sys_path(d):
-            raise RuntimeError("boom")
-        assert d_str not in sys.path
-
-
-# ---------------------------------------------------------------------------
-# load_module_from_file
-# ---------------------------------------------------------------------------
-
-
-class TestLoadModuleFromFile:
-    def test_loads_module_and_pops_by_default(self, tmp_path):
-        f = tmp_path / "mod.py"
-        f.write_text("X = 1\n")
-
-        module = load_module_from_file("clarinet_test_mod", f)
-
-        assert module.X == 1
-        assert "clarinet_test_mod" not in sys.modules
-
-    def test_keep_in_sys_leaves_module(self, tmp_path):
-        f = tmp_path / "mod.py"
-        f.write_text("X = 2\n")
-
-        try:
-            load_module_from_file("clarinet_test_keep", f, keep_in_sys=True)
-            assert "clarinet_test_keep" in sys.modules
-        finally:
-            sys.modules.pop("clarinet_test_keep", None)
-
-    def test_broken_file_raises_and_pops_sys_modules(self, tmp_path):
-        f = tmp_path / "broken.py"
-        f.write_text("raise RuntimeError('boom')\n")
-
-        with pytest.raises(ConfigLoadError) as exc_info:
-            load_module_from_file("clarinet_test_broken", f)
-
-        # The half-initialized module must not leak into later imports
-        assert "clarinet_test_broken" not in sys.modules
-        assert isinstance(exc_info.value.__cause__, RuntimeError)
-        assert exc_info.value.path == str(f)
-
-    def test_syntax_error_raises(self, tmp_path):
-        f = tmp_path / "syntax.py"
-        f.write_text("def broken(\n")
-
-        with pytest.raises(ConfigLoadError):
-            load_module_from_file("clarinet_test_syntax", f)
-        assert "clarinet_test_syntax" not in sys.modules
 
 
 # ---------------------------------------------------------------------------
