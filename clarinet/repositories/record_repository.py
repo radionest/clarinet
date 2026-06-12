@@ -14,6 +14,7 @@ from uuid import UUID
 
 from sqlalchemy import and_, distinct, exists, func, literal, or_, tuple_
 from sqlalchemy import delete as sa_delete
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, aliased, selectinload
 from sqlmodel import col, select
@@ -553,7 +554,7 @@ class RecordRepository(BaseRepository[Record]):
     ) -> Sequence[Record]:
         """Find active (non-terminal) records assigned to a user with relations loaded.
 
-        Returns records that are not blocked, finished, failed, or paused.
+        Returns records that are not preparing, blocked, finished, failed, or paused.
 
         Args:
             user_id: User UUID to filter by
@@ -573,6 +574,7 @@ class RecordRepository(BaseRepository[Record]):
         needs_join = role_names is not None or exclude_unique_violations
         statement = select(Record).where(
             user_filter,
+            Record.status != RecordStatus.preparing,
             Record.status != RecordStatus.blocked,
             Record.status != RecordStatus.finished,
             Record.status != RecordStatus.failed,
@@ -679,12 +681,75 @@ class RecordRepository(BaseRepository[Record]):
 
         Args:
             record: Record with eager-loaded file_links
-            checksums: New checksums dict (file definition name -> SHA256)
+            checksums: New checksums dict keyed by file definition name for
+                singular files and ``"name:filename"`` for collections
+                (``multiple=True``) — the link's stored filename picks its key.
         """
         for link in record.file_links or []:
-            if link.file_definition.name in checksums:
-                link.checksum = checksums[link.file_definition.name]
+            name = link.file_definition.name
+            key = name if name in checksums else f"{name}:{link.filename}"
+            if key in checksums:
+                link.checksum = checksums[key]
         await self.session.commit()
+
+    async def add_file_links(
+        self,
+        record: Record,
+        matched_files: dict[str, str],
+    ) -> int:
+        """Create RecordFileLink rows for definitions that have no link yet.
+
+        Additive counterpart of ``set_files`` — existing links (and their
+        checksums) stay untouched, so OUTPUT files discovered after record
+        creation can be registered without wiping INPUT links. Already-linked
+        definitions are detected with a direct SELECT (the eagerly loaded
+        ``record.file_links`` may be stale within a request). New links are
+        attached via relationship objects, so ``record.file_links`` reflects
+        them in memory and a follow-up ``update_checksums`` on the same
+        instance sees them without a re-fetch.
+
+        A concurrent writer inserting the same (record_id, file_definition_id)
+        PK first wins the race: the IntegrityError is rolled back and the
+        record is reloaded in place (rollback expires it), so callers can keep
+        using the instance — the links exist either way.
+
+        Args:
+            record: Record with ``record_type.file_links`` and ``file_links``
+                eagerly loaded.
+            matched_files: Dict mapping file definition name to matched filename.
+
+        Returns:
+            Number of links created (0 when all existed or the race was lost).
+        """
+        record_id = record.id
+        fd_map = {
+            link.file_definition.name: link.file_definition
+            for link in record.record_type.file_links
+        }
+        result = await self.session.execute(
+            select(RecordFileLink.file_definition_id).where(
+                col(RecordFileLink.record_id) == record_id
+            )
+        )
+        linked_ids = set(result.scalars())
+        created = 0
+        for name, filename in matched_files.items():
+            fd = fd_map.get(name)
+            if fd is None or fd.id in linked_ids:
+                continue
+            self.session.add(RecordFileLink(record=record, file_definition=fd, filename=filename))
+            created += 1
+        try:
+            await self.session.commit()
+        except IntegrityError:
+            await self.session.rollback()
+            assert record_id is not None
+            await self.get_with_relations(record_id)
+            logger.warning(
+                f"Record {record_id}: lost file-link creation race to a concurrent writer"
+            )
+            return 0
+        return created
 
     async def set_files(
         self,
@@ -764,11 +829,11 @@ class RecordRepository(BaseRepository[Record]):
         Raises:
             RecordNotFoundError: If record doesn't exist
             UserNotFoundError: If user doesn't exist
-            ValidationError: If record is blocked
+            ValidationError: If record is blocked or preparing
         """
         record = await self.get(record_id)
-        if record.status == RecordStatus.blocked:
-            raise ValidationError("Cannot assign user to a blocked record")
+        if record.status in (RecordStatus.blocked, RecordStatus.preparing):
+            raise ValidationError(f"Cannot assign user to a {record.status.value} record")
         user = await self.session.get(User, user_id)
         if not user:
             raise UserNotFoundError(user_id)
@@ -824,8 +889,11 @@ class RecordRepository(BaseRepository[Record]):
 
         Raises:
             RecordNotFoundError: If record doesn't exist
+            ValidationError: If record is blocked or preparing
         """
         record = await self.get(record_id)
+        if record.status in (RecordStatus.blocked, RecordStatus.preparing):
+            raise ValidationError(f"Cannot claim a {record.status.value} record")
         record.user_id = user_id
         record.status = RecordStatus.inwork
         await self.session.commit()
@@ -858,7 +926,9 @@ class RecordRepository(BaseRepository[Record]):
 
         Args:
             record_id: ID of the record to invalidate.
-            mode: "hard" resets status to pending (keeps user_id).
+            mode: "hard" resets status to pending (keeps user_id); a
+                  ``preparing`` record keeps its status — preparation owns the
+                  exit, only the reason is appended.
                   "soft" only appends reason to context_info.
             source_record_id: ID of the record that triggered invalidation.
             reason: Human-readable reason. Defaults to a generated message.
@@ -880,7 +950,7 @@ class RecordRepository(BaseRepository[Record]):
             else:
                 record.context_info = reason
 
-        if mode == "hard":
+        if mode == "hard" and record.status != RecordStatus.preparing:
             record.status = RecordStatus.pending
 
         await self.session.commit()

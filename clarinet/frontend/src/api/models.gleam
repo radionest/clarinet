@@ -130,6 +130,10 @@ pub type Record {
     finished_at: Option(String),
     // Computed fields
     radiant: Option(String),
+    // Server-derived per-study anon ID: set only when
+    // anon_per_study_patient_id is enabled and the study is anonymized;
+    // display falls back to patient.anon_id otherwise
+    display_anon_id: Option(String),
     // Server-side verdict: may the submitted data still be changed by
     // non-superusers (RecordType.editable + edit_window_days)
     is_editable: Bool,
@@ -382,6 +386,7 @@ pub type RoleMatrix {
 // Per-status record counts for a record type
 pub type RecordTypeStatusCounts {
   RecordTypeStatusCounts(
+    preparing: Int,
     blocked: Int,
     pending: Int,
     inwork: Int,

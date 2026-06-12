@@ -91,6 +91,7 @@ def create_broker(queue_name: str) -> AsyncBroker:
     )
 
     from .middleware import (
+        AuditMiddleware,
         DeadLetterMiddleware,
         DLQPublisher,
         PipelineChainMiddleware,
@@ -109,6 +110,7 @@ def create_broker(queue_name: str) -> AsyncBroker:
             max_delay_exponent=settings.pipeline_retry_max_delay,
         ),
         PipelineLoggingMiddleware(),
+        AuditMiddleware(queue_name=queue_name),
         DeadLetterMiddleware(dlq),
         PipelineChainMiddleware(dlq),
     )

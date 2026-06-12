@@ -34,6 +34,8 @@ pub type ApiError {
 
 // Record status (matching backend RecordStatus enum)
 pub type RecordStatus {
+  Preparing
+  // preparing in backend
   Blocked
   // blocked in backend
   Pending

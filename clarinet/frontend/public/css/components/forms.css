@@ -15,24 +15,33 @@
 
 .form-label {
     display: block;
-    margin-bottom: 0.5rem;
+    margin-bottom: 0.4rem;
     font-weight: 500;
+    font-size: 0.875rem;
+    color: var(--ink);
 }
 
 .form-input,
 .form-textarea,
 .form-select {
     width: 100%;
-    padding: 0.5rem;
-    border: 1px solid var(--border-color);
+    padding: 0.5rem 0.65rem;
+    border: 1px solid var(--hairline-strong);
     border-radius: var(--radius-md);
-    font-size: 1rem;
-    transition: border-color 0.2s, box-shadow 0.2s;
+    background: var(--surface);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    font-size: 0.9rem;
+    transition: border-color 0.15s, box-shadow 0.15s;
+
+    &::placeholder {
+        color: var(--ink-faint);
+    }
 
     &:focus {
         outline: none;
-        border-color: var(--primary-color);
-        box-shadow: 0 0 0 3px rgba(30, 64, 175, 0.1);
+        border-color: var(--teal);
+        box-shadow: var(--focus-ring);
     }
 }
 
@@ -43,18 +52,18 @@
 
 .form-select-sm {
     padding: var(--spacing-xs) var(--spacing-sm);
-    font-size: 0.875rem;
+    font-size: 0.8125rem;
 }
 
 .form-error {
-    color: var(--danger-color);
-    font-size: 0.875rem;
+    color: var(--red);
+    font-size: 0.8125rem;
     margin-top: var(--spacing-xs);
 }
 
 .form-success {
-    color: var(--success-color);
-    font-size: 0.875rem;
+    color: var(--green);
+    font-size: 0.8125rem;
     margin-top: var(--spacing-xs);
 }
 
@@ -68,7 +77,8 @@
 }
 
 .form-title {
-    font-size: 1.5rem;
+    font-family: var(--font-display);
+    font-size: 1.4rem;
     font-weight: 600;
     margin-bottom: var(--spacing-lg);
 }
@@ -93,13 +103,13 @@
 
 .form-help-text,
 .form-text {
-    color: var(--text-secondary);
-    font-size: 0.875rem;
+    color: var(--ink-soft);
+    font-size: 0.8125rem;
     margin-top: var(--spacing-xs);
 }
 
 .required-marker {
-    color: var(--danger-color);
+    color: var(--red);
     margin-left: 2px;
 }
 
@@ -122,52 +132,64 @@
 .checkbox-input {
     width: auto;
     cursor: pointer;
+    accent-color: var(--teal);
 }
 
 .radio-text,
 .checkbox-text {
-    font-size: 0.95rem;
+    font-size: 0.9rem;
 }
 
-/* Login / Register */
+/* Login / Register — paper sheet over a faint coordinate grid */
 .login-page,
 .register-page {
     display: flex;
     align-items: center;
     justify-content: center;
     min-height: 100vh;
-    background: var(--surface-color);
+    background-color: var(--paper);
+    background-image:
+        linear-gradient(rgba(31, 34, 38, 0.035) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(31, 34, 38, 0.035) 1px, transparent 1px);
+    background-size: 28px 28px;
 }
 
 .login-container,
 .register-container {
     width: 100%;
-    max-width: 420px;
+    max-width: 430px;
     padding: var(--spacing-md);
 }
 
 .login-card,
 .register-card {
-    background: white;
-    border: 1px solid var(--border-color);
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    border-top: 3px solid var(--brass);
     border-radius: var(--radius-lg);
     padding: var(--spacing-xl);
-    box-shadow: var(--shadow-md);
+    box-shadow: var(--shadow-lg);
 }
 
 .login-title,
 .register-title {
-    font-size: 1.75rem;
-    font-weight: 700;
+    font-family: var(--font-display);
+    font-size: 1.9rem;
+    font-weight: 600;
     text-align: center;
-    margin-bottom: var(--spacing-xs);
+    margin-bottom: var(--spacing-sm);
+    letter-spacing: -0.01em;
 }
 
 .login-subtitle,
 .register-subtitle {
     text-align: center;
-    color: var(--text-secondary);
+    color: var(--ink-soft);
+    font-size: 0.875rem;
+    line-height: 1.5;
     margin-bottom: var(--spacing-lg);
+    padding-bottom: var(--spacing-lg);
+    border-bottom: 1px solid var(--hairline);
 }
 
 .login-form,
@@ -181,8 +203,8 @@
 .register-footer {
     text-align: center;
     margin-top: var(--spacing-md);
-    color: var(--text-secondary);
-    font-size: 0.875rem;
+    color: var(--ink-soft);
+    font-size: 0.8125rem;
 }
 
 /* Formosh component overrides — formosh >= 0.6.0 renders inside Shadow DOM,
@@ -196,48 +218,53 @@ formosh-form::part(input),
 formosh-form::part(textarea),
 formosh-form::part(select) {
     width: 100%;
-    padding: 0.5rem;
-    border: 1px solid var(--border-color);
+    padding: 0.5rem 0.65rem;
+    border: 1px solid var(--hairline-strong);
     border-radius: var(--radius-md);
-    font-size: 1rem;
-    transition: border-color 0.2s, box-shadow 0.2s;
+    background: var(--surface);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    font-size: 0.9rem;
+    transition: border-color 0.15s, box-shadow 0.15s;
 }
 
 formosh-form::part(input):focus,
 formosh-form::part(textarea):focus,
 formosh-form::part(select):focus {
     outline: none;
-    border-color: var(--primary-color);
-    box-shadow: 0 0 0 3px rgba(30, 64, 175, 0.1);
+    border-color: var(--teal);
+    box-shadow: var(--focus-ring);
 }
 
 formosh-form::part(submit) {
     display: inline-block;
-    padding: 0.5rem 1rem;
-    background-color: var(--primary-color);
-    color: white;
+    padding: 0.45rem 1rem;
+    background-color: var(--teal);
+    color: #ffffff;
     border: none;
     border-radius: var(--radius-md);
-    font-size: 1rem;
+    font-family: var(--font-sans);
+    font-size: 0.9rem;
     font-weight: 500;
     cursor: pointer;
-    transition: background-color 0.2s;
+    transition: background-color 0.15s;
 }
 
 formosh-form::part(submit):hover {
-    background-color: #1e3a8a;
+    background-color: var(--teal-deep);
 }
 
 formosh-form::part(error) {
-    color: var(--danger-color);
-    font-size: 0.875rem;
+    color: var(--red);
+    font-size: 0.8125rem;
     margin-top: var(--spacing-xs);
 }
 
 formosh-form::part(label) {
     display: block;
     font-weight: 500;
-    margin-bottom: 0.5rem;
+    font-size: 0.875rem;
+    margin-bottom: 0.4rem;
 }
 
 formosh-form::part(radio-group) {
@@ -257,23 +284,23 @@ formosh-form::part(header) {
 }
 
 formosh-form::part(title) {
-    font-size: 1.25rem;
+    font-size: 1.15rem;
     font-weight: 600;
 }
 
 formosh-form::part(description) {
-    color: var(--text-secondary);
-    font-size: 0.9rem;
+    color: var(--ink-soft);
+    font-size: 0.875rem;
     margin-top: var(--spacing-xs);
 }
 
 /* Array (list) fields */
 .array-item {
-    border: 1px solid var(--border-color);
+    border: 1px solid var(--hairline);
     border-radius: var(--radius-md);
     padding: 0.75rem 1rem;
     margin-bottom: 0.75rem;
-    background: var(--bg-secondary, #f9fafb);
+    background: var(--surface-sunken);
 }
 
 /* Since formosh 0.7.3 the header holds only the remove button (rendered in
@@ -283,35 +310,35 @@ formosh-form::part(description) {
     justify-content: flex-end;
     margin-bottom: 0.5rem;
     padding-bottom: 0.5rem;
-    border-bottom: 1px solid var(--border-color);
+    border-bottom: 1px solid var(--hairline);
 }
 
 .remove-array-item {
-    color: var(--danger-color);
+    color: var(--red);
     background: none;
-    border: 1px solid var(--danger-color);
+    border: 1px solid var(--red);
     border-radius: var(--radius-md);
     padding: 0.25rem 0.5rem;
     cursor: pointer;
-    font-size: 0.875rem;
+    font-size: 0.8125rem;
 
     &:hover {
-        background: var(--danger-color);
-        color: white;
+        background: var(--red);
+        color: #ffffff;
     }
 }
 
 .add-array-item {
     margin-top: 0.5rem;
     padding: 0.375rem 0.75rem;
-    border: 1px dashed var(--border-color);
+    border: 1px dashed var(--hairline-strong);
     border-radius: var(--radius-md);
     background: none;
     cursor: pointer;
-    color: var(--text-secondary);
+    color: var(--ink-soft);
 
     &:hover {
-        border-color: var(--primary-color);
-        color: var(--primary-color);
+        border-color: var(--teal);
+        color: var(--teal);
     }
 }

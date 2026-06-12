@@ -612,12 +612,17 @@ fn append_optional(
 fn append_user_filter(
   acc: List(#(String, json.Json)),
   user_id: Option(String),
-  wo_user: Bool,
+  wo_user: Option(Bool),
 ) -> List(#(String, json.Json)) {
   case wo_user, user_id {
-    True, _ -> [#("wo_user", json.bool(True)), ..acc]
-    False, Some(uid) -> [#("user_id", json.string(uid)), ..acc]
-    False, None -> acc
+    Some(flag), Some(uid) -> [
+      #("user_id", json.string(uid)),
+      #("wo_user", json.bool(flag)),
+      ..acc
+    ]
+    Some(flag), None -> [#("wo_user", json.bool(flag)), ..acc]
+    None, Some(uid) -> [#("user_id", json.string(uid)), ..acc]
+    None, None -> acc
   }
 }
 

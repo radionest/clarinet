@@ -4,15 +4,13 @@ Discovers ``record_types.py`` in a given folder and collects all
 ``RecordDef`` instances from its module namespace, converting them
 to ``RecordTypeCreate`` objects for the reconciler.
 
-Reuses the importlib pattern from ``clarinet/services/recordflow/flow_loader.py``.
+Imports go through the ``clarinet_plan`` anchor package
+(``clarinet/config/plan_package.py``) — no ``sys.path`` manipulation.
+Contract: ``.claude/rules/custom-code-loading.md``.
 """
 
-import importlib.util
 import json
-import sys
 import types
-from collections.abc import Generator
-from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -24,42 +22,6 @@ from clarinet.utils.logger import logger
 
 # Fields whose values can reference external .py files
 _SCRIPT_FIELDS = ("slicer_script", "slicer_result_validator")
-
-
-def _load_module(file_path: Path, *, keep_in_sys: bool = False) -> types.ModuleType | None:
-    """Load a Python module from file using importlib.
-
-    The module is registered under its **stem** name (e.g. ``files_catalog``)
-    so that sibling modules can import it with ``from files_catalog import X``.
-
-    Args:
-        file_path: Path to the Python file.
-        keep_in_sys: If True, leave the module in ``sys.modules`` after
-            loading so other modules can import it.
-
-    Returns:
-        Loaded module, or None on failure.
-    """
-    # Use the plain stem so sibling imports work (e.g. "files_catalog")
-    module_name = file_path.stem
-    spec = importlib.util.spec_from_file_location(module_name, file_path)
-    if spec is None or spec.loader is None:
-        logger.error(f"Cannot create module spec for {file_path}")
-        return None
-
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
-    try:
-        spec.loader.exec_module(module)
-    except Exception:
-        logger.exception(f"Error loading module {file_path}")
-        sys.modules.pop(module_name, None)
-        return None
-
-    if not keep_in_sys:
-        sys.modules.pop(module_name, None)
-
-    return module
 
 
 def _collect_named_instances(module: types.ModuleType, cls: type[Any]) -> list[tuple[str, Any]]:
@@ -93,68 +55,6 @@ def _set_file_names_from_module(module: types.ModuleType) -> None:
     for attr_name, file_obj in _collect_named_instances(module, FileDef):
         if not file_obj.name:
             file_obj.name = attr_name
-
-
-@contextmanager
-def preload_record_types(flow_dir: Path) -> Generator[None]:
-    """Resolve and pre-load ``record_types.py`` for flow file imports.
-
-    Manages ``sys.path`` and ``sys.modules`` so that flow files can use
-    ``from record_types import ...``.  On exit, cleans up the added paths
-    and removes the module from ``sys.modules``.
-
-    The caller is still responsible for adding/removing *flow_dir* itself
-    from ``sys.path``.
-
-    Resolution order for ``record_types.py``:
-    1. ``flow_dir / "record_types.py"``
-    2. ``settings.config_tasks_path / settings.config_record_types_file``
-
-    Args:
-        flow_dir: Directory containing flow files.
-    """
-    from clarinet.settings import settings
-
-    flow_dir_str = str(flow_dir.resolve())
-
-    # Add config_tasks_path so package-style imports work
-    # (e.g. ``from utils.seg_utils import ...`` when utils/ is under tasks/)
-    config_dir_str = str(Path(settings.config_tasks_path).resolve())
-    added_config_dir = config_dir_str != flow_dir_str and config_dir_str not in sys.path
-    if added_config_dir:
-        sys.path.insert(0, config_dir_str)
-
-    # Resolve record_types.py: check flow_dir first, then settings fallback
-    record_types_file = flow_dir / "record_types.py"
-    if not record_types_file.is_file():
-        config_dir = Path(settings.config_tasks_path).resolve()
-        candidate = config_dir / settings.config_record_types_file
-        if candidate.is_file():
-            record_types_file = candidate
-
-    # If record_types is in a subdirectory, add its parent to sys.path
-    rt_parent_str = str(record_types_file.parent.resolve())
-    added_rt_parent = rt_parent_str != flow_dir_str and rt_parent_str not in sys.path
-    if added_rt_parent:
-        sys.path.insert(0, rt_parent_str)
-
-    # Pre-load the module so ``from record_types import X`` works
-    rt_module_name: str | None = None
-    if record_types_file.is_file() and record_types_file.stem not in sys.modules:
-        rt_module = _load_module(record_types_file, keep_in_sys=True)
-        if rt_module:
-            rt_module_name = record_types_file.stem
-            _set_file_names_from_module(rt_module)
-
-    try:
-        yield
-    finally:
-        if rt_module_name:
-            sys.modules.pop(rt_module_name, None)
-        if added_rt_parent and rt_parent_str in sys.path:
-            sys.path.remove(rt_parent_str)
-        if added_config_dir and config_dir_str in sys.path:
-            sys.path.remove(config_dir_str)
 
 
 async def _resolve_data_schema(rt_def: RecordDef, folder: Path) -> dict[str, Any] | None:
@@ -304,6 +204,8 @@ async def _to_record_type_create(
     # absent from config — matching the contract of all other optional fields.
     if "mask_patient_data" in rt_def.model_fields_set:
         kwargs["mask_patient_data"] = rt_def.mask_patient_data
+    if "unique_per_user" in rt_def.model_fields_set:
+        kwargs["unique_per_user"] = rt_def.unique_per_user
     if "parent_required" in rt_def.model_fields_set:
         kwargs["parent_required"] = rt_def.parent_required
     if "inherit_user_from_parent" in rt_def.model_fields_set:
@@ -324,6 +226,50 @@ async def _to_record_type_create(
     return RecordTypeCreate(**kwargs)
 
 
+def _ensure_record_types_imported(folder: Path | None = None) -> None:
+    """Import the catalog + ``record_types`` modules and set FileDef names.
+
+    Ordering is strict and matters:
+
+    1. import ``clarinet_plan.<files_catalog>`` (if the file exists);
+    2. set FileDef names from the catalog module;
+    3. import ``clarinet_plan.<record_types>`` (if the file exists);
+    4. single-file fallback — no catalog → set FileDef names from
+       ``record_types`` itself.
+
+    Idempotent: ``import_plan_module`` returns the cached module on re-entry,
+    and ``_set_file_names_from_module`` only fills *empty* names.
+
+    Must run after the anchor is active (it calls ``ensure_plan_root`` itself)
+    and **before** any plan file that transitively imports ``record_types``
+    (e.g. ``validators.py``) — otherwise module-level reads of ``FileDef.name``
+    would see ``""`` because the names are assigned here.
+
+    Args:
+        folder: Config root (defaults to ``settings.config_tasks_path``).
+
+    Raises:
+        ConfigLoadError: If the catalog or ``record_types`` file fails to import.
+    """
+    from clarinet.config.plan_package import ensure_plan_root, import_plan_module, module_name_for
+    from clarinet.settings import settings
+
+    root = Path(folder) if folder is not None else Path(settings.config_tasks_path)
+    ensure_plan_root(root)
+
+    catalog_file = root / settings.config_files_catalog_file
+    has_catalog = catalog_file.is_file()
+    if has_catalog:
+        catalog = import_plan_module(module_name_for(catalog_file), path_hint=catalog_file)
+        _set_file_names_from_module(catalog)
+
+    record_types_file = root / settings.config_record_types_file
+    if record_types_file.is_file():
+        rt = import_plan_module(module_name_for(record_types_file), path_hint=record_types_file)
+        if not has_catalog:
+            _set_file_names_from_module(rt)
+
+
 async def load_python_config(folder: Path) -> list[RecordTypeCreate]:
     """Load RecordType definitions from Python files in *folder*.
 
@@ -336,15 +282,22 @@ async def load_python_config(folder: Path) -> list[RecordTypeCreate]:
     If ``files_catalog.py`` is absent, FileDef instances in
     ``record_types.py`` get their names auto-derived (single-file mode).
 
-    ``record_types.py`` imports from ``files_catalog.py`` to reference
-    shared FileDef objects.
+    ``record_types.py`` imports from ``files_catalog.py`` via the
+    ``clarinet_plan.`` prefix (or a relative import) to reference shared FileDef
+    objects.
 
     Args:
         folder: Path to the folder containing Python config files.
 
     Returns:
         List of RecordTypeCreate objects ready for reconciliation.
+
+    Raises:
+        ConfigLoadError: If ``record_types.py`` or ``files_catalog.py``
+            fails to import — a broken Python config must crash startup,
+            not silently reconcile zero record types.
     """
+    from clarinet.config.plan_package import import_plan_module, module_name_for
     from clarinet.settings import settings
 
     record_types_file = folder / settings.config_record_types_file
@@ -352,60 +305,21 @@ async def load_python_config(folder: Path) -> list[RecordTypeCreate]:
         logger.warning(f"No {settings.config_record_types_file} found in {folder}")
         return []
 
-    # Add folder to sys.path temporarily so imports work
-    folder_str = str(folder.resolve())
-    added_to_path = folder_str not in sys.path
-    if added_to_path:
-        sys.path.insert(0, folder_str)
+    # Imports catalog + record_types and assigns FileDef names (idempotent).
+    _ensure_record_types_imported(folder)
 
-    # If record_types_file is in a subdirectory, add its parent too
-    rt_parent = str(record_types_file.parent.resolve())
-    added_rt_parent = rt_parent != folder_str and rt_parent not in sys.path
-    if added_rt_parent:
-        sys.path.insert(0, rt_parent)
+    module = import_plan_module(module_name_for(record_types_file), path_hint=record_types_file)
 
-    catalog_module_name: str | None = None
-    try:
-        # Load files_catalog first (if present) to set FileDef names.
-        # Keep it in sys.modules so record_types.py can import it.
-        files_catalog_file = folder / settings.config_files_catalog_file
-        has_catalog = files_catalog_file.is_file()
-        if has_catalog:
-            catalog_module = _load_module(files_catalog_file, keep_in_sys=True)
-            if catalog_module:
-                catalog_module_name = files_catalog_file.stem
-                _set_file_names_from_module(catalog_module)
+    rt_defs = _collect_named_instances(module, RecordDef)
+    if not rt_defs:
+        logger.warning(f"No RecordDef instances found in {record_types_file}")
+        return []
 
-        # Load record_types module (catalog is available for import)
-        module = _load_module(record_types_file)
-        if module is None:
-            return []
+    logger.info(f"Found {len(rt_defs)} RecordDef(s) in {record_types_file}")
 
-        # Single-file mode: set file names from record_types.py itself
-        if not has_catalog:
-            _set_file_names_from_module(module)
+    result: list[RecordTypeCreate] = []
+    for _var_name, rt_def in rt_defs:
+        config_item = await _to_record_type_create(rt_def, folder)
+        result.append(config_item)
 
-        # Collect RecordDef instances
-        rt_defs = _collect_named_instances(module, RecordDef)
-        if not rt_defs:
-            logger.warning(f"No RecordDef instances found in {record_types_file}")
-            return []
-
-        logger.info(f"Found {len(rt_defs)} RecordDef(s) in {record_types_file}")
-
-        # Convert to RecordTypeCreate objects
-        result: list[RecordTypeCreate] = []
-        for _var_name, rt_def in rt_defs:
-            config_item = await _to_record_type_create(rt_def, folder)
-            result.append(config_item)
-
-        return result
-
-    finally:
-        # Clean up sys.modules and sys.path
-        if catalog_module_name:
-            sys.modules.pop(catalog_module_name, None)
-        if added_rt_parent and rt_parent in sys.path:
-            sys.path.remove(rt_parent)
-        if added_to_path and folder_str in sys.path:
-            sys.path.remove(folder_str)
+    return result

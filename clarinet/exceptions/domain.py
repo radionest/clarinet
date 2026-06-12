@@ -5,7 +5,9 @@ These exceptions are used in repositories and services to represent
 business logic errors without coupling to HTTP status codes.
 """
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, ClassVar, Self
 from uuid import UUID
 
@@ -399,6 +401,47 @@ class QuartoRenderError(ClarinetError):
 # Configuration errors
 class ConfigurationError(ClarinetError):
     """Raised when there's a configuration problem."""
+
+
+class ConfigLoadError(ConfigurationError):
+    """Raised when project custom code (a ``plan/`` ``.py`` file) fails to import.
+
+    Loaders raise this instead of silently returning an empty result, so a
+    broken config file crashes startup (where the operator can fix it)
+    rather than degrading into missing hydrators/validators/flows at runtime.
+
+    Attributes:
+        path: The file that failed to load, when known.
+        kind: Human-readable label of what was being loaded
+            (e.g. ``"flow file"``), used by :meth:`aggregate`.
+        failures: Individual per-file errors when this instance was built by
+            :meth:`aggregate` (empty for a single-file failure) — kept so
+            consumers retain each file's ``path`` and ``__cause__``.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        path: "str | Path | None" = None,
+        kind: str | None = None,
+        failures: "Sequence[ConfigLoadError] | None" = None,
+    ) -> None:
+        super().__init__(message)
+        self.path = str(path) if path is not None else None
+        self.kind = kind
+        self.failures = list(failures) if failures is not None else []
+
+    @classmethod
+    def aggregate(cls, failures: "Sequence[ConfigLoadError]", kind: str) -> "ConfigLoadError":
+        """Collapse per-file failures into one error so every broken file is
+        reported in a single startup crash instead of fix-restart-fix cycles."""
+        details = "; ".join(str(f) for f in failures)
+        return cls(
+            f"{len(failures)} {kind}(s) failed to load: {details}",
+            kind=kind,
+            failures=failures,
+        )
 
 
 class AnonPathError(ConfigurationError):

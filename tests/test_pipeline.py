@@ -826,6 +826,149 @@ class TestRetryMiddleware:
             mock_super.assert_called_once_with(msg, result, exc)
 
 
+# ─── Worker task-module loading (fail-fast) ──────────────────────────────────
+
+
+class TestLoadTaskModulesFailFast:
+    """Broken flow files must crash the worker at startup, not degrade silently."""
+
+    def test_aggregates_failures_across_files(self, tmp_path, monkeypatch):
+        from clarinet.exceptions.domain import ConfigLoadError
+        from clarinet.services.pipeline.worker import load_task_modules
+        from clarinet.settings import settings
+
+        (tmp_path / "a_broken_flow.py").write_text("raise RuntimeError('first failure')\n")
+        (tmp_path / "b_broken_flow.py").write_text("raise RuntimeError('second failure')\n")
+        monkeypatch.setattr(settings, "config_tasks_path", str(tmp_path))
+        monkeypatch.setattr(settings, "recordflow_paths", [str(tmp_path)])
+        monkeypatch.setattr(settings, "have_dicom", False)
+
+        with pytest.raises(ConfigLoadError, match="2 pipeline task module"):
+            load_task_modules()
+
+    def test_aggregates_failures_across_paths(self, tmp_path, monkeypatch):
+        """Broken flows in different recordflow_paths are all reported in one
+        aggregate — every path is attempted."""
+        from clarinet.exceptions.domain import ConfigLoadError
+        from clarinet.services.pipeline.worker import load_task_modules
+
+        dir_a = tmp_path / "a"
+        dir_a.mkdir()
+        (dir_a / "x_broken_flow.py").write_text("raise RuntimeError('broken a')\n")
+        dir_b = tmp_path / "b"
+        dir_b.mkdir()
+        (dir_b / "y_broken_flow.py").write_text("raise RuntimeError('broken b')\n")
+
+        monkeypatch.setattr(settings, "config_tasks_path", str(tmp_path))
+        monkeypatch.setattr(settings, "recordflow_paths", [str(dir_a), str(dir_b)])
+        monkeypatch.setattr(settings, "have_dicom", False)
+
+        with pytest.raises(ConfigLoadError, match="2 pipeline task module"):
+            load_task_modules()
+
+    def test_broken_central_record_types_crashes(self, tmp_path, monkeypatch):
+        """A broken record_types.py at config_tasks_path crashes the worker —
+        record types are imported once, centrally, before any flow file."""
+        from clarinet.exceptions.domain import ConfigLoadError
+        from clarinet.services.pipeline.worker import load_task_modules
+
+        (tmp_path / "record_types.py").write_text("raise RuntimeError('broken rt')\n")
+        monkeypatch.setattr(settings, "config_tasks_path", str(tmp_path))
+        monkeypatch.setattr(settings, "recordflow_paths", [])
+        monkeypatch.setattr(settings, "have_dicom", False)
+
+        with pytest.raises(ConfigLoadError):
+            load_task_modules()
+
+    def test_recordflow_path_outside_config_root_raises(self, tmp_path, monkeypatch):
+        """A recordflow_path outside config_tasks_path is rejected — single
+        root means flow files must live under config_tasks_path."""
+        from clarinet.exceptions.domain import ConfigLoadError
+        from clarinet.services.pipeline.worker import load_task_modules
+
+        inside = tmp_path / "plan"
+        inside.mkdir()
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (outside / "x_flow.py").write_text("# flow\n")
+
+        monkeypatch.setattr(settings, "config_tasks_path", str(inside))
+        monkeypatch.setattr(settings, "recordflow_paths", [str(outside)])
+        monkeypatch.setattr(settings, "have_dicom", False)
+
+        with pytest.raises(ConfigLoadError, match="must live inside config_tasks_path"):
+            load_task_modules()
+
+    def test_cross_flow_import_no_reexecution(self, tmp_path, monkeypatch):
+        """A flow file importing a sibling must reuse the cached module —
+        re-execution would re-register @pipeline_task and trip the task-name
+        collision guard, killing the worker. Works in either sort direction."""
+        from clarinet.services.pipeline.worker import load_task_modules
+
+        (tmp_path / "early_cross_flow.py").write_text(
+            "from clarinet.services.pipeline import pipeline_task\n"
+            "@pipeline_task()\n"
+            "async def early_cross_task(msg, ctx):\n"
+            "    return None\n"
+        )
+        (tmp_path / "late_cross_flow.py").write_text("import clarinet_plan.early_cross_flow\n")
+
+        monkeypatch.setattr(settings, "config_tasks_path", str(tmp_path))
+        monkeypatch.setattr(settings, "recordflow_paths", [str(tmp_path)])
+        monkeypatch.setattr(settings, "have_dicom", False)
+
+        load_task_modules()  # must not raise task-name collision
+
+    def test_call_id_consistent_between_loaders(self, tmp_path, monkeypatch):
+        """flow_loader and the worker derive the SAME dotted module name for a
+        file, so a ``.call(func)`` gets the same ``call:`` node id in the API and
+        in the worker — cross-process dispatch depends on this."""
+        from clarinet.config.plan_package import deactivate_plan_package
+        from clarinet.services.pipeline.worker import load_task_modules
+        from clarinet.services.recordflow import call_function_registry
+        from clarinet.services.recordflow.flow_loader import load_flows_from_file
+
+        (tmp_path / "cc_flow.py").write_text(
+            "from clarinet.services.recordflow import record\n"
+            "async def cc_callback(record, context, client):\n"
+            "    return None\n"
+            "record('cc').on_finished().call(cc_callback)\n"
+        )
+
+        # flow_loader path (API side)
+        load_flows_from_file(tmp_path / "cc_flow.py")
+        ids_loader = call_function_registry.all_ids()
+
+        # worker path
+        deactivate_plan_package()
+        call_function_registry.reset()
+        monkeypatch.setattr(settings, "config_tasks_path", str(tmp_path))
+        monkeypatch.setattr(settings, "recordflow_paths", [str(tmp_path)])
+        monkeypatch.setattr(settings, "have_dicom", False)
+        load_task_modules()
+        ids_worker = call_function_registry.all_ids()
+
+        assert ids_loader == ids_worker
+        assert ids_loader and ids_loader[0].startswith("call:clarinet_plan.")
+
+    @pytest.mark.asyncio
+    async def test_run_worker_exits_nonzero_on_config_error(self):
+        from clarinet.exceptions.domain import ConfigLoadError
+        from clarinet.services.pipeline.worker import run_worker
+
+        with (
+            patch("clarinet.services.pipeline.worker.reconfigure_for_worker"),
+            patch(
+                "clarinet.services.pipeline.worker.load_task_modules",
+                side_effect=ConfigLoadError("broken flow file"),
+            ),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            await run_worker(queues=[DEFAULT_QUEUE])
+
+        assert exc_info.value.code == 1
+
+
 # ─── Worker signal handling (Windows regression) ─────────────────────────────
 
 
@@ -1068,3 +1211,238 @@ class TestQueueNamespacing:
         assert bound_task.task_name in payload["error"]
         assert GPU_QUEUE in payload["error"]
         assert DICOM_QUEUE in payload["error"]
+
+
+# ─── Audit middleware ────────────────────────────────────────────────────────
+
+
+class TestAuditMiddleware:
+    """Tests for AuditMiddleware — fire-and-forget run auditing over HTTP."""
+
+    def _msg(self, task_id: str = "audit-tid"):
+        from taskiq import TaskiqMessage
+
+        return TaskiqMessage(
+            task_id=task_id,
+            task_name="test_task",
+            labels={"queue": DEFAULT_QUEUE, "pipeline_id": "p1", "step_index": "2"},
+            args=[
+                {
+                    "patient_id": "P1",
+                    "study_uid": "1.2.3",
+                    "series_uid": None,
+                    "record_id": 7,
+                }
+            ],
+            kwargs={},
+        )
+
+    def _result(self, is_err: bool = False, error: Exception | None = None):
+        from taskiq import TaskiqResult
+
+        return TaskiqResult(
+            is_err=is_err,
+            return_value={"score": 0.9} if not is_err else None,
+            execution_time=1.23,
+            error=error,
+        )
+
+    def _middleware(self):
+        from clarinet.client import ClarinetClient
+        from clarinet.services.pipeline.middleware import AuditMiddleware
+
+        mock_client = AsyncMock(spec=ClarinetClient)
+        return AuditMiddleware(client=mock_client), mock_client
+
+    @pytest.mark.asyncio
+    async def test_pre_execute_posts_running_row(self):
+        mw, mock_client = self._middleware()
+
+        await mw.pre_execute(self._msg())
+        await mw.shutdown()  # drain pending fire-and-forget tasks
+
+        mock_client.create_pipeline_run.assert_called_once()
+        kwargs = mock_client.create_pipeline_run.call_args.kwargs
+        assert kwargs["task_id"] == "audit-tid"
+        assert kwargs["task_name"] == "test_task"
+        assert kwargs["queue"] == DEFAULT_QUEUE
+        assert kwargs["pipeline_id"] == "p1"
+        assert kwargs["step_index"] == 2
+        assert kwargs["record_id"] == 7
+        assert kwargs["patient_id"] == "P1"
+        assert kwargs["started_at"] is not None
+
+    @pytest.mark.asyncio
+    async def test_pre_execute_tolerates_non_pipeline_args(self):
+        """Tasks whose first arg is not a PipelineMessage dict still get audited."""
+        from taskiq import TaskiqMessage
+
+        mw, mock_client = self._middleware()
+        msg = TaskiqMessage(
+            task_id="raw-tid", task_name="raw_task", labels={}, args=["not-a-dict"], kwargs={}
+        )
+
+        await mw.pre_execute(msg)
+        await mw.shutdown()
+
+        kwargs = mock_client.create_pipeline_run.call_args.kwargs
+        assert kwargs["record_id"] is None
+        assert kwargs["pipeline_id"] is None
+        assert kwargs["step_index"] is None
+        assert kwargs["queue"] == ""
+
+    @pytest.mark.asyncio
+    async def test_post_execute_succeeded(self):
+        mw, mock_client = self._middleware()
+
+        await mw.post_execute(self._msg(), self._result(is_err=False))
+        await mw.shutdown()
+
+        kwargs = mock_client.finish_pipeline_run.call_args.kwargs
+        assert kwargs["status"] == "succeeded"
+        assert kwargs["result"] == {"score": 0.9}
+        assert kwargs["execution_time"] == pytest.approx(1.23)
+        assert kwargs["error_type"] is None
+
+    @pytest.mark.asyncio
+    async def test_post_execute_failed_captures_error(self):
+        from clarinet.client import ClarinetAPIError
+
+        mw, mock_client = self._middleware()
+        error = ClarinetAPIError("Conflict", status_code=409)
+
+        await mw.post_execute(self._msg(), self._result(is_err=True, error=error))
+        await mw.shutdown()
+
+        kwargs = mock_client.finish_pipeline_run.call_args.kwargs
+        assert kwargs["status"] == "failed"
+        assert kwargs["error_type"] == "ClarinetAPIError"
+        assert "Conflict" in kwargs["error_message"]
+        assert kwargs["error_status_code"] == 409
+        assert kwargs["result"] is None
+
+    @pytest.mark.asyncio
+    async def test_post_execute_retrying_on_no_result_error(self):
+        from taskiq.exceptions import NoResultError
+
+        mw, mock_client = self._middleware()
+
+        await mw.post_execute(self._msg(), self._result(is_err=True, error=NoResultError()))
+        await mw.shutdown()
+
+        kwargs = mock_client.finish_pipeline_run.call_args.kwargs
+        assert kwargs["status"] == "retrying"
+        assert kwargs["error_type"] is None
+
+    @pytest.mark.asyncio
+    async def test_client_error_is_swallowed(self):
+        """Audit HTTP failures must not propagate into task execution."""
+        mw, mock_client = self._middleware()
+        mock_client.create_pipeline_run.side_effect = Exception("network down")
+
+        await mw.pre_execute(self._msg())
+        await mw.shutdown()  # must not raise
+
+    @pytest.mark.asyncio
+    async def test_shutdown_drains_pending(self):
+        mw, mock_client = self._middleware()
+
+        async def slow(**_kwargs):
+            await asyncio.sleep(0.01)
+
+        mock_client.create_pipeline_run.side_effect = slow
+
+        await mw.pre_execute(self._msg())
+        assert len(mw._pending) == 1
+        await mw.shutdown()
+        assert len(mw._pending) == 0
+
+    @pytest.mark.asyncio
+    async def test_patch_waits_for_post(self):
+        """Terminal PATCH must not race ahead of the row-creating POST."""
+        mw, mock_client = self._middleware()
+        order: list[str] = []
+
+        async def slow_post(**_kwargs):
+            await asyncio.sleep(0.01)
+            order.append("post")
+
+        async def fast_patch(**_kwargs):
+            order.append("patch")
+
+        mock_client.create_pipeline_run.side_effect = slow_post
+        mock_client.finish_pipeline_run.side_effect = fast_patch
+
+        msg = self._msg()
+        await mw.pre_execute(msg)
+        await mw.post_execute(msg, self._result(is_err=False))
+        await mw.shutdown()
+
+        assert order == ["post", "patch"]
+
+    @pytest.mark.asyncio
+    async def test_pop_start_task_keeps_newer_entry(self):
+        """A stale done-callback (attempt N) must not evict attempt N+1's task."""
+        mw, _ = self._middleware()
+
+        async def noop():
+            pass
+
+        stale = asyncio.create_task(noop())
+        current = asyncio.create_task(noop())
+        await asyncio.gather(stale, current)
+
+        mw._start_tasks["tid"] = current
+        mw._pop_start_task("tid", stale)
+        assert mw._start_tasks["tid"] is current
+        mw._pop_start_task("tid", current)
+        assert "tid" not in mw._start_tasks
+
+    @pytest.mark.asyncio
+    async def test_queue_falls_back_to_broker_queue_name(self):
+        """Messages without a queue label get the broker's queue."""
+        from taskiq import TaskiqMessage
+
+        from clarinet.client import ClarinetClient
+        from clarinet.services.pipeline.middleware import AuditMiddleware
+
+        mock_client = AsyncMock(spec=ClarinetClient)
+        mw = AuditMiddleware(client=mock_client, queue_name=GPU_QUEUE)
+        msg = TaskiqMessage(
+            task_id="no-label", task_name="direct_task", labels={}, args=[], kwargs={}
+        )
+
+        await mw.pre_execute(msg)
+        await mw.shutdown()
+
+        kwargs = mock_client.create_pipeline_run.call_args.kwargs
+        assert kwargs["queue"] == GPU_QUEUE
+
+    def test_broker_includes_audit_between_logging_and_dlq(self):
+        """create_broker() wires Audit after Logging and before DeadLetter."""
+        from clarinet.services.pipeline.middleware import (
+            AuditMiddleware,
+            DeadLetterMiddleware,
+            PipelineLoggingMiddleware,
+        )
+
+        with patch("clarinet.services.pipeline.broker.settings") as mock_settings:
+            mock_settings.rabbitmq_login = "guest"
+            mock_settings.rabbitmq_password = "guest"
+            mock_settings.rabbitmq_host = "localhost"
+            mock_settings.rabbitmq_port = 5672
+            mock_settings.rabbitmq_exchange = "test"
+            mock_settings.dlq_queue_name = "test.dead_letter"
+            mock_settings.pipeline_result_backend_url = None
+            mock_settings.pipeline_retry_count = 3
+            mock_settings.pipeline_retry_delay = 5
+            mock_settings.pipeline_retry_max_delay = 120
+
+            from clarinet.services.pipeline.broker import create_broker
+
+            broker = create_broker("test.default")
+
+            types = [type(mw) for mw in broker.middlewares]
+            assert AuditMiddleware in types
+            assert types.index(PipelineLoggingMiddleware) < types.index(AuditMiddleware)
+            assert types.index(AuditMiddleware) < types.index(DeadLetterMiddleware)

@@ -35,11 +35,22 @@ make vm-acceptance   # pytest acceptance tests (requires running VM)
   dispatched, a failure or timeout **fails** the test — templates without the
   `quarto` CLI/Jupyter kernel means a misprovisioned VM, not an absent feature.
 
-To make the render test run (not skip), the test VM needs:
+The test VM is provisioned automatically by `vm.sh cmd_deploy`: it ships the
+Quarto tarball (host-cached in `~/.cache/clarinet-deploy/`), the `quarto` pip
+extra wheels, and the demo fixtures from `deploy/test/fixtures/quarto/`
+(`review/*.qmd` + `*.sql` → `/opt/clarinet/review/`, plus a downstream-style
+`.env.example` → `/opt/clarinet/`), then restarts the services. On a freshly
+imaged VM the render test therefore runs for real — a skip means the
+provisioning step regressed. Smoke block `[7] Quarto CLI` additionally runs
+`clarinet quarto status` from `/opt/clarinet` (with the planted `.env.example`
+this regression-tests the neutral-cwd fix in `quarto_status`).
+
+For an arbitrary (non-test) deployment the render test still skips unless the
+same pieces are provisioned by hand:
 - the `quarto` CLI — `clarinet quarto install` (or `--from-file <tarball>` offline);
 - the `quarto` pip extra in the app venv — `jupyter`, `ipykernel`, `pandas`;
 - a `*.qmd` in `settings.quarto_reports_path` (default `./review/`) whose
   `clarinet.data` report names resolve to `*.sql` files in `settings.reports_path`.
 
-These are **not** in the standard production installer (Quarto is an optional,
-heavy feature) — provision them on the test VM only. See `docs/quarto-reports.md`.
+Production bundles without a Quarto tarball are unaffected (Quarto stays an
+optional, heavy feature). See `docs/quarto-reports.md`.

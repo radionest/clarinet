@@ -329,8 +329,8 @@ class Settings(BaseSettings):
     # Config file locations (relative to config_tasks_path)
     config_record_types_file: str = "record_types.py"
     config_files_catalog_file: str = "files_catalog.py"
-    config_context_hydrators_file: str = "context_hydrators.py"
-    config_schema_hydrators_file: str = "hydrators.py"
+    config_context_hydrators_file: str = "slicer_hydrators.py"
+    config_schema_hydrators_file: str = "schema_hydrators.py"
     config_validators_file: str = "validators.py"
 
     # Reports settings (custom SQL reports, downloaded as CSV/XLSX by superusers)
@@ -408,10 +408,16 @@ class Settings(BaseSettings):
     # Project branding
     project_name: str = "Clarinet"
     project_description: str = "Medical Imaging Framework"
+    project_title: str | None = None  # Browser tab <title>; falls back to project_name
 
     # Project customization
     project_path: Path | None = None
     project_static_path: Path | None = None
+
+    @property
+    def browser_title(self) -> str:
+        """Title shown in the browser tab. Falls back to ``project_name``."""
+        return self.project_title or self.project_name
 
     @property
     def pipeline_task_namespace(self) -> str:

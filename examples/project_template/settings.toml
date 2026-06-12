@@ -4,6 +4,7 @@
 # ── Project ──────────────────────────────────────────
 project_name = "TODO: Project Name"
 project_description = "TODO: short description of the research"
+# project_title = "TODO: browser tab title"  # defaults to project_name
 root_url = "/my_project"
 api_base_url = "http://127.0.0.1:8111/my_project/api"
 
@@ -34,7 +35,7 @@ frontend_enabled = true     # serve the SPA
 config_mode = "python"
 config_tasks_path = "./plan/"
 config_record_types_file = "definitions/record_types.py"
-config_context_hydrators_file = "hydrators/context_hydrators.py"
+# config_context_hydrators_file defaults to "slicer_hydrators.py" (plan root)
 recordflow_paths = ["./plan/workflows"]
 
 # ── External Viewers ─────────────────────────────────

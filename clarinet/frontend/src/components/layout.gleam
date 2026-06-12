@@ -25,7 +25,9 @@ fn navbar(model: Model) -> Element(Msg) {
   let t = i18n.translate(model.locale, _)
   html.nav([attribute.class("navbar")], [
     html.div([attribute.class("navbar-brand")], [
-      nav_link(route: router.Home, text: model.project_name, current_route: model.route),
+      html.a([attribute.href(router.route_to_path(router.Home))], [
+        html.text(model.project_name),
+      ]),
     ]),
     html.div([attribute.class("navbar-menu")], [
       nav_link(route: router.Records(dict.new()), text: t(i18n.NavRecords), current_route: model.route),

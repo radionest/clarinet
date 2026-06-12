@@ -38,16 +38,16 @@ plan/utils/
 
 ## Импорты из других разделов
 
-`plan/` добавляется фреймворком в `sys.path`, поэтому импорты работают так:
+`plan/` доступен как пакет `clarinet_plan` (единственный корень — `config_tasks_path`); все импорты идут через этот префикс, `sys.path` фреймворк не трогает:
 
 ```python
-# В pipeline_flow.py
-from utils.seg_utils import save_seg_nrrd, master_label_converter
-from record_types import master_model
-
-# В Slicer-скриптах и валидаторах
-from utils.seg_utils import read_seg_nrrd_labels
+# В pipeline_flow.py (workflows/ — recordflow_paths)
+from clarinet_plan.utils.seg_utils import save_seg_nrrd, master_label_converter
+from clarinet_plan.definitions.record_types import master_model
+# внутри одного подпакета допустимы относительные: from ..utils.seg_utils import ...
 ```
+
+**Slicer-скрипты** (`plan/scripts/`, текст `slicer_result_validator`) исполняются **внутри процесса 3D Slicer**, где пакета `clarinet_plan` НЕТ — они должны быть самодостаточными (нужный helper-код инлайнить, не импортировать из `plan/utils/`). Python-валидаторы record-data (`plan/validators.py`, грузятся фреймворком) могут использовать `from clarinet_plan.utils... import ...`.
 
 `plan/utils/__init__.py` может быть пустым — наличие файла делает структуру явной и переживает рефакторинги.
 

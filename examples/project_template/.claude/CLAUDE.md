@@ -25,14 +25,16 @@ Clarinet моделирует исследовательский pipeline чер
 
 ```
 plan/
-├── definitions/      # FileDef + RecordDef — единственное место объявления типов
-├── workflows/        # @pipeline_task функции + RecordFlow DSL
-├── hydrators/        # Async-функции, инжектирующие переменные в Slicer-скрипты
-├── scripts/          # Bare Python-скрипты для 3D Slicer (интерактивная работа)
-├── validators/       # Bare Python-валидаторы, выполняющиеся после Slicer-задачи
-├── schemas/          # JSON Schema для record.data (валидация + UI-формы)
-└── utils/            # Проектно-специфичные helper-модули
+├── definitions/        # FileDef + RecordDef — единственное место объявления типов
+├── workflows/          # @pipeline_task функции + RecordFlow DSL
+├── slicer_hydrators.py # Async-функции, инжектирующие переменные в Slicer-скрипты
+├── scripts/            # Bare Python-скрипты для 3D Slicer (интерактивная работа)
+├── validators/         # Bare Python-валидаторы, выполняющиеся после Slicer-задачи
+├── schemas/            # JSON Schema для record.data (валидация + UI-формы)
+└── utils/              # Проектно-специфичные helper-модули
 ```
+
+Все файлы `plan/` импортируются как подмодули пакета `clarinet_plan` (единственный корень — `config_tasks_path`), `sys.path` не используется.
 
 Каждой подпапке соответствует rule-файл в `.claude/rules/` с подробными конвенциями.
 
@@ -56,10 +58,10 @@ plan/
 
 ```toml
 config_mode = "python"                                 # Python-режим конфигурации
-config_tasks_path = "./plan/"                          # Корневая папка для остальных путей
+config_tasks_path = "./plan/"                          # Корневая папка (= корень пакета clarinet_plan)
 config_record_types_file = "definitions/record_types.py"
-config_context_hydrators_file = "hydrators/context_hydrators.py"
-recordflow_paths = ["./plan/workflows"]                # Где искать *_flow.py
+# config_context_hydrators_file по умолчанию "slicer_hydrators.py" (корень plan/)
+recordflow_paths = ["./plan/workflows"]                # Где искать *_flow.py (внутри config_tasks_path)
 
 recordflow_enabled = true                              # Включить движок RecordFlow
 pipeline_enabled = true                                # Включить TaskIQ-брокер (нужен RabbitMQ)

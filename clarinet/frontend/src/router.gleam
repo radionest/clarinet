@@ -168,13 +168,12 @@ fn section(route: Route) -> String {
     Studies(_) | StudyDetail(_) | StudyViewer(_) | SeriesDetail(_) -> "studies"
     Records(_) | RecordDetail(_) | RecordNew -> "records"
     Patients(_) | PatientDetail(_) | PatientNew -> "patients"
-    AdminDashboard(_)
-    | AdminRecordTypes
-    | AdminRecordTypeDetail(_)
-    | AdminRecordTypeEdit(_)
-    | AdminReports
-    | AdminQuartoReports
-    | AdminWorkflow -> "admin"
+    AdminDashboard(_) -> "admin"
+    AdminRecordTypes | AdminRecordTypeDetail(_) | AdminRecordTypeEdit(_) ->
+      "record-types"
+    AdminReports -> "reports"
+    AdminQuartoReports -> "quarto"
+    AdminWorkflow -> "workflow"
     Settings -> "settings"
     NotFound -> "notfound"
   }
@@ -216,5 +215,16 @@ pub fn route_to_query(route: Route) -> Option(String) {
     | Patients(filters)
     | AdminDashboard(filters) -> filters_to_query(filters)
     _ -> None
+  }
+}
+
+/// Full href for a route: path plus serialized query string (if any).
+/// Use for anchor hrefs to filtered routes — `route_to_path` alone drops
+/// the filters.
+pub fn route_to_href(route: Route) -> String {
+  let path = route_to_path(route)
+  case route_to_query(route) {
+    Some(q) -> path <> "?" <> q
+    None -> path
   }
 }

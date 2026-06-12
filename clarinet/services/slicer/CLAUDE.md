@@ -101,6 +101,8 @@ Hybrid approach: PACS server params (`pacs_host`, `pacs_port`, `pacs_aet`) are i
 
 Fallback: if context variables are absent (standalone/manual usage), `PacsHelper.from_slicer()` provides all params from Slicer's QSettings.
 
+**The context branch always wins for API-driven calls**: `build_slicer_context()` injects `pacs_host`/`pacs_port`/`pacs_aet` unconditionally (defaults `localhost:4242` / `ORTHANC`), so the full QSettings fallback is only reachable for scripts sent without `context=`. Deployments that configured PACS only in Slicer's QSettings must set `CLARINET_PACS_HOST`/`PORT`/`AET` — otherwise record-open PACS loads target the defaults. Injected context keys are scoped to a single `execute()` call: `_build_script` pops them in a `finally`, so they never leak into later scripts or manual console sessions.
+
 **Usage via POST /exec:**
 ```json
 {
@@ -131,7 +133,7 @@ Fallback: if context variables are absent (standalone/manual usage), `PacsHelper
 - Scripts return results via `__execResult = {...}`, NOT `print(json.dumps(...))`
 - Use `_pacs_helper_script_block()` for explicit PacsHelper params
 - Use `_monkey_patch_from_slicer_block()` for overriding `from_slicer()`
-- Use `_context_injection_block()` for Clarinet PACS context variables
+- Pass Clarinet PACS context via `execute(context=...)` — inline assignments in the script body land in the per-call `_ns` namespace and are invisible to helper functions like `_get_pacs_helper()`
 
 ## `__execResult` Result-Merging Contract
 

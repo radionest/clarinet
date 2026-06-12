@@ -39,7 +39,14 @@ install_wheel() {
         "$VENV_DIR/bin/pip" install --upgrade pip
     fi
 
-    "$VENV_DIR/bin/pip" install "${pip_extra_args[@]}" "${WHEEL_PATH}[performance]"
+    # The quarto extra (jupyter/ipykernel/pandas) ships only when the deploy
+    # bundle carries a Quarto tarball — see install_quarto below.
+    local extras="performance"
+    if [[ -n "$(find "${DEPLOY_DIR}" -maxdepth 1 -name 'quarto-*-linux-amd64.tar.gz' -print -quit 2>/dev/null)" ]]; then
+        extras="performance,quarto"
+    fi
+
+    "$VENV_DIR/bin/pip" install "${pip_extra_args[@]}" "${WHEEL_PATH}[${extras}]"
 
     chown -R clarinet:clarinet "$INSTALL_DIR"
     log "Clarinet installed to $VENV_DIR"
@@ -96,6 +103,20 @@ install_ohif() {
     fi
     sudo -u clarinet "$VENV_DIR/bin/clarinet" ohif install "${ohif_args[@]}" || warn "OHIF install failed (non-critical)"
     log "OHIF Viewer installed"
+}
+
+# --- Step 8b: Quarto CLI (optional — installed only when a tarball is shipped) ---
+install_quarto() {
+    local tarball
+    tarball=$(find "${DEPLOY_DIR}" -maxdepth 1 -name 'quarto-*-linux-amd64.tar.gz' -print -quit 2>/dev/null)
+    if [[ -z "$tarball" ]]; then
+        log "No Quarto tarball in bundle — skipping (optional feature)"
+        return
+    fi
+    log "Installing Quarto CLI..."
+    cd "$INSTALL_DIR"
+    sudo -u clarinet "$VENV_DIR/bin/clarinet" quarto install --from-file "$tarball" || warn "Quarto install failed (non-critical)"
+    log "Quarto CLI installed"
 }
 
 # --- Step 9: Systemd units ---
@@ -167,6 +188,7 @@ setup_services
 generate_settings
 init_database
 install_ohif
+install_quarto
 install_systemd
 install_nginx
 print_summary

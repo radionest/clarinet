@@ -10,7 +10,7 @@ from __future__ import annotations
 import mimetypes
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated
+from typing import TYPE_CHECKING, Annotated, Literal
 from uuid import UUID
 
 from fastapi import (
@@ -37,6 +37,7 @@ from clarinet.api.dependencies import (
     CurrentUserDep,
     MutableRecordDep,
     PaginationDep,
+    PipelineTaskRunRepositoryDep,
     RecordEventRepositoryDep,
     RecordRepositoryDep,
     RecordServiceDep,
@@ -59,6 +60,7 @@ from clarinet.config.toml_exporter import (
 from clarinet.exceptions import CONFLICT, NOT_FOUND
 from clarinet.exceptions.domain import AuthorizationError
 from clarinet.models import (
+    PipelineTaskRunRead,
     Record,
     RecordContextInfoUpdate,
     RecordCreate,
@@ -555,6 +557,9 @@ async def submit_record_data(
     if record.status == RecordStatus.blocked:
         raise CONFLICT.with_context("Record is blocked — required input files are missing.")
 
+    if record.status == RecordStatus.preparing:
+        raise CONFLICT.with_context("Record is being prepared — preparation has not finished.")
+
     if record.status == RecordStatus.finished:
         raise CONFLICT.with_context("Record already finished. Use PATCH to update the record data.")
 
@@ -608,7 +613,7 @@ async def update_record_data(
     )
 
 
-_PREFILL_STATUSES = (RecordStatus.pending, RecordStatus.blocked)
+_PREFILL_STATUSES = (RecordStatus.pending, RecordStatus.blocked, RecordStatus.preparing)
 
 
 async def _do_prefill(
@@ -639,7 +644,7 @@ async def prefill_record_data_post(
     user: CurrentUserDep,
     data: RecordData = Body(),
 ) -> RecordRead:
-    """Set prefill data on a pending/blocked record. Errors if data already exists."""
+    """Set prefill data on a pending/blocked/preparing record. Errors if data already exists."""
     if authorized_record.data:
         raise CONFLICT.with_context(
             "Record already has data. Use PUT to replace or PATCH to merge."
@@ -656,7 +661,7 @@ async def prefill_record_data_put(
     user: CurrentUserDep,
     data: RecordData = Body(),
 ) -> RecordRead:
-    """Replace prefill data on a pending/blocked record."""
+    """Replace prefill data on a pending/blocked/preparing record."""
     return await _do_prefill(record_id, authorized_record, data, user, service, rt_service)
 
 
@@ -669,7 +674,7 @@ async def prefill_record_data_patch(
     user: CurrentUserDep,
     data: RecordData = Body(),
 ) -> RecordRead:
-    """Merge new data into existing prefill data on a pending/blocked record."""
+    """Merge new data into existing prefill data on a pending/blocked/preparing record."""
     merged = {**(authorized_record.data or {}), **data}
     return await _do_prefill(record_id, authorized_record, merged, user, service, rt_service)
 
@@ -710,6 +715,9 @@ async def submit_record_with_validation(
 
     if record.status == RecordStatus.blocked:
         raise CONFLICT.with_context("Record is blocked — required input files are missing.")
+
+    if record.status == RecordStatus.preparing:
+        raise CONFLICT.with_context("Record is being prepared — preparation has not finished.")
 
     if record.status == RecordStatus.finished:
         raise CONFLICT.with_context("Record already finished. Use PATCH to update the record data.")
@@ -863,6 +871,54 @@ async def get_record_events(
     return [RecordEventRead.model_validate(e) for e in events]
 
 
+def _mask_run_identifier(value: str | None, raw: str | None, substitute: str | None) -> str | None:
+    """Mask one patient/study/series identifier on a pipeline run row.
+
+    ``raw`` is the record's real identifier, ``substitute`` its masked
+    counterpart from :func:`mask_record_patient_data`. When masking is not
+    active (``substitute == raw``) the value passes through unchanged; when
+    it is active, the record's own identifier is substituted and any other
+    raw identifier is dropped instead of leaked.
+    """
+    if value is None or substitute == raw:
+        return value
+    return substitute if value == raw else None
+
+
+@router.get("/{record_id}/runs", response_model=list[PipelineTaskRunRead])
+async def get_record_pipeline_runs(
+    record: AuthorizedRecordDep,
+    user: CurrentUserDep,
+    runs_repo: PipelineTaskRunRepositoryDep,
+    pagination: PaginationDep,
+) -> list[PipelineTaskRunRead]:
+    """Pipeline task runs linked to this record, newest first.
+
+    Patient/study/series identifiers are masked with the same policy as
+    the record itself — raw identifiers of an anonymized patient never
+    reach non-superusers.
+    """
+    assert record.id is not None  # SQLModel PK after get
+    runs = await runs_repo.find_by_record(record.id, skip=pagination.skip, limit=pagination.limit)
+    masked = mask_record_patient_data(RecordRead.model_validate(record), user)
+    return [
+        PipelineTaskRunRead.model_validate(run).model_copy(
+            update={
+                "patient_id": _mask_run_identifier(
+                    run.patient_id, record.patient_id, masked.patient_id
+                ),
+                "study_uid": _mask_run_identifier(
+                    run.study_uid, record.study_uid, masked.study_uid
+                ),
+                "series_uid": _mask_run_identifier(
+                    run.series_uid, record.series_uid, masked.series_uid
+                ),
+            }
+        )
+        for run in runs
+    ]
+
+
 # Anything outside ``[A-Za-z0-9_.-]`` is replaced before going into the
 # Content-Disposition header so a hostile or accidental filename (newline,
 # double quote) cannot break the response framing.
@@ -926,14 +982,16 @@ async def invalidate_record(
     service: RecordServiceDep,
     user: CurrentUserDep,
     actor: AuditActorDep,
-    mode: str = Body(default="hard"),
+    mode: Literal["hard", "soft"] = Body(default="hard"),
     source_record_id: int | None = Body(default=None),
     reason: str | None = Body(default=None),
 ) -> RecordRead:
     """Invalidate a record.
 
     Hard mode resets status to pending (keeps user assignment) and fires
-    RecordFlow triggers. Soft mode only appends the reason to context_info.
+    RecordFlow triggers — every call re-fires them, even when the record is
+    already pending, re-running the cascade. Soft mode only appends the
+    reason to context_info.
 
     Hard mode returns 409 for non-superusers when the record is finished and
     its type locks submitted records (``editable`` / ``edit_window_days``).

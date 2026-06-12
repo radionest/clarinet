@@ -68,6 +68,53 @@ def _filter_in_sandbox(paths: list[Path], sandbox: Path) -> list[Path]:
     return [p for p in paths if p.resolve().is_relative_to(sandbox_resolved)]
 
 
+def _missing_output_links(
+    record: RecordRead,
+    checksums: dict[str, str],
+    parent: RecordRead | None = None,
+) -> dict[str, str]:
+    """Derive OUTPUT file links to create from freshly computed checksums.
+
+    OUTPUT files appear on disk only after pipeline tasks or users produce
+    them, so creation-time matching (``set_files``) never sees them — without
+    this reconciliation no ``RecordFileLink`` would ever exist for outputs.
+    ``compute_checksums`` keys every found file by definition name (singular)
+    or ``"name:filename"`` (collections), so each key proves the file existed
+    on disk at scan time — no second filesystem scan is needed. Returns
+    name → filename for OUTPUT definitions that have no link yet; for
+    collections the lexicographically first file is stored, matching the
+    download endpoint's pick. ``parent`` must mirror the fallback passed to
+    ``compute_checksums`` so the stored filename matches the scanned path.
+    """
+    output_defs = {
+        fd.name: fd for fd in (record.record_type.file_registry or []) if fd.role == FileRole.OUTPUT
+    }
+    linked = {link.name for link in (record.file_links or [])}
+    missing: dict[str, str] = {}
+    for key in sorted(checksums):
+        name, _, collection_file = key.partition(":")
+        fd = output_defs.get(name)
+        if fd is None or name in linked or name in missing:
+            continue
+        missing[name] = collection_file or resolve_pattern(fd.pattern, record, parent)
+    return missing
+
+
+def _stored_checksums(record: RecordRead) -> dict[str, str]:
+    """Checksums stored on file links, keyed to match ``compute_checksums``.
+
+    Emits both ``name`` (singular definitions) and ``"name:filename"``
+    (collections) for every link — the irrelevant key of the pair never
+    collides with computed keys, so comparisons stay exact.
+    """
+    stored: dict[str, str] = {}
+    for link in record.file_links or []:
+        if link.checksum:
+            stored[link.name] = link.checksum
+            stored[f"{link.name}:{link.filename}"] = link.checksum
+    return stored
+
+
 class RecordService:
     """Service wrapping record mutations with automatic RecordFlow triggers.
 
@@ -178,7 +225,7 @@ class RecordService:
             if file_result.valid and file_result.matched_files:
                 await self.repo.set_files(record, file_result.matched_files)
                 record = await self.repo.get_with_relations(record.id)  # type: ignore[arg-type]
-            elif not file_result.valid:
+            elif not file_result.valid and record.status != RecordStatus.preparing:
                 record, _ = await self.repo.update_status(record.id, RecordStatus.blocked)  # type: ignore[arg-type]
 
         await self._record_event(
@@ -204,6 +251,14 @@ class RecordService:
     ) -> tuple[Record, RecordStatus]:
         """Update record status and fire RecordFlow trigger if status changed.
 
+        When a record leaves ``preparing`` for ``pending``, input files are
+        re-validated *before* any status is written: an invalid file set sends
+        the record to ``blocked`` instead (check-files unblocks it later once
+        files appear), so the record is never observable as
+        pending-with-invalid-files. Direct ``preparing`` → ``inwork``/
+        ``finished`` transitions are rejected — a preparing record must exit
+        via ``pending``.
+
         Args:
             record_id: Record ID.
             new_status: New status to set.
@@ -212,23 +267,34 @@ class RecordService:
             actor_id: Audit actor; ``None`` marks a system/worker call.
 
         Returns:
-            Tuple of (updated record, old status).
+            Tuple of (updated record, old status). The record's final status
+            may differ from ``new_status`` (see above).
 
         Raises:
             RecordEditLockedError: If the record is finished and its type
                 locks submitted records for *acting_user*.
+            BusinessRuleViolationError: On a direct preparing → inwork/finished
+                transition.
         """
         if acting_user is not None and not acting_user.is_superuser:
             record = await self.repo.get_with_relations(record_id)
             ensure_record_editable(record, acting_user)
-        record, old_status = await self.repo.update_status(record_id, new_status)
-        if old_status != new_status:
+        target_status = new_status
+        matched_files: dict[str, str] = {}
+        current = await self.repo.get(record_id)
+        if current.status == RecordStatus.preparing:
+            target_status, matched_files = await self._resolve_preparing_exit(record_id, new_status)
+        record, old_status = await self.repo.update_status(record_id, target_status)
+        if matched_files:
+            await self.repo.set_files(record, matched_files)
+            record = await self.repo.get_with_relations(record_id)
+        if old_status != record.status:
             await self._record_event(
                 record_id=record_id,
                 kind="status_changed",
                 actor_id=actor_id,
                 from_status=old_status,
-                to_status=new_status,
+                to_status=record.status,
             )
             await self._fire_status_change(record, old_status)
         return record, old_status
@@ -369,16 +435,17 @@ class RecordService:
         )
         await self._fire_status_change(record, old_status)
 
-        # Detect output file changes and emit file events
+        # Register output files that appeared on disk and emit file events
         if new_status == RecordStatus.finished:
-            await self._emit_output_file_events(record)
+            await self._sync_output_files(record)
 
         return record, old_status
 
     async def prefill_data(self, record_id: int, data: RecordData) -> tuple[Record, RecordStatus]:
         """Write prefill data without firing RecordFlow triggers or audit events.
 
-        For pipeline tasks writing preliminary data to pending/blocked records.
+        For pipeline tasks writing preliminary data to pending/blocked/preparing
+        records.
         Caller is responsible for status checks and data merging.
 
         Args:
@@ -445,6 +512,10 @@ class RecordService:
     ) -> None:
         """Update status for multiple records and fire triggers for each changed record.
 
+        ``preparing`` records are routed through :meth:`update_status` one by
+        one so the exit re-validation applies (preparing → pending may land in
+        ``blocked``) — the bulk repo path would bypass it.
+
         Args:
             record_ids: List of record IDs.
             new_status: New status to set.
@@ -456,18 +527,36 @@ class RecordService:
             RecordEditLockedError: If any target record is finished and its
                 type locks submitted records for *acting_user*. Raised before
                 any status is mutated.
+            BusinessRuleViolationError: If any target record is preparing and
+                ``new_status`` is inwork/finished. Raised before any status
+                is mutated.
         """
         # Capture old statuses (and enforce the edit lock) before bulk update
         old_statuses: dict[int, RecordStatus] = {}
+        preparing_ids: list[int] = []
         for record_id in record_ids:
             record = await self.repo.get_optional(record_id)
             if record:
                 if acting_user is not None and not acting_user.is_superuser:
                     with_type = await self.repo.get_with_relations(record_id)
                     ensure_record_editable(with_type, acting_user)
+                if record.status == RecordStatus.preparing:
+                    if new_status in (RecordStatus.inwork, RecordStatus.finished):
+                        raise BusinessRuleViolationError(
+                            f"Record {record_id} is still preparing — it must leave "
+                            f"via 'pending' (with file re-validation) before "
+                            f"'{new_status.value}'."
+                        )
+                    preparing_ids.append(record_id)
+                    continue
                 old_statuses[record_id] = record.status
 
-        await self.repo.bulk_update_status(record_ids, new_status)
+        await self.repo.bulk_update_status(list(old_statuses), new_status)
+
+        # Preparing records take the single-record path: exit re-validation
+        # applies and each fires its own trigger.
+        for record_id in preparing_ids:
+            await self.update_status(record_id, new_status, acting_user=acting_user)
 
         # Fire triggers for each record whose status actually changed
         for record_id, old_status in old_statuses.items():
@@ -494,6 +583,10 @@ class RecordService:
         actor_id: UUID | None = None,
     ) -> Record:
         """Invalidate a record and fire RecordFlow trigger on hard mode.
+
+        Hard mode always fires the status trigger — even when the record was
+        already pending — so on_status("pending") flows re-run on every
+        re-invalidation. Soft mode never changes status and never fires.
 
         Args:
             record_id: ID of the record to invalidate.
@@ -537,9 +630,11 @@ class RecordService:
             reason=reason,
         )
 
-        # Fire trigger on hard mode if status actually changed
-        if mode == "hard" and status_changed:
-            await self._fire_status_change(record, old_status)
+        # Hard invalidation means "needs processing again" — fire even when the
+        # status didn't change (pending → pending), so on_status("pending")
+        # flows re-run. Handlers must be idempotent.
+        if mode == "hard":
+            await self._fire_invalidation(record, old_status)
 
         return record
 
@@ -577,24 +672,31 @@ class RecordService:
     ) -> tuple[list[str], dict[str, str]]:
         """Check file status, auto-unblock if ready, compute & compare checksums.
 
+        For preparing records: no-op — prefill / file generation is in flight,
+        so neither auto-unblock nor checksum bookkeeping may run.
         For blocked records: validates input files, transitions to pending if valid.
-        For non-blocked: computes checksums, updates DB, notifies on change.
+        For the rest: computes checksums, registers newly appeared OUTPUT
+        files as ``RecordFileLink`` rows, updates DB, notifies on change.
 
         Returns:
             Tuple of (changed file keys, current checksums).
-            Empty tuple ([], {}) if record stays blocked.
+            Empty tuple ([], {}) if record stays blocked or is preparing.
         """
         record = await self.repo.get_with_relations(record_id)
         record_read = RecordRead.model_validate(record)
 
+        if record.status == RecordStatus.preparing:
+            return [], {}
+
+        # Fetch parent once — feeds fallback pattern resolution for both
+        # input validation (blocked records) and the OUTPUT checksum scan.
+        parent_read = None
+        if record.parent_record_id is not None:
+            parent = await self.repo.get_with_relations(record.parent_record_id)
+            parent_read = RecordRead.model_validate(parent)
+
         # Auto-unblock: if record is blocked, check whether input files are now present
         if record.status == RecordStatus.blocked:
-            # Fetch parent for fallback pattern resolution only when needed
-            parent_read = None
-            if record.parent_record_id is not None:
-                parent = await self.repo.get_with_relations(record.parent_record_id)
-                parent_read = RecordRead.model_validate(parent)
-
             file_result = await validate_record_files(record_read, parent=parent_read)
             if file_result is not None and file_result.valid:
                 if file_result.matched_files:
@@ -611,11 +713,12 @@ class RecordService:
             record_read.record_type.file_registry or [],
             record_read,
             working_dir,
+            parent=parent_read,
         )
-        old_checksums = {
-            link.name: link.checksum for link in (record_read.file_links or []) if link.checksum
-        }
+        old_checksums = _stored_checksums(record_read)
         changed = checksums_changed(old_checksums, new_checksums)
+
+        await self._register_output_links(record, record_read, new_checksums, parent_read)
 
         await self.repo.update_checksums(record, new_checksums)
 
@@ -965,20 +1068,88 @@ class RecordService:
                 f"for this {record_type.level.lower()} context"
             )
 
-    async def _emit_output_file_events(self, record: Record) -> None:
-        """Detect output file changes and emit project-level file events.
+    async def _resolve_preparing_exit(
+        self, record_id: int, new_status: RecordStatus
+    ) -> tuple[RecordStatus, dict[str, str]]:
+        """Resolve the target status for a record leaving ``preparing``.
 
-        Computes checksums on disk for OUTPUT files and compares against
-        stored checksums in ``file_links``. Emits file-update events for
-        any changed files so that downstream file flows (e.g. invalidation)
-        are triggered.
+        Records created as ``preparing`` skip creation-time auto-blocking, so
+        missing input files are caught on exit instead. For the ``pending``
+        target the files are validated before any status is written; an
+        invalid set redirects the transition to ``blocked`` (check-files
+        unblocks it later). No file registry → pending. ``inwork`` and
+        ``finished`` are rejected — a preparing record must pass through
+        ``pending`` and its file re-validation first.
+
+        Returns:
+            Tuple of (resolved status, matched files for ``set_files``).
+
+        Raises:
+            BusinessRuleViolationError: On a direct preparing → inwork/finished
+                transition (→ 409).
+        """
+        if new_status in (RecordStatus.inwork, RecordStatus.finished):
+            raise BusinessRuleViolationError(
+                f"Record {record_id} is still preparing — it must leave via "
+                f"'pending' (with file re-validation) before '{new_status.value}'."
+            )
+        if new_status != RecordStatus.pending:
+            return new_status, {}
+        record = await self.repo.get_with_relations(record_id)
+        record_read = RecordRead.model_validate(record)
+        parent_read = None
+        if record.parent_record_id is not None:
+            parent = await self.repo.get_with_relations(record.parent_record_id)
+            parent_read = RecordRead.model_validate(parent)
+        file_result = await validate_record_files(record_read, parent=parent_read)
+        if file_result is None:
+            return RecordStatus.pending, {}
+        if not file_result.valid:
+            return RecordStatus.blocked, {}
+        return RecordStatus.pending, file_result.matched_files or {}
+
+    async def _register_output_links(
+        self,
+        record: Record,
+        record_read: RecordRead,
+        checksums: dict[str, str],
+        parent: RecordRead | None = None,
+    ) -> None:
+        """Create links for OUTPUT files discovered by a checksum scan.
+
+        Never raises: link registration is bookkeeping on top of the caller's
+        main flow (submit / check-files) and must not fail it after the data
+        is already committed.
+        """
+        record_id = record.id
+        new_links = _missing_output_links(record_read, checksums, parent)
+        if not new_links:
+            return
+        try:
+            created = await self.repo.add_file_links(record, new_links)
+        except Exception as e:
+            logger.warning(f"Failed to register output file links for record {record_id}: {e}")
+            return
+        if created:
+            logger.info(
+                f"Record {record_id}: registered {created} output file link(s): {sorted(new_links)}"
+            )
+
+    async def _sync_output_files(self, record: Record) -> None:
+        """Reconcile OUTPUT file state on disk with the DB after a submission.
+
+        Computes checksums on disk for OUTPUT files, registers files that
+        appeared since the last sync as ``RecordFileLink`` rows, updates
+        stored checksums, and emits file-update events for any changed files
+        so that downstream file flows (e.g. invalidation) are triggered.
+        Link/checksum bookkeeping runs even without a RecordFlow engine —
+        only event emission requires it. The SHA256 scan adds I/O latency to
+        finished submissions proportional to output size — the same trade-off
+        the engine-enabled path has always had.
 
         Args:
             record: Record with relations loaded (must have record_type, patient).
         """
-        if not self.engine:
-            return
-
         record_read = RecordRead.model_validate(record)
         output_defs = [
             fd for fd in (record_read.record_type.file_registry or []) if fd.role == FileRole.OUTPUT
@@ -986,26 +1157,40 @@ class RecordService:
         if not output_defs:
             return
 
+        # Parent feeds fallback placeholder resolution, e.g. {user_id} on
+        # auto-records — must match the download path's resolution.
+        parent_read: RecordRead | None = None
+        if record.parent_record_id is not None:
+            parent = await self.repo.get_with_relations(record.parent_record_id)
+            parent_read = RecordRead.model_validate(parent)
+
         _, working_dir = FileRepository.resolve_with_fallback(record_read)
         try:
-            new_checksums = await compute_checksums(output_defs, record_read, working_dir)
+            new_checksums = await compute_checksums(
+                output_defs, record_read, working_dir, parent=parent_read
+            )
         except Exception as e:
             logger.warning(f"Failed to compute output checksums for record {record.id}: {e}")
             return
 
-        old_checksums = {
-            link.name: link.checksum for link in (record_read.file_links or []) if link.checksum
-        }
+        old_checksums = _stored_checksums(record_read)
 
+        # A file without a link has no stored checksum, so any link to create
+        # implies a non-empty changed set — safe to early-return here.
         changed = checksums_changed(old_checksums, new_checksums)
         if not changed:
             return
+
+        await self._register_output_links(record, record_read, new_checksums, parent_read)
 
         # Update stored checksums in DB
         try:
             await self.repo.update_checksums(record, new_checksums)
         except Exception as e:
             logger.warning(f"Failed to update checksums for record {record.id}: {e}")
+
+        if not self.engine:
+            return
 
         # Extract logical file names (strip collection suffix "name:filename" → "name")
         changed_file_names = {key.split(":")[0] for key in changed}
@@ -1022,6 +1207,13 @@ class RecordService:
             return
         record_read = RecordRead.model_validate(record)
         await self.engine.handle_record_status_change(record_read, old_status)
+
+    async def _fire_invalidation(self, record: Record, old_status: RecordStatus | None) -> None:
+        """Convert record to RecordRead and fire the cycle-guarded invalidation dispatch."""
+        if not self.engine:
+            return
+        record_read = RecordRead.model_validate(record)
+        await self.engine.handle_record_invalidation(record_read, old_status)
 
     async def _fire_data_update(self, record: Record) -> None:
         """Convert record to RecordRead and fire data-update trigger."""

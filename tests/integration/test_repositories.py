@@ -11,6 +11,7 @@ from clarinet.exceptions.domain import (
     RecordNotFoundError,
     RecordTypeAlreadyExistsError,
     RecordTypeNotFoundError,
+    ValidationError,
 )
 from clarinet.models.base import DicomQueryLevel, RecordStatus
 from clarinet.models.file_schema import FileDefinition, FileRole, RecordTypeFileLink
@@ -462,6 +463,20 @@ class TestRecordRepository:
         assert rec.status == RecordStatus.inwork
 
     @pytest.mark.asyncio
+    async def test_claim_record_rejects_preparing(self, env):
+        env["record"].status = RecordStatus.preparing
+        await env["session"].commit()
+        with pytest.raises(ValidationError):
+            await env["repo"].claim_record(env["record"].id, env["user"].id)
+
+    @pytest.mark.asyncio
+    async def test_claim_record_rejects_blocked(self, env):
+        env["record"].status = RecordStatus.blocked
+        await env["session"].commit()
+        with pytest.raises(ValidationError):
+            await env["repo"].claim_record(env["record"].id, env["user"].id)
+
+    @pytest.mark.asyncio
     async def test_ensure_user_assigned_when_no_user(self, env):
         # Clear user assignment
         env["record"].user_id = None
@@ -524,6 +539,18 @@ class TestRecordRepository:
             env["record"].id, mode="hard", source_record_id=42
         )
         assert rec.status == RecordStatus.pending
+        assert "Invalidated by record #42" in rec.context_info
+
+    @pytest.mark.asyncio
+    async def test_invalidate_record_hard_keeps_preparing(self, env):
+        env["record"].status = RecordStatus.preparing
+        await env["session"].commit()
+
+        rec = await env["repo"].invalidate_record(
+            env["record"].id, mode="hard", source_record_id=42
+        )
+        # Preparation owns the exit — hard mode must not flip preparing to pending
+        assert rec.status == RecordStatus.preparing
         assert "Invalidated by record #42" in rec.context_info
 
     @pytest.mark.asyncio

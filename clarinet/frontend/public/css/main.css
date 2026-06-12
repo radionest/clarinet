@@ -2,6 +2,7 @@
 @layer base, components, pages, utilities;
 
 /* Base */
+@import url("base/fonts.css") layer(base);
 @import url("base/variables.css") layer(base);
 @import url("base/reset.css") layer(base);
 @import url("base/layout.css") layer(base);

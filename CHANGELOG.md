@@ -1,5 +1,58 @@
 # Changelog
 
+## Unreleased
+
+### Breaking
+
+- **`plan/` files now import via the `clarinet_plan.` prefix (single root).**
+  At startup an in-memory anchor package `clarinet_plan` is rooted at the one
+  `config_tasks_path`; every plan file is a submodule of it. Sibling-by-stem
+  imports (`from record_types import ...`, `from utils.x import y`,
+  `from tasks import ...`) no longer resolve — use
+  `from clarinet_plan.record_types import ...` /
+  `from clarinet_plan.utils.x import y` (or a relative `from .x import y`). A
+  leftover un-prefixed import fails at startup with a migration hint naming the
+  correct spelling. No directory is ever placed on `sys.path`.
+- **`recordflow_paths` must live inside `config_tasks_path`.** A flow directory
+  outside the single root raises `ConfigLoadError` at startup.
+- **File and directory names on import paths must be valid Python identifiers.**
+  `2_phase_flow.py`, `my-utils/`, or a keyword segment fail at startup with a
+  message naming the file/dir to rename.
+- **A `X.py` + `X/` name collision under the root is rejected** (Python would
+  silently import only one) — rename or remove one.
+- **Hydrator-file default names changed**: `config_schema_hydrators_file`
+  `hydrators.py` → `schema_hydrators.py`; `config_context_hydrators_file`
+  `context_hydrators.py` → `slicer_hydrators.py`. The setting names are
+  unchanged — projects that set them explicitly are unaffected; projects on the
+  defaults must rename the files (or pin the old names in `settings.toml`).
+- **Ops**: the `call:` node-id in pipeline payloads now uses the
+  `clarinet_plan.`-rooted module name. On upgrade, drain pipeline queues and
+  restart the API and all workers together so both sides agree on the id format.
+
+### Improved
+
+- Cross-flow imports now work in **both** sort directions (native module cache),
+  and a flow file's `.call()` callbacks survive across a multi-file load — the
+  per-file `call_function_registry.reset()` that erased earlier files' callbacks
+  is fixed.
+
+### Changed
+
+- Hard invalidation (`POST /records/{id}/invalidate`, RecordFlow
+  `invalidate_records()`) now always fires `on_status("pending")` flows —
+  even when the record was already `pending`. Previously an already-pending
+  record was reset silently and its flows never re-ran, so stale prefills
+  survived re-invalidation. Downstream impact: every action reachable from
+  `on_status("pending")` (and from flows without a status trigger) must be
+  idempotent — it re-runs on every hard re-invalidation.
+- The RecordFlow engine cuts invalidation cycles at runtime: a record whose
+  flows are already dispatching in the current cascade is still invalidated,
+  but its flows are skipped with an `Invalidation cycle detected` ERROR log.
+  Mutually-invalidating flows remain a configuration error.
+- `mode` on the invalidate endpoint and in `InvalidateRecordsAction` is now
+  validated as `"hard" | "soft"` — a typo returns 422 / fails at flow
+  definition instead of silently behaving like soft mode.
+
 ## 0.7.0 — Post-submit edit locking (RecordType.editable / edit_window_days)
 
 ### Added

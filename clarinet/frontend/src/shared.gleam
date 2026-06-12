@@ -14,6 +14,7 @@ pub type Shared {
   Shared(
     user: Option(User),
     route: Route,
+    previous_route: Option(Route),
     project_name: String,
     project_description: String,
     // Global entity caches (studies/series/records/record_types/patients/users/record_type_stats)
@@ -83,5 +84,5 @@ pub type OutMsg {
   CloseRecordModal
   SetUser(User)
   Logout
-  StartPreload(viewer_url: String, study_uid: String)
+  StartPreload(viewer_url: String, study_uids: List(String))
 }

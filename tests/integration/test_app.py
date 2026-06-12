@@ -1,7 +1,9 @@
 """Application startup and basic functionality tests."""
 
+from pathlib import Path
+
 import pytest
-from httpx import AsyncClient
+from httpx import ASGITransport, AsyncClient
 from sqlmodel import select
 
 from clarinet.models.record import RecordType
@@ -18,6 +20,26 @@ async def test_app_startup(client: AsyncClient):
     if response.status_code == 200:
         assert "text/html" in response.headers.get("content-type", "")
         assert "<title>" in response.text
+
+
+@pytest.mark.asyncio
+async def test_spa_title_html_escaped(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """browser_title is HTML-escaped when substituted into the SPA <title>."""
+    from clarinet.api.app import create_app
+    from clarinet.settings import settings
+
+    (tmp_path / "index.html").write_text("<title>$PROJECT_TITLE</title>", encoding="utf-8")
+    monkeypatch.setattr(settings, "project_static_path", tmp_path)
+    monkeypatch.setattr(settings, "project_title", 'A <b> & "c"')
+
+    app = create_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        response = await ac.get("/some/spa/route")
+
+    assert response.status_code == 200
+    assert "A &lt;b&gt; &amp; &quot;c&quot;" in response.text
+    assert "<b>" not in response.text
 
 
 @pytest.mark.asyncio

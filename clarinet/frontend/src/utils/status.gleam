@@ -3,11 +3,20 @@ import api/types
 import clarinet_frontend/i18n
 
 pub fn all_statuses() -> List(types.RecordStatus) {
-  [types.Blocked, types.Pending, types.InWork, types.Finished, types.Failed, types.Paused]
+  [
+    types.Preparing,
+    types.Blocked,
+    types.Pending,
+    types.InWork,
+    types.Finished,
+    types.Failed,
+    types.Paused,
+  ]
 }
 
 pub fn to_i18n_key(status: types.RecordStatus) -> i18n.Key {
   case status {
+    types.Preparing -> i18n.StatusPreparing
     types.Blocked -> i18n.StatusBlocked
     types.Pending -> i18n.StatusPending
     types.InWork -> i18n.StatusInProgress
@@ -20,6 +29,7 @@ pub fn to_i18n_key(status: types.RecordStatus) -> i18n.Key {
 /// Human-readable display text for a RecordStatus
 pub fn display_text(status: types.RecordStatus) -> String {
   case status {
+    types.Preparing -> "Preparing"
     types.Blocked -> "Blocked"
     types.Pending -> "Pending"
     types.InWork -> "In Progress"
@@ -36,6 +46,7 @@ pub fn display_text(status: types.RecordStatus) -> String {
 /// URL filter on /records (neither matched any backend record).
 pub fn to_backend_string(status: types.RecordStatus) -> String {
   case status {
+    types.Preparing -> "preparing"
     types.Blocked -> "blocked"
     types.Pending -> "pending"
     types.InWork -> "inwork"
@@ -50,6 +61,7 @@ pub fn to_backend_string(status: types.RecordStatus) -> String {
 /// to absorb stale URL/localStorage state from before that was unified.
 pub fn from_backend_string(s: String) -> types.RecordStatus {
   case s {
+    "preparing" -> types.Preparing
     "blocked" -> types.Blocked
     "pending" -> types.Pending
     "inwork" -> types.InWork
@@ -65,6 +77,7 @@ pub fn from_backend_string(s: String) -> types.RecordStatus {
 /// adding a new `RecordStatus` variant is a compile error here.
 pub fn color(status: types.RecordStatus) -> String {
   case status {
+    types.Preparing -> "teal"
     types.Blocked -> "yellow"
     types.Pending -> "blue"
     types.InWork -> "orange"

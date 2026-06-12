@@ -59,6 +59,7 @@ def init_project(path: str, template: str | None = None) -> None:
 # ── Project ──────────────────────────────────────────
 project_name = "My Project"
 # project_description = "Medical Imaging Framework"
+# project_title = "My Project"  # browser tab <title>; defaults to project_name
 
 # ── Server ───────────────────────────────────────────
 port = 8000
@@ -984,7 +985,7 @@ def install_quarto(version: str | None = None, from_file: str | None = None) -> 
 
 def quarto_status() -> None:
     """Show Quarto installation status and run ``quarto check``."""
-    from clarinet.services.quarto_render import resolve_quarto_executable
+    from clarinet.services.quarto_render import build_render_env, resolve_quarto_executable
 
     executable = resolve_quarto_executable()
     if executable is None:
@@ -1002,9 +1003,25 @@ def quarto_status() -> None:
     # setup used to execute .qmd code chunks. On older hosts (e.g. Astra Linux
     # SE 1.7) it surfaces glibc incompatibilities immediately.
     try:
-        result = subprocess.run(
-            [str(executable), "check"], capture_output=True, text=True, timeout=120
-        )
+        # Quarto's startup dotenv loader reads .env/.env.example from the CWD
+        # and aborts when example vars are undefined — run the check from an
+        # empty temp dir so it never depends on the operator's project files.
+        # The check also runs in the same minimal environment real renders use
+        # (build_render_env), so a green status reproduces render conditions
+        # instead of the operator's shell environment.
+        with tempfile.TemporaryDirectory() as check_cwd:
+            tmp_dir = Path(check_cwd) / "tmp"
+            tmp_dir.mkdir()
+            env = build_render_env(Path(check_cwd), tmp_dir)
+            print(f"Kernel interpreter: {env['QUARTO_PYTHON']}")
+            result = subprocess.run(
+                [str(executable), "check"],
+                capture_output=True,
+                text=True,
+                timeout=120,
+                cwd=check_cwd,
+                env=env,
+            )
         print(result.stdout)
         if result.returncode != 0:
             print(result.stderr)

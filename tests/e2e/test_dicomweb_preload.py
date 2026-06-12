@@ -1,8 +1,8 @@
 """E2E tests: DICOMweb preload endpoints.
 
-Tests the preload workflow: POST /preload/{study_uid} starts background
-cache population, GET /preload/{study_uid}/progress/{task_id} reports
-progress, and the task eventually reaches "ready" status.
+Tests the preload workflow: POST /preload (body: {"study_uids": [...]})
+starts background cache population, GET /preload/progress/{task_id}
+reports progress, and the task eventually reaches "ready" status.
 
 Studies are imported into the Clarinet DB before preload tests run.
 All tests auto-skip when Orthanc PACS is unreachable.
@@ -72,6 +72,27 @@ def pacs_study_uid(pacs_available: None) -> str:
     assert orthanc_ids, "No SHIPILOV studies found on test PACS"
     study_info = requests.get(f"{PACS_REST_URL}/studies/{orthanc_ids[0]}", timeout=5).json()
     return study_info["MainDicomTags"]["StudyInstanceUID"]
+
+
+@pytest.fixture(scope="session")
+def pacs_two_study_uids(pacs_available: None) -> list[str]:
+    """Fetch two distinct study UIDs from Orthanc for multi-study preload tests."""
+    resp = requests.post(
+        f"{PACS_REST_URL}/tools/find",
+        json={"Level": "Study", "Query": {}},
+        timeout=5,
+    )
+    resp.raise_for_status()
+    orthanc_ids = resp.json()
+    uids: list[str] = []
+    for orthanc_id in orthanc_ids:
+        info = requests.get(f"{PACS_REST_URL}/studies/{orthanc_id}", timeout=5).json()
+        uid = info["MainDicomTags"].get("StudyInstanceUID")
+        if uid and uid not in uids:
+            uids.append(uid)
+        if len(uids) == 2:
+            return uids
+    pytest.skip("Test PACS has fewer than 2 studies — skipping multi-study preload test")
 
 
 @pytest.fixture(scope="session")
@@ -176,25 +197,38 @@ async def _disable_recordflow() -> AsyncGenerator[None]:
 
 async def poll_until_ready(
     client: AsyncClient,
-    study_uid: str,
     task_id: str,
     *,
     poll_timeout: float = PRELOAD_TIMEOUT,
     interval: float = PRELOAD_POLL_INTERVAL,
+    snapshots: list[dict] | None = None,
 ) -> dict:
-    """Poll preload progress until status is terminal (ready/error) or timeout."""
+    """Poll preload progress until status is terminal (ready/error) or timeout.
+
+    When ``snapshots`` is given, every polled progress dict is appended to it
+    so tests can assert on intermediate states (e.g. study_index/study_count).
+    """
     elapsed = 0.0
     last_progress: dict = {}
     while elapsed < poll_timeout:
-        resp = await client.get(f"{DICOMWEB_BASE}/preload/{study_uid}/progress/{task_id}")
+        resp = await client.get(f"{DICOMWEB_BASE}/preload/progress/{task_id}")
         assert resp.status_code == 200
         last_progress = resp.json()
+        if snapshots is not None:
+            snapshots.append(last_progress)
         status = last_progress.get("status")
         if status in ("ready", "error", "not_found"):
             return last_progress
         await asyncio.sleep(interval)
         elapsed += interval
     raise TimeoutError(f"Preload did not complete within {poll_timeout}s. Last: {last_progress}")
+
+
+async def start_preload(client: AsyncClient, study_uids: list[str]) -> str:
+    """POST /preload and return the task_id."""
+    resp = await client.post(f"{DICOMWEB_BASE}/preload", json={"study_uids": study_uids})
+    assert resp.status_code == 200
+    return resp.json()["task_id"]
 
 
 # ===========================================================================
@@ -212,14 +246,13 @@ class TestPreloadStartAndProgress:
         pacs_available: None,
         imported_study: str,
     ) -> None:
-        """POST /preload/{study_uid} returns a task_id."""
-        resp = await client.post(f"{DICOMWEB_BASE}/preload/{imported_study}")
+        """POST /preload returns a task_id."""
+        resp = await client.post(f"{DICOMWEB_BASE}/preload", json={"study_uids": [imported_study]})
         assert resp.status_code == 200
 
         data = resp.json()
         assert "task_id" in data
         assert data["task_id"].startswith("preload_")
-        assert imported_study in data["task_id"]
 
     @pytest.mark.asyncio
     async def test_preload_reaches_ready(
@@ -229,11 +262,9 @@ class TestPreloadStartAndProgress:
         imported_study: str,
     ) -> None:
         """Preload eventually reaches 'ready' status for an imported study."""
-        resp = await client.post(f"{DICOMWEB_BASE}/preload/{imported_study}")
-        assert resp.status_code == 200
-        task_id = resp.json()["task_id"]
+        task_id = await start_preload(client, [imported_study])
 
-        progress = await poll_until_ready(client, imported_study, task_id)
+        progress = await poll_until_ready(client, task_id)
         assert progress["status"] == "ready"
 
     @pytest.mark.asyncio
@@ -244,10 +275,9 @@ class TestPreloadStartAndProgress:
         imported_study: str,
     ) -> None:
         """Progress endpoint reports received count when preload completes."""
-        resp = await client.post(f"{DICOMWEB_BASE}/preload/{imported_study}")
-        task_id = resp.json()["task_id"]
+        task_id = await start_preload(client, [imported_study])
 
-        progress = await poll_until_ready(client, imported_study, task_id)
+        progress = await poll_until_ready(client, task_id)
         assert progress["status"] == "ready"
         assert progress.get("received", 0) >= 0
 
@@ -259,9 +289,8 @@ class TestPreloadStartAndProgress:
         imported_study: str,
     ) -> None:
         """After preload completes, WADO-RS metadata is served from cache."""
-        resp = await client.post(f"{DICOMWEB_BASE}/preload/{imported_study}")
-        task_id = resp.json()["task_id"]
-        progress = await poll_until_ready(client, imported_study, task_id)
+        task_id = await start_preload(client, [imported_study])
+        progress = await poll_until_ready(client, task_id)
         assert progress["status"] == "ready"
 
         meta_resp = await client.get(f"{DICOMWEB_BASE}/studies/{imported_study}/metadata")
@@ -277,15 +306,48 @@ class TestPreloadStartAndProgress:
         pacs_available: None,
     ) -> None:
         """Preload for a study with no series completes with ready/0."""
-        fake_uid = "1.2.999.999.0"
-        resp = await client.post(f"{DICOMWEB_BASE}/preload/{fake_uid}")
-        assert resp.status_code == 200
-        task_id = resp.json()["task_id"]
+        task_id = await start_preload(client, ["1.2.999.999.0"])
 
-        progress = await poll_until_ready(client, fake_uid, task_id)
+        progress = await poll_until_ready(client, task_id)
         assert progress["status"] == "ready"
         assert progress.get("received", 0) == 0
         assert progress.get("total", 0) == 0
+
+    @pytest.mark.asyncio
+    async def test_preload_multi_study_reaches_ready(
+        self,
+        client: AsyncClient,
+        pacs_available: None,
+        pacs_two_study_uids: list[str],
+    ) -> None:
+        """Multi-study preload aggregates all studies and reaches 'ready'.
+
+        Intermediate "fetching" snapshots carry study_index/study_count; the
+        check is best-effort — a warm cache may jump straight to "ready".
+        """
+        task_id = await start_preload(client, pacs_two_study_uids)
+
+        snapshots: list[dict] = []
+        progress = await poll_until_ready(client, task_id, snapshots=snapshots)
+        assert progress["status"] == "ready"
+        assert progress.get("received", 0) >= 0
+
+        fetching = [s for s in snapshots if s.get("status") == "fetching"]
+        for snap in fetching:
+            assert snap.get("study_count") == len(pacs_two_study_uids)
+            assert 1 <= snap.get("study_index", 0) <= len(pacs_two_study_uids)
+
+    @pytest.mark.asyncio
+    async def test_preload_validation_empty_list(
+        self,
+        client: AsyncClient,
+    ) -> None:
+        """POST /preload with an empty study_uids list is rejected with 422.
+
+        No PACS needed — validation fails before the service is touched.
+        """
+        resp = await client.post(f"{DICOMWEB_BASE}/preload", json={"study_uids": []})
+        assert resp.status_code == 422
 
 
 # ===========================================================================
@@ -301,12 +363,9 @@ class TestPreloadProgressEndpoint:
         self,
         client: AsyncClient,
         pacs_available: None,
-        imported_study: str,
     ) -> None:
-        """GET /preload/.../progress/{unknown} returns not_found."""
-        resp = await client.get(
-            f"{DICOMWEB_BASE}/preload/{imported_study}/progress/nonexistent_task_id"
-        )
+        """GET /preload/progress/{unknown} returns not_found."""
+        resp = await client.get(f"{DICOMWEB_BASE}/preload/progress/nonexistent_task_id")
         assert resp.status_code == 200
         assert resp.json()["status"] == "not_found"
 
@@ -317,17 +376,14 @@ class TestPreloadProgressEndpoint:
         pacs_available: None,
         imported_study: str,
     ) -> None:
-        """First progress poll returns starting or checking_cache status."""
-        resp = await client.post(f"{DICOMWEB_BASE}/preload/{imported_study}")
-        task_id = resp.json()["task_id"]
+        """First progress poll returns an early-phase or terminal status."""
+        task_id = await start_preload(client, [imported_study])
 
         # Immediately poll — should be in early phase
-        progress_resp = await client.get(
-            f"{DICOMWEB_BASE}/preload/{imported_study}/progress/{task_id}"
-        )
+        progress_resp = await client.get(f"{DICOMWEB_BASE}/preload/progress/{task_id}")
         assert progress_resp.status_code == 200
         status = progress_resp.json()["status"]
-        assert status in ("starting", "checking_cache", "fetching", "ready")
+        assert status in ("starting", "fetching", "ready")
 
 
 # ===========================================================================
@@ -342,8 +398,8 @@ class TestPreloadAuthEnforcement:
     @pytest.mark.parametrize(
         "method,path",
         [
-            ("POST", "/preload/1.2.3"),
-            ("GET", "/preload/1.2.3/progress/some_task_id"),
+            ("POST", "/preload"),
+            ("GET", "/preload/progress/some_task_id"),
         ],
     )
     async def test_preload_requires_auth(
@@ -374,13 +430,11 @@ class TestPreloadCacheReuse:
     ) -> None:
         """Second preload of same study completes instantly (cache hit)."""
         # First preload — cold cache
-        resp1 = await client.post(f"{DICOMWEB_BASE}/preload/{imported_study}")
-        task_id1 = resp1.json()["task_id"]
-        progress1 = await poll_until_ready(client, imported_study, task_id1)
+        task_id1 = await start_preload(client, [imported_study])
+        progress1 = await poll_until_ready(client, task_id1)
         assert progress1["status"] == "ready"
 
         # Second preload — warm cache, should be near-instant
-        resp2 = await client.post(f"{DICOMWEB_BASE}/preload/{imported_study}")
-        task_id2 = resp2.json()["task_id"]
-        progress2 = await poll_until_ready(client, imported_study, task_id2, poll_timeout=10.0)
+        task_id2 = await start_preload(client, [imported_study])
+        progress2 = await poll_until_ready(client, task_id2, poll_timeout=10.0)
         assert progress2["status"] == "ready"

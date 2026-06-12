@@ -8,6 +8,7 @@ import clarinet_frontend/i18n
 import components/layout
 import formosh/component as formosh_component
 import gleam/bool
+import gleam/dict
 import gleam/javascript/promise
 import gleam/list
 import gleam/option.{None, Some}
@@ -27,7 +28,6 @@ import lustre/event
 import modem
 import plinth/javascript/global
 import plinth/javascript/storage
-import plinth/browser/window
 import preload
 import pages/admin as admin_page
 import pages/admin/quarto_reports as admin_quarto_reports_page
@@ -169,7 +169,7 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       // Cleanup current page (e.g. slicer ping timer) + stop preload
       let page_cleanup = cleanup_current_page(model)
       let preload_cleanup =
-        effect.map(preload.stop_timer(model.preload), store.PreloadMsg)
+        effect.map(preload.cleanup(model.preload), store.PreloadMsg)
       let cleanup_effect = effect.batch([page_cleanup, preload_cleanup])
       let was_preloading = preload.is_active(model.preload)
       // Force-close the create-record modal on navigation: it carries a live
@@ -181,9 +181,24 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         _ -> False
       }
       let should_close_modal = was_preloading || has_create_record_modal
+      // Track where the user came from so detail pages can navigate back.
+      // Skip: echoes of the same route (redirect_to push-backs), auth/404
+      // pages, the transient create-record form, and record→record hops
+      // (parent/child navigation must not overwrite the originating
+      // container page).
+      let previous_route = case route == model.route, model.route {
+        True, _ -> model.previous_route
+        False, router.Login -> model.previous_route
+        False, router.Register -> model.previous_route
+        False, router.NotFound -> model.previous_route
+        False, router.RecordNew -> model.previous_route
+        False, router.RecordDetail(_) -> model.previous_route
+        False, prev -> Some(strip_stale_filters(prev))
+      }
       let new_model =
         store.Model(
           ..store.set_route(model, route),
+          previous_route: previous_route,
           preload: preload.init(),
           modal_open: case should_close_modal {
             True -> False
@@ -208,17 +223,19 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       // Don't redirect while session check is in progress
       use <- bool.guard(model.checking_session, #(new_model, cleanup_effect))
 
-      // Redirect to login if auth required but no user
-      use <- bool.guard(
+      // Redirect to login if auth required but no user.
+      // lazy_guard: redirect_to builds a URL via config.base_path(), which
+      // reads the DOM — must not run unless the redirect actually fires.
+      use <- bool.lazy_guard(
         router.requires_auth(route) && model.user == None,
-        redirect_to(router.Login),
+        fn() { redirect_to(router.Login) },
       )
 
       // Redirect from login/register if already authenticated
       let is_auth_page = route == router.Login || route == router.Register
-      use <- bool.guard(
+      use <- bool.lazy_guard(
         is_auth_page && model.user != None,
-        redirect_to(router.Home),
+        fn() { redirect_to(router.Home) },
       )
 
       // Redirect non-admin user away from admin route
@@ -226,9 +243,9 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         Some(user) -> !permissions.is_admin_user(user)
         None -> False
       }
-      use <- bool.guard(
+      use <- bool.lazy_guard(
         router.requires_admin_role(route) && is_non_admin,
-        redirect_to(router.Home),
+        fn() { redirect_to(router.Home) },
       )
 
       // Initialize page model for modular pages
@@ -335,7 +352,7 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           client_settings.settings_key,
         ])
       let preload_cleanup =
-        effect.map(preload.stop_timer(model.preload), store.PreloadMsg)
+        effect.map(preload.cleanup(model.preload), store.PreloadMsg)
       #(
         store.reset_for_logout(model),
         effect.batch([logout_effect, clear_storage, preload_cleanup]),
@@ -770,13 +787,6 @@ fn delegate_preload(model: Model, pmsg: preload.Msg) -> #(Model, Effect(Msg)) {
   let out_effects =
     list.fold(out_msgs, [], fn(acc, out_msg) {
       case out_msg {
-        preload.OpenViewer(url) -> [
-          effect.from(fn(_dispatch) {
-            let _ = window.open(url, "_blank", "")
-            Nil
-          }),
-          ..acc
-        ]
         preload.ShowError(msg) -> {
           [dispatch_msg(store.SetError(Some(msg))), ..acc]
         }
@@ -785,10 +795,25 @@ fn delegate_preload(model: Model, pmsg: preload.Msg) -> #(Model, Effect(Msg)) {
   #(model, effect.batch([effect.map(eff, store.PreloadMsg), ..out_effects]))
 }
 
+/// List-page filters change via url.replace_route without OnRouteChange,
+/// so the filters captured in model.route go stale and, replayed through
+/// Navigate's query string, would override the fresher localStorage copy.
+/// Store the route bare — the list page restores its own filters.
+fn strip_stale_filters(route: Route) -> Route {
+  case route {
+    router.Records(_) -> router.Records(dict.new())
+    router.Patients(_) -> router.Patients(dict.new())
+    router.Studies(_) -> router.Studies(dict.new())
+    router.AdminDashboard(_) -> router.AdminDashboard(dict.new())
+    other -> other
+  }
+}
+
 fn build_shared(model: Model) -> shared.Shared {
   shared.Shared(
     user: model.user,
     route: model.route,
+    previous_route: model.previous_route,
     project_name: model.project_name,
     project_description: model.project_description,
     cache: model.cache,
@@ -983,8 +1008,8 @@ fn apply_out_msgs(
           #(store.set_user(m, user), eff_list)
         shared.Logout ->
           #(m, [dispatch_msg(store.Logout), ..eff_list])
-        shared.StartPreload(viewer_url, study_uid) ->
-          #(m, [dispatch_msg(store.PreloadMsg(preload.Start(viewer_url, study_uid))), ..eff_list])
+        shared.StartPreload(viewer_url, study_uids) ->
+          #(m, [dispatch_msg(store.PreloadMsg(preload.Start(viewer_url, study_uids))), ..eff_list])
       }
     })
   #(final_model, effect.batch(list.reverse(effs)))

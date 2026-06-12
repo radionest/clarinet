@@ -79,7 +79,7 @@ When the diff touches these paths, open the corresponding rule file before finis
 - `clarinet/api/routers/**`, `clarinet/api/dependencies.py` → `.claude/rules/api-deps.md`, `.claude/rules/api-urls.md`
 - `clarinet/repositories/record_repository.py`, `clarinet/repositories/record_type_repository.py` → `.claude/rules/record-repo.md`
 - `clarinet/services/pipeline/**`, `tests/**/*pipeline*` → `.claude/rules/pipeline-ops.md`
-- `clarinet/services/slicer/context*.py`, `tasks/**/context_hydrators.py` → `.claude/rules/slicer-context.md`
+- `clarinet/services/slicer/context*.py`, `tasks/**/slicer_hydrators.py` → `.claude/rules/slicer-context.md`
 - `clarinet/services/slicer/helper.py` → `.claude/rules/slicer-helper-api.md`
 - `clarinet/services/recordflow/**`, `tasks/**/*_flow.py` → `.claude/rules/recordflow-dsl.md`
 - `clarinet/models/file_schema.py`, `clarinet/repositories/file_definition_repository.py` → `.claude/rules/file-registry.md`

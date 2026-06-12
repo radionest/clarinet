@@ -228,6 +228,90 @@ async def test_startup_ohif_missing(startup_settings, monkeypatch, tmp_path):
             pass
 
 
+# ── Test 5b: broken plan/ file fails startup with a Config banner ────────────
+
+
+@pytest.mark.asyncio
+async def test_startup_broken_plan_file_raises_config_startup_error(
+    startup_settings, monkeypatch, tmp_path, isolated_validator_registry
+):
+    """A plan/ file with an import error crashes startup via StartupError(Config).
+
+    Regression for the silent-degradation incident: a broken
+    ``validators.py``/``context_hydrators.py`` used to be swallowed by the
+    loader, and the server started without the custom code.
+    """
+    from clarinet.api.app import StartupError
+
+    plan_dir = tmp_path / "plan"
+    plan_dir.mkdir()
+    (plan_dir / "validators.py").write_text("from utils.nonexistent import nothing\n")
+    monkeypatch.setattr(settings, "config_tasks_path", str(plan_dir))
+
+    app = FastAPI(lifespan=lifespan)
+
+    with pytest.raises(StartupError, match="Config") as exc_info:
+        async with lifespan(app):
+            pass
+
+    # Config is mandatory — the banner must not suggest a nonexistent
+    # CLARINET_CONFIG_ENABLED switch, and should name the failing file.
+    banner = str(exc_info.value)
+    assert "Disable the component" not in banner
+    assert "validators.py" in banner
+
+
+# ── Test 5c: hydrators load BEFORE reconcile (order regression) ──────────────
+
+
+@pytest.mark.asyncio
+async def test_startup_loads_hydrators_before_reconcile(startup_settings, monkeypatch, tmp_path):
+    """RecordType referencing a custom slicer hydrator passes reconcile.
+
+    Reconcile validates ``slicer_context_hydrators`` names against the
+    registry, so the lifespan must load ``slicer_hydrators.py`` BEFORE
+    ``reconcile_config()`` — this lifespan would crash with
+    ``ConfigurationError`` if the order regressed.
+    """
+    from clarinet.services.slicer.context_hydration import (
+        _SLICER_HYDRATOR_REGISTRY,
+        get_registered_slicer_hydrator_names,
+    )
+
+    plan_dir = tmp_path / "plan"
+    plan_dir.mkdir()
+    (plan_dir / "slicer_hydrators.py").write_text(
+        "from clarinet.services.slicer.context_hydration import slicer_context_hydrator\n"
+        "\n"
+        "@slicer_context_hydrator('startup_order_probe')\n"
+        "async def startup_order_probe(record, context, ctx):\n"
+        "    return {}\n"
+    )
+    (plan_dir / "record_types.py").write_text(
+        "from clarinet.config.primitives import RecordDef\n"
+        "\n"
+        "rt = RecordDef(\n"
+        "    name='rt-hydrator-order',\n"
+        "    level='SERIES',\n"
+        "    slicer_context_hydrators=['startup_order_probe'],\n"
+        ")\n"
+    )
+    monkeypatch.setattr(settings, "config_mode", "python")
+    monkeypatch.setattr(settings, "config_tasks_path", str(plan_dir))
+    # The autouse _plan_package_sanitation fixture purges clarinet_plan.* afterwards.
+
+    saved = _SLICER_HYDRATOR_REGISTRY.snapshot()
+    app = FastAPI(lifespan=lifespan)
+    try:
+        async with lifespan(app):
+            # Not vacuous: the probe must actually have been loaded from the
+            # plan file — otherwise a removed reconcile guard would let this
+            # lifespan pass without exercising the order at all.
+            assert "startup_order_probe" in get_registered_slicer_hydrator_names()
+    finally:
+        _SLICER_HYDRATOR_REGISTRY.restore(saved)
+
+
 # ── Test 6: RecordFlow must not perform eager health check ───────────────────
 
 

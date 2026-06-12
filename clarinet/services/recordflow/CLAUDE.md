@@ -86,8 +86,8 @@ for `record('X').any()/.all()` and `update_record(strategy=...)` are documented 
 - Patient-level change can invalidate series-level records
 
 Modes:
-- **hard**: reset status to `pending`, append reason to `context_info` (keeps `user_id`)
-- **soft**: only append reason to `context_info`
+- **hard**: reset status to `pending`, append reason to `context_info` (keeps `user_id`). Always fires `on_status("pending")` flows — re-fire/idempotency/cycle semantics: `.claude/rules/recordflow-dsl.md` (Invalidation Semantics)
+- **soft**: only append reason to `context_info`; never fires triggers
 
 Optional `callback(record, source_record, client)` for per-project custom behavior.
 
@@ -132,7 +132,17 @@ await engine.handle_entity_created("series", patient_id, study_uid, series_uid)
 await engine.handle_file_update("master_model", patient_id)  # For file change triggers
 ```
 
-**Loader implementation**: uses `importlib.util.spec_from_file_location()` to load flow files as modules (replaces former `exec()`). `load_flows_from_file()` clears `RECORD_REGISTRY`, `ENTITY_REGISTRY`, and `FILE_REGISTRY` before each file load to prevent duplicate registrations.
+**Loader implementation**: flow files import as `clarinet_plan.` submodules off
+the single anchor root (`module_name_for` + `import_plan_module`) — no `sys.path`.
+`load_and_register_flows()` clears the four registries (`RECORD_REGISTRY`,
+`ENTITY_REGISTRY`, `FILE_REGISTRY`, `call_function_registry`) **once per load
+cycle** (not per file), imports every file, then collects flows once. The native
+module cache makes execution exactly-once, so a flow file may import any sibling
+in **either** sort direction (the old sorted-order limitation is gone). Cross-flow
+imports use the prefix: `from clarinet_plan.workflows.tasks import ...` (or relative
+`from .tasks import ...`). `recordflow_paths` must live inside `config_tasks_path`.
+`load_flows_from_file()` is the standalone single-file variant (clear → import →
+collect). Contract: `.claude/rules/custom-code-loading.md`.
 
 ## API Integration
 

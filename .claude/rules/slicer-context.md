@@ -2,7 +2,8 @@
 paths:
   - "clarinet/services/slicer/context*.py"
   - "clarinet/services/slicer/service.py"
-  - "tasks/**/context_hydrators.py"
+  - "tasks/**/slicer_hydrators.py"
+  - "plan/**/slicer_hydrators.py"
 ---
 
 # Slicer — Context Builder & Hydration Reference
@@ -50,12 +51,16 @@ Decorator-based registry for async context enrichment. Mirrors `clarinet/service
 - `SlicerHydrationContext(frozen dataclass)` — holds `StudyRepository` and `RecordRepository`; created via `.from_session(session)`
 - `@slicer_context_hydrator("name")` — registers an async function that returns `dict[str, Any]` to merge into context
 - `hydrate_slicer_context(context, record, session, names)` — runs named hydrators sequentially, merges results
-- `load_custom_slicer_hydrators(folder)` — loads `context_hydrators.py` from tasks folder at startup
+- `load_custom_slicer_hydrators(folder)` — loads `slicer_hydrators.py` (the `config_context_hydrators_file` default) from the tasks folder at startup as the `clarinet_plan.slicer_hydrators` submodule; raises `ConfigLoadError` on a broken file (loading contract: `.claude/rules/custom-code-loading.md`)
 
 ### RecordType field
 
 `RecordType.slicer_context_hydrators: list[str] | None` (JSON column) — list of hydrator names to run.
 Set in `RecordDef` config: `slicer_context_hydrators=["patient_first_study"]`.
+Names are validated at startup: `reconcile_config` fail-fasts with `ConfigurationError`
+on any name missing from the registry (hydrators load before reconcile). Boundary:
+config-defined RecordTypes only — types mutated via the API (TOML mode) and orphaned
+DB rows are caught only by the runtime ERROR log in `hydrate_slicer_context`.
 
 ### Writing a hydrator
 
@@ -75,22 +80,16 @@ async def hydrate_patient_first_study(record, context, ctx):
 
 ## exec scope в `_build_script` (`service.py`)
 
-`_build_script` оборачивает context + пользовательский скрипт в `def _run()`, чтобы все переменные были function-local и GC'd после return (VTK-объекты ~1-3 GB на том).
+Slicer переиспользует один exec-namespace для всех HTTP-вызовов (см. guard `_current_helper` в helper.py). `_build_script` собирает скрипт так:
 
-### Проблема: `exec(code, globals, locals)` с раздельными dict
+1. **helper.py** исполняется на module-level — определения (`SlicerHelper`, `PacsHelper`, `_get_pacs_helper`, ...) живут в module globals; `__globals__` каждой helper-функции указывает туда же.
+2. **Context-переменные** инъецируются в module globals (`globals()[key] = value` внутри `_run()`): только так их видят helper-функции, читающие `globals()` (например `_get_pacs_helper()`). Инъекция в `_ns` для хелперов невидима — их `__globals__` фиксирован на module namespace.
+3. **Пользовательский скрипт** исполняется через `exec(code, _ns)`, где `_ns = dict(globals())` — плоская per-call копия (один dict = и globals, и locals):
+   - нет local-vs-global различия → паттерны `slicer = SlicerHelper(...)` не дают `UnboundLocalError`;
+   - тяжёлые VTK-объекты (~1-3 GB на том) остаются в `_ns` и собираются GC после вызова, не накапливаясь в переиспользуемом namespace;
+   - копия строится ПОСЛЕ инъекции — скрипт видит context-переменные.
+4. **Cleanup в `finally`**: инъецированные ключи удаляются из module globals после exec (в т.ч. при исключении в скрипте). Без этого context одного вызова (UID'ы записи, пути file_registry, PACS-параметры) утекал бы во все последующие скрипты и в ручные сессии консоли Слайсера; документированный fallback `PacsHelper.from_slicer()` остаётся достижимым.
 
-Slicer's web handler может вызвать `exec(code, g, l)` с раздельными globals/locals. В этом случае:
-- Helper-определения (классы, функции) попадают в `l` (locals)
-- `_run().__globals__` указывает на `g` (globals) — `_run()` не видит имена из `l`
-- Паттерн `SlicerHelper = SlicerHelper(...)` в скрипте делает `SlicerHelper` локальной переменной `_run()`, вызывая `UnboundLocalError`
-- Дефолтные значения в определениях классов (напр. `overwrite_mode: OverwriteMode = OverwriteMode.OVERWRITE_ALL`) вычисляются при определении — если `OverwriteMode` в `l`, а не в `g`, определение класса падает
+Наружу пробрасывается только `globals()['__execResult']` — канал результата, который читает Slicer после выполнения скрипта.
 
-### Почему `globals().update(locals())` не работает
-
-Внутри `_run()` вызов `globals().update(locals())` копирует текущие locals в globals. Но определения классов из helper.py (напр. `SlicerHelper`) содержат дефолтные значения, которые вычисляются **при определении класса** — до того, как `globals().update(locals())` успеет скопировать зависимые имена.
-
-### Текущий подход: `global` declarations
-
-`_extract_top_level_names(source)` парсит helper.py через `ast` при инициализации `SlicerService.__init__` и кеширует список top-level имён в `self._helper_globals`.
-
-`_build_script` генерирует `global SlicerHelper, PacsHelper, OverwriteMode, ...` в начале `_run()`. Это говорит Python, что эти имена — глобальные, и `_run()` читает/пишет их из `g` напрямую, обходя проблему раздельных dict'ов.
+Юнит-тесты механики: `tests/test_slicer_build_script.py` — generated script исполняется в обычном dict без живого Слайсера (благодаря `_Dummy`-стабам helper.py). Файл намеренно в корне `tests/`: модуль `tests/integration/test_slicer_service.py` гейтится `_check_slicer` и в CI скипается целиком.

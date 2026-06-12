@@ -44,7 +44,6 @@ pub type Key {
   ThDate
   ThDescription
   ThModality
-  ThStudy
   ThStudySeries
   ThUser
   ThStudies
@@ -64,6 +63,8 @@ pub type Key {
   ThStudyUid
   ThSeriesUid
   ThAssignedUser
+  ThPatientName
+  ThPatientId
 
   // --- Common labels ---
   LblYes
@@ -71,6 +72,7 @@ pub type Key {
   LblLoading
 
   // --- Status badges ---
+  StatusPreparing
   StatusBlocked
   StatusPending
   StatusInProgress
@@ -129,6 +131,10 @@ pub type Key {
   HomeViewAll
   HomeRecentStudies
   HomeNoRecentStudies
+  HomeQuickActions
+  HomeActionInWork
+  HomeActionMyPending
+  HomeActionFreePending
 
   // --- Records ---
   RecordsAllTitle
@@ -289,6 +295,10 @@ pub type Key {
   ExecLblAssigned
   ExecRecordTypeNotFound
   ExecBackToRecords
+  ExecBackToPatient
+  ExecBackToStudy
+  ExecBackToSeries
+  ExecBack
   ExecMsgSlicerOpened
   ExecMsgSlicerFailed
   ExecMsgValidationDone
@@ -418,8 +428,6 @@ pub fn translate(locale: Locale, key: Key) -> String {
     Ru, ThDescription -> "Описание"
     En, ThModality -> "Modality"
     Ru, ThModality -> "Модальность"
-    En, ThStudy -> "Study"
-    Ru, ThStudy -> "Исследование"
     En, ThStudySeries -> "Study / Series"
     Ru, ThStudySeries -> "Исследование / Серия"
     En, ThUser -> "User"
@@ -458,6 +466,10 @@ pub fn translate(locale: Locale, key: Key) -> String {
     Ru, ThSeriesUid -> "UID серии"
     En, ThAssignedUser -> "Assigned User"
     Ru, ThAssignedUser -> "Назначенный"
+    En, ThPatientName -> "Name"
+    Ru, ThPatientName -> "ФИО"
+    En, ThPatientId -> "Patient ID"
+    Ru, ThPatientId -> "ID пациента"
 
     // --- Common labels ---
     En, LblYes -> "Yes"
@@ -468,6 +480,8 @@ pub fn translate(locale: Locale, key: Key) -> String {
     Ru, LblLoading -> "Загрузка..."
 
     // --- Status badges ---
+    En, StatusPreparing -> "Preparing"
+    Ru, StatusPreparing -> "Готовится"
     En, StatusBlocked -> "Blocked"
     Ru, StatusBlocked -> "Заблокирована"
     En, StatusPending -> "Pending"
@@ -544,9 +558,12 @@ pub fn translate(locale: Locale, key: Key) -> String {
     Ru, RegisterPasswordMismatch -> "Пароли не совпадают"
     En, RegisterPasswordTooShort -> "Password must be at least 8 characters"
     Ru, RegisterPasswordTooShort -> "Пароль должен быть не менее 8 символов"
-    En, RegisterSuccess(project) -> "Registration successful! Welcome to " <> project
-    Ru, RegisterSuccess(project) -> "Регистрация успешна! Добро пожаловать в " <> project
-    En, RegisterInvalidData -> "Invalid registration data. Please check your inputs."
+    En, RegisterSuccess(project) ->
+      "Registration successful! Welcome to " <> project
+    Ru, RegisterSuccess(project) ->
+      "Регистрация успешна! Добро пожаловать в " <> project
+    En, RegisterInvalidData ->
+      "Invalid registration data. Please check your inputs."
     Ru, RegisterInvalidData -> "Неверные данные. Проверьте введённые поля."
     En, RegisterDuplicate -> "Username or email already exists."
     Ru, RegisterDuplicate -> "Пользователь с таким email уже существует."
@@ -574,6 +591,14 @@ pub fn translate(locale: Locale, key: Key) -> String {
     Ru, HomeRecentStudies -> "Недавние исследования"
     En, HomeNoRecentStudies -> "No recent studies found."
     Ru, HomeNoRecentStudies -> "Нет недавних исследований."
+    En, HomeQuickActions -> "My Tasks"
+    Ru, HomeQuickActions -> "Мои задачи"
+    En, HomeActionInWork -> "In progress"
+    Ru, HomeActionInWork -> "В работе"
+    En, HomeActionMyPending -> "Assigned to me"
+    Ru, HomeActionMyPending -> "Назначенные мне"
+    En, HomeActionFreePending -> "Available tasks"
+    Ru, HomeActionFreePending -> "Свободные задачи"
 
     // --- Records ---
     En, RecordsAllTitle -> "All Records"
@@ -665,7 +690,8 @@ pub fn translate(locale: Locale, key: Key) -> String {
     En, PatientMsgStudyImported -> "Study imported from PACS successfully"
     Ru, PatientMsgStudyImported -> "Исследование успешно импортировано из PACS"
     En, PatientMsgImportFailed -> "Failed to import study from PACS"
-    Ru, PatientMsgImportFailed -> "Не удалось импортировать исследование из PACS"
+    Ru, PatientMsgImportFailed ->
+      "Не удалось импортировать исследование из PACS"
     En, PatientMsgPacsSearchFailed -> "Failed to search PACS"
     Ru, PatientMsgPacsSearchFailed -> "Не удалось выполнить поиск в PACS"
     En, PatientLoading(id) -> "Loading patient " <> id
@@ -859,7 +885,8 @@ pub fn translate(locale: Locale, key: Key) -> String {
     En, ExecNoFormRequired -> "This record does not require form data."
     Ru, ExecNoFormRequired -> "Эта запись не требует заполнения формы."
     En, ExecRecordCompleted -> "Record completed. Re-submit after changes."
-    Ru, ExecRecordCompleted -> "Запись завершена. Повторно отправьте после изменений."
+    Ru, ExecRecordCompleted ->
+      "Запись завершена. Повторно отправьте после изменений."
     En, ExecNoFormDefined -> "This record does not have a data form defined."
     Ru, ExecNoFormDefined -> "Для этой записи не определена форма данных."
     En, ExecNoDataSubmitted -> "No data submitted."
@@ -882,6 +909,14 @@ pub fn translate(locale: Locale, key: Key) -> String {
     Ru, ExecRecordTypeNotFound -> "Тип записи не найден"
     En, ExecBackToRecords -> "Back to Records"
     Ru, ExecBackToRecords -> "К списку записей"
+    En, ExecBackToPatient -> "Back to Patient"
+    Ru, ExecBackToPatient -> "К пациенту"
+    En, ExecBackToStudy -> "Back to Study"
+    Ru, ExecBackToStudy -> "К исследованию"
+    En, ExecBackToSeries -> "Back to Series"
+    Ru, ExecBackToSeries -> "К серии"
+    En, ExecBack -> "Back"
+    Ru, ExecBack -> "Назад"
     En, ExecMsgSlicerOpened -> "Workspace opened in 3D Slicer"
     Ru, ExecMsgSlicerOpened -> "Рабочее пространство открыто в 3D Slicer"
     En, ExecMsgSlicerFailed -> "Failed to open record in Slicer"

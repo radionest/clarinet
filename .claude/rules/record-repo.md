@@ -34,7 +34,8 @@ Beyond `BaseRepository`, `RecordRepository` has:
 | `update_data(id, data, new_status)` | Update data and optionally status |
 | `update_fields(record_id, update_data)` | Update arbitrary fields from a dict |
 | `set_files(record, matched_files)` | Create `RecordFileLink` rows; builds fd_map internally from eager-loaded `record_type.file_links` |
-| `update_checksums(record, checksums)` | Update checksum on existing `RecordFileLink` rows |
+| `add_file_links(record, matched_files)` | Additive `set_files`: creates links only for unlinked definitions (DB-dedupe via SELECT), existing links/checksums untouched; appends to `record.file_links` in memory. Returns links created; PK race vs concurrent writer → rollback + in-place reload, returns 0 |
+| `update_checksums(record, checksums)` | Update checksum on existing `RecordFileLink` rows (keys: `name` for singular, `name:filename` for collections) |
 | `delete_output_file_links(record)` | Single SQL `DELETE` of OUTPUT file links (race-safe vs concurrent pipeline writers) |
 | `assign_user(id, user_id)` | Assign record to user |
 | `unassign_user(id)` | Remove user; inwork -> pending |

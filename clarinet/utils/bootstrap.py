@@ -266,6 +266,63 @@ async def _upsert_record_type(record_type: RecordTypeCreate, session: AsyncSessi
             logger.error(f"Error creating record type {record_type.name}: {e}")
 
 
+def _validate_registry_refs(
+    all_items: list[RecordTypeCreate],
+    *,
+    attr: str,
+    registered: frozenset[str],
+    label: str,
+    decorator: str,
+    config_file: str,
+    folder: str,
+) -> None:
+    """Fail-fast when RecordType configs reference names absent from a registry.
+
+    Shared by the ``data_validators`` and ``slicer_context_hydrators`` guards
+    (and any future decorator-registry reference). Relies on the corresponding
+    ``load_custom_*`` loader running BEFORE ``reconcile_config`` in the
+    lifespan — otherwise the registry is empty and every reference is flagged
+    as missing.
+
+    Args:
+        all_items: RecordType configs about to be reconciled.
+        attr: Name of the list-of-names field on ``RecordTypeCreate``.
+        registered: Currently registered names for this registry.
+        label: Human-readable singular label for the error message.
+        decorator: Decorator name to suggest in the fix hint.
+        config_file: Plan file (relative to *folder*) where names are registered.
+        folder: Config folder actually being reconciled (not necessarily
+            ``settings.config_tasks_path`` — reconcile accepts an override).
+
+    Raises:
+        ConfigurationError: If any referenced name is not registered.
+    """
+    referenced: set[str] = set()
+    for item in all_items:
+        referenced.update(getattr(item, attr) or [])
+    if not referenced:
+        return
+
+    missing = referenced - registered
+    if not missing:
+        return
+
+    bad_items = [
+        f"  - '{item.name}' references {label}(s) "
+        f"{[n for n in (getattr(item, attr) or []) if n in missing]}"
+        for item in all_items
+        if any(n in missing for n in (getattr(item, attr) or []))
+    ]
+    raise ConfigurationError(
+        f"RecordType config references unregistered {label}(s): "
+        f"{', '.join(sorted(missing))}.\n"
+        + "\n".join(bad_items)
+        + f"\nRegistered {label}s: {sorted(registered)}.\n"
+        f"Register them in {folder.rstrip('/')}/{config_file} "
+        f"via the @{decorator}('name') decorator."
+    )
+
+
 async def reconcile_config(
     folder: str | None = None,
     suffix_filter: str = "",
@@ -334,38 +391,34 @@ async def reconcile_config(
                     f"Add missing roles to CLARINET_EXTRA_ROLES or fix the config."
                 )
 
-        # Validate that all referenced data_validators are registered.
-        # Relies on ``load_custom_validators`` running BEFORE reconcile_config
-        # in the lifespan — otherwise the registry is empty and every
-        # reference is flagged as missing.
+        # Validate decorator-registry references (data_validators,
+        # slicer_context_hydrators). A typo used to surface only at runtime —
+        # e.g. when the doctor opened the record in Slicer.
         from clarinet.services.record_data_validation import (
             get_registered_validator_names,
         )
+        from clarinet.services.slicer.context_hydration import (
+            get_registered_slicer_hydrator_names,
+        )
 
-        referenced_validators: set[str] = set()
-        for item in all_items:
-            if item.data_validators:
-                referenced_validators.update(item.data_validators)
-        if referenced_validators:
-            registered = get_registered_validator_names()
-            missing_validators = referenced_validators - registered
-            if missing_validators:
-                bad_validator_items = [
-                    f"  - '{item.name}' references validator(s) "
-                    f"{[v for v in (item.data_validators or []) if v in missing_validators]}"
-                    for item in all_items
-                    if item.data_validators
-                    and any(v in missing_validators for v in item.data_validators)
-                ]
-                raise ConfigurationError(
-                    f"RecordType config references unregistered data validator(s): "
-                    f"{', '.join(sorted(missing_validators))}.\n"
-                    + "\n".join(bad_validator_items)
-                    + f"\nRegistered validators: {sorted(registered)}.\n"
-                    f"Register them in "
-                    f"{settings.config_tasks_path.rstrip('/')}/{settings.config_validators_file} "
-                    f"via the @record_validator('name') decorator."
-                )
+        _validate_registry_refs(
+            all_items,
+            attr="data_validators",
+            registered=get_registered_validator_names(),
+            label="data validator",
+            decorator="record_validator",
+            config_file=settings.config_validators_file,
+            folder=folder,
+        )
+        _validate_registry_refs(
+            all_items,
+            attr="slicer_context_hydrators",
+            registered=get_registered_slicer_hydrator_names(),
+            label="slicer context hydrator",
+            decorator="slicer_context_hydrator",
+            config_file=settings.config_context_hydrators_file,
+            folder=folder,
+        )
 
         result = await reconcile_record_types(
             all_items,

@@ -5,18 +5,19 @@
 .alert {
     padding: var(--spacing-md);
     border-radius: var(--radius-md);
+    border: 1px solid var(--hairline);
     margin-bottom: var(--spacing-md);
-    font-size: 0.9rem;
+    font-size: 0.875rem;
 }
 
 .alert-danger {
-    background: #fef2f2;
-    color: #991b1b;
-    border: 1px solid #fecaca;
+    background: var(--red-wash);
+    color: #7c2a22;
+    border-color: #e8c5c0;
 }
 
 .alert-success {
-    background: #f0fdf4;
-    color: #166534;
-    border: 1px solid #bbf7d0;
+    background: var(--green-wash);
+    color: #225c3c;
+    border-color: #c4dfce;
 }

@@ -1,14 +1,15 @@
 ---
 paths:
   - "clarinet/services/schema_hydration.py"
-  - "tasks/**/hydrators.py"
+  - "tasks/**/schema_hydrators.py"
+  - "plan/**/schema_hydrators.py"
 ---
 
 # Schema Hydration — dynamic field options
 
 ## How it works
 
-JSON Schema fields with `x-options` markers get resolved to `oneOf` arrays at runtime via registered hydrator callbacks. Built-in hydrators are registered at import time; project-specific ones live in `plan/hydrators.py` (loaded automatically via `load_custom_hydrators`).
+JSON Schema fields with `x-options` markers get resolved to `oneOf` arrays at runtime via registered hydrator callbacks. Built-in hydrators are registered at import time (`_register_builtin_hydrators`); project-specific ones live in `plan/schema_hydrators.py` (the `config_schema_hydrators_file` default), loaded automatically via `load_custom_hydrators` as the `clarinet_plan.schema_hydrators` submodule (see `.claude/rules/custom-code-loading.md`).
 
 ## Writing a hydrator
 

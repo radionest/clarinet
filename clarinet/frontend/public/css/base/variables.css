@@ -1,40 +1,84 @@
 /* ============================
-   Design tokens
+   Design tokens — "clinical instrument"
+   Warm paper canvas, ink text, ebony chrome,
+   deep teal actions, brass accents.
    ============================ */
 
 :root {
-    /* Brand palette */
-    --primary-color: #1e40af;
-    --secondary-color: #64748b;
-    --accent-color: #f59e0b;
-    --background-color: #ffffff;
-    --text-color: #1f2937;
-    --border-color: #e5e7eb;
+    /* Typography */
+    --font-sans: "Golos Text", "Segoe UI", Roboto, Ubuntu, Cantarell, sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, "Cascadia Code", "Fira Code", monospace;
+    --font-display: "Piazzolla", Georgia, "Times New Roman", serif;
 
-    /* Semantic colors */
-    --danger-color: #dc2626;
-    --warning-color: #d97706;
-    --success-color: #16a34a;
-    --info-color: #2563eb;
+    /* Ink (text) */
+    --ink: #1f2226;
+    --ink-soft: #585d64;
+    --ink-faint: #65696f;
 
-    /* Surface & text */
-    --surface-color: #f8fafc;
-    --surface-hover: #e5e7eb;
-    --text-secondary: #6b7280;
+    /* Paper (canvas & surfaces) */
+    --paper: #f2f0ea;
+    --surface: #fdfdfb;
+    --surface-sunken: #f7f5f0;
+
+    /* Ebony chrome (navbar) */
+    --ebony: #1b1d21;
+    --ebony-raised: #26282e;
+    --chrome-text: #b4b8c0;
+    --chrome-text-bright: #f2f0ea;
+
+    /* Action colors */
+    --teal: #0f6f66;
+    --teal-deep: #0a5650;
+    --teal-wash: #e3efed;
+    --brass: #a16207;
+    --brass-bright: #c9912a;
+    --brass-wash: #f5ecd9;
+
+    /* Semantic */
+    --green: #2e7d4f;
+    --green-wash: #e6f2ea;
+    --red: #b3382d;
+    --red-wash: #f8e9e7;
+    --amber: #9a6b15;
+    --amber-wash: #f6eedd;
+    --blue: #3661a8;
+    --blue-wash: #e9eef7;
+    --plum: #7c5295;
+    --plum-wash: #f1ebf7;
+
+    /* Hairlines */
+    --hairline: #e2ded4;
+    --hairline-strong: #c9c4b6;
+
+    /* ---- Legacy aliases (older selectors reference these) ---- */
+    --primary-color: var(--teal);
+    --secondary-color: var(--ink-soft);
+    --accent-color: var(--brass);
+    --background-color: var(--paper);
+    --text-color: var(--ink);
+    --border-color: var(--hairline);
+    --danger-color: var(--red);
+    --warning-color: var(--amber);
+    --success-color: var(--green);
+    --info-color: var(--blue);
+    --surface-color: var(--surface-sunken);
+    --surface-hover: #efece4;
+    --text-secondary: var(--ink-soft);
 
     /* Layout */
     --navbar-height: 56px;
-    --container-max-width: 1200px;
+    --container-max-width: 1600px;
+    --container-pad: clamp(16px, 3vw, 44px);
 
-    /* Shadows */
-    --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.1);
-    --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.1);
-    --shadow-lg: 0 10px 20px rgba(0, 0, 0, 0.15);
+    /* Shadows — soft, warm-tinted */
+    --shadow-sm: 0 1px 2px rgba(31, 28, 20, 0.06);
+    --shadow-md: 0 2px 8px rgba(31, 28, 20, 0.08), 0 1px 2px rgba(31, 28, 20, 0.05);
+    --shadow-lg: 0 12px 32px rgba(31, 28, 20, 0.14), 0 2px 8px rgba(31, 28, 20, 0.07);
 
-    /* Radii */
-    --radius-sm: 4px;
-    --radius-md: 6px;
-    --radius-lg: 8px;
+    /* Radii — instrument-sharp */
+    --radius-sm: 3px;
+    --radius-md: 4px;
+    --radius-lg: 6px;
 
     /* Spacing (4-8px system) */
     --spacing-xs: 4px;
@@ -42,4 +86,7 @@
     --spacing-md: 16px;
     --spacing-lg: 24px;
     --spacing-xl: 32px;
+
+    /* Focus ring */
+    --focus-ring: 0 0 0 3px rgba(15, 111, 102, 0.25);
 }

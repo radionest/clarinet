@@ -23,14 +23,18 @@ Changing auth levels on routers has cascading impact on tests — check `tests/t
 Startup sequence:
 1. Database init (`db_manager.create_db_and_tables_async()`)
 1b. Default roles (`add_default_user_roles()`)
-1c. Load custom record-data validators (`load_custom_validators()`) — must run BEFORE `reconcile_config` so the registry is populated when reconcile validates `RecordType.data_validators` names
-2. Config reconciliation (`reconcile_config()`) → stores `app.state.config_mode`, `app.state.config_tasks_path`; fail-fasts on unknown role_names or validator names
-2b. Load project file registry + custom schema hydrators + custom slicer context hydrators from tasks folder
+1c. Anchor the `clarinet_plan` package + load registries: `activate_plan_package(config_tasks_path)` → `_ensure_record_types_imported()` (imports record types, sets FileDef names before validators read them) → `_load_plan_registries()` (clears the 3 registries + `_register_builtin_hydrators()`, then `load_custom_validators/hydrators/slicer_hydrators`). Must run BEFORE `reconcile_config` so the registries are populated when reconcile validates `RecordType.data_validators` and `RecordType.slicer_context_hydrators` names. Loading contract: `.claude/rules/custom-code-loading.md`
+2. Config reconciliation (`reconcile_config()`) → stores `app.state.config_mode`, `app.state.config_tasks_path`; fail-fasts on unknown role_names, validator names, and slicer-hydrator names
+2b. Load project file registry from tasks folder
 3. Admin user creation (`ensure_admin_exists()`)
 4. RecordFlow engine setup (if `recordflow_enabled`) → `app.state.recordflow_engine`
 5. Pipeline broker startup (if `pipeline_enabled`) → `app.state.pipeline_broker`; syncs pipeline definitions to DB
 6. Session cleanup service start (if `session_cleanup_enabled`)
 7. DICOMweb cache init (if `dicomweb_enabled`) → `app.state.dicomweb_cache`; cleanup service → `app.state.dicomweb_cleanup`
+
+Any `ConfigLoadError` from steps 1c/2/2b/4/5 (a broken plan/ `.py` file) is converted to
+`StartupError(component="Config")` — the server refuses to start instead of running without
+custom validators/hydrators/flows. Loading contract: `.claude/rules/custom-code-loading.md`.
 
 Shutdown (reverse order): stop DICOMweb cleanup → flush DICOMweb cache → stop session cleanup → shutdown pipeline broker → close RecordFlow client → close DB.
 
@@ -46,12 +50,13 @@ See `clarinet/api/exception_handlers.py` for the full mapping.
 
 ## Pipeline Router (pipeline.py)
 
-Mounted at `/api/pipelines`, conditional on `pipeline_enabled`. Endpoints:
-- `GET /api/pipelines` — list all pipeline definitions from DB
-- `GET /api/pipelines/{name}/definition` — get definition by name (used by `PipelineChainMiddleware`)
-- `POST /api/pipelines/sync` — re-sync pipeline definitions to DB on demand
+Mounted at `/api/pipelines` (unconditionally). Endpoints:
+- `GET /api/pipelines/{name}/definition` — get definition by name (used by `PipelineChainMiddleware`); no auth (workers)
+- `POST /api/pipelines/sync` — re-sync pipeline definitions to DB on demand; no auth
+- `POST /api/pipelines/runs` / `PATCH /api/pipelines/runs/{task_id}` — task run audit rows written by `AuditMiddleware` (`AdminUserDep`; service token resolves to admin — regular users must not forge audit)
+- `GET /api/pipelines/runs[/{task_id}]` — list/get runs (`AdminUserDep`)
 
-Uses `PipelineDefinitionRepositoryDep`.
+Uses `PipelineDefinitionRepositoryDep` + `PipelineTaskRunRepositoryDep`. Record-scoped view: `GET /api/records/{id}/runs` in record.py (`AuthorizedRecordDep`).
 
 ## Config Mode Guards
 

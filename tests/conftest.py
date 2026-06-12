@@ -65,15 +65,29 @@ def isolated_validator_registry():
     """
     from clarinet.services.record_data_validation import _VALIDATOR_REGISTRY
 
-    saved = dict(_VALIDATOR_REGISTRY)
+    saved = _VALIDATOR_REGISTRY.snapshot()
     # Empty the registry before the test so each test starts clean and
     # cannot rely on (or be polluted by) registrations from earlier tests.
     _VALIDATOR_REGISTRY.clear()
     try:
         yield
     finally:
-        _VALIDATOR_REGISTRY.clear()
-        _VALIDATOR_REGISTRY.update(saved)
+        _VALIDATOR_REGISTRY.restore(saved)
+
+
+@pytest.fixture(autouse=True)
+def _plan_package_sanitation():
+    """Tear down the ``clarinet_plan`` anchor after every test.
+
+    Replaces all ad-hoc ``monkeypatch.delitem(sys.modules, "...")`` cleanups:
+    any test that activates the anchor (directly or via a loader) leaves the
+    in-memory ``clarinet_plan`` submodules in ``sys.modules``; this fixture
+    purges them so the next test starts from a clean import state.
+    """
+    yield
+    from clarinet.config.plan_package import deactivate_plan_package
+
+    deactivate_plan_package()
 
 
 @pytest.fixture(autouse=True, scope="session")

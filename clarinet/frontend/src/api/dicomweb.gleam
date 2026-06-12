@@ -18,6 +18,7 @@ import plinth/browser/window
 fn dicomweb_request(
   method: http.Method,
   path: String,
+  body: String,
 ) -> request.Request(String) {
   {
     use origin <- result.try(window.origin() |> uri.parse)
@@ -28,7 +29,7 @@ fn dicomweb_request(
   |> request.set_path(config.base_path() <> "/dicom-web" <> path)
   |> request.set_header("accept", "application/json")
   |> request.set_header("content-type", "application/json")
-  |> request.set_body("")
+  |> request.set_body(body)
 }
 
 fn process_response(
@@ -52,11 +53,14 @@ fn process_response(
   }
 }
 
-/// POST /dicom-web/preload/{study_uid} — start background preload.
-pub fn preload_study(
-  study_uid: String,
+/// POST /dicom-web/preload — start background preload of one or more studies.
+pub fn preload_studies(
+  study_uids: List(String),
 ) -> Promise(Result(Dynamic, ApiError)) {
-  let req = dicomweb_request(http.Post, "/preload/" <> study_uid)
+  let body =
+    json.object([#("study_uids", json.array(study_uids, json.string))])
+    |> json.to_string
+  let req = dicomweb_request(http.Post, "/preload", body)
 
   use resp_result <- promise.await(fetch.send(req))
   case resp_result {
@@ -67,16 +71,9 @@ pub fn preload_study(
   }
 }
 
-/// GET /dicom-web/preload/{study_uid}/progress/{task_id} — poll progress.
-pub fn preload_progress(
-  study_uid: String,
-  task_id: String,
-) -> Promise(Result(Dynamic, ApiError)) {
-  let req =
-    dicomweb_request(
-      http.Get,
-      "/preload/" <> study_uid <> "/progress/" <> task_id,
-    )
+/// GET /dicom-web/preload/progress/{task_id} — poll progress.
+pub fn preload_progress(task_id: String) -> Promise(Result(Dynamic, ApiError)) {
+  let req = dicomweb_request(http.Get, "/preload/progress/" <> task_id, "")
 
   use resp_result <- promise.await(fetch.send(req))
   case resp_result {

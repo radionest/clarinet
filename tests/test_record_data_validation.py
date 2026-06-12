@@ -17,6 +17,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from clarinet.exceptions.domain import (
+    ConfigLoadError,
     FieldError,
     RecordDataValidationError,
 )
@@ -58,7 +59,8 @@ class TestRecordValidatorDecorator:
         async def alpha(record, data, ctx):
             return None
 
-        spec = _VALIDATOR_REGISTRY["test.alpha"]
+        spec = _VALIDATOR_REGISTRY.get("test.alpha")
+        assert spec is not None
         assert spec.func is alpha
         assert spec.run_on_partial is True
 
@@ -67,7 +69,9 @@ class TestRecordValidatorDecorator:
         async def beta(record, data, ctx):
             return None
 
-        assert _VALIDATOR_REGISTRY["test.beta"].run_on_partial is False
+        spec = _VALIDATOR_REGISTRY.get("test.beta")
+        assert spec is not None
+        assert spec.run_on_partial is False
 
     def test_duplicate_name_raises_value_error(self):
         @record_validator("test.dup")
@@ -203,13 +207,40 @@ class TestLoadCustomValidators:
 
         count = load_custom_validators(tmp_path)
         assert count == 1
-        assert "loaded.test_validator" in _VALIDATOR_REGISTRY
+        assert _VALIDATOR_REGISTRY.get("loaded.test_validator") is not None
 
-    def test_broken_file_returns_zero_does_not_crash(self, tmp_path):
+    def test_broken_file_raises_config_load_error(self, tmp_path):
+        """Broken file fails fast — a silent 0 would start the server with
+        submit-time validation missing."""
         (tmp_path / "validators.py").write_text("raise RuntimeError('import error')")
-        # Must not propagate the exception
-        count = load_custom_validators(tmp_path)
-        assert count == 0
+
+        with pytest.raises(ConfigLoadError) as exc_info:
+            load_custom_validators(tmp_path)
+
+        assert isinstance(exc_info.value.__cause__, RuntimeError)
+
+    def test_duplicate_name_in_file_raises_config_load_error(self, tmp_path):
+        """ValueError from @record_validator (duplicate name) surfaces as
+        ConfigLoadError with the original error preserved as __cause__."""
+        (tmp_path / "validators.py").write_text(
+            textwrap.dedent("""\
+            from clarinet.services.record_data_validation import record_validator
+
+            @record_validator("dup.name")
+            async def first(record, data, ctx):
+                return None
+
+            @record_validator("dup.name")
+            async def second(record, data, ctx):
+                return None
+            """)
+        )
+
+        with pytest.raises(ConfigLoadError) as exc_info:
+            load_custom_validators(tmp_path)
+
+        assert isinstance(exc_info.value.__cause__, ValueError)
+        assert "already registered" in str(exc_info.value.__cause__)
 
 
 # ---------------------------------------------------------------------------

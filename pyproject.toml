@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "clarinet"
-version = "0.7.0"
+version = "0.10.0"
 description = "Clarinet — an imaging-centric framework for clinical research"
 readme = "README.md"
 authors = [
@@ -53,6 +53,16 @@ dependencies = [
     "openpyxl>=3.1",
     "orjson>=3.10.0",
     "pyyaml>=6.0",
+    # Quarto report kernel (*.qmd python chunks): the unconditional imports of
+    # quarto's bundled jupyter engine (nbformat, nbclient, jupyter_client) plus
+    # the kernel itself (ipykernel) and pandas, which the docs promise to chunk
+    # authors. papermill / jupyter-cache deliberately omitted: optional quarto
+    # features (--execute-params, cache) that the renderer does not expose.
+    "nbformat>=5.0",
+    "nbclient>=0.9",
+    "jupyter-client>=8.0",
+    "ipykernel>=6.0",
+    "pandas>=2.0",
 ]
 
 [project.optional-dependencies]
@@ -65,13 +75,7 @@ docs = [
     "sphinx-rtd-theme>=1.2.0",
     "myst-parser>=1.0.0"
 ]
-quarto = [
-    # Python execution for *.qmd code chunks, run by the quarto CLI's Jupyter
-    # engine. The quarto binary itself is delivered via `clarinet quarto install`.
-    "jupyter>=1.0",
-    "ipykernel>=6.0",
-    "pandas>=2.0",
-]
+quarto = []  # kernel deps moved to base; stub keeps `clarinet[quarto]` installs working (removal: #348)
 
 [project.scripts]
 clarinet = "clarinet.cli.main:main"

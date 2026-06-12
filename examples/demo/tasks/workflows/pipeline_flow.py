@@ -16,8 +16,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
-from record_types import master_model, master_projection, segmentation
-from utils.seg_utils import master_label_converter, save_seg_nrrd
+from clarinet_plan.definitions.record_types import master_model, master_projection, segmentation
+from clarinet_plan.utils.seg_utils import master_label_converter, save_seg_nrrd
 
 from clarinet.services.image import Segmentation
 from clarinet.services.pipeline import (

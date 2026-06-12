@@ -7,7 +7,7 @@ them as a valid cache hit on the next OHIF request.
 
 Bypasses the in-memory tier of ``DicomWebCache`` on purpose: the worker
 runs in a separate process from the API server, and routing prefetches
-through ``POST /dicom-web/preload/...`` would inflate the API server's
+through ``POST /dicom-web/preload`` would inflate the API server's
 RAM (memory tier holds whole datasets keyed by SOPInstanceUID).
 
 Triggered from RecordFlow via ``do_task``::

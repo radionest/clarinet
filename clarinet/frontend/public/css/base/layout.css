@@ -3,9 +3,10 @@
    ============================ */
 
 .container {
+    width: 100%;
     max-width: var(--container-max-width);
     margin: 0 auto;
-    padding: 0 20px;
+    padding: 0 var(--container-pad);
 }
 
 .app-layout {
@@ -16,14 +17,15 @@
 
 .main-content {
     flex: 1;
-    padding: var(--spacing-lg) 0;
+    padding: var(--spacing-lg) 0 var(--spacing-xl);
     margin-top: var(--navbar-height);
+    min-width: 0;
 }
 
 .app-footer {
-    border-top: 1px solid var(--border-color);
+    border-top: 1px solid var(--hairline);
     padding: var(--spacing-md) 0;
-    color: var(--text-secondary);
-    font-size: 0.875rem;
+    color: var(--ink-faint);
+    font-size: 0.8125rem;
     text-align: center;
 }

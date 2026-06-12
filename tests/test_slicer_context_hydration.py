@@ -3,18 +3,21 @@
 Covers:
 - Decorator registers hydrators
 - hydrate_slicer_context runs matching hydrators and merges results
-- Unknown hydrator names are skipped with warning
+- Unknown hydrator names are skipped with error log
 - Hydrator exceptions are caught and skipped
 - Empty hydrator_names is a no-op
-- load_custom_slicer_hydrators loads from file
+- load_custom_slicer_hydrators loads from file, fails fast on broken files,
+  and imports it as a clarinet_plan submodule (package-import regression)
 """
 
+import sys
 import textwrap
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from clarinet.exceptions.domain import ConfigLoadError
 from clarinet.services.slicer.context_hydration import (
     _SLICER_HYDRATOR_REGISTRY,
     SlicerHydrationContext,
@@ -27,10 +30,9 @@ from clarinet.services.slicer.context_hydration import (
 @pytest.fixture(autouse=True)
 def _clean_registry():
     """Save and restore the hydrator registry around each test."""
-    saved = dict(_SLICER_HYDRATOR_REGISTRY)
+    saved = _SLICER_HYDRATOR_REGISTRY.snapshot()
     yield
-    _SLICER_HYDRATOR_REGISTRY.clear()
-    _SLICER_HYDRATOR_REGISTRY.update(saved)
+    _SLICER_HYDRATOR_REGISTRY.restore(saved)
 
 
 # ---------------------------------------------------------------------------
@@ -45,8 +47,7 @@ def test_decorator_registers_hydrator():
     async def my_hydrator(record: Any, context: Any, ctx: Any) -> dict[str, Any]:
         return {"key": "value"}
 
-    assert "test_hydrator" in _SLICER_HYDRATOR_REGISTRY
-    assert _SLICER_HYDRATOR_REGISTRY["test_hydrator"] is my_hydrator
+    assert _SLICER_HYDRATOR_REGISTRY.get("test_hydrator") is my_hydrator
 
 
 def test_decorator_overwrites_existing():
@@ -60,7 +61,7 @@ def test_decorator_overwrites_existing():
     async def second(record: Any, context: Any, ctx: Any) -> dict[str, Any]:
         return {"v": 2}
 
-    assert _SLICER_HYDRATOR_REGISTRY["dup"] is second
+    assert _SLICER_HYDRATOR_REGISTRY.get("dup") is second
 
 
 # ---------------------------------------------------------------------------
@@ -159,14 +160,14 @@ def test_load_from_missing_folder(tmp_path):
 
 
 def test_load_from_folder_without_file(tmp_path):
-    """Folder without context_hydrators.py returns 0."""
+    """Folder without slicer_hydrators.py returns 0."""
     count = load_custom_slicer_hydrators(tmp_path)
     assert count == 0
 
 
 def test_load_valid_hydrator(tmp_path):
-    """Valid context_hydrators.py registers hydrators."""
-    hydrator_file = tmp_path / "context_hydrators.py"
+    """Valid slicer_hydrators.py registers hydrators."""
+    hydrator_file = tmp_path / "slicer_hydrators.py"
     hydrator_file.write_text(
         textwrap.dedent("""\
         from clarinet.services.slicer.context_hydration import slicer_context_hydrator
@@ -179,16 +180,21 @@ def test_load_valid_hydrator(tmp_path):
 
     count = load_custom_slicer_hydrators(tmp_path)
     assert count == 1
-    assert "loaded_test" in _SLICER_HYDRATOR_REGISTRY
+    assert _SLICER_HYDRATOR_REGISTRY.get("loaded_test") is not None
 
 
 def test_load_broken_file(tmp_path):
-    """Broken file returns 0, does not crash."""
-    hydrator_file = tmp_path / "context_hydrators.py"
+    """Broken file fails fast — a silent 0 would start the server without
+    hydrators and break Slicer-open at runtime."""
+    hydrator_file = tmp_path / "slicer_hydrators.py"
     hydrator_file.write_text("raise RuntimeError('import error')")
 
-    count = load_custom_slicer_hydrators(tmp_path)
-    assert count == 0
+    with pytest.raises(ConfigLoadError) as exc_info:
+        load_custom_slicer_hydrators(tmp_path)
+
+    assert isinstance(exc_info.value.__cause__, RuntimeError)
+    # Python removes the half-initialized module; it must not leak.
+    assert "clarinet_plan.slicer_hydrators" not in sys.modules
 
 
 # ---------------------------------------------------------------------------
@@ -227,4 +233,39 @@ def test_load_from_subdirectory(tmp_path):
         settings.config_context_hydrators_file = orig
 
     assert count == 1
-    assert "subdir_test" in _SLICER_HYDRATOR_REGISTRY
+    assert _SLICER_HYDRATOR_REGISTRY.get("subdir_test") is not None
+
+
+def test_load_with_package_import_from_config_root(tmp_path, monkeypatch):
+    """Regression (nir_liver incident): a hydrators file in a subdirectory
+    imports a package from the plan/ root via the ``clarinet_plan.`` prefix.
+
+    No ``sys.path`` entry, no stdlib shadowing — the import resolves off the
+    single anchor root. The autouse ``_plan_package_sanitation`` fixture purges
+    the ``clarinet_plan.*`` submodules afterwards.
+    """
+    (tmp_path / "utils").mkdir()
+    (tmp_path / "utils" / "helper.py").write_text("VALUE = 42\n")
+    (tmp_path / "hydrators").mkdir()
+    (tmp_path / "hydrators" / "slicer_hydrators.py").write_text(
+        textwrap.dedent("""\
+        from clarinet_plan.utils.helper import VALUE
+
+        from clarinet.services.slicer.context_hydration import slicer_context_hydrator
+
+        @slicer_context_hydrator("uses_package_import")
+        async def uses_package_import(record, context, ctx):
+            return {"value": VALUE}
+        """)
+    )
+
+    from clarinet.settings import settings
+
+    monkeypatch.setattr(settings, "config_context_hydrators_file", "hydrators/slicer_hydrators.py")
+
+    sys_path_before = list(sys.path)
+    count = load_custom_slicer_hydrators(tmp_path)
+
+    assert count == 1
+    assert _SLICER_HYDRATOR_REGISTRY.get("uses_package_import") is not None
+    assert sys.path == sys_path_before

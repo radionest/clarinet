@@ -5,6 +5,7 @@ This module creates and configures the FastAPI application with all routers,
 middleware, and static files.
 """
 
+import html
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
@@ -33,7 +34,7 @@ from clarinet.api.routers import study as study
 from clarinet.api.routers import user as user
 from clarinet.api.routers import viewer as viewer
 from clarinet.api.routers import workflow as workflow
-from clarinet.exceptions.domain import RecordFlowError
+from clarinet.exceptions.domain import ConfigLoadError, RecordFlowError
 from clarinet.services.session_cleanup import session_cleanup_service
 from clarinet.settings import settings
 from clarinet.utils.admin import ensure_admin_exists
@@ -48,23 +49,92 @@ from clarinet.utils.logger import logger
 
 
 class StartupError(SystemExit):
-    """Raised when an enabled component fails to initialize at startup."""
+    """Raised when an enabled component fails to initialize at startup.
 
-    def __init__(self, component: str, reason: str, hint: str) -> None:
+    ``disableable=False`` is for mandatory subsystems (e.g. project config)
+    that have no ``CLARINET_*_ENABLED`` switch — the banner then offers only
+    the fix step instead of suggesting a nonexistent setting.
+    """
+
+    def __init__(self, component: str, reason: str, hint: str, *, disableable: bool = True) -> None:
         self.component = component
         self.reason = reason
         self.hint = hint
+        if disableable:
+            fix_block = (
+                f"To fix, either:\n"
+                f"  1. {hint}\n"
+                f"  2. Disable the component: "
+                f"set CLARINET_{component.upper().replace(' ', '_')}_ENABLED=false\n"
+            )
+        else:
+            fix_block = f"To fix: {hint}\n"
         message = (
             f"\n{'=' * 60}\n"
             f"STARTUP FAILED: {component}\n"
             f"{'=' * 60}\n"
             f"Reason: {reason}\n\n"
-            f"To fix, either:\n"
-            f"  1. {hint}\n"
-            f"  2. Disable the component: set CLARINET_{component.upper().replace(' ', '_')}_ENABLED=false\n"
+            f"{fix_block}"
             f"{'=' * 60}\n"
         )
         super().__init__(message)
+
+
+def _load_plan_registries() -> None:
+    """Populate the validator/hydrator registries from the project's config folder.
+
+    Must run BEFORE ``reconcile_config`` — reconcile validates RecordType
+    references (``data_validators``, ``slicer_context_hydrators``) against
+    these registries. Each loader logs the registered names itself.
+
+    Clears the three registries first so a second lifespan in the same process
+    re-executes the plan files against an empty registry (otherwise
+    ``validators.py`` re-registers an already-present name and raises a
+    duplicate ``ValueError`` → bogus ``StartupError``). ``study_series`` is the
+    only built-in living in a registry; ``clear()`` drops it, so re-register the
+    built-ins right after.
+
+    Raises:
+        ConfigLoadError: If any of the plan files fails to import.
+    """
+    from clarinet.services.record_data_validation import (
+        _VALIDATOR_REGISTRY,
+        load_custom_validators,
+    )
+    from clarinet.services.schema_hydration import (
+        _HYDRATOR_REGISTRY,
+        _register_builtin_hydrators,
+        load_custom_hydrators,
+    )
+    from clarinet.services.slicer.context_hydration import (
+        _SLICER_HYDRATOR_REGISTRY,
+        load_custom_slicer_hydrators,
+    )
+
+    _VALIDATOR_REGISTRY.clear()
+    _HYDRATOR_REGISTRY.clear()
+    _SLICER_HYDRATOR_REGISTRY.clear()
+    _register_builtin_hydrators()
+
+    load_custom_validators(settings.config_tasks_path)
+    load_custom_hydrators(settings.config_tasks_path)
+    load_custom_slicer_hydrators(settings.config_tasks_path)
+
+
+def _config_startup_error(e: ConfigLoadError) -> StartupError:
+    """Uniform startup banner for project custom-code import failures.
+
+    Flow/pipeline modules may live outside plan/ (``recordflow_paths``), so
+    the hint points at the failing file when known instead of hardcoding a
+    folder name.
+    """
+    target = e.path or "the project's custom Python files"
+    return StartupError(
+        component="Config",
+        reason=str(e),
+        hint=f"Fix the import error in {target}, then restart",
+        disableable=False,
+    )
 
 
 def _check_frontend() -> None:
@@ -164,17 +234,24 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     await add_default_user_roles()
 
-    # Load custom record validators BEFORE reconcile — reconcile checks that
-    # every RecordType.data_validators name is registered in the registry,
-    # which is populated by the @record_validator decorators in this file.
-    # ``load_custom_validators`` logs the registered names itself; no need to
-    # log again here (matches the load_custom_hydrators pattern below).
-    from clarinet.services.record_data_validation import load_custom_validators
+    try:
+        # Anchor the clarinet_plan package at the config root, import record
+        # types (sets FileDef names before validators.py reads them), then load
+        # the validator/hydrator registries — all before reconcile.
+        from clarinet.config.plan_package import activate_plan_package
+        from clarinet.config.python_loader import _ensure_record_types_imported
 
-    load_custom_validators(settings.config_tasks_path)
+        activate_plan_package(settings.config_tasks_path)
+        _ensure_record_types_imported()
+        _load_plan_registries()
+    except ConfigLoadError as e:
+        raise _config_startup_error(e) from e
 
     # Reconcile RecordType definitions
-    reconcile_result = await reconcile_config()
+    try:
+        reconcile_result = await reconcile_config()
+    except ConfigLoadError as e:
+        raise _config_startup_error(e) from e
     app.state.config_mode = settings.config_mode
     app.state.config_tasks_path = settings.config_tasks_path
     logger.info(
@@ -184,22 +261,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         f"{len(reconcile_result.orphaned)} orphaned"
     )
 
-    # Load project file registry for API use
-    app.state.project_file_registry = await load_project_file_registry(settings.config_tasks_path)
-
-    # Load custom schema hydrators from tasks folder
-    from clarinet.services.schema_hydration import load_custom_hydrators
-
-    hydrator_count = load_custom_hydrators(settings.config_tasks_path)
-    if hydrator_count:
-        logger.info(f"Loaded {hydrator_count} custom schema hydrator(s)")
-
-    # Load custom slicer context hydrators from tasks folder
-    from clarinet.services.slicer.context_hydration import load_custom_slicer_hydrators
-
-    slicer_hydrator_count = load_custom_slicer_hydrators(settings.config_tasks_path)
-    if slicer_hydrator_count:
-        logger.info(f"Loaded {slicer_hydrator_count} custom slicer context hydrator(s)")
+    # Load project file registry for API use; parse/validation errors get the
+    # same Config banner as broken plan/ code instead of a raw traceback
+    try:
+        app.state.project_file_registry = await load_project_file_registry(
+            settings.config_tasks_path
+        )
+    except Exception as e:
+        raise StartupError(
+            component="Config",
+            reason=f"Failed to load project file registry: {e}",
+            hint="Fix file_registry.toml / file_registry.json in the config folder, then restart",
+            disableable=False,
+        ) from e
 
     # Load custom SQL report templates from project's reports folder
     from clarinet.services.report_service import ReportRegistry
@@ -263,6 +337,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     if settings.recordflow_enabled:
         try:
             await _init_recordflow(app)
+        except ConfigLoadError as e:
+            raise _config_startup_error(e) from e
         except Exception as e:
             raise StartupError(
                 component="RecordFlow",
@@ -307,6 +383,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
             count = await sync_pipeline_definitions()
             logger.info(f"Synced {count} pipeline definition(s) to database")
+        except ConfigLoadError as e:
+            raise _config_startup_error(e) from e
         except Exception as e:
             raise StartupError(
                 component="Pipeline",
@@ -524,15 +602,18 @@ def create_app(root_path: str = "") -> FastAPI:
             # Should not happen: _check_frontend() in lifespan catches this.
             logger.error("No static directories found after startup")
 
-        # Cache rendered index.html with $BASE_PATH substituted
+        # Cache rendered index.html with $BASE_PATH / $PROJECT_TITLE substituted
         _index_html_cache: dict[str, str] = {}
 
         def _render_index(index_path: Path) -> str:
-            """Read index.html, substitute $BASE_PATH template variable, cache result."""
+            """Read index.html, substitute $BASE_PATH/$PROJECT_TITLE, cache result."""
             key = str(index_path)
             if key not in _index_html_cache:
                 tmpl = Template(index_path.read_text(encoding="utf-8"))
-                _index_html_cache[key] = tmpl.safe_substitute(BASE_PATH=root_path)
+                _index_html_cache[key] = tmpl.safe_substitute(
+                    BASE_PATH=root_path,
+                    PROJECT_TITLE=html.escape(settings.browser_title),
+                )
             return _index_html_cache[key]
 
         # Serve index.html for all non-API routes (SPA support)
@@ -581,6 +662,10 @@ def create_app(root_path: str = "") -> FastAPI:
                 except ValueError:
                     continue
                 if candidate.is_file():
+                    # index.html carries $BASE_PATH/$PROJECT_TITLE placeholders —
+                    # render it instead of serving the raw template.
+                    if candidate.name == "index.html":
+                        return HTMLResponse(_render_index(candidate))
                     return FileResponse(candidate)
 
             # Serve index.html for all other routes (SPA routing)

@@ -8,7 +8,7 @@ import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 
-from clarinet.config.reconciler import _COMPARED_FIELDS, reconcile_record_types
+from clarinet.config.reconciler import _COMPARED_FIELDS, ReconcileResult, reconcile_record_types
 from clarinet.exceptions.domain import ConfigurationError
 from clarinet.models.record import RecordType, RecordTypeCreate
 from clarinet.models.user import UserRole
@@ -522,6 +522,46 @@ async def test_reconcile_config_passes_with_valid_roles(
     assert "no-role-type" in result.created
 
 
+async def _reconcile_with_mocked_env(
+    test_session: AsyncSession, items: list[RecordTypeCreate]
+) -> "ReconcileResult":
+    """Run ``reconcile_config`` over *items* with mocked python-mode settings.
+
+    Shared by the registry-reference guard tests (data_validators /
+    slicer_context_hydrators). ``spec_set=True`` keeps attribute names
+    honest — a typo in a ``config_*_file`` assignment would raise instead
+    of silently leaving the real attribute as an auto-created MagicMock
+    (see tests/CLAUDE.md → MagicMock pitfalls).
+    """
+    from unittest.mock import AsyncMock, patch
+
+    from clarinet.utils.bootstrap import reconcile_config
+
+    with (
+        patch(
+            "clarinet.config.python_loader.load_python_config",
+            new_callable=AsyncMock,
+            return_value=items,
+        ),
+        patch(
+            "clarinet.utils.bootstrap.db_manager.get_async_session_context",
+        ) as mock_ctx,
+        patch("clarinet.settings.settings", spec_set=True) as mock_settings,
+    ):
+        mock_settings.config_mode = "python"
+        mock_settings.config_tasks_path = "/fake/path"
+        mock_settings.config_validators_file = "validators.py"
+        mock_settings.config_context_hydrators_file = "context_hydrators.py"
+        mock_settings.config_delete_orphans = False
+
+        ctx = AsyncMock()
+        ctx.__aenter__ = AsyncMock(return_value=test_session)
+        ctx.__aexit__ = AsyncMock(return_value=False)
+        mock_ctx.return_value = ctx
+
+        return await reconcile_config(folder="/fake/path")
+
+
 @pytest.mark.asyncio
 async def test_reconcile_config_validates_data_validators_registered(
     test_session: AsyncSession,
@@ -532,13 +572,10 @@ async def test_reconcile_config_validates_data_validators_registered(
     Mirrors the role-validation guard above — fail-fast at startup keeps a broken
     config from silently bypassing submit-time validation.
     """
-    from unittest.mock import AsyncMock, patch
-
     from clarinet.services.record_data_validation import _VALIDATOR_REGISTRY
-    from clarinet.utils.bootstrap import reconcile_config
 
     # Isolate registry so other tests' registrations don't bleed in.
-    saved_registry = dict(_VALIDATOR_REGISTRY)
+    saved_registry = _VALIDATOR_REGISTRY.snapshot()
     _VALIDATOR_REGISTRY.clear()
     try:
         items = [
@@ -548,38 +585,14 @@ async def test_reconcile_config_validates_data_validators_registered(
             ),
         ]
 
-        with (
-            patch(
-                "clarinet.config.python_loader.load_python_config",
-                new_callable=AsyncMock,
-                return_value=items,
-            ),
-            patch(
-                "clarinet.utils.bootstrap.db_manager.get_async_session_context",
-            ) as mock_ctx,
-            patch("clarinet.settings.settings") as mock_settings,
-        ):
-            mock_settings.config_mode = "python"
-            mock_settings.config_tasks_path = "/fake/path"
-            mock_settings.config_validators_file = "validators.py"
-            mock_settings.config_delete_orphans = False
-
-            ctx = AsyncMock()
-            ctx.__aenter__ = AsyncMock(return_value=test_session)
-            ctx.__aexit__ = AsyncMock(return_value=False)
-            mock_ctx.return_value = ctx
-
-            with pytest.raises(
-                ConfigurationError, match=r"plan\.nonexistent_validator"
-            ) as exc_info:
-                await reconcile_config(folder="/fake/path")
+        with pytest.raises(ConfigurationError, match=r"plan\.nonexistent_validator") as exc_info:
+            await _reconcile_with_mocked_env(test_session, items)
 
         msg = str(exc_info.value)
         assert "rt-with-ghost-validator" in msg
-        assert "plan/validators.py" in msg or "validators.py" in msg
+        assert "validators.py" in msg
     finally:
-        _VALIDATOR_REGISTRY.clear()
-        _VALIDATOR_REGISTRY.update(saved_registry)
+        _VALIDATOR_REGISTRY.restore(saved_registry)
 
 
 @pytest.mark.asyncio
@@ -587,15 +600,12 @@ async def test_reconcile_config_passes_with_registered_validator(
     test_session: AsyncSession,
 ) -> None:
     """reconcile_config succeeds when every data_validators name is registered."""
-    from unittest.mock import AsyncMock, patch
-
     from clarinet.services.record_data_validation import (
         _VALIDATOR_REGISTRY,
         record_validator,
     )
-    from clarinet.utils.bootstrap import reconcile_config
 
-    saved_registry = dict(_VALIDATOR_REGISTRY)
+    saved_registry = _VALIDATOR_REGISTRY.snapshot()
     _VALIDATOR_REGISTRY.clear()
     try:
 
@@ -611,35 +621,81 @@ async def test_reconcile_config_passes_with_registered_validator(
             _make_config("rt-without-validators"),  # data_validators=None
         ]
 
-        with (
-            patch(
-                "clarinet.config.python_loader.load_python_config",
-                new_callable=AsyncMock,
-                return_value=items,
-            ),
-            patch(
-                "clarinet.utils.bootstrap.db_manager.get_async_session_context",
-            ) as mock_ctx,
-            patch("clarinet.settings.settings") as mock_settings,
-        ):
-            mock_settings.config_mode = "python"
-            mock_settings.config_tasks_path = "/fake/path"
-            mock_settings.config_validators_file = "validators.py"
-            mock_settings.config_delete_orphans = False
-
-            ctx = AsyncMock()
-            ctx.__aenter__ = AsyncMock(return_value=test_session)
-            ctx.__aexit__ = AsyncMock(return_value=False)
-            mock_ctx.return_value = ctx
-
-            result = await reconcile_config(folder="/fake/path")
+        result = await _reconcile_with_mocked_env(test_session, items)
 
         assert result.errors == []
         assert "rt-with-registered-validator" in result.created
         assert "rt-without-validators" in result.created
     finally:
-        _VALIDATOR_REGISTRY.clear()
-        _VALIDATOR_REGISTRY.update(saved_registry)
+        _VALIDATOR_REGISTRY.restore(saved_registry)
+
+
+@pytest.mark.asyncio
+async def test_reconcile_config_validates_slicer_hydrators_registered(
+    test_session: AsyncSession,
+) -> None:
+    """reconcile_config raises ConfigurationError when slicer_context_hydrators
+    references an unregistered hydrator name.
+
+    Mirrors the data_validators guard above — a typo here used to surface only
+    at runtime, when the doctor opened the record in Slicer.
+    """
+    from clarinet.services.slicer.context_hydration import _SLICER_HYDRATOR_REGISTRY
+
+    # Isolate registry so other tests' registrations don't bleed in.
+    saved_registry = _SLICER_HYDRATOR_REGISTRY.snapshot()
+    _SLICER_HYDRATOR_REGISTRY.clear()
+    try:
+        items = [
+            _make_config(
+                "rt-with-ghost-hydrator",
+                slicer_context_hydrators=["plan.nonexistent_hydrator"],
+            ),
+        ]
+
+        with pytest.raises(ConfigurationError, match=r"plan\.nonexistent_hydrator") as exc_info:
+            await _reconcile_with_mocked_env(test_session, items)
+
+        msg = str(exc_info.value)
+        assert "rt-with-ghost-hydrator" in msg
+        assert "context_hydrators.py" in msg
+    finally:
+        _SLICER_HYDRATOR_REGISTRY.restore(saved_registry)
+
+
+@pytest.mark.asyncio
+async def test_reconcile_config_passes_with_registered_slicer_hydrator(
+    test_session: AsyncSession,
+) -> None:
+    """reconcile_config succeeds when every slicer_context_hydrators name is registered."""
+    from clarinet.services.slicer.context_hydration import (
+        _SLICER_HYDRATOR_REGISTRY,
+        slicer_context_hydrator,
+    )
+
+    saved_registry = _SLICER_HYDRATOR_REGISTRY.snapshot()
+    _SLICER_HYDRATOR_REGISTRY.clear()
+    try:
+
+        @slicer_context_hydrator("test.registered_hydrator")
+        async def _registered(record, context, ctx):
+            return {}
+
+        items = [
+            _make_config(
+                "rt-with-registered-hydrator",
+                slicer_context_hydrators=["test.registered_hydrator"],
+            ),
+            _make_config("rt-without-hydrators"),  # slicer_context_hydrators=None
+        ]
+
+        result = await _reconcile_with_mocked_env(test_session, items)
+
+        assert result.errors == []
+        assert "rt-with-registered-hydrator" in result.created
+        assert "rt-without-hydrators" in result.created
+    finally:
+        _SLICER_HYDRATOR_REGISTRY.restore(saved_registry)
 
 
 @pytest.mark.asyncio

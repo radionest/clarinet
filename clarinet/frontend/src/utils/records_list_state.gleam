@@ -8,6 +8,7 @@
 import api/models.{type Record}
 import gleam/dict.{type Dict}
 import gleam/int
+import gleam/list
 import gleam/option
 import gleam/order
 import gleam/string
@@ -51,19 +52,29 @@ pub fn common_comparator(
 /// and persist it to localStorage under `storage_key`.
 /// `route_for` builds the page's Route from the filter dict — pass the
 /// route constructor directly (e.g. `router.Records`).
+/// `transient_keys` are stripped from the localStorage copy while staying
+/// in the URL: filters with no visible UI on the page (e.g. "user" on
+/// /records) must work as deep links but not silently resurrect on a
+/// later plain visit.
 pub fn sync_filters_effect(
   filters: Dict(String, String),
   route_for: fn(Dict(String, String)) -> Route,
   storage_key: String,
+  transient_keys: List(String),
 ) -> Effect(msg) {
   effect.batch([
     url.replace_route(route_for(filters)),
-    storage.save_dict(storage.Local, storage_key, filters),
+    storage.save_dict(
+      storage.Local,
+      storage_key,
+      drop_keys(filters, transient_keys),
+    ),
   ])
 }
 
 /// Resolve the initial filter dict for a page's `init`:
-/// - URL filters non-empty → use them, save to localStorage.
+/// - URL filters non-empty → use them, save to localStorage (minus
+///   `transient_keys` — see `sync_filters_effect`).
 /// - URL filters empty + localStorage non-empty → restore from storage,
 ///   reflect into the URL via `replace_state` so the address bar matches.
 /// - Both empty → empty dict, no effect.
@@ -71,18 +82,34 @@ pub fn resolve_initial_filters(
   url_filters: Dict(String, String),
   storage_key: String,
   route_for: fn(Dict(String, String)) -> Route,
+  transient_keys: List(String),
 ) -> #(Dict(String, String), Effect(msg)) {
   case dict.is_empty(url_filters) {
     False -> #(
       url_filters,
-      storage.save_dict(storage.Local, storage_key, url_filters),
+      storage.save_dict(
+        storage.Local,
+        storage_key,
+        drop_keys(url_filters, transient_keys),
+      ),
     )
     True -> {
-      let saved = storage.load_dict_sync(storage.Local, storage_key)
+      // Defensive: a storage entry written before a key became transient
+      // may still carry it — drop on read as well as on write.
+      let saved =
+        storage.load_dict_sync(storage.Local, storage_key)
+        |> drop_keys(transient_keys)
       case dict.is_empty(saved) {
         True -> #(dict.new(), effect.none())
         False -> #(saved, url.replace_route(route_for(saved)))
       }
     }
   }
+}
+
+fn drop_keys(
+  filters: Dict(String, String),
+  keys: List(String),
+) -> Dict(String, String) {
+  list.fold(keys, filters, dict.delete)
 }

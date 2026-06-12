@@ -100,7 +100,7 @@ class InvalidateRecordsAction(_ActionBase):
 
     type: Literal["invalidate_records"] = "invalidate_records"
     record_type_names: list[str]
-    mode: str = "hard"
+    mode: Literal["hard", "soft"] = "hard"
     callback: Callable[..., Any] | None = None
 
 

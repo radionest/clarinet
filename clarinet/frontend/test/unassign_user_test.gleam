@@ -19,6 +19,7 @@ fn make_shared() -> shared.Shared {
   shared.Shared(
     user: None,
     route: router.Home,
+    previous_route: None,
     project_name: "",
     project_description: "",
     cache: cache.init(),
@@ -58,6 +59,7 @@ fn make_record() -> models.Record {
     started_at: None,
     finished_at: None,
     radiant: None,
+    display_anon_id: None,
     is_editable: True,
   )
 }

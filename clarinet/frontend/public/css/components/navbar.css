@@ -1,5 +1,5 @@
 /* ============================
-   Navigation (sticky)
+   Navigation — ebony chassis
    ============================ */
 
 .navbar {
@@ -8,54 +8,79 @@
     width: 100%;
     height: var(--navbar-height);
     z-index: 1000;
-    background: white;
-    border-bottom: 1px solid var(--border-color);
+    background: var(--ebony);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
     display: flex;
     align-items: center;
-    padding: 0 var(--spacing-lg);
-    box-shadow: var(--shadow-sm);
+    padding: 0 var(--container-pad);
 }
 
 .navbar-brand {
-    font-size: 1.5rem;
-    font-weight: 700;
-    color: var(--primary-color);
-    text-decoration: none;
+    font-family: var(--font-display);
+    font-size: 1.25rem;
+    font-weight: 600;
+    letter-spacing: 0.01em;
     flex-shrink: 0;
 
     & a {
-        color: inherit;
+        color: var(--chrome-text-bright);
         text-decoration: none;
+        display: inline-flex;
+        align-items: baseline;
+        gap: 8px;
+
+        /* Brass tick — the instrument's key */
+        &::before {
+            content: "";
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: var(--brass-bright);
+            align-self: center;
+            flex-shrink: 0;
+        }
+
+        &:hover {
+            color: #ffffff;
+        }
     }
 }
 
 .navbar-menu {
     display: flex;
     align-items: center;
-    gap: var(--spacing-xs);
+    gap: 2px;
     margin-left: auto;
+    min-width: 0;
 }
 
 .navbar-item {
-    color: var(--text-color);
+    position: relative;
+    color: var(--chrome-text);
     text-decoration: none;
     font-weight: 500;
-    padding: var(--spacing-sm) var(--spacing-md);
-    border-radius: var(--radius-md);
-    transition: background-color 0.2s, color 0.2s;
-    font-size: 0.9rem;
+    /* Full-height hit area so the active underline sits on the bar's edge */
+    padding: 0 12px;
+    line-height: var(--navbar-height);
+    transition: background-color 0.15s, color 0.15s;
+    font-size: 0.875rem;
     white-space: nowrap;
 
     &:hover {
-        background-color: var(--surface-color);
-        color: var(--primary-color);
+        color: var(--chrome-text-bright);
+        background-color: rgba(255, 255, 255, 0.05);
     }
 
     &.active {
-        background-color: #eff6ff;
-        color: var(--primary-color);
+        color: var(--chrome-text-bright);
         font-weight: 600;
+        box-shadow: inset 0 -2px 0 0 var(--brass-bright);
     }
+}
+
+/* Teal outline is invisible on the ebony chrome — use brass there */
+.navbar :focus-visible {
+    outline-color: var(--brass-bright);
 }
 
 .navbar-user {
@@ -64,26 +89,52 @@
     gap: var(--spacing-sm);
     margin-left: var(--spacing-md);
     padding-left: var(--spacing-md);
-    border-left: 1px solid var(--border-color);
+    border-left: 1px solid rgba(255, 255, 255, 0.12);
 }
 
 .username {
-    font-size: 0.875rem;
-    color: var(--text-secondary);
+    font-size: 0.8125rem;
+    font-family: var(--font-mono);
+    color: var(--chrome-text);
+
+    &:hover {
+        color: var(--chrome-text-bright);
+    }
 }
 
 .btn-logout {
     background: none;
-    border: 1px solid var(--border-color);
+    border: 1px solid rgba(255, 255, 255, 0.18);
     border-radius: var(--radius-md);
-    padding: var(--spacing-xs) var(--spacing-sm);
-    font-size: 0.8rem;
-    color: var(--text-secondary);
+    padding: 3px 10px;
+    font-size: 0.75rem;
+    font-family: var(--font-sans);
+    color: var(--chrome-text);
     cursor: pointer;
-    transition: all 0.2s;
+    transition: all 0.15s;
 
     &:hover {
-        border-color: var(--danger-color);
-        color: var(--danger-color);
+        border-color: var(--red);
+        color: #e89a91;
+    }
+}
+
+.btn-locale {
+    background: none;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: var(--radius-md);
+    padding: 3px 8px;
+    font-size: 0.7rem;
+    font-family: var(--font-mono);
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    color: var(--chrome-text);
+    cursor: pointer;
+    margin-left: var(--spacing-sm);
+    transition: all 0.15s;
+
+    &:hover {
+        border-color: var(--brass-bright);
+        color: var(--brass-bright);
     }
 }

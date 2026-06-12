@@ -25,7 +25,7 @@ rabbitmq_password = "clarinet_test"
 anon_send_to_pacs = true
 config_mode = "python"
 config_record_types_file = "definitions/record_types.py"
-config_context_hydrators_file = "hydrators/context_hydrators.py"
+# config_context_hydrators_file defaults to "slicer_hydrators.py" (plan root)
 recordflow_paths = ["./tasks/workflows"]
 frontend_enabled = true
 

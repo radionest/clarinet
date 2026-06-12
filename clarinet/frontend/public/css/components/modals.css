@@ -5,7 +5,8 @@
 .modal-backdrop {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.5);
+    background: rgba(27, 29, 33, 0.55);
+    backdrop-filter: blur(2px);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -14,10 +15,12 @@
 }
 
 .modal {
-    background: white;
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    border-top: 3px solid var(--brass);
     border-radius: var(--radius-lg);
     padding: var(--spacing-lg);
-    max-width: 500px;
+    max-width: 520px;
     width: 90%;
     max-height: 90vh;
     overflow-y: auto;
@@ -28,11 +31,12 @@
 .modal-header {
     margin-bottom: var(--spacing-md);
     padding-bottom: var(--spacing-md);
-    border-bottom: 1px solid var(--border-color);
+    border-bottom: 1px solid var(--hairline);
 }
 
 .modal-title {
-    font-size: 1.25rem;
+    font-family: var(--font-display);
+    font-size: 1.3rem;
     font-weight: 600;
     margin-bottom: 0;
 }

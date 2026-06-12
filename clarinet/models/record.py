@@ -348,6 +348,7 @@ class RecordRead(RecordBase):
     study: StudyBase | None = None
     series: SeriesBase | None = None
     record_type: RecordTypeRead
+    display_anon_id: str | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -383,6 +384,33 @@ class RecordRead(RecordBase):
                 result["file_links"] = None
             return result
         return data
+
+    @model_validator(mode="after")
+    def populate_display_anon_id(self) -> "RecordRead":
+        """Per-study anon ID for table display; None unless the mode applies.
+
+        Set only when ``anon_per_study_patient_id`` is enabled and the study
+        is anonymized (gating lives in ``compute_display_anon_id``); consumers
+        fall back to ``patient.anon_id`` when None.
+
+        Computed at validation time (not a ``computed_field``): masking
+        rewrites ``study_uid`` to the anon UID before FastAPI serializes the
+        response, and a hash of the anon UID would not match the PatientID
+        written into PACS. An already-set value is trusted (first-write-wins)
+        so FastAPI's response re-validation after masking keeps the
+        original-UID hash — safe only while ``RecordRead`` stays a
+        response-only model; revisit the guard if it ever accepts client
+        input.
+        """
+        if self.display_anon_id is not None:
+            return self
+        from ..services.common.storage_paths import compute_display_anon_id
+
+        self.display_anon_id = compute_display_anon_id(
+            self.study_uid,
+            self.study.anon_uid if self.study is not None else None,
+        )
+        return self
 
     @computed_field
     def radiant(self) -> str | None:

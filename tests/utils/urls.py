@@ -37,6 +37,7 @@ RECORDS_BULK_STATUS = "/api/records/bulk/status"
 # Dynamic: f"{RECORDS_BASE}/{record_id}/data/prefill"
 # Dynamic: f"{RECORDS_BASE}/{record_id}/context-info"
 # Dynamic: f"{RECORDS_BASE}/{record_id}/output-files/{file_name}"
+# Dynamic: f"{RECORDS_BASE}/{record_id}/invalidate"
 
 
 def record_events_url(record_id: int) -> str:
@@ -112,6 +113,16 @@ HEALTH = "/api/health"
 # --- Pipelines ---
 PIPELINES_BASE = "/api/pipelines"
 PIPELINES_SYNC = "/api/pipelines/sync"
+PIPELINE_RUNS = "/api/pipelines/runs"
+
+
+def pipeline_run_url(task_id: str) -> str:
+    return f"{PIPELINE_RUNS}/{task_id}"
+
+
+def record_runs_url(record_id: int) -> str:
+    return f"{RECORDS_BASE}/{record_id}/runs"
+
 
 # --- Viewers ---
 # Dynamic: f"{RECORDS_BASE}/{record_id}/viewers"

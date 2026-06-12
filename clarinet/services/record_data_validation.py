@@ -18,9 +18,7 @@ See :doc:`.claude/rules/record-data-validator.md` for the contract and a
 worked example.
 """
 
-import importlib.util
 import inspect
-import sys
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from pathlib import Path
@@ -28,6 +26,7 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from clarinet.config.custom_registry import CustomCodeRegistry
 from clarinet.exceptions.domain import FieldError, RecordDataValidationError
 from clarinet.models.record import Record
 from clarinet.repositories.record_repository import RecordRepository
@@ -86,18 +85,21 @@ class ValidatorSpec:
     run_on_partial: bool
 
 
-_VALIDATOR_REGISTRY: dict[str, ValidatorSpec] = {}
+_VALIDATOR_REGISTRY: CustomCodeRegistry[ValidatorSpec] = CustomCodeRegistry(
+    filename_setting="config_validators_file",
+    label="record validator",
+)
 
 
 def get_registered_validator_names() -> frozenset[str]:
     """Return the set of currently registered validator names.
 
-    Public accessor for the module-private ``_VALIDATOR_REGISTRY`` dict —
+    Public accessor for the module-private ``_VALIDATOR_REGISTRY`` —
     intended for reconcile-time validation in :func:`bootstrap.reconcile_config`
     and similar consumers that need to check membership without coupling to
     the registry's internal structure.
     """
-    return frozenset(_VALIDATOR_REGISTRY)
+    return _VALIDATOR_REGISTRY.names()
 
 
 def record_validator(
@@ -131,14 +133,16 @@ def record_validator(
                 f"{func.__module__}.{func.__qualname__} is a regular function. "
                 f"``run_record_validators`` awaits the result."
             )
-        if name in _VALIDATOR_REGISTRY:
-            existing = _VALIDATOR_REGISTRY[name].func
+        existing = _VALIDATOR_REGISTRY.get(name)
+        if existing is not None:
             raise ValueError(
                 f"Record validator '{name}' is already registered "
-                f"(by {existing.__module__}.{existing.__qualname__}). "
+                f"(by {existing.func.__module__}.{existing.func.__qualname__}). "
                 f"Choose a unique name."
             )
-        _VALIDATOR_REGISTRY[name] = ValidatorSpec(func=func, run_on_partial=run_on_partial)
+        _VALIDATOR_REGISTRY.register(
+            name, ValidatorSpec(func=func, run_on_partial=run_on_partial), replace=False
+        )
         return func
 
     return decorator
@@ -200,63 +204,22 @@ async def run_record_validators(
 
 
 def load_custom_validators(folder: str | Path) -> int:
-    """Load ``validators.py`` (or ``settings.config_validators_file``) via importlib.
+    """Load ``validators.py`` (``settings.config_validators_file``) from *folder*.
 
     Decorators in the loaded file auto-register into ``_VALIDATOR_REGISTRY``.
     Must be called **before** ``reconcile_config()`` in the lifespan so that
     ``reconcile_record_types`` can fail-fast on unknown validator names.
 
     Args:
-        folder: Directory that may contain a ``validators.py`` file.
+        folder: Config root that may contain the validators file.
 
     Returns:
-        Number of *new* validators added (0 if file not found or all names
-        were already present).
+        Number of *new* validators added (0 if file not found).
+
+    Raises:
+        ConfigLoadError: If the file exists but fails to import. A
+            ``ValueError`` from ``@record_validator`` (duplicate name /
+            non-async function) surfaces the same way, preserved as
+            ``__cause__``.
     """
-    from clarinet.settings import settings
-
-    path = Path(folder) / settings.config_validators_file
-    if not path.exists():
-        return 0
-
-    before = set(_VALIDATOR_REGISTRY)
-
-    # If validators file is in a subdirectory, add its parent to sys.path so
-    # local sibling imports work (mirrors load_custom_hydrators).
-    folder_str = str(Path(folder).resolve())
-    parent_str = str(path.parent.resolve())
-    added_parent = parent_str != folder_str and parent_str not in sys.path
-    if added_parent:
-        sys.path.insert(0, parent_str)
-
-    module_name = "clarinet_custom_validators"
-    spec = importlib.util.spec_from_file_location(module_name, path)
-    if spec is None or spec.loader is None:
-        logger.error(f"Cannot create module spec for {path}")
-        if added_parent and parent_str in sys.path:
-            sys.path.remove(parent_str)
-        return 0
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
-    # Narrow try-scope per project guidance ("max two function calls; always
-    # log errors before handling"). Only the dynamic import call can raise
-    # validator-author bugs; setup above is fixed-shape and either succeeds or
-    # surfaces a logged early return. ``ValueError`` from
-    # ``@record_validator`` (duplicate name / non-async function) propagates
-    # so the lifespan crashes loudly instead of silently leaving a partial
-    # registry behind.
-    try:
-        spec.loader.exec_module(module)
-    except ValueError:
-        raise
-    except Exception:
-        logger.exception(f"Error loading custom validators from {path}")
-        return 0
-    finally:
-        if added_parent and parent_str in sys.path:
-            sys.path.remove(parent_str)
-
-    added = set(_VALIDATOR_REGISTRY) - before
-    if added:
-        logger.info(f"Loaded {len(added)} custom record validator(s): {', '.join(sorted(added))}")
-    return len(added)
+    return _VALIDATOR_REGISTRY.load_from(folder)

@@ -22,8 +22,8 @@
 }
 
 .welcome {
-    font-size: 1.1rem;
-    color: var(--text-secondary);
+    font-size: 1rem;
+    color: var(--ink-soft);
     margin-bottom: var(--spacing-lg);
 }
 
@@ -38,45 +38,103 @@
     gap: var(--spacing-md);
 }
 
+/* Instrument readout: big mono numeral over an engraved label */
 .stat-card {
     display: flex;
     flex-direction: column;
-    padding: var(--spacing-lg);
-    border-left: 4px solid var(--primary-color);
+    padding: var(--spacing-md) var(--spacing-lg);
+    border-left: 3px solid var(--teal);
 
     &.stat-blue {
-        border-left-color: var(--primary-color);
+        border-left-color: var(--blue);
     }
 
     &.stat-green {
-        border-left-color: var(--success-color);
+        border-left-color: var(--green);
     }
 
     &.stat-purple {
-        border-left-color: #7c3aed;
+        border-left-color: var(--plum);
+    }
+
+    &.stat-yellow {
+        border-left-color: var(--amber);
+    }
+
+    &.stat-orange {
+        border-left-color: var(--brass-bright);
+    }
+
+    &.stat-red {
+        border-left-color: var(--red);
+    }
+
+    &.stat-gray {
+        border-left-color: var(--ink-faint);
     }
 }
 
 .stat-value {
-    font-size: 2rem;
-    font-weight: 700;
-    color: var(--text-color);
+    font-family: var(--font-mono);
+    font-size: 2.1rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: var(--ink);
     line-height: 1.2;
 }
 
 .stat-label {
-    font-size: 0.9rem;
-    color: var(--text-secondary);
-    margin-top: var(--spacing-xs);
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--ink-faint);
+    margin-top: 2px;
 }
 
 .stat-link {
-    font-size: 0.85rem;
+    font-size: 0.8125rem;
     margin-top: var(--spacing-sm);
-    color: var(--primary-color);
+    color: var(--teal);
 
     &:hover {
         text-decoration: underline;
+    }
+}
+
+/* One-click worklist entry points on the user dashboard */
+.quick-actions-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: var(--spacing-md);
+}
+
+.quick-action {
+    display: block;
+    padding: var(--spacing-md) var(--spacing-lg);
+    border-left: 3px solid var(--teal);
+    font-weight: 600;
+    color: var(--ink);
+    transition: background-color 0.15s;
+
+    &::after {
+        content: " →";
+    }
+
+    &:hover {
+        background-color: var(--surface-sunken);
+    }
+
+    &.qa-inwork {
+        border-left-color: var(--brass-bright);
+    }
+
+    &.qa-pending {
+        border-left-color: var(--amber);
+    }
+
+    &.qa-free {
+        border-left-color: var(--plum);
     }
 }
 
@@ -84,18 +142,23 @@
     display: flex;
     flex-direction: column;
     gap: 0;
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
 }
 
 .recent-item {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: var(--spacing-md);
-    border-bottom: 1px solid var(--border-color);
-    transition: background-color 0.2s;
+    gap: var(--spacing-md);
+    padding: 10px var(--spacing-md);
+    border-bottom: 1px solid var(--hairline);
+    transition: background-color 0.15s;
 
     &:hover {
-        background-color: var(--surface-color);
+        background-color: var(--surface-sunken);
     }
 
     &:last-child {
@@ -105,10 +168,13 @@
 
 .recent-link {
     color: var(--text-color);
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
     font-weight: 500;
+    overflow-wrap: anywhere;
 
     &:hover {
-        color: var(--primary-color);
+        color: var(--teal);
     }
 }
 
@@ -117,13 +183,15 @@
 }
 
 .recent-date {
-    font-size: 0.85rem;
-    color: var(--text-secondary);
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    color: var(--ink-faint);
+    white-space: nowrap;
 }
 
 .empty-state {
     text-align: center;
     padding: var(--spacing-xl);
-    color: var(--text-secondary);
+    color: var(--ink-faint);
     font-style: italic;
 }
