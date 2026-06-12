@@ -22,6 +22,216 @@ from clarinet.config.python_loader import (
 from clarinet.exceptions.domain import ConfigLoadError
 
 # ---------------------------------------------------------------------------
+# clarinet_plan anchor package (plan_package.py)
+# ---------------------------------------------------------------------------
+
+
+class TestPlanPackage:
+    """Anchor-package machinery: activate/ensure/deactivate, name derivation,
+    import classification.  The autouse ``_plan_package_sanitation`` conftest
+    fixture tears the anchor down after each test."""
+
+    def _make_root(self, tmp_path):
+        (tmp_path / "record_types.py").write_text("MARKER = 'rt'\n")
+        (tmp_path / "utils").mkdir()
+        (tmp_path / "utils" / "study_type.py").write_text("VALUE = 7\n")
+        return tmp_path
+
+    def test_activate_installs_anchor(self, tmp_path):
+        from clarinet.config import plan_package as pp
+
+        root = self._make_root(tmp_path)
+        pp.activate_plan_package(root)
+        assert pp.plan_root() == root.resolve()
+        assert pp.PLAN_PACKAGE in sys.modules
+
+    def test_reactivation_replaces_stale_anchor(self, tmp_path):
+        from clarinet.config import plan_package as pp
+
+        root = self._make_root(tmp_path)
+        pp.activate_plan_package(root)
+        pp.import_plan_module("clarinet_plan.utils")
+        assert hasattr(sys.modules[pp.PLAN_PACKAGE], "utils")
+
+        pp.activate_plan_package(root)
+        # Fresh anchor: the stale submodule attribute does not survive.
+        assert not hasattr(sys.modules[pp.PLAN_PACKAGE], "utils")
+
+    def test_ensure_root_noop_for_root_and_descendants(self, tmp_path):
+        from clarinet.config import plan_package as pp
+
+        root = self._make_root(tmp_path)
+        pp.activate_plan_package(root)
+        pp.ensure_plan_root(root)
+        pp.ensure_plan_root(root / "utils")
+        assert pp.plan_root() == root.resolve()
+
+    def test_ensure_root_auto_activates_when_absent(self, tmp_path):
+        from clarinet.config import plan_package as pp
+
+        root = self._make_root(tmp_path)
+        assert pp.plan_root() is None
+        pp.ensure_plan_root(root)
+        assert pp.plan_root() == root.resolve()
+
+    def test_ensure_root_outside_raises(self, tmp_path):
+        from clarinet.config import plan_package as pp
+
+        root = tmp_path / "plan"
+        root.mkdir()
+        self._make_root(root)
+        pp.activate_plan_package(root)
+        outside = tmp_path / "elsewhere"
+        outside.mkdir()
+        with pytest.raises(ConfigLoadError, match="must live inside config_tasks_path"):
+            pp.ensure_plan_root(outside)
+
+    def test_one_file_one_name(self, tmp_path):
+        from clarinet.config import plan_package as pp
+
+        root = self._make_root(tmp_path)
+        pp.activate_plan_package(root)
+        assert pp.module_name_for(root / "record_types.py") == "clarinet_plan.record_types"
+        # A file in a subdirectory is reachable only as clarinet_plan.<sub>.<mod>.
+        assert (
+            pp.module_name_for(root / "utils" / "study_type.py") == "clarinet_plan.utils.study_type"
+        )
+
+    def test_relative_imports_work(self, tmp_path):
+        from clarinet.config import plan_package as pp
+
+        root = self._make_root(tmp_path)
+        (root / "workflows").mkdir()
+        (root / "workflows" / "callbacks.py").write_text("CB = 'cb'\n")
+        (root / "workflows" / "ct_flow.py").write_text(
+            "from .callbacks import CB\nfrom ..utils.study_type import VALUE\nOUT = (CB, VALUE)\n"
+        )
+        pp.activate_plan_package(root)
+        mod = pp.import_plan_module("clarinet_plan.workflows.ct_flow")
+        assert mod.OUT == ("cb", 7)
+
+    def test_cross_module_import_late_from_early(self, tmp_path):
+        """Cross-flow imports work in both directions — the sorted-order
+        limitation of the old loader is gone (native module cache)."""
+        from clarinet.config import plan_package as pp
+
+        root = tmp_path
+        # a_flow sorts BEFORE b_flow yet imports it — re-execution-free.
+        (root / "a_flow.py").write_text("from clarinet_plan.b_flow import B\nA = B + 1\n")
+        (root / "b_flow.py").write_text("B = 100\n")
+        pp.activate_plan_package(root)
+        mod = pp.import_plan_module("clarinet_plan.a_flow")
+        assert mod.A == 101
+
+    def test_invalid_identifier_filename_raises(self, tmp_path):
+        from clarinet.config import plan_package as pp
+
+        root = self._make_root(tmp_path)
+        (root / "2_phase_flow.py").write_text("X = 1\n")
+        pp.activate_plan_package(root)
+        with pytest.raises(ConfigLoadError) as exc:
+            pp.module_name_for(root / "2_phase_flow.py")
+        assert "2_phase_flow" in str(exc.value)
+
+    def test_invalid_identifier_dirname_raises(self, tmp_path):
+        from clarinet.config import plan_package as pp
+
+        root = self._make_root(tmp_path)
+        (root / "my-utils").mkdir()
+        (root / "my-utils" / "helper.py").write_text("X = 1\n")
+        pp.activate_plan_package(root)
+        with pytest.raises(ConfigLoadError) as exc:
+            pp.module_name_for(root / "my-utils" / "helper.py")
+        assert "my-utils" in str(exc.value)
+
+    def test_keyword_segment_raises(self, tmp_path):
+        from clarinet.config import plan_package as pp
+
+        root = self._make_root(tmp_path)
+        (root / "class.py").write_text("X = 1\n")
+        pp.activate_plan_package(root)
+        with pytest.raises(ConfigLoadError):
+            pp.module_name_for(root / "class.py")
+
+    def test_module_vs_dir_conflict_raises(self, tmp_path):
+        from clarinet.config import plan_package as pp
+
+        root = self._make_root(tmp_path)
+        (root / "hydrators.py").write_text("X = 1\n")
+        (root / "hydrators").mkdir()
+        pp.activate_plan_package(root)
+        with pytest.raises(ConfigLoadError, match="collision"):
+            pp.module_name_for(root / "hydrators.py")
+
+    def test_module_name_outside_root_raises(self, tmp_path):
+        from clarinet.config import plan_package as pp
+
+        root = tmp_path / "plan"
+        root.mkdir()
+        pp.activate_plan_package(root)
+        (tmp_path / "elsewhere.py").write_text("X = 1\n")
+        with pytest.raises(ConfigLoadError, match="outside"):
+            pp.module_name_for(tmp_path / "elsewhere.py")
+
+    def test_migration_hint_for_unprefixed_sibling_import(self, tmp_path):
+        from clarinet.config import plan_package as pp
+
+        root = self._make_root(tmp_path)
+        (root / "tasks.py").write_text("from record_types import MARKER\n")
+        pp.activate_plan_package(root)
+        with pytest.raises(ConfigLoadError) as exc:
+            pp.import_plan_module("clarinet_plan.tasks")
+        msg = str(exc.value)
+        assert "from clarinet_plan.record_types import" in msg
+
+    def test_third_party_missing_not_reported_as_module_not_found(self, tmp_path):
+        from clarinet.config import plan_package as pp
+
+        root = self._make_root(tmp_path)
+        (root / "needs_dep.py").write_text("import a_totally_absent_third_party\n")
+        pp.activate_plan_package(root)
+        with pytest.raises(ConfigLoadError) as exc:
+            pp.import_plan_module("clarinet_plan.needs_dep")
+        msg = str(exc.value)
+        # A failed transitive import is an import-failure, not "plan module not found".
+        assert "plan module" not in msg
+        assert "a_totally_absent_third_party" in msg
+
+    def test_guard_against_installed_distribution(self, tmp_path, monkeypatch):
+        from clarinet.config import plan_package as pp
+
+        root = self._make_root(tmp_path)
+        fake_spec = pp.ModuleSpec("clarinet_plan", None)
+        monkeypatch.setattr(
+            pp.PathFinder, "find_spec", lambda name, path=None, target=None: fake_spec
+        )
+        with pytest.raises(ConfigLoadError, match="distribution is installed"):
+            pp.activate_plan_package(root)
+
+    def test_sys_path_untouched(self, tmp_path):
+        from clarinet.config import plan_package as pp
+
+        root = self._make_root(tmp_path)
+        before = list(sys.path)
+        pp.activate_plan_package(root)
+        pp.import_plan_module("clarinet_plan.record_types")
+        pp.ensure_plan_root(root / "utils")
+        assert sys.path == before
+        assert str(root.resolve()) not in sys.path
+
+    def test_deactivate_purges_anchor(self, tmp_path):
+        from clarinet.config import plan_package as pp
+
+        root = self._make_root(tmp_path)
+        pp.activate_plan_package(root)
+        pp.import_plan_module("clarinet_plan.utils")
+        pp.deactivate_plan_package()
+        assert pp.plan_root() is None
+        assert "clarinet_plan" not in sys.modules
+        assert "clarinet_plan.utils" not in sys.modules
+
+
+# ---------------------------------------------------------------------------
 # config_sys_path
 # ---------------------------------------------------------------------------
 
