@@ -481,7 +481,7 @@ pub fn translate(locale: Locale, key: Key) -> String {
 
     // --- Status badges ---
     En, StatusPreparing -> "Preparing"
-    Ru, StatusPreparing -> "Подготовка"
+    Ru, StatusPreparing -> "Готовится"
     En, StatusBlocked -> "Blocked"
     Ru, StatusBlocked -> "Заблокирована"
     En, StatusPending -> "Pending"

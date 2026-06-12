@@ -53,10 +53,10 @@ URL constants live in `tests/utils/urls.py`. Status codes: 201 = POST create, 20
 | `/api/records/find/random` | POST | 200 | Find random record matching filters (RecordRead or null) |
 | `/api/records/available_types` | GET | 200 | Available record types for user |
 | `/api/records/filter-options` | POST | 200 | Distinct patient/record_type/user values for filter dropdowns (RBAC-scoped; body filters ignored) |
-| `/api/records/bulk/status` | PATCH | 204 | Bulk status update. **409** for non-superusers when any target record is finished and its type locks submitted records (`editable=False` or expired `edit_window_days`) |
+| `/api/records/bulk/status` | PATCH | 204 | Bulk status update. **409** for non-superusers when any target record is finished and its type locks submitted records (`editable=False` or expired `edit_window_days`); **409** when any target is `preparing` and the new status is `inwork`/`finished`. Preparing → pending re-validates files per record (may land in `blocked`) |
 | `/api/records/{id}` | GET | 200 | Get record |
 | `/api/records/{id}/schema` | GET | 200 | Hydrated JSON Schema (x-options → oneOf) |
-| `/api/records/{id}/status` | PATCH | 200 | Update status. **409** for non-superusers when the record is finished and its type locks submitted records |
+| `/api/records/{id}/status` | PATCH | 200 | Update status. **409** for non-superusers when the record is finished and its type locks submitted records; **409** on `preparing` → `inwork`/`finished` (must exit via `pending`). Preparing → pending re-validates files (may land in `blocked`) |
 | `/api/records/{id}/user` | PATCH | 200 | Assign user |
 | `/api/records/{id}/context-info` | PATCH | 200 | Replace context_info (markdown). Body: `{"context_info": str \| null}`. Auth: superuser/owner/unassigned |
 | `/api/records/{id}/data` | POST | 200 | Submit data. **409** when the record is `blocked`, `preparing`, or already `finished` |

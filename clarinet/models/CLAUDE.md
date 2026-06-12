@@ -121,15 +121,23 @@ required input files; completed sibling record types may be added later.
 `preparing` contract: "the system is actively preparing the record".
 - Set via `RecordCreate(status="preparing")` or `update_status` / RecordFlow `update_record(status='preparing')`
 - Creation-time auto-blocking is skipped for `preparing` records (files are checked on exit instead)
-- `check_files` never touches `preparing` records — this is what removes the
-  race between prefill and a concurrent check-files call
+- `check_files` is a no-op for `preparing` records (early return: no auto-unblock,
+  no checksum scan, no file triggers) — this is what removes the race between
+  prefill and a concurrent check-files call
 - On the explicit `preparing → pending` transition, `RecordService.update_status`
-  re-validates input files: invalid → the record lands in `blocked`, not `pending`
-  (linearizes both waits: preparation → file wait → ready)
+  re-validates input files *before* writing any status: invalid → the record
+  lands in `blocked`, not `pending` (linearizes both waits: preparation → file
+  wait → ready; never observable as pending-with-invalid-files).
+  `bulk_update_status` routes preparing records through the same path
+- Direct `preparing → inwork/finished` is rejected (409) — a preparing record
+  must exit via `pending`
+- Hard invalidation keeps `preparing` untouched (reason appended, status
+  unchanged) — preparation owns the exit
 - Prefill is allowed (like `blocked`); submit returns 409
 
-Both `preparing` and `blocked` records cannot be assigned to users or accept
-data submissions; `find_pending_by_user()` excludes both.
+Both `preparing` and `blocked` records cannot be assigned to users or claimed
+(`assign_user` / `claim_record` raise) and cannot accept data submissions;
+`find_pending_by_user()` excludes both.
 
 ## Frontend Consistency
 

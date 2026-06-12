@@ -6,6 +6,7 @@ from uuid import uuid4
 
 import pytest
 
+from clarinet.exceptions.domain import BusinessRuleViolationError
 from clarinet.models import RecordStatus
 from clarinet.models.file_schema import FileDefinitionRead, FileRole, RecordFileLinkRead
 from clarinet.services.record_service import (
@@ -510,19 +511,26 @@ class TestCreateRecord:
             assert result == record_mock
 
 
-class TestPreparingToPendingRevalidation:
-    """Test file re-validation on the explicit preparing → pending transition."""
+class TestPreparingExit:
+    """Test exit rules for ``preparing``: pre-write re-validation, rejected targets."""
+
+    @staticmethod
+    def _preparing_mock() -> MagicMock:
+        prep_mock = MagicMock()
+        prep_mock.id = 1
+        prep_mock.parent_record_id = None
+        prep_mock.status = RecordStatus.preparing
+        return prep_mock
 
     @pytest.mark.asyncio
     async def test_valid_files_sets_files_and_stays_pending(self) -> None:
         """preparing → pending with valid matched files registers links, stays pending."""
+        prep_mock = self._preparing_mock()
         pending_mock = MagicMock()
-        pending_mock.id = 1
-        pending_mock.parent_record_id = None
         pending_mock.status = RecordStatus.pending
         refreshed_mock = MagicMock()
         refreshed_mock.status = RecordStatus.pending
-        pending_read_mock = MagicMock()
+        prep_read_mock = MagicMock()
         refreshed_read_mock = MagicMock()
 
         file_result_mock = MagicMock()
@@ -530,8 +538,9 @@ class TestPreparingToPendingRevalidation:
         file_result_mock.matched_files = {"input": "file.nii.gz"}
 
         repo_mock = AsyncMock()
+        repo_mock.get.return_value = prep_mock
+        repo_mock.get_with_relations.side_effect = [prep_mock, refreshed_mock]
         repo_mock.update_status.return_value = (pending_mock, RecordStatus.preparing)
-        repo_mock.get_with_relations.return_value = refreshed_mock
 
         engine_mock = AsyncMock()
         service = RecordService(repo_mock, engine_mock)
@@ -540,13 +549,13 @@ class TestPreparingToPendingRevalidation:
             patch("clarinet.services.record_service.RecordRead") as patched_read,
             patch("clarinet.services.record_service.validate_record_files") as patched_vrf,
         ):
-            patched_read.model_validate.side_effect = [pending_read_mock, refreshed_read_mock]
+            patched_read.model_validate.side_effect = [prep_read_mock, refreshed_read_mock]
             patched_vrf.return_value = file_result_mock
 
             result, old_status = await service.update_status(1, RecordStatus.pending)
 
             repo_mock.update_status.assert_awaited_once_with(1, RecordStatus.pending)
-            patched_vrf.assert_awaited_once_with(pending_read_mock, parent=None)
+            patched_vrf.assert_awaited_once_with(prep_read_mock, parent=None)
             repo_mock.set_files.assert_awaited_once_with(pending_mock, {"input": "file.nii.gz"})
             engine_mock.handle_record_status_change.assert_awaited_once_with(
                 refreshed_read_mock, RecordStatus.preparing
@@ -556,14 +565,11 @@ class TestPreparingToPendingRevalidation:
 
     @pytest.mark.asyncio
     async def test_invalid_files_lands_in_blocked(self) -> None:
-        """preparing → pending with invalid files ends up blocked; trigger fires once."""
-        pending_mock = MagicMock()
-        pending_mock.id = 1
-        pending_mock.parent_record_id = None
-        pending_mock.status = RecordStatus.pending
+        """preparing → pending with invalid files writes blocked once; trigger fires once."""
+        prep_mock = self._preparing_mock()
         blocked_mock = MagicMock()
         blocked_mock.status = RecordStatus.blocked
-        pending_read_mock = MagicMock()
+        prep_read_mock = MagicMock()
         blocked_read_mock = MagicMock()
 
         file_result_mock = MagicMock()
@@ -571,10 +577,9 @@ class TestPreparingToPendingRevalidation:
         file_result_mock.matched_files = {}
 
         repo_mock = AsyncMock()
-        repo_mock.update_status.side_effect = [
-            (pending_mock, RecordStatus.preparing),
-            (blocked_mock, RecordStatus.pending),
-        ]
+        repo_mock.get.return_value = prep_mock
+        repo_mock.get_with_relations.return_value = prep_mock
+        repo_mock.update_status.return_value = (blocked_mock, RecordStatus.preparing)
 
         engine_mock = AsyncMock()
         service = RecordService(repo_mock, engine_mock)
@@ -583,13 +588,14 @@ class TestPreparingToPendingRevalidation:
             patch("clarinet.services.record_service.RecordRead") as patched_read,
             patch("clarinet.services.record_service.validate_record_files") as patched_vrf,
         ):
-            patched_read.model_validate.side_effect = [pending_read_mock, blocked_read_mock]
+            patched_read.model_validate.side_effect = [prep_read_mock, blocked_read_mock]
             patched_vrf.return_value = file_result_mock
 
             result, old_status = await service.update_status(1, RecordStatus.pending)
 
-            assert repo_mock.update_status.await_count == 2
-            repo_mock.update_status.assert_awaited_with(1, RecordStatus.blocked)
+            # Single status write — the record is never observable as pending
+            repo_mock.update_status.assert_awaited_once_with(1, RecordStatus.blocked)
+            repo_mock.set_files.assert_not_awaited()
             engine_mock.handle_record_status_change.assert_awaited_once_with(
                 blocked_read_mock, RecordStatus.preparing
             )
@@ -599,13 +605,15 @@ class TestPreparingToPendingRevalidation:
     @pytest.mark.asyncio
     async def test_no_file_registry_stays_pending(self) -> None:
         """preparing → pending without a file registry stays pending."""
+        prep_mock = self._preparing_mock()
         pending_mock = MagicMock()
-        pending_mock.id = 1
-        pending_mock.parent_record_id = None
         pending_mock.status = RecordStatus.pending
+        prep_read_mock = MagicMock()
         pending_read_mock = MagicMock()
 
         repo_mock = AsyncMock()
+        repo_mock.get.return_value = prep_mock
+        repo_mock.get_with_relations.return_value = prep_mock
         repo_mock.update_status.return_value = (pending_mock, RecordStatus.preparing)
 
         engine_mock = AsyncMock()
@@ -615,7 +623,7 @@ class TestPreparingToPendingRevalidation:
             patch("clarinet.services.record_service.RecordRead") as patched_read,
             patch("clarinet.services.record_service.validate_record_files") as patched_vrf,
         ):
-            patched_read.model_validate.return_value = pending_read_mock
+            patched_read.model_validate.side_effect = [prep_read_mock, pending_read_mock]
             patched_vrf.return_value = None  # no input files defined
 
             result, old_status = await service.update_status(1, RecordStatus.pending)
@@ -627,6 +635,67 @@ class TestPreparingToPendingRevalidation:
             )
             assert result == pending_mock
             assert old_status == RecordStatus.preparing
+
+    @pytest.mark.asyncio
+    async def test_preparing_to_inwork_rejected(self) -> None:
+        """Direct preparing → inwork is rejected before any status write."""
+        prep_mock = self._preparing_mock()
+
+        repo_mock = AsyncMock()
+        repo_mock.get.return_value = prep_mock
+
+        engine_mock = AsyncMock()
+        service = RecordService(repo_mock, engine_mock)
+
+        with pytest.raises(BusinessRuleViolationError):
+            await service.update_status(1, RecordStatus.inwork)
+
+        repo_mock.update_status.assert_not_awaited()
+        engine_mock.handle_record_status_change.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_bulk_update_routes_preparing_through_single_path(self) -> None:
+        """bulk_update_status sends preparing records through update_status."""
+        plain_mock = MagicMock()
+        plain_mock.status = RecordStatus.pause
+        prep_mock = self._preparing_mock()
+        updated_read_mock = MagicMock()
+
+        repo_mock = AsyncMock()
+        repo_mock.get_optional.side_effect = [plain_mock, prep_mock]
+
+        engine_mock = AsyncMock()
+        service = RecordService(repo_mock, engine_mock)
+
+        with (
+            patch("clarinet.services.record_service.RecordRead") as patched_read,
+            patch.object(service, "update_status", new_callable=AsyncMock) as single_mock,
+        ):
+            patched_read.model_validate.return_value = updated_read_mock
+
+            await service.bulk_update_status([1, 2], RecordStatus.pending)
+
+            repo_mock.bulk_update_status.assert_awaited_once_with([1], RecordStatus.pending)
+            single_mock.assert_awaited_once_with(2, RecordStatus.pending, acting_user=None)
+
+    @pytest.mark.asyncio
+    async def test_bulk_update_preparing_to_inwork_rejected_before_mutation(self) -> None:
+        """bulk preparing → inwork raises before any status is mutated."""
+        plain_mock = MagicMock()
+        plain_mock.status = RecordStatus.pending
+        prep_mock = self._preparing_mock()
+
+        repo_mock = AsyncMock()
+        repo_mock.get_optional.side_effect = [plain_mock, prep_mock]
+
+        engine_mock = AsyncMock()
+        service = RecordService(repo_mock, engine_mock)
+
+        with pytest.raises(BusinessRuleViolationError):
+            await service.bulk_update_status([1, 2], RecordStatus.inwork)
+
+        repo_mock.bulk_update_status.assert_not_awaited()
+        engine_mock.handle_record_status_change.assert_not_awaited()
 
 
 class TestStudyServiceEntityTriggers:

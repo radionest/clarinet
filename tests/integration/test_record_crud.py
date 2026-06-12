@@ -685,19 +685,37 @@ async def test_status_update_preparing_to_pending(client, test_session, _pending
 
 
 @pytest.mark.asyncio
-async def test_check_files_does_not_touch_preparing_record(
-    client, test_session, test_series, _pending_record
-):
-    """check-files never changes a preparing record's status (auto-unblock is blocked-only)."""
-    # series_uid makes the record match its type's SERIES level — check-files
-    # resolves working dirs by that level (prefill tests never hit this path).
-    _pending_record.series_uid = test_series.series_uid
+async def test_check_files_does_not_touch_preparing_record(client, test_session, _pending_record):
+    """check-files is a no-op for preparing records: no status change, no checksum scan.
+
+    The record deliberately has no series_uid while its type is SERIES-level —
+    if check-files ever resolved working dirs before the preparing early-return,
+    this would 500 (KeyError on the level lookup).
+    """
     _pending_record.status = RecordStatus.preparing
     test_session.add(_pending_record)
     await test_session.commit()
 
     response = await client.post(f"/api/records/{_pending_record.id}/check-files")
     assert response.status_code == 200
+    assert response.json() == {"changed_files": [], "checksums": {}}
+
+    await test_session.refresh(_pending_record)
+    assert _pending_record.status == RecordStatus.preparing
+
+
+@pytest.mark.asyncio
+async def test_status_update_preparing_to_inwork_conflict(client, test_session, _pending_record):
+    """PATCH /status preparing → inwork returns 409 — must exit via pending."""
+    _pending_record.status = RecordStatus.preparing
+    test_session.add(_pending_record)
+    await test_session.commit()
+
+    response = await client.patch(
+        f"/api/records/{_pending_record.id}/status",
+        params={"record_status": "inwork"},
+    )
+    assert response.status_code == 409
 
     await test_session.refresh(_pending_record)
     assert _pending_record.status == RecordStatus.preparing

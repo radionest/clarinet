@@ -889,8 +889,11 @@ class RecordRepository(BaseRepository[Record]):
 
         Raises:
             RecordNotFoundError: If record doesn't exist
+            ValidationError: If record is blocked or preparing
         """
         record = await self.get(record_id)
+        if record.status in (RecordStatus.blocked, RecordStatus.preparing):
+            raise ValidationError(f"Cannot claim a {record.status.value} record")
         record.user_id = user_id
         record.status = RecordStatus.inwork
         await self.session.commit()
@@ -923,7 +926,9 @@ class RecordRepository(BaseRepository[Record]):
 
         Args:
             record_id: ID of the record to invalidate.
-            mode: "hard" resets status to pending (keeps user_id).
+            mode: "hard" resets status to pending (keeps user_id); a
+                  ``preparing`` record keeps its status — preparation owns the
+                  exit, only the reason is appended.
                   "soft" only appends reason to context_info.
             source_record_id: ID of the record that triggered invalidation.
             reason: Human-readable reason. Defaults to a generated message.
@@ -945,7 +950,7 @@ class RecordRepository(BaseRepository[Record]):
             else:
                 record.context_info = reason
 
-        if mode == "hard":
+        if mode == "hard" and record.status != RecordStatus.preparing:
             record.status = RecordStatus.pending
 
         await self.session.commit()
