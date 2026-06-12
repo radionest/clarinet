@@ -23,9 +23,9 @@ Changing auth levels on routers has cascading impact on tests — check `tests/t
 Startup sequence:
 1. Database init (`db_manager.create_db_and_tables_async()`)
 1b. Default roles (`add_default_user_roles()`)
-1c. Load custom record-data validators (`load_custom_validators()`) — must run BEFORE `reconcile_config` so the registry is populated when reconcile validates `RecordType.data_validators` names
-2. Config reconciliation (`reconcile_config()`) → stores `app.state.config_mode`, `app.state.config_tasks_path`; fail-fasts on unknown role_names or validator names
-2b. Load project file registry + custom schema hydrators + custom slicer context hydrators from tasks folder
+1c. Load custom record-data validators + schema hydrators + slicer context hydrators (`load_custom_validators()`, `load_custom_hydrators()`, `load_custom_slicer_hydrators()`) — must run BEFORE `reconcile_config` so the registries are populated when reconcile validates `RecordType.data_validators` and `RecordType.slicer_context_hydrators` names
+2. Config reconciliation (`reconcile_config()`) → stores `app.state.config_mode`, `app.state.config_tasks_path`; fail-fasts on unknown role_names, validator names, and slicer-hydrator names
+2b. Load project file registry from tasks folder
 3. Admin user creation (`ensure_admin_exists()`)
 4. RecordFlow engine setup (if `recordflow_enabled`) → `app.state.recordflow_engine`
 5. Pipeline broker startup (if `pipeline_enabled`) → `app.state.pipeline_broker`; syncs pipeline definitions to DB

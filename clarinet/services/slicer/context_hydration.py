@@ -58,6 +58,16 @@ _SLICER_HYDRATOR_REGISTRY: CustomCodeRegistry[SlicerHydratorFunc] = CustomCodeRe
 )
 
 
+def get_registered_slicer_hydrator_names() -> frozenset[str]:
+    """Return the set of currently registered slicer hydrator names.
+
+    Public accessor for the module-private ``_SLICER_HYDRATOR_REGISTRY`` —
+    intended for reconcile-time validation in :func:`bootstrap.reconcile_config`
+    (mirrors ``record_data_validation.get_registered_validator_names``).
+    """
+    return _SLICER_HYDRATOR_REGISTRY.names()
+
+
 def slicer_context_hydrator(source_name: str) -> Callable[[SlicerHydratorFunc], SlicerHydratorFunc]:
     """Register a slicer context hydrator by name.
 

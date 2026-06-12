@@ -261,6 +261,53 @@ async def test_startup_broken_plan_file_raises_config_startup_error(
     assert "validators.py" in banner
 
 
+# ── Test 5c: hydrators load BEFORE reconcile (order regression) ──────────────
+
+
+@pytest.mark.asyncio
+async def test_startup_loads_hydrators_before_reconcile(startup_settings, monkeypatch, tmp_path):
+    """RecordType referencing a custom slicer hydrator passes reconcile.
+
+    Reconcile validates ``slicer_context_hydrators`` names against the
+    registry, so the lifespan must load ``context_hydrators.py`` BEFORE
+    ``reconcile_config()`` — this lifespan would crash with
+    ``ConfigurationError`` if the order regressed.
+    """
+    import sys
+
+    from clarinet.services.slicer.context_hydration import _SLICER_HYDRATOR_REGISTRY
+
+    plan_dir = tmp_path / "plan"
+    plan_dir.mkdir()
+    (plan_dir / "context_hydrators.py").write_text(
+        "from clarinet.services.slicer.context_hydration import slicer_context_hydrator\n"
+        "\n"
+        "@slicer_context_hydrator('startup_order_probe')\n"
+        "async def startup_order_probe(record, context, ctx):\n"
+        "    return {}\n"
+    )
+    (plan_dir / "record_types.py").write_text(
+        "from clarinet.config.primitives import RecordDef\n"
+        "\n"
+        "rt = RecordDef(\n"
+        "    name='rt-hydrator-order',\n"
+        "    level='SERIES',\n"
+        "    slicer_context_hydrators=['startup_order_probe'],\n"
+        ")\n"
+    )
+    monkeypatch.setattr(settings, "config_mode", "python")
+    monkeypatch.setattr(settings, "config_tasks_path", str(plan_dir))
+    monkeypatch.delitem(sys.modules, "record_types", raising=False)
+
+    saved = _SLICER_HYDRATOR_REGISTRY.snapshot()
+    app = FastAPI(lifespan=lifespan)
+    try:
+        async with lifespan(app):
+            pass
+    finally:
+        _SLICER_HYDRATOR_REGISTRY.restore(saved)
+
+
 # ── Test 6: RecordFlow must not perform eager health check ───────────────────
 
 

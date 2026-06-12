@@ -83,6 +83,10 @@ A broken plan file must crash startup, never degrade silently:
   (individual errors kept on `.failures`)
 - a file that imports cleanly but registers nothing logs a WARNING
   (missing decorator — same silent-degradation class)
+- `reconcile_config` (`bootstrap.py`) validates RecordType references against
+  the populated registries — `data_validators` and `slicer_context_hydrators`
+  raise `ConfigurationError` on unknown names; loaders therefore run BEFORE
+  reconcile in the lifespan
 - `app.py` lifespan converts `ConfigLoadError` → `StartupError(component="Config",
   disableable=False)` — no bogus "disable the component" hint
 - `worker.run_worker` converts it → `SystemExit(1)`

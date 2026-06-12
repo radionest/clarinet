@@ -367,6 +367,40 @@ async def reconcile_config(
                     f"via the @record_validator('name') decorator."
                 )
 
+        # Validate that all referenced slicer_context_hydrators are registered.
+        # Relies on ``load_custom_slicer_hydrators`` running BEFORE
+        # reconcile_config in the lifespan — mirrors the data_validators
+        # check above. A typo here used to surface only at runtime, when the
+        # doctor opened the record in Slicer.
+        from clarinet.services.slicer.context_hydration import (
+            get_registered_slicer_hydrator_names,
+        )
+
+        referenced_hydrators: set[str] = set()
+        for item in all_items:
+            if item.slicer_context_hydrators:
+                referenced_hydrators.update(item.slicer_context_hydrators)
+        if referenced_hydrators:
+            registered_hydrators = get_registered_slicer_hydrator_names()
+            missing_hydrators = referenced_hydrators - registered_hydrators
+            if missing_hydrators:
+                bad_hydrator_items = [
+                    f"  - '{item.name}' references hydrator(s) "
+                    f"{[h for h in (item.slicer_context_hydrators or []) if h in missing_hydrators]}"
+                    for item in all_items
+                    if item.slicer_context_hydrators
+                    and any(h in missing_hydrators for h in item.slicer_context_hydrators)
+                ]
+                raise ConfigurationError(
+                    f"RecordType config references unregistered slicer context hydrator(s): "
+                    f"{', '.join(sorted(missing_hydrators))}.\n"
+                    + "\n".join(bad_hydrator_items)
+                    + f"\nRegistered hydrators: {sorted(registered_hydrators)}.\n"
+                    f"Register them in "
+                    f"{settings.config_tasks_path.rstrip('/')}/{settings.config_context_hydrators_file} "
+                    f"via the @slicer_context_hydrator('name') decorator."
+                )
+
         result = await reconcile_record_types(
             all_items,
             session,

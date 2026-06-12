@@ -641,6 +641,122 @@ async def test_reconcile_config_passes_with_registered_validator(
 
 
 @pytest.mark.asyncio
+async def test_reconcile_config_validates_slicer_hydrators_registered(
+    test_session: AsyncSession,
+) -> None:
+    """reconcile_config raises ConfigurationError when slicer_context_hydrators
+    references an unregistered hydrator name.
+
+    Mirrors the data_validators guard above — a typo here used to surface only
+    at runtime, when the doctor opened the record in Slicer.
+    """
+    from unittest.mock import AsyncMock, patch
+
+    from clarinet.services.slicer.context_hydration import _SLICER_HYDRATOR_REGISTRY
+    from clarinet.utils.bootstrap import reconcile_config
+
+    # Isolate registry so other tests' registrations don't bleed in.
+    saved_registry = _SLICER_HYDRATOR_REGISTRY.snapshot()
+    _SLICER_HYDRATOR_REGISTRY.clear()
+    try:
+        items = [
+            _make_config(
+                "rt-with-ghost-hydrator",
+                slicer_context_hydrators=["plan.nonexistent_hydrator"],
+            ),
+        ]
+
+        with (
+            patch(
+                "clarinet.config.python_loader.load_python_config",
+                new_callable=AsyncMock,
+                return_value=items,
+            ),
+            patch(
+                "clarinet.utils.bootstrap.db_manager.get_async_session_context",
+            ) as mock_ctx,
+            patch("clarinet.settings.settings") as mock_settings,
+        ):
+            mock_settings.config_mode = "python"
+            mock_settings.config_tasks_path = "/fake/path"
+            mock_settings.config_context_hydrators_file = "context_hydrators.py"
+            mock_settings.config_delete_orphans = False
+
+            ctx = AsyncMock()
+            ctx.__aenter__ = AsyncMock(return_value=test_session)
+            ctx.__aexit__ = AsyncMock(return_value=False)
+            mock_ctx.return_value = ctx
+
+            with pytest.raises(ConfigurationError, match=r"plan\.nonexistent_hydrator") as exc_info:
+                await reconcile_config(folder="/fake/path")
+
+        msg = str(exc_info.value)
+        assert "rt-with-ghost-hydrator" in msg
+        assert "context_hydrators.py" in msg
+    finally:
+        _SLICER_HYDRATOR_REGISTRY.restore(saved_registry)
+
+
+@pytest.mark.asyncio
+async def test_reconcile_config_passes_with_registered_slicer_hydrator(
+    test_session: AsyncSession,
+) -> None:
+    """reconcile_config succeeds when every slicer_context_hydrators name is registered."""
+    from unittest.mock import AsyncMock, patch
+
+    from clarinet.services.slicer.context_hydration import (
+        _SLICER_HYDRATOR_REGISTRY,
+        slicer_context_hydrator,
+    )
+    from clarinet.utils.bootstrap import reconcile_config
+
+    saved_registry = _SLICER_HYDRATOR_REGISTRY.snapshot()
+    _SLICER_HYDRATOR_REGISTRY.clear()
+    try:
+
+        @slicer_context_hydrator("test.registered_hydrator")
+        async def _registered(record, context, ctx):
+            return {}
+
+        items = [
+            _make_config(
+                "rt-with-registered-hydrator",
+                slicer_context_hydrators=["test.registered_hydrator"],
+            ),
+            _make_config("rt-without-hydrators"),  # slicer_context_hydrators=None
+        ]
+
+        with (
+            patch(
+                "clarinet.config.python_loader.load_python_config",
+                new_callable=AsyncMock,
+                return_value=items,
+            ),
+            patch(
+                "clarinet.utils.bootstrap.db_manager.get_async_session_context",
+            ) as mock_ctx,
+            patch("clarinet.settings.settings") as mock_settings,
+        ):
+            mock_settings.config_mode = "python"
+            mock_settings.config_tasks_path = "/fake/path"
+            mock_settings.config_context_hydrators_file = "context_hydrators.py"
+            mock_settings.config_delete_orphans = False
+
+            ctx = AsyncMock()
+            ctx.__aenter__ = AsyncMock(return_value=test_session)
+            ctx.__aexit__ = AsyncMock(return_value=False)
+            mock_ctx.return_value = ctx
+
+            result = await reconcile_config(folder="/fake/path")
+
+        assert result.errors == []
+        assert "rt-with-registered-hydrator" in result.created
+        assert "rt-without-hydrators" in result.created
+    finally:
+        _SLICER_HYDRATOR_REGISTRY.restore(saved_registry)
+
+
+@pytest.mark.asyncio
 async def test_error_message_lists_all_db_roles(
     test_session: AsyncSession,
 ) -> None:

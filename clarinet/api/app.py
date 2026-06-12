@@ -192,15 +192,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     await add_default_user_roles()
 
-    # Load custom record validators BEFORE reconcile — reconcile checks that
-    # every RecordType.data_validators name is registered in the registry,
-    # which is populated by the @record_validator decorators in this file.
-    # ``load_custom_validators`` logs the registered names itself; no need to
-    # log again here (matches the load_custom_hydrators pattern below).
+    # Load custom validators and hydrators BEFORE reconcile — reconcile
+    # validates RecordType references (``data_validators``,
+    # ``slicer_context_hydrators``) against the registries these loaders
+    # populate. Each loader logs the registered names itself.
     from clarinet.services.record_data_validation import load_custom_validators
+    from clarinet.services.schema_hydration import load_custom_hydrators
+    from clarinet.services.slicer.context_hydration import load_custom_slicer_hydrators
 
     try:
         load_custom_validators(settings.config_tasks_path)
+        load_custom_hydrators(settings.config_tasks_path)
+        load_custom_slicer_hydrators(settings.config_tasks_path)
     except ConfigLoadError as e:
         raise _config_startup_error(e) from e
 
@@ -231,17 +234,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
             hint="Fix file_registry.toml / file_registry.json in the config folder, then restart",
             disableable=False,
         ) from e
-
-    # Load custom schema + slicer context hydrators from tasks folder
-    # (each loader logs the registered names itself)
-    from clarinet.services.schema_hydration import load_custom_hydrators
-    from clarinet.services.slicer.context_hydration import load_custom_slicer_hydrators
-
-    try:
-        load_custom_hydrators(settings.config_tasks_path)
-        load_custom_slicer_hydrators(settings.config_tasks_path)
-    except ConfigLoadError as e:
-        raise _config_startup_error(e) from e
 
     # Load custom SQL report templates from project's reports folder
     from clarinet.services.report_service import ReportRegistry
