@@ -214,12 +214,20 @@ async def _load_allowed_types(user: User) -> set[str]:
         return await RecordTypeRepository(session).get_names_for_roles(get_user_role_names(user))
 
 
-async def _revalidate(token: str | None) -> bool:
-    """Re-check the session token mid-stream with a fresh short-lived session."""
+async def _revalidate(token: str | None, request: Request) -> bool:
+    """Re-check the session token mid-stream with a fresh short-lived session.
+
+    Pass `request` to DatabaseStrategy so the IP-binding check (session_ip_check)
+    stays in force — parity with the production cookie path (get_database_strategy
+    threads the request); the handshake client IP is the long-lived peer. NB:
+    read_token always commits access_token.last_accessed, so this is NOT read-only
+    — it refreshes idle-timeout state every sse_revalidate_seconds; its validation
+    TTL cache (session_cache_ttl_seconds) can delay revoke detection by up to the TTL.
+    """
     if not token:
         return False
     async with db_manager.get_async_session_context() as session:
-        user = await DatabaseStrategy(session).read_token(token, None)  # type: ignore[arg-type]
+        user = await DatabaseStrategy(session, request).read_token(token, None)  # type: ignore[arg-type]
     return user is not None
 
 
@@ -253,7 +261,7 @@ async def events_stream(request: Request, user: CurrentUserDep) -> StreamingResp
                     yield 'data: {"type": "ping"}\n\n'
                     next_ping = now + PING_INTERVAL
                 if now >= next_reval:
-                    if not await _revalidate(token):
+                    if not await _revalidate(token, request):
                         yield 'data: {"type": "auth_expired"}\n\n'
                         return
                     next_reval = now + settings.sse_revalidate_seconds
@@ -353,7 +361,7 @@ def sse_bus():
 | `test_sse_rejects_without_cookie` | `tests/integration/test_sse_endpoint.py` | `TestClient(app).get(SSE_URL)` **без cookie → `status_code == 401`** (обычный HTTP, не WS-handshake) |
 | `test_sse_handshake_with_cookie` | — | с валидной cookie: `with client.stream("GET", SSE_URL) as r: assert r.status_code == 200; assert "text/event-stream" in r.headers["content-type"]` — **тело не итерировать** (блокирует), сразу выйти |
 
-Интеграционный happy-path (`test_sse_receives_record_event`, опционально): SSE — обычный HTTP-стрим, поэтому проще WS. Рецепт как в `tests/test_app_startup.py`: file-based SQLite через monkeypatch `CLARINET_DATABASE_URL` + `with TestClient(app) as tc:` (lifespan: таблицы + admin), `tc.post("/api/auth/login", ...)`, затем **в фоновом потоке** мутация `tc.post(...)`, а в основном — `with tc.stream("GET", SSE_URL) as r:` читать `r.iter_lines()` до первого `data: {entity}` (пропуская `retry:`/`ping`). Если упрётся в инфраструктуру (блокирующий стрим + cross-loop) более ~часа — оставить только 401/handshake-тесты, happy-path → ручная проверка фазы 3.
+Интеграционный happy-path (`test_sse_receives_record_event`, опционально): SSE — обычный HTTP-стрим, поэтому проще WS. Рецепт как в `tests/test_app_startup.py`: file-based SQLite через monkeypatch `CLARINET_DATABASE_URL` + `with TestClient(app) as tc:` (lifespan: таблицы + admin), `tc.post("/api/auth/login", ...)`, затем **в фоновом потоке** мутация `tc.post(...)`, а в основном — `with tc.stream("GET", SSE_URL) as r:` читать `r.iter_lines()` до первого `data: {entity}` (пропуская `retry:`/`ping`). Если упрётся в инфраструктуру (блокирующий стрим + cross-loop) более ~часа — оставить только 401/handshake-тесты, happy-path → ручная проверка фазы 3. **Известный пробел покрытия:** в этом случае механика генератора (дедлайн-цикл ping/reval, `asyncio.Queue`, slow-consumer sentinel из 2.5) автотестами НЕ покрыта — только auth-handshake; закрыть happy-path'ом или отдельным async-тестом генератора, когда инфраструктура позволит.
 
 ### Проверка фазы 2
 ```bash
@@ -627,19 +635,20 @@ make check && make frontend-check && make frontend-build
 
 `deploy/nginx/clarinet.conf` — один `server` на `listen 443 ssl` с единственным `location __PATH_PREFIX__` (proxy на uvicorn). Изменения:
 
-### 6.1 HTTP/2 — снимает лимит 6 вкладок
+### 6.1 HTTP/2 — снимает лимит соединений на origin
 В `server { listen 443 ssl default_server; ... }` (строка 11) добавить:
 ```nginx
     http2 on;          # nginx >= 1.25.1; для старых: listen 443 ssl http2 default_server;
 ```
-HTTP/2 мультиплексирует ~100 потоков в одном TCP-соединении → лимит «~6 соединений на хост» (которым каждый открытый SSE занимает слот навсегда) исчезает. Уже на TLS (cookie `Secure` в проде) — изменение однострочное. **Без HTTP/2: 7-я+ вкладка с открытым SSE виснет.**
+HTTP/2 мультиплексирует ~100 потоков в одном TCP-соединении → лимит «~6 соединений на хост» исчезает. Уже на TLS (cookie `Secure` в проде) — изменение однострочное. Апстрим nginx↔uvicorn остаётся `proxy_http_version 1.1` (строка 31) — **намеренно**: лимит снимается на плече браузер↔nginx, апстрим его не имеет, противоречия с `http2 on` нет. **Без HTTP/2** лимит ~6 делится на **весь** origin (XHR/fetch/картинки/preload-поллинг), а каждый живой SSE держит слот навсегда → стрим голодает обычные REST-рефетчи (тот же `records.get_record` из событийного кэша) уже на 2–3 вкладках, не только на 7-й.
 
 ### 6.2 Буферизация — закрыта заголовком приложения
 SSE-эндпоинт уже ставит `X-Accel-Buffering: no` (фаза 2.5) → nginx не буферизует этот ответ даже при глобальном `proxy_buffering on`. **Доп. правок конфига не требуется** (вложенный `location` для `/api/events` с плейсхолдером `__PATH_PREFIX__` хрупок — не делаем).
 
-### 6.3 Что НЕ трогаем
+### 6.3 Что НЕ трогаем (но проверить)
 - `proxy_read_timeout 300s` (строка 36) — ping раз в 30 с держит поток непустым, идл не наступает.
 - `Connection "upgrade"` (строка 33) — WS-специфично, для SSE безвредно. Оставить (WS-совместимость) либо сменить на `Connection ''`, если WS не планируется.
+- **`gzip` для `text/event-stream` должен быть `off`** — иначе nginx буферизует SSE-ответ ради компрессии и нивелирует `X-Accel-Buffering: no`. В текущем `clarinet.conf` gzip не включён (не блокер), но при добавлении глобального `gzip on` исключить SSE (`gzip_types` без `text/event-stream` либо `location` с `gzip off;`).
 
 ### Проверка фазы 6
 - Открыть 7+ вкладок приложения: на HTTP/1.1 7-я виснет (лимит), после `http2 on;` — все живут.
