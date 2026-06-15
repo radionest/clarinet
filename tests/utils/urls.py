@@ -67,6 +67,7 @@ ADMIN_RECORDS = "/api/admin/records"  # + /{id} for cascade delete
 ADMIN_RECORD_STATUS = "/api/admin/records"  # + /{id}/status
 ADMIN_RECORD_USER = "/api/admin/records"  # + /{id}/user
 ADMIN_RECORD_OUTPUT_FILES = "/api/admin/records"  # + /{id}/output-files
+ADMIN_RECORD_EVENTS = "/api/admin/records/events"
 ADMIN_DELETED_RECORD_EVENTS = "/api/admin/records/events/deleted"
 
 # --- Reports ---

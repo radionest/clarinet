@@ -1,14 +1,16 @@
 // Patient detail page — self-contained MVU module
+import api/audit
 import api/dicom
 import api/models.{
-  type PacsSeriesResult, type PacsStudyWithSeries, type Patient, type Record,
-  type Study,
+  type PacsSeriesResult, type PacsStudyWithSeries, type Patient,
+  type PipelineRun, type Record, type RecordEvent, type Study,
 }
 import api/patients
 import api/types.{type ApiError, AuthError}
 import cache
 import cache/bucket
 import clarinet_frontend/i18n
+import components/activity_feed
 import components/records_list
 import components/status_badge
 import gleam/dict.{type Dict}
@@ -40,6 +42,11 @@ pub type Model {
     pacs_loading: Bool,
     pacs_importing: Option(String),
     active_filters: Dict(String, String),
+    activity_tab: activity_feed.ActivityTab,
+    activity_events: List(RecordEvent),
+    activity_events_status: LoadStatus,
+    activity_runs: List(PipelineRun),
+    activity_runs_status: LoadStatus,
   )
 }
 
@@ -69,6 +76,11 @@ pub type Msg {
   NavigateBack
   RequestDelete
   OpenAddRecord
+  // Activity section
+  ActivityTabSelected(activity_feed.ActivityTab)
+  ActivityEventsLoaded(Result(List(RecordEvent), ApiError))
+  ActivityRunsLoaded(Result(List(PipelineRun), ApiError))
+  ActivityRetry(activity_feed.ActivityTab)
 }
 
 // --- Init ---
@@ -85,11 +97,24 @@ pub fn init(
       pacs_loading: False,
       pacs_importing: None,
       active_filters: dict.new(),
+      activity_tab: activity_feed.EventsTab,
+      activity_events: [],
+      activity_events_status: load_status.Loading,
+      activity_runs: [],
+      activity_runs_status: load_status.Loading,
     )
-  #(model, load_patient_effect(patient_id), [
-    shared.FetchBucket(bucket_key_for(model.active_filters, patient_id)),
-    shared.ReloadFilterOptions,
-  ])
+  #(
+    model,
+    effect.batch([
+      load_patient_effect(patient_id),
+      load_activity_events_effect(patient_id),
+      load_activity_runs_effect(patient_id),
+    ]),
+    [
+      shared.FetchBucket(bucket_key_for(model.active_filters, patient_id)),
+      shared.ReloadFilterOptions,
+    ],
+  )
 }
 
 /// Bucket key for the patient's records list. Reuses the server-side
@@ -109,6 +134,20 @@ fn load_patient_effect(patient_id: String) -> Effect(Msg) {
   use dispatch <- effect.from
   patients.get_patient(patient_id)
   |> promise.tap(fn(result) { dispatch(PatientLoaded(result)) })
+  Nil
+}
+
+fn load_activity_events_effect(patient_id: String) -> Effect(Msg) {
+  use dispatch <- effect.from
+  audit.list_events(Some(patient_id))
+  |> promise.tap(fn(result) { dispatch(ActivityEventsLoaded(result)) })
+  Nil
+}
+
+fn load_activity_runs_effect(patient_id: String) -> Effect(Msg) {
+  use dispatch <- effect.from
+  audit.list_runs(Some(patient_id))
+  |> promise.tap(fn(result) { dispatch(ActivityRunsLoaded(result)) })
   Nil
 }
 
@@ -310,6 +349,59 @@ pub fn update(
     OpenAddRecord -> #(model, effect.none(), [
       shared.OpenCreateRecordModal(shared.PatientArgs(model.patient_id)),
     ])
+
+    ActivityTabSelected(tab) -> #(
+      Model(..model, activity_tab: tab),
+      effect.none(),
+      [],
+    )
+
+    ActivityEventsLoaded(Ok(events)) -> #(
+      Model(
+        ..model,
+        activity_events: events,
+        activity_events_status: load_status.Loaded,
+      ),
+      effect.none(),
+      [],
+    )
+    ActivityEventsLoaded(Error(err)) -> #(
+      Model(
+        ..model,
+        activity_events_status: load_status.Failed("Failed to load events"),
+      ),
+      effect.none(),
+      activity_error(err),
+    )
+
+    ActivityRunsLoaded(Ok(runs)) -> #(
+      Model(
+        ..model,
+        activity_runs: runs,
+        activity_runs_status: load_status.Loaded,
+      ),
+      effect.none(),
+      [],
+    )
+    ActivityRunsLoaded(Error(err)) -> #(
+      Model(
+        ..model,
+        activity_runs_status: load_status.Failed("Failed to load pipeline runs"),
+      ),
+      effect.none(),
+      activity_error(err),
+    )
+
+    ActivityRetry(activity_feed.EventsTab) -> #(
+      Model(..model, activity_events_status: load_status.Loading),
+      load_activity_events_effect(model.patient_id),
+      [],
+    )
+    ActivityRetry(activity_feed.RunsTab) -> #(
+      Model(..model, activity_runs_status: load_status.Loading),
+      load_activity_runs_effect(model.patient_id),
+      [],
+    )
   }
 }
 
@@ -319,6 +411,15 @@ fn handle_error(err: ApiError, fallback_msg: String) -> List(OutMsg) {
   case err {
     AuthError(_) -> [shared.Logout]
     _ -> [shared.SetLoading(False), shared.ShowError(fallback_msg)]
+  }
+}
+
+/// Activity is a secondary section: the inline Failed + retry state carries
+/// the error, so only the session-killing AuthError escalates (no toast).
+fn activity_error(err: ApiError) -> List(OutMsg) {
+  case err {
+    AuthError(_) -> [shared.Logout]
+    _ -> []
   }
 }
 
@@ -383,7 +484,24 @@ fn render_detail(model: Model, shared: Shared, patient: Patient) -> Element(Msg)
     patient_info_card(patient),
     studies_section(patient.studies),
     pacs_section(model, patient),
+    activity_section(model, shared),
     records_section(model, records, records_status, shared),
+  ])
+}
+
+fn activity_section(model: Model, shared: Shared) -> Element(Msg) {
+  html.div([attribute.class("card")], [
+    html.h3([], [html.text(shared.translate(i18n.NavActivity))]),
+    activity_feed.view(
+      model.activity_tab,
+      model.activity_events_status,
+      model.activity_events,
+      model.activity_runs_status,
+      model.activity_runs,
+      ActivityTabSelected,
+      ActivityRetry,
+      shared.translate,
+    ),
   ])
 }
 

@@ -3,9 +3,11 @@
 from collections.abc import Sequence
 
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 from sqlmodel import col, select
 
-from clarinet.models.record_event import RecordEvent
+from clarinet.models.record import Record
+from clarinet.models.record_event import RecordEvent, RecordEventFind
 from clarinet.repositories.base import BaseRepository
 
 
@@ -33,6 +35,7 @@ class RecordEventRepository(BaseRepository[RecordEvent]):
         """Events for *record_id*, oldest first (timeline order)."""
         stmt = (
             select(RecordEvent)
+            .options(selectinload(RecordEvent.actor))  # type: ignore[arg-type]
             .where(RecordEvent.record_id == record_id)
             .order_by(col(RecordEvent.occurred_at).asc(), col(RecordEvent.id).asc())
             .offset(skip)
@@ -45,10 +48,38 @@ class RecordEventRepository(BaseRepository[RecordEvent]):
         """``deleted`` events (their ``record_id`` is NULL), newest first."""
         stmt = (
             select(RecordEvent)
+            .options(selectinload(RecordEvent.actor))  # type: ignore[arg-type]
             .where(RecordEvent.kind == "deleted")
             .order_by(col(RecordEvent.occurred_at).desc(), col(RecordEvent.id).desc())
             .offset(skip)
             .limit(limit)
+        )
+        result = await self.session.execute(stmt)
+        return result.scalars().all()
+
+    async def find(self, criteria: RecordEventFind) -> Sequence[RecordEvent]:
+        """Return events matching *criteria*, newest first.
+
+        ``patient_id`` is resolved through the record table; events of
+        already-deleted records (NULL ``record_id``) never match it.
+        """
+        stmt = select(RecordEvent).options(selectinload(RecordEvent.actor))  # type: ignore[arg-type]
+        if criteria.kind is not None:
+            stmt = stmt.where(RecordEvent.kind == criteria.kind)
+        if criteria.actor_id is not None:
+            stmt = stmt.where(RecordEvent.actor_id == criteria.actor_id)
+        if criteria.patient_id is not None:
+            stmt = stmt.where(
+                col(RecordEvent.record_id).in_(
+                    select(Record.id).where(Record.patient_id == criteria.patient_id)
+                )
+            )
+        if criteria.since is not None:
+            stmt = stmt.where(col(RecordEvent.occurred_at) >= criteria.since)
+        stmt = (
+            stmt.order_by(col(RecordEvent.occurred_at).desc(), col(RecordEvent.id).desc())
+            .offset(criteria.skip)
+            .limit(criteria.limit)
         )
         result = await self.session.execute(stmt)
         return result.scalars().all()

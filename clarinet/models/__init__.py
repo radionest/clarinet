@@ -70,7 +70,7 @@ from .record import (
 )
 
 # Record audit event models
-from .record_event import RecordEvent, RecordEventKind, RecordEventRead
+from .record_event import RecordEvent, RecordEventFind, RecordEventKind, RecordEventRead
 
 # Record type models
 from .record_type import (
@@ -135,6 +135,7 @@ __all__ = [
     "RecordContextInfoUpdate",
     "RecordCreate",
     "RecordEvent",
+    "RecordEventFind",
     "RecordEventKind",
     "RecordEventRead",
     "RecordFileLink",

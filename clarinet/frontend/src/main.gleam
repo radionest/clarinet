@@ -30,6 +30,7 @@ import plinth/javascript/global
 import plinth/javascript/storage
 import preload
 import pages/admin as admin_page
+import pages/admin/activity as admin_activity_page
 import pages/admin/quarto_reports as admin_quarto_reports_page
 import pages/admin/reports as admin_reports_page
 import pages/admin/workflow as admin_workflow_page
@@ -502,6 +503,15 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         store.AdminReportsMsg,
       )
 
+    store.AdminActivityMsg(page_msg) ->
+      delegate_page_update(
+        model,
+        fn(p) { case p { store.AdminActivityPage(m) -> Ok(m) _ -> Error(Nil) } },
+        fn(m, s) { admin_activity_page.update(m, page_msg, s) },
+        store.AdminActivityPage,
+        store.AdminActivityMsg,
+      )
+
     store.AdminQuartoReportsMsg(page_msg) ->
       delegate_page_update(
         model,
@@ -887,6 +897,8 @@ fn init_page_for_route(model: Model, route: Route) -> #(Model, Effect(Msg)) {
       init_page(model, record_type_edit.init(name, _), store.RecordTypeEditPage, store.RecordTypeEditMsg)
     router.AdminReports ->
       init_page(model, admin_reports_page.init, store.AdminReportsPage, store.AdminReportsMsg)
+    router.AdminActivity ->
+      init_page(model, admin_activity_page.init, store.AdminActivityPage, store.AdminActivityMsg)
     router.AdminQuartoReports ->
       init_page(
         model,
@@ -1114,6 +1126,8 @@ fn view_content(model: Model) -> Element(Msg) {
       element.map(record_type_edit.view(pm, shared), store.RecordTypeEditMsg)
     store.AdminReportsPage(pm) ->
       element.map(admin_reports_page.view(pm, shared), store.AdminReportsMsg)
+    store.AdminActivityPage(pm) ->
+      element.map(admin_activity_page.view(pm, shared), store.AdminActivityMsg)
     store.AdminQuartoReportsPage(pm) ->
       element.map(
         admin_quarto_reports_page.view(pm, shared),

@@ -14,9 +14,11 @@ from uuid import UUID
 
 from sqlalchemy import DateTime, ForeignKey, Index, Integer, Text, func
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
-from sqlmodel import Column, Field, SQLModel
+from sqlmodel import Column, Field, Relationship, SQLModel
 
 from clarinet.types import PortableJSON
+
+from .user import User
 
 # DB column stays a plain string (additive downstream migrations);
 # API payloads and service writes are constrained to these values.
@@ -87,8 +89,43 @@ class RecordEvent(RecordEventBase, table=True):
 
     id: int | None = Field(default=None, primary_key=True)
 
+    # Read-only nav to the acting user (single FK: actor_id), never
+    # back-populated — User has no events backref. The repo's read methods
+    # eager-load it with selectinload so ``actor_name`` can be serialized.
+    actor: User | None = Relationship()
+
+    @property
+    def actor_name(self) -> str | None:
+        """Email of the acting user; None for system actions or when unloaded.
+
+        Reads from ``__dict__`` to avoid triggering a lazy load outside an
+        async context (mirrors ``User.role_names``). Populated only when the
+        caller eager-loaded ``actor``.
+        """
+        actor = self.__dict__.get("actor")
+        return actor.email if actor is not None else None
+
 
 class RecordEventRead(RecordEventBase):
     """API response schema for record audit events."""
 
     id: int
+    # Email of the acting user, resolved from ``actor_id`` via the eager-loaded
+    # ``actor`` relationship; None for system actions (actor_id NULL).
+    actor_name: str | None = None
+
+
+class RecordEventFind(SQLModel):
+    """Search filters for the record audit feed (all optional).
+
+    ``patient_id`` matches events whose record currently belongs to that
+    patient (JOIN via ``record``); events of already-deleted records
+    (``record_id`` NULL) are excluded. Results are newest first.
+    """
+
+    kind: str | None = None
+    actor_id: UUID | None = None
+    patient_id: str | None = None
+    since: datetime | None = None
+    skip: int = 0
+    limit: int = 100

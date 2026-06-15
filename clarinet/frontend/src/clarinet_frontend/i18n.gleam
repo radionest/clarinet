@@ -355,6 +355,40 @@ pub type Key {
   FormContextInfo
   FormContextPlaceholder
   FormBtnCreateRecord
+
+  // --- Audit / Activity ---
+  NavActivity
+  ActivityTabEvents
+  ActivityTabRuns
+  ActivityLoading
+  ActivityNoEvents
+  ActivityNoRuns
+  ActivitySystemActor
+  BtnRetry
+  ThEvent
+  ThChange
+  ThReason
+  ThTask
+  ThStarted
+  ThDuration
+  ThError
+  ActivityKindCreated
+  ActivityKindStatusChanged
+  ActivityKindDataSubmitted
+  ActivityKindDataUpdated
+  ActivityKindAssigned
+  ActivityKindUnassigned
+  ActivityKindFailed
+  ActivityKindInvalidated
+  ActivityKindContextInfoUpdated
+  ActivityKindFilesCleared
+  ActivityKindDeleted
+  ActivityKindOther
+  ActivityRunRunning
+  ActivityRunSucceeded
+  ActivityRunFailed
+  ActivityRunRetrying
+  ActivityRunOther
 }
 
 pub fn translate(locale: Locale, key: Key) -> String {
@@ -1041,6 +1075,72 @@ pub fn translate(locale: Locale, key: Key) -> String {
     Ru, FormContextPlaceholder -> "Необязательные заметки или контекст"
     En, FormBtnCreateRecord -> "Create Record"
     Ru, FormBtnCreateRecord -> "Создать запись"
+
+    // --- Audit / Activity ---
+    En, NavActivity -> "Activity"
+    Ru, NavActivity -> "Активность"
+    En, ActivityTabEvents -> "Events"
+    Ru, ActivityTabEvents -> "События"
+    En, ActivityTabRuns -> "Pipeline runs"
+    Ru, ActivityTabRuns -> "Запуски задач"
+    En, ActivityLoading -> "Loading activity..."
+    Ru, ActivityLoading -> "Загрузка активности..."
+    En, ActivityNoEvents -> "No events yet"
+    Ru, ActivityNoEvents -> "Событий пока нет"
+    En, ActivityNoRuns -> "No pipeline runs"
+    Ru, ActivityNoRuns -> "Запусков задач нет"
+    En, ActivitySystemActor -> "System"
+    Ru, ActivitySystemActor -> "Система"
+    En, BtnRetry -> "Retry"
+    Ru, BtnRetry -> "Повторить"
+    En, ThEvent -> "Event"
+    Ru, ThEvent -> "Событие"
+    En, ThChange -> "Change"
+    Ru, ThChange -> "Изменение"
+    En, ThReason -> "Reason"
+    Ru, ThReason -> "Причина"
+    En, ThTask -> "Task"
+    Ru, ThTask -> "Задача"
+    En, ThStarted -> "Started"
+    Ru, ThStarted -> "Начато"
+    En, ThDuration -> "Duration"
+    Ru, ThDuration -> "Длительность"
+    En, ThError -> "Error"
+    Ru, ThError -> "Ошибка"
+    En, ActivityKindCreated -> "Created"
+    Ru, ActivityKindCreated -> "Создано"
+    En, ActivityKindStatusChanged -> "Status changed"
+    Ru, ActivityKindStatusChanged -> "Смена статуса"
+    En, ActivityKindDataSubmitted -> "Data submitted"
+    Ru, ActivityKindDataSubmitted -> "Данные отправлены"
+    En, ActivityKindDataUpdated -> "Data updated"
+    Ru, ActivityKindDataUpdated -> "Данные изменены"
+    En, ActivityKindAssigned -> "Assigned"
+    Ru, ActivityKindAssigned -> "Назначено"
+    En, ActivityKindUnassigned -> "Unassigned"
+    Ru, ActivityKindUnassigned -> "Снято назначение"
+    En, ActivityKindFailed -> "Failed"
+    Ru, ActivityKindFailed -> "Ошибка"
+    En, ActivityKindInvalidated -> "Invalidated"
+    Ru, ActivityKindInvalidated -> "Аннулировано"
+    En, ActivityKindContextInfoUpdated -> "Context updated"
+    Ru, ActivityKindContextInfoUpdated -> "Контекст изменён"
+    En, ActivityKindFilesCleared -> "Files cleared"
+    Ru, ActivityKindFilesCleared -> "Файлы очищены"
+    En, ActivityKindDeleted -> "Deleted"
+    Ru, ActivityKindDeleted -> "Удалено"
+    En, ActivityKindOther -> "Event"
+    Ru, ActivityKindOther -> "Событие"
+    En, ActivityRunRunning -> "Running"
+    Ru, ActivityRunRunning -> "Выполняется"
+    En, ActivityRunSucceeded -> "Succeeded"
+    Ru, ActivityRunSucceeded -> "Успешно"
+    En, ActivityRunFailed -> "Failed"
+    Ru, ActivityRunFailed -> "Ошибка"
+    En, ActivityRunRetrying -> "Retrying"
+    Ru, ActivityRunRetrying -> "Повтор"
+    En, ActivityRunOther -> "Unknown"
+    Ru, ActivityRunOther -> "Неизвестно"
   }
 }
 

@@ -11,6 +11,7 @@ from clarinet.models.pipeline_task_run import (
     PipelineTaskRunUpdate,
 )
 from clarinet.repositories.pipeline_task_run_repository import PipelineTaskRunRepository
+from tests.utils.factories import make_patient, next_auto_id
 
 
 def _make_create(
@@ -99,6 +100,34 @@ class TestPipelineTaskRunRepository:
         await repo.upsert_start(_make_create("tid-recent"))
         results = await repo.find(PipelineTaskRunFind(since=datetime.now(UTC) - timedelta(hours=1)))
         assert any(r.id == "tid-recent" for r in results)
+
+    @pytest.mark.asyncio
+    async def test_find_filters_by_patient_id(self, test_session):
+        repo = PipelineTaskRunRepository(test_session)
+        # patient_id carries a SET NULL FK, so the patients must exist first.
+        test_session.add(make_patient("PAT_A", "A", auto_id=next_auto_id()))
+        test_session.add(make_patient("PAT_B", "B", auto_id=next_auto_id()))
+        await test_session.commit()
+        await repo.upsert_start(
+            PipelineTaskRunCreate(
+                id="tid-pa",
+                task_name="t",
+                queue="q",
+                patient_id="PAT_A",
+                started_at=datetime.now(UTC),
+            )
+        )
+        await repo.upsert_start(
+            PipelineTaskRunCreate(
+                id="tid-pb",
+                task_name="t",
+                queue="q",
+                patient_id="PAT_B",
+                started_at=datetime.now(UTC),
+            )
+        )
+        results = await repo.find(PipelineTaskRunFind(patient_id="PAT_A"))
+        assert {r.id for r in results} == {"tid-pa"}
 
     @pytest.mark.asyncio
     async def test_find_by_record_empty(self, test_session):
