@@ -16,6 +16,7 @@ from clarinet.models import Record, RecordRead, RecordStatus, is_record_editable
 from clarinet.models.file_schema import FileDefinitionRead, FileRole
 from clarinet.models.record_event import RecordEvent
 from clarinet.repositories.file_repository import FileRepository
+from clarinet.services.events.capture import emit_entity
 from clarinet.services.file_validation import validate_record_files
 from clarinet.utils.file_checksums import checksums_changed, compute_checksums
 from clarinet.utils.file_patterns import glob_file_paths, resolve_pattern
@@ -811,6 +812,8 @@ class RecordService:
         # so the row locks acquired above cover the whole check-and-delete.
         await self.repo.delete_records(deleted_ids, commit=False)
         await self.repo.session.commit()
+        # sse-capture: explicit emit, UoW-invisible (Core bulk DML in delete_records)
+        emit_entity("record", "deleted", [str(i) for i in deleted_ids])
 
         files_removed = 0
         for p in paths_to_unlink:

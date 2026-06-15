@@ -111,6 +111,9 @@ DICOM_IMPORT_STUDY = "/api/dicom/import-study"
 # --- Health ---
 HEALTH = "/api/health"
 
+# --- SSE ---
+SSE_URL = "/api/events"
+
 # --- Pipelines ---
 PIPELINES_BASE = "/api/pipelines"
 PIPELINES_SYNC = "/api/pipelines/sync"

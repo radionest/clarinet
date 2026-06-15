@@ -5,6 +5,7 @@ This module creates and configures the FastAPI application with all routers,
 middleware, and static files.
 """
 
+import asyncio
 import html
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager, suppress
@@ -442,6 +443,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
             app.state.dicomweb_cleanup = DicomWebCacheCleanupService(cache=app.state.dicomweb_cache)
             await app.state.dicomweb_cleanup.start()
 
+    if settings.sse_enabled:
+        from clarinet.services.events.bus import EventBus, set_event_bus
+        from clarinet.services.events.capture import register_capture_listeners
+
+        app.state.event_bus = EventBus(asyncio.get_running_loop())
+        set_event_bus(app.state.event_bus)
+        register_capture_listeners()
+
     logger.info("Application startup complete")
 
     try:
@@ -478,6 +487,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
             await _shutdown_recordflow(app)
 
         shutdown_fs_executor()
+
+        from clarinet.services.events.bus import set_event_bus
+
+        if getattr(app.state, "event_bus", None) is not None:
+            app.state.event_bus.shutdown()
+        set_event_bus(None)
 
         await db_manager.close()
         logger.info("Application shutdown")
@@ -576,6 +591,13 @@ def create_app(root_path: str = "") -> FastAPI:
     app.include_router(pipeline.router, prefix="/api/pipelines", tags=["Pipelines"])
     app.include_router(viewer.router, prefix="/api/records", tags=["Viewers"])
     app.include_router(health.router, prefix="/api", tags=["Health"])
+
+    # Mount SSE event stream (conditional on settings)
+    if settings.sse_enabled:
+        from clarinet.api.routers import sse
+
+        app.include_router(sse.router, prefix="/api", tags=["SSE"])
+        logger.info("SSE event stream enabled at /api/events")
 
     # Mount DICOMweb proxy router (conditional on settings)
     if settings.dicomweb_enabled:

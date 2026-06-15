@@ -7,7 +7,7 @@ from sqlalchemy import String as SQLString
 from sqlalchemy import cast
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
-from sqlmodel import select
+from sqlmodel import col, select
 
 from clarinet.exceptions.domain import (
     RecordTypeAlreadyExistsError,
@@ -128,3 +128,12 @@ class RecordTypeRepository(BaseRepository[RecordType]):
         existing = await self.get_by(name=name)
         if existing:
             raise RecordTypeAlreadyExistsError(name)
+
+    async def get_names_for_roles(self, role_names: set[str]) -> set[str]:
+        """RecordType names visible to the given roles (RBAC filter for SSE)."""
+        if not role_names:
+            return set()
+        result = await self.session.execute(
+            select(col(RecordType.name)).where(col(RecordType.role_name).in_(list(role_names)))
+        )
+        return set(result.scalars().all())
