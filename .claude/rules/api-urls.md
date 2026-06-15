@@ -187,3 +187,11 @@ Admin-only (`AdminUserDep`). 503 when `recordflow_enabled=False`.
 | `/dicom-web/studies/{uid}/series/{uid}/archive` | GET | 200 | Download series as ZIP |
 | `/dicom-web/preload` | POST | 200 | Start multi-study preload. Body `{"study_uids": [...]}` (1–20 UIDs). **422**: empty/oversized list |
 | `/dicom-web/preload/progress/{task_id}` | GET | 200 | Poll preload progress (`starting`/`fetching`/`ready`/`error`/`not_found`) |
+
+### SSE (`/api/events`)
+
+Mounted under `/api`, conditional on `settings.sse_enabled`. Cookie auth via `CurrentUserDep`.
+
+| URL | Method | Status | Description |
+|---|---|---|---|
+| `/api/events` | GET | 200 | Server-Sent Events stream (`text/event-stream`) of entity / task-progress events. Server-push only (client sends nothing). Frames: `entity`, `task_progress`, `ping`, `auth_expired`. **401** without a valid session cookie. **503** when `sse_enabled=False` or the bus is not initialised |
