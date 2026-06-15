@@ -1249,7 +1249,8 @@ class SlicerHelper:
         Returns:
             The (never-``None``) list of loaded MRML node IDs.
         """
-        for nid in node_ids or []:
+        node_ids = node_ids or []
+        for nid in node_ids:
             node = self._scene.GetNodeByID(nid)
             if node is not None and node.IsA("vtkMRMLScalarVolumeNode"):
                 self._image_node = node
@@ -1257,7 +1258,6 @@ class SlicerHelper:
                     self._apply_window(node, window)
                 break
 
-        node_ids = node_ids or []
         if raise_on_empty and not node_ids:
             raise SlicerHelperError(empty_message)
         return node_ids
@@ -1488,20 +1488,8 @@ class SlicerHelper:
         Safe to call from observer callbacks — no event processing, no
         re-entry risk.
 
-        .. note:: **VTK shared-labelmap pitfall (Slicer 5.0+)**
-
-           In modern Slicer, multiple segments share a single
-           ``vtkOrientedImageData`` (shared labelmap). The intuitive API —
-           ``segment.GetRepresentation("Binary labelmap")`` — returns this
-           *shared* object, whose extent covers the **entire volume** (all
-           segments combined). Computing the bounding-box center from the
-           shared labelmap yields the same point (volume center) for every
-           segment, making ``JumpSlice`` appear to do nothing.
-
-           The fix is ``node.GetBinaryLabelmapRepresentation(seg_id, out)`` —
-           the MRML-node-level API that extracts a **per-segment copy**.
-           This is the same API used internally by
-           ``slicer.util.arrayFromSegmentBinaryLabelmap()``.
+        The per-segment extraction — and the shared-labelmap pitfall it avoids
+        (Slicer 5.0+) — lives in :func:`_extract_segment_labelmap`.
 
         Args:
             segmentation: SegmentationBuilder or raw segmentation node.
@@ -1517,8 +1505,6 @@ class SlicerHelper:
         if seg_id is None:
             return None
 
-        # Per-segment labelmap via node-level API (see _extract_segment_labelmap
-        # and the "VTK shared-labelmap pitfall" note in this method's docstring).
         extracted = _extract_segment_labelmap(node, seg_id)
         if extracted is None:
             return None
@@ -1966,7 +1952,8 @@ class SlicerHelper:
         source_node = self._unwrap_node(source_seg)
         target_node = self._unwrap_node(target_seg)
 
-        # Target needs the reference geometry too — it is imported into below.
+        # Apply reference geometry to the target (it is imported into below);
+        # the source's is applied inside _export_segments_labelmap.
         self._apply_reference_geometry(target_node)
 
         seg_logic = slicer.modules.segmentations.logic()
