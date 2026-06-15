@@ -728,6 +728,31 @@ class TestMaskRecords:
         assert results[1].patient.name == "Anon Two"
         assert results[1].study_uid == "9.8.7.6.5.4.3.2.2"
 
+    def test_mask_records_masks_study_date_and_description(self) -> None:
+        """Batch mask_records masks study date + description, not just identifiers.
+
+        mask_records is the list-path used by /records/find and the list
+        endpoints; it delegates to mask_record_patient_data, so this guards the
+        actual user-facing batch surface against the date/description leak.
+        """
+        user = _make_user(is_superuser=False)
+        record = _make_record_read(
+            anon_name="Anon Patient Name",
+            auto_id=1,
+            study_anon_uid="9.8.7.6.5.4.3.2",
+            study_date=date(2025, 1, 17),
+            study_description="CT ANGIO LIVER - IVANOV",
+            series_uid=None,
+            series_anon_uid=None,
+        )
+
+        results = mask_records([record], user)  # type: ignore[arg-type, list-item]
+
+        assert len(results) == 1
+        assert results[0].study is not None
+        assert results[0].study.date == _MASKED_STUDY_DATE
+        assert results[0].study.study_description is None
+
     def test_mask_records_empty_list(self) -> None:
         """mask_records handles empty list correctly."""
         user = _make_user(is_superuser=False)

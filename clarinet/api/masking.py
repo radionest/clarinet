@@ -96,11 +96,15 @@ def mask_record_patient_data(record: RecordRead, user: User) -> RecordRead:
         study_nested_update: dict[str, Any] = {"study_uid": record.study.anon_uid}
         if masked_id is not None:
             study_nested_update["patient_id"] = masked_id
-        # Study acquisition date is a quasi-identifier (PHI): replace with a
-        # fixed sentinel so neither the exact date nor the year leaks.
+        # Study date + free-text description are quasi-identifiers (PHI) on this
+        # non-superuser REST surface: replace the date with a fixed sentinel
+        # (neither exact date nor year leaks) and drop the description. This is
+        # deliberately stricter than db_scrub (services/db_scrub/scrubber.py),
+        # which keeps study.date for ``{study_date}`` path templates on the
+        # trusted test stand. Study is the only date-bearing level here —
+        # SeriesBase carries no date/time; if a StudyTime or a series date is
+        # ever added to the model, mask it in this branch too.
         study_nested_update["date"] = _MASKED_STUDY_DATE
-        # StudyDescription is free-text that routinely carries PHI (name
-        # fragments, referral/indication text) — drop it on the masked path.
         study_nested_update["study_description"] = None
         updates["study"] = record.study.model_copy(update=study_nested_update)
         updates["study_uid"] = record.study.anon_uid
