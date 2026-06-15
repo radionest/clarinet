@@ -3,7 +3,6 @@
 // page chrome and forwards everything else to the feed.
 import clarinet_frontend/i18n
 import components/activity_feed
-import gleam/list
 import lustre/attribute
 import lustre/effect.{type Effect}
 import lustre/element.{type Element}
@@ -26,7 +25,7 @@ pub type Msg {
 
 pub fn init(_shared: Shared) -> #(Model, Effect(Msg), List(OutMsg)) {
   let #(activity, eff, out) = activity_feed.init(activity_feed.GlobalSource)
-  #(Model(activity: activity), effect.map(eff, ActivityMsg), activity_out(out))
+  #(Model(activity: activity), effect.map(eff, ActivityMsg), shared.activity_out(out))
 }
 
 // --- Update ---
@@ -39,18 +38,9 @@ pub fn update(
   case msg {
     ActivityMsg(sub_msg) -> {
       let #(activity, eff, out) = activity_feed.update(model.activity, sub_msg)
-      #(Model(activity: activity), effect.map(eff, ActivityMsg), activity_out(out))
+      #(Model(activity: activity), effect.map(eff, ActivityMsg), shared.activity_out(out))
     }
   }
-}
-
-/// Translate the feed's lone `OutMsg` into the app-level logout signal.
-fn activity_out(out: List(activity_feed.OutMsg)) -> List(OutMsg) {
-  list.map(out, fn(o) {
-    case o {
-      activity_feed.AuthExpired -> shared.Logout
-    }
-  })
 }
 
 // --- View ---

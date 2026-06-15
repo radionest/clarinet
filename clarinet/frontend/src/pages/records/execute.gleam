@@ -330,16 +330,6 @@ fn load_record_probe_effect(record_id: String) -> Effect(Msg) {
   Nil
 }
 
-/// Translate the activity feed's `OutMsg` into the page's app-level signals:
-/// a 401 during a load becomes a logout (non-auth errors stay inline).
-fn activity_out(out: List(activity_feed.OutMsg)) -> List(OutMsg) {
-  list.map(out, fn(o) {
-    case o {
-      activity_feed.AuthExpired -> shared.Logout
-    }
-  })
-}
-
 /// Cleanup slicer ping timer — called from main.gleam on route change
 pub fn cleanup(model: Model) -> Effect(Msg) {
   case model.slicer_ping_timer {
@@ -1187,7 +1177,7 @@ pub fn update(
       #(
         Model(..model, activity: activity),
         effect.map(eff, ActivityMsg),
-        activity_out(out),
+        shared.activity_out(out),
       )
     }
   }

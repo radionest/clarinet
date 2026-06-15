@@ -70,6 +70,11 @@ pub type Model {
     events_status: LoadStatus,
     runs: List(PipelineRun),
     runs_status: LoadStatus,
+    // Monotonic load tokens — a fetch result is applied only when its token
+    // still matches, so a slow stale response can't clobber a fresher one
+    // (rapid filter changes / typing fire overlapping requests).
+    events_gen: Int,
+    runs_gen: Int,
   )
 }
 
@@ -77,8 +82,8 @@ pub type Model {
 
 pub type Msg {
   TabSelected(ActivityTab)
-  EventsLoaded(Result(List(RecordEvent), ApiError))
-  RunsLoaded(Result(List(PipelineRun), ApiError))
+  EventsLoaded(gen: Int, result: Result(List(RecordEvent), ApiError))
+  RunsLoaded(gen: Int, result: Result(List(PipelineRun), ApiError))
   Retry(ActivityTab)
   // Global-feed filters
   EventKindSelected(String)
@@ -108,10 +113,15 @@ pub fn init(source: Source) -> #(Model, Effect(Msg), List(OutMsg)) {
       events_status: load_status.Loading,
       runs: [],
       runs_status: load_status.Loading,
+      events_gen: 1,
+      runs_gen: 1,
     )
   #(
     model,
-    effect.batch([load_events(source, filters), load_runs(source, filters)]),
+    effect.batch([
+      load_events(source, filters, 1),
+      load_runs(source, filters, 1),
+    ]),
     [],
   )
 }
@@ -122,41 +132,64 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg), List(OutMsg)) {
   case msg {
     TabSelected(tab) -> #(Model(..model, tab: tab), effect.none(), [])
 
-    EventsLoaded(Ok(events)) -> #(
-      Model(..model, events: events, events_status: load_status.Loaded),
-      effect.none(),
-      [],
-    )
-    EventsLoaded(Error(err)) -> #(
-      Model(..model, events_status: load_status.Failed("Failed to load events")),
-      effect.none(),
-      auth_out(err),
-    )
+    EventsLoaded(gen, result) ->
+      case gen == model.events_gen {
+        False -> #(model, effect.none(), [])
+        True ->
+          case result {
+            Ok(events) -> #(
+              Model(..model, events: events, events_status: load_status.Loaded),
+              effect.none(),
+              [],
+            )
+            Error(err) -> #(
+              Model(
+                ..model,
+                events_status: load_status.Failed("Failed to load events"),
+              ),
+              effect.none(),
+              auth_out(err),
+            )
+          }
+      }
 
-    RunsLoaded(Ok(runs)) -> #(
-      Model(..model, runs: runs, runs_status: load_status.Loaded),
-      effect.none(),
-      [],
-    )
-    RunsLoaded(Error(err)) -> #(
-      Model(
-        ..model,
-        runs_status: load_status.Failed("Failed to load pipeline runs"),
-      ),
-      effect.none(),
-      auth_out(err),
-    )
+    RunsLoaded(gen, result) ->
+      case gen == model.runs_gen {
+        False -> #(model, effect.none(), [])
+        True ->
+          case result {
+            Ok(runs) -> #(
+              Model(..model, runs: runs, runs_status: load_status.Loaded),
+              effect.none(),
+              [],
+            )
+            Error(err) -> #(
+              Model(
+                ..model,
+                runs_status: load_status.Failed("Failed to load pipeline runs"),
+              ),
+              effect.none(),
+              auth_out(err),
+            )
+          }
+      }
 
-    Retry(EventsTab) -> #(
-      Model(..model, events_status: load_status.Loading),
-      load_events(model.source, model.filters),
-      [],
-    )
-    Retry(RunsTab) -> #(
-      Model(..model, runs_status: load_status.Loading),
-      load_runs(model.source, model.filters),
-      [],
-    )
+    Retry(EventsTab) -> {
+      let gen = model.events_gen + 1
+      #(
+        Model(..model, events_status: load_status.Loading, events_gen: gen),
+        load_events(model.source, model.filters, gen),
+        [],
+      )
+    }
+    Retry(RunsTab) -> {
+      let gen = model.runs_gen + 1
+      #(
+        Model(..model, runs_status: load_status.Loading, runs_gen: gen),
+        load_runs(model.source, model.filters, gen),
+        [],
+      )
+    }
 
     EventKindSelected(kind) ->
       reload_events(model, Filters(..model.filters, event_kind: kind))
@@ -176,9 +209,15 @@ fn reload_events(
   model: Model,
   filters: Filters,
 ) -> #(Model, Effect(Msg), List(OutMsg)) {
+  let gen = model.events_gen + 1
   let model =
-    Model(..model, filters: filters, events_status: load_status.Loading)
-  #(model, load_events(model.source, filters), [])
+    Model(
+      ..model,
+      filters: filters,
+      events_status: load_status.Loading,
+      events_gen: gen,
+    )
+  #(model, load_events(model.source, filters, gen), [])
 }
 
 /// Apply new filters and refetch the runs tab; the events tab is untouched.
@@ -186,8 +225,15 @@ fn reload_runs(
   model: Model,
   filters: Filters,
 ) -> #(Model, Effect(Msg), List(OutMsg)) {
-  let model = Model(..model, filters: filters, runs_status: load_status.Loading)
-  #(model, load_runs(model.source, filters), [])
+  let gen = model.runs_gen + 1
+  let model =
+    Model(
+      ..model,
+      filters: filters,
+      runs_status: load_status.Loading,
+      runs_gen: gen,
+    )
+  #(model, load_runs(model.source, filters, gen), [])
 }
 
 /// Only a session-killing 401 escalates to the host; everything else is shown
@@ -199,10 +245,10 @@ fn auth_out(err: ApiError) -> List(OutMsg) {
   }
 }
 
-fn load_events(source: Source, filters: Filters) -> Effect(Msg) {
+fn load_events(source: Source, filters: Filters, gen: Int) -> Effect(Msg) {
   use dispatch <- effect.from
   events_promise(source, filters)
-  |> promise.tap(fn(result) { dispatch(EventsLoaded(result)) })
+  |> promise.tap(fn(result) { dispatch(EventsLoaded(gen, result)) })
   Nil
 }
 
@@ -222,10 +268,10 @@ fn events_promise(
   }
 }
 
-fn load_runs(source: Source, filters: Filters) -> Effect(Msg) {
+fn load_runs(source: Source, filters: Filters, gen: Int) -> Effect(Msg) {
   use dispatch <- effect.from
   runs_promise(source, filters)
-  |> promise.tap(fn(result) { dispatch(RunsLoaded(result)) })
+  |> promise.tap(fn(result) { dispatch(RunsLoaded(gen, result)) })
   Nil
 }
 
@@ -321,7 +367,7 @@ fn filter_bar(model: Model, t: fn(Key) -> String) -> Element(Msg) {
 fn events_filter_bar(filters: Filters, t: fn(Key) -> String) -> Element(Msg) {
   html.div([attribute.class("activity-filters")], [
     filter_field(
-      t(i18n.ThEvent),
+      t(i18n.ActivityFilterKind),
       base.select(
         name: "activity-event-kind",
         value: filters.event_kind,
@@ -353,12 +399,16 @@ fn runs_filter_bar(filters: Filters, t: fn(Key) -> String) -> Element(Msg) {
     ),
     filter_field(
       t(i18n.ThTask),
-      base.text_input(
-        name: "activity-run-task",
-        value: filters.run_task_name,
-        placeholder: None,
-        on_input: RunTaskNameChanged,
-      ),
+      // `on_change` (commit on blur / Enter) rather than `on_input` so typing a
+      // task name doesn't fire a request on every keystroke.
+      html.input([
+        attribute.type_("text"),
+        attribute.id("activity-run-task"),
+        attribute.name("activity-run-task"),
+        attribute.value(filters.run_task_name),
+        attribute.class("form-input"),
+        event.on_change(RunTaskNameChanged),
+      ]),
     ),
     filter_field(
       t(i18n.ActivityFilterSince),
