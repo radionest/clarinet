@@ -2,7 +2,7 @@
 
 import hashlib
 from collections.abc import Generator
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Any
 from unittest.mock import patch
 from uuid import uuid4
@@ -66,6 +66,7 @@ def _make_record_read(
     auto_id: int | None = 1,
     study_uid: str = "1.2.3.4.5.6.7.8",
     study_anon_uid: str | None = "9.8.7.6.5.4.3.2",
+    study_date: date = date(2025, 6, 15),
     series_uid: str | None = "1.2.3.4.5.6.7.8.9",
     series_anon_uid: str | None = "9.8.7.6.5.4.3.2.1",
     mask_patient_data: bool = True,
@@ -95,7 +96,7 @@ def _make_record_read(
 
     study = StudyBase(
         study_uid=study_uid,
-        date=datetime.now(tz=UTC).date(),
+        date=study_date,
         anon_uid=study_anon_uid,
         patient_id=patient_id,
     )
@@ -258,6 +259,85 @@ class TestMaskRecordPatientData:
         assert result.study_uid == "1.2.3.4.5.6.7.8"
         assert result.study is not None
         assert result.study.study_uid == "1.2.3.4.5.6.7.8"
+
+    def test_study_date_truncated_to_year_when_masked(self) -> None:
+        """Masked study date is truncated to Jan 1 — exact day/month must not leak."""
+        user = _make_user(is_superuser=False)
+        record = _make_record_read(
+            anon_name="Anon Patient Name",
+            auto_id=1,
+            study_uid="1.2.3.4.5.6.7.8",
+            study_anon_uid="9.8.7.6.5.4.3.2",
+            study_date=date(2025, 1, 17),
+            series_uid=None,
+            series_anon_uid=None,
+        )
+
+        result = mask_record_patient_data(record, user)
+
+        assert result.study is not None
+        assert result.study.date == date(2025, 1, 1)
+
+    def test_study_date_not_truncated_for_superuser(self) -> None:
+        """Superusers see the exact study date."""
+        superuser = _make_user(is_superuser=True)
+        record = _make_record_read(
+            anon_name="Anon Patient Name",
+            auto_id=1,
+            study_date=date(2025, 1, 17),
+        )
+
+        result = mask_record_patient_data(record, superuser)
+
+        assert result.study is not None
+        assert result.study.date == date(2025, 1, 17)
+
+    def test_study_date_preserved_when_opted_out(self) -> None:
+        """``mask_patient_data=False`` keeps the exact study date for clinical roles."""
+        user = _make_user(is_superuser=False)
+        record = _make_record_read(
+            anon_name="Anon Patient Name",
+            auto_id=1,
+            study_date=date(2025, 1, 17),
+            mask_patient_data=False,
+        )
+
+        result = mask_record_patient_data(record, user)
+
+        assert result.study is not None
+        assert result.study.date == date(2025, 1, 17)
+
+    def test_study_date_preserved_when_not_anonymized(self) -> None:
+        """Non-anonymized patient: study date is shown as-is to non-superusers."""
+        user = _make_user(is_superuser=False)
+        record = _make_record_read(
+            anon_name=None,  # not anonymized
+            auto_id=None,
+            study_date=date(2025, 1, 17),
+        )
+
+        result = mask_record_patient_data(record, user)
+
+        assert result.study is not None
+        assert result.study.date == date(2025, 1, 17)
+
+    def test_study_date_not_truncated_when_study_not_masked(self) -> None:
+        """Study without anon_uid is not masked — date stays exact (consistent with UID)."""
+        user = _make_user(is_superuser=False)
+        record = _make_record_read(
+            anon_name="Anon Patient Name",
+            auto_id=1,
+            study_anon_uid=None,  # study not anonymized → UID + date untouched
+            study_date=date(2025, 1, 17),
+            series_uid=None,
+            series_anon_uid=None,
+        )
+
+        result = mask_record_patient_data(record, user)
+
+        assert result.study is not None
+        assert result.study.study_uid == "1.2.3.4.5.6.7.8"
+        assert result.study.date == date(2025, 1, 17)
 
     def test_series_uid_masked_when_anon_uid_exists(self) -> None:
         """Series UID is masked when anon_uid is set."""

@@ -1,7 +1,9 @@
 """Patient data masking for non-superuser responses.
 
 When a patient has been anonymized (anon_name is set), non-superusers see
-anonymized identifiers instead of real patient/study/series data.
+anonymized identifiers instead of real patient/study/series data. The study
+acquisition date is truncated to January 1 of its year so the exact date
+(a quasi-identifier) does not leak past anonymization.
 
 RecordTypes may opt out of masking via ``mask_patient_data=False`` — used for
 record types filled by clinicians who need real patient IDs (surgery,
@@ -14,6 +16,7 @@ so the frontend stays consistent with OHIF and PACS.
 """
 
 from collections.abc import Sequence
+from datetime import date
 from typing import Any
 
 from clarinet.models import Record, RecordRead, User
@@ -88,6 +91,10 @@ def mask_record_patient_data(record: RecordRead, user: User) -> RecordRead:
         study_nested_update: dict[str, Any] = {"study_uid": record.study.anon_uid}
         if masked_id is not None:
             study_nested_update["patient_id"] = masked_id
+        # Study acquisition date is a quasi-identifier (PHI): truncate to Jan 1
+        # of the same year so the exact day/month doesn't leak past
+        # anonymization, while the year is retained (HIPAA Safe Harbor).
+        study_nested_update["date"] = date(record.study.date.year, 1, 1)
         updates["study"] = record.study.model_copy(update=study_nested_update)
         updates["study_uid"] = record.study.anon_uid
 
