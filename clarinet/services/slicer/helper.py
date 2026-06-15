@@ -189,6 +189,52 @@ def get_segment_names(segmentation_node: Any) -> list[str]:
     return names
 
 
+def _extract_segment_labelmap(
+    segmentation_node: Any, segment_id: str
+) -> tuple[Any, tuple[int, int, int, int, int, int]] | None:
+    """Extract a per-segment binary labelmap and its extent.
+
+    Uses the MRML node-level API ``GetBinaryLabelmapRepresentation`` — NOT
+    ``segment.GetRepresentation("Binary labelmap")``, which returns the
+    *shared* labelmap whose extent spans every segment combined (Slicer 5.0+
+    pitfall; see ``slicer-helper-api.md`` pitfall 1).
+
+    Returns ``None`` when the segment has no allocated extent
+    (``extent[0] > extent[1]``), so callers fold the emptiness guard into a
+    single ``None`` check.
+
+    Returns:
+        ``(labelmap, extent)`` — a ``vtkOrientedImageData`` and its
+        ``(xmin, xmax, ymin, ymax, zmin, zmax)`` extent — or ``None``.
+    """
+    import vtkSegmentationCorePython as vtkSegCore
+
+    labelmap = vtkSegCore.vtkOrientedImageData()
+    segmentation_node.GetBinaryLabelmapRepresentation(segment_id, labelmap)
+
+    extent = labelmap.GetExtent()
+    if extent[0] > extent[1]:
+        return None
+    return labelmap, extent
+
+
+def _labelmap_to_mask(image_data: Any) -> Any | None:
+    """Reshape a VTK labelmap's scalars into a boolean numpy mask.
+
+    Follows VTK's Fortran-order reshape convention ``(k, j, i)`` =
+    ``(dims[2], dims[1], dims[0])`` (i varies fastest). Returns ``None`` only
+    when the labelmap carries no scalars; an all-zero array is returned as-is
+    so callers decide emptiness via their own centroid / component logic.
+    """
+    from vtk.util.numpy_support import vtk_to_numpy
+
+    scalars = image_data.GetPointData().GetScalars()
+    if scalars is None:
+        return None
+    dims = image_data.GetDimensions()
+    return vtk_to_numpy(scalars).reshape(dims[2], dims[1], dims[0]) > 0
+
+
 def _get_segment_mask(segmentation_node: Any, segment_id: str) -> Any | None:
     """Extract a per-segment binary mask as a reshaped numpy bool array.
 
@@ -205,23 +251,13 @@ def _get_segment_mask(segmentation_node: Any, segment_id: str) -> Any | None:
         the VTK Fortran-order reshape convention, or ``None`` if the segment
         has no non-zero voxels.
     """
-    import vtkSegmentationCorePython as vtkSegCore
-    from vtk.util.numpy_support import vtk_to_numpy
-
-    labelmap = vtkSegCore.vtkOrientedImageData()
-    segmentation_node.GetBinaryLabelmapRepresentation(segment_id, labelmap)
-
-    extent = labelmap.GetExtent()
-    if extent[0] > extent[1]:
+    extracted = _extract_segment_labelmap(segmentation_node, segment_id)
+    if extracted is None:
         return None
-    scalars = labelmap.GetPointData().GetScalars()
-    if scalars is None:
-        return None
+    labelmap, _extent = extracted
 
-    dims = labelmap.GetDimensions()
-    arr = vtk_to_numpy(scalars).reshape(dims[2], dims[1], dims[0])
-    mask = arr > 0
-    if not mask.any():
+    mask = _labelmap_to_mask(labelmap)
+    if mask is None or not mask.any():
         return None
     return mask
 
@@ -883,6 +919,16 @@ class SlicerHelper:
         display.AutoWindowLevelOff()
         display.SetWindowLevelMinMax(window[0], window[1])
 
+    def _apply_reference_geometry(self, node: Any) -> None:
+        """Set a segmentation's reference image geometry from the source volume.
+
+        No-op until a source volume (``_image_node``) has been loaded. Centralizes
+        the reference-geometry step that ``ExportAllSegmentsToLabelmapNode`` needs
+        for a deterministic extent (see ``slicer-helper-api.md`` pitfall 5).
+        """
+        if self._image_node is not None:
+            node.SetReferenceImageGeometryParameterFromVolumeNode(self._image_node)
+
     def load_volume(
         self,
         path: str,
@@ -922,8 +968,7 @@ class SlicerHelper:
         """
         node = self._scene.AddNewNodeByClass("vtkMRMLSegmentationNode", name)
         node.CreateDefaultDisplayNodes()
-        if self._image_node is not None:
-            node.SetReferenceImageGeometryParameterFromVolumeNode(self._image_node)
+        self._apply_reference_geometry(node)
         return SegmentationBuilder(node, self._image_node)
 
     def load_segmentation(self, path: str, name: str | None = None) -> Any:
@@ -948,8 +993,7 @@ class SlicerHelper:
         if name is not None:
             seg_node.SetName(name)
 
-        if self._image_node is not None:
-            seg_node.SetReferenceImageGeometryParameterFromVolumeNode(self._image_node)
+        self._apply_reference_geometry(seg_node)
 
         seg_node.CreateDefaultDisplayNodes()
         return seg_node
@@ -1188,6 +1232,36 @@ class SlicerHelper:
                 shortcut.connect("activated()", lambda code=action: exec(code))
             self._shortcuts.append(shortcut)
 
+    def _post_pacs_load(
+        self,
+        node_ids: list[str] | None,
+        window: tuple[float, float] | None,
+        raise_on_empty: bool,
+        empty_message: str,
+    ) -> list[str]:
+        """Finalize a PACS load: adopt the first scalar volume, enforce non-empty.
+
+        Sets ``_image_node`` to the first loaded ``vtkMRMLScalarVolumeNode`` (and
+        applies *window* if given) so the Segment Editor has a source volume,
+        then raises ``SlicerHelperError(empty_message)`` when nothing was loaded
+        and *raise_on_empty* is set.
+
+        Returns:
+            The (never-``None``) list of loaded MRML node IDs.
+        """
+        for nid in node_ids or []:
+            node = self._scene.GetNodeByID(nid)
+            if node is not None and node.IsA("vtkMRMLScalarVolumeNode"):
+                self._image_node = node
+                if window is not None:
+                    self._apply_window(node, window)
+                break
+
+        node_ids = node_ids or []
+        if raise_on_empty and not node_ids:
+            raise SlicerHelperError(empty_message)
+        return node_ids
+
     def load_study_from_pacs(
         self,
         study_instance_uid: str,
@@ -1217,23 +1291,13 @@ class SlicerHelper:
         """
         pacs = _get_pacs_helper(server_name)
         node_ids = pacs.retrieve_study(study_instance_uid)
-
-        # Auto-set first scalar volume as source for Segment Editor
-        for nid in node_ids or []:
-            node = self._scene.GetNodeByID(nid)
-            if node is not None and node.IsA("vtkMRMLScalarVolumeNode"):
-                self._image_node = node
-                if window is not None:
-                    self._apply_window(node, window)
-                break
-
-        node_ids = node_ids or []
-        if raise_on_empty and not node_ids:
-            raise SlicerHelperError(
-                f"No DICOM nodes loaded for study '{study_instance_uid}'. "
-                f"Check PACS configuration in Edit > Application Settings > DICOM."
-            )
-        return node_ids
+        return self._post_pacs_load(
+            node_ids,
+            window,
+            raise_on_empty,
+            f"No DICOM nodes loaded for study '{study_instance_uid}'. "
+            f"Check PACS configuration in Edit > Application Settings > DICOM.",
+        )
 
     def load_series_from_pacs(
         self,
@@ -1266,24 +1330,14 @@ class SlicerHelper:
         """
         pacs = _get_pacs_helper(server_name)
         node_ids = pacs.retrieve_series(study_instance_uid, series_instance_uid)
-
-        # Auto-set first scalar volume as source for Segment Editor
-        for nid in node_ids or []:
-            node = self._scene.GetNodeByID(nid)
-            if node is not None and node.IsA("vtkMRMLScalarVolumeNode"):
-                self._image_node = node
-                if window is not None:
-                    self._apply_window(node, window)
-                break
-
-        node_ids = node_ids or []
-        if raise_on_empty and not node_ids:
-            raise SlicerHelperError(
-                f"No DICOM nodes loaded for series '{series_instance_uid}' "
-                f"(study '{study_instance_uid}'). "
-                f"Check PACS configuration in Edit > Application Settings > DICOM."
-            )
-        return node_ids
+        return self._post_pacs_load(
+            node_ids,
+            window,
+            raise_on_empty,
+            f"No DICOM nodes loaded for series '{series_instance_uid}' "
+            f"(study '{study_instance_uid}'). "
+            f"Check PACS configuration in Edit > Application Settings > DICOM.",
+        )
 
     def download_series_zip(
         self,
@@ -1413,14 +1467,9 @@ class SlicerHelper:
         Returns:
             ``(R, A, S)`` centroid or ``None`` if the mask is empty.
         """
-        from vtk.util.numpy_support import vtk_to_numpy
-
-        scalars = image_data.GetPointData().GetScalars()
-        if scalars is None:
+        mask = _labelmap_to_mask(image_data)
+        if mask is None:
             return None
-
-        dims = image_data.GetDimensions()
-        mask = vtk_to_numpy(scalars).reshape(dims[2], dims[1], dims[0]) > 0
         return SlicerHelper._bbox_centroid_ras(mask, extent, image_to_world_source)
 
     def get_segment_centroid(
@@ -1461,8 +1510,6 @@ class SlicerHelper:
         Returns:
             (R, A, S) centroid tuple, or None if the segment is empty.
         """
-        import vtkSegmentationCorePython as vtkSegCore
-
         node = self._unwrap_node(segmentation)
         vtk_seg = node.GetSegmentation()
 
@@ -1470,16 +1517,12 @@ class SlicerHelper:
         if seg_id is None:
             return None
 
-        # Extract per-segment labelmap via node-level API.
-        # DO NOT use segment.GetRepresentation("Binary labelmap") — it
-        # returns the shared labelmap (same extent for all segments).
-        # See docstring "VTK shared-labelmap pitfall" above.
-        labelmap = vtkSegCore.vtkOrientedImageData()
-        node.GetBinaryLabelmapRepresentation(seg_id, labelmap)
-
-        extent = labelmap.GetExtent()
-        if extent[0] > extent[1]:
+        # Per-segment labelmap via node-level API (see _extract_segment_labelmap
+        # and the "VTK shared-labelmap pitfall" note in this method's docstring).
+        extracted = _extract_segment_labelmap(node, seg_id)
+        if extracted is None:
             return None
+        labelmap, extent = extracted
 
         return self._centroid_from_labelmap(labelmap, extent, labelmap)
 
@@ -1524,8 +1567,6 @@ class SlicerHelper:
         Returns:
             (R, A, S) centroid of the largest island, or None if empty.
         """
-        import vtkSegmentationCorePython as vtkSegCore
-
         node = self._unwrap_node(segmentation)
         vtk_seg = node.GetSegmentation()
 
@@ -1533,11 +1574,13 @@ class SlicerHelper:
         if seg_id is None:
             return None
 
-        labelmap = vtkSegCore.vtkOrientedImageData()
-        node.GetBinaryLabelmapRepresentation(seg_id, labelmap)
+        extracted = _extract_segment_labelmap(node, seg_id)
+        if extracted is None:
+            return None
+        labelmap, extent = extracted
 
-        extent = labelmap.GetExtent()
-        if extent[0] > extent[1]:
+        mask = _labelmap_to_mask(labelmap)
+        if mask is None:
             return None
 
         # Isolate the largest connected component with scipy.ndimage.label.
@@ -1551,14 +1594,6 @@ class SlicerHelper:
         # (no Qt event processing), so it stays observer-callback-safe.
         import numpy as np
         from scipy.ndimage import label
-        from vtk.util.numpy_support import vtk_to_numpy
-
-        scalars = labelmap.GetPointData().GetScalars()
-        if scalars is None:
-            return None
-
-        dims = labelmap.GetDimensions()
-        mask = vtk_to_numpy(scalars).reshape(dims[2], dims[1], dims[0]) > 0
 
         labeled, num = label(mask)
         if num == 0:
@@ -1751,6 +1786,25 @@ class SlicerHelper:
         vtk_seg.AddEmptySegment(seg_name, seg_name)
         return next_num
 
+    def _export_segments_labelmap(self, node: Any, tmp_name: str) -> tuple[Any, Any]:
+        """Export all segments of *node* into a fresh temp labelmap volume.
+
+        Applies the source-volume reference geometry first, then exports with
+        ``extentComputationMode=0`` (reference-geometry extent — see
+        ``slicer-helper-api.md`` pitfall 5) so repeated exports share one grid.
+        The caller owns the returned node and must ``RemoveNode()`` it.
+
+        Returns:
+            ``(labelmap_node, array)`` — the temp ``vtkMRMLLabelMapVolumeNode``
+            and its voxels as a numpy array.
+        """
+        self._apply_reference_geometry(node)
+        seg_logic = slicer.modules.segmentations.logic()
+        labelmap = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLLabelMapVolumeNode", tmp_name)
+        seg_logic.ExportAllSegmentsToLabelmapNode(node, labelmap, 0)
+        arr = slicer.util.arrayFromVolume(labelmap)
+        return labelmap, arr
+
     def subtract_segmentations(
         self,
         seg_a: SegmentationBuilder | Any,
@@ -1781,21 +1835,9 @@ class SlicerHelper:
         node_a = self._unwrap_node(seg_a)
         node_b = self._unwrap_node(seg_b)
 
-        # Align both to the same reference grid
-        if self._image_node is not None:
-            node_a.SetReferenceImageGeometryParameterFromVolumeNode(self._image_node)
-            node_b.SetReferenceImageGeometryParameterFromVolumeNode(self._image_node)
-
-        seg_logic = slicer.modules.segmentations.logic()
-
         # Export both with mode 0 (reference geometry extent) → same shape
-        labelmap_b = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLLabelMapVolumeNode", "_sub_b")
-        seg_logic.ExportAllSegmentsToLabelmapNode(node_b, labelmap_b, 0)
-        arr_b = slicer.util.arrayFromVolume(labelmap_b)
-
-        labelmap_a = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLLabelMapVolumeNode", "_sub_a")
-        seg_logic.ExportAllSegmentsToLabelmapNode(node_a, labelmap_a, 0)
-        arr_a = slicer.util.arrayFromVolume(labelmap_a)
+        labelmap_b, arr_b = self._export_segments_labelmap(node_b, "_sub_b")
+        labelmap_a, arr_a = self._export_segments_labelmap(node_a, "_sub_a")
 
         vtk_seg_a = node_a.GetSegmentation()
         segments_to_remove: list[str] = []
@@ -1824,8 +1866,7 @@ class SlicerHelper:
             # Create new segmentation with surviving segments
             output_node = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentationNode", output_name)
             output_node.CreateDefaultDisplayNodes()
-            if self._image_node is not None:
-                output_node.SetReferenceImageGeometryParameterFromVolumeNode(self._image_node)
+            self._apply_reference_geometry(output_node)
             output_vtk = output_node.GetSegmentation()
             for i in range(vtk_seg_a.GetNumberOfSegments()):
                 seg_id = vtk_seg_a.GetNthSegmentID(i)
@@ -1862,22 +1903,16 @@ class SlicerHelper:
 
         node = self._unwrap_node(segmentation)
 
-        if self._image_node is not None:
-            node.SetReferenceImageGeometryParameterFromVolumeNode(self._image_node)
-
         seg_logic = slicer.modules.segmentations.logic()
 
         # Phase A — merge all segments into a single binary labelmap
-        labelmap = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLLabelMapVolumeNode", "_bin_tmp")
-        seg_logic.ExportAllSegmentsToLabelmapNode(node, labelmap, 0)
-        arr = slicer.util.arrayFromVolume(labelmap)
+        labelmap, arr = self._export_segments_labelmap(node, "_bin_tmp")
         arr_binary = (arr > 0).astype(np.uint8)
         slicer.util.updateVolumeFromArray(labelmap, arr_binary)
 
         output_node = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentationNode", output_name)
         output_node.CreateDefaultDisplayNodes()
-        if self._image_node is not None:
-            output_node.SetReferenceImageGeometryParameterFromVolumeNode(self._image_node)
+        self._apply_reference_geometry(output_node)
         seg_logic.ImportLabelmapToSegmentationNode(labelmap, output_node)
         slicer.mrmlScene.RemoveNode(labelmap)
 
@@ -1931,16 +1966,13 @@ class SlicerHelper:
         source_node = self._unwrap_node(source_seg)
         target_node = self._unwrap_node(target_seg)
 
-        if self._image_node is not None:
-            source_node.SetReferenceImageGeometryParameterFromVolumeNode(self._image_node)
-            target_node.SetReferenceImageGeometryParameterFromVolumeNode(self._image_node)
+        # Target needs the reference geometry too — it is imported into below.
+        self._apply_reference_geometry(target_node)
 
         seg_logic = slicer.modules.segmentations.logic()
 
         # Export source → binarize
-        labelmap = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLLabelMapVolumeNode", "_pool_tmp")
-        seg_logic.ExportAllSegmentsToLabelmapNode(source_node, labelmap, 0)
-        arr = slicer.util.arrayFromVolume(labelmap)
+        labelmap, arr = self._export_segments_labelmap(source_node, "_pool_tmp")
         arr_binary = (arr > 0).astype(np.uint8)
         slicer.util.updateVolumeFromArray(labelmap, arr_binary)
 
