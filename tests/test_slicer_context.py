@@ -777,18 +777,25 @@ def test_validate_record_id_mismatch():
 # ---------------------------------------------------------------------------
 
 
-def _make_request_with_header(header_value: str | None):
-    """Build a minimal Starlette Request carrying (or omitting) the header.
+def _make_request_with_header(header_value: str | None, *, cookie_value: str | None = None):
+    """Build a minimal Starlette Request carrying the header and/or cookie.
 
     We bypass FastAPI's full request pipeline and construct an ASGI scope by
-    hand — `get_client_storage_path` only reads `request.headers.get(...)`,
-    so the scope just needs a headers list.
+    hand — `get_client_storage_path` only reads `request.headers.get(...)` and
+    `request.cookies.get(...)`, so the scope just needs a headers list (the
+    `Cookie` header is parsed into `request.cookies` by Starlette). `cookie_value`
+    is the raw stored form, i.e. already `encodeURIComponent`-escaped as the
+    frontend writes it.
     """
     from starlette.requests import Request
 
     headers: list[tuple[bytes, bytes]] = []
     if header_value is not None:
         headers.append((b"x-clarinet-storage-path-client", header_value.encode("latin-1")))
+    if cookie_value is not None:
+        headers.append(
+            (b"cookie", f"clarinet_storage_path_client={cookie_value}".encode("latin-1"))
+        )
     scope = {
         "type": "http",
         "method": "POST",
@@ -857,6 +864,75 @@ async def test_get_client_storage_path_max_length_boundary():
     over_limit = "a" * 513
     assert await get_client_storage_path(_make_request_with_header(at_limit)) == at_limit
     assert await get_client_storage_path(_make_request_with_header(over_limit)) is None
+
+
+# ---------------------------------------------------------------------------
+# get_client_storage_path — cookie fallback (clarinet_storage_path_client)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_get_client_storage_path_cookie_only_url_decoded():
+    """No header, cookie present → URL-decoded cookie value is returned.
+
+    The frontend stores the cookie `encodeURIComponent`-escaped, so a POSIX
+    mount like `/mnt/larisa_storage/nir_liver` arrives percent-encoded.
+    """
+    from clarinet.api.dependencies import get_client_storage_path
+
+    encoded = "%2Fmnt%2Flarisa_storage%2Fnir_liver"
+    request = _make_request_with_header(None, cookie_value=encoded)
+    assert await get_client_storage_path(request) == "/mnt/larisa_storage/nir_liver"
+
+
+@pytest.mark.asyncio
+async def test_get_client_storage_path_cookie_unc_url_decoded():
+    """Windows UNC cookie value decodes back to `//host/share`."""
+    from clarinet.api.dependencies import get_client_storage_path
+
+    encoded = "%2F%2Fhost%2Fshare"
+    request = _make_request_with_header(None, cookie_value=encoded)
+    assert await get_client_storage_path(request) == "//host/share"
+
+
+@pytest.mark.asyncio
+async def test_get_client_storage_path_header_wins_over_cookie():
+    """Header is read first — a present header shadows the cookie entirely."""
+    from clarinet.api.dependencies import get_client_storage_path
+
+    request = _make_request_with_header("/from/header", cookie_value="%2Ffrom%2Fcookie")
+    assert await get_client_storage_path(request) == "/from/header"
+
+
+@pytest.mark.asyncio
+async def test_get_client_storage_path_cookie_blank():
+    """Empty cookie value → falls through to None (global fallback)."""
+    from clarinet.api.dependencies import get_client_storage_path
+
+    request = _make_request_with_header(None, cookie_value="")
+    assert await get_client_storage_path(request) is None
+
+
+@pytest.mark.asyncio
+async def test_get_client_storage_path_cookie_non_ascii_after_decode_rejected():
+    """Cookie that URL-decodes to non-printable-ASCII is silently dropped.
+
+    `%C3%A9` is UTF-8 for "é"; after decode it lands outside 0x20-0x7E and the
+    shared printable-ASCII guard rejects it (HTTP/header parity).
+    """
+    from clarinet.api.dependencies import get_client_storage_path
+
+    request = _make_request_with_header(None, cookie_value="%C3%A9-share")
+    assert await get_client_storage_path(request) is None
+
+
+@pytest.mark.asyncio
+async def test_get_client_storage_path_cookie_oversize_rejected():
+    """Cookie decoding to >512 chars is silently dropped, same as the header."""
+    from clarinet.api.dependencies import get_client_storage_path
+
+    request = _make_request_with_header(None, cookie_value="a" * 600)
+    assert await get_client_storage_path(request) is None
 
 
 def test_validate_record_id_no_open():

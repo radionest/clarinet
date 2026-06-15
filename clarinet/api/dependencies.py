@@ -3,6 +3,7 @@ Dependencies for FastAPI application with enhanced dependency injection.
 """
 
 from typing import Annotated
+from urllib.parse import unquote
 from uuid import UUID
 
 from fastapi import Depends, HTTPException, Path, Query, Request
@@ -74,13 +75,19 @@ _CLIENT_STORAGE_PATH_MAX_LEN = 512
 
 
 async def get_client_storage_path(request: Request) -> str | None:
-    """Extract per-client storage path override from request header.
+    """Extract per-client storage path override from request header or cookie.
 
-    Reads ``X-Clarinet-Storage-Path-Client``, set by the frontend from
-    ``localStorage`` (managed via the ``/settings`` page). Returns ``None``
-    when the header is absent, blank, or rejected by validation — callers
-    then fall back to ``settings.storage_path_client`` (legacy global)
-    inside ``build_slicer_context_async``.
+    Reads ``X-Clarinet-Storage-Path-Client`` first; when absent, falls back to
+    the ``clarinet_storage_path_client`` cookie (URL-decoded — the frontend
+    stores it ``encodeURIComponent``-escaped). Both are set by the frontend
+    from ``localStorage`` (managed via the ``/settings`` page). The cookie
+    transport exists so the value survives form-submits that strip custom
+    headers (formosh ``rsvp.post`` on records with a Slicer result validator).
+    Header-first preserves the working ``/slicer/.../open`` path and any
+    not-yet-updated client. Returns ``None`` when neither is present, blank,
+    or rejected by validation — callers then fall back to
+    ``settings.storage_path_client`` (legacy global) inside
+    ``build_slicer_context_async``.
 
     Validation (silent rejection, never raises — a bad header must not
     break unrelated endpoints that all share this Depends):
@@ -95,6 +102,12 @@ async def get_client_storage_path(request: Request) -> str | None:
     is the authority on what works locally.
     """
     raw = request.headers.get("X-Clarinet-Storage-Path-Client")
+    source = "X-Clarinet-Storage-Path-Client header"
+    if not raw:
+        cookie_raw = request.cookies.get("clarinet_storage_path_client")
+        if cookie_raw:
+            raw = unquote(cookie_raw)
+            source = "clarinet_storage_path_client cookie"
     if not raw:
         return None
     stripped = raw.strip()
@@ -102,12 +115,11 @@ async def get_client_storage_path(request: Request) -> str | None:
         return None
     if len(stripped) > _CLIENT_STORAGE_PATH_MAX_LEN:
         logger.warning(
-            f"Rejected X-Clarinet-Storage-Path-Client: length "
-            f"{len(stripped)} > {_CLIENT_STORAGE_PATH_MAX_LEN}"
+            f"Rejected {source}: length {len(stripped)} > {_CLIENT_STORAGE_PATH_MAX_LEN}"
         )
         return None
     if not all(0x20 <= ord(c) <= 0x7E for c in stripped):
-        logger.warning("Rejected X-Clarinet-Storage-Path-Client: non-printable-ASCII characters")
+        logger.warning(f"Rejected {source}: non-printable-ASCII characters")
         return None
     return stripped
 
