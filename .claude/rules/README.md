@@ -25,6 +25,7 @@ When adding a new rule: pick a focused topic, set `paths:` to the directory or f
 | `record-data-validator.md` | Python validators for cross-field/cross-element RecordData invariants | `plan/validators*` (root + examples) |
 | `record-repo.md` | Specialized methods, invalidation, auto_id | record repositories |
 | `recordflow-dsl.md` | Full RecordFlow DSL API reference | `recordflow/**`, `*_flow.py` |
+| `release.md` | Release process — tag `v*` → CI builds wheel + publishes GitHub Release; hotfix flow | `.github/workflows/release.yml`, `pyproject.toml` |
 | `schema-hydration.md` | Dynamic field options resolver | `schema_hydration.py`, hydrators |
 | `schemathesis.md` | Property-based testing guide, boundary-value handling | `tests/schema/**` |
 | `slicer-context.md` | Slicer context builder & hydration | `context*.py`, hydrators |
