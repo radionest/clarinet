@@ -4,11 +4,13 @@
 // client OS sees the share, so a single user on Windows and Linux machines
 // keeps two different values, one per device.
 
+import config
 import gleam/dict
 import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
 import lustre/effect.{type Effect}
+import utils/cookie
 import utils/storage
 
 /// localStorage key (without the `clarinet:` prefix) under which these
@@ -17,6 +19,15 @@ import utils/storage
 pub const settings_key = "client_settings"
 
 const storage_path_field = "storage_path_client"
+
+/// Cookie carrying `storage_path_client` to the backend. localStorage stays the
+/// source for the settings input; this cookie is the transport for requests the
+/// frontend's HTTP client does not build (formosh form-submits drop custom
+/// headers). Read by `get_client_storage_path` (header-first, cookie-fallback).
+const cookie_name = "clarinet_storage_path_client"
+
+/// 1 year — the path is device-bound and rarely changes.
+const cookie_max_age_seconds = 31_536_000
 
 /// Per-client settings persisted in this browser's localStorage.
 pub type ClientSettings {
@@ -39,21 +50,33 @@ pub fn load_sync() -> ClientSettings {
   )
 }
 
-/// Persist settings to localStorage. Fire-and-forget effect.
+/// Persist settings to localStorage **and** mirror the storage path into the
+/// `clarinet_storage_path_client` cookie (so it rides on formosh form-submits
+/// that strip custom headers). Fire-and-forget effect.
 ///
-/// When all fields are `None`, removes the key entirely instead of writing
-/// `{}` — avoids a "settings exist but are empty" sentinel that complicates
-/// future migrations and gives a false signal to consumers checking
-/// `load_sync()` against `default()`.
+/// When all fields are `None`, removes the localStorage key entirely instead of
+/// writing `{}` — avoids a "settings exist but are empty" sentinel that
+/// complicates future migrations and gives a false signal to consumers checking
+/// `load_sync()` against `default()` — and expires the cookie. The cookie is
+/// scoped to `config.base_path()` so it attaches to this app's `…/api/…` calls
+/// and stays out of sibling apps deployed under other sub-paths.
 pub fn save(settings: ClientSettings) -> Effect(msg) {
+  let cookie_path = config.base_path() <> "/"
   case settings.storage_path_client {
     Some(p) ->
-      storage.save_dict(
-        storage.Local,
-        settings_key,
-        dict.from_list([#(storage_path_field, p)]),
-      )
-    None -> storage.remove(storage.Local, settings_key)
+      effect.batch([
+        storage.save_dict(
+          storage.Local,
+          settings_key,
+          dict.from_list([#(storage_path_field, p)]),
+        ),
+        cookie.set_cookie(cookie_name, p, cookie_path, cookie_max_age_seconds),
+      ])
+    None ->
+      effect.batch([
+        storage.remove(storage.Local, settings_key),
+        cookie.delete_cookie(cookie_name, cookie_path),
+      ])
   }
 }
 
