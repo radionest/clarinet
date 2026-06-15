@@ -1561,6 +1561,51 @@ def main() -> None:
         ),
     )
 
+    anon_scrub = anon_subparsers.add_parser(
+        "scrub-db",
+        help=(
+            "Anonymize the configured database in place for selected patients "
+            "(restore a production copy into a scratch DB first)"
+        ),
+        description=(
+            "Anonymize the configured database in place so it can ship as a "
+            "test-stand fixture: narrow to the selected patients, strip PHI "
+            "(relational columns + record.data + audit-table JSON snapshots), "
+            "rewrite the patient MRN to the deterministic anon_id, and audit "
+            "the result for surviving PHI.\n\n"
+            "Operates on settings.database_* — restore a production copy into a "
+            "throwaway scratch database BEFORE running. study.anon_uid / "
+            "series.anon_uid / patient.auto_id are preserved so FileRepository "
+            "still resolves the anonymized DICOM."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    anon_scrub.add_argument(
+        "--patients",
+        required=True,
+        help="Comma-separated patient ids to keep, or 'all' to scrub without subsetting",
+    )
+    anon_scrub.add_argument(
+        "--out",
+        help="Optional path for a pg_dump of the scrubbed DB ('.gz' compresses; PostgreSQL only)",
+    )
+    anon_scrub.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Run the full scrub + audit, then roll back without persisting",
+    )
+    anon_scrub.add_argument(
+        "--allow-phi-leak",
+        action="store_true",
+        help="Commit even if the audit finds surviving PHI (logs hits; use only to debug)",
+    )
+    anon_scrub.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="Show DEBUG-level details on stderr",
+    )
+
     # deploy command
     deploy_parser = subparsers.add_parser("deploy", help="Generate deployment configurations")
     deploy_subparsers = deploy_parser.add_subparsers(dest="deploy_command")
@@ -1700,6 +1745,10 @@ def main() -> None:
             from clarinet.cli.anon import migrate_paths
 
             asyncio.run(migrate_paths(args))
+        elif args.anon_command == "scrub-db":
+            from clarinet.cli.anon_scrub import scrub_db
+
+            asyncio.run(scrub_db(args))
         else:
             anon_parser.print_help()
     elif args.command == "deploy":
