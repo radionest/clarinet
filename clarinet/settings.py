@@ -285,6 +285,13 @@ class Settings(BaseSettings):
     session_secure_cookie: bool = True  # HTTPS only in production
     session_cache_ttl_seconds: int = 30  # In-memory session validation cache TTL
 
+    # SSE push (single-process in-memory bus; see services/events/bus.py)
+    sse_enabled: bool = True
+    sse_revalidate_seconds: int = 300  # session re-check interval per connection
+    sse_send_queue_size: int = (
+        256  # per-connection send queue; overflow -> close stream (slow consumer)
+    )
+
     # Internal service token for ClarinetClient (RecordFlow, pipeline tasks).
     # If empty, auto-derived from admin_password so API and workers share
     # the same token without explicit configuration.

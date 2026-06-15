@@ -19,4 +19,5 @@ async def get_project_info(registry: ViewerRegistryDep) -> dict[str, Any]:
         "project_name": settings.project_name,
         "project_description": settings.project_description,
         "viewers": registry.viewer_info(),
+        "sse_enabled": settings.sse_enabled,
     }
