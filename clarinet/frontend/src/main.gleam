@@ -845,8 +845,27 @@ fn delegate_sse(model: Model, smsg: sse.Msg) -> #(Model, Effect(Msg)) {
           dispatch_msg(store.CacheMsg(cache.SseEntityEvent(event))),
           ..effs
         ])
-        // Task-progress consumers are wired in Phase 4 (preload / quarto).
-        sse.SseTaskProgress(_, _, _) -> #(m, effs)
+        sse.SseTaskProgress(task, task_id, payload) ->
+          case task {
+            "preload" -> #(m, [
+              dispatch_msg(store.PreloadMsg(preload.ProgressPush(task_id, payload))),
+              ..effs
+            ])
+            // Quarto pushes only matter while the admin reports page is open.
+            "quarto_render" ->
+              case m.page {
+                store.AdminQuartoReportsPage(_) -> #(m, [
+                  dispatch_msg(
+                    store.AdminQuartoReportsMsg(
+                      admin_quarto_reports_page.RenderPushed(payload),
+                    ),
+                  ),
+                  ..effs
+                ])
+                _ -> #(m, effs)
+              }
+            _ -> #(m, effs)
+          }
         sse.SseAuthExpired ->
           case m.user {
             Some(_) -> #(m, [dispatch_msg(store.Logout), ..effs])

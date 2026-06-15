@@ -29,6 +29,8 @@ from typing import Any
 from clarinet.client import ClarinetClient
 from clarinet.exceptions.domain import QuartoRenderError
 from clarinet.models.quarto_report import QuartoRenderStatus, QuartoReportFormat
+from clarinet.services.events.bus import get_event_bus
+from clarinet.services.events.models import TaskProgressEvent
 from clarinet.settings import settings
 from clarinet.utils.logger import logger
 
@@ -93,6 +95,16 @@ def write_status(
     tmp = render_dir / f"{_STATUS_FILE}.tmp"
     tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     tmp.replace(render_dir / _STATUS_FILE)
+
+    # Opportunistic SSE push (admins only; user_id=None). No-op in the TaskIQ
+    # worker process where no bus is registered — there the poller still drives
+    # updates. write_status always runs via asyncio.to_thread, so use the
+    # thread-safe publish.
+    bus = get_event_bus()
+    if bus is not None:
+        bus.publish_threadsafe(
+            TaskProgressEvent(task="quarto_render", task_id=render_id, payload=payload)
+        )
 
 
 def read_status(render_dir: Path) -> dict[str, Any] | None:

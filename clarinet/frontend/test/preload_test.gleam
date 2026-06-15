@@ -15,7 +15,7 @@ fn inactive_model() -> preload.Model {
 }
 
 fn active_model() -> preload.Model {
-  Model(timer: None, progress: Some(active_progress()), window: None)
+  Model(timer: None, progress: Some(active_progress()), window: None, last_push_ms: 0)
 }
 
 fn active_progress() -> preload.ProgressState {
