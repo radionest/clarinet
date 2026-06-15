@@ -52,6 +52,7 @@ import pages/studies/detail as study_detail
 import pages/studies/list as studies_list
 import router.{type Route}
 import shared.{type OutMsg}
+import sse
 import store.{type Model, type Msg}
 
 // Initialize the application
@@ -296,7 +297,7 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
                 False -> {
                   let #(new_model, page_init_eff) =
                     init_page_for_route(new_model, route)
-                  #(new_model, page_init_eff)
+                  #(new_model, effect.batch([page_init_eff, ensure_sse(new_model)]))
                 }
               }
             }
@@ -354,9 +355,12 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         ])
       let preload_cleanup =
         effect.map(preload.cleanup(model.preload), store.PreloadMsg)
+      // Close the live SSE stream from the pre-reset model (reset_for_logout
+      // wipes model.sse, so it must be captured before that).
+      let sse_cleanup = effect.map(sse.cleanup(model.sse), store.SseMsg)
       #(
         store.reset_for_logout(model),
-        effect.batch([logout_effect, clear_storage, preload_cleanup]),
+        effect.batch([logout_effect, clear_storage, preload_cleanup, sse_cleanup]),
       )
     }
 
@@ -468,15 +472,15 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
 
     // Project info
     store.ProjectInfoLoaded(Ok(project_info)) -> {
-      #(
+      let new_model =
         store.Model(
           ..model,
           project_name: project_info.project_name,
           project_description: project_info.project_description,
           viewers: project_info.viewers,
-        ),
-        effect.none(),
-      )
+          sse_enabled: project_info.sse_enabled,
+        )
+      #(new_model, ensure_sse(new_model))
     }
 
     store.ProjectInfoLoaded(Error(_)) -> {
@@ -705,6 +709,9 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
 
     // Preload delegation
     store.PreloadMsg(pmsg) -> delegate_preload(model, pmsg)
+
+    // SSE delegation
+    store.SseMsg(smsg) -> delegate_sse(model, smsg)
   }
 }
 
@@ -803,6 +810,51 @@ fn delegate_preload(model: Model, pmsg: preload.Msg) -> #(Model, Effect(Msg)) {
       }
     })
   #(model, effect.batch([effect.map(eff, store.PreloadMsg), ..out_effects]))
+}
+
+/// Open the SSE stream when a user is present, the backend advertises SSE, and
+/// no connection is in flight. Idempotent — safe to call from every entry point
+/// (session check, project info, SetUser).
+fn ensure_sse(model: Model) -> Effect(Msg) {
+  case model.user, model.sse_enabled, model.sse.state {
+    Some(_), True, sse.Idle -> dispatch_msg(store.SseMsg(sse.Connect))
+    _, _, _ -> effect.none()
+  }
+}
+
+fn delegate_sse(model: Model, smsg: sse.Msg) -> #(Model, Effect(Msg)) {
+  let #(sse_model, eff, out_msgs) = sse.update(model.sse, smsg)
+  let model = store.Model(..model, sse: sse_model)
+  let #(model, out_effects) =
+    list.fold(out_msgs, #(model, []), fn(acc, out_msg) {
+      let #(m, effs) = acc
+      case out_msg {
+        // First connect: the page was just initialised, nothing to resync.
+        sse.SseConnected(False) -> #(m, effs)
+        // Reconnect: events during the gap were lost — invalidate and re-init.
+        sse.SseConnected(True) -> {
+          let #(m2, page_eff) = init_page_for_route(m, m.route)
+          let resync = [
+            dispatch_msg(store.CacheMsg(cache.InvalidateAllRecordBucketsMsg)),
+            dispatch_msg(store.CacheMsg(cache.InvalidateFilterOptions)),
+            page_eff,
+          ]
+          #(m2, list.append(resync, effs))
+        }
+        sse.SseEntityEvent(event) -> #(m, [
+          dispatch_msg(store.CacheMsg(cache.SseEntityEvent(event))),
+          ..effs
+        ])
+        // Task-progress consumers are wired in Phase 4 (preload / quarto).
+        sse.SseTaskProgress(_, _, _) -> #(m, effs)
+        sse.SseAuthExpired ->
+          case m.user {
+            Some(_) -> #(m, [dispatch_msg(store.Logout), ..effs])
+            None -> #(m, effs)
+          }
+      }
+    })
+  #(model, effect.batch([effect.map(eff, store.SseMsg), ..out_effects]))
 }
 
 /// List-page filters change via url.replace_route without OnRouteChange,
@@ -1016,8 +1068,10 @@ fn apply_out_msgs(
             store.Model(..m, modal_open: False, modal_content: store.NoModal),
             eff_list,
           )
-        shared.SetUser(user) ->
-          #(store.set_user(m, user), eff_list)
+        shared.SetUser(user) -> {
+          let m2 = store.set_user(m, user)
+          #(m2, [ensure_sse(m2), ..eff_list])
+        }
         shared.Logout ->
           #(m, [dispatch_msg(store.Logout), ..eff_list])
         shared.StartPreload(viewer_url, study_uids) ->

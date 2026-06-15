@@ -28,6 +28,7 @@ import pages/studies/detail as study_detail_page
 import pages/studies/list as studies_list_page
 import preload
 import router.{type Route}
+import sse
 
 // Application state model
 pub type Model {
@@ -53,6 +54,9 @@ pub type Model {
     fail_reason: String,
     // Preload
     preload: preload.Model,
+    // SSE realtime push
+    sse: sse.Model,
+    sse_enabled: Bool,
     // Viewers
     viewers: List(ViewerInfo),
     // Locale
@@ -175,6 +179,9 @@ pub type Msg {
   // Preload delegation
   PreloadMsg(preload.Msg)
 
+  // SSE delegation
+  SseMsg(sse.Msg)
+
   // Locale
   SetLocale(i18n.Locale)
 }
@@ -196,6 +203,8 @@ pub fn init() -> Model {
     modal_content: NoModal,
     fail_reason: "",
     preload: preload.init(),
+    sse: sse.init(),
+    sse_enabled: False,
     viewers: [],
     locale: i18n.En,
     page: NoPage,
@@ -219,6 +228,7 @@ pub fn reset_for_logout(model: Model) -> Model {
     project_description: model.project_description,
     viewers: model.viewers,
     locale: model.locale,
+    sse_enabled: model.sse_enabled,
     checking_session: False,
     page: NoPage,
   )
