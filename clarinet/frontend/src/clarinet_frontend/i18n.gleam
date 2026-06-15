@@ -389,6 +389,9 @@ pub type Key {
   ActivityRunFailed
   ActivityRunRetrying
   ActivityRunOther
+  ActivityFilterAllKinds
+  ActivityFilterAllStatuses
+  ActivityFilterSince
 }
 
 pub fn translate(locale: Locale, key: Key) -> String {
@@ -1141,6 +1144,12 @@ pub fn translate(locale: Locale, key: Key) -> String {
     Ru, ActivityRunRetrying -> "Повтор"
     En, ActivityRunOther -> "Unknown"
     Ru, ActivityRunOther -> "Неизвестно"
+    En, ActivityFilterAllKinds -> "All events"
+    Ru, ActivityFilterAllKinds -> "Все события"
+    En, ActivityFilterAllStatuses -> "All statuses"
+    Ru, ActivityFilterAllStatuses -> "Все статусы"
+    En, ActivityFilterSince -> "Since"
+    Ru, ActivityFilterSince -> "С даты"
   }
 }
 
