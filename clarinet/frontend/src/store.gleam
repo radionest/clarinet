@@ -6,6 +6,7 @@ import cache
 import clarinet_frontend/i18n
 import gleam/option.{type Option, None, Some}
 import pages/admin as admin_page
+import pages/admin/activity as admin_activity_page
 import pages/admin/quarto_reports as admin_quarto_reports_page
 import pages/admin/reports as admin_reports_page
 import pages/admin/workflow as admin_workflow_page
@@ -82,6 +83,7 @@ pub type PageModel {
   AdminReportsPage(admin_reports_page.Model)
   AdminQuartoReportsPage(admin_quarto_reports_page.Model)
   AdminWorkflowPage(admin_workflow_page.Model)
+  AdminActivityPage(admin_activity_page.Model)
   HomePage(home_page.Model)
   SettingsPage(settings_page.Model)
 }
@@ -142,6 +144,7 @@ pub type Msg {
   AdminReportsMsg(admin_reports_page.Msg)
   AdminQuartoReportsMsg(admin_quarto_reports_page.Msg)
   AdminWorkflowMsg(admin_workflow_page.Msg)
+  AdminActivityMsg(admin_activity_page.Msg)
 
   // Settings page delegation
   SettingsMsg(settings_page.Msg)

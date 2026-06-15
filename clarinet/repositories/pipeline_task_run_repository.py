@@ -76,6 +76,8 @@ class PipelineTaskRunRepository(BaseRepository[PipelineTaskRun]):
             stmt = stmt.where(PipelineTaskRun.task_name == criteria.task_name)
         if criteria.record_id is not None:
             stmt = stmt.where(PipelineTaskRun.record_id == criteria.record_id)
+        if criteria.patient_id is not None:
+            stmt = stmt.where(PipelineTaskRun.patient_id == criteria.patient_id)
         if criteria.since is not None:
             stmt = stmt.where(col(PipelineTaskRun.started_at) >= criteria.since)
         stmt = (

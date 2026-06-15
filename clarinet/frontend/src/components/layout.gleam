@@ -40,6 +40,7 @@ fn navbar(model: Model) -> Element(Msg) {
             nav_link(route: router.AdminReports, text: t(i18n.NavReports), current_route: model.route),
             nav_link(route: router.AdminQuartoReports, text: t(i18n.NavQuartoReports), current_route: model.route),
             nav_link(route: router.AdminWorkflow, text: t(i18n.NavWorkflow), current_route: model.route),
+            nav_link(route: router.AdminActivity, text: t(i18n.NavActivity), current_route: model.route),
             nav_link(route: router.AdminDashboard(dict.new()), text: t(i18n.NavAdmin), current_route: model.route),
           ])
         False -> html.text("")

@@ -157,6 +157,7 @@ class PipelineTaskRunFind(SQLModel):
     status: PipelineRunStatus | None = None
     task_name: str | None = None
     record_id: int | None = None
+    patient_id: str | None = None
     since: datetime | None = None
     skip: int = 0
     limit: int = 100

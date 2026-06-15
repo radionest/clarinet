@@ -29,6 +29,7 @@ pub type Route {
   AdminReports
   AdminQuartoReports
   AdminWorkflow
+  AdminActivity
   Settings
   NotFound
 }
@@ -57,6 +58,7 @@ pub fn route_to_path(route: Route) -> String {
     AdminReports -> "/admin/reports"
     AdminQuartoReports -> "/admin/quarto-reports"
     AdminWorkflow -> "/admin/workflow"
+    AdminActivity -> "/admin/activity"
     Settings -> "/settings"
     NotFound -> "/404"
   }
@@ -94,6 +96,7 @@ pub fn parse_route(uri: Uri) -> Route {
     ["admin", "reports"] -> AdminReports
     ["admin", "quarto-reports"] -> AdminQuartoReports
     ["admin", "workflow"] -> AdminWorkflow
+    ["admin", "activity"] -> AdminActivity
     ["admin", "record-types"] -> AdminRecordTypes
     ["admin", "record-types", name, "edit"] -> AdminRecordTypeEdit(name)
     ["admin", "record-types", name] -> AdminRecordTypeDetail(name)
@@ -127,7 +130,8 @@ pub fn requires_admin_role(route: Route) -> Bool {
     | AdminRecordTypeEdit(_)
     | AdminReports
     | AdminQuartoReports
-    | AdminWorkflow -> True
+    | AdminWorkflow
+    | AdminActivity -> True
     _ -> False
   }
 }
@@ -155,6 +159,7 @@ pub fn get_route_title(route: Route) -> String {
     AdminReports -> "Reports"
     AdminQuartoReports -> "Quarto Reports"
     AdminWorkflow -> "Workflow"
+    AdminActivity -> "Activity"
     Settings -> "Settings"
     NotFound -> "Page Not Found"
   }
@@ -174,6 +179,7 @@ fn section(route: Route) -> String {
     AdminReports -> "reports"
     AdminQuartoReports -> "quarto"
     AdminWorkflow -> "workflow"
+    AdminActivity -> "activity"
     Settings -> "settings"
     NotFound -> "notfound"
   }

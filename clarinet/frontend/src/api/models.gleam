@@ -56,11 +56,7 @@ pub type FileDefinition {
 
 // Per-file link on a record (matching backend RecordFileLinkRead)
 pub type RecordFileLink {
-  RecordFileLink(
-    name: String,
-    filename: String,
-    checksum: Option(String),
-  )
+  RecordFileLink(name: String, filename: String, checksum: Option(String))
 }
 
 // Record Type model (matching backend)
@@ -318,7 +314,6 @@ pub type UserRead {
   )
 }
 
-
 // PACS series result (mirrors backend SeriesResult)
 pub type PacsSeriesResult {
   PacsSeriesResult(
@@ -442,5 +437,38 @@ pub type RecordFilterOptions {
     patients: List(String),
     record_types: List(String),
     users: List(String),
+  )
+}
+
+/// Record audit event (mirrors backend RecordEventRead). `actor_name` is the
+/// acting user's email resolved server-side; None marks a system action.
+pub type RecordEvent {
+  RecordEvent(
+    id: Int,
+    record_id: Option(Int),
+    record_key: Option(Int),
+    kind: String,
+    actor_name: Option(String),
+    from_status: Option(String),
+    to_status: Option(String),
+    reason: Option(String),
+    occurred_at: String,
+  )
+}
+
+/// Pipeline task run audit row (mirrors backend PipelineTaskRunRead).
+pub type PipelineRun {
+  PipelineRun(
+    id: String,
+    task_name: String,
+    queue: String,
+    status: String,
+    record_id: Option(Int),
+    started_at: String,
+    finished_at: Option(String),
+    execution_time: Option(Float),
+    retry_count: Int,
+    error_type: Option(String),
+    error_message: Option(String),
   )
 }

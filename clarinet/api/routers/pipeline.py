@@ -61,6 +61,7 @@ async def list_pipeline_runs(
     status: PipelineRunStatus | None = None,
     task_name: str | None = None,
     record_id: int | None = None,
+    patient_id: str | None = None,
     since: datetime | None = None,
 ) -> list[PipelineTaskRun]:
     """List pipeline task runs with optional filters, newest first (admin only)."""
@@ -68,6 +69,7 @@ async def list_pipeline_runs(
         status=status,
         task_name=task_name,
         record_id=record_id,
+        patient_id=patient_id,
         since=since,
         skip=pagination.skip,
         limit=pagination.limit,

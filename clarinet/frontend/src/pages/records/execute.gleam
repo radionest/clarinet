@@ -1,6 +1,9 @@
 // Record execution page — self-contained MVU module
 import api/admin as admin_api
-import api/models.{type Record, type RecordType}
+import api/audit
+import api/models.{
+  type PipelineRun, type Record, type RecordEvent, type RecordType,
+}
 import api/records
 import api/slicer
 import api/types.{type ApiError, AuthError}
@@ -16,6 +19,7 @@ import api/workflow_models.{
 }
 import cache
 import clarinet_frontend/i18n
+import components/activity_feed
 import components/status_badge
 import components/workflow_graph as wf_renderer
 import config
@@ -69,6 +73,13 @@ pub type Model {
     /// Generation counter — bumped on every workflow_load_effect dispatch
     /// so late responses from rapid TogglePipeline clicks are dropped.
     workflow_request_id: Int,
+    // Activity section (record events + pipeline runs) — visible to anyone
+    // with record access; loaded on init alongside the record.
+    activity_tab: activity_feed.ActivityTab,
+    activity_events: List(RecordEvent),
+    activity_events_status: LoadStatus,
+    activity_runs: List(PipelineRun),
+    activity_runs_status: LoadStatus,
   )
 }
 
@@ -212,6 +223,11 @@ pub type Msg {
   DispatchCancelled
   DispatchDismiss
   RetryDispatchDryRun(PendingDispatch)
+  // Activity section
+  ActivityTabSelected(activity_feed.ActivityTab)
+  ActivityEventsLoaded(Result(List(RecordEvent), ApiError))
+  ActivityRunsLoaded(Result(List(PipelineRun), ApiError))
+  ActivityRetry(activity_feed.ActivityTab)
 }
 
 // --- Init ---
@@ -240,6 +256,11 @@ pub fn init(
       dispatch_picker: NoDispatchPicker,
       dispatch_state: NoDispatch,
       workflow_request_id: 1,
+      activity_tab: activity_feed.EventsTab,
+      activity_events: [],
+      activity_events_status: load_status.Loading,
+      activity_runs: [],
+      activity_runs_status: load_status.Loading,
     )
 
   // Start slicer ping timer + load hydrated schema
@@ -267,7 +288,14 @@ pub fn init(
   }
   #(
     model,
-    effect.batch([ping_eff, schema_eff, probe_eff, workflow_eff]),
+    effect.batch([
+      ping_eff,
+      schema_eff,
+      probe_eff,
+      workflow_eff,
+      load_activity_events_effect(record_id),
+      load_activity_runs_effect(record_id),
+    ]),
     out_msgs,
   )
 }
@@ -313,6 +341,30 @@ fn load_record_probe_effect(record_id: String) -> Effect(Msg) {
   records.get_record(record_id)
   |> promise.tap(fn(result) { dispatch(RecordLoadProbe(result)) })
   Nil
+}
+
+fn load_activity_events_effect(record_id: String) -> Effect(Msg) {
+  use dispatch <- effect.from
+  audit.get_record_events(record_id)
+  |> promise.tap(fn(result) { dispatch(ActivityEventsLoaded(result)) })
+  Nil
+}
+
+fn load_activity_runs_effect(record_id: String) -> Effect(Msg) {
+  use dispatch <- effect.from
+  audit.get_record_runs(record_id)
+  |> promise.tap(fn(result) { dispatch(ActivityRunsLoaded(result)) })
+  Nil
+}
+
+/// Activity loads are secondary to the record itself: the inline Failed +
+/// retry state is the feedback channel, so we don't raise a toast (only the
+/// session-killing AuthError needs to escalate).
+fn activity_error(err: ApiError) -> List(OutMsg) {
+  case err {
+    AuthError(_) -> [shared.Logout]
+    _ -> []
+  }
 }
 
 /// Cleanup slicer ping timer — called from main.gleam on route change
@@ -1156,6 +1208,59 @@ pub fn update(
       effect.none(),
       [],
     )
+
+    ActivityTabSelected(tab) -> #(
+      Model(..model, activity_tab: tab),
+      effect.none(),
+      [],
+    )
+
+    ActivityEventsLoaded(Ok(events)) -> #(
+      Model(
+        ..model,
+        activity_events: events,
+        activity_events_status: load_status.Loaded,
+      ),
+      effect.none(),
+      [],
+    )
+    ActivityEventsLoaded(Error(err)) -> #(
+      Model(
+        ..model,
+        activity_events_status: load_status.Failed("Failed to load events"),
+      ),
+      effect.none(),
+      activity_error(err),
+    )
+
+    ActivityRunsLoaded(Ok(runs)) -> #(
+      Model(
+        ..model,
+        activity_runs: runs,
+        activity_runs_status: load_status.Loaded,
+      ),
+      effect.none(),
+      [],
+    )
+    ActivityRunsLoaded(Error(err)) -> #(
+      Model(
+        ..model,
+        activity_runs_status: load_status.Failed("Failed to load pipeline runs"),
+      ),
+      effect.none(),
+      activity_error(err),
+    )
+
+    ActivityRetry(activity_feed.EventsTab) -> #(
+      Model(..model, activity_events_status: load_status.Loading),
+      load_activity_events_effect(model.record_id),
+      [],
+    )
+    ActivityRetry(activity_feed.RunsTab) -> #(
+      Model(..model, activity_runs_status: load_status.Loading),
+      load_activity_runs_effect(model.record_id),
+      [],
+    )
   }
 }
 
@@ -1485,6 +1590,23 @@ fn render_record_execution(
         False -> element.none()
       },
     ]),
+    activity_section(model, shared),
+  ])
+}
+
+fn activity_section(model: Model, shared: Shared) -> Element(Msg) {
+  html.div([attribute.class("card")], [
+    html.h3([], [html.text(shared.translate(i18n.NavActivity))]),
+    activity_feed.view(
+      model.activity_tab,
+      model.activity_events_status,
+      model.activity_events,
+      model.activity_runs_status,
+      model.activity_runs,
+      ActivityTabSelected,
+      ActivityRetry,
+      shared.translate,
+    ),
   ])
 }
 

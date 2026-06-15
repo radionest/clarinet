@@ -1,5 +1,6 @@
 """Admin router with system-wide statistics and record management endpoints."""
 
+from datetime import datetime
 from typing import Annotated
 from uuid import UUID
 
@@ -14,7 +15,7 @@ from clarinet.api.dependencies import (
     RecordEventRepositoryDep,
     RecordServiceDep,
 )
-from clarinet.models import Record, RecordEventRead, RecordRead
+from clarinet.models import Record, RecordEventFind, RecordEventRead, RecordRead
 from clarinet.models.admin import (
     AdminStats,
     ClearOutputFilesResult,
@@ -153,6 +154,35 @@ async def clear_record_output_files(
     """
     deleted_files, deleted_links = await service.clear_output_files(record_id, actor_id=actor)
     return ClearOutputFilesResult(deleted_files=deleted_files, deleted_links=deleted_links)
+
+
+@router.get("/records/events", response_model=list[RecordEventRead])
+async def list_record_events(
+    _current_user: AdminUserDep,
+    events_repo: RecordEventRepositoryDep,
+    pagination: PaginationDep,
+    kind: str | None = None,
+    actor_id: UUID | None = None,
+    patient_id: str | None = None,
+    since: datetime | None = None,
+) -> list[RecordEventRead]:
+    """Global record audit feed, newest first (admin only).
+
+    Optional filters: ``kind``, ``actor_id``, ``patient_id`` (events of the
+    patient's current records), ``since`` (``occurred_at`` lower bound).
+    Events of already-deleted records are available only via
+    ``/records/events/deleted``.
+    """
+    criteria = RecordEventFind(
+        kind=kind,
+        actor_id=actor_id,
+        patient_id=patient_id,
+        since=since,
+        skip=pagination.skip,
+        limit=pagination.limit,
+    )
+    events = await events_repo.find(criteria)
+    return [RecordEventRead.model_validate(e) for e in events]
 
 
 @router.get("/records/events/deleted", response_model=list[RecordEventRead])
