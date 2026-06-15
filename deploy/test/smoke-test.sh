@@ -47,6 +47,12 @@ check() {
     fi
 }
 
+vm_setting() {
+    # vm_setting <key> — read a setting from the VM with the same layering
+    # clarinet uses (settings.custom.toml overrides settings.toml).
+    bash "${SCRIPT_DIR}/../lib/vm-setting.sh" "$IP" "$1"
+}
+
 echo "Smoke testing: ${BASE_URL}"
 echo "-------------------------------------------"
 
@@ -91,9 +97,8 @@ echo "[6] Auth cookie flow"
 COOKIE_FILE=$(mktemp)
 trap 'rm -f "$COOKIE_FILE"' EXIT
 
-# Read admin password from VM settings
-ADMIN_PASS=$(ssh -o StrictHostKeyChecking=no -i "$SSH_KEY_PATH" clarinet@"${IP}" \
-    "grep '^admin_password' /opt/clarinet/settings.toml | head -1 | sed 's/.*= *\"//;s/\".*//'" 2>/dev/null || echo "")
+# Read admin password from VM settings (custom.toml overlay wins)
+ADMIN_PASS=$(vm_setting admin_password || echo "")
 
 if [[ -n "$ADMIN_PASS" ]]; then
     login_status=$(curl -sk --max-time 10 -o /dev/null -w '%{http_code}' \
@@ -117,7 +122,7 @@ SSH_VM=(ssh -o StrictHostKeyChecking=no \
     -i "$SSH_KEY_PATH" "clarinet@${IP}")
 # Resolve the Quarto location from the VM's settings (storage_path) instead of
 # hardcoding the default layout — a relocated storage must not turn into SKIP.
-VM_STORAGE=$("${SSH_VM[@]}" "python3 -c \"import tomllib; print(tomllib.load(open('/opt/clarinet/settings.toml','rb')).get('storage_path',''))\"" 2>/dev/null) || VM_STORAGE=""
+VM_STORAGE=$(vm_setting storage_path) || VM_STORAGE=""
 QUARTO_BIN="${VM_STORAGE:-/var/lib/clarinet/data}/quarto/bin/quarto"
 if "${SSH_VM[@]}" "test -x '${QUARTO_BIN}'" 2>/dev/null; then
     # /opt/clarinet carries a downstream-style .env.example (e2e fixture), so a

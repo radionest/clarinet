@@ -63,6 +63,65 @@ setup_services() {
     init_logging "install"
 }
 
+# --- Step 5b: Downstream project (optional) ---
+# The marker records that plan/ and review/ were placed by a project bundle —
+# a later bare install removes exactly those (and only those) artifacts.
+PROJECT_MARKER="${INSTALL_DIR}/.clarinet-project-bundle"
+
+install_project() {
+    local bundle="${CLARINET_PROJECT_BUNDLE:-}"
+    if [[ -z "$bundle" ]]; then
+        # Bare deployment: drop project artifacts left by a previous bundle
+        # deploy (marker-gated — operator-managed files are not touched).
+        if [[ -f "$PROJECT_MARKER" ]]; then
+            log "Removing previous project bundle artifacts (plan/, review/)..."
+            rm -rf "${INSTALL_DIR}/plan" "${INSTALL_DIR}/review" "$PROJECT_MARKER"
+        fi
+        return
+    fi
+    if [[ ! -d "$bundle/plan" || ! -f "$bundle/settings.toml" ]]; then
+        err "Project bundle incomplete: $bundle (need plan/ and settings.toml)"
+        exit 1
+    fi
+
+    log "Installing downstream project from $bundle..."
+    # The DB keeps the existing admin's password hash, so snapshot the
+    # currently effective admin_password before the base file is replaced —
+    # generate-settings.sh honours CLARINET_ADMIN_PASSWORD first.
+    if [[ -z "${CLARINET_ADMIN_PASSWORD:-}" ]]; then
+        local existing_pass
+        existing_pass=$(python3 -c "
+import sys, tomllib, pathlib
+m = {}
+for name in ('settings.toml', 'settings.custom.toml'):
+    f = pathlib.Path(sys.argv[1]) / name
+    if f.is_file():
+        m.update(tomllib.load(f.open('rb')))
+print(m.get('admin_password', ''))
+" "$INSTALL_DIR" 2>/dev/null) || existing_pass=""
+        if [[ -n "$existing_pass" ]]; then
+            export CLARINET_ADMIN_PASSWORD="$existing_pass"
+        fi
+    fi
+
+    # Clean replace (not merge) so files dropped from the project disappear.
+    rm -rf "${INSTALL_DIR}/plan" "${INSTALL_DIR}/review"
+    cp -r "$bundle/plan" "${INSTALL_DIR}/plan"
+    # The project's settings.toml becomes the base config; stand-specific
+    # values are layered on top via settings.custom.toml (generate-settings.sh
+    # overlay mode) — settings.custom.toml has higher priority in clarinet.
+    # It may carry dev secrets — keep it group-readable only.
+    cp "$bundle/settings.toml" "${INSTALL_DIR}/settings.toml"
+    chmod 640 "${INSTALL_DIR}/settings.toml"
+    if [[ -d "$bundle/review" ]]; then
+        cp -r "$bundle/review" "${INSTALL_DIR}/review"
+    fi
+    touch "$PROJECT_MARKER"
+    chown -R clarinet:clarinet "$INSTALL_DIR"
+    export CLARINET_SETTINGS_OVERLAY=1
+    log "Downstream project installed (plan/, settings.toml$([[ -d "$bundle/review" ]] && echo ', review/'))"
+}
+
 # --- Step 6: Settings ---
 generate_settings() {
     # Compute root_url from PATH_PREFIX (strip trailing slash for FastAPI root_path)
@@ -185,6 +244,7 @@ setup_user
 install_python
 install_wheel
 setup_services
+install_project
 generate_settings
 init_database
 install_ohif
