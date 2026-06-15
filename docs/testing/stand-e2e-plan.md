@@ -4,7 +4,8 @@
 стенд-инфраструктуры: разрозненные ветки про «тестовые стенды» и «перенос downstream-проектов»
 сводятся сюда — каждая регистрируется против своей фазы (§5.1), стыки между фазами зафиксированы
 как контракты (§5.2). Прозой по-русски, идентификаторы/команды/код — английским.
-При переносе в репозиторий: `docs/testing/stand-e2e.md` (перевести прозу на английский).
+Файл уже в репо как рабочий tracker (`stand-e2e-plan.md`); перевод прозы на английский и переименование
+в `docs/testing/stand-e2e.md` — отложенный шаг при стабилизации из tracker'а в публичную доку.
 
 ---
 
@@ -47,7 +48,7 @@
 Связи (по приватным IP virbr0):
 - **Хост → VM-STAND**: HTTPS `https://<stand-ip>/<prefix>/` (API+фронт), SSH (управление, резолв путей).
 - **Хост → VM-PACS / VM-WORKER**: SSH (провижн, инъекция файлов, проверки).
-- **VM-WORKER → VM-STAND**: HTTP API (`ClarinetClient`: `api_base_url` + `service_token`) + RabbitMQ (`rabbitmq_host`)
+- **VM-WORKER → VM-STAND**: HTTP API (`ClarinetClient`: `api_base_url` + `internal_service_token`) + RabbitMQ (`rabbitmq_host`)
   + **общий storage-моунт (NFS)** для файловых артефактов. **Прямого доступа к PostgreSQL у воркера нет** —
   все чтения/записи записей идут через API.
 - **VM-STAND (api) → VM-PACS**: C-FIND (`import-study`).
@@ -71,7 +72,7 @@
 | **DICOMweb-прокси (OHIF)** | `clarinet` api (WADO-RS/QIDO-RS), `dicomweb_cache/`, task `prefetch_dicom_web` | HTTP-источник анонимного DICOM при capture — отдаёт `dcm_anon` без DICOM-networking (см. 3.2/3.3) |
 | **Воркер ↔ API по HTTP** | `ClarinetClient` (`client.py`), `effective_api_base_url`, `effective_service_token`, `TaskContext.client/.records/.files` | воркер читает/пишет **через API + service-token**, не через БД; файлы — через `ctx.files` (общий storage). Уже готов к выносу на отдельную VM |
 | Прототип-харнесс (3 слоя) | `clarinet-stand/nir_liver/tests/workflow/` | `Stand` driver, `stand_tool.py`, `setup_stand.sh`, сценарий-DAG |
-| `test-all-stages` оркестрация | `Makefile:216–385` | 8 стадий, флаги `SKIP_VM/KEEP_VM/SKIP_SCHEMA/SKIP_SLICER` |
+| `test-all-stages` оркестрация | `Makefile` (`test-all-stages` target) | 8 стадий, флаги `SKIP_VM/KEEP_VM/SKIP_SCHEMA/SKIP_SLICER` |
 | e2e (Playwright) | `deploy/test/e2e/`, env `CLARINET_TEST_URL` | модель «прогон против VM по HTTPS+sub-path» |
 | Headless Slicer на хосте | `deploy/test/slicer/run-headless.sh` (порт 2016) | основа для реальных Slicer-стадий |
 | RecordFlow DSL (workflow-DAG) | `plan/workflows/*_flow.py`, `recordflow/`, `plan_package.py` | декларация DAG проекта; состояния `preparing/blocked` сериализуют гонку prefill↔check-files |
@@ -208,7 +209,7 @@ scratch-БД), затем опционально `pg_dump` результата 
 ```
 fixtures/<project>/<version>/
   manifest.toml      # см. 3.5: проект, prefix, demo-пациенты, spine-DAG, seg-классы,
-                     #          режим стадий (replay|synthetic|inject|slicer|form), race-точки,
+                     #          режим стадий (form|replay|segment|inject|slicer|auto), race-точки,
                      #          source-provenance hash, версия схемы (для миграций)
   db.sql.gz          # анонимный pg_dump
   dicom/<anon_patient>/<anon_study>/<anon_series>/dcm_anon/*.dcm
@@ -287,20 +288,30 @@ replay_seg = "segment-prospective-ct.seg.nrrd"
 seg_classes = ["mts", "unclear", "benign"]
 
 [[spine]]
-record_type = "mdk-conclusion"
-mode = "inject"         # GPU-печень: подложить artifacts/, потом форма
+record_type = "auto-liver"
+mode = "inject"         # GPU-печень: подложить нерегенерируемую маску из artifacts/
 inject_file = "auto-liver"
+
+[[spine]]
+record_type = "mdk-conclusion"
+expect = "finished"
+mode = "form"           # форма (lesions); зависит от auto-liver
 
 # Точки гонок: что проверять на конкуррентность/сериализацию
 [[race]]
 kind = "prefill_vs_checkfiles"   # расширить окно через CLARINET_PREFILL_DELAY, проверить preparing/blocked
 record_type = "mdk-conclusion"
-data_key = "lesion_cluster_mapping"
+data_key = "lesions"             # prefill-ключ mdk-conclusion (см. прототип test_workflow.py)
 
 [[race]]
 kind = "parallel_branches"        # anon/archive ветки — обе достигают ожидаемых состояний
 branches = ["segment-ct-single", "segment-ct-with-archive"]
 ```
+
+**Режимы стадии** (`mode`, канонический набор): `form` — отправка формы; `replay` — воспроизвести
+захваченную сегментацию (§3.6); `segment` — синтез `.seg.nrrd` (synthetic, §3.6 fallback); `inject` —
+подложить нерегенерируемый артефакт из `artifacts/`; `slicer` — реальный headless Slicer (§3.6);
+`auto` — стадия проходится auto-pipeline без ручного ввода.
 
 `scenario.py` (тонкий, per-project) — только то, что нельзя декларативно:
 ```python
@@ -312,7 +323,7 @@ def assert_resection_report(stand, record): ...    # кастомные пров
 **Покрытие гонок** — харнесс даёт примитивы:
 - `wait_record_data` (уже есть — закрывает prefill-гонку);
 - `CLARINET_PREFILL_DELAY` (test-only settings hook) — расширить окно prefill, убедиться что
-  `preparing→pending` ре-валидация (`models/record.py:151`) держит сериализацию (record уходит в `blocked`, не `pending`);
+  `preparing→pending` ре-валидация (hard-invalidation guard в `clarinet/repositories/record_repository.py`) держит сериализацию (record уходит в `blocked`, не `pending`);
 - параллельные ветки — submit обе, ассертить оба терминальных состояния (прототип оставлял их `pending` намеренно —
   теперь покрываем явно).
 
@@ -327,7 +338,7 @@ def assert_resection_report(stand, record): ...    # кастомные пров
 2. **`slicer`** (opt-in/nightly) — headless Slicer на хосте (`run-headless.sh`, порт 2016) тянет контекст из VM-STAND,
    гоняет реальный Slicer-скрипт проекта (`plan/scripts/*.py`), отдаёт результат через **полный валидированный путь**
    (context-hydration + record-data-validator). Самая высокая достоверность, самый медленный.
-3. **`segment`/`synthetic`** (fallback) — синтез геометрически-консистентного `.seg.nrrd` (как в прототипе), когда
+3. **`segment`** (fallback, ранее «synthetic») — синтез геометрически-консистентного `.seg.nrrd` (как в прототипе), когда
    захвата нет (новый record-тип, нет прод-данных).
 
 Решение D3 (уточнено): **default — `replay`** там, где есть захваченные сегментации; `synthetic` — fallback без захвата;
