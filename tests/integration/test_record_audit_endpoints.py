@@ -40,6 +40,7 @@ class TestRecordEventsEndpoint:
         assert event["from_status"] == "pending"
         assert event["to_status"] == "inwork"
         assert event["actor_id"] is not None  # browser user, not system
+        assert event["actor_name"] is not None  # admin sees the actor email
         assert event["record_id"] == record.id
         assert event["record_key"] == record.id  # survives deletion, unlike record_id
 

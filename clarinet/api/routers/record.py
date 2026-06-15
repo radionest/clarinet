@@ -857,18 +857,25 @@ async def check_record_files(
 @router.get("/{record_id}/events", response_model=list[RecordEventRead])
 async def get_record_events(
     record: AuthorizedRecordDep,
+    user: CurrentUserDep,
     events_repo: RecordEventRepositoryDep,
     pagination: PaginationDep,
 ) -> list[RecordEventRead]:
     """Audit trail for this record, oldest first.
 
     ``actor_id=null`` marks system actions (pipeline workers, RecordFlow).
+    The actor's email (``actor_name``) is exposed only to admins; other users
+    with record access see the events but not the acting user's email.
     """
     assert record.id is not None  # SQLModel PK after get
     events = await events_repo.list_for_record(
         record.id, skip=pagination.skip, limit=pagination.limit
     )
-    return [RecordEventRead.model_validate(e) for e in events]
+    reads = [RecordEventRead.model_validate(e) for e in events]
+    is_admin = user.is_superuser or "admin" in get_user_role_names(user)
+    if not is_admin:
+        reads = [r.model_copy(update={"actor_name": None}) for r in reads]
+    return reads
 
 
 def _mask_run_identifier(value: str | None, raw: str | None, substitute: str | None) -> str | None:

@@ -99,10 +99,21 @@ class RecordEvent(RecordEventBase, table=True):
         """Email of the acting user; None for system actions or when unloaded.
 
         Reads from ``__dict__`` to avoid triggering a lazy load outside an
-        async context (mirrors ``User.role_names``). Populated only when the
-        caller eager-loaded ``actor``.
+        async context (mirrors ``User.role_names``). When ``actor_id`` is set
+        but ``actor`` was not eager-loaded, logs a warning and returns None so
+        a missing ``selectinload(RecordEvent.actor)`` surfaces instead of
+        silently dropping the email.
         """
-        actor = self.__dict__.get("actor")
+        if "actor" not in self.__dict__:
+            if self.actor_id is not None:
+                from clarinet.utils.logger import logger
+
+                logger.warning(
+                    f"RecordEvent.actor_name accessed without eager-loaded actor "
+                    f"(event_id={self.id}, actor_id={self.actor_id}); returning None",
+                )
+            return None
+        actor = self.__dict__["actor"]
         return actor.email if actor is not None else None
 
 
