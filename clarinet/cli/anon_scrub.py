@@ -104,10 +104,12 @@ def _pg_dump(out_path: str) -> None:
         "--no-owner",
         "--no-privileges",
     ]
-    if out_path.endswith(".gz"):
-        completed = subprocess.run(cmd, env=env, stdout=subprocess.PIPE, check=True)
-        with gzip.open(out_path, "wb") as fh:
-            fh.write(completed.stdout)
-    else:
-        with open(out_path, "wb") as fh:
-            subprocess.run(cmd, env=env, stdout=fh, check=True)
+    # Buffer then write via a temp file + atomic rename: a pg_dump failure
+    # (check=True raises before any file is created) or a mid-write error never
+    # leaves a truncated artifact at out_path that looks like a valid dump.
+    completed = subprocess.run(cmd, env=env, stdout=subprocess.PIPE, check=True)
+    tmp = f"{out_path}.partial"
+    opener = gzip.open if out_path.endswith(".gz") else open
+    with opener(tmp, "wb") as fh:
+        fh.write(completed.stdout)
+    os.replace(tmp, out_path)

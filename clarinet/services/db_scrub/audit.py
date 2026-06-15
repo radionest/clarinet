@@ -19,20 +19,28 @@ from typing import Any
 _MIN_TERM_LEN = 3
 
 
-def collect_phi_terms(values: Iterable[str | None]) -> set[str]:
-    """Build PHI search terms from original names and MRNs.
+def collect_phi_terms(names: Iterable[str | None], ids: Iterable[str | None]) -> set[str]:
+    """Build PHI search terms from original patient names and ids (MRNs).
 
-    Names are split on whitespace so ``"Ivanov Ivan"`` matches either token;
-    everything is lower-cased and terms shorter than ``_MIN_TERM_LEN`` dropped.
+    Names are split on whitespace so ``"Ivanov Ivan"`` matches either token, and
+    tokens shorter than ``_MIN_TERM_LEN`` are dropped (short word fragments are
+    noisy). Ids are operator-supplied MRNs and are included **verbatim,
+    regardless of length** — a short MRN must still be auditable. The cost is a
+    rare false positive when a short numeric MRN collides with a kept DICOM-UID
+    segment, which fails safe (rollback; re-run with ``--allow-phi-leak`` if the
+    hit is a known false positive). Everything is lower-cased.
     """
     terms: set[str] = set()
-    for value in values:
+    for value in names:
         if not value:
             continue
         for token in re.split(r"\s+", value.strip()):
             normalized = token.strip().lower()
             if len(normalized) >= _MIN_TERM_LEN:
                 terms.add(normalized)
+    for value in ids:
+        if value and value.strip():
+            terms.add(value.strip().lower())
     return terms
 
 

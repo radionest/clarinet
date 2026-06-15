@@ -122,9 +122,10 @@ def test_scrub_honours_if_then_branch_enum() -> None:
 # ── audit (pure) ─────────────────────────────────────────────────────
 
 
-def test_collect_phi_terms_splits_and_filters() -> None:
-    terms = collect_phi_terms(["Ivanov Ivan", "MRN12345", "Al", None, ""])
-    assert terms == {"ivanov", "ivan", "mrn12345"}  # "Al" dropped (too short)
+def test_collect_phi_terms_splits_names_and_keeps_ids_verbatim() -> None:
+    terms = collect_phi_terms(["Ivanov Ivan", "Al", None, ""], ["MRN12345", "7"])
+    # Name "Al" dropped (too short); ids kept verbatim incl. the 1-char MRN.
+    assert terms == {"ivanov", "ivan", "mrn12345", "7"}
 
 
 def test_scan_text_whole_word_only() -> None:
@@ -318,6 +319,8 @@ async def test_scrub_db_end_to_end(test_session: AsyncSession) -> None:
     user_emails = (await test_session.execute(select(User.email))).scalars().all()
     assert meta["admin_email"] in user_emails  # superuser kept
     assert any(e.endswith("@example.invalid") for e in user_emails)  # doctor scrubbed
+    hashes = (await test_session.execute(select(User.hashed_password))).scalars().all()
+    assert all(h == "!scrubbed-no-login!" for h in hashes)  # credentials blanked (all roles)
 
     # Sequence/counter pinned to MAX(auto_id) so a new stand patient won't collide.
     counter = (

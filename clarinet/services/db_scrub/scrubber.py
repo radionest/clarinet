@@ -48,6 +48,11 @@ from clarinet.utils.logger import logger
 # ``patient_id`` (it links via ``record_id``), so it is not listed here.
 _PATIENT_FK_MODELS = (Study, Record, PipelineTaskRun)
 
+# Placeholder for ``User.hashed_password``: real bcrypt hashes are crackable
+# credentials and must not ship in a fixture. Not a valid hash, so password
+# verification fails closed; the stand re-establishes admin login on load.
+_NO_LOGIN_HASH = "!scrubbed-no-login!"
+
 
 class PhiLeakError(RuntimeError):
     """Audit found captured PHI surviving in the scrubbed database."""
@@ -122,7 +127,7 @@ class DbScrubber:
         if not patients:
             raise ValueError("no patients selected — refusing to scrub an empty set")
         keep_ids = {p.old_id for p in patients}
-        phi_terms = collect_phi_terms([p.name for p in patients] + [p.old_id for p in patients])
+        phi_terms = collect_phi_terms([p.name for p in patients], [p.old_id for p in patients])
         report = ScrubReport(patients_kept=len(patients))
 
         total = await self._scalar(select(func.count()).select_from(Patient))
@@ -246,19 +251,21 @@ class DbScrubber:
         return len(rows)
 
     async def _scrub_users(self) -> int:
-        """Replace non-superuser emails (PII); keep superuser system accounts."""
+        """Blank every password hash; scrub non-superuser emails.
+
+        ``hashed_password`` is a real credential and is replaced for ALL users
+        regardless of role (the stand re-establishes admin login via
+        ``clarinet db init`` / ``admin reset-password``). Superuser emails are
+        kept (system accounts such as the default admin) — operators must ensure
+        those carry no PII.
+        """
         rows = (await self.session.execute(select(User.id, User.is_superuser))).all()
-        scrubbed = 0
         for uid, is_superuser in rows:
-            if is_superuser:
-                continue
-            await self.session.execute(
-                update(User)
-                .where(col(User.id) == uid)
-                .values(email=f"user-{uid}@example.invalid")  # full uuid — unique
-            )
-            scrubbed += 1
-        return scrubbed
+            values: dict[str, Any] = {"hashed_password": _NO_LOGIN_HASH}
+            if not is_superuser:
+                values["email"] = f"user-{uid}@example.invalid"  # full uuid — unique
+            await self.session.execute(update(User).where(col(User.id) == uid).values(**values))
+        return len(rows)
 
     async def _scrub_relational_text(self) -> None:
         """Null the free-text columns outside ``record.data`` / user email.
