@@ -127,6 +127,12 @@
     box-shadow: var(--shadow-sm);
 }
 
+/* Keyboard focus must stay visible on the active segment — its own
+   box-shadow would otherwise mask the focus ring (equal specificity) */
+.activity-tab.is-active:focus-visible {
+    box-shadow: var(--shadow-sm), var(--focus-ring);
+}
+
 /* Activity feed filters (global audit feed) */
 .activity-filters {
     display: flex;
@@ -160,7 +166,7 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: var(--spacing-sm);
+    gap: var(--spacing-xs);
 }
 
 /* Assigned-user email — fills the cell so the Change button pins to a

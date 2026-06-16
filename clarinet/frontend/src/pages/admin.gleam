@@ -652,7 +652,7 @@ fn assign_cell(
                 attribute.class("btn btn-sm btn-outline"),
                 event.on_click(ToggleAssignDropdown(Some(record_id))),
               ],
-              [html.text("Change")],
+              [html.text(shared.translate(i18n.BtnChange))],
             ),
           ])
         }
@@ -662,7 +662,7 @@ fn assign_cell(
               attribute.class("btn btn-sm btn-primary"),
               event.on_click(ToggleAssignDropdown(Some(record_id))),
             ],
-            [html.text("Assign")],
+            [html.text(shared.translate(i18n.BtnAssign))],
           )
       }
   }

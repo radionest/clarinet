@@ -24,6 +24,7 @@ pub type Key {
   BtnChange
   BtnCancel
   BtnUnassign
+  BtnAssign
   BtnDelete
   BtnBack
   BtnFail
@@ -429,6 +430,8 @@ pub fn translate(locale: Locale, key: Key) -> String {
     Ru, BtnCancel -> "Отмена"
     En, BtnUnassign -> "Unassign"
     Ru, BtnUnassign -> "Снять назначение"
+    En, BtnAssign -> "Assign"
+    Ru, BtnAssign -> "Назначить"
     En, BtnDelete -> "Delete"
     Ru, BtnDelete -> "Удалить"
     En, BtnBack -> "Back"
