@@ -488,15 +488,26 @@ fn run_record_cell(record_id: Option(Int)) -> Element(msg) {
 
 /// Record column for an audit event. Links via the live FK while the record
 /// exists; once deleted (`record_id` NULL) the denormalized `record_key` is
-/// shown unlinked so the row stays correlatable.
+/// shown unlinked so the row stays correlatable. The record type name is shown
+/// as a muted suffix when available (NULL for system / deleted-record events).
 fn event_record_cell(ev: RecordEvent) -> Element(msg) {
   case ev.record_id, ev.record_key {
-    Some(id), _ -> record_link(id)
+    Some(id), _ ->
+      html.span([], [record_link(id), record_type_suffix(ev.record_type_name)])
     None, Some(key) ->
       html.span([attribute.class("text-muted")], [
         html.text("#" <> int.to_string(key)),
       ])
     None, None -> html.text("—")
+  }
+}
+
+/// Muted " TypeName" appended after a live record link; empty when absent
+/// (system events and deleted records carry no record type to show).
+fn record_type_suffix(name: Option(String)) -> Element(msg) {
+  case name {
+    Some(n) -> html.span([attribute.class("text-muted")], [html.text(" " <> n)])
+    None -> element.none()
   }
 }
 

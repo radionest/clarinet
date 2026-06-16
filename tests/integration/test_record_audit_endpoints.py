@@ -43,6 +43,7 @@ class TestRecordEventsEndpoint:
         assert event["actor_name"] is not None  # admin sees the actor email
         assert event["record_id"] == record.id
         assert event["record_key"] == record.id  # survives deletion, unlike record_id
+        assert event["record_type_name"] == record.record_type_name
 
     @pytest.mark.asyncio
     async def test_context_info_update_is_audited(self, client: AsyncClient, test_session):
@@ -131,6 +132,8 @@ class TestGlobalRecordEvents:
         # A browser mutation resolves to the acting user's email.
         assert status_events[0]["actor_name"] is not None
         assert "@" in status_events[0]["actor_name"]
+        # The record type name rides along, resolved from the eager-loaded record.
+        assert status_events[0]["record_type_name"] == record.record_type_name
 
     @pytest.mark.asyncio
     async def test_feed_filters_by_kind(self, client: AsyncClient, test_session):

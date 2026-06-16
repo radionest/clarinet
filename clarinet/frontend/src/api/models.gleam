@@ -447,6 +447,7 @@ pub type RecordEvent {
     id: Int,
     record_id: Option(Int),
     record_key: Option(Int),
+    record_type_name: Option(String),
     patient_id: Option(String),
     kind: String,
     actor_name: Option(String),
