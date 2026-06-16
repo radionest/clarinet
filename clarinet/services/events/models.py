@@ -41,9 +41,9 @@ class EntityEvent(BaseModel):
 
 
 class TaskProgressEvent(BaseModel):
-    """Progress of a long-running task (preload, quarto render)."""
+    """Progress of a long-running task (preload, quarto render, pipeline run)."""
 
-    task: Literal["preload", "quarto_render"]
+    task: Literal["preload", "quarto_render", "pipeline"]
     task_id: str
     payload: dict[str, Any]
     user_id: UUID | None = None  # recipient for RBAC routing; NOT serialized into the frame

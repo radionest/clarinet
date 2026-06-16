@@ -16,7 +16,7 @@ from clarinet.models import Record, RecordRead, RecordStatus, is_record_editable
 from clarinet.models.file_schema import FileDefinitionRead, FileRole
 from clarinet.models.record_event import RecordEvent
 from clarinet.repositories.file_repository import FileRepository
-from clarinet.services.events.capture import emit_record_events
+from clarinet.services.events.capture import emit_record_events, mark_pending_audit
 from clarinet.services.events.models import EntityEvent
 from clarinet.services.file_validation import validate_record_files
 from clarinet.utils.file_checksums import checksums_changed, compute_checksums
@@ -178,6 +178,17 @@ class RecordService:
             )
         )
 
+    def _mark_audit(self, record_id: int | None, actor_id: UUID | None) -> None:
+        """Announce the *next* committing record mutation to the SSE capture.
+
+        The repo write commits internally and the matching ``RecordEvent``
+        commits later, so the SSE capture cannot pair them per-commit. Setting
+        this breadcrumb right before the committing write lets the capture emit
+        one enriched record event (``user_id`` = the acting user) and skip the
+        drift warning. No-op when SSE is off (see ``mark_pending_audit``).
+        """
+        mark_pending_audit(self.repo.session, record_id, actor_id)
+
     # ── Public methods ───────────────────────────────────────────────────
 
     async def create_record(self, record: Record, *, actor_id: UUID | None = None) -> Record:
@@ -228,6 +239,7 @@ class RecordService:
                 await self.repo.set_files(record, file_result.matched_files)
                 record = await self.repo.get_with_relations(record.id)  # type: ignore[arg-type]
             elif not file_result.valid and record.status != RecordStatus.preparing:
+                self._mark_audit(record.id, actor_id)
                 record, _ = await self.repo.update_status(record.id, RecordStatus.blocked)  # type: ignore[arg-type]
 
         await self._record_event(
@@ -286,6 +298,7 @@ class RecordService:
         current = await self.repo.get(record_id)
         if current.status == RecordStatus.preparing:
             target_status, matched_files = await self._resolve_preparing_exit(record_id, new_status)
+        self._mark_audit(record_id, actor_id)
         record, old_status = await self.repo.update_status(record_id, target_status)
         if matched_files:
             await self.repo.set_files(record, matched_files)
@@ -319,6 +332,7 @@ class RecordService:
         """
         record = await self.repo.get_with_record_type(record_id)
         await self._check_unique_per_user(user_id, record)
+        self._mark_audit(record_id, actor_id)
         record, old_status = await self.repo.assign_user(record_id, user_id)
         await self._record_event(
             record_id=record_id,
@@ -351,6 +365,7 @@ class RecordService:
         record = await self.repo.get_with_record_type(record_id)
         old_status = record.status
         await self._check_unique_per_user(user_id, record)
+        self._mark_audit(record_id, actor_id)
         updated = await self.repo.claim_record(record_id, user_id)
         await self._record_event(
             record_id=record_id,
@@ -374,6 +389,7 @@ class RecordService:
         Returns:
             Tuple of (updated record, old status).
         """
+        self._mark_audit(record_id, actor_id)
         record, old_status = await self.repo.unassign_user(record_id)
         await self._record_event(
             record_id=record_id,
@@ -416,6 +432,7 @@ class RecordService:
             record_check = await self.repo.get_with_record_type(record_id)
             if record_check.user_id is None:
                 await self._check_unique_per_user(user_id, record_check)
+                self._mark_audit(record_id, actor_id)
                 await self.repo.ensure_user_assigned(record_id, user_id)
                 await self._record_event(
                     record_id=record_id,
@@ -426,6 +443,7 @@ class RecordService:
             else:
                 await self.repo.ensure_user_assigned(record_id, user_id)
 
+        self._mark_audit(record_id, actor_id)
         record, old_status = await self.repo.update_data(record_id, data, new_status=new_status)
         await self._record_event(
             record_id=record_id,
@@ -486,6 +504,7 @@ class RecordService:
         if acting_user is not None and not acting_user.is_superuser:
             record = await self.repo.get_with_relations(record_id)
             ensure_record_editable(record, acting_user)
+        self._mark_audit(record_id, actor_id)
         record, old_status = await self.repo.update_data(record_id, data)
         await self._record_event(
             record_id=record_id,
@@ -553,6 +572,8 @@ class RecordService:
                     continue
                 old_statuses[record_id] = record.status
 
+        for marked_id in old_statuses:
+            self._mark_audit(marked_id, actor_id)
         await self.repo.bulk_update_status(list(old_statuses), new_status)
 
         # Preparing records take the single-record path: exit re-validation
@@ -614,6 +635,7 @@ class RecordService:
         old_record = await self.repo.get(record_id)
         old_status = old_record.status
 
+        self._mark_audit(record_id, actor_id)
         record = await self.repo.invalidate_record(
             record_id=record_id,
             mode=mode,
@@ -653,6 +675,7 @@ class RecordService:
         Returns:
             Updated record with relations.
         """
+        self._mark_audit(record_id, actor_id)
         record, old_status = await self.repo.fail_record(record_id, reason)
         logger.info(f"Record {record_id} manually failed")
 
@@ -1015,6 +1038,7 @@ class RecordService:
         """
         record = await self.repo.get(record_id)
         old_value = record.context_info
+        self._mark_audit(record_id, actor_id)
         updated = await self.repo.update_fields(record_id, {"context_info": context_info})
         await self._record_event(
             record_id=record_id,
