@@ -342,8 +342,8 @@ fn tab_button(
   t: fn(Key) -> String,
 ) -> Element(Msg) {
   let class = case tab == active {
-    True -> "btn btn-primary"
-    False -> "btn btn-outline"
+    True -> "activity-tab is-active"
+    False -> "activity-tab"
   }
   html.button([attribute.class(class), event.on_click(TabSelected(tab))], [
     html.text(t(label)),

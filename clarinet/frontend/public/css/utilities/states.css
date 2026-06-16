@@ -86,6 +86,47 @@
     }
 }
 
+/* Activity feed tab switcher — segmented control (Events / Runs) */
+.activity-tabs {
+    display: inline-flex;
+    gap: 2px;
+    padding: 3px;
+    margin-bottom: var(--spacing-md);
+    background-color: var(--surface-sunken);
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius-lg);
+}
+
+.activity-tab {
+    appearance: none;
+    border: none;
+    background: transparent;
+    padding: 0.4rem 1.1rem;
+    border-radius: var(--radius-md);
+    font-family: var(--font-sans);
+    font-size: 0.875rem;
+    font-weight: 500;
+    line-height: 1.45;
+    color: var(--ink-soft);
+    cursor: pointer;
+    transition: background-color 0.15s, color 0.15s, box-shadow 0.15s;
+}
+
+.activity-tab:hover {
+    color: var(--ink);
+}
+
+.activity-tab:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+}
+
+.activity-tab.is-active {
+    background-color: var(--teal);
+    color: #ffffff;
+    box-shadow: var(--shadow-sm);
+}
+
 /* Activity feed filters (global audit feed) */
 .activity-filters {
     display: flex;
@@ -118,7 +159,17 @@
 .assign-cell {
     display: flex;
     align-items: center;
-    gap: var(--spacing-xs);
+    justify-content: space-between;
+    gap: var(--spacing-sm);
+}
+
+/* Assigned-user email — fills the cell so the Change button pins to a
+   consistent right edge across rows; truncates instead of jagging the column */
+.assign-email {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .assign-dropdown {

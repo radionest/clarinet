@@ -646,8 +646,7 @@ fn assign_cell(
         Some(uid) -> {
           let email = cache.user_email(shared.cache, uid)
           html.div([attribute.class("assign-cell")], [
-            html.span([], [html.text(email)]),
-            html.text(" "),
+            html.span([attribute.class("assign-email")], [html.text(email)]),
             html.button(
               [
                 attribute.class("btn btn-sm btn-outline"),
