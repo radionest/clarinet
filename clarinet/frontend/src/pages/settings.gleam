@@ -113,7 +113,7 @@ pub fn update(
       effect.none(),
       // Non-auth failures are shown inline (Failed status + retry); only a
       // session-killing 401 escalates to the host.
-      auth_out(err),
+      handle_error(err, None),
     )
 
     RetryLoadSessions -> #(
@@ -143,18 +143,19 @@ pub fn update(
     SessionRevoked(_token_preview, Error(err)) -> #(
       Model(..model, revoking: None),
       effect.none(),
-      case err {
-        AuthError(_) -> [shared.Logout]
-        _ -> [shared.ShowError("Failed to revoke session")]
-      },
+      handle_error(err, Some("Failed to revoke session")),
     )
   }
 }
 
-fn auth_out(err: ApiError) -> List(OutMsg) {
-  case err {
-    AuthError(_) -> [shared.Logout]
-    _ -> []
+// AuthError always triggers logout. Other errors optionally surface a toast —
+// load failures render inline via the Failed status, so they pass None; the
+// revoke mutation has no inline slot, so it passes a message.
+fn handle_error(err: ApiError, toast: Option(String)) -> List(OutMsg) {
+  case err, toast {
+    AuthError(_), _ -> [shared.Logout]
+    _, Some(message) -> [shared.ShowError(message)]
+    _, None -> []
   }
 }
 

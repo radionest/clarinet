@@ -223,11 +223,11 @@ async def revoke_session(
             detail="Multiple sessions match this preview. Please use full token.",
         )
 
-    # Delete the session and evict it from the in-memory validation cache,
-    # mirroring DatabaseStrategy.destroy_token — otherwise the revoked token
-    # stays valid in the TTL cache until session_cache_ttl_seconds elapses.
+    # Delete the session and evict it from the in-memory validation cache —
+    # otherwise the revoked token stays valid in the TTL cache until
+    # session_cache_ttl_seconds elapses (same eviction destroy_token does).
     revoked = access_tokens[0]
-    DatabaseStrategy._user_cache.pop(revoked.token, None)
+    DatabaseStrategy.evict_token(revoked.token)
     await session.delete(revoked)
     await session.commit()
 

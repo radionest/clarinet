@@ -117,8 +117,6 @@ pub fn revoke_session(token_preview: String) -> Promise(Result(Nil, ApiError)) {
 
 fn session_info_decoder() -> decode.Decoder(SessionInfo) {
   use token_preview <- decode.field("token_preview", decode.string)
-  use created_at <- decode.field("created_at", decode.string)
-  use expires_at <- decode.field("expires_at", decode.string)
   use last_accessed <- decode.field("last_accessed", decode.string)
   use user_agent <- decode.optional_field(
     "user_agent",
@@ -133,8 +131,6 @@ fn session_info_decoder() -> decode.Decoder(SessionInfo) {
   use is_current <- decode.field("is_current", decode.bool)
   decode.success(models.SessionInfo(
     token_preview:,
-    created_at:,
-    expires_at:,
     last_accessed:,
     user_agent:,
     ip_address:,
