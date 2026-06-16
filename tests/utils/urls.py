@@ -64,6 +64,7 @@ SERIES_FIND = "/api/series/find"
 # --- Admin ---
 ADMIN_BASE = "/api/admin"
 ADMIN_STATS = "/api/admin/stats"
+ADMIN_ONLINE_USERS = "/api/admin/online-users"
 ADMIN_RT_STATS = "/api/admin/record-types/stats"
 ADMIN_RECORDS = "/api/admin/records"  # + /{id} for cascade delete
 ADMIN_RECORD_STATUS = "/api/admin/records"  # + /{id}/status

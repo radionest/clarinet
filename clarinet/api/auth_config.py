@@ -179,6 +179,11 @@ class DatabaseStrategy(Strategy[User, UUID]):
             },
         )
 
+        # sse-capture: explicit emit, session lifecycle (AccessToken not ORM-captured)
+        from clarinet.services.events.capture import emit_presence
+
+        emit_presence(user.id, True)
+
         return token
 
     async def read_token(
@@ -372,6 +377,14 @@ class DatabaseStrategy(Strategy[User, UUID]):
                 f"Session destroyed for user {user.id}",
                 extra={"user_id": str(user.id), "token_preview": token[:8] + "..."},
             )
+            # sse-capture: explicit emit, session lifecycle
+            from clarinet.services.events.capture import emit_presence
+            from clarinet.utils.session import is_user_online
+
+            if not await is_user_online(
+                self.session, user.id, settings.session_idle_timeout_minutes
+            ):
+                emit_presence(user.id, False)
 
     async def _enforce_session_limit(self, user_id: UUID) -> None:
         """Enforce maximum concurrent sessions per user."""

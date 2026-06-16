@@ -14,16 +14,20 @@ from clarinet.api.dependencies import (
     PaginationDep,
     RecordEventRepositoryDep,
     RecordServiceDep,
+    SessionDep,
 )
 from clarinet.models import Record, RecordEventFind, RecordEventRead, RecordRead
 from clarinet.models.admin import (
     AdminStats,
     ClearOutputFilesResult,
     DeleteRecordResult,
+    OnlineUsersResponse,
     RecordTypeStats,
     RoleMatrixResponse,
 )
 from clarinet.models.base import RecordStatus
+from clarinet.settings import settings
+from clarinet.utils.session import get_online_user_ids
 
 router = APIRouter(
     responses={
@@ -224,6 +228,22 @@ async def get_role_matrix(
         RoleMatrixResponse with all roles and users with their assignments.
     """
     return await service.get_role_matrix()
+
+
+@router.get("/online-users", response_model=OnlineUsersResponse)
+async def get_online_users(
+    _current_user: AdminUserDep,
+    session: SessionDep,
+) -> OnlineUsersResponse:
+    """Ids of users currently online, for the admin presence indicator.
+
+    "Online" = at least one session that would still authenticate now: not
+    expired and within ``session_idle_timeout_minutes`` of last access. SSE
+    ``presence`` events deliver live deltas; this is the initial snapshot (and
+    the resync after an SSE reconnect).
+    """
+    ids = await get_online_user_ids(session, settings.session_idle_timeout_minutes)
+    return OnlineUsersResponse(user_ids=sorted(str(u) for u in ids))
 
 
 @router.get("/record-types/stats", response_model=list[RecordTypeStats])

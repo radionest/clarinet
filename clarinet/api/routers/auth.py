@@ -236,4 +236,11 @@ async def revoke_session(
         extra={"user_id": str(user.id), "token_preview": token_preview},
     )
 
+    # sse-capture: explicit emit, session lifecycle
+    from clarinet.services.events.capture import emit_presence
+    from clarinet.utils.session import is_user_online
+
+    if not await is_user_online(session, user.id, settings.session_idle_timeout_minutes):
+        emit_presence(user.id, False)
+
     return {"status": "success", "message": "Session revoked successfully"}
