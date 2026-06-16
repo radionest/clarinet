@@ -180,6 +180,22 @@ pub type RegisterRequest {
   RegisterRequest(email: String, password: String)
 }
 
+/// One active session row from GET /api/auth/sessions/active. Timestamps are
+/// backend ISO-8601 strings (UTC). `is_current` marks the session making the
+/// request — the settings page renders it as "This device" with no revoke
+/// button, so users can't sign themselves out by accident.
+pub type SessionInfo {
+  SessionInfo(
+    token_preview: String,
+    created_at: String,
+    expires_at: String,
+    last_accessed: String,
+    user_agent: Option(String),
+    ip_address: Option(String),
+    is_current: Bool,
+  )
+}
+
 // Form data types for creating/updating models
 pub type PatientCreate {
   PatientCreate(
