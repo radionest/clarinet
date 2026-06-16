@@ -25,6 +25,7 @@ pub type EntityEvent {
 pub type SseEvent {
   Entity(EntityEvent)
   TaskProgress(task: String, task_id: String, payload: dynamic.Dynamic)
+  Presence(user_id: String, online: Bool)
   AuthExpired
   Ping
 }
@@ -65,11 +66,18 @@ fn task_progress_decoder() -> decode.Decoder(SseEvent) {
   decode.success(TaskProgress(task:, task_id:, payload:))
 }
 
+fn presence_decoder() -> decode.Decoder(SseEvent) {
+  use user_id <- decode.field("user_id", decode.string)
+  use online <- decode.field("online", decode.bool)
+  decode.success(Presence(user_id:, online:))
+}
+
 fn frame_decoder() -> decode.Decoder(SseEvent) {
   use type_ <- decode.field("type", decode.string)
   case type_ {
     "entity" -> entity_decoder()
     "task_progress" -> task_progress_decoder()
+    "presence" -> presence_decoder()
     "auth_expired" -> decode.success(AuthExpired)
     "ping" -> decode.success(Ping)
     _ -> decode.failure(Ping, "SseEvent")

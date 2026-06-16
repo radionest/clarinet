@@ -1,5 +1,6 @@
 import api/sse_events.{
-  AuthExpired, Created, Deleted, Entity, EntityEvent, Ping, TaskProgress,
+  AuthExpired, Created, Deleted, Entity, EntityEvent, Ping, Presence,
+  TaskProgress,
 }
 import gleam/option.{None, Some}
 import gleeunit/should
@@ -78,4 +79,16 @@ pub fn decode_bad_action_test() {
   "{\"type\":\"entity\",\"entity\":\"record\",\"action\":\"frobnicate\",\"id\":\"1\"}"
   |> sse_events.decode_frame
   |> should.equal(Error(Nil))
+}
+
+pub fn decode_presence_online_test() {
+  "{\"type\":\"presence\",\"user_id\":\"u-1\",\"online\":true}"
+  |> sse_events.decode_frame
+  |> should.equal(Ok(Presence(user_id: "u-1", online: True)))
+}
+
+pub fn decode_presence_offline_test() {
+  "{\"type\":\"presence\",\"user_id\":\"u-2\",\"online\":false}"
+  |> sse_events.decode_frame
+  |> should.equal(Ok(Presence(user_id: "u-2", online: False)))
 }

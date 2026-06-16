@@ -8,6 +8,7 @@ import cache
 import clarinet_frontend/i18n
 import gleam/dict
 import gleam/option.{None, Some}
+import gleam/set
 import gleeunit/should
 import pages/admin
 import pages/records/execute
@@ -73,6 +74,7 @@ fn make_admin_model() -> admin.Model {
     role_matrix: None,
     matrix_status: load_status.Loaded,
     role_toggling: None,
+    online_user_ids: set.new(),
     active_filters: dict.new(),
   )
 }
