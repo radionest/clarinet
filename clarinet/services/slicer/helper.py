@@ -815,16 +815,39 @@ class PacsHelper:
 
 # Only initialize on first load — subsequent exec() calls must NOT reset
 # this to None, otherwise cleanup() in __init__ can't reach the old helper.
+# Typed as the base (not SlicerHelper) because __init__ assigns ``self`` from
+# inside ``_SlicerHelperBase``; only SlicerHelper is ever instantiated.
 if "_current_helper" not in globals():
-    _current_helper: SlicerHelper | None = None
+    _current_helper: _SlicerHelperBase | None = None
 
 
-class SlicerHelper:
-    """DSL for concise 3D Slicer workspace setup.
+class _SlicerHelperBase:
+    """Shared state + primitives used across all SlicerHelper mixins."""
 
-    Provides a high-level API that wraps verbose Slicer Python calls into
-    short, chainable methods. Designed to run inside the 3D Slicer environment.
-    """
+    working_folder: str
+    _scene: Any
+    _layout_manager: Any
+    _image_node: Any
+    _editor_widget: Any
+    _observer_tags: list[tuple[Any, int]]
+    _shortcuts: list[Any]
+
+    if TYPE_CHECKING:
+        # Cross-mixin method contracts. The real implementations live on the
+        # sibling mixins; these stubs are evaluated only by the type checker
+        # (no runtime footprint), so mypy resolves sibling `self.`/alias calls
+        # through the shared base. SlicerHelper's MRO binds the real methods.
+        def load_segmentation(self, path: str, name: str | None = None) -> Any: ...
+        def get_segment_names(self, segmentation: SegmentationBuilder | Any) -> list[str]: ...
+        def get_segment_centroid(
+            self, segmentation: SegmentationBuilder | Any, segment_name: str
+        ) -> tuple[float, float, float] | None: ...
+        def _local_to_world_centroid(
+            self, segmentation: SegmentationBuilder | Any, segment_name: str
+        ) -> tuple[float, float, float] | None: ...
+        def _local_to_world_island_centroid(
+            self, segmentation: SegmentationBuilder | Any, segment_name: str
+        ) -> tuple[float, float, float] | None: ...
 
     def __init__(self, working_folder: str) -> None:
         """Reset views, clear scene, and set root directory.
@@ -929,6 +952,8 @@ class SlicerHelper:
         if self._image_node is not None:
             node.SetReferenceImageGeometryParameterFromVolumeNode(self._image_node)
 
+
+class _VolumeLayoutMixin(_SlicerHelperBase):
     def load_volume(
         self,
         path: str,
@@ -957,6 +982,459 @@ class SlicerHelper:
 
         return self._image_node
 
+    def set_layout(self, layout: str) -> None:
+        """Set view layout.
+
+        Args:
+            layout: One of 'axial', 'sagittal', 'coronal', 'four_up'.
+        """
+        attr_name = LAYOUT_MAP.get(layout)
+        if attr_name is None:
+            raise ValueError(f"Unknown layout '{layout}'. Use: {list(LAYOUT_MAP.keys())}")
+        layout_id = getattr(slicer.vtkMRMLLayoutNode, attr_name)
+        self._layout_manager.setLayout(layout_id)
+
+    def annotate(
+        self,
+        text: str,
+        position: str = "upper_right",
+        color: tuple[float, float, float] = (1.0, 0.0, 0.0),
+    ) -> None:
+        """Add text annotation to the red slice view.
+
+        Args:
+            text: Annotation text to display.
+            position: VTK corner position name (e.g. 'upper_right', 'upper_left').
+            color: RGB color tuple (0-1 range).
+        """
+        position_map = {
+            "upper_right": vtk.vtkCornerAnnotation.UpperRight,
+            "upper_left": vtk.vtkCornerAnnotation.UpperLeft,
+            "lower_right": vtk.vtkCornerAnnotation.LowerRight,
+            "lower_left": vtk.vtkCornerAnnotation.LowerLeft,
+        }
+        vtk_pos = position_map.get(position, vtk.vtkCornerAnnotation.UpperRight)
+
+        view = self._layout_manager.sliceWidget("Red").sliceView()
+        view.cornerAnnotation().SetText(vtk_pos, text)
+        view.cornerAnnotation().GetTextProperty().SetColor(*color)
+        view.forceRender()
+
+    def configure_slab(self, thickness: float = 10.0, reconstruction_type: int = 1) -> None:
+        """Enable slab reconstruction on axial (Red) view.
+
+        Args:
+            thickness: Slab thickness in mm.
+            reconstruction_type: 0=Max, 1=Mean, 2=Sum.
+        """
+        slice_node = self._scene.GetNodeByID("vtkMRMLSliceNodeRed")
+        slice_node.SlabReconstructionEnabledOn()
+        slice_node.SetSlabReconstructionThickness(thickness)
+        slice_node.SetSlabReconstructionType(reconstruction_type)
+
+    def setup_edit_mask(self, mask_path: str, segment_id: str = "Segment_1") -> None:
+        """Load edit mask segmentation and restrict editing to mask region.
+
+        Args:
+            mask_path: Path to the mask segmentation file.
+            segment_id: Segment ID within the mask to use as editable area.
+        """
+        mask_node = self.load_segmentation(mask_path, name="EditMask")
+
+        if self._editor_widget is not None:
+            self._editor_widget.setMaskSegmentationNode(mask_node)
+            self._editor_widget.setMaskSegmentID(segment_id)
+            self._editor_widget.setMaskMode(
+                slicer.vtkMRMLSegmentEditorNode.PaintAllowedInsideSingleSegment
+            )
+
+    def add_view_shortcuts(self) -> None:
+        """Add standard keyboard shortcuts: a/s/c for axial/sagittal/coronal."""
+        self.add_shortcuts(
+            [
+                ("a", "axial"),
+                ("s", "sagittal"),
+                ("c", "coronal"),
+            ]
+        )
+
+    def add_shortcuts(self, shortcuts: list[tuple[str, str]]) -> None:
+        """Add custom keyboard shortcuts.
+
+        Args:
+            shortcuts: List of (key, layout_or_code) tuples. If the value is a
+                       known layout name, sets that layout. Otherwise the value
+                       is treated as Python code to exec.
+        """
+        main_window = slicer.util.mainWindow()
+        for key, action in shortcuts:
+            shortcut = qt.QShortcut(main_window)
+            shortcut.setKey(qt.QKeySequence(key))
+            if action in LAYOUT_MAP:
+                layout_attr = LAYOUT_MAP[action]
+                layout_id = getattr(slicer.vtkMRMLLayoutNode, layout_attr)
+                shortcut.connect(
+                    "activated()",
+                    lambda lid=layout_id: self._layout_manager.setLayout(lid),
+                )
+            else:
+                shortcut.connect("activated()", lambda code=action: exec(code))
+            self._shortcuts.append(shortcut)
+
+    def _detect_acquisition_orientation(self, volume_node: Any) -> str:
+        """Determine natural acquisition plane from volume's direction matrix.
+
+        Args:
+            volume_node: Loaded vtkMRMLScalarVolumeNode.
+
+        Returns:
+            "Axial", "Sagittal", or "Coronal".
+        """
+        import numpy as np
+
+        try:
+            mat = vtk.vtkMatrix4x4()
+            volume_node.GetIJKToRASDirectionMatrix(mat)
+
+            # Third column = slice normal direction
+            slice_normal = np.array(
+                [
+                    mat.GetElement(0, 2),
+                    mat.GetElement(1, 2),
+                    mat.GetElement(2, 2),
+                ]
+            )
+            dominant = int(np.argmax(np.abs(slice_normal)))
+            # 0=L/R → Sagittal, 1=A/P → Coronal, 2=S/I → Axial
+            return {0: "Sagittal", 1: "Coronal", 2: "Axial"}[dominant]
+        except Exception:
+            return "Axial"
+
+    def set_dual_layout(
+        self,
+        volume_a: Any,
+        volume_b: Any,
+        seg_a: SegmentationBuilder | Any | None = None,
+        seg_b: SegmentationBuilder | Any | None = None,
+        linked: bool = True,
+        orientation_a: str | None = None,
+        orientation_b: str | None = None,
+    ) -> None:
+        """Set side-by-side layout with two volumes and optional segmentations.
+
+        Args:
+            volume_a: Volume node for the left (Red) view.
+            volume_b: Volume node for the right (Yellow) view.
+            seg_a: Optional segmentation visible only in the left view.
+            seg_b: Optional segmentation visible only in the right view.
+            linked: If True, link slice navigation between views.
+            orientation_a: Orientation for left view ("Axial", "Sagittal",
+                "Coronal"). Auto-detected from volume_a if None.
+            orientation_b: Orientation for right view ("Axial", "Sagittal",
+                "Coronal"). Auto-detected from volume_b if None.
+        """
+        layout_node = self._layout_manager.layoutLogic().GetLayoutNode()
+        layout_node.SetViewArrangement(slicer.vtkMRMLLayoutNode.SlicerLayoutSideBySideView)
+
+        # Configure Red (left) composite
+        red_widget = self._layout_manager.sliceWidget("Red")
+        red_composite = red_widget.mrmlSliceCompositeNode()
+        red_composite.SetBackgroundVolumeID(volume_a.GetID())
+
+        # Configure Yellow (right) composite
+        yellow_widget = self._layout_manager.sliceWidget("Yellow")
+        yellow_composite = yellow_widget.mrmlSliceCompositeNode()
+        yellow_composite.SetBackgroundVolumeID(volume_b.GetID())
+
+        # Restrict segmentation visibility to specific views
+        if seg_a is not None:
+            node_a = self._unwrap_node(seg_a)
+            display_a = node_a.GetDisplayNode()
+            if display_a is not None:
+                display_a.SetViewNodeIDs(["vtkMRMLSliceNodeRed"])
+
+        if seg_b is not None:
+            node_b = self._unwrap_node(seg_b)
+            display_b = node_b.GetDisplayNode()
+            if display_b is not None:
+                display_b.SetViewNodeIDs(["vtkMRMLSliceNodeYellow"])
+
+        # Link slice navigation (SetLinkedControl lives on SliceCompositeNode)
+        if linked:
+            red_composite = self._scene.GetNodeByID("vtkMRMLSliceCompositeNodeRed")
+            yellow_composite = self._scene.GetNodeByID("vtkMRMLSliceCompositeNodeYellow")
+            if red_composite is not None:
+                red_composite.SetLinkedControl(True)
+            if yellow_composite is not None:
+                yellow_composite.SetLinkedControl(True)
+
+        self._layout_manager.resetSliceViews()
+
+        # Set per-view orientation (auto-detect from volume if not specified)
+        orient_a = orientation_a or self._detect_acquisition_orientation(volume_a)
+        orient_b = orientation_b or self._detect_acquisition_orientation(volume_b)
+
+        red_node = self._scene.GetNodeByID("vtkMRMLSliceNodeRed")
+        yellow_node = self._scene.GetNodeByID("vtkMRMLSliceNodeYellow")
+
+        if red_node is not None:
+            red_node.SetOrientation(orient_a)
+        if yellow_node is not None:
+            yellow_node.SetOrientation(orient_b)
+
+
+class _SegmentAnalysisMixin(_SlicerHelperBase):
+    def get_segment_names(self, segmentation: SegmentationBuilder | Any) -> list[str]:
+        """Get ordered list of segment names from a segmentation node.
+
+        Args:
+            segmentation: SegmentationBuilder or raw segmentation node.
+
+        Returns:
+            List of segment names in index order.
+        """
+        return get_segment_names(self._unwrap_node(segmentation))
+
+    @staticmethod
+    def _bbox_centroid_ras(
+        mask: Any,
+        extent: tuple[int, int, int, int, int, int],
+        image_to_world_source: Any,
+    ) -> tuple[float, float, float] | None:
+        """RAS bounding-box centroid of a boolean voxel *mask*.
+
+        Uses ``np.any`` axis projections instead of ``np.nonzero`` to avoid
+        allocating huge coordinate arrays (~10-50x faster, negligible memory).
+
+        *mask* must follow VTK's Fortran-order reshape
+        ``(k, j, i)`` = ``(dims[2], dims[1], dims[0])`` (i varies fastest), so
+        ``np.any(mask, axis=(0, 1))`` collapses k and j to a 1-D array along
+        the i-axis, and so on for j and k.
+
+        Args:
+            mask: 3D boolean array in ``(k, j, i)`` order.
+            extent: ``(xmin, xmax, ymin, ymax, zmin, zmax)`` of the labelmap.
+            image_to_world_source: Image data to read the IJK→RAS matrix from.
+
+        Returns:
+            ``(R, A, S)`` centroid or ``None`` if *mask* is all-False.
+        """
+        import numpy as np
+
+        i_idx = np.where(np.any(mask, axis=(0, 1)))[0]
+        if len(i_idx) == 0:
+            return None
+        j_idx = np.where(np.any(mask, axis=(0, 2)))[0]
+        k_idx = np.where(np.any(mask, axis=(1, 2)))[0]
+
+        ci = (float(i_idx[0]) + float(i_idx[-1])) / 2.0 + extent[0]
+        cj = (float(j_idx[0]) + float(j_idx[-1])) / 2.0 + extent[2]
+        ck = (float(k_idx[0]) + float(k_idx[-1])) / 2.0 + extent[4]
+
+        mat = vtk.vtkMatrix4x4()
+        image_to_world_source.GetImageToWorldMatrix(mat)
+        ras = mat.MultiplyPoint([ci, cj, ck, 1.0])
+        return (ras[0], ras[1], ras[2])
+
+    @staticmethod
+    def _centroid_from_labelmap(
+        image_data: Any,
+        extent: tuple[int, int, int, int, int, int],
+        image_to_world_source: Any,
+    ) -> tuple[float, float, float] | None:
+        """Compute bounding-box centroid from a VTK labelmap in RAS coords.
+
+        Thin wrapper over :meth:`_bbox_centroid_ras`: turns the labelmap
+        scalars into a boolean mask, then delegates. ``image_to_world_source``
+        may differ from *image_data* when a filter strips orientation metadata
+        from its output.
+
+        Args:
+            image_data: ``vtkImageData`` whose scalars contain the mask.
+            extent: ``(xmin, xmax, ymin, ymax, zmin, zmax)`` of the labelmap.
+            image_to_world_source: Image data to read the IJK→RAS matrix from.
+
+        Returns:
+            ``(R, A, S)`` centroid or ``None`` if the mask is empty.
+        """
+        mask = _labelmap_to_mask(image_data)
+        if mask is None:
+            return None
+        return _SegmentAnalysisMixin._bbox_centroid_ras(mask, extent, image_to_world_source)
+
+    def get_segment_centroid(
+        self,
+        segmentation: SegmentationBuilder | Any,
+        segment_name: str,
+    ) -> tuple[float, float, float] | None:
+        """Compute the RAS centroid of a named segment via per-segment labelmap.
+
+        Extracts a per-segment copy of the binary labelmap using the MRML
+        node-level API (not the shared representation from the segment
+        object). Computes the tight bounding-box center from actual non-zero
+        voxels using numpy, which works correctly regardless of shared
+        labelmaps or missing extent metadata.
+
+        Safe to call from observer callbacks — no event processing, no
+        re-entry risk.
+
+        The per-segment extraction — and the shared-labelmap pitfall it avoids
+        (Slicer 5.0+) — lives in :func:`_extract_segment_labelmap`.
+
+        Args:
+            segmentation: SegmentationBuilder or raw segmentation node.
+            segment_name: Name of the segment to find.
+
+        Returns:
+            (R, A, S) centroid tuple, or None if the segment is empty.
+        """
+        node = self._unwrap_node(segmentation)
+        vtk_seg = node.GetSegmentation()
+
+        seg_id = _find_segment_id(vtk_seg, segment_name)
+        if seg_id is None:
+            return None
+
+        extracted = _extract_segment_labelmap(node, seg_id)
+        if extracted is None:
+            return None
+        labelmap, extent = extracted
+
+        return self._centroid_from_labelmap(labelmap, extent, labelmap)
+
+    def count_segment_components(
+        self,
+        segmentation: SegmentationBuilder | Any,
+        segment_name: str,
+    ) -> int:
+        """Count connected components in a named segment.
+
+        Uses per-segment binary labelmap (not shared) and
+        ``scipy.ndimage.label`` with default 6-connectivity.
+
+        Args:
+            segmentation: SegmentationBuilder or raw segmentation node.
+            segment_name: Name of the segment to find.
+
+        Returns:
+            Number of connected components. 0 if segment is empty or not found.
+        """
+        return count_segment_components(self._unwrap_node(segmentation), segment_name)
+
+    def get_largest_island_centroid(
+        self,
+        segmentation: SegmentationBuilder | Any,
+        segment_name: str,
+    ) -> tuple[float, float, float] | None:
+        """Compute the RAS centroid of the largest connected component in a segment.
+
+        Like ``get_segment_centroid`` but isolates the largest island first
+        via ``scipy.ndimage.label``. Useful for segments that contain
+        multiple disconnected regions (e.g. ``_pool`` in second_review) where
+        the overall bounding-box center would fall in empty space.
+
+        Safe to call from observer callbacks — pure numpy + scipy, no event
+        processing.
+
+        Args:
+            segmentation: SegmentationBuilder or raw segmentation node.
+            segment_name: Name of the segment to find.
+
+        Returns:
+            (R, A, S) centroid of the largest island, or None if empty.
+        """
+        node = self._unwrap_node(segmentation)
+        vtk_seg = node.GetSegmentation()
+
+        seg_id = _find_segment_id(vtk_seg, segment_name)
+        if seg_id is None:
+            return None
+
+        extracted = _extract_segment_labelmap(node, seg_id)
+        if extracted is None:
+            return None
+        labelmap, extent = extracted
+
+        mask = _labelmap_to_mask(labelmap)
+        if mask is None:
+            return None
+
+        # Isolate the largest connected component with scipy.ndimage.label.
+        #
+        # vtkImageConnectivityFilter is NOT usable here: in VTK 9.5 (Slicer
+        # 5.10) it ignores the foreground ScalarRange and labels every voxel —
+        # background included — as a single region, so "largest region" spans
+        # the whole bounding box and the centroid collapses onto
+        # get_segment_centroid (dist == 0). scipy is bundled with Slicer and
+        # already used by count_segment_components; ndimage.label is pure CPU
+        # (no Qt event processing), so it stays observer-callback-safe.
+        import numpy as np
+        from scipy.ndimage import label
+
+        labeled, num = label(mask)
+        if num == 0:
+            return None
+
+        # bincount index 0 is background; pick the heaviest foreground label.
+        sizes = np.bincount(labeled.ravel())
+        sizes[0] = 0
+        largest = labeled == int(sizes.argmax())
+
+        return self._bbox_centroid_ras(largest, extent, labelmap)
+
+    def _apply_parent_transform(
+        self,
+        node: Any,
+        local: tuple[float, float, float],
+    ) -> tuple[float, float, float]:
+        """Apply the node's parent MRML transform to a local RAS point.
+
+        If the node has no parent transform, returns *local* unchanged.
+        """
+        parent_tf = node.GetParentTransformNode()
+        if parent_tf is None:
+            return local
+        mat = vtk.vtkMatrix4x4()
+        parent_tf.GetMatrixTransformToWorld(mat)
+        world = mat.MultiplyPoint([local[0], local[1], local[2], 1.0])
+        return (world[0], world[1], world[2])
+
+    def _local_to_world_centroid(
+        self,
+        segmentation: SegmentationBuilder | Any,
+        segment_name: str,
+    ) -> tuple[float, float, float] | None:
+        """Convert a segment centroid from local RAS to world RAS.
+
+        ``get_segment_centroid`` returns coordinates in the labelmap's own
+        image-to-world space (local RAS). If the segmentation node has a
+        parent MRML transform (e.g. an alignment transform), this method
+        applies it to produce world RAS coordinates suitable for
+        ``JumpSlice``.
+        """
+        local = self.get_segment_centroid(segmentation, segment_name)
+        if local is None:
+            return None
+        return self._apply_parent_transform(self._unwrap_node(segmentation), local)
+
+    def _local_to_world_island_centroid(
+        self,
+        segmentation: SegmentationBuilder | Any,
+        segment_name: str,
+    ) -> tuple[float, float, float] | None:
+        """Convert largest-island centroid from local RAS to world RAS.
+
+        Same as ``_local_to_world_centroid`` but delegates to
+        ``get_largest_island_centroid`` for segments with disconnected
+        islands (e.g. ``_pool``).
+        """
+        local = self.get_largest_island_centroid(segmentation, segment_name)
+        if local is None:
+            return None
+        return self._apply_parent_transform(self._unwrap_node(segmentation), local)
+
+
+class _SegmentEditMixin(_SlicerHelperBase):
     def create_segmentation(self, name: str) -> SegmentationBuilder:
         """Create an empty segmentation node.
 
@@ -1132,516 +1610,6 @@ class SlicerHelper:
                     active_effect.self().onUseForPaint()
                 elif effect == "Islands":
                     active_effect.setParameter("Operation", "ADD_SELECTED_ISLAND")
-
-    def set_layout(self, layout: str) -> None:
-        """Set view layout.
-
-        Args:
-            layout: One of 'axial', 'sagittal', 'coronal', 'four_up'.
-        """
-        attr_name = LAYOUT_MAP.get(layout)
-        if attr_name is None:
-            raise ValueError(f"Unknown layout '{layout}'. Use: {list(LAYOUT_MAP.keys())}")
-        layout_id = getattr(slicer.vtkMRMLLayoutNode, attr_name)
-        self._layout_manager.setLayout(layout_id)
-
-    def annotate(
-        self,
-        text: str,
-        position: str = "upper_right",
-        color: tuple[float, float, float] = (1.0, 0.0, 0.0),
-    ) -> None:
-        """Add text annotation to the red slice view.
-
-        Args:
-            text: Annotation text to display.
-            position: VTK corner position name (e.g. 'upper_right', 'upper_left').
-            color: RGB color tuple (0-1 range).
-        """
-        position_map = {
-            "upper_right": vtk.vtkCornerAnnotation.UpperRight,
-            "upper_left": vtk.vtkCornerAnnotation.UpperLeft,
-            "lower_right": vtk.vtkCornerAnnotation.LowerRight,
-            "lower_left": vtk.vtkCornerAnnotation.LowerLeft,
-        }
-        vtk_pos = position_map.get(position, vtk.vtkCornerAnnotation.UpperRight)
-
-        view = self._layout_manager.sliceWidget("Red").sliceView()
-        view.cornerAnnotation().SetText(vtk_pos, text)
-        view.cornerAnnotation().GetTextProperty().SetColor(*color)
-        view.forceRender()
-
-    def configure_slab(self, thickness: float = 10.0, reconstruction_type: int = 1) -> None:
-        """Enable slab reconstruction on axial (Red) view.
-
-        Args:
-            thickness: Slab thickness in mm.
-            reconstruction_type: 0=Max, 1=Mean, 2=Sum.
-        """
-        slice_node = self._scene.GetNodeByID("vtkMRMLSliceNodeRed")
-        slice_node.SlabReconstructionEnabledOn()
-        slice_node.SetSlabReconstructionThickness(thickness)
-        slice_node.SetSlabReconstructionType(reconstruction_type)
-
-    def setup_edit_mask(self, mask_path: str, segment_id: str = "Segment_1") -> None:
-        """Load edit mask segmentation and restrict editing to mask region.
-
-        Args:
-            mask_path: Path to the mask segmentation file.
-            segment_id: Segment ID within the mask to use as editable area.
-        """
-        mask_node = self.load_segmentation(mask_path, name="EditMask")
-
-        if self._editor_widget is not None:
-            self._editor_widget.setMaskSegmentationNode(mask_node)
-            self._editor_widget.setMaskSegmentID(segment_id)
-            self._editor_widget.setMaskMode(
-                slicer.vtkMRMLSegmentEditorNode.PaintAllowedInsideSingleSegment
-            )
-
-    def add_view_shortcuts(self) -> None:
-        """Add standard keyboard shortcuts: a/s/c for axial/sagittal/coronal."""
-        self.add_shortcuts(
-            [
-                ("a", "axial"),
-                ("s", "sagittal"),
-                ("c", "coronal"),
-            ]
-        )
-
-    def add_shortcuts(self, shortcuts: list[tuple[str, str]]) -> None:
-        """Add custom keyboard shortcuts.
-
-        Args:
-            shortcuts: List of (key, layout_or_code) tuples. If the value is a
-                       known layout name, sets that layout. Otherwise the value
-                       is treated as Python code to exec.
-        """
-        main_window = slicer.util.mainWindow()
-        for key, action in shortcuts:
-            shortcut = qt.QShortcut(main_window)
-            shortcut.setKey(qt.QKeySequence(key))
-            if action in LAYOUT_MAP:
-                layout_attr = LAYOUT_MAP[action]
-                layout_id = getattr(slicer.vtkMRMLLayoutNode, layout_attr)
-                shortcut.connect(
-                    "activated()",
-                    lambda lid=layout_id: self._layout_manager.setLayout(lid),
-                )
-            else:
-                shortcut.connect("activated()", lambda code=action: exec(code))
-            self._shortcuts.append(shortcut)
-
-    def _post_pacs_load(
-        self,
-        node_ids: list[str] | None,
-        window: tuple[float, float] | None,
-        raise_on_empty: bool,
-        empty_message: str,
-    ) -> list[str]:
-        """Finalize a PACS load: adopt the first scalar volume, enforce non-empty.
-
-        Sets ``_image_node`` to the first loaded ``vtkMRMLScalarVolumeNode`` (and
-        applies *window* if given) so the Segment Editor has a source volume,
-        then raises ``SlicerHelperError(empty_message)`` when nothing was loaded
-        and *raise_on_empty* is set.
-
-        Returns:
-            The (never-``None``) list of loaded MRML node IDs.
-        """
-        node_ids = node_ids or []
-        for nid in node_ids:
-            node = self._scene.GetNodeByID(nid)
-            if node is not None and node.IsA("vtkMRMLScalarVolumeNode"):
-                self._image_node = node
-                if window is not None:
-                    self._apply_window(node, window)
-                break
-
-        if raise_on_empty and not node_ids:
-            raise SlicerHelperError(empty_message)
-        return node_ids
-
-    def load_study_from_pacs(
-        self,
-        study_instance_uid: str,
-        *,
-        server_name: str | None = None,
-        raise_on_empty: bool = True,
-        window: tuple[float, float] | None = None,
-    ) -> list[str]:
-        """Load a DICOM study from PACS into the current scene.
-
-        Uses PACS connection params from Clarinet settings (injected via context
-        variables). Falls back to Slicer's DICOM module config if context is absent.
-
-        Args:
-            study_instance_uid: DICOM Study Instance UID to retrieve.
-            server_name: Optional PACS server name configured in Slicer
-                (only used in fallback mode).
-            raise_on_empty: If True (default), raise SlicerHelperError when no
-                DICOM nodes are loaded. Set to False for optional/fallback loads.
-            window: Optional (min, max) window level values for the loaded volume.
-
-        Returns:
-            List of loaded MRML node IDs.
-
-        Raises:
-            SlicerHelperError: If no nodes were loaded and raise_on_empty is True.
-        """
-        pacs = _get_pacs_helper(server_name)
-        node_ids = pacs.retrieve_study(study_instance_uid)
-        return self._post_pacs_load(
-            node_ids,
-            window,
-            raise_on_empty,
-            f"No DICOM nodes loaded for study '{study_instance_uid}'. "
-            f"Check PACS configuration in Edit > Application Settings > DICOM.",
-        )
-
-    def load_series_from_pacs(
-        self,
-        study_instance_uid: str,
-        series_instance_uid: str,
-        *,
-        server_name: str | None = None,
-        raise_on_empty: bool = True,
-        window: tuple[float, float] | None = None,
-    ) -> list[str]:
-        """Load a single DICOM series from PACS into the current scene.
-
-        Uses PACS connection params from Clarinet settings (injected via context
-        variables). Falls back to Slicer's DICOM module config if context is absent.
-
-        Args:
-            study_instance_uid: DICOM Study Instance UID.
-            series_instance_uid: DICOM Series Instance UID to retrieve.
-            server_name: Optional PACS server name configured in Slicer
-                (only used in fallback mode).
-            raise_on_empty: If True (default), raise SlicerHelperError when no
-                DICOM nodes are loaded. Set to False for optional/fallback loads.
-            window: Optional (min, max) window level values for the loaded volume.
-
-        Returns:
-            List of loaded MRML node IDs.
-
-        Raises:
-            SlicerHelperError: If no nodes were loaded and raise_on_empty is True.
-        """
-        pacs = _get_pacs_helper(server_name)
-        node_ids = pacs.retrieve_series(study_instance_uid, series_instance_uid)
-        return self._post_pacs_load(
-            node_ids,
-            window,
-            raise_on_empty,
-            f"No DICOM nodes loaded for series '{series_instance_uid}' "
-            f"(study '{study_instance_uid}'). "
-            f"Check PACS configuration in Edit > Application Settings > DICOM.",
-        )
-
-    def download_series_zip(
-        self,
-        study_uid: str,
-        series_uid: str,
-        server_url: str,
-        auth_cookie: str,
-    ) -> str:
-        """Download DICOM series ZIP from Clarinet, extract, import into Slicer DB.
-
-        Alternative to DIMSE retrieval — downloads via HTTP from Clarinet's
-        DICOMweb cache endpoint.
-
-        Args:
-            study_uid: DICOM Study Instance UID.
-            series_uid: DICOM Series Instance UID.
-            server_url: Clarinet API base URL (e.g. "http://host:8000").
-            auth_cookie: Cookie header value (e.g. "clarinet_session=token").
-
-        Returns:
-            Path to the directory containing extracted DICOM files.
-        """
-        import shutil
-        import tempfile
-        import urllib.request
-        import zipfile
-
-        url = f"{server_url}/dicom-web/studies/{study_uid}/series/{series_uid}/archive"
-        req = urllib.request.Request(url)
-        req.add_header("Cookie", auth_cookie)
-
-        extract_dir = os.path.join(self.working_folder, "_dicom_download", series_uid)
-        os.makedirs(extract_dir, exist_ok=True)
-
-        tmp = tempfile.NamedTemporaryFile(suffix=".zip", delete=False)  # noqa: SIM115
-        tmp_path = tmp.name
-        tmp.close()
-        try:
-            with urllib.request.urlopen(req) as resp, open(tmp_path, "wb") as f:
-                shutil.copyfileobj(resp, f)
-            with zipfile.ZipFile(tmp_path) as zf:
-                zf.extractall(extract_dir)
-        finally:
-            if os.path.exists(tmp_path):
-                os.unlink(tmp_path)
-
-        # Import into Slicer DICOM database (if running inside Slicer)
-        try:
-            from DICOMLib import DICOMUtils
-
-            DICOMUtils.importDicom(extract_dir)
-        except ImportError:
-            pass
-
-        return extract_dir
-
-    def get_segment_names(self, segmentation: SegmentationBuilder | Any) -> list[str]:
-        """Get ordered list of segment names from a segmentation node.
-
-        Args:
-            segmentation: SegmentationBuilder or raw segmentation node.
-
-        Returns:
-            List of segment names in index order.
-        """
-        return get_segment_names(self._unwrap_node(segmentation))
-
-    @staticmethod
-    def _bbox_centroid_ras(
-        mask: Any,
-        extent: tuple[int, int, int, int, int, int],
-        image_to_world_source: Any,
-    ) -> tuple[float, float, float] | None:
-        """RAS bounding-box centroid of a boolean voxel *mask*.
-
-        Uses ``np.any`` axis projections instead of ``np.nonzero`` to avoid
-        allocating huge coordinate arrays (~10-50x faster, negligible memory).
-
-        *mask* must follow VTK's Fortran-order reshape
-        ``(k, j, i)`` = ``(dims[2], dims[1], dims[0])`` (i varies fastest), so
-        ``np.any(mask, axis=(0, 1))`` collapses k and j to a 1-D array along
-        the i-axis, and so on for j and k.
-
-        Args:
-            mask: 3D boolean array in ``(k, j, i)`` order.
-            extent: ``(xmin, xmax, ymin, ymax, zmin, zmax)`` of the labelmap.
-            image_to_world_source: Image data to read the IJK→RAS matrix from.
-
-        Returns:
-            ``(R, A, S)`` centroid or ``None`` if *mask* is all-False.
-        """
-        import numpy as np
-
-        i_idx = np.where(np.any(mask, axis=(0, 1)))[0]
-        if len(i_idx) == 0:
-            return None
-        j_idx = np.where(np.any(mask, axis=(0, 2)))[0]
-        k_idx = np.where(np.any(mask, axis=(1, 2)))[0]
-
-        ci = (float(i_idx[0]) + float(i_idx[-1])) / 2.0 + extent[0]
-        cj = (float(j_idx[0]) + float(j_idx[-1])) / 2.0 + extent[2]
-        ck = (float(k_idx[0]) + float(k_idx[-1])) / 2.0 + extent[4]
-
-        mat = vtk.vtkMatrix4x4()
-        image_to_world_source.GetImageToWorldMatrix(mat)
-        ras = mat.MultiplyPoint([ci, cj, ck, 1.0])
-        return (ras[0], ras[1], ras[2])
-
-    @staticmethod
-    def _centroid_from_labelmap(
-        image_data: Any,
-        extent: tuple[int, int, int, int, int, int],
-        image_to_world_source: Any,
-    ) -> tuple[float, float, float] | None:
-        """Compute bounding-box centroid from a VTK labelmap in RAS coords.
-
-        Thin wrapper over :meth:`_bbox_centroid_ras`: turns the labelmap
-        scalars into a boolean mask, then delegates. ``image_to_world_source``
-        may differ from *image_data* when a filter strips orientation metadata
-        from its output.
-
-        Args:
-            image_data: ``vtkImageData`` whose scalars contain the mask.
-            extent: ``(xmin, xmax, ymin, ymax, zmin, zmax)`` of the labelmap.
-            image_to_world_source: Image data to read the IJK→RAS matrix from.
-
-        Returns:
-            ``(R, A, S)`` centroid or ``None`` if the mask is empty.
-        """
-        mask = _labelmap_to_mask(image_data)
-        if mask is None:
-            return None
-        return SlicerHelper._bbox_centroid_ras(mask, extent, image_to_world_source)
-
-    def get_segment_centroid(
-        self,
-        segmentation: SegmentationBuilder | Any,
-        segment_name: str,
-    ) -> tuple[float, float, float] | None:
-        """Compute the RAS centroid of a named segment via per-segment labelmap.
-
-        Extracts a per-segment copy of the binary labelmap using the MRML
-        node-level API (not the shared representation from the segment
-        object). Computes the tight bounding-box center from actual non-zero
-        voxels using numpy, which works correctly regardless of shared
-        labelmaps or missing extent metadata.
-
-        Safe to call from observer callbacks — no event processing, no
-        re-entry risk.
-
-        The per-segment extraction — and the shared-labelmap pitfall it avoids
-        (Slicer 5.0+) — lives in :func:`_extract_segment_labelmap`.
-
-        Args:
-            segmentation: SegmentationBuilder or raw segmentation node.
-            segment_name: Name of the segment to find.
-
-        Returns:
-            (R, A, S) centroid tuple, or None if the segment is empty.
-        """
-        node = self._unwrap_node(segmentation)
-        vtk_seg = node.GetSegmentation()
-
-        seg_id = _find_segment_id(vtk_seg, segment_name)
-        if seg_id is None:
-            return None
-
-        extracted = _extract_segment_labelmap(node, seg_id)
-        if extracted is None:
-            return None
-        labelmap, extent = extracted
-
-        return self._centroid_from_labelmap(labelmap, extent, labelmap)
-
-    def count_segment_components(
-        self,
-        segmentation: SegmentationBuilder | Any,
-        segment_name: str,
-    ) -> int:
-        """Count connected components in a named segment.
-
-        Uses per-segment binary labelmap (not shared) and
-        ``scipy.ndimage.label`` with default 6-connectivity.
-
-        Args:
-            segmentation: SegmentationBuilder or raw segmentation node.
-            segment_name: Name of the segment to find.
-
-        Returns:
-            Number of connected components. 0 if segment is empty or not found.
-        """
-        return count_segment_components(self._unwrap_node(segmentation), segment_name)
-
-    def get_largest_island_centroid(
-        self,
-        segmentation: SegmentationBuilder | Any,
-        segment_name: str,
-    ) -> tuple[float, float, float] | None:
-        """Compute the RAS centroid of the largest connected component in a segment.
-
-        Like ``get_segment_centroid`` but isolates the largest island first
-        via ``scipy.ndimage.label``. Useful for segments that contain
-        multiple disconnected regions (e.g. ``_pool`` in second_review) where
-        the overall bounding-box center would fall in empty space.
-
-        Safe to call from observer callbacks — pure numpy + scipy, no event
-        processing.
-
-        Args:
-            segmentation: SegmentationBuilder or raw segmentation node.
-            segment_name: Name of the segment to find.
-
-        Returns:
-            (R, A, S) centroid of the largest island, or None if empty.
-        """
-        node = self._unwrap_node(segmentation)
-        vtk_seg = node.GetSegmentation()
-
-        seg_id = _find_segment_id(vtk_seg, segment_name)
-        if seg_id is None:
-            return None
-
-        extracted = _extract_segment_labelmap(node, seg_id)
-        if extracted is None:
-            return None
-        labelmap, extent = extracted
-
-        mask = _labelmap_to_mask(labelmap)
-        if mask is None:
-            return None
-
-        # Isolate the largest connected component with scipy.ndimage.label.
-        #
-        # vtkImageConnectivityFilter is NOT usable here: in VTK 9.5 (Slicer
-        # 5.10) it ignores the foreground ScalarRange and labels every voxel —
-        # background included — as a single region, so "largest region" spans
-        # the whole bounding box and the centroid collapses onto
-        # get_segment_centroid (dist == 0). scipy is bundled with Slicer and
-        # already used by count_segment_components; ndimage.label is pure CPU
-        # (no Qt event processing), so it stays observer-callback-safe.
-        import numpy as np
-        from scipy.ndimage import label
-
-        labeled, num = label(mask)
-        if num == 0:
-            return None
-
-        # bincount index 0 is background; pick the heaviest foreground label.
-        sizes = np.bincount(labeled.ravel())
-        sizes[0] = 0
-        largest = labeled == int(sizes.argmax())
-
-        return self._bbox_centroid_ras(largest, extent, labelmap)
-
-    def _apply_parent_transform(
-        self,
-        node: Any,
-        local: tuple[float, float, float],
-    ) -> tuple[float, float, float]:
-        """Apply the node's parent MRML transform to a local RAS point.
-
-        If the node has no parent transform, returns *local* unchanged.
-        """
-        parent_tf = node.GetParentTransformNode()
-        if parent_tf is None:
-            return local
-        mat = vtk.vtkMatrix4x4()
-        parent_tf.GetMatrixTransformToWorld(mat)
-        world = mat.MultiplyPoint([local[0], local[1], local[2], 1.0])
-        return (world[0], world[1], world[2])
-
-    def _local_to_world_centroid(
-        self,
-        segmentation: SegmentationBuilder | Any,
-        segment_name: str,
-    ) -> tuple[float, float, float] | None:
-        """Convert a segment centroid from local RAS to world RAS.
-
-        ``get_segment_centroid`` returns coordinates in the labelmap's own
-        image-to-world space (local RAS). If the segmentation node has a
-        parent MRML transform (e.g. an alignment transform), this method
-        applies it to produce world RAS coordinates suitable for
-        ``JumpSlice``.
-        """
-        local = self.get_segment_centroid(segmentation, segment_name)
-        if local is None:
-            return None
-        return self._apply_parent_transform(self._unwrap_node(segmentation), local)
-
-    def _local_to_world_island_centroid(
-        self,
-        segmentation: SegmentationBuilder | Any,
-        segment_name: str,
-    ) -> tuple[float, float, float] | None:
-        """Convert largest-island centroid from local RAS to world RAS.
-
-        Same as ``_local_to_world_centroid`` but delegates to
-        ``get_largest_island_centroid`` for segments with disconnected
-        islands (e.g. ``_pool``).
-        """
-        local = self.get_largest_island_centroid(segmentation, segment_name)
-        if local is None:
-            return None
-        return self._apply_parent_transform(self._unwrap_node(segmentation), local)
 
     def copy_segments(
         self,
@@ -1981,107 +1949,172 @@ class SlicerHelper:
         pool_segment.SetName(pool_name)
         pool_segment.SetColor(*color)
 
-    def _detect_acquisition_orientation(self, volume_node: Any) -> str:
-        """Determine natural acquisition plane from volume's direction matrix.
 
-        Args:
-            volume_node: Loaded vtkMRMLScalarVolumeNode.
+class _PacsLoadMixin(_SlicerHelperBase):
+    def _post_pacs_load(
+        self,
+        node_ids: list[str] | None,
+        window: tuple[float, float] | None,
+        raise_on_empty: bool,
+        empty_message: str,
+    ) -> list[str]:
+        """Finalize a PACS load: adopt the first scalar volume, enforce non-empty.
+
+        Sets ``_image_node`` to the first loaded ``vtkMRMLScalarVolumeNode`` (and
+        applies *window* if given) so the Segment Editor has a source volume,
+        then raises ``SlicerHelperError(empty_message)`` when nothing was loaded
+        and *raise_on_empty* is set.
 
         Returns:
-            "Axial", "Sagittal", or "Coronal".
+            The (never-``None``) list of loaded MRML node IDs.
         """
-        import numpy as np
+        node_ids = node_ids or []
+        for nid in node_ids:
+            node = self._scene.GetNodeByID(nid)
+            if node is not None and node.IsA("vtkMRMLScalarVolumeNode"):
+                self._image_node = node
+                if window is not None:
+                    self._apply_window(node, window)
+                break
 
-        try:
-            mat = vtk.vtkMatrix4x4()
-            volume_node.GetIJKToRASDirectionMatrix(mat)
+        if raise_on_empty and not node_ids:
+            raise SlicerHelperError(empty_message)
+        return node_ids
 
-            # Third column = slice normal direction
-            slice_normal = np.array(
-                [
-                    mat.GetElement(0, 2),
-                    mat.GetElement(1, 2),
-                    mat.GetElement(2, 2),
-                ]
-            )
-            dominant = int(np.argmax(np.abs(slice_normal)))
-            # 0=L/R → Sagittal, 1=A/P → Coronal, 2=S/I → Axial
-            return {0: "Sagittal", 1: "Coronal", 2: "Axial"}[dominant]
-        except Exception:
-            return "Axial"
-
-    def set_dual_layout(
+    def load_study_from_pacs(
         self,
-        volume_a: Any,
-        volume_b: Any,
-        seg_a: SegmentationBuilder | Any | None = None,
-        seg_b: SegmentationBuilder | Any | None = None,
-        linked: bool = True,
-        orientation_a: str | None = None,
-        orientation_b: str | None = None,
-    ) -> None:
-        """Set side-by-side layout with two volumes and optional segmentations.
+        study_instance_uid: str,
+        *,
+        server_name: str | None = None,
+        raise_on_empty: bool = True,
+        window: tuple[float, float] | None = None,
+    ) -> list[str]:
+        """Load a DICOM study from PACS into the current scene.
+
+        Uses PACS connection params from Clarinet settings (injected via context
+        variables). Falls back to Slicer's DICOM module config if context is absent.
 
         Args:
-            volume_a: Volume node for the left (Red) view.
-            volume_b: Volume node for the right (Yellow) view.
-            seg_a: Optional segmentation visible only in the left view.
-            seg_b: Optional segmentation visible only in the right view.
-            linked: If True, link slice navigation between views.
-            orientation_a: Orientation for left view ("Axial", "Sagittal",
-                "Coronal"). Auto-detected from volume_a if None.
-            orientation_b: Orientation for right view ("Axial", "Sagittal",
-                "Coronal"). Auto-detected from volume_b if None.
+            study_instance_uid: DICOM Study Instance UID to retrieve.
+            server_name: Optional PACS server name configured in Slicer
+                (only used in fallback mode).
+            raise_on_empty: If True (default), raise SlicerHelperError when no
+                DICOM nodes are loaded. Set to False for optional/fallback loads.
+            window: Optional (min, max) window level values for the loaded volume.
+
+        Returns:
+            List of loaded MRML node IDs.
+
+        Raises:
+            SlicerHelperError: If no nodes were loaded and raise_on_empty is True.
         """
-        layout_node = self._layout_manager.layoutLogic().GetLayoutNode()
-        layout_node.SetViewArrangement(slicer.vtkMRMLLayoutNode.SlicerLayoutSideBySideView)
+        pacs = _get_pacs_helper(server_name)
+        node_ids = pacs.retrieve_study(study_instance_uid)
+        return self._post_pacs_load(
+            node_ids,
+            window,
+            raise_on_empty,
+            f"No DICOM nodes loaded for study '{study_instance_uid}'. "
+            f"Check PACS configuration in Edit > Application Settings > DICOM.",
+        )
 
-        # Configure Red (left) composite
-        red_widget = self._layout_manager.sliceWidget("Red")
-        red_composite = red_widget.mrmlSliceCompositeNode()
-        red_composite.SetBackgroundVolumeID(volume_a.GetID())
+    def load_series_from_pacs(
+        self,
+        study_instance_uid: str,
+        series_instance_uid: str,
+        *,
+        server_name: str | None = None,
+        raise_on_empty: bool = True,
+        window: tuple[float, float] | None = None,
+    ) -> list[str]:
+        """Load a single DICOM series from PACS into the current scene.
 
-        # Configure Yellow (right) composite
-        yellow_widget = self._layout_manager.sliceWidget("Yellow")
-        yellow_composite = yellow_widget.mrmlSliceCompositeNode()
-        yellow_composite.SetBackgroundVolumeID(volume_b.GetID())
+        Uses PACS connection params from Clarinet settings (injected via context
+        variables). Falls back to Slicer's DICOM module config if context is absent.
 
-        # Restrict segmentation visibility to specific views
-        if seg_a is not None:
-            node_a = self._unwrap_node(seg_a)
-            display_a = node_a.GetDisplayNode()
-            if display_a is not None:
-                display_a.SetViewNodeIDs(["vtkMRMLSliceNodeRed"])
+        Args:
+            study_instance_uid: DICOM Study Instance UID.
+            series_instance_uid: DICOM Series Instance UID to retrieve.
+            server_name: Optional PACS server name configured in Slicer
+                (only used in fallback mode).
+            raise_on_empty: If True (default), raise SlicerHelperError when no
+                DICOM nodes are loaded. Set to False for optional/fallback loads.
+            window: Optional (min, max) window level values for the loaded volume.
 
-        if seg_b is not None:
-            node_b = self._unwrap_node(seg_b)
-            display_b = node_b.GetDisplayNode()
-            if display_b is not None:
-                display_b.SetViewNodeIDs(["vtkMRMLSliceNodeYellow"])
+        Returns:
+            List of loaded MRML node IDs.
 
-        # Link slice navigation (SetLinkedControl lives on SliceCompositeNode)
-        if linked:
-            red_composite = self._scene.GetNodeByID("vtkMRMLSliceCompositeNodeRed")
-            yellow_composite = self._scene.GetNodeByID("vtkMRMLSliceCompositeNodeYellow")
-            if red_composite is not None:
-                red_composite.SetLinkedControl(True)
-            if yellow_composite is not None:
-                yellow_composite.SetLinkedControl(True)
+        Raises:
+            SlicerHelperError: If no nodes were loaded and raise_on_empty is True.
+        """
+        pacs = _get_pacs_helper(server_name)
+        node_ids = pacs.retrieve_series(study_instance_uid, series_instance_uid)
+        return self._post_pacs_load(
+            node_ids,
+            window,
+            raise_on_empty,
+            f"No DICOM nodes loaded for series '{series_instance_uid}' "
+            f"(study '{study_instance_uid}'). "
+            f"Check PACS configuration in Edit > Application Settings > DICOM.",
+        )
 
-        self._layout_manager.resetSliceViews()
+    def download_series_zip(
+        self,
+        study_uid: str,
+        series_uid: str,
+        server_url: str,
+        auth_cookie: str,
+    ) -> str:
+        """Download DICOM series ZIP from Clarinet, extract, import into Slicer DB.
 
-        # Set per-view orientation (auto-detect from volume if not specified)
-        orient_a = orientation_a or self._detect_acquisition_orientation(volume_a)
-        orient_b = orientation_b or self._detect_acquisition_orientation(volume_b)
+        Alternative to DIMSE retrieval — downloads via HTTP from Clarinet's
+        DICOMweb cache endpoint.
 
-        red_node = self._scene.GetNodeByID("vtkMRMLSliceNodeRed")
-        yellow_node = self._scene.GetNodeByID("vtkMRMLSliceNodeYellow")
+        Args:
+            study_uid: DICOM Study Instance UID.
+            series_uid: DICOM Series Instance UID.
+            server_url: Clarinet API base URL (e.g. "http://host:8000").
+            auth_cookie: Cookie header value (e.g. "clarinet_session=token").
 
-        if red_node is not None:
-            red_node.SetOrientation(orient_a)
-        if yellow_node is not None:
-            yellow_node.SetOrientation(orient_b)
+        Returns:
+            Path to the directory containing extracted DICOM files.
+        """
+        import shutil
+        import tempfile
+        import urllib.request
+        import zipfile
 
+        url = f"{server_url}/dicom-web/studies/{study_uid}/series/{series_uid}/archive"
+        req = urllib.request.Request(url)
+        req.add_header("Cookie", auth_cookie)
+
+        extract_dir = os.path.join(self.working_folder, "_dicom_download", series_uid)
+        os.makedirs(extract_dir, exist_ok=True)
+
+        tmp = tempfile.NamedTemporaryFile(suffix=".zip", delete=False)  # noqa: SIM115
+        tmp_path = tmp.name
+        tmp.close()
+        try:
+            with urllib.request.urlopen(req) as resp, open(tmp_path, "wb") as f:
+                shutil.copyfileobj(resp, f)
+            with zipfile.ZipFile(tmp_path) as zf:
+                zf.extractall(extract_dir)
+        finally:
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+
+        # Import into Slicer DICOM database (if running inside Slicer)
+        try:
+            from DICOMLib import DICOMUtils
+
+            DICOMUtils.importDicom(extract_dir)
+        except ImportError:
+            pass
+
+        return extract_dir
+
+
+class _AlignmentMixin(_SlicerHelperBase):
     def align_by_center(
         self,
         moving_volume: Any,
@@ -2211,6 +2244,8 @@ class SlicerHelper:
 
         return int(n_pairs)
 
+
+class _ObserverMixin(_SlicerHelperBase):
     def setup_segment_focus_observer(
         self,
         editable_seg: SegmentationBuilder | Any,
@@ -2452,3 +2487,18 @@ class SlicerHelper:
 
         tag = editor_node.AddObserver(vtk.vtkCommand.ModifiedEvent, on_segment_changed)
         self._observer_tags.append((editor_node, tag))
+
+
+class SlicerHelper(
+    _VolumeLayoutMixin,
+    _SegmentAnalysisMixin,
+    _SegmentEditMixin,
+    _PacsLoadMixin,
+    _AlignmentMixin,
+    _ObserverMixin,
+):
+    """DSL for concise 3D Slicer workspace setup.
+
+    Provides a high-level API that wraps verbose Slicer Python calls into
+    short, chainable methods. Designed to run inside the 3D Slicer environment.
+    """
