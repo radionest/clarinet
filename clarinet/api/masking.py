@@ -1,7 +1,10 @@
 """Patient data masking for non-superuser responses.
 
 When a patient has been anonymized (anon_name is set), non-superusers see
-anonymized identifiers instead of real patient/study/series data.
+anonymized identifiers instead of real patient/study/series data. The study
+acquisition date is replaced with a fixed sentinel (1976-01-01) so neither the
+exact date nor its year (both quasi-identifiers) leak past anonymization, and
+the free-text study description is dropped on the same path.
 
 RecordTypes may opt out of masking via ``mask_patient_data=False`` — used for
 record types filled by clinicians who need real patient IDs (surgery,
@@ -14,10 +17,15 @@ so the frontend stays consistent with OHIF and PACS.
 """
 
 from collections.abc import Sequence
+from datetime import date
 from typing import Any
 
 from clarinet.models import Record, RecordRead, User
 from clarinet.utils.logger import logger
+
+# Sentinel shown in place of the real study acquisition date for masked
+# (anonymized, non-superuser) records — neither the date nor its year leaks.
+_MASKED_STUDY_DATE = date(1976, 1, 1)
 
 
 def mask_record_patient_data(record: RecordRead, user: User) -> RecordRead:
@@ -88,6 +96,16 @@ def mask_record_patient_data(record: RecordRead, user: User) -> RecordRead:
         study_nested_update: dict[str, Any] = {"study_uid": record.study.anon_uid}
         if masked_id is not None:
             study_nested_update["patient_id"] = masked_id
+        # Study date + free-text description are quasi-identifiers (PHI) on this
+        # non-superuser REST surface: replace the date with a fixed sentinel
+        # (neither exact date nor year leaks) and drop the description. This is
+        # deliberately stricter than db_scrub (services/db_scrub/scrubber.py),
+        # which keeps study.date for ``{study_date}`` path templates on the
+        # trusted test stand. Study is the only date-bearing level here —
+        # SeriesBase carries no date/time; if a StudyTime or a series date is
+        # ever added to the model, mask it in this branch too.
+        study_nested_update["date"] = _MASKED_STUDY_DATE
+        study_nested_update["study_description"] = None
         updates["study"] = record.study.model_copy(update=study_nested_update)
         updates["study_uid"] = record.study.anon_uid
 

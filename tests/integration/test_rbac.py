@@ -453,6 +453,30 @@ async def test_patient_masking_for_non_admin(
 
 
 @pytest.mark.asyncio
+async def test_study_date_and_description_masked_for_non_admin(
+    test_session, role_a_client, record_role_a, test_patient, test_study
+):
+    """Non-superuser sees the study date replaced with the sentinel and the
+    free-text description dropped (PHI) when the patient is anonymized.
+
+    Guards the HTTP serialization contract: the sentinel ``date(1976, 1, 1)``
+    must reach the client as the ISO string ``"1976-01-01"``.
+    """
+    test_patient.auto_id = 123
+    test_study.study_description = "CT ANGIO LIVER - IVANOV I.I."
+    test_session.add(test_patient)
+    test_session.add(test_study)
+    await test_session.commit()
+
+    response = await role_a_client.get(f"/api/records/{record_role_a.id}")
+    assert response.status_code == 200
+    data = response.json()
+
+    assert data["study"]["date"] == "1976-01-01"
+    assert data["study"]["study_description"] is None
+
+
+@pytest.mark.asyncio
 async def test_superuser_sees_real_patient_data(
     test_session, superuser_client, record_role_a, test_patient
 ):
