@@ -1,13 +1,22 @@
-// Reusable audit/activity views: tab bar + record-event table + pipeline-run
-// table. State (active tab, LoadStatus, data) lives in the host page; this
-// module is a pure projection parameterised by the page's Msg via callbacks.
+// Audit/activity feed — a self-contained MVU sub-component embedded by the
+// per-record, per-patient and global-admin pages. It owns the active tab,
+// the tri-state LoadStatus of both tabs, and the fetched data; the host page
+// only stores `Model`, forwards `Msg`, and translates the lone `OutMsg`
+// (`AuthExpired`, raised on a 401) into its own logout signal. The module
+// deliberately does NOT import `shared` — like `cache`/`preload`, it keeps a
+// minimal local `OutMsg` so it stays reusable across pages.
+import api/audit
 import api/models.{type PipelineRun, type RecordEvent}
+import api/types.{type ApiError, AuthError}
 import clarinet_frontend/i18n.{type Key}
+import components/forms/base
 import gleam/float
 import gleam/int
+import gleam/javascript/promise.{type Promise}
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import lustre/attribute
+import lustre/effect.{type Effect}
 import lustre/element.{type Element}
 import lustre/element/html
 import lustre/event
@@ -19,48 +28,309 @@ pub type ActivityTab {
   RunsTab
 }
 
-/// Full activity body: tab bar + the active tab's table wrapped in the
-/// tri-state LoadStatus renderer. `on_select` / `on_retry` lift tab and retry
-/// clicks into the host page's own Msg.
-pub fn view(
-  active: ActivityTab,
-  events_status: LoadStatus,
-  events: List(RecordEvent),
-  runs_status: LoadStatus,
-  runs: List(PipelineRun),
-  on_select: fn(ActivityTab) -> msg,
-  on_retry: fn(ActivityTab) -> msg,
-  t: fn(Key) -> String,
-) -> Element(msg) {
+/// Selects which `api/audit` calls back the feed. Per-record uses the
+/// record-scoped endpoints (visible to anyone with record access); per-patient
+/// and global use the admin endpoints (`patient_id` filter vs. server-wide).
+pub type Source {
+  RecordSource(record_id: String)
+  PatientSource(patient_id: String)
+  GlobalSource
+}
+
+/// In-memory filters for the global feed. Ignored for record/patient sources
+/// (those have no filter UI). An empty string means "no filter" on that field.
+pub type Filters {
+  Filters(
+    event_kind: String,
+    event_since: String,
+    run_status: String,
+    run_task_name: String,
+    run_since: String,
+  )
+}
+
+fn empty_filters() -> Filters {
+  Filters(
+    event_kind: "",
+    event_since: "",
+    run_status: "",
+    run_task_name: "",
+    run_since: "",
+  )
+}
+
+// --- Model ---
+
+pub type Model {
+  Model(
+    source: Source,
+    tab: ActivityTab,
+    filters: Filters,
+    events: List(RecordEvent),
+    events_status: LoadStatus,
+    runs: List(PipelineRun),
+    runs_status: LoadStatus,
+    // Monotonic load tokens — a fetch result is applied only when its token
+    // still matches, so a slow stale response can't clobber a fresher one
+    // (rapid filter changes / typing fire overlapping requests).
+    events_gen: Int,
+    runs_gen: Int,
+  )
+}
+
+// --- Msg / OutMsg ---
+
+pub type Msg {
+  TabSelected(ActivityTab)
+  EventsLoaded(gen: Int, result: Result(List(RecordEvent), ApiError))
+  RunsLoaded(gen: Int, result: Result(List(PipelineRun), ApiError))
+  Retry(ActivityTab)
+  // Global-feed filters
+  EventKindSelected(String)
+  EventSinceChanged(String)
+  RunStatusSelected(String)
+  RunTaskNameChanged(String)
+  RunSinceChanged(String)
+}
+
+/// The only signal the host must act on: a 401 during a load. Non-auth
+/// failures are surfaced inline (the `Failed` LoadStatus + a retry button),
+/// so they never escalate to the host.
+pub type OutMsg {
+  AuthExpired
+}
+
+// --- Init ---
+
+pub fn init(source: Source) -> #(Model, Effect(Msg), List(OutMsg)) {
+  let filters = empty_filters()
+  let model =
+    Model(
+      source: source,
+      tab: EventsTab,
+      filters: filters,
+      events: [],
+      events_status: load_status.Loading,
+      runs: [],
+      runs_status: load_status.Loading,
+      events_gen: 1,
+      runs_gen: 1,
+    )
+  #(
+    model,
+    effect.batch([
+      load_events(source, filters, 1),
+      load_runs(source, filters, 1),
+    ]),
+    [],
+  )
+}
+
+// --- Update ---
+
+pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg), List(OutMsg)) {
+  case msg {
+    TabSelected(tab) -> #(Model(..model, tab: tab), effect.none(), [])
+
+    EventsLoaded(gen, result) ->
+      case gen == model.events_gen {
+        False -> #(model, effect.none(), [])
+        True ->
+          case result {
+            Ok(events) -> #(
+              Model(..model, events: events, events_status: load_status.Loaded),
+              effect.none(),
+              [],
+            )
+            Error(err) -> #(
+              Model(
+                ..model,
+                events_status: load_status.Failed("Failed to load events"),
+              ),
+              effect.none(),
+              auth_out(err),
+            )
+          }
+      }
+
+    RunsLoaded(gen, result) ->
+      case gen == model.runs_gen {
+        False -> #(model, effect.none(), [])
+        True ->
+          case result {
+            Ok(runs) -> #(
+              Model(..model, runs: runs, runs_status: load_status.Loaded),
+              effect.none(),
+              [],
+            )
+            Error(err) -> #(
+              Model(
+                ..model,
+                runs_status: load_status.Failed("Failed to load pipeline runs"),
+              ),
+              effect.none(),
+              auth_out(err),
+            )
+          }
+      }
+
+    Retry(EventsTab) -> {
+      let gen = model.events_gen + 1
+      #(
+        Model(..model, events_status: load_status.Loading, events_gen: gen),
+        load_events(model.source, model.filters, gen),
+        [],
+      )
+    }
+    Retry(RunsTab) -> {
+      let gen = model.runs_gen + 1
+      #(
+        Model(..model, runs_status: load_status.Loading, runs_gen: gen),
+        load_runs(model.source, model.filters, gen),
+        [],
+      )
+    }
+
+    EventKindSelected(kind) ->
+      reload_events(model, Filters(..model.filters, event_kind: kind))
+    EventSinceChanged(since) ->
+      reload_events(model, Filters(..model.filters, event_since: since))
+    RunStatusSelected(status) ->
+      reload_runs(model, Filters(..model.filters, run_status: status))
+    RunTaskNameChanged(name) ->
+      reload_runs(model, Filters(..model.filters, run_task_name: name))
+    RunSinceChanged(since) ->
+      reload_runs(model, Filters(..model.filters, run_since: since))
+  }
+}
+
+/// Apply new filters and refetch the events tab; the runs tab is untouched.
+fn reload_events(
+  model: Model,
+  filters: Filters,
+) -> #(Model, Effect(Msg), List(OutMsg)) {
+  let gen = model.events_gen + 1
+  let model =
+    Model(
+      ..model,
+      filters: filters,
+      events_status: load_status.Loading,
+      events_gen: gen,
+    )
+  #(model, load_events(model.source, filters, gen), [])
+}
+
+/// Apply new filters and refetch the runs tab; the events tab is untouched.
+fn reload_runs(
+  model: Model,
+  filters: Filters,
+) -> #(Model, Effect(Msg), List(OutMsg)) {
+  let gen = model.runs_gen + 1
+  let model =
+    Model(
+      ..model,
+      filters: filters,
+      runs_status: load_status.Loading,
+      runs_gen: gen,
+    )
+  #(model, load_runs(model.source, filters, gen), [])
+}
+
+/// Only a session-killing 401 escalates to the host; everything else is shown
+/// inline via the `Failed` LoadStatus.
+fn auth_out(err: ApiError) -> List(OutMsg) {
+  case err {
+    AuthError(_) -> [AuthExpired]
+    _ -> []
+  }
+}
+
+fn load_events(source: Source, filters: Filters, gen: Int) -> Effect(Msg) {
+  use dispatch <- effect.from
+  events_promise(source, filters)
+  |> promise.tap(fn(result) { dispatch(EventsLoaded(gen, result)) })
+  Nil
+}
+
+fn events_promise(
+  source: Source,
+  filters: Filters,
+) -> Promise(Result(List(RecordEvent), ApiError)) {
+  case source {
+    RecordSource(id) -> audit.get_record_events(id)
+    PatientSource(id) -> audit.list_events(Some(id), None, None)
+    GlobalSource ->
+      audit.list_events(
+        None,
+        none_if_empty(filters.event_kind),
+        none_if_empty(filters.event_since),
+      )
+  }
+}
+
+fn load_runs(source: Source, filters: Filters, gen: Int) -> Effect(Msg) {
+  use dispatch <- effect.from
+  runs_promise(source, filters)
+  |> promise.tap(fn(result) { dispatch(RunsLoaded(gen, result)) })
+  Nil
+}
+
+fn runs_promise(
+  source: Source,
+  filters: Filters,
+) -> Promise(Result(List(PipelineRun), ApiError)) {
+  case source {
+    RecordSource(id) -> audit.get_record_runs(id)
+    PatientSource(id) -> audit.list_runs(Some(id), None, None, None)
+    GlobalSource ->
+      audit.list_runs(
+        None,
+        none_if_empty(filters.run_status),
+        none_if_empty(filters.run_task_name),
+        none_if_empty(filters.run_since),
+      )
+  }
+}
+
+fn none_if_empty(value: String) -> Option(String) {
+  case value {
+    "" -> None
+    _ -> Some(value)
+  }
+}
+
+// --- View ---
+
+/// Tab bar + the active tab's table wrapped in the tri-state LoadStatus
+/// renderer. The component dispatches its own `Msg`; the host maps the result
+/// via `element.map(view(..), HostActivityMsg)`.
+pub fn view(model: Model, t: fn(Key) -> String) -> Element(Msg) {
   html.div([attribute.class("activity")], [
-    tabs(active, on_select, t),
-    case active {
+    tabs(model.tab, t),
+    filter_bar(model, t),
+    case model.tab {
       EventsTab ->
         load_status.render(
-          events_status,
+          model.events_status,
           fn() { loading_view(t) },
-          fn() { events_table(events, t) },
-          fn(m) { error_view(m, on_retry(EventsTab), t) },
+          fn() { events_table(model.events, t) },
+          fn(m) { error_view(m, Retry(EventsTab), t) },
         )
       RunsTab ->
         load_status.render(
-          runs_status,
+          model.runs_status,
           fn() { loading_view(t) },
-          fn() { runs_table(runs, t) },
-          fn(m) { error_view(m, on_retry(RunsTab), t) },
+          fn() { runs_table(model.runs, t) },
+          fn(m) { error_view(m, Retry(RunsTab), t) },
         )
     },
   ])
 }
 
-fn tabs(
-  active: ActivityTab,
-  on_select: fn(ActivityTab) -> msg,
-  t: fn(Key) -> String,
-) -> Element(msg) {
+fn tabs(active: ActivityTab, t: fn(Key) -> String) -> Element(Msg) {
   html.div([attribute.class("activity-tabs")], [
-    tab_button(i18n.ActivityTabEvents, EventsTab, active, on_select, t),
-    tab_button(i18n.ActivityTabRuns, RunsTab, active, on_select, t),
+    tab_button(i18n.ActivityTabEvents, EventsTab, active, t),
+    tab_button(i18n.ActivityTabRuns, RunsTab, active, t),
   ])
 }
 
@@ -68,16 +338,121 @@ fn tab_button(
   label: Key,
   tab: ActivityTab,
   active: ActivityTab,
-  on_select: fn(ActivityTab) -> msg,
   t: fn(Key) -> String,
-) -> Element(msg) {
+) -> Element(Msg) {
   let class = case tab == active {
     True -> "btn btn-primary"
     False -> "btn btn-outline"
   }
-  html.button([attribute.class(class), event.on_click(on_select(tab))], [
+  html.button([attribute.class(class), event.on_click(TabSelected(tab))], [
     html.text(t(label)),
   ])
+}
+
+// --- Filter bar (global feed only) ---
+
+/// Renders the filter row for the active tab — but only for the global feed.
+/// Record/patient feeds are already scoped, so they show no filters.
+fn filter_bar(model: Model, t: fn(Key) -> String) -> Element(Msg) {
+  case model.source {
+    GlobalSource ->
+      case model.tab {
+        EventsTab -> events_filter_bar(model.filters, t)
+        RunsTab -> runs_filter_bar(model.filters, t)
+      }
+    _ -> element.none()
+  }
+}
+
+fn events_filter_bar(filters: Filters, t: fn(Key) -> String) -> Element(Msg) {
+  html.div([attribute.class("activity-filters")], [
+    filter_field(
+      t(i18n.ActivityFilterKind),
+      base.select(
+        name: "activity-event-kind",
+        value: filters.event_kind,
+        options: event_kind_options(t),
+        on_change: EventKindSelected,
+      ),
+    ),
+    filter_field(
+      t(i18n.ActivityFilterSince),
+      base.date_input(
+        name: "activity-event-since",
+        value: filters.event_since,
+        on_input: EventSinceChanged,
+      ),
+    ),
+  ])
+}
+
+fn runs_filter_bar(filters: Filters, t: fn(Key) -> String) -> Element(Msg) {
+  html.div([attribute.class("activity-filters")], [
+    filter_field(
+      t(i18n.ThStatus),
+      base.select(
+        name: "activity-run-status",
+        value: filters.run_status,
+        options: run_status_options(t),
+        on_change: RunStatusSelected,
+      ),
+    ),
+    filter_field(
+      t(i18n.ThTask),
+      // `on_change` (commit on blur / Enter) rather than `on_input` so typing a
+      // task name doesn't fire a request on every keystroke.
+      html.input([
+        attribute.type_("text"),
+        attribute.id("activity-run-task"),
+        attribute.name("activity-run-task"),
+        attribute.value(filters.run_task_name),
+        attribute.class("form-input"),
+        event.on_change(RunTaskNameChanged),
+      ]),
+    ),
+    filter_field(
+      t(i18n.ActivityFilterSince),
+      base.date_input(
+        name: "activity-run-since",
+        value: filters.run_since,
+        on_input: RunSinceChanged,
+      ),
+    ),
+  ])
+}
+
+fn filter_field(label: String, control: Element(Msg)) -> Element(Msg) {
+  html.label([attribute.class("activity-filter")], [
+    html.span([attribute.class("activity-filter-label")], [html.text(label)]),
+    control,
+  ])
+}
+
+fn event_kind_options(t: fn(Key) -> String) -> List(#(String, String)) {
+  [
+    #("", t(i18n.ActivityFilterAllKinds)),
+    #("created", t(i18n.ActivityKindCreated)),
+    #("status_changed", t(i18n.ActivityKindStatusChanged)),
+    #("data_submitted", t(i18n.ActivityKindDataSubmitted)),
+    #("data_updated", t(i18n.ActivityKindDataUpdated)),
+    #("assigned", t(i18n.ActivityKindAssigned)),
+    #("unassigned", t(i18n.ActivityKindUnassigned)),
+    #("failed", t(i18n.ActivityKindFailed)),
+    #("invalidated", t(i18n.ActivityKindInvalidated)),
+    #("context_info_updated", t(i18n.ActivityKindContextInfoUpdated)),
+    #("files_cleared", t(i18n.ActivityKindFilesCleared)),
+    #("deleted", t(i18n.ActivityKindDeleted)),
+  ]
+}
+
+fn run_status_options(t: fn(Key) -> String) -> List(#(String, String)) {
+  [
+    #("", t(i18n.ActivityFilterAllStatuses)),
+    #("running", t(i18n.ActivityRunRunning)),
+    #("succeeded", t(i18n.ActivityRunSucceeded)),
+    #("failed", t(i18n.ActivityRunFailed)),
+    #("retrying", t(i18n.ActivityRunRetrying)),
+  ]
 }
 
 fn loading_view(t: fn(Key) -> String) -> Element(msg) {
@@ -88,9 +463,9 @@ fn loading_view(t: fn(Key) -> String) -> Element(msg) {
 
 fn error_view(
   message: String,
-  retry_msg: msg,
+  retry_msg: Msg,
   t: fn(Key) -> String,
-) -> Element(msg) {
+) -> Element(Msg) {
   html.div([attribute.class("error-container")], [
     html.p([attribute.class("error-message")], [html.text(message)]),
     html.button(

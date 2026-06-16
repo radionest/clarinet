@@ -86,6 +86,34 @@
     }
 }
 
+/* Activity feed filters (global audit feed) */
+.activity-filters {
+    display: flex;
+    align-items: flex-end;
+    gap: var(--spacing-md);
+    margin-bottom: var(--spacing-md);
+    flex-wrap: wrap;
+}
+
+.activity-filter {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-xs);
+}
+
+.activity-filter-label {
+    font-size: 0.75rem;
+    color: var(--ink-soft);
+}
+
+.activity-filters .form-select,
+.activity-filters .form-input {
+    width: auto;
+    min-width: 160px;
+    padding: 0.35rem 0.6rem;
+    font-size: 0.8125rem;
+}
+
 /* Admin assignment dropdown */
 .assign-cell {
     display: flex;
