@@ -158,7 +158,7 @@ async def clear_record_output_files(
 
 @router.get("/records/events", response_model=list[RecordEventRead])
 async def list_record_events(
-    _current_user: AdminUserDep,
+    current_user: AdminUserDep,
     events_repo: RecordEventRepositoryDep,
     pagination: PaginationDep,
     kind: str | None = None,
@@ -172,6 +172,12 @@ async def list_record_events(
     patient's current records), ``since`` (``occurred_at`` lower bound).
     Events of already-deleted records are available only via
     ``/records/events/deleted``.
+
+    ``patient_id`` is returned to superusers only. This cross-patient feed also
+    serves admin-role non-superusers, who are masked on every other surface
+    (the record-scoped ``/records/{id}/events`` view applies per-patient
+    masking), so an anonymized patient's real id is withheld here too. The
+    ``patient_id`` query filter still works for any admin.
     """
     criteria = RecordEventFind(
         kind=kind,
@@ -182,7 +188,10 @@ async def list_record_events(
         limit=pagination.limit,
     )
     events = await events_repo.find(criteria)
-    return [RecordEventRead.model_validate(e) for e in events]
+    reads = [RecordEventRead.model_validate(e) for e in events]
+    if not current_user.is_superuser:
+        reads = [r.model_copy(update={"patient_id": None}) for r in reads]
+    return reads
 
 
 @router.get("/records/events/deleted", response_model=list[RecordEventRead])

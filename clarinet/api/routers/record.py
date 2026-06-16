@@ -865,17 +865,26 @@ async def get_record_events(
 
     ``actor_id=null`` marks system actions (pipeline workers, RecordFlow).
     The actor's email (``actor_name``) is exposed only to admins; other users
-    with record access see the events but not the acting user's email.
+    with record access see the events but not the acting user's email. The
+    ``patient_id`` is masked with the same policy as the record itself — a
+    non-superuser never sees an anonymized patient's real id.
     """
     assert record.id is not None  # SQLModel PK after get
     events = await events_repo.list_for_record(
         record.id, skip=pagination.skip, limit=pagination.limit
     )
-    reads = [RecordEventRead.model_validate(e) for e in events]
     is_admin = user.is_superuser or "admin" in get_user_role_names(user)
-    if not is_admin:
-        reads = [r.model_copy(update={"actor_name": None}) for r in reads]
-    return reads
+    # Every event here belongs to ``record``, so its patient is the record's
+    # patient; mask once and apply to all rows (mirrors get_record_pipeline_runs).
+    masked_patient_id = mask_record_patient_data(RecordRead.model_validate(record), user).patient_id
+    masked: list[RecordEventRead] = []
+    for event in events:
+        update: dict[str, str | None] = {"patient_id": masked_patient_id}
+        if not is_admin:
+            # actor email is admin-only — other users with record access don't see it
+            update["actor_name"] = None
+        masked.append(RecordEventRead.model_validate(event).model_copy(update=update))
+    return masked
 
 
 def _mask_run_identifier(value: str | None, raw: str | None, substitute: str | None) -> str | None:

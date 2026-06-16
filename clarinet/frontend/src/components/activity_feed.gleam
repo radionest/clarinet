@@ -20,6 +20,7 @@ import lustre/effect.{type Effect}
 import lustre/element.{type Element}
 import lustre/element/html
 import lustre/event
+import router
 import utils/datetime
 import utils/load_status.{type LoadStatus}
 
@@ -313,14 +314,14 @@ pub fn view(model: Model, t: fn(Key) -> String) -> Element(Msg) {
         load_status.render(
           model.events_status,
           fn() { loading_view(t) },
-          fn() { events_table(model.events, t) },
+          fn() { events_table(model.events, model.source, t) },
           fn(m) { error_view(m, Retry(EventsTab), t) },
         )
       RunsTab ->
         load_status.render(
           model.runs_status,
           fn() { loading_view(t) },
-          fn() { runs_table(model.runs, t) },
+          fn() { runs_table(model.runs, model.source, t) },
           fn(m) { error_view(m, Retry(RunsTab), t) },
         )
     },
@@ -475,12 +476,88 @@ fn error_view(
   ])
 }
 
+// --- Shared audit cells (record + patient links) ---
+
+/// Record column for a pipeline run (only a live `record_id` is available).
+fn run_record_cell(record_id: Option(Int)) -> Element(msg) {
+  case record_id {
+    Some(id) -> record_link(id)
+    None -> html.text("—")
+  }
+}
+
+/// Record column for an audit event. Links via the live FK while the record
+/// exists; once deleted (`record_id` NULL) the denormalized `record_key` is
+/// shown unlinked so the row stays correlatable.
+fn event_record_cell(ev: RecordEvent) -> Element(msg) {
+  case ev.record_id, ev.record_key {
+    Some(id), _ -> record_link(id)
+    None, Some(key) ->
+      html.span([attribute.class("text-muted")], [
+        html.text("#" <> int.to_string(key)),
+      ])
+    None, None -> html.text("—")
+  }
+}
+
+fn record_link(id: Int) -> Element(msg) {
+  html.a(
+    [
+      attribute.href(
+        router.route_to_path(router.RecordDetail(int.to_string(id))),
+      ),
+    ],
+    [html.text("#" <> int.to_string(id))],
+  )
+}
+
+/// Patient column; links to the patient page when an id is present.
+fn patient_cell(patient_id: Option(String)) -> Element(msg) {
+  case patient_id {
+    Some(pid) ->
+      html.a([attribute.href(router.route_to_path(router.PatientDetail(pid)))], [
+        html.text(pid),
+      ])
+    None -> html.text("—")
+  }
+}
+
+// --- Column visibility (the feed component is shared across sources) ---
+
+/// Per-record feeds drop the Record column (every row is the same record); the
+/// global (cross-patient) and per-patient feeds keep it (records vary there).
+fn show_record_col(source: Source) -> Bool {
+  case source {
+    RecordSource(_) -> False
+    _ -> True
+  }
+}
+
+/// Only the cross-patient global feed needs the Patient column — per-patient
+/// and per-record feeds have a constant patient (the page subject).
+fn show_patient_col(source: Source) -> Bool {
+  case source {
+    GlobalSource -> True
+    _ -> False
+  }
+}
+
+fn optional_cell(show: Bool, cell: Element(msg)) -> List(Element(msg)) {
+  case show {
+    True -> [cell]
+    False -> []
+  }
+}
+
 // --- Record events table ---
 
 pub fn events_table(
   events: List(RecordEvent),
+  source: Source,
   t: fn(Key) -> String,
 ) -> Element(msg) {
+  let show_record = show_record_col(source)
+  let show_patient = show_patient_col(source)
   case events {
     [] ->
       html.p([attribute.class("text-muted")], [
@@ -490,32 +567,62 @@ pub fn events_table(
       html.div([attribute.class("table-responsive")], [
         html.table([attribute.class("table")], [
           html.thead([], [
-            html.tr([], [
-              html.th([], [html.text(t(i18n.ThDate))]),
-              html.th([], [html.text(t(i18n.ThEvent))]),
-              html.th([], [html.text(t(i18n.ThUser))]),
-              html.th([], [html.text(t(i18n.ThChange))]),
-              html.th([], [html.text(t(i18n.ThReason))]),
-            ]),
+            html.tr(
+              [],
+              list.flatten([
+                [html.th([], [html.text(t(i18n.ThDate))])],
+                optional_cell(
+                  show_record,
+                  html.th([], [html.text(t(i18n.ThRecord))]),
+                ),
+                optional_cell(
+                  show_patient,
+                  html.th([], [html.text(t(i18n.ThPatient))]),
+                ),
+                [
+                  html.th([], [html.text(t(i18n.ThEvent))]),
+                  html.th([], [html.text(t(i18n.ThUser))]),
+                  html.th([], [html.text(t(i18n.ThChange))]),
+                  html.th([], [html.text(t(i18n.ThReason))]),
+                ],
+              ]),
+            ),
           ]),
-          html.tbody([], list.map(events, fn(ev) { event_row(ev, t) })),
+          html.tbody(
+            [],
+            list.map(events, fn(ev) {
+              event_row(ev, show_record, show_patient, t)
+            }),
+          ),
         ]),
       ])
   }
 }
 
-fn event_row(ev: RecordEvent, t: fn(Key) -> String) -> Element(msg) {
-  html.tr([], [
-    html.td([], [html.text(datetime.format(ev.occurred_at))]),
-    html.td([], [kind_badge(ev.kind, t)]),
-    html.td([], [
-      html.text(option.unwrap(ev.actor_name, t(i18n.ActivitySystemActor))),
+fn event_row(
+  ev: RecordEvent,
+  show_record: Bool,
+  show_patient: Bool,
+  t: fn(Key) -> String,
+) -> Element(msg) {
+  html.tr(
+    [],
+    list.flatten([
+      [html.td([], [html.text(datetime.format(ev.occurred_at))])],
+      optional_cell(show_record, html.td([], [event_record_cell(ev)])),
+      optional_cell(show_patient, html.td([], [patient_cell(ev.patient_id)])),
+      [
+        html.td([], [kind_badge(ev.kind, t)]),
+        html.td([], [
+          html.text(option.unwrap(ev.actor_name, t(i18n.ActivitySystemActor))),
+        ]),
+        html.td([], [status_transition(ev)]),
+        html.td([attribute.class("text-muted")], [
+          html.text(option.unwrap(ev.reason, "—")),
+        ]),
+      ],
     ]),
-    html.td([], [status_transition(ev)]),
-    html.td([attribute.class("text-muted")], [
-      html.text(option.unwrap(ev.reason, "—")),
-    ]),
-  ])
+  )
 }
 
 fn status_transition(ev: RecordEvent) -> Element(msg) {
@@ -552,7 +659,13 @@ fn kind_display(kind: String) -> #(Key, String) {
 
 // --- Pipeline runs table ---
 
-pub fn runs_table(runs: List(PipelineRun), t: fn(Key) -> String) -> Element(msg) {
+pub fn runs_table(
+  runs: List(PipelineRun),
+  source: Source,
+  t: fn(Key) -> String,
+) -> Element(msg) {
+  let show_record = show_record_col(source)
+  let show_patient = show_patient_col(source)
   case runs {
     [] ->
       html.p([attribute.class("text-muted")], [
@@ -562,28 +675,56 @@ pub fn runs_table(runs: List(PipelineRun), t: fn(Key) -> String) -> Element(msg)
       html.div([attribute.class("table-responsive")], [
         html.table([attribute.class("table")], [
           html.thead([], [
-            html.tr([], [
-              html.th([], [html.text(t(i18n.ThTask))]),
-              html.th([], [html.text(t(i18n.ThStatus))]),
-              html.th([], [html.text(t(i18n.ThStarted))]),
-              html.th([], [html.text(t(i18n.ThDuration))]),
-              html.th([], [html.text(t(i18n.ThError))]),
-            ]),
+            html.tr(
+              [],
+              list.flatten([
+                [html.th([], [html.text(t(i18n.ThTask))])],
+                optional_cell(
+                  show_record,
+                  html.th([], [html.text(t(i18n.ThRecord))]),
+                ),
+                optional_cell(
+                  show_patient,
+                  html.th([], [html.text(t(i18n.ThPatient))]),
+                ),
+                [
+                  html.th([], [html.text(t(i18n.ThStatus))]),
+                  html.th([], [html.text(t(i18n.ThStarted))]),
+                  html.th([], [html.text(t(i18n.ThDuration))]),
+                  html.th([], [html.text(t(i18n.ThError))]),
+                ],
+              ]),
+            ),
           ]),
-          html.tbody([], list.map(runs, fn(r) { run_row(r, t) })),
+          html.tbody(
+            [],
+            list.map(runs, fn(r) { run_row(r, show_record, show_patient, t) }),
+          ),
         ]),
       ])
   }
 }
 
-fn run_row(run: PipelineRun, t: fn(Key) -> String) -> Element(msg) {
-  html.tr([], [
-    html.td([], [html.text(run.task_name)]),
-    html.td([], [run_status_badge(run.status, t)]),
-    html.td([], [html.text(datetime.format(run.started_at))]),
-    html.td([], [html.text(duration_text(run.execution_time))]),
-    html.td([attribute.class("text-muted")], [html.text(error_text(run))]),
-  ])
+fn run_row(
+  run: PipelineRun,
+  show_record: Bool,
+  show_patient: Bool,
+  t: fn(Key) -> String,
+) -> Element(msg) {
+  html.tr(
+    [],
+    list.flatten([
+      [html.td([], [html.text(run.task_name)])],
+      optional_cell(show_record, html.td([], [run_record_cell(run.record_id)])),
+      optional_cell(show_patient, html.td([], [patient_cell(run.patient_id)])),
+      [
+        html.td([], [run_status_badge(run.status, t)]),
+        html.td([], [html.text(datetime.format(run.started_at))]),
+        html.td([], [html.text(duration_text(run.execution_time))]),
+        html.td([attribute.class("text-muted")], [html.text(error_text(run))]),
+      ],
+    ]),
+  )
 }
 
 fn run_status_badge(status: String, t: fn(Key) -> String) -> Element(msg) {

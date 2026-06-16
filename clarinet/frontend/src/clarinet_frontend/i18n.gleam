@@ -372,6 +372,7 @@ pub type Key {
   ThStarted
   ThDuration
   ThError
+  ThRecord
   ActivityKindCreated
   ActivityKindStatusChanged
   ActivityKindDataSubmitted
@@ -1111,6 +1112,8 @@ pub fn translate(locale: Locale, key: Key) -> String {
     Ru, ThDuration -> "Длительность"
     En, ThError -> "Error"
     Ru, ThError -> "Ошибка"
+    En, ThRecord -> "Record"
+    Ru, ThRecord -> "Запись"
     En, ActivityKindCreated -> "Created"
     Ru, ActivityKindCreated -> "Создано"
     En, ActivityKindStatusChanged -> "Status changed"

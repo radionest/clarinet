@@ -55,7 +55,7 @@ async def create_pipeline_run(
 
 @router.get("/runs", response_model=list[PipelineTaskRunRead])
 async def list_pipeline_runs(
-    _user: AdminUserDep,
+    user: AdminUserDep,
     repo: PipelineTaskRunRepositoryDep,
     pagination: PaginationDep,
     status: PipelineRunStatus | None = None,
@@ -63,8 +63,15 @@ async def list_pipeline_runs(
     record_id: int | None = None,
     patient_id: str | None = None,
     since: datetime | None = None,
-) -> list[PipelineTaskRun]:
-    """List pipeline task runs with optional filters, newest first (admin only)."""
+) -> list[PipelineTaskRunRead]:
+    """List pipeline task runs with optional filters, newest first (admin only).
+
+    Patient/study/series identifiers are returned to superusers only. This
+    cross-patient feed also serves admin-role non-superusers, who are masked on
+    every other surface (the record-scoped ``/records/{id}/runs`` view applies
+    per-record masking), so anonymized identifiers are withheld here too. The
+    ``patient_id`` query filter still works for any admin.
+    """
     criteria = PipelineTaskRunFind(
         status=status,
         task_name=task_name,
@@ -74,7 +81,14 @@ async def list_pipeline_runs(
         skip=pagination.skip,
         limit=pagination.limit,
     )
-    return list(await repo.find(criteria))
+    runs = await repo.find(criteria)
+    reads = [PipelineTaskRunRead.model_validate(r) for r in runs]
+    if not user.is_superuser:
+        reads = [
+            r.model_copy(update={"patient_id": None, "study_uid": None, "series_uid": None})
+            for r in reads
+        ]
+    return reads
 
 
 @router.get("/runs/{task_id}", response_model=PipelineTaskRunRead)
