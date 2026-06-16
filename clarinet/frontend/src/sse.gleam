@@ -13,6 +13,7 @@ import lustre/effect.{type Effect}
 import plinth/javascript/global
 import utils/event_source
 import utils/logger
+import utils/time
 
 const watchdog_ms = 90_000
 
@@ -27,6 +28,10 @@ pub type Model {
     state: State,
     has_connected_once: Bool,
     watchdog: Option(global.TimerID),
+    // Wall-clock ms of the last received frame. The watchdog clears the timer
+    // id best-effort, but a burst of frames can leave a stale timer pending;
+    // WatchdogTick re-checks real idle against this so such a timer is a no-op.
+    last_frame_ms: Int,
   )
 }
 
@@ -47,7 +52,7 @@ pub type OutMsg {
 }
 
 pub fn init() -> Model {
-  Model(state: Idle, has_connected_once: False, watchdog: None)
+  Model(state: Idle, has_connected_once: False, watchdog: None, last_frame_ms: 0)
 }
 
 pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg), List(OutMsg)) {
@@ -65,7 +70,12 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg), List(OutMsg)) {
     SetWatchdog(id) -> #(Model(..model, watchdog: Some(id)), effect.none(), [])
 
     Event(event_source.Opened(es)) -> #(
-      Model(state: Active(es), has_connected_once: True, watchdog: None),
+      Model(
+        state: Active(es),
+        has_connected_once: True,
+        watchdog: None,
+        last_frame_ms: time.now_ms(),
+      ),
       arm_watchdog(model.watchdog),
       [SseConnected(reconnected: model.has_connected_once)],
     )
@@ -89,11 +99,17 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg), List(OutMsg)) {
 
     WatchdogTick ->
       case model.state {
-        Active(es) -> #(
-          Model(..model, state: Idle, watchdog: None),
-          effect.batch([event_source.close(es), dispatch(Connect)]),
-          [],
-        )
+        Active(es) ->
+          // A burst of frames can leave a stale watchdog timer pending; only
+          // act on genuine idle (no frame for watchdog_ms), else it's a no-op.
+          case time.now_ms() - model.last_frame_ms >= watchdog_ms {
+            True -> #(
+              Model(..model, state: Idle, watchdog: None),
+              effect.batch([event_source.close(es), dispatch(Connect)]),
+              [],
+            )
+            False -> #(model, effect.none(), [])
+          }
         _ -> #(model, effect.none(), [])
       }
 
@@ -108,14 +124,15 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg), List(OutMsg)) {
 }
 
 fn handle_frame(model: Model, text: String) -> #(Model, Effect(Msg), List(OutMsg)) {
+  let now = time.now_ms()
   case sse_events.decode_frame(text) {
     Ok(sse_events.Entity(e)) -> #(
-      Model(..model, watchdog: None),
+      Model(..model, watchdog: None, last_frame_ms: now),
       arm_watchdog(model.watchdog),
       [SseEntityEvent(e)],
     )
     Ok(sse_events.TaskProgress(task, task_id, payload)) -> #(
-      Model(..model, watchdog: None),
+      Model(..model, watchdog: None, last_frame_ms: now),
       arm_watchdog(model.watchdog),
       [SseTaskProgress(task, task_id, payload)],
     )
@@ -131,12 +148,12 @@ fn handle_frame(model: Model, text: String) -> #(Model, Effect(Msg), List(OutMsg
       )
     }
     Ok(sse_events.Ping) -> #(
-      Model(..model, watchdog: None),
+      Model(..model, watchdog: None, last_frame_ms: now),
       arm_watchdog(model.watchdog),
       [],
     )
     Error(Nil) -> #(
-      Model(..model, watchdog: None),
+      Model(..model, watchdog: None, last_frame_ms: now),
       effect.batch([arm_watchdog(model.watchdog), log_bad_frame(text)]),
       [],
     )

@@ -8,17 +8,20 @@ and clears it on teardown.
 import pytest
 import pytest_asyncio
 
-from clarinet.models.base import DicomQueryLevel
+from clarinet.models.base import DicomQueryLevel, RecordStatus
 from clarinet.repositories.patient_repository import PatientRepository
+from clarinet.repositories.record_event_repository import RecordEventRepository
 from clarinet.repositories.record_repository import RecordRepository
 from clarinet.services.events.bus import set_event_bus
 from clarinet.services.events.capture import register_capture_listeners
 from clarinet.services.events.models import EntityEvent
+from clarinet.services.record_service import RecordService
 from tests.utils.factories import (
     make_patient,
     make_record_type,
     make_series,
     make_study,
+    make_user,
     seed_record,
 )
 
@@ -182,6 +185,31 @@ async def test_delete_records_bulk_emits_deleted(test_session, sse_bus, hierarch
     await RecordRepository(test_session).delete_records([rec_a.id, rec_b.id])
     deleted = _entity_events(sse_bus, "record", "deleted")
     assert {ev.id for ev in deleted} == {str(rec_a.id), str(rec_b.id)}
+
+
+@pytest.mark.asyncio
+async def test_delete_record_cascade_emits_enriched(test_session, sse_bus, hierarchy):
+    """Core bulk cascade delete emits record/deleted WITH record_type_name and
+    user_id (from the pre-delete snapshot) so the owning non-admin user — not
+    just admins — receives it through the RBAC filter."""
+    owner = make_user()
+    test_session.add(owner)
+    await test_session.commit()
+    rec = await _seed(test_session, hierarchy, user_id=owner.id, status=RecordStatus.pending)
+    sse_bus.events.clear()
+
+    service = RecordService(
+        RecordRepository(test_session),
+        engine=None,
+        event_repo=RecordEventRepository(test_session),
+    )
+    await service.delete_record_cascade(rec.id)
+
+    deleted = _entity_events(sse_bus, "record", "deleted")
+    assert len(deleted) == 1
+    assert deleted[0].id == str(rec.id)
+    assert deleted[0].record_type_name == "sse-rt"
+    assert deleted[0].user_id == owner.id
 
 
 @pytest.mark.asyncio

@@ -137,3 +137,18 @@ def emit_entity(entity: str, action: str, ids: Iterable[str]) -> None:
         return
     for ident in ids:
         bus.publish(EntityEvent(entity=entity, action=action, id=ident))
+
+
+def emit_record_events(events: Iterable[EntityEvent]) -> None:
+    """Explicit publish of pre-built record events (Core bulk DML).
+
+    Used for enriched cascade deletes where the caller still has the record's
+    ``record_type_name``/``user_id`` snapshot, so the RBAC filter can deliver
+    the delete to the owning non-admin user (a bare ``emit_entity`` carries
+    neither field and would reach admins only). No-op without a bus.
+    """
+    bus = get_event_bus()
+    if bus is None:
+        return
+    for ev in events:
+        bus.publish(ev)

@@ -38,6 +38,13 @@ async def _revalidate(token: str | None, request: Request) -> bool:
     NOT read-only — it refreshes idle-timeout state every
     ``sse_revalidate_seconds``; its validation TTL cache
     (``session_cache_ttl_seconds``) can delay revoke detection by up to the TTL.
+
+    Security implication (intentional): because every revalidation refreshes
+    ``last_accessed``, an open stream keeps the session non-idle for its whole
+    lifetime — a tab left open will not hit ``session_idle_timeout_minutes``.
+    This mirrors any other active session and is still bounded by the hard
+    ``session_absolute_timeout_days`` cap. A truly idle-respecting revalidation
+    would need a read-only token check in the auth layer (out of scope here).
     """
     if not token:
         return False
@@ -88,7 +95,11 @@ async def events_stream(request: Request, user: CurrentUserDep) -> StreamingResp
                 if frame is None:  # slow-consumer sentinel
                     return
                 yield f"data: {frame}\n\n"
-                if '"record_type"' in frame:  # new types become visible immediately
+                # Match the entity field precisely: '"record_type"' alone also
+                # appears inside every record event's "record_type_name", which
+                # would reload RBAC on every record frame. to_wire() uses
+                # json.dumps default separators, so the key reads `"entity": "...`.
+                if '"entity": "record_type"' in frame:  # new types visible immediately
                     conn.allowed_types = await _load_allowed_types(user)
         finally:
             bus.unregister(conn)

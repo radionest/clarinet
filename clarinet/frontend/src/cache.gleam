@@ -15,7 +15,6 @@ import api/users
 import cache/bucket.{type Bucket, type BucketKey, type BucketStatus}
 import cache/bucket_lru
 import gleam/dict.{type Dict}
-import gleam/time/timestamp
 import gleam/int
 import gleam/javascript/promise.{type Promise}
 import gleam/json
@@ -23,6 +22,7 @@ import gleam/list
 import gleam/option.{type Option, None, Some}
 import lustre/effect.{type Effect}
 import plinth/javascript/global
+import utils/time
 
 // --- Model ---
 
@@ -541,17 +541,20 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg), List(OutMsg)) {
             _ -> #(dict.insert(buckets_acc, topic, b), effs_acc)
           }
         })
+      // Only refresh slots that are actually loaded — avoids redundant fetches
+      // and, after logout (cache reset to None), a stray 401 from a debounce
+      // timer that fires post-logout.
+      let filter_eff = case model.filter_options {
+        Some(_) -> [dispatch_self(InvalidateFilterOptions)]
+        None -> []
+      }
       let stats_eff = case model.record_type_stats {
         Some(_) -> [dispatch_self(LoadRecordTypeStats)]
         None -> []
       }
       #(
         Model(..model, record_buckets: new_buckets, sse_debounce: False),
-        effect.batch(list.flatten([
-          refetch_effs,
-          [dispatch_self(InvalidateFilterOptions)],
-          stats_eff,
-        ])),
+        effect.batch(list.flatten([refetch_effs, filter_eff, stats_eff])),
         [],
       )
     }
@@ -899,10 +902,7 @@ fn api_error_msg(err: ApiError) -> String {
 }
 
 fn now_ms() -> Int {
-  let #(seconds, nanoseconds) =
-    timestamp.system_time()
-    |> timestamp.to_unix_seconds_and_nanoseconds()
-  seconds * 1000 + nanoseconds / 1_000_000
+  time.now_ms()
 }
 
 fn load_effect(

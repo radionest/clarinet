@@ -16,7 +16,8 @@ from clarinet.models import Record, RecordRead, RecordStatus, is_record_editable
 from clarinet.models.file_schema import FileDefinitionRead, FileRole
 from clarinet.models.record_event import RecordEvent
 from clarinet.repositories.file_repository import FileRepository
-from clarinet.services.events.capture import emit_entity
+from clarinet.services.events.capture import emit_record_events
+from clarinet.services.events.models import EntityEvent
 from clarinet.services.file_validation import validate_record_files
 from clarinet.utils.file_checksums import checksums_changed, compute_checksums
 from clarinet.utils.file_patterns import glob_file_paths, resolve_pattern
@@ -812,8 +813,20 @@ class RecordService:
         # so the row locks acquired above cover the whole check-and-delete.
         await self.repo.delete_records(deleted_ids, commit=False)
         await self.repo.session.commit()
-        # sse-capture: explicit emit, UoW-invisible (Core bulk DML in delete_records)
-        emit_entity("record", "deleted", [str(i) for i in deleted_ids])
+        # sse-capture: explicit emit, UoW-invisible (Core bulk DML in delete_records).
+        # Enriched from pre-delete snapshots so the owning non-admin user gets
+        # the delete — a bare id-only event carries no record_type_name/user_id
+        # and the RBAC filter would deliver it to admins only.
+        emit_record_events(
+            EntityEvent(
+                entity="record",
+                action="deleted",
+                id=str(rid),
+                record_type_name=read.record_type_name,
+                user_id=read.user_id,
+            )
+            for rid, read in reads.items()
+        )
 
         files_removed = 0
         for p in paths_to_unlink:

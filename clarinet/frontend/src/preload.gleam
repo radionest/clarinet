@@ -13,7 +13,6 @@ import gleam/int
 import gleam/javascript/promise
 import gleam/option.{type Option, None, Some}
 import gleam/string
-import gleam/time/timestamp
 import lustre/attribute
 import lustre/effect.{type Effect}
 import lustre/element.{type Element}
@@ -21,6 +20,7 @@ import lustre/element/html
 import lustre/event
 import plinth/javascript/global
 import utils/logger
+import utils/time
 import utils/viewer_window
 
 // --- Model ---
@@ -209,7 +209,7 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg), List(OutMsg)) {
         True ->
           // A fresh SSE push means the stream is live — skip the HTTP poll.
           // When the stream drops, pushes stop and polling resumes.
-          case now_ms() - model.last_push_ms < 2500 {
+          case time.now_ms() - model.last_push_ms < 2500 {
             True -> #(model, effect.none(), [])
             False -> {
               let poll_effect = {
@@ -239,7 +239,7 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg), List(OutMsg)) {
         False -> #(model, effect.none(), [])
         True ->
           apply_progress(
-            Model(..model, last_push_ms: now_ms()),
+            Model(..model, last_push_ms: time.now_ms()),
             progress,
             task_id,
             payload,
@@ -322,13 +322,6 @@ fn apply_progress(
       #(Model(..model, progress: Some(new_progress)), effect.none(), [])
     }
   }
-}
-
-fn now_ms() -> Int {
-  let #(seconds, nanoseconds) =
-    timestamp.system_time()
-    |> timestamp.to_unix_seconds_and_nanoseconds()
-  seconds * 1000 + nanoseconds / 1_000_000
 }
 
 pub fn stop_timer(model: Model) -> Effect(Msg) {
