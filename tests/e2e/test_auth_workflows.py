@@ -21,6 +21,13 @@ import clarinet.api.auth_config as auth_config_module
 from clarinet.models.auth import AccessToken
 from clarinet.models.user import User, UserRole, UserRolesLink
 from clarinet.settings import settings
+from tests.utils.urls import (
+    AUTH_LOGIN,
+    AUTH_ME,
+    AUTH_REGISTER,
+    AUTH_SESSIONS_ACTIVE,
+    AUTH_SESSIONS_REVOKE,
+)
 
 # Test constants
 MAX_CONCURRENT_SESSIONS = 2
@@ -33,6 +40,105 @@ CONCURRENT_REQUESTS_COUNT = 10
 # Expected status codes
 LOGIN_SUCCESS_CODES = [200, 204]
 LOGOUT_SUCCESS_CODES = [200, 204]
+
+
+class TestSessionManagement:
+    """User-facing active-session listing + per-session revoke.
+
+    Guards the fix where revoking a session deleted the DB row but left the
+    token valid in ``DatabaseStrategy._user_cache`` until the TTL expired —
+    so a "revoked" session kept working until the cache entry aged out.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _clear_session_cache(self):
+        # _user_cache is a process-wide class-level TTLCache; clear it around
+        # each test so cache assertions aren't polluted by tokens that other
+        # tests validated.
+        cache = auth_config_module.DatabaseStrategy._user_cache
+        cache.clear()
+        yield
+        cache.clear()
+
+    @pytest.mark.asyncio
+    async def test_revoke_session_evicts_user_cache(
+        self, client: AsyncClient, test_session: AsyncSession
+    ):
+        """Revoking a session removes its token from the in-memory cache too."""
+        cache = auth_config_module.DatabaseStrategy._user_cache
+        email = "revoke_cache@example.com"
+        password = "SecurePassword123!"
+
+        reg = await client.post(AUTH_REGISTER, json={"email": email, "password": password})
+        assert reg.status_code == 201
+
+        login = await client.post(AUTH_LOGIN, data={"username": email, "password": password})
+        assert login.status_code in LOGIN_SUCCESS_CODES
+        token = login.cookies[settings.cookie_name]
+
+        # An authenticated request primes the in-memory validation cache.
+        assert (await client.get(AUTH_ME)).status_code == 200
+        assert token in cache
+
+        listed = await client.get(AUTH_SESSIONS_ACTIVE)
+        assert listed.status_code == 200
+        sessions = listed.json()
+        assert len(sessions) == 1
+        assert sessions[0]["is_current"] is True
+        preview = sessions[0]["token_preview"]
+        assert preview == token[:8] + "..."
+
+        revoke = await client.delete(AUTH_SESSIONS_REVOKE.format(token_preview=preview))
+        assert revoke.status_code == 200
+
+        # The fix: token evicted from the cache, not merely deleted from the DB.
+        assert token not in cache
+
+        row = (
+            await test_session.execute(select(AccessToken).where(AccessToken.token == token))
+        ).scalar_one_or_none()
+        assert row is None
+
+        # Session is truly dead — no longer served from a stale cache entry.
+        assert (await client.get(AUTH_ME)).status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_list_and_revoke_other_session(
+        self, client: AsyncClient, test_session: AsyncSession
+    ):
+        """List both sessions, mark the right one current, revoke the other."""
+        email = "two_sessions@example.com"
+        password = "SecurePassword123!"
+
+        reg = await client.post(AUTH_REGISTER, json={"email": email, "password": password})
+        assert reg.status_code == 201
+
+        login_a = await client.post(AUTH_LOGIN, data={"username": email, "password": password})
+        token_a = login_a.cookies[settings.cookie_name]
+
+        login_b = await client.post(AUTH_LOGIN, data={"username": email, "password": password})
+        token_b = login_b.cookies[settings.cookie_name]
+        assert token_a != token_b
+
+        # The client's cookie jar now carries token_b → it is the current one.
+        sessions = (await client.get(AUTH_SESSIONS_ACTIVE)).json()
+        assert len(sessions) == 2
+        current = [s for s in sessions if s["is_current"]]
+        assert len(current) == 1
+        assert current[0]["token_preview"] == token_b[:8] + "..."
+
+        # Revoke the other (non-current) session.
+        revoke = await client.delete(AUTH_SESSIONS_REVOKE.format(token_preview=token_a[:8] + "..."))
+        assert revoke.status_code == 200
+
+        remaining = (await client.get(AUTH_SESSIONS_ACTIVE)).json()
+        assert len(remaining) == 1
+        assert remaining[0]["token_preview"] == token_b[:8] + "..."
+
+        row = (
+            await test_session.execute(select(AccessToken).where(AccessToken.token == token_a))
+        ).scalar_one_or_none()
+        assert row is None
 
 
 class TestCompleteRegistrationFlow:

@@ -19,6 +19,8 @@ AUTH_ME = "/api/auth/me"
 AUTH_SESSION_VALIDATE = "/api/auth/session/validate"
 AUTH_SESSION_REFRESH = "/api/auth/session/refresh"
 AUTH_SESSIONS_ACTIVE = "/api/auth/sessions/active"
+# Dynamic: AUTH_SESSIONS_REVOKE.format(token_preview="abcdef12...")
+AUTH_SESSIONS_REVOKE = "/api/auth/sessions/{token_preview}"
 
 # --- Users ---
 USERS_BASE = "/api/user"

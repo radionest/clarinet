@@ -126,6 +126,16 @@ class DatabaseStrategy(Strategy[User, UUID]):
         for token in stale:
             cls._user_cache.pop(token, None)
 
+    @classmethod
+    def evict_token(cls, token: str) -> None:
+        """Drop a single token from the in-memory validation cache.
+
+        Lets callers outside this class (e.g. the session-revoke endpoint)
+        invalidate one session immediately without reaching into the private
+        cache or deleting the DB row (which ``destroy_token`` also does).
+        """
+        cls._user_cache.pop(token, None)
+
     def __init__(self, session: AsyncSession, request: Request | None = None) -> None:
         """Initialize strategy with database session and optional request."""
         self.session = session

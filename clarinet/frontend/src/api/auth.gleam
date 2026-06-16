@@ -1,10 +1,14 @@
 // Authentication API endpoints
 import api/http_client
-import api/models.{type LoginResponse, type RegisterRequest, type User}
+import api/models.{
+  type LoginResponse, type RegisterRequest, type SessionInfo, type User,
+}
 import api/types.{type ApiError}
 import api/users
+import gleam/dynamic/decode
 import gleam/javascript/promise.{type Promise}
 import gleam/json
+import gleam/option.{None}
 import gleam/result
 import multipart_form/field
 
@@ -23,7 +27,10 @@ pub fn login(
 
   // Send the login request - it returns 204 No Content on success
   // Using try_await to handle the Result inside the promise
-  use _login <- promise.try_await(http_client.post_multipart("/auth/login", form))
+  use _login <- promise.try_await(http_client.post_multipart(
+    "/auth/login",
+    form,
+  ))
   use current_user <- promise.map_try(get_current_user())
   Ok(models.LoginResponse(user: current_user))
 }
@@ -86,4 +93,47 @@ pub fn refresh_token() -> Promise(Result(LoginResponse, ApiError)) {
     // Transform the user result into a LoginResponse
     result.map(result, fn(user) { models.LoginResponse(user: user) })
   })
+}
+
+// List the current user's active sessions (GET /api/auth/sessions/active).
+pub fn get_active_sessions() -> Promise(Result(List(SessionInfo), ApiError)) {
+  http_client.get("/auth/sessions/active")
+  |> promise.map(fn(result) {
+    result.try(result, http_client.decode_response(
+      _,
+      decode.list(session_info_decoder()),
+      "Invalid sessions data",
+    ))
+  })
+}
+
+// Revoke one of the current user's sessions by its token preview
+// (DELETE /api/auth/sessions/{token_preview}). The preview ends in "...",
+// which is URL-safe, so it is interpolated directly.
+pub fn revoke_session(token_preview: String) -> Promise(Result(Nil, ApiError)) {
+  http_client.delete("/auth/sessions/" <> token_preview)
+  |> promise.map(fn(result) { result.map(result, fn(_) { Nil }) })
+}
+
+fn session_info_decoder() -> decode.Decoder(SessionInfo) {
+  use token_preview <- decode.field("token_preview", decode.string)
+  use last_accessed <- decode.field("last_accessed", decode.string)
+  use user_agent <- decode.optional_field(
+    "user_agent",
+    None,
+    decode.optional(decode.string),
+  )
+  use ip_address <- decode.optional_field(
+    "ip_address",
+    None,
+    decode.optional(decode.string),
+  )
+  use is_current <- decode.field("is_current", decode.bool)
+  decode.success(models.SessionInfo(
+    token_preview:,
+    last_accessed:,
+    user_agent:,
+    ip_address:,
+    is_current:,
+  ))
 }
