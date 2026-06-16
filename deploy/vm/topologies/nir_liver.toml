@@ -1,0 +1,33 @@
+# Multi-VM topology: stand + pacs + worker on the libvirt default NAT network.
+# Brought up with: make vm-topology-up TOPOLOGY=nir_liver
+
+[defaults]
+ram = 4096
+vcpus = 2
+disk_size = 20
+
+[project]
+name = "nir_liver"
+path_prefix = "/nir_liver/"
+# Optional project checkout shipped to the stand AND the worker (plan/ +
+# settings.toml). Empty/absent -> bare clarinet. The worker needs the same
+# project so its pipeline_task_namespace (derived from project_name) matches
+# the stand's — otherwise it consumes a different queue than the API publishes.
+# Env override: CLARINET_PROJECT_SOURCE_DIR.
+source_dir = ""
+
+[vm.stand]
+role = "stand"        # nginx + api + postgres + rabbitmq
+ram = 4096
+vcpus = 2
+
+[vm.pacs]
+role = "pacs"         # orthanc only
+ram = 2048
+vcpus = 1
+
+[vm.worker]
+role = "worker"       # clarinet-worker@<queues>
+ram = 4096
+vcpus = 2
+queues = ["default", "dicom"]

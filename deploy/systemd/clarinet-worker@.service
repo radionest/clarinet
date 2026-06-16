@@ -2,6 +2,10 @@
 Description=Clarinet Pipeline Worker (%i)
 After=network.target rabbitmq-server.service
 Wants=rabbitmq-server.service
+# In a multi-VM topology /var/lib/clarinet/data is an NFS mount from the stand;
+# block startup until it is mounted so task output never lands in a shadowed
+# local dir after a reboot. No-op on single-VM (resolves to the root mount).
+RequiresMountsFor=/var/lib/clarinet/data
 
 [Service]
 Type=simple

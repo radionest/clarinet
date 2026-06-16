@@ -549,5 +549,32 @@ vm-reset-testdb: ## Drop and recreate clarinet_test database on VM
 vm-reimage: ## Destroy + recreate VM (clean slate)
 	@bash $(VM_SH) reimage
 
+.PHONY: vm-topology-up
+vm-topology-up: ## Topology: create -> deploy -> wire -> smoke. Usage: make vm-topology-up TOPOLOGY=nir_liver
+	@TOPOLOGY=$(TOPOLOGY) bash $(VM_SH) topology-create && \
+	 TOPOLOGY=$(TOPOLOGY) bash $(VM_SH) topology-deploy && \
+	 TOPOLOGY=$(TOPOLOGY) bash $(VM_SH) topology-wire && \
+	 TOPOLOGY=$(TOPOLOGY) bash $(VM_SH) topology-smoke
+
+.PHONY: vm-topology-down
+vm-topology-down: ## Topology: destroy all VMs. Usage: make vm-topology-down TOPOLOGY=nir_liver
+	@TOPOLOGY=$(TOPOLOGY) bash $(VM_SH) topology-down
+
+.PHONY: vm-topology-create
+vm-topology-create: ## Topology: create all VMs + write lock (TOPOLOGY=<name>)
+	@TOPOLOGY=$(TOPOLOGY) bash $(VM_SH) topology-create
+
+.PHONY: vm-topology-deploy
+vm-topology-deploy: ## Topology: per-role deploy to each VM (TOPOLOGY=<name>)
+	@TOPOLOGY=$(TOPOLOGY) bash $(VM_SH) topology-deploy
+
+.PHONY: vm-topology-wire
+vm-topology-wire: ## Topology: write settings + NFS + modality reg (TOPOLOGY=<name>)
+	@TOPOLOGY=$(TOPOLOGY) bash $(VM_SH) topology-wire
+
+.PHONY: vm-topology-smoke
+vm-topology-smoke: ## Topology: connectivity smoke (TOPOLOGY=<name>)
+	@TOPOLOGY=$(TOPOLOGY) bash $(VM_SH) topology-smoke
+
 # Default target
 .DEFAULT_GOAL := help

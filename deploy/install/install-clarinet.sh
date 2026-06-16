@@ -10,6 +10,11 @@ SKIP_SERVICES="${3:-}"
 
 PATH_PREFIX="${CLARINET_PATH_PREFIX:-/}"
 
+# Role gating for multi-VM topologies (see deploy/vm/topologies/). Unset role
+# means "all" — the single-VM path where every step runs, unchanged.
+ROLE="${CLARINET_ROLE:-all}"
+role_is() { [[ "$ROLE" == all || "$ROLE" == "$1" ]]; }
+
 source "${DEPLOY_DIR}/lib/logging.sh"
 init_logging "install"
 source "${DEPLOY_DIR}/lib/provision.sh"
@@ -181,15 +186,22 @@ install_quarto() {
 # --- Step 9: Systemd units ---
 install_systemd() {
     log "Installing systemd units..."
-    cp "${DEPLOY_DIR}/systemd/clarinet-api.service" /etc/systemd/system/
-    cp "${DEPLOY_DIR}/systemd/clarinet-worker@.service" /etc/systemd/system/
-
-    systemctl daemon-reload
-    systemctl enable clarinet-api
-    systemctl enable clarinet-worker@default
-    systemctl restart clarinet-api
-    systemctl restart clarinet-worker@default
-    log "Systemd services started"
+    if role_is stand; then
+        cp "${DEPLOY_DIR}/systemd/clarinet-api.service" /etc/systemd/system/
+        cp "${DEPLOY_DIR}/systemd/clarinet-worker@.service" /etc/systemd/system/
+        systemctl daemon-reload
+        systemctl enable clarinet-api
+        systemctl enable clarinet-worker@default
+        systemctl restart clarinet-api
+        systemctl restart clarinet-worker@default
+        log "Systemd services started (api + worker@default)"
+    else
+        # worker role: install the unit template only. topology-wire enables the
+        # per-queue instances once the broker/API overlay settings are in place.
+        cp "${DEPLOY_DIR}/systemd/clarinet-worker@.service" /etc/systemd/system/
+        systemctl daemon-reload
+        log "Worker unit installed (enable deferred to topology-wire)"
+    fi
 }
 
 # --- Step 9: Nginx ---
@@ -236,19 +248,32 @@ print_summary() {
 }
 
 # --- Main ---
-log "Starting Clarinet installation..."
+log "Starting Clarinet installation (role: ${ROLE})..."
 log "Wheel: $WHEEL_PATH"
 log "Deploy dir: $DEPLOY_DIR"
 
-setup_user
-install_python
-install_wheel
+# pacs runs Orthanc only (setup_services self-gates); stand + worker get the
+# wheel/project/settings; the DB, OHIF/Quarto and nginx are stand-only; the
+# worker installs only the systemd unit template (enabled later by wire).
+if role_is stand || role_is worker; then
+    setup_user
+    install_python
+    install_wheel
+fi
 setup_services
-install_project
-generate_settings
-init_database
-install_ohif
-install_quarto
-install_systemd
-install_nginx
+if role_is stand || role_is worker; then
+    install_project
+    generate_settings
+fi
+if role_is stand; then
+    init_database
+    install_ohif
+    install_quarto
+fi
+if role_is stand || role_is worker; then
+    install_systemd
+fi
+if role_is stand; then
+    install_nginx
+fi
 print_summary
