@@ -534,6 +534,9 @@ async def test_record_events_mask_patient_id_for_non_admin(
     assert events, "seeded event should appear in the record's audit trail"
     assert all(e["patient_id"] == "CLARINET_123" for e in events)  # anon_id, not real
     assert all(e["patient_id"] != test_patient.id for e in events)
+    # The record type is workflow metadata, not PHI — it is NOT masked for
+    # non-admins, unlike patient_id / actor_name.
+    assert all(e["record_type_name"] == record_role_a.record_type_name for e in events)
 
 
 @pytest.mark.asyncio
@@ -774,6 +777,9 @@ async def test_global_events_feed_masks_patient_id_for_admin_role(admin_role_cli
     events = resp.json()
     assert events, "seeded event should appear in the feed"
     assert all(e["patient_id"] is None for e in events)
+    # The record type is workflow metadata, not PHI — it rides through unmasked
+    # even though patient_id is withheld from admin-role users.
+    assert all(e["record_type_name"] == record.record_type_name for e in events)
 
 
 @pytest.mark.asyncio
