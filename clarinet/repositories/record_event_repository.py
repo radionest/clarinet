@@ -35,7 +35,10 @@ class RecordEventRepository(BaseRepository[RecordEvent]):
         """Events for *record_id*, oldest first (timeline order)."""
         stmt = (
             select(RecordEvent)
-            .options(selectinload(RecordEvent.actor))  # type: ignore[arg-type]
+            .options(
+                selectinload(RecordEvent.actor),  # type: ignore[arg-type]
+                selectinload(RecordEvent.record),  # type: ignore[arg-type]
+            )
             .where(RecordEvent.record_id == record_id)
             .order_by(col(RecordEvent.occurred_at).asc(), col(RecordEvent.id).asc())
             .offset(skip)
@@ -48,7 +51,10 @@ class RecordEventRepository(BaseRepository[RecordEvent]):
         """``deleted`` events (their ``record_id`` is NULL), newest first."""
         stmt = (
             select(RecordEvent)
-            .options(selectinload(RecordEvent.actor))  # type: ignore[arg-type]
+            .options(
+                selectinload(RecordEvent.actor),  # type: ignore[arg-type]
+                selectinload(RecordEvent.record),  # type: ignore[arg-type]
+            )
             .where(RecordEvent.kind == "deleted")
             .order_by(col(RecordEvent.occurred_at).desc(), col(RecordEvent.id).desc())
             .offset(skip)
@@ -63,7 +69,10 @@ class RecordEventRepository(BaseRepository[RecordEvent]):
         ``patient_id`` is resolved through the record table; events of
         already-deleted records (NULL ``record_id``) never match it.
         """
-        stmt = select(RecordEvent).options(selectinload(RecordEvent.actor))  # type: ignore[arg-type]
+        stmt = select(RecordEvent).options(
+            selectinload(RecordEvent.actor),  # type: ignore[arg-type]
+            selectinload(RecordEvent.record),  # type: ignore[arg-type]
+        )
         if criteria.kind is not None:
             stmt = stmt.where(RecordEvent.kind == criteria.kind)
         if criteria.actor_id is not None:

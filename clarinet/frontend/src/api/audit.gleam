@@ -24,6 +24,11 @@ pub fn record_event_decoder() -> decode.Decoder(RecordEvent) {
     None,
     decode.optional(decode.int),
   )
+  use patient_id <- decode.optional_field(
+    "patient_id",
+    None,
+    decode.optional(decode.string),
+  )
   use kind <- decode.field("kind", decode.string)
   use actor_name <- decode.optional_field(
     "actor_name",
@@ -50,6 +55,7 @@ pub fn record_event_decoder() -> decode.Decoder(RecordEvent) {
     id: id,
     record_id: record_id,
     record_key: record_key,
+    patient_id: patient_id,
     kind: kind,
     actor_name: actor_name,
     from_status: from_status,
@@ -68,6 +74,11 @@ pub fn pipeline_run_decoder() -> decode.Decoder(PipelineRun) {
     "record_id",
     None,
     decode.optional(decode.int),
+  )
+  use patient_id <- decode.optional_field(
+    "patient_id",
+    None,
+    decode.optional(decode.string),
   )
   use started_at <- decode.field("started_at", decode.string)
   use finished_at <- decode.optional_field(
@@ -97,6 +108,7 @@ pub fn pipeline_run_decoder() -> decode.Decoder(PipelineRun) {
     queue: queue,
     status: status,
     record_id: record_id,
+    patient_id: patient_id,
     started_at: started_at,
     finished_at: finished_at,
     execution_time: execution_time,
