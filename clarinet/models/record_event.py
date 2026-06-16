@@ -145,6 +145,31 @@ class RecordEvent(RecordEventBase, table=True):
         record = self.__dict__["record"]
         return record.patient_id if record is not None else None
 
+    @property
+    def record_type_name(self) -> str | None:
+        """RecordType name of the linked record; None for system/deleted events.
+
+        ``record_type_name`` is a scalar FK column on ``record`` (FK to
+        ``recordtype.name``), so the repo's existing
+        ``selectinload(RecordEvent.record)`` already loads it — no nested
+        ``selectinload(Record.record_type)`` is required. Reads from
+        ``__dict__`` to avoid a lazy load outside an async context (mirrors
+        ``patient_id``); a missing eager-load logs a warning rather than
+        silently dropping the name.
+        """
+        if "record" not in self.__dict__:
+            if self.record_id is not None:
+                from clarinet.utils.logger import logger
+
+                logger.warning(
+                    f"RecordEvent.record_type_name accessed without eager-loaded "
+                    f"record (event_id={self.id}, record_id={self.record_id}); "
+                    f"returning None",
+                )
+            return None
+        record = self.__dict__["record"]
+        return record.record_type_name if record is not None else None
+
 
 class RecordEventRead(RecordEventBase):
     """API response schema for record audit events."""
@@ -157,6 +182,10 @@ class RecordEventRead(RecordEventBase):
     # relationship; None for system / deleted-record events. Masked per the
     # record masking policy on the record-scoped endpoint.
     patient_id: str | None = None
+    # RecordType name of the linked record, resolved via the eager-loaded
+    # ``record`` relationship; None for system / deleted-record events. Not
+    # masked — the record type is workflow metadata, not patient data.
+    record_type_name: str | None = None
 
 
 class RecordEventFind(SQLModel):

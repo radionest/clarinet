@@ -24,6 +24,11 @@ pub fn record_event_decoder() -> decode.Decoder(RecordEvent) {
     None,
     decode.optional(decode.int),
   )
+  use record_type_name <- decode.optional_field(
+    "record_type_name",
+    None,
+    decode.optional(decode.string),
+  )
   use patient_id <- decode.optional_field(
     "patient_id",
     None,
@@ -55,6 +60,7 @@ pub fn record_event_decoder() -> decode.Decoder(RecordEvent) {
     id: id,
     record_id: record_id,
     record_key: record_key,
+    record_type_name: record_type_name,
     patient_id: patient_id,
     kind: kind,
     actor_name: actor_name,
