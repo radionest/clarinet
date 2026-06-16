@@ -9,18 +9,20 @@ import api/record_page.{type RecordPage}
 import api/records
 import api/series as series_api
 import api/studies
+import api/sse_events
 import api/types.{type ApiError}
 import api/users
 import cache/bucket.{type Bucket, type BucketKey, type BucketStatus}
 import cache/bucket_lru
 import gleam/dict.{type Dict}
-import gleam/time/timestamp
 import gleam/int
 import gleam/javascript/promise.{type Promise}
 import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import lustre/effect.{type Effect}
+import plinth/javascript/global
+import utils/time
 
 // --- Model ---
 
@@ -38,6 +40,9 @@ pub type Model {
     // None = not yet loaded; cleared via InvalidateFilterOptions when
     // records are mutated.
     filter_options: Option(RecordFilterOptions),
+    // True while a 750ms SSE refetch debounce is scheduled (dedup only;
+    // the timer is never cancelled, so its id need not be stored).
+    sse_debounce: Bool,
   )
 }
 
@@ -84,6 +89,11 @@ pub type Msg {
   LoadFilterOptions
   FilterOptionsLoaded(Result(RecordFilterOptions, ApiError))
   InvalidateFilterOptions
+
+  // SSE event-driven invalidation
+  SseEntityEvent(event: sse_events.EntityEvent)
+  SseRecordRefetched(id: String, result: Result(Record, ApiError))
+  RefetchStaleBuckets
 }
 
 // --- OutMsg ---
@@ -110,6 +120,7 @@ pub fn init() -> Model {
     record_type_stats: None,
     record_buckets: dict.new(),
     filter_options: None,
+    sse_debounce: False,
   )
 }
 
@@ -491,6 +502,62 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg), List(OutMsg)) {
       load_effect(records.get_filter_options, FilterOptionsLoaded),
       [],
     )
+
+    // --- SSE event-driven invalidation ---
+    SseEntityEvent(event) -> handle_sse_entity(model, event)
+
+    SseRecordRefetched(_id, Ok(record)) -> {
+      let model = put_record(model, record)
+      #(upsert_record_in_buckets(model, record), effect.none(), [])
+    }
+
+    // 403/404 on refetch (lost visibility or deleted) — drop it everywhere.
+    SseRecordRefetched(id, Error(_)) -> #(
+      Model(
+        ..model,
+        records: dict.delete(model.records, id),
+        record_buckets: remove_record_from_buckets(model.record_buckets, id),
+      ),
+      effect.none(),
+      [],
+    )
+
+    RefetchStaleBuckets -> {
+      let now = now_ms()
+      let #(new_buckets, refetch_effs) =
+        dict.fold(model.record_buckets, #(dict.new(), []), fn(acc, topic, b) {
+          let #(buckets_acc, effs_acc) = acc
+          case b.status {
+            bucket.Stale(loaded_at) ->
+              case now - loaded_at > 600_000 {
+                // Older than 10 min: drop from the LRU instead of refetching.
+                True -> #(buckets_acc, effs_acc)
+                // Silent refetch (no Loading status) — stale-while-revalidate.
+                False -> #(dict.insert(buckets_acc, topic, b), [
+                  fetch_bucket_effect(b.key, None),
+                  ..effs_acc
+                ])
+              }
+            _ -> #(dict.insert(buckets_acc, topic, b), effs_acc)
+          }
+        })
+      // Only refresh slots that are actually loaded — avoids redundant fetches
+      // and, after logout (cache reset to None), a stray 401 from a debounce
+      // timer that fires post-logout.
+      let filter_eff = case model.filter_options {
+        Some(_) -> [dispatch_self(InvalidateFilterOptions)]
+        None -> []
+      }
+      let stats_eff = case model.record_type_stats {
+        Some(_) -> [dispatch_self(LoadRecordTypeStats)]
+        None -> []
+      }
+      #(
+        Model(..model, record_buckets: new_buckets, sse_debounce: False),
+        effect.batch(list.flatten([refetch_effs, filter_eff, stats_eff])),
+        [],
+      )
+    }
   }
 }
 
@@ -573,6 +640,172 @@ pub fn upsert_record_in_buckets(model: Model, record: Record) -> Model {
       bucket.Bucket(..b, items: new_items)
     })
   Model(..model, record_buckets: new_buckets)
+}
+
+// --- SSE event handlers ---
+
+fn handle_sse_entity(
+  model: Model,
+  event: sse_events.EntityEvent,
+) -> #(Model, Effect(Msg), List(OutMsg)) {
+  case event.entity {
+    "record" -> handle_record_event(model, event)
+
+    "patient" ->
+      case event.action {
+        sse_events.Deleted -> #(
+          Model(..model, patients: dict.delete(model.patients, event.id)),
+          effect.none(),
+          [],
+        )
+        _ ->
+          case dict.has_key(model.patients, event.id) {
+            True -> #(model, dispatch_self(LoadPatientDetail(event.id)), [])
+            False -> #(model, effect.none(), [])
+          }
+      }
+
+    "study" ->
+      case event.action {
+        sse_events.Deleted -> #(
+          Model(..model, studies: dict.delete(model.studies, event.id)),
+          effect.none(),
+          [],
+        )
+        _ ->
+          case dict.is_empty(model.studies) {
+            False -> #(model, dispatch_self(LoadStudies), [])
+            True -> #(model, effect.none(), [])
+          }
+      }
+
+    "series" ->
+      case event.action {
+        sse_events.Deleted -> #(
+          Model(..model, series: dict.delete(model.series, event.id)),
+          effect.none(),
+          [],
+        )
+        _ ->
+          case dict.has_key(model.series, event.id) {
+            True -> #(model, dispatch_self(LoadSeriesDetail(event.id)), [])
+            False -> #(model, effect.none(), [])
+          }
+      }
+
+    "record_type" -> {
+      let base = case event.action {
+        sse_events.Deleted ->
+          Model(
+            ..model,
+            record_types: dict.delete(model.record_types, event.id),
+          )
+        _ -> model
+      }
+      let should_reload =
+        event.action != sse_events.Deleted && !dict.is_empty(model.record_types)
+      let reload_eff = case should_reload {
+        True -> dispatch_self(LoadRecordTypes)
+        False -> effect.none()
+      }
+      // New/changed types can shift filter options and bucket contents.
+      let #(marked, debounce_eff) = mark_buckets_and_debounce(base)
+      #(
+        marked,
+        effect.batch([
+          reload_eff,
+          dispatch_self(InvalidateFilterOptions),
+          debounce_eff,
+        ]),
+        [],
+      )
+    }
+
+    "user" ->
+      case dict.is_empty(model.users) {
+        False -> #(model, dispatch_self(LoadUsers), [])
+        True -> #(model, effect.none(), [])
+      }
+
+    _ -> #(model, effect.none(), [])
+  }
+}
+
+fn handle_record_event(
+  model: Model,
+  event: sse_events.EntityEvent,
+) -> #(Model, Effect(Msg), List(OutMsg)) {
+  case event.action {
+    sse_events.Deleted -> {
+      let pruned =
+        Model(
+          ..model,
+          records: dict.delete(model.records, event.id),
+          record_buckets: remove_record_from_buckets(
+            model.record_buckets,
+            event.id,
+          ),
+        )
+      let #(marked, debounce_eff) = mark_buckets_and_debounce(pruned)
+      #(marked, debounce_eff, [])
+    }
+    _ -> {
+      // Refetch only records we already hold. LoadRecordDetail is avoided —
+      // it carries auto-assign side effects.
+      let refetch = case dict.has_key(model.records, event.id) {
+        True -> refetch_record_effect(event.id)
+        False -> effect.none()
+      }
+      let #(marked, debounce_eff) = mark_buckets_and_debounce(model)
+      #(marked, effect.batch([refetch, debounce_eff]), [])
+    }
+  }
+}
+
+fn mark_buckets_and_debounce(model: Model) -> #(Model, Effect(Msg)) {
+  let new_buckets =
+    dict.map_values(model.record_buckets, fn(_k, b) { bucket.mark_stale(b) })
+  case model.sse_debounce {
+    True -> #(Model(..model, record_buckets: new_buckets), effect.none())
+    False -> #(
+      Model(..model, record_buckets: new_buckets, sse_debounce: True),
+      debounce_effect(),
+    )
+  }
+}
+
+fn debounce_effect() -> Effect(Msg) {
+  use dispatch <- effect.from
+  let _ = global.set_timeout(750, fn() { dispatch(RefetchStaleBuckets) })
+  Nil
+}
+
+fn dispatch_self(msg: Msg) -> Effect(Msg) {
+  use dispatch <- effect.from
+  dispatch(msg)
+}
+
+fn refetch_record_effect(id: String) -> Effect(Msg) {
+  use dispatch <- effect.from
+  records.get_record(id)
+  |> promise.tap(fn(result) { dispatch(SseRecordRefetched(id, result)) })
+  Nil
+}
+
+fn remove_record_from_buckets(
+  buckets: Dict(String, Bucket),
+  id: String,
+) -> Dict(String, Bucket) {
+  dict.map_values(buckets, fn(_k, b) {
+    let items =
+      list.filter(b.items, fn(r) {
+        case r.id {
+          Some(rid) -> int.to_string(rid) != id
+          None -> True
+        }
+      })
+    bucket.Bucket(..b, items: items)
+  })
 }
 
 // --- Private helpers ---
@@ -669,10 +902,7 @@ fn api_error_msg(err: ApiError) -> String {
 }
 
 fn now_ms() -> Int {
-  let #(seconds, nanoseconds) =
-    timestamp.system_time()
-    |> timestamp.to_unix_seconds_and_nanoseconds()
-  seconds * 1000 + nanoseconds / 1_000_000
+  time.now_ms()
 }
 
 fn load_effect(

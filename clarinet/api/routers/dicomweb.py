@@ -224,14 +224,14 @@ class PreloadRequest(BaseModel):
 @router.post("/preload")
 async def preload_studies(
     body: PreloadRequest,
-    _user: CurrentUserDep,
+    user: CurrentUserDep,
     service: DicomWebProxyServiceDep,
 ) -> JSONResponse:
     """Start background preloading of one or more studies into the DICOMweb cache.
 
     Returns a task_id for polling progress via GET /preload/progress/{task_id}.
     """
-    task_id = await service.start_preload(body.study_uids)
+    task_id = await service.start_preload(body.study_uids, user.id)
     return JSONResponse({"task_id": task_id})
 
 

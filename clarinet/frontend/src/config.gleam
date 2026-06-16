@@ -3,9 +3,11 @@
 /// Reads the `<base href>` tag injected by the backend to determine
 /// the sub-path prefix (e.g. "/liver_nir" or "" for root deployment).
 /// The value is computed once on first access via `lazy_const`.
+import gleam/bool
 import gleam/result
 import gleam/string
 import lazy_const
+import lustre
 import plinth/browser/document
 import plinth/browser/element
 
@@ -13,6 +15,9 @@ import plinth/browser/element
 /// Returns "" for root deployment, "/liver_nir" for sub-path deployment.
 /// Cached after first call — the `<base href>` never changes at runtime.
 pub fn base_path() -> String {
+  // Off-DOM (gleeunit/SSR) there is no `document` to read — return root so
+  // pure code paths that build URLs don't throw a ReferenceError.
+  use <- bool.guard(!lustre.is_browser(), "")
   use <- lazy_const.new(lazy_const.defined_in(base_path))
   let path = {
     use el <- result.try(document.query_selector("base"))

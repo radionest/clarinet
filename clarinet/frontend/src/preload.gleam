@@ -20,6 +20,7 @@ import lustre/element/html
 import lustre/event
 import plinth/javascript/global
 import utils/logger
+import utils/time
 import utils/viewer_window
 
 // --- Model ---
@@ -29,6 +30,9 @@ pub type Model {
     timer: Option(global.TimerID),
     progress: Option(ProgressState),
     window: Option(viewer_window.ViewerWindow),
+    // Wall-clock ms of the last SSE progress push; PollTick skips the HTTP
+    // poll while a push is fresher than the poll interval.
+    last_push_ms: Int,
   )
 }
 
@@ -58,6 +62,8 @@ pub type Msg {
     task_id: String,
     result: Result(dynamic.Dynamic, types.ApiError),
   )
+  /// SSE push carrying the same payload the poller would fetch.
+  ProgressPush(task_id: String, payload: dynamic.Dynamic)
   Cancel
 }
 
@@ -70,7 +76,7 @@ pub type OutMsg {
 // --- Init ---
 
 pub fn init() -> Model {
-  Model(timer: None, progress: None, window: None)
+  Model(timer: None, progress: None, window: None, last_push_ms: 0)
 }
 
 // --- Queries ---
@@ -130,6 +136,7 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg), List(OutMsg)) {
           timer: None,
           progress: Some(initial_progress(viewer_url, "")),
           window: None,
+          last_push_ms: 0,
         ),
         effect.batch([cleanup, open_eff, preload_eff]),
         [],
@@ -199,76 +206,45 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg), List(OutMsg)) {
     PollTick(task_id), Some(progress) -> {
       case progress.task_id == task_id {
         False -> #(model, effect.none(), [])
-        True -> {
-          let poll_effect = {
-            use dispatch <- effect.from
-            dicomweb.preload_progress(task_id)
-            |> promise.tap(fn(result) {
-              dispatch(ProgressUpdate(task_id, result))
-            })
-            Nil
+        True ->
+          // A fresh SSE push means the stream is live — skip the HTTP poll.
+          // When the stream drops, pushes stop and polling resumes.
+          case time.now_ms() - model.last_push_ms < 2500 {
+            True -> #(model, effect.none(), [])
+            False -> {
+              let poll_effect = {
+                use dispatch <- effect.from
+                dicomweb.preload_progress(task_id)
+                |> promise.tap(fn(result) {
+                  dispatch(ProgressUpdate(task_id, result))
+                })
+                Nil
+              }
+              #(model, poll_effect, [])
+            }
           }
-          #(model, poll_effect, [])
-        }
       }
     }
 
-    ProgressUpdate(task_id, Ok(data)), Some(progress) -> {
+    ProgressUpdate(task_id, Ok(data)), Some(progress) ->
       case progress.task_id == task_id {
         False -> #(model, effect.none(), [])
-        True -> {
-          let status =
-            decode.run(data, decode.at(["status"], decode.string))
-            |> option.from_result
-            |> option.unwrap("unknown")
-
-          case status {
-            "ready" -> {
-              // A closed stub means the user changed their mind — silent cancel
-              let stop_eff = stop_timer(model)
-              let nav_eff = navigate_window(model, progress.viewer_url)
-              #(init(), effect.batch([stop_eff, nav_eff]), [])
-            }
-            "error" -> {
-              let cleanup =
-                effect.batch([stop_timer(model), close_window(model)])
-              let error_msg =
-                decode.run(data, decode.at(["error"], decode.string))
-                |> option.from_result
-                |> option.unwrap("Preload failed")
-              #(init(), cleanup, [ShowError(error_msg)])
-            }
-            // Progress entry fell out of the server-side TTL cache
-            "not_found" -> {
-              let cleanup =
-                effect.batch([stop_timer(model), close_window(model)])
-              #(init(), cleanup, [
-                ShowError("Preload status expired — please try again"),
-              ])
-            }
-            _ -> {
-              let int_field = fn(key: String) {
-                decode.run(data, decode.at([key], decode.int))
-                |> option.from_result
-              }
-              let new_progress =
-                ProgressState(
-                  viewer_url: progress.viewer_url,
-                  task_id: task_id,
-                  received: int_field("received") |> option.unwrap(0),
-                  total: int_field("total"),
-                  status: status,
-                  study_index: int_field("study_index"),
-                  study_count: int_field("study_count"),
-                  study_received: int_field("study_received"),
-                  study_total: int_field("study_total"),
-                )
-              #(Model(..model, progress: Some(new_progress)), effect.none(), [])
-            }
-          }
-        }
+        True -> apply_progress(model, progress, task_id, data)
       }
-    }
+
+    // SSE push for the active task — same handling as a poll result, plus a
+    // last_push_ms stamp so PollTick can back off while the stream is alive.
+    ProgressPush(task_id, payload), Some(progress) ->
+      case progress.task_id == task_id {
+        False -> #(model, effect.none(), [])
+        True ->
+          apply_progress(
+            Model(..model, last_push_ms: time.now_ms()),
+            progress,
+            task_id,
+            payload,
+          )
+      }
 
     ProgressUpdate(_, Error(err)), Some(_) -> {
       case err {
@@ -290,6 +266,63 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg), List(OutMsg)) {
 }
 
 // --- Helpers ---
+
+/// Apply a progress payload (from a poll result or an SSE push) to the active
+/// preload. Shared by ProgressUpdate and ProgressPush.
+fn apply_progress(
+  model: Model,
+  progress: ProgressState,
+  task_id: String,
+  data: dynamic.Dynamic,
+) -> #(Model, Effect(Msg), List(OutMsg)) {
+  let status =
+    decode.run(data, decode.at(["status"], decode.string))
+    |> option.from_result
+    |> option.unwrap("unknown")
+
+  case status {
+    "ready" -> {
+      // A closed stub means the user changed their mind — silent cancel
+      let stop_eff = stop_timer(model)
+      let nav_eff = navigate_window(model, progress.viewer_url)
+      #(init(), effect.batch([stop_eff, nav_eff]), [])
+    }
+    "error" -> {
+      let cleanup = effect.batch([stop_timer(model), close_window(model)])
+      let error_msg =
+        decode.run(data, decode.at(["error"], decode.string))
+        |> option.from_result
+        |> option.unwrap("Preload failed")
+      #(init(), cleanup, [ShowError(error_msg)])
+    }
+    // Progress entry fell out of the server-side TTL cache
+    "not_found" -> {
+      let cleanup = effect.batch([stop_timer(model), close_window(model)])
+      #(init(), cleanup, [
+        ShowError("Preload status expired — please try again"),
+      ])
+    }
+    _ -> {
+      let int_field = fn(key: String) {
+        decode.run(data, decode.at([key], decode.int))
+        |> option.from_result
+      }
+      let new_progress =
+        ProgressState(
+          viewer_url: progress.viewer_url,
+          task_id: task_id,
+          received: int_field("received") |> option.unwrap(0),
+          total: int_field("total"),
+          status: status,
+          study_index: int_field("study_index"),
+          study_count: int_field("study_count"),
+          study_received: int_field("study_received"),
+          study_total: int_field("study_total"),
+        )
+      #(Model(..model, progress: Some(new_progress)), effect.none(), [])
+    }
+  }
+}
 
 pub fn stop_timer(model: Model) -> Effect(Msg) {
   case model.timer {

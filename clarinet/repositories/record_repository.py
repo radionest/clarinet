@@ -38,6 +38,7 @@ from clarinet.models.record import RecordFindResult, RecordFindResultComparisonO
 from clarinet.models.study import Series, Study
 from clarinet.models.user import User, UserRolesLink
 from clarinet.repositories.base import BaseRepository
+from clarinet.services.events.capture import emit_entity
 from clarinet.settings import settings
 from clarinet.types import RecordData
 from clarinet.utils.logger import logger
@@ -1126,6 +1127,12 @@ class RecordRepository(BaseRepository[Record]):
         result = await self.session.execute(stmt)
         if commit:
             await self.session.commit()
+            # sse-capture: explicit emit, UoW-invisible (Core bulk DML).
+            # Children whose parent_record_id is SET NULL by the FK are
+            # intentionally not emitted as "updated" (minor: parent rarely
+            # affects the UI; thin events keep the client cache eventually
+            # consistent via TTL/refetch).
+            emit_entity("record", "deleted", [str(i) for i in record_ids])
         return int(result.rowcount or 0)  # type: ignore[attr-defined]
 
     async def collect_descendants(self, root_id: int, *, for_update: bool = False) -> list[Record]:
