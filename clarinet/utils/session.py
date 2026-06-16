@@ -79,6 +79,22 @@ async def is_user_online(session: AsyncSession, user_id: UUID, within_minutes: i
     return result.first() is not None
 
 
+async def emit_offline_if_last(session: AsyncSession, user_id: UUID) -> None:
+    """Emit presence ``offline`` for a user iff no live session remains.
+
+    One home for the delete -> re-check -> emit ordering shared by every
+    session-eviction path (logout, self-revoke, admin revoke, idle cleanup) so
+    the "still online via another session?" guard cannot drift between them.
+    The ``emit_presence`` import is local on purpose: ``capture`` pulls in the
+    ORM model graph, so a module-level import here would risk an import cycle
+    (same rationale as the ``# sse-capture:`` explicit emits). No-op without a bus.
+    """
+    from clarinet.services.events.capture import emit_presence
+
+    if not await is_user_online(session, user_id, settings.session_idle_timeout_minutes):
+        emit_presence(user_id, False)
+
+
 async def revoke_user_sessions(
     session: AsyncSession, user_id: UUID, except_token: str | None = None
 ) -> int:
@@ -102,11 +118,7 @@ async def revoke_user_sessions(
 
     if result.rowcount > 0:
         logger.info(f"Revoked {result.rowcount} sessions for user {user_id}")
-        # sse-capture: explicit emit, session lifecycle (AccessToken not ORM-captured)
-        from clarinet.services.events.capture import emit_presence
-
-        if not await is_user_online(session, user_id, settings.session_idle_timeout_minutes):
-            emit_presence(user_id, False)
+        await emit_offline_if_last(session, user_id)  # sse-capture: session lifecycle
 
     return result.rowcount
 

@@ -15,6 +15,7 @@ from clarinet.models.auth import AccessToken
 from clarinet.settings import settings
 from clarinet.utils.database import get_async_session
 from clarinet.utils.logger import logger
+from clarinet.utils.session import emit_offline_if_last
 
 
 def _dead_session_filter() -> Any:
@@ -150,16 +151,10 @@ class SessionCleanupService:
 
                 logger.info(f"Cleanup completed: removed {deleted_total} sessions")
 
-                # sse-capture: explicit emit, session lifecycle. A user whose last
-                # valid session was just evicted (expired or idle) goes offline.
-                if affected_users:
-                    from clarinet.services.events.capture import emit_presence
-                    from clarinet.utils.session import is_user_online
-
-                    idle = settings.session_idle_timeout_minutes
-                    for uid in affected_users:
-                        if not await is_user_online(session, uid, idle):
-                            emit_presence(uid, False)
+                # sse-capture: a user whose last valid session was just evicted
+                # (expired or idle) goes offline.
+                for uid in affected_users:
+                    await emit_offline_if_last(session, uid)
 
                 # Also clean very old sessions (older than retention days)
                 if settings.session_cleanup_retention_days > 0:
