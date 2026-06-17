@@ -24,7 +24,7 @@ from playwright.sync_api import Page, expect
 
 def _open_quarto_page(page: Page, base_url: str, path_prefix: str) -> None:
     page.goto(f"{base_url}/admin/quarto-reports")
-    page.wait_for_load_state("networkidle")
+    page.wait_for_load_state("load")
     assert_url_has_prefix(page, path_prefix)
 
 
@@ -40,7 +40,7 @@ def test_quarto_render_to_docx(auth_page: Page, base_url: str, path_prefix: str)
 
     render_btn = auth_page.get_by_role("button", name="Render DOCX")
     empty_note = auth_page.get_by_text("No Quarto reports available")
-    # The template list loads asynchronously after networkidle and
+    # The template list loads asynchronously after navigation and
     # locator.count() does not wait — settle on a real state (render buttons
     # or the empty note) first, or the test self-skips on slow VMs.
     expect(render_btn.or_(empty_note).first).to_be_visible(timeout=15_000)

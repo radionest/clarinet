@@ -16,5 +16,5 @@ def test_page_transitions_preserve_prefix(auth_page: Page, base_url: str, path_p
     routes = ["/studies", "/patients", "/records"]
     for route in routes:
         auth_page.goto(f"{base_url}{route}")
-        auth_page.wait_for_load_state("networkidle")
+        auth_page.wait_for_load_state("load")
         assert_url_has_prefix(auth_page, path_prefix)
