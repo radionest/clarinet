@@ -415,7 +415,7 @@ fn activity_section(model: Model, shared: Shared) -> Element(Msg) {
   html.div([attribute.class("card")], [
     html.h3([], [html.text(shared.translate(i18n.NavActivity))]),
     element.map(
-      activity_feed.view(model.activity, shared.translate),
+      activity_feed.view(model.activity, shared.translate, [], []),
       ActivityMsg,
     ),
   ])

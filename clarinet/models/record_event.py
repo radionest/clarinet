@@ -191,14 +191,16 @@ class RecordEventRead(RecordEventBase):
 class RecordEventFind(SQLModel):
     """Search filters for the record audit feed (all optional).
 
-    ``patient_id`` matches events whose record currently belongs to that
-    patient (JOIN via ``record``); events of already-deleted records
-    (``record_id`` NULL) are excluded. Results are newest first.
+    ``patient_id`` and ``record_type_name`` match events whose record
+    currently belongs to that patient / has that record type (subquery via
+    ``record``); events of already-deleted records (``record_id`` NULL) are
+    excluded by either. Results are newest first.
     """
 
     kind: str | None = None
     actor_id: UUID | None = None
     patient_id: str | None = None
+    record_type_name: str | None = None
     since: datetime | None = None
     skip: int = 0
     limit: int = 100

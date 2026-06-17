@@ -173,6 +173,33 @@ class TestGlobalRecordEvents:
         assert record_b.id not in record_ids
 
     @pytest.mark.asyncio
+    async def test_feed_filters_by_record_type(self, client: AsyncClient, test_session):
+        # Two records of different record types under one patient; the filter
+        # must return only events of records whose type matches.
+        patient = await PatientFactory.create_patient(test_session)
+        rt_a = make_record_type(name="audit-type-a", level=DicomQueryLevel.PATIENT)
+        rt_b = make_record_type(name="audit-type-b", level=DicomQueryLevel.PATIENT)
+        test_session.add(rt_a)
+        test_session.add(rt_b)
+        await test_session.commit()
+        record_a = await RecordFactory.create_record_with_relations(
+            test_session, patient=patient, record_type=rt_a
+        )
+        record_b = await RecordFactory.create_record_with_relations(
+            test_session, patient=patient, record_type=rt_b
+        )
+        await client.patch(f"{RECORDS_BASE}/{record_a.id}/status?record_status=inwork")
+        await client.patch(f"{RECORDS_BASE}/{record_b.id}/status?record_status=inwork")
+
+        resp = await client.get(ADMIN_RECORD_EVENTS, params={"record_type_name": "audit-type-a"})
+        assert resp.status_code == 200, resp.text
+        events = resp.json()
+        record_ids = {e["record_id"] for e in events}
+        assert record_a.id in record_ids
+        assert record_b.id not in record_ids
+        assert all(e["record_type_name"] == "audit-type-a" for e in events)
+
+    @pytest.mark.asyncio
     async def test_feed_requires_auth(self, unauthenticated_client: AsyncClient):
         resp = await unauthenticated_client.get(ADMIN_RECORD_EVENTS)
         assert resp.status_code == 401

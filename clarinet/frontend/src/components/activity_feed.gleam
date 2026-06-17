@@ -43,6 +43,8 @@ pub type Source {
 pub type Filters {
   Filters(
     event_kind: String,
+    event_actor: String,
+    event_record_type: String,
     event_since: String,
     run_status: String,
     run_task_name: String,
@@ -53,6 +55,8 @@ pub type Filters {
 fn empty_filters() -> Filters {
   Filters(
     event_kind: "",
+    event_actor: "",
+    event_record_type: "",
     event_since: "",
     run_status: "",
     run_task_name: "",
@@ -88,6 +92,8 @@ pub type Msg {
   Retry(ActivityTab)
   // Global-feed filters
   EventKindSelected(String)
+  EventActorSelected(String)
+  EventRecordTypeSelected(String)
   EventSinceChanged(String)
   RunStatusSelected(String)
   RunTaskNameChanged(String)
@@ -194,6 +200,13 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg), List(OutMsg)) {
 
     EventKindSelected(kind) ->
       reload_events(model, Filters(..model.filters, event_kind: kind))
+    EventActorSelected(actor) ->
+      reload_events(model, Filters(..model.filters, event_actor: actor))
+    EventRecordTypeSelected(record_type) ->
+      reload_events(
+        model,
+        Filters(..model.filters, event_record_type: record_type),
+      )
     EventSinceChanged(since) ->
       reload_events(model, Filters(..model.filters, event_since: since))
     RunStatusSelected(status) ->
@@ -259,11 +272,13 @@ fn events_promise(
 ) -> Promise(Result(List(RecordEvent), ApiError)) {
   case source {
     RecordSource(id) -> audit.get_record_events(id)
-    PatientSource(id) -> audit.list_events(Some(id), None, None)
+    PatientSource(id) -> audit.list_events(Some(id), None, None, None, None)
     GlobalSource ->
       audit.list_events(
         None,
         none_if_empty(filters.event_kind),
+        none_if_empty(filters.event_actor),
+        none_if_empty(filters.event_record_type),
         none_if_empty(filters.event_since),
       )
   }
@@ -305,10 +320,15 @@ fn none_if_empty(value: String) -> Option(String) {
 /// Tab bar + the active tab's table wrapped in the tri-state LoadStatus
 /// renderer. The component dispatches its own `Msg`; the host maps the result
 /// via `element.map(view(..), HostActivityMsg)`.
-pub fn view(model: Model, t: fn(Key) -> String) -> Element(Msg) {
+pub fn view(
+  model: Model,
+  t: fn(Key) -> String,
+  actor_options: List(#(String, String)),
+  record_type_options: List(#(String, String)),
+) -> Element(Msg) {
   html.div([attribute.class("activity")], [
     tabs(model.tab, t),
-    filter_bar(model, t),
+    filter_bar(model, actor_options, record_type_options, t),
     case model.tab {
       EventsTab ->
         load_status.render(
@@ -354,18 +374,29 @@ fn tab_button(
 
 /// Renders the filter row for the active tab — but only for the global feed.
 /// Record/patient feeds are already scoped, so they show no filters.
-fn filter_bar(model: Model, t: fn(Key) -> String) -> Element(Msg) {
+fn filter_bar(
+  model: Model,
+  actor_options: List(#(String, String)),
+  record_type_options: List(#(String, String)),
+  t: fn(Key) -> String,
+) -> Element(Msg) {
   case model.source {
     GlobalSource ->
       case model.tab {
-        EventsTab -> events_filter_bar(model.filters, t)
+        EventsTab ->
+          events_filter_bar(model.filters, actor_options, record_type_options, t)
         RunsTab -> runs_filter_bar(model.filters, t)
       }
     _ -> element.none()
   }
 }
 
-fn events_filter_bar(filters: Filters, t: fn(Key) -> String) -> Element(Msg) {
+fn events_filter_bar(
+  filters: Filters,
+  actor_options: List(#(String, String)),
+  record_type_options: List(#(String, String)),
+  t: fn(Key) -> String,
+) -> Element(Msg) {
   html.div([attribute.class("activity-filters")], [
     filter_field(
       t(i18n.ActivityFilterKind),
@@ -374,6 +405,24 @@ fn events_filter_bar(filters: Filters, t: fn(Key) -> String) -> Element(Msg) {
         value: filters.event_kind,
         options: event_kind_options(t),
         on_change: EventKindSelected,
+      ),
+    ),
+    filter_field(
+      t(i18n.ThUser),
+      base.select(
+        name: "activity-event-actor",
+        value: filters.event_actor,
+        options: actor_options,
+        on_change: EventActorSelected,
+      ),
+    ),
+    filter_field(
+      t(i18n.ThRecordType),
+      base.select(
+        name: "activity-event-record-type",
+        value: filters.event_record_type,
+        options: record_type_options,
+        on_change: EventRecordTypeSelected,
       ),
     ),
     filter_field(

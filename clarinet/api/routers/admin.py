@@ -168,14 +168,15 @@ async def list_record_events(
     kind: str | None = None,
     actor_id: UUID | None = None,
     patient_id: str | None = None,
+    record_type_name: str | None = None,
     since: datetime | None = None,
 ) -> list[RecordEventRead]:
     """Global record audit feed, newest first (admin only).
 
     Optional filters: ``kind``, ``actor_id``, ``patient_id`` (events of the
-    patient's current records), ``since`` (``occurred_at`` lower bound).
-    Events of already-deleted records are available only via
-    ``/records/events/deleted``.
+    patient's current records), ``record_type_name`` (events of records of that
+    type), ``since`` (``occurred_at`` lower bound). Events of already-deleted
+    records are available only via ``/records/events/deleted``.
 
     ``patient_id`` is returned to superusers only. This cross-patient feed also
     serves admin-role non-superusers, who are masked on every other surface
@@ -187,6 +188,7 @@ async def list_record_events(
         kind=kind,
         actor_id=actor_id,
         patient_id=patient_id,
+        record_type_name=record_type_name,
         since=since,
         skip=pagination.skip,
         limit=pagination.limit,
