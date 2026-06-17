@@ -529,6 +529,17 @@ class ImageWriteError(ImageError):
     """Raised when writing an image fails."""
 
 
+class GeometryMismatchError(ImageError):
+    """Two images/segmentations occupy incompatible voxel grids (shape or affine differ).
+
+    Raised by grid-sensitive operations (set operations, index-wise overlays) when the
+    inputs are not on the same physical grid. Mirrors ITK's "Inputs do not occupy the
+    same physical space" guard. Resample one input onto the other's grid
+    (``Segmentation.reindex_to`` / ``conform_seg_to_grid``) before retrying, or pass
+    ``resample=True`` to opt into automatic nearest-neighbour resampling.
+    """
+
+
 # Slicer errors
 class SlicerError(ClarinetError):
     """Base exception for Slicer-related errors."""

@@ -947,3 +947,30 @@ def test_validate_record_id_no_open():
 
     with pytest.raises(SlicerHelperError, match="No record was opened"):
         validate_record_id(1)
+
+
+def test_matrices_match_grid_guard():
+    """_matrices_match: same grid (within float tol) vs Z-flip (the prod bug)."""
+    from clarinet.services.slicer.helper import _matrices_match
+
+    class _Mat:
+        def __init__(self, rows):
+            self._rows = rows
+
+        def GetElement(self, r, c):
+            return self._rows[r][c]
+
+    base = _Mat(
+        [[1.1875, 0, 0, -184.0], [0, 1.1875, 0, -116.0], [0, 0, 3.0, -40.27], [0, 0, 0, 1.0]]
+    )
+    # identical up to a sub-tol float round-trip → same grid
+    roundtrip = _Mat(
+        [[1.1875, 0, 0, -184.0], [0, 1.1875, 0, -116.0], [0, 0, 3.0, -40.2701], [0, 0, 0, 1.0]]
+    )
+    # Z direction +3 → -3, origin -40.27 → +172.73 (slice order reversed) → foreign grid
+    z_flipped = _Mat(
+        [[1.1875, 0, 0, -184.0], [0, 1.1875, 0, -116.0], [0, 0, -3.0, 172.73], [0, 0, 0, 1.0]]
+    )
+
+    assert _matrices_match(base, roundtrip)
+    assert not _matrices_match(base, z_flipped)

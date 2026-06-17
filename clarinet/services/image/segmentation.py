@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import warnings
+from pathlib import Path
 from typing import Any, Literal, Self
 
 import numpy as np
@@ -17,7 +18,8 @@ from skimage.morphology import (  # type: ignore[attr-defined]
     opening,
 )
 
-from clarinet.services.image.image import Image
+from clarinet.exceptions.domain import ImageError
+from clarinet.services.image.image import FileType, Image
 from clarinet.utils.logger import logger
 
 PropName = Literal["axis_major_length", "num_pixels", "area"]
@@ -201,18 +203,20 @@ class Segmentation(Image):
         new_seg.img = new_img
         return new_seg
 
-    def subtract(self, other: Self) -> None:
+    def subtract(self, other: Self, *, resample: bool = False) -> None:
         """Zero out all voxels that are nonzero in `other` (in-place).
 
         Args:
             other: Segmentation to subtract.
+            resample: If True, resample `other` onto this grid when they differ.
+                If False (default), raises ``GeometryMismatchError`` on grid mismatch.
         """
-        other = self._align_other(other)  # type: ignore[assignment]
+        other = self._align_other(other, resample=resample)  # type: ignore[assignment]
         img = self.img.copy()
         img[other.img != 0] = 0
         self.img = img
 
-    def append(self, other: Self | Image) -> None:
+    def append(self, other: Self | Image, *, resample: bool = False) -> None:
         """Add ROIs from `other` that overlap with exactly one existing label.
 
         Each connected component in `other` is checked for overlap with this mask:
@@ -222,11 +226,13 @@ class Segmentation(Image):
 
         Args:
             other: Image or Segmentation whose ROIs to append.
+            resample: If True, resample `other` onto this grid when they differ.
+                If False (default), raises ``GeometryMismatchError`` on grid mismatch.
 
         Raises:
             ValueError: If an ROI in `other` overlaps multiple labels.
         """
-        other = self._align_other(other)
+        other = self._align_other(other, resample=resample)
         for region in regionprops(label(other.img)):
             coords = region.coords
             intersection = self.img[coords[:, 0], coords[:, 1], coords[:, 2]]
@@ -272,9 +278,22 @@ class Segmentation(Image):
         result.img = resampled
         return result
 
-    def _align_other(self, other: Image) -> Image:
-        """Return *other* reindexed to *self*'s grid, or unchanged if grids match."""
-        if self._same_grid(other):
+    def _align_other(self, other: Image, *, resample: bool = False) -> Image:
+        """Return *other* on *self*'s grid.
+
+        If the grids already match, returns *other* unchanged. Otherwise:
+
+        - ``resample=False`` (default): raises :class:`GeometryMismatchError` — two
+          segmentations compared by index must share a grid (cf. ITK). This is the
+          safe default: a silent resample can mask a projection/segmentation that
+          drifted onto a flipped grid.
+        - ``resample=True``: resamples *other* onto *self*'s grid (nearest-neighbour,
+          labels preserved).
+        """
+        if not resample:
+            self.assert_same_grid(other)
+            return other
+        if self.same_grid(other):
             return other
         return other.reindex_to(self, order=0)
 
@@ -288,6 +307,7 @@ class Segmentation(Image):
         *,
         min_overlap: int = 1,
         min_overlap_ratio: float | None = None,
+        resample: bool = False,
     ) -> Segmentation:
         """Intersection: keep ROIs from self that overlap sufficiently with other.
 
@@ -296,11 +316,13 @@ class Segmentation(Image):
             min_overlap: Minimum absolute overlap in voxels to keep a label.
             min_overlap_ratio: Minimum overlap as a fraction of label size
                 (0.0--1.0). ``None`` disables the ratio check.
+            resample: If True, resample `other` onto this grid when they differ.
+                If False (default), raises ``GeometryMismatchError`` on grid mismatch.
 
         Returns:
             New Segmentation with only the kept labels.
         """
-        other = self._align_other(other)  # type: ignore[assignment]
+        other = self._align_other(other, resample=resample)  # type: ignore[assignment]
         output = Segmentation(template=self)
         for region in self.label_props:
             coords = region.coords
@@ -314,18 +336,20 @@ class Segmentation(Image):
                 output.img[coords[:, 0], coords[:, 1], coords[:, 2]] = region.label
         return output
 
-    def union(self, other: Self) -> Segmentation:
+    def union(self, other: Self, *, resample: bool = False) -> Segmentation:
         """Union: combine nonzero voxels from both masks into a binary result.
 
         Args:
             other: Segmentation to combine with.
+            resample: If True, resample `other` onto this grid when they differ.
+                If False (default), raises ``GeometryMismatchError`` on grid mismatch.
 
         Returns:
             New Segmentation with all nonzero voxels from either mask.
         """
         if other.img.size == 1:
             return Segmentation(template=self, copy_data=True)
-        other = self._align_other(other)  # type: ignore[assignment]
+        other = self._align_other(other, resample=resample)  # type: ignore[assignment]
         output = Segmentation(template=self)
         combined = self.img.astype(np.uint16) + other.img.astype(np.uint16)
         combined[combined != 0] = 1
@@ -338,6 +362,7 @@ class Segmentation(Image):
         *,
         max_overlap: int = 0,
         max_overlap_ratio: float | None = None,
+        resample: bool = False,
     ) -> Segmentation:
         """Difference with tolerance: keep ROIs with overlap below thresholds.
 
@@ -350,13 +375,15 @@ class Segmentation(Image):
             max_overlap: Maximum absolute overlap in voxels to tolerate.
             max_overlap_ratio: Maximum overlap as a fraction of label size
                 (0.0--1.0). ``None`` disables the ratio check.
+            resample: If True, resample `other` onto this grid when they differ.
+                If False (default), raises ``GeometryMismatchError`` on grid mismatch.
 
         Returns:
             New Segmentation with only the kept labels.
         """
         if other.img.size == 1:
             return Segmentation(template=self, copy_data=True)
-        other = self._align_other(other)  # type: ignore[assignment]
+        other = self._align_other(other, resample=resample)  # type: ignore[assignment]
         output = Segmentation(template=self)
         for region in self.label_props:
             coords = region.coords
@@ -378,6 +405,7 @@ class Segmentation(Image):
         min_overlap_ratio: float | None = None,
         max_overlap: int = 0,
         max_overlap_ratio: float | None = None,
+        resample: bool = False,
     ) -> Segmentation:
         """Symmetric difference: voxels in the union but not in the intersection.
 
@@ -389,15 +417,18 @@ class Segmentation(Image):
             min_overlap_ratio: Passed to ``intersection()`` as ``min_overlap_ratio``.
             max_overlap: Passed to ``difference()`` as ``max_overlap``.
             max_overlap_ratio: Passed to ``difference()`` as ``max_overlap_ratio``.
+            resample: If True, resample `other` onto this grid when they differ.
+                If False (default), raises ``GeometryMismatchError`` on grid mismatch.
 
         Returns:
             New Segmentation with the symmetric difference.
         """
-        combined = self.union(other)
+        combined = self.union(other, resample=resample)
         intersected = self.intersection(
             other,
             min_overlap=min_overlap,
             min_overlap_ratio=min_overlap_ratio,
+            resample=resample,
         )
         return combined.difference(
             intersected,
@@ -476,3 +507,57 @@ class Segmentation(Image):
             stacklevel=2,
         )
         return self.symmetric_difference(other, min_overlap=3)
+
+
+def conform_seg_to_grid(
+    seg_path: Path | str,
+    grid_path: Path | str,
+    *,
+    out_path: Path | str | None = None,
+    atol: float = 1e-4,
+) -> bool:
+    """Repair a segmentation file so it shares *grid_path*'s voxel grid.
+
+    Reads the segmentation and a reference image (e.g. the series ``volume.nii.gz``);
+    if their grids differ, resamples the segmentation onto the reference grid
+    (nearest-neighbour, labels preserved) and writes it back. A no-op when the grids
+    already match.
+
+    Intended for downstream repair scripts that fix historically misaligned
+    ``.seg.nrrd`` files (e.g. projection/segmentation Z-flips) against the canonical
+    series volume.
+
+    Args:
+        seg_path: Segmentation file to repair.
+        grid_path: Reference image whose grid is the target (``volume.nii.gz`` / .nrrd).
+        out_path: Where to write the conformed segmentation. Defaults to *seg_path*
+            (in-place overwrite).
+        atol: Grid-equality tolerance passed to :meth:`Image.same_grid`.
+
+    Returns:
+        True if a resample was performed, False if the grids already matched.
+
+    Raises:
+        ImageError: If *out_path* has an unsupported extension.
+    """
+    seg = Segmentation(autolabel=False)
+    seg.read(Path(seg_path))
+    reference = Image()
+    reference.read(Path(grid_path))
+
+    if seg.same_grid(reference, atol=atol):
+        return False
+
+    target = Path(out_path) if out_path is not None else Path(seg_path)
+    suffixes = target.suffixes
+    if ".nrrd" in suffixes:
+        filetype = FileType.NRRD
+    elif ".nii" in suffixes:
+        filetype = FileType.NIFTI
+    else:
+        raise ImageError(f"Cannot infer format for {target.name}: expected .nrrd, .nii, or .nii.gz")
+
+    conformed = seg.reindex_to(reference, order=0)
+    conformed.save_as(target, filetype)
+    logger.info(f"Conformed segmentation {Path(seg_path).name} onto grid of {Path(grid_path).name}")
+    return True
