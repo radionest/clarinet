@@ -71,12 +71,19 @@ def dicom_client() -> DicomClient:
 
 @pytest.fixture(scope="session")
 def small_mr_study(dicom_client: DicomClient, orthanc_node: DicomNode) -> StudyResult:
-    """Find the smallest MR study on Orthanc for fast C-MOVE tests."""
+    """Smallest SHIPILOV MR study on Orthanc for fast C-MOVE tests.
+
+    Scoped to the SHIPILOV test patient so the anonymized MR copies that the
+    anonymize tests push to the shared PACS (patient ``CLARINET_*``) can't be
+    selected — they mutate mid-run and would flake the count assertions.
+    """
     from clarinet.services.dicom import StudyQuery
 
-    studies = asyncio.run(dicom_client.find_studies(StudyQuery(), orthanc_node))
+    studies = asyncio.run(
+        dicom_client.find_studies(StudyQuery(patient_name="SHIPILOV*"), orthanc_node)
+    )
     mr = [s for s in studies if s.modalities_in_study and "MR" in s.modalities_in_study]
-    assert mr, "No MR study found on test PACS"
+    assert mr, "No SHIPILOV MR study found on test PACS"
     return min(mr, key=lambda s: s.number_of_study_related_instances or float("inf"))
 
 

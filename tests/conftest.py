@@ -26,6 +26,28 @@ from clarinet.utils.logger import logger
 from tests.utils.cookies import patch_cookie_forwarding
 
 
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    """Serialize the DICOM suite onto a single xdist worker.
+
+    Every ``dicom``-marked test shares one mutable test PACS (Orthanc). The
+    anonymize -> send-to-PACS tests C-STORE anonymized studies back to it, so
+    spreading the suite across xdist workers lets those writes race reads on
+    another worker: the unscoped whole-PACS count assertions (e.g.
+    ``test_find_all_studies`` and the modality counts) then see a shifting study
+    set, and the deterministic anonymized study UIDs can collide between
+    workers. A shared ``xdist_group`` keeps every dicom test on one worker under
+    ``--dist loadgroup`` (a no-op when xdist is inactive), restoring serial PACS
+    access. (``mr_study``/``small_mr_study`` additionally scope their selection
+    to the SHIPILOV patient so they never pick an anonymized copy.)
+    """
+    for item in items:
+        # Leave tests that already declare their own xdist_group alone — the
+        # slicer-PACS suite carries xdist_group("slicer"), and a second group
+        # would merge it into a combined "dicom_slicer" group.
+        if item.get_closest_marker("dicom") and not item.get_closest_marker("xdist_group"):
+            item.add_marker(pytest.mark.xdist_group("dicom"))
+
+
 @pytest.fixture
 def caplog(caplog):
     """Bridge loguru → pytest's ``caplog`` so ``caplog.records`` sees app logs.
