@@ -109,6 +109,7 @@ pub fn viewer_buttons(
 /// Other viewers open directly via link.
 pub fn record_viewer_buttons(
   viewers: List(ViewerInfo),
+  allowed_viewers: Option(List(String)),
   study_uid: Option(String),
   series_uid: Option(String),
   viewer_study_uids: Option(List(String)),
@@ -118,6 +119,13 @@ pub fn record_viewer_buttons(
   class: String,
   on_view: fn(String, List(String)) -> msg,
 ) -> Element(msg) {
+  // Per-RecordType allowlist: keep only viewers whose name is listed. An empty
+  // list (or None) means no restriction — show all configured viewers.
+  let viewers = case allowed_viewers {
+    Some(names) if names != [] ->
+      list.filter(viewers, fn(v) { list.contains(names, v.name) })
+    _ -> viewers
+  }
   case level, viewer_study_uids {
     Some(types.Patient), Some(uids) if uids != [] ->
       element.fragment(

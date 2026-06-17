@@ -1425,6 +1425,8 @@ fn render_record_execution(
       render_record_metadata(record, shared),
       viewer.record_viewer_buttons(
         shared.viewers,
+        option.map(record.record_type, fn(rt) { rt.allowed_viewers })
+          |> option.flatten,
         record.study_uid,
         record.series_uid,
         record.viewer_study_uids,

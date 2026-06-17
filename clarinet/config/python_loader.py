@@ -216,6 +216,8 @@ async def _to_record_type_create(
         kwargs["edit_window_days"] = rt_def.edit_window_days
     if "viewer_mode" in rt_def.model_fields_set:
         kwargs["viewer_mode"] = rt_def.viewer_mode
+    if rt_def.allowed_viewers is not None:
+        kwargs["allowed_viewers"] = rt_def.allowed_viewers
     if data_schema is not None:
         kwargs["data_schema"] = data_schema
     if ui_schema is not None:

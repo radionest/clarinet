@@ -138,6 +138,11 @@ fn record_type_base_decoder() -> decode.Decoder(RecordType) {
     None,
     decode.optional(decode.list(file_definition_decoder())),
   )
+  use allowed_viewers <- decode.optional_field(
+    "allowed_viewers",
+    None,
+    decode.optional(decode.list(decode.string)),
+  )
 
   let level = case level_str {
     None -> types.Series
@@ -176,6 +181,7 @@ fn record_type_base_decoder() -> decode.Decoder(RecordType) {
     editable: editable,
     edit_window_days: edit_window_days,
     viewer_mode: viewer_mode,
+    allowed_viewers: allowed_viewers,
     level: level,
     file_registry: file_registry,
     constraint_role: None,
@@ -574,6 +580,11 @@ pub fn record_type_full_decoder() -> decode.Decoder(RecordType) {
     None,
     decode.optional(decode.list(file_definition_decoder())),
   )
+  use allowed_viewers <- decode.optional_field(
+    "allowed_viewers",
+    None,
+    decode.optional(decode.list(decode.string)),
+  )
   use constraint_role_name <- decode.optional_field(
     "constraint_role",
     None,
@@ -616,6 +627,7 @@ pub fn record_type_full_decoder() -> decode.Decoder(RecordType) {
     editable: editable,
     edit_window_days: edit_window_days,
     viewer_mode: viewer_mode,
+    allowed_viewers: allowed_viewers,
     level: level,
     file_registry: file_registry,
     constraint_role: constraint_role_name,

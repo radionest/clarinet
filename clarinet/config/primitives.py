@@ -118,6 +118,9 @@ class RecordDef(BaseModel):
         editable: Whether non-superusers may change a submitted (finished) record.
         edit_window_days: Days a finished record stays editable; None = no limit.
         viewer_mode: How many series the viewer loads (single vs all series).
+        allowed_viewers: Restrict the DICOM viewers shown for this type to these
+            viewer names (matching ``ViewerInfo.name``); None/empty = all
+            configured viewers.
     """
 
     name: str
@@ -150,6 +153,7 @@ class RecordDef(BaseModel):
     editable: bool = True
     edit_window_days: int | None = None
     viewer_mode: ViewerMode = ViewerMode.SINGLE_SERIES
+    allowed_viewers: list[str] | None = None
 
     def __init__(self, *, role: str | None = None, **kwargs: Any) -> None:
         """Accept ``role`` as a user-friendly alias for ``role_name``."""

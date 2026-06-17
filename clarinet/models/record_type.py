@@ -126,6 +126,11 @@ class RecordTypeBase(SQLModel):
     ui_schema: RecordSchema | None = None
     slicer_context_hydrators: SlicerHydratorNames | None = None
     data_validators: ValidatorNames | None = None
+    # Per-RecordType allowlist of viewer names (matching ``ViewerInfo.name``).
+    # None or an empty list = show all configured viewers (default — zero impact
+    # on existing types); a non-empty list shows only those viewers. ``[]`` is
+    # normalized to "show all" on the frontend.
+    allowed_viewers: list[str] | None = None
 
     # ``server_default`` is required so alembic autogenerate emits
     # ``ALTER TABLE recordtype ADD COLUMN ... NOT NULL DEFAULT true`` instead
@@ -197,6 +202,7 @@ class RecordType(RecordTypeBase, table=True):
     # JSON-Schema validation. Nullable JSON column: ``None`` = no validators,
     # ``[]`` and ``None`` are equivalent at the DB level for this feature.
     data_validators: ValidatorNames | None = Field(default=None, sa_column=Column(PortableJSON))
+    allowed_viewers: list[str] | None = Field(default=None, sa_column=Column(PortableJSON))
 
     role_name: str | None = Field(foreign_key="userrole.name", default=None)
     constraint_role: UserRole | None = Relationship(back_populates="allowed_record_types")
@@ -320,6 +326,7 @@ class RecordTypeOptional(SQLModel):
     data_validators: ValidatorNames | None = None
     mask_patient_data: bool | None = Field(default=None)
     viewer_mode: ViewerMode | None = None
+    allowed_viewers: list[str] | None = None
 
     role_name: str | None = Field(default=None)
     max_records: int | None = Field(default=None)
@@ -341,6 +348,7 @@ class RecordTypeOptional(SQLModel):
         "slicer_result_validator_args",
         "slicer_context_hydrators",
         "data_validators",
+        "allowed_viewers",
         mode="before",
     )
     @classmethod

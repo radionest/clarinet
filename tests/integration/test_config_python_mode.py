@@ -186,6 +186,7 @@ _FORWARD_SAMPLES: dict[str, object] = {
     "editable": False,
     "edit_window_days": 7,
     "viewer_mode": "all_series",
+    "allowed_viewers": ["ohif"],
 }
 
 
