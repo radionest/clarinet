@@ -101,14 +101,25 @@ def all_studies(dicom_client: DicomClient, orthanc_node: DicomNode) -> list[Stud
 
 @pytest.fixture(scope="session")
 def mr_study(all_studies: list[StudyResult]) -> StudyResult:
-    """Smallest MR study on the PACS — used for C-GET tests.
+    """Smallest SHIPILOV MR study on the PACS — used for C-GET tests.
 
-    Selects the study with fewest instances to avoid C-GET timeouts
-    on large studies (2000+ instances).
+    Restricted to the SHIPILOV test patient: the anonymize -> send-to-PACS
+    tests push anonymized MR copies (patient ``CLARINET_*``) back to the shared
+    PACS, so an unscoped "smallest MR study" would intermittently select one
+    while it is still being ingested, yielding flaky instance-count mismatches.
+    The SHIPILOV studies are immutable for the test run, so this selection is
+    stable. Picks the fewest-instance study to avoid C-GET timeouts on large
+    studies (2000+ instances).
     """
-    matches = [s for s in all_studies if s.modalities_in_study and "MR" in s.modalities_in_study]
-    assert matches, "No MR study found on test PACS"
-    # Pick smallest study to keep tests fast and reliable
+    matches = [
+        s
+        for s in all_studies
+        if s.modalities_in_study
+        and "MR" in s.modalities_in_study
+        and s.patient_name
+        and "SHIPILOV" in str(s.patient_name).upper()
+    ]
+    assert matches, "No SHIPILOV MR study found on test PACS"
     return min(matches, key=lambda s: s.number_of_study_related_instances or float("inf"))
 
 
