@@ -201,6 +201,8 @@ projects need an alembic migration for the new table.
 
 `pipeline_task()` decorator provides `TaskContext` with: `files` (FileResolver), `records` (RecordQuery), `client` (ClarinetClient), `msg` (PipelineMessage). Sync tasks get `SyncTaskContext` with sync wrappers.
 
+`ctx.files` resolves the task's own record. To resolve files of *another* record you already hold (parent, reloaded copy, cross-patient), use `ctx.files_for(record)` — sugar over `FileResolver.from_record(record)`, which also works in standalone scripts that have no `ctx`. For lookup-by-criteria use `ctx.records.file_path(...)` instead.
+
 `build_task_context(msg, client)` fallback: record_id → series_uid → study_uid → empty context.
 
 `@broker.task()` still works for simple tasks without TaskContext.

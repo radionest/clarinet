@@ -321,6 +321,71 @@ class TestBuildFields:
         assert fields["origin_type"] == "ct-segmentation"
 
 
+# ── FileResolver.from_record / TaskContext.files_for ─────────────────────────
+
+
+class TestFromRecord:
+    """Tests for FileResolver.from_record() and TaskContext.files_for()."""
+
+    @patch("clarinet.services.common.file_resolver.settings")
+    def test_resolves_like_manual_construction(self, mock_settings: MagicMock):
+        mock_settings.storage_path = "/data"
+        fd = _make_file_def(name="seg", pattern="seg_{id}.nrrd")
+        record = _make_record_read(record_id=7, file_registry=[fd])
+
+        auto = FileResolver.from_record(record)
+        manual = FileResolver(
+            working_dirs=FileResolver.build_working_dirs(record),
+            record_type_level=record.record_type.level,
+            file_registry=record.record_type.file_registry or [],
+            fields=FileResolver.build_fields(record),
+        )
+
+        assert auto.resolve("seg") == manual.resolve("seg")
+        assert auto.resolve("seg") == Path("/data/CLARINET_1/9.8.7.6.5/9.8.7.6.5.4/seg_7.nrrd")
+
+    @patch("clarinet.services.common.file_resolver.settings")
+    def test_files_for_builds_for_another_record(self, mock_settings: MagicMock):
+        mock_settings.storage_path = "/data"
+        fd = _make_file_def(name="seg", pattern="seg.nrrd")
+        own = _make_record_read(record_id=1, file_registry=[fd])
+        other = _make_record_read(record_id=2, file_registry=[fd])
+        other.patient.anon_id = "CLARINET_OTHER"
+        ctx = TaskContext(
+            files=FileResolver.from_record(own),
+            records=MagicMock(),
+            client=MagicMock(),
+            msg=MagicMock(),
+        )
+
+        other_resolver = ctx.files_for(other)
+
+        assert other_resolver is not ctx.files
+        assert other_resolver.resolve("seg") == Path(
+            "/data/CLARINET_OTHER/9.8.7.6.5/9.8.7.6.5.4/seg.nrrd"
+        )
+
+    @patch("clarinet.services.common.file_resolver.settings")
+    def test_sync_files_for(self, mock_settings: MagicMock):
+        from clarinet.services.pipeline.sync_wrappers import SyncTaskContext
+
+        mock_settings.storage_path = "/data"
+        fd = _make_file_def(name="seg", pattern="seg.nrrd")
+        own = _make_record_read(record_id=1, file_registry=[fd])
+        other = _make_record_read(record_id=2, file_registry=[fd])
+        other.patient.anon_id = "CLARINET_OTHER"
+        ctx = SyncTaskContext(
+            files=FileResolver.from_record(own),
+            records=MagicMock(),
+            client=MagicMock(),
+            msg=MagicMock(),
+        )
+
+        assert ctx.files_for(other).resolve("seg") == Path(
+            "/data/CLARINET_OTHER/9.8.7.6.5/9.8.7.6.5.4/seg.nrrd"
+        )
+
+
 # ── FileResolver.dir ────────────────────────────────────────────────────────
 
 

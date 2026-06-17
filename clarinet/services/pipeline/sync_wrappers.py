@@ -266,6 +266,12 @@ class SyncTaskContext:
     client: SyncPipelineClient
     msg: PipelineMessage
 
+    def files_for(self, record: RecordRead) -> FileResolver:
+        """Build a resolver for another record (sync ``TaskContext.files_for``)."""
+        from clarinet.services.common.file_resolver import FileResolver
+
+        return FileResolver.from_record(record)
+
 
 def build_sync_context(ctx: TaskContext, loop: asyncio.AbstractEventLoop) -> SyncTaskContext:
     """Build a ``SyncTaskContext`` from an async ``TaskContext``.

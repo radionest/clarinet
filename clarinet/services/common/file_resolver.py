@@ -117,6 +117,24 @@ class FileResolver:
 
     # ── Static factories ──
 
+    @classmethod
+    def from_record(cls, record: RecordRead) -> FileResolver:
+        """Build a resolver for a single ``RecordRead`` — the common case.
+
+        Bundles the four constructor arguments derived from one record so
+        callers that already hold a record (pipeline tasks resolving a
+        *parent* / reloaded record, standalone scripts) don't repeat the
+        assembly. ``SeriesRead`` / ``StudyRead`` / ``PatientRead`` carry no
+        file registry — build those resolvers explicitly or use
+        ``FileRepository`` for working-dir-only access.
+        """
+        return cls(
+            working_dirs=cls.build_working_dirs(record),
+            record_type_level=DicomQueryLevel(record.record_type.level),
+            file_registry=record.record_type.file_registry or [],
+            fields=cls.build_fields(record),
+        )
+
     @staticmethod
     def build_working_dirs(
         record: RecordRead,
