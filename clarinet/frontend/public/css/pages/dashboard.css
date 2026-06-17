@@ -74,6 +74,16 @@
     }
 }
 
+/* Clickable stat cards (/admin) — hover affordance like .quick-action;
+   the non-clickable Users card stays a plain <div>, so scope to a.stat-card. */
+a.stat-card {
+    transition: background-color 0.15s;
+
+    &:hover {
+        background-color: var(--surface-sunken);
+    }
+}
+
 .stat-value {
     font-family: var(--font-mono);
     font-size: 2.1rem;

@@ -450,17 +450,25 @@ fn overview_section(stats: models.AdminStats) -> Element(Msg) {
         label: "Studies",
         count: stats.total_studies,
         color: "blue",
+        route: Some(router.Studies(dict.new())),
       ),
       admin_stat_card(
         label: "Records",
         count: stats.total_records,
         color: "green",
+        route: Some(router.Records(dict.new())),
       ),
-      admin_stat_card(label: "Users", count: stats.total_users, color: "purple"),
+      admin_stat_card(
+        label: "Users",
+        count: stats.total_users,
+        color: "purple",
+        route: None,
+      ),
       admin_stat_card(
         label: "Patients",
         count: stats.total_patients,
         color: "orange",
+        route: Some(router.Patients(dict.new())),
       ),
     ]),
   ])
@@ -480,6 +488,7 @@ fn status_section(stats: models.AdminStats) -> Element(Msg) {
             label: s,
             count: count,
             color: status.color(status.from_backend_string(s)),
+            route: Some(router.Records(dict.from_list([#("status", s)]))),
           )
         }),
     ),
@@ -812,11 +821,15 @@ fn admin_stat_card(
   label label: String,
   count count: Int,
   color color: String,
+  route route: Option(router.Route),
 ) -> Element(Msg) {
-  html.div([attribute.class("stat-card card stat-" <> color)], [
-    html.div([attribute.class("stat-value")], [
-      html.text(int.to_string(count)),
-    ]),
+  let card_class = attribute.class("stat-card card stat-" <> color)
+  let body = [
+    html.div([attribute.class("stat-value")], [html.text(int.to_string(count))]),
     html.div([attribute.class("stat-label")], [html.text(label)]),
-  ])
+  ]
+  case route {
+    Some(r) -> html.a([attribute.href(router.route_to_href(r)), card_class], body)
+    None -> html.div([card_class], body)
+  }
 }
