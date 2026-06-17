@@ -385,6 +385,18 @@ class TestFromRecord:
             "/data/CLARINET_OTHER/9.8.7.6.5/9.8.7.6.5.4/seg.nrrd"
         )
 
+    @patch("clarinet.services.common.file_resolver.settings")
+    def test_record_without_file_registry(self, mock_settings: MagicMock):
+        mock_settings.storage_path = "/data"
+        record = _make_record_read()
+        record.record_type.file_registry = None  # exercise the `or []` guard
+
+        resolver = FileResolver.from_record(record)
+
+        assert resolver.dir() == Path("/data/CLARINET_1/9.8.7.6.5/9.8.7.6.5.4")
+        with pytest.raises(KeyError):
+            resolver.resolve("anything")
+
 
 # ── FileResolver.dir ────────────────────────────────────────────────────────
 
