@@ -646,14 +646,13 @@ fn assign_cell(
         Some(uid) -> {
           let email = cache.user_email(shared.cache, uid)
           html.div([attribute.class("assign-cell")], [
-            html.span([], [html.text(email)]),
-            html.text(" "),
+            html.span([attribute.class("assign-email")], [html.text(email)]),
             html.button(
               [
                 attribute.class("btn btn-sm btn-outline"),
                 event.on_click(ToggleAssignDropdown(Some(record_id))),
               ],
-              [html.text("Change")],
+              [html.text(shared.translate(i18n.BtnChange))],
             ),
           ])
         }
@@ -663,7 +662,7 @@ fn assign_cell(
               attribute.class("btn btn-sm btn-primary"),
               event.on_click(ToggleAssignDropdown(Some(record_id))),
             ],
-            [html.text("Assign")],
+            [html.text(shared.translate(i18n.BtnAssign))],
           )
       }
   }
