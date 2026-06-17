@@ -1,6 +1,7 @@
 // Studies list page — self-contained MVU module
 import api/models
 import clarinet_frontend/i18n.{type Key}
+import components/entity_link
 import gleam/dict.{type Dict}
 import gleam/int
 import gleam/list
@@ -189,10 +190,12 @@ fn study_row(study: models.Study, translate: fn(Key) -> String) -> Element(Msg) 
 
   html.tr([], [
     html.td([attribute.class("cell-uid"), attribute.title(study.study_uid)], [
-      html.text(study.study_uid),
+      entity_link.study(study.study_uid),
     ]),
     html.td([attribute.class("cell-date")], [html.text(study.date)]),
-    html.td([attribute.class("cell-id")], [html.text(study.patient_id)]),
+    html.td([attribute.class("cell-id")], [
+      entity_link.patient(study.patient_id),
+    ]),
     html.td(
       case study.anon_uid {
         option.Some(uid) -> [attribute.class("cell-uid"), attribute.title(uid)]

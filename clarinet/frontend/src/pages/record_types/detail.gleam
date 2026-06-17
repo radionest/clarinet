@@ -3,6 +3,7 @@ import api/models.{type Record, type RecordTypeStats}
 import cache
 import cache/bucket
 import clarinet_frontend/i18n.{type Key}
+import components/entity_link
 import components/status_badge
 import gleam/int
 import gleam/list
@@ -189,8 +190,8 @@ fn record_row(record: Record, translate: fn(Key) -> String) -> Element(Msg) {
   let record_id_str = int.to_string(record_id)
 
   html.tr([], [
-    html.td([], [html.text(record_id_str)]),
-    html.td([], [html.text(record.patient_id)]),
+    html.td([], [entity_link.record(record_id)]),
+    html.td([], [entity_link.patient(record.patient_id)]),
     html.td([], [status_badge.render(record.status, translate)]),
     html.td([], [html.text(option.unwrap(record.user_id, "-"))]),
     html.td([], [
