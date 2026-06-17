@@ -1713,6 +1713,10 @@ fn render_dynamic_form(
                 ],
                 [html.text("Re-submit")],
               ),
+              case record.data {
+                Some(data) -> render_stored_data(data)
+                None -> element.none()
+              },
             ])
           _, _ ->
             html.div([], [
@@ -1727,6 +1731,24 @@ fn render_dynamic_form(
         },
       ])
     }
+  }
+}
+
+// Append the formosh ui_schema attribute, skipping the backend's
+// default-factory empty value: record types without a ui_schema serialize it
+// as "{}", which formosh would parse into an empty UiSchema anyway — emitting
+// it just adds noise. Shared by the editable and read-only form renderers.
+fn append_ui_schema(
+  attrs: List(attribute.Attribute(Msg)),
+  ui_schema_json: Option(String),
+) -> List(attribute.Attribute(Msg)) {
+  case ui_schema_json {
+    Some(ui) ->
+      case ui == "" || ui == "{}" {
+        True -> attrs
+        False -> list.append(attrs, [formosh_component.ui_schema_string(ui)])
+      }
+    None -> attrs
   }
 }
 
@@ -1754,18 +1776,7 @@ fn render_editable_form(
     event.on("formosh-submit", decode_form_submit()),
   ]
 
-  // Default-factory on the backend produces ui_schema="{}" for record types
-  // that don't set one. Skip the attribute in that case — formosh would parse
-  // {} into an empty UiSchema anyway, so emitting it adds noise without effect.
-  let attrs_with_ui = case ui_schema_json {
-    Some(ui) ->
-      case ui == "" || ui == "{}" {
-        True -> base_attrs
-        False ->
-          list.append(base_attrs, [formosh_component.ui_schema_string(ui)])
-      }
-    None -> base_attrs
-  }
+  let attrs_with_ui = append_ui_schema(base_attrs, ui_schema_json)
 
   let attrs = case record.data {
     Some(data) ->
@@ -1815,16 +1826,7 @@ fn render_readonly_form(
         formosh_component.read_only(True),
         formosh_component.initial_values_string(data),
       ]
-      let attrs = case ui_schema_json {
-        Some(ui) ->
-          case ui == "" || ui == "{}" {
-            True -> base_attrs
-            False ->
-              list.append(base_attrs, [formosh_component.ui_schema_string(ui)])
-          }
-        None -> base_attrs
-      }
-      formosh_component.element(attrs)
+      formosh_component.element(append_ui_schema(base_attrs, ui_schema_json))
     }
   }
 }
@@ -1991,7 +1993,13 @@ fn format_dynamic(value: Dynamic) -> String {
               case decode.run(value, decode.bool) {
                 Ok(True) -> "Yes"
                 Ok(False) -> "No"
-                Error(_) -> json_utils.dynamic_to_string(value)
+                Error(_) ->
+                  case decode.run(value, decode.list(decode.dynamic)) {
+                    Ok([]) -> "—"
+                    Ok(items) ->
+                      list.map(items, format_dynamic) |> string.join(", ")
+                    Error(_) -> json_utils.dynamic_to_string(value)
+                  }
               }
           }
       }
