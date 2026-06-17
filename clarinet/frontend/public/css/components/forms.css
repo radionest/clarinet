@@ -254,6 +254,11 @@ formosh-form::part(submit):hover {
     background-color: var(--teal-deep);
 }
 
+formosh-form::part(submit):focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+}
+
 formosh-form::part(footer) {
     display: flex;
     align-items: center;
@@ -278,6 +283,11 @@ formosh-form::part(reset) {
 formosh-form::part(reset):hover {
     background-color: var(--surface-sunken);
     border-color: var(--ink-faint);
+}
+
+formosh-form::part(reset):focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
 }
 
 formosh-form::part(reset):disabled {
