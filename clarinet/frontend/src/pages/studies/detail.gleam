@@ -6,6 +6,7 @@ import cache/bucket
 import api/studies
 import api/types.{type ApiError, AuthError}
 import clarinet_frontend/i18n.{type Key}
+import components/entity_link
 import components/status_badge
 import gleam/dict
 import gleam/int
@@ -223,7 +224,7 @@ fn study_info_card(viewers: List(ViewerInfo), study: Study) -> Element(Msg) {
       html.dt([], [html.text("Anonymous UID:")]),
       html.dd([], [html.text(option.unwrap(study.anon_uid, "-"))]),
       html.dt([], [html.text("Patient ID:")]),
-      html.dd([], [html.text(study.patient_id)]),
+      html.dd([], [entity_link.patient(study.patient_id)]),
     ]),
     html.div([attribute.class("card-actions")], [
       viewer.viewer_buttons(
@@ -312,7 +313,7 @@ fn series_section(
 
 fn series_row(viewers: List(ViewerInfo), s: Series) -> Element(Msg) {
   html.tr([], [
-    html.td([], [html.text(s.series_uid)]),
+    html.td([], [entity_link.series(s.series_uid)]),
     html.td([], [html.text(option.unwrap(s.series_description, "-"))]),
     html.td([], [html.text(int.to_string(s.series_number))]),
     html.td([], [html.text(option.unwrap(s.anon_uid, "-"))]),
@@ -374,7 +375,7 @@ fn record_row(record: Record, translate: fn(Key) -> String) -> Element(Msg) {
   }
 
   html.tr([], [
-    html.td([], [html.text(record_id_str)]),
+    html.td([], [entity_link.record(record_id)]),
     html.td([], [html.text(type_label)]),
     html.td([], [status_badge.render(record.status, translate)]),
     html.td([], [

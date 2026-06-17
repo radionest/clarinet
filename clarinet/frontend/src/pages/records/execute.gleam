@@ -17,6 +17,7 @@ import api/workflow_models.{
 import cache
 import clarinet_frontend/i18n
 import components/activity_feed
+import components/entity_link
 import components/status_badge
 import components/workflow_graph as wf_renderer
 import config
@@ -1866,20 +1867,23 @@ fn format_series_label(
 }
 
 fn render_record_metadata(record: Record, shared: Shared) -> Element(Msg) {
+  let is_admin = is_admin_user(shared)
   html.div([attribute.class("record-metadata")], [
     html.dl([], [
       html.dt([], [html.text("Patient:")]),
-      html.dd([], [html.text(record.patient_id)]),
+      html.dd([], [entity_link.patient_if_admin(record.patient_id, is_admin)]),
       case record.study {
         Some(study) ->
           element.fragment([
             html.dt([], [html.text("Study:")]),
             html.dd([], [
-              html.text(
+              entity_link.study_labeled_if_admin(
+                study.study_uid,
                 option.unwrap(study.study_description, study.study_uid)
-                <> " ("
-                <> study.date
-                <> ")",
+                  <> " ("
+                  <> study.date
+                  <> ")",
+                is_admin,
               ),
             ]),
           ])
@@ -1888,7 +1892,9 @@ fn render_record_metadata(record: Record, shared: Shared) -> Element(Msg) {
             Some(uid) ->
               element.fragment([
                 html.dt([], [html.text("Study:")]),
-                html.dd([], [html.text(uid)]),
+                html.dd([], [
+                  entity_link.study_labeled_if_admin(uid, uid, is_admin),
+                ]),
               ])
             None -> element.none()
           }
@@ -1898,12 +1904,14 @@ fn render_record_metadata(record: Record, shared: Shared) -> Element(Msg) {
           element.fragment([
             html.dt([], [html.text("Series:")]),
             html.dd([], [
-              html.text(
+              entity_link.series_labeled_if_admin(
+                series.series_uid,
                 format_series_label(series.modality, series.series_description)
-                <> case series.instance_count {
+                  <> case series.instance_count {
                   Some(n) -> " (" <> int.to_string(n) <> " img)"
                   None -> ""
                 },
+                is_admin,
               ),
             ]),
           ])
@@ -1912,7 +1920,9 @@ fn render_record_metadata(record: Record, shared: Shared) -> Element(Msg) {
             Some(uid) ->
               element.fragment([
                 html.dt([], [html.text("Series:")]),
-                html.dd([], [html.text(uid)]),
+                html.dd([], [
+                  entity_link.series_labeled_if_admin(uid, uid, is_admin),
+                ]),
               ])
             None -> element.none()
           }
