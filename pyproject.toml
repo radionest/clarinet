@@ -125,11 +125,21 @@ dev = [
     "pytest-xdist>=3.5.0",
     "pytest-json-report>=1.5.0",
     "pytest-timeout>=2.4.0",
+    "mutmut>=3.6.0",
 ]
 
 e2e = [
     "pytest-playwright>=0.6",
 ]
+
+[tool.mutmut]
+# Mutation testing, intentionally scoped to the RecordFlow comparison core —
+# pure business logic exercised by fast unit tests (no DB / external services).
+# `source_paths` copies the package into mutants/ so imports resolve;
+# `only_mutate` restricts which file is actually mutated. Run: `uv run mutmut run`.
+source_paths = ["clarinet"]
+only_mutate = ["clarinet/services/recordflow/flow_result.py"]
+pytest_add_cli_args_test_selection = ["tests/test_recordflow_dsl.py"]
 
 [tool.black]
 line-length = 100
