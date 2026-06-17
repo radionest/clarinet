@@ -364,9 +364,10 @@ class TestStrategyResolution:
         assert cmp.evaluate(ctx2) is False
 
     def test_single_left_multi_right(self):
-        """Single/constant on the LEFT, multi-valued record on the RIGHT —
-        exercises the mirror branch of the any/all comparison (existing tests
-        only ever put .any()/.all() on the left)."""
+        """Single on the LEFT, multi-valued record on the RIGHT — covers the
+        ``left_strategy == "single"`` branch of ``FieldComparison.evaluate``,
+        previously unexercised because the existing any/all tests always put
+        the multi-valued side on the left (the ``else`` branch)."""
         ctx = {
             "threshold": [make_record_read("threshold", data={"v": 100})],
             "measurement": [
@@ -376,6 +377,20 @@ class TestStrategyResolution:
         }
         cmp = FlowResult("threshold", ["v"]) < record("measurement").any().d.v
         assert cmp.evaluate(ctx) is True  # any(100 < 50, 100 < 200)
+
+    def test_multi_left_single_record_right(self):
+        """Multi-valued record on the LEFT compared to a single *record* on
+        the RIGHT (not a constant) — the ``else`` branch with both operands
+        resolved from context."""
+        ctx = {
+            "measurement": [
+                make_record_read("measurement", data={"v": 150}, record_id=1),
+                make_record_read("measurement", data={"v": 200}, record_id=2),
+            ],
+            "threshold": [make_record_read("threshold", data={"v": 100})],
+        }
+        cmp = record("measurement").all().d.v > FlowResult("threshold", ["v"])
+        assert cmp.evaluate(ctx) is True  # all(150 > 100, 200 > 100)
 
     def test_two_multivalued_sides_unsupported(self):
         """any/all on both sides is rejected — must reduce one side."""
