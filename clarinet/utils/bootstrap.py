@@ -391,6 +391,33 @@ async def reconcile_config(
                     f"Add missing roles to CLARINET_EXTRA_ROLES or fix the config."
                 )
 
+        # Validate that referenced viewer names are actually configured. A typo
+        # (e.g. ["ohiff"]) would otherwise pass a non-empty allowlist that
+        # matches no configured viewer, silently hiding every viewer button on
+        # the record page. Fail fast at startup instead. (Built-in adapter names
+        # — ohif/radiant/weasis — plus any custom TemplateAdapter live in
+        # settings.viewers, so that dict is the source of truth.)
+        referenced_viewers: set[str] = set()
+        for item in all_items:
+            referenced_viewers.update(item.allowed_viewers or [])
+        if referenced_viewers:
+            configured_viewers = set(settings.viewers)
+            missing_viewers = referenced_viewers - configured_viewers
+            if missing_viewers:
+                bad_items = [
+                    f"  - '{item.name}' allows viewer(s) "
+                    f"{[n for n in (item.allowed_viewers or []) if n in missing_viewers]}"
+                    for item in all_items
+                    if any(n in missing_viewers for n in (item.allowed_viewers or []))
+                ]
+                raise ConfigurationError(
+                    f"RecordType config references unconfigured viewer(s): "
+                    f"{', '.join(sorted(missing_viewers))}.\n"
+                    + "\n".join(bad_items)
+                    + f"\nConfigured viewers: {sorted(configured_viewers)}.\n"
+                    f"Enable them via [viewers.<name>] in settings.toml."
+                )
+
         # Validate decorator-registry references (data_validators,
         # slicer_context_hydrators). A typo used to surface only at runtime —
         # e.g. when the doctor opened the record in Slicer.

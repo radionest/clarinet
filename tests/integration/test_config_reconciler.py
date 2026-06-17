@@ -743,6 +743,52 @@ async def test_error_message_lists_all_db_roles(
     assert "missing-role" in msg
 
 
+@pytest.mark.asyncio
+async def test_reconcile_config_validates_allowed_viewers_configured(
+    test_session: AsyncSession,
+) -> None:
+    """reconcile_config raises ConfigurationError when allowed_viewers references
+    a viewer name absent from ``settings.viewers``.
+
+    A typo (e.g. ["ohiff"]) would otherwise pass a non-empty allowlist matching
+    no configured viewer, silently hiding every viewer button on the record
+    page. Fail-fast at startup surfaces the misconfiguration instead.
+    """
+    from unittest.mock import AsyncMock, patch
+
+    from clarinet.utils.bootstrap import reconcile_config
+
+    items = [_make_config("rt-bad-viewer", allowed_viewers=["ohiff"])]
+
+    with (
+        patch(
+            "clarinet.config.python_loader.load_python_config",
+            new_callable=AsyncMock,
+            return_value=items,
+        ),
+        patch(
+            "clarinet.utils.bootstrap.db_manager.get_async_session_context",
+        ) as mock_ctx,
+        patch("clarinet.settings.settings") as mock_settings,
+    ):
+        mock_settings.config_mode = "python"
+        mock_settings.config_tasks_path = "/fake/path"
+        mock_settings.config_delete_orphans = False
+        mock_settings.viewers = {"ohif": {}, "radiant": {}}
+
+        ctx = AsyncMock()
+        ctx.__aenter__ = AsyncMock(return_value=test_session)
+        ctx.__aexit__ = AsyncMock(return_value=False)
+        mock_ctx.return_value = ctx
+
+        with pytest.raises(ConfigurationError, match="ohiff") as exc_info:
+            await reconcile_config(folder="/fake/path")
+
+    msg = str(exc_info.value)
+    assert "rt-bad-viewer" in msg
+    assert "radiant" in msg  # configured viewers listed in the hint
+
+
 def test_reconciler_compares_all_record_type_fields() -> None:
     """Drift guard: every RecordTypeCreate field is compared or excluded here.
 
