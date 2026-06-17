@@ -161,6 +161,13 @@
     font-size: 0.8125rem;
 }
 
+/* A row that just arrived via SSE live-update flashes once, then fades to the
+   normal row background. Keyed rendering gives each new row a fresh DOM node,
+   so successive bursts re-trigger the animation. */
+.activity-row-new {
+    animation: activity-row-flash 2s ease-out;
+}
+
 /* Admin assignment dropdown */
 .assign-cell {
     display: flex;

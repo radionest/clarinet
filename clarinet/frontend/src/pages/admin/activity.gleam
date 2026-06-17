@@ -53,6 +53,27 @@ pub fn update(
   }
 }
 
+// --- Cleanup ---
+
+/// Cancel the feed's pending SSE-refresh / highlight timers on route change.
+/// Registered in `main.cleanup_current_page`.
+pub fn cleanup(model: Model) -> Effect(Msg) {
+  effect.map(activity_feed.cleanup(model.activity), ActivityMsg)
+}
+
+// --- SSE bridge ---
+
+/// Built by `main.delegate_sse` when a relevant push lands while this page is
+/// open, so the feed silently refreshes the matching tab. Kept here so `main`
+/// constructs the page Msg without importing the feed sub-component directly.
+pub fn external_events_change() -> Msg {
+  ActivityMsg(activity_feed.ExternalEventsChange)
+}
+
+pub fn external_runs_change() -> Msg {
+  ActivityMsg(activity_feed.ExternalRunsChange)
+}
+
 // --- View ---
 
 pub fn view(model: Model, shared: Shared) -> Element(Msg) {
