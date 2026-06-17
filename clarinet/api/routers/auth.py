@@ -24,6 +24,7 @@ from clarinet.models.user import User, UserCreate, UserRead
 from clarinet.settings import settings
 from clarinet.utils.database import get_async_session
 from clarinet.utils.logger import logger
+from clarinet.utils.session import emit_offline_if_last
 
 
 class SessionInfo(BaseModel):
@@ -235,5 +236,8 @@ async def revoke_session(
         f"User {user.id} revoked session {token_preview}",
         extra={"user_id": str(user.id), "token_preview": token_preview},
     )
+
+    # sse-capture: session lifecycle (AccessToken not ORM-captured)
+    await emit_offline_if_last(session, user.id)
 
     return {"status": "success", "message": "Session revoked successfully"}

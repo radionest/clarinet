@@ -57,6 +57,12 @@ class RoleMatrixResponse(PydanticBaseModel):
     users: list[UserRoleInfo]
 
 
+class OnlineUsersResponse(PydanticBaseModel):
+    """Ids of users currently online (at least one session valid now)."""
+
+    user_ids: list[str]
+
+
 class ClearOutputFilesResult(PydanticBaseModel):
     """Result of clearing output files from disk for a record."""
 

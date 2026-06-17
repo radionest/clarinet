@@ -48,6 +48,7 @@ pub type OutMsg {
   SseConnected(reconnected: Bool)
   SseEntityEvent(sse_events.EntityEvent)
   SseTaskProgress(task: String, task_id: String, payload: dynamic.Dynamic)
+  SsePresence(user_id: String, online: Bool)
   SseAuthExpired
 }
 
@@ -135,6 +136,11 @@ fn handle_frame(model: Model, text: String) -> #(Model, Effect(Msg), List(OutMsg
       Model(..model, watchdog: None, last_frame_ms: now),
       arm_watchdog(model.watchdog),
       [SseTaskProgress(task, task_id, payload)],
+    )
+    Ok(sse_events.Presence(user_id, online)) -> #(
+      Model(..model, watchdog: None, last_frame_ms: now),
+      arm_watchdog(model.watchdog),
+      [SsePresence(user_id, online)],
     )
     Ok(sse_events.AuthExpired) -> {
       let close_eff = case model.state {

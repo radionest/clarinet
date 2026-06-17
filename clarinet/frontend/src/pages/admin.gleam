@@ -12,6 +12,7 @@ import gleam/int
 import gleam/javascript/promise
 import gleam/list
 import gleam/option.{type Option, None, Some}
+import gleam/set
 import gleam/string
 import lustre/attribute
 import lustre/effect.{type Effect}
@@ -38,6 +39,7 @@ pub type Model {
     role_matrix: Option(models.RoleMatrix),
     matrix_status: LoadStatus,
     role_toggling: Option(#(String, String)),
+    online_user_ids: set.Set(String),
     active_filters: Dict(String, String),
   )
 }
@@ -63,6 +65,9 @@ pub type Msg {
   RetryLoadMatrix
   ToggleUserRole(user_id: String, role_name: String, add: Bool)
   UserRoleToggled(Result(Nil, types.ApiError))
+  // Online presence (role matrix dots)
+  OnlineUsersLoaded(Result(List(String), types.ApiError))
+  PresenceChanged(user_id: String, online: Bool)
   // Records filters / sort
   AddFilter(key: String, value: String)
   RemoveFilter(key: String)
@@ -95,12 +100,14 @@ pub fn init(
       role_matrix: None,
       matrix_status: load_status.Loading,
       role_toggling: None,
+      online_user_ids: set.new(),
       active_filters: effective_filters,
     )
   let effects =
     effect.batch([
       load_effect(admin_api.get_admin_stats, AdminStatsLoaded),
       load_effect(admin_api.get_role_matrix, RoleMatrixLoaded),
+      load_effect(admin_api.get_online_users, OnlineUsersLoaded),
       filters_fx,
     ])
   #(model, effects, [
@@ -297,6 +304,24 @@ pub fn update(
       effect.none(),
       handle_error(err, "Failed to update role"),
     )
+
+    OnlineUsersLoaded(Ok(ids)) -> #(
+      Model(..model, online_user_ids: set.from_list(ids)),
+      effect.none(),
+      [],
+    )
+
+    // Presence is a non-critical overlay; ignore load errors silently
+    // (stats/matrix loaders already surface auth failures).
+    OnlineUsersLoaded(Error(_)) -> #(model, effect.none(), [])
+
+    PresenceChanged(user_id, online) -> {
+      let ids = case online {
+        True -> set.insert(model.online_user_ids, user_id)
+        False -> set.delete(model.online_user_ids, user_id)
+      }
+      #(Model(..model, online_user_ids: ids), effect.none(), [])
+    }
 
     AddFilter(key, value) -> {
       let filters = dict.insert(model.active_filters, key, value)
@@ -534,6 +559,10 @@ fn role_matrix_row(
             html.text("admin"),
           ])
         False -> html.text("")
+      },
+      case set.contains(model.online_user_ids, user.id) {
+        True -> html.span([attribute.class("online-dot")], [])
+        False -> element.none()
       },
     ]),
     ..list.map(roles, fn(role) {

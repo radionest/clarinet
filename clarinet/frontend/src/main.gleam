@@ -866,6 +866,17 @@ fn delegate_sse(model: Model, smsg: sse.Msg) -> #(Model, Effect(Msg)) {
               }
             _ -> #(m, effs)
           }
+        sse.SsePresence(user_id, online) ->
+          // Presence dots only matter while the admin role matrix is open.
+          case m.page {
+            store.AdminPage(_) -> #(m, [
+              dispatch_msg(
+                store.AdminMsg(admin_page.PresenceChanged(user_id, online)),
+              ),
+              ..effs
+            ])
+            _ -> #(m, effs)
+          }
         sse.SseAuthExpired ->
           case m.user {
             Some(_) -> #(m, [dispatch_msg(store.Logout), ..effs])

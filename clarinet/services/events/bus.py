@@ -16,7 +16,7 @@ import asyncio
 from dataclasses import dataclass
 from uuid import UUID
 
-from clarinet.services.events.models import Event, TaskProgressEvent
+from clarinet.services.events.models import Event, PresenceEvent, TaskProgressEvent
 from clarinet.utils.logger import logger
 
 
@@ -40,6 +40,8 @@ def _allow(conn: SseConnection, event: Event) -> bool:
         if event.user_id is not None:
             return conn.user_id == event.user_id
         return conn.is_admin  # quarto renders: admins only
+    if isinstance(event, PresenceEvent):
+        return conn.is_admin  # presence is admin-only data
     # EntityEvent
     if conn.is_admin:
         return True

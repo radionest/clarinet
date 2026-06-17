@@ -48,7 +48,7 @@ from clarinet.models.record import Record, RecordType
 from clarinet.models.study import Series, Study
 from clarinet.models.user import User
 from clarinet.services.events.bus import get_event_bus
-from clarinet.services.events.models import EntityEvent, TaskProgressEvent
+from clarinet.services.events.models import EntityEvent, PresenceEvent, TaskProgressEvent
 from clarinet.utils.logger import logger
 
 _INFO_KEY = "clarinet_sse_events"  # per-transaction list[EntityEvent]
@@ -351,3 +351,16 @@ def emit_record_events(events: Iterable[EntityEvent]) -> None:
         return
     for ev in events:
         bus.publish(ev)
+
+
+def emit_presence(user_id: UUID, online: bool) -> None:
+    """Publish a user's online/offline transition.
+
+    Sessions (``AccessToken``) are not ORM-captured here, so the session
+    lifecycle layer (login / logout / revoke / cleanup) calls this explicitly,
+    marked ``# sse-capture:`` at the call site. No-op without a bus.
+    """
+    bus = get_event_bus()
+    if bus is None:
+        return
+    bus.publish(PresenceEvent(user_id=user_id, online=online))

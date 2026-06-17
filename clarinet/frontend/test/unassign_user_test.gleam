@@ -1,13 +1,13 @@
-// Unit tests for the admin "unassign user" update arms on the admin
-// dashboard and record execute pages. Effects are not executed — only the
-// returned Model and OutMsg list are asserted (same approach as
-// record_new_test).
+// Unit tests for admin dashboard update arms (unassign + online presence) and
+// the record execute page. Effects are not executed — only the returned Model
+// and OutMsg list are asserted (same approach as record_new_test).
 import api/models
 import api/types
 import cache
 import clarinet_frontend/i18n
 import gleam/dict
 import gleam/option.{None, Some}
+import gleam/set
 import gleeunit/should
 import pages/admin
 import pages/records/execute
@@ -73,6 +73,7 @@ fn make_admin_model() -> admin.Model {
     role_matrix: None,
     matrix_status: load_status.Loaded,
     role_toggling: None,
+    online_user_ids: set.new(),
     active_filters: dict.new(),
   )
 }
@@ -116,6 +117,34 @@ pub fn admin_unassign_auth_error_logs_out_test() {
       make_shared(),
     )
   out |> should.equal([shared.Logout])
+}
+
+pub fn admin_online_users_loaded_sets_ids_test() {
+  let #(model, _eff, out) =
+    admin.update(
+      make_admin_model(),
+      admin.OnlineUsersLoaded(Ok(["u1", "u2"])),
+      make_shared(),
+    )
+  model.online_user_ids |> set.contains("u1") |> should.be_true
+  model.online_user_ids |> set.contains("u2") |> should.be_true
+  out |> should.equal([])
+}
+
+pub fn admin_presence_online_inserts_user_test() {
+  let #(model, _eff, out) =
+    admin.update(make_admin_model(), admin.PresenceChanged("u9", True), make_shared())
+  model.online_user_ids |> set.contains("u9") |> should.be_true
+  out |> should.equal([])
+}
+
+pub fn admin_presence_offline_removes_user_test() {
+  let start =
+    admin.Model(..make_admin_model(), online_user_ids: set.from_list(["u9"]))
+  let #(model, _eff, out) =
+    admin.update(start, admin.PresenceChanged("u9", False), make_shared())
+  model.online_user_ids |> set.contains("u9") |> should.be_false
+  out |> should.equal([])
 }
 
 // --- record execute page ---

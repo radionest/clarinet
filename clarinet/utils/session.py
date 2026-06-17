@@ -39,6 +39,62 @@ async def get_user_sessions(
     return list(result.scalars().all())
 
 
+def _online_session_conditions(within_minutes: int | None) -> list[Any]:
+    """WHERE terms for a session that counts as "online" right now.
+
+    Mirrors ``read_token``'s own validity gate: not expired, and (when a window
+    is given) accessed within it. ``within_minutes=None`` counts any non-expired
+    session.
+    """
+    now = datetime.now(UTC)
+    conds: list[Any] = [AccessToken.expires_at > now]
+    if within_minutes:
+        conds.append(AccessToken.last_accessed > now - timedelta(minutes=within_minutes))
+    return conds
+
+
+async def get_online_user_ids(session: AsyncSession, within_minutes: int | None) -> set[UUID]:
+    """Distinct ids of users with at least one session valid "now".
+
+    Snapshot for the admin presence indicator; SSE presence events deliver the
+    live deltas on top.
+    """
+    stmt = (
+        select(col(AccessToken.user_id))
+        .where(*_online_session_conditions(within_minutes))
+        .distinct()
+    )
+    result = await session.execute(stmt)
+    return set(result.scalars().all())
+
+
+async def is_user_online(session: AsyncSession, user_id: UUID, within_minutes: int | None) -> bool:
+    """True if the user still has a session valid "now" — the offline-emit guard."""
+    stmt = (
+        select(col(AccessToken.token))
+        .where(col(AccessToken.user_id) == user_id, *_online_session_conditions(within_minutes))
+        .limit(1)
+    )
+    result = await session.execute(stmt)
+    return result.first() is not None
+
+
+async def emit_offline_if_last(session: AsyncSession, user_id: UUID) -> None:
+    """Emit presence ``offline`` for a user iff no live session remains.
+
+    One home for the delete -> re-check -> emit ordering shared by every
+    session-eviction path (logout, self-revoke, admin revoke, idle cleanup) so
+    the "still online via another session?" guard cannot drift between them.
+    The ``emit_presence`` import is local on purpose: ``capture`` pulls in the
+    ORM model graph, so a module-level import here would risk an import cycle
+    (same rationale as the ``# sse-capture:`` explicit emits). No-op without a bus.
+    """
+    from clarinet.services.events.capture import emit_presence
+
+    if not await is_user_online(session, user_id, settings.session_idle_timeout_minutes):
+        emit_presence(user_id, False)
+
+
 async def revoke_user_sessions(
     session: AsyncSession, user_id: UUID, except_token: str | None = None
 ) -> int:
@@ -62,6 +118,7 @@ async def revoke_user_sessions(
 
     if result.rowcount > 0:
         logger.info(f"Revoked {result.rowcount} sessions for user {user_id}")
+        await emit_offline_if_last(session, user_id)  # sse-capture: session lifecycle
 
     return result.rowcount
 

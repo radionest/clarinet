@@ -118,6 +118,23 @@ pub fn get_role_matrix() -> Promise(Result(models.RoleMatrix, ApiError)) {
   })
 }
 
+// Get ids of users currently online (role-matrix presence dots)
+pub fn get_online_users() -> Promise(Result(List(String), ApiError)) {
+  http_client.get("/admin/online-users")
+  |> promise.map(fn(res) {
+    result.try(res, http_client.decode_response(
+      _,
+      online_users_decoder(),
+      "Invalid online users data",
+    ))
+  })
+}
+
+fn online_users_decoder() -> decode.Decoder(List(String)) {
+  use user_ids <- decode.field("user_ids", decode.list(decode.string))
+  decode.success(user_ids)
+}
+
 // Add a role to a user
 pub fn add_user_role(
   user_id: String,

@@ -6,7 +6,7 @@ from uuid import uuid4
 import pytest
 
 from clarinet.services.events.bus import EventBus, SseConnection, _allow
-from clarinet.services.events.models import EntityEvent, TaskProgressEvent
+from clarinet.services.events.models import EntityEvent, PresenceEvent, TaskProgressEvent
 
 
 def _conn(*, is_admin: bool, user_id, allowed_types: set[str]) -> SseConnection:
@@ -54,6 +54,16 @@ def test_allow_rbac_matrix():
     assert _allow(user, my_task) is True
     assert _allow(user, others_task) is False
     assert _allow(user, quarto) is False
+
+
+def test_allow_presence_admin_only():
+    me = uuid4()
+    admin = _conn(is_admin=True, user_id=uuid4(), allowed_types=set())
+    user = _conn(is_admin=False, user_id=me, allowed_types=set())
+    ev = PresenceEvent(user_id=me, online=True)
+    # Admins get presence; a non-admin gets none — even about themselves.
+    assert _allow(admin, ev) is True
+    assert _allow(user, ev) is False
 
 
 @pytest.mark.asyncio

@@ -59,4 +59,18 @@ class TaskProgressEvent(BaseModel):
         )
 
 
-type Event = EntityEvent | TaskProgressEvent
+class PresenceEvent(BaseModel):
+    """A user coming online (session acquired) or going offline (last valid session gone).
+
+    Admin-only on the bus: presence reveals who is logged in, which is
+    admin-scoped data (it feeds the admin-only role matrix).
+    """
+
+    user_id: UUID
+    online: bool
+
+    def to_wire(self) -> str:
+        return json.dumps({"type": "presence", "user_id": str(self.user_id), "online": self.online})
+
+
+type Event = EntityEvent | TaskProgressEvent | PresenceEvent
