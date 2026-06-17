@@ -12,13 +12,28 @@
     font-weight: 500;
     line-height: 1.45;
     cursor: pointer;
-    transition: background-color 0.15s, border-color 0.15s, color 0.15s, box-shadow 0.15s;
+    transition: background-color 0.15s, border-color 0.15s, color 0.15s,
+        box-shadow 0.15s, transform 0.08s ease;
     text-decoration: none;
     text-align: center;
 
     &:focus-visible {
         outline: none;
         box-shadow: var(--focus-ring);
+    }
+
+    /* Pressed-in feedback — the button recesses into the paper. */
+    &:active {
+        transform: translateY(1px);
+        box-shadow: var(--shadow-inset);
+        filter: brightness(0.95);
+    }
+
+    /* Keyboard activation lights up :focus-visible AND :active at once
+       (equal specificity) — layer the focus ring on top of the pressed-in
+       shadow instead of letting :active clobber it. */
+    &:focus-visible:active {
+        box-shadow: var(--focus-ring), var(--shadow-inset);
     }
 
     &:disabled,
@@ -110,4 +125,17 @@
 .btn-block {
     display: block;
     width: 100%;
+}
+
+/* Reduced-motion: keep the pressed-in shadow + dim (static press feedback),
+   drop the positional nudge and its transition. */
+@media (prefers-reduced-motion: reduce) {
+    .btn {
+        transition: background-color 0.15s, border-color 0.15s, color 0.15s,
+            box-shadow 0.15s;
+    }
+
+    .btn:active {
+        transform: none;
+    }
 }
