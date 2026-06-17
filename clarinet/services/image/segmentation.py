@@ -322,6 +322,8 @@ class Segmentation(Image):
         Returns:
             New Segmentation with only the kept labels.
         """
+        if other.img.size == 1:
+            return Segmentation(template=self)  # empty other → empty intersection
         other = self._align_other(other, resample=resample)  # type: ignore[assignment]
         output = Segmentation(template=self)
         for region in self.label_props:
@@ -540,14 +542,8 @@ def conform_seg_to_grid(
     Raises:
         ImageError: If *out_path* has an unsupported extension.
     """
-    seg = Segmentation(autolabel=False)
-    seg.read(Path(seg_path))
-    reference = Image()
-    reference.read(Path(grid_path))
-
-    if seg.same_grid(reference, atol=atol):
-        return False
-
+    # Resolve target format up front so an unsupported extension fails before
+    # reading two images off disk.
     target = Path(out_path) if out_path is not None else Path(seg_path)
     suffixes = target.suffixes
     if ".nrrd" in suffixes:
@@ -556,6 +552,14 @@ def conform_seg_to_grid(
         filetype = FileType.NIFTI
     else:
         raise ImageError(f"Cannot infer format for {target.name}: expected .nrrd, .nii, or .nii.gz")
+
+    seg = Segmentation(autolabel=False)
+    seg.read(Path(seg_path))
+    reference = Image()
+    reference.read(Path(grid_path))
+
+    if seg.same_grid(reference, atol=atol):
+        return False
 
     conformed = seg.reindex_to(reference, order=0)
     conformed.save_as(target, filetype)

@@ -145,6 +145,8 @@ The dunder operators delegate to the named methods above and emit `DeprecationWa
 | `a + b` | `a.union(b)` | — |
 | `a ^ b` | `a.symmetric_difference(b, min_overlap=3)` | Inherits old `&` threshold |
 
+Because they delegate to the named methods, the operators also **raise `GeometryMismatchError` on grid mismatch** — there is no `resample` opt-in on the operator form, so migrate to the named method (`a.union(b, resample=True)`) if you need resampling.
+
 ### In-Place Operations
 
 | Method | Behavior |

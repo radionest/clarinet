@@ -145,13 +145,16 @@ class Image:
         return bool(np.allclose(self.affine_4x4, other.affine_4x4, atol=atol, rtol=0))
 
     def _grid_summary(self) -> str:
-        """One-line grid description for mismatch diagnostics."""
-        diag = tuple(round(float(self._direction[i, i]), 3) for i in range(3))
+        """One-line grid description for mismatch diagnostics.
+
+        Prints the full direction matrix (not just its diagonal) so an oblique
+        or off-diagonal flip is visible in the error, not only an axis-aligned one.
+        """
         return (
             f"shape={tuple(self.shape)}, "
             f"origin={tuple(round(float(x), 3) for x in self._origin)}, "
             f"spacing={tuple(round(float(x), 3) for x in self._spacing)}, "
-            f"dir_diag={diag}"
+            f"direction={np.round(self._direction, 3).tolist()}"
         )
 
     def assert_same_grid(self, other: Image, *, atol: float = 1e-4) -> None:

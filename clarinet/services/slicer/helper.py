@@ -129,10 +129,11 @@ def find_loaded_volume(path: str | None = None) -> Any:
 
     Args:
         path: If given, return the loaded volume whose storage file is the same
-            file (inode-aware). When no name match is found, falls back to the
-            sole scalar volume *only* when exactly one is loaded — with several
-            volumes in the scene the reference is ambiguous, so ``None`` is
-            returned to keep callers from validating against a foreign grid.
+            file (inode-aware), or ``None`` if no loaded volume matches — the
+            caller named a specific file, so substituting a different volume as
+            the reference grid would defeat the guard. When ``path`` is None,
+            falls back to the sole scalar volume, or ``None`` if several are
+            loaded (ambiguous reference).
 
     Returns:
         The matching ``vtkMRMLScalarVolumeNode``, or ``None`` if unresolved.
@@ -144,6 +145,7 @@ def find_loaded_volume(path: str | None = None) -> Any:
             file_name = storage.GetFileName() if storage else None
             if file_name and _same_volume_file(file_name, path):
                 return candidate
+        return None  # path requested but unmatched — don't substitute a foreign volume
     if len(volumes) == 1:
         return volumes[0]
     return None
@@ -194,6 +196,9 @@ def assert_segmentation_matches_volume(
     seg_dims = tuple(ref_geom.GetDimensions())
     vol_dims = tuple(volume_node.GetImageData().GetDimensions())
 
+    # In Slicer "world" space is RAS, so the segmentation's ImageToWorld matrix
+    # and the volume's IJKToRAS matrix live in the same space and are directly
+    # comparable (no LPS/RAS conversion needed here).
     seg_to_world = vtk.vtkMatrix4x4()
     ref_geom.GetImageToWorldMatrix(seg_to_world)
     vol_to_ras = vtk.vtkMatrix4x4()

@@ -1174,14 +1174,27 @@ class TestSpatialAlignment:
         """Set operations fail-fast on misaligned grids unless resample=True."""
         a = _make_seg(origin=(0.0, 0.0, 0.0))
         b = _make_seg(origin=(0.0, 0.0, 5.0))
-        with pytest.raises(GeometryMismatchError):
+        with pytest.raises(GeometryMismatchError, match="same physical grid") as exc:
             a.difference(b)
+        # diagnostic names both grids (self/other summaries with origin)
+        msg = str(exc.value)
+        assert "self" in msg and "other" in msg and "origin" in msg
         with pytest.raises(GeometryMismatchError):
             a.union(b)
         with pytest.raises(GeometryMismatchError):
             a.intersection(b)
         with pytest.raises(GeometryMismatchError):
             a.subtract(b)
+
+    def test_setops_size1_other_short_circuits_grid_guard(self) -> None:
+        """A size-1 (empty marker) other short-circuits before the grid guard."""
+        a = _make_seg(data=np.ones((10, 10, 10), dtype=np.uint8))
+        empty = Segmentation(autolabel=False)
+        empty.img = np.zeros((1, 1, 1), dtype=np.uint8)
+        # none of these raise GeometryMismatchError on the size-1 path
+        assert a.union(empty).img.shape == (10, 10, 10)
+        assert a.difference(empty).img.shape == (10, 10, 10)
+        assert a.intersection(empty).is_empty
 
     def test_setop_same_grid_needs_no_resample(self) -> None:
         """Matching grids take the fast path without resample."""
