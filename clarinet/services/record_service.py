@@ -28,7 +28,7 @@ if TYPE_CHECKING:
     from clarinet.models import User
     from clarinet.models.record_event import RecordEventKind
     from clarinet.repositories.record_event_repository import RecordEventRepository
-    from clarinet.repositories.record_repository import RecordRepository
+    from clarinet.repositories.record_repository import RecordRepository, RecordSearchCriteria
     from clarinet.services.recordflow.engine import RecordFlowEngine
     from clarinet.types import RecordData
 
@@ -351,13 +351,17 @@ class RecordService:
     ) -> Record:
         """Claim a record for a user with uniqueness constraint check.
 
+        Mirrors ``assign_user``: assigns the user, moves the record to
+        ``inwork`` and fires the RecordFlow status-change trigger, so taking a
+        task from the pool runs the same automation as an admin assignment.
+
         Args:
             record_id: Record ID.
             user_id: User UUID claiming the record.
             actor_id: Audit actor; ``None`` marks a system/worker call.
 
         Returns:
-            Updated record with inwork status.
+            Updated record (relations loaded) with inwork status.
 
         Raises:
             RecordConstraintViolationError: If unique_per_user is violated.
@@ -366,7 +370,8 @@ class RecordService:
         old_status = record.status
         await self._check_unique_per_user(user_id, record)
         self._mark_audit(record_id, actor_id)
-        updated = await self.repo.claim_record(record_id, user_id)
+        await self.repo.claim_record(record_id, user_id)
+        updated = await self.repo.get_with_relations(record_id)
         await self._record_event(
             record_id=record_id,
             kind="assigned",
@@ -375,7 +380,34 @@ class RecordService:
             to_status=updated.status,
             new_value={"user_id": str(user_id), "via": "claim"},
         )
+        if old_status != updated.status:
+            await self._fire_status_change(updated, old_status)
         return updated
+
+    async def claim_random_from_pool(
+        self,
+        criteria: RecordSearchCriteria,
+        user_id: UUID,
+        *,
+        actor_id: UUID | None = None,
+    ) -> Record | None:
+        """Claim a random record matching ``criteria`` for ``user_id``.
+
+        Picks one random record from the pool (typically an unassigned
+        ``pending`` record of a given type) and claims it via ``claim_record``.
+        Returns ``None`` when nothing matches, so the router can answer 404
+        without reaching into the repository itself.
+
+        ``find_random`` runs with ``for_update=True`` (``FOR UPDATE SKIP
+        LOCKED``): the chosen row is locked for this transaction until
+        ``claim_record`` commits, so a concurrent claimer skips it and two
+        users can never win the same pool record.
+        """
+        record = await self.repo.find_random(criteria, for_update=True)
+        if record is None:
+            return None
+        assert record.id is not None  # find_random returns a persisted record
+        return await self.claim_record(record.id, user_id, actor_id=actor_id)
 
     async def unassign_user(
         self, record_id: int, *, actor_id: UUID | None = None

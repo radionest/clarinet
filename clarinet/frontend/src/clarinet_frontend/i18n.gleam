@@ -128,14 +128,17 @@ pub type Key {
   HomeOverview
   HomeStudies
   HomeRecords
-  HomeMyRecords
   HomeViewAll
   HomeRecentStudies
   HomeNoRecentStudies
-  HomeQuickActions
-  HomeActionInWork
-  HomeActionMyPending
-  HomeActionFreePending
+  HomeMyTasks
+  HomeTakeTask
+  HomeTakeTaskPlaceholder
+  HomeNoPoolTasks
+  HomeWorklistEmpty
+  HomeOpenTask
+  HomeTaskTaken
+  HomeTakeTaskError
 
   // --- Records ---
   RecordsAllTitle
@@ -629,22 +632,28 @@ pub fn translate(locale: Locale, key: Key) -> String {
     Ru, HomeStudies -> "Исследования"
     En, HomeRecords -> "Records"
     Ru, HomeRecords -> "Записи"
-    En, HomeMyRecords -> "My Records"
-    Ru, HomeMyRecords -> "Мои записи"
     En, HomeViewAll -> "View all →"
     Ru, HomeViewAll -> "Показать все →"
     En, HomeRecentStudies -> "Recent Studies"
     Ru, HomeRecentStudies -> "Недавние исследования"
     En, HomeNoRecentStudies -> "No recent studies found."
     Ru, HomeNoRecentStudies -> "Нет недавних исследований."
-    En, HomeQuickActions -> "My Tasks"
-    Ru, HomeQuickActions -> "Мои задачи"
-    En, HomeActionInWork -> "In progress"
-    Ru, HomeActionInWork -> "В работе"
-    En, HomeActionMyPending -> "Assigned to me"
-    Ru, HomeActionMyPending -> "Назначенные мне"
-    En, HomeActionFreePending -> "Available tasks"
-    Ru, HomeActionFreePending -> "Свободные задачи"
+    En, HomeMyTasks -> "My Tasks"
+    Ru, HomeMyTasks -> "Мои задачи"
+    En, HomeTakeTask -> "Take a task"
+    Ru, HomeTakeTask -> "Взять задачу"
+    En, HomeTakeTaskPlaceholder -> "Select task type"
+    Ru, HomeTakeTaskPlaceholder -> "Выберите тип задачи"
+    En, HomeNoPoolTasks -> "No tasks available to take"
+    Ru, HomeNoPoolTasks -> "Нет доступных задач"
+    En, HomeWorklistEmpty -> "No tasks"
+    Ru, HomeWorklistEmpty -> "Нет задач"
+    En, HomeOpenTask -> "Open"
+    Ru, HomeOpenTask -> "Открыть"
+    En, HomeTaskTaken -> "Task taken"
+    Ru, HomeTaskTaken -> "Задача взята"
+    En, HomeTakeTaskError -> "Couldn't take a task"
+    Ru, HomeTakeTaskError -> "Не удалось взять задачу"
 
     // --- Records ---
     En, RecordsAllTitle -> "All Records"
