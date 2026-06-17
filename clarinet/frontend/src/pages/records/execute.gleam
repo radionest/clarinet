@@ -25,12 +25,14 @@ import gleam/bool
 import gleam/dict
 import gleam/dynamic.{type Dynamic}
 import gleam/dynamic/decode
+import gleam/float
 import gleam/int
 import gleam/javascript/promise
 import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/set.{type Set}
+import gleam/string
 import lustre/attribute
 import lustre/effect.{type Effect}
 import lustre/element.{type Element}
@@ -39,6 +41,7 @@ import lustre/event
 import plinth/javascript/global
 import router
 import shared.{type OutMsg, type Shared}
+import utils/json_utils
 import utils/load_status.{type LoadStatus}
 import utils/logger
 import utils/permissions
@@ -1696,7 +1699,8 @@ fn render_dynamic_form(
             model.record_id,
             record,
           )
-        False -> render_readonly_data(record)
+        False ->
+          render_readonly_form(schema_json, record_type.ui_schema, record)
       }
     }
     None -> {
@@ -1729,6 +1733,10 @@ fn render_dynamic_form(
                 ],
                 [html.text("Re-submit")],
               ),
+              case record.data {
+                Some(data) -> render_stored_data(data)
+                None -> element.none()
+              },
             ])
           _, _ ->
             html.div([], [
@@ -1736,13 +1744,31 @@ fn render_dynamic_form(
                 html.text("This record does not have a data form defined."),
               ]),
               case record.data {
-                Some(data) -> render_raw_data(data)
+                Some(data) -> render_stored_data(data)
                 None -> html.text("No data submitted.")
               },
             ])
         },
       ])
     }
+  }
+}
+
+// Append the formosh ui_schema attribute, skipping the backend's
+// default-factory empty value: record types without a ui_schema serialize it
+// as "{}", which formosh would parse into an empty UiSchema anyway — emitting
+// it just adds noise. Shared by the editable and read-only form renderers.
+fn append_ui_schema(
+  attrs: List(attribute.Attribute(Msg)),
+  ui_schema_json: Option(String),
+) -> List(attribute.Attribute(Msg)) {
+  case ui_schema_json {
+    Some(ui) ->
+      case ui == "" || ui == "{}" {
+        True -> attrs
+        False -> list.append(attrs, [formosh_component.ui_schema_string(ui)])
+      }
+    None -> attrs
   }
 }
 
@@ -1770,18 +1796,7 @@ fn render_editable_form(
     event.on("formosh-submit", decode_form_submit()),
   ]
 
-  // Default-factory on the backend produces ui_schema="{}" for record types
-  // that don't set one. Skip the attribute in that case — formosh would parse
-  // {} into an empty UiSchema anyway, so emitting it adds noise without effect.
-  let attrs_with_ui = case ui_schema_json {
-    Some(ui) ->
-      case ui == "" || ui == "{}" {
-        True -> base_attrs
-        False ->
-          list.append(base_attrs, [formosh_component.ui_schema_string(ui)])
-      }
-    None -> base_attrs
-  }
+  let attrs_with_ui = append_ui_schema(base_attrs, ui_schema_json)
 
   let attrs = case record.data {
     Some(data) ->
@@ -1810,13 +1825,29 @@ fn decode_form_submit() -> decode.Decoder(Msg) {
   }
 }
 
-fn render_readonly_data(record: Record) -> Element(Msg) {
+// Read-only "review" rendering for a finished, non-editable record: the same
+// formosh component as the editable form, but in `read_only` mode — every
+// field is a static "label → value" row (no inputs, no submit). Reuses the
+// record type's schema + ui_schema so labels, enums, units and field order
+// match exactly what the user saw while filling the form.
+fn render_readonly_form(
+  schema_json: String,
+  ui_schema_json: Option(String),
+  record: Record,
+) -> Element(Msg) {
   case record.data {
-    Some(data) -> render_raw_data(data)
     None ->
       html.div([attribute.class("no-data")], [
         html.p([], [html.text("No data submitted yet")]),
       ])
+    Some(data) -> {
+      let base_attrs = [
+        formosh_component.schema_string(schema_json),
+        formosh_component.read_only(True),
+        formosh_component.initial_values_string(data),
+      ]
+      formosh_component.element(append_ui_schema(base_attrs, ui_schema_json))
+    }
   }
 }
 
@@ -1935,6 +1966,64 @@ fn render_raw_data(data: String) -> Element(Msg) {
       html.code([], [html.text(data)]),
     ]),
   ])
+}
+
+// Schema-less fallback (results from Slicer/pipeline with no data_schema):
+// render the stored JSON object as a humanized key/value summary. Keys are
+// sorted because the decoder does not preserve JSON object order; payloads
+// that aren't a flat object fall back to the raw JSON block.
+fn render_stored_data(data: String) -> Element(Msg) {
+  case json.parse(data, decode.dict(decode.string, decode.dynamic)) {
+    Ok(fields) ->
+      case dict.size(fields) {
+        0 -> render_raw_data(data)
+        _ ->
+          html.dl(
+            [attribute.class("record-data-summary")],
+            dict.to_list(fields)
+              |> list.sort(fn(a, b) { string.compare(a.0, b.0) })
+              |> list.flat_map(fn(pair) { data_row(pair.0, pair.1) }),
+          )
+      }
+    Error(_) -> render_raw_data(data)
+  }
+}
+
+fn data_row(key: String, value: Dynamic) -> List(Element(Msg)) {
+  [
+    html.dt([], [html.text(humanize_key(key))]),
+    html.dd([], [html.text(format_dynamic(value))]),
+  ]
+}
+
+fn humanize_key(key: String) -> String {
+  key |> string.replace("_", " ") |> string.capitalise()
+}
+
+fn format_dynamic(value: Dynamic) -> String {
+  case decode.run(value, decode.string) {
+    Ok(s) -> s
+    Error(_) ->
+      case decode.run(value, decode.int) {
+        Ok(i) -> int.to_string(i)
+        Error(_) ->
+          case decode.run(value, decode.float) {
+            Ok(f) -> float.to_string(f)
+            Error(_) ->
+              case decode.run(value, decode.bool) {
+                Ok(True) -> "Yes"
+                Ok(False) -> "No"
+                Error(_) ->
+                  case decode.run(value, decode.list(decode.dynamic)) {
+                    Ok([]) -> "—"
+                    Ok(items) ->
+                      list.map(items, format_dynamic) |> string.join(", ")
+                    Error(_) -> json_utils.dynamic_to_string(value)
+                  }
+              }
+          }
+      }
+  }
 }
 
 fn loading_view(record_id: String) -> Element(Msg) {

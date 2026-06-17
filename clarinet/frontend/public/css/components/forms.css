@@ -335,6 +335,67 @@ formosh-form::part(description) {
     margin-top: var(--spacing-xs);
 }
 
+/* Read-only (review) mode — static "label → value" summary rendered when the
+   component has read-only="true". No inputs: the stored result is shown,
+   immutable. */
+formosh-form::part(readonly-field) {
+    display: grid;
+    grid-template-columns: minmax(8rem, 14rem) 1fr;
+    gap: var(--spacing-md);
+    align-items: baseline;
+    padding: 0.45rem 0;
+    border-bottom: 1px solid var(--hairline);
+}
+
+formosh-form::part(readonly-label) {
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--ink-soft);
+}
+
+formosh-form::part(readonly-value) {
+    color: var(--ink);
+    font-size: 0.9rem;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+formosh-form::part(readonly-group) {
+    margin: var(--spacing-md) 0;
+}
+
+formosh-form::part(readonly-group-label) {
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--ink-soft);
+    margin-bottom: var(--spacing-xs);
+}
+
+formosh-form::part(readonly-table) {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.875rem;
+}
+
+formosh-form::part(readonly-th) {
+    text-align: left;
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--ink-soft);
+    padding: 0.4rem 0.6rem;
+    border-bottom: 2px solid var(--hairline-strong);
+}
+
+formosh-form::part(readonly-td) {
+    padding: 0.4rem 0.6rem;
+    border-bottom: 1px solid var(--hairline);
+    color: var(--ink);
+}
+
 /* Array (list) fields */
 .array-item {
     border: 1px solid var(--hairline);
