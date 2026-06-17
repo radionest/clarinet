@@ -10,6 +10,7 @@ import api/models.{type PipelineRun, type RecordEvent}
 import api/types.{type ApiError, AuthError}
 import clarinet_frontend/i18n.{type Key}
 import components/forms/base
+import gleam/bool
 import gleam/float
 import gleam/int
 import gleam/javascript/promise.{type Promise}
@@ -31,8 +32,9 @@ import utils/load_status.{type LoadStatus}
 // pushes coalesces into a single refetch, capping the refresh rate to ~1/s.
 const refresh_throttle_ms = 1000
 
-// How long a freshly-arrived row keeps its highlight before the flash clears.
-const highlight_window_ms = 2500
+// How long a freshly-arrived row keeps its highlight; matches the CSS
+// `activity-row-flash` animation (2s) so the class clears as the flash ends.
+const highlight_window_ms = 2000
 
 pub type ActivityTab {
   EventsTab
@@ -169,7 +171,10 @@ pub fn init(source: Source) -> #(Model, Effect(Msg), List(OutMsg)) {
 
 pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg), List(OutMsg)) {
   case msg {
-    TabSelected(tab) ->
+    TabSelected(tab) -> {
+      // Clicking the already-active tab is a no-op — don't refetch or drop the
+      // current highlight.
+      use <- bool.guard(tab == model.tab, #(model, effect.none(), []))
       case model.source {
         // The live admin feed: cancel any queued refresh/highlight, switch, and
         // silently refetch the now-visible tab so it reflects changes that
@@ -201,6 +206,7 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg), List(OutMsg)) {
         // original instant, fetch-free switch.
         _ -> #(Model(..model, tab: tab), effect.none(), [])
       }
+    }
 
     EventsLoaded(gen, result) ->
       case gen == model.events_gen {
@@ -319,7 +325,7 @@ fn auth_out(err: ApiError) -> List(OutMsg) {
   }
 }
 
-// --- SSE live refresh ---
+// --- SSE live refresh helpers ---
 
 /// Apply an events fetch. The initial / filter / retry load (status `Loading`)
 /// just shows the data; a silent SSE refetch (status already `Loaded`) keeps the

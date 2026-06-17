@@ -168,6 +168,13 @@
     animation: activity-row-flash 2s ease-out;
 }
 
+/* Respect reduced-motion: keep the row update, drop the flash pulse */
+@media (prefers-reduced-motion: reduce) {
+    .activity-row-new {
+        animation: none;
+    }
+}
+
 /* Admin assignment dropdown */
 .assign-cell {
     display: flex;
