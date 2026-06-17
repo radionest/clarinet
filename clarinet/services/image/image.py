@@ -12,7 +12,12 @@ import nibabel.loadsave
 import nrrd
 import numpy as np
 
-from clarinet.exceptions.domain import ImageError, ImageReadError, ImageWriteError
+from clarinet.exceptions.domain import (
+    GeometryMismatchError,
+    ImageError,
+    ImageReadError,
+    ImageWriteError,
+)
 from clarinet.utils.logger import logger
 
 # Internal representation uses LPS (DICOM native). NIfTI uses RAS.
@@ -128,11 +133,45 @@ class Image:
         A[:3, 3] = np.array(self._origin)
         return A
 
-    def _same_grid(self, other: Image, *, atol: float = 1e-4) -> bool:
-        """Check whether two images share the same voxel grid."""
+    def same_grid(self, other: Image, *, atol: float = 1e-4) -> bool:
+        """Check whether two images share the same voxel grid.
+
+        Grid identity = same shape AND ``affine_4x4`` (origin, spacing, direction)
+        equal within ``atol``. Tolerance — not exact equality — because on-disk
+        formats carry different float precision (cf. ITK Coordinate/DirectionTolerance).
+        """
         if self.shape != other.shape:
             return False
         return bool(np.allclose(self.affine_4x4, other.affine_4x4, atol=atol, rtol=0))
+
+    def _grid_summary(self) -> str:
+        """One-line grid description for mismatch diagnostics.
+
+        Prints the full direction matrix (not just its diagonal) so an oblique
+        or off-diagonal flip is visible in the error, not only an axis-aligned one.
+        """
+        return (
+            f"shape={tuple(self.shape)}, "
+            f"origin={tuple(round(float(x), 3) for x in self._origin)}, "
+            f"spacing={tuple(round(float(x), 3) for x in self._spacing)}, "
+            f"direction={np.round(self._direction, 3).tolist()}"
+        )
+
+    def assert_same_grid(self, other: Image, *, atol: float = 1e-4) -> None:
+        """Raise :class:`GeometryMismatchError` if *other* is not on this image's grid.
+
+        Fail-fast guard mirroring ITK's ``VerifyInputInformation``. Use before any
+        index-wise overlay of two images/segmentations that must share a grid.
+        """
+        if self.same_grid(other, atol=atol):
+            return
+        raise GeometryMismatchError(
+            "Images do not occupy the same physical grid:\n"
+            f"  self : {self._grid_summary()}\n"
+            f"  other: {other._grid_summary()}\n"
+            "Resample onto a common grid (reindex_to / conform_seg_to_grid) "
+            "or pass resample=True to opt into automatic nearest-neighbour resampling."
+        )
 
     def reindex_to(self, target: Image, *, order: Literal[0, 1] = 1) -> Self:
         """Resample this image into *target*'s voxel grid.

@@ -101,22 +101,145 @@ def _resolve_overwrite_mode(mode: OverwriteMode) -> int:
         raise SlicerHelperError(f"Unsupported overwrite mode: {mode!r}")
 
 
-def export_segmentation(name: str, output_path: str) -> str:
+def _matrices_match(a: Any, b: Any, tol: float = 0.1) -> bool:
+    """Coarse same-grid check: max abs elementwise diff of two vtk 4x4 matrices.
+
+    The same absolute ``tol`` is applied to translation (mm) and to direction
+    cosines (dimensionless, |·| <= 1) — tight enough to catch a mask drawn on a
+    different study or a flipped axis (grids differ by whole voxels / a sign),
+    loose enough to absorb float round-trips through geometry serialization.
+    """
+    for r in range(3):
+        for c in range(4):
+            if abs(a.GetElement(r, c) - b.GetElement(r, c)) > tol:
+                return False
+    return True
+
+
+def _same_volume_file(a: str, b: str) -> bool:
+    """Inode-aware path comparison (Slicer may normalize/realpath stored names)."""
+    try:
+        return os.path.samefile(a, b)
+    except OSError:
+        return os.path.realpath(a) == os.path.realpath(b)
+
+
+def find_loaded_volume(path: str | None = None) -> Any:
+    """Resolve the reference scalar volume node in the current Slicer scene.
+
+    Args:
+        path: If given, return the loaded volume whose storage file is the same
+            file (inode-aware), or ``None`` if no loaded volume matches — the
+            caller named a specific file, so substituting a different volume as
+            the reference grid would defeat the guard. When ``path`` is None,
+            falls back to the sole scalar volume, or ``None`` if several are
+            loaded (ambiguous reference).
+
+    Returns:
+        The matching ``vtkMRMLScalarVolumeNode``, or ``None`` if unresolved.
+    """
+    volumes = list(slicer.util.getNodesByClass("vtkMRMLScalarVolumeNode"))
+    if path:
+        for candidate in volumes:
+            storage = candidate.GetStorageNode()
+            file_name = storage.GetFileName() if storage else None
+            if file_name and _same_volume_file(file_name, path):
+                return candidate
+        return None  # path requested but unmatched — don't substitute a foreign volume
+    if len(volumes) == 1:
+        return volumes[0]
+    return None
+
+
+def assert_segmentation_matches_volume(
+    segmentation: Any,
+    volume_node: Any,
+    *,
+    tol: float = 0.1,
+) -> None:
+    """Raise if a segmentation's reference geometry does not match a volume's grid.
+
+    Save-time fail-fast guard. A segmentation drawn or imported on a foreign grid
+    (a different study, or a volume regenerated with a flipped axis) would export
+    onto a grid inconsistent with ``volume.nii.gz`` — silently shifting or
+    mirroring the mask relative to the canonical series volume, which downstream
+    index-wise consumers then read as zero overlap. Call this before
+    ``export_segmentation`` (or pass ``reference_volume=`` to it) so the mismatch
+    fails loudly at the source instead of corrupting saved data.
+
+    Compares the segmentation's reference image geometry (dimensions +
+    voxel-to-world matrix) against the volume within ``tol``. A no-op when the
+    segmentation has no recorded reference geometry or ``volume_node`` is None.
+
+    Args:
+        segmentation: ``vtkMRMLSegmentationNode`` or ``SegmentationBuilder``.
+        volume_node: Reference ``vtkMRMLScalarVolumeNode`` (e.g. from
+            ``find_loaded_volume``). ``None`` skips the check.
+        tol: Absolute tolerance for both translation (mm) and direction cosines.
+
+    Raises:
+        SlicerHelperError: On dimension or voxel-to-world mismatch.
+    """
+    if volume_node is None:
+        return
+    seg_node = getattr(segmentation, "node", segmentation)
+    seg = seg_node.GetSegmentation()
+
+    geom_param = slicer.vtkSegmentationConverter.GetReferenceImageGeometryParameterName()
+    geom_str = seg.GetConversionParameter(geom_param)
+    if not geom_str:
+        return  # no reference geometry recorded — nothing to compare
+
+    ref_geom = slicer.vtkOrientedImageData()
+    slicer.vtkSegmentationConverter.DeserializeImageGeometry(geom_str, ref_geom, False)
+
+    seg_dims = tuple(ref_geom.GetDimensions())
+    vol_dims = tuple(volume_node.GetImageData().GetDimensions())
+
+    # In Slicer "world" space is RAS, so the segmentation's ImageToWorld matrix
+    # and the volume's IJKToRAS matrix live in the same space and are directly
+    # comparable (no LPS/RAS conversion needed here).
+    seg_to_world = vtk.vtkMatrix4x4()
+    ref_geom.GetImageToWorldMatrix(seg_to_world)
+    vol_to_ras = vtk.vtkMatrix4x4()
+    volume_node.GetIJKToRASMatrix(vol_to_ras)
+
+    if seg_dims != vol_dims or not _matrices_match(seg_to_world, vol_to_ras, tol):
+        raise SlicerHelperError(
+            "Segmentation geometry does not match the volume grid "
+            f"(seg dims={seg_dims} vs volume dims={vol_dims}). The mask was drawn or "
+            "imported on a foreign grid (different study, or a volume regenerated "
+            "with a flipped axis) and would export inconsistent with the volume. "
+            "Re-segment on the loaded volume, or conform the saved file to the "
+            "volume grid (clarinet.services.image.conform_seg_to_grid)."
+        )
+
+
+def export_segmentation(name: str, output_path: str, *, reference_volume: Any = None) -> str:
     """Find segmentation node by name, export to file, and verify.
 
     Args:
         name: Display name of the segmentation node in the scene.
         output_path: Absolute path where the segmentation file will be saved.
+        reference_volume: Optional ``vtkMRMLScalarVolumeNode``. When provided, the
+            segmentation's reference geometry is checked against this volume's grid
+            before export and a mismatch raises ``SlicerHelperError`` (save-time
+            fail-fast guard — see ``assert_segmentation_matches_volume``). ``None``
+            skips the check (backward-compatible default).
 
     Returns:
         The output_path on success.
 
     Raises:
-        SlicerHelperError: If the node is not found or the file was not created.
+        SlicerHelperError: If the node is not found, the geometry guard fails, or
+            the file was not created.
     """
     seg_node = slicer.util.getNode(name)
     if seg_node is None:
         raise SlicerHelperError(f"Segmentation node '{name}' not found in scene")
+
+    if reference_volume is not None:
+        assert_segmentation_matches_volume(seg_node, reference_volume)
 
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     slicer.util.exportNode(seg_node, output_path)

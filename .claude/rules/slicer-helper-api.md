@@ -8,7 +8,9 @@ paths:
 ## Module-level functions
 
 - `SlicerHelperError(Exception)` — lightweight exception for helper errors
-- `export_segmentation(name, output_path)` → exports segmentation node to file
+- `export_segmentation(name, output_path, *, reference_volume=None)` → exports segmentation node to file; with `reference_volume` (a `vtkMRMLScalarVolumeNode`) runs the save-time geometry guard first (raises `SlicerHelperError` on grid mismatch)
+- `find_loaded_volume(path=None)` → reference `vtkMRMLScalarVolumeNode`: matches a loaded volume by storage filename (inode-aware), else the sole scalar volume, else `None` (ambiguous with several volumes)
+- `assert_segmentation_matches_volume(segmentation, volume_node, *, tol=0.1)` → save-time fail-fast guard: raises `SlicerHelperError` if the segmentation's reference geometry (dims + voxel-to-world matrix) differs from `volume_node`'s grid. No-op when `volume_node` is None or no reference geometry is recorded. Mirrors the geometry check that was inline in nir_liver `segment_validator.py`
 - `clear_scene()` → calls `slicer.mrmlScene.Clear(0)`
 - `store_record_id(rid)` — saves record ID to `slicer.modules` (called automatically after `/open`)
 - `validate_record_id(rid)` — checks stored record ID matches expected (called automatically before validation); raises `SlicerHelperError` on mismatch or if no record was opened

@@ -125,6 +125,14 @@ All set operations are **label-based** (operate on connected-component labels), 
 
 **Strict difference** (`max_overlap=0`, the default): drops any label with nonzero overlap. Use `max_overlap=N` to tolerate small overlaps.
 
+**Grid alignment (fail-fast)**: every set operation compares the two segmentations **by voxel index**, so both must occupy the same physical grid. By default a grid mismatch (different shape, origin, spacing, or direction — e.g. a Z-flipped projection vs. its doctor segmentation) raises `GeometryMismatchError` instead of silently producing wrong results. Pass `resample=True` to opt into automatic nearest-neighbour resampling of `other` onto the caller's grid. This mirrors ITK's "same physical space" guard plus an explicit `ResampleImageFilter`.
+
+| Helper | Returns | Purpose |
+|---|---|---|
+| `a.same_grid(b, *, atol=1e-4)` | `bool` | Grids equal within tolerance (shape + affine). |
+| `a.assert_same_grid(b, *, atol=1e-4)` | `None` | Raises `GeometryMismatchError` with a diagnostic if grids differ. |
+| `conform_seg_to_grid(seg_path, grid_path, *, out_path=None)` | `bool` | Repair helper: resample a `.seg.nrrd` onto a reference volume's grid (in place or to `out_path`); returns whether a resample was needed. For batch-fixing historically misaligned files. |
+
 ### Deprecated Operators
 
 The dunder operators delegate to the named methods above and emit `DeprecationWarning`. They preserve the old hardcoded thresholds for backward compatibility.
@@ -137,12 +145,14 @@ The dunder operators delegate to the named methods above and emit `DeprecationWa
 | `a + b` | `a.union(b)` | — |
 | `a ^ b` | `a.symmetric_difference(b, min_overlap=3)` | Inherits old `&` threshold |
 
+Because they delegate to the named methods, the operators also **raise `GeometryMismatchError` on grid mismatch** — there is no `resample` opt-in on the operator form, so migrate to the named method (`a.union(b, resample=True)`) if you need resampling.
+
 ### In-Place Operations
 
 | Method | Behavior |
 |---|---|
-| `subtract(other)` | Zeros out voxels where `other` is nonzero (voxel-level, not label-level) |
-| `append(other)` | Merges ROIs from `other` into matching labels. Raises `ValueError` if an ROI overlaps multiple labels. |
+| `subtract(other, *, resample=False)` | Zeros out voxels where `other` is nonzero (voxel-level, not label-level). Grid mismatch → `GeometryMismatchError` unless `resample=True`. |
+| `append(other, *, resample=False)` | Merges ROIs from `other` into matching labels. Raises `ValueError` if an ROI overlaps multiple labels. Grid mismatch → `GeometryMismatchError` unless `resample=True`. |
 | `copy_from(other)` | Replaces voxel data entirely |
 | `separate_labels()` | Re-runs connected-component labeling |
 

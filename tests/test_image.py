@@ -11,12 +11,13 @@ import pydicom.uid
 import pytest
 from pydicom.dataset import FileDataset
 
-from clarinet.exceptions.domain import ImageError, ImageReadError
+from clarinet.exceptions.domain import GeometryMismatchError, ImageError, ImageReadError
 from clarinet.services.image import (
     FileType,
     Image,
     Segmentation,
     coco_to_segmentation,
+    conform_seg_to_grid,
 )
 from clarinet.services.image.dicom_volume import read_dicom_series
 
@@ -997,33 +998,33 @@ class TestSpatialAlignment:
     def test_same_grid_true(self) -> None:
         a = _make_seg(origin=(1.0, 2.0, 3.0))
         b = _make_seg(origin=(1.0, 2.0, 3.0))
-        assert a._same_grid(b)
+        assert a.same_grid(b)
 
     def test_same_grid_false_origin(self) -> None:
         a = _make_seg(origin=(0.0, 0.0, 0.0))
         b = _make_seg(origin=(0.0, 0.0, 1.0))
-        assert not a._same_grid(b)
+        assert not a.same_grid(b)
 
     def test_same_grid_false_shape(self) -> None:
         a = _make_seg(shape=(10, 10, 10))
         b = _make_seg(shape=(10, 10, 12))
-        assert not a._same_grid(b)
+        assert not a.same_grid(b)
 
     def test_same_grid_false_spacing(self) -> None:
         a = _make_seg(spacing=(1.0, 1.0, 1.0))
         b = _make_seg(spacing=(1.0, 1.0, 2.0))
-        assert not a._same_grid(b)
+        assert not a.same_grid(b)
 
     def test_same_grid_false_direction(self) -> None:
         a = _make_seg()
         flipped = np.array([[1, 0, 0], [0, 1, 0], [0, 0, -1]], dtype=float)
         b = _make_seg(direction=flipped)
-        assert not a._same_grid(b)
+        assert not a.same_grid(b)
 
     def test_same_grid_within_tolerance(self) -> None:
         a = _make_seg(origin=(0.0, 0.0, 0.0))
         b = _make_seg(origin=(0.0, 0.0, 1e-6))
-        assert a._same_grid(b)
+        assert a.same_grid(b)
 
     # -- reindex_to --
 
@@ -1109,7 +1110,7 @@ class TestSpatialAlignment:
             data=proj_data,
         )
 
-        fp = seg.difference(proj, max_overlap_ratio=0.05)
+        fp = seg.difference(proj, max_overlap_ratio=0.05, resample=True)
         assert fp.count == 0  # no false positives
 
     def test_union_with_different_origin(self) -> None:
@@ -1123,7 +1124,7 @@ class TestSpatialAlignment:
         data_b[2:5, 2:5, 0:3] = 1  # same physical location as a's blob
         b = _make_seg(shape=shape, origin=(0.0, 0.0, 2.0), data=data_b)
 
-        result = a.union(b)
+        result = a.union(b, resample=True)
         # The blob from b should land at k=2..4 in a's space
         assert np.sum(result.img[2:5, 2:5, 2:5]) > 0
 
@@ -1145,7 +1146,7 @@ class TestSpatialAlignment:
             data=data_other,
         )
 
-        seg.subtract(other)
+        seg.subtract(other, resample=True)
         # After subtract, blob at k=7..9 should be zeroed
         assert np.sum(seg.img[2:5, 2:5, 7:10]) == 0
 
@@ -1154,3 +1155,123 @@ class TestSpatialAlignment:
         b = _make_seg()
         aligned = a._align_other(b)
         assert aligned is b  # no copy, same object
+
+    # -- assert_same_grid + fail-fast set operations --
+
+    def test_assert_same_grid_passes(self) -> None:
+        a = _make_seg(origin=(1.0, 2.0, 3.0))
+        b = _make_seg(origin=(1.0, 2.0, 3.0))
+        a.assert_same_grid(b)  # no raise
+
+    def test_assert_same_grid_raises_on_flip(self) -> None:
+        a = _make_seg()
+        flipped = np.array([[1, 0, 0], [0, 1, 0], [0, 0, -1]], dtype=float)
+        b = _make_seg(direction=flipped)
+        with pytest.raises(GeometryMismatchError, match="same physical grid"):
+            a.assert_same_grid(b)
+
+    def test_setop_raises_on_grid_mismatch_by_default(self) -> None:
+        """Set operations fail-fast on misaligned grids unless resample=True."""
+        a = _make_seg(origin=(0.0, 0.0, 0.0))
+        b = _make_seg(origin=(0.0, 0.0, 5.0))
+        with pytest.raises(GeometryMismatchError, match="same physical grid") as exc:
+            a.difference(b)
+        # diagnostic names both grids (self/other summaries with origin)
+        msg = str(exc.value)
+        assert "self" in msg and "other" in msg and "origin" in msg
+        with pytest.raises(GeometryMismatchError):
+            a.union(b)
+        with pytest.raises(GeometryMismatchError):
+            a.intersection(b)
+        with pytest.raises(GeometryMismatchError):
+            a.subtract(b)
+
+    def test_setops_size1_other_short_circuits_grid_guard(self) -> None:
+        """A size-1 (empty marker) other short-circuits before the grid guard."""
+        a = _make_seg(data=np.ones((10, 10, 10), dtype=np.uint8))
+        empty = Segmentation(autolabel=False)
+        empty.img = np.zeros((1, 1, 1), dtype=np.uint8)
+        # none of these raise GeometryMismatchError on the size-1 path
+        assert a.union(empty).img.shape == (10, 10, 10)
+        assert a.difference(empty).img.shape == (10, 10, 10)
+        assert a.intersection(empty).is_empty
+
+    def test_setop_same_grid_needs_no_resample(self) -> None:
+        """Matching grids take the fast path without resample."""
+        data = np.zeros((10, 10, 10), dtype=np.uint8)
+        data[2:5, 2:5, 2:5] = 1
+        a = _make_seg(data=data)
+        b = _make_seg(data=data.copy())
+        result = a.union(b)  # no resample arg
+        assert np.sum(result.img) > 0
+
+
+class TestConformSegToGrid:
+    """Tests for the conform_seg_to_grid repair helper."""
+
+    @staticmethod
+    def _write_volume(path: Path, shape: tuple[int, ...]) -> Image:
+        vol = Image()
+        vol._direction = np.eye(3)
+        vol._origin = (0.0, 0.0, 0.0)
+        vol._spacing = (1.0, 1.0, 1.0)
+        vol.img = np.zeros(shape, dtype=np.uint8)
+        vol.save_as(path, FileType.NIFTI)
+        return vol
+
+    def test_conform_resamples_flipped_seg(self, tmp_path: Path) -> None:
+        shape = (10, 10, 10)
+        vol_path = tmp_path / "volume.nii.gz"
+        vol = self._write_volume(vol_path, shape)
+
+        # Segmentation: Z-flipped, blob at high k (mirrors the production bug)
+        seg_data = np.zeros(shape, dtype=np.uint8)
+        seg_data[3:6, 3:6, 7:10] = 4
+        flipped = np.array([[1, 0, 0], [0, 1, 0], [0, 0, -1]], dtype=float)
+        seg_path = tmp_path / "seg.seg.nrrd"
+        _make_seg(origin=(0.0, 0.0, 9.0), direction=flipped, data=seg_data).save_as(
+            seg_path, FileType.NRRD
+        )
+
+        changed = conform_seg_to_grid(seg_path, vol_path)
+        assert changed is True
+
+        fixed = Segmentation(autolabel=False)
+        fixed.read(seg_path)
+        assert fixed.same_grid(vol)
+        # blob at k=7..9 in flipped space → k=0..2 in the canonical grid
+        assert np.sum(fixed.img[3:6, 3:6, 0:3]) > 0
+        assert np.sum(fixed.img[3:6, 3:6, 7:10]) == 0
+        assert set(np.unique(fixed.img)) == {0, 4}  # labels preserved (NN)
+
+    def test_conform_noop_when_same_grid(self, tmp_path: Path) -> None:
+        shape = (8, 8, 8)
+        vol_path = tmp_path / "volume.nii.gz"
+        self._write_volume(vol_path, shape)
+
+        seg_data = np.zeros(shape, dtype=np.uint8)
+        seg_data[1:4, 1:4, 1:4] = 1
+        seg_path = tmp_path / "seg.seg.nrrd"
+        _make_seg(origin=(0.0, 0.0, 0.0), data=seg_data).save_as(seg_path, FileType.NRRD)
+
+        assert conform_seg_to_grid(seg_path, vol_path) is False
+
+    def test_conform_to_out_path_leaves_source(self, tmp_path: Path) -> None:
+        shape = (8, 8, 8)
+        vol_path = tmp_path / "volume.nii.gz"
+        self._write_volume(vol_path, shape)
+        flipped = np.array([[1, 0, 0], [0, 1, 0], [0, 0, -1]], dtype=float)
+        seg_data = np.zeros(shape, dtype=np.uint8)
+        seg_data[2:5, 2:5, 5:8] = 2
+        seg_path = tmp_path / "seg.seg.nrrd"
+        _make_seg(origin=(0.0, 0.0, 7.0), direction=flipped, data=seg_data).save_as(
+            seg_path, FileType.NRRD
+        )
+        out_path = tmp_path / "fixed.seg.nrrd"
+
+        assert conform_seg_to_grid(seg_path, vol_path, out_path=out_path) is True
+        assert out_path.is_file()
+        # source still on the flipped grid (not overwritten)
+        src = Segmentation(autolabel=False)
+        src.read(seg_path)
+        assert float(src._direction[2, 2]) == -1.0
