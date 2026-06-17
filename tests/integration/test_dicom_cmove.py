@@ -25,6 +25,7 @@ from clarinet.services.dicom import DicomClient, DicomNode, SeriesQuery, StudyRe
 from clarinet.services.dicom.models import SeriesResult
 from clarinet.services.dicom.scp import StorageSCP
 from tests.config import PACS_AET, PACS_HOST, PACS_PORT, PACS_REST_URL
+from tests.utils.dicom import move_with_retry
 
 # ---------------------------------------------------------------------------
 # Constants (same Orthanc as test_dicom_service.py)
@@ -231,13 +232,7 @@ async def test_cmove_series_to_memory(
 
     ops = DicomOperations(calling_aet=CALLING_AET)
     result = await asyncio.to_thread(
-        ops.retrieve_via_move,
-        config,
-        request,
-        storage,
-        CALLING_AET,
-        storage_scp,
-        timeout=120.0,
+        move_with_retry, ops, config, request, storage, CALLING_AET, storage_scp, timeout=120.0
     )
 
     assert result.instances, "No instances received via C-MOVE"
@@ -282,13 +277,7 @@ async def test_cmove_study_to_disk(
 
     ops = DicomOperations(calling_aet=CALLING_AET)
     result = await asyncio.to_thread(
-        ops.retrieve_via_move,
-        config,
-        request,
-        storage,
-        CALLING_AET,
-        storage_scp,
-        timeout=120.0,
+        move_with_retry, ops, config, request, storage, CALLING_AET, storage_scp, timeout=120.0
     )
 
     assert result.num_completed > 0
@@ -339,13 +328,7 @@ async def test_cmove_matches_cget(
 
     ops = DicomOperations(calling_aet=CALLING_AET)
     cmove_result = await asyncio.to_thread(
-        ops.retrieve_via_move,
-        config,
-        request,
-        storage,
-        CALLING_AET,
-        storage_scp,
-        timeout=120.0,
+        move_with_retry, ops, config, request, storage, CALLING_AET, storage_scp, timeout=120.0
     )
     cmove_uids = set(cmove_result.instances.keys())
 

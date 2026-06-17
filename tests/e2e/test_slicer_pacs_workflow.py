@@ -38,6 +38,7 @@ from tests.config import (
     SLICER_HOST,
     SLICER_PORT,
 )
+from tests.utils.dicom import move_with_retry
 
 pytestmark = [
     pytest.mark.slicer,
@@ -735,13 +736,7 @@ class TestBackendCmoveThenSlicer:
 
         ops = DicomOperations(calling_aet=CALLING_AET)
         result = await asyncio.to_thread(
-            ops.retrieve_via_move,
-            config,
-            request,
-            storage,
-            CALLING_AET,
-            storage_scp,
-            timeout=120.0,
+            move_with_retry, ops, config, request, storage, CALLING_AET, storage_scp, timeout=120.0
         )
         assert result.num_completed > 0, "C-MOVE retrieved 0 instances"
         dcm_files = list(output_dir.glob("*.dcm"))
