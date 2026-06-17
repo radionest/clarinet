@@ -1556,8 +1556,9 @@ fn render_slicer_toolbar(
   let btn_tooltip = case model.slicer_available {
     Some(True) -> translate(i18n.ExecSlicerOpenHint)
     Some(False) -> translate(i18n.ExecSlicerUnreachableHint)
-    None -> translate(i18n.ExecSlicerChecking)
+    None -> translate(i18n.ExecSlicerCheckingHint)
   }
+  let hint_id = "slicer-open-hint"
 
   html.div([attribute.class("slicer-toolbar card")], [
     html.div([attribute.class("slicer-toolbar-header")], [
@@ -1567,13 +1568,14 @@ fn render_slicer_toolbar(
     html.div([attribute.class("slicer-toolbar-actions")], [
       // The tooltip lives on a wrapper, not the button: a disabled button
       // has `pointer-events: none`, so hover never reaches it and a `title`
-      // on the button alone would stay hidden. The wrapper stays
-      // interactive and surfaces the hint for both states.
+      // on the button alone would stay hidden. The wrapper surfaces the
+      // hint to sighted users on hover.
       html.span([attribute.title(btn_tooltip)], [
         html.button(
           [
             attribute.class("btn btn-primary"),
             attribute.disabled(btn_disabled),
+            attribute.attribute("aria-describedby", hint_id),
             event.on_click(OpenInSlicer),
           ],
           [
@@ -1583,6 +1585,12 @@ fn render_slicer_toolbar(
             },
           ],
         ),
+        // The same hint exposed to assistive tech: a native `title` on a
+        // disabled button is not announced, so back aria-describedby with
+        // a visually-hidden copy.
+        html.span([attribute.id(hint_id), attribute.class("sr-only")], [
+          html.text(btn_tooltip),
+        ]),
       ]),
     ]),
   ])

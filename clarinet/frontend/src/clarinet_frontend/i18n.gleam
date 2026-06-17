@@ -286,6 +286,7 @@ pub type Key {
   ExecSlicerOpening
   ExecSlicerOpenHint
   ExecSlicerUnreachableHint
+  ExecSlicerCheckingHint
   ExecNoFormRequired
   ExecRecordCompleted
   ExecNoFormDefined
@@ -935,6 +936,8 @@ pub fn translate(locale: Locale, key: Key) -> String {
       "3D Slicer is not reachable. Launch 3D Slicer and enable its Web Server module. If a plain launch doesn't help, restart Slicer and make sure the Web Server is running."
     Ru, ExecSlicerUnreachableHint ->
       "3D Slicer недоступен. Запустите 3D Slicer и включите на нём веб-сервер (модуль Web Server). Если простой запуск не помог — перезапустите Slicer и убедитесь, что веб-сервер запущен."
+    En, ExecSlicerCheckingHint -> "Checking 3D Slicer availability..."
+    Ru, ExecSlicerCheckingHint -> "Проверяем доступность 3D Slicer..."
     En, ExecNoFormRequired -> "This record does not require form data."
     Ru, ExecNoFormRequired -> "Эта запись не требует заполнения формы."
     En, ExecRecordCompleted -> "Record completed. Re-submit after changes."
