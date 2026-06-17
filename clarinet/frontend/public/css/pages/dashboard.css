@@ -112,39 +112,98 @@ a.stat-card {
     }
 }
 
-/* One-click worklist entry points on the user dashboard */
-.quick-actions-grid {
+/* "Take a task" picker on the user dashboard — type dropdown + claim button */
+.take-task {
+    display: flex;
+    gap: var(--spacing-md);
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+/* Personal worklist — the user's records grouped by status */
+.worklist {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
     gap: var(--spacing-md);
 }
 
-.quick-action {
-    display: block;
-    padding: var(--spacing-md) var(--spacing-lg);
-    border-left: 3px solid var(--teal);
-    font-weight: 600;
-    color: var(--ink);
-    transition: background-color 0.15s;
+.worklist-group {
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius-lg);
+    padding: var(--spacing-md);
+}
 
-    &::after {
-        content: " →";
-    }
+.worklist-group-title {
+    margin: 0 0 var(--spacing-sm);
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--ink-soft);
+}
+
+.worklist-items {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.worklist-item {
+    display: flex;
+    align-items: baseline;
+    gap: var(--spacing-sm);
+    padding: 6px var(--spacing-sm);
+    border-radius: var(--radius-sm);
+    transition: background-color 0.15s;
 
     &:hover {
         background-color: var(--surface-sunken);
     }
+}
 
-    &.qa-inwork {
-        border-left-color: var(--brass-bright);
+.worklist-item-id {
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    color: var(--ink-faint);
+    white-space: nowrap;
+}
+
+.worklist-item-type {
+    font-weight: 500;
+    overflow-wrap: anywhere;
+}
+
+/* Patient id is pushed to the right, before the open link */
+.worklist-item-patient {
+    margin-left: auto;
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    color: var(--ink-faint);
+    white-space: nowrap;
+}
+
+.worklist-item-open {
+    color: var(--teal);
+    font-size: 0.8125rem;
+    white-space: nowrap;
+
+    &:hover {
+        text-decoration: underline;
     }
+}
 
-    &.qa-pending {
-        border-left-color: var(--amber);
-    }
+.worklist-show-all {
+    display: inline-block;
+    margin-top: var(--spacing-sm);
+    font-size: 0.8125rem;
+    color: var(--teal);
 
-    &.qa-free {
-        border-left-color: var(--plum);
+    &:hover {
+        text-decoration: underline;
     }
 }
 

@@ -244,6 +244,46 @@ async def get_my_available_record_types(
     return {rt.name: count for rt, count in type_counts.items()}
 
 
+@router.post(
+    "/claim-next",
+    response_model=RecordRead,
+    responses={
+        404: {"description": "No claimable record of this type in the pool"},
+        409: {"description": "unique_per_user violated for this user and type"},
+    },
+)
+async def claim_next_record(
+    record_type_name: Annotated[str, Query(min_length=1)],
+    service: RecordServiceDep,
+    user: CurrentUserDep,
+    actor: AuditActorDep,
+) -> RecordRead:
+    """Claim a random unassigned pending record of ``record_type_name`` from the pool.
+
+    Powers the dashboard "take a task" action: picks one random ``pending`` record
+    with no assigned user that the caller may work on (role match, no
+    ``unique_per_user`` conflict), assigns it to the caller and moves it to
+    ``inwork``. The claimable scope is built by ``_build_record_search_criteria``
+    exactly like the records list, so role filtering and unique-violation hiding
+    stay consistent; the find-and-claim itself runs in
+    ``RecordService.claim_random_from_pool``. 404 when the pool holds no
+    claimable record of this type.
+    """
+    query = RecordSearchFilter(
+        record_type_name=record_type_name,
+        record_status=RecordStatus.pending,
+        wo_user=True,
+        # Attach user_id so ``exclude_unique_violations`` applies; for a
+        # superuser it would clash with ``wo_user`` (user_id IS NULL), so drop it.
+        user_id=None if user.is_superuser else user.id,
+    )
+    criteria = _build_record_search_criteria(query, user)
+    record = await service.claim_random_from_pool(criteria, user.id, actor_id=actor)
+    if record is None:
+        raise NOT_FOUND.with_context(f"No available record of type '{record_type_name}' to claim")
+    return mask_record_patient_data(RecordRead.model_validate(record), user)
+
+
 @router.get("/{record_id}", response_model=RecordRead)
 async def get_record(
     record: AuthorizedRecordDep,

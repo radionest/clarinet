@@ -6,7 +6,6 @@ import api/models.{
 }
 import api/record_page.{type RecordPage}
 import api/types.{type ApiError}
-import utils/status
 import gleam/dict
 import gleam/dynamic
 import gleam/dynamic/decode
@@ -18,8 +17,7 @@ import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/uri
 import utils/json_utils
-
-
+import utils/status
 
 // Search records with cursor-based pagination
 pub fn find_records(
@@ -38,14 +36,11 @@ pub fn find_records(
     |> json.to_string
   http_client.post("/records/find", body)
   |> promise.map(fn(res) {
-    result.try(
-      res,
-      http_client.decode_response(
-        _,
-        record_page.decoder(record_decoder()),
-        "Invalid page data",
-      ),
-    )
+    result.try(res, http_client.decode_response(
+      _,
+      record_page.decoder(record_decoder()),
+      "Invalid page data",
+    ))
   })
 }
 
@@ -76,7 +71,11 @@ fn record_type_base_decoder() -> decode.Decoder(RecordType) {
     None,
     decode.optional(decode.string),
   )
-  use label <- decode.optional_field("label", None, decode.optional(decode.string))
+  use label <- decode.optional_field(
+    "label",
+    None,
+    decode.optional(decode.string),
+  )
   use level_str <- decode.optional_field(
     "level",
     None,
@@ -265,7 +264,11 @@ fn series_base_decoder() -> decode.Decoder(models.Series) {
 // Inline patient decoder to avoid circular deps with patients.gleam
 fn patient_base_decoder() -> decode.Decoder(models.Patient) {
   use id <- decode.field("id", decode.string)
-  use name <- decode.optional_field("name", None, decode.optional(decode.string))
+  use name <- decode.optional_field(
+    "name",
+    None,
+    decode.optional(decode.string),
+  )
   use anon_id <- decode.optional_field(
     "anon_id",
     None,
@@ -498,7 +501,11 @@ pub fn record_type_full_decoder() -> decode.Decoder(RecordType) {
     None,
     decode.optional(decode.string),
   )
-  use label <- decode.optional_field("label", None, decode.optional(decode.string))
+  use label <- decode.optional_field(
+    "label",
+    None,
+    decode.optional(decode.string),
+  )
   use level_str <- decode.optional_field(
     "level",
     None,
@@ -641,10 +648,7 @@ pub fn assign_record_user(
   user_id: String,
 ) -> Promise(Result(Record, ApiError)) {
   let path =
-    "/records/"
-    <> int.to_string(record_id)
-    <> "/user?user_id="
-    <> user_id
+    "/records/" <> int.to_string(record_id) <> "/user?user_id=" <> user_id
   http_client.patch(path, json.to_string(json.object([])))
   |> promise.map(fn(res) {
     result.try(res, http_client.decode_response(
@@ -655,6 +659,37 @@ pub fn assign_record_user(
   })
 }
 
+/// Record types the current user can still take from the pool, mapped to the
+/// count of pending records per type (GET /records/available_types).
+pub fn get_available_types() -> Promise(
+  Result(dict.Dict(String, Int), ApiError),
+) {
+  http_client.get("/records/available_types")
+  |> promise.map(fn(res) {
+    result.try(res, http_client.decode_response(
+      _,
+      decode.dict(decode.string, decode.int),
+      "Invalid available types data",
+    ))
+  })
+}
+
+/// Claim a random unassigned pending record of `record_type_name` from the pool
+/// (POST /records/claim-next). The record is assigned to the caller and set to
+/// inwork; a 404 means the pool holds no claimable record of that type.
+pub fn claim_next(record_type_name: String) -> Promise(Result(Record, ApiError)) {
+  let path =
+    "/records/claim-next?record_type_name="
+    <> uri.percent_encode(record_type_name)
+  http_client.post(path, json.to_string(json.object([])))
+  |> promise.map(fn(res) {
+    result.try(res, http_client.decode_response(
+      _,
+      record_decoder(),
+      "Invalid record data",
+    ))
+  })
+}
 
 /// Submit empty data for a record without data_schema (slicer completion)
 pub fn submit_record_data(
@@ -685,9 +720,7 @@ pub fn resubmit_record_data(
 }
 
 /// Submit record with server-side Slicer validation (POST /submit)
-pub fn submit_record(
-  record_id: String,
-) -> Promise(Result(Record, ApiError)) {
+pub fn submit_record(record_id: String) -> Promise(Result(Record, ApiError)) {
   http_client.post_with_slicer_context(
     "/records/" <> record_id <> "/submit",
     "{}",
@@ -702,9 +735,7 @@ pub fn submit_record(
 }
 
 /// Re-submit record with server-side Slicer validation (PATCH /submit)
-pub fn resubmit_record(
-  record_id: String,
-) -> Promise(Result(Record, ApiError)) {
+pub fn resubmit_record(record_id: String) -> Promise(Result(Record, ApiError)) {
   http_client.patch_with_slicer_context(
     "/records/" <> record_id <> "/submit",
     "{}",
@@ -719,15 +750,16 @@ pub fn resubmit_record(
 }
 
 /// Restart an auto task by invalidating it (hard mode)
-pub fn restart_record(
-  record_id: String,
-) -> Promise(Result(Record, ApiError)) {
+pub fn restart_record(record_id: String) -> Promise(Result(Record, ApiError)) {
   let body =
     json.object([
       #("mode", json.string("hard")),
       #("reason", json.string("Manually restarted")),
     ])
-  http_client.post("/records/" <> record_id <> "/invalidate", json.to_string(body))
+  http_client.post(
+    "/records/" <> record_id <> "/invalidate",
+    json.to_string(body),
+  )
   |> promise.map(fn(res) {
     result.try(res, http_client.decode_response(
       _,
@@ -794,14 +826,11 @@ pub fn get_record_types() -> Promise(Result(List(RecordType), ApiError)) {
 pub fn get_filter_options() -> Promise(Result(RecordFilterOptions, ApiError)) {
   http_client.post("/records/filter-options", "{}")
   |> promise.map(fn(res) {
-    result.try(
-      res,
-      http_client.decode_response(
-        _,
-        filter_options_decoder(),
-        "Invalid filter options data",
-      ),
-    )
+    result.try(res, http_client.decode_response(
+      _,
+      filter_options_decoder(),
+      "Invalid filter options data",
+    ))
   })
 }
 
@@ -817,9 +846,7 @@ fn filter_options_decoder() -> decode.Decoder(RecordFilterOptions) {
 }
 
 /// Create a new record
-pub fn create_record(
-  data: RecordCreate,
-) -> Promise(Result(Record, ApiError)) {
+pub fn create_record(data: RecordCreate) -> Promise(Result(Record, ApiError)) {
   let body =
     json.object([
       #("record_type_name", json.string(data.record_type_name)),

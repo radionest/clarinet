@@ -33,6 +33,7 @@ RECORDS_BASE = "/api/records"
 RECORDS_FIND = "/api/records/find"
 RECORDS_FIND_RANDOM = "/api/records/find/random"
 RECORDS_AVAILABLE_TYPES = "/api/records/available_types"
+RECORDS_CLAIM_NEXT = "/api/records/claim-next"
 RECORDS_FILTER_OPTIONS = "/api/records/filter-options"
 RECORDS_BULK_STATUS = "/api/records/bulk/status"
 

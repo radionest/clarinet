@@ -1462,10 +1462,21 @@ class RecordRepository(BaseRepository[Record]):
     async def find_random(
         self,
         criteria: RecordSearchCriteria,
+        *,
+        for_update: bool = False,
     ) -> Record | None:
-        """Find a single random record matching criteria (SQL-level random)."""
+        """Find a single random record matching criteria (SQL-level random).
+
+        ``for_update=True`` locks the chosen row with ``FOR UPDATE OF record
+        SKIP LOCKED`` (PostgreSQL) so a concurrent claimer skips it instead of
+        selecting the same record — this is what makes the claim-from-pool
+        select-then-claim atomic. SQLite omits the clause (no row locking),
+        which only relaxes the in-memory test runner, never production.
+        """
         statement = self._build_criteria_query(criteria)
         statement = statement.order_by(func.random()).limit(1)
+        if for_update:
+            statement = statement.with_for_update(skip_locked=True, of=Record)
         result = await self.session.execute(statement)
         return result.scalars().first()
 
