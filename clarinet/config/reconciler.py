@@ -46,6 +46,7 @@ _COMPARED_FIELDS: tuple[str, ...] = (
     "editable",
     "edit_window_days",
     "viewer_mode",
+    "allowed_viewers",
 )
 
 

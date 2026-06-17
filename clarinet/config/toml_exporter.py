@@ -45,6 +45,7 @@ _TABLE_FIELDS: tuple[str, ...] = (
 _LIST_FIELDS: tuple[str, ...] = (
     "slicer_context_hydrators",
     "data_validators",
+    "allowed_viewers",
 )
 
 

@@ -84,6 +84,9 @@ pub type RecordType {
     editable: Bool,
     edit_window_days: Option(Int),
     viewer_mode: String,
+    // Per-RecordType viewer allowlist (matching ViewerInfo.name). None or empty
+    // → all configured viewers; a non-empty list restricts the UI to those.
+    allowed_viewers: Option(List(String)),
     level: DicomQueryLevel,
     file_registry: Option(List(FileDefinition)),
     constraint_role: Option(String),
