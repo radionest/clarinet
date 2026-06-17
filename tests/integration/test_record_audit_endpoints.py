@@ -3,9 +3,9 @@
 import pytest
 from httpx import AsyncClient
 
-from clarinet.models import DicomQueryLevel
+from clarinet.models import DicomQueryLevel, RecordEvent
 from tests.utils.factories import make_record_type
-from tests.utils.test_helpers import PatientFactory, RecordFactory
+from tests.utils.test_helpers import PatientFactory, RecordFactory, UserFactory
 from tests.utils.urls import (
     ADMIN_DELETED_RECORD_EVENTS,
     ADMIN_RECORD_EVENTS,
@@ -198,6 +198,37 @@ class TestGlobalRecordEvents:
         assert record_a.id in record_ids
         assert record_b.id not in record_ids
         assert all(e["record_type_name"] == "audit-type-a" for e in events)
+
+    @pytest.mark.asyncio
+    async def test_feed_filters_by_actor(self, client: AsyncClient, test_session):
+        # Two events on one record — one by a real user, one by the system
+        # (actor_id NULL); filtering by the user's id must exclude the system one.
+        record = await _seed_record(test_session)
+        actor = await UserFactory.create_user(test_session, email="audit-actor@test.com")
+        test_session.add(
+            RecordEvent(
+                record_id=record.id,
+                record_key=record.id,
+                kind="status_changed",
+                actor_id=actor.id,
+            )
+        )
+        test_session.add(
+            RecordEvent(
+                record_id=record.id,
+                record_key=record.id,
+                kind="status_changed",
+                actor_id=None,
+            )
+        )
+        await test_session.commit()
+
+        resp = await client.get(ADMIN_RECORD_EVENTS, params={"actor_id": str(actor.id)})
+        assert resp.status_code == 200, resp.text
+        events = resp.json()
+        # Only the user's event — the system (NULL-actor) event is excluded.
+        assert {e["actor_id"] for e in events} == {str(actor.id)}
+        assert all(e["actor_name"] == actor.email for e in events)
 
     @pytest.mark.asyncio
     async def test_feed_requires_auth(self, unauthenticated_client: AsyncClient):
