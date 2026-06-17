@@ -121,7 +121,7 @@ URL constants live in `tests/utils/urls.py`. Status codes: 201 = POST create, 20
 | `/api/admin/records/{id}/status` | PATCH | 200 | Admin set record status |
 | `/api/admin/records/{id}/user` | DELETE | 200 | Admin unassign record user |
 | `/api/admin/records/{id}/output-files` | DELETE | 200 | Clear output files (admin) |
-| `/api/admin/records/events` | GET | 200 | Global record audit feed, newest first (admin). Filters: `kind`, `actor_id`, `patient_id` (events of the patient's current records), `since` + pagination. `actor_name` (email) resolved server-side |
+| `/api/admin/records/events` | GET | 200 | Global record audit feed, newest first (admin). Filters: `kind`, `actor_id`, `patient_id` (events of the patient's current records), `record_type_name` (events of records of that type), `since` + pagination. `actor_name` (email) resolved server-side |
 | `/api/admin/records/events/deleted` | GET | 200 | Audit events of deleted records (snapshot in `old_value`), newest first |
 | `/api/admin/record-types/stats` | GET | 200 | Record type stats |
 | `/api/admin/reports` | GET | 200 | List custom SQL reports (`*.sql` from `settings.reports_path`) |

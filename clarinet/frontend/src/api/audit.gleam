@@ -160,12 +160,16 @@ pub fn get_record_runs(
 pub fn list_events(
   patient_id: Option(String),
   kind: Option(String),
+  actor_id: Option(String),
+  record_type_name: Option(String),
   since: Option(String),
 ) -> Promise(Result(List(RecordEvent), ApiError)) {
   let query =
     build_query([
       #("patient_id", patient_id),
       #("kind", kind),
+      #("actor_id", actor_id),
+      #("record_type_name", record_type_name),
       #("since", since),
     ])
   http_client.get("/admin/records/events" <> query)

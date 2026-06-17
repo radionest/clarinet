@@ -66,8 +66,9 @@ class RecordEventRepository(BaseRepository[RecordEvent]):
     async def find(self, criteria: RecordEventFind) -> Sequence[RecordEvent]:
         """Return events matching *criteria*, newest first.
 
-        ``patient_id`` is resolved through the record table; events of
-        already-deleted records (NULL ``record_id``) never match it.
+        ``patient_id`` and ``record_type_name`` are resolved through the record
+        table; events of already-deleted records (NULL ``record_id``) never
+        match either.
         """
         stmt = select(RecordEvent).options(
             selectinload(RecordEvent.actor),  # type: ignore[arg-type]
@@ -81,6 +82,12 @@ class RecordEventRepository(BaseRepository[RecordEvent]):
             stmt = stmt.where(
                 col(RecordEvent.record_id).in_(
                     select(Record.id).where(Record.patient_id == criteria.patient_id)
+                )
+            )
+        if criteria.record_type_name is not None:
+            stmt = stmt.where(
+                col(RecordEvent.record_id).in_(
+                    select(Record.id).where(Record.record_type_name == criteria.record_type_name)
                 )
             )
         if criteria.since is not None:
