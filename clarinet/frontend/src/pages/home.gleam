@@ -64,6 +64,7 @@ pub type Msg {
   TakeTaskClicked
   TaskClaimed(Result(models.Record, ApiError))
   ToggleGroup(status: String, open: Bool)
+  LoadMoreClicked(key: BucketKey)
 }
 
 // --- Worklist ---
@@ -166,6 +167,7 @@ pub fn update(
         [],
       )
     }
+    LoadMoreClicked(key) -> #(model, effect.none(), [shared.FetchMoreBucket(key)])
   }
 }
 
@@ -513,7 +515,7 @@ fn worklist_group(
       ],
     ),
     html.div(body_attrs, [
-      worklist_group_body(status, items, status_str, shared, user),
+      worklist_group_body(status, items, key, shared),
     ]),
   ])
 }
@@ -528,9 +530,8 @@ fn aria_bool(b: Bool) -> String {
 fn worklist_group_body(
   status: BucketStatus,
   items: List(models.Record),
-  status_str: String,
+  key: BucketKey,
   shared: Shared,
-  user: models.User,
 ) -> Element(Msg) {
   case status {
     bucket.Cold | bucket.Loading ->
@@ -551,16 +552,38 @@ fn worklist_group_body(
               [attribute.class("worklist-items")],
               list.map(items, worklist_item),
             ),
-            html.a(
-              [
-                attribute.href(
-                  router.route_to_href(records_filter_route(status_str, user)),
-                ),
-                attribute.class("worklist-show-all"),
-              ],
-              [html.text(shared.translate(i18n.HomeViewAll))],
-            ),
+            load_more_control(status, key, shared),
           ])
+      }
+  }
+}
+
+/// "Load more" affordance under a non-empty worklist group: a spinner while
+/// the next page is in flight, a button while more records remain, nothing
+/// once the bucket is fully loaded. Replaces the old "Show all" link to the
+/// now admin-only Records list.
+fn load_more_control(
+  status: BucketStatus,
+  key: BucketKey,
+  shared: Shared,
+) -> Element(Msg) {
+  case status {
+    bucket.LoadingMore(_) ->
+      html.p([attribute.class("loading-indicator")], [
+        html.text(shared.translate(i18n.LblLoading)),
+      ])
+    _ ->
+      case cache.bucket_has_more(shared.cache, key) {
+        True ->
+          html.button(
+            [
+              attribute.type_("button"),
+              attribute.class("btn worklist-load-more"),
+              event.on_click(LoadMoreClicked(key)),
+            ],
+            [html.text(shared.translate(i18n.HomeLoadMore))],
+          )
+        False -> element.none()
       }
   }
 }
@@ -589,10 +612,6 @@ fn worklist_item(record: models.Record) -> Element(Msg) {
 }
 
 // --- Helpers ---
-
-fn records_filter_route(status_str: String, user: models.User) -> router.Route {
-  router.Records(dict.from_list([#("status", status_str), #("user", user.id)]))
-}
 
 /// Pool-picker label: the record type's display label, falling back to its name
 /// (the available-types endpoint only returns names; labels come from cache).
