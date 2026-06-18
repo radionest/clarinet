@@ -1275,3 +1275,162 @@ class TestConformSegToGrid:
         src = Segmentation(autolabel=False)
         src.read(seg_path)
         assert float(src._direction[2, 2]) == -1.0
+
+
+def _label_to_name(header: dict) -> dict[int, str]:
+    """Map LabelValue -> Name from contiguous Segment{i}_* header blocks."""
+    out: dict[int, str] = {}
+    i = 0
+    while f"Segment{i}_LabelValue" in header:
+        out[int(header[f"Segment{i}_LabelValue"])] = header[f"Segment{i}_Name"]
+        i += 1
+    return out
+
+
+class TestSegmentMetadataRoundtrip:
+    """Named-segment metadata must survive writes, resampling, and set operations.
+
+    Regression for the conform_seg_to_grid bug where Segment{i}_Name/LabelValue
+    were dropped on resample (PR #393 follow-up).
+    """
+
+    def test_save_roundtrips_segment_names(self, tmp_path: Path) -> None:
+        """A plain read -> save preserves semantic keys and drops grid-bound extents."""
+        seg_path = tmp_path / "named.seg.nrrd"
+        data = np.zeros((6, 6, 6), dtype=np.uint8)
+        data[1:4, 1:4, 1:4] = 1
+        data[1:4, 1:4, 4:6] = 2
+        nrrd.write(
+            str(seg_path),
+            data,
+            {
+                "space": "left-posterior-superior",
+                "space directions": np.eye(3),
+                "space origin": np.zeros(3),
+                "Segment0_Name": "liver",
+                "Segment0_LabelValue": "1",
+                "Segment0_Color": "1 0 0",
+                "Segment0_Extent": "1 3 1 3 1 3",
+                "Segment1_Name": "tumor",
+                "Segment1_LabelValue": "2",
+            },
+        )
+        seg = Segmentation(autolabel=False)
+        seg.read(seg_path)
+        out_path = tmp_path / "out.seg.nrrd"
+        seg.save_as(out_path, FileType.NRRD)
+
+        _, header = nrrd.read(str(out_path))
+        assert _label_to_name(header) == {1: "liver", 2: "tumor"}
+        assert header.get("Segment0_Color") == "1 0 0"
+        assert not any("Extent" in k for k in header)  # grid-dependent dropped on write
+
+    def test_conform_preserves_segment_names(self, tmp_path: Path) -> None:
+        """conform_seg_to_grid round-trips Name/LabelValue across a Z-flip resample."""
+        seg_path = tmp_path / "doctor.seg.nrrd"
+        ref_path = tmp_path / "volume.nrrd"
+        data = np.zeros((8, 8, 8), dtype=np.uint8)
+        data[2:5, 2:5, 2:5] = 1  # mts
+        data[2:5, 2:5, 5:7] = 3  # benign
+        nrrd.write(
+            str(seg_path),
+            data,
+            {
+                "space": "left-posterior-superior",
+                "space directions": np.eye(3),
+                "space origin": np.zeros(3),
+                "Segment0_Name": "mts",
+                "Segment0_LabelValue": "1",
+                "Segment0_Layer": "0",
+                "Segment0_Extent": "2 4 2 4 2 4",
+                "Segment1_Name": "benign",
+                "Segment1_LabelValue": "3",
+                "Segment1_Layer": "0",
+            },
+        )
+        # Reference on a flipped grid (same physical volume) forces a real resample.
+        nrrd.write(
+            str(ref_path),
+            np.zeros((8, 8, 8), dtype=np.uint8),
+            {
+                "space": "left-posterior-superior",
+                "space directions": np.diag([1.0, 1.0, -1.0]),
+                "space origin": np.array([0.0, 0.0, 7.0]),
+            },
+        )
+
+        assert conform_seg_to_grid(seg_path, ref_path) is True
+        out_data, header = nrrd.read(str(seg_path))
+        assert sorted(int(x) for x in np.unique(out_data) if x) == [1, 3]  # labels survive
+        assert _label_to_name(header) == {1: "mts", 3: "benign"}  # names survive
+        assert not any("Extent" in k for k in header)  # stale grid extent dropped
+
+    def test_reindex_carries_source_metadata(self, tmp_path: Path) -> None:
+        """reindex_to carries the source's names onto the target grid (seen on save)."""
+        shape = (10, 10, 10)
+        data = np.zeros(shape, dtype=np.uint8)
+        data[2:5, 2:5, 2:5] = 1
+        data[2:5, 2:5, 6:9] = 2
+        src = _make_seg(shape=shape, data=data)
+        src._nrrd_header = {
+            "Segment0_Name": "mts",
+            "Segment0_LabelValue": "1",
+            "Segment0_Color": "1 0 0",
+            "Segment0_Extent": "2 4 2 4 2 4",
+            "Segment1_Name": "benign",
+            "Segment1_LabelValue": "2",
+            "Segment1_Extent": "2 4 2 4 6 8",
+        }
+        flipped = np.array([[1, 0, 0], [0, 1, 0], [0, 0, -1]], dtype=float)
+        target = _make_seg(shape=shape, direction=flipped, origin=(0.0, 0.0, 9.0))
+
+        out_path = tmp_path / "reindexed.seg.nrrd"
+        src.reindex_to(target).save_as(out_path, FileType.NRRD)
+        out_data, header = nrrd.read(str(out_path))
+        assert {int(v) for v in np.unique(out_data) if v} == {1, 2}  # both labels resampled
+        assert _label_to_name(header) == {1: "mts", 2: "benign"}
+        assert header.get("Segment0_Color") == "1 0 0"
+        assert not any("Extent" in k for k in header)  # grid-dependent dropped
+
+    def test_intersection_prunes_dropped_segment(self, tmp_path: Path) -> None:
+        """A label dropped by intersection loses its metadata on save; survivors renumber."""
+        shape = (10, 10, 10)
+        data = np.zeros(shape, dtype=np.uint8)
+        data[1:4, 1:4, 1:4] = 1  # mts
+        data[6:9, 6:9, 6:9] = 2  # benign
+        a = _make_seg(shape=shape, data=data)
+        a._nrrd_header = {
+            "Segment0_Name": "mts",
+            "Segment0_LabelValue": "1",
+            "Segment1_Name": "benign",
+            "Segment1_LabelValue": "2",
+        }
+        other_data = np.zeros(shape, dtype=np.uint8)
+        other_data[1:4, 1:4, 1:4] = 1  # overlaps only the mts blob
+        other = _make_seg(shape=shape, data=other_data)
+
+        out_path = tmp_path / "inter.seg.nrrd"
+        a.intersection(other, min_overlap=1).save_as(out_path, FileType.NRRD)
+        out_data, header = nrrd.read(str(out_path))
+        assert {int(v) for v in np.unique(out_data) if v} == {1}  # benign dropped
+        assert _label_to_name(header) == {1: "mts"}  # renumbered, benign pruned
+
+    def test_union_drops_segment_names(self, tmp_path: Path) -> None:
+        """union relabels into components — original per-label names no longer apply."""
+        shape = (10, 10, 10)
+        data = np.zeros(shape, dtype=np.uint8)
+        data[1:4, 1:4, 1:4] = 1  # mts
+        data[6:9, 6:9, 6:9] = 3  # benign
+        a = _make_seg(shape=shape, data=data)
+        a._nrrd_header = {
+            "Segment0_Name": "mts",
+            "Segment0_LabelValue": "1",
+            "Segment1_Name": "benign",
+            "Segment1_LabelValue": "3",
+        }
+        other = _make_seg(shape=shape, data=np.zeros(shape, dtype=np.uint8))
+
+        out_path = tmp_path / "uni.seg.nrrd"
+        a.union(other).save_as(out_path, FileType.NRRD)
+        _, header = nrrd.read(str(out_path))
+        assert not any(k.startswith("Segment") for k in header)  # no named segments survive

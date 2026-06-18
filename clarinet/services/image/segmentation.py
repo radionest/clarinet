@@ -29,6 +29,18 @@ PropName = Literal["axis_major_length", "num_pixels", "area"]
 _ISOTROPIC_Z_THRESHOLD = 200
 
 
+def _strip_segment_metadata(header: dict[str, Any] | None) -> dict[str, Any]:
+    """Header copy without any per-segment / ``Segmentation_*`` keys.
+
+    Used by operations that relabel the mask (``union``, ``filter_segmentation``):
+    their output labels are connected-component indices that no longer map to the
+    source's named segments, so carrying those names would be wrong.
+    """
+    if not header:
+        return {}
+    return {k: v for k, v in header.items() if not k.startswith("Segment")}
+
+
 class Segmentation(Image):
     """Labeled segmentation mask with morphological operations.
 
@@ -201,6 +213,7 @@ class Segmentation(Image):
         new_img = self.filter_roi(prop_name=prop_name, ge=ge, le=le)
         new_seg = Segmentation(template=self)
         new_seg.img = new_img
+        new_seg._nrrd_header = _strip_segment_metadata(new_seg._nrrd_header)
         return new_seg
 
     def subtract(self, other: Self, *, resample: bool = False) -> None:
@@ -258,7 +271,8 @@ class Segmentation(Image):
         """Resample into *target*'s voxel grid (nearest-neighbor only).
 
         Overrides :meth:`Image.reindex_to` to force ``order=0``, preventing
-        label value corruption from interpolation.
+        label value corruption from interpolation. Segment metadata (names, label
+        values, colors) is carried onto the new grid, pruned to surviving labels.
         """
         if order != 0:
             logger.warning("Segmentation.reindex_to: forcing order=0 to prevent label corruption")
@@ -276,6 +290,12 @@ class Segmentation(Image):
         )
         result = Segmentation(autolabel=False, template=target)
         result.img = resampled
+        # The template copies the *target*'s header (no segment metadata); carry the
+        # source's segment keys instead. Save reconciles them to the surviving labels
+        # and drops the now-stale grid extents.
+        if self._nrrd_header is not None:
+            seg_meta = {k: v for k, v in self._nrrd_header.items() if k.startswith("Segment")}
+            result._nrrd_header = {**_strip_segment_metadata(result._nrrd_header), **seg_meta}
         return result
 
     def _align_other(self, other: Image, *, resample: bool = False) -> Image:
@@ -356,6 +376,9 @@ class Segmentation(Image):
         combined = self.img.astype(np.uint16) + other.img.astype(np.uint16)
         combined[combined != 0] = 1
         output.img = combined
+        # union relabels into connected components — the source's named segments no
+        # longer map to these labels, so drop them (a plain labelmap is written).
+        output._nrrd_header = _strip_segment_metadata(output._nrrd_header)
         return output
 
     def difference(
