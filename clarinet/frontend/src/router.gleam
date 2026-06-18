@@ -120,6 +120,7 @@ pub fn requires_admin_role(route: Route) -> Bool {
     Studies(_)
     | StudyDetail(_)
     | SeriesDetail(_)
+    | Records(_)
     | Patients(_)
     | PatientDetail(_)
     | PatientNew

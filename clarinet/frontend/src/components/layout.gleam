@@ -30,10 +30,10 @@ fn navbar(model: Model) -> Element(Msg) {
       ]),
     ]),
     html.div([attribute.class("navbar-menu")], [
-      nav_link(route: router.Records(dict.new()), text: t(i18n.NavRecords), current_route: model.route),
       case is_admin(model) {
         True ->
           element.fragment([
+            nav_link(route: router.Records(dict.new()), text: t(i18n.NavRecords), current_route: model.route),
             nav_link(route: router.Studies(dict.new()), text: t(i18n.NavStudies), current_route: model.route),
             nav_link(route: router.Patients(dict.new()), text: t(i18n.NavPatients), current_route: model.route),
             nav_link(route: router.AdminRecordTypes, text: t(i18n.NavRecordTypes), current_route: model.route),

@@ -513,7 +513,7 @@ fn worklist_group(
       ],
     ),
     html.div(body_attrs, [
-      worklist_group_body(status, items, status_str, shared, user),
+      worklist_group_body(status, items, shared),
     ]),
   ])
 }
@@ -528,9 +528,7 @@ fn aria_bool(b: Bool) -> String {
 fn worklist_group_body(
   status: BucketStatus,
   items: List(models.Record),
-  status_str: String,
   shared: Shared,
-  user: models.User,
 ) -> Element(Msg) {
   case status {
     bucket.Cold | bucket.Loading ->
@@ -546,21 +544,10 @@ fn worklist_group_body(
             html.text(shared.translate(i18n.HomeWorklistEmpty)),
           ])
         _ ->
-          element.fragment([
-            html.div(
-              [attribute.class("worklist-items")],
-              list.map(items, worklist_item),
-            ),
-            html.a(
-              [
-                attribute.href(
-                  router.route_to_href(records_filter_route(status_str, user)),
-                ),
-                attribute.class("worklist-show-all"),
-              ],
-              [html.text(shared.translate(i18n.HomeViewAll))],
-            ),
-          ])
+          html.div(
+            [attribute.class("worklist-items")],
+            list.map(items, worklist_item),
+          )
       }
   }
 }
@@ -589,10 +576,6 @@ fn worklist_item(record: models.Record) -> Element(Msg) {
 }
 
 // --- Helpers ---
-
-fn records_filter_route(status_str: String, user: models.User) -> router.Route {
-  router.Records(dict.from_list([#("status", status_str), #("user", user.id)]))
-}
 
 /// Pool-picker label: the record type's display label, falling back to its name
 /// (the available-types endpoint only returns names; labels come from cache).
