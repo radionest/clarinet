@@ -155,21 +155,22 @@ a.stat-card {
     border-left-color: var(--green);
 }
 
-/* Header row — doubles as the disclosure control */
+/* Header row — the accordion's disclosure control (a reset <button>) */
 .worklist-group-summary {
     display: flex;
     align-items: center;
     gap: var(--spacing-sm);
+    width: 100%;
     padding: var(--spacing-sm) var(--spacing-md);
+    border: none;
+    background: transparent;
+    font: inherit;
+    color: inherit;
+    text-align: left;
     cursor: pointer;
     user-select: none;
-    list-style: none;
 
-    &::-webkit-details-marker {
-        display: none;
-    }
-
-    /* custom chevron — points right when closed, down when open */
+    /* custom chevron — points right when collapsed, down when expanded */
     &::before {
         content: "";
         width: 6px;
@@ -191,8 +192,12 @@ a.stat-card {
     }
 }
 
-.worklist-group[open] .worklist-group-summary::before {
+.worklist-group-summary[aria-expanded="true"]::before {
     transform: rotate(45deg);
+}
+
+.worklist-group-body[hidden] {
+    display: none;
 }
 
 .worklist-group-name {

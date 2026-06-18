@@ -136,7 +136,6 @@ pub type Key {
   HomeTakeTaskPlaceholder
   HomeNoPoolTasks
   HomeWorklistEmpty
-  HomeOpenTask
   HomeTaskTaken
   HomeTakeTaskError
 
@@ -648,8 +647,6 @@ pub fn translate(locale: Locale, key: Key) -> String {
     Ru, HomeNoPoolTasks -> "Нет доступных задач"
     En, HomeWorklistEmpty -> "No tasks"
     Ru, HomeWorklistEmpty -> "Нет задач"
-    En, HomeOpenTask -> "Open"
-    Ru, HomeOpenTask -> "Открыть"
     En, HomeTaskTaken -> "Task taken"
     Ru, HomeTaskTaken -> "Задача взята"
     En, HomeTakeTaskError -> "Couldn't take a task"
