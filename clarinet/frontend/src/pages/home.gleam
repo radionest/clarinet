@@ -409,14 +409,36 @@ fn worklist_group(
   let key = worklist_key(user.id, status_str)
   let items = cache.bucket_items(shared.cache, key)
   let status = cache.bucket_status(shared.cache, key)
-  html.div([attribute.class("worklist-group")], [
-    html.h4([attribute.class("worklist-group-title")], [
-      html.text(
-        shared.translate(title_key)
-        <> " ("
-        <> int.to_string(list.length(items))
-        <> ")",
-      ),
+  let count = list.length(items)
+  // Loading and Failed both carry feedback (a spinner / an error message) that
+  // must not hide behind a collapsed header, so treat them as "transient" and
+  // open the group even with zero items.
+  let transient = case status {
+    bucket.Cold | bucket.Loading | bucket.Failed(_) -> True
+    _ -> False
+  }
+  // Open the actionable, non-empty (or transient) groups by default; "finished"
+  // and settled-empty groups stay collapsed. Collapsed groups must OMIT the
+  // `open` attribute — `attribute.open(False)` sets the DOM property and would
+  // re-snap the group shut on every re-render (e.g. an SSE-driven cache
+  // update), overriding the user's manual expand. With `open` simply absent,
+  // the native <details> toggle is uncontrolled and survives re-renders.
+  let default_open = status_str != "finished" && { count > 0 || transient }
+  let base_attrs = [
+    attribute.class("worklist-group worklist-group--" <> status_str),
+  ]
+  let group_attrs = case default_open {
+    True -> [attribute.open(True), ..base_attrs]
+    False -> base_attrs
+  }
+  html.details(group_attrs, [
+    html.summary([attribute.class("worklist-group-summary")], [
+      html.span([attribute.class("worklist-group-name")], [
+        html.text(shared.translate(title_key)),
+      ]),
+      html.span([attribute.class("worklist-group-count")], [
+        html.text(int.to_string(count)),
+      ]),
     ]),
     worklist_group_body(status, items, status_str, shared, user),
   ])
@@ -439,14 +461,14 @@ fn worklist_group_body(
     _ ->
       case items {
         [] ->
-          html.p([attribute.class("empty-state")], [
+          html.div([attribute.class("worklist-empty")], [
             html.text(shared.translate(i18n.HomeWorklistEmpty)),
           ])
         _ ->
           element.fragment([
-            html.ul(
+            html.div(
               [attribute.class("worklist-items")],
-              list.map(items, fn(r) { worklist_item(r, shared) }),
+              list.map(items, worklist_item),
             ),
             html.a(
               [
@@ -462,24 +484,27 @@ fn worklist_group_body(
   }
 }
 
-fn worklist_item(record: models.Record, shared: Shared) -> Element(Msg) {
+/// Whole row is a click-through link to the record; the open affordance is a
+/// CSS hover chevron (`.worklist-item::after`), so no per-row "open" link.
+fn worklist_item(record: models.Record) -> Element(Msg) {
   let id_str = int.to_string(option.unwrap(record.id, 0))
-  html.li([attribute.class("worklist-item")], [
-    html.span([attribute.class("worklist-item-id")], [html.text("#" <> id_str)]),
-    html.span([attribute.class("worklist-item-type")], [
-      html.text(record_type_label(record)),
-    ]),
-    html.span([attribute.class("worklist-item-patient")], [
-      html.text(record.patient_id),
-    ]),
-    html.a(
-      [
-        attribute.href(router.route_to_path(router.RecordDetail(id_str))),
-        attribute.class("worklist-item-open"),
-      ],
-      [html.text(shared.translate(i18n.HomeOpenTask))],
-    ),
-  ])
+  html.a(
+    [
+      attribute.href(router.route_to_path(router.RecordDetail(id_str))),
+      attribute.class("worklist-item"),
+    ],
+    [
+      html.span([attribute.class("worklist-item-id")], [
+        html.text("#" <> id_str),
+      ]),
+      html.span([attribute.class("worklist-item-type")], [
+        html.text(record_type_label(record)),
+      ]),
+      html.span([attribute.class("worklist-item-patient")], [
+        html.text(record.patient_id),
+      ]),
+    ],
+  )
 }
 
 // --- Helpers ---

@@ -120,22 +120,82 @@ a.stat-card {
     flex-wrap: wrap;
 }
 
-/* Personal worklist — the user's records grouped by status */
+/* Personal worklist — the user's records grouped by status.
+   Stacked status "channels": a status-colored left rail, an engraved header
+   that doubles as a <summary> disclosure, and a mono count readout. Actionable
+   groups render <details open>; finished and empty groups stay collapsed to a
+   single header line (home.gleam omits the `open` attribute for those). */
 .worklist {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-    gap: var(--spacing-md);
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-sm);
 }
 
 .worklist-group {
     background: var(--surface);
     border: 1px solid var(--hairline);
+    border-left: 3px solid var(--ink-faint);
     border-radius: var(--radius-lg);
-    padding: var(--spacing-md);
+    overflow: hidden;
 }
 
-.worklist-group-title {
-    margin: 0 0 var(--spacing-sm);
+.worklist-group--inwork {
+    border-left-color: var(--brass-bright);
+}
+
+.worklist-group--pending {
+    border-left-color: var(--blue);
+}
+
+.worklist-group--pause {
+    border-left-color: var(--ink-faint);
+}
+
+.worklist-group--finished {
+    border-left-color: var(--green);
+}
+
+/* Header row — doubles as the disclosure control */
+.worklist-group-summary {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    padding: var(--spacing-sm) var(--spacing-md);
+    cursor: pointer;
+    user-select: none;
+    list-style: none;
+
+    &::-webkit-details-marker {
+        display: none;
+    }
+
+    /* custom chevron — points right when closed, down when open */
+    &::before {
+        content: "";
+        width: 6px;
+        height: 6px;
+        flex: none;
+        border-right: 1.5px solid var(--ink-faint);
+        border-bottom: 1.5px solid var(--ink-faint);
+        transform: rotate(-45deg);
+        transition: transform 0.15s ease;
+    }
+
+    &:hover {
+        background-color: var(--surface-sunken);
+    }
+
+    &:focus-visible {
+        outline: none;
+        box-shadow: var(--focus-ring);
+    }
+}
+
+.worklist-group[open] .worklist-group-summary::before {
+    transform: rotate(45deg);
+}
+
+.worklist-group-name {
     font-size: 0.75rem;
     font-weight: 600;
     text-transform: uppercase;
@@ -143,25 +203,58 @@ a.stat-card {
     color: var(--ink-soft);
 }
 
+/* Count as a small instrument readout, pinned right */
+.worklist-group-count {
+    margin-left: auto;
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    font-variant-numeric: tabular-nums;
+    color: var(--ink-faint);
+    background: var(--surface-sunken);
+    border-radius: var(--radius-sm);
+    padding: 1px 8px;
+}
+
 .worklist-items {
     display: flex;
     flex-direction: column;
-    gap: 2px;
     margin: 0;
-    padding: 0;
-    list-style: none;
+    padding: var(--spacing-xs) var(--spacing-sm) var(--spacing-sm);
+    border-top: 1px solid var(--hairline);
 }
 
+/* Each row is a click-through link to the record */
 .worklist-item {
     display: flex;
     align-items: baseline;
     gap: var(--spacing-sm);
-    padding: 6px var(--spacing-sm);
+    padding: 7px var(--spacing-sm);
     border-radius: var(--radius-sm);
-    transition: background-color 0.15s;
+    color: var(--ink);
+    text-decoration: none;
+    transition: background-color 0.12s;
 
     &:hover {
         background-color: var(--surface-sunken);
+    }
+
+    &:focus-visible {
+        outline: none;
+        box-shadow: var(--focus-ring);
+    }
+
+    /* hover affordance — replaces the per-row "open" link */
+    &::after {
+        content: "→";
+        font-family: var(--font-mono);
+        color: var(--teal);
+        opacity: 0;
+        transition: opacity 0.12s;
+    }
+
+    &:hover::after,
+    &:focus-visible::after {
+        opacity: 1;
     }
 }
 
@@ -177,7 +270,7 @@ a.stat-card {
     overflow-wrap: anywhere;
 }
 
-/* Patient id is pushed to the right, before the open link */
+/* Patient id pinned right, before the hover chevron */
 .worklist-item-patient {
     margin-left: auto;
     font-family: var(--font-mono);
@@ -186,19 +279,18 @@ a.stat-card {
     white-space: nowrap;
 }
 
-.worklist-item-open {
-    color: var(--teal);
-    font-size: 0.8125rem;
-    white-space: nowrap;
-
-    &:hover {
-        text-decoration: underline;
-    }
+/* In-group empty state — quieter than the page-level .empty-state */
+.worklist-empty {
+    padding: var(--spacing-sm) var(--spacing-md) var(--spacing-md);
+    border-top: 1px solid var(--hairline);
+    color: var(--ink-faint);
+    font-size: 0.85rem;
+    font-style: italic;
 }
 
 .worklist-show-all {
     display: inline-block;
-    margin-top: var(--spacing-sm);
+    margin: var(--spacing-xs) var(--spacing-sm) var(--spacing-sm);
     font-size: 0.8125rem;
     color: var(--teal);
 
