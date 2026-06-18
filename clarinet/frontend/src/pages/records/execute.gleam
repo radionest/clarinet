@@ -1872,6 +1872,38 @@ fn render_record_metadata(record: Record, shared: Shared) -> Element(Msg) {
     html.dl([], [
       html.dt([], [html.text("Patient:")]),
       html.dd([], [entity_link.patient_if_admin(record.patient_id, is_admin)]),
+      // Simple per-patient anon_id. Hidden whenever the deployment uses
+      // per-study anonymization: it is stable across a patient's studies, so
+      // showing it would let studies be correlated and defeat per-study
+      // unlinkability (backend also strips it from non-superuser payloads).
+      case is_admin && !shared.anon_per_study {
+        True ->
+          case option.then(record.patient, fn(p) { p.anon_id }) {
+            Some(anon_id) ->
+              element.fragment([
+                html.dt([], [html.text("Anon ID:")]),
+                html.dd([], [html.text(anon_id)]),
+              ])
+            None -> element.none()
+          }
+        False -> element.none()
+      },
+      // Study-specific anon ID (per-study hash). The backend sets
+      // display_anon_id only in per-study mode once the study is anonymized
+      // (None otherwise), so this row needs no explicit anon_per_study gate —
+      // it simply never appears in per-patient mode.
+      case is_admin {
+        True ->
+          case record.display_anon_id {
+            Some(study_anon_id) ->
+              element.fragment([
+                html.dt([], [html.text("Study anon ID:")]),
+                html.dd([], [html.text(study_anon_id)]),
+              ])
+            None -> element.none()
+          }
+        False -> element.none()
+      },
       case record.study {
         Some(study) ->
           element.fragment([

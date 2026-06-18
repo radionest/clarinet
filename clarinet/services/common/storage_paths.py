@@ -64,6 +64,7 @@ __all__ = [
     "build_context",
     "compute_display_anon_id",
     "derive_anon_patient_id",
+    "per_study_patient_id",
     "render_all_levels",
     "render_working_folder",
     "split_template",
@@ -116,6 +117,28 @@ def _modalities_string(study: "Study | StudyBase | None") -> str:
     return "unknown"
 
 
+def per_study_patient_id(study_uid: str) -> str:
+    """Deterministic per-study PatientID hash for ``study_uid``.
+
+    Shared source of the ``(salt, hex_length, prefix)`` arguments for the
+    read / display / masking paths: storage-path derivation
+    (:func:`derive_anon_patient_id`), the UI display ID
+    (:func:`compute_display_anon_id`) and response masking
+    (``api.masking.mask_record_patient_data``). The DICOM anonymization writer
+    (``anonymization_service``) composes the same tuple separately. Applies no
+    mode / anonymization gate — callers decide when a per-study hash is
+    appropriate.
+    """
+    from clarinet.services.dicom.anonymizer import compute_per_study_patient_id
+
+    return compute_per_study_patient_id(
+        settings.anon_uid_salt,
+        study_uid,
+        settings.anon_per_study_patient_id_hex_length,
+        prefix=settings.anon_id_prefix,
+    )
+
+
 def derive_anon_patient_id(
     patient: "Patient | PatientInfo | None",
     study: "Study | StudyBase | None",
@@ -137,17 +160,10 @@ def derive_anon_patient_id(
     ``fallback_to_unanonymized=True`` to preserve the legacy behavior of
     falling back to ``patient.id`` (or ``"unknown"`` when no patient).
     """
-    from clarinet.services.dicom.anonymizer import compute_per_study_patient_id
-
     if settings.anon_per_study_patient_id:
         study_uid = getattr(study, "study_uid", None) if study else None
         if study_uid:
-            return compute_per_study_patient_id(
-                settings.anon_uid_salt,
-                study_uid,
-                settings.anon_per_study_patient_id_hex_length,
-                prefix=settings.anon_id_prefix,
-            )
+            return per_study_patient_id(study_uid)
     if patient is None:
         # Caller did not supply a patient — keep the "unknown" sentinel so
         # PATIENT-level template rendering works without forcing the caller
@@ -185,14 +201,7 @@ def compute_display_anon_id(
         return None
     if study_uid is None or study_anon_uid is None:
         return None
-    from clarinet.services.dicom.anonymizer import compute_per_study_patient_id
-
-    return compute_per_study_patient_id(
-        settings.anon_uid_salt,
-        study_uid,
-        settings.anon_per_study_patient_id_hex_length,
-        prefix=settings.anon_id_prefix,
-    )
+    return per_study_patient_id(study_uid)
 
 
 def build_context(

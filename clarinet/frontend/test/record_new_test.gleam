@@ -20,6 +20,7 @@ fn make_shared() -> shared.Shared {
     project_description: "",
     cache: cache.init(),
     viewers: [],
+    anon_per_study: False,
     translate: fn(_) { "" },
     locale: i18n.En,
   )

@@ -57,6 +57,9 @@ pub type Model {
     // SSE realtime push
     sse: sse.Model,
     sse_enabled: Bool,
+    // Deployment-level anonymization mode (from /api/info); gates display of
+    // the simple per-patient anon_id in the record header.
+    anon_per_study: Bool,
     // Viewers
     viewers: List(ViewerInfo),
     // Locale
@@ -205,6 +208,7 @@ pub fn init() -> Model {
     preload: preload.init(),
     sse: sse.init(),
     sse_enabled: False,
+    anon_per_study: False,
     viewers: [],
     locale: i18n.En,
     page: NoPage,
@@ -229,6 +233,7 @@ pub fn reset_for_logout(model: Model) -> Model {
     viewers: model.viewers,
     locale: model.locale,
     sse_enabled: model.sse_enabled,
+    anon_per_study: model.anon_per_study,
     checking_session: False,
     page: NoPage,
   )

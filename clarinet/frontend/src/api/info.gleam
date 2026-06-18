@@ -15,6 +15,10 @@ pub type ProjectInfo {
     project_description: String,
     viewers: List(ViewerInfo),
     sse_enabled: Bool,
+    // Deployment uses per-study anonymized patient IDs. When True the simple
+    // per-patient anon_id must not be shown (it is stable across studies and
+    // would defeat per-study unlinkability).
+    anon_per_study: Bool,
   )
 }
 
@@ -29,11 +33,17 @@ fn project_info_decoder() -> decode.Decoder(ProjectInfo) {
   use project_description <- decode.field("project_description", decode.string)
   use viewers <- decode.optional_field("viewers", [], decode.list(viewer_info_decoder()))
   use sse_enabled <- decode.optional_field("sse_enabled", False, decode.bool)
+  use anon_per_study <- decode.optional_field(
+    "anon_per_study_patient_id",
+    False,
+    decode.bool,
+  )
   decode.success(ProjectInfo(
     project_name:,
     project_description:,
     viewers:,
     sse_enabled:,
+    anon_per_study:,
   ))
 }
 
