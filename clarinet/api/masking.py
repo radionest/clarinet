@@ -12,8 +12,16 @@ pathology, MDK). Each deanonymized access is audit-logged at INFO level
 without leaking PII (identifiers only).
 
 When ``settings.anon_per_study_patient_id`` is enabled, the masked patient ID
-is a per-study hash (matching what was written into the DICOM tags in PACS),
-so the frontend stays consistent with OHIF and PACS.
+is a per-study hash derived from the study UID — the same value written into
+the DICOM tags in PACS, so the frontend stays consistent with OHIF and PACS.
+The hash is used even before the study is anonymized (the race window where
+``display_anon_id`` is still None): it is forward-consistent with the eventual
+PACS value and, unlike the per-patient ``anon_id`` / ``anon_name``, is
+per-study, so it never lets a non-superuser correlate a patient's studies. In
+that mode the per-patient ``auto_id`` (and the ``anon_id`` computed from it)
+are also dropped from the payload, since both are stable across studies.
+Patient-level records (no study) have no per-study context and keep the
+per-patient anon_id.
 """
 
 from collections.abc import Sequence
@@ -21,6 +29,7 @@ from datetime import date
 from typing import Any
 
 from clarinet.models import Record, RecordRead, User
+from clarinet.settings import settings
 from clarinet.utils.logger import logger
 
 # Sentinel shown in place of the real study acquisition date for masked
@@ -56,25 +65,50 @@ def mask_record_patient_data(record: RecordRead, user: User) -> RecordRead:
         )
         return record
 
-    # In per-study mode the masked PatientID/PatientName is the hash that was
-    # written into the DICOM tags in PACS. The RecordRead validator has already
-    # computed it from the ORIGINAL study_uid: display_anon_id is non-None
-    # exactly when per-study mode applies and the study has been anonymized
-    # (see RecordRead.populate_display_anon_id). Before that, PACS still holds
-    # the real PatientID, so fall back to per-patient anon_id.
+    # Choose the masked PatientID / PatientName.
+    #
+    # - Study already anonymized (``display_anon_id`` set): the RecordRead
+    #   validator computed the per-study hash from the original study_uid — the
+    #   same value written into the DICOM tags in PACS, keeping the UI
+    #   consistent with OHIF/PACS.
+    # - Per-study mode but the study is NOT anonymized yet (the race window,
+    #   ``display_anon_id`` is None): derive the per-study hash from the
+    #   still-raw study_uid directly. It is forward-consistent with the eventual
+    #   PACS value and is per-study; falling back to the per-patient anon_id /
+    #   anon_name here would expose a cross-study-stable identifier and let a
+    #   non-superuser correlate the patient's studies.
+    # - Otherwise (per-patient mode, or a patient-level record with no study):
+    #   the per-patient anon_id / anon_name is the operative anonymized id.
     if record.display_anon_id is not None:
         masked_id: str | None = record.display_anon_id
         masked_name: str | None = record.display_anon_id
+    elif settings.anon_per_study_patient_id and record.study_uid is not None:
+        from clarinet.services.dicom.anonymizer import compute_per_study_patient_id
+
+        masked_id = compute_per_study_patient_id(
+            settings.anon_uid_salt,
+            record.study_uid,
+            settings.anon_per_study_patient_id_hex_length,
+            prefix=settings.anon_id_prefix,
+        )
+        masked_name = masked_id
     else:
         masked_id = record.patient.anon_id
         masked_name = record.patient.anon_name
 
     # Build masked patient
-    patient_update = {}
+    patient_update: dict[str, Any] = {}
     if masked_id is not None:
         patient_update["id"] = masked_id
     if masked_name is not None:
         patient_update["name"] = masked_name
+
+    # Per-study mode: drop the cross-study-stable per-patient identifiers from
+    # the payload. auto_id is the source of the computed anon_id, so nulling it
+    # makes both serialize as null — otherwise a non-superuser could read the
+    # per-patient anon_id straight off the wire and correlate the studies.
+    if settings.anon_per_study_patient_id:
+        patient_update["auto_id"] = None
 
     masked_patient = record.patient.model_copy(update=patient_update)
 
@@ -130,6 +164,13 @@ def mask_record_patient_data(record: RecordRead, user: User) -> RecordRead:
                 # URL and series metadata).
                 updates["series"] = None
                 updates["series_uid"] = None
+    elif settings.anon_per_study_patient_id and record.study is not None and masked_id is not None:
+        # Race window: the study has no anon_uid yet, so its UIDs / date are
+        # left untouched (there is no anonymized counterpart), but the nested
+        # study.patient_id would still carry the REAL patient ID. Rewrite it to
+        # the same per-study hash so no patient identifier — real or
+        # per-patient-anon — leaks through the study relation.
+        updates["study"] = record.study.model_copy(update={"patient_id": masked_id})
 
     return record.model_copy(update=updates)
 

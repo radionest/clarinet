@@ -34,6 +34,7 @@ fn make_shared_with_cache(
     project_description: "",
     cache: c,
     viewers: [],
+    anon_per_study: False,
     translate: fn(_) { "" },
     locale: i18n.En,
   )

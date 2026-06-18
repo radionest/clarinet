@@ -23,6 +23,9 @@ pub type Shared {
     cache: cache.Model,
     // Viewer plugins
     viewers: List(ViewerInfo),
+    // Deployment uses per-study anonymized patient IDs — gates display of the
+    // simple per-patient anon_id (hidden when True to keep studies unlinkable).
+    anon_per_study: Bool,
     // i18n
     translate: fn(Key) -> String,
     locale: Locale,

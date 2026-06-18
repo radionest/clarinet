@@ -479,6 +479,7 @@ fn update_inner(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           project_description: project_info.project_description,
           viewers: project_info.viewers,
           sse_enabled: project_info.sse_enabled,
+          anon_per_study: project_info.anon_per_study,
         )
       #(new_model, ensure_sse(new_model))
     }
@@ -938,6 +939,7 @@ fn build_shared(model: Model) -> shared.Shared {
     project_description: model.project_description,
     cache: model.cache,
     viewers: model.viewers,
+    anon_per_study: model.anon_per_study,
     translate: i18n.translate(model.locale, _),
     locale: model.locale,
   )

@@ -20,6 +20,7 @@ from clarinet.models.record import RecordRead
 from clarinet.models.record_type import RecordTypeRead
 from clarinet.models.study import SeriesBase, StudyBase
 from clarinet.models.user import User
+from clarinet.services.dicom.anonymizer import compute_per_study_patient_id
 from clarinet.settings import settings
 from clarinet.utils.logger import logger
 
@@ -994,3 +995,122 @@ class TestMaskRecords:
         assert results[0].patient_id == "PAT_001"
         assert results[0].patient.name == "Patient One"
         assert results[0].study_uid == "1.2.3.4.5.6.7.8"
+
+
+class TestPerStudyAnonIdStripping:
+    """Per-study mode hides the stable per-patient anon_id / auto_id.
+
+    When ``anon_per_study_patient_id`` is enabled the per-patient ``anon_id``
+    (``{prefix}_{auto_id}``) is stable across a patient's studies, so handing it
+    to a non-superuser would let them correlate studies the per-study hashing is
+    meant to keep unlinkable. The masked response must therefore expose only the
+    per-study hash and drop ``anon_id`` / ``auto_id`` from the payload.
+    """
+
+    def test_non_superuser_strips_anon_id_and_auto_id(self) -> None:
+        """Non-superuser: per-study hash is visible, per-patient ids are gone."""
+        user = _make_user(is_superuser=False)
+        with patch.object(settings, "anon_per_study_patient_id", True):
+            record = _make_record_read(
+                patient_id="REAL_PAT_001",
+                anon_name="Anon Patient Name",
+                auto_id=42,
+                study_uid="1.2.3.4.5.6.7.8",
+                study_anon_uid="9.8.7.6.5.4.3.2",
+            )
+            result = mask_record_patient_data(record, user)
+
+            expected_hash = compute_per_study_patient_id(
+                settings.anon_uid_salt,
+                "1.2.3.4.5.6.7.8",
+                settings.anon_per_study_patient_id_hex_length,
+                prefix=settings.anon_id_prefix,
+            )
+
+        # The per-study hash is the visible identifier...
+        assert result.display_anon_id == expected_hash
+        assert result.patient_id == expected_hash
+        assert result.patient.id == expected_hash
+        # ...and the stable per-patient identifiers never reach the client,
+        # including the serialized JSON (anon_id is computed from auto_id).
+        assert result.patient.auto_id is None
+        assert result.patient.anon_id is None
+        dumped = result.model_dump()
+        assert dumped["patient"]["auto_id"] is None
+        assert dumped["patient"]["anon_id"] is None
+
+    def test_superuser_keeps_anon_id(self) -> None:
+        """Superuser sees full data even in per-study mode — ids are preserved."""
+        superuser = _make_user(is_superuser=True)
+        with patch.object(settings, "anon_per_study_patient_id", True):
+            record = _make_record_read(
+                anon_name="Anon Patient Name",
+                auto_id=42,
+                study_anon_uid="9.8.7.6.5.4.3.2",
+            )
+            result = mask_record_patient_data(record, superuser)
+
+        assert result.patient.auto_id == 42
+        assert result.patient.anon_id == f"{settings.anon_id_prefix}_42"
+
+    def test_default_mode_keeps_anon_id_for_non_superuser(self) -> None:
+        """Default (per-patient) mode is unchanged: the per-patient anon_id is
+        still the masked identifier and auto_id is preserved."""
+        user = _make_user(is_superuser=False)
+        with patch.object(settings, "anon_per_study_patient_id", False):
+            record = _make_record_read(
+                anon_name="Anon Patient Name",
+                auto_id=42,
+                study_anon_uid="9.8.7.6.5.4.3.2",
+            )
+            result = mask_record_patient_data(record, user)
+
+        expected_anon_id = f"{settings.anon_id_prefix}_42"
+        assert result.display_anon_id is None
+        assert result.patient_id == expected_anon_id
+        assert result.patient.anon_id == expected_anon_id
+        assert result.patient.auto_id == 42
+
+    def test_race_window_uses_per_study_hash_not_anon_id(self) -> None:
+        """Race window: per-study mode ON, patient anonymized, study NOT yet
+        anonymized (``study_anon_uid=None`` -> ``display_anon_id`` is None).
+
+        The masked identifier must be the per-study hash of the (still-raw)
+        study_uid — NOT the per-patient anon_id / anon_name, which are stable
+        across studies and would let a non-superuser correlate them. The real
+        patient ID must also not survive on the nested study relation.
+        """
+        user = _make_user(is_superuser=False)
+        with patch.object(settings, "anon_per_study_patient_id", True):
+            record = _make_record_read(
+                patient_id="REAL_PAT_001",
+                anon_name="Anon Patient Name",
+                auto_id=42,
+                study_uid="1.2.3.4.5.6.7.8",
+                study_anon_uid=None,  # study not anonymized yet
+            )
+            result = mask_record_patient_data(record, user)
+
+            expected_hash = compute_per_study_patient_id(
+                settings.anon_uid_salt,
+                "1.2.3.4.5.6.7.8",
+                settings.anon_per_study_patient_id_hex_length,
+                prefix=settings.anon_id_prefix,
+            )
+
+        plain_anon_id = f"{settings.anon_id_prefix}_42"
+        # display_anon_id stays None (study has no anon_uid)...
+        assert result.display_anon_id is None
+        # ...but the masked patient identifier is the per-study hash, never the
+        # cross-study-stable per-patient anon_id / anon_name.
+        assert result.patient_id == expected_hash
+        assert result.patient.id == expected_hash
+        assert result.patient.name == expected_hash
+        assert result.patient_id != plain_anon_id
+        assert result.patient.anon_id is None
+        assert result.patient.auto_id is None
+        # The real patient ID must not leak through the nested study relation.
+        assert result.study is not None
+        assert result.study.patient_id == expected_hash
+        # The study itself is not anonymized, so its UID is left as-is.
+        assert result.study.study_uid == "1.2.3.4.5.6.7.8"
