@@ -841,10 +841,25 @@ fn delegate_sse(model: Model, smsg: sse.Msg) -> #(Model, Effect(Msg)) {
           ]
           #(m2, list.append(resync, effs))
         }
-        sse.SseEntityEvent(event) -> #(m, [
-          dispatch_msg(store.CacheMsg(cache.SseEntityEvent(event))),
-          ..effs
-        ])
+        sse.SseEntityEvent(event) -> {
+          let base = [
+            dispatch_msg(store.CacheMsg(cache.SseEntityEvent(event))),
+            ..effs
+          ]
+          // A record mutation is the birth of a new audit row — nudge the open
+          // activity feed to silently refresh its Events tab.
+          case m.page, event.entity {
+            store.AdminActivityPage(_), "record" -> #(m, [
+              dispatch_msg(
+                store.AdminActivityMsg(
+                  admin_activity_page.external_events_change(),
+                ),
+              ),
+              ..base
+            ])
+            _, _ -> #(m, base)
+          }
+        }
         sse.SseTaskProgress(task, task_id, payload) ->
           case task {
             "preload" -> #(m, [
@@ -858,6 +873,19 @@ fn delegate_sse(model: Model, smsg: sse.Msg) -> #(Model, Effect(Msg)) {
                   dispatch_msg(
                     store.AdminQuartoReportsMsg(
                       admin_quarto_reports_page.RenderPushed(payload),
+                    ),
+                  ),
+                  ..effs
+                ])
+                _ -> #(m, effs)
+              }
+            // Pipeline runs only matter while the activity feed is open.
+            "pipeline" ->
+              case m.page {
+                store.AdminActivityPage(_) -> #(m, [
+                  dispatch_msg(
+                    store.AdminActivityMsg(
+                      admin_activity_page.external_runs_change(),
                     ),
                   ),
                   ..effs
@@ -924,6 +952,11 @@ fn cleanup_current_page(model: Model) -> Effect(Msg) {
       effect.map(
         admin_quarto_reports_page.cleanup(page_model),
         store.AdminQuartoReportsMsg,
+      )
+    store.AdminActivityPage(page_model) ->
+      effect.map(
+        admin_activity_page.cleanup(page_model),
+        store.AdminActivityMsg,
       )
     _ -> effect.none()
   }

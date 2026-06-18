@@ -33,3 +33,9 @@
         opacity: 1;
     }
 }
+
+/* One-shot flash for activity-feed rows that just arrived via SSE live-update */
+@keyframes activity-row-flash {
+    from { background-color: var(--teal-wash); }
+    to { background-color: transparent; }
+}

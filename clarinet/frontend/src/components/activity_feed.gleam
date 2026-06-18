@@ -10,19 +10,31 @@ import api/models.{type PipelineRun, type RecordEvent}
 import api/types.{type ApiError, AuthError}
 import clarinet_frontend/i18n.{type Key}
 import components/forms/base
+import gleam/bool
 import gleam/float
 import gleam/int
 import gleam/javascript/promise.{type Promise}
 import gleam/list
 import gleam/option.{type Option, None, Some}
+import gleam/set.{type Set}
 import lustre/attribute
 import lustre/effect.{type Effect}
 import lustre/element.{type Element}
 import lustre/element/html
+import lustre/element/keyed
 import lustre/event
+import plinth/javascript/global
 import router
 import utils/datetime
 import utils/load_status.{type LoadStatus}
+
+// Throttle window for SSE-driven silent refetches of the active tab: a burst of
+// pushes coalesces into a single refetch, capping the refresh rate to ~1/s.
+const refresh_throttle_ms = 1000
+
+// How long a freshly-arrived row keeps its highlight; matches the CSS
+// `activity-row-flash` animation (2s) so the class clears as the flash ends.
+const highlight_window_ms = 2000
 
 pub type ActivityTab {
   EventsTab
@@ -80,6 +92,15 @@ pub type Model {
     // (rapid filter changes / typing fire overlapping requests).
     events_gen: Int,
     runs_gen: Int,
+    // SSE live-refresh state (armed only for the global admin feed — the lone
+    // source main.delegate_sse routes pushes to; record/patient feeds keep the
+    // timers None and the highlight sets empty). `refresh_timer` throttles the
+    // silent refetch; `new_*_ids` are the rows that just arrived (highlighted);
+    // `highlight_timer` clears that highlight after a short window.
+    refresh_timer: Option(global.TimerID),
+    new_event_ids: Set(Int),
+    new_run_ids: Set(String),
+    highlight_timer: Option(global.TimerID),
   )
 }
 
@@ -98,6 +119,15 @@ pub type Msg {
   RunStatusSelected(String)
   RunTaskNameChanged(String)
   RunSinceChanged(String)
+  // SSE live refresh (global feed) — `External*Change` is dispatched by
+  // main.delegate_sse on a relevant push; the rest drive the throttle and the
+  // highlight-clear timers (cf. the watchdog pattern in sse.gleam).
+  ExternalEventsChange
+  ExternalRunsChange
+  SetRefreshTimer(global.TimerID)
+  RefreshTick(ActivityTab)
+  SetHighlightTimer(global.TimerID)
+  ClearHighlight
 }
 
 /// The only signal the host must act on: a 401 during a load. Non-auth
@@ -122,6 +152,10 @@ pub fn init(source: Source) -> #(Model, Effect(Msg), List(OutMsg)) {
       runs_status: load_status.Loading,
       events_gen: 1,
       runs_gen: 1,
+      refresh_timer: None,
+      new_event_ids: set.new(),
+      new_run_ids: set.new(),
+      highlight_timer: None,
     )
   #(
     model,
@@ -137,48 +171,53 @@ pub fn init(source: Source) -> #(Model, Effect(Msg), List(OutMsg)) {
 
 pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg), List(OutMsg)) {
   case msg {
-    TabSelected(tab) -> #(Model(..model, tab: tab), effect.none(), [])
+    TabSelected(tab) -> {
+      // Clicking the already-active tab is a no-op — don't refetch or drop the
+      // current highlight.
+      use <- bool.guard(tab == model.tab, #(model, effect.none(), []))
+      case model.source {
+        // The live admin feed: cancel any queued refresh/highlight, switch, and
+        // silently refetch the now-visible tab so it reflects changes that
+        // landed while it was hidden. Capture the timers to cancel *before*
+        // `silent_refresh` nils the fields, or the old JS timeouts would leak
+        // (a stale ClearHighlight could even cut a fresh highlight short).
+        GlobalSource -> {
+          let cancel =
+            effect.batch([
+              cancel_timer(model.refresh_timer),
+              cancel_timer(model.highlight_timer),
+            ])
+          let #(model, eff, out) =
+            silent_refresh(
+              Model(
+                ..model,
+                tab: tab,
+                refresh_timer: None,
+                highlight_timer: None,
+                new_event_ids: set.new(),
+                new_run_ids: set.new(),
+              ),
+              tab,
+            )
+          #(model, effect.batch([cancel, eff]), out)
+        }
+        // Record/patient feeds aren't wired to SSE (main.delegate_sse only
+        // routes to the admin page), so they never arm a timer — keep the
+        // original instant, fetch-free switch.
+        _ -> #(Model(..model, tab: tab), effect.none(), [])
+      }
+    }
 
     EventsLoaded(gen, result) ->
       case gen == model.events_gen {
         False -> #(model, effect.none(), [])
-        True ->
-          case result {
-            Ok(events) -> #(
-              Model(..model, events: events, events_status: load_status.Loaded),
-              effect.none(),
-              [],
-            )
-            Error(err) -> #(
-              Model(
-                ..model,
-                events_status: load_status.Failed("Failed to load events"),
-              ),
-              effect.none(),
-              auth_out(err),
-            )
-          }
+        True -> apply_events(model, result)
       }
 
     RunsLoaded(gen, result) ->
       case gen == model.runs_gen {
         False -> #(model, effect.none(), [])
-        True ->
-          case result {
-            Ok(runs) -> #(
-              Model(..model, runs: runs, runs_status: load_status.Loaded),
-              effect.none(),
-              [],
-            )
-            Error(err) -> #(
-              Model(
-                ..model,
-                runs_status: load_status.Failed("Failed to load pipeline runs"),
-              ),
-              effect.none(),
-              auth_out(err),
-            )
-          }
+        True -> apply_runs(model, result)
       }
 
     Retry(EventsTab) -> {
@@ -215,6 +254,31 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg), List(OutMsg)) {
       reload_runs(model, Filters(..model.filters, run_task_name: name))
     RunSinceChanged(since) ->
       reload_runs(model, Filters(..model.filters, run_since: since))
+
+    // --- SSE live refresh ---
+    ExternalEventsChange -> schedule_refresh(model, EventsTab)
+    ExternalRunsChange -> schedule_refresh(model, RunsTab)
+    SetRefreshTimer(id) -> #(
+      Model(..model, refresh_timer: Some(id)),
+      effect.none(),
+      [],
+    )
+    RefreshTick(tab) -> silent_refresh(Model(..model, refresh_timer: None), tab)
+    SetHighlightTimer(id) -> #(
+      Model(..model, highlight_timer: Some(id)),
+      effect.none(),
+      [],
+    )
+    ClearHighlight -> #(
+      Model(
+        ..model,
+        new_event_ids: set.new(),
+        new_run_ids: set.new(),
+        highlight_timer: None,
+      ),
+      effect.none(),
+      [],
+    )
   }
 }
 
@@ -230,6 +294,7 @@ fn reload_events(
       filters: filters,
       events_status: load_status.Loading,
       events_gen: gen,
+      new_event_ids: set.new(),
     )
   #(model, load_events(model.source, filters, gen), [])
 }
@@ -246,6 +311,7 @@ fn reload_runs(
       filters: filters,
       runs_status: load_status.Loading,
       runs_gen: gen,
+      new_run_ids: set.new(),
     )
   #(model, load_runs(model.source, filters, gen), [])
 }
@@ -256,6 +322,162 @@ fn auth_out(err: ApiError) -> List(OutMsg) {
   case err {
     AuthError(_) -> [AuthExpired]
     _ -> []
+  }
+}
+
+// --- SSE live refresh helpers ---
+
+/// Apply an events fetch. The initial / filter / retry load (status `Loading`)
+/// just shows the data; a silent SSE refetch (status already `Loaded`) keeps the
+/// table on screen, highlights the rows that just appeared, and on failure
+/// leaves the current rows untouched — only a 401 ever escalates.
+fn apply_events(
+  model: Model,
+  result: Result(List(RecordEvent), ApiError),
+) -> #(Model, Effect(Msg), List(OutMsg)) {
+  let silent = model.events_status == load_status.Loaded
+  case result, silent {
+    Ok(events), True -> {
+      let added = added_ids(model.events, events, fn(e) { e.id })
+      case set.is_empty(added) {
+        True -> #(Model(..model, events: events), effect.none(), [])
+        False -> #(
+          Model(..model, events: events, new_event_ids: added),
+          arm_highlight(model.highlight_timer),
+          [],
+        )
+      }
+    }
+    Ok(events), False -> #(
+      Model(..model, events: events, events_status: load_status.Loaded),
+      effect.none(),
+      [],
+    )
+    Error(err), True -> #(model, effect.none(), auth_out(err))
+    Error(err), False -> #(
+      Model(..model, events_status: load_status.Failed("Failed to load events")),
+      effect.none(),
+      auth_out(err),
+    )
+  }
+}
+
+/// Runs counterpart of `apply_events`.
+fn apply_runs(
+  model: Model,
+  result: Result(List(PipelineRun), ApiError),
+) -> #(Model, Effect(Msg), List(OutMsg)) {
+  let silent = model.runs_status == load_status.Loaded
+  case result, silent {
+    Ok(runs), True -> {
+      let added = added_ids(model.runs, runs, fn(r) { r.id })
+      case set.is_empty(added) {
+        True -> #(Model(..model, runs: runs), effect.none(), [])
+        False -> #(
+          Model(..model, runs: runs, new_run_ids: added),
+          arm_highlight(model.highlight_timer),
+          [],
+        )
+      }
+    }
+    Ok(runs), False -> #(
+      Model(..model, runs: runs, runs_status: load_status.Loaded),
+      effect.none(),
+      [],
+    )
+    Error(err), True -> #(model, effect.none(), auth_out(err))
+    Error(err), False -> #(
+      Model(
+        ..model,
+        runs_status: load_status.Failed("Failed to load pipeline runs"),
+      ),
+      effect.none(),
+      auth_out(err),
+    )
+  }
+}
+
+/// Schedule a throttled silent refetch of `tab`. Only the visible tab
+/// auto-refreshes (the other is refetched on `TabSelected`); while a refresh is
+/// already queued, further pushes are dropped — the queued one catches them.
+fn schedule_refresh(
+  model: Model,
+  tab: ActivityTab,
+) -> #(Model, Effect(Msg), List(OutMsg)) {
+  case tab == model.tab, model.refresh_timer {
+    True, None -> #(model, arm_refresh(tab), [])
+    _, _ -> #(model, effect.none(), [])
+  }
+}
+
+/// Refetch a tab with the current filters without flipping it to `Loading`, so
+/// the table stays on screen and the rows swap in place when the result lands.
+fn silent_refresh(
+  model: Model,
+  tab: ActivityTab,
+) -> #(Model, Effect(Msg), List(OutMsg)) {
+  case tab {
+    EventsTab -> {
+      let gen = model.events_gen + 1
+      #(
+        Model(..model, events_gen: gen),
+        load_events(model.source, model.filters, gen),
+        [],
+      )
+    }
+    RunsTab -> {
+      let gen = model.runs_gen + 1
+      #(
+        Model(..model, runs_gen: gen),
+        load_runs(model.source, model.filters, gen),
+        [],
+      )
+    }
+  }
+}
+
+fn arm_refresh(tab: ActivityTab) -> Effect(Msg) {
+  use dispatch <- effect.from
+  let id =
+    global.set_timeout(refresh_throttle_ms, fn() { dispatch(RefreshTick(tab)) })
+  dispatch(SetRefreshTimer(id))
+}
+
+/// (Re)arm the highlight-clear timer, cancelling any pending one so a fresh
+/// burst extends the window instead of an old timer cutting it short.
+fn arm_highlight(old: Option(global.TimerID)) -> Effect(Msg) {
+  use dispatch <- effect.from
+  case old {
+    Some(id) -> global.clear_timeout(id)
+    None -> Nil
+  }
+  let id =
+    global.set_timeout(highlight_window_ms, fn() { dispatch(ClearHighlight) })
+  dispatch(SetHighlightTimer(id))
+}
+
+/// Keys present in `new` but not in `old` — the rows that just appeared.
+fn added_ids(old: List(a), new: List(a), key: fn(a) -> b) -> Set(b) {
+  let seen = old |> list.map(key) |> set.from_list
+  new
+  |> list.map(key)
+  |> list.filter(fn(k) { !set.contains(seen, k) })
+  |> set.from_list
+}
+
+/// Cancel pending refresh / highlight timers on route change so a queued
+/// refetch can't fire into a stale page. Wired via the host page's `cleanup`.
+pub fn cleanup(model: Model) -> Effect(Msg) {
+  effect.batch([
+    cancel_timer(model.refresh_timer),
+    cancel_timer(model.highlight_timer),
+  ])
+}
+
+fn cancel_timer(timer: Option(global.TimerID)) -> Effect(Msg) {
+  case timer {
+    Some(id) -> effect.from(fn(_dispatch) { global.clear_timeout(id) })
+    None -> effect.none()
   }
 }
 
@@ -334,14 +556,14 @@ pub fn view(
         load_status.render(
           model.events_status,
           fn() { loading_view(t) },
-          fn() { events_table(model.events, model.source, t) },
+          fn() { events_table(model.events, model.source, model.new_event_ids, t) },
           fn(m) { error_view(m, Retry(EventsTab), t) },
         )
       RunsTab ->
         load_status.render(
           model.runs_status,
           fn() { loading_view(t) },
-          fn() { runs_table(model.runs, model.source, t) },
+          fn() { runs_table(model.runs, model.source, model.new_run_ids, t) },
           fn(m) { error_view(m, Retry(RunsTab), t) },
         )
     },
@@ -609,11 +831,21 @@ fn optional_cell(show: Bool, cell: Element(msg)) -> List(Element(msg)) {
   }
 }
 
+/// CSS class for a feed row — `activity-row-new` triggers the one-shot flash
+/// animation on rows that just arrived via SSE live-update.
+fn row_class(is_new: Bool) -> String {
+  case is_new {
+    True -> "activity-row-new"
+    False -> ""
+  }
+}
+
 // --- Record events table ---
 
 pub fn events_table(
   events: List(RecordEvent),
   source: Source,
+  new_ids: Set(Int),
   t: fn(Key) -> String,
 ) -> Element(msg) {
   let show_record = show_record_col(source)
@@ -648,10 +880,19 @@ pub fn events_table(
               ]),
             ),
           ]),
-          html.tbody(
+          keyed.tbody(
             [],
             list.map(events, fn(ev) {
-              event_row(ev, show_record, show_patient, t)
+              #(
+                int.to_string(ev.id),
+                event_row(
+                  ev,
+                  show_record,
+                  show_patient,
+                  set.contains(new_ids, ev.id),
+                  t,
+                ),
+              )
             }),
           ),
         ]),
@@ -663,10 +904,11 @@ fn event_row(
   ev: RecordEvent,
   show_record: Bool,
   show_patient: Bool,
+  is_new: Bool,
   t: fn(Key) -> String,
 ) -> Element(msg) {
   html.tr(
-    [],
+    [attribute.class(row_class(is_new))],
     list.flatten([
       [html.td([], [html.text(datetime.format(ev.occurred_at))])],
       optional_cell(show_record, html.td([], [event_record_cell(ev)])),
@@ -722,6 +964,7 @@ fn kind_display(kind: String) -> #(Key, String) {
 pub fn runs_table(
   runs: List(PipelineRun),
   source: Source,
+  new_ids: Set(String),
   t: fn(Key) -> String,
 ) -> Element(msg) {
   let show_record = show_record_col(source)
@@ -756,9 +999,20 @@ pub fn runs_table(
               ]),
             ),
           ]),
-          html.tbody(
+          keyed.tbody(
             [],
-            list.map(runs, fn(r) { run_row(r, show_record, show_patient, t) }),
+            list.map(runs, fn(r) {
+              #(
+                r.id,
+                run_row(
+                  r,
+                  show_record,
+                  show_patient,
+                  set.contains(new_ids, r.id),
+                  t,
+                ),
+              )
+            }),
           ),
         ]),
       ])
@@ -769,10 +1023,11 @@ fn run_row(
   run: PipelineRun,
   show_record: Bool,
   show_patient: Bool,
+  is_new: Bool,
   t: fn(Key) -> String,
 ) -> Element(msg) {
   html.tr(
-    [],
+    [attribute.class(row_class(is_new))],
     list.flatten([
       [html.td([], [html.text(run.task_name)])],
       optional_cell(show_record, html.td([], [run_record_cell(run.record_id)])),
