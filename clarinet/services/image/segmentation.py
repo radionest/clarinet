@@ -19,7 +19,7 @@ from skimage.morphology import (  # type: ignore[attr-defined]
 )
 
 from clarinet.exceptions.domain import ImageError
-from clarinet.services.image.image import FileType, Image
+from clarinet.services.image.image import FileType, Image, _is_segment_key
 from clarinet.utils.logger import logger
 
 PropName = Literal["axis_major_length", "num_pixels", "area"]
@@ -38,7 +38,7 @@ def _strip_segment_metadata(header: dict[str, Any] | None) -> dict[str, Any]:
     """
     if not header:
         return {}
-    return {k: v for k, v in header.items() if not k.startswith("Segment")}
+    return {k: v for k, v in header.items() if not _is_segment_key(k)}
 
 
 class Segmentation(Image):
@@ -228,6 +228,8 @@ class Segmentation(Image):
         img = self.img.copy()
         img[other.img != 0] = 0
         self.img = img
+        # In-place ops leave _nrrd_header untouched: a label fully removed here is
+        # pruned from the segment metadata on write (Image._save_nrrd reconciles it).
 
     def append(self, other: Self | Image, *, resample: bool = False) -> None:
         """Add ROIs from `other` that overlap with exactly one existing label.
@@ -294,7 +296,7 @@ class Segmentation(Image):
         # source's segment keys instead. Save reconciles them to the surviving labels
         # and drops the now-stale grid extents.
         if self._nrrd_header is not None:
-            seg_meta = {k: v for k, v in self._nrrd_header.items() if k.startswith("Segment")}
+            seg_meta = {k: v for k, v in self._nrrd_header.items() if _is_segment_key(k)}
             result._nrrd_header = {**_strip_segment_metadata(result._nrrd_header), **seg_meta}
         return result
 
