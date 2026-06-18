@@ -39,3 +39,4 @@ type ValidationSchema = dict[str, Any]
 # Database-constrained integer types
 DbInt64 = Annotated[int, Ge(-(2**63)), Le(2**63 - 1)]
 DbPositiveInt32 = Annotated[int, Gt(0), Le(2**31 - 1)]
+DbNonNegativeInt32 = Annotated[int, Ge(0), Le(2**31 - 1)]
