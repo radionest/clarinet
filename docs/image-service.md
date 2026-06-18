@@ -40,7 +40,7 @@ Image(template=None, copy_data=False, dtype=None)
 
 **NIfTI write (`_save_nifti`)**: uses `_nifti_image.affine` if available, otherwise `np.eye(4)`. This means spacing is only preserved in the NIfTI affine when the source was also NIfTI.
 
-**NRRD write (`_save_nrrd`)**: passes `_nrrd_header` (minus `Segment*` keys) if available, otherwise empty `{}`. Spacing is only embedded in NRRD when the source was also NRRD.
+**NRRD write (`_save_nrrd`)**: passes `_nrrd_header` if available, otherwise empty `{}`. Segment metadata (`Segment{i}_Name`/`_LabelValue`/`_Color`/...) is preserved but **reconciled to the labels actually present** in the voxel data — blocks for absent label values are dropped and survivors renumbered contiguously, and grid-dependent keys (`*_Extent`, `Segmentation_ReferenceImageExtentOffset`) are dropped (readers recompute the effective extent on load). This guarantees a written segmentation never names a label value absent from its data. Spacing is only embedded in NRRD when the source was also NRRD.
 
 ### Cross-Format Spacing Preservation
 

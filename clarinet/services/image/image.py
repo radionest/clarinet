@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import enum
+import re
 from pathlib import Path
 from typing import Any, Literal, Self
 
@@ -23,6 +24,89 @@ from clarinet.utils.logger import logger
 # Internal representation uses LPS (DICOM native). NIfTI uses RAS.
 # Flip X and Y to convert between them (the matrix is its own inverse).
 _LPS_TO_RAS = np.diag([-1.0, -1.0, 1.0])
+
+
+# Matches a per-segment NRRD header key, e.g. "Segment0_Name" -> ("0", "Name").
+_SEGMENT_BLOCK_KEY = re.compile(r"^Segment(\d+)_(.+)$")
+# Segment metadata encoding the voxel grid: invalidated by any resample. Matched
+# exactly (per-segment sub-key / global key) rather than by substring.
+_GRID_DEPENDENT_SEGMENT_SUBKEYS = frozenset({"Extent"})
+_GRID_DEPENDENT_SEGMENT_GLOBALS = frozenset({"Segmentation_ReferenceImageExtentOffset"})
+
+
+def _is_segment_key(key: str) -> bool:
+    """True for any NRRD segmentation header key (per-segment block or global)."""
+    return key.startswith("Segment")
+
+
+def _is_grid_dependent_segment_key(key: str) -> bool:
+    """True for segment-header keys tied to a specific voxel grid (dropped on write).
+
+    Slicer stores per-segment voxel bounding boxes (``Segment{i}_Extent``) and a
+    global ``Segmentation_ReferenceImageExtentOffset``; both become invalid once the
+    grid changes (resample / reindex), so readers recompute the effective extent
+    from the labelmap on load. Matched exactly — not by ``"Extent" in key`` — so a
+    semantic key that merely contains the substring is never dropped by accident.
+    The semantic keys (``_Name``, ``_LabelValue``, ``_Color``, ``_Layer``, ...) are
+    grid-independent and must round-trip.
+    """
+    if key in _GRID_DEPENDENT_SEGMENT_GLOBALS:
+        return True
+    match = _SEGMENT_BLOCK_KEY.match(key)
+    return match is not None and match.group(2) in _GRID_DEPENDENT_SEGMENT_SUBKEYS
+
+
+def _present_labels(volume: np.ndarray) -> set[int]:
+    """Nonzero label values present in a labelmap."""
+    return {int(v) for v in np.unique(volume) if v != 0}
+
+
+def _reconcile_segment_metadata(header: dict[str, Any], present_labels: set[int]) -> dict[str, Any]:
+    """Return only the segment header keys that match the labels actually present.
+
+    - per-segment blocks (``Segment{i}_*``) are kept iff their ``LabelValue`` is in
+      ``present_labels``, then renumbered contiguously from 0;
+    - grid-dependent keys (``*_Extent``) are dropped;
+    - global ``Segmentation_*`` keys are preserved (minus the grid-dependent offset).
+
+    Applied on write so a saved segmentation never names a label value absent from
+    its voxel data (e.g. after a set operation or resample drops a label).
+    """
+    blocks: dict[int, dict[str, Any]] = {}
+    seg_globals: dict[str, Any] = {}
+    for key, value in header.items():
+        match = _SEGMENT_BLOCK_KEY.match(key)
+        if match is not None:
+            if not _is_grid_dependent_segment_key(key):
+                blocks.setdefault(int(match.group(1)), {})[match.group(2)] = value
+        elif _is_segment_key(key) and not _is_grid_dependent_segment_key(key):
+            seg_globals[key] = value
+
+    reconciled: dict[str, Any] = dict(seg_globals)
+    emitted_labels: set[int] = set()
+    new_index = 0
+    for old_index in sorted(blocks):
+        block = blocks[old_index]
+        try:
+            label_value = int(block["LabelValue"])
+        except (KeyError, TypeError, ValueError):
+            logger.warning(
+                f"Dropping segment block {old_index} with missing/invalid LabelValue "
+                f"{block.get('LabelValue')!r} (corrupted segmentation metadata?)"
+            )
+            continue
+        if label_value not in present_labels:
+            continue
+        if label_value in emitted_labels:
+            logger.warning(
+                f"Duplicate segment LabelValue {label_value} in NRRD header; "
+                "keeping both blocks (corrupted segmentation metadata?)"
+            )
+        emitted_labels.add(label_value)
+        for sub_key, value in block.items():
+            reconciled[f"Segment{new_index}_{sub_key}"] = value
+        new_index += 1
+    return reconciled
 
 
 class FileType(enum.Enum):
@@ -403,7 +487,15 @@ class Image:
         try:
             header: dict[str, Any] = {}
             if self._nrrd_header is not None:
-                header = {k: v for k, v in self._nrrd_header.items() if not k.startswith("Segment")}
+                # Drop all segment keys, then re-add only those reconciled to the
+                # labels actually present (prunes stale entries left by set operations
+                # and grid-dependent extents). Guarantees a written segmentation never
+                # names a label value absent from its voxel data.
+                header = {k: v for k, v in self._nrrd_header.items() if not _is_segment_key(k)}
+                if any(_is_segment_key(k) for k in self._nrrd_header):
+                    header.update(
+                        _reconcile_segment_metadata(self._nrrd_header, _present_labels(self.img))
+                    )
             # Always write canonical spatial metadata
             space_dirs = (self._direction * np.array(self.spacing)).T
             header["space directions"] = space_dirs
