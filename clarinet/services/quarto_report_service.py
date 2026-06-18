@@ -143,6 +143,15 @@ class QuartoReportService:
             # folder — it reads the .qmd from render_dir like everything else.
             work_qmd = render_dir / qmd_path.name
             await asyncio.to_thread(shutil.copy2, qmd_path, work_qmd)
+            # Stage the generated pandera schema module (if the project ran
+            # `clarinet quarto gen-types`) beside the .qmd so a chunk can
+            # `import report_schemas`. It is pure pandas/pandera — no DB access,
+            # no secrets — safe to copy into the sandboxed render dir.
+            schema_module = qmd_path.parent / "report_schemas.py"
+            if await asyncio.to_thread(schema_module.is_file):
+                await asyncio.to_thread(
+                    shutil.copy2, schema_module, render_dir / schema_module.name
+                )
             await self._dispatch(name, work_qmd, template.data_reports, formats, render_dir)
         except Exception as exc:
             # A copy/broker/enqueue failure must not leave the sidecar stuck on

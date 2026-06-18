@@ -1075,6 +1075,62 @@ def cleanup_quarto_renders(days: int) -> None:
     )
 
 
+def generate_report_types() -> None:
+    """Generate ``review/report_schemas.py`` (pandera) from the ``*.sql`` reports.
+
+    Connects to the configured PostgreSQL database to read each report's result
+    column types (no rows fetched), then writes one module the ``*.qmd`` reports
+    import for typed, dtype-coerced DataFrames. Re-run after adding or changing
+    a report; commit the result.
+    """
+    asyncio.run(_generate_report_types())
+
+
+async def _generate_report_types() -> None:
+    from clarinet.exceptions.domain import ReportQueryError
+    from clarinet.repositories.report_repository import ReportColumn, ReportRepository
+    from clarinet.utils.db_manager import db_manager
+    from clarinet.utils.report_discovery import discover_report_templates
+    from clarinet.utils.report_schema_codegen import (
+        ReportSpec,
+        duplicate_column_names,
+        render_schemas_module,
+    )
+
+    reports_dir = settings.get_reports_path()
+    discovered = discover_report_templates(reports_dir)
+    if not discovered:
+        logger.warning(f"No *.sql reports found in {reports_dir}; nothing to generate")
+        return
+
+    repo = ReportRepository()
+    specs: list[ReportSpec] = []
+    try:
+        for template, sql in discovered:
+            columns: list[ReportColumn] = await repo.describe_report(sql)
+            specs.append((template.name, columns))
+            logger.info(f"Report '{template.name}': {len(columns)} column(s)")
+            if dups := duplicate_column_names(columns):
+                logger.warning(
+                    f"Report '{template.name}': duplicate column name(s) {dups} — "
+                    "alias them in SQL or coercion won't apply to the later copy"
+                )
+    except ReportQueryError as exc:
+        # opt(exception=) so the underlying planner/SQL error (preserved on
+        # __cause__) reaches the operator — there is no API handler on the CLI
+        # path to log the traceback for us.
+        logger.opt(exception=exc).error(f"Type generation failed: {exc}")
+        sys.exit(1)
+    finally:
+        await db_manager.close()
+
+    out_path = reports_dir / "report_schemas.py"
+    out_path.write_text(render_schemas_module(specs), encoding="utf-8")
+    logger.info(
+        f"Wrote {out_path} ({len(specs)} schema(s)). Commit it — the .qmd reports import it."
+    )
+
+
 def handle_quarto_command(args: argparse.Namespace) -> None:
     """Handle Quarto-related commands."""
     if args.quarto_command == "install":
@@ -1085,6 +1141,8 @@ def handle_quarto_command(args: argparse.Namespace) -> None:
         uninstall_quarto()
     elif args.quarto_command == "cleanup":
         cleanup_quarto_renders(days=args.days)
+    elif args.quarto_command == "gen-types":
+        generate_report_types()
     else:
         logger.error(f"Unknown quarto command: {args.quarto_command}")
         sys.exit(1)
@@ -1404,6 +1462,11 @@ def main() -> None:
     )
     quarto_cleanup_parser.add_argument(
         "--days", type=int, default=30, help="Retention in days (default: 30)"
+    )
+
+    quarto_subparsers.add_parser(
+        "gen-types",
+        help="Generate review/report_schemas.py (pandera) from *.sql reports for typed .qmd DataFrames",
     )
 
     # worker command
