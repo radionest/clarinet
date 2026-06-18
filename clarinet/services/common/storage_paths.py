@@ -120,12 +120,14 @@ def _modalities_string(study: "Study | StudyBase | None") -> str:
 def per_study_patient_id(study_uid: str) -> str:
     """Deterministic per-study PatientID hash for ``study_uid``.
 
-    The single source of the ``(salt, hex_length, prefix)`` arguments shared by
-    every per-study identifier: storage-path derivation
+    Shared source of the ``(salt, hex_length, prefix)`` arguments for the
+    read / display / masking paths: storage-path derivation
     (:func:`derive_anon_patient_id`), the UI display ID
     (:func:`compute_display_anon_id`) and response masking
-    (``api.masking.mask_record_patient_data``). Applies no mode / anonymization
-    gate — callers decide when a per-study hash is appropriate.
+    (``api.masking.mask_record_patient_data``). The DICOM anonymization writer
+    (``anonymization_service``) composes the same tuple separately. Applies no
+    mode / anonymization gate — callers decide when a per-study hash is
+    appropriate.
     """
     from clarinet.services.dicom.anonymizer import compute_per_study_patient_id
 
