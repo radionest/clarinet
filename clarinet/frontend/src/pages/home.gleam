@@ -25,6 +25,7 @@ import lustre/event
 import router
 import shared.{type OutMsg, type Shared}
 import utils/permissions
+import utils/storage
 
 // --- Model ---
 
@@ -39,11 +40,20 @@ pub type Model {
     selected_type: String,
     // True while a claim request is in flight (disables the button).
     claiming: Bool,
+    // Explicit per-status collapse choices (status -> is_open), persisted to
+    // localStorage. A missing entry falls back to the smart default below.
+    group_open: dict.Dict(String, Bool),
   )
 }
 
 fn empty_model() -> Model {
-  Model(pool_types: [], pool_loaded: False, selected_type: "", claiming: False)
+  Model(
+    pool_types: [],
+    pool_loaded: False,
+    selected_type: "",
+    claiming: False,
+    group_open: dict.new(),
+  )
 }
 
 // --- Msg ---
@@ -53,6 +63,7 @@ pub type Msg {
   PoolTypeSelected(String)
   TakeTaskClicked
   TaskClaimed(Result(models.Record, ApiError))
+  ToggleGroup(status: String, open: Bool)
 }
 
 // --- Worklist ---
@@ -98,7 +109,7 @@ pub fn init(shared: Shared) -> #(Model, Effect(Msg), List(OutMsg)) {
           shared.ReloadUsers,
         ])
         False -> #(
-          empty_model(),
+          Model(..empty_model(), group_open: load_group_open()),
           load_available_types_effect(),
           list.map(worklist_groups, fn(g) {
             shared.FetchBucket(worklist_key(u.id, g.0))
@@ -147,6 +158,14 @@ pub fn update(
       effect.none(),
       handle_error(err, shared.translate(i18n.HomeTakeTaskError)),
     )
+    ToggleGroup(status, open) -> {
+      let group_open = dict.insert(model.group_open, status, open)
+      #(
+        Model(..model, group_open: group_open),
+        save_group_open_effect(group_open),
+        [],
+      )
+    }
   }
 }
 
@@ -192,6 +211,33 @@ fn claim_next_effect(record_type_name: String) -> Effect(Msg) {
   records.claim_next(record_type_name)
   |> promise.tap(fn(res) { dispatch(TaskClaimed(res)) })
   Nil
+}
+
+const group_open_key = "dashboard_worklist_open"
+
+/// Per-group collapse state survives navigation away and back: read the saved
+/// `status -> "true"/"false"` map and parse it into bools (unknown values are
+/// dropped, so a corrupt entry just falls back to the smart default).
+fn load_group_open() -> dict.Dict(String, Bool) {
+  storage.load_dict_sync(storage.Local, group_open_key)
+  |> dict.fold(dict.new(), fn(acc, status, value) {
+    case value {
+      "true" -> dict.insert(acc, status, True)
+      "false" -> dict.insert(acc, status, False)
+      _ -> acc
+    }
+  })
+}
+
+fn save_group_open_effect(group_open: dict.Dict(String, Bool)) -> Effect(Msg) {
+  group_open
+  |> dict.map_values(fn(_status, open) {
+    case open {
+      True -> "true"
+      False -> "false"
+    }
+  })
+  |> storage.save_dict(storage.Local, group_open_key, _)
 }
 
 // --- View ---
@@ -334,7 +380,7 @@ fn user_sections(
 ) -> Element(Msg) {
   element.fragment([
     take_task_section(model, shared),
-    worklist_section(shared, user),
+    worklist_section(model, shared, user),
   ])
 }
 
@@ -389,18 +435,25 @@ fn pool_type_options(
   ]
 }
 
-fn worklist_section(shared: Shared, user: models.User) -> Element(Msg) {
+fn worklist_section(
+  model: Model,
+  shared: Shared,
+  user: models.User,
+) -> Element(Msg) {
   let t = shared.translate
   html.div([attribute.class("dashboard-section")], [
     html.h3([], [html.text(t(i18n.HomeMyTasks))]),
     html.div(
       [attribute.class("worklist")],
-      list.map(worklist_groups, fn(g) { worklist_group(g.0, g.1, shared, user) }),
+      list.map(worklist_groups, fn(g) {
+        worklist_group(model, g.0, g.1, shared, user)
+      }),
     ),
   ])
 }
 
 fn worklist_group(
+  model: Model,
   status_str: String,
   title_key: i18n.Key,
   shared: Shared,
@@ -409,17 +462,67 @@ fn worklist_group(
   let key = worklist_key(user.id, status_str)
   let items = cache.bucket_items(shared.cache, key)
   let status = cache.bucket_status(shared.cache, key)
-  html.div([attribute.class("worklist-group")], [
-    html.h4([attribute.class("worklist-group-title")], [
-      html.text(
-        shared.translate(title_key)
-        <> " ("
-        <> int.to_string(list.length(items))
-        <> ")",
-      ),
+  let count = list.length(items)
+  // Loading and Failed both carry feedback (a spinner / an error message) that
+  // must not hide behind a collapsed header, so treat them as "transient" and
+  // open the group even with zero items.
+  let transient = case status {
+    bucket.Cold | bucket.Loading | bucket.Failed(_) -> True
+    _ -> False
+  }
+  // Default: open the actionable, non-empty (or transient) groups; "finished"
+  // and settled-empty groups start collapsed. A persisted user choice (restored
+  // by load_group_open) overrides the default for that status.
+  let default_open = status_str != "finished" && { count > 0 || transient }
+  let is_open = case dict.get(model.group_open, status_str) {
+    Ok(persisted) -> persisted
+    Error(_) -> default_open
+  }
+  let next_open = case is_open {
+    True -> False
+    False -> True
+  }
+  let body_id = "worklist-body-" <> status_str
+  // Controlled accordion: open state lives in the model (only on_click mutates
+  // it), so programmatic re-renders never fire a spurious toggle — a user's
+  // choice survives SSE re-renders and, via localStorage, page remounts.
+  let body_attrs = case is_open {
+    True -> [attribute.id(body_id), attribute.class("worklist-group-body")]
+    False -> [
+      attribute.id(body_id),
+      attribute.class("worklist-group-body"),
+      attribute.attribute("hidden", "true"),
+    ]
+  }
+  html.div([attribute.class("worklist-group worklist-group--" <> status_str)], [
+    html.button(
+      [
+        attribute.type_("button"),
+        attribute.class("worklist-group-summary"),
+        attribute.attribute("aria-expanded", aria_bool(is_open)),
+        attribute.attribute("aria-controls", body_id),
+        event.on_click(ToggleGroup(status_str, next_open)),
+      ],
+      [
+        html.span([attribute.class("worklist-group-name")], [
+          html.text(shared.translate(title_key)),
+        ]),
+        html.span([attribute.class("worklist-group-count")], [
+          html.text(int.to_string(count)),
+        ]),
+      ],
+    ),
+    html.div(body_attrs, [
+      worklist_group_body(status, items, status_str, shared, user),
     ]),
-    worklist_group_body(status, items, status_str, shared, user),
   ])
+}
+
+fn aria_bool(b: Bool) -> String {
+  case b {
+    True -> "true"
+    False -> "false"
+  }
 }
 
 fn worklist_group_body(
@@ -439,14 +542,14 @@ fn worklist_group_body(
     _ ->
       case items {
         [] ->
-          html.p([attribute.class("empty-state")], [
+          html.div([attribute.class("worklist-empty")], [
             html.text(shared.translate(i18n.HomeWorklistEmpty)),
           ])
         _ ->
           element.fragment([
-            html.ul(
+            html.div(
               [attribute.class("worklist-items")],
-              list.map(items, fn(r) { worklist_item(r, shared) }),
+              list.map(items, worklist_item),
             ),
             html.a(
               [
@@ -462,24 +565,27 @@ fn worklist_group_body(
   }
 }
 
-fn worklist_item(record: models.Record, shared: Shared) -> Element(Msg) {
+/// Whole row is a click-through link to the record; the open affordance is a
+/// CSS hover chevron (`.worklist-item::after`), so no per-row "open" link.
+fn worklist_item(record: models.Record) -> Element(Msg) {
   let id_str = int.to_string(option.unwrap(record.id, 0))
-  html.li([attribute.class("worklist-item")], [
-    html.span([attribute.class("worklist-item-id")], [html.text("#" <> id_str)]),
-    html.span([attribute.class("worklist-item-type")], [
-      html.text(record_type_label(record)),
-    ]),
-    html.span([attribute.class("worklist-item-patient")], [
-      html.text(record.patient_id),
-    ]),
-    html.a(
-      [
-        attribute.href(router.route_to_path(router.RecordDetail(id_str))),
-        attribute.class("worklist-item-open"),
-      ],
-      [html.text(shared.translate(i18n.HomeOpenTask))],
-    ),
-  ])
+  html.a(
+    [
+      attribute.href(router.route_to_path(router.RecordDetail(id_str))),
+      attribute.class("worklist-item"),
+    ],
+    [
+      html.span([attribute.class("worklist-item-id")], [
+        html.text("#" <> id_str),
+      ]),
+      html.span([attribute.class("worklist-item-type")], [
+        html.text(record_type_label(record)),
+      ]),
+      html.span([attribute.class("worklist-item-patient")], [
+        html.text(record.patient_id),
+      ]),
+    ],
+  )
 }
 
 // --- Helpers ---
