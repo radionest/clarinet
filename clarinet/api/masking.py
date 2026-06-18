@@ -19,9 +19,9 @@ The hash is used even before the study is anonymized (the race window where
 PACS value and, unlike the per-patient ``anon_id`` / ``anon_name``, is
 per-study, so it never lets a non-superuser correlate a patient's studies. In
 that mode the per-patient ``auto_id`` (and the ``anon_id`` computed from it)
-are also dropped from the payload, since both are stable across studies.
-Patient-level records (no study) have no per-study context and keep the
-per-patient anon_id.
+and ``anon_name`` are also dropped from the payload, since all are stable
+across studies. Patient-level records (no study) have no per-study context and
+keep the per-patient anon_id.
 """
 
 from collections.abc import Sequence
@@ -83,14 +83,9 @@ def mask_record_patient_data(record: RecordRead, user: User) -> RecordRead:
         masked_id: str | None = record.display_anon_id
         masked_name: str | None = record.display_anon_id
     elif settings.anon_per_study_patient_id and record.study_uid is not None:
-        from clarinet.services.dicom.anonymizer import compute_per_study_patient_id
+        from clarinet.services.common.storage_paths import per_study_patient_id
 
-        masked_id = compute_per_study_patient_id(
-            settings.anon_uid_salt,
-            record.study_uid,
-            settings.anon_per_study_patient_id_hex_length,
-            prefix=settings.anon_id_prefix,
-        )
+        masked_id = per_study_patient_id(record.study_uid)
         masked_name = masked_id
     else:
         masked_id = record.patient.anon_id
@@ -105,10 +100,12 @@ def mask_record_patient_data(record: RecordRead, user: User) -> RecordRead:
 
     # Per-study mode: drop the cross-study-stable per-patient identifiers from
     # the payload. auto_id is the source of the computed anon_id, so nulling it
-    # makes both serialize as null — otherwise a non-superuser could read the
-    # per-patient anon_id straight off the wire and correlate the studies.
+    # makes both serialize as null; anon_name is likewise stable per patient.
+    # Otherwise a non-superuser could read either straight off the wire and
+    # correlate the studies even though patient.id/name carry the per-study hash.
     if settings.anon_per_study_patient_id:
         patient_update["auto_id"] = None
+        patient_update["anon_name"] = None
 
     masked_patient = record.patient.model_copy(update=patient_update)
 

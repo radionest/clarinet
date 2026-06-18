@@ -1888,8 +1888,10 @@ fn render_record_metadata(record: Record, shared: Shared) -> Element(Msg) {
           }
         False -> element.none()
       },
-      // Study-specific anon ID (per-study hash). Set only in per-study mode
-      // once the study is anonymized.
+      // Study-specific anon ID (per-study hash). The backend sets
+      // display_anon_id only in per-study mode once the study is anonymized
+      // (None otherwise), so this row needs no explicit anon_per_study gate —
+      // it simply never appears in per-patient mode.
       case is_admin {
         True ->
           case record.display_anon_id {

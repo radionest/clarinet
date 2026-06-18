@@ -1032,12 +1032,15 @@ class TestPerStudyAnonIdStripping:
         assert result.patient_id == expected_hash
         assert result.patient.id == expected_hash
         # ...and the stable per-patient identifiers never reach the client,
-        # including the serialized JSON (anon_id is computed from auto_id).
+        # including the serialized JSON (anon_id is computed from auto_id;
+        # anon_name is a stable per-patient value of its own).
         assert result.patient.auto_id is None
         assert result.patient.anon_id is None
+        assert result.patient.anon_name is None
         dumped = result.model_dump()
         assert dumped["patient"]["auto_id"] is None
         assert dumped["patient"]["anon_id"] is None
+        assert dumped["patient"]["anon_name"] is None
 
     def test_superuser_keeps_anon_id(self) -> None:
         """Superuser sees full data even in per-study mode — ids are preserved."""
@@ -1052,6 +1055,7 @@ class TestPerStudyAnonIdStripping:
 
         assert result.patient.auto_id == 42
         assert result.patient.anon_id == f"{settings.anon_id_prefix}_42"
+        assert result.patient.anon_name == "Anon Patient Name"
 
     def test_default_mode_keeps_anon_id_for_non_superuser(self) -> None:
         """Default (per-patient) mode is unchanged: the per-patient anon_id is
@@ -1109,6 +1113,7 @@ class TestPerStudyAnonIdStripping:
         assert result.patient_id != plain_anon_id
         assert result.patient.anon_id is None
         assert result.patient.auto_id is None
+        assert result.patient.anon_name is None
         # The real patient ID must not leak through the nested study relation.
         assert result.study is not None
         assert result.study.patient_id == expected_hash
