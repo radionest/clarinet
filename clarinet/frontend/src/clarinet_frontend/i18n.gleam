@@ -129,6 +129,7 @@ pub type Key {
   HomeStudies
   HomeRecords
   HomeViewAll
+  HomeLoadMore
   HomeRecentStudies
   HomeNoRecentStudies
   HomeMyTasks
@@ -633,6 +634,8 @@ pub fn translate(locale: Locale, key: Key) -> String {
     Ru, HomeRecords -> "Записи"
     En, HomeViewAll -> "View all →"
     Ru, HomeViewAll -> "Показать все →"
+    En, HomeLoadMore -> "Load more"
+    Ru, HomeLoadMore -> "Загрузить ещё"
     En, HomeRecentStudies -> "Recent Studies"
     Ru, HomeRecentStudies -> "Недавние исследования"
     En, HomeNoRecentStudies -> "No recent studies found."

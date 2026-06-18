@@ -64,6 +64,7 @@ pub type Msg {
   TakeTaskClicked
   TaskClaimed(Result(models.Record, ApiError))
   ToggleGroup(status: String, open: Bool)
+  LoadMoreClicked(key: BucketKey)
 }
 
 // --- Worklist ---
@@ -166,6 +167,7 @@ pub fn update(
         [],
       )
     }
+    LoadMoreClicked(key) -> #(model, effect.none(), [shared.FetchMoreBucket(key)])
   }
 }
 
@@ -513,7 +515,7 @@ fn worklist_group(
       ],
     ),
     html.div(body_attrs, [
-      worklist_group_body(status, items, shared),
+      worklist_group_body(status, items, key, shared),
     ]),
   ])
 }
@@ -528,6 +530,7 @@ fn aria_bool(b: Bool) -> String {
 fn worklist_group_body(
   status: BucketStatus,
   items: List(models.Record),
+  key: BucketKey,
   shared: Shared,
 ) -> Element(Msg) {
   case status {
@@ -544,10 +547,43 @@ fn worklist_group_body(
             html.text(shared.translate(i18n.HomeWorklistEmpty)),
           ])
         _ ->
-          html.div(
-            [attribute.class("worklist-items")],
-            list.map(items, worklist_item),
+          element.fragment([
+            html.div(
+              [attribute.class("worklist-items")],
+              list.map(items, worklist_item),
+            ),
+            load_more_control(status, key, shared),
+          ])
+      }
+  }
+}
+
+/// "Load more" affordance under a non-empty worklist group: a spinner while
+/// the next page is in flight, a button while more records remain, nothing
+/// once the bucket is fully loaded. Replaces the old "Show all" link to the
+/// now admin-only Records list.
+fn load_more_control(
+  status: BucketStatus,
+  key: BucketKey,
+  shared: Shared,
+) -> Element(Msg) {
+  case status {
+    bucket.LoadingMore(_) ->
+      html.p([attribute.class("loading-indicator")], [
+        html.text(shared.translate(i18n.LblLoading)),
+      ])
+    _ ->
+      case cache.bucket_has_more(shared.cache, key) {
+        True ->
+          html.button(
+            [
+              attribute.type_("button"),
+              attribute.class("btn worklist-load-more"),
+              event.on_click(LoadMoreClicked(key)),
+            ],
+            [html.text(shared.translate(i18n.HomeLoadMore))],
           )
+        False -> element.none()
       }
   }
 }

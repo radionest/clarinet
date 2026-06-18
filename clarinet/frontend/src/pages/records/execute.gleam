@@ -1314,9 +1314,18 @@ fn dispatch_fire_effect(
 // --- Helpers ---
 
 /// Where "Back" / post-completion auto-return should lead: the page the
-/// user came from, or the Records list when entered by direct URL.
+/// user came from, or — on direct entry — the Records list for admins and the
+/// dashboard for non-admins (who can't open the admin-gated Records list).
 fn back_target(shared: Shared) -> router.Route {
-  option.unwrap(shared.previous_route, router.Records(dict.new()))
+  let fallback = case shared.user {
+    Some(user) ->
+      case permissions.is_admin_user(user) {
+        True -> router.Records(dict.new())
+        False -> router.Home
+      }
+    None -> router.Home
+  }
+  option.unwrap(shared.previous_route, fallback)
 }
 
 /// Pre-submit status check: True when the cached record is already
