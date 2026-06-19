@@ -46,6 +46,7 @@ class QueueConfig(BaseSettings):
 
     have_gpu: bool = False
     have_dicom: bool = False
+    have_quarto: bool = False
 
     def has_not(self, conditions: Self) -> bool:
         """Check if the current configuration doesn't meet the specified conditions.
@@ -541,6 +542,7 @@ class Settings(BaseSettings):
         return QueueConfig(
             have_gpu=self.have_gpu,
             have_dicom=self.have_dicom,
+            have_quarto=self.have_quarto,
         )
 
     @property
