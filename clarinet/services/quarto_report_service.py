@@ -152,6 +152,14 @@ class QuartoReportService:
                 await asyncio.to_thread(
                     shutil.copy2, schema_module, render_dir / schema_module.name
                 )
+            # Stage the docx reference template (justified body, hyphenation) when the
+            # .qmd's `format.docx.reference-doc` points at a sibling reference.docx.
+            # Pure formatting asset — no DB, no secrets — safe in the sandboxed render dir.
+            reference_doc = qmd_path.parent / "reference.docx"
+            if await asyncio.to_thread(reference_doc.is_file):
+                await asyncio.to_thread(
+                    shutil.copy2, reference_doc, render_dir / reference_doc.name
+                )
             await self._dispatch(name, work_qmd, template.data_reports, formats, render_dir)
         except Exception as exc:
             # A copy/broker/enqueue failure must not leave the sidecar stuck on

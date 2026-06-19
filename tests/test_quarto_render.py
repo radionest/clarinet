@@ -358,6 +358,36 @@ async def test_request_render_stages_schema_module_into_render_dir(
 
 
 @pytest.mark.asyncio
+async def test_request_render_stages_reference_doc_into_render_dir(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A present sibling reference.docx (the docx `reference-doc`) is staged into
+    render_dir next to the .qmd. The absent case is covered by
+    test_request_render_copies_qmd_into_render_dir."""
+    from clarinet.models.quarto_report import QuartoReportTemplate
+    from clarinet.services.quarto_report_service import (
+        QuartoReportRegistry,
+        QuartoReportService,
+    )
+    from clarinet.services.report_service import ReportRegistry
+
+    qmd = _write_min_qmd(tmp_path)
+    reference_bytes = b"PK\x03\x04 fake docx"
+    (tmp_path / "reference.docx").write_bytes(reference_bytes)
+    template = QuartoReportTemplate(name="rep", title="T", description="", data_reports=[])
+    service = QuartoReportService(QuartoReportRegistry([(template, qmd)]), ReportRegistry([]))
+    monkeypatch.setattr(settings, "quarto_output_path", str(tmp_path / "renders"))
+    monkeypatch.setattr(quarto_render, "resolve_quarto_executable", lambda: tmp_path / "quarto")
+    dispatch = AsyncMock()
+    monkeypatch.setattr(service, "_dispatch", dispatch)
+
+    await service.request_render("rep", [QuartoReportFormat.DOCX])
+
+    _, _, _, _, render_dir = dispatch.call_args.args
+    assert (render_dir / "reference.docx").read_bytes() == reference_bytes
+
+
+@pytest.mark.asyncio
 async def test_request_render_fails_fast_on_empty_service_token(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
