@@ -63,6 +63,10 @@ dependencies = [
     "jupyter-client>=8.0",
     "ipykernel>=6.0",
     "pandas>=2.0",
+    # Typed report DataFrames: `clarinet quarto gen-types` emits pandera
+    # schemas the *.qmd chunks import (coerce=True restores the dtypes a CSV
+    # round-trip loses). Base dep, not an extra: the render kernel imports it.
+    "pandera>=0.24",
 ]
 
 [project.optional-dependencies]

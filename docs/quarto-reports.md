@@ -52,6 +52,45 @@ df.head()
 Because the data is a plain CSV, the chunk never opens a database connection
 and never needs credentials.
 
+## Typed columns (optional)
+
+A bare `pd.read_csv` loses the column types the SQL query knew: a CSV round-trip
+turns dates into strings and integer columns with NULLs into floats, and the
+DataFrame's columns are untyped in the editor. To get **typed, dtype-correct
+columns**, generate a [pandera](https://pandera.readthedocs.io/) schema per
+report from the live SQL result types:
+
+```bash
+# Run with the project's PostgreSQL database reachable (CLARINET_DATABASE_URL).
+uv run clarinet quarto gen-types
+```
+
+This inspects each `*.sql` report's result columns (via the planner — no rows
+are fetched) and writes `review/report_schemas.py`, one
+`pandera.DataFrameModel` per report. **Commit that file** — the renderer stages
+it next to the `.qmd`. PostgreSQL only: SQLite exposes no column types, so the
+command refuses on the SQLite driver.
+
+A chunk then reads through the generated schema instead of `pd.read_csv`:
+
+````markdown
+```{python}
+from report_schemas import MonthlySummary
+
+df = MonthlySummary.read()        # validates + coerces dtypes
+df[MonthlySummary.status]         # typo-checked column reference (mypy/pyright)
+```
+````
+
+`Config.coerce = True` repairs the dtypes the CSV lost — `int4`→`Int64`,
+`timestamptz`→`datetime64`, `bool`→`boolean` — and `MonthlySummary.read()`
+returns a validated frame. Columns whose PostgreSQL type has no mapping (JSON,
+arrays, enums) fall back to an untyped `object` column rather than failing
+generation. Re-run `gen-types` whenever you change a report's `SELECT`.
+
+The generated module imports only `pandas`/`pandera` (no DB, no clarinet), so
+it is safe to import inside the sandboxed render kernel.
+
 ## Rendering & download (UI / API)
 
 - **List:** `GET /api/admin/quarto-reports`

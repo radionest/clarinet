@@ -59,7 +59,8 @@ def test_build_render_env_strips_secrets(monkeypatch: pytest.MonkeyPatch, tmp_pa
     assert "CLARINET_DATABASE_PASSWORD" not in env
     assert "CLARINET_SECRET_KEY" not in env
     assert "DATABASE_URL" not in env
-    # Only the explicitly-allowed keys are present.
+    # Only the explicitly-allowed keys are present. PYTHONPATH is always set
+    # (to render_dir) so a chunk can import the staged report_schemas module.
     assert set(env) == {
         "PATH",
         "HOME",
@@ -70,6 +71,7 @@ def test_build_render_env_strips_secrets(monkeypatch: pytest.MonkeyPatch, tmp_pa
         "LC_ALL",
         "QUARTO_PYTHON",
         "PYTHONUSERBASE",
+        "PYTHONPATH",
     }
     assert env["HOME"] == str(tmp_path)
     assert env["TMPDIR"] == str(tmp_path / "tmp")
@@ -77,18 +79,21 @@ def test_build_render_env_strips_secrets(monkeypatch: pytest.MonkeyPatch, tmp_pa
     assert env["PATH"] == "/usr/bin:/bin"
     # Compare with the call, not a literal — Windows CI resolves %APPDATA%\Python.
     assert env["PYTHONUSERBASE"] == site.getuserbase()
+    # No inherited PYTHONPATH (delenv above) → render_dir alone.
+    assert env["PYTHONPATH"] == str(tmp_path)
 
 
 def test_build_render_env_passes_pythonpath_when_set(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """PYTHONPATH is a package search path, not a secret — the kernel must
-    resolve the same packages as the worker process."""
+    resolve the same packages as the worker process. render_dir leads (for
+    report_schemas import); the inherited PYTHONPATH follows."""
     monkeypatch.setenv("PYTHONPATH", "/opt/extra-packages")
 
     env = build_render_env(tmp_path, tmp_path / "tmp")
 
-    assert env["PYTHONPATH"] == "/opt/extra-packages"
+    assert env["PYTHONPATH"] == f"{tmp_path}{os.pathsep}/opt/extra-packages"
 
 
 _skip_windows = pytest.mark.skipif(
@@ -322,6 +327,34 @@ async def test_request_render_copies_qmd_into_render_dir(
     _, dispatched_qmd, _, _, render_dir = dispatch.call_args.args
     assert dispatched_qmd == render_dir / qmd.name
     assert dispatched_qmd.is_file()
+
+
+@pytest.mark.asyncio
+async def test_request_render_stages_schema_module_into_render_dir(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A sibling report_schemas.py is staged next to the .qmd so a chunk can
+    import it; absence is fine (the copy-qmd test above ships no schema)."""
+    from clarinet.models.quarto_report import QuartoReportTemplate
+    from clarinet.services.quarto_report_service import (
+        QuartoReportRegistry,
+        QuartoReportService,
+    )
+    from clarinet.services.report_service import ReportRegistry
+
+    qmd = _write_min_qmd(tmp_path)
+    (tmp_path / "report_schemas.py").write_text("# generated\n", encoding="utf-8")
+    template = QuartoReportTemplate(name="rep", title="T", description="", data_reports=[])
+    service = QuartoReportService(QuartoReportRegistry([(template, qmd)]), ReportRegistry([]))
+    monkeypatch.setattr(settings, "quarto_output_path", str(tmp_path / "renders"))
+    monkeypatch.setattr(quarto_render, "resolve_quarto_executable", lambda: tmp_path / "quarto")
+    dispatch = AsyncMock()
+    monkeypatch.setattr(service, "_dispatch", dispatch)
+
+    await service.request_render("rep", [QuartoReportFormat.DOCX])
+
+    _, _, _, _, render_dir = dispatch.call_args.args
+    assert (render_dir / "report_schemas.py").read_text() == "# generated\n"
 
 
 @pytest.mark.asyncio

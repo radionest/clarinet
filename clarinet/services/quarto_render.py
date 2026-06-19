@@ -353,7 +353,9 @@ def build_render_env(render_dir: Path, tmp_dir: Path) -> dict[str, str]:
         "PYTHONUSERBASE": site.getuserbase(),
     }
     # Same motivation: kernel package visibility == worker process visibility.
-    # These are search paths, not secrets.
-    if os.environ.get("PYTHONPATH"):
-        env["PYTHONPATH"] = os.environ["PYTHONPATH"]
+    # render_dir leads so a chunk can `import report_schemas` (the generated
+    # pandera module the dispatcher stages here); the inherited PYTHONPATH
+    # follows. Both are search paths, not secrets.
+    inherited = os.environ.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = f"{render_dir}{os.pathsep}{inherited}" if inherited else str(render_dir)
     return env
