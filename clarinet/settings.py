@@ -208,6 +208,7 @@ class Settings(BaseSettings):
     # Queue requirements
     have_gpu: bool = False
     have_dicom: bool = False
+    have_quarto: bool = False
     have_keras: bool = False
     have_torch: bool = False
 
@@ -454,6 +455,11 @@ class Settings(BaseSettings):
     def dicom_queue_name(self) -> str:
         """Project-namespaced DICOM queue name."""
         return f"{self.pipeline_task_namespace}.dicom"
+
+    @property
+    def quarto_queue_name(self) -> str:
+        """Project-namespaced Quarto render queue name."""
+        return f"{self.pipeline_task_namespace}.quarto"
 
     @property
     def dlq_queue_name(self) -> str:

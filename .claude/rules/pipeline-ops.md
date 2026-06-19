@@ -56,6 +56,7 @@ from `settings.project_name`):
 | `settings.default_queue_name` | `clarinet.default` | `liver.default` |
 | `settings.gpu_queue_name` | `clarinet.gpu` | `liver.gpu` |
 | `settings.dicom_queue_name` | `clarinet.dicom` | `liver.dicom` |
+| `settings.quarto_queue_name` | `clarinet.quarto` | `liver.quarto` |
 | `settings.dlq_queue_name` | `clarinet.dead_letter` | `liver.dead_letter` |
 
 Tasks should use these properties (`settings.dicom_queue_name`) instead of hard-coded

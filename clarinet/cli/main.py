@@ -147,6 +147,7 @@ secret_key = "change-this-secret-key-in-production"
 # ── Worker capabilities ──────────────────────────────
 # have_gpu = false
 # have_dicom = false
+# have_quarto = false
 # have_keras = false
 # have_torch = false
 
