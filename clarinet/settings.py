@@ -46,6 +46,7 @@ class QueueConfig(BaseSettings):
 
     have_gpu: bool = False
     have_dicom: bool = False
+    have_quarto: bool = False
 
     def has_not(self, conditions: Self) -> bool:
         """Check if the current configuration doesn't meet the specified conditions.
@@ -208,6 +209,7 @@ class Settings(BaseSettings):
     # Queue requirements
     have_gpu: bool = False
     have_dicom: bool = False
+    have_quarto: bool = False
     have_keras: bool = False
     have_torch: bool = False
 
@@ -456,6 +458,11 @@ class Settings(BaseSettings):
         return f"{self.pipeline_task_namespace}.dicom"
 
     @property
+    def quarto_queue_name(self) -> str:
+        """Project-namespaced Quarto render queue name."""
+        return f"{self.pipeline_task_namespace}.quarto"
+
+    @property
     def dlq_queue_name(self) -> str:
         """Project-namespaced dead letter queue name."""
         return f"{self.pipeline_task_namespace}.dead_letter"
@@ -535,6 +542,7 @@ class Settings(BaseSettings):
         return QueueConfig(
             have_gpu=self.have_gpu,
             have_dicom=self.have_dicom,
+            have_quarto=self.have_quarto,
         )
 
     @property

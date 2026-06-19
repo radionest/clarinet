@@ -7,7 +7,7 @@ TaskIQ-based distributed task pipeline for long-running operations (GPU processi
 - **TaskIQ** as task queue (not FastStream) — built-in retry, DLQ, FastAPI DI compatibility
 - **AioPikaBroker** connects to RabbitMQ via existing `settings.rabbitmq_*` configuration
 - **Direct exchange** (`settings.rabbitmq_exchange`, default `clarinet`) with **per-queue brokers**: each queue gets its own `AioPikaBroker` instance via `get_broker_for(queue_name)`
-- **Project-namespaced queues**: queue names are `{settings.pipeline_task_namespace}.{default,gpu,dicom,dead_letter}`. With the default `project_name = "Clarinet"` they remain `clarinet.default`/`.gpu`/`.dicom`/`.dead_letter`. Other projects (e.g. `project_name = "Liver"`) get their own isolated queues
+- **Project-namespaced queues**: queue names are `{settings.pipeline_task_namespace}.{default,gpu,dicom,quarto,dead_letter}`. With the default `project_name = "Clarinet"` they remain `clarinet.default`/`.gpu`/`.dicom`/`.quarto`/`.dead_letter`. Other projects (e.g. `project_name = "Liver"`) get their own isolated queues
 - **routing_key = full queue name** — guarantees no cross-project routing collisions on a shared exchange
 - **Tasks are bound to brokers at decoration time**: `@pipeline_task(queue=...)` registers on `get_broker_for(queue)`. `task.kicker().kiq()` always publishes to the correct queue without any routing-key juggling
 - **PipelineChainMiddleware** advances multi-step pipelines via DB-backed definitions (HTTP API lookup); next-step dispatch goes through the next task's own broker
@@ -134,13 +134,14 @@ uv run clarinet worker --dicom WORKER:4006    # with Storage SCP for C-MOVE
 ## Queue Routing
 
 - Exchange: `settings.rabbitmq_exchange` (direct type)
-- Queue name = `{settings.pipeline_task_namespace}.{kind}` where `kind ∈ {default, gpu, dicom, dead_letter}`
-- For default `project_name = "Clarinet"`: `clarinet.default`/`.gpu`/`.dicom`/`.dead_letter` (backward-compatible)
-- For projects with custom `project_name` (e.g. `"Liver Project"`): `liver_project.default`/`.gpu`/`.dicom`/`.dead_letter`
+- Queue name = `{settings.pipeline_task_namespace}.{kind}` where `kind ∈ {default, gpu, dicom, quarto, dead_letter}`
+- For default `project_name = "Clarinet"`: `clarinet.default`/`.gpu`/`.dicom`/`.quarto`/`.dead_letter` (backward-compatible)
+- For projects with custom `project_name` (e.g. `"Liver Project"`): `liver_project.default`/`.gpu`/`.dicom`/`.quarto`/`.dead_letter`
 - **routing_key = full queue name** (not the suffix) — guarantees no cross-project collisions
 - Default queue: `settings.default_queue_name` (all workers)
 - GPU queue: `settings.gpu_queue_name` (workers with `have_gpu=True`)
 - DICOM queue: `settings.dicom_queue_name` (workers with `have_dicom=True`)
+- Quarto queue: `settings.quarto_queue_name` (workers with `have_quarto=True` — need the quarto + jupyter toolchain; render data arrives via the API, no DB access)
 - Per-queue broker registry: `get_broker_for(queue_name)` returns the cached broker (creates on first use).
   `get_broker()` is a backward-compat shim equivalent to `get_broker_for(settings.default_queue_name)`.
   `get_all_brokers()` returns the snapshot of all created brokers (used by API lifespan to start/stop them).

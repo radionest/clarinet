@@ -21,7 +21,8 @@ def get_worker_queues() -> list[str]:
     """Auto-detect worker queues based on machine capabilities.
 
     Every worker listens to the default queue. Additional queues
-    are added based on ``settings.have_gpu`` and ``settings.have_dicom``.
+    are added based on ``settings.have_gpu``, ``settings.have_dicom``,
+    and ``settings.have_quarto``.
 
     Returns:
         List of queue names this worker should consume from.
@@ -35,6 +36,10 @@ def get_worker_queues() -> list[str]:
     if settings.have_dicom:
         queues.append(settings.dicom_queue_name)
         logger.info("DICOM capability detected — worker will listen to DICOM queue")
+
+    if settings.have_quarto:
+        queues.append(settings.quarto_queue_name)
+        logger.info("Quarto capability detected — worker will listen to Quarto queue")
 
     return queues
 

@@ -29,6 +29,7 @@ from clarinet.settings import settings
 DEFAULT_QUEUE = settings.default_queue_name
 GPU_QUEUE = settings.gpu_queue_name
 DICOM_QUEUE = settings.dicom_queue_name
+QUARTO_QUEUE = settings.quarto_queue_name
 
 
 @pytest.fixture(autouse=True)
@@ -314,6 +315,7 @@ class TestWorkerQueues:
         """Worker with no capabilities gets only default queue."""
         monkeypatch.setattr(settings, "have_gpu", False)
         monkeypatch.setattr(settings, "have_dicom", False)
+        monkeypatch.setattr(settings, "have_quarto", False)
         queues = get_worker_queues()
         assert queues == [DEFAULT_QUEUE]
 
@@ -321,6 +323,7 @@ class TestWorkerQueues:
         """Worker with GPU capability gets default + GPU queues."""
         monkeypatch.setattr(settings, "have_gpu", True)
         monkeypatch.setattr(settings, "have_dicom", False)
+        monkeypatch.setattr(settings, "have_quarto", False)
         queues = get_worker_queues()
         assert DEFAULT_QUEUE in queues
         assert GPU_QUEUE in queues
@@ -329,19 +332,31 @@ class TestWorkerQueues:
         """Worker with DICOM capability gets default + DICOM queues."""
         monkeypatch.setattr(settings, "have_gpu", False)
         monkeypatch.setattr(settings, "have_dicom", True)
+        monkeypatch.setattr(settings, "have_quarto", False)
         queues = get_worker_queues()
         assert DEFAULT_QUEUE in queues
         assert DICOM_QUEUE in queues
+
+    def test_quarto_queue(self, monkeypatch):
+        """Worker with Quarto capability gets default + Quarto queues."""
+        monkeypatch.setattr(settings, "have_gpu", False)
+        monkeypatch.setattr(settings, "have_dicom", False)
+        monkeypatch.setattr(settings, "have_quarto", True)
+        queues = get_worker_queues()
+        assert DEFAULT_QUEUE in queues
+        assert QUARTO_QUEUE in queues
 
     def test_all_queues(self, monkeypatch):
         """Worker with all capabilities gets all queues."""
         monkeypatch.setattr(settings, "have_gpu", True)
         monkeypatch.setattr(settings, "have_dicom", True)
+        monkeypatch.setattr(settings, "have_quarto", True)
         queues = get_worker_queues()
         assert DEFAULT_QUEUE in queues
         assert GPU_QUEUE in queues
         assert DICOM_QUEUE in queues
-        assert len(queues) == 3
+        assert QUARTO_QUEUE in queues
+        assert len(queues) == 4
 
 
 # ─── RecordFlow PipelineAction integration ───────────────────────────────────

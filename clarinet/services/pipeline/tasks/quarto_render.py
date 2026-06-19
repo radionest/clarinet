@@ -24,7 +24,7 @@ from clarinet.settings import settings
 from clarinet.utils.logger import logger
 
 
-@pipeline_task(queue=settings.default_queue_name)
+@pipeline_task(queue=settings.quarto_queue_name)
 async def render_quarto_report(msg: PipelineMessage, ctx: TaskContext) -> None:
     """Render the Quarto report described by ``msg.payload``.
 
