@@ -561,3 +561,79 @@ def _write_min_qmd(tmp_path: Path) -> Path:
     qmd = tmp_path / "rep.qmd"
     qmd.write_text("---\ntitle: T\n---\n\nHello.\n")
     return qmd
+
+
+def _write_fake_book_quarto(path: Path, *, output_subdir: str, artifacts: list[str]) -> Path:
+    """A fake quarto that creates ``artifacts`` inside ``<cwd>/<output_subdir>`` and exits 0.
+
+    Mimics a book render: the real binary writes a title-named file into the project's
+    output-dir; here we drop caller-named placeholder files there.
+    """
+    lines = [f"mkdir -p '{output_subdir}'"] + [f": > '{output_subdir}/{a}'" for a in artifacts]
+    path.write_text("#!/bin/sh\n" + "\n".join(lines) + "\nexit 0\n")
+    path.chmod(0o755)
+    return path
+
+
+@_skip_windows
+@pytest.mark.asyncio
+async def test_run_quarto_book_collects_single_artifact(tmp_path: Path) -> None:
+    render_dir = tmp_path / "out"
+    work_dir = render_dir / "project"
+    work_dir.mkdir(parents=True)
+    fake = _write_fake_book_quarto(
+        tmp_path / "quarto", output_subdir="_book", artifacts=["Some-Long-Title.docx"]
+    )
+
+    await quarto_render._run_quarto_book(
+        work_dir, QuartoReportFormat.DOCX, "_book", render_dir, fake, 30.0
+    )
+
+    assert (render_dir / "report.docx").is_file()
+
+
+@_skip_windows
+@pytest.mark.asyncio
+async def test_run_quarto_book_honors_custom_output_dir(tmp_path: Path) -> None:
+    render_dir = tmp_path / "out"
+    work_dir = render_dir / "project"
+    work_dir.mkdir(parents=True)
+    fake = _write_fake_book_quarto(tmp_path / "quarto", output_subdir="_site", artifacts=["b.docx"])
+
+    await quarto_render._run_quarto_book(
+        work_dir, QuartoReportFormat.DOCX, "_site", render_dir, fake, 30.0
+    )
+
+    assert (render_dir / "report.docx").is_file()
+
+
+@_skip_windows
+@pytest.mark.asyncio
+async def test_run_quarto_book_errors_when_no_artifact(tmp_path: Path) -> None:
+    render_dir = tmp_path / "out"
+    work_dir = render_dir / "project"
+    work_dir.mkdir(parents=True)
+    fake = _write_fake_book_quarto(tmp_path / "quarto", output_subdir="_book", artifacts=[])
+
+    with pytest.raises(QuartoRenderError) as exc_info:
+        await quarto_render._run_quarto_book(
+            work_dir, QuartoReportFormat.DOCX, "_book", render_dir, fake, 30.0
+        )
+    assert "no docx" in str(exc_info.value)
+
+
+@_skip_windows
+@pytest.mark.asyncio
+async def test_run_quarto_book_errors_when_multiple_artifacts(tmp_path: Path) -> None:
+    render_dir = tmp_path / "out"
+    work_dir = render_dir / "project"
+    work_dir.mkdir(parents=True)
+    fake = _write_fake_book_quarto(
+        tmp_path / "quarto", output_subdir="_book", artifacts=["a.docx", "b.docx"]
+    )
+
+    with pytest.raises(QuartoRenderError) as exc_info:
+        await quarto_render._run_quarto_book(
+            work_dir, QuartoReportFormat.DOCX, "_book", render_dir, fake, 30.0
+        )
+    assert "expected exactly one" in str(exc_info.value)

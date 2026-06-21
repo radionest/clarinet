@@ -309,6 +309,49 @@ async def _run_quarto(
         raise QuartoRenderError(f"quarto produced no {output_name} for format {fmt.value}")
 
 
+async def _run_quarto_book(
+    work_dir: Path,
+    fmt: QuartoReportFormat,
+    output_dir: str,
+    render_dir: Path,
+    quarto_executable: Path,
+    timeout_seconds: float,
+) -> None:
+    """Render a Quarto *book* project to a single ``fmt`` file, normalized to
+    ``render_dir/report.<ext>``.
+
+    A book project ignores ``--output`` and writes into its ``output-dir`` under a
+    title-derived name, so we render the whole project (``cwd=work_dir``) and then
+    collect the lone artifact of the requested format from ``work_dir/<output_dir>``.
+    """
+    logger.info(f"Rendering book {work_dir.name} → {fmt.value} via quarto")
+    await _invoke_quarto(
+        [".", "--to", fmt.value], fmt, work_dir, render_dir, quarto_executable, timeout_seconds
+    )
+    await asyncio.to_thread(_collect_book_artifact, work_dir / output_dir, fmt, render_dir)
+
+
+def _collect_book_artifact(output_path: Path, fmt: QuartoReportFormat, render_dir: Path) -> None:
+    """Copy the single rendered ``*.<ext>`` from a book's output-dir to ``render_dir/report.<ext>``.
+
+    Raises :class:`QuartoRenderError` when zero or more than one candidate exists — a
+    book that emitted nothing (silent failure) or several files (ambiguous) must not be
+    served as a successful render.
+    """
+    candidates = sorted(output_path.glob(f"*.{fmt.extension}")) if output_path.is_dir() else []
+    if not candidates:
+        raise QuartoRenderError(
+            f"book produced no {fmt.extension} in {output_path.name}/ for format {fmt.value}"
+        )
+    if len(candidates) > 1:
+        names = ", ".join(p.name for p in candidates)
+        raise QuartoRenderError(
+            f"book produced {len(candidates)} {fmt.extension} files in {output_path.name}/ "
+            f"({names}); expected exactly one"
+        )
+    shutil.copy2(candidates[0], render_dir / f"report.{fmt.extension}")
+
+
 async def _kernel_diagnostics(env: dict[str, str]) -> str:
     """Probe the kernel interpreter for the imports quarto's jupyter engine needs.
 
