@@ -88,6 +88,7 @@ uv run clarinet ohif install             # Download/install OHIF Viewer (served 
 uv run clarinet deploy systemd           # Generate systemd unit files
 uv run clarinet anon migrate-paths       # Relocate dcm_anon dirs after disk_path_template change
 uv run clarinet anon scrub-db --patients # Anonymize a restored DB copy into a test-stand fixture (PHI scrub + audit)
+uv run clarinet quarto new NAME          # Scaffold a Quarto report (.qmd + reference.docx)
 ```
 
 ## Anti-patterns

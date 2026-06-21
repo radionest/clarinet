@@ -390,3 +390,57 @@ def test_scaffold_title_defaults_to_name(monkeypatch: pytest.MonkeyPatch, tmp_pa
     )
     fm = _front_matter(qmd.read_text(encoding="utf-8"))
     assert fm["title"] == "my_report"
+
+
+# ---------------------------------------------------------------------------
+# CLI wiring tests
+# ---------------------------------------------------------------------------
+
+import argparse  # noqa: E402
+
+from clarinet.cli.main import cmd_quarto_new  # noqa: E402
+
+
+def test_cmd_quarto_new_maps_args(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    seen: dict[str, object] = {}
+
+    def fake_scaffold(name: str, **kwargs: object) -> Path:
+        seen["name"] = name
+        seen.update(kwargs)
+        return tmp_path / f"{name}.qmd"
+
+    monkeypatch.setattr("clarinet.cli.main.scaffold_quarto_report", fake_scaffold)
+    args = argparse.Namespace(
+        name="rep",
+        title="T",
+        description="",
+        lang="ru",
+        format="both",
+        data="a, b",
+        from_docx=None,
+        force=False,
+    )
+    cmd_quarto_new(args)
+    assert seen["name"] == "rep"
+    assert seen["formats"] == ["docx", "pdf"]
+    assert seen["data_reports"] == ["a", "b"]
+    assert seen["from_docx"] is None
+
+
+def test_cmd_quarto_new_exits_on_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    def boom(name: str, **kwargs: object) -> Path:
+        raise QuartoScaffoldError("nope")
+
+    monkeypatch.setattr("clarinet.cli.main.scaffold_quarto_report", boom)
+    args = argparse.Namespace(
+        name="rep",
+        title=None,
+        description="",
+        lang="ru",
+        format="docx",
+        data="",
+        from_docx=None,
+        force=False,
+    )
+    with pytest.raises(SystemExit):
+        cmd_quarto_new(args)
