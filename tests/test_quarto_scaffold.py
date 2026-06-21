@@ -140,3 +140,53 @@ def test_strip_rejects_missing_document_part(tmp_path: Path) -> None:
         z.writestr("word/styles.xml", _STYLES_XML)
     with pytest.raises(QuartoScaffoldError):
         strip_docx_body(src, tmp_path / "out.docx")
+
+
+# ---------------------------------------------------------------------------
+# Namespace-preservation test (Word 2016+ documents with extra prefixes)
+# ---------------------------------------------------------------------------
+
+_MC_NS = "http://schemas.openxmlformats.org/markup-compatibility/2006"
+_W14_NS = "http://schemas.microsoft.com/office/word/2010/wordml"
+
+_DOCUMENT_XML_EXTRA_NS = (
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+    f'<w:document xmlns:w="{_W}" xmlns:r="{_R}"'
+    f' xmlns:mc="{_MC_NS}" xmlns:w14="{_W14_NS}"'
+    f' mc:Ignorable="w14">'
+    "<w:body>"
+    "<w:p><w:r><w:t>BODY TEXT TO STRIP</w:t></w:r></w:p>"
+    '<w:sectPr><w:pgSz w:w="11906" w:h="16838"/></w:sectPr>'
+    "</w:body></w:document>"
+)
+
+
+def _make_docx_extra_ns(path: Path) -> Path:
+    """Build a .docx whose document.xml root declares extra namespace prefixes."""
+    with zipfile.ZipFile(path, "w") as z:
+        z.writestr("[Content_Types].xml", '<?xml version="1.0"?><Types/>')
+        z.writestr("_rels/.rels", '<?xml version="1.0"?><Relationships/>')
+        z.writestr("word/document.xml", _DOCUMENT_XML_EXTRA_NS)
+        z.writestr("word/styles.xml", _STYLES_XML)
+    return path
+
+
+def test_strip_preserves_extra_namespaces(tmp_path: Path) -> None:
+    src = _make_docx_extra_ns(tmp_path / "in.docx")
+    dest = tmp_path / "reference.docx"
+    strip_docx_body(src, dest)
+    with zipfile.ZipFile(dest) as z:
+        doc = z.read("word/document.xml").decode("utf-8")
+
+    # Body text gone, sectPr kept
+    assert "BODY TEXT TO STRIP" not in doc
+    assert "sectPr" in doc
+
+    # Prefixes that appear in attributes are preserved verbatim (mc:Ignorable).
+    # ET drops namespace declarations for prefixes unused after body stripping
+    # (e.g. w14 is declared but no element uses it), but prefixes that are
+    # actively used must not be renamed to ns0/ns1.
+    assert "xmlns:mc=" in doc
+    assert "mc:Ignorable=" in doc
+    assert "ns0" not in doc
+    assert "ns1" not in doc

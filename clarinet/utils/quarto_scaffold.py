@@ -5,6 +5,7 @@ front matter; this one writes a fresh ``.qmd`` plus its sibling
 ``reference.docx`` style asset). Pure file/CLI logic — no DB, no app state.
 """
 
+import io
 import zipfile
 from pathlib import Path
 from xml.etree import ElementTree as ET
@@ -16,6 +17,10 @@ from clarinet.exceptions.domain import QuartoScaffoldError
 _W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 _R_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 _DOCUMENT_PART = "word/document.xml"
+
+# Register well-known prefixes at module level so they are always available.
+ET.register_namespace("w", _W_NS)
+ET.register_namespace("r", _R_NS)
 
 
 def build_qmd_text(
@@ -71,8 +76,6 @@ def strip_docx_body(src: Path, dest: Path) -> None:
     Raises:
         QuartoScaffoldError: ``src`` is not a zip or has no ``word/document.xml``.
     """
-    ET.register_namespace("w", _W_NS)
-    ET.register_namespace("r", _R_NS)
     try:
         with zipfile.ZipFile(src) as zin:
             infos = zin.infolist()
@@ -93,6 +96,8 @@ def strip_docx_body(src: Path, dest: Path) -> None:
 
 def _empty_body(document_xml: bytes) -> bytes:
     """Return ``document_xml`` with ``<w:body>`` reduced to its ``<w:sectPr>``."""
+    for _event, ns in ET.iterparse(io.BytesIO(document_xml), events=["start-ns"]):
+        ET.register_namespace(str(ns[0]), str(ns[1]))
     root = ET.fromstring(document_xml)
     body = root.find(f"{{{_W_NS}}}body")
     if body is None:
