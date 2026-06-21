@@ -243,29 +243,29 @@ async def _materialize_data(
         await asyncio.to_thread((data_dir / f"{report_name}.csv").write_bytes, csv_bytes)
 
 
-async def _run_quarto(
-    qmd_path: Path,
+async def _invoke_quarto(
+    extra_args: list[str],
     fmt: QuartoReportFormat,
+    work_dir: Path,
     render_dir: Path,
     quarto_executable: Path,
     timeout_seconds: float,
 ) -> None:
-    """Run ``quarto render`` for a single format; raise on non-zero / timeout."""
-    output_name = f"report.{fmt.extension}"
+    """Run ``quarto render <extra_args>`` in ``work_dir``; raise on timeout/non-zero.
+
+    Shared by the single-file (:func:`_run_quarto`) and book (:func:`_run_quarto_book`)
+    paths. The environment is built from scratch (``build_render_env``) so secrets never
+    reach executed chunks; output collection is left to the caller.
+    """
     tmp_dir = render_dir / "tmp"
     await asyncio.to_thread(tmp_dir.mkdir, parents=True, exist_ok=True)
     env = build_render_env(render_dir, tmp_dir)
-    logger.info(f"Rendering {qmd_path.name} → {output_name} via quarto ({fmt.value})")
 
     proc = await asyncio.create_subprocess_exec(
         str(quarto_executable),
         "render",
-        qmd_path.name,
-        "--to",
-        fmt.value,
-        "--output",
-        output_name,
-        cwd=str(render_dir),
+        *extra_args,
+        cwd=str(work_dir),
         env=env,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
@@ -285,6 +285,26 @@ async def _run_quarto(
         if _KERNEL_ERROR_MARKERS.search(detail):
             message += await _kernel_diagnostics(env)
         raise QuartoRenderError(message)
+
+
+async def _run_quarto(
+    qmd_path: Path,
+    fmt: QuartoReportFormat,
+    render_dir: Path,
+    quarto_executable: Path,
+    timeout_seconds: float,
+) -> None:
+    """Run ``quarto render`` for a single ``.qmd`` format; raise on non-zero / missing output."""
+    output_name = f"report.{fmt.extension}"
+    logger.info(f"Rendering {qmd_path.name} → {output_name} via quarto ({fmt.value})")
+    await _invoke_quarto(
+        [qmd_path.name, "--to", fmt.value, "--output", output_name],
+        fmt,
+        render_dir,
+        render_dir,
+        quarto_executable,
+        timeout_seconds,
+    )
     if not await asyncio.to_thread((render_dir / output_name).is_file):
         raise QuartoRenderError(f"quarto produced no {output_name} for format {fmt.value}")
 
