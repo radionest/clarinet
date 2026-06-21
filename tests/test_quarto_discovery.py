@@ -73,6 +73,12 @@ def test_parse_metadata_stage_files() -> None:
     assert stage == ["report_figures.py", "../plan/utils/seg_utils.py"]
 
 
+def test_parse_metadata_stage_not_a_list_ignored() -> None:
+    qmd = "---\ntitle: T\nclarinet:\n  stage: report_figures.py\n---\nbody\n"
+    _title, _desc, _data, stage = parse_quarto_metadata(qmd, fallback_name="x")
+    assert stage == []
+
+
 def test_discover_missing_folder_returns_empty(tmp_path: Path) -> None:
     assert discover_quarto_templates(tmp_path / "nope") == []
 
