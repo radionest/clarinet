@@ -148,6 +148,213 @@ def test_strip_rejects_missing_document_part(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# PHI-leak regression: non-body parts must be scrubbed too (footnotes,
+# comments incl. author names, docProps authorship/custom props), while
+# styling + headers/footers + media are preserved.
+# ---------------------------------------------------------------------------
+
+_CT = "http://schemas.openxmlformats.org/package/2006/content-types"
+_PKG_REL = "http://schemas.openxmlformats.org/package/2006/relationships"
+
+_FOOTNOTES_XML = (
+    f'<w:footnotes xmlns:w="{_W}">'
+    '<w:footnote w:id="1"><w:p><w:r><w:t>FOOTNOTE_PHI</w:t></w:r></w:p></w:footnote>'
+    "</w:footnotes>"
+)
+_ENDNOTES_XML = (
+    f'<w:endnotes xmlns:w="{_W}">'
+    '<w:endnote w:id="1"><w:p><w:r><w:t>ENDNOTE_PHI</w:t></w:r></w:p></w:endnote>'
+    "</w:endnotes>"
+)
+_COMMENTS_XML = (
+    f'<w:comments xmlns:w="{_W}">'
+    '<w:comment w:id="1" w:author="Reviewer_PHI" w:initials="RP">'
+    "<w:p><w:r><w:t>COMMENT_PHI</w:t></w:r></w:p></w:comment>"
+    "</w:comments>"
+)
+_PEOPLE_XML = (
+    f'<w:people xmlns:w="{_W}">'
+    '<w:person w:author="Reviewer_PHI"><w:presenceInfo w:providerId="None" '
+    'w:userId="Reviewer_PHI"/></w:person></w:people>'
+)
+_CORE_XML = (
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+    "<cp:coreProperties "
+    'xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" '
+    'xmlns:dc="http://purl.org/dc/elements/1.1/">'
+    "<dc:title>TITLE_PHI</dc:title>"
+    "<dc:creator>Author_PHI</dc:creator>"
+    "<dc:subject>SUBJECT_PHI</dc:subject>"
+    "<dc:description>DESC_PHI</dc:description>"
+    "<cp:keywords>KEYWORDS_PHI</cp:keywords>"
+    "<cp:lastModifiedBy>Editor_PHI</cp:lastModifiedBy>"
+    "</cp:coreProperties>"
+)
+_CUSTOM_XML = (
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+    "<Properties "
+    'xmlns="http://schemas.openxmlformats.org/officeDocument/2006/custom-properties" '
+    'xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes">'
+    '<property fmtid="{D5CDD505-2E9C-101B-9397-08002B2CF9AE}" pid="2" name="PatientName">'
+    "<vt:lpwstr>CUSTOM_PHI</vt:lpwstr></property></Properties>"
+)
+_CONTENT_TYPES_FULL = (
+    '<?xml version="1.0" encoding="UTF-8"?>'
+    f'<Types xmlns="{_CT}">'
+    '<Default Extension="xml" ContentType="application/xml"/>'
+    '<Default Extension="rels" '
+    'ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+    '<Override PartName="/word/document.xml" '
+    'ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>'
+    '<Override PartName="/word/styles.xml" '
+    'ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>'
+    '<Override PartName="/word/footnotes.xml" '
+    'ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footnotes+xml"/>'
+    '<Override PartName="/word/endnotes.xml" '
+    'ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.endnotes+xml"/>'
+    '<Override PartName="/word/comments.xml" '
+    'ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml"/>'
+    '<Override PartName="/docProps/core.xml" '
+    'ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>'
+    '<Override PartName="/docProps/custom.xml" '
+    'ContentType="application/vnd.openxmlformats-officedocument.custom-properties+xml"/>'
+    "</Types>"
+)
+_DOC_RELS_FULL = (
+    '<?xml version="1.0" encoding="UTF-8"?>'
+    f'<Relationships xmlns="{_PKG_REL}">'
+    f'<Relationship Type="{_R}/styles" Id="rId1" Target="styles.xml"/>'
+    f'<Relationship Type="{_R}/header" Id="rId2" Target="header1.xml"/>'
+    f'<Relationship Type="{_R}/footnotes" Id="rId7" Target="footnotes.xml"/>'
+    f'<Relationship Type="{_R}/endnotes" Id="rId8" Target="endnotes.xml"/>'
+    f'<Relationship Type="{_R}/comments" Id="rId9" Target="comments.xml"/>'
+    "</Relationships>"
+)
+_ROOT_RELS_FULL = (
+    '<?xml version="1.0" encoding="UTF-8"?>'
+    f'<Relationships xmlns="{_PKG_REL}">'
+    f'<Relationship Id="rIdD1" Type="{_R}/officeDocument" Target="word/document.xml"/>'
+    '<Relationship Id="rIdD3" '
+    'Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" '
+    'Target="docProps/core.xml"/>'
+    f'<Relationship Id="rIdD5" Type="{_R}/custom-properties" Target="docProps/custom.xml"/>'
+    "</Relationships>"
+)
+
+_PHI_TOKENS = [
+    "BODY_PHI",
+    "FOOTNOTE_PHI",
+    "ENDNOTE_PHI",
+    "COMMENT_PHI",
+    "Reviewer_PHI",
+    "Author_PHI",
+    "Editor_PHI",
+    "TITLE_PHI",
+    "SUBJECT_PHI",
+    "DESC_PHI",
+    "KEYWORDS_PHI",
+    "CUSTOM_PHI",
+]
+
+
+def _make_docx_with_phi(path: Path) -> Path:
+    """Build a docx that carries PHI in body, footnotes/endnotes, comments
+    (text + author/initials), people, and docProps (core + custom), plus a
+    valid [Content_Types].xml and document rels referencing those parts.
+    Styling (Heading1) and header letterhead must survive.
+    """
+    body_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        f'<w:document xmlns:w="{_W}" xmlns:r="{_R}">'
+        "<w:body>"
+        "<w:p><w:r><w:t>BODY_PHI</w:t></w:r></w:p>"
+        '<w:sectPr><w:pgSz w:w="11906" w:h="16838"/></w:sectPr>'
+        "</w:body></w:document>"
+    )
+    with zipfile.ZipFile(path, "w") as z:
+        z.writestr("[Content_Types].xml", _CONTENT_TYPES_FULL)
+        z.writestr("_rels/.rels", _ROOT_RELS_FULL)
+        z.writestr("word/document.xml", body_xml)
+        z.writestr("word/_rels/document.xml.rels", _DOC_RELS_FULL)
+        z.writestr("word/styles.xml", _STYLES_XML)
+        z.writestr("word/header1.xml", _HEADER_XML.replace("ORG LETTERHEAD", "ORG_LETTERHEAD"))
+        z.writestr("word/footnotes.xml", _FOOTNOTES_XML)
+        z.writestr("word/endnotes.xml", _ENDNOTES_XML)
+        z.writestr("word/comments.xml", _COMMENTS_XML)
+        z.writestr("word/people.xml", _PEOPLE_XML)
+        z.writestr("word/media/image1.png", b"\x89PNG\r\n\x1a\nLOGO_BYTES")
+        z.writestr("docProps/core.xml", _CORE_XML)
+        z.writestr("docProps/custom.xml", _CUSTOM_XML)
+    return path
+
+
+def test_strip_scrubs_all_phi_bearing_parts(tmp_path: Path) -> None:
+    src = _make_docx_with_phi(tmp_path / "phi.docx")
+    dest = tmp_path / "reference.docx"
+    strip_docx_body(src, dest)
+
+    with zipfile.ZipFile(dest) as z:
+        names = z.namelist()
+        all_bytes = b"".join(z.read(n) for n in names)
+
+    # 1) No PHI token survives in ANY zip part.
+    blob = all_bytes.decode("latin-1")
+    for token in _PHI_TOKENS:
+        assert token not in blob, f"PHI leaked: {token}"
+
+    # 2) Styling + header letterhead + logo media survive.
+    with zipfile.ZipFile(dest) as z:
+        assert "Heading1" in z.read("word/styles.xml").decode("utf-8")
+        assert "ORG_LETTERHEAD" in z.read("word/header1.xml").decode("utf-8")
+        assert b"LOGO_BYTES" in z.read("word/media/image1.png")
+        # 3) document.xml present and structurally a docx.
+        assert "word/document.xml" in z.namelist()
+        ct = z.read("[Content_Types].xml").decode("utf-8")
+        rels = z.read("word/_rels/document.xml.rels").decode("utf-8")
+
+    # 4) No dangling references to dropped parts.
+    for dropped in ("footnotes.xml", "endnotes.xml", "comments.xml"):
+        assert f'Target="{dropped}"' not in rels, f"dangling rel to {dropped}"
+        assert f"/word/{dropped}" not in ct, f"dangling Override for {dropped}"
+    assert "/docProps/custom.xml" not in ct
+    # core.xml is kept (scrubbed in place), so its Override stays.
+    assert "/docProps/core.xml" in ct
+
+
+def test_strip_drops_own_rels_of_dropped_parts(tmp_path: Path) -> None:
+    """A dropped part's own _rels file (word/_rels/footnotes.xml.rels) must go."""
+    src = tmp_path / "phi.docx"
+    _make_docx_with_phi(src)
+    # add a sidecar rels for footnotes (pandoc ships one)
+    with zipfile.ZipFile(src, "a") as z:
+        z.writestr(
+            "word/_rels/footnotes.xml.rels",
+            f'<?xml version="1.0"?><Relationships xmlns="{_PKG_REL}">'
+            f'<Relationship Type="{_R}/hyperlink" Id="rId30" '
+            'Target="http://example.com" TargetMode="External"/></Relationships>',
+        )
+    dest = tmp_path / "reference.docx"
+    strip_docx_body(src, dest)
+    with zipfile.ZipFile(dest) as z:
+        names = z.namelist()
+    assert "word/footnotes.xml" not in names
+    assert "word/_rels/footnotes.xml.rels" not in names
+
+
+def test_strip_scrubs_core_props_in_place(tmp_path: Path) -> None:
+    """docProps/core.xml is kept but authorship/metadata values are blanked."""
+    src = _make_docx_with_phi(tmp_path / "phi.docx")
+    dest = tmp_path / "reference.docx"
+    strip_docx_body(src, dest)
+    with zipfile.ZipFile(dest) as z:
+        assert "docProps/core.xml" in z.namelist()
+        core = z.read("docProps/core.xml").decode("utf-8")
+    # part still present and parseable, but the PHI values are gone
+    assert "Author_PHI" not in core
+    assert "Editor_PHI" not in core
+
+
+# ---------------------------------------------------------------------------
 # Namespace-preservation test (Word 2016+ documents with extra prefixes)
 # ---------------------------------------------------------------------------
 
@@ -230,6 +437,21 @@ def test_generate_default_reference_raises_on_failure(
         generate_default_reference(tmp_path / "reference.docx", Path("/opt/quarto/bin/quarto"))
 
 
+def test_generate_default_reference_raises_on_empty_stdout(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Zero exit but empty stdout must error instead of writing a 0-byte file."""
+
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        return subprocess.CompletedProcess(cmd, 0, stdout=b"", stderr=b"")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    dest = tmp_path / "reference.docx"
+    with pytest.raises(QuartoScaffoldError):
+        generate_default_reference(dest, Path("/opt/quarto/bin/quarto"))
+    assert not dest.exists()
+
+
 # ---------------------------------------------------------------------------
 # scaffold_quarto_report tests
 # ---------------------------------------------------------------------------
@@ -299,10 +521,32 @@ def test_scaffold_default_no_quarto_raises(monkeypatch: pytest.MonkeyPatch, tmp_
         scaffold_quarto_report("rep", formats=["docx"], data_reports=[], reports_dir=tmp_path)
 
 
-@pytest.mark.parametrize("bad_name", ["", "/evil", "evil\\path", "../evil"])
+@pytest.mark.parametrize(
+    "bad_name",
+    [
+        "",
+        "/evil",
+        "evil\\path",
+        "../evil",
+        ".",  # leading dot → "..qmd"
+        "report.qmd",  # would double the suffix → "report.qmd.qmd"
+        "C:report",  # colon (drive-relative path) not in allowlist
+        "rep ort",  # space not in allowlist
+        ".hidden",  # leading dot rejected
+    ],
+)
 def test_scaffold_rejects_path_traversal(tmp_path: Path, bad_name: str) -> None:
     with pytest.raises(QuartoScaffoldError):
         scaffold_quarto_report(bad_name, formats=["docx"], data_reports=[], reports_dir=tmp_path)
+
+
+def test_scaffold_accepts_valid_name(tmp_path: Path) -> None:
+    """A name within the allowlist (letters/digits/._-) is accepted (pdf-only,
+    so no Quarto needed)."""
+    qmd = scaffold_quarto_report(
+        "my-report.v2", formats=["pdf"], data_reports=[], reports_dir=tmp_path
+    )
+    assert qmd == tmp_path / "my-report.v2.qmd"
 
 
 def test_scaffold_pdf_only_skips_reference(tmp_path: Path) -> None:
@@ -444,3 +688,46 @@ def test_cmd_quarto_new_exits_on_error(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     with pytest.raises(SystemExit):
         cmd_quarto_new(args)
+
+
+# ---------------------------------------------------------------------------
+# Optional: real Quarto round-trip — a stripped reference.docx still renders.
+# Skipped when Quarto is not installed.
+# ---------------------------------------------------------------------------
+
+import shutil  # noqa: E402
+import sys  # noqa: E402
+
+_QUARTO_BIN = shutil.which("quarto")
+
+
+@pytest.mark.skipif(_QUARTO_BIN is None, reason="quarto CLI not installed")
+@pytest.mark.skipif(sys.platform == "win32", reason="render kernel is Linux-only")
+def test_stripped_reference_renders_with_quarto(tmp_path: Path) -> None:
+    """The pandoc default reference.docx — which ships footnotes/comments —
+    must still produce a valid docx after strip_docx_body drops those parts."""
+    assert _QUARTO_BIN is not None
+    src = tmp_path / "default-reference.docx"
+    generate_default_reference(src, Path(_QUARTO_BIN))
+    ref = tmp_path / "reference.docx"
+    strip_docx_body(src, ref)
+
+    qmd = tmp_path / "doc.qmd"
+    qmd.write_text(
+        "---\n"
+        'title: "RT"\n'
+        "format:\n"
+        "  docx:\n"
+        "    reference-doc: reference.docx\n"
+        "---\n\n"
+        "# Heading\n\nbody text\n",
+        encoding="utf-8",
+    )
+    proc = subprocess.run(
+        [_QUARTO_BIN, "render", str(qmd), "--to", "docx"],
+        cwd=tmp_path,
+        capture_output=True,
+        timeout=180,
+    )
+    assert proc.returncode == 0, proc.stderr.decode(errors="replace")
+    assert (tmp_path / "doc.docx").is_file()

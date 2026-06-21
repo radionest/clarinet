@@ -43,10 +43,18 @@ single `reference.docx`. The command refuses to overwrite an existing one unless
 `--force` is set, so adding a second report to an already-scaffolded folder is
 safe — the existing styles file is kept.
 
-**`--from-docx` copies styles only** (body text is dropped). This is a PHI
-guard: a clinical document used as a branding template may contain patient data
-in the body — stripping it ensures the resulting `reference.docx` holds only
-fonts, paragraph styles, and page layout.
+**`--from-docx` scrubs author content, keeps the letterhead.** A clinical
+document used as a branding template can carry patient data far beyond the main
+body, so the import strips it thoroughly. **Scrubbed:** the document body;
+footnotes and endnotes; comments (text *and* reviewer names in `w:author` /
+`w:initials`) and the `people.xml` roster; document authorship and metadata in
+`docProps/core.xml` (`dc:creator`, `cp:lastModifiedBy`, title/subject/
+description/keywords) and any `docProps/custom.xml` custom properties. Dropped
+parts have their relationships and `[Content_Types].xml` entries cleaned so the
+result is still a valid `.docx`. **Kept:** the visual style template — paragraph
+and character styles, theme, numbering, fonts, page geometry — and, by design,
+the **whole letterhead**: headers, footers, and embedded media (the org logo).
+Review the produced `reference.docx` before committing it.
 
 **Default `reference.docx`** (when `--from-docx` is omitted) is generated via
 `quarto pandoc --print-default-data-file reference.docx`. Quarto must be
