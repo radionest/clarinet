@@ -6,6 +6,7 @@ front matter; this one writes a fresh ``.qmd`` plus its sibling
 """
 
 import io
+import subprocess
 import zipfile
 from pathlib import Path
 from xml.etree import ElementTree as ET
@@ -110,3 +111,24 @@ def _empty_body(document_xml: bytes) -> bytes:
     result = ET.tostring(root, encoding="UTF-8", xml_declaration=True)
     assert isinstance(result, bytes)
     return result
+
+
+def generate_default_reference(dest: Path, quarto_executable: Path) -> None:
+    """Write the bundled pandoc default ``reference.docx`` to ``dest``.
+
+    ``quarto pandoc`` proxies Quarto's bundled pandoc, so no separate pandoc
+    install is needed. ``--print-default-data-file reference.docx`` emits the
+    docx bytes on stdout.
+
+    Raises:
+        QuartoScaffoldError: the subprocess exits non-zero.
+    """
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    proc = subprocess.run(
+        [str(quarto_executable), "pandoc", "--print-default-data-file", "reference.docx"],
+        capture_output=True,
+    )
+    if proc.returncode != 0:
+        detail = proc.stderr.decode(errors="replace").strip()[:500]
+        raise QuartoScaffoldError(f"failed to generate default reference.docx: {detail}")
+    dest.write_bytes(proc.stdout)

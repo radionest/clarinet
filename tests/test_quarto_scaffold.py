@@ -1,5 +1,6 @@
 """Unit tests for clarinet.utils.quarto_scaffold."""
 
+import subprocess
 import zipfile
 from pathlib import Path
 
@@ -7,7 +8,11 @@ import pytest
 import yaml
 
 from clarinet.exceptions.domain import QuartoScaffoldError
-from clarinet.utils.quarto_scaffold import build_qmd_text, strip_docx_body
+from clarinet.utils.quarto_scaffold import (
+    build_qmd_text,
+    generate_default_reference,
+    strip_docx_body,
+)
 
 
 def _front_matter(qmd: str) -> dict:
@@ -190,3 +195,36 @@ def test_strip_preserves_extra_namespaces(tmp_path: Path) -> None:
     assert "mc:Ignorable=" in doc
     assert "ns0" not in doc
     assert "ns1" not in doc
+
+
+# ---------------------------------------------------------------------------
+# generate_default_reference tests
+# ---------------------------------------------------------------------------
+
+
+def test_generate_default_reference_writes_stdout(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    captured: dict[str, list[str]] = {}
+
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        captured["cmd"] = cmd
+        return subprocess.CompletedProcess(cmd, 0, stdout=b"PKdocxbytes", stderr=b"")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    dest = tmp_path / "reference.docx"
+    generate_default_reference(dest, Path("/opt/quarto/bin/quarto"))
+
+    assert dest.read_bytes() == b"PKdocxbytes"
+    assert captured["cmd"][1:] == ["pandoc", "--print-default-data-file", "reference.docx"]
+
+
+def test_generate_default_reference_raises_on_failure(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        return subprocess.CompletedProcess(cmd, 1, stdout=b"", stderr=b"boom")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    with pytest.raises(QuartoScaffoldError):
+        generate_default_reference(tmp_path / "reference.docx", Path("/opt/quarto/bin/quarto"))
