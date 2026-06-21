@@ -15,6 +15,9 @@ pdm.lock
 .coverage
 .env.test
 
+# Mutation testing (mutmut) — generated mutant copies + stats
+/mutants/
+
 # Build artifacts
 **/build/**
 dist/

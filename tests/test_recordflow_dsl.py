@@ -123,6 +123,18 @@ class TestFlowResult:
         assert chained.record_name == "r"
         assert chained.field_path == ["a", "b", "c"]
 
+    def test_getattr_private_name_raises(self):
+        """The leading-underscore guard keeps dunder/private access from being
+        misread as a data field (protects copy/pickle/hasattr probes)."""
+        fr = FlowResult("r")
+        with pytest.raises(AttributeError):
+            _ = fr._not_a_field
+
+    def test_string_field_path_splits_on_dot(self):
+        """A dotted string field_path is split into a path list."""
+        fr = FlowResult("r", "findings.tumor")
+        assert fr.field_path == ["findings", "tumor"]
+
     def test_data_field_with_none_data(self):
         """Accessing a field on None data returns None via dict.get."""
         ctx = {"report": make_record_read("report", data=None)}
@@ -204,6 +216,9 @@ class TestComparisons:
             ("__gt__", 5, 10, False),
             ("__ge__", 10, 10, True),
             ("__ge__", 9, 10, False),
+            # Equality boundary distinguishes strict (<, >) from non-strict (<=, >=)
+            ("__lt__", 5, 5, False),
+            ("__gt__", 5, 5, False),
         ],
         ids=[
             "eq-true",
@@ -218,6 +233,8 @@ class TestComparisons:
             "gt-false",
             "ge-true",
             "ge-false",
+            "lt-equal",
+            "gt-equal",
         ],
     )
     def test_all_operators(self, op_method, left_val, right_val, expected):
@@ -345,6 +362,35 @@ class TestStrategyResolution:
             ]
         }
         assert cmp.evaluate(ctx2) is False
+
+    def test_single_left_multi_right(self):
+        """Single on the LEFT, multi-valued record on the RIGHT — covers the
+        ``left_strategy == "single"`` branch of ``FieldComparison.evaluate``,
+        previously unexercised because the existing any/all tests always put
+        the multi-valued side on the left (the ``else`` branch)."""
+        ctx = {
+            "threshold": [make_record_read("threshold", data={"v": 100})],
+            "measurement": [
+                make_record_read("measurement", data={"v": 50}, record_id=1),
+                make_record_read("measurement", data={"v": 200}, record_id=2),
+            ],
+        }
+        cmp = FlowResult("threshold", ["v"]) < record("measurement").any().d.v
+        assert cmp.evaluate(ctx) is True  # any(100 < 50, 100 < 200)
+
+    def test_multi_left_single_record_right(self):
+        """Multi-valued record on the LEFT compared to a single *record* on
+        the RIGHT (not a constant) — the ``else`` branch with both operands
+        resolved from context."""
+        ctx = {
+            "measurement": [
+                make_record_read("measurement", data={"v": 150}, record_id=1),
+                make_record_read("measurement", data={"v": 200}, record_id=2),
+            ],
+            "threshold": [make_record_read("threshold", data={"v": 100})],
+        }
+        cmp = record("measurement").all().d.v > FlowResult("threshold", ["v"])
+        assert cmp.evaluate(ctx) is True  # all(150 > 100, 200 > 100)
 
     def test_two_multivalued_sides_unsupported(self):
         """any/all on both sides is rejected — must reduce one side."""
