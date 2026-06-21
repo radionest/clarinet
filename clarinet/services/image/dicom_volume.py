@@ -112,15 +112,25 @@ def _canonicalize_slice_axis(
     direction are reversed *together*, so every voxel keeps its physical position
     (unlike a direction-only flip, which mirrors the data through the origin
     plane). No-op when the slice axis already points the canonical way.
+
+    Scope — this stabilizes *future* conversions. Segmentations that were frozen
+    on a divergent earlier-epoch grid stay physically correct but still need
+    ``clarinet.services.image.conform_seg_to_grid`` (PR #393) to re-align by index
+    against a re-converted volume. The canonical frame may be left-handed (det < 0) for
+    series whose in-plane axes oppose the slice normal — this is valid (NIfTI /
+    NRRD / ITK all support a negative-determinant direction), matches the
+    pre-#221 reader, and no framework consumer depends on a positive determinant.
     """
     slice_dir = direction[:, 2]
+    # argmax resolves a perfectly diagonal (equal-magnitude) slice normal to the
+    # first axis deterministically, so the canonical choice stays reproducible.
     dominant = int(np.argmax(np.abs(slice_dir)))
     if slice_dir[dominant] >= 0:
         return volume, origin, direction
 
-    logger.debug(
-        f"Flipping slice axis to canonical orientation in {name} "
-        f"(slice direction {np.round(slice_dir, 3).tolist()})"
+    logger.info(
+        f"Canonicalizing DICOM slice axis in {name} "
+        f"(flipping slice direction {np.round(slice_dir, 3).tolist()} to +{dominant}-axis)"
     )
     n_slices = volume.shape[2]
     new_origin = np.asarray(origin, dtype=float) + slice_dir * slice_spacing * (n_slices - 1)

@@ -357,13 +357,17 @@ class TestDicomVolume:
         assert any("Multiple DICOM series" in m for m in captured)
 
     @staticmethod
-    def _write_neg_z_series(dcm_dir: Path, slice_pixels: dict[float, np.ndarray]) -> None:
-        """Write an axial series whose IOP slice normal points along -Z.
+    def _write_axial_series(
+        dcm_dir: Path,
+        slice_pixels: dict[float, np.ndarray],
+        iop: tuple[int, ...] = (1, 0, 0, 0, -1, 0),
+    ) -> None:
+        """Write an axial series mapping physical Z (mm) → (rows, cols) pixel array.
 
-        ``slice_pixels`` maps physical Z (mm) → the (rows, cols) pixel array for
-        that slice. With ``ImageOrientationPatient=[1,0,0,0,-1,0]`` SimpleITK
-        orders slices opposite to the legacy ascending-``ImagePositionPatient[2]``
-        convention, exercising the slice-axis canonicalisation.
+        With the default ``ImageOrientationPatient=[1,0,0,0,-1,0]`` the slice normal
+        points along -Z, so SimpleITK orders slices opposite to the legacy ascending-
+        ``ImagePositionPatient[2]`` convention — exercising the slice-axis flip. Pass
+        ``iop=(1,0,0,0,1,0)`` (normal +Z) for an already-canonical series.
         """
         dcm_dir.mkdir()
         suid = pydicom.uid.generate_uid()
@@ -386,25 +390,25 @@ class TestDicomVolume:
             ds.PhotometricInterpretation = "MONOCHROME2"
             ds.PixelSpacing = [1.0, 1.0]
             ds.SliceThickness = 3.0
-            ds.ImageOrientationPatient = [1, 0, 0, 0, -1, 0]
+            ds.ImageOrientationPatient = list(iop)
             ds.ImagePositionPatient = [0.0, 0.0, z]
             ds.InstanceNumber = k + 1
             ds.PixelData = pixels.astype(np.uint16).tobytes()
             pydicom.dcmwrite(str(filename), ds)
 
-    def test_slice_axis_canonicalized_to_ascending_z(self, tmp_path: Path) -> None:
+    def test_negative_z_axial_series_canonicalized(self, tmp_path: Path) -> None:
         """DICOM→NIfTI conversion must be slice-order canonical and version-stable.
 
-        A series whose IOP slice normal points along -Z (common on MRI / oblique)
-        is ordered by SimpleITK opposite to the legacy ascending-
+        An axial series whose IOP slice normal points along -Z (common on MRI) is
+        ordered by SimpleITK opposite to the legacy ascending-
         ``ImagePositionPatient[2]`` convention used by the pre-#221 reader. The
-        reader normalises the slice axis to point along the positive sense of its
-        dominant anatomical axis, so re-converting a series always yields the same
-        grid — preventing the projection/doctor-seg index-reversed Z-flip.
+        reader normalises the slice axis to the positive sense of its dominant axis
+        (here Z), so re-converting a series always yields the same grid —
+        preventing the projection/doctor-seg index-reversed Z-flip.
         """
         dcm_dir = tmp_path / "neg_z_series"
         # value encodes |Z|: Z=0 -> 100, Z=-3 -> 130, Z=-6 -> 160
-        self._write_neg_z_series(
+        self._write_axial_series(
             dcm_dir,
             {z: np.full((4, 5), int(100 + abs(z) * 10)) for z in (0.0, -3.0, -6.0)},
         )
@@ -418,6 +422,27 @@ class TestDicomVolume:
         assert int(volume[0, 0, 0]) == 160
         assert int(volume[0, 0, -1]) == 100
 
+    def test_positive_z_axial_series_unchanged(self, tmp_path: Path) -> None:
+        """A series whose slice axis already points +Z is passed through untouched
+        (the canonicalisation early-return), guaranteeing idempotency for the common
+        case: re-converting a standard +Z axial series never moves the grid.
+        """
+        dcm_dir = tmp_path / "pos_z_series"
+        # IOP normal = +Z; value encodes Z: Z=0 -> 100, Z=3 -> 130, Z=6 -> 160
+        self._write_axial_series(
+            dcm_dir,
+            {z: np.full((4, 5), int(100 + z * 10)) for z in (0.0, 3.0, 6.0)},
+            iop=(1, 0, 0, 0, 1, 0),
+        )
+
+        volume, _spacing, origin, direction = read_dicom_series(dcm_dir)
+
+        # No flip: origin stays at the first (min-Z) slice, slice order unchanged.
+        assert direction[2, 2] > 0
+        assert pytest.approx(origin[2], abs=1e-4) == 0.0
+        assert int(volume[0, 0, 0]) == 100
+        assert int(volume[0, 0, -1]) == 160
+
     def test_canonicalization_preserves_geometry(self, tmp_path: Path) -> None:
         """Slice-axis canonicalisation flips the array, origin and direction
         together, so every voxel keeps its physical location — unlike a
@@ -429,7 +454,7 @@ class TestDicomVolume:
         marker = 999
         z0_pixels = np.zeros((4, 5), dtype=np.uint16)
         z0_pixels[1, 2] = marker  # row=1, col=2 in the slice at physical Z=0
-        self._write_neg_z_series(
+        self._write_axial_series(
             dcm_dir,
             {0.0: z0_pixels, -3.0: np.zeros((4, 5)), -6.0: np.zeros((4, 5))},
         )
