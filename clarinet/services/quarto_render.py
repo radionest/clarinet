@@ -28,11 +28,12 @@ from typing import Any
 
 from clarinet.client import ClarinetClient
 from clarinet.exceptions.domain import QuartoRenderError
-from clarinet.models.quarto_report import QuartoRenderStatus, QuartoReportFormat
+from clarinet.models.quarto_report import QuartoRenderStatus, QuartoReportFormat, QuartoReportKind
 from clarinet.services.events.bus import get_event_bus
 from clarinet.services.events.models import TaskProgressEvent
 from clarinet.settings import settings
 from clarinet.utils.logger import logger
+from clarinet.utils.quarto_discovery import parse_book_metadata
 
 _STATUS_FILE = "status.json"
 
@@ -143,6 +144,8 @@ async def render_report(
     quarto_executable: Path,
     timeout_seconds: float,
     client: ClarinetClient,
+    kind: QuartoReportKind = QuartoReportKind.FILE,
+    project_subdir: str | None = None,
 ) -> None:
     """Render the ``.qmd`` named by ``qmd_path`` to ``formats`` inside ``render_dir``.
 
@@ -171,15 +174,38 @@ async def render_report(
 
     ready: dict[str, bool] = {f.value: False for f in formats}
     try:
-        # Only the file name from the payload is trusted: the .qmd must already
-        # sit inside render_dir (copied there by QuartoReportService), so a
-        # hostile qmd_path cannot make the renderer read an arbitrary file.
-        work_qmd = render_dir / qmd_path.name
-        if not await asyncio.to_thread(work_qmd.is_file):
-            raise QuartoRenderError(f"template '{qmd_path.name}' not found in render dir")
-        await _materialize_data(data_reports, render_dir, client)
+        if kind is QuartoReportKind.BOOK:
+            if project_subdir is None:
+                raise QuartoRenderError(f"book '{name}': missing project_subdir")
+            work_dir = render_dir / project_subdir
+            quarto_yml = work_dir / "_quarto.yml"
+            if not await asyncio.to_thread(quarto_yml.is_file):
+                raise QuartoRenderError(
+                    f"book '{name}': _quarto.yml not found in staged project dir"
+                )
+            await _materialize_data(data_reports, work_dir, client)
+            yml_text = await asyncio.to_thread(quarto_yml.read_text, "utf-8")
+            _title, _desc, _data, output_dir = parse_book_metadata(yml_text, name)
+
+            async def render_one(fmt: QuartoReportFormat) -> None:
+                await _run_quarto_book(
+                    work_dir, fmt, output_dir, render_dir, quarto_executable, timeout_seconds
+                )
+        else:
+            # Only the file name from the payload is trusted: the .qmd must already
+            # sit inside render_dir (copied there by QuartoReportService), so a
+            # hostile qmd_path cannot make the renderer read an arbitrary file.
+            work_qmd = render_dir / qmd_path.name
+            if not await asyncio.to_thread(work_qmd.is_file):
+                raise QuartoRenderError(f"template '{qmd_path.name}' not found in render dir")
+            await _materialize_data(data_reports, render_dir, client)
+
+            async def render_one(fmt: QuartoReportFormat) -> None:
+                await _run_quarto(work_qmd, fmt, render_dir, quarto_executable, timeout_seconds)
+
+        # Shared across both kinds: render each format, then flip its sidecar bit.
         for fmt in formats:
-            await _run_quarto(work_qmd, fmt, render_dir, quarto_executable, timeout_seconds)
+            await render_one(fmt)
             ready[fmt.value] = True
             await asyncio.to_thread(
                 write_status,

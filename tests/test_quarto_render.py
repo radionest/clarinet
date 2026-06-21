@@ -637,3 +637,66 @@ async def test_run_quarto_book_errors_when_multiple_artifacts(tmp_path: Path) ->
             work_dir, QuartoReportFormat.DOCX, "_book", render_dir, fake, 30.0
         )
     assert "expected exactly one" in str(exc_info.value)
+
+
+_MIN_BOOK_YML = "project:\n  type: book\n  output-dir: _book\nbook:\n  title: B\n"
+
+
+@_skip_windows
+@pytest.mark.asyncio
+async def test_render_report_book_end_to_end(tmp_path: Path) -> None:
+    """A staged book renders and normalizes its output-dir artifact to report.docx."""
+    from clarinet.models.quarto_report import QuartoReportKind
+
+    render_dir = tmp_path / "out"
+    work_dir = render_dir / "project"
+    work_dir.mkdir(parents=True)
+    (work_dir / "_quarto.yml").write_text(_MIN_BOOK_YML)
+    (work_dir / "index.qmd").write_text("# i\n")
+    fake = _write_fake_book_quarto(tmp_path / "quarto", output_subdir="_book", artifacts=["B.docx"])
+
+    await quarto_render.render_report(
+        name="bk",
+        qmd_path=work_dir,  # for books, render_report uses project_subdir, not this
+        data_reports=[],
+        formats=[QuartoReportFormat.DOCX],
+        render_dir=render_dir,
+        quarto_executable=fake,
+        timeout_seconds=30.0,
+        client=AsyncMock(spec=ClarinetClient),
+        kind=QuartoReportKind.BOOK,
+        project_subdir="project",
+    )
+
+    assert (render_dir / "report.docx").is_file()
+    state = read_status(render_dir)
+    assert state is not None
+    assert state["status"] == "done"
+    assert state["ready"] == {"docx": True}
+
+
+@pytest.mark.asyncio
+async def test_render_report_book_missing_quarto_yml_fails(tmp_path: Path) -> None:
+    """A book whose staged project dir lacks _quarto.yml lands FAILED, not raised."""
+    from clarinet.models.quarto_report import QuartoReportKind
+
+    render_dir = tmp_path / "out"
+    (render_dir / "project").mkdir(parents=True)
+
+    await quarto_render.render_report(
+        name="bk",
+        qmd_path=render_dir / "project",
+        data_reports=[],
+        formats=[QuartoReportFormat.DOCX],
+        render_dir=render_dir,
+        quarto_executable=tmp_path / "quarto",
+        timeout_seconds=10.0,
+        client=AsyncMock(spec=ClarinetClient),
+        kind=QuartoReportKind.BOOK,
+        project_subdir="project",
+    )
+
+    state = read_status(render_dir)
+    assert state is not None
+    assert state["status"] == "failed"
+    assert "_quarto.yml" in state["error"]
