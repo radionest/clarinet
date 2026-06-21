@@ -398,6 +398,12 @@ class QuartoRenderError(ClarinetError):
     """Raised when the ``quarto`` CLI exits non-zero or the render times out."""
 
 
+class QuartoScaffoldError(ClarinetError):
+    """Raised when scaffolding a new Quarto report fails: an invalid report
+    name, an existing target file without ``--force``, or an unreadable
+    source ``.docx`` passed to ``--from-docx``."""
+
+
 # Configuration errors
 class ConfigurationError(ClarinetError):
     """Raised when there's a configuration problem."""

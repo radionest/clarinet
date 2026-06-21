@@ -9,6 +9,57 @@ download the result from the **Quarto** tab once it finishes.
 It mirrors the SQL *reports* feature (`*.sql` → CSV/XLSX) but produces a
 formatted document instead of a spreadsheet.
 
+## Scaffolding a new report
+
+Use `clarinet quarto new` to create a minimal `.qmd` and a matching
+`reference.docx` in one step:
+
+```bash
+clarinet quarto new my_report \
+    --title "Monthly Summary" \
+    --description "Records grouped by status." \
+    --lang ru \
+    --format docx \
+    --data monthly_summary,user_stats \
+    --from-docx /path/to/brand.docx   # optional: copy styles from an existing .docx
+```
+
+The command writes `<name>.qmd` (YAML front matter + one empty heading) into the
+project's `quarto_reports_path` (default `./review/`). Flags:
+
+| Flag | Default | Description |
+|---|---|---|
+| `name` | (required) | Stem of the `.qmd` file |
+| `--title` | `<name>` | `title` in front matter |
+| `--description` | `""` | `description` in front matter |
+| `--lang` | `ru` | `lang` in front matter |
+| `--format` | `docx` | Output format: `docx`, `pdf`, or `both` |
+| `--data` | `""` | Comma-separated SQL report names for `clarinet.data` |
+| `--from-docx` | — | Existing `.docx` whose styles become `reference.docx` |
+| `--force` | `false` | Overwrite existing `.qmd` / `reference.docx` |
+
+**One `reference.docx` per folder.** All `.qmd` files in the same folder share a
+single `reference.docx`. The command refuses to overwrite an existing one unless
+`--force` is set, so adding a second report to an already-scaffolded folder is
+safe — the existing styles file is kept.
+
+**`--from-docx` scrubs author content, keeps the letterhead.** A clinical
+document used as a branding template can carry patient data far beyond the main
+body, so the import strips it thoroughly. **Scrubbed:** the document body;
+footnotes and endnotes; comments (text *and* reviewer names in `w:author` /
+`w:initials`) and the `people.xml` roster; document authorship and metadata in
+`docProps/core.xml` (`dc:creator`, `cp:lastModifiedBy`, title/subject/
+description/keywords) and any `docProps/custom.xml` custom properties. Dropped
+parts have their relationships and `[Content_Types].xml` entries cleaned so the
+result is still a valid `.docx`. **Kept:** the visual style template — paragraph
+and character styles, theme, numbering, fonts, page geometry — and, by design,
+the **whole letterhead**: headers, footers, and embedded media (the org logo).
+Review the produced `reference.docx` before committing it.
+
+**Default `reference.docx`** (when `--from-docx` is omitted) is generated via
+`quarto pandoc --print-default-data-file reference.docx`. Quarto must be
+installed (`clarinet quarto install`) for this branch.
+
 ## Authoring a report
 
 Drop a `*.qmd` file into the project's reports folder

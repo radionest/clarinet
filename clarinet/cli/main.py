@@ -1087,6 +1087,30 @@ def generate_report_types() -> None:
     asyncio.run(_generate_report_types())
 
 
+def cmd_quarto_new(args: argparse.Namespace) -> None:
+    """Handle ``clarinet quarto new`` — scaffold a .qmd + reference.docx."""
+    from clarinet.exceptions.domain import QuartoNotInstalledError, QuartoScaffoldError
+    from clarinet.utils.quarto_scaffold import scaffold_quarto_report
+
+    formats = {"docx": ["docx"], "pdf": ["pdf"], "both": ["docx", "pdf"]}[args.format]
+    data_reports = [item.strip() for item in args.data.split(",") if item.strip()]
+    from_docx = Path(args.from_docx) if args.from_docx else None
+    try:
+        scaffold_quarto_report(
+            args.name,
+            title=args.title,
+            description=args.description,
+            lang=args.lang,
+            formats=formats,
+            data_reports=data_reports,
+            from_docx=from_docx,
+            force=args.force,
+        )
+    except (QuartoScaffoldError, QuartoNotInstalledError) as exc:
+        logger.error(f"{exc}")
+        sys.exit(1)
+
+
 async def _generate_report_types() -> None:
     from clarinet.exceptions.domain import ReportQueryError
     from clarinet.repositories.report_repository import ReportColumn, ReportRepository
@@ -1144,6 +1168,8 @@ def handle_quarto_command(args: argparse.Namespace) -> None:
         cleanup_quarto_renders(days=args.days)
     elif args.quarto_command == "gen-types":
         generate_report_types()
+    elif args.quarto_command == "new":
+        cmd_quarto_new(args)
     else:
         logger.error(f"Unknown quarto command: {args.quarto_command}")
         sys.exit(1)
@@ -1468,6 +1494,26 @@ def main() -> None:
     quarto_subparsers.add_parser(
         "gen-types",
         help="Generate review/report_schemas.py (pandera) from *.sql reports for typed .qmd DataFrames",
+    )
+
+    quarto_new_parser = quarto_subparsers.add_parser(
+        "new", help="Scaffold a new Quarto report (.qmd + reference.docx)"
+    )
+    quarto_new_parser.add_argument("name", help="Report name → <name>.qmd")
+    quarto_new_parser.add_argument("--title", help="Front-matter title (default: <name>)")
+    quarto_new_parser.add_argument("--description", default="", help="Front-matter description")
+    quarto_new_parser.add_argument("--lang", default="ru", help="Document language (default: ru)")
+    quarto_new_parser.add_argument(
+        "--format", default="docx", choices=["docx", "pdf", "both"], help="Output format(s)"
+    )
+    quarto_new_parser.add_argument(
+        "--data", default="", help="Comma-separated SQL report names for clarinet.data"
+    )
+    quarto_new_parser.add_argument(
+        "--from-docx", help="Existing .docx whose styles become reference.docx"
+    )
+    quarto_new_parser.add_argument(
+        "--force", action="store_true", help="Overwrite existing .qmd / reference.docx"
     )
 
     # worker command
