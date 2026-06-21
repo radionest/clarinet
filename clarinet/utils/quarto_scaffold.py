@@ -42,6 +42,7 @@ _PHI_PARTS_TO_DROP = frozenset(
         "word/commentsExtensible.xml",
         "word/people.xml",
         "docProps/custom.xml",
+        "docProps/app.xml",
     }
 )
 
@@ -116,6 +117,8 @@ def strip_docx_body(src: Path, dest: Path) -> None:
       ``word/people.xml`` — dropped (comment text *and* reviewer names in
       ``w:author``/``w:initials``);
     * ``docProps/custom.xml`` — dropped (arbitrary custom properties);
+    * ``docProps/app.xml`` — dropped (``<Company>``, ``<Manager>``,
+      ``<TitlesOfParts>``/``<HeadingPairs>`` carry section/heading titles);
     * ``docProps/core.xml`` — kept but its authorship/metadata text blanked
       (``dc:creator``, ``cp:lastModifiedBy``, ``dc:title``/``subject``/
       ``description``, ``cp:keywords``).
@@ -278,10 +281,16 @@ def generate_default_reference(dest: Path, quarto_executable: Path) -> None:
         QuartoScaffoldError: the subprocess exits non-zero or emits no bytes.
     """
     dest.parent.mkdir(parents=True, exist_ok=True)
-    proc = subprocess.run(
-        [str(quarto_executable), "pandoc", "--print-default-data-file", "reference.docx"],
-        capture_output=True,
-    )
+    try:
+        proc = subprocess.run(
+            [str(quarto_executable), "pandoc", "--print-default-data-file", "reference.docx"],
+            capture_output=True,
+            timeout=60,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise QuartoScaffoldError(
+            "failed to generate default reference.docx: pandoc timed out after 60 s"
+        ) from exc
     if proc.returncode != 0:
         detail = proc.stderr.decode(errors="replace").strip()[:500]
         raise QuartoScaffoldError(f"failed to generate default reference.docx: {detail}")

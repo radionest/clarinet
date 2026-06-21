@@ -198,6 +198,15 @@ _CUSTOM_XML = (
     '<property fmtid="{D5CDD505-2E9C-101B-9397-08002B2CF9AE}" pid="2" name="PatientName">'
     "<vt:lpwstr>CUSTOM_PHI</vt:lpwstr></property></Properties>"
 )
+_APP_XML = (
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+    "<Properties "
+    'xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties">'
+    "<Application>Microsoft Word</Application>"
+    "<Company>Company_PHI</Company>"
+    "<Manager>Manager_PHI</Manager>"
+    "</Properties>"
+)
 _CONTENT_TYPES_FULL = (
     '<?xml version="1.0" encoding="UTF-8"?>'
     f'<Types xmlns="{_CT}">'
@@ -218,6 +227,8 @@ _CONTENT_TYPES_FULL = (
     'ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>'
     '<Override PartName="/docProps/custom.xml" '
     'ContentType="application/vnd.openxmlformats-officedocument.custom-properties+xml"/>'
+    '<Override PartName="/docProps/app.xml" '
+    'ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>'
     "</Types>"
 )
 _DOC_RELS_FULL = (
@@ -238,6 +249,9 @@ _ROOT_RELS_FULL = (
     'Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" '
     'Target="docProps/core.xml"/>'
     f'<Relationship Id="rIdD5" Type="{_R}/custom-properties" Target="docProps/custom.xml"/>'
+    '<Relationship Id="rIdD6" '
+    'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" '
+    'Target="docProps/app.xml"/>'
     "</Relationships>"
 )
 
@@ -254,6 +268,8 @@ _PHI_TOKENS = [
     "DESC_PHI",
     "KEYWORDS_PHI",
     "CUSTOM_PHI",
+    "Company_PHI",
+    "Manager_PHI",
 ]
 
 
@@ -285,6 +301,7 @@ def _make_docx_with_phi(path: Path) -> Path:
         z.writestr("word/media/image1.png", b"\x89PNG\r\n\x1a\nLOGO_BYTES")
         z.writestr("docProps/core.xml", _CORE_XML)
         z.writestr("docProps/custom.xml", _CUSTOM_XML)
+        z.writestr("docProps/app.xml", _APP_XML)
     return path
 
 
@@ -317,8 +334,13 @@ def test_strip_scrubs_all_phi_bearing_parts(tmp_path: Path) -> None:
         assert f'Target="{dropped}"' not in rels, f"dangling rel to {dropped}"
         assert f"/word/{dropped}" not in ct, f"dangling Override for {dropped}"
     assert "/docProps/custom.xml" not in ct
+    assert "/docProps/app.xml" not in ct
     # core.xml is kept (scrubbed in place), so its Override stays.
     assert "/docProps/core.xml" in ct
+    # No dangling relationship to app.xml in the package-root rels.
+    with zipfile.ZipFile(dest) as z:
+        root_rels = z.read("_rels/.rels").decode("utf-8")
+    assert "docProps/app.xml" not in root_rels
 
 
 def test_strip_drops_own_rels_of_dropped_parts(tmp_path: Path) -> None:
@@ -450,6 +472,19 @@ def test_generate_default_reference_raises_on_empty_stdout(
     with pytest.raises(QuartoScaffoldError):
         generate_default_reference(dest, Path("/opt/quarto/bin/quarto"))
     assert not dest.exists()
+
+
+def test_generate_default_reference_raises_on_timeout(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """subprocess.TimeoutExpired must be mapped to QuartoScaffoldError."""
+
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        raise subprocess.TimeoutExpired(cmd, 60)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    with pytest.raises(QuartoScaffoldError, match="timed out"):
+        generate_default_reference(tmp_path / "reference.docx", Path("/opt/quarto/bin/quarto"))
 
 
 # ---------------------------------------------------------------------------
