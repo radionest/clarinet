@@ -6,8 +6,10 @@ front matter; this one writes a fresh ``.qmd`` plus its sibling
 """
 
 import io
+import os
 import re
 import subprocess
+import tempfile
 import zipfile
 from pathlib import Path
 from xml.etree import ElementTree as ET
@@ -26,29 +28,45 @@ _PKG_REL_NS = "http://schemas.openxmlformats.org/package/2006/relationships"
 _DOCUMENT_PART = "word/document.xml"
 _CONTENT_TYPES_PART = "[Content_Types].xml"
 _DOCUMENT_RELS_PART = "word/_rels/document.xml.rels"
+_SETTINGS_PART = "word/settings.xml"
+# docProps/core.xml is kept but its authorship/metadata text is blanked in place.
+_CORE_PROPS_PART = "docProps/core.xml"
 
-# Parts that carry user-authored text or names (PHI) but contribute nothing to
-# the visual style template, so strip_docx_body drops them outright (along with
-# any sidecar _rels and their [Content_Types] Override / document relationship).
-# Headers/footers and word/media/* are deliberately NOT here — the letterhead
-# (logo + org header) is wanted; styles/theme/numbering/settings/fonts stay too.
-_PHI_PARTS_TO_DROP = frozenset(
+# strip_docx_body uses an ALLOWLIST: only known styling / layout / letterhead
+# parts are kept; everything else is dropped. A denylist proved fragile —
+# reviewers kept finding new PHI-bearing parts (embeddings, charts, glossary,
+# customXml, …) — so the safe default is "drop unless explicitly recognised".
+#
+# Exact content-part names that are kept (after their own transforms, where
+# applicable). ``_rels`` sidecars are handled generically by _is_kept: a sidecar
+# is kept iff the content part it describes is kept (so settings.xml.rels,
+# numbering.xml.rels, header1.xml.rels … follow their part automatically), with
+# the package-root ``_rels/.rels`` always kept.
+_KEEP_EXACT = frozenset(
     {
-        "word/footnotes.xml",
-        "word/endnotes.xml",
-        "word/comments.xml",
-        "word/commentsExtended.xml",
-        "word/commentsIds.xml",
-        "word/commentsExtensible.xml",
-        "word/people.xml",
-        "docProps/custom.xml",
-        "docProps/app.xml",
+        _CONTENT_TYPES_PART,
+        _DOCUMENT_PART,
+        "word/styles.xml",
+        "word/stylesWithEffects.xml",
+        "word/numbering.xml",
+        _SETTINGS_PART,
+        "word/webSettings.xml",
+        "word/fontTable.xml",
+        _CORE_PROPS_PART,
     }
 )
 
-# docProps/core.xml is kept (its part is harmless and removing it would mean
-# editing the root _rels too) but its authorship/metadata text is blanked.
-_CORE_PROPS_PART = "docProps/core.xml"
+# Content-part prefixes kept WITH content: theme, embedded media/fonts, and the
+# letterhead (headers/footers). The user explicitly chose the whole letterhead
+# (logo + org header); a footer may carry a page-number field but no patient text.
+_KEEP_PREFIXES = (
+    "word/theme/",
+    "word/media/",
+    "word/fonts/",
+    "word/header",
+    "word/footer",
+)
+_ROOT_RELS_PART = "_rels/.rels"
 
 # Report name → ``<name>.qmd`` filename. Positive allowlist (letters, digits,
 # dot, underscore, hyphen) keeps the stem to a single path segment; a leading
@@ -101,40 +119,79 @@ def build_qmd_text(
     return f"---\n{yaml_text}---\n\n# \n"
 
 
+def _described_part(rels_name: str) -> str | None:
+    """Map a sidecar ``_rels`` path to the content part it describes, else None.
+
+    ``word/_rels/document.xml.rels`` → ``word/document.xml``;
+    ``word/_rels/header1.xml.rels`` → ``word/header1.xml``;
+    ``_rels/.rels`` (package root) → ``None`` (no single content part).
+    """
+    head, sep, tail = rels_name.rpartition("/_rels/")
+    if not sep or not tail.endswith(".rels"):
+        return None
+    base = tail[: -len(".rels")]
+    if not base:  # ``_rels/.rels`` → empty base
+        return None
+    return f"{head}/{base}" if head else base
+
+
+def _is_kept(part_name: str) -> bool:
+    """Allowlist predicate: is ``part_name`` a known styling/layout/letterhead part?
+
+    A ``_rels`` sidecar is kept iff the content part it describes is kept (the
+    package-root ``_rels/.rels`` is always kept). Anything else not matching
+    :data:`_KEEP_EXACT` or a :data:`_KEEP_PREFIXES` prefix is dropped — the safe
+    default for a PHI guard.
+    """
+    if part_name == _ROOT_RELS_PART:
+        return True
+    described = _described_part(part_name)
+    if described is not None:
+        return _is_kept(described)
+    return part_name in _KEEP_EXACT or part_name.startswith(_KEEP_PREFIXES)
+
+
 def strip_docx_body(src: Path, dest: Path) -> None:
-    """Write ``dest`` = ``src`` docx scrubbed of all author-supplied content.
+    """Write ``dest`` = ``src`` docx reduced to its styling/layout/letterhead.
 
     A real ``.docx`` carries text and names in many parts, not just the main
     body, so this is a thorough PHI guard — ``review/reference.docx`` is
     committed and shipped in the deploy bundle, and the source document's text
-    must never travel with it.
+    must never travel with it. The scrub is therefore an **allowlist**: only
+    parts known to be style/layout/letterhead are kept; *everything else is
+    dropped*. (A denylist proved fragile — new PHI-bearing parts kept surfacing.)
 
-    **Scrubbed**:
+    **Kept** (the visual style template + letterhead):
+
+    * ``word/styles.xml``, ``stylesWithEffects.xml``, ``numbering.xml``,
+      ``webSettings.xml``, ``fontTable.xml``, ``word/theme/*``, ``word/fonts/*``;
+    * the page geometry (``<w:sectPr>`` inside ``document.xml``);
+    * headers/footers and ``word/media/*`` — by design, the user chose the whole
+      letterhead (logo + org header) — kept WITH content.
+
+    **Transformed** kept parts:
 
     * ``word/document.xml`` — body emptied to its trailing ``<w:sectPr>``;
-    * ``word/footnotes.xml``, ``word/endnotes.xml`` — dropped (note text);
-    * ``word/comments.xml`` (+ ``commentsExtended/Ids/Extensible.xml``),
-      ``word/people.xml`` — dropped (comment text *and* reviewer names in
-      ``w:author``/``w:initials``);
-    * ``docProps/custom.xml`` — dropped (arbitrary custom properties);
-    * ``docProps/app.xml`` — dropped (``<Company>``, ``<Manager>``,
-      ``<TitlesOfParts>``/``<HeadingPairs>`` carry section/heading titles);
-    * ``docProps/core.xml`` — kept but its authorship/metadata text blanked
-      (``dc:creator``, ``cp:lastModifiedBy``, ``dc:title``/``subject``/
-      ``description``, ``cp:keywords``).
+    * ``docProps/core.xml`` — kept but authorship/metadata text blanked;
+    * ``word/settings.xml`` — kept, but any ``<w:mailMerge>`` (DB connection
+      string in ``<w:odso>``/``<w:connectString>``) is removed and author
+      attributes (``w:author``, ``*lastModifiedBy``) are stripped tree-wide.
 
-    When a part is dropped, its sidecar ``_rels`` file, its
-    ``[Content_Types].xml`` ``<Override>``, and its relationship in
-    ``word/_rels/document.xml.rels`` are removed too, so the result has no
-    dangling references and remains a valid ``.docx``.
+    **Dropped** (not on the allowlist): ``footnotes``/``endnotes``,
+    ``comments*``/``people.xml``, ``word/embeddings/*`` (OLE/Excel),
+    ``word/charts/*``, ``word/glossary/*``, ``customXml/*``, ``docProps/app.xml``
+    and ``docProps/custom.xml``, plus any unrecognised part. When a part is
+    dropped, its sidecar ``_rels``, its ``[Content_Types].xml`` ``<Override>``
+    and any relationship pointing at it (in every kept ``*.rels``) are removed
+    too, so the result has no dangling references and remains a valid ``.docx``.
 
-    **Kept verbatim** (the visual style template): ``styles.xml``, ``theme*``,
-    ``numbering.xml``, ``settings.xml``, ``webSettings.xml``, ``fontTable.xml``,
-    the page geometry (``<w:sectPr>``), and — by design, the user chose the
-    whole letterhead — headers/footers and ``word/media/*`` (logo + org header).
+    The result is written atomically (temp file + ``os.replace``) so a mid-write
+    failure cannot leave a corrupt ``reference.docx`` behind.
 
     Raises:
-        QuartoScaffoldError: ``src`` is not a zip or has no ``word/document.xml``.
+        QuartoScaffoldError: ``src`` is not a zip, has no ``word/document.xml``,
+            has a structurally malformed XML part, or a ``document.xml`` with no
+            ``<w:body>`` (fail-safe — a malformed body must not pass through).
     """
     try:
         with zipfile.ZipFile(src) as zin:
@@ -145,42 +202,43 @@ def strip_docx_body(src: Path, dest: Path) -> None:
     except zipfile.BadZipFile as exc:
         raise QuartoScaffoldError(f"{src} is not a valid .docx (not a zip archive)") from exc
 
-    dropped = {name for name in parts if name in _PHI_PARTS_TO_DROP}
-    # Also drop each dropped part's own sidecar relationships file.
-    dropped |= {_rels_path_for(name) for name in dropped if _rels_path_for(name) in parts}
+    kept_infos = [info for info in infos if _is_kept(info.filename)]
+    dropped = {name for name in parts if not _is_kept(name)}
 
-    parts[_DOCUMENT_PART] = _empty_body(parts[_DOCUMENT_PART])
-    if _CORE_PROPS_PART in parts:
-        parts[_CORE_PROPS_PART] = _scrub_core_props(parts[_CORE_PROPS_PART])
-    if _CONTENT_TYPES_PART in parts:
-        parts[_CONTENT_TYPES_PART] = _drop_content_type_overrides(
-            parts[_CONTENT_TYPES_PART], dropped
-        )
-    # rels Targets are relative to the directory of the part they describe:
-    # word/_rels/document.xml.rels → word/ ; _rels/.rels → package root.
-    if _DOCUMENT_RELS_PART in parts:
-        parts[_DOCUMENT_RELS_PART] = _drop_relationships(
-            parts[_DOCUMENT_RELS_PART], "word", dropped
-        )
-    if "_rels/.rels" in parts:
-        parts["_rels/.rels"] = _drop_relationships(parts["_rels/.rels"], "", dropped)
+    try:
+        parts[_DOCUMENT_PART] = _empty_body(parts[_DOCUMENT_PART])
+        if _CORE_PROPS_PART in parts:
+            parts[_CORE_PROPS_PART] = _scrub_core_props(parts[_CORE_PROPS_PART])
+        if _SETTINGS_PART in parts:
+            parts[_SETTINGS_PART] = _scrub_settings(parts[_SETTINGS_PART])
+        if _CONTENT_TYPES_PART in parts:
+            parts[_CONTENT_TYPES_PART] = _drop_content_type_overrides(
+                parts[_CONTENT_TYPES_PART], dropped
+            )
+        # rels Targets are relative to the directory of the part they describe:
+        # word/_rels/*.rels → word/ ; _rels/.rels → package root. Clean every
+        # kept rels file so no relationship points at a dropped part.
+        for info in kept_infos:
+            name = info.filename
+            if not name.endswith(".rels"):
+                continue
+            directory = name.rpartition("/_rels/")[0]
+            parts[name] = _drop_relationships(parts[name], directory, dropped)
+    except ET.ParseError as exc:
+        raise QuartoScaffoldError(f"{src} has a malformed XML part: {exc}") from exc
 
     dest.parent.mkdir(parents=True, exist_ok=True)
-    with zipfile.ZipFile(dest, "w", zipfile.ZIP_DEFLATED) as zout:
-        for info in infos:
-            if info.filename in dropped:
-                continue
-            zout.writestr(info, parts[info.filename])
-
-
-def _rels_path_for(part_name: str) -> str:
-    """Return the OPC sidecar ``_rels`` path for ``part_name``.
-
-    ``word/footnotes.xml`` → ``word/_rels/footnotes.xml.rels``.
-    """
-    directory, _, base = part_name.rpartition("/")
-    prefix = f"{directory}/" if directory else ""
-    return f"{prefix}_rels/{base}.rels"
+    fd, tmp_name = tempfile.mkstemp(dir=str(dest.parent), prefix=".reference-", suffix=".tmp")
+    os.close(fd)
+    tmp_path = Path(tmp_name)
+    try:
+        with zipfile.ZipFile(tmp_path, "w", zipfile.ZIP_DEFLATED) as zout:
+            for info in kept_infos:
+                zout.writestr(info, parts[info.filename])
+        os.replace(tmp_path, dest)
+    except BaseException:
+        tmp_path.unlink(missing_ok=True)
+        raise
 
 
 def _scrub_core_props(core_xml: bytes) -> bytes:
@@ -195,6 +253,32 @@ def _scrub_core_props(core_xml: bytes) -> bytes:
         if list(el):
             continue  # container element — only blank leaf text
         el.text = None
+    result = ET.tostring(root, encoding="UTF-8", xml_declaration=True)
+    assert isinstance(result, bytes)
+    return result
+
+
+def _scrub_settings(settings_xml: bytes) -> bytes:
+    """Scrub PHI from ``word/settings.xml`` while keeping style-relevant settings.
+
+    Removes any ``<w:mailMerge>`` element (its ``<w:odso>``/``<w:connectString>``
+    carry a DB connection string) and strips author-bearing attributes
+    (``w:author`` and any attribute whose local-name contains ``lastModifiedBy``)
+    anywhere in the tree. Everything else (zoom, defaults, compat flags, …) is
+    kept.
+    """
+    root = _parse_preserving_ns(settings_xml)
+    mail_merge_tag = f"{{{_W_NS}}}mailMerge"
+    author_attr = f"{{{_W_NS}}}author"
+    for parent in root.iter():
+        for child in list(parent):
+            if child.tag == mail_merge_tag:
+                parent.remove(child)
+    for el in root.iter():
+        for attr in list(el.attrib):
+            local = attr.rpartition("}")[2]
+            if attr == author_attr or "lastModifiedBy" in local:
+                del el.attrib[attr]
     result = ET.tostring(root, encoding="UTF-8", xml_declaration=True)
     assert isinstance(result, bytes)
     return result
@@ -255,11 +339,18 @@ def _parse_preserving_ns(xml: bytes) -> ET.Element:
 
 
 def _empty_body(document_xml: bytes) -> bytes:
-    """Return ``document_xml`` with ``<w:body>`` reduced to its ``<w:sectPr>``."""
+    """Return ``document_xml`` with ``<w:body>`` reduced to its ``<w:sectPr>``.
+
+    Fails SAFE: a ``document.xml`` without a ``<w:body>`` is malformed; passing
+    it through unchanged could leak body text, so raise instead.
+
+    Raises:
+        QuartoScaffoldError: no ``<w:body>`` element found.
+    """
     root = _parse_preserving_ns(document_xml)
     body = root.find(f"{{{_W_NS}}}body")
     if body is None:
-        return document_xml
+        raise QuartoScaffoldError("malformed document.xml: no <w:body> element")
     sect_pr = body.find(f"{{{_W_NS}}}sectPr")
     for child in list(body):
         body.remove(child)

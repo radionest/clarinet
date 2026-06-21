@@ -177,6 +177,19 @@ _PEOPLE_XML = (
     '<w:person w:author="Reviewer_PHI"><w:presenceInfo w:providerId="None" '
     'w:userId="Reviewer_PHI"/></w:person></w:people>'
 )
+# settings.xml is KEPT (style-relevant), but its mailMerge (DB connect string)
+# and author attributes must be scrubbed in place.
+_SETTINGS_XML = (
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+    f'<w:settings xmlns:w="{_W}">'
+    '<w:zoom w:percent="100"/>'
+    "<w:mailMerge>"
+    '<w:mainDocumentType w:val="formLetters"/>'
+    '<w:dataType w:val="textFile"/>'
+    '<w:connectString w:val="DSN_PHI"/></w:mailMerge>'
+    '<w:rsid w:val="00000000" w:author="Author_PHI"/>'
+    "</w:settings>"
+)
 _CORE_XML = (
     '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
     "<cp:coreProperties "
@@ -229,6 +242,12 @@ _CONTENT_TYPES_FULL = (
     'ContentType="application/vnd.openxmlformats-officedocument.custom-properties+xml"/>'
     '<Override PartName="/docProps/app.xml" '
     'ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>'
+    '<Override PartName="/word/settings.xml" '
+    'ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml"/>'
+    '<Override PartName="/word/charts/chart1.xml" '
+    'ContentType="application/vnd.openxmlformats-officedocument.drawingml.chart+xml"/>'
+    '<Override PartName="/word/glossary/document.xml" '
+    'ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.glossary+xml"/>'
     "</Types>"
 )
 _DOC_RELS_FULL = (
@@ -239,6 +258,9 @@ _DOC_RELS_FULL = (
     f'<Relationship Type="{_R}/footnotes" Id="rId7" Target="footnotes.xml"/>'
     f'<Relationship Type="{_R}/endnotes" Id="rId8" Target="endnotes.xml"/>'
     f'<Relationship Type="{_R}/comments" Id="rId9" Target="comments.xml"/>'
+    f'<Relationship Type="{_R}/settings" Id="rId10" Target="settings.xml"/>'
+    f'<Relationship Type="{_R}/chart" Id="rId11" Target="charts/chart1.xml"/>'
+    f'<Relationship Type="{_R}/oleObject" Id="rId12" Target="embeddings/oleObject1.bin"/>'
     "</Relationships>"
 )
 _ROOT_RELS_FULL = (
@@ -270,6 +292,10 @@ _PHI_TOKENS = [
     "CUSTOM_PHI",
     "Company_PHI",
     "Manager_PHI",
+    "EMBED_PHI",
+    "CHART_PHI",
+    "GLOSSARY_PHI",
+    "DSN_PHI",
 ]
 
 
@@ -294,11 +320,23 @@ def _make_docx_with_phi(path: Path) -> Path:
         z.writestr("word/_rels/document.xml.rels", _DOC_RELS_FULL)
         z.writestr("word/styles.xml", _STYLES_XML)
         z.writestr("word/header1.xml", _HEADER_XML.replace("ORG LETTERHEAD", "ORG_LETTERHEAD"))
+        z.writestr("word/settings.xml", _SETTINGS_XML)
         z.writestr("word/footnotes.xml", _FOOTNOTES_XML)
         z.writestr("word/endnotes.xml", _ENDNOTES_XML)
         z.writestr("word/comments.xml", _COMMENTS_XML)
         z.writestr("word/people.xml", _PEOPLE_XML)
         z.writestr("word/media/image1.png", b"\x89PNG\r\n\x1a\nLOGO_BYTES")
+        z.writestr("word/embeddings/oleObject1.bin", b"EMBED_PHI\x00\x01ole-spreadsheet")
+        z.writestr(
+            "word/charts/chart1.xml",
+            f'<c:chartSpace xmlns:c="{_R}"><c:title>CHART_PHI</c:title></c:chartSpace>',
+        )
+        z.writestr(
+            "word/glossary/document.xml",
+            f'<w:glossaryDocument xmlns:w="{_W}"><w:docParts><w:docPart>'
+            "<w:p><w:r><w:t>GLOSSARY_PHI</w:t></w:r></w:p></w:docPart>"
+            "</w:docParts></w:glossaryDocument>",
+        )
         z.writestr("docProps/core.xml", _CORE_XML)
         z.writestr("docProps/custom.xml", _CUSTOM_XML)
         z.writestr("docProps/app.xml", _APP_XML)
@@ -321,22 +359,49 @@ def test_strip_scrubs_all_phi_bearing_parts(tmp_path: Path) -> None:
 
     # 2) Styling + header letterhead + logo media survive.
     with zipfile.ZipFile(dest) as z:
+        names_out = z.namelist()
         assert "Heading1" in z.read("word/styles.xml").decode("utf-8")
         assert "ORG_LETTERHEAD" in z.read("word/header1.xml").decode("utf-8")
         assert b"LOGO_BYTES" in z.read("word/media/image1.png")
         # 3) document.xml present and structurally a docx.
-        assert "word/document.xml" in z.namelist()
+        assert "word/document.xml" in names_out
         ct = z.read("[Content_Types].xml").decode("utf-8")
         rels = z.read("word/_rels/document.xml.rels").decode("utf-8")
+        # settings.xml kept (style-relevant), but mailMerge scrubbed in place.
+        settings_out = z.read("word/settings.xml").decode("utf-8")
+    assert "<w:zoom" in settings_out  # benign style setting survives
+    assert "mailMerge" not in settings_out  # DB connect string element gone
 
-    # 4) No dangling references to dropped parts.
-    for dropped in ("footnotes.xml", "endnotes.xml", "comments.xml"):
+    # 4) Allowlist drops embeddings/charts/glossary entirely (PHI carriers).
+    for gone in (
+        "word/embeddings/oleObject1.bin",
+        "word/charts/chart1.xml",
+        "word/glossary/document.xml",
+    ):
+        assert gone not in names_out, f"non-styling part survived: {gone}"
+
+    # 5) No dangling references to dropped parts.
+    for dropped in (
+        "footnotes.xml",
+        "endnotes.xml",
+        "comments.xml",
+        "charts/chart1.xml",
+        "embeddings/oleObject1.bin",
+    ):
         assert f'Target="{dropped}"' not in rels, f"dangling rel to {dropped}"
-        assert f"/word/{dropped}" not in ct, f"dangling Override for {dropped}"
-    assert "/docProps/custom.xml" not in ct
-    assert "/docProps/app.xml" not in ct
-    # core.xml is kept (scrubbed in place), so its Override stays.
+    for ct_gone in (
+        "/word/footnotes.xml",
+        "/word/endnotes.xml",
+        "/word/comments.xml",
+        "/word/charts/chart1.xml",
+        "/word/glossary/document.xml",
+        "/docProps/custom.xml",
+        "/docProps/app.xml",
+    ):
+        assert ct_gone not in ct, f"dangling Override for {ct_gone}"
+    # core.xml and settings.xml are kept, so their Overrides stay.
     assert "/docProps/core.xml" in ct
+    assert "/word/settings.xml" in ct
     # No dangling relationship to app.xml in the package-root rels.
     with zipfile.ZipFile(dest) as z:
         root_rels = z.read("_rels/.rels").decode("utf-8")
@@ -374,6 +439,48 @@ def test_strip_scrubs_core_props_in_place(tmp_path: Path) -> None:
     # part still present and parseable, but the PHI values are gone
     assert "Author_PHI" not in core
     assert "Editor_PHI" not in core
+
+
+def test_strip_drops_unknown_part(tmp_path: Path) -> None:
+    """Allowlist semantics: an arbitrary unknown part is dropped, not copied."""
+    src = _make_docx_with_phi(tmp_path / "phi.docx")
+    with zipfile.ZipFile(src, "a") as z:
+        z.writestr("word/unknownpart.xml", f'<w:x xmlns:w="{_W}">UNKNOWN_PHI</w:x>')
+    dest = tmp_path / "reference.docx"
+    strip_docx_body(src, dest)
+    with zipfile.ZipFile(dest) as z:
+        names = z.namelist()
+        blob = b"".join(z.read(n) for n in names).decode("latin-1")
+    assert "word/unknownpart.xml" not in names
+    assert "UNKNOWN_PHI" not in blob
+
+
+def test_strip_raises_on_malformed_xml(tmp_path: Path) -> None:
+    """A valid zip entry that is malformed XML → QuartoScaffoldError (not ParseError)."""
+    src = tmp_path / "broken.docx"
+    with zipfile.ZipFile(src, "w") as z:
+        z.writestr("[Content_Types].xml", '<?xml version="1.0"?><Types/>')
+        z.writestr("_rels/.rels", '<?xml version="1.0"?><Relationships/>')
+        z.writestr("word/document.xml", "<w:document><w:body>UNCLOSED")
+        z.writestr("word/styles.xml", _STYLES_XML)
+    with pytest.raises(QuartoScaffoldError):
+        strip_docx_body(src, tmp_path / "out.docx")
+
+
+def test_strip_fails_safe_without_body(tmp_path: Path) -> None:
+    """document.xml lacking <w:body> must fail SAFE (raise), not pass through."""
+    src = tmp_path / "nobody.docx"
+    no_body = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        f'<w:document xmlns:w="{_W}"><w:p><w:r><w:t>X</w:t></w:r></w:p></w:document>'
+    )
+    with zipfile.ZipFile(src, "w") as z:
+        z.writestr("[Content_Types].xml", '<?xml version="1.0"?><Types/>')
+        z.writestr("_rels/.rels", '<?xml version="1.0"?><Relationships/>')
+        z.writestr("word/document.xml", no_body)
+        z.writestr("word/styles.xml", _STYLES_XML)
+    with pytest.raises(QuartoScaffoldError):
+        strip_docx_body(src, tmp_path / "out.docx")
 
 
 # ---------------------------------------------------------------------------
