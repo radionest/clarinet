@@ -356,34 +356,95 @@ class TestDicomVolume:
         assert volume.shape == (3, 3, 2)
         assert any("Multiple DICOM series" in m for m in captured)
 
-    def test_left_handed_direction_corrected(
-        self, dicom_dir: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """SimpleITK GDCM can return a left-handed direction matrix on some series
-        (observed on Philips iDose CT) — det = -1, slice axis sign flipped relative
-        to actual file ordering, causing a SI flip in the saved NIfTI. The reader
-        must detect this and recompute the slice axis from the cross product so the
-        resulting direction is right-handed and matches the array layout.
+    @staticmethod
+    def _write_neg_z_series(dcm_dir: Path, slice_pixels: dict[float, np.ndarray]) -> None:
+        """Write an axial series whose IOP slice normal points along -Z.
+
+        ``slice_pixels`` maps physical Z (mm) → the (rows, cols) pixel array for
+        that slice. With ``ImageOrientationPatient=[1,0,0,0,-1,0]`` SimpleITK
+        orders slices opposite to the legacy ascending-``ImagePositionPatient[2]``
+        convention, exercising the slice-axis canonicalisation.
         """
-        import SimpleITK as sitk
+        dcm_dir.mkdir()
+        suid = pydicom.uid.generate_uid()
+        for k, (z, pixels) in enumerate(slice_pixels.items()):
+            filename = dcm_dir / f"slice_{k:03d}.dcm"
+            file_meta = pydicom.Dataset()
+            file_meta.MediaStorageSOPClassUID = pydicom.uid.CTImageStorage
+            file_meta.MediaStorageSOPInstanceUID = pydicom.uid.generate_uid()
+            file_meta.TransferSyntaxUID = pydicom.uid.ExplicitVRLittleEndian
 
-        original_execute = sitk.ImageSeriesReader.Execute
+            ds = FileDataset(str(filename), {}, file_meta=file_meta, preamble=b"\x00" * 128)
+            ds.SeriesInstanceUID = suid
+            ds.Rows = int(pixels.shape[0])
+            ds.Columns = int(pixels.shape[1])
+            ds.BitsAllocated = 16
+            ds.BitsStored = 16
+            ds.HighBit = 15
+            ds.PixelRepresentation = 0
+            ds.SamplesPerPixel = 1
+            ds.PhotometricInterpretation = "MONOCHROME2"
+            ds.PixelSpacing = [1.0, 1.0]
+            ds.SliceThickness = 3.0
+            ds.ImageOrientationPatient = [1, 0, 0, 0, -1, 0]
+            ds.ImagePositionPatient = [0.0, 0.0, z]
+            ds.InstanceNumber = k + 1
+            ds.PixelData = pixels.astype(np.uint16).tobytes()
+            pydicom.dcmwrite(str(filename), ds)
 
-        def execute_with_flipped_z(self: sitk.ImageSeriesReader) -> sitk.Image:
-            image = original_execute(self)
-            d = np.array(image.GetDirection()).reshape(3, 3)
-            d[:, 2] = -d[:, 2]  # flip slice axis sign — simulate the SimpleITK bug
-            image.SetDirection(tuple(d.flatten()))
-            return image
+    def test_slice_axis_canonicalized_to_ascending_z(self, tmp_path: Path) -> None:
+        """DICOM→NIfTI conversion must be slice-order canonical and version-stable.
 
-        monkeypatch.setattr(sitk.ImageSeriesReader, "Execute", execute_with_flipped_z)
+        A series whose IOP slice normal points along -Z (common on MRI / oblique)
+        is ordered by SimpleITK opposite to the legacy ascending-
+        ``ImagePositionPatient[2]`` convention used by the pre-#221 reader. The
+        reader normalises the slice axis to point along the positive sense of its
+        dominant anatomical axis, so re-converting a series always yields the same
+        grid — preventing the projection/doctor-seg index-reversed Z-flip.
+        """
+        dcm_dir = tmp_path / "neg_z_series"
+        # value encodes |Z|: Z=0 -> 100, Z=-3 -> 130, Z=-6 -> 160
+        self._write_neg_z_series(
+            dcm_dir,
+            {z: np.full((4, 5), int(100 + abs(z) * 10)) for z in (0.0, -3.0, -6.0)},
+        )
+
+        volume, _spacing, origin, direction = read_dicom_series(dcm_dir)
+
+        # Slice axis points +Z (canonical); origin sits at the minimum physical Z.
+        assert direction[2, 2] > 0
+        assert pytest.approx(origin[2], abs=1e-4) == -6.0
+        # In-array slices run ascending physical Z: Z=-6 (160) first, Z=0 (100) last.
+        assert int(volume[0, 0, 0]) == 160
+        assert int(volume[0, 0, -1]) == 100
+
+    def test_canonicalization_preserves_geometry(self, tmp_path: Path) -> None:
+        """Slice-axis canonicalisation flips the array, origin and direction
+        together, so every voxel keeps its physical location — unlike a
+        direction-only flip, which would mirror the data through the origin plane.
+        A single marked voxel must map, via the voxel→LPS affine, to its true DICOM
+        physical position and land on the canonical (last) slice index.
+        """
+        dcm_dir = tmp_path / "marked_series"
+        marker = 999
+        z0_pixels = np.zeros((4, 5), dtype=np.uint16)
+        z0_pixels[1, 2] = marker  # row=1, col=2 in the slice at physical Z=0
+        self._write_neg_z_series(
+            dcm_dir,
+            {0.0: z0_pixels, -3.0: np.zeros((4, 5)), -6.0: np.zeros((4, 5))},
+        )
 
         img = Image()
-        img.read_dicom_series(dicom_dir)
-        # After fix, the internal direction must be right-handed (det = +1 for a
-        # standard axial scan where row=y, col=x, slice=+z in LPS).
-        expected = np.array([[0, 1, 0], [1, 0, 0], [0, 0, 1]], dtype=float)
-        np.testing.assert_array_almost_equal(img.direction, expected, decimal=4)
+        img.read_dicom_series(dcm_dir)
+
+        idx = np.argwhere(img.img == marker)
+        assert idx.shape[0] == 1
+        r, c, k = (int(v) for v in idx[0])
+        assert k == 2  # Z=0 is the maximum physical Z → last slice after canon
+        phys = img.affine_4x4 @ np.array([r, c, k, 1.0])
+        # IOP rowdir(col index)=[1,0,0], coldir(row index)=[0,-1,0], 1 mm spacing,
+        # slice IPP z=0 → physical (col, -row, 0) = (2, -1, 0) in LPS.
+        np.testing.assert_array_almost_equal(phys[:3], [2.0, -1.0, 0.0], decimal=4)
 
     def test_rescale_slope_intercept_applied(self, tmp_path: Path) -> None:
         """RescaleSlope/RescaleIntercept convert stored pixels to real-world values (HU)."""

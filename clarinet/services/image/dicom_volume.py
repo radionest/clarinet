@@ -73,32 +73,62 @@ def read_dicom_series(
     # Fancy indexing returns a non-contiguous view; force C-contiguous so
     # downstream consumers can rely on .tobytes() / C-extension passing.
     d = np.array(image.GetDirection()).reshape(3, 3)
-    # SimpleITK GDCM can return a left-handed direction matrix on some series
-    # (observed on Philips iDose CT) — slice direction has the wrong sign so
-    # TransformIndexToPhysicalPoint disagrees with the actual array ordering,
-    # producing a SI flip in saved NIfTI. Force right-handed by flipping the
-    # sign of the slice axis; this preserves any gantry-tilt component (the
-    # slice axis itself is computed from IPP deltas, not from row x col, so
-    # it carries real geometry and must not be replaced with a cross product).
-    # No-op for series that already have a consistent direction matrix.
-    det = np.linalg.det(d)
-    if det < 0:
-        slice_from_cross = np.cross(d[:, 0], d[:, 1])
-        if np.dot(slice_from_cross, d[:, 2]) < 0:
-            logger.debug(
-                f"Left-handed DICOM direction matrix in {directory.name} "
-                f"(det={det:.3f}); flipping slice-axis sign"
-            )
-            d[:, 2] *= -1
-        else:
-            logger.warning(
-                f"Left-handed direction matrix in {directory.name} "
-                f"(det={det:.3f}) with consistent slice axis — leaving as-is"
-            )
     direction = np.ascontiguousarray(d[:, [1, 0, 2]])
+
+    volume, origin, direction = _canonicalize_slice_axis(
+        volume, spacing[2], origin, direction, directory.name
+    )
 
     logger.debug(
         f"Read {len(dicom_names)} DICOM slices from {directory.name}: "
         f"shape={volume.shape}, spacing={spacing}"
     )
     return volume, spacing, origin, direction
+
+
+def _canonicalize_slice_axis(
+    volume: np.ndarray,
+    slice_spacing: float,
+    origin: tuple[float, float, float],
+    direction: np.ndarray,
+    name: str,
+) -> tuple[np.ndarray, tuple[float, float, float], np.ndarray]:
+    """Normalise the slice axis to point along the +sense of its dominant axis.
+
+    DICOM→NIfTI conversion must be reproducible across framework versions: a series
+    re-converted later (repair, anonymization path migration, manual re-run) must
+    land on the *identical* voxel grid. Otherwise a segmentation frozen on the old
+    grid and one frozen on the new grid sit on physically equivalent but
+    index-reversed grids, and any index-wise overlay of the two reads as zero
+    overlap (the projection/doctor-seg Z-flip).
+
+    The slice-ordering convention drifted when the reader switched from a
+    hand-written pydicom reader (sorted by ascending ``ImagePositionPatient[2]``)
+    to SimpleITK (sorted along the IOP slice normal, which may point either way).
+    Flipping the slice axis to a single canonical sense restores a stable
+    convention for every reader/version.
+
+    The flip is **geometry-preserving**: the array, ``origin`` and the slice
+    direction are reversed *together*, so every voxel keeps its physical position
+    (unlike a direction-only flip, which mirrors the data through the origin
+    plane). No-op when the slice axis already points the canonical way.
+    """
+    slice_dir = direction[:, 2]
+    dominant = int(np.argmax(np.abs(slice_dir)))
+    if slice_dir[dominant] >= 0:
+        return volume, origin, direction
+
+    logger.debug(
+        f"Flipping slice axis to canonical orientation in {name} "
+        f"(slice direction {np.round(slice_dir, 3).tolist()})"
+    )
+    n_slices = volume.shape[2]
+    new_origin = np.asarray(origin, dtype=float) + slice_dir * slice_spacing * (n_slices - 1)
+    new_volume = np.ascontiguousarray(volume[:, :, ::-1])
+    new_direction = direction.copy()
+    new_direction[:, 2] = -new_direction[:, 2]
+    return (
+        new_volume,
+        (float(new_origin[0]), float(new_origin[1]), float(new_origin[2])),
+        new_direction,
+    )

@@ -27,7 +27,7 @@ Image(template=None, copy_data=False, dtype=None)
 
 **NRRD spacing resolution**: tries `spacings` key first, then `space directions` diagonal. Falls back to default `(1.0, 1.0, 1.0)` if neither is present.
 
-**DICOM slice sorting**: `ImagePositionPatient[2]` (Z-coordinate) → `InstanceNumber` → file order.
+**DICOM slice sorting**: GDCM orders by `ImagePositionPatient` projected onto the slice normal (→ `InstanceNumber` fallback); the reader then canonicalizes the slice axis to a version-stable orientation (see "Slice-Axis Canonicalization" below).
 
 **DICOM error tolerance**: non-DICOM files and DICOM files without `pixel_array` are silently skipped. Only raises `ImageReadError` if zero valid slices remain.
 
@@ -203,12 +203,25 @@ Supports compressed (JPEG/JPEG2000/JPEG-LS), Enhanced multi-frame, and vendor-sp
 GDCM sorts slices by projection of `ImagePositionPatient` onto the slice direction (handles oblique acquisitions).
 Falls back to `InstanceNumber` when position metadata is unavailable.
 
+### Slice-Axis Canonicalization
+
+The reader normalizes the slice axis so it points along the **positive sense of its dominant
+anatomical axis** (`_canonicalize_slice_axis`). This makes the conversion **reproducible across
+framework versions**: a series re-converted later (repair, anonymization path migration, manual
+re-run) lands on the *identical* voxel grid. Without it, the slice-ordering convention drifts
+between readers — the pre-#221 hand-written reader sorted by ascending `ImagePositionPatient[2]`,
+while GDCM sorts along the IOP slice normal, which can point either way — so a segmentation frozen
+on one grid and another frozen on the other end up on physically equivalent but **index-reversed**
+grids (the projection/doctor-seg Z-flip). The flip is **geometry-preserving**: the array, origin,
+and slice direction are reversed *together*, so every voxel keeps its physical position (a
+direction-only flip would mirror the data). No-op when the slice axis already points the canonical way.
+
 ### Spacing, Origin, Direction
 
-Pulled directly from the resulting `sitk.Image`:
+Pulled from the resulting `sitk.Image`, then passed through slice-axis canonicalization:
 - `GetSpacing()` returns `(x, y, z)`, mapped to internal `(row=y, col=x, slice=z)`
-- `GetOrigin()` returns `(x, y, z)` in LPS, used as-is
-- `GetDirection()` reshaped to a 3×3 matrix; columns are reordered from `(x, y, z)` to `(y, x, z)` to match the numpy axis convention
+- `GetOrigin()` returns `(x, y, z)` in LPS — moved to the opposite slice end if the axis is flipped
+- `GetDirection()` reshaped to a 3×3 matrix; columns are reordered from `(x, y, z)` to `(y, x, z)` to match the numpy axis convention, then the slice column is sign-normalized
 
 `RescaleSlope`/`RescaleIntercept` are applied automatically by GDCM during `Execute()`.
 
