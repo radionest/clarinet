@@ -83,6 +83,39 @@ async def test_list_quarto_reports(quarto_client: AsyncClient) -> None:
     data = resp.json()
     assert [t["name"] for t in data] == ["demo"]
     assert data[0]["data_reports"] == []
+    assert data[0]["kind"] == "file"  # default kind serialized in the response
+
+
+async def test_list_marks_book_kind(test_session, test_settings) -> None:
+    """A BOOK template is surfaced with kind == 'book' so the UI can distinguish it."""
+    from clarinet.models.quarto_report import QuartoReportKind
+
+    mock_user = await create_mock_superuser(test_session, email="qbook@test.com")
+
+    def book_registry() -> QuartoReportRegistry:
+        return QuartoReportRegistry(
+            [
+                (
+                    QuartoReportTemplate(
+                        name="bk",
+                        title="Book",
+                        description="",
+                        data_reports=[],
+                        kind=QuartoReportKind.BOOK,
+                    ),
+                    Path("/tmp/bk"),
+                )
+            ]
+        )
+
+    app.dependency_overrides[get_quarto_report_registry] = book_registry
+    try:
+        async for ac in create_authenticated_client(mock_user, test_session, test_settings):
+            resp = await ac.get(ADMIN_QUARTO_REPORTS)
+            assert resp.status_code == 200
+            assert resp.json()[0]["kind"] == "book"
+    finally:
+        app.dependency_overrides.pop(get_quarto_report_registry, None)
 
 
 async def test_list_requires_auth(unauth_client: AsyncClient) -> None:

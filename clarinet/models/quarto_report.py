@@ -49,6 +49,13 @@ class QuartoRenderStatus(str, Enum):
     FAILED = "failed"
 
 
+class QuartoReportKind(str, Enum):
+    """Whether a Quarto report is a single ``.qmd`` file or a multi-file book project."""
+
+    FILE = "file"
+    BOOK = "book"
+
+
 class QuartoReportTemplate(PydanticBaseModel):
     """Metadata for a Quarto report shown to admins in the UI."""
 
@@ -58,6 +65,8 @@ class QuartoReportTemplate(PydanticBaseModel):
     # Names of SQL reports the .qmd front matter declares under ``clarinet.data``.
     # Each is executed and materialized as ``data/<name>.csv`` before rendering.
     data_reports: list[str]
+    # FILE = single .qmd (front-matter metadata); BOOK = directory with _quarto.yml.
+    kind: QuartoReportKind = QuartoReportKind.FILE
     # Extra files the .qmd front matter declares under ``clarinet.stage`` (paths
     # relative to the .qmd). Each is staged flat into the sandbox render dir so a
     # chunk can import a project helper module — and its non-sibling deps — that
