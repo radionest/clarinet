@@ -299,12 +299,94 @@ def test_scaffold_default_no_quarto_raises(monkeypatch: pytest.MonkeyPatch, tmp_
         scaffold_quarto_report("rep", formats=["docx"], data_reports=[], reports_dir=tmp_path)
 
 
-def test_scaffold_rejects_path_traversal(tmp_path: Path) -> None:
+@pytest.mark.parametrize("bad_name", ["", "/evil", "evil\\path", "../evil"])
+def test_scaffold_rejects_path_traversal(tmp_path: Path, bad_name: str) -> None:
     with pytest.raises(QuartoScaffoldError):
-        scaffold_quarto_report("../evil", formats=["docx"], data_reports=[], reports_dir=tmp_path)
+        scaffold_quarto_report(bad_name, formats=["docx"], data_reports=[], reports_dir=tmp_path)
 
 
 def test_scaffold_pdf_only_skips_reference(tmp_path: Path) -> None:
     qmd = scaffold_quarto_report("rep", formats=["pdf"], data_reports=[], reports_dir=tmp_path)
     assert not (tmp_path / "reference.docx").exists()
     assert "reference-doc" not in qmd.read_text(encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------
+# --from-docx validation sub-rules
+# ---------------------------------------------------------------------------
+
+
+def test_from_docx_nonexistent_raises(tmp_path: Path) -> None:
+    with pytest.raises(QuartoScaffoldError):
+        scaffold_quarto_report(
+            "rep",
+            formats=["docx"],
+            data_reports=[],
+            from_docx=tmp_path / "nope.docx",
+            reports_dir=tmp_path,
+        )
+
+
+def test_from_docx_wrong_suffix_raises(tmp_path: Path) -> None:
+    bad = tmp_path / "brand.txt"
+    bad.write_bytes(b"not a docx")
+    with pytest.raises(QuartoScaffoldError):
+        scaffold_quarto_report(
+            "rep",
+            formats=["docx"],
+            data_reports=[],
+            from_docx=bad,
+            reports_dir=tmp_path,
+        )
+
+
+def test_from_docx_existing_reference_without_force_raises(tmp_path: Path) -> None:
+    (tmp_path / "reference.docx").write_bytes(b"EXISTING")
+    src = _make_docx(tmp_path / "brand.docx")
+    with pytest.raises(QuartoScaffoldError):
+        scaffold_quarto_report(
+            "rep",
+            formats=["docx"],
+            data_reports=[],
+            from_docx=src,
+            force=False,
+            reports_dir=tmp_path,
+        )
+
+
+def test_from_docx_existing_reference_with_force_overwrites(tmp_path: Path) -> None:
+    (tmp_path / "reference.docx").write_bytes(b"OLD")
+    src = _make_docx(tmp_path / "brand.docx")
+    qmd = scaffold_quarto_report(
+        "rep",
+        formats=["docx"],
+        data_reports=[],
+        from_docx=src,
+        force=True,
+        reports_dir=tmp_path,
+    )
+    assert qmd.exists()
+    # reference.docx was replaced (body stripped, no longer the sentinel bytes)
+    ref_bytes = (tmp_path / "reference.docx").read_bytes()
+    assert ref_bytes != b"OLD"
+
+
+# ---------------------------------------------------------------------------
+# title or name fallback
+# ---------------------------------------------------------------------------
+
+
+def test_scaffold_title_defaults_to_name(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _patch_quarto(monkeypatch, tmp_path / "quarto")
+    monkeypatch.setattr(
+        "clarinet.utils.quarto_scaffold.generate_default_reference",
+        lambda dest, exe: dest.write_bytes(b"PKref"),
+    )
+    qmd = scaffold_quarto_report(
+        "my_report",
+        formats=["docx"],
+        data_reports=[],
+        reports_dir=tmp_path,
+    )
+    fm = _front_matter(qmd.read_text(encoding="utf-8"))
+    assert fm["title"] == "my_report"
