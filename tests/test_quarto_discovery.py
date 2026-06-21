@@ -95,3 +95,97 @@ def test_discover_results_are_sorted_by_stem(tmp_path: Path) -> None:
         (tmp_path / f"{name}.qmd").write_text("body\n")
     items = discover_quarto_templates(tmp_path)
     assert [t.name for t, _ in items] == ["a", "b", "c"]
+
+
+def test_template_kind_defaults_to_file() -> None:
+    from clarinet.models.quarto_report import QuartoReportKind, QuartoReportTemplate
+
+    t = QuartoReportTemplate(name="x", title="X", description="", data_reports=[])
+    assert t.kind is QuartoReportKind.FILE
+    book = QuartoReportTemplate(
+        name="b", title="B", description="", data_reports=[], kind=QuartoReportKind.BOOK
+    )
+    assert book.kind is QuartoReportKind.BOOK
+
+
+_BOOK_YML = """project:
+  type: book
+  output-dir: _site
+book:
+  title: Liver Book
+  description: Multi-chapter liver report
+clarinet:
+  data:
+    - liver_stats
+"""
+
+
+def test_parse_book_metadata_full() -> None:
+    from clarinet.utils.quarto_discovery import parse_book_metadata
+
+    title, desc, data, output_dir = parse_book_metadata(_BOOK_YML, fallback_name="liver")
+    assert title == "Liver Book"
+    assert desc == "Multi-chapter liver report"
+    assert data == ["liver_stats"]
+    assert output_dir == "_site"
+
+
+def test_parse_book_metadata_defaults() -> None:
+    from clarinet.utils.quarto_discovery import parse_book_metadata
+
+    title, desc, data, output_dir = parse_book_metadata(
+        "project:\n  type: book\n", fallback_name="b"
+    )
+    assert title == "b"
+    assert desc == ""
+    assert data == []
+    assert output_dir == "_book"  # default when project.output-dir absent
+
+
+def test_parse_book_metadata_invalid_yaml_falls_back() -> None:
+    from clarinet.utils.quarto_discovery import parse_book_metadata
+
+    title, desc, data, output_dir = parse_book_metadata("book:\n  title: [bad\n", fallback_name="b")
+    assert (title, desc, data, output_dir) == ("b", "", [], "_book")
+
+
+def test_discover_recognizes_book_subdir(tmp_path: Path) -> None:
+    from clarinet.models.quarto_report import QuartoReportKind
+
+    book = tmp_path / "report_book"
+    book.mkdir()
+    (book / "_quarto.yml").write_text(_BOOK_YML)
+    (book / "index.qmd").write_text("# ch\n")
+    (tmp_path / "single.qmd").write_text(_FULL_QMD)
+
+    items = discover_quarto_templates(tmp_path)
+    by_name = {t.name: (t, p) for t, p in items}
+
+    book_t, book_path = by_name["report_book"]
+    assert book_t.kind is QuartoReportKind.BOOK
+    assert book_t.title == "Liver Book"
+    assert book_t.data_reports == ["liver_stats"]
+    assert book_path == book.resolve()  # path is the project dir, not a .qmd
+
+    assert by_name["single"][0].kind is QuartoReportKind.FILE
+
+
+def test_discover_ignores_non_book_subdir(tmp_path: Path) -> None:
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    (assets / "img.png").write_text("x")
+    (tmp_path / "ok.qmd").write_text("body\n")
+
+    items = discover_quarto_templates(tmp_path)
+    assert [t.name for t, _ in items] == ["ok"]
+
+
+def test_discover_skips_book_with_non_utf8_quarto_yml(tmp_path: Path) -> None:
+    """A _quarto.yml with invalid UTF-8 is skipped, not fatal to the whole scan."""
+    bad = tmp_path / "badbook"
+    bad.mkdir()
+    (bad / "_quarto.yml").write_bytes(b"\xff\xfe not valid utf-8")
+    (tmp_path / "ok.qmd").write_text("body\n")
+
+    items = discover_quarto_templates(tmp_path)
+    assert [t.name for t, _ in items] == ["ok"]

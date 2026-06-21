@@ -28,7 +28,7 @@ from typing import Any
 
 from clarinet.client import ClarinetClient
 from clarinet.exceptions.domain import QuartoRenderError
-from clarinet.models.quarto_report import QuartoRenderStatus, QuartoReportFormat
+from clarinet.models.quarto_report import QuartoRenderStatus, QuartoReportFormat, QuartoReportKind
 from clarinet.services.events.bus import get_event_bus
 from clarinet.services.events.models import TaskProgressEvent
 from clarinet.settings import settings
@@ -143,16 +143,24 @@ async def render_report(
     quarto_executable: Path,
     timeout_seconds: float,
     client: ClarinetClient,
+    kind: QuartoReportKind = QuartoReportKind.FILE,
+    project_subdir: str | None = None,
+    output_dir: str | None = None,
 ) -> None:
-    """Render the ``.qmd`` named by ``qmd_path`` to ``formats`` inside ``render_dir``.
+    """Render the report to ``formats`` inside ``render_dir``.
 
     Materializes each declared data report as ``data/<name>.csv`` by fetching
     it from the reports API via ``client``, then runs ``quarto render`` once
-    per format. The ``.qmd`` must already be inside ``render_dir`` (the
-    dispatching service copies it there); only its file name is used. Progress
-    and failures are recorded in the status sidecar; this coroutine never
-    raises to its caller so a fire-and-forget dispatch cannot crash the worker
-    loop.
+    per format.  Progress and failures are recorded in the status sidecar;
+    this coroutine never raises to its caller so a fire-and-forget dispatch
+    cannot crash the worker loop.
+
+    When ``kind`` is FILE the ``.qmd`` must already be inside ``render_dir``
+    (the dispatching service copies it there); only its file name is used.
+    When ``kind`` is BOOK, ``render_dir/<project_subdir>/`` holds the staged
+    book project; ``quarto render`` is run over that directory and the lone
+    artifact in ``output_dir`` (the book's ``project.output-dir``, resolved by
+    the dispatcher; default ``_book``) is normalized to ``render_dir/report.<ext>``.
     """
     created_at = _now_iso()
     existing = await asyncio.to_thread(read_status, render_dir)
@@ -171,15 +179,43 @@ async def render_report(
 
     ready: dict[str, bool] = {f.value: False for f in formats}
     try:
-        # Only the file name from the payload is trusted: the .qmd must already
-        # sit inside render_dir (copied there by QuartoReportService), so a
-        # hostile qmd_path cannot make the renderer read an arbitrary file.
-        work_qmd = render_dir / qmd_path.name
-        if not await asyncio.to_thread(work_qmd.is_file):
-            raise QuartoRenderError(f"template '{qmd_path.name}' not found in render dir")
-        await _materialize_data(data_reports, render_dir, client)
+        if kind is QuartoReportKind.BOOK:
+            if project_subdir is None:
+                raise QuartoRenderError(f"book '{name}': missing project_subdir")
+            work_dir = render_dir / project_subdir
+            # project_subdir arrives via the queue payload; refuse a value that
+            # escapes render_dir (mirrors the FILE path trusting only a basename).
+            if not work_dir.resolve().is_relative_to(render_dir.resolve()):
+                raise QuartoRenderError(f"book '{name}': project_subdir escapes render_dir")
+            quarto_yml = work_dir / "_quarto.yml"
+            if not await asyncio.to_thread(quarto_yml.is_file):
+                raise QuartoRenderError(
+                    f"book '{name}': _quarto.yml not found in staged project dir"
+                )
+            await _materialize_data(data_reports, work_dir, client)
+            # output_dir is resolved once by the dispatching service (from the
+            # book's _quarto.yml) and passed through; default mirrors Quarto.
+            book_output_dir = output_dir or "_book"
+
+            async def render_one(fmt: QuartoReportFormat) -> None:
+                await _run_quarto_book(
+                    work_dir, fmt, book_output_dir, render_dir, quarto_executable, timeout_seconds
+                )
+        else:
+            # Only the file name from the payload is trusted: the .qmd must already
+            # sit inside render_dir (copied there by QuartoReportService), so a
+            # hostile qmd_path cannot make the renderer read an arbitrary file.
+            work_qmd = render_dir / qmd_path.name
+            if not await asyncio.to_thread(work_qmd.is_file):
+                raise QuartoRenderError(f"template '{qmd_path.name}' not found in render dir")
+            await _materialize_data(data_reports, render_dir, client)
+
+            async def render_one(fmt: QuartoReportFormat) -> None:
+                await _run_quarto(work_qmd, fmt, render_dir, quarto_executable, timeout_seconds)
+
+        # Shared across both kinds: render each format, then flip its sidecar bit.
         for fmt in formats:
-            await _run_quarto(work_qmd, fmt, render_dir, quarto_executable, timeout_seconds)
+            await render_one(fmt)
             ready[fmt.value] = True
             await asyncio.to_thread(
                 write_status,
@@ -243,29 +279,29 @@ async def _materialize_data(
         await asyncio.to_thread((data_dir / f"{report_name}.csv").write_bytes, csv_bytes)
 
 
-async def _run_quarto(
-    qmd_path: Path,
+async def _invoke_quarto(
+    extra_args: list[str],
     fmt: QuartoReportFormat,
+    work_dir: Path,
     render_dir: Path,
     quarto_executable: Path,
     timeout_seconds: float,
 ) -> None:
-    """Run ``quarto render`` for a single format; raise on non-zero / timeout."""
-    output_name = f"report.{fmt.extension}"
+    """Run ``quarto render <extra_args>`` in ``work_dir``; raise on timeout/non-zero.
+
+    Shared by the single-file (:func:`_run_quarto`) and book (:func:`_run_quarto_book`)
+    paths. The environment is built from scratch (``build_render_env``) so secrets never
+    reach executed chunks; output collection is left to the caller.
+    """
     tmp_dir = render_dir / "tmp"
     await asyncio.to_thread(tmp_dir.mkdir, parents=True, exist_ok=True)
-    env = build_render_env(render_dir, tmp_dir)
-    logger.info(f"Rendering {qmd_path.name} → {output_name} via quarto ({fmt.value})")
+    env = build_render_env(render_dir, tmp_dir, import_root=work_dir)
 
     proc = await asyncio.create_subprocess_exec(
         str(quarto_executable),
         "render",
-        qmd_path.name,
-        "--to",
-        fmt.value,
-        "--output",
-        output_name,
-        cwd=str(render_dir),
+        *extra_args,
+        cwd=str(work_dir),
         env=env,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
@@ -285,8 +321,71 @@ async def _run_quarto(
         if _KERNEL_ERROR_MARKERS.search(detail):
             message += await _kernel_diagnostics(env)
         raise QuartoRenderError(message)
+
+
+async def _run_quarto(
+    qmd_path: Path,
+    fmt: QuartoReportFormat,
+    render_dir: Path,
+    quarto_executable: Path,
+    timeout_seconds: float,
+) -> None:
+    """Run ``quarto render`` for a single ``.qmd`` format; raise on non-zero / missing output."""
+    output_name = f"report.{fmt.extension}"
+    logger.info(f"Rendering {qmd_path.name} → {output_name} via quarto ({fmt.value})")
+    await _invoke_quarto(
+        [qmd_path.name, "--to", fmt.value, "--output", output_name],
+        fmt,
+        render_dir,
+        render_dir,
+        quarto_executable,
+        timeout_seconds,
+    )
     if not await asyncio.to_thread((render_dir / output_name).is_file):
         raise QuartoRenderError(f"quarto produced no {output_name} for format {fmt.value}")
+
+
+async def _run_quarto_book(
+    work_dir: Path,
+    fmt: QuartoReportFormat,
+    output_dir: str,
+    render_dir: Path,
+    quarto_executable: Path,
+    timeout_seconds: float,
+) -> None:
+    """Render a Quarto *book* project to a single ``fmt`` file, normalized to
+    ``render_dir/report.<ext>``.
+
+    A book project ignores ``--output`` and writes into its ``output-dir`` under a
+    title-derived name, so we render the whole project (``cwd=work_dir``) and then
+    collect the lone artifact of the requested format from ``work_dir/<output_dir>``.
+    """
+    logger.info(f"Rendering book {work_dir.name} → {fmt.value} via quarto")
+    await _invoke_quarto(
+        [".", "--to", fmt.value], fmt, work_dir, render_dir, quarto_executable, timeout_seconds
+    )
+    await asyncio.to_thread(_collect_book_artifact, work_dir / output_dir, fmt, render_dir)
+
+
+def _collect_book_artifact(output_path: Path, fmt: QuartoReportFormat, render_dir: Path) -> None:
+    """Copy the single rendered ``*.<ext>`` from a book's output-dir to ``render_dir/report.<ext>``.
+
+    Raises :class:`QuartoRenderError` when zero or more than one candidate exists — a
+    book that emitted nothing (silent failure) or several files (ambiguous) must not be
+    served as a successful render.
+    """
+    candidates = sorted(output_path.glob(f"*.{fmt.extension}")) if output_path.is_dir() else []
+    if not candidates:
+        raise QuartoRenderError(
+            f"book produced no {fmt.extension} in {output_path.name}/ for format {fmt.value}"
+        )
+    if len(candidates) > 1:
+        names = ", ".join(p.name for p in candidates)
+        raise QuartoRenderError(
+            f"book produced {len(candidates)} {fmt.extension} files in {output_path.name}/ "
+            f"({names}); expected exactly one"
+        )
+    shutil.copy2(candidates[0], render_dir / f"report.{fmt.extension}")
 
 
 async def _kernel_diagnostics(env: dict[str, str]) -> str:
@@ -326,7 +425,9 @@ async def _kernel_diagnostics(env: dict[str, str]) -> str:
     )
 
 
-def build_render_env(render_dir: Path, tmp_dir: Path) -> dict[str, str]:
+def build_render_env(
+    render_dir: Path, tmp_dir: Path, import_root: Path | None = None
+) -> dict[str, str]:
     """Minimal environment for the quarto subprocess.
 
     Built from scratch (not a copy of ``os.environ``) so DB URL, service token,
@@ -355,7 +456,15 @@ def build_render_env(render_dir: Path, tmp_dir: Path) -> dict[str, str]:
     # Same motivation: kernel package visibility == worker process visibility.
     # render_dir leads so a chunk can `import report_schemas` (the generated
     # pandera module the dispatcher stages here); the inherited PYTHONPATH
-    # follows. Both are search paths, not secrets.
+    # follows. Both are search paths, not secrets. For a book render the chunks
+    # live in the staged project dir (import_root = work_dir), which is a child
+    # of render_dir, so it must lead the path — otherwise `import _common` /
+    # `import report_schemas` from a chapter fails.
+    roots = [str(render_dir)]
+    if import_root is not None and import_root != render_dir:
+        roots.insert(0, str(import_root))
     inherited = os.environ.get("PYTHONPATH", "")
-    env["PYTHONPATH"] = f"{render_dir}{os.pathsep}{inherited}" if inherited else str(render_dir)
+    if inherited:
+        roots.append(inherited)
+    env["PYTHONPATH"] = os.pathsep.join(roots)
     return env

@@ -25,12 +25,13 @@ from clarinet.models.quarto_report import (
     QuartoRenderState,
     QuartoRenderStatus,
     QuartoReportFormat,
+    QuartoReportKind,
     QuartoReportTemplate,
 )
 from clarinet.services.report_service import ReportRegistry
 from clarinet.settings import settings
 from clarinet.utils.logger import logger
-from clarinet.utils.quarto_discovery import DiscoveredQuartoReport
+from clarinet.utils.quarto_discovery import DiscoveredQuartoReport, parse_book_metadata
 
 # Fire-and-forget render tasks (pipeline-disabled fallback). Held in a module
 # set so they are not garbage-collected mid-flight; the done callback discards.
@@ -40,6 +41,26 @@ _background_tasks: set[asyncio.Task[None]] = set()
 # presumed crashed: covers data-CSV materialization (runs before the first
 # per-format sidecar write) and pipeline retry backoff (max 120s by default).
 _STALE_GRACE_SECONDS = 300.0
+
+# Generated / cache / VCS dirs never staged for a book render: outputs and freeze
+# caches are excluded so every render re-executes against freshly materialized data
+# (parity with single-file reports), and VCS/venv noise stays out of the sandbox.
+_BOOK_STAGE_IGNORE = (
+    "_book",
+    "_freeze",
+    ".quarto",
+    "_output",
+    ".git",
+    ".ipynb_checkpoints",
+    "__pycache__",
+    ".pytest_cache",
+    ".venv",
+    "node_modules",
+)
+
+# Subdir of render_dir a book project is staged into. Shared between the
+# dispatcher (which sets it) and the payload the worker consumes.
+_BOOK_PROJECT_SUBDIR = "project"
 
 
 def _mark_failed_if_stale(state: QuartoRenderState, mtime: float | None) -> QuartoRenderState:
@@ -138,29 +159,55 @@ class QuartoReportService:
         )
 
         try:
-            # Copy the template into the (shared-storage) render dir before
-            # dispatch, so the worker host never needs the project's reports
-            # folder — it reads the .qmd from render_dir like everything else.
-            work_qmd = render_dir / qmd_path.name
-            await asyncio.to_thread(shutil.copy2, qmd_path, work_qmd)
-            # Stage the generated pandera schema module (if the project ran
-            # `clarinet quarto gen-types`) beside the .qmd so a chunk can
-            # `import report_schemas`. It is pure pandas/pandera — no DB access,
-            # no secrets — safe to copy into the sandboxed render dir.
-            schema_module = qmd_path.parent / "report_schemas.py"
-            if await asyncio.to_thread(schema_module.is_file):
+            if template.kind is QuartoReportKind.BOOK:
+                # qmd_path is the book's project dir here (discovery set it so).
+                # Resolve the book's output-dir up front so a stale copy of it is
+                # excluded from staging — otherwise old artifacts would join the
+                # fresh render and _collect_book_artifact would see >1 file.
+                yml_text = await asyncio.to_thread((qmd_path / "_quarto.yml").read_text, "utf-8")
+                _t, _d, _data, output_dir = parse_book_metadata(yml_text, name)
+                project_subdir = _BOOK_PROJECT_SUBDIR
+                work_dir = render_dir / project_subdir
+                # Stage the whole tree (minus generated/cache/VCS dirs + the
+                # output-dir) so the worker host reads everything from render_dir.
+                # symlinks=True copies links as links rather than slurping their
+                # (possibly out-of-tree) targets into the render sandbox.
                 await asyncio.to_thread(
-                    shutil.copy2, schema_module, render_dir / schema_module.name
+                    shutil.copytree,
+                    qmd_path,
+                    work_dir,
+                    ignore=shutil.ignore_patterns(*_BOOK_STAGE_IGNORE, output_dir),
+                    symlinks=True,
                 )
-            # Stage the docx reference template (justified body, hyphenation) when the
-            # .qmd's `format.docx.reference-doc` points at a sibling reference.docx.
-            # Pure formatting asset — no DB, no secrets — safe in the sandboxed render dir.
-            reference_doc = qmd_path.parent / "reference.docx"
-            if await asyncio.to_thread(reference_doc.is_file):
-                await asyncio.to_thread(
-                    shutil.copy2, reference_doc, render_dir / reference_doc.name
+                await self._dispatch(
+                    name,
+                    work_dir,
+                    template.data_reports,
+                    formats,
+                    render_dir,
+                    kind=QuartoReportKind.BOOK,
+                    project_subdir=project_subdir,
+                    output_dir=output_dir,
                 )
-            await self._dispatch(name, work_qmd, template.data_reports, formats, render_dir)
+            else:
+                # Copy the template into the (shared-storage) render dir before
+                # dispatch, so the worker host never needs the project's reports folder.
+                work_qmd = render_dir / qmd_path.name
+                await asyncio.to_thread(shutil.copy2, qmd_path, work_qmd)
+                # Stage the generated pandera schema module (if present) beside the .qmd
+                # so a chunk can `import report_schemas`. Pure pandas/pandera — safe.
+                schema_module = qmd_path.parent / "report_schemas.py"
+                if await asyncio.to_thread(schema_module.is_file):
+                    await asyncio.to_thread(
+                        shutil.copy2, schema_module, render_dir / schema_module.name
+                    )
+                # Stage the docx reference template when present (justified body, hyphenation).
+                reference_doc = qmd_path.parent / "reference.docx"
+                if await asyncio.to_thread(reference_doc.is_file):
+                    await asyncio.to_thread(
+                        shutil.copy2, reference_doc, render_dir / reference_doc.name
+                    )
+                await self._dispatch(name, work_qmd, template.data_reports, formats, render_dir)
         except Exception as exc:
             # A copy/broker/enqueue failure must not leave the sidecar stuck on
             # PENDING — record it as failed so the UI stops polling.
@@ -236,6 +283,10 @@ class QuartoReportService:
         data_reports: list[str],
         formats: list[QuartoReportFormat],
         render_dir: Path,
+        *,
+        kind: QuartoReportKind = QuartoReportKind.FILE,
+        project_subdir: str | None = None,
+        output_dir: str | None = None,
     ) -> None:
         """Queue the render on the pipeline, or run it in-process as a fallback.
 
@@ -253,10 +304,15 @@ class QuartoReportService:
             )
         payload = {
             "report_name": name,
+            # For a book, qmd_path is the staged project dir (render_dir/<subdir>);
+            # the worker renders via project_subdir, not this path (kept for debug).
             "qmd_path": str(qmd_path),
             "render_dir": str(render_dir),
             "data_reports": data_reports,
             "formats": [f.value for f in formats],
+            "report_kind": kind.value,
+            "project_subdir": project_subdir,
+            "output_dir": output_dir,
         }
         if settings.pipeline_enabled:
             from clarinet.services.pipeline.message import PipelineMessage
@@ -293,6 +349,9 @@ class QuartoReportService:
                         quarto_executable=executable,
                         timeout_seconds=settings.quarto_render_timeout_seconds,
                         client=client,
+                        kind=kind,
+                        project_subdir=project_subdir,
+                        output_dir=output_dir,
                     )
                 finally:
                     await client.close()
