@@ -129,7 +129,7 @@ def discover_quarto_templates(folder: str | Path) -> list[DiscoveredQuartoReport
                 continue
             try:
                 yml_text = quarto_yml.read_text(encoding="utf-8")
-            except OSError as exc:
+            except (OSError, UnicodeDecodeError) as exc:
                 logger.error(f"Failed to read book _quarto.yml {quarto_yml}: {exc}")
                 continue
             title, description, data_reports, _output_dir = parse_book_metadata(yml_text, path.name)
@@ -150,7 +150,7 @@ def discover_quarto_templates(folder: str | Path) -> list[DiscoveredQuartoReport
             continue
         try:
             qmd_text = path.read_text(encoding="utf-8")
-        except OSError as exc:
+        except (OSError, UnicodeDecodeError) as exc:
             logger.error(f"Failed to read Quarto report file {path}: {exc}")
             continue
         title, description, data_reports = parse_quarto_metadata(qmd_text, path.stem)

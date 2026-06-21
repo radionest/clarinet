@@ -178,3 +178,14 @@ def test_discover_ignores_non_book_subdir(tmp_path: Path) -> None:
 
     items = discover_quarto_templates(tmp_path)
     assert [t.name for t, _ in items] == ["ok"]
+
+
+def test_discover_skips_book_with_non_utf8_quarto_yml(tmp_path: Path) -> None:
+    """A _quarto.yml with invalid UTF-8 is skipped, not fatal to the whole scan."""
+    bad = tmp_path / "badbook"
+    bad.mkdir()
+    (bad / "_quarto.yml").write_bytes(b"\xff\xfe not valid utf-8")
+    (tmp_path / "ok.qmd").write_text("body\n")
+
+    items = discover_quarto_templates(tmp_path)
+    assert [t.name for t, _ in items] == ["ok"]

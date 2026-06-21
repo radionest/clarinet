@@ -183,6 +183,10 @@ async def render_report(
             if project_subdir is None:
                 raise QuartoRenderError(f"book '{name}': missing project_subdir")
             work_dir = render_dir / project_subdir
+            # project_subdir arrives via the queue payload; refuse a value that
+            # escapes render_dir (mirrors the FILE path trusting only a basename).
+            if not work_dir.resolve().is_relative_to(render_dir.resolve()):
+                raise QuartoRenderError(f"book '{name}': project_subdir escapes render_dir")
             quarto_yml = work_dir / "_quarto.yml"
             if not await asyncio.to_thread(quarto_yml.is_file):
                 raise QuartoRenderError(

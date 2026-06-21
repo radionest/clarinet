@@ -703,6 +703,33 @@ async def test_render_report_book_missing_quarto_yml_fails(tmp_path: Path) -> No
 
 
 @pytest.mark.asyncio
+async def test_render_report_book_rejects_project_subdir_escape(tmp_path: Path) -> None:
+    """A project_subdir that escapes render_dir (forged payload) → FAILED, no render."""
+    from clarinet.models.quarto_report import QuartoReportKind
+
+    render_dir = tmp_path / "out"
+    render_dir.mkdir()
+
+    await quarto_render.render_report(
+        name="bk",
+        qmd_path=render_dir / "project",
+        data_reports=[],
+        formats=[QuartoReportFormat.DOCX],
+        render_dir=render_dir,
+        quarto_executable=tmp_path / "quarto",
+        timeout_seconds=10.0,
+        client=AsyncMock(spec=ClarinetClient),
+        kind=QuartoReportKind.BOOK,
+        project_subdir="../evil",
+    )
+
+    state = read_status(render_dir)
+    assert state is not None
+    assert state["status"] == "failed"
+    assert "escapes render_dir" in state["error"]
+
+
+@pytest.mark.asyncio
 async def test_request_render_stages_book_tree(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
