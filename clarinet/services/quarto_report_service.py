@@ -31,7 +31,7 @@ from clarinet.models.quarto_report import (
 from clarinet.services.report_service import ReportRegistry
 from clarinet.settings import settings
 from clarinet.utils.logger import logger
-from clarinet.utils.quarto_discovery import DiscoveredQuartoReport
+from clarinet.utils.quarto_discovery import DiscoveredQuartoReport, parse_book_metadata
 
 # Fire-and-forget render tasks (pipeline-disabled fallback). Held in a module
 # set so they are not garbage-collected mid-flight; the done callback discards.
@@ -57,6 +57,10 @@ _BOOK_STAGE_IGNORE = (
     ".venv",
     "node_modules",
 )
+
+# Subdir of render_dir a book project is staged into. Shared between the
+# dispatcher (which sets it) and the payload the worker consumes.
+_BOOK_PROJECT_SUBDIR = "project"
 
 
 def _mark_failed_if_stale(state: QuartoRenderState, mtime: float | None) -> QuartoRenderState:
@@ -157,15 +161,23 @@ class QuartoReportService:
         try:
             if template.kind is QuartoReportKind.BOOK:
                 # qmd_path is the book's project dir here (discovery set it so).
-                # Stage the whole tree (minus generated/cache/VCS dirs) so the worker
-                # host reads everything from render_dir, like the single-file path.
-                project_subdir = "project"
+                # Resolve the book's output-dir up front so a stale copy of it is
+                # excluded from staging — otherwise old artifacts would join the
+                # fresh render and _collect_book_artifact would see >1 file.
+                yml_text = await asyncio.to_thread((qmd_path / "_quarto.yml").read_text, "utf-8")
+                _t, _d, _data, output_dir = parse_book_metadata(yml_text, name)
+                project_subdir = _BOOK_PROJECT_SUBDIR
                 work_dir = render_dir / project_subdir
+                # Stage the whole tree (minus generated/cache/VCS dirs + the
+                # output-dir) so the worker host reads everything from render_dir.
+                # symlinks=True copies links as links rather than slurping their
+                # (possibly out-of-tree) targets into the render sandbox.
                 await asyncio.to_thread(
                     shutil.copytree,
                     qmd_path,
                     work_dir,
-                    ignore=shutil.ignore_patterns(*_BOOK_STAGE_IGNORE),
+                    ignore=shutil.ignore_patterns(*_BOOK_STAGE_IGNORE, output_dir),
+                    symlinks=True,
                 )
                 await self._dispatch(
                     name,
@@ -175,6 +187,7 @@ class QuartoReportService:
                     render_dir,
                     kind=QuartoReportKind.BOOK,
                     project_subdir=project_subdir,
+                    output_dir=output_dir,
                 )
             else:
                 # Copy the template into the (shared-storage) render dir before
@@ -273,6 +286,7 @@ class QuartoReportService:
         *,
         kind: QuartoReportKind = QuartoReportKind.FILE,
         project_subdir: str | None = None,
+        output_dir: str | None = None,
     ) -> None:
         """Queue the render on the pipeline, or run it in-process as a fallback.
 
@@ -290,12 +304,15 @@ class QuartoReportService:
             )
         payload = {
             "report_name": name,
+            # For a book, qmd_path is the staged project dir (render_dir/<subdir>);
+            # the worker renders via project_subdir, not this path (kept for debug).
             "qmd_path": str(qmd_path),
             "render_dir": str(render_dir),
             "data_reports": data_reports,
             "formats": [f.value for f in formats],
             "report_kind": kind.value,
             "project_subdir": project_subdir,
+            "output_dir": output_dir,
         }
         if settings.pipeline_enabled:
             from clarinet.services.pipeline.message import PipelineMessage
@@ -334,6 +351,7 @@ class QuartoReportService:
                         client=client,
                         kind=kind,
                         project_subdir=project_subdir,
+                        output_dir=output_dir,
                     )
                 finally:
                     await client.close()

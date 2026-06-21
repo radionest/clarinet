@@ -13,6 +13,7 @@ so the in-process fallback (``pipeline_enabled=False``) shares the same code.
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 from clarinet.models.quarto_report import QuartoRenderStatus, QuartoReportFormat, QuartoReportKind
@@ -37,19 +38,21 @@ async def _render_quarto_report_impl(msg: PipelineMessage, ctx: TaskContext) -> 
     qmd_path = Path(payload["qmd_path"])
     render_dir = Path(payload["render_dir"])
     data_reports: list[str] = payload.get("data_reports", [])
-    report_kind = QuartoReportKind(payload.get("report_kind", "file"))
     project_subdir: str | None = payload.get("project_subdir")
+    output_dir: str | None = payload.get("output_dir")
     try:
+        report_kind = QuartoReportKind(payload.get("report_kind", "file"))
         formats = [QuartoReportFormat(value) for value in payload.get("formats", ["docx"])]
     except ValueError as exc:
-        logger.error(f"Quarto render '{name}': invalid formats in payload: {exc}")
-        write_status(
+        logger.error(f"Quarto render '{name}': invalid enum in payload: {exc}")
+        await asyncio.to_thread(
+            write_status,
             render_dir,
             name=name,
             render_id=render_dir.name,
             status=QuartoRenderStatus.FAILED,
             formats=[],
-            error=f"invalid formats: {exc}",
+            error=f"invalid payload: {exc}",
         )
         return
 
@@ -63,7 +66,8 @@ async def _render_quarto_report_impl(msg: PipelineMessage, ctx: TaskContext) -> 
     executable = resolve_quarto_executable()
     if executable is None:
         logger.error(f"Quarto render '{name}' dispatched but quarto binary is not installed")
-        write_status(
+        await asyncio.to_thread(
+            write_status,
             render_dir,
             name=name,
             render_id=render_dir.name,
@@ -84,4 +88,5 @@ async def _render_quarto_report_impl(msg: PipelineMessage, ctx: TaskContext) -> 
         client=ctx.client,
         kind=report_kind,
         project_subdir=project_subdir,
+        output_dir=output_dir,
     )

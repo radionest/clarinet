@@ -33,7 +33,6 @@ from clarinet.services.events.bus import get_event_bus
 from clarinet.services.events.models import TaskProgressEvent
 from clarinet.settings import settings
 from clarinet.utils.logger import logger
-from clarinet.utils.quarto_discovery import parse_book_metadata
 
 _STATUS_FILE = "status.json"
 
@@ -146,6 +145,7 @@ async def render_report(
     client: ClarinetClient,
     kind: QuartoReportKind = QuartoReportKind.FILE,
     project_subdir: str | None = None,
+    output_dir: str | None = None,
 ) -> None:
     """Render the report to ``formats`` inside ``render_dir``.
 
@@ -159,7 +159,8 @@ async def render_report(
     (the dispatching service copies it there); only its file name is used.
     When ``kind`` is BOOK, ``render_dir/<project_subdir>/`` holds the staged
     book project; ``quarto render`` is run over that directory and the lone
-    output-dir artifact is normalized to ``render_dir/report.<ext>``.
+    artifact in ``output_dir`` (the book's ``project.output-dir``, resolved by
+    the dispatcher; default ``_book``) is normalized to ``render_dir/report.<ext>``.
     """
     created_at = _now_iso()
     existing = await asyncio.to_thread(read_status, render_dir)
@@ -188,12 +189,13 @@ async def render_report(
                     f"book '{name}': _quarto.yml not found in staged project dir"
                 )
             await _materialize_data(data_reports, work_dir, client)
-            yml_text = await asyncio.to_thread(quarto_yml.read_text, "utf-8")
-            _title, _desc, _data, output_dir = parse_book_metadata(yml_text, name)
+            # output_dir is resolved once by the dispatching service (from the
+            # book's _quarto.yml) and passed through; default mirrors Quarto.
+            book_output_dir = output_dir or "_book"
 
             async def render_one(fmt: QuartoReportFormat) -> None:
                 await _run_quarto_book(
-                    work_dir, fmt, output_dir, render_dir, quarto_executable, timeout_seconds
+                    work_dir, fmt, book_output_dir, render_dir, quarto_executable, timeout_seconds
                 )
         else:
             # Only the file name from the payload is trusted: the .qmd must already
@@ -289,7 +291,7 @@ async def _invoke_quarto(
     """
     tmp_dir = render_dir / "tmp"
     await asyncio.to_thread(tmp_dir.mkdir, parents=True, exist_ok=True)
-    env = build_render_env(render_dir, tmp_dir)
+    env = build_render_env(render_dir, tmp_dir, import_root=work_dir)
 
     proc = await asyncio.create_subprocess_exec(
         str(quarto_executable),
@@ -419,7 +421,9 @@ async def _kernel_diagnostics(env: dict[str, str]) -> str:
     )
 
 
-def build_render_env(render_dir: Path, tmp_dir: Path) -> dict[str, str]:
+def build_render_env(
+    render_dir: Path, tmp_dir: Path, import_root: Path | None = None
+) -> dict[str, str]:
     """Minimal environment for the quarto subprocess.
 
     Built from scratch (not a copy of ``os.environ``) so DB URL, service token,
@@ -448,7 +452,15 @@ def build_render_env(render_dir: Path, tmp_dir: Path) -> dict[str, str]:
     # Same motivation: kernel package visibility == worker process visibility.
     # render_dir leads so a chunk can `import report_schemas` (the generated
     # pandera module the dispatcher stages here); the inherited PYTHONPATH
-    # follows. Both are search paths, not secrets.
+    # follows. Both are search paths, not secrets. For a book render the chunks
+    # live in the staged project dir (import_root = work_dir), which is a child
+    # of render_dir, so it must lead the path — otherwise `import _common` /
+    # `import report_schemas` from a chapter fails.
+    roots = [str(render_dir)]
+    if import_root is not None and import_root != render_dir:
+        roots.insert(0, str(import_root))
     inherited = os.environ.get("PYTHONPATH", "")
-    env["PYTHONPATH"] = f"{render_dir}{os.pathsep}{inherited}" if inherited else str(render_dir)
+    if inherited:
+        roots.append(inherited)
+    env["PYTHONPATH"] = os.pathsep.join(roots)
     return env

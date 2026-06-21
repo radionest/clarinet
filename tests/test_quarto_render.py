@@ -127,7 +127,7 @@ async def test_run_quarto_enriches_kernel_errors(
     monkeypatch.setattr(
         quarto_render,
         "build_render_env",
-        lambda render_dir, tmp_dir: {"QUARTO_PYTHON": str(fake_python)},
+        lambda render_dir, tmp_dir, import_root=None: {"QUARTO_PYTHON": str(fake_python)},
     )
     render_dir = tmp_path / "out"
     render_dir.mkdir()
