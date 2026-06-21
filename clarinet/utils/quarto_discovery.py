@@ -103,7 +103,15 @@ def parse_book_metadata(
 
 
 def discover_quarto_templates(folder: str | Path) -> list[DiscoveredQuartoReport]:
-    """Scan ``folder`` for ``*.qmd`` files and return ``(template, path)`` pairs.
+    """Scan ``folder`` for Quarto templates and return ``(template, path)`` pairs.
+
+    Two kinds are discovered:
+
+    * **FILE** — a top-level ``*.qmd`` file; ``name`` = file stem, path = the
+      ``.qmd`` file itself.
+    * **BOOK** — a top-level subdirectory that contains a ``_quarto.yml``; ``name``
+      = directory name, path = the project directory.  Subdirectories without
+      ``_quarto.yml`` are silently ignored.
 
     A missing folder is not an error — the list is simply empty so the API can
     degrade gracefully when no Quarto reports are configured.

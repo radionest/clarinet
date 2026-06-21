@@ -147,15 +147,19 @@ async def render_report(
     kind: QuartoReportKind = QuartoReportKind.FILE,
     project_subdir: str | None = None,
 ) -> None:
-    """Render the ``.qmd`` named by ``qmd_path`` to ``formats`` inside ``render_dir``.
+    """Render the report to ``formats`` inside ``render_dir``.
 
     Materializes each declared data report as ``data/<name>.csv`` by fetching
     it from the reports API via ``client``, then runs ``quarto render`` once
-    per format. The ``.qmd`` must already be inside ``render_dir`` (the
-    dispatching service copies it there); only its file name is used. Progress
-    and failures are recorded in the status sidecar; this coroutine never
-    raises to its caller so a fire-and-forget dispatch cannot crash the worker
-    loop.
+    per format.  Progress and failures are recorded in the status sidecar;
+    this coroutine never raises to its caller so a fire-and-forget dispatch
+    cannot crash the worker loop.
+
+    When ``kind`` is FILE the ``.qmd`` must already be inside ``render_dir``
+    (the dispatching service copies it there); only its file name is used.
+    When ``kind`` is BOOK, ``render_dir/<project_subdir>/`` holds the staged
+    book project; ``quarto render`` is run over that directory and the lone
+    output-dir artifact is normalized to ``render_dir/report.<ext>``.
     """
     created_at = _now_iso()
     existing = await asyncio.to_thread(read_status, render_dir)
