@@ -700,3 +700,45 @@ async def test_render_report_book_missing_quarto_yml_fails(tmp_path: Path) -> No
     assert state is not None
     assert state["status"] == "failed"
     assert "_quarto.yml" in state["error"]
+
+
+@pytest.mark.asyncio
+async def test_request_render_stages_book_tree(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A BOOK template is staged as a whole tree into render_dir/project, minus
+    generated/cache dirs; dispatch receives kind=BOOK + project_subdir."""
+    from clarinet.models.quarto_report import QuartoReportKind, QuartoReportTemplate
+    from clarinet.services.quarto_report_service import QuartoReportRegistry, QuartoReportService
+    from clarinet.services.report_service import ReportRegistry
+
+    book = tmp_path / "mybook"
+    (book / "chapters").mkdir(parents=True)
+    (book / "_quarto.yml").write_text("project:\n  type: book\n")
+    (book / "index.qmd").write_text("# i\n")
+    (book / "chapters" / "01.qmd").write_text("# c\n")
+    (book / "_freeze").mkdir()
+    (book / "_freeze" / "stale.json").write_text("x")
+    (book / "_book").mkdir()
+    (book / "_book" / "old.docx").write_text("x")
+
+    template = QuartoReportTemplate(
+        name="mybook", title="T", description="", data_reports=[], kind=QuartoReportKind.BOOK
+    )
+    service = QuartoReportService(QuartoReportRegistry([(template, book)]), ReportRegistry([]))
+    monkeypatch.setattr(settings, "quarto_output_path", str(tmp_path / "renders"))
+    monkeypatch.setattr(quarto_render, "resolve_quarto_executable", lambda: tmp_path / "quarto")
+    dispatch = AsyncMock()
+    monkeypatch.setattr(service, "_dispatch", dispatch)
+
+    await service.request_render("mybook", [QuartoReportFormat.DOCX])
+
+    _name, source, _data, _fmts, render_dir = dispatch.call_args.args
+    work_dir = render_dir / "project"
+    assert (work_dir / "_quarto.yml").is_file()
+    assert (work_dir / "chapters" / "01.qmd").is_file()
+    assert not (work_dir / "_freeze").exists()  # excluded on staging
+    assert not (work_dir / "_book").exists()  # excluded on staging
+    assert source == work_dir
+    assert dispatch.call_args.kwargs["kind"] is QuartoReportKind.BOOK
+    assert dispatch.call_args.kwargs["project_subdir"] == "project"
