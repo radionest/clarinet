@@ -95,3 +95,14 @@ def test_discover_results_are_sorted_by_stem(tmp_path: Path) -> None:
         (tmp_path / f"{name}.qmd").write_text("body\n")
     items = discover_quarto_templates(tmp_path)
     assert [t.name for t, _ in items] == ["a", "b", "c"]
+
+
+def test_template_kind_defaults_to_file() -> None:
+    from clarinet.models.quarto_report import QuartoReportKind, QuartoReportTemplate
+
+    t = QuartoReportTemplate(name="x", title="X", description="", data_reports=[])
+    assert t.kind is QuartoReportKind.FILE
+    book = QuartoReportTemplate(
+        name="b", title="B", description="", data_reports=[], kind=QuartoReportKind.BOOK
+    )
+    assert book.kind is QuartoReportKind.BOOK
