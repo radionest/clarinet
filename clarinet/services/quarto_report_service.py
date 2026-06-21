@@ -207,6 +207,37 @@ class QuartoReportService:
                     await asyncio.to_thread(
                         shutil.copy2, reference_doc, render_dir / reference_doc.name
                     )
+                # Stage the extra files the report declares under ``clarinet.stage``
+                # (paths relative to the .qmd): a project helper module the chunks
+                # import — e.g. a ``report_figures.py`` plotting helper — plus its
+                # non-sibling dependencies. Copied flat (basename) since render_dir
+                # leads PYTHONPATH, so a flat ``import`` resolves. Pure disk, no DB /
+                # secrets — the project author owns this list, same trust model as the
+                # report_schemas.py / reference.docx siblings above. The source may
+                # resolve outside the reports folder (via ``..`` or a symlink) — that
+                # is intentional (a dep like ``seg_utils`` lives in ``plan/``) and
+                # trusted for the same reason; unlike the render dir itself there is no
+                # source-containment guard. A declared file that is missing is logged,
+                # not fatal: show_lesion-style helpers degrade to a placeholder rather
+                # than failing the whole render.
+                for staged in template.stage_files:
+                    source = (qmd_path.parent / staged).resolve()
+                    if not await asyncio.to_thread(source.is_file):
+                        logger.warning(
+                            f"Quarto report '{name}' declares clarinet.stage entry '{staged}' "
+                            f"but {source} is not a file; skipping"
+                        )
+                        continue
+                    # Flat staging means a same-basename entry would clobber an
+                    # earlier-staged file (.qmd / report_schemas.py / reference.docx /
+                    # a prior stage entry). Surface it instead of silently overwriting.
+                    dest = render_dir / source.name
+                    if await asyncio.to_thread(dest.exists):
+                        logger.warning(
+                            f"Quarto report '{name}' clarinet.stage entry '{staged}' overwrites "
+                            f"an already-staged '{source.name}' in render_dir"
+                        )
+                    await asyncio.to_thread(shutil.copy2, source, dest)
                 await self._dispatch(name, work_qmd, template.data_reports, formats, render_dir)
         except Exception as exc:
             # A copy/broker/enqueue failure must not leave the sidecar stuck on

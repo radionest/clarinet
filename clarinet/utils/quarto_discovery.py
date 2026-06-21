@@ -12,10 +12,18 @@ SQL reports must be materialized as CSV before rendering::
       data:
         - monthly_summary
         - user_stats
+      stage:
+        - report_figures.py
+        - ../plan/utils/seg_utils.py
     ---
 
-``title`` falls back to the file stem, ``description`` to ``""`` and the data
-report list to ``[]`` when the front matter is missing or malformed.
+``clarinet.stage`` is an optional list of files (paths relative to the .qmd) the
+renderer stages flat into the sandbox render dir, so a chunk can import a project
+helper module — and its non-sibling dependencies — alongside the .qmd.
+
+``title`` falls back to the file stem, ``description`` to ``""`` and both the data
+report list and the stage list to ``[]`` when the front matter is missing or
+malformed.
 """
 
 import re
@@ -37,37 +45,44 @@ _FRONT_MATTER_RE = re.compile(r"\A﻿?---[^\n]*\n(.*?)\n---\s*(?:\n|$)", re.DOTA
 type DiscoveredQuartoReport = tuple[QuartoReportTemplate, Path]
 
 
-def parse_quarto_metadata(qmd_text: str, fallback_name: str) -> tuple[str, str, list[str]]:
-    """Extract ``(title, description, data_reports)`` from a ``.qmd`` front matter.
+def parse_quarto_metadata(
+    qmd_text: str, fallback_name: str
+) -> tuple[str, str, list[str], list[str]]:
+    """Extract ``(title, description, data_reports, stage_files)`` from front matter.
 
     A missing or invalid front matter is not an error: ``title`` defaults to
-    ``fallback_name``, ``description`` to ``""`` and ``data_reports`` to ``[]``.
+    ``fallback_name``, ``description`` to ``""`` and both lists to ``[]``.
     """
     match = _FRONT_MATTER_RE.match(qmd_text)
     if match is None:
-        return fallback_name, "", []
+        return fallback_name, "", [], []
     try:
         meta = yaml.safe_load(match.group(1))
     except yaml.YAMLError as exc:
         logger.warning(f"Invalid YAML front matter in Quarto report '{fallback_name}': {exc}")
-        return fallback_name, "", []
+        return fallback_name, "", [], []
     if not isinstance(meta, dict):
-        return fallback_name, "", []
+        return fallback_name, "", [], []
 
     title = str(meta.get("title") or fallback_name)
     description = str(meta.get("description") or "")
-    return title, description, _extract_data_reports(meta)
+    return (
+        title,
+        description,
+        _extract_clarinet_list(meta, "data"),
+        _extract_clarinet_list(meta, "stage"),
+    )
 
 
-def _extract_data_reports(meta: dict[str, Any]) -> list[str]:
-    """Read the ``clarinet.data`` list of SQL report names from front matter."""
+def _extract_clarinet_list(meta: dict[str, Any], key: str) -> list[str]:
+    """Read the ``clarinet.<key>`` list of strings from front matter (``[]`` if absent)."""
     clarinet_meta = meta.get("clarinet")
     if not isinstance(clarinet_meta, dict):
         return []
-    data = clarinet_meta.get("data")
-    if not isinstance(data, list):
+    values = clarinet_meta.get(key)
+    if not isinstance(values, list):
         return []
-    return [str(item) for item in data if item]
+    return [str(item) for item in values if item]
 
 
 def parse_book_metadata(
@@ -99,7 +114,7 @@ def parse_book_metadata(
     project = project if isinstance(project, dict) else {}
     output_dir = str(project.get("output-dir") or "_book")
 
-    return title, description, _extract_data_reports(meta), output_dir
+    return title, description, _extract_clarinet_list(meta, "data"), output_dir
 
 
 def discover_quarto_templates(folder: str | Path) -> list[DiscoveredQuartoReport]:
@@ -153,12 +168,13 @@ def discover_quarto_templates(folder: str | Path) -> list[DiscoveredQuartoReport
         except (OSError, UnicodeDecodeError) as exc:
             logger.error(f"Failed to read Quarto report file {path}: {exc}")
             continue
-        title, description, data_reports = parse_quarto_metadata(qmd_text, path.stem)
+        title, description, data_reports, stage_files = parse_quarto_metadata(qmd_text, path.stem)
         template = QuartoReportTemplate(
             name=path.stem,
             title=title,
             description=description,
             data_reports=data_reports,
+            stage_files=stage_files,
         )
         discovered.append((template, path.resolve()))
     return discovered

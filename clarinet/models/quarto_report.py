@@ -67,6 +67,11 @@ class QuartoReportTemplate(PydanticBaseModel):
     data_reports: list[str]
     # FILE = single .qmd (front-matter metadata); BOOK = directory with _quarto.yml.
     kind: QuartoReportKind = QuartoReportKind.FILE
+    # Extra files the .qmd front matter declares under ``clarinet.stage`` (paths
+    # relative to the .qmd). Each is staged flat into the sandbox render dir so a
+    # chunk can import a project helper module — and its non-sibling deps — that
+    # is not the generated ``report_schemas.py``. Empty when undeclared.
+    stage_files: list[str] = Field(default_factory=list)
 
 
 class QuartoRenderRequest(PydanticBaseModel):

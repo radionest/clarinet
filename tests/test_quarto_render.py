@@ -388,6 +388,84 @@ async def test_request_render_stages_reference_doc_into_render_dir(
 
 
 @pytest.mark.asyncio
+async def test_request_render_stages_declared_files_into_render_dir(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Files declared under ``clarinet.stage`` are staged flat into render_dir —
+    including a non-sibling dependency reached via a ``../`` path (mirrors the real
+    review/ + ../plan/utils/ layout). Flat basenames let a chunk ``import`` a
+    project helper module and its deps via the render_dir PYTHONPATH entry."""
+    from clarinet.models.quarto_report import QuartoReportTemplate
+    from clarinet.services.quarto_report_service import (
+        QuartoReportRegistry,
+        QuartoReportService,
+    )
+    from clarinet.services.report_service import ReportRegistry
+
+    reports_dir = tmp_path / "review"
+    reports_dir.mkdir()
+    qmd = _write_min_qmd(reports_dir)
+    (reports_dir / "report_figures.py").write_text("# figures helper\n", encoding="utf-8")
+    dep_dir = tmp_path / "plan" / "utils"  # sibling of review/, reached via ../
+    dep_dir.mkdir(parents=True)
+    (dep_dir / "seg_utils.py").write_text("# seg helpers\n", encoding="utf-8")
+    template = QuartoReportTemplate(
+        name="rep",
+        title="T",
+        description="",
+        data_reports=[],
+        stage_files=["report_figures.py", "../plan/utils/seg_utils.py"],
+    )
+    service = QuartoReportService(QuartoReportRegistry([(template, qmd)]), ReportRegistry([]))
+    monkeypatch.setattr(settings, "quarto_output_path", str(tmp_path / "renders"))
+    monkeypatch.setattr(quarto_render, "resolve_quarto_executable", lambda: tmp_path / "quarto")
+    dispatch = AsyncMock()
+    monkeypatch.setattr(service, "_dispatch", dispatch)
+
+    await service.request_render("rep", [QuartoReportFormat.DOCX])
+
+    _, _, _, _, render_dir = dispatch.call_args.args
+    assert (render_dir / "report_figures.py").read_text() == "# figures helper\n"
+    assert (render_dir / "seg_utils.py").read_text() == "# seg helpers\n"
+
+
+@pytest.mark.asyncio
+async def test_request_render_skips_missing_stage_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A declared ``clarinet.stage`` file that is absent is skipped (logged, not
+    fatal): the render is still dispatched and present entries are staged."""
+    from clarinet.models.quarto_report import QuartoReportTemplate
+    from clarinet.services.quarto_report_service import (
+        QuartoReportRegistry,
+        QuartoReportService,
+    )
+    from clarinet.services.report_service import ReportRegistry
+
+    qmd = _write_min_qmd(tmp_path)
+    (tmp_path / "report_figures.py").write_text("# present\n", encoding="utf-8")
+    template = QuartoReportTemplate(
+        name="rep",
+        title="T",
+        description="",
+        data_reports=[],
+        stage_files=["report_figures.py", "missing_helper.py"],
+    )
+    service = QuartoReportService(QuartoReportRegistry([(template, qmd)]), ReportRegistry([]))
+    monkeypatch.setattr(settings, "quarto_output_path", str(tmp_path / "renders"))
+    monkeypatch.setattr(quarto_render, "resolve_quarto_executable", lambda: tmp_path / "quarto")
+    dispatch = AsyncMock()
+    monkeypatch.setattr(service, "_dispatch", dispatch)
+
+    await service.request_render("rep", [QuartoReportFormat.DOCX])
+
+    dispatch.assert_awaited_once()
+    _, _, _, _, render_dir = dispatch.call_args.args
+    assert (render_dir / "report_figures.py").is_file()
+    assert not (render_dir / "missing_helper.py").exists()
+
+
+@pytest.mark.asyncio
 async def test_request_render_fails_fast_on_empty_service_token(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

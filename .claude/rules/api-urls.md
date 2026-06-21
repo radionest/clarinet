@@ -128,7 +128,7 @@ URL constants live in `tests/utils/urls.py`. Status codes: 201 = POST create, 20
 | `/api/admin/reports` | GET | 200 | List custom SQL reports (`*.sql` from `settings.reports_path`) |
 | `/api/admin/reports/{name}/download?format=csv\|xlsx` | GET | 200 | Download report as CSV or XLSX (default: csv) |
 | `/api/admin/quarto-reports` | GET | 200 | List Quarto report templates (`*.qmd` from `settings.quarto_reports_path`) |
-| `/api/admin/quarto-reports/{name}/render` | POST | 202 | Start background render. Body `{"formats":["docx","pdf"]}`; returns the pending render state (with `render_id`). **404** template or a declared `clarinet.data` SQL report is unknown. **422** empty `formats`. **503** quarto CLI not installed |
+| `/api/admin/quarto-reports/{name}/render` | POST | 202 | Start background render. Body `{"formats":["docx","pdf"]}`; returns the pending render state (with `render_id`). Files declared in front matter under `clarinet.stage` (paths relative to the .qmd) are staged flat into the render dir so a chunk can import a project helper module + its deps; a missing stage file is logged, not fatal (unlike `clarinet.data`). **404** template or a declared `clarinet.data` SQL report is unknown. **422** empty `formats`. **503** quarto CLI not installed |
 | `/api/admin/quarto-reports/{name}/renders/{render_id}/status` | GET | 200 | Poll the render status sidecar. **404** render unknown |
 | `/api/admin/quarto-reports/{name}/renders/{render_id}/download?format=docx\|pdf` | GET | 200 | Download the rendered file. **409** render not finished. **404** render unknown |
 
