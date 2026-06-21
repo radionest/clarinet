@@ -795,7 +795,7 @@ def test_cmd_quarto_new_maps_args(monkeypatch: pytest.MonkeyPatch, tmp_path: Pat
         seen.update(kwargs)
         return tmp_path / f"{name}.qmd"
 
-    monkeypatch.setattr("clarinet.cli.main.scaffold_quarto_report", fake_scaffold)
+    monkeypatch.setattr("clarinet.utils.quarto_scaffold.scaffold_quarto_report", fake_scaffold)
     args = argparse.Namespace(
         name="rep",
         title="T",
@@ -817,7 +817,7 @@ def test_cmd_quarto_new_exits_on_error(monkeypatch: pytest.MonkeyPatch) -> None:
     def boom(name: str, **kwargs: object) -> Path:
         raise QuartoScaffoldError("nope")
 
-    monkeypatch.setattr("clarinet.cli.main.scaffold_quarto_report", boom)
+    monkeypatch.setattr("clarinet.utils.quarto_scaffold.scaffold_quarto_report", boom)
     args = argparse.Namespace(
         name="rep",
         title=None,

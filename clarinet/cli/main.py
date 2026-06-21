@@ -22,7 +22,6 @@ from pathlib import Path
 
 from clarinet.settings import settings
 from clarinet.utils.logger import logger
-from clarinet.utils.quarto_scaffold import scaffold_quarto_report
 
 
 def init_project(path: str, template: str | None = None) -> None:
@@ -1091,6 +1090,7 @@ def generate_report_types() -> None:
 def cmd_quarto_new(args: argparse.Namespace) -> None:
     """Handle ``clarinet quarto new`` — scaffold a .qmd + reference.docx."""
     from clarinet.exceptions.domain import QuartoNotInstalledError, QuartoScaffoldError
+    from clarinet.utils.quarto_scaffold import scaffold_quarto_report
 
     formats = {"docx": ["docx"], "pdf": ["pdf"], "both": ["docx", "pdf"]}[args.format]
     data_reports = [item.strip() for item in args.data.split(",") if item.strip()]
@@ -1107,7 +1107,7 @@ def cmd_quarto_new(args: argparse.Namespace) -> None:
             force=args.force,
         )
     except (QuartoScaffoldError, QuartoNotInstalledError) as exc:
-        logger.error(str(exc))
+        logger.error(f"{exc}")
         sys.exit(1)
 
 
