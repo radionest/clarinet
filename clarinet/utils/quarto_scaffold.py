@@ -13,7 +13,10 @@ from xml.etree import ElementTree as ET
 
 import yaml
 
-from clarinet.exceptions.domain import QuartoScaffoldError
+from clarinet.exceptions.domain import QuartoNotInstalledError, QuartoScaffoldError
+from clarinet.services.quarto_render import resolve_quarto_executable
+from clarinet.settings import settings
+from clarinet.utils.logger import logger
 
 _W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 _R_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
@@ -132,3 +135,87 @@ def generate_default_reference(dest: Path, quarto_executable: Path) -> None:
         detail = proc.stderr.decode(errors="replace").strip()[:500]
         raise QuartoScaffoldError(f"failed to generate default reference.docx: {detail}")
     dest.write_bytes(proc.stdout)
+
+
+def scaffold_quarto_report(
+    name: str,
+    *,
+    title: str | None = None,
+    description: str = "",
+    lang: str = "ru",
+    formats: list[str],
+    data_reports: list[str],
+    from_docx: Path | None = None,
+    force: bool = False,
+    reports_dir: Path | None = None,
+) -> Path:
+    """Create ``<name>.qmd`` (+ sibling ``reference.docx``) in the reports folder.
+
+    Returns the path to the created ``.qmd``. See the plan's behavior contract
+    for the full reference.docx / force / pdf-only rules.
+
+    Raises:
+        QuartoScaffoldError: invalid name, or a target exists without ``force``.
+        QuartoNotInstalledError: a default reference.docx is needed but Quarto
+            is not installed (``--from-docx`` does not require Quarto).
+    """
+    if not name or "/" in name or "\\" in name or ".." in name:
+        raise QuartoScaffoldError(f"invalid report name: {name!r}")
+
+    folder = reports_dir if reports_dir is not None else settings.get_quarto_reports_path()
+    folder.mkdir(parents=True, exist_ok=True)
+
+    qmd_path = folder / f"{name}.qmd"
+    if qmd_path.exists() and not force:
+        raise QuartoScaffoldError(f"{qmd_path} already exists (use --force to overwrite)")
+
+    reference_doc_name = _prepare_reference(folder, formats, from_docx, force)
+
+    title = title or name
+    text = build_qmd_text(
+        title=title,
+        description=description,
+        lang=lang,
+        formats=formats,
+        data_reports=data_reports,
+        reference_doc=reference_doc_name,
+    )
+    qmd_path.write_text(text, encoding="utf-8")
+    logger.info(f"Created Quarto report scaffold: {qmd_path}")
+    return qmd_path
+
+
+def _prepare_reference(
+    folder: Path, formats: list[str], from_docx: Path | None, force: bool
+) -> str | None:
+    """Materialize ``folder/reference.docx`` per the docx/from-docx/force rules.
+
+    Returns ``"reference.docx"`` when the .qmd should reference it, else ``None``.
+    """
+    if "docx" not in formats:
+        if from_docx is not None:
+            logger.warning("--from-docx is ignored: reference.docx applies to docx output only")
+        return None
+
+    ref_path = folder / "reference.docx"
+    if from_docx is not None:
+        if not from_docx.is_file() or from_docx.suffix.lower() != ".docx":
+            raise QuartoScaffoldError(f"--from-docx is not a .docx file: {from_docx}")
+        if ref_path.exists() and not force:
+            raise QuartoScaffoldError(
+                f"{ref_path} already exists (use --force to replace the shared style)"
+            )
+        strip_docx_body(from_docx, ref_path)
+        return "reference.docx"
+
+    if ref_path.exists():
+        logger.info(f"Using existing {ref_path}")
+        return "reference.docx"
+
+    executable = resolve_quarto_executable()
+    if executable is None:
+        raise QuartoNotInstalledError(
+            "default reference.docx needs Quarto; run 'clarinet quarto install' or pass --from-docx"
+        )
+    generate_default_reference(ref_path, executable)
+    return "reference.docx"
