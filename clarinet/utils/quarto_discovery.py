@@ -24,7 +24,7 @@ from typing import Any
 
 import yaml
 
-from clarinet.models.quarto_report import QuartoReportTemplate
+from clarinet.models.quarto_report import QuartoReportKind, QuartoReportTemplate
 from clarinet.utils.logger import logger
 
 # Quarto front matter is a leading YAML block fenced by '---' lines. The
@@ -70,6 +70,38 @@ def _extract_data_reports(meta: dict[str, Any]) -> list[str]:
     return [str(item) for item in data if item]
 
 
+def parse_book_metadata(
+    quarto_yml_text: str, fallback_name: str
+) -> tuple[str, str, list[str], str]:
+    """Extract ``(title, description, data_reports, output_dir)`` from a book's ``_quarto.yml``.
+
+    Mirrors :func:`parse_quarto_metadata` for single ``.qmd`` files, reading a Quarto
+    *book* project file instead: ``book.title`` / ``book.description`` for display, a
+    top-level ``clarinet.data`` list for SQL reports to materialize, and
+    ``project.output-dir`` (default ``_book``) for locating the rendered artifact. A
+    missing/invalid YAML is not an error — title falls back to ``fallback_name``,
+    description to ``""``, data to ``[]``, output-dir to ``_book``.
+    """
+    try:
+        meta = yaml.safe_load(quarto_yml_text)
+    except yaml.YAMLError as exc:
+        logger.warning(f"Invalid YAML in book '{fallback_name}' _quarto.yml: {exc}")
+        return fallback_name, "", [], "_book"
+    if not isinstance(meta, dict):
+        return fallback_name, "", [], "_book"
+
+    book = meta.get("book")
+    book = book if isinstance(book, dict) else {}
+    title = str(book.get("title") or fallback_name)
+    description = str(book.get("description") or "")
+
+    project = meta.get("project")
+    project = project if isinstance(project, dict) else {}
+    output_dir = str(project.get("output-dir") or "_book")
+
+    return title, description, _extract_data_reports(meta), output_dir
+
+
 def discover_quarto_templates(folder: str | Path) -> list[DiscoveredQuartoReport]:
     """Scan ``folder`` for ``*.qmd`` files and return ``(template, path)`` pairs.
 
@@ -83,6 +115,29 @@ def discover_quarto_templates(folder: str | Path) -> list[DiscoveredQuartoReport
 
     discovered: list[DiscoveredQuartoReport] = []
     for path in sorted(folder_path.iterdir(), key=lambda p: p.stem):
+        if path.is_dir():
+            quarto_yml = path / "_quarto.yml"
+            if not quarto_yml.is_file():
+                continue
+            try:
+                yml_text = quarto_yml.read_text(encoding="utf-8")
+            except OSError as exc:
+                logger.error(f"Failed to read book _quarto.yml {quarto_yml}: {exc}")
+                continue
+            title, description, data_reports, _output_dir = parse_book_metadata(yml_text, path.name)
+            discovered.append(
+                (
+                    QuartoReportTemplate(
+                        name=path.name,
+                        title=title,
+                        description=description,
+                        data_reports=data_reports,
+                        kind=QuartoReportKind.BOOK,
+                    ),
+                    path.resolve(),
+                )
+            )
+            continue
         if not path.is_file() or path.suffix.lower() != ".qmd":
             continue
         try:
