@@ -160,6 +160,24 @@ class QuartoReportService:
                 await asyncio.to_thread(
                     shutil.copy2, reference_doc, render_dir / reference_doc.name
                 )
+            # Stage the extra files the report declares under ``clarinet.stage``
+            # (paths relative to the .qmd): a project helper module the chunks
+            # import — e.g. a ``report_figures.py`` plotting helper — plus its
+            # non-sibling dependencies. Copied flat (basename) since render_dir
+            # leads PYTHONPATH, so a flat ``import`` resolves. Pure disk, no DB /
+            # secrets — the project author owns this list, same trust model as the
+            # report_schemas.py / reference.docx siblings above. A declared file
+            # that is missing is logged, not fatal: show_lesion-style helpers
+            # degrade to a placeholder rather than failing the whole render.
+            for staged in template.stage_files:
+                source = (qmd_path.parent / staged).resolve()
+                if await asyncio.to_thread(source.is_file):
+                    await asyncio.to_thread(shutil.copy2, source, render_dir / source.name)
+                else:
+                    logger.warning(
+                        f"Quarto report '{name}' declares clarinet.stage entry '{staged}' "
+                        f"but {source} is not a file; skipping"
+                    )
             await self._dispatch(name, work_qmd, template.data_reports, formats, render_dir)
         except Exception as exc:
             # A copy/broker/enqueue failure must not leave the sidecar stuck on
