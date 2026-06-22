@@ -368,9 +368,8 @@ class Settings(BaseSettings):
     pipeline_retry_delay: int = 5  # Initial retry delay (seconds)
     pipeline_retry_max_delay: int = 120  # Max retry delay with backoff
     pipeline_ack_type: AcknowledgeType = AcknowledgeType.WHEN_EXECUTED
-    pipeline_version_check_enabled: bool = (
-        True  # Gate workers by version fingerprint (queue-name segment)
-    )
+    # Gate workers by version fingerprint (queue-name segment); also enables the worker startup diagnostic
+    pipeline_version_check_enabled: bool = True
 
     # Viewer plugin settings (nested dict, configured via [viewers.<name>] in TOML)
     viewers: dict[str, dict[str, Any]] = {}

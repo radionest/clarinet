@@ -58,6 +58,8 @@ def test_queue_name_versioned_when_enabled(monkeypatch, tmp_path) -> None:
     ns = settings.pipeline_task_namespace
     assert settings.default_queue_name == f"{ns}.{seg}.default"
     assert settings.gpu_queue_name == f"{ns}.{seg}.gpu"
+    assert settings.dicom_queue_name == f"{ns}.{seg}.dicom"
+    assert settings.quarto_queue_name == f"{ns}.{seg}.quarto"
 
 
 def test_queue_name_legacy_when_disabled(monkeypatch) -> None:

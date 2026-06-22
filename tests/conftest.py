@@ -184,7 +184,10 @@ def test_settings() -> Settings:
         cors_allow_methods=["*"],
         cors_allow_headers=["*"],
         debug=True,
-        # version gating off by default in tests; the fingerprint tests opt in explicitly
+        # Belt-and-suspenders: the module-level `settings.pipeline_version_check_enabled = False`
+        # above is the load-bearing disable (queue-name properties and warn_if_stale read the
+        # module singleton, not the DI fixture). This arg keeps the isolated Settings instance
+        # consistent so fixture-injected code doesn't accidentally enable the gate.
         pipeline_version_check_enabled=False,
     )
 

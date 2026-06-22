@@ -150,6 +150,7 @@ URL constants live in `tests/utils/urls.py`. Status codes: 201 = POST create, 20
 | `/api/pipelines/runs` | GET | 200 | List runs, filters: `status`, `task_name`, `record_id`, `patient_id`, `since` (started_at lower bound) + pagination (AdminUserDep) |
 | `/api/pipelines/runs/{task_id}` | GET | 200 | Get single run (AdminUserDep) |
 | `/api/pipelines/runs/{task_id}` | PATCH | 200 | Record terminal status (AdminUserDep); late `retrying` after a terminal status is ignored |
+| `/api/pipelines/fingerprint` | GET | 200 | Version fingerprint (clarinet version + plan/ hash); no auth, worker-facing — workers compare against their own to detect stale code |
 
 ### Workflow visualization (`/api/admin/workflow`)
 
