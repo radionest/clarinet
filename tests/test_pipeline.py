@@ -1437,6 +1437,7 @@ class TestAuditMiddleware:
         """create_broker() wires Audit after Logging and before DeadLetter."""
         from clarinet.services.pipeline.middleware import (
             AuditMiddleware,
+            DeadLetterMiddleware,
             PipelineLoggingMiddleware,
         )
 
@@ -1459,6 +1460,7 @@ class TestAuditMiddleware:
             types = [type(mw) for mw in broker.middlewares]
             assert AuditMiddleware in types
             assert types.index(PipelineLoggingMiddleware) < types.index(AuditMiddleware)
+            assert types.index(AuditMiddleware) < types.index(DeadLetterMiddleware)
 
 
 # ─── warn_if_stale ──────────────────────────────────────────────────────────
