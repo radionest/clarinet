@@ -250,6 +250,29 @@ def export_segmentation(name: str, output_path: str, *, reference_volume: Any = 
     return output_path
 
 
+def _labelmap_array_or_raise(labelmap_node: Any, *, what: str) -> Any:
+    """Read an exported labelmap as a numpy array, failing fast on an empty grid.
+
+    ExportAllSegmentsToLabelmapNode yields a labelmap with no scalars when the
+    source segmentation has no voxels on the reference volume grid — typically a
+    mask saved on a flipped/foreign grid (so it does not overlap the reference
+    extent), or a genuinely empty segmentation. slicer.util.arrayFromVolume would
+    then dereference None and crash with an opaque 'NoneType' object has no
+    attribute 'GetDataType'. Surface a diagnosable error pointing at the on-disk
+    repair instead — the set-op companion to the save-time
+    assert_segmentation_matches_volume guard.
+    """
+    image = labelmap_node.GetImageData()
+    if image is None or image.GetPointData().GetScalars() is None:
+        raise SlicerHelperError(
+            f"Exporting {what} produced an empty labelmap — the segmentation has no "
+            "voxels on the reference volume grid (commonly a mask saved on a "
+            "flipped/foreign grid, or an empty segmentation). Conform the file to the "
+            "volume grid (clarinet.services.image.conform_seg_to_grid) and retry."
+        )
+    return slicer.util.arrayFromVolume(labelmap_node)
+
+
 def _find_segment_id(vtk_seg: Any, name: str) -> str | None:
     """Find segment ID by display name.
 
@@ -1914,11 +1937,11 @@ class SlicerHelper:
         # Export both with mode 0 (reference geometry extent) → same shape
         labelmap_b = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLLabelMapVolumeNode", "_sub_b")
         seg_logic.ExportAllSegmentsToLabelmapNode(node_b, labelmap_b, 0)
-        arr_b = slicer.util.arrayFromVolume(labelmap_b)
+        arr_b = _labelmap_array_or_raise(labelmap_b, what="the subtracted segmentation (seg_b)")
 
         labelmap_a = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLLabelMapVolumeNode", "_sub_a")
         seg_logic.ExportAllSegmentsToLabelmapNode(node_a, labelmap_a, 0)
-        arr_a = slicer.util.arrayFromVolume(labelmap_a)
+        arr_a = _labelmap_array_or_raise(labelmap_a, what="the base segmentation (seg_a)")
 
         vtk_seg_a = node_a.GetSegmentation()
         segments_to_remove: list[str] = []
@@ -1993,7 +2016,7 @@ class SlicerHelper:
         # Phase A — merge all segments into a single binary labelmap
         labelmap = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLLabelMapVolumeNode", "_bin_tmp")
         seg_logic.ExportAllSegmentsToLabelmapNode(node, labelmap, 0)
-        arr = slicer.util.arrayFromVolume(labelmap)
+        arr = _labelmap_array_or_raise(labelmap, what="the segmentation to binarize")
         arr_binary = (arr > 0).astype(np.uint8)
         slicer.util.updateVolumeFromArray(labelmap, arr_binary)
 
@@ -2063,7 +2086,7 @@ class SlicerHelper:
         # Export source → binarize
         labelmap = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLLabelMapVolumeNode", "_pool_tmp")
         seg_logic.ExportAllSegmentsToLabelmapNode(source_node, labelmap, 0)
-        arr = slicer.util.arrayFromVolume(labelmap)
+        arr = _labelmap_array_or_raise(labelmap, what="the pool source segmentation")
         arr_binary = (arr > 0).astype(np.uint8)
         slicer.util.updateVolumeFromArray(labelmap, arr_binary)
 
