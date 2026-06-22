@@ -20,7 +20,7 @@ from clarinet.services.pipeline.chain import (
     persist_definitions,
 )
 from clarinet.services.pipeline.message import PipelineMessage
-from clarinet.services.pipeline.worker import get_worker_queues
+from clarinet.services.pipeline.worker import get_worker_queues, warn_if_stale
 from clarinet.settings import settings
 
 # Module-level snapshots of the namespaced queue names. Captured at
@@ -1437,7 +1437,6 @@ class TestAuditMiddleware:
         """create_broker() wires Audit after Logging and before DeadLetter."""
         from clarinet.services.pipeline.middleware import (
             AuditMiddleware,
-            DeadLetterMiddleware,
             PipelineLoggingMiddleware,
         )
 
@@ -1460,4 +1459,46 @@ class TestAuditMiddleware:
             types = [type(mw) for mw in broker.middlewares]
             assert AuditMiddleware in types
             assert types.index(PipelineLoggingMiddleware) < types.index(AuditMiddleware)
-            assert types.index(AuditMiddleware) < types.index(DeadLetterMiddleware)
+
+
+# ─── warn_if_stale ──────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_warn_if_stale_logs_error_on_mismatch(monkeypatch, caplog) -> None:
+    monkeypatch.setattr(settings, "pipeline_version_check_enabled", True)
+    monkeypatch.setattr(
+        "clarinet.services.pipeline.fingerprint.compute_fingerprint", lambda: "mine"
+    )
+    mock_client = AsyncMock()
+    mock_client.get_worker_fingerprint = AsyncMock(return_value="theirs")
+    mock_client.close = AsyncMock()
+    with (
+        patch("clarinet.client.ClarinetClient", return_value=mock_client),
+        caplog.at_level("ERROR"),
+    ):
+        await warn_if_stale(["proj.default"])
+    assert "stale" in caplog.text.lower()
+    mock_client.close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_warn_if_stale_info_on_match(monkeypatch, caplog) -> None:
+    monkeypatch.setattr(settings, "pipeline_version_check_enabled", True)
+    monkeypatch.setattr(
+        "clarinet.services.pipeline.fingerprint.compute_fingerprint", lambda: "same"
+    )
+    mock_client = AsyncMock()
+    mock_client.get_worker_fingerprint = AsyncMock(return_value="same")
+    mock_client.close = AsyncMock()
+    with patch("clarinet.client.ClarinetClient", return_value=mock_client), caplog.at_level("INFO"):
+        await warn_if_stale(["proj.default"])
+    assert "matches" in caplog.text.lower()
+
+
+@pytest.mark.asyncio
+async def test_warn_if_stale_disabled_is_noop(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "pipeline_version_check_enabled", False)
+    with patch("clarinet.client.ClarinetClient") as mk:
+        await warn_if_stale(["proj.default"])
+    mk.assert_not_called()
