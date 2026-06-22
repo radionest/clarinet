@@ -367,6 +367,16 @@ class ClarinetClient:
         response = await self._request("GET", "/auth/me")
         return UserRead.model_validate(response.json())
 
+    async def get_worker_fingerprint(self) -> str:
+        """Fetch the running API's version fingerprint.
+
+        Returns the ``{clarinet_version}:{plan_hash}`` string. Raises
+        ``ClarinetAPIError`` on transport/HTTP errors, including a 404 from an
+        API too old to expose the endpoint.
+        """
+        response = await self._request("GET", "/pipelines/fingerprint")
+        return str(response.json()["fingerprint"])
+
     async def validate_session(self) -> UserRead:
         """Validate current session.
 
