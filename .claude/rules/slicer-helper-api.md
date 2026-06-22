@@ -33,6 +33,7 @@ paths:
 - `add_shortcuts(shortcuts: list[tuple[str, str]])` — custom keyboard shortcuts
 - `load_study_from_pacs(study_instance_uid, *, server_name=, raise_on_empty=True, window=)` → list of MRML node IDs; auto-sets first scalar volume as `_image_node`
 - `load_series_from_pacs(study_instance_uid, series_instance_uid, *, server_name=, raise_on_empty=True, window=)` → list of MRML node IDs; loads only specified series
+- `download_series_zip(study_uid, series_uid, server_url, auth_cookie)` → path to extracted dir; downloads a series ZIP from Clarinet's DICOMweb cache (HTTP, not DIMSE), extracts it, and imports into the Slicer DICOM database
 - `get_segment_names(segmentation)` → `list[str]`
 - `get_segment_centroid(segmentation, segment_name)` → `tuple[float,float,float] | None` — per-segment labelmap center via numpy
 - `count_segment_components(segmentation, segment_name)` → `int` — number of connected components via `scipy.ndimage.label` (6-connectivity); 0 if empty or not found
