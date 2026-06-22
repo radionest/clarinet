@@ -20,10 +20,16 @@ from clarinet.api.app import app
 # Import all models to ensure metadata is populated
 from clarinet.models import *  # noqa: F403
 from clarinet.models.user import User
-from clarinet.settings import Settings
+from clarinet.settings import Settings, settings
 from clarinet.utils.database import get_async_session
 from clarinet.utils.logger import logger
 from tests.utils.cookies import patch_cookie_forwarding
+
+# Disable version gating on the singleton before any test module is imported.
+# Module-level constants in test files (e.g. DEFAULT_QUEUE = settings.default_queue_name)
+# are evaluated at collection time — before fixtures run — so the flag must be off here.
+# Individual fingerprint tests opt in explicitly via monkeypatch.setattr.
+settings.pipeline_version_check_enabled = False
 
 
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
@@ -178,6 +184,8 @@ def test_settings() -> Settings:
         cors_allow_methods=["*"],
         cors_allow_headers=["*"],
         debug=True,
+        # version gating off by default in tests; the fingerprint tests opt in explicitly
+        pipeline_version_check_enabled=False,
     )
 
 

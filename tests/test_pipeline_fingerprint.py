@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from clarinet.services.pipeline import fingerprint as fp
+from clarinet.settings import settings
 
 
 @pytest.fixture
@@ -47,3 +48,26 @@ def test_queue_version_segment_format() -> None:
 
 def test_clarinet_version_nonempty() -> None:
     assert fp.clarinet_version()
+
+
+def test_queue_name_versioned_when_enabled(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(settings, "config_tasks_path", str(tmp_path))
+    monkeypatch.setattr(settings, "pipeline_version_check_enabled", True)
+    fp.reset_fingerprint_cache()
+    seg = fp.queue_version_segment()
+    ns = settings.pipeline_task_namespace
+    assert settings.default_queue_name == f"{ns}.{seg}.default"
+    assert settings.gpu_queue_name == f"{ns}.{seg}.gpu"
+
+
+def test_queue_name_legacy_when_disabled(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "pipeline_version_check_enabled", False)
+    ns = settings.pipeline_task_namespace
+    assert settings.default_queue_name == f"{ns}.default"
+
+
+def test_dlq_never_versioned(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "pipeline_version_check_enabled", True)
+    fp.reset_fingerprint_cache()
+    ns = settings.pipeline_task_namespace
+    assert settings.dlq_queue_name == f"{ns}.dead_letter"
