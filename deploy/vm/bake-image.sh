@@ -33,7 +33,8 @@ install_system_packages() {
         nginx \
         postgresql postgresql-contrib \
         rabbitmq-server \
-        orthanc
+        orthanc \
+        nfs-kernel-server nfs-common
 
     install_python312
 
@@ -49,6 +50,9 @@ enable_services() {
     systemctl enable orthanc
     # nginx stays disabled — configured per-VM during deploy
     systemctl disable nginx
+    # NFS server stays disabled — only the topology stand enables it (via wire);
+    # pacs/worker never export. mirrors the nginx per-role pattern.
+    systemctl disable nfs-server 2>/dev/null || true
     log "Services enabled"
 }
 

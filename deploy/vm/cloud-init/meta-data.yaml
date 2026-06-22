@@ -1,2 +1,2 @@
-instance-id: clarinet-test-vm
-local-hostname: clarinet-test
+instance-id: __HOSTNAME__
+local-hostname: __HOSTNAME__

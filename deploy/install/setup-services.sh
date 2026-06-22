@@ -46,7 +46,24 @@ setup_rabbitmq() {
     log "Setting up RabbitMQ..."
     install_packages_if_missing rabbitmq-server
 
+    # Bind the AMQP listener to all interfaces so a remote worker VM (topology
+    # mode) can reach the broker. The package default already listens on
+    # 0.0.0.0:5672 — set it explicitly so remote access never depends on a
+    # distro default.
+    local rabbit_conf=/etc/rabbitmq/rabbitmq.conf
+    local rabbit_conf_changed=0
+    if ! grep -qs '^listeners\.tcp\.default' "$rabbit_conf"; then
+        mkdir -p /etc/rabbitmq
+        echo 'listeners.tcp.default = 0.0.0.0:5672' >> "$rabbit_conf"
+        rabbit_conf_changed=1
+        log "RabbitMQ listener bound to 0.0.0.0:5672"
+    fi
+
     systemctl enable --now rabbitmq-server
+    if [[ $rabbit_conf_changed -eq 1 ]]; then
+        systemctl restart rabbitmq-server
+        rabbitmqctl await_startup 2>/dev/null || true
+    fi
 
     # Enable management plugin
     rabbitmq-plugins enable rabbitmq_management --quiet 2>/dev/null || true
@@ -82,8 +99,16 @@ setup_orthanc() {
 }
 
 # --- Main ---
-log "Installing external services..."
-setup_postgresql
-setup_rabbitmq
-setup_orthanc
-log "All services configured."
+# Role gating: stand runs the DB + broker, pacs runs Orthanc, worker runs no
+# local daemons (it reaches the broker + API + PACS over the network). Unset
+# role ("all") keeps the single-VM behaviour where everything runs.
+ROLE="${CLARINET_ROLE:-all}"
+log "Installing external services (role: ${ROLE})..."
+if [[ "$ROLE" == all || "$ROLE" == stand ]]; then
+    setup_postgresql
+    setup_rabbitmq
+fi
+if [[ "$ROLE" == all || "$ROLE" == pacs ]]; then
+    setup_orthanc
+fi
+log "External services configured (role: ${ROLE})."
