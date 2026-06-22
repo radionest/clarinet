@@ -112,6 +112,15 @@ def _plan_package_sanitation():
     deactivate_plan_package()
 
 
+@pytest.fixture(autouse=True)
+def _reset_fingerprint_cache():
+    from clarinet.services.pipeline.fingerprint import reset_fingerprint_cache
+
+    reset_fingerprint_cache()
+    yield
+    reset_fingerprint_cache()
+
+
 @pytest.fixture(autouse=True, scope="session")
 def _suppress_pynetdicom_logging():
     """Prevent pynetdicom background threads from polluting test output.

@@ -46,6 +46,11 @@ from .chain import (
     sync_pipeline_definitions,
 )
 from .context import FileResolver, RecordQuery, TaskContext, build_task_context
+from .fingerprint import (
+    compute_fingerprint,
+    queue_version_segment,
+    reset_fingerprint_cache,
+)
 
 # ``FileResolver`` is re-exported here for backward compatibility with
 # downstream projects that imported it as
@@ -75,6 +80,7 @@ __all__ = [
     "TaskContext",
     "build_pipeline_message_from_record",
     "build_task_context",
+    "compute_fingerprint",
     "create_broker",
     "get_all_brokers",
     "get_all_pipelines",
@@ -87,8 +93,10 @@ __all__ = [
     "load_task_modules",
     "persist_definitions",
     "pipeline_task",
+    "queue_version_segment",
     "register_task",
     "reset_brokers",
+    "reset_fingerprint_cache",
     "run_worker",
     "sync_pipeline_definitions",
 ]
