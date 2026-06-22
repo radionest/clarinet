@@ -57,11 +57,12 @@ async def warn_if_stale(queues: list[str]) -> None:
     from clarinet.client import ClarinetAPIError, ClarinetClient
     from clarinet.services.pipeline.fingerprint import compute_fingerprint
 
-    client = ClarinetClient(
-        base_url=settings.effective_api_base_url,
-        service_token=settings.effective_service_token,
-    )
+    client = None
     try:
+        client = ClarinetClient(
+            base_url=settings.effective_api_base_url,
+            service_token=settings.effective_service_token,
+        )
         api_fp = await client.get_worker_fingerprint()
         mine = compute_fingerprint()
         if api_fp != mine:
@@ -78,7 +79,8 @@ async def warn_if_stale(queues: list[str]) -> None:
     except Exception as e:  # diagnostic must never crash worker startup
         logger.warning(f"Unexpected error verifying worker fingerprint: {e}")
     finally:
-        await client.close()
+        if client is not None:
+            await client.close()
 
 
 def load_task_modules() -> None:

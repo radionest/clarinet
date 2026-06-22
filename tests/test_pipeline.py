@@ -1502,3 +1502,20 @@ async def test_warn_if_stale_disabled_is_noop(monkeypatch) -> None:
     with patch("clarinet.client.ClarinetClient") as mk:
         await warn_if_stale(["proj.default"])
     mk.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_warn_if_stale_warning_on_api_error(monkeypatch, caplog) -> None:
+    from clarinet.client import ClarinetAPIError
+
+    monkeypatch.setattr(settings, "pipeline_version_check_enabled", True)
+    mock_client = AsyncMock()
+    mock_client.get_worker_fingerprint = AsyncMock(side_effect=ClarinetAPIError("boom"))
+    mock_client.close = AsyncMock()
+    with (
+        patch("clarinet.client.ClarinetClient", return_value=mock_client),
+        caplog.at_level("WARNING"),
+    ):
+        await warn_if_stale(["proj.default"])
+    assert any(r.levelname == "WARNING" for r in caplog.records)
+    mock_client.close.assert_awaited_once()
