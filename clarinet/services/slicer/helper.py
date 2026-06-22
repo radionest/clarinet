@@ -1095,6 +1095,7 @@ class SlicerHelper:
             seg_node.SetName(name)
 
         if self._image_node is not None:
+            assert_segmentation_matches_volume(seg_node, self._image_node)
             seg_node.SetReferenceImageGeometryParameterFromVolumeNode(self._image_node)
 
         seg_node.CreateDefaultDisplayNodes()
