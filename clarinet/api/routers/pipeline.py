@@ -122,6 +122,18 @@ async def finish_pipeline_run(
     return run
 
 
+@router.get("/fingerprint")
+async def get_fingerprint() -> dict[str, str]:
+    """Return the running API's version fingerprint (no auth — worker-facing).
+
+    Workers compare this against their own fingerprint at startup to detect that
+    they are running stale code (and are therefore listening on dead queues).
+    """
+    from clarinet.services.pipeline.fingerprint import compute_fingerprint
+
+    return {"fingerprint": compute_fingerprint()}
+
+
 @router.get("/{name}/definition", response_model=PipelineDefinitionRead)
 async def get_pipeline_definition(
     name: str,

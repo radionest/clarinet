@@ -120,6 +120,7 @@ SSE_URL = "/api/events"
 
 # --- Pipelines ---
 PIPELINES_BASE = "/api/pipelines"
+PIPELINE_FINGERPRINT = "/api/pipelines/fingerprint"
 PIPELINES_SYNC = "/api/pipelines/sync"
 PIPELINE_RUNS = "/api/pipelines/runs"
 

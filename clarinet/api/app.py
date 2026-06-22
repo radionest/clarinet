@@ -244,6 +244,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
         activate_plan_package(settings.config_tasks_path)
         _ensure_record_types_imported()
+        from clarinet.services.pipeline.fingerprint import compute_fingerprint
+
+        compute_fingerprint()  # pin the startup snapshot before any later plan/ edits
         _load_plan_registries()
     except ConfigLoadError as e:
         raise _config_startup_error(e) from e
