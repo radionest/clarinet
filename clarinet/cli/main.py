@@ -719,8 +719,6 @@ def _patch_ohif_paths(ohif_dir: Path, base_path: str = "") -> None:
     if config_file.exists():
         config = config_file.read_text(encoding="utf-8")
         config = config.replace("routerBasename: '/ohif'", f"routerBasename: '{ohif_base}'")
-        dicomweb_path = f"{base_path}/dicom-web"
-        config = config.replace("'/dicom-web'", f"'{dicomweb_path}'")
         config_file.write_text(config, encoding="utf-8")
 
 

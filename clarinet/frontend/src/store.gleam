@@ -60,6 +60,9 @@ pub type Model {
     // Deployment-level anonymization mode (from /api/info); gates display of
     // the simple per-patient anon_id in the record header.
     anon_per_study: Bool,
+    // DICOMweb backend in use ("builtin" | "external") — gates the builtin-only
+    // OHIF preload widget.
+    dicomweb_backend: String,
     // Viewers
     viewers: List(ViewerInfo),
     // Locale
@@ -209,6 +212,7 @@ pub fn init() -> Model {
     sse: sse.init(),
     sse_enabled: False,
     anon_per_study: False,
+    dicomweb_backend: "builtin",
     viewers: [],
     locale: i18n.En,
     page: NoPage,
@@ -234,6 +238,7 @@ pub fn reset_for_logout(model: Model) -> Model {
     locale: model.locale,
     sse_enabled: model.sse_enabled,
     anon_per_study: model.anon_per_study,
+    dicomweb_backend: model.dicomweb_backend,
     checking_session: False,
     page: NoPage,
   )

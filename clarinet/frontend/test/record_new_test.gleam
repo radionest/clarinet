@@ -21,6 +21,7 @@ fn make_shared() -> shared.Shared {
     cache: cache.init(),
     viewers: [],
     anon_per_study: False,
+    dicomweb_backend: "builtin",
     translate: fn(_) { "" },
     locale: i18n.En,
   )

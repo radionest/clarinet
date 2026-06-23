@@ -14,9 +14,10 @@ from string import Template
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, ORJSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, ORJSONResponse, Response
 from starlette.middleware.gzip import GZipMiddleware
 
+from clarinet.api import ohif_config
 from clarinet.api.exception_handlers import setup_exception_handlers
 
 # Use relative imports for development
@@ -629,6 +630,7 @@ def create_app(root_path: str = "") -> FastAPI:
 
         # Cache rendered index.html with $BASE_PATH / $PROJECT_TITLE substituted
         _index_html_cache: dict[str, str] = {}
+        _app_config_cache: dict[str, str] = {}
 
         def _render_index(index_path: Path) -> str:
             """Read index.html, substitute $BASE_PATH/$PROJECT_TITLE, cache result."""
@@ -643,7 +645,7 @@ def create_app(root_path: str = "") -> FastAPI:
 
         # Serve index.html for all non-API routes (SPA support)
         @app.get("/{full_path:path}", response_model=None)
-        async def serve_spa(full_path: str) -> FileResponse | HTMLResponse:
+        async def serve_spa(full_path: str) -> FileResponse | HTMLResponse | Response:
             """Serve SPA for all non-API routes."""
             # Skip API and DICOMweb routes
             if full_path.startswith(("api/", "dicom-web/")):
@@ -653,6 +655,34 @@ def create_app(root_path: str = "") -> FastAPI:
 
             # OHIF Viewer SPA routing: serve static files or fall back to index.html
             if full_path.startswith("ohif/"):
+                if full_path == "ohif/app-config.js" and settings.ohif_enabled:
+                    cfg_path = ohif_dir / "app-config.js"
+                    if cfg_path.is_file():
+                        if root_path in _app_config_cache:
+                            return Response(
+                                _app_config_cache[root_path],
+                                media_type="application/javascript",
+                            )
+                        text = cfg_path.read_text(encoding="utf-8")
+                        js = ohif_config.render_datasources_js(
+                            backend=settings.dicomweb_backend,
+                            external_root=settings.dicomweb_external_root,
+                            friendly_name=settings.dicomweb_friendly_name,
+                            qido_include=settings.dicomweb_qido_supports_include_field,
+                            fuzzy=settings.dicomweb_supports_fuzzy_matching,
+                            wildcard=settings.dicomweb_supports_wildcard,
+                            base_path=root_path,
+                        )
+                        rendered = ohif_config.inject_datasources(text, js)
+                        if rendered is None:
+                            logger.warning(
+                                f"OHIF app-config.js missing {ohif_config.DATASOURCES_SENTINEL} "
+                                "sentinel; serving unrendered. Run "
+                                "'clarinet ohif install --force-config' to refresh."
+                            )
+                            return Response(text, media_type="application/javascript")
+                        _app_config_cache[root_path] = rendered
+                        return Response(rendered, media_type="application/javascript")
                 if settings.ohif_enabled and ohif_dir.exists():
                     # Try to serve the exact static file
                     ohif_file = ohif_dir / full_path.removeprefix("ohif/")

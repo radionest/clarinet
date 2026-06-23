@@ -13,7 +13,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal, Self
 
-from pydantic import SecretStr, field_validator
+from pydantic import SecretStr, field_validator, model_validator
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
@@ -179,6 +179,23 @@ class Settings(BaseSettings):
 
         return validate_template(v)
 
+    @model_validator(mode="after")
+    def _check_dicomweb_external_root(self) -> Self:
+        """Require dicomweb_external_root (an absolute path) when backend is 'external'."""
+        if self.dicomweb_backend == "external":
+            if not self.dicomweb_external_root:
+                msg = (
+                    "dicomweb_backend='external' requires dicomweb_external_root (e.g. '/pacs-web')"
+                )
+                raise ValueError(msg)
+            if not self.dicomweb_external_root.startswith("/"):
+                msg = (
+                    "dicomweb_external_root must be an absolute path starting with '/' "
+                    "(e.g. '/pacs-web') — it is prefixed with the deploy base path at render time"
+                )
+                raise ValueError(msg)
+        return self
+
     anon_names_list: str | None = None
 
     # Frontend settings
@@ -245,6 +262,22 @@ class Settings(BaseSettings):
     # "first read precedes anonymize" races recover without an API restart.
     dicomweb_dcm_anon_path_cache_max_entries: int = 1000
     dicomweb_dcm_anon_path_cache_ttl_seconds: int = 300
+
+    # --- DICOMweb backend selection (which proxy OHIF talks to) ---
+    # "builtin" = in-process proxy router (/dicom-web); "external" = a separate
+    # DICOMweb server (e.g. Orthanc) reverse-proxied same-origin by nginx.
+    # Drives the OHIF app-config.js dataSources block (clarinet/api/ohif_config.py).
+    dicomweb_backend: Literal["builtin", "external"] = "builtin"
+    # Same-origin path OHIF uses for QIDO/WADO when backend == "external"
+    # (e.g. "/pacs-web"); nginx proxies it to the local DICOMweb server. The
+    # deploy base path is prepended at render time. Required when "external".
+    dicomweb_external_root: str | None = None
+    dicomweb_friendly_name: str = "Clarinet PACS"
+    # OHIF capability flags. None -> per-backend default (builtin: False,
+    # external: True), resolved in clarinet/api/ohif_config.py.
+    dicomweb_qido_supports_include_field: bool | None = None
+    dicomweb_supports_fuzzy_matching: bool | None = None
+    dicomweb_supports_wildcard: bool | None = None
 
     # OHIF viewer settings
     ohif_enabled: bool = True
