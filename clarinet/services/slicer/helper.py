@@ -193,8 +193,15 @@ def assert_segmentation_matches_volume(
     ref_geom = slicer.vtkOrientedImageData()
     slicer.vtkSegmentationConverter.DeserializeImageGeometry(geom_str, ref_geom, False)
 
+    vol_image = volume_node.GetImageData()
+    if vol_image is None:
+        raise SlicerHelperError(
+            "Reference volume has no image data — cannot verify segmentation geometry "
+            "(load the volume before validating a segmentation against it)."
+        )
+
     seg_dims = tuple(ref_geom.GetDimensions())
-    vol_dims = tuple(volume_node.GetImageData().GetDimensions())
+    vol_dims = tuple(vol_image.GetDimensions())
 
     # In Slicer "world" space is RAS, so the segmentation's ImageToWorld matrix
     # and the volume's IJKToRAS matrix live in the same space and are directly
