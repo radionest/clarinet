@@ -15,6 +15,7 @@ MANAGED = Path(".claude") / "rules" / "clarinet"
 
 DOCS = Path(clarinet.__file__).resolve().parent / "docs"
 AGENT_CLAUDE = DOCS / "agent" / "claude"
+RULES_DIR = Path(clarinet.__file__).resolve().parent.parent / ".claude" / "rules"
 
 SECTION_RULES = ["definitions", "workflows", "slicer", "schemas", "utils"]
 DEEP_DOCS = [
@@ -122,3 +123,24 @@ def test_cli_init_existing_exits(tmp_path: Path) -> None:
     with pytest.raises(SystemExit) as exc:
         handle_agent_command(args)
     assert exc.value.code == 1
+
+
+@pytest.mark.skipif(not RULES_DIR.is_dir(), reason="repo .claude/rules absent (installed wheel)")
+def test_deep_docs_identical_to_rules_seeds() -> None:
+    for name in DEEP_DOCS:
+        shipped = DOCS / f"{name}.md"
+        seed = RULES_DIR / f"{name}.md"
+        assert shipped.read_bytes() == seed.read_bytes(), (
+            f"clarinet/docs/{name}.md has drifted from .claude/rules/{name}.md — re-copy the seed"
+        )
+
+
+def test_written_deep_doc_links_resolve(tmp_path: Path) -> None:
+    dest = scaffold_agent_docs("claude", project_dir=tmp_path, mode="init")
+    overview = (dest / "overview.md").read_text(encoding="utf-8")
+    deep_link_re = re.compile(r"(/[^\s`'\"]+/docs/[\w.-]+\.md)")
+    matches = deep_link_re.findall(overview)
+    deep_matches = [m for m in matches if any(m.endswith(f"{n}.md") for n in DEEP_DOCS)]
+    assert deep_matches, "no substituted deep-doc link found in written overview.md"
+    for link in deep_matches:
+        assert Path(link).is_file(), f"written link does not resolve to a file: {link}"
