@@ -1,11 +1,13 @@
 """Unit tests for clarinet.utils.agent_scaffold and the shipped clarinet/docs payload."""
 
+import argparse
 import re
 from pathlib import Path
 
 import pytest
 
 import clarinet
+from clarinet.cli.main import handle_agent_command
 from clarinet.exceptions.domain import AgentScaffoldError
 from clarinet.utils.agent_scaffold import agent_source_dir, scaffold_agent_docs
 
@@ -97,3 +99,26 @@ def test_update_overwrites_and_reresolves(tmp_path: Path) -> None:
     refreshed = (dest / "overview.md").read_text(encoding="utf-8")
     assert "STALE" not in refreshed
     assert refreshed.startswith("<!-- managed by clarinet v")
+
+
+def test_cli_init_then_update(tmp_path: Path) -> None:
+    args = argparse.Namespace(
+        command="agent", agent_command="init", path=str(tmp_path), agent="claude", force=False
+    )
+    handle_agent_command(args)
+    assert (tmp_path / MANAGED / "overview.md").is_file()
+
+    upd = argparse.Namespace(
+        command="agent", agent_command="update", path=str(tmp_path), agent="claude"
+    )
+    handle_agent_command(upd)  # must not raise now that the dir is populated
+
+
+def test_cli_init_existing_exits(tmp_path: Path) -> None:
+    args = argparse.Namespace(
+        command="agent", agent_command="init", path=str(tmp_path), agent="claude", force=False
+    )
+    handle_agent_command(args)
+    with pytest.raises(SystemExit) as exc:
+        handle_agent_command(args)
+    assert exc.value.code == 1

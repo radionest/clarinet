@@ -23,6 +23,10 @@ template ships a `.claude/CLAUDE.md` and `.claude/rules/*.md` covering
 definitions / workflows / slicer / schemas / utils — agents working in a
 generated project get section-specific guidance auto-loaded.
 
+For an existing project (or one not made from the `research` template), run
+`clarinet agent init` to install framework agent docs into `.claude/rules/clarinet/`
+(re-run `clarinet agent update` after upgrading clarinet to refresh them).
+
 ## Project Structure
 
 ```

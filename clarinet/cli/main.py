@@ -1175,6 +1175,45 @@ def handle_quarto_command(args: argparse.Namespace) -> None:
         sys.exit(1)
 
 
+def cmd_agent_init(args: argparse.Namespace) -> None:
+    """Handle ``clarinet agent init`` — install managed agent docs into a project."""
+    from clarinet.exceptions.domain import AgentScaffoldError
+    from clarinet.utils.agent_scaffold import scaffold_agent_docs
+
+    try:
+        dest = scaffold_agent_docs(
+            args.agent, project_dir=Path(args.path), mode="init", force=args.force
+        )
+    except AgentScaffoldError as exc:
+        logger.error(f"{exc}")
+        sys.exit(1)
+    logger.info(f"Agent docs installed at {dest}")
+
+
+def cmd_agent_update(args: argparse.Namespace) -> None:
+    """Handle ``clarinet agent update`` — refresh managed agent docs + re-resolve links."""
+    from clarinet.exceptions.domain import AgentScaffoldError
+    from clarinet.utils.agent_scaffold import scaffold_agent_docs
+
+    try:
+        dest = scaffold_agent_docs(args.agent, project_dir=Path(args.path), mode="update")
+    except AgentScaffoldError as exc:
+        logger.error(f"{exc}")
+        sys.exit(1)
+    logger.info(f"Agent docs updated at {dest}")
+
+
+def handle_agent_command(args: argparse.Namespace) -> None:
+    """Handle agent-docs commands."""
+    if args.agent_command == "init":
+        cmd_agent_init(args)
+    elif args.agent_command == "update":
+        cmd_agent_update(args)
+    else:
+        logger.error(f"Unknown agent command: {args.agent_command}")
+        sys.exit(1)
+
+
 async def _rabbitmq_clean(dry_run: bool = False) -> None:
     """Delete orphaned test queues/exchanges from RabbitMQ."""
     from clarinet.services.pipeline.rabbitmq_cleanup import cleanup_test_resources
@@ -1516,6 +1555,33 @@ def main() -> None:
         "--force", action="store_true", help="Overwrite existing .qmd / reference.docx"
     )
 
+    # agent command
+    agent_parser = subparsers.add_parser(
+        "agent", help="Manage framework agent docs in a project's .claude/rules/clarinet/"
+    )
+    agent_subparsers = agent_parser.add_subparsers(dest="agent_command")
+
+    agent_init_parser = agent_subparsers.add_parser(
+        "init", help="Install agent docs into a project"
+    )
+    agent_init_parser.add_argument("path", nargs="?", default=".", help="Project dir (default: .)")
+    agent_init_parser.add_argument(
+        "--agent", default="claude", choices=["claude"], help="Target agent (default: claude)"
+    )
+    agent_init_parser.add_argument(
+        "--force", action="store_true", help="Overwrite existing managed docs"
+    )
+
+    agent_update_parser = agent_subparsers.add_parser(
+        "update", help="Refresh agent docs and re-resolve package links"
+    )
+    agent_update_parser.add_argument(
+        "path", nargs="?", default=".", help="Project dir (default: .)"
+    )
+    agent_update_parser.add_argument(
+        "--agent", default="claude", choices=["claude"], help="Target agent (default: claude)"
+    )
+
     # worker command
     worker_parser = subparsers.add_parser("worker", help="Run pipeline task worker")
     worker_parser.add_argument(
@@ -1840,6 +1906,8 @@ def main() -> None:
         handle_ohif_command(args)
     elif args.command == "quarto":
         handle_quarto_command(args)
+    elif args.command == "agent":
+        handle_agent_command(args)
     elif args.command == "session":
         if not args.session_command:
             session_parser.print_help()
