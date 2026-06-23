@@ -727,21 +727,6 @@ class TestJSONSerialization:
         assert "content" not in captured
         assert captured["data"] == {"username": "u", "password": "p"}
 
-
-@pytest.mark.asyncio
-async def test_get_worker_fingerprint(monkeypatch) -> None:
-    client = ClarinetClient("http://x/api", service_token="t", auto_login=False)
-
-    async def fake_request(method, endpoint, **kwargs):
-        assert (method, endpoint) == ("GET", "/pipelines/fingerprint")
-        return httpx.Response(200, json={"fingerprint": "1.0:abc"})
-
-    monkeypatch.setattr(client, "_request", fake_request)
-    try:
-        assert await client.get_worker_fingerprint() == "1.0:abc"
-    finally:
-        await client.close()
-
     @pytest.mark.asyncio
     async def test_request_preserves_caller_headers(self) -> None:
         """Caller-supplied headers (Authorization, custom Content-Type) must survive."""
@@ -879,6 +864,21 @@ async def test_get_worker_fingerprint(monkeypatch) -> None:
         # httpx.Headers normalizes to a single case-insensitive entry.
         assert headers["Content-Type"] == "application/xml"
         assert headers["content-type"] == "application/xml"
+
+
+@pytest.mark.asyncio
+async def test_get_worker_fingerprint(monkeypatch) -> None:
+    client = ClarinetClient("http://x/api", service_token="t", auto_login=False)
+
+    async def fake_request(method, endpoint, **kwargs):
+        assert (method, endpoint) == ("GET", "/pipelines/fingerprint")
+        return httpx.Response(200, json={"fingerprint": "1.0:abc"})
+
+    monkeypatch.setattr(client, "_request", fake_request)
+    try:
+        assert await client.get_worker_fingerprint() == "1.0:abc"
+    finally:
+        await client.close()
 
 
 class TestDownloadReport:
