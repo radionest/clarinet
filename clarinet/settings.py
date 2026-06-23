@@ -181,10 +181,19 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _check_dicomweb_external_root(self) -> Self:
-        """Require dicomweb_external_root when backend is 'external'."""
-        if self.dicomweb_backend == "external" and not self.dicomweb_external_root:
-            msg = "dicomweb_backend='external' requires dicomweb_external_root (e.g. '/pacs-web')"
-            raise ValueError(msg)
+        """Require dicomweb_external_root (an absolute path) when backend is 'external'."""
+        if self.dicomweb_backend == "external":
+            if not self.dicomweb_external_root:
+                msg = (
+                    "dicomweb_backend='external' requires dicomweb_external_root (e.g. '/pacs-web')"
+                )
+                raise ValueError(msg)
+            if not self.dicomweb_external_root.startswith("/"):
+                msg = (
+                    "dicomweb_external_root must be an absolute path starting with '/' "
+                    "(e.g. '/pacs-web') — it is prefixed with the deploy base path at render time"
+                )
+                raise ValueError(msg)
         return self
 
     anon_names_list: str | None = None

@@ -25,6 +25,12 @@ Effect: `GET /ohif/app-config.js` renders OHIF's `dataSources` with
 preload widget is hidden in the frontend (it only warms the builtin cache). Changing the
 backend is a settings edit + API restart — no `clarinet ohif install` re-run.
 
+`dicomweb_enabled = false` un-mounts Clarinet's builtin `/dicom-web` proxy router (it is
+mounted when `dicomweb_enabled = true`, the default). With the `external` backend OHIF never
+calls `/dicom-web`, so leaving it mounted only keeps an unused, PACS-reachable endpoint
+exposed — disable it unless you still rely on the builtin archive/preload endpoints. The two
+settings are intentionally independent; nothing auto-disables the router for you.
+
 `{base_path}` is the sub-path the instance is deployed under (e.g. `/liver_nir`), empty for a
 root deploy. Below, substitute it wherever `{base_path}` appears.
 
