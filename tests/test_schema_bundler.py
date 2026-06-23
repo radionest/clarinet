@@ -143,3 +143,18 @@ def test_same_name_from_two_files_raises(tmp_path: Path) -> None:
     }
     with pytest.raises(ConfigLoadError):
         bundle_external_defs(schema, tmp_path)
+
+
+def test_non_defs_intra_doc_ref_in_def_raises(tmp_path: Path) -> None:
+    # A shared def whose internal $ref targets a non-$defs location would
+    # silently re-resolve against the destination document once hoisted.
+    _write(
+        tmp_path / "common.schema.json",
+        {
+            "properties": {"shared": {"type": "string"}},
+            "$defs": {"Wrap": {"$ref": "#/properties/shared"}},
+        },
+    )
+    schema = {"properties": {"w": {"$ref": "common.schema.json#/$defs/Wrap"}}}
+    with pytest.raises(ConfigLoadError):
+        bundle_external_defs(schema, tmp_path)

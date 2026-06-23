@@ -83,7 +83,15 @@ def bundle_external_defs(schema: dict[str, Any], base_dir: Path) -> dict[str, An
                         _register(sib, file_part)
                         out[k] = f"#/$defs/{sib}"
                     elif v.startswith("#"):
-                        out[k] = v  # other intra-doc ref — leave
+                        # A portable hoisted def may only self-reference sibling
+                        # $defs entries (handled above). Any other intra-doc
+                        # pointer (e.g. #/properties/x) would silently re-resolve
+                        # against the destination document once the def is hoisted,
+                        # so reject it — keep the fail-fast single-layer invariant.
+                        raise ConfigLoadError(
+                            f"Unsupported intra-document $ref inside a shared def: "
+                            f"'{v}' — only sibling '#/$defs/<Name>' refs are allowed"
+                        )
                     else:
                         raise ConfigLoadError(
                             f"Cross-file $ref chain not supported: a shared def references '{v}'"
