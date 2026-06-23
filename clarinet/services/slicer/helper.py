@@ -1095,7 +1095,11 @@ class SlicerHelper:
             seg_node.SetName(name)
 
         if self._image_node is not None:
-            assert_segmentation_matches_volume(seg_node, self._image_node)
+            try:
+                assert_segmentation_matches_volume(seg_node, self._image_node)
+            except SlicerHelperError:
+                slicer.mrmlScene.RemoveNode(seg_node)
+                raise
             seg_node.SetReferenceImageGeometryParameterFromVolumeNode(self._image_node)
 
         seg_node.CreateDefaultDisplayNodes()
@@ -1938,11 +1942,20 @@ class SlicerHelper:
         # Export both with mode 0 (reference geometry extent) → same shape
         labelmap_b = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLLabelMapVolumeNode", "_sub_b")
         seg_logic.ExportAllSegmentsToLabelmapNode(node_b, labelmap_b, 0)
-        arr_b = _labelmap_array_or_raise(labelmap_b, what="the subtracted segmentation (seg_b)")
+        try:
+            arr_b = _labelmap_array_or_raise(labelmap_b, what="the subtracted segmentation (seg_b)")
+        except SlicerHelperError:
+            slicer.mrmlScene.RemoveNode(labelmap_b)
+            raise
 
         labelmap_a = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLLabelMapVolumeNode", "_sub_a")
         seg_logic.ExportAllSegmentsToLabelmapNode(node_a, labelmap_a, 0)
-        arr_a = _labelmap_array_or_raise(labelmap_a, what="the base segmentation (seg_a)")
+        try:
+            arr_a = _labelmap_array_or_raise(labelmap_a, what="the base segmentation (seg_a)")
+        except SlicerHelperError:
+            slicer.mrmlScene.RemoveNode(labelmap_a)
+            slicer.mrmlScene.RemoveNode(labelmap_b)
+            raise
 
         vtk_seg_a = node_a.GetSegmentation()
         segments_to_remove: list[str] = []
@@ -2017,7 +2030,11 @@ class SlicerHelper:
         # Phase A — merge all segments into a single binary labelmap
         labelmap = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLLabelMapVolumeNode", "_bin_tmp")
         seg_logic.ExportAllSegmentsToLabelmapNode(node, labelmap, 0)
-        arr = _labelmap_array_or_raise(labelmap, what="the segmentation to binarize")
+        try:
+            arr = _labelmap_array_or_raise(labelmap, what="the segmentation to binarize")
+        except SlicerHelperError:
+            slicer.mrmlScene.RemoveNode(labelmap)
+            raise
         arr_binary = (arr > 0).astype(np.uint8)
         slicer.util.updateVolumeFromArray(labelmap, arr_binary)
 
@@ -2087,7 +2104,11 @@ class SlicerHelper:
         # Export source → binarize
         labelmap = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLLabelMapVolumeNode", "_pool_tmp")
         seg_logic.ExportAllSegmentsToLabelmapNode(source_node, labelmap, 0)
-        arr = _labelmap_array_or_raise(labelmap, what="the pool source segmentation")
+        try:
+            arr = _labelmap_array_or_raise(labelmap, what="the pool source segmentation")
+        except SlicerHelperError:
+            slicer.mrmlScene.RemoveNode(labelmap)
+            raise
         arr_binary = (arr > 0).astype(np.uint8)
         slicer.util.updateVolumeFromArray(labelmap, arr_binary)
 
