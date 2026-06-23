@@ -103,3 +103,26 @@ async def test_config_loader_sidecar_bundles_external_def(tmp_path: Path) -> Non
     schema = props["data_schema"]
     assert schema["properties"]["grade"] == {"$ref": "#/$defs/Grade"}
     assert "Grade" in schema["$defs"]
+
+
+@pytest.mark.asyncio
+async def test_toml_mode_bad_ref_fails_fast(tmp_path: Path, monkeypatch) -> None:
+    # A TOML-mode config whose schema references a missing shared file must
+    # crash reconcile (fail-fast), not be silently skipped.
+    _write(
+        tmp_path / "bad.schema.json",
+        {"type": "object", "properties": {"x": {"$ref": "nope.schema.json#/$defs/X"}}},
+    )
+    _write(
+        tmp_path / "bad.json", {"name": "bad", "level": "SERIES", "data_schema": "bad.schema.json"}
+    )
+
+    from clarinet.exceptions.domain import ConfigLoadError
+    from clarinet.settings import settings
+    from clarinet.utils.bootstrap import reconcile_config
+
+    monkeypatch.setattr(settings, "config_mode", "toml")
+    monkeypatch.setattr(settings, "config_tasks_path", str(tmp_path))
+
+    with pytest.raises(ConfigLoadError):
+        await reconcile_config()
