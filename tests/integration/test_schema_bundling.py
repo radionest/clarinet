@@ -85,3 +85,21 @@ async def test_config_loader_bundles_external_def(tmp_path: Path) -> None:
     schema = props["data_schema"]
     assert schema["properties"]["grade"] == {"$ref": "#/$defs/Grade"}
     assert "Grade" in schema["$defs"]
+
+
+@pytest.mark.asyncio
+async def test_config_loader_sidecar_bundles_external_def(tmp_path: Path) -> None:
+    _write(tmp_path / "_common.schema.json", {"$defs": {"Grade": {"type": "string"}}})
+    _write(
+        tmp_path / "lesion.schema.json",
+        {"type": "object", "properties": {"grade": {"$ref": "_common.schema.json#/$defs/Grade"}}},
+    )
+    # No data_schema in the config → loader resolves the `{stem}.schema.json` sidecar.
+    _write(tmp_path / "lesion.json", {"name": "lesion", "level": "SERIES"})
+
+    props = await load_record_config(tmp_path / "lesion.json")
+
+    assert props is not None
+    schema = props["data_schema"]
+    assert schema["properties"]["grade"] == {"$ref": "#/$defs/Grade"}
+    assert "Grade" in schema["$defs"]
