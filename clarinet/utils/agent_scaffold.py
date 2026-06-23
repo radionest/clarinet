@@ -9,6 +9,7 @@ environment. Pure file/CLI logic — no DB, no app state (mirror of quarto_scaff
 
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
+from typing import Literal
 
 import clarinet
 from clarinet.exceptions.domain import AgentScaffoldError
@@ -66,7 +67,7 @@ def scaffold_agent_docs(
     agent: str = "claude",
     *,
     project_dir: Path,
-    mode: str,
+    mode: Literal["init", "update"],
     force: bool = False,
 ) -> Path:
     """Install (``mode="init"``) or refresh (``mode="update"``) the managed agent docs.

@@ -1907,7 +1907,10 @@ def main() -> None:
     elif args.command == "quarto":
         handle_quarto_command(args)
     elif args.command == "agent":
-        handle_agent_command(args)
+        if not args.agent_command:
+            agent_parser.print_help()
+        else:
+            handle_agent_command(args)
     elif args.command == "session":
         if not args.session_command:
             session_parser.print_help()
