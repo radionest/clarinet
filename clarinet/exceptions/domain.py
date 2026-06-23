@@ -404,6 +404,11 @@ class QuartoScaffoldError(ClarinetError):
     source ``.docx`` passed to ``--from-docx``."""
 
 
+class AgentScaffoldError(ClarinetError):
+    """Raised when installing/refreshing agent docs fails (bad agent, missing
+    package payload, init over an existing managed dir, update with none)."""
+
+
 # Configuration errors
 class ConfigurationError(ClarinetError):
     """Raised when there's a configuration problem."""

@@ -112,6 +112,7 @@ exclude = [
 [tool.hatch.build]
 artifacts = [
     "clarinet/static/**/*",
+    "clarinet/docs/**/*",
 ]
 
 [dependency-groups]
