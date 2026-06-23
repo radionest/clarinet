@@ -193,8 +193,15 @@ def assert_segmentation_matches_volume(
     ref_geom = slicer.vtkOrientedImageData()
     slicer.vtkSegmentationConverter.DeserializeImageGeometry(geom_str, ref_geom, False)
 
+    vol_image = volume_node.GetImageData()
+    if vol_image is None:
+        raise SlicerHelperError(
+            "Reference volume has no image data — cannot verify segmentation geometry "
+            "(load the volume before validating a segmentation against it)."
+        )
+
     seg_dims = tuple(ref_geom.GetDimensions())
-    vol_dims = tuple(volume_node.GetImageData().GetDimensions())
+    vol_dims = tuple(vol_image.GetDimensions())
 
     # In Slicer "world" space is RAS, so the segmentation's ImageToWorld matrix
     # and the volume's IJKToRAS matrix live in the same space and are directly
@@ -248,6 +255,60 @@ def export_segmentation(name: str, output_path: str, *, reference_volume: Any = 
         raise SlicerHelperError(f"Export failed: file not created at {output_path}")
 
     return output_path
+
+
+def _labelmap_array_or_raise(labelmap_node: Any, source_node: Any, *, what: str) -> Any | None:
+    """Read an exported labelmap as a numpy array; classify an empty export.
+
+    ``ExportAllSegmentsToLabelmapNode`` yields a labelmap with no scalars whenever
+    the export lands no voxels on the reference volume grid. Two very different
+    causes need opposite handling:
+
+    - **Foreign grid** — the source carries painted voxels in its own grid that
+      vanish when re-gridded to the reference extent (a mask saved on a
+      flipped/foreign grid: the projection Z-flip bug class).
+      ``slicer.util.arrayFromVolume`` would then dereference ``None`` and crash
+      with an opaque ``'NoneType' object has no attribute 'GetDataType'``. Raise a
+      diagnosable ``SlicerHelperError`` pointing at the on-disk repair instead —
+      the set-op companion to the save-time ``assert_segmentation_matches_volume``.
+    - **Genuinely empty** — the source has no voxels anywhere. Pre-guard set-ops
+      treated this as a no-op; preserve that. Warn and return ``None`` so the
+      caller can short-circuit to its own empty-result path.
+
+    Args:
+        labelmap_node: The exported ``vtkMRMLLabelMapVolumeNode``.
+        source_node: The segmentation node that was exported. Inspected (native
+            per-segment labelmaps, independent of the reference geometry) to tell
+            the two empty causes apart.
+        what: Human description of the export, for diagnostics.
+
+    Returns:
+        The labelmap as a numpy array, or ``None`` when the source is genuinely
+        empty (the caller treats this as an empty result / no-op).
+
+    Raises:
+        SlicerHelperError: Empty export from a source that *does* carry voxels —
+            a flipped/foreign grid that does not overlap the reference extent.
+    """
+    image = labelmap_node.GetImageData()
+    point_data = image.GetPointData() if image is not None else None
+    scalars = point_data.GetScalars() if point_data is not None else None
+    if scalars is not None:
+        return slicer.util.arrayFromVolume(labelmap_node)
+
+    if _segmentation_has_voxels(source_node):
+        raise SlicerHelperError(
+            f"Exporting {what} produced an empty labelmap although the source carries "
+            "voxels — the mask sits on a flipped/foreign grid and does not overlap the "
+            "reference volume extent. Conform the file to the volume grid "
+            "(clarinet.services.image.conform_seg_to_grid) and retry."
+        )
+
+    print(
+        f"[SlicerHelper] WARNING: {what} is empty (no voxels on any grid) — treating it "
+        "as an empty result (no-op), not a grid mismatch."
+    )
+    return None
 
 
 def _find_segment_id(vtk_seg: Any, name: str) -> str | None:
@@ -360,6 +421,24 @@ def is_segment_empty(segmentation_node: Any, segment_id: str) -> bool:
         True if segment is empty (no voxels) or not found.
     """
     return _get_segment_mask(segmentation_node, segment_id) is None
+
+
+def _segmentation_has_voxels(segmentation_node: Any) -> bool:
+    """True if any segment carries non-zero voxels in its native labelmap.
+
+    Distinguishes a genuinely empty segmentation (no voxels anywhere — set-ops
+    tolerate it as a no-op) from a foreign-grid mask whose voxels exist in their
+    own grid but vanish when re-gridded to the reference extent (the flipped-grid
+    bug — set-ops must fail fast). Inspects each segment's native binary labelmap,
+    which is independent of the reference geometry, so it stays non-empty for a
+    foreign-grid mask even after ``SetReferenceImageGeometryParameterFromVolumeNode``.
+    """
+    vtk_seg = segmentation_node.GetSegmentation()
+    for i in range(vtk_seg.GetNumberOfSegments()):
+        seg_id = vtk_seg.GetNthSegmentID(i)
+        if not is_segment_empty(segmentation_node, seg_id):
+            return True
+    return False
 
 
 def count_segment_components(segmentation_node: Any, segment_name: str) -> int:
@@ -1072,6 +1151,11 @@ class SlicerHelper:
             seg_node.SetName(name)
 
         if self._image_node is not None:
+            try:
+                assert_segmentation_matches_volume(seg_node, self._image_node)
+            except SlicerHelperError:
+                slicer.mrmlScene.RemoveNode(seg_node)
+                raise
             seg_node.SetReferenceImageGeometryParameterFromVolumeNode(self._image_node)
 
         seg_node.CreateDefaultDisplayNodes()
@@ -1914,31 +1998,48 @@ class SlicerHelper:
         # Export both with mode 0 (reference geometry extent) → same shape
         labelmap_b = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLLabelMapVolumeNode", "_sub_b")
         seg_logic.ExportAllSegmentsToLabelmapNode(node_b, labelmap_b, 0)
-        arr_b = slicer.util.arrayFromVolume(labelmap_b)
+        try:
+            arr_b = _labelmap_array_or_raise(
+                labelmap_b, node_b, what="the subtracted segmentation (seg_b)"
+            )
+        except SlicerHelperError:
+            slicer.mrmlScene.RemoveNode(labelmap_b)
+            raise
 
         labelmap_a = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLLabelMapVolumeNode", "_sub_a")
         seg_logic.ExportAllSegmentsToLabelmapNode(node_a, labelmap_a, 0)
-        arr_a = slicer.util.arrayFromVolume(labelmap_a)
+        try:
+            arr_a = _labelmap_array_or_raise(
+                labelmap_a, node_a, what="the base segmentation (seg_a)"
+            )
+        except SlicerHelperError:
+            slicer.mrmlScene.RemoveNode(labelmap_a)
+            slicer.mrmlScene.RemoveNode(labelmap_b)
+            raise
 
         vtk_seg_a = node_a.GetSegmentation()
         segments_to_remove: list[str] = []
 
-        for i in range(vtk_seg_a.GetNumberOfSegments()):
-            seg_id = vtk_seg_a.GetNthSegmentID(i)
-            label_value = i + 1  # merged labelmap: segment 0 → label 1
+        # A None array means a source was genuinely empty (already warned, tolerated):
+        # an empty base subtracts to itself, an empty subtrahend removes nothing —
+        # either way no segment is dropped, so skip the overlap scan entirely.
+        if arr_a is not None and arr_b is not None:
+            for i in range(vtk_seg_a.GetNumberOfSegments()):
+                seg_id = vtk_seg_a.GetNthSegmentID(i)
+                label_value = i + 1  # merged labelmap: segment 0 → label 1
 
-            mask_a = arr_a == label_value
-            total = int(np.sum(mask_a))
-            if total == 0:
-                continue
+                mask_a = arr_a == label_value
+                total = int(np.sum(mask_a))
+                if total == 0:
+                    continue
 
-            overlap = int(np.sum(mask_a & (arr_b > 0)))
+                overlap = int(np.sum(mask_a & (arr_b > 0)))
 
-            remove = overlap > max_overlap
-            if max_overlap_ratio is not None:
-                remove = remove and (overlap / total > max_overlap_ratio)
-            if remove:
-                segments_to_remove.append(seg_id)
+                remove = overlap > max_overlap
+                if max_overlap_ratio is not None:
+                    remove = remove and (overlap / total > max_overlap_ratio)
+                if remove:
+                    segments_to_remove.append(seg_id)
 
         slicer.mrmlScene.RemoveNode(labelmap_a)
         slicer.mrmlScene.RemoveNode(labelmap_b)
@@ -1993,7 +2094,19 @@ class SlicerHelper:
         # Phase A — merge all segments into a single binary labelmap
         labelmap = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLLabelMapVolumeNode", "_bin_tmp")
         seg_logic.ExportAllSegmentsToLabelmapNode(node, labelmap, 0)
-        arr = slicer.util.arrayFromVolume(labelmap)
+        try:
+            arr = _labelmap_array_or_raise(labelmap, node, what="the segmentation to binarize")
+        except SlicerHelperError:
+            slicer.mrmlScene.RemoveNode(labelmap)
+            raise
+        if arr is None:
+            # Genuinely empty source — no islands to split. Return an empty node.
+            slicer.mrmlScene.RemoveNode(labelmap)
+            output_node = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentationNode", output_name)
+            output_node.CreateDefaultDisplayNodes()
+            if self._image_node is not None:
+                output_node.SetReferenceImageGeometryParameterFromVolumeNode(self._image_node)
+            return output_node
         arr_binary = (arr > 0).astype(np.uint8)
         slicer.util.updateVolumeFromArray(labelmap, arr_binary)
 
@@ -2063,7 +2176,17 @@ class SlicerHelper:
         # Export source → binarize
         labelmap = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLLabelMapVolumeNode", "_pool_tmp")
         seg_logic.ExportAllSegmentsToLabelmapNode(source_node, labelmap, 0)
-        arr = slicer.util.arrayFromVolume(labelmap)
+        try:
+            arr = _labelmap_array_or_raise(
+                labelmap, source_node, what="the pool source segmentation"
+            )
+        except SlicerHelperError:
+            slicer.mrmlScene.RemoveNode(labelmap)
+            raise
+        if arr is None:
+            # Genuinely empty source — nothing to pool (pre-guard no-op).
+            slicer.mrmlScene.RemoveNode(labelmap)
+            return
         arr_binary = (arr > 0).astype(np.uint8)
         slicer.util.updateVolumeFromArray(labelmap, arr_binary)
 
