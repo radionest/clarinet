@@ -1444,6 +1444,7 @@ fn render_record_execution(
         option.map(record.record_type, fn(rt) { rt.level }),
         option.map(record.record_type, fn(rt) { rt.viewer_mode })
           |> option.unwrap("single_series"),
+        viewer.ohif_preload_enabled(shared.dicomweb_backend),
         "btn btn-primary",
         fn(url, study_uids) { RequestPreload(url, study_uids) },
       ),

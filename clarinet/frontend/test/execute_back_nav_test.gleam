@@ -35,6 +35,7 @@ fn make_shared_with_cache(
     cache: c,
     viewers: [],
     anon_per_study: False,
+    dicomweb_backend: "builtin",
     translate: fn(_) { "" },
     locale: i18n.En,
   )

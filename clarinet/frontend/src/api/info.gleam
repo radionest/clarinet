@@ -19,6 +19,10 @@ pub type ProjectInfo {
     // per-patient anon_id must not be shown (it is stable across studies and
     // would defeat per-study unlinkability).
     anon_per_study: Bool,
+    // DICOMweb backend in use ("builtin" | "external"). Gates the builtin-only
+    // OHIF preload widget — external backends (e.g. Orthanc) serve their own
+    // DICOMweb, so preloading the builtin cache is meaningless.
+    dicomweb_backend: String,
   )
 }
 
@@ -38,12 +42,18 @@ fn project_info_decoder() -> decode.Decoder(ProjectInfo) {
     False,
     decode.bool,
   )
+  use dicomweb_backend <- decode.optional_field(
+    "dicomweb_backend",
+    "builtin",
+    decode.string,
+  )
   decode.success(ProjectInfo(
     project_name:,
     project_description:,
     viewers:,
     sse_enabled:,
     anon_per_study:,
+    dicomweb_backend:,
   ))
 }
 
