@@ -42,6 +42,7 @@ def bundle_external_defs(schema: dict[str, Any], base_dir: Path) -> dict[str, An
     """
     result = copy.deepcopy(schema)
     hoisted: dict[str, Any] = {}
+    source: dict[str, str] = {}
     file_cache: dict[Path, dict[str, Any]] = {}
 
     def _load_file(file_part: str) -> dict[str, Any]:
@@ -96,7 +97,15 @@ def bundle_external_defs(schema: dict[str, Any], base_dir: Path) -> dict[str, An
 
     def _register(name: str, file_part: str) -> None:
         if name in hoisted:
+            prior = source.get(name)
+            if prior is not None and prior != file_part:
+                raise ConfigLoadError(
+                    f"$defs name '{name}' is referenced from two different "
+                    f"files ('{prior}' and '{file_part}') — rename one so the "
+                    f"local $defs key is unambiguous"
+                )
             return
+        source[name] = file_part
         defs = _load_file(file_part)
         pool = defs.get("$defs") or defs.get("definitions") or {}
         if name not in pool:

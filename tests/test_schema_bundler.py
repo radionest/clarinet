@@ -120,3 +120,26 @@ def test_idempotent_on_already_bundled_schema(tmp_path: Path) -> None:
     once = bundle_external_defs(schema, tmp_path)
     twice = bundle_external_defs(once, tmp_path)
     assert twice == once
+
+
+def test_definitions_pointer_is_supported(tmp_path: Path) -> None:
+    _write(
+        tmp_path / "legacy.schema.json", {"definitions": {"X": {"type": "string", "enum": ["a"]}}}
+    )
+    schema = {"properties": {"a": {"$ref": "legacy.schema.json#/definitions/X"}}}
+    out = bundle_external_defs(schema, tmp_path)
+    assert out["properties"]["a"] == {"$ref": "#/$defs/X"}
+    assert out["$defs"]["X"]["enum"] == ["a"]
+
+
+def test_same_name_from_two_files_raises(tmp_path: Path) -> None:
+    _write(tmp_path / "a.schema.json", {"$defs": {"Dup": {"type": "string"}}})
+    _write(tmp_path / "b.schema.json", {"$defs": {"Dup": {"type": "integer"}}})
+    schema = {
+        "properties": {
+            "a": {"$ref": "a.schema.json#/$defs/Dup"},
+            "b": {"$ref": "b.schema.json#/$defs/Dup"},
+        }
+    }
+    with pytest.raises(ConfigLoadError):
+        bundle_external_defs(schema, tmp_path)
