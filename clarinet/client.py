@@ -375,7 +375,12 @@ class ClarinetClient:
         API too old to expose the endpoint.
         """
         response = await self._request("GET", "/pipelines/fingerprint")
-        return str(response.json()["fingerprint"])
+        fingerprint = response.json().get("fingerprint")
+        if fingerprint is None:
+            raise ClarinetAPIError(
+                "API /pipelines/fingerprint response missing 'fingerprint' field"
+            )
+        return str(fingerprint)
 
     async def validate_session(self) -> UserRead:
         """Validate current session.

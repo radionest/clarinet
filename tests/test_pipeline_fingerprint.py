@@ -39,6 +39,27 @@ def test_compute_plan_hash_missing_root(tmp_path: Path) -> None:
     assert fp.compute_plan_hash(tmp_path / "nope") == hashlib.sha256().hexdigest()
 
 
+def test_compute_plan_hash_normalizes_line_endings(tmp_path: Path) -> None:
+    # A CRLF (Windows/git autocrlf) checkout must hash identically to LF, so a
+    # Linux API and a Windows worker on the same code agree on queue names.
+    lf = tmp_path / "lf"
+    lf.mkdir()
+    (lf / "a.py").write_bytes(b"x = 1\ny = 2\n")
+    crlf = tmp_path / "crlf"
+    crlf.mkdir()
+    (crlf / "a.py").write_bytes(b"x = 1\r\ny = 2\r\n")
+    assert fp.compute_plan_hash(lf) == fp.compute_plan_hash(crlf)
+
+
+def test_compute_plan_hash_ignores_host_local(plan_dir: Path) -> None:
+    before = fp.compute_plan_hash(plan_dir)
+    (plan_dir / ".env").write_text("SECRET=1\n")
+    (plan_dir / "tasks.py~").write_text("editor backup\n")
+    (plan_dir / ".idea").mkdir()
+    (plan_dir / ".idea" / "workspace.xml").write_text("<x/>\n")
+    assert fp.compute_plan_hash(plan_dir) == before
+
+
 def test_queue_version_segment_format() -> None:
     fp.reset_fingerprint_cache()
     seg = fp.queue_version_segment()

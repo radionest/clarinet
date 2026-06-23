@@ -881,6 +881,22 @@ async def test_get_worker_fingerprint(monkeypatch) -> None:
         await client.close()
 
 
+async def test_get_worker_fingerprint_missing_field(monkeypatch) -> None:
+    # A malformed 200 (no "fingerprint" key) surfaces as ClarinetAPIError,
+    # not a raw KeyError, per the method's documented contract.
+    client = ClarinetClient("http://x/api", service_token="t", auto_login=False)
+
+    async def fake_request(method, endpoint, **kwargs):
+        return httpx.Response(200, json={"unexpected": "shape"})
+
+    monkeypatch.setattr(client, "_request", fake_request)
+    try:
+        with pytest.raises(ClarinetAPIError):
+            await client.get_worker_fingerprint()
+    finally:
+        await client.close()
+
+
 class TestDownloadReport:
     """download_report fetches server-rendered SQL report bytes."""
 

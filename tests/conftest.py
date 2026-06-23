@@ -25,10 +25,12 @@ from clarinet.utils.database import get_async_session
 from clarinet.utils.logger import logger
 from tests.utils.cookies import patch_cookie_forwarding
 
-# Disable version gating on the singleton before any test module is imported.
-# Module-level constants in test files (e.g. DEFAULT_QUEUE = settings.default_queue_name)
-# are evaluated at collection time — before fixtures run — so the flag must be off here.
-# Individual fingerprint tests opt in explicitly via monkeypatch.setattr.
+# Disable version gating on the module singleton before any test module is imported.
+# This is the single, load-bearing disable: the queue-name properties and warn_if_stale
+# read the module singleton `settings` (not the DI-injected test_settings), and test
+# modules capture constants like `DEFAULT_QUEUE = settings.default_queue_name` at collection
+# time — before any fixture runs — so the flag must already be off here. Individual
+# fingerprint tests opt back in explicitly via monkeypatch.setattr.
 settings.pipeline_version_check_enabled = False
 
 
@@ -184,11 +186,6 @@ def test_settings() -> Settings:
         cors_allow_methods=["*"],
         cors_allow_headers=["*"],
         debug=True,
-        # Belt-and-suspenders: the module-level `settings.pipeline_version_check_enabled = False`
-        # above is the load-bearing disable (queue-name properties and warn_if_stale read the
-        # module singleton, not the DI fixture). This arg keeps the isolated Settings instance
-        # consistent so fixture-injected code doesn't accidentally enable the gate.
-        pipeline_version_check_enabled=False,
     )
 
 
